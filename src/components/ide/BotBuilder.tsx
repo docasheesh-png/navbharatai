@@ -173,11 +173,16 @@ export const BotBuilder: React.FC = () => {
   }, [nodes, connectingFrom]);
 
   const handleCanvasPointerMove = useCallback((e: React.PointerEvent) => {
-    if (!dragging.current || e.pointerId !== dragging.current.pointerId) return;
+    const drag = dragging.current;
+    if (!drag || e.pointerId !== drag.pointerId) return;
     const p = canvasPoint(e.clientX, e.clientY);
-    const x = Math.max(0, p.x - dragging.current.ox);
-    const y = Math.max(0, p.y - dragging.current.oy);
-    setNodes(prev => prev.map(n => n.id === dragging.current!.id ? { ...n, x, y } : n));
+    const x = Math.max(0, p.x - drag.ox);
+    const y = Math.max(0, p.y - drag.oy);
+    // The id is read NOW, not inside the updater: React may run the updater after the finger
+    // lifts, when pointer-up has already set `dragging.current` to null — reading the ref there
+    // crashed the whole screen ("null is not an object (evaluating 'k.current.id')").
+    const id = drag.id;
+    setNodes(prev => prev.map(n => n.id === id ? { ...n, x, y } : n));
   }, []);
 
   const handleCanvasPointerUp = useCallback(() => {

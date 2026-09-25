@@ -116,7 +116,13 @@ describe('X.ts and X/index.ts both exist — the import reads the one nobody mea
       'src/hooks/useQuestionBank.ts': 'import { seedQuestionBank } from "../data";',
       'src/data/index.ts': 'export const questionBank = 1;',
     };
-    expect(tscErrorCauses(SHADOWED, noShadow)).toHaveLength(0);
+    // ⚠️ UPDATED 2026-09-25 (autopsy 2a7fa4b0): this pinned "no cause at all", but its name — and the
+    // intent — is that a genuine missing export is not diagnosed as a SHADOW. Since then a missing
+    // export in a file the caller holds gets its own, correct cause (`export-missing:`), so the
+    // assertion now checks the thing the case is named for.
+    const ids = tscErrorCauses(SHADOWED, noShadow).map((c) => c.id);
+    expect(ids.some((i) => i.startsWith('index-shadowed:'))).toBe(false);
+    expect(ids).toEqual(['export-missing:src/data/index.ts:seedQuestionBank']);
   });
 });
 

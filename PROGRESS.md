@@ -81345,3 +81345,37 @@ either for the whole paper (default) or per question, with the two behaviours sp
   Bengali, Urdu… never caught duplicates; now `\p{L}\p{N}`.
 - Verified in Chromium with a mocked paper and a fake clock (both timer shapes, reload persistence,
   timer off). Tests: `tests/examSettingsTimerAndLanguage.test.ts`.
+
+## 2026-09-25 — Autopsy 2a7fa4b0 follow-up: the open items, closed at the root (admin: "sabhi problem root cause se fix huye? agar nahi to karo")
+
+Honest status first: #3306 fixed six root causes and left five OPEN. This entry closes three, hands one to
+the session that owns it, and one waits on the admin.
+
+- ✅ **BottomNav rewritten 3× — CLOSED.** The real cause was OUR note, not the model:
+  `writeTypecheckNote` said *"fix them NOW, in this turn, before writing the next file"* about
+  `BottomNav.tsx(1,15): TS2614 Module '"../App"' has no exported member 'Screen'` — and the next file
+  (App.tsx) WAS the fix. Now `remedyFileFor` classifies an error whose remedy lives in another file
+  (a relative module that is missing, or a held target that certainly lacks the export) and the note
+  says `⏳ … fixed in ANOTHER file — src/App.tsx … Do NOT rewrite BottomNav.tsx`. New cause
+  `export-missing:<file>:<name>` (claimed only when the target is held; the dispatcher reads it, bounded
+  to two targets). Upstream half: the architect prompt now puts shared types in `src/types.ts`, written
+  first, never imported from App.tsx. `tests/theErrorWaitsOnAnotherFile.test.ts`, reversion-proven.
+  ⚠️ One pinned case narrowed and why: `aPlaceholderIsNotAFix` asserted "no cause at all" for a real
+  missing export under a test NAMED "is still not diagnosed as [a shadow]"; it now asserts exactly that,
+  plus the new correct cause.
+- ✅ **First-read race — CLOSED.** `ensureWorkspace` made the directory BEFORE writing the template and
+  read "directory exists" as "ready", so a second in-process caller (the report says `sandbox=warm`)
+  returned in 221 ms onto an empty `src/`. Both actuators (AgentV3 and the live Engineer AI sibling) are
+  now single-flight per workspace. `tests/aSecondCallerWaitsForTheScaffold.test.ts`, reversion-proven.
+  ⚠️ Residual, stated: two DIFFERENT server instances setting up one brand-new machine in the same
+  seconds is not covered (needs an atomic staged seed); no report shows it.
+- ✅ **"#3285 complex fast-lane budget is inert" — CORRECTED, not a defect.** Measured: with every key set
+  a complex build's opener always reasons, so the lane is skipped on all three tiers. The 480 s budget is
+  the budget for the paths where the lane still runs — reasoning gate off (autopsy 3ab93068's exact
+  conditions) or GLM+KIMI keyless. My "dead code" line was wrong; `tests/theComplexLaneBudgetHasAHome.test.ts`
+  pins which path uses it.
+- ↪️ **`PREVIEW_SNAPSHOT_STALE` with no post-green writer — TAKEN by PR #3308** (identity hash read the
+  bridged sandbox `index.html`). Not touched here.
+- ⏳ **Green Freeze refuses post-settle tests/PWA — ASKED the admin (in Hindi), awaiting a decision.**
+  Also named open by #3307 and #3308. Options put: (1) generate them BEFORE the green latch
+  (recommended), (2) allow after green with verify-and-revert, (3) leave as is.

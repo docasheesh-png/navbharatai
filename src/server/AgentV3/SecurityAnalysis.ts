@@ -6,6 +6,8 @@
 // `evaluate` tool can report concrete, real security defects for the team to fix —
 // never a synthetic "looks secure".
 
+import { enclosingTag } from './jsxTags';
+
 export type Severity = 'high' | 'medium' | 'low';
 
 export interface SecurityFinding {
@@ -23,7 +25,14 @@ interface Rule {
   message: string;
   /** Optional guard to suppress obvious false positives (e.g. placeholders). Receives the full match
    *  array so it can test the captured CREDENTIAL VALUE, not the whole line (see PLACEHOLDER note). */
-  ignore?: (m: RegExpExecArray, fullLine: string) => boolean;
+  ignore?: (m: RegExpExecArray, fullLine: string, context?: string) => boolean;
+  /**
+   * What the guard must be able to SEE beyond the line (autopsy Study-Racer, 2026-09-25). `'tag'`
+   * hands `ignore` the whole enclosing JSX/HTML tag, across lines; `'call'` hands it the whole call
+   * expression up to its balancing `)`. A same-line guard on a multi-line construct is the class that
+   * has now produced false findings in three analyzers (8a92e5ed, c847b523, and this rule).
+   */
+  contextual?: 'tag' | 'call';
   /** A hardcoded-CREDENTIAL-VALUE rule (a secret string baked into data), as opposed to a code
    *  vulnerability. In an obvious mock/fixture/demo file these are almost always DEMO fixtures, not a
    *  real leak — so they are downgraded to 'low' there (still reported, never a build-failing 'high').
@@ -569,7 +578,10 @@ const RULES: Rule[] = [
     // form; same-line rel is the common case (a documented precision trade-off).
     re: /target\s*=\s*['"]_blank['"]/i,
     message: 'target="_blank" without rel="noopener" — the opened page can hijack this tab (reverse tabnabbing); add rel="noopener noreferrer".',
-    ignore: (_m, line) => /noopener/i.test(line),
+    // The whole TAG, across lines — a same-line read reported two correctly-guarded links as a medium
+    // security issue on two consecutive builds (autopsy Study-Racer, 2026-09-25).
+    contextual: 'tag',
+    ignore: (_m, line, tag) => /noopener/i.test(tag ?? line),
   },
   {
     rule: 'window-open-no-opener',
@@ -580,7 +592,9 @@ const RULES: Rule[] = [
     // 'noopener' feature string, or a same-line opener cleanup) is ignored below.
     re: /\bwindow\.open\s*\(\s*[^)\s]/,
     message: "window.open() without 'noopener' lets the opened page control this tab via window.opener (reverse tabnabbing) — pass 'noopener' in the features argument (or set the returned handle's opener to null).",
-    ignore: (_m, line) => /noopener/i.test(line) || /\.opener\s*=\s*null/.test(line),
+    // The whole CALL, across lines — the sibling of the tag rule above, hunted in the same change.
+    contextual: 'call',
+    ignore: (_m, line, call) => /noopener/i.test(call ?? line) || /\.opener\s*=\s*null/.test(line),
   },
   {
     rule: 'document-domain-write',
@@ -654,10 +668,33 @@ const RULES: Rule[] = [
   },
 ];
 
+/**
+ * The call expression that starts at `offset` (its callee's first character), up to the `)` that
+ * balances its opening paren, across lines. Bounded, quote-aware; null when it never closes.
+ */
+export function callSpanAt(source: string, offset: number): string | null {
+  const open = source.indexOf('(', offset);
+  if (open < 0 || open - offset > 200) return null;
+  let depth = 0;
+  let quote: string | null = null;
+  const limit = Math.min(source.length, open + 2000);
+  for (let j = open; j < limit; j++) {
+    const c = source[j];
+    if (quote) { if (c === '\\') { j++; continue; } if (c === quote) quote = null; continue; }
+    if (c === '"' || c === "'" || c === '`') { quote = c; continue; }
+    if (c === '(') depth++;
+    else if (c === ')') { depth--; if (depth === 0) return source.slice(offset, j + 1); }
+  }
+  return null;
+}
+
 /** Scan one file's content for security findings. Returns [] for non-issues. */
 export function scanSecurity(file: string, content: string): SecurityFinding[] {
   const findings: SecurityFinding[] = [];
   const lines = content.split('\n');
+  // Offset of each line's first character in `content`, so a contextual rule can read across lines.
+  const lineStart: number[] = new Array(lines.length);
+  for (let i = 0, at = 0; i < lines.length; i++) { lineStart[i] = at; at += lines[i].length + 1; }
   // A hardcoded credential VALUE inside an obvious mock/fixture/demo file is demo data, not a real
   // leak — downgrade those (demoDowngrade rules) from 'high' to 'low' so a demo app never FAILS its
   // readiness gate on its own mock login creds, while a real secret in real source still blocks. Real
@@ -671,7 +708,13 @@ export function scanSecurity(file: string, content: string): SecurityFinding[] {
     if (line.length > 4000) continue; // skip minified/huge lines
     for (const r of RULES) {
       const m = r.re.exec(line);
-      if (m && !(r.ignore && r.ignore(m, line))) {
+      if (!m) continue;
+      const context = r.contextual === 'tag'
+        ? enclosingTag(content, lineStart[i] + m.index) ?? undefined
+        : r.contextual === 'call'
+          ? callSpanAt(content, lineStart[i] + m.index) ?? undefined
+          : undefined;
+      if (!(r.ignore && r.ignore(m, line, context))) {
         const severity: Severity = credsBelongHere && r.demoDowngrade ? 'low' : r.severity;
         findings.push({ file, line: i + 1, severity, rule: r.rule, message: r.message });
       }

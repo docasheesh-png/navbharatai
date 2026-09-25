@@ -137,6 +137,29 @@ function readTagAt(source: string, from: number): { tag: string; end: number } |
 }
 
 /**
+ * The opening tag that CONTAINS `offset`, across lines, or null when the offset is not inside one.
+ *
+ * Written for `SecurityAnalysis`'s `unsafe-target-blank` rule (autopsy Study-Racer, 2026-09-25),
+ * whose guard read `rel="noopener"` off the SAME LINE as `target="_blank"` — the JSX-multiline class
+ * this module was created to end (autopsy 8a92e5ed): a generated React `<a>` is routinely written
+ * over four lines, so a correctly-guarded link was reported as a medium security issue on two builds
+ * in a row, and the reviewer had to call the platform's own finding a false positive. Walks back
+ * from the offset to the nearest `<` that opens a readable tag and asks whether that tag reaches the
+ * offset. Bounded; conservative — an unreadable tag answers null, never a guess.
+ */
+export function enclosingTag(source: string, offset: number): string | null {
+  if (typeof source !== 'string' || offset < 0 || offset >= source.length) return null;
+  const floor = Math.max(0, offset - 4000);
+  for (let i = offset; i >= floor; i--) {
+    if (source[i] !== '<' || !/[a-zA-Z]/.test(source[i + 1] ?? '')) continue;
+    const read = readTagAt(source, i);
+    if (!read) continue;
+    return read.end >= offset ? read.tag : null;
+  }
+  return null;
+}
+
+/**
  * Every opening tag in a whole source file, each carrying whether a `<label>` encloses it.
  *
  * Two facts a regex cannot carry, and both were false findings in one real report:

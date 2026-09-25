@@ -82,6 +82,10 @@ export function megaRoadmapSystemPrompt(): string {
     '   on its own — a real-time/game multiplayer server, live video/voice calling, a self-trained AI',
     '   model, billions-of-users scale — say so plainly in that step (set "needsInfra" to a short honest',
     '   phrase). Do NOT drop the feature silently and do NOT pretend it is fully done.',
+    '   "needsInfra" is ONLY for a step that cannot work at all without it. A step that runs fully in the',
+    '   browser (search, sort, filters, charts, CSV / JSON export, backup to a file, restore from a file)',
+    '   gets "needsInfra": null — even if a bigger version of it (cloud sync, a server-made PDF) would need',
+    '   a server; put that optional extra in "note" instead.',
     '5. Write every user-facing field (achievableSummary, note, each title, each goal) in the SAME',
     '   language the user wrote their request in. Keep "buildPrompt" in clear English (it drives the build).',
     '6. NEVER mention any AI vendor or model name anywhere. You are "the builder".',
@@ -221,8 +225,16 @@ export function parseMegaRoadmap(text: string, famousApp: string | null): {
 /** Vague/filler that must never survive as a real step's build instruction. */
 const VAGUE = /^(?:etc\.?|and more|more features|\.\.\.|todo|tbd|polish|cleanup|clean up|finish (?:it|the app)|complete (?:it|the app)|improve|misc|various|other stuff)\.?$/i;
 
-/** Heavy-infra phrases the guardrail flags on its OWN — it does not trust the model to always self-declare. */
-const INFRA_RE = /\b(multiplayer|real-?time|websocket|game server|matchmaking|video call|voice call|webrtc|live stream|push notification server|train (?:a|an|our|my) (?:ai|ml|model)|foundation model|blockchain|peer-?to-?peer|p2p)\b/i;
+/**
+ * Heavy-infra phrases the guardrail flags on its OWN — it does not trust the model to always self-declare.
+ *
+ * 🔴 "REAL-TIME" ON ITS OWN IS A UI WORD (autopsy 2a7fa4b0, 2026-09-25). An expense tracker's step
+ * "Add a real-time search input that filters expenses as the user types" was badged as needing a
+ * server — to the user, in the 💡 roadmap — because a bare `real-?time` matched. Filtering a list while
+ * someone types runs entirely in their browser. Real-time is infrastructure only when it is real-time
+ * BETWEEN people or devices (chat, sync, collaboration, live location), so only those spellings count.
+ */
+const INFRA_RE = /\b(multiplayer|real-?time\s+(?:chat|messag\w*|sync\w*|collaborat\w*|co-?editing|location|tracking|multiplayer|notifications?|updates?\s+(?:between|across|for all|to (?:all|other))|feed)|websocket|game server|matchmaking|video call|voice call|webrtc|live stream|push notification server|train (?:a|an|our|my) (?:ai|ml|model)|foundation model|blockchain|peer-?to-?peer|p2p)\b/i;
 
 const normTitle = (t: string): string => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 

@@ -228,8 +228,9 @@ export function hasSeparatorInsideQuotes(command: string): boolean {
   return false;
 }
 
-export function isNodeServerCommand(command: string): boolean {
-  if (!command) return false;
+export function isNodeServerCommand(rawCommand: string): boolean {
+  if (!rawCommand) return false;
+  const command = withoutHeredocBodies(rawCommand); // see withoutHeredocBodies — a file's text is not a command
   // A real bundler/dev-CLI invocation is not a bare node server — let the framework branches own it.
   if (/\b(?:vite(?:\.js)?|next|astro|nux(?:t|i)|ng|react-scripts)\b/i.test(command)) return false;
   return /\b(?:tsx|ts-node|nodemon|node)\b[^;|&]*\b(?:server|app|index|main|backend|api)\b/i.test(command);
@@ -566,8 +567,43 @@ export function isSmokeTestSegment(segment: string): boolean {
   return secs !== null && secs <= MAX_TIMEBOX_SECONDS;
 }
 
-export function isLongRunningCommand(command: string): boolean {
-  if (!command) return false;
+/**
+ * The command with every HEREDOC BODY removed — the text a command writes into a file is data, not
+ * something the shell runs.
+ *
+ * 🔴 WHY (autopsies 2a7fa4b0 + ea07382a, 2026-09-25). The platform's own user-journey check is one
+ * command: `cat > /tmp/nbai-journey.mjs <<'NBAI_EOF' … NBAI_EOF` followed by `node …`. Inside that
+ * script is the string `'vite-error-overlay'`, and `isLongRunningCommand` read it as a Vite dev
+ * server being started. So the journey was handed to the DEV-SERVER path: its output was redirected
+ * into the dev server's own log (the report quoted `NBAI_JOURNEY {…}` as the dev server's "last
+ * words"), and the preview port was stopped — every journey came back *"none of the form fields were
+ * present on the running page"*, and the runtime check found the server dead a moment later. This is
+ * the "dev server died between the first render and the runtime check" recorded OPEN twice before.
+ *
+ * It is a class, not one script: an agent writing a README that says "run `npm run dev`" through a
+ * heredoc hit the same door. So the body is removed before ANY classification reads the command.
+ * Handles `<<EOF`, `<<-EOF`, `<<'EOF'` and `<<"EOF"`; an unterminated heredoc drops everything after
+ * its opener, which is what the shell does too. PURE.
+ */
+export function withoutHeredocBodies(command: string): string {
+  const lines = String(command ?? '').split('\n');
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    out.push(line);
+    const m = line.match(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/);
+    if (!m) continue;
+    const tag = m[2];
+    let j = i + 1;
+    while (j < lines.length && lines[j].trim() !== tag) j++;
+    i = j; // skip the body AND the terminator line
+  }
+  return out.join('\n');
+}
+
+export function isLongRunningCommand(rawCommand: string): boolean {
+  if (!rawCommand) return false;
+  const command = withoutHeredocBodies(rawCommand);
   if (/^\s*(?:curl|wget)\b/.test(command)) return false;
   // Judge EACH top-level chained segment (split on `;`/`&&`/`||`) on its own, not just the whole
   // string. A one-shot process-inspection/management segment (pkill/ps/grep/…) is NEVER itself a

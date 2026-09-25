@@ -40,6 +40,13 @@ export const MAX_ITEM_WORDS = 5;
 /** Nothing downstream benefits from a bigger number, and a runaway prompt must not produce one. */
 export const MAX_COUNTED = 40;
 
+/**
+ * A request for BIG software by name — the one definition every gate reads (ProjectPlan's project
+ * gate and the scope analyzer's small-app hint). Written once so the two cannot drift apart.
+ */
+export const BIG_SOFTWARE_NOUN =
+  /\b(?:erp|crm|lms|hms|hrms|pos)\b|management system|management software|enterprise|saas platform|multi[- ]tenant|marketplace|social network|super ?app|full[- ](?:fledged|scale)/i;
+
 /** A list-opening connective: what follows it is the list, whatever preceded it was the request. */
 const LIST_OPENER =
   /\b(?:with|including|includes|such as|like|having|jisme|jismein|jinme|jinmein|jaise|aur usme|ke saath)\b|:/i;
@@ -82,6 +89,29 @@ function isItem(s: string): boolean {
 }
 
 /**
+ * 🔴 A FIELD OF ONE RECORD IS NOT A FEATURE OF THE APP (autopsy 2a7fa4b0, 2026-09-25).
+ *
+ * *"App to add expenses with date, category, amount, payment method like cash card UPI, search and
+ * sort, total amount and report generation. Backup and restore option too"* counted EIGHT features,
+ * and eight is the mega-roadmap line: an ordinary expense tracker was split into six checkpoints, the
+ * user got step one (a form, a list and a total) for ₹81, and the search, sort, report and backup they
+ * had asked for in the same sentence never arrived. Four of the eight were the COLUMNS of an expense —
+ * date, category, amount, payment method — which every one-screen app has, however small.
+ *
+ * So an item that IS a common attribute of a record, or that attribute followed only by its example
+ * values ("payment method like cash card UPI"), is not counted. A module name — students, fees,
+ * attendance, pharmacy, payroll — is never on this list, so the project gates that read module lists
+ * keep their count. Deliberately a closed list of words, not a heuristic: a gate that spends a planner
+ * call must be able to say exactly why it did not.
+ */
+const RECORD_ATTRIBUTE =
+  /^(?:date|dates|time|timing|due date|start date|end date|category|categories|amount|amounts|price|prices|cost|qty|quantity|name|names|title|description|email|e-?mail id|phone|phone number|mobile|mobile number|address|status|priority|note|notes|tag|tags|label|labels|rating|age|gender|remarks?|payment (?:method|mode|type|option)s?)(?:\s+(?:like|such as|e\.?g\.?|ex)\b.*)?$/i;
+
+function isRecordAttribute(item: string): boolean {
+  return RECORD_ATTRIBUTE.test(item.trim());
+}
+
+/**
  * Count the distinct parts a prompt enumerates — bullets, numbered lines, and inline comma /
  * "and" / "aur" runs alike.
  *
@@ -95,6 +125,7 @@ export function countEnumeratedFeatures(prompt: string): number {
   const add = (raw: string): void => {
     const item = tidy(raw);
     if (!isItem(item)) return;
+    if (isRecordAttribute(item)) return;
     seen.add(item.toLowerCase());
   };
 

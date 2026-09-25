@@ -16,7 +16,7 @@
 // PURE: no I/O, no clock, no model. Never throws. The exact thresholds are meant to be reviewed against
 // real prompts (the admin will eye-ball the classifications) and tuned here.
 
-import { countEnumeratedFeatures } from '../AgentV3/enumeratedFeatures';
+import { countEnumeratedFeatures, BIG_SOFTWARE_NOUN } from '../AgentV3/enumeratedFeatures';
 
 export type AppSize = 'small' | 'large';
 
@@ -117,7 +117,13 @@ const HEAVY_INFRA: Array<{ label: string; re: RegExp }> = [
 ];
 
 /** Single-purpose things that are almost always small, buildable one-shot — used only to KEEP the default. */
-const CLEARLY_SMALL = /\b(calculator|to-?do|todo|task list|timer|stopwatch|counter|quiz|flash ?card|converter|unit convert|weather|clock|notepad|notes app|landing page|portfolio|resume|cv\b|one-?page|business card|invoice|form|survey|poll|tracker|habit|budget|expense|dictionary|recipe|menu card|qr code|password|pomodoro)\b/i;
+//
+// 🔴 PLURALS (autopsy 2a7fa4b0, 2026-09-25): every word here matched only in the SINGULAR, so "app to
+// add expenses" was not a small app while "app to add expense" was — and people name what an app
+// holds in the plural. The plural only widens the hint, which only SUPPRESSES escalation, so it is
+// held back wherever big software is named (`BIG_SOFTWARE_NOUN`): "an ERP with invoices and forms"
+// is still an ERP.
+const CLEARLY_SMALL = /\b(?:calculator|to-?do|todo|task list|timer|stopwatch|counter|quiz(?:zes)?|flash ?card|converter|unit convert|weather|clock|notepad|notes app|landing page|portfolio|resume|cv|one-?page|business card|invoice|form|survey|poll|tracker|habit|budget|expense|dictionar(?:y|ies)|recipe|menu card|qr code|password|pomodoro)s?\b/i;
 
 /**
  * Count roughly how many DISTINCT features a prompt asks for — a huge multi-feature spec (often an
@@ -155,7 +161,7 @@ export function analyzeAppScope(prompt: string): AppScope {
   const famous = FAMOUS_APPS.find((f) => namesAsProduct(text, f.re));
   const heavy = HEAVY_INFRA.filter((h) => h.re.test(text));
   const feats = featureCount(text);
-  const smallHint = CLEARLY_SMALL.test(text);
+  const smallHint = CLEARLY_SMALL.test(text) && !BIG_SOFTWARE_NOUN.test(text);
 
   if (famous) signals.push(`asks to clone ${famous.name}`);
   for (const h of heavy) signals.push(`needs ${h.label}`);

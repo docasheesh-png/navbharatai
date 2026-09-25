@@ -81337,3 +81337,39 @@ the session that owns it, and one waits on the admin.
 - ⏳ **Green Freeze refuses post-settle tests/PWA — ASKED the admin (in Hindi), awaiting a decision.**
   Also named open by #3307 and #3308. Options put: (1) generate them BEFORE the green latch
   (recommended), (2) allow after green with verify-and-revert, (3) leave as is.
+
+## 2026-09-25 — Autopsy b9287f85 ("ek desi boyz naam ki ecom website"): a newsletter box is not a cart
+
+Weak tier, 8.7 min, ok, rendered in a real browser at 314 s, typecheck clean, production build OK, all
+6 routes rendered — and `RELEASE_GATE: RED — Not shippable — a real user journey failed`, twice.
+
+- ❌→✅ **JOURNEY_FAILED was OUR false finding.** `deriveJourneys` built a create-and-find-it journey
+  whenever a file had a form AND a `.map` list. Home had a NEWSLETTER form and a FEATURED PRODUCTS grid,
+  so the check typed an email, pressed Subscribe, and looked for the email among the products. Nothing
+  asked whether the form adds to that list. Now `formFeedsList` reads the form's own submit handler:
+  `yes` (builds/grows an array), `no` (only preventDefault / plain setters / toast / timeout), or
+  `unknown` (no handler found, or it calls something we cannot see into). Only a readable `no`
+  downgrades the journey to `form-submit`, which still fills, submits and fails on a crash. `unknown`
+  keeps today's create-persists, so no real persistence check is lost.
+- ❌→✅ **One form counted as two failures.** `App.tsx` imports `Home.tsx` and `formSourcesFor` looks one
+  level deep, so both pages derived the same newsletter journey. Journeys are now deduped by the FORM's
+  file.
+- Tests: `tests/theNewsletterIsNotACart.test.ts` (14), reversion-proven for both halves (removing the
+  `feeds` gate → 1 failure; removing the dedupe → 2).
+- ✔️ **Not a defect, recorded so nobody re-derives it:** `COMPLEXITY_ROUTING: COMPLEX (score 15, model)`.
+  "ecom" matches no scorer signal (`signalsMatchedNothing`), so a second opinion was bought as designed
+  (autopsy c6e4c6ff: "E commerce website" on the flash rung ran 26.7 min). It read complex, the build
+  opened on KIMI and never fell (`LADDER_DEPTH` rung 2). The fast lane was skipped because that rung
+  always reasons (#3278), also as designed. Keyword-widening was deliberately NOT done (RequestAnalyser's
+  own note).
+- ✔️ **Not a defect:** write-time typecheck `SANDBOX_CMD` lines read `exit ?`. `exitCode: null` is
+  deliberate (the output is piped through `head`, so the shell's code is not tsc's; the parser reads the
+  output).
+- ⏳ **Open, recorded rather than guessed at:** (1) Home's `LIST_WITHOUT_EMPTY_STATE` was flagged on a
+  featured-products grid derived from a static catalogue (`PRODUCTS.filter(...)`); `rendersDataList`
+  treats only an UPPER_CASE receiver as static, so a derived constant reads as user data, and the design
+  heal spent 83 s on it. Deciding "derived from a constant = cannot be empty" needs a data-flow rule;
+  not done here. (2) The lean suggest-only review timed out (45 s + grace, `REVIEW_INCOMPLETE`). (3)
+  `CartDrawer.tsx` was created and never mounted — a builder-output defect, reported by READINESS, not
+  healed. (4) ETA (basis heuristic, confidence 0.4) said ~2.9 min; the build took 8.7 min (3.0×). Not
+  investigated in this change.

@@ -31,7 +31,7 @@ import { routeParam } from '../lib/expressCompat';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mirroredCreditPatch } from '../lib/walletMirror';
 import { MAX_WEB_GIFT_TOKENS } from '../lib/giftPolicy';
-import { recordClaimOutcome, deviceRefusalCategory } from '../lib/referralClaimOutcomes';
+import { recordClaimOutcome, deviceRefusalCategory, phoneCheckFailureCategory } from '../lib/referralClaimOutcomes';
 import { ledgerPatch } from '../lib/walletStatement';
 import { mintReferralCode, normalizeReferralCode, referralShareMessage } from '../lib/referralCode';
 import { checkDeviceIntegrity, deviceRefusalMessage, type DeviceCheck } from '../lib/deviceIntegrity';
@@ -570,10 +570,8 @@ export function registerReferralRoutes(app: Express): void {
    */
   app.post('/api/referral/:userId/claim-failed', requireUserMatch('userId'), async (req: Request, res: Response) => {
     if (!referralRewardsEnabled()) return res.json({ ok: true });
-    const raw = String((req.body as { reason?: unknown } | undefined)?.reason ?? '').trim().toLowerCase();
-    const reason = raw === 'unavailable' ? 'plugin-unavailable'
-      : raw === 'not-configured' ? 'not-configured-in-this-build'
-      : 'phone-check-failed';
+    const body = (req.body ?? {}) as { reason?: unknown; message?: unknown };
+    const reason = phoneCheckFailureCategory(String(body.reason ?? ''), String(body.message ?? '').slice(0, 300));
     void recordClaimOutcome(routeParam(req.params.userId), 'android', 'device-failed-on-phone', { reason });
     return res.json({ ok: true });
   });

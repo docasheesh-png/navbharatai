@@ -40,9 +40,17 @@ export function readSendOnEnter(get: (k: string) => string | null | undefined): 
   }
 }
 
-/** The toggle's own label — short enough for a phone, and it says what the key does, not its state. */
-export function sendToggleLabel(sendOnEnter: boolean): string {
-  return sendOnEnter ? '↵ Send' : '⇧↵ Send';
+/**
+ * The toggle's own label — short enough for a phone.
+ *
+ * The label is now IDENTICAL in both states (`↵ Send`), because COLOUR carries the state, not the
+ * glyph (admin 2026-09-26: *"blue send → enter = send / gray send → enter = new line"*). The old
+ * `⇧↵ Send` variant put a Shift symbol on a button whose colour already says what Enter does; two
+ * signals for one fact is what the admin asked to remove. The button is BLUE when Enter sends and
+ * GRAY when Enter starts a new line — see `ChatToolbar.tsx`, which keys that colour on `sendOnEnter`.
+ */
+export function sendToggleLabel(_sendOnEnter: boolean): string {
+  return '↵ Send';
 }
 
 /** The tooltip. Spells out BOTH halves, since the label alone cannot say what the other key now does. */

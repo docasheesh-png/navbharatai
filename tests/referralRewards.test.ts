@@ -3,7 +3,7 @@ import {
   decideSelfReward, decideReferrerReward, decideAttribution, attributionRefusalMessage,
   selfProgress, readSteps, ALL_STEPS, REFERRER_PAYING_STEPS,
   referralRewardsEnabled, stepRewardTokens, referrerStepTokens, referrerLifetimeCapTokens,
-  friendVerificationStatus,
+  friendVerificationStatus, canStillRedeem,
   type RewardStep,
 } from '../src/server/lib/referralRewards';
 
@@ -436,5 +436,20 @@ describe('the Earning screen — a referred friend’s three-step status', () =>
     });
     expect(status.completedCount).toBe(2); // email + mobile; referral-code does not pay the referrer
     expect(reward.recordSteps.sort()).toEqual(['email', 'mobile']);
+  });
+});
+
+describe('🔒 canStillRedeem — "refer only for new user", without locking out the Gmail-login grant', () => {
+  it('a brand-new account may redeem', () => {
+    expect(canStillRedeem([])).toBe(true);
+    expect(canStillRedeem(undefined)).toBe(true);
+  });
+  it('the automatic Gmail-login (email) grant alone does NOT make an account old', () => {
+    expect(canStillRedeem(['email'])).toBe(true);
+  });
+  it('any real verification (mobile / github) before the code makes it old — "old ko never"', () => {
+    expect(canStillRedeem(['mobile'])).toBe(false);
+    expect(canStillRedeem(['github'])).toBe(false);
+    expect(canStillRedeem(['email', 'mobile'])).toBe(false);
   });
 });

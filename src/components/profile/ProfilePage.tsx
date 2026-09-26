@@ -27,6 +27,7 @@ import { useReferralProgress } from '../../hooks/useReferralProgress';
 import { shareReferral } from '../../lib/shareReferral';
 import { auth as firebaseAuth } from '../../lib/firebase';
 import { sendVerificationEmail, linkGithubAccount, isGithubLinked, describeLinkGithubError } from '../../lib/accountVerificationActions';
+import { consumeProfileFocus, scrollToProfileVerifications, PROFILE_FOCUS_EVENT, PROFILE_VERIFICATIONS_ID } from '../../lib/profileFocus';
 
 // ── Types mirroring server responses ──────────────────────────────────────────
 
@@ -177,6 +178,15 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
     setGithubLinked(isGithubLinked(user));
   }, [user]);
 
+  // "Complete →" from the rewards checklist lands HERE, on the Verifications card — on a fresh mount
+  // (the one-shot flag) or while the page is already open (the event). See lib/profileFocus.ts.
+  useEffect(() => {
+    if (consumeProfileFocus()) scrollToProfileVerifications();
+    const onFocus = () => { consumeProfileFocus(); scrollToProfileVerifications(); };
+    window.addEventListener(PROFILE_FOCUS_EVENT, onFocus);
+    return () => window.removeEventListener(PROFILE_FOCUS_EVENT, onFocus);
+  }, []);
+
   // ── Published apps (admin 2026-09-17: "kitne app published huyi hai, woh bhi dikhe") ───────────
   // `null` is NOT an empty list: it means "not read yet". The card needs the difference, because
   // "you have published nothing" and "we could not read your apps" are opposite statements to make
@@ -208,7 +218,9 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
     try {
       await user.reload();
       setEmailVerified(user.emailVerified);
-      if (user.emailVerified) setEmailSent(false);
+      // A newly verified email is a referral step that may now be paid — refreshing the progress is
+      // what lets the automatic claim (useReferralProgress) pick it up without a second tap.
+      if (user.emailVerified) { setEmailSent(false); referral.refresh(); }
     } finally {
       setVerifyBusy(null);
     }
@@ -218,7 +230,7 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
     setVerifyBusy('github'); setVerifyError(null);
     try {
       const outcome = await linkGithubAccount(firebaseAuth);
-      if (outcome === 'ok') setGithubLinked(true);
+      if (outcome === 'ok') { setGithubLinked(true); referral.refresh(); }
       // 'cancelled' and 'redirecting' need no message — a closed popup is silent, and a redirect
       // navigates the page away (App.tsx's own getRedirectResult finishes it on return).
     } catch (e) {
@@ -596,7 +608,7 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
             One real button per step — click it, the verification actually starts, and a step already
             done shows as done. Verifying all three (plus applying a friend's referral code, in the
             Refer a Friend screen) is what the referral bonus is paid against. */}
-        <div className="bg-card border border-line rounded-3xl p-6 space-y-3">
+        <div id={PROFILE_VERIFICATIONS_ID} className="bg-card border border-line rounded-3xl p-6 space-y-3 scroll-mt-4">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-accent-text" />
             <h2 className="text-xs font-black text-ink uppercase tracking-widest">Verifications</h2>

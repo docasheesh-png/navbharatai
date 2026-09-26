@@ -93,6 +93,25 @@ export function stepAllowedOnWeb(step: RewardStep): boolean {
 }
 
 /**
+ * May this account still APPLY a referral code? ("refer — only for new user", admin 2026-09-26.)
+ *
+ * 🔴 WHY THIS IS NOT `paidSteps.length === 0` ANY MORE. That was the old "old ko never" test, and it
+ * collides with the Gmail-login grant: `email` is claimed automatically the moment a user signs in on
+ * the app, so under the old rule EVERY Android user became "old" before they could type a code, and the
+ * referral step could never be reached by anyone. The sign-in grant says nothing about an account being
+ * old — it happens on day one by construction — so it alone does not disqualify.
+ *
+ * Any REAL verification (mobile, github) still does: an account that has already earned those before
+ * hearing about a code is exactly the retro-attribution "old ko never" exists to refuse, since the
+ * referrer would otherwise be paid for work that happened before the referral. One definition, read by
+ * both the redeem route (the decision) and the status endpoint (whether to show the step at all), so the
+ * screen can never offer a code box the server would refuse.
+ */
+export function canStillRedeem(paidSteps: unknown): boolean {
+  return readSteps(paidSteps).every((s) => s === 'email');
+}
+
+/**
  * The three steps that pay the REFERRER. `referral-code` is deliberately absent — see rule 2. It is
  * derived from ALL_STEPS rather than written out again, so adding a fifth step cannot silently create
  * a referrer payout nobody decided on: a new step pays the referrer only if it is a verification.

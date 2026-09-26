@@ -18,6 +18,18 @@ import { heldReferralCode, clearHeldReferralCode } from '../lib/pendingReferralC
 import { collectDeviceCheck } from '../lib/deviceIntegrityNative';
 import { authedHeaders } from '../lib/authHeaders';
 
+/**
+ * The redeem currently in flight, if any. The automatic reward claim (useReferralProgress) waits on it:
+ * a user who signed in by PHONE has a verified mobile the instant they arrive, and claiming that ₹100
+ * BEFORE their held code is applied would make the account "old" (see canStillRedeem on the server) and
+ * turn the code they typed on the sign-in screen into a refusal. Module-level because the two hooks are
+ * separate and may mount in either order.
+ */
+let redeemInFlight: Promise<void> | null = null;
+export function heldRedeemInFlight(): Promise<void> | null {
+  return redeemInFlight;
+}
+
 export interface HeldCodeOutcome {
   /** A line to show the user, or null when there was no held code. */
   message: string | null;
@@ -37,6 +49,8 @@ export function useHeldReferralCode(userId: string | null | undefined, onApplied
     tried.current = userId;
     let alive = true;
 
+    let settle: () => void = () => {};
+    redeemInFlight = new Promise<void>((resolve) => { settle = resolve; });
     (async () => {
       // Cleared FIRST, deliberately: whatever happens next, this code has had its one attempt.
       clearHeldReferralCode();
@@ -54,7 +68,7 @@ export function useHeldReferralCode(userId: string | null | undefined, onApplied
         const data = await res.json().catch(() => null);
         if (!alive) return;
         if (res.ok && data?.ok) {
-          setOutcome({ applied: true, message: 'Referral code applied — your bonus is waiting in Wallet → Promo.' });
+          setOutcome({ applied: true, message: 'Referral code applied — your ₹100 bonus is on its way to your wallet.' });
           onApplied?.();
         } else {
           // The server's own sentence, which is written to be actionable and to accuse nobody.
@@ -62,6 +76,10 @@ export function useHeldReferralCode(userId: string | null | undefined, onApplied
         }
       } catch {
         if (alive) setOutcome({ applied: false, message: 'Your referral code could not be applied just now. You can enter it again in Wallet → Promo.' });
+      } finally {
+        // Whatever the outcome, the code has had its one attempt — the automatic claim may proceed.
+        redeemInFlight = null;
+        settle();
       }
     })();
 

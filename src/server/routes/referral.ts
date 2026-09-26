@@ -30,6 +30,7 @@ import { sendSafeError } from '../lib/httpError';
 import { routeParam } from '../lib/expressCompat';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mirroredCreditPatch } from '../lib/walletMirror';
+import { MAX_WEB_GIFT_TOKENS } from '../lib/giftPolicy';
 import { ledgerPatch } from '../lib/walletStatement';
 import { mintReferralCode, normalizeReferralCode, referralShareMessage } from '../lib/referralCode';
 import { checkDeviceIntegrity, deviceRefusalMessage, type DeviceCheck } from '../lib/deviceIntegrity';
@@ -37,7 +38,7 @@ import {
   decideSelfReward, decideReferrerReward, decideAttribution, attributionRefusalMessage,
   selfProgress, readSteps, referralRewardsEnabled, referrerLifetimeCapTokens,
   stepIsProven, stepNotDoneMessage, githubIsLinked, friendVerificationStatus,
-  ALL_STEPS, WEB_ELIGIBLE_STEPS, type RewardStep, type StepProof,
+  ALL_STEPS, WEB_ELIGIBLE_STEPS, canStillRedeem, stepAllowedOnWeb, type RewardStep, type StepProof,
 } from '../lib/referralRewards';
 
 /** One person's referral record. Absent until they first open the screen or redeem a code. */
@@ -246,9 +247,25 @@ export function registerReferralRoutes(app: Express): void {
       const code = await ensureCode(db, userId);
       const [rec, contact] = await Promise.all([readReferral(db, userId), resolveAccountContact(userId)]);
       const earned = num(rec.earnedTokens);
+      // 📱 WHICH SURFACE IS ASKING. The website earns only mobile + github (₹200 max), the app earns all
+      // four — so each is shown only the steps it can actually complete. Client-declared, and it can only
+      // ever NARROW what is shown: the claim route re-decides everything server-side regardless.
+      const platform = String(req.query?.platform ?? '').trim().toLowerCase() === 'web' ? 'web' : 'android';
+      // "Refer — only for new user": the code step is offered while the account can still redeem, and
+      // kept (✅ or claimable) once a code has been applied. Otherwise it would be a row nobody can finish.
+      const canRedeem = platform === 'android' && !rec.referrerUserId && canStillRedeem(rec.paidSteps);
+      const visibleSteps = selfProgress(rec.paidSteps).filter((s) => {
+        if (platform === 'web') return stepAllowedOnWeb(s.step);
+        if (s.step === 'referral-code') return s.claimed || Boolean(rec.referrerUserId) || canRedeem;
+        return true;
+      });
       return res.json({
         ok: true,
         enabled: true,
+        platform,
+        canRedeem,
+        webCapRupees: platform === 'web' ? MAX_WEB_GIFT_TOKENS / TOKENS_PER_RUPEE : null,
+        webEarnedRupees: num(rec.webGiftedTokens) / TOKENS_PER_RUPEE,
         code,
         // What the account has ACTUALLY done. The screen uses it to say what is missing instead of
         // offering a Claim button that the proof gate would refuse — a button that cannot work is
@@ -257,7 +274,7 @@ export function registerReferralRoutes(app: Express): void {
         phoneVerified: Boolean(contact.phone),
         githubLinked: githubIsLinked(contact.providers),
         shareMessage: referralShareMessage(code),
-        steps: selfProgress(rec.paidSteps).map((s) => ({
+        steps: visibleSteps.map((s) => ({
           step: s.step,
           claimed: s.claimed,
           rupees: s.tokens / TOKENS_PER_RUPEE,
@@ -367,9 +384,9 @@ export function registerReferralRoutes(app: Express): void {
         // the owner's own handset is caught by the self-referral check above.
         deviceAlreadyReferred: deviceMarker.exists()
           && String((deviceMarker.data() as { referredUserId?: unknown })?.referredUserId ?? '') !== userId,
-        // "old ko never": an account that already earned a step predates the referral and cannot be
-        // retro-attributed. A brand-new account has claimed nothing.
-        isNewUser: readSteps(mine.paidSteps).length === 0,
+        // "old ko never": an account that already earned a REAL verification predates the referral and
+        // cannot be retro-attributed. The automatic Gmail-login grant does not count — see canStillRedeem.
+        isNewUser: canStillRedeem(mine.paidSteps),
         platform: claimedPlatform(req) || 'android',
       });
       if (!verdict.ok) return res.status(409).json({ ok: false, message: attributionRefusalMessage(verdict.reason) });

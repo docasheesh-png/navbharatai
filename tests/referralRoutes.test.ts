@@ -213,6 +213,29 @@ describe('the WEBSITE path — mobile + github, capped ₹200, held until a real
     expect(tokensOf('B')).toBe(20_000);                                        // B's own ₹200
     expect(Number(DOCS[key('user_referrals', 'A')]?.earnedTokens || 0)).toBe(5_000); // A's ₹50, mobile-anchored
   });
+  it('📱 the website status shows ONLY the two web steps, with the ₹200 web cap', async () => {
+    const res = mockRes();
+    await (await GET_STATUS())(mockReq({ params: { userId: 'W' }, query: { platform: 'web' } }), res);
+    const body = res.body as any;
+    expect(body.platform).toBe('web');
+    expect(body.steps.map((s: any) => s.step).sort()).toEqual(['github', 'mobile']);
+    expect(body.webCapRupees).toBe(200);
+    expect(body.canRedeem).toBe(false); // no code-entry on the website
+  });
+
+  it('📱 the app status shows all four steps to a new user, and offers the code box', async () => {
+    const s = await status('N');
+    expect(s.platform).toBe('android');
+    expect(s.steps.map((x: any) => x.step)).toContain('referral-code');
+    expect(s.canRedeem).toBe(true);
+  });
+
+  it('📱 "refer only for new user": once a real verification is earned with no code, the refer row disappears', async () => {
+    await claim('O', 'mobile', 'cccccccccccccccc');
+    const s = await status('O');
+    expect(s.canRedeem).toBe(false);
+    expect(s.steps.map((x: any) => x.step)).not.toContain('referral-code');
+  });
 });
 
 describe('the referral code', () => {
@@ -487,11 +510,21 @@ describe('🔒 attribution — the chain machine, blocked where the money is', (
     expect(DOCS[key('user_referrals', 'B')].referrerUserId).toBe('A');
   });
 
-  it('refuses an EXISTING user — "old ko never"', async () => {
+  it('refuses an EXISTING user — "old ko never": a real verification before the code disqualifies', async () => {
     const code = (await status('A')).code;
-    await claim('B', 'email', 'bbbbbbbbbbbbbbbb'); // B already earned before hearing about the code
+    await claim('B', 'mobile', 'bbbbbbbbbbbbbbbb'); // B already earned a real verification first
     const res = await redeem('B', code, 'bbbbbbbbbbbbbbbb');
     expect(res.statusCode).toBe(409);
+  });
+
+  it('🔴 the automatic Gmail-login grant does NOT make a user "old" — the code can still be applied after it', async () => {
+    // Gmail-login (email) is claimed on sign-in, before anyone could type a code. Under the old
+    // "no paid steps" rule this made EVERY Android user un-referrable; it must not.
+    const code = (await status('A')).code;
+    await claim('B', 'email', 'bbbbbbbbbbbbbbbb');
+    const res = await redeem('B', code, 'bbbbbbbbbbbbbbbb');
+    expect(res.statusCode).toBe(200);
+    expect(DOCS[key('user_referrals', 'B')].referrerUserId).toBe('A');
   });
 
   it('the refusal never tells a prober which marker caught them', async () => {

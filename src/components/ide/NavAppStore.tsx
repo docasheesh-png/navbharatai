@@ -12,7 +12,8 @@ import { authedHeaders } from '../../lib/authHeaders';
 import { authedFetch } from '../../lib/authedFetch';
 import { LONG_REQUEST_TIMEOUT_MS, isFetchTimeout } from '../../lib/longRequest';
 import { resolveApiHref } from '../../lib/apiBase';
-import { isNativeApp } from '../../lib/mobileNative';
+import { isNativeApp, nativePlatformName } from '../../lib/mobileNative';
+import { androidInstallsHidden, visibleAndroidApps } from '../../lib/appStoreCompliance';
 import { adultBadge } from '../../lib/adultContent';
 import { mergeReviewQueue, pendingReviewCount, reviewStatusLabel, reviewActionsFor } from './storeReviewQueue';
 import { publishableApps, publishBlockedReason, type PublishableApp } from './publishablePicker';
@@ -112,6 +113,14 @@ export interface NavAppStoreProps {
    */
   initialPublishWorkspaceId?: string | null;
 }
+
+// 🍎 WHICH DEVICE THIS IS, read ONCE at module load rather than per render — `Capacitor.getPlatform()`
+// cannot change while the app is running, and this is the same shape `LiveCollaboration.tsx` already
+// uses for the medical gate. `HIDE_ANDROID_INSTALLS` hides the INSTALL half of App Mart on Apple
+// hardware, where an `.apk` cannot install at all; see `lib/appStoreCompliance.ts` for the reason and
+// for everything this deliberately leaves alone.
+const STORE_PLATFORM = nativePlatformName();
+const HIDE_ANDROID_INSTALLS = androidInstallsHidden(STORE_PLATFORM);
 
 export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initialTab, initialPublishWorkspaceId }) => {
   const [tab, setTab] = useState<Tab>(initialTab ?? 'browse');
@@ -217,7 +226,12 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
     try {
       const res = await fetch('/api/nav-store/apps');
       const data = await res.json().catch(() => null);
-      if (liveRef.current) setApps(Array.isArray(data?.apps) ? data.apps : []);
+      // 🔒 FILTERED HERE, AT THE ONE PLACE THE LIST ENTERS STATE. Gating each surface that reads
+      // `apps` would be an inventory the next surface is missing from; an empty list is correct for
+      // all of them by construction. The fetch itself is kept on Apple devices on purpose — it is
+      // what drives this page's `loading` and `error` states, and skipping it would mean re-deriving
+      // both, i.e. fixing one thing by risking another.
+      if (liveRef.current) setApps(visibleAndroidApps(Array.isArray(data?.apps) ? data.apps : [], STORE_PLATFORM));
     } catch {
       if (liveRef.current) setError('Could not load the store.');
     } finally {
@@ -475,6 +489,12 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
    * shell, not at our server.
    */
   const startDownload = useCallback(async (appId: string) => {
+    // 🍎 THE ACTION-LEVEL REFUSAL, and it is here for the reason the payment fix already recorded:
+    // "refusing at the one function every purchase passes through makes the guarantee true by
+    // construction rather than by inventory". This is that one function for a download. It says
+    // nothing to the user because on an Apple device nothing can reach it — the honest notice lives
+    // in the section being hidden, not in a message for a press that cannot happen.
+    if (HIDE_ANDROID_INSTALLS) return;
     if (dlBusy) return;
     setDlBusy(true);
     setDlError('');
@@ -663,8 +683,13 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
           </p>
         )}
 
-        {/* ── Half 2: INSTALL (Android) — real .apk apps, a different product entirely ── */}
-        {tab === 'browse' && !loading && (webApps.length > 0 || apps.length > 0) && (
+        {/* ── Half 2: INSTALL (Android) — real .apk apps, a different product entirely ──
+            🍎 HIDDEN ENTIRELY ON APPLE HARDWARE. The list is already empty there (see `loadApps`), but
+            the heading and its own "No Android apps yet" empty line would still render — and on an
+            iPhone that line is not information, it is an apology for a section that could never have
+            worked. The two gates are not redundant: the list makes the tiles impossible, this makes
+            the section invisible. */}
+        {tab === 'browse' && !loading && !HIDE_ANDROID_INSTALLS && (webApps.length > 0 || apps.length > 0) && (
           <div className="mb-6">
             <p className="text-sm font-bold text-body mb-0.5 flex items-center gap-1.5">
               <Package size={13} className="text-info" /> Install on Android
@@ -1271,7 +1296,12 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
         </div>
       )}
 
-      {openApp && (
+      {/* 🍎 `!HIDE_ANDROID_INSTALLS` is DEFENCE IN DEPTH, the same role `medicalViewBlocked` plays
+          behind the medical tile filter. Today the only thing that can set `openApp` is a tile in the
+          gated grid above, so this can never be the gate that matters — which is exactly why it is
+          here: the next caller that opens this sheet from somewhere else inherits the rule instead of
+          having to remember it. */}
+      {openApp && !HIDE_ANDROID_INSTALLS && (
         <div className="nb-sheet-overlay-flush fixed inset-0 z-50 bg-scrim flex items-end sm:items-center justify-center sm:p-4" onClick={() => setOpenApp(null)}>
           <div
             className="nb-sheet w-full sm:max-w-lg overflow-y-auto bg-card border border-line rounded-t-2xl sm:rounded-2xl p-4 sm:p-5"

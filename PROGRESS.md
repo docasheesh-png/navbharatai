@@ -81662,6 +81662,117 @@ reader anywhere. Asked, the admin chose to make them real, with 1,000 tokens = �
 - ⚠️ The admin screen itself was not opened in a browser here (it needs an admin sign-in); the server
   half is proven by the tests above.
 
+---
+
+## 2026-09-26 — 🍎 THE SECOND ANDROID-SHAPED SCREEN ON THE iPHONE: App Mart's INSTALL half
+
+**The admin asked to be guided through listing NavBharatAI on the App Store** (*"navbharatai ko app
+store par list karane me guide karo"*). The build side turned out to be finished — **96 `ios-ipa.yml`
+runs, the latest green on `main` the day before** — so the guidance was going to be App Store Connect
+paperwork. **Reading the code to write that guidance found a screen instead**, and the admin's reply to
+it was one line: *"App Mart ka Android half iOS par hide kar do."*
+
+### What was about to be submitted
+
+`NavAppStore.tsx` browse tab is two halves by design (admin 2026-08-16). Half 2 is
+**"Install on Android" — real apps you download and install on your phone**, with a **`Download .apk`**
+button in each listing's detail sheet. Neither half was gated on platform, so on an iPhone:
+
+- the section rendered in full, with its own heading and its own *"No Android apps yet"* empty line;
+- the detail sheet's `Download .apk` was reachable and pressable;
+- `startDownload` ran, minted a real download ticket, and handed the URL to `window.open` — on a
+  device where **an `.apk` cannot be installed by anyone, ever.**
+
+Two separate harms, and the second is the one a reviewer sees. **A control that promises what the
+device physically cannot do is the dead button the second absolute rule forbids.** And an iOS app that
+lists another platform's installable application packages invites a Guideline **2.5.2** (executable
+code) / **4.7** question — a risk taken for nothing, since the capability is unusable there.
+
+🔴 **THE CLASS, AND IT IS THE SECOND INSTANCE IN SIX DAYS.** On 2026-09-20, guiding the same
+submission, `purchaseRail` was found answering `'web-gateway'` on iOS **by fall-through** and offering
+a Cashfree checkout inside the iPhone app. Same shape exactly: **a page that is correct on Android,
+shipped unchanged to a platform where half of it cannot work.** Nothing failed, nothing logged, and
+no test could have caught either — both are *"this screen is Android-shaped"*, which neither `tsc` nor
+a unit test has a way to ask.
+
+> **So the question for the next iOS submission is not "does the app build?" — it is "which screens
+> are Android-shaped?"** `MOBILE_PUBLISHING.md` §6.3 now lists all four iOS-only suppressions in one
+> table so the answer is read rather than re-derived.
+
+### The fix — the LIST is the chokepoint, not the section
+
+`src/lib/appStoreCompliance.ts` (new, pure, no Capacitor imports) — deliberately the same shape as
+`playCompliance.ts`, which hides the medical AIs inside the **Play** shell. Two stores, two rules, one
+pattern.
+
+- **`androidInstallsHidden(platform)`** — the named reason, asked by both the filter and the section.
+- **`visibleAndroidApps(apps, platform)`** — `[]` on Apple hardware, a copy everywhere else.
+
+🔒 **Applied where the list enters state** (`loadApps` → `setApps(visibleAndroidApps(…))`), because
+**five** surfaces read it: the tile grid, its pager, the two *"is the browse page empty?"* conditions,
+and the detail sheet a tile opens. Gating them one at a time is an inventory the sixth surface is
+missing from — the lesson the payment fix already paid for in its own words (*"refusing at the one
+function every purchase passes through makes the guarantee true by construction rather than by
+inventory"*). Three further gates ride the same constant: the section itself (so no *"No Android apps
+yet"* apology renders — on an iPhone that line is not information), the detail sheet (defence in depth,
+the role `medicalViewBlocked` plays behind the medical tile filter), and **`startDownload`, which
+refuses before anything else in the function.**
+
+⚠️ **THE GATE IS THE PLATFORM, NEVER `isNativeApp()`** — `purchaseRail`'s own hard-won rule. A gate on
+the flag would hide Android apps from the **Android** app, the one place they install.
+`isApplePlatform` is **imported** from `storePurchase.ts` rather than re-matched, because a second copy
+of *"is this iOS?"* is the drifted-copy class this repo has paid for with `safeRelPath` (×4),
+`tagsOnLine` (×2), the HTML boot guard (×2) and `PLAYWRIGHT_BROWSERS_PATH` (×2). A test asserts the
+module contains no `=== 'ios'` of its own.
+
+⚠️ **The fetch is KEPT on Apple devices**, and that is a choice rather than an oversight: `loadApps`
+drives this page's `loading` and `error` states, so skipping the request would mean re-deriving both —
+fixing one thing by risking another, which this file's own core rule forbids.
+
+### Scope — three things deliberately untouched
+
+- **The instant-app half.** It runs in the WebView, works perfectly on iOS, and is why the page is
+  worth having there at all.
+- **The "My apps" tab.** A record of the creator's OWN submissions — app name, version, review status,
+  reviewer note, download count. Nothing to install, nothing distributed to anyone else. Hiding a
+  creator's own listing from them would be over-reach the admin did not ask for.
+- **The Publish tab's *"Want a real Android app (.apk) instead?"* steps.** A builder explaining how to
+  produce an artifact of YOUR OWN project is not a store handing one out — it is NavBharatAI's actual
+  product, and there is no download on that tab.
+
+Each of the three is asserted as a **scope guard** in the suite, so a later sweep that goes further
+fails CI rather than quietly shrinking the app on iOS.
+
+### Honesty half (rule 5)
+
+`AppKnowledgeBase.ts` is updated in the same commit, per the sync rule. Its App Mart entry told every
+AI in the product how to *"tap Download .apk"* — advice that is now false on one platform, and the
+kind of promise the second absolute rule forbids an AI to make. It now says the half is absent on
+iPhone, says **why**, says the instant-app half and publishing are unaffected, and answers the question
+an iPhone user will actually ask (*"Install on Android nahi dikh raha"*). The precedent is the
+adult-content entry's own *"THE ANDROID APP: this setting is not there at all… it is deliberate"*.
+
+### Tests
+
+`tests/theAndroidHalfIsHiddenOnIphones.test.ts` — 19 cases, **proven by reversion six ways**: the
+filter removed, either JSX gate removed, the download refusal removed, the platform read swapped for
+`isNativeApp()`, and `isApplePlatform` duplicated instead of imported. **Each breaks nothing `tsc` or
+the existing suite can see**, which is exactly why the wiring guards are source-level, with comments
+stripped first so a docblock that merely DESCRIBES a gate can never stand in for one.
+
+### Still the admin's, and none of it is code (rule 6)
+
+Screenshots (6.7" 1290×2796 and 6.1" 1179×2556, min 3 each — not in the repo, and only a real device
+or simulator makes them), the App Privacy form (§6.1's draft sheet), a working reviewer test account,
+the review notes, and Submit. **A session cannot see App Store Connect.**
+
+⚠️ **One thing this repo contradicts itself about, recorded rather than guessed:** whether iOS push is
+configured. `PROGRESS.md` 2026-07-26 says the admin confirmed the Firebase APNs key and the Apple
+Developer capability were set up; a later entry says no APNs key was ever uploaded. That later entry
+is **partly wrong on its own terms** — it looked for `ios/App/App/GoogleService-Info.plist`, which is
+generated, while the real file is committed at `ios-config/GoogleService-Info.plist` and copied in by
+`ios-ipa.yml` (line 215). It only matters if a reviewer raises Guideline 4.2, where push is the
+strongest answer. Left open for the admin to settle, hand-to-hand.
 ## 2026-09-26 — The ₹250 welcome backfill is deleted; the referral ladder is the only welcome credit
 
 Admin, with the admin card on screen: *"ab isko har jagah se hata do, bas referral wala chhor do,

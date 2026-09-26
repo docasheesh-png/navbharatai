@@ -329,6 +329,41 @@ above rather than needing one of its own.
 - **Say in the notes that top-up is intentionally unavailable on iOS**, so the reviewer reads the
   notice as a deliberate design rather than a broken screen.
 
+### 6.3 What the iPhone app deliberately does NOT do — the four iOS-only suppressions
+
+A reviewer meeting any of these without explanation reads a broken screen. Each is a code decision
+with a named predicate, so each can be re-verified rather than trusted, and each belongs in the App
+Review Notes.
+
+| Suppressed on iOS | The predicate that does it | Why |
+|---|---|---|
+| **Wallet top-up / any purchase** | `purchaseRail()` → `'none'` (`src/lib/storePurchase.ts`) | Guideline 3.1.1 — digital goods must go through StoreKit, which is not built (§5.1/§5.3). No external path is offered and no "cheaper on the web" copy exists anywhere (§5.2) |
+| **The four medical AIs** (Doctor AI, Pharmacist, First Aid, Maternity) | `medicalFeaturesHidden(isNativeApp())` (`src/lib/playCompliance.ts`) | written for Play's organization-account rule, and it hides them on EVERY native shell, so the App Privacy answer *Health & Fitness: not collected* is true |
+| **The Meta advertising pixel** | `shouldLoadPixel({ isNative })` → false (`src/lib/metaPixel.ts`) | no tracking on iOS ⇒ no ATT prompt and no `NSUserTrackingUsageDescription`, which is what makes *Tracking: No* honest |
+| **App Mart's "Install on Android" half** | `androidInstallsHidden(nativePlatformName())` (`src/lib/appStoreCompliance.ts`) | an `.apk` cannot install on iOS, so a "Download .apk" button is a dead control — and an iOS app listing another platform's installable packages invites a Guideline 2.5.2 / 4.7 question for a capability nobody there can use |
+
+🔴 **The fourth was added 2026-09-26 and was found by READING THE CODE while writing §4–§6 guidance,
+exactly as the §5.1 payment blocker was on 2026-09-20.** Both had the same shape: a page that is
+correct on Android, shipped unchanged to a platform where half of it cannot work. **When the next iOS
+submission is prepared, the question to ask is not "does the app build?" — it is "which screens are
+Android-shaped?"**
+
+🔒 **The gate is the PLATFORM, never `isNativeApp()`** — the rule §5.1 already paid for. A gate on the
+flag would hide Android apps from the **Android** app, which is the one place they install. And the
+chokepoint is the LIST (`visibleAndroidApps`), not the section's visibility: five surfaces read that
+list, and gating them one at a time is an inventory the sixth is missing from.
+
+⚠️ **Three things it deliberately leaves alone**, so nobody widens it later: the instant-app half
+(runs in the WebView, and is why the page is worth having on iOS), the **My apps** tab (a record of
+the creator's own submissions — status text, no download, nothing distributed), and the Publish tab's
+steps for building an Android app **of your own project** (a builder explaining how to produce an
+artifact is not a store handing one out — that is NavBharatAI's actual product).
+
+**For the App Review Notes**, one line covers all four:
+> *On iOS this app intentionally does not offer in-app purchases, health-related assistants,
+> advertising/tracking, or Android app downloads. Those sections are hidden by design on Apple
+> devices; everything visible is fully functional.*
+
 ---
 
 ## 7. Avoid the "just a website" rejection (Apple Guideline 4.2 / Google minimum functionality)

@@ -3579,6 +3579,23 @@ admin's word is the ONLY trigger.
   with input `upload: true` to ship straight to TestFlight (leave it off for a signing dry-run artifact).
 
 ### iOS release — durable facts (admin-verified 2026-07-21, so no session re-litigates them)
+- 🍎 **FOUR THINGS ARE HIDDEN ON iOS ON PURPOSE, and each has a named predicate — do NOT "restore"
+  any of them.** `purchaseRail()` → `'none'` (no purchase at all: Guideline 3.1.1) ·
+  `medicalFeaturesHidden(isNativeApp())` (the four medical AIs) · `shouldLoadPixel({ isNative })` →
+  false (no Meta pixel ⇒ no ATT prompt) · `androidInstallsHidden(nativePlatformName())` (App Mart's
+  **"Install on Android"** half — an `.apk` cannot install on an iPhone, so a `Download .apk` button
+  there is a dead control, and listing another platform's app packages invites a Guideline 2.5.2 / 4.7
+  question). The full table, with the reasoning and the App Review Notes line that covers all four, is
+  `MOBILE_PUBLISHING.md` **§6.3**.
+  🔴 **TWO OF THE FOUR WERE FOUND BY READING THE CODE WHILE WRITING SUBMISSION GUIDANCE — six days
+  apart (2026-09-20 and 2026-09-26) — not by a test and not by a review.** Both were the same shape: a
+  screen that is correct on Android, shipped unchanged to a platform where half of it cannot work.
+  **So before any App Store submission the question is not "does the app build?" — it is "which screens
+  are Android-shaped?"** Neither `tsc` nor a unit test can ask that.
+  ⚠️ **Every one of these gates is on the PLATFORM, never on `isNativeApp()`.** A gate on the flag
+  hides the feature from the ANDROID app too — which for purchases would delete real revenue and for
+  App Mart would hide Android apps from the one device they install on. `isApplePlatform` in
+  `storePurchase.ts` is the single owner of "is this iOS?"; import it, never re-match the string.
 - **The persistent distribution cert IS set up and ACTIVE.** The admin has configured the repo secrets
   `IOS_DIST_CERT_P12_BASE64` + `IOS_DIST_CERT_PASSWORD` (verified 2026-07-21). So the Fastfile takes the
   `import_certificate` path (reuses ONE cert every run) — NOT `cert()` per run. **Apple's 2-distribution-

@@ -14,6 +14,7 @@
 // judgment, a second false-positive filter). Pure, no I/O, never throws. Advisory report content only.
 
 import { analyzeDependencies, type DependencyIssue } from './DependencyAnalysis';
+import { isPlatformE2eScaffold } from './e2eScaffold';
 
 /**
  * Curated well-known npm packages → a known-good caret range. Deliberately EXCLUDES bare names that
@@ -40,8 +41,14 @@ import { analyzeDependencies, type DependencyIssue } from './DependencyAnalysis'
  * next. Same allowlist discipline: real packages, known-good caret ranges, nothing ambiguous.
  */
 export const WELL_KNOWN_DEV_DEPS: Record<string, string> = {
-  vitest: '^2',
-  '@vitest/coverage-v8': '^2',
+  // THE VITEST FAMILY MOVES IN LOCKSTEP WITH VITE — these three are the DEFAULT for our own scaffold
+  // (Vite 8); `knownDepVersion` picks the major from the PROJECT's Vite when it knows it (autopsy
+  // 7d79254b). This used to read '^2', and `pinKnownDepsInInstallCommand` rewrote the model's bare
+  // `npm i -D vitest @vitest/ui jsdom` into `vitest@^2` — on a Vite 8 app. vitest 2 cannot use Vite 8,
+  // so it nested its own Vite 5 and esbuild, and those carried the build's two critical advisories.
+  vitest: '^5',
+  '@vitest/coverage-v8': '^5',
+  '@vitest/ui': '^5',
   '@playwright/test': '^1',
   '@testing-library/react': '^16',
   '@testing-library/dom': '^10',
@@ -146,11 +153,42 @@ export const WELL_KNOWN_DEPS: Record<string, string> = {
  * which section of package.json it belongs to. `hasOwnProperty` rather than a bare index, so a name
  * like `constructor` or `toString` cannot resolve through the prototype chain to something truthy. PURE.
  */
-export function knownDepVersion(name: string): string {
+export function knownDepVersion(name: string, ctx?: PinContext): string {
   const n = String(name ?? '');
+  if (VITEST_FAMILY.has(n)) return vitestRangeForVite(ctx?.viteRange);
   if (Object.prototype.hasOwnProperty.call(WELL_KNOWN_DEPS, n)) return WELL_KNOWN_DEPS[n];
   if (Object.prototype.hasOwnProperty.call(WELL_KNOWN_DEV_DEPS, n)) return WELL_KNOWN_DEV_DEPS[n];
   return '';
+}
+
+/** What a pin may know about the project it is pinning into. Every field is optional. */
+export interface PinContext {
+  /** The project's declared Vite range (`dependencies` or `devDependencies`), when it has one. */
+  viteRange?: string | null;
+}
+
+/** Packages that must share vitest's major, or npm installs two test runners that disagree. */
+const VITEST_FAMILY = new Set(['vitest', '@vitest/coverage-v8', '@vitest/ui']);
+
+/**
+ * The vitest major that runs on this Vite (autopsy 7d79254b). vitest 5 peers Vite ^6.4 / ^7 / ^8; vitest 3
+ * peers ^5 / ^6 / ^7. So a Vite 5 project gets '^3' and everything else — our own Vite 8 scaffold and a
+ * project with no Vite at all — gets '^5'. Verified against the npm registry's peerDependencies, not
+ * guessed. PURE.
+ */
+export function vitestRangeForVite(viteRange: string | null | undefined): string {
+  const major = firstMajor(String(viteRange ?? ''));
+  return major !== null && major <= 5 ? '^3' : '^5';
+}
+
+/** The project's declared Vite range, or undefined when package.json is absent, unreadable or has none. */
+export function viteRangeOf(packageJson: string | null | undefined): string | undefined {
+  if (typeof packageJson !== 'string') return undefined;
+  try {
+    const pkg = JSON.parse(packageJson) as { dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown> };
+    const v = pkg?.devDependencies?.vite ?? pkg?.dependencies?.vite;
+    return typeof v === 'string' ? v : undefined;
+  } catch { return undefined; }
 }
 
 // Matches an npm/pnpm/yarn INSTALL sub-command (not `npx prisma generate`, not `npm run`, not a bare
@@ -169,7 +207,7 @@ const INSTALL_SUBCOMMAND_RE = /(?:^|\s)(?:npm\s+(?:install|i|add)|pnpm\s+(?:inst
  * only inside an install sub-command, are pinned. `npx prisma generate` (not an install) is untouched;
  * `prisma@7` (explicit version) is respected; flags and unknown packages pass through. Pure & deterministic.
  */
-export function pinKnownDepsInInstallCommand(command: string): string {
+export function pinKnownDepsInInstallCommand(command: string, ctx?: PinContext): string {
   if (typeof command !== 'string' || !command) return command;
   if (!INSTALL_SUBCOMMAND_RE.test(command)) return command; // fast path: no install at all
   // Split on shell separators (keeping them) so each sub-command is judged independently.
@@ -185,7 +223,7 @@ export function pinKnownDepsInInstallCommand(command: string): string {
         // only the production map meant that moving `tailwindcss` to the dev map silently dropped its
         // v3 pin, which is load-bearing: a bare install pulls v4 and every v3 convention then fails.
         // Its own test caught that, which is why this reads both rather than the pin being special-cased.
-        .map((tok) => (knownDepVersion(tok) ? `${tok}@${knownDepVersion(tok)}` : tok))
+        .map((tok) => (knownDepVersion(tok, ctx) ? `${tok}@${knownDepVersion(tok, ctx)}` : tok))
         .join('');
     })
     .join('');
@@ -389,7 +427,7 @@ export interface DependencyAutoFixPlan {
  * Partition the `missing` dependency findings into confidently-fixable (allowlisted npm packages) vs
  * needs-review (probable local aliases). Only considers kind === 'missing'. Deduped, order-stable. Pure.
  */
-export function planDependencyAutoFix(missing: readonly DependencyIssue[]): DependencyAutoFixPlan {
+export function planDependencyAutoFix(missing: readonly DependencyIssue[], ctx?: PinContext): DependencyAutoFixPlan {
   const autofixable: Array<{ package: string; version: string }> = [];
   const needsReview: string[] = [];
   const seen = new Set<string>();
@@ -400,7 +438,7 @@ export function planDependencyAutoFix(missing: readonly DependencyIssue[]): Depe
     seen.add(name);
     // Both allowlists, one planner. A test runner is as autofixable as axios — the only difference is
     // which SECTION of package.json it belongs in, and that is decided where it is written.
-    const version = WELL_KNOWN_DEPS[name] ?? WELL_KNOWN_DEV_DEPS[name];
+    const version = knownDepVersion(name, ctx);
     if (version) autofixable.push({ package: name, version });
     else needsReview.push(name);
   }
@@ -417,6 +455,7 @@ export interface DependencyReconcileResult {
 /** Matches import/require specifiers so external package imports can be collected without a parser. */
 const IMPORT_SPECIFIER_RE = /(?:import\s[^'"\n]*?from\s*|import\s*|export\s[^'"\n]*?from\s*|require\(\s*)['"]([^'"\n]+)['"]/g;
 const CODE_FILE_RE = /\.(?:m?[jt]sx?)$/i;
+
 
 /**
  * Deterministically ADD the well-known, version-pinned missing dependencies to package.json (P-PIPE
@@ -442,6 +481,14 @@ export function applyWellKnownMissingDeps(files: Record<string, string>): Depend
   const external: string[] = [];
   for (const [path, content] of Object.entries(files)) {
     if (!CODE_FILE_RE.test(path) || typeof content !== 'string') continue;
+    // 🔴 OUR E2E NET IS NOT RECONCILED (autopsy 7d79254b). It is written, never run, and its runner is
+    // deliberately NOT installed (a ~300 MB browser per build). Reading its imports used to add
+    // `@playwright/test` to package.json in the middle of the preview check — the next command then
+    // reinstalled and restarted the dev server, and Vite's reload is what the render check read as
+    // `net::ERR_ABORTED`. It also declared a runner with no browsers, the exact state `testRunner.ts`
+    // was fixed to refuse (BENCHMARK 0). Recognised by its own marker, so a Playwright suite the model
+    // wrote on purpose is still reconciled.
+    if (isPlatformE2eScaffold(path, content)) continue;
     let m: RegExpExecArray | null;
     IMPORT_SPECIFIER_RE.lastIndex = 0;
     while ((m = IMPORT_SPECIFIER_RE.exec(content))) {
@@ -455,7 +502,7 @@ export function applyWellKnownMissingDeps(files: Record<string, string>): Depend
   let missing: DependencyIssue[];
   try { missing = analyzeDependencies(external, pkgRaw).filter((d) => d.kind === 'missing'); }
   catch { return unchanged; }
-  const plan = planDependencyAutoFix(missing);
+  const plan = planDependencyAutoFix(missing, { viteRange: viteRangeOf(pkgRaw) });
   if (plan.autofixable.length === 0) return unchanged;
 
   let pkg: Record<string, unknown>;

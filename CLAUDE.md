@@ -3190,6 +3190,20 @@ the flag entries above promise.
   cancellation may take our margin and never our cost, and the route passes `realCostUsd` /
   `sandboxUsd` in (commit `6844b99f`). Re-grep before re-raising anything this file calls open.
 
+- **⏯️ `AGENTV3_UNFINISHED_RESUME` — A BUILD THAT STOPPED TALKING IS NOT A BUILD THAT FINISHED (autopsy
+  121c2431, 2026-09-26). ⚠️ NOT set, and the code default is ON**; `off` restores the old ending exactly.
+  Read by `src/server/AgentV3/unfinishedResume.ts`; applied in `AgentRunner`'s readiness gate.
+  🔴 **WHY:** the build-nudge fires only for a run with ZERO tool calls, so an architect that worked, then
+  wrote 26,371 characters of deliberation and ended its turn with no tool call, ended the build FAILED at
+  5.4 min with 1,418 s of budget unspent — while the readiness gate, run only to write the failure message,
+  already knew the entry was still the starter. Now the gate's blockers are handed back with "act now", **at
+  most twice**, and **never after a refusal or a question to the user** (the nudge's own two tests, reused —
+  the asymmetry in `nudgeToBuild.ts` holds here too). Admin code `UNFINISHED_BUILD_RESUMED`.
+  🔒 **Two siblings in the same change:** a compile error a later clean compile answered is RESOLVED in
+  project memory instead of being handed to every later agent as a "Recent error" (`markTscClean`,
+  `openErrors`, one output-read door `noteCompileOutput` — the shell path had marked tsc clean on a `| head`
+  exit code of 0); and when the release gate's typecheck passed, a reviewer finding claiming the project does
+  not compile is dropped before the user sees it (`reviewEvidence.ts`, `REVIEW_REFUTED_BY_EVIDENCE`).
 - **🙋 A QUESTION IS AN ANSWER, NOT AN EMPTY BUILD — the retry overrode a correct reply and billed
   ₹196.28 for it (autopsy `e628efd4`, 2026-09-25; no flag, on by construction).** A free-tier user
   asked *"if we don't have a chat in next 2 hours can you send a message to initiate the chat
@@ -4247,6 +4261,12 @@ and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; 
   `kimi-k2.7-code` ($0.95/$4.00) instead of `glm-4.7-flashx` ($0.07/$0.40) — ~13× the input price for
   THOSE builds. The bet is that a cheap rung which fails is paid twice, once in the wasted call and
   once in the heal. **Watch: the share of builds routed complex, and whether their heal count drops.**
+- 🗺️ **THE PLANNERS ARE THE ONE EXCEPTION (admin chose "A", 2026-09-26, autopsy 7d79254b).** The
+  roadmap, blueprint and project-mode planners are plans, so they climb `planLadder` through
+  `makePlanTextRunner` (#3334) instead of the complex build chain — which had cost a large app 76 s of
+  Kimi reasoning before its first file, and a project decomposition 315 s and a timeout (autopsy
+  eed79815). There is no separate kill switch. The build itself still opens on KIMI. ⚠️ On Weak, with
+  `AGENTV3_NEMOTRON=weak`, the plan rung is Nemotron Ultra — also a reasoning model, speed unmeasured.
 - 🔗 `healLadder` and this router share ONE definition of "the cheap opener"
   (`withoutCheapFlashLead`), applied by `buildTurnRunner` for `heal || complex`. They stay separate
   FLAGS — "this is a repair" and "this is a big app" are different questions with the same answer
@@ -4808,6 +4828,16 @@ infrastructure and no monthly cost — which is why it is the *first* thing to d
 **TRIGGER:** sustained concurrent instances above ~30, OR any Firestore contention error in the logs.
 
 ### 2 · 🟡 Per-instance memory that pretends to be global
+
+✅ **THE BUILD LOCK HALF OF THIS TRIGGER FIRED AND IS BUILT (autopsy eed79815, 2026-09-26) — without
+Redis.** A user's retry after a dropped connection reached another Cloud Run instance, which knew
+nothing of the running build and started a second one in the same workspace, then a third: fourteen
+minutes of two builds overwriting each other's files and running npm into one `node_modules` at once.
+The fix is a **Firestore lease per workspace** (`AgentV3/workspaceBuildLease.ts`, the `jobLease.ts`
+pattern): claimed in a transaction before the stream opens, renewed every 20 s, released when the build
+ends, stale after 90 s, and **fail-open** on a store error. A Stop pressed on any instance reaches the
+build through the lease. Kill switch **`AGENTV3_WORKSPACE_LEASE=off`** (NOT set; default ON). The
+table below is otherwise unchanged — rate limiters and the other rows are still per-instance.
 
 Several things live in one instance's RAM and are therefore wrong the moment there are several:
 

@@ -155,6 +155,56 @@ describe('the master switch', () => {
   });
 });
 
+async function webClaim(uid: string) {
+  // The web path branches BEFORE the device check, so no integrity token is needed; `step` must still
+  // be a valid step to pass the shared validation, but the web reconciliation ignores which one.
+  const res = mockRes();
+  await (await POST_CLAIM())(mockReq({ params: { userId: uid }, body: { step: 'mobile', platform: 'web' } }), res);
+  return res;
+}
+
+describe('the WEBSITE path — mobile + github, capped ₹200, held until a real mobile', () => {
+  it('credits ₹200 and records BOTH steps when mobile is verified and github linked', async () => {
+    account = { email: 'u@example.com', emailVerified: true, phone: '+919876543210', providers: ['google.com', 'github.com'] };
+    const r = await webClaim('W');
+    expect(r.body.granted).toBe(20_000); // ₹200
+    expect(tokensOf('W')).toBe(20_000);
+    expect(new Set(stepsOf('W'))).toEqual(new Set(['mobile', 'github']));
+    expect(DOCS[key('user_referrals', 'W')].webGiftedTokens).toBe(20_000);
+  });
+
+  it('🔒 NO MOBILE VERIFY → ₹0, nothing written, even with github linked', async () => {
+    account = { email: 'u@example.com', emailVerified: true, phone: '', providers: ['google.com', 'github.com'] };
+    const r = await webClaim('W');
+    expect(r.body.granted).toBe(0);
+    expect(tokensOf('W')).toBe(0);
+    expect(stepsOf('W')).toEqual([]);
+  });
+
+  it('mobile verified but github not linked pays ₹100 for the mobile alone', async () => {
+    account = { email: 'u@example.com', emailVerified: true, phone: '+919876543210', providers: ['google.com'] };
+    const r = await webClaim('W');
+    expect(r.body.granted).toBe(10_000); // ₹100
+    expect(stepsOf('W')).toEqual(['mobile']);
+  });
+
+  it('is idempotent — a second web claim after ₹200 pays nothing', async () => {
+    account = { email: 'u@example.com', emailVerified: true, phone: '+919876543210', providers: ['google.com', 'github.com'] };
+    await webClaim('W');
+    const again = await webClaim('W');
+    expect(again.body.granted).toBe(0);
+    expect(tokensOf('W')).toBe(20_000); // still exactly ₹200
+  });
+
+  it('never grants the Android-only steps on the web — the web tops out at ₹200, never ₹300+', async () => {
+    account = { email: 'u@example.com', emailVerified: true, phone: '+919876543210', providers: ['google.com', 'github.com'] };
+    await webClaim('W');
+    expect(stepsOf('W')).not.toContain('email');        // gmail-login is Android-only
+    expect(stepsOf('W')).not.toContain('referral-code'); // the code is Android-only
+    expect(tokensOf('W')).toBe(20_000);
+  });
+});
+
 describe('the referral code', () => {
   it('is minted by the SERVER, stored, and stable across reads', async () => {
     const first = await status('A');

@@ -28,6 +28,32 @@ export interface AppScope {
   famousApp: string | null;
   /** Human-readable reasons the decision was made — shown in the build report for threshold tuning. */
   signals: string[];
+  /** The prompt names a single-purpose, one-shot-buildable thing (CLEARLY_SMALL). Read by `scopeDispute`. */
+  smallHint: boolean;
+}
+
+/**
+ * TWO CLASSIFIERS DISAGREED, AND THE DEARER ONE WON (autopsy Study-Racer, 2026-09-25).
+ *
+ * The scope analyzer said *"LARGE — clone of YouTube"* and the complexity router scored the same prompt
+ * 15 ("simple") — and nothing compared the two. The planner call ran, the roadmap steered the build,
+ * and the user's own core ask was cut to steps 2–3. The tool-mention fix closes that instance; this is
+ * the class: when the ONLY mega-signal is a famous name, the complexity router calls the request
+ * simple, AND the prompt names a clearly small thing (a quiz, a notes app, a calculator…), the famous
+ * name is being used, not cloned. Return the reason to record; the caller then builds direct.
+ *
+ * ⚠️ PRECISION-FIRST IN THE NON-ESCALATING DIRECTION, and deliberately NARROW: a bare "PUBG banao"
+ * (no small hint) still escalates, heavy infra still escalates, a ≥8-feature spec still escalates.
+ * Only the three-way agreement of a used-not-cloned name, a simple score and a small noun stands
+ * down — the exact shape of the reported build. Pure.
+ */
+export function scopeDispute(scope: AppScope, opts: { complex: boolean }): string | null {
+  if (scope.decision !== 'analyze' || !scope.famousApp) return null;
+  if (opts.complex) return null;
+  const otherSignals = scope.signals.filter((s) => !s.startsWith('asks to clone '));
+  if (otherSignals.length > 0) return null; // heavy infra or a huge feature list — a real mega app
+  if (!scope.smallHint) return null;
+  return `the only mega-signal was the name "${scope.famousApp}", the complexity router scored the request simple, and the prompt names a single-purpose app — the name is being used, not cloned. Built directly; the roadmap planner was not asked.`;
 }
 
 /**
@@ -172,9 +198,9 @@ export function analyzeAppScope(prompt: string): AppScope {
   const strongMega = !!famous || heavy.length > 0 || (feats >= FEATURE_COUNT_MEGA && !smallHint);
 
   if (strongMega) {
-    return { decision: 'analyze', size: 'large', famousApp: famous?.name ?? null, signals };
+    return { decision: 'analyze', size: 'large', famousApp: famous?.name ?? null, signals, smallHint };
   }
   if (smallHint) signals.push('single-purpose app — buildable in one shot');
   else signals.push('no mega-signal — treated as an ordinary one-shot app (today\'s behaviour)');
-  return { decision: 'direct', size: 'small', famousApp: null, signals };
+  return { decision: 'direct', size: 'small', famousApp: null, signals, smallHint };
 }

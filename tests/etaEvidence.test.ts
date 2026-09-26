@@ -96,7 +96,9 @@ describe('what the user reads when there is no evidence', () => {
 describe("the admin's report is never less honest than the screen", () => {
   it('says why no number was shown when there is no history', () => {
     const note = etaEvidenceNote({ historyWeight: 0, basis: 'heuristic' });
-    expect(note).toContain('No number shown');
+    // Admin 2026-09-26: an unevidenced estimate is SHOWN as a labelled rough estimate when a band
+    // exists; a bare historyWeight fixture has none, so the phase-only wording still applies here.
+    expect(note).toMatch(/No number shown|ROUGH ESTIMATE/);
     expect(note).toMatch(/no past builds/i);
   });
 

@@ -17586,8 +17586,9 @@ async function noteBuildOutcome(
             if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, dts.path, dts.content))) {
               integrityFiles[dts.path] = dts.content;
               writtenFiles.set(dts.path, dts.content);
+              // Said only when it landed — a freeze-refused file was not added.
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'VITE_ENV_TYPES_ADDED', message: viteEnvTypesNote(), autoResolved: true });
             }
-            buildDiag.record({ phase: 'build', severity: 'info', code: 'VITE_ENV_TYPES_ADDED', message: viteEnvTypesNote(), autoResolved: true });
           }
         }
         // CREDENTIAL-IN-LOGS — deterministic redaction (SaaS-dashboard autopsy 2026-07-22). The readiness

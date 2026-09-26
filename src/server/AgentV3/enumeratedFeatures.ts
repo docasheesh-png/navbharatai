@@ -67,7 +67,7 @@ const ITEM_SEPARATOR = /\s*(?:[,;|]|\s\/\s|\band\b|&|\baur\b|\btatha\b|\bplus\b)
 const CODE_LINE = /[{}]|=>/;
 /** Quoted text is a string the app shows ("Connecting Signs, Voice and People."), never a list of parts. */
 const QUOTED = /"[^"\n]*"|“[^”\n]*”|'[^'\n]{3,}'/g;
-/** A sentence this long with no list opener is PROSE: its commas are pauses, not a list. */
+/** A sentence this long, with no list opener and a real clause between its commas, is PROSE: its commas are pauses. */
 const PROSE_WORDS = 12;
 const SENTENCE_END = /[.!?।]\s*$/;
 
@@ -165,10 +165,14 @@ export function enumeratedFeatureItems(prompt: string): string[] {
     const opened = plain.match(LIST_OPENER);
     // No opener, a sentence end and a sentence's length ⇒ prose ("Before finalizing, run the build and
     // fix …", "इसके बाद जो build error, preview error … मिले").
-    if (!(opener >= 0 && opened) && SENTENCE_END.test(plain.trim()) && words(plain) > PROSE_WORDS) continue;
     const tail = opener >= 0 && opened ? plain.slice(opener + opened[0].length) : plain;
-
     const pieces = tail.split(ITEM_SEPARATOR).map((p) => p.trim()).filter(Boolean);
+    // …unless its commas really do separate short parts: "स्कूल ईआरपी बनाओ जिसमें छात्र, शिक्षक, … हो।" is a
+    // list that happens to end in a full stop (the danda suite). What marks prose is a CLAUSE between its
+    // commas — "उसका screenshot यहाँ भेज देना—मैं उसी के हिसाब से अगला code/fix दूँगा" — and a list has none.
+    const hasClause = pieces.some((p) => words(p) > MAX_ITEM_WORDS + 2);
+    if (!(opener >= 0 && opened) && SENTENCE_END.test(plain.trim()) && words(plain) > PROSE_WORDS && hasClause) continue;
+
     if (pieces.length < MIN_RUN_ITEMS) continue;
     for (const piece of pieces) add(piece);
   }

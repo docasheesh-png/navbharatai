@@ -228,4 +228,22 @@ describe('🔒 reversion guards — the wiring tsc and vitest cannot see', () =>
     expect(wd).toBeGreaterThan(0);
     expect(hook.slice(wd, wd + 700).indexOf('buildRunningElsewhere')).toBeLessThan(hook.slice(wd, wd + 1400).indexOf('stallWatchdogAction('));
   });
+
+  it('a screen following a build elsewhere offers Stop, and loses it when the build ends', () => {
+    const panel = readFileSync(resolve(__dirname, '../src/components/agentv3/AgentV3Panel.tsx'), 'utf8');
+    // Every place that starts following also raises the flag — a notice without it has no Stop.
+    const notices = hook.split('text: FOLLOWING_ELSEWHERE_NOTICE').length - 1;
+    const raised = hook.split('setFollowingElsewhere(true)').length - 1;
+    expect(notices).toBe(4);
+    expect(raised).toBe(notices);
+    // The status poll is the truth, and a delivered result ends it.
+    expect(hook).toMatch(/setFollowingElsewhere\(j\.buildRunningElsewhere && !sawResultRef\.current\)/);
+    expect(hook).toMatch(/type === 'result'\)\) setFollowingElsewhere\(false\)/);
+    // Stop clears it, and the panel renders a real Stop button wired to stop() on that flag.
+    const stopAt = hook.indexOf('const stop = useCallback(');
+    expect(hook.slice(stopAt, stopAt + 400)).toContain('setFollowingElsewhere(false)');
+    const branch = panel.indexOf(') : followingElsewhere ? (');
+    expect(branch).toBeGreaterThan(0);
+    expect(panel.slice(branch, branch + 700)).toMatch(/onClick=\{stop\}[\s\S]*Stop/);
+  });
 });

@@ -83,6 +83,10 @@ export interface UseAgentV3Build {
   /** True when a build is running server-side but this UI is NOT attached to it
    *  (e.g. the original connection was lost) — the panel offers "Resume". */
   serverBuildRunning: boolean;
+  /** True while this screen is FOLLOWING a build that runs on another server (autopsy 2026-09-26): it
+   *  cannot be streamed from here, so the panel shows its progress through the live mirror and offers
+   *  Stop, which the server forwards to whichever instance holds the build. */
+  followingElsewhere: boolean;
   /** Re-attach to a build that is already running for this account (replays its events so the UI
    *  catches up, then streams live). Pass `workspaceId` (the caller's current session) so the server
    *  refuses to attach a build that belongs to a DIFFERENT session under the same account. */
@@ -328,6 +332,7 @@ export function useAgentV3Build(): UseAgentV3Build {
   const [state, setState] = useState<AgentV3ClientState>(initialAgentV3State);
   const [running, setRunning] = useState(false);
   const [serverBuildRunning, setServerBuildRunning] = useState(false);
+  const [followingElsewhere, setFollowingElsewhere] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /**
    * Did this error come from an HTTP refusal raised BEFORE the build stream opened?
@@ -398,6 +403,7 @@ export function useAgentV3Build(): UseAgentV3Build {
     abortRef.current = null;
     resumeInFlightRef.current = false;
     setRunning(false);
+    setFollowingElsewhere(false);
     setState(initialAgentV3State());
     setError(null);
     setErrorBeforeBuildStarted(false);
@@ -410,6 +416,7 @@ export function useAgentV3Build(): UseAgentV3Build {
     abortRef.current = null;
     setRunning(false);
     setServerBuildRunning(false);
+    setFollowingElsewhere(false);
     // Clear any "a build is already running" error — Stop is exactly its resolution, so the banner must
     // not linger and re-tempt the user into the "Fix with AI" retry loop it produced.
     setError(null);
@@ -604,6 +611,8 @@ export function useAgentV3Build(): UseAgentV3Build {
             idlePolls = 0;
             hadActivity = true;
             setState((cur) => events.reduce((s, e) => agentV3Reducer(s, e), cur));
+            // The followed build delivered its result — there is nothing left to stop.
+            if (events.some((e) => (e as { type?: string }).type === 'result')) setFollowingElsewhere(false);
           } else if (j.running !== true) {
             idlePolls += 1; // no activity + not provably running → wind down so an idle open panel stops polling
           }
@@ -638,6 +647,9 @@ export function useAgentV3Build(): UseAgentV3Build {
       const r = await fetch(`/api/agentv3/status?${params.toString()}`, { headers: await authJsonHeaders() });
       const j = await r.json().catch(() => ({}));
       const serverSaysRunning = opts?.workspaceId ? j?.buildRunningHere === true : j?.buildRunning === true;
+      // Held by another server (workspaceBuildLease.ts): the status poll is the truth either way, so a
+      // reopened screen starts following, and a build that ended elsewhere stops offering Stop.
+      if (opts?.workspaceId && typeof j?.buildRunningElsewhere === 'boolean') setFollowingElsewhere(j.buildRunningElsewhere && !sawResultRef.current);
       // NOT a blind overwrite: the server keeps saying "running" through the post-result tail, and
       // this session already knows whether the build delivered. See serverBuildNeedsAttention.
       setServerBuildRunning(serverBuildNeedsAttention({
@@ -911,6 +923,7 @@ export function useAgentV3Build(): UseAgentV3Build {
           // The build is alive on another server. It cannot be streamed from this one, but the panel's
           // live mirror follows it once `running` is false — which the lines below set.
           setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text: FOLLOWING_ELSEWHERE_NOTICE, ts: Date.now() }));
+          setFollowingElsewhere(true);
           setError(null);
           setErrorBeforeBuildStarted(false);
         } else if (outcome === 'gone-notice') {
@@ -1412,6 +1425,7 @@ export function useAgentV3Build(): UseAgentV3Build {
           // "Fix with AI" — that button is how a dropped connection became a second build.
           if (isHeldElsewhere(res.status, body)) {
             setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text: FOLLOWING_ELSEWHERE_NOTICE, ts: Date.now() }));
+            setFollowingElsewhere(true);
             setError(null);
             setErrorBeforeBuildStarted(false);
             setRunning(false);
@@ -1554,6 +1568,7 @@ export function useAgentV3Build(): UseAgentV3Build {
                 // build is alive — follow it through the live mirror (it starts once `running` is false).
                 reconnected = true;
                 setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text: FOLLOWING_ELSEWHERE_NOTICE, ts: Date.now() }));
+                setFollowingElsewhere(true);
                 break;
               }
               if (aliveHere) {
@@ -1623,6 +1638,7 @@ export function useAgentV3Build(): UseAgentV3Build {
             setError(null);
             setErrorBeforeBuildStarted(false);
             setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text: FOLLOWING_ELSEWHERE_NOTICE, ts: Date.now() }));
+            setFollowingElsewhere(true);
             return;
           }
           const action = stallWatchdogAction({ alive, sawResult: sawResultRef.current });
@@ -1663,5 +1679,5 @@ export function useAgentV3Build(): UseAgentV3Build {
 
   const clearBillingBlock = useCallback(() => setBillingBlock(null), []);
 
-  return { state, running, error, errorBeforeBuildStarted, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
+  return { state, running, error, errorBeforeBuildStarted, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, followingElsewhere, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
 }

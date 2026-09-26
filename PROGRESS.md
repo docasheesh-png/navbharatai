@@ -81773,3 +81773,19 @@ is **partly wrong on its own terms** — it looked for `ios/App/App/GoogleServic
 generated, while the real file is committed at `ios-config/GoogleService-Info.plist` and copied in by
 `ios-ipa.yml` (line 215). It only matters if a reviewer raises Guideline 4.2, where push is the
 strongest answer. Left open for the admin to settle, hand-to-hand.
+## 2026-09-26 — The ₹250 welcome backfill is deleted; the referral ladder is the only welcome credit
+
+Admin, with the admin card on screen: *"ab isko har jagah se hata do, bas referral wala chhor do,
+100*4 chhorna hai"*. The backfill had already been switched off (`WELCOME_BACKFILL=off`) the same
+morning; this removes it from the code:
+
+- **Removed:** `src/server/lib/welcomeBackfill.ts`; `GET /api/admin/welcome-backfill` and
+  `POST /api/admin/welcome-backfill/run` with their survey helpers; `WelcomeBackfillCard.tsx` and its
+  mount in the admin Reports tab; `tests/nobodyIsPaidTheWelcomeBonusTwice.test.ts`, which tested only
+  the removed module.
+- **Kept:** the 4 × ₹100 referral ladder and its Referral cost card, untouched.
+- `WELCOME_BACKFILL`, `WELCOME_BACKFILL_TOKENS` and `WELCOME_BACKFILL_SINCE` are read by nothing now
+  and may be deleted from Cloud Run. The CLAUDE.md registry entry now records the removal.
+- Records it already wrote (`payment_transactions/welcome_backfill_<uid>`, ledger rows) stay as history;
+  a credit already paid is not taken back.
+- Locked by `tests/theWelcomeBackfillIsGone.test.ts`, which also asserts the referral ladder remains.

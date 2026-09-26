@@ -81662,6 +81662,117 @@ reader anywhere. Asked, the admin chose to make them real, with 1,000 tokens = �
 - ⚠️ The admin screen itself was not opened in a browser here (it needs an admin sign-in); the server
   half is proven by the tests above.
 
+---
+
+## 2026-09-26 — 🍎 THE SECOND ANDROID-SHAPED SCREEN ON THE iPHONE: App Mart's INSTALL half
+
+**The admin asked to be guided through listing NavBharatAI on the App Store** (*"navbharatai ko app
+store par list karane me guide karo"*). The build side turned out to be finished — **96 `ios-ipa.yml`
+runs, the latest green on `main` the day before** — so the guidance was going to be App Store Connect
+paperwork. **Reading the code to write that guidance found a screen instead**, and the admin's reply to
+it was one line: *"App Mart ka Android half iOS par hide kar do."*
+
+### What was about to be submitted
+
+`NavAppStore.tsx` browse tab is two halves by design (admin 2026-08-16). Half 2 is
+**"Install on Android" — real apps you download and install on your phone**, with a **`Download .apk`**
+button in each listing's detail sheet. Neither half was gated on platform, so on an iPhone:
+
+- the section rendered in full, with its own heading and its own *"No Android apps yet"* empty line;
+- the detail sheet's `Download .apk` was reachable and pressable;
+- `startDownload` ran, minted a real download ticket, and handed the URL to `window.open` — on a
+  device where **an `.apk` cannot be installed by anyone, ever.**
+
+Two separate harms, and the second is the one a reviewer sees. **A control that promises what the
+device physically cannot do is the dead button the second absolute rule forbids.** And an iOS app that
+lists another platform's installable application packages invites a Guideline **2.5.2** (executable
+code) / **4.7** question — a risk taken for nothing, since the capability is unusable there.
+
+🔴 **THE CLASS, AND IT IS THE SECOND INSTANCE IN SIX DAYS.** On 2026-09-20, guiding the same
+submission, `purchaseRail` was found answering `'web-gateway'` on iOS **by fall-through** and offering
+a Cashfree checkout inside the iPhone app. Same shape exactly: **a page that is correct on Android,
+shipped unchanged to a platform where half of it cannot work.** Nothing failed, nothing logged, and
+no test could have caught either — both are *"this screen is Android-shaped"*, which neither `tsc` nor
+a unit test has a way to ask.
+
+> **So the question for the next iOS submission is not "does the app build?" — it is "which screens
+> are Android-shaped?"** `MOBILE_PUBLISHING.md` §6.3 now lists all four iOS-only suppressions in one
+> table so the answer is read rather than re-derived.
+
+### The fix — the LIST is the chokepoint, not the section
+
+`src/lib/appStoreCompliance.ts` (new, pure, no Capacitor imports) — deliberately the same shape as
+`playCompliance.ts`, which hides the medical AIs inside the **Play** shell. Two stores, two rules, one
+pattern.
+
+- **`androidInstallsHidden(platform)`** — the named reason, asked by both the filter and the section.
+- **`visibleAndroidApps(apps, platform)`** — `[]` on Apple hardware, a copy everywhere else.
+
+🔒 **Applied where the list enters state** (`loadApps` → `setApps(visibleAndroidApps(…))`), because
+**five** surfaces read it: the tile grid, its pager, the two *"is the browse page empty?"* conditions,
+and the detail sheet a tile opens. Gating them one at a time is an inventory the sixth surface is
+missing from — the lesson the payment fix already paid for in its own words (*"refusing at the one
+function every purchase passes through makes the guarantee true by construction rather than by
+inventory"*). Three further gates ride the same constant: the section itself (so no *"No Android apps
+yet"* apology renders — on an iPhone that line is not information), the detail sheet (defence in depth,
+the role `medicalViewBlocked` plays behind the medical tile filter), and **`startDownload`, which
+refuses before anything else in the function.**
+
+⚠️ **THE GATE IS THE PLATFORM, NEVER `isNativeApp()`** — `purchaseRail`'s own hard-won rule. A gate on
+the flag would hide Android apps from the **Android** app, the one place they install.
+`isApplePlatform` is **imported** from `storePurchase.ts` rather than re-matched, because a second copy
+of *"is this iOS?"* is the drifted-copy class this repo has paid for with `safeRelPath` (×4),
+`tagsOnLine` (×2), the HTML boot guard (×2) and `PLAYWRIGHT_BROWSERS_PATH` (×2). A test asserts the
+module contains no `=== 'ios'` of its own.
+
+⚠️ **The fetch is KEPT on Apple devices**, and that is a choice rather than an oversight: `loadApps`
+drives this page's `loading` and `error` states, so skipping the request would mean re-deriving both —
+fixing one thing by risking another, which this file's own core rule forbids.
+
+### Scope — three things deliberately untouched
+
+- **The instant-app half.** It runs in the WebView, works perfectly on iOS, and is why the page is
+  worth having there at all.
+- **The "My apps" tab.** A record of the creator's OWN submissions — app name, version, review status,
+  reviewer note, download count. Nothing to install, nothing distributed to anyone else. Hiding a
+  creator's own listing from them would be over-reach the admin did not ask for.
+- **The Publish tab's *"Want a real Android app (.apk) instead?"* steps.** A builder explaining how to
+  produce an artifact of YOUR OWN project is not a store handing one out — it is NavBharatAI's actual
+  product, and there is no download on that tab.
+
+Each of the three is asserted as a **scope guard** in the suite, so a later sweep that goes further
+fails CI rather than quietly shrinking the app on iOS.
+
+### Honesty half (rule 5)
+
+`AppKnowledgeBase.ts` is updated in the same commit, per the sync rule. Its App Mart entry told every
+AI in the product how to *"tap Download .apk"* — advice that is now false on one platform, and the
+kind of promise the second absolute rule forbids an AI to make. It now says the half is absent on
+iPhone, says **why**, says the instant-app half and publishing are unaffected, and answers the question
+an iPhone user will actually ask (*"Install on Android nahi dikh raha"*). The precedent is the
+adult-content entry's own *"THE ANDROID APP: this setting is not there at all… it is deliberate"*.
+
+### Tests
+
+`tests/theAndroidHalfIsHiddenOnIphones.test.ts` — 19 cases, **proven by reversion six ways**: the
+filter removed, either JSX gate removed, the download refusal removed, the platform read swapped for
+`isNativeApp()`, and `isApplePlatform` duplicated instead of imported. **Each breaks nothing `tsc` or
+the existing suite can see**, which is exactly why the wiring guards are source-level, with comments
+stripped first so a docblock that merely DESCRIBES a gate can never stand in for one.
+
+### Still the admin's, and none of it is code (rule 6)
+
+Screenshots (6.7" 1290×2796 and 6.1" 1179×2556, min 3 each — not in the repo, and only a real device
+or simulator makes them), the App Privacy form (§6.1's draft sheet), a working reviewer test account,
+the review notes, and Submit. **A session cannot see App Store Connect.**
+
+⚠️ **One thing this repo contradicts itself about, recorded rather than guessed:** whether iOS push is
+configured. `PROGRESS.md` 2026-07-26 says the admin confirmed the Firebase APNs key and the Apple
+Developer capability were set up; a later entry says no APNs key was ever uploaded. That later entry
+is **partly wrong on its own terms** — it looked for `ios/App/App/GoogleService-Info.plist`, which is
+generated, while the real file is committed at `ios-config/GoogleService-Info.plist` and copied in by
+`ios-ipa.yml` (line 215). It only matters if a reviewer raises Guideline 4.2, where push is the
+strongest answer. Left open for the admin to settle, hand-to-hand.
 ## 2026-09-26 — The ₹250 welcome backfill is deleted; the referral ladder is the only welcome credit
 
 Admin, with the admin card on screen: *"ab isko har jagah se hata do, bas referral wala chhor do,
@@ -81679,6 +81790,37 @@ morning; this removes it from the code:
   a credit already paid is not taken back.
 - Locked by `tests/theWelcomeBackfillIsGone.test.ts`, which also asserts the referral ladder remains.
 
+## 2026-09-26 — Security audit (admin asked 4 questions): login errors no longer show internals
+
+Admin: *"1 server side validation 2 login rate limit 3 password me encryption 4 error ko generic karo —
+abhi andar ki coding show ho rahi sayad."* Checked in code, not assumed:
+
+- ✅ **Rate limit — present.** User login rides the auth provider's own throttling
+  (`auth/too-many-requests`); the ADMIN login has a 5/min IP limiter + escalating lockout (1m → 30m)
+  + TOTP MFA + constant-time compare + generic "Invalid credentials." Chat 20/min, payment 5/min, OTP
+  30 s cooldown + 5/hour per phone and per IP + a platform-wide hourly ceiling, plus `adaptiveGuard`.
+- ✅ **Passwords — never stored by us.** User passwords are hashed by the auth provider (salted scrypt);
+  our database never holds one. The admin password is an env value compared by SHA-256 + timing-safe
+  equality. User secrets/API keys are AES-256-GCM encrypted (`lib/secrets.ts`).
+- 🟡 **Server-side validation — partial.** Every data route verifies the user's ID token server-side
+  (`requireUserMatch`, 403 on a uid mismatch) and many validate types (e.g. send-otp), but only 5
+  server files use a schema validator (zod) across 108 route files. Recorded as OPEN below.
+- ❌→✅ **Generic errors — the admin was right.** The email sign-in screen printed the raw SDK error
+  (`[auth/invalid-credential] Firebase: Error (auth/invalid-credential).`), and for unknown failures a
+  second probe's raw server reply plus the auth console path and project id. Fixed at the class:
+  `src/lib/authErrorMessage.ts` (`userFacingAuthError`) is now the ONLY thing that writes a sign-in
+  error to the screen — email, sign-up, reset, OTP and social. Detail goes to the console
+  (`logAuthErrorDetail`). Our own OTP server sentences ("wait 30 seconds") are kept via `ownMessage`.
+- ⚠️ **Pushed back on one part:** separate "incorrect password" / "incorrect email" messages would let
+  anyone test which emails have an account (user enumeration). All wrong-credential shapes now read
+  ONE sentence: "Email or password is incorrect."
+- 🔎 **Sibling:** 8 build/workspace routes in `routes/agentv3.ts` answered a 500 with raw
+  `err.message`; now `toSafeClientMessage` (strips vendor names, links, secrets; keeps our sentences).
+- Tests: `tests/signInErrorsAreGeneric.test.ts` (133), source guard reversion-proven.
+  `tests/authOtpSubmit.test.ts` pin updated to the new shape (same intent: gate before probe).
+- ⏳ **OPEN (admin console, a session cannot do it):** turn on *Email enumeration protection* and a
+  *password policy* in the auth console. ⏳ **OPEN (code):** schema validation on every route body;
+  App Check (0 uses); user-account 2FA (0 uses).
 ## 2026-09-26 — Every welcome grant except the referral ladder is deleted; a new wallet opens at ₹0
 
 Admin: *"100*4 ko chor ke sab hata do"*. Follows the backfill removal above, in the same PR (#3320).
@@ -81724,3 +81866,47 @@ Admin: *"100*4 ko chor ke sab hata do"*. Follows the backfill removal above, in 
   (iOS), then a fresh `.aab`/`.ipa`. Enforcement must wait for it AND for the admin card showing
   valid ≈ 100% on both surfaces. Also open: the other AI tool routes (Other-AI tools, App Debugger…) are
   not in the guarded list yet.
+## 2026-09-26 — Study-Racer autopsy, part 2: the five open items closed (admin: "sab karo, ETA dikhao andaaza label ke saath")
+
+Part 1 (above, 2026-09-25) fixed six root causes and named five it had left open. Asked "sabhi problem
+root cause se dna level par fix ho gayi?", the honest answer was no — five were open. The admin said do
+all five, and decided the one product question: show the ETA, labelled a guess. Same PR (#3308), second
+commit. Test-locked in `tests/theStudyRacerAutopsyPart2.test.ts`.
+
+- **The fast lane hands off when its chain FALLS to a reasoning rung.** `fastLaneRungDecision` asked
+  "does the opener always reason?" once, at the start; the Study-Racer lane opened on flashx and fell to
+  `kimi-k2.7-code` on the first file, then spent its whole budget on a rung whose 90 s plan cap was sized
+  for a model that answers directly. `SimpleBuildDeps.stopLane` is asked before every per-file call; the
+  route answers it from the model that served the LAST call (`modelAlwaysReasons(servedBy.model)`, under
+  the same `fastLaneReasoningGateEnabled()` kill switch as the opener gate), records
+  `FAST_LANE_FELL_TO_REASONING_RUNG` (process-only), and the lane throws "stopped early — …" so the
+  existing salvage path keeps the files that finished. Behavioural test drives `runSimpleBuild` with a
+  fake `generate` that "falls" after the third call.
+- **Two classifiers disagreeing is a fact, not a tie the dearer one wins.** `scopeDispute(scope, {
+  complex })` in `appScopeAnalyzer.ts`: a famous name USED (not cloned, no other clone signal) + the
+  complexity router saying `simple` + a small-app noun (`smallHint`) ⇒ the roadmap planner stands down,
+  `APP_SCOPE_DISPUTED` recorded, build goes direct. Deliberately narrow: a complex score, heavy infra, a
+  feature list or no small noun all keep the roadmap.
+- **`REQUIREMENT_GAPS` on a fresh build only**: the gate now reads `intent === 'new_build' && !isEditMode`,
+  so the six "questions to confirm" no longer land on an edit turn.
+- **The unevidenced ETA is SHOWN, as a rough estimate, labelled.** `roughEstimateBand(est)` +
+  `ROUGH_ESTIMATE_LABEL` ("a guess from the size of your request, not a measurement") in `etaEvidence.ts`:
+  first line `⏱️ Rough estimate: ~2–5 min — a guess …; I'll replace it with a real figure as soon as I
+  can measure how big your app is`, the live tick carries the band with the same label (budget clause
+  intact), the admin `ETA_BASIS` note says "Shown as a ROUGH ESTIMATE (band), labelled a guess", and the
+  ETA-accuracy line reads the shown text (`/rough estimate/i`) so the ending is measured against what the
+  user actually read. No band ⇒ the old phase-only sentences byte for byte. Two wiring tests re-anchored to
+  the new arguments (`unevidencedFirstEtaLine(est)`, tick `+ etaRoughBand`) — the intent (the budget must
+  reach the line) is unchanged.
+- **The architect is told what the platform verifies after its turn** (`systemPrompt.ts`, build + edit
+  mode): real-browser open, console read, production build, typecheck — call `update_preview` ONCE after
+  the last write, do not re-run tsc / build / a second dev server / screenshot / console_errors as a
+  closing ritual. "Prove it still works" kept. This is the prompt-side half; the shared evidence ledger
+  stays the OPEN root cause behind it.
+- **`GREEN_FREEZE_DEFERRED` wording**: a refused post-green write by the engine's own pass now says it is
+  the engine being held to the freeze, "not something the user asked for; nothing to do" — it no longer
+  invites the user to "Reply if you want this change made" about a file they never asked for.
+
+Still open after part 2 (recorded, not hidden): the shared evidence ledger (why the model re-verifies at
+all); the fast lane's 90 s plan cap is still sized for a direct-answer rung (the hand-off bounds the loss,
+it does not make a reasoning rung fast).

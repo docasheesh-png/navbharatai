@@ -66,7 +66,7 @@ describe('building the rows', () => {
 
 describe('the words', () => {
   it('say claimed or pending, with the amount, as the admin’s example does', () => {
-    expect(checklistLabel('email', true, 100)).toBe('Email verified — ₹100 claimed');
+    expect(checklistLabel('email', true, 100)).toBe('Gmail / email verified — ₹100 claimed');
     expect(checklistLabel('github', false, 100)).toBe('GitHub not connected — ₹100 pending');
     expect(checklistLabel('mobile', false, 100)).toBe('Mobile number not verified — ₹100 pending');
     expect(checklistLabel('referral-code', true, 100)).toBe('Referral code applied — ₹100 claimed');

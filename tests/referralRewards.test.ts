@@ -3,7 +3,7 @@ import {
   decideSelfReward, decideReferrerReward, decideAttribution, attributionRefusalMessage,
   selfProgress, readSteps, ALL_STEPS, REFERRER_PAYING_STEPS,
   referralRewardsEnabled, stepRewardTokens, referrerStepTokens, referrerLifetimeCapTokens,
-  friendVerificationStatus,
+  friendVerificationStatus, canStillRedeem,
   type RewardStep,
 } from '../src/server/lib/referralRewards';
 
@@ -98,19 +98,7 @@ describe('the amounts are the admin-approved plan', () => {
   });
 });
 
-describe('🔒 RULE 1 — Android only, device-verified, no exceptions', () => {
-  it('pays nothing on the website, for EVERY step including email and github', () => {
-    for (const step of ALL_STEPS) {
-      const r = android({ step, platform: 'web' });
-      expect(r.tokens, step).toBe(0);
-      expect(r.reason, step).toBe('not-android');
-    }
-  });
-
-  it('pays nothing on iOS either — the device check is an Android capability', () => {
-    expect(android({ platform: 'ios' }).reason).toBe('not-android');
-  });
-
+describe('🔒 RULE 1 — the full ₹400 ladder is Android-only and device-verified', () => {
   it('pays nothing without device proof, even on Android', () => {
     const r = android({ deviceVerified: false });
     expect(r.tokens).toBe(0);
@@ -121,6 +109,79 @@ describe('🔒 RULE 1 — Android only, device-verified, no exceptions', () => {
     // Ordering matters: recording a step against a refusal would burn it for the honest retry.
     const r = android({ deviceVerified: false, step: 'email', alreadyPaidSteps: [] });
     expect(r.recordStep).toBeNull();
+  });
+
+  it('pays nothing on iOS — the device check is an Android capability, and iOS has no web sub-path', () => {
+    expect(android({ platform: 'ios' }).reason).toBe('not-android');
+  });
+});
+
+// The WEB path — added 2026-09-26 (admin: "website par github aur mobile verification par 100-100,
+// maximum 100 only"). This REVERSES the old "no web path at all" rule for exactly two steps, under a
+// ₹100 website ceiling. The full ₹400 ladder stays Android + device-verified; the web is a small,
+// bounded trial so a website-only user is not stranded at ₹0 and unable to build even once.
+const web = (over: Partial<Parameters<typeof decideSelfReward>[0]> = {}) => decideSelfReward({
+  step: 'github', alreadyPaidSteps: [], deviceVerified: false, platform: 'web',
+  alreadyGiftedTokens: 0, alreadyWebGiftedTokens: 0, mobileVerified: true, env: ON, ...over,
+});
+
+describe('🔒 the website earns only mobile + github, capped at ₹100', () => {
+  it('pays ₹100 for a github or mobile verification on the web, with no device check', () => {
+    for (const step of ['github', 'mobile'] as RewardStep[]) {
+      const r = web({ step });
+      expect(r.reason, step).toBe('granted');
+      expect(r.tokens, step).toBe(10_000); // ₹100
+      expect(r.web, step).toBe(true);
+      expect(r.recordStep, step).toBe(step);
+    }
+  });
+
+  it('🔒 NO MOBILE VERIFY → NO TOKEN: a web github link is held (₹0, unrecorded) until a real mobile is verified', () => {
+    const r = web({ step: 'github', mobileVerified: false });
+    expect(r.tokens).toBe(0);
+    expect(r.reason).toBe('web-held-until-mobile');
+    expect(r.recordStep).toBeNull(); // must stay claimable — never burned while held
+  });
+
+  it('verifying the mobile releases the held github: the same github claim now pays ₹100', () => {
+    const held = web({ step: 'github', mobileVerified: false });
+    expect(held.reason).toBe('web-held-until-mobile');
+    const released = web({ step: 'github', mobileVerified: true });
+    expect(released.reason).toBe('granted');
+    expect(released.tokens).toBe(10_000);
+  });
+
+  it('refuses the Android-only steps on the web — gmail-login and the referral code never pay here', () => {
+    for (const step of ['email', 'referral-code'] as RewardStep[]) {
+      const r = web({ step });
+      expect(r.tokens, step).toBe(0);
+      expect(r.reason, step).toBe('web-not-eligible');
+      expect(r.recordStep, step).toBeNull();
+    }
+  });
+
+  it('both web steps pay ₹100 — the second still pays after the first (the ₹200 ceiling is not yet hit)', () => {
+    const r = web({ step: 'mobile', alreadyWebGiftedTokens: 10_000 }); // ₹100 already earned on the web
+    expect(r.reason).toBe('granted');
+    expect(r.tokens).toBe(10_000); // ₹100 — total web now ₹200
+  });
+
+  it('caps the WHOLE website at ₹200 — a grant once ₹200 is already earned on the web pays nothing', () => {
+    const r = web({ step: 'mobile', alreadyWebGiftedTokens: 20_000 }); // ₹200 already earned on the web
+    expect(r.tokens).toBe(0);
+    expect(r.reason).toBe('web-cap-reached');
+  });
+
+  it('the web still obeys the ₹400 lifetime self-cap — an account already at ₹400 earns ₹0 on the web', () => {
+    const r = web({ step: 'github', alreadyGiftedTokens: 40_000, alreadyWebGiftedTokens: 0 });
+    expect(r.tokens).toBe(0);
+    expect(r.reason).toBe('cap-reached'); // the ₹400 total, not the ₹200 web slice, is what bit
+  });
+
+  it('the ₹200 web grant is a SUB-cap: the same account can still earn the remaining ₹200 on Android', () => {
+    const r = android({ step: 'mobile', alreadyGiftedTokens: 20_000 }); // ₹200 already taken on the web
+    expect(r.reason).toBe('granted');
+    expect(r.tokens).toBe(10_000);
   });
 });
 
@@ -375,5 +436,20 @@ describe('the Earning screen — a referred friend’s three-step status', () =>
     });
     expect(status.completedCount).toBe(2); // email + mobile; referral-code does not pay the referrer
     expect(reward.recordSteps.sort()).toEqual(['email', 'mobile']);
+  });
+});
+
+describe('🔒 canStillRedeem — "refer only for new user", without locking out the Gmail-login grant', () => {
+  it('a brand-new account may redeem', () => {
+    expect(canStillRedeem([])).toBe(true);
+    expect(canStillRedeem(undefined)).toBe(true);
+  });
+  it('the automatic Gmail-login (email) grant alone does NOT make an account old', () => {
+    expect(canStillRedeem(['email'])).toBe(true);
+  });
+  it('any real verification (mobile / github) before the code makes it old — "old ko never"', () => {
+    expect(canStillRedeem(['mobile'])).toBe(false);
+    expect(canStillRedeem(['github'])).toBe(false);
+    expect(canStillRedeem(['email', 'mobile'])).toBe(false);
   });
 });

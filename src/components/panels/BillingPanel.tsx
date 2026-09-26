@@ -74,7 +74,7 @@ export interface BillingPanelProps {
   onFetchWallet: () => void;
   onSetActiveBillingDetailTab: (tab: BillingDetailTab) => void;
   onSetCouponCodeInput: (v: string) => void;
-  /** The referral state for this account — see useReferralProgress. Empty off Android. */
+  /** The referral state for this account — see useReferralProgress (the app's four steps or the website's two). */
   referral: ReferralProgress;
   onRefreshReferral: () => void;
   onRedeemPromoCoupon: (code: string) => void;
@@ -528,6 +528,9 @@ export function BillingPanel(props: BillingPanelProps) {
                   capRupees={referral.capRupees}
                   capReached={referral.capReached}
                   referred={referral.referred}
+                  surface={referral.surface}
+                  canRedeem={referral.canRedeem}
+                  webCapRupees={referral.webCapRupees}
                   emailVerified={referral.emailVerified}
                   phoneVerified={referral.phoneVerified}
                   githubLinked={referral.githubLinked}

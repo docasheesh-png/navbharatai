@@ -69,9 +69,11 @@ describe('form submission routes by the tab the user is on', () => {
   });
 
   it('the misleading deep probe is gated at the single place it is appended', () => {
-    expect(code).toContain('if (!shouldDeepDiagnose(err?.code))');
+    // Since 2026-09-26 the probe's verdict goes to the console only (signInErrorsAreGeneric.test.ts);
+    // the gate is unchanged — it still runs BEFORE the probe and still decides whether it runs at all.
+    expect(code).toContain('if (shouldDeepDiagnose(err?.code))');
     const gate = code.indexOf('shouldDeepDiagnose(err?.code)');
-    const probe = code.indexOf('await diagnoseAuth(email, password)', gate);
+    const probe = code.indexOf('diagnoseAuth(email, password)', gate);
     expect(gate).toBeGreaterThan(-1);
     expect(probe).toBeGreaterThan(gate); // the gate runs BEFORE the probe, never after
   });

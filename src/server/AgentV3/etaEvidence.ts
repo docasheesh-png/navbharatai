@@ -35,6 +35,32 @@
 
 import type { BuildEstimate } from '../lib/BuildTimeEstimator';
 import { formatEta } from '../lib/BuildTimeEstimator';
+import { formatEtaRange } from './progressEta';
+
+/**
+ * The band an UNEVIDENCED estimate is shown as — a rough estimate, said to be one.
+ *
+ * 🔴 THE RULE ABOVE ("show the number wherever it is measured, the phase wherever it is not") had a
+ * cost the Study-Racer autopsy put a number on (admin, 2026-09-25): a 13.5-minute first build during
+ * which the user saw "I don't have a reliable time for this one yet" for the ENTIRE build, because a
+ * fresh workspace never reaches the history bar and the measured line never arrived. The admin's
+ * ruling (2026-09-26, verbatim: *"ETA dikhao andaaza label ke saath"*): show the estimator's own band,
+ * and call it what it is — a guess from the size of the request, never a measurement. The label is
+ * the whole difference from the broken promise this module was written against: "~2–4 min" as a
+ * bare figure was an anchor the build could not keep; "rough estimate ~2–4 min — a guess, not a
+ * measurement" is a disclosed one. `null` when the estimate carries no usable band, so the phase-only
+ * sentence is still the fallback.
+ */
+export function roughEstimateBand(est: Pick<BuildEstimate, 'estimateMs' | 'lowMs' | 'highMs'> | null | undefined): string | null {
+  if (!est) return null;
+  const mid = Number(est.estimateMs);
+  if (!Number.isFinite(mid) || mid <= 0) return null;
+  const band = formatEtaRange(Number(est.lowMs), Number(est.highMs), mid);
+  return band && band !== '~0s' ? band : null;
+}
+
+/** The words that make a rough estimate honest. Shared by the first line, the tick and the report. */
+export const ROUGH_ESTIMATE_LABEL = 'a guess from the size of your request, not a measurement';
 
 /**
  * How much of an estimate must come from real past builds before its number may be shown.
@@ -68,7 +94,13 @@ export function estimateIsEvidenced(est: Pick<BuildEstimate, 'historyWeight'> | 
  * reaches either produces the number this sentence undertakes to produce. The line it replaced made
  * the same promise from a path where no code existed that could keep it.
  */
-export function unevidencedFirstEtaLine(): string {
+export function unevidencedFirstEtaLine(est?: Pick<BuildEstimate, 'estimateMs' | 'lowMs' | 'highMs'> | null): string {
+  const band = roughEstimateBand(est);
+  if (band) {
+    // Admin 2026-09-26: the band is shown, and labelled. The promise of a real figure is kept as before.
+    return `⏱️ Rough estimate: ${band} — ${ROUGH_ESTIMATE_LABEL}. `
+      + 'I\'ll replace it with a real figure — and keep it updated — as soon as I can measure how big your app is.';
+  }
   return '⏱️ Planning your app… I don\'t have a reliable time for this one yet. '
     + 'I\'ll show you a real figure — and keep it updated — as soon as I can measure how big it is.';
 }
@@ -108,10 +140,14 @@ export const LONG_RUN_BUDGET_SHARE = 0.6;
  * with no limit is never told about a limit that does not exist. Past the cap it also falls back:
  * a negative remainder is not a number worth inventing a phrase for.
  */
-export function unevidencedEtaTickLine(elapsedMs: number, budgetMs?: number): string {
+export function unevidencedEtaTickLine(elapsedMs: number, budgetMs?: number, roughBand?: string | null): string {
   const elapsed = Math.max(0, Number(elapsedMs) || 0);
   const inTxt = formatEta(elapsed).replace('~', '');
-  const plain = `⏱️ Still building… ${inTxt} in · still working out how big this one is — I'll show a time as soon as I can measure it, and tell you the moment it's done.`;
+  // The rough band rides the tick too (admin 2026-09-26), still labelled; without one, the phase.
+  const sizing = roughBand
+    ? `rough estimate ${roughBand} (${ROUGH_ESTIMATE_LABEL}) — I'll show a measured time as soon as I have one`
+    : 'still working out how big this one is — I\'ll show a time as soon as I can measure it';
+  const plain = `⏱️ Still building… ${inTxt} in · ${sizing}, and tell you the moment it's done.`;
   const budget = Number(budgetMs);
   if (!Number.isFinite(budget) || budget <= 0 || elapsed >= budget) return plain;
   const leftTxt = formatEta(budget - elapsed).replace('~', '');
@@ -123,7 +159,7 @@ export function unevidencedEtaTickLine(elapsedMs: number, budgetMs?: number): st
     return `⏱️ Still building… ${inTxt} in · this one is taking longer than most. `
       + `I'll keep working for up to ${leftTxt} more, then save whatever is finished and tell you honestly how far it got — nothing you have is lost.`;
   }
-  return `⏱️ Still building… ${inTxt} in · up to ${leftTxt} left for this one · still working out how big it is — I'll show a time as soon as I can measure it.`;
+  return `⏱️ Still building… ${inTxt} in · up to ${leftTxt} left for this one · ${sizing}.`;
 }
 
 /**
@@ -132,13 +168,16 @@ export function unevidencedEtaTickLine(elapsedMs: number, budgetMs?: number): st
  * The report is the surface that must never be less honest than the screen (autopsy f04421ef), so it
  * states which of the two the user actually saw and why — a number, or the reason there wasn't one.
  */
-export function etaEvidenceNote(est: Pick<BuildEstimate, 'historyWeight' | 'basis'>): string {
+export function etaEvidenceNote(est: Pick<BuildEstimate, 'historyWeight' | 'basis'> & Partial<Pick<BuildEstimate, 'estimateMs' | 'lowMs' | 'highMs'>>): string {
   if (estimateIsEvidenced(est)) {
     return `Shown as a number: ${Math.round(Number(est.historyWeight) * 100)}% of it comes from this workspace's own past builds (basis ${est.basis}).`;
   }
   const w = Number(est?.historyWeight);
+  const band = roughEstimateBand(est as Pick<BuildEstimate, 'estimateMs' | 'lowMs' | 'highMs'>);
+  // What the user saw: a labelled rough estimate (admin 2026-09-26), or the phase when no band existed.
+  const shown = band ? `Shown as a ROUGH ESTIMATE (${band}), labelled a guess` : 'No number shown';
   if (!Number.isFinite(w) || w <= 0) {
-    return 'No number shown: there are no past builds to measure against, and the prompt-word heuristic alone is not evidence (it scores short, ambitious prompts smallest).';
+    return `${shown}: there are no past builds to measure against, and the prompt-word heuristic alone is not evidence (it scores short, ambitious prompts smallest).`;
   }
-  return `No number shown: only ${Math.round(w * 100)}% of the estimate comes from real past builds, so the prompt-word heuristic still dominates it.`;
+  return `${shown}: only ${Math.round(w * 100)}% of the estimate comes from real past builds, so the prompt-word heuristic still dominates it.`;
 }

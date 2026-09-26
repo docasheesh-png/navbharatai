@@ -19,10 +19,12 @@
 // goes back to its three seconds — otherwise a user who finished weeks ago would be shown a
 // congratulation on every single launch, which is how a helpful thing becomes a nagging one.
 //
-// 🔒 ANDROID ONLY, like everything else in this feature. On the website the checklist is not shown
-// at all — advertising four ₹100 steps to somebody who cannot claim any of them would be worse than
-// silence, and the website deliberately has no way to claim them (admin: "website par kuch bhi nahi
-// dena").
+// 🔒 THE TESTING-NOTICE POPUP STAYS ANDROID-ONLY (`shouldShowChecklist`). ⚠️ CORRECTED 2026-09-26: the
+// website is no longer a place that "cannot claim any of them" — it earns mobile + GitHub (₹200 max,
+// mobile first) — and the rows themselves are now platform-aware, because the SERVER returns only the
+// steps the asking surface can finish (`?platform=web` → two rows). The checklist every surface shows
+// is the pinned card at the top of the notifications panel (RewardsChecklistCard); this popup keeps its
+// Android-only rule so the website's launch notice is not made to wait on money.
 //
 // PURE — no DOM, no clock, no fetch.
 
@@ -42,13 +44,13 @@ export function checklistLabel(step: RewardStep, claimed: boolean, rupees: numbe
   const amount = `₹${rupees}`;
   const done: Record<RewardStep, string> = {
     'referral-code': 'Referral code applied',
-    email: 'Email verified',
+    email: 'Gmail / email verified',
     mobile: 'Mobile number verified',
     github: 'GitHub connected',
   };
   const todo: Record<RewardStep, string> = {
     'referral-code': 'Referral code not applied',
-    email: 'Email not verified',
+    email: 'Gmail / email not verified',
     mobile: 'Mobile number not verified',
     github: 'GitHub not connected',
   };

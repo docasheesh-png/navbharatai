@@ -1,3 +1,4 @@
+import { toSafeClientMessage } from '../lib/httpError';
 import type { Express, Request, Response } from 'express';
 import { copyName, copyStatus } from '../AgentV3/duplicateApp';
 import { decideMarkupOnProof, markupNeedsPreview } from '../AgentV3/previewEarnsMarkup';
@@ -19,7 +20,7 @@ import { resolveDomainKnowledge, type DomainKnowledge } from '../lib/domainKnowl
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
 import { memoryLinkedSuggestions, mergeSuggestions } from '../AgentV3/memoryLinkedSuggestions';
 import { buildFindingSuggestions } from '../AgentV3/buildFindingSuggestions';
-import { analyzeAppScope } from '../lib/appScopeAnalyzer';
+import { analyzeAppScope, scopeDispute } from '../lib/appScopeAnalyzer';
 import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, hardConstraintLines, type MegaRoadmap } from '../lib/megaRoadmap';
@@ -33,7 +34,7 @@ import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
-import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote } from '../AgentV3/etaEvidence';
+import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
 import { decideComplexity } from '../AgentV3/complexityRouting';
 import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary, repairLostEscapes, scriptRepairSummary } from '../AgentV3/scriptIntegrity';
@@ -224,6 +225,7 @@ import { GoogleGenAI } from '@google/genai';
 import { scanGeneratedCode, formatCodeScanReport } from '../AgentV3/CodeSafetyScanner';
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
 import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, sharedRateLimitCooldowns, createBuildBenchRegistry, type NamedRunner, type BuildBenchRegistry } from '../AgentV3/providers/MultiProviderTurnRunner';
+import { modelAlwaysReasons } from '../AgentV3/providers/glmThinking';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { buildStreamingEnabled, streamHardCapMs } from '../AgentV3/providers/openAiStream';
 import {
@@ -9014,7 +9016,7 @@ async function noteBuildOutcome(
       // their app on the internet did not get a broken one, whatever they grumbled about on the way.
       void (async () => { await noteBuildOutcome(workspaceId, { invested: true }, await outcomeIdentity(req)); })();
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Could not publish your app. Please try again.' });
+      res.status(500).json({ error: toSafeClientMessage(err, 'Could not publish your app. Please try again.') });
     }
   });
 
@@ -9087,7 +9089,7 @@ async function noteBuildOutcome(
         const { files, skipped } = await collectNamedWorkspaceFiles(actuator, workspaceId, namedPaths);
         res.json({ files, count: Object.keys(files).length, skipped: skipped.length, liveSync: true });
       } catch (err: any) {
-        res.status(500).json({ error: err?.message || 'Failed to read the workspace files.' });
+        res.status(500).json({ error: toSafeClientMessage(err, 'Failed to read the workspace files.') });
       }
       return;
     }
@@ -9096,7 +9098,7 @@ async function noteBuildOutcome(
       const { files, skipped } = await collectFilesWithSavedFallback(actuator, workspaceId, { liveTimeoutMs: 2_500 });
       res.json({ files, count: Object.keys(files).length, skipped: skipped.length });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Failed to read the workspace files.' });
+      res.status(500).json({ error: toSafeClientMessage(err, 'Failed to read the workspace files.') });
     }
   });
 
@@ -9274,7 +9276,7 @@ async function noteBuildOutcome(
       }
       res.json({ html, kind, count: Object.keys(files).length, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed, fidelityNotice: previewFidelityNotice(previewFidelityCaveats(files)), ...copyFields });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Failed to build the in-browser preview.' });
+      res.status(500).json({ error: toSafeClientMessage(err, 'Failed to build the in-browser preview.') });
     }
   });
 
@@ -9358,7 +9360,7 @@ async function noteBuildOutcome(
       await mergeWorkspaceFiles(workspaceId, { [filePath]: newSource });
       res.json({ ok: true, file: filePath, content: newSource, ...(partial.length > 0 ? { failures: partial } : {}) });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Failed to apply the visual edit.' });
+      res.status(500).json({ error: toSafeClientMessage(err, 'Failed to apply the visual edit.') });
     }
   });
 
@@ -9476,7 +9478,7 @@ async function noteBuildOutcome(
       }
       res.json({ imported: written.length, skipped: skipped.length, ...(github ? { github } : {}), ...(needsGithub ? { needsGithub: true } : {}) });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Failed to import the files.' });
+      res.status(500).json({ error: toSafeClientMessage(err, 'Failed to import the files.') });
     }
   });
 
@@ -9510,7 +9512,7 @@ async function noteBuildOutcome(
       const deleted = await removeWorkspaceFiles(workspaceId, paths.slice(0, 5000));
       res.json({ deleted });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Failed to delete the files.' });
+      res.status(500).json({ error: toSafeClientMessage(err, 'Failed to delete the files.') });
     }
   });
 
@@ -9558,7 +9560,7 @@ async function noteBuildOutcome(
       }
       res.json({ files: [], count: 0, restored: false, source: 'none' });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Failed to restore the workspace files.' });
+      res.status(500).json({ error: toSafeClientMessage(err, 'Failed to restore the workspace files.') });
     }
   });
 
@@ -12204,6 +12206,8 @@ async function noteBuildOutcome(
     // False while the only thing backing the budget is the prompt-word heuristic, and the heartbeat
     // then shows elapsed time and the phase instead of a remaining time. See AgentV3/etaEvidence.ts.
     let etaEvidenced = false;
+    // The labelled rough band an unevidenced build shows (admin 2026-09-26) — read by the tick.
+    let etaRoughBand: string | null = null;
     // MEASURED ETA state (2026-08-23). Everything above predicts from the PROMPT, which is how "Make an
     // VPN App" — a prompt with no page-words and no feature-words — scored the floor of the formula and
     // promised ~3 min for a build that ran 18m 42s. These two fields let the heartbeat stop predicting
@@ -12370,7 +12374,7 @@ async function noteBuildOutcome(
           // d11ad529). Elapsed time is still reported — it has already happened, so it promises
           // nothing — and the moment a real measurement lands the branch above takes over.
           if (!etaEvidenced) {
-            events.emit({ type: 'narration', agent: 'architect', text: unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000), ts: now, id: 'eta-live' });
+            events.emit({ type: 'narration', agent: 'architect', text: unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000, etaRoughBand), ts: now, id: 'eta-live' });
             return;
           }
           const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs, etaRevisions);
@@ -12555,7 +12559,10 @@ async function noteBuildOutcome(
       // when a real domain is detected AND something is genuinely missing/askable, to keep the report high-signal.
       try {
         const reqGaps = analyzeRequirementGaps(prompt);
-        if (shouldSurfaceRequirementGaps(reqGaps)) {
+        // A FRESH build only (autopsy Study-Racer, 2026-09-25): on an edit turn ("no arrows to move the
+        // car") this recorded eight "likely-missing features" and six "questions to confirm" about an
+        // app that already existed — the requirement-aware build is a fresh-build feature by design.
+        if (intent === 'new_build' && !isEditMode && shouldSurfaceRequirementGaps(reqGaps)) {
           buildDiag.record({
             phase: 'build',
             severity: 'info',
@@ -13001,7 +13008,17 @@ async function noteBuildOutcome(
       if (envFlag('AGENTV3_MEGA_ROADMAP', true) && intent === 'new_build' && !isEditMode) {
         try {
           const scope = analyzeAppScope(prompt);
-          if (scope.decision === 'analyze') {
+          // TWO CLASSIFIERS DISAGREEING IS A FACT, NOT A TIE THE DEARER ONE WINS (autopsy Study-Racer,
+          // 2026-09-25 — see scopeDispute). Recorded as a fact about OUR routing; the build runs direct.
+          const dispute = scopeDispute(scope, { complex: buildIsComplex });
+          if (dispute) {
+            buildDiag.record({
+              phase: 'plan', severity: 'info', code: 'APP_SCOPE_DISPUTED', autoResolved: true,
+              message: `Scope stood down: ${dispute}`,
+              detail: `scope signals: ${scope.signals.join('; ')} · complexity: simple`,
+            });
+          }
+          if (scope.decision === 'analyze' && !dispute) {
             const rmStartedAt = Date.now();
             let rmProvider = 'CLAUDE';
             const rmCall = makeFastTextRunner((used) => { rmProvider = used; }).runTurn({
@@ -13168,7 +13185,8 @@ async function noteBuildOutcome(
           // from. What changes is that its fallback may not count down from a figure we declined to
           // show — see the tick below, which withholds the countdown until something real anchors it.
           etaEvidenced = estimateIsEvidenced(est);
-          const etaShown = etaEvidenced ? firstEtaLine(est, past.length) : unevidencedFirstEtaLine();
+          etaRoughBand = etaEvidenced ? null : roughEstimateBand(est);
+          const etaShown = etaEvidenced ? firstEtaLine(est, past.length) : unevidencedFirstEtaLine(est);
           // KEEP THE PROMISE SO THE ENDING CAN BE MEASURED AGAINST IT (open root cause #6). The
           // `ETA_BASIS` line below records the same numbers as PROSE, for a human; this records them
           // as NUMBERS, so the report can reconcile them against its own clock without anyone parsing
@@ -14116,7 +14134,11 @@ async function noteBuildOutcome(
         try {
           buildDiag.record({
             phase: 'build', severity: 'info', code: 'GREEN_FREEZE_DEFERRED',
-            message: `The app was already verified working, so an edit to "${path}"${pass ? ` (${pass})` : ''} was NOT applied — the working app was left untouched. Reply if you want this change made.`,
+            // Wording (autopsy Study-Racer, 2026-09-25): six of these on one build were the engine's OWN
+            // default files (manifest, robots, icon, service worker, a test), and each ended "Reply if
+            // you want this change made" — an invitation about work the user never asked for. A refused
+            // post-green write is the engine being held to the freeze, and the line says so.
+            message: `The app was already verified working, so a later write to "${path}"${pass ? ` by the ${pass} pass` : ''} was NOT applied — the working app was left untouched. This is the engine's own follow-up being refused by the freeze, not something the user asked for; nothing to do.`,
             autoResolved: true,
           });
         } catch { /* best-effort */ }
@@ -15873,6 +15895,9 @@ async function noteBuildOutcome(
         // ONE fast-lane model round trip. Returns the provider's stop reason alongside the text so the
         // continuation wrapper below can tell "the model finished" from "the model ran out of budget"
         // — a distinction the lane previously threw away, which is how a truncated app shipped as done.
+        // The model that served the lane's LAST call reasons before every answer — the lane stops at
+        // the next boundary and hands off (SimpleBuildDeps.stopLane; autopsy Study-Racer, 2026-09-25).
+        let fastLaneReasoningRung: string | null = null;
         const fastGenerateOnce = async (system: string, user: string, deadlineAt?: number): Promise<{ text: string; stopReason: string | null }> => {
           // #2 — capture this fast-lane model call's I/O into the diagnosis bundle. The fast lane
           // (Simple Builder / OneShot) does NOT go through AgentRunner, so its model calls were a
@@ -15927,6 +15952,15 @@ async function noteBuildOutcome(
           }
           const servedBy = fastLaneCallIdentity(providerReported, usedProvider, fbModel);
           try { buildDiag.recordLlmCall({ model: servedBy.model, provider: servedBy.provider, promptPreview, promptChars: promptPreview.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true }); } catch { /* diagnostics best-effort */ }
+          if (!fastLaneReasoningRung && fastLaneReasoningGateEnabled() && modelAlwaysReasons(servedBy.model)) {
+            fastLaneReasoningRung = servedBy.model;
+            try {
+              buildDiag.record({
+                phase: 'build', severity: 'info', code: 'FAST_LANE_FELL_TO_REASONING_RUNG', autoResolved: true,
+                message: `The fast lane's chain fell to an engine that reasons before every answer (${servedBy.model}) after ${Math.round((Date.now() - startedAt) / 1000)}s on one file call; the lane stops at its next boundary and hands the finished files to the full builder rather than paying that price per file.`,
+              });
+            } catch { /* diagnostics best-effort */ }
+          }
           osUsage.inputTokens += t.usage.inputTokens;
           osUsage.outputTokens += t.usage.outputTokens;
           osUsage.cacheCreationInputTokens += t.usage.cacheCreationInputTokens ?? 0;
@@ -16268,7 +16302,11 @@ async function noteBuildOutcome(
           const c = await actuator.readFile(workspaceId, p).catch(() => null);
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
-        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate, writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
+        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
+          stopLane: () => (fastLaneReasoningRung
+            ? `the lane's engine fell to ${fastLaneReasoningRung}, which reasons before every answer; the lane's per-file budget cannot carry that, so the files finished so far go to the full builder now`
+            : null),
+          writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         // WHERE THE FAST LANE'S MINUTES WENT (autopsy 21b431e1). Measurement only — nothing reads it.
         // Recorded on BOTH outcomes, because a lane that handed off is exactly the one whose time

@@ -30,6 +30,7 @@ import { sendSafeError } from '../lib/httpError';
 import { routeParam } from '../lib/expressCompat';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mirroredCreditPatch } from '../lib/walletMirror';
+import { MAX_WEB_GIFT_TOKENS } from '../lib/giftPolicy';
 import { ledgerPatch } from '../lib/walletStatement';
 import { mintReferralCode, normalizeReferralCode, referralShareMessage } from '../lib/referralCode';
 import { checkDeviceIntegrity, deviceRefusalMessage, type DeviceCheck } from '../lib/deviceIntegrity';
@@ -37,7 +38,7 @@ import {
   decideSelfReward, decideReferrerReward, decideAttribution, attributionRefusalMessage,
   selfProgress, readSteps, referralRewardsEnabled, referrerLifetimeCapTokens,
   stepIsProven, stepNotDoneMessage, githubIsLinked, friendVerificationStatus,
-  ALL_STEPS, type RewardStep, type StepProof,
+  ALL_STEPS, WEB_ELIGIBLE_STEPS, canStillRedeem, stepAllowedOnWeb, type RewardStep, type StepProof,
 } from '../lib/referralRewards';
 
 /** One person's referral record. Absent until they first open the screen or redeem a code. */
@@ -51,6 +52,8 @@ interface ReferralDoc {
   referrerPaidSteps?: unknown;
   /** Tokens this user has EVER earned as a referrer. The ₹1,500 cap is measured against it. */
   earnedTokens?: unknown;
+  /** Tokens this user has been paid THROUGH THE WEBSITE. The ₹200 web sub-cap is measured against it. */
+  webGiftedTokens?: unknown;
   /** Devices this user has been seen on — the device-level self-referral check reads it. */
   deviceIds?: unknown;
   createdAt?: string;
@@ -127,6 +130,108 @@ function claimedPlatform(req: Request): string {
   return String((req.body as { platform?: unknown } | undefined)?.platform ?? '').trim().toLowerCase();
 }
 
+/**
+ * A WEBSITE claim: pay the new user for their web-eligible verifications (mobile, github), capped at
+ * ₹200 and held until a real mobile (OTP) is verified. No device check — the web has none; the mobile
+ * SIM is the gate. Reconciles BOTH steps in one transaction, mobile first, so verifying the mobile
+ * releases a github linked earlier, atomically and idempotently.
+ *
+ * 🔗 Pays the REFERRER too (admin 2026-09-26: *"website par jo user hai woh refer kar sakta hai, usko
+ * refer token milne chahiye — wahi maximum 1500 ke"*). A web user cannot REDEEM a code (there is no
+ * code-entry box on the website — the redeem/attribution route stays Android-only), so a friend only
+ * ever acquires a referrer on Android; but once they have one, that referrer earns ₹25 for each of the
+ * friend's verifications wherever they happen. `decideReferrerReward` is mobile-anchored (nothing until
+ * the friend's real number lands) and ₹1,500-capped, so a web verification pays the referrer exactly as
+ * a device-verified one does — a real SIM either way. Separate transaction, so it can never roll back
+ * the friend's own credit.
+ */
+async function claimWeb(db: any, userId: string, res: Response): Promise<Response> {
+  const contact = await resolveAccountContact(userId);
+  const proof: StepProof = {
+    emailVerified: contact.emailVerified && Boolean(contact.email),
+    phoneVerified: Boolean(contact.phone),
+    githubLinked: githubIsLinked(contact.providers),
+    hasReferrer: false, // the referral code is Android-only; it is never earned on the web
+  };
+  const nowIso = new Date().toISOString();
+  const selfRef = doc(db, REFERRALS, userId);
+  const walletRef = doc(db, 'user_token_wallets', userId);
+
+  const result = await runTransaction(db, async (tx: any) => {
+    const [refSnap, walletSnap] = await Promise.all([tx.get(selfRef), tx.get(walletRef)]);
+    const rec = (refSnap.exists() ? refSnap.data() : {}) as ReferralDoc;
+    const wallet = (walletSnap.exists() ? walletSnap.data() : {}) as Record<string, unknown>;
+
+    // Fold the running totals forward across BOTH steps so each decision sees what the previous one in
+    // this same loop already granted — the ₹400 lifetime cap and the ₹200 web cap stay honest across a
+    // two-step release (mobile + github paid together the moment the mobile lands).
+    let paidSteps = readSteps(rec.paidSteps);
+    let webGifted = num(rec.webGiftedTokens);
+    let lifetimeGifted = num(wallet.freeGiftedTokens);
+    let totalGranted = 0;
+
+    for (const s of WEB_ELIGIBLE_STEPS) {
+      if (paidSteps.includes(s) || !stepIsProven(s, proof)) continue;
+      const reward = decideSelfReward({
+        step: s,
+        alreadyPaidSteps: paidSteps,
+        deviceVerified: false,
+        platform: 'web',
+        alreadyGiftedTokens: lifetimeGifted,
+        alreadyWebGiftedTokens: webGifted,
+        mobileVerified: proof.phoneVerified,
+      });
+      if (reward.tokens <= 0 || !reward.recordStep) continue;
+      totalGranted += reward.tokens;
+      paidSteps = [...paidSteps, reward.recordStep];
+      webGifted += reward.tokens;
+      lifetimeGifted += reward.tokens;
+    }
+
+    if (totalGranted <= 0) return { granted: 0, referrerUserId: rec.referrerUserId ?? null };
+
+    // ONE combined credit + ledger row + updated markers, atomically — the same idempotency guarantee
+    // the Android path relies on: the credit and the record of what earned it are a single write.
+    const patch = mirroredCreditPatch(wallet, totalGranted, 'gift');
+    const rupees = totalGranted / TOKENS_PER_RUPEE;
+    tx.set(walletRef, {
+      ...patch,
+      freeGiftedTokens: num(wallet.freeGiftedTokens) + totalGranted,
+      totalTokensPurchased: num(wallet.totalTokensPurchased) + totalGranted,
+      ...ledgerPatch(wallet, {
+        type: 'purchase',
+        amountCoinsOrTokens: totalGranted,
+        moneySpent: 0,
+        timestamp: nowIso,
+        description: `Referral bonus: ₹${rupees.toLocaleString('en-IN')} credited`,
+      }),
+      updatedAt: nowIso,
+    }, { merge: true });
+    tx.set(selfRef, { paidSteps, webGiftedTokens: webGifted, updatedAt: nowIso }, { merge: true });
+    return { granted: totalGranted, referrerUserId: rec.referrerUserId ?? null };
+  });
+
+  // The referrer's half — separate transaction, separate user, never able to undo the credit above.
+  // `decideReferrerReward` reconciles over the friend's state, so it is safe to call after ANY of the
+  // friend's steps and pays ₹0 on a repeat; mobile-anchored and ₹1,500-capped inside it.
+  if (result.granted > 0 && result.referrerUserId) {
+    await payReferrer(db, String(result.referrerUserId), userId, nowIso)
+      .catch(() => { /* re-offered on this friend's next step; never breaks the claimer's reply */ });
+  }
+
+  const grantedRupees = result.granted / TOKENS_PER_RUPEE;
+  return res.json({
+    ok: result.granted > 0,
+    granted: result.granted,
+    rupees: grantedRupees,
+    message: result.granted > 0
+      ? `₹${grantedRupees.toLocaleString('en-IN')} added to your wallet.`
+      : (proof.phoneVerified
+          ? 'Nothing new to claim on the website right now.'
+          : 'Verify your mobile number to unlock your website reward — ₹100 for mobile and ₹100 for GitHub.'),
+  });
+}
+
 export function registerReferralRoutes(app: Express): void {
   /**
    * The user's own referral state: their code, what they have claimed, what is still pending, and
@@ -142,9 +247,25 @@ export function registerReferralRoutes(app: Express): void {
       const code = await ensureCode(db, userId);
       const [rec, contact] = await Promise.all([readReferral(db, userId), resolveAccountContact(userId)]);
       const earned = num(rec.earnedTokens);
+      // 📱 WHICH SURFACE IS ASKING. The website earns only mobile + github (₹200 max), the app earns all
+      // four — so each is shown only the steps it can actually complete. Client-declared, and it can only
+      // ever NARROW what is shown: the claim route re-decides everything server-side regardless.
+      const platform = String(req.query?.platform ?? '').trim().toLowerCase() === 'web' ? 'web' : 'android';
+      // "Refer — only for new user": the code step is offered while the account can still redeem, and
+      // kept (✅ or claimable) once a code has been applied. Otherwise it would be a row nobody can finish.
+      const canRedeem = platform === 'android' && !rec.referrerUserId && canStillRedeem(rec.paidSteps);
+      const visibleSteps = selfProgress(rec.paidSteps).filter((s) => {
+        if (platform === 'web') return stepAllowedOnWeb(s.step);
+        if (s.step === 'referral-code') return s.claimed || Boolean(rec.referrerUserId) || canRedeem;
+        return true;
+      });
       return res.json({
         ok: true,
         enabled: true,
+        platform,
+        canRedeem,
+        webCapRupees: platform === 'web' ? MAX_WEB_GIFT_TOKENS / TOKENS_PER_RUPEE : null,
+        webEarnedRupees: num(rec.webGiftedTokens) / TOKENS_PER_RUPEE,
         code,
         // What the account has ACTUALLY done. The screen uses it to say what is missing instead of
         // offering a Claim button that the proof gate would refuse — a button that cannot work is
@@ -153,7 +274,7 @@ export function registerReferralRoutes(app: Express): void {
         phoneVerified: Boolean(contact.phone),
         githubLinked: githubIsLinked(contact.providers),
         shareMessage: referralShareMessage(code),
-        steps: selfProgress(rec.paidSteps).map((s) => ({
+        steps: visibleSteps.map((s) => ({
           step: s.step,
           claimed: s.claimed,
           rupees: s.tokens / TOKENS_PER_RUPEE,
@@ -263,9 +384,9 @@ export function registerReferralRoutes(app: Express): void {
         // the owner's own handset is caught by the self-referral check above.
         deviceAlreadyReferred: deviceMarker.exists()
           && String((deviceMarker.data() as { referredUserId?: unknown })?.referredUserId ?? '') !== userId,
-        // "old ko never": an account that already earned a step predates the referral and cannot be
-        // retro-attributed. A brand-new account has claimed nothing.
-        isNewUser: readSteps(mine.paidSteps).length === 0,
+        // "old ko never": an account that already earned a REAL verification predates the referral and
+        // cannot be retro-attributed. The automatic Gmail-login grant does not count — see canStillRedeem.
+        isNewUser: canStillRedeem(mine.paidSteps),
         platform: claimedPlatform(req) || 'android',
       });
       if (!verdict.ok) return res.status(409).json({ ok: false, message: attributionRefusalMessage(verdict.reason) });
@@ -304,6 +425,22 @@ export function registerReferralRoutes(app: Express): void {
       const userId = routeParam(req.params.userId);
       const step = String((req.body as { step?: unknown } | undefined)?.step ?? '') as RewardStep;
       if (!ALL_STEPS.includes(step)) return res.status(400).json({ ok: false, granted: 0, message: 'Unknown step.' });
+
+      // ── WEB PATH ──────────────────────────────────────────────────────────────────────────────
+      // The website earns only mobile + github, capped at ₹200, and NOTHING until a real mobile (OTP)
+      // is verified (admin 2026-09-26). There is NO device check here — the web has none; the mobile
+      // SIM is the gate and github rides inside the ₹200. `platform` is client-declared and can only
+      // ever REFUSE the Android-only steps, never grant more: `decideSelfReward`'s web branch pays only
+      // the two web-eligible steps and requires the mobile, so a caller who spoofs `platform:'web'`
+      // gets exactly what a web user gets and nothing an Android device would unlock.
+      //
+      // 🔒 It RECONCILES both web steps in ONE transaction, in WEB_ELIGIBLE_STEPS order (mobile first),
+      // so verifying the mobile releases a github that was linked earlier — in the same call, with no
+      // separate release path to forget (the shape rule 3 already uses for the referrer). Idempotent:
+      // a repeat call pays ₹0 because every granted step is recorded in the same write as the credit.
+      if (claimedPlatform(req) === 'web') {
+        return await claimWeb(getDb() as any, routeParam(req.params.userId), res);
+      }
 
       const device = await proveDevice(req);
       if (device.verdict !== 'verified') {

@@ -155,6 +155,89 @@ describe('the master switch', () => {
   });
 });
 
+async function webClaim(uid: string) {
+  // The web path branches BEFORE the device check, so no integrity token is needed; `step` must still
+  // be a valid step to pass the shared validation, but the web reconciliation ignores which one.
+  const res = mockRes();
+  await (await POST_CLAIM())(mockReq({ params: { userId: uid }, body: { step: 'mobile', platform: 'web' } }), res);
+  return res;
+}
+
+describe('the WEBSITE path — mobile + github, capped ₹200, held until a real mobile', () => {
+  it('credits ₹200 and records BOTH steps when mobile is verified and github linked', async () => {
+    account = { email: 'u@example.com', emailVerified: true, phone: '+919876543210', providers: ['google.com', 'github.com'] };
+    const r = await webClaim('W');
+    expect(r.body.granted).toBe(20_000); // ₹200
+    expect(tokensOf('W')).toBe(20_000);
+    expect(new Set(stepsOf('W'))).toEqual(new Set(['mobile', 'github']));
+    expect(DOCS[key('user_referrals', 'W')].webGiftedTokens).toBe(20_000);
+  });
+
+  it('🔒 NO MOBILE VERIFY → ₹0, nothing written, even with github linked', async () => {
+    account = { email: 'u@example.com', emailVerified: true, phone: '', providers: ['google.com', 'github.com'] };
+    const r = await webClaim('W');
+    expect(r.body.granted).toBe(0);
+    expect(tokensOf('W')).toBe(0);
+    expect(stepsOf('W')).toEqual([]);
+  });
+
+  it('mobile verified but github not linked pays ₹100 for the mobile alone', async () => {
+    account = { email: 'u@example.com', emailVerified: true, phone: '+919876543210', providers: ['google.com'] };
+    const r = await webClaim('W');
+    expect(r.body.granted).toBe(10_000); // ₹100
+    expect(stepsOf('W')).toEqual(['mobile']);
+  });
+
+  it('is idempotent — a second web claim after ₹200 pays nothing', async () => {
+    account = { email: 'u@example.com', emailVerified: true, phone: '+919876543210', providers: ['google.com', 'github.com'] };
+    await webClaim('W');
+    const again = await webClaim('W');
+    expect(again.body.granted).toBe(0);
+    expect(tokensOf('W')).toBe(20_000); // still exactly ₹200
+  });
+
+  it('never grants the Android-only steps on the web — the web tops out at ₹200, never ₹300+', async () => {
+    account = { email: 'u@example.com', emailVerified: true, phone: '+919876543210', providers: ['google.com', 'github.com'] };
+    await webClaim('W');
+    expect(stepsOf('W')).not.toContain('email');        // gmail-login is Android-only
+    expect(stepsOf('W')).not.toContain('referral-code'); // the code is Android-only
+    expect(tokensOf('W')).toBe(20_000);
+  });
+
+  it('🔗 a friend verifying on the WEB pays the REFERRER too — ₹25 each for mobile + github = ₹50', async () => {
+    // A refers B (B redeems on Android — the website has no code-entry box). B then verifies on the web.
+    const code = (await status('A')).code;
+    await redeem('B', code, 'bbbbbbbbbbbbbbbb');
+    account = { email: 'b@example.com', emailVerified: true, phone: '+919000000000', providers: ['google.com', 'github.com'] };
+    await webClaim('B');
+    expect(tokensOf('B')).toBe(20_000);                                        // B's own ₹200
+    expect(Number(DOCS[key('user_referrals', 'A')]?.earnedTokens || 0)).toBe(5_000); // A's ₹50, mobile-anchored
+  });
+  it('📱 the website status shows ONLY the two web steps, with the ₹200 web cap', async () => {
+    const res = mockRes();
+    await (await GET_STATUS())(mockReq({ params: { userId: 'W' }, query: { platform: 'web' } }), res);
+    const body = res.body as any;
+    expect(body.platform).toBe('web');
+    expect(body.steps.map((s: any) => s.step).sort()).toEqual(['github', 'mobile']);
+    expect(body.webCapRupees).toBe(200);
+    expect(body.canRedeem).toBe(false); // no code-entry on the website
+  });
+
+  it('📱 the app status shows all four steps to a new user, and offers the code box', async () => {
+    const s = await status('N');
+    expect(s.platform).toBe('android');
+    expect(s.steps.map((x: any) => x.step)).toContain('referral-code');
+    expect(s.canRedeem).toBe(true);
+  });
+
+  it('📱 "refer only for new user": once a real verification is earned with no code, the refer row disappears', async () => {
+    await claim('O', 'mobile', 'cccccccccccccccc');
+    const s = await status('O');
+    expect(s.canRedeem).toBe(false);
+    expect(s.steps.map((x: any) => x.step)).not.toContain('referral-code');
+  });
+});
+
 describe('the referral code', () => {
   it('is minted by the SERVER, stored, and stable across reads', async () => {
     const first = await status('A');
@@ -427,11 +510,21 @@ describe('🔒 attribution — the chain machine, blocked where the money is', (
     expect(DOCS[key('user_referrals', 'B')].referrerUserId).toBe('A');
   });
 
-  it('refuses an EXISTING user — "old ko never"', async () => {
+  it('refuses an EXISTING user — "old ko never": a real verification before the code disqualifies', async () => {
     const code = (await status('A')).code;
-    await claim('B', 'email', 'bbbbbbbbbbbbbbbb'); // B already earned before hearing about the code
+    await claim('B', 'mobile', 'bbbbbbbbbbbbbbbb'); // B already earned a real verification first
     const res = await redeem('B', code, 'bbbbbbbbbbbbbbbb');
     expect(res.statusCode).toBe(409);
+  });
+
+  it('🔴 the automatic Gmail-login grant does NOT make a user "old" — the code can still be applied after it', async () => {
+    // Gmail-login (email) is claimed on sign-in, before anyone could type a code. Under the old
+    // "no paid steps" rule this made EVERY Android user un-referrable; it must not.
+    const code = (await status('A')).code;
+    await claim('B', 'email', 'bbbbbbbbbbbbbbbb');
+    const res = await redeem('B', code, 'bbbbbbbbbbbbbbbb');
+    expect(res.statusCode).toBe(200);
+    expect(DOCS[key('user_referrals', 'B')].referrerUserId).toBe('A');
   });
 
   it('the refusal never tells a prober which marker caught them', async () => {

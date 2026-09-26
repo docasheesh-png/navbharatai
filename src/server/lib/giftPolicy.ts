@@ -46,6 +46,20 @@ export const MAX_SELF_GIFT_TOKENS = 400 * TOKENS_PER_RUPEE;
 /** The most a referrer may be paid for ONE friend. ₹75 — that friend's three verifications. */
 export const MAX_REFERRER_PER_FRIEND_TOKENS = 75 * TOKENS_PER_RUPEE;
 
+/**
+ * The most an account may EVER be gifted through the WEBSITE. ₹100 (admin 2026-09-26: *"website par
+ * github aur mobile verification par 100-100 maximum 100 only"*).
+ *
+ * 🔒 WHY THE WEB HAS ITS OWN, SMALLER CEILING. The full ₹400 ladder is claimed inside the Android app
+ * behind the Play Integrity device check, which bounds how many accounts can farm it at once. The web
+ * has no such check — a linked GitHub account is free and scriptable — so the web is deliberately
+ * capped at a single ₹100 grant per account. The strong web gate is the MOBILE step (a real SIM,
+ * TRAI-bounded); GitHub on the web rides inside this same ₹100 so it can never become a second
+ * scriptable ₹100. This is a SUB-ceiling: it sits under `MAX_SELF_GIFT_TOKENS`, never above it, so an
+ * account that took ₹100 on the web can still earn the remaining ₹300 on a verified Android device.
+ */
+export const MAX_WEB_GIFT_TOKENS = 100 * TOKENS_PER_RUPEE;
+
 /** What acquiring one user may cost NavBharatAI, all in. ₹475. Stated so the sum is checkable. */
 export const MAX_ACQUISITION_COST_TOKENS = MAX_SELF_GIFT_TOKENS + MAX_REFERRER_PER_FRIEND_TOKENS;
 
@@ -79,6 +93,25 @@ export function capSelfGift(grantTokens: number, alreadyGifted: unknown): number
   const givenRaw = Number(alreadyGifted);
   const given = Number.isFinite(givenRaw) && givenRaw > 0 ? Math.floor(givenRaw) : 0;
   const room = MAX_SELF_GIFT_TOKENS - given;
+  if (room <= 0) return 0;
+  return Math.min(Math.floor(want), room);
+}
+
+/**
+ * Clamp a WEB grant so an account's total WEBSITE-earned gift can never pass ₹100.
+ *
+ * `alreadyWebGifted` is the account's own running total of what it has been paid THROUGH THE WEB
+ * (`webGiftedTokens`), written in the same transaction as every web credit — so, like `capSelfGift`,
+ * this is a decision about the real figure, not a guess. A negative or unreadable total is treated as
+ * 0: unreadable must never mean "unlimited room". Apply it AFTER `capSelfGift`, never instead of it —
+ * the ₹400 lifetime ceiling still governs; this only makes the web's slice of it ₹100.
+ */
+export function capWebGift(grantTokens: number, alreadyWebGifted: unknown): number {
+  const want = Number(grantTokens);
+  if (!Number.isFinite(want) || want <= 0) return 0;
+  const givenRaw = Number(alreadyWebGifted);
+  const given = Number.isFinite(givenRaw) && givenRaw > 0 ? Math.floor(givenRaw) : 0;
+  const room = MAX_WEB_GIFT_TOKENS - given;
   if (room <= 0) return 0;
   return Math.min(Math.floor(want), room);
 }

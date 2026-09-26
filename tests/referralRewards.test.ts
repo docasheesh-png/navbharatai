@@ -98,19 +98,7 @@ describe('the amounts are the admin-approved plan', () => {
   });
 });
 
-describe('🔒 RULE 1 — Android only, device-verified, no exceptions', () => {
-  it('pays nothing on the website, for EVERY step including email and github', () => {
-    for (const step of ALL_STEPS) {
-      const r = android({ step, platform: 'web' });
-      expect(r.tokens, step).toBe(0);
-      expect(r.reason, step).toBe('not-android');
-    }
-  });
-
-  it('pays nothing on iOS either — the device check is an Android capability', () => {
-    expect(android({ platform: 'ios' }).reason).toBe('not-android');
-  });
-
+describe('🔒 RULE 1 — the full ₹400 ladder is Android-only and device-verified', () => {
   it('pays nothing without device proof, even on Android', () => {
     const r = android({ deviceVerified: false });
     expect(r.tokens).toBe(0);
@@ -121,6 +109,58 @@ describe('🔒 RULE 1 — Android only, device-verified, no exceptions', () => {
     // Ordering matters: recording a step against a refusal would burn it for the honest retry.
     const r = android({ deviceVerified: false, step: 'email', alreadyPaidSteps: [] });
     expect(r.recordStep).toBeNull();
+  });
+
+  it('pays nothing on iOS — the device check is an Android capability, and iOS has no web sub-path', () => {
+    expect(android({ platform: 'ios' }).reason).toBe('not-android');
+  });
+});
+
+// The WEB path — added 2026-09-26 (admin: "website par github aur mobile verification par 100-100,
+// maximum 100 only"). This REVERSES the old "no web path at all" rule for exactly two steps, under a
+// ₹100 website ceiling. The full ₹400 ladder stays Android + device-verified; the web is a small,
+// bounded trial so a website-only user is not stranded at ₹0 and unable to build even once.
+const web = (over: Partial<Parameters<typeof decideSelfReward>[0]> = {}) => decideSelfReward({
+  step: 'github', alreadyPaidSteps: [], deviceVerified: false, platform: 'web',
+  alreadyGiftedTokens: 0, alreadyWebGiftedTokens: 0, env: ON, ...over,
+});
+
+describe('🔒 the website earns only mobile + github, capped at ₹100', () => {
+  it('pays ₹100 for a github or mobile verification on the web, with no device check', () => {
+    for (const step of ['github', 'mobile'] as RewardStep[]) {
+      const r = web({ step });
+      expect(r.reason, step).toBe('granted');
+      expect(r.tokens, step).toBe(10_000); // ₹100
+      expect(r.web, step).toBe(true);
+      expect(r.recordStep, step).toBe(step);
+    }
+  });
+
+  it('refuses the Android-only steps on the web — gmail-login and the referral code never pay here', () => {
+    for (const step of ['email', 'referral-code'] as RewardStep[]) {
+      const r = web({ step });
+      expect(r.tokens, step).toBe(0);
+      expect(r.reason, step).toBe('web-not-eligible');
+      expect(r.recordStep, step).toBeNull();
+    }
+  });
+
+  it('caps the WHOLE website at ₹100 — a second web step after ₹100 already earned pays nothing', () => {
+    const r = web({ step: 'mobile', alreadyWebGiftedTokens: 10_000 });
+    expect(r.tokens).toBe(0);
+    expect(r.reason).toBe('web-cap-reached');
+  });
+
+  it('the web still obeys the ₹400 lifetime self-cap — an account already at ₹400 earns ₹0 on the web', () => {
+    const r = web({ step: 'github', alreadyGiftedTokens: 40_000, alreadyWebGiftedTokens: 0 });
+    expect(r.tokens).toBe(0);
+    expect(r.reason).toBe('cap-reached'); // the ₹400 total, not the ₹100 web slice, is what bit
+  });
+
+  it('the ₹100 web grant is a SUB-cap: the same account can still earn the remaining ₹300 on Android', () => {
+    const r = android({ step: 'mobile', alreadyGiftedTokens: 10_000 });
+    expect(r.reason).toBe('granted');
+    expect(r.tokens).toBe(10_000);
   });
 });
 

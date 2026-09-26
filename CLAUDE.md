@@ -2934,7 +2934,9 @@ the flag entries above promise.
   missing-files, syntax, missing-export, the fast lane's repair). Each prompt said "only the files you
   change"; none enforced it. `src/server/AgentV3/repairScope.ts` decides once: a path the pass was shown or
   the compiler named is kept; a NEW path only when an error names it or an import that does NOT already
-  resolve points at it (`./App` → `App.tsx` does not license `App.jsx`); a template path never. Refusals are
+  resolve points at it (`./App` → `App.tsx` does not license `App.jsx`) — read from the existing files AND
+  the repair's own in-scope rewrites (splitting a component is legitimate), never from a refused block;
+  a template path never. Refusals are
   recorded as `REPAIR_WRITE_REFUSED` (process-only). Test-locked and reversion-proven in
   `tests/aRepairWritesOnlyWhatItWasAskedToRepair.test.ts`.
   ⚠️ **What the repair was handed is NOT in that report** (it fell in the 10 model calls truncated for

@@ -63,6 +63,22 @@ describe('🔒 THE REPORT: the invented auth app is refused, the named file is a
     expect(newPathIsReferenced('src/components/Navbar.jsx', undefined, GAME)).toBe(false);
   });
 
+  it('a repair that rewrites an in-scope file to import a NEW file may create it in the same answer', () => {
+    const r = scopeRepairFiles(
+      [{ path: 'src/App.tsx', content: "import { Brand } from './Brand';" }, { path: 'src/Brand.tsx', content: 'x' }],
+      { allowed: ['src/App.tsx'], existing: GAME },
+    );
+    expect(r.kept.map((f) => f.path).sort()).toEqual(['src/App.tsx', 'src/Brand.tsx']);
+  });
+
+  it('a refused block cannot vouch for another (the invented App.jsx importing an invented Navbar)', () => {
+    const r = scopeRepairFiles(
+      [{ path: 'src/Shell.jsx', content: "import Navbar from './components/Navbar';" }, { path: 'src/components/Navbar.jsx', content: 'x' }],
+      { allowed: ['src/App.tsx'], existing: GAME },
+    );
+    expect(r.kept).toHaveLength(0);
+  });
+
   it('a pass that may not create files refuses a new file even when something imports it', () => {
     const r = scopeRepairFiles([{ path: 'src/game/engine.ts', content: 'x' }], { allowed: ['src/game/Game.tsx'], existing: GAME, allowCreate: false });
     expect(r.kept).toHaveLength(0);

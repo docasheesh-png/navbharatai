@@ -140,15 +140,28 @@ export function newPathIsReferenced(
  */
 export function scopeRepairFiles(files: RepairFile[], scope: RepairScopeInput): RepairScopeResult {
   const allowed = new Set([...scope.allowed].map(normalize));
+  const existing: Record<string, string> = scope.existing instanceof Map
+    ? Object.fromEntries(scope.existing)
+    : { ...(scope.existing ?? {}) };
   const kept: RepairFile[] = [];
   const refused: RepairScopeResult['refused'] = [];
+  const candidates: RepairFile[] = [];
+  // Phase 1 — the files the pass was asked to repair. Their NEW content counts for phase 2: a repair
+  // that splits a component rewrites `App.tsx` to import `./Brand` AND creates `Brand.tsx`, in one answer.
   for (const f of files) {
     if (!f || typeof f.path !== 'string') continue;
     if (isPlaceholderPath(f.path)) { refused.push({ path: f.path, reason: 'template-path' }); continue; }
+    if (allowed.has(normalize(f.path))) { kept.push(f); continue; }
+    candidates.push(f);
+  }
+  // Phase 2 — a new file, only when an error or an in-scope file (as it will be after this repair) points
+  // at it. A block refused here cannot vouch for another: only phase-1 content is read.
+  const after: Record<string, string> = { ...existing };
+  for (const f of kept) after[normalize(f.path)] = f.content;
+  for (const f of candidates) {
     const p = normalize(f.path);
-    if (allowed.has(p)) { kept.push(f); continue; }
-    const isNew = !(scope.existing instanceof Map ? scope.existing.has(p) : scope.existing && p in scope.existing);
-    if (scope.allowCreate !== false && isNew && newPathIsReferenced(p, scope.errors, scope.existing)) {
+    const isNew = !(p in existing);
+    if (scope.allowCreate !== false && isNew && newPathIsReferenced(p, scope.errors, after)) {
       kept.push(f);
       continue;
     }

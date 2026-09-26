@@ -25,7 +25,7 @@ const debit = (tokens: number, desc = 'Build') => ({ type: 'usage', amountCoinsO
  * A wallet that STARTS with money must represent that money — as an opening balance or as a credit
  * row. A test that gave a wallet ₹1,000 with an empty ledger and a zero opening was asserting a
  * broken wallet, and the reconciler correctly said so; that is how these three cases first failed.
- * `buildInitialWallet` writes the welcome row, which is why real wallets are sound from birth — see
+ * The retired welcome grant wrote the welcome row, which is why real wallets are sound from birth — see
  * the test at the end that pins exactly that.
  */
 const opened = (tokens: number, over: Record<string, unknown> = {}) => wallet({
@@ -217,18 +217,14 @@ describe('🔒 the reconciler only ever REPORTS', () => {
 });
 
 describe('🔒 a real wallet is sound from birth', () => {
-  it('buildInitialWallet satisfies the invariant — the welcome row equals the opening balance', async () => {
-    // This is what makes every scenario above realistic rather than contrived: a genuine new wallet
-    // does not start with an unexplained balance, it starts with a credit row for it.
-    const { buildInitialWallet } = await import('../src/server/lib/welcomeBonus');
-    const w = buildInitialWallet({
-      userId: 'u', email: 'u@example.com', name: 'U',
-      welcomeTokens: 25_000, nowIso: '2026-09-15T00:00:00Z',
-    });
+  it('buildEmptyWallet satisfies the invariant — no rows, no balance', async () => {
+    // A new wallet opens at ₹0 since 2026-09-26 (the referral ladder is the only welcome credit), so
+    // it starts with nothing to explain.
+    const { buildEmptyWallet } = await import('../src/server/lib/newWallet');
+    const w = buildEmptyWallet({ userId: 'u', email: 'u@example.com', name: 'U', nowIso: '2026-09-26T00:00:00Z' });
     const s = buildWalletStatement(w);
-    expect(s.creditTokens).toBe(25_000);
-    expect(s.expectedTokens).toBe(25_000);
-    expect(s.actualTokens).toBe(25_000);
+    expect(s.actualTokens).toBe(0);
+    expect(s.expectedTokens).toBe(0);
     expect(s.verdict).toBe('balanced');
   });
 

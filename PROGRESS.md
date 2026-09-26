@@ -81678,3 +81678,30 @@ morning; this removes it from the code:
 - Records it already wrote (`payment_transactions/welcome_backfill_<uid>`, ledger rows) stay as history;
   a credit already paid is not taken back.
 - Locked by `tests/theWelcomeBackfillIsGone.test.ts`, which also asserts the referral ladder remains.
+
+## 2026-09-26 — Every welcome grant except the referral ladder is deleted; a new wallet opens at ₹0
+
+Admin: *"100*4 ko chor ke sab hata do"*. Follows the backfill removal above, in the same PR (#3320).
+
+- **Removed from the code, not switched off:** the legacy flat bonus (`welcomeBonus.ts`), the ₹250/₹500
+  v2 plan and its phone-bonus claim (`giftPlan.ts`, `POST /api/wallet/:uid/claim-phone-bonus`,
+  `PhoneBonusCard.tsx`), the weekly top-up ladder (`weeklyTopUp.ts`), the ₹50 interim credit
+  (`interimWelcomeGift.ts`), `welcomeGiftExclusion.ts`, and the wallet screen's `FreeGiftBanner.tsx`,
+  plus the tests that tested only those modules.
+- **The wallet route** creates an EMPTY wallet (`newWallet.ts` → `buildEmptyWallet`) and no longer returns
+  a `freeGift` summary. No `welcome_<uid>` receipt or per-identity marker is written.
+- **Trimmed, not deleted:** `giftPolicy.ts` keeps only the ₹400 / ₹75 caps the referral ladder uses;
+  `giftIdentity.ts` keeps only `normalizePhoneForGift`, which the OTP send limits key on;
+  `welcomeBonusTokens()` stays in `payments.ts` because `accountMerge.ts` needs it to recognise PAST
+  welcome gifts when two old wallets are merged.
+- **The AI knowledge base** now says a new account opens at ₹0 and the referral steps are the only free
+  credit; the stale "referral NOT SWITCHED ON YET" paragraph is corrected (it has been on since today).
+- Env keys read by nothing now: `WALLET_GIFT_V2`, `GIFT_UNVERIFIED_TOKENS`, `GIFT_VERIFIED_TOTAL_TOKENS`,
+  `WEEKLY_TOPUP_TOKENS`, `INTERIM_WELCOME_TOKENS`, `GIFT_ID_PEPPER`. Keep `WELCOME_BONUS_TOKENS` if set.
+- ⚠️ With `REFERRAL_REWARDS` off a new account now gets nothing at all — the condition the ₹50 interim
+  credit was added for after the 2026-09-22 Play rejection. The ladder is on, so this is not the live
+  state; recorded so nobody switches the ladder off without knowing it.
+- Existing wallets keep whatever they were given; nothing is taken back.
+- Locked by `tests/theReferralLadderIsTheOnlyGift.test.ts`, which runs the real wallet route against an
+  in-memory store (proven by reversion: a non-zero opening balance fails two cases) and also asserts
+  the referral ladder, its routes, panel and admin card remain.

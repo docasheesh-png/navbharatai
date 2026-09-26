@@ -25,18 +25,16 @@ import {
 export { TOKENS_PER_RUPEE };
 
 /**
- * WELCOME BONUS tokens minted for a brand-new wallet.
+ * The size of the RETIRED welcome bonus, for reading HISTORY only.
  *
- * 25,000 = ₹250 (admin 2026-07-28). Previously 50,000 (₹500), from the era when the bonus only had to
- * cover a first app BUILD. It is now the opening balance of a single wallet that pays for everything —
- * builds, images, strong-model answers — and it is followed by a weekly top-up (see weeklyTopUp.ts), so
- * the SIGNUP grant no longer has to carry a user on its own. ₹250 still funds a complete first app.
+ * No wallet is granted this any more (admin 2026-09-26: the referral ladder is the only welcome
+ * credit, and a new wallet opens at ₹0 — see `newWallet.ts`). Its one reader is `accountMerge.ts`,
+ * which reconstructs a merged balance from first principles and has to know how much of an OLD
+ * wallet's `totalTokensPurchased` was that bonus rather than money the user paid. Removing it would
+ * count a past gift as a purchase when two such accounts are merged.
  *
- * What it actually costs us: builds bill at roughly 4x the real provider cost, so ₹250 of credit is
- * about ₹62 of real spend per new account — the number that matters when signups scale.
- *
- * Env-overridable (WELCOME_BONUS_TOKENS) so the admin can tune it from Cloud Run without a deploy;
- * non-finite/negative overrides fall back to the default.
+ * 25,000 = ₹250, the amount granted from 2026-07-28. `WELCOME_BONUS_TOKENS` still overrides it,
+ * because an admin who ran a different value then may need it read back the same way now.
  */
 export function welcomeBonusTokens(): number {
   const n = parseEnvNumber(process.env.WELCOME_BONUS_TOKENS);

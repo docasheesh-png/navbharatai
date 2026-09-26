@@ -2145,9 +2145,16 @@ the code (it is actually read somewhere) on 2026-07-11.
   (`/api/chat/completions`, API-key auth) by design. 🔒 **A verifier that cannot run FAILS OPEN even in
   enforce** — our outage must never become every user's refusal. 🔒 **The client can never stop a
   request**: no key / blocked reCAPTCHA / slow token (1.5 s cap) ⇒ sent without the header.
-  ⛔ **DO NOT SET `APP_CHECK_MODE=enforce` YET.** The phone apps do not send tokens until slice 2 (a native
-  Play Integrity / App Attest plugin ⇒ a fresh `.aab`/`.ipa`), so enforce would refuse every installed
-  Android/iOS build on its next build or chat. Read `GET /api/admin/app-check` first — it counts
+  ⛔ **DO NOT SET `APP_CHECK_MODE=enforce` YET.** Slice 2 (2026-09-26) added the phone half —
+  `@capacitor-firebase/app-check` (pinned `~8.3.0` like the other Firebase plugins): Play Integrity on
+  Android, App Attest on iOS — but it reaches users only through a FRESH `.aab`/`.ipa`, and every build
+  already installed sends no token. Enforce would refuse all of those on their next build or chat.
+  ⚠️ iOS needs TWO one-time admin steps before its tokens are real: Apple Developer → Identifiers →
+  com.navbharat.ai → **App Attest** ✅, then the `ios-ipa.yml` input **`enable_app_attest`** (default OFF —
+  signing with the entitlement before the capability exists fails the export). Android needs Firebase
+  console → App Check → the Android app → **Play Integrity** registered with the app's SHA-256 (the same
+  fingerprints `ANDROID_CERT_SHA256` holds). `capacitor.config.ts` carries the SwiftPM `symlink` option the
+  plugin's README requires (a package-identity collision with Firebase's own `FirebaseAppCheck`). Read `GET /api/admin/app-check` first — it counts
   valid/missing/invalid/unverifiable **per web and per native**, per instance since boot.
   ⛔ **AND DO NOT turn on App Check ENFORCEMENT in the Firebase console for Firestore/Auth** — the phone
   apps talk to Firestore directly and would lose it. Registering the web app with the site key is safe;

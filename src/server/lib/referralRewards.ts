@@ -9,9 +9,10 @@
 //   ─────────────────────────────────────────────────────────────────────────────────────
 //   One referred user costs                                                            ₹475
 //
-// Today's flat welcome gift is ₹500 (`giftPlan.ts`), so this is CHEAPER per referred user and
-// cheaper still for an organic one (₹300 — no code, so no code step). The point was never to spend
-// more on growth; it was to make every rupee land behind a verified person.
+// It replaced a flat ₹500 welcome gift, so it is CHEAPER per referred user and cheaper still for an
+// organic one (₹300 — no code, so no code step). The point was never to spend more on growth; it was
+// to make every rupee land behind a verified person. Since 2026-09-26 it is the ONLY welcome credit:
+// every other grant was deleted from the code, and a new wallet opens at ₹0 (`newWallet.ts`).
 //
 // ── THE FOUR RULES THAT MAKE IT SAFE, each learned from a specific way it would otherwise leak ───
 //
@@ -43,7 +44,7 @@
 //    which is a different guarantee and the one that matters when the reasoning behind 2 and 3 turns
 //    out to be wrong about somebody's patience. It counts what was EVER PAID, never what is held — a
 //    cap measured against a balance is refunded every time the user spends, which is precisely the
-//    mistake `weeklyTopUp.ts` records for the lifetime gift cap.
+//    mistake the retired weekly ladder (`weeklyTopUp.ts`, deleted 2026-09-26) recorded for its lifetime cap.
 //
 // ── WHAT THIS MODULE IS NOT ──────────────────────────────────────────────────────────────────────
 // PURE. No Firestore, no clock, no env reads beyond the tunables below, no I/O. It DECIDES; the
@@ -98,9 +99,8 @@ function tokensFromEnv(raw: string | undefined, fallbackRupees: number): number 
 }
 
 /**
- * Master switch. Default OFF — while off every decision here pays ZERO and the existing giftPlan
- * behaviour is untouched, byte for byte. The two plans must never both pay: together they would hand
- * one person ₹500 + ₹400.
+ * Master switch. Default OFF — while off every decision here pays ZERO. Since the other welcome
+ * grants were deleted (2026-09-26), OFF means a new account receives nothing at all.
  */
 export function referralRewardsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return parseEnvFlag((env.REFERRAL_REWARDS || '').trim().toLowerCase()) === true;
@@ -344,7 +344,7 @@ export function decideAttribution(input: {
  *
  * It reaches REAL people — a shared family handset, someone reinstalling, a friend who signed up
  * last week and only now got the code — so it never accuses anyone of anything and never implies the
- * account is in trouble, the discipline `claimRefusalMessage` already sets in `giftPlan.ts`.
+ * account is in trouble.
  *
  * ⚠️ 'self-referral' and 'device-used' deliberately say the SAME thing. Distinguishing them would
  * tell someone probing the system exactly which marker caught them, which is the one piece of

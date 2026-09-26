@@ -20,7 +20,6 @@ import { join } from 'node:path';
 import { codeOnly } from './helpers/sourceSlice';
 import { parseEnvNumber } from '../src/server/lib/envNumber';
 import { welcomeBonusTokens, TOKENS_PER_RUPEE } from '../src/server/lib/payments';
-import { weeklyTopUpTokens } from '../src/server/lib/weeklyTopUp';
 import { aiToolFreeDailyLimit, imageFreeDailyLimit, imagePassDailyLimit } from '../src/server/tools/toolGate';
 import { professionalFreeDailyLimit } from '../src/server/professionals/professionalPaid';
 import { maxDeployMb } from '../src/server/lib/HostingQuota';
@@ -29,7 +28,7 @@ import { sandboxSpikeMinUsd } from '../src/server/lib/monitorAlerts';
 import { memoryMinScore } from '../src/server/memory/semanticMemory';
 
 const KEYS = [
-  'WELCOME_BONUS_TOKENS', 'WEEKLY_TOPUP_TOKENS', 'AI_TOOL_FREE_DAILY_LIMIT',
+  'WELCOME_BONUS_TOKENS', 'AI_TOOL_FREE_DAILY_LIMIT',
   'AI_IMAGE_FREE_DAILY_LIMIT', 'AI_IMAGE_PASS_DAILY_LIMIT', 'PROFESSIONAL_FREE_DAILY_LIMIT',
   'AGENTV3_DEPLOY_MAX_MB', 'STORE_FEE_PCT', 'MONITOR_SANDBOX_SPIKE_MIN_USD',
   'SEMANTIC_MEMORY_MIN_SCORE',
@@ -38,8 +37,7 @@ afterEach(() => { for (const k of KEYS) delete process.env[k]; });
 
 /** Every fixed reader, with the default it must fall back to. */
 const READERS: Array<{ key: string; read: () => number; dflt: number; zeroMeans: string }> = [
-  { key: 'WELCOME_BONUS_TOKENS', read: welcomeBonusTokens, dflt: 250 * TOKENS_PER_RUPEE, zeroMeans: 'no welcome gift for any new account' },
-  { key: 'WEEKLY_TOPUP_TOKENS', read: weeklyTopUpTokens, dflt: 200 * TOKENS_PER_RUPEE, zeroMeans: 'the weekly gift ladder is off' },
+  { key: 'WELCOME_BONUS_TOKENS', read: welcomeBonusTokens, dflt: 250 * TOKENS_PER_RUPEE, zeroMeans: 'past welcome grants are misread when two accounts are merged' },
   { key: 'AI_TOOL_FREE_DAILY_LIMIT', read: aiToolFreeDailyLimit, dflt: 5, zeroMeans: 'no free tool actions' },
   { key: 'AI_IMAGE_FREE_DAILY_LIMIT', read: imageFreeDailyLimit, dflt: 3, zeroMeans: 'no free images' },
   { key: 'AI_IMAGE_PASS_DAILY_LIMIT', read: imagePassDailyLimit, dflt: 25, zeroMeans: 'no images on an unlimited tier' },

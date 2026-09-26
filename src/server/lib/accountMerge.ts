@@ -21,7 +21,7 @@ type Wallet = Record<string, any>;
 
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
-/** Did this wallet ever receive the welcome bonus? Detected from the ledger entry buildInitialWallet
+/** Did this wallet ever receive the welcome bonus? Detected from the ledger entry the retired welcome grant
  *  writes ("Welcome Bonus: … AI Tokens Credited!"). A person who has ANY such wallet has had their one. */
 export function walletReceivedWelcome(w: Wallet | null | undefined): boolean {
   const ledger = Array.isArray(w?.walletLedger) ? w!.walletLedger : [];

@@ -46,6 +46,7 @@ const CLASSIFICATION: Record<string, { kind: 'user' | 'workspace' | 'platform' |
   site_uptime:         { kind: 'workspace', why: 'one record per connected domain, not per user' },
 
   job_leases:          { kind: 'platform', why: 'one doc per job id; a lease that expires by its own clock' },
+  agentv3_build_leases: { kind: 'platform', why: 'one doc per BUILDING workspace, deleted when the build ends and stale after 90 s — holds a uid only while that build runs (workspaceBuildLease.ts)' },
   metrics_timeline:    { kind: 'platform', why: 'one doc per time bucket — see the SCALE-PLAN entry' },
   monitor_alert_state: { kind: 'platform', why: 'a single document holding alert episodes' },
   web_risk_budget:     { kind: 'platform', why: 'one doc per calendar month, replaced in place' },

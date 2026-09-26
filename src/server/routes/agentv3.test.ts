@@ -1498,9 +1498,18 @@ describe('shouldReclaimBuildLock — never trap the account behind a dead/hung b
     expect(shouldReclaimBuildLock(rb({ ended: true }), NOW + 5_000)).toBe(true);
   });
 
-  it('ABANDONED: no attached subscriber and past the stall window → reclaim (the hung-build / dropped-client case)', () => {
+  it('ABANDONED: no attached subscriber and SILENT past the stall window → reclaim (the hung-build case)', () => {
     const build = rb({ startedTs: NOW, subscribers: new Set() });
-    expect(shouldReclaimBuildLock(build, NOW + 31_000)).toBe(true);
+    expect(shouldReclaimBuildLock(build, NOW + 6 * 60_000 + 1_000)).toBe(true);
+    expect(shouldReclaimBuildLock(build, NOW + 31_000, 30_000)).toBe(true);
+  });
+
+  it('an UNWATCHED build that is still emitting is NOT abandoned (autopsy eed79815)', () => {
+    // The viewer dropped (network blip) but the build is alive — its last event was seconds ago. The
+    // old rule measured from START and aborted it thirty seconds in; the retry must re-attach instead.
+    const build = rb({ startedTs: NOW, subscribers: new Set(), lastEventTs: NOW + 5 * 60_000 });
+    expect(shouldReclaimBuildLock(build, NOW + 5 * 60_000 + 20_000)).toBe(false);
+    expect(shouldReclaimBuildLock(build, NOW + 5 * 60_000 + 20_000, 30_000)).toBe(false);
   });
 
   it('a genuinely-active build WITH a live watcher → NEVER reclaim (keep the honest 409)', () => {

@@ -115,6 +115,7 @@ import {
   buildLockKey,
   countActiveBuildsForUser,
   findAttachableBuild,
+  STALE_BUILD_SILENCE_MS,
   acquireDecision,
   buildKeyCandidates,
   workspaceSessionsMatch,
@@ -150,6 +151,11 @@ import {
 // ADMIN-SDK binding (bypasses rules) — getDb() here feeds only the wallet read/debit money path.
 import { getServerDb as getDb } from '../lib/serverDb';
 import { randomUUID } from 'crypto';
+import { processOwnerId } from '../lib/jobLease';
+import {
+  claimWorkspaceBuild, renewWorkspaceBuild, releaseWorkspaceBuild, requestWorkspaceBuildStop,
+  LEASE_HEARTBEAT_MS, BUILD_RUNNING_ELSEWHERE_MESSAGE, BUILD_RUNNING_ELSEWHERE_CODE, type BuildLeaseStore,
+} from '../AgentV3/workspaceBuildLease';
 import { getConnection } from '../lib/supabaseConnectionStore';
 import { provisionDatabaseForUser } from '../lib/supabaseProvisionFlow';
 import { databaseReadiness } from '../AgentV3/databaseNeed';
@@ -305,7 +311,7 @@ import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/lane
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled } from '../AgentV3/fastLaneRung';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
-import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
+import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
 import { buildNestedRepoCommand, parseNestedRepoRoots, nestedRepoNote } from '../AgentV3/nestedRepoProbe';
 // The sandbox's workspace root, from the module CLAUDE.md names as this class's one home (the
@@ -377,7 +383,7 @@ import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionRe
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
-import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, starterTestsNarration } from '../AgentV3/TestGenerationAgent';
+import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, testSkeletonsCanRun, starterTestsNarration } from '../AgentV3/TestGenerationAgent';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from '../AgentV3/appDefaults';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { findingsToDebt } from '../AgentV3/engineeringMemory';
@@ -387,6 +393,7 @@ import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates, lastGroundingCost } from '../AgentV3/ContextReranker';
 import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextBudget';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
+import { renderCheckConsoleSince } from '../AgentV3/renderCheckConsole';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, partitionServerDown, type RuntimeError } from '../AgentV3/AutoFix';
 import { provenFromTimeline } from '../AgentV3/provenFromTimeline';
 import { appRenderedRecord } from '../AgentV3/renderProof';
@@ -485,6 +492,8 @@ import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from 
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
 import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable } from '../AgentV3/ReviewerAgent';
+import { refuteReviewByEvidence } from '../AgentV3/reviewEvidence';
+import { SALVAGE_HANDOFF_MARKER, HANDOFF_NOTE_FIX_LINE } from '../AgentV3/handoffRule';
 import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
 import {
   saveWorkspaceMemoryFor,
@@ -516,7 +525,7 @@ import { terminalDailyLimitSeconds, decideTerminalAccess, type TerminalAccess } 
 import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../AgentV3/terminalMeter';
 import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } from '../AgentV3/buildQualityLint';
-import { abortBuild, abortCauseOf } from '../AgentV3/buildAbortCause';
+import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
@@ -2373,10 +2382,18 @@ export function isBuildRunningForWorkspace(rb: RunningBuild | undefined, workspa
  * `runningBuilds` but not the lock) or ABANDONED (its client dropped, so it has NO attached subscriber,
  * and it has been running past the stall window). A build with a live watcher, or a freshly-started one,
  * is genuinely active → keep the honest 409 (the client re-attaches, or the user Stops it). Pure + tested. */
-export function shouldReclaimBuildLock(existing: RunningBuild | undefined, now: number, staleMs = 30_000, hardMaxMs = 0): boolean {
+export function shouldReclaimBuildLock(existing: RunningBuild | undefined, now: number, staleMs = STALE_BUILD_SILENCE_MS, hardMaxMs = 0): boolean {
   if (!existing || existing.ended) return true;
-  // Abandoned: no live watcher AND past the stall window.
-  if (existing.subscribers.size === 0 && now - existing.startedTs > staleMs) return true;
+  // Abandoned: no live watcher AND SILENT past the stall window.
+  //
+  // 🔴 SILENT, NOT MERELY UNWATCHED (autopsy eed79815, 2026-09-26). This read `now - startedTs`, so a
+  // build whose viewer dropped was "abandoned" 30 s after it STARTED, however busy it still was — and
+  // this registry exists precisely so a build survives its viewer ("if it disconnects we keep the build
+  // alive so the user can resume it"). A retry after a network blip therefore aborted a live build it
+  // should have re-attached to. Liveness is `lastEventTs`, stamped on every broadcast; a build that is
+  // still emitting is never abandoned, and the caller's 409 lets the client attach to it instead.
+  const lastSeen = typeof existing.lastEventTs === 'number' ? existing.lastEventTs : existing.startedTs;
+  if (existing.subscribers.size === 0 && now - lastSeen > staleMs) return true;
   // ZOMBIE (GA-2 in-process reaper): a build grossly past the HARD max duration is definitively dead — the
   // AgentRunner aborts at AGENTV3_MAX_BUILD_SECONDS, so a build still "running" well beyond that never fired
   // its cleanup (a hung await / crashed heal gate). Reclaim it even with a lingering subscriber, so a single
@@ -3668,6 +3685,15 @@ export function sanitizeSteerMessage(raw: unknown): string | null {
   const t = raw.trim();
   if (!t) return null;
   return t.length > 2000 ? t.slice(0, 2000) : t;
+}
+
+/**
+ * Whether a build claims its workspace in Firestore so a retry on ANOTHER instance cannot start a
+ * second build in the same workspace (autopsy eed79815 — see workspaceBuildLease.ts). Default ON;
+ * `AGENTV3_WORKSPACE_LEASE=off` reverts to the in-memory lock alone, with no deploy.
+ */
+export function workspaceLeaseEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.AGENTV3_WORKSPACE_LEASE ?? '').trim().toLowerCase() !== 'off';
 }
 
 /**
@@ -5755,7 +5781,10 @@ async function noteBuildOutcome(
               }
             } catch { /* best-effort — a bad tsconfig extends just falls through as before */ }
           }
-          await writeWorkspaceFiles(actuator, workspaceId, saved);
+          // Named as the restore it is (greenFreeze.ts ALLOWED_PASSES): copying the app's OWN saved bytes
+          // back alters nothing. Unnamed, a verified-green app refused every file of its own restore, one
+          // "Reply if you want this change made" line per file (autopsy 2026-09-26 — 49 of them).
+          await runInPass('sandbox-file-restore', () => writeWorkspaceFiles(actuator, workspaceId, saved));
         }
         // Re-materialize durable binary assets (logo/icons/fonts) into the re-seeded sandbox.
         await restoreWorkspaceAssets(actuator, workspaceId).catch(() => 0);
@@ -6483,6 +6512,13 @@ async function noteBuildOutcome(
       break;
     }
     activeBuilds.delete(candidates[0]);                       // always unblock the caller's own key
+    // Nothing to stop HERE — the build may be running on another instance (autopsy eed79815). Flag its
+    // workspace lease; the holder aborts on its next heartbeat. Only for a workspace the VERIFIED caller
+    // owns: a claimed id must never let one account stop another's build.
+    if (!wasRunning && stopWorkspaceId && verifiedStopUid && workspaceLeaseEnabled()
+      && workspaceOwnershipOk(verifiedStopUid, null, stopWorkspaceId)) {
+      wasRunning = await requestWorkspaceBuildStop(getDb() as unknown as BuildLeaseStore, { workspaceId: stopWorkspaceId }).catch(() => false);
+    }
     res.json({ stopped: wasRunning });
   });
 
@@ -9621,7 +9657,8 @@ async function noteBuildOutcome(
       // Cold sandbox → genuinely restore the last durably-saved files into it.
       const saved = await loadWorkspaceFiles(workspaceId);
       if (saved && Object.keys(saved).length > 0) {
-        const { written } = await writeWorkspaceFiles(actuator, workspaceId, saved);
+        // The same restore, the same name — see the revive path above.
+        const { written } = await runInPass('sandbox-file-restore', () => writeWorkspaceFiles(actuator, workspaceId, saved));
         // Also re-materialize the durable binary assets so a restored app isn't full of broken images.
         await restoreWorkspaceAssets(actuator, workspaceId).catch(() => 0);
         res.json({ files: written, count: written.length, restored: true, source: 'saved' });
@@ -9919,7 +9956,7 @@ async function noteBuildOutcome(
       // A build past its hard max + a 2-min grace is a zombie (the run aborts at maxBuildSeconds) — reclaim
       // it even if a stale subscriber lingers. 0 (max disabled) keeps only the abandoned-lock reclaim.
       const hardMaxMs = maxBuildSeconds() > 0 ? maxBuildSeconds() * 1000 + 120_000 : 0;
-      if (shouldReclaimBuildLock(existing, Date.now(), 30_000, hardMaxMs)) {
+      if (shouldReclaimBuildLock(existing, Date.now(), STALE_BUILD_SILENCE_MS, hardMaxMs)) {
         // Abandoned/zombie lock (its client dropped on a network blip and the build hung, or it crashed
         // without clearing the lock) — RECLAIM it so the account is never trapped until the wall-clock
         // deadline. Tear the old build down cleanly, then fall through to start the fresh one.
@@ -10170,6 +10207,65 @@ async function noteBuildOutcome(
     // A switch that appears to work and quietly does nothing is exactly the fake feature the second
     // absolute rule forbids — so when the answer is no, the user is told why, and where to fix it.
     const appSignatureNoticeText = appSignatureNotice(signatureDecision.reason, hostingPlanPriceInr());
+
+    // 🔒 ONE BUILD PER WORKSPACE — ACROSS EVERY INSTANCE (autopsy eed79815, 2026-09-26). The lock above
+    // is this PROCESS's memory. A user's retry after a dropped connection reached another Cloud Run
+    // instance, which knew nothing of the first build and started a second in the same workspace — then
+    // a third. They overwrote each other's files and ran npm into one node_modules at once for fourteen
+    // minutes. The workspace is now claimed in Firestore before the stream opens (so a refusal is a clean
+    // 409), renewed every LEASE_HEARTBEAT_MS while the build runs, released when it ends, and flagged by
+    // a Stop pressed on any instance. Fails OPEN on a store error; see workspaceBuildLease.ts.
+    const leaseWorkspaceId = lockSessionId && SESSION_ID_RE.test(lockSessionId) ? deriveWorkspaceId(userId, lockSessionId) : null;
+    const buildLeaseStore = leaseWorkspaceId && workspaceLeaseEnabled() ? (getDb() as unknown as BuildLeaseStore) : null;
+    const buildLeaseToken = randomUUID();
+    const buildLeaseClaimedAt = Date.now();
+    let buildLeaseHeld = false;
+    let buildLeaseTimer: ReturnType<typeof setInterval> | undefined;
+    // The build this lease belongs to, once it is registered — the heartbeat acts on THIS build only,
+    // never on whatever later build happens to hold the same in-memory key.
+    let buildLeaseRb: RunningBuild | null = null;
+    const releaseBuildLease = (): void => {
+      if (buildLeaseTimer) { clearInterval(buildLeaseTimer); buildLeaseTimer = undefined; }
+      if (!buildLeaseHeld || !buildLeaseStore || !leaseWorkspaceId) return;
+      buildLeaseHeld = false;
+      void releaseWorkspaceBuild(buildLeaseStore, { workspaceId: leaseWorkspaceId, token: buildLeaseToken }).catch(() => {});
+    };
+    if (buildLeaseStore && leaseWorkspaceId) {
+      const claim = await claimWorkspaceBuild(buildLeaseStore, { workspaceId: leaseWorkspaceId, token: buildLeaseToken, owner: processOwnerId(), userId });
+      if (!claim.ok) {
+        activeBuilds.delete(buildKey);
+        audit('AGENTV3_BUILD_RUNNING_ELSEWHERE', { userId, workspaceId: leaseWorkspaceId }, 'info');
+        // resumable:false on purpose — /attach only reaches builds on THIS instance, so a resumable hint
+        // would send the client to attach, 404, and tell the user the build "isn't live anymore".
+        res.status(409).json({ error: BUILD_RUNNING_ELSEWHERE_MESSAGE, code: BUILD_RUNNING_ELSEWHERE_CODE, resumable: false });
+        return;
+      }
+      buildLeaseHeld = claim.verified;
+      if (buildLeaseHeld) {
+        buildLeaseTimer = setInterval(() => {
+          void (async () => {
+            // Self-terminating, so an exit path that forgets to release cannot keep a dead build's lease
+            // alive: every exit deletes the in-memory lock, and an ended build is ended.
+            if (buildLeaseRb) {
+              if (buildLeaseRb.ended || runningBuilds.get(buildKey) !== buildLeaseRb) { releaseBuildLease(); return; }
+            } else if (!activeBuilds.has(buildKey) || Date.now() - buildLeaseClaimedAt > 5 * 60_000) {
+              releaseBuildLease();
+              return;
+            }
+            const renewal = await renewWorkspaceBuild(buildLeaseStore, { workspaceId: leaseWorkspaceId, token: buildLeaseToken });
+            if (renewal === 'stop-requested' && buildLeaseRb && !buildLeaseRb.ended) {
+              abortBuild(buildLeaseRb.abort, 'user-stop');
+            } else if (renewal === 'lost') {
+              // A newer build owns the workspace now (this lease lapsed). Two builds must not share it.
+              if (buildLeaseRb && !buildLeaseRb.ended) abortBuild(buildLeaseRb.abort, 'lock-reclaimed');
+              buildLeaseHeld = false;
+              releaseBuildLease();
+            }
+          })().catch(() => { /* a heartbeat failure just lets the lease age; the next beat retries */ });
+        }, LEASE_HEARTBEAT_MS);
+        buildLeaseTimer.unref?.();
+      }
+    }
 
     // NDJSON stream (mirrors the Engineer route's streaming contract).
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -10752,6 +10848,7 @@ async function noteBuildOutcome(
           }), 8_000, 'persistChatTurn');
         } catch { /* persistence is best-effort — never blocks the reply */ }
         activeBuilds.delete(buildKey);
+        releaseBuildLease();
         if (!res.writableEnded) res.end();
         return;
       } catch {
@@ -10772,6 +10869,7 @@ async function noteBuildOutcome(
       send({ type: 'error', message: 'Build sandbox (E2B) is not configured on the server — refusing to run the build on the host for safety.' });
       send({ type: 'result', ok: false, summary: 'Build sandbox not configured on the server.', steps: 0, billedUsd: 0, billedInr: 0 });
       activeBuilds.delete(buildKey);
+      releaseBuildLease();
       if (!res.writableEnded) res.end();
       return;
     }
@@ -10793,6 +10891,7 @@ async function noteBuildOutcome(
     };
     rb.subscribers.add(primary);
     runningBuilds.set(buildKey, rb);
+    buildLeaseRb = rb;
     req.on('close', () => { rb.subscribers.delete(primary); });
     // ETERNAL SESSIONS: tap every outgoing build event into a compact durable timeline (tool
     // calls, file changes, diffs, preview, terminal facts). Persisted once in the finally below
@@ -12158,6 +12257,7 @@ async function noteBuildOutcome(
       await persistSessionTimeline();
       try { clearGreenLatch(workspaceId); } catch { /* best-effort */ }
       activeBuilds.delete(buildKey);
+      releaseBuildLease();
       if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
       endBuild(rb);
     };
@@ -13931,7 +14031,8 @@ async function noteBuildOutcome(
               );
             } catch { /* diagnostics are best-effort */ }
             const writeT0 = Date.now();
-            await writeWorkspaceFiles(actuator, workspaceId, plan.restore);
+            // Restoring files the sandbox LOST from the durable store — the same restore as above.
+            await runInPass('sandbox-file-restore', () => writeWorkspaceFiles(actuator, workspaceId, plan.restore));
             // A recycled sandbox loses binary assets too (they aren't in the text-file store or the
             // sandbox scan) — re-materialize them from the durable asset store alongside the files.
             await restoreWorkspaceAssets(actuator, workspaceId).catch(() => 0);
@@ -16468,10 +16569,10 @@ async function noteBuildOutcome(
         if (!sb.ok && sb.salvagedPaths?.length) {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_SALVAGE', message: `Fast lane salvaged ${sb.salvagedPaths.length} finished file(s) into the workspace for the full builder to continue from.`, autoResolved: true, detail: sb.salvagedPaths.join(', ') });
           buildPrompt =
-            `[CONTINUE — DO NOT START OVER] A faster build lane already generated ${sb.salvagedPaths.length} file(s) of THIS app before running out of time; ` +
+            `${SALVAGE_HANDOFF_MARKER} A faster build lane already generated ${sb.salvagedPaths.length} file(s) of THIS app before running out of time; ` +
             `they are in the workspace now and they are YOUR OWN prior work:\n${sb.salvagedPaths.slice(0, 40).map((p) => `- ${p}`).join('\n')}\n` +
             `READ these files first and COMPLETE the app around them — keep their module structure, types and export names; add only what is missing; ` +
-            `fix any error in place. Do NOT re-plan a parallel structure (no duplicate types/ or utils/ trees), do NOT delete or rewrite them wholesale.\n\n---\n\n${buildPrompt}`;
+            `fix any error in place. ${HANDOFF_NOTE_FIX_LINE} Do NOT re-plan a parallel structure (no duplicate types/ or utils/ trees), do NOT delete or rewrite them wholesale.\n\n---\n\n${buildPrompt}`;
         }
         // 🔴 A PLAN IS WORK TOO — do not make the full builder buy it twice (autopsy f97eb0ec,
         // 2026-09-20). The lane can bail AFTER planning and BEFORE writing: its budget projection
@@ -17106,6 +17207,15 @@ async function noteBuildOutcome(
         // the `.env` we write ourselves used to defeat the size-only guard (see the predicate).
         isImportTurn, aborted: abort.signal.aborted,
       };
+      // A post-build repair that answered with files outside its scope (autopsy eed79815) — said once per
+      // pass, in the admin report, with the paths, so a dropped file is never a silent disappearance.
+      const recordRepairOutOfScope = (pass: string, dropped: string[]): void => {
+        if (dropped.length === 0) return;
+        buildDiag.record({
+          phase: 'build', severity: 'warning', code: 'REPAIR_OUT_OF_SCOPE', autoResolved: true,
+          message: `The ${pass} repair answered with ${dropped.length} file(s) it was neither shown nor named by the errors; they were NOT written: ${dropped.slice(0, 12).join(', ')}${dropped.length > 12 ? ', …' : ''}.`,
+        });
+      };
       const wroteTypeScript = [...writtenFiles.keys()].some(isTypeScriptSourcePath);
       if (postBuildCodeGateShouldRun(tscGateBase) && !wroteTypeScript) {
         // Honest, and cheap: a single-file HTML app (or a CSS/JSON-only edit) has no TypeScript of ours
@@ -17197,7 +17307,13 @@ async function noteBuildOutcome(
             // Same guard the fast lane now carries: a REPAIR aimed at a file we own and that has one
             // correct form is replaced with that form. The restore above already put it back once — this
             // is what stops this very pass from immediately undoing that and starting the loop again.
-            const guarded = protectBoilerplateInRepair(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })));
+            // IN SCOPE ONLY (autopsy eed79815): a file this repair was shown, or one the compiler named.
+            const scoped = limitRepairToScope(
+              parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })),
+              [...currentFiles.map((f) => f.path), ...pathsNamedInErrors(check.errors)],
+            );
+            recordRepairOutOfScope('typecheck', scoped.dropped);
+            const guarded = protectBoilerplateInRepair(scoped.kept);
             const fixes = guarded.files;
             if (guarded.overridden.length > 0) {
               buildDiag.record({
@@ -17400,7 +17516,9 @@ async function noteBuildOutcome(
                 ],
                 tools: [], maxTokens: 8000,
               });
-              const fixed = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
+              const scopedSyntax = limitRepairToScope(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })), brokenPaths);
+              recordRepairOutOfScope('syntax', scopedSyntax.dropped);
+              const fixed = scopedSyntax.kept;
               for (let i = 0; i < fixed.length; i++) {
                 await dispatcher.dispatch({ id: `syntax-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend');
               }
@@ -17470,7 +17588,9 @@ async function noteBuildOutcome(
                 ],
                 tools: [], maxTokens: 8000,
               });
-              const fixed = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
+              const scopedExport = limitRepairToScope(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })), targetFiles.map((f) => f.path));
+              recordRepairOutOfScope('missing-export', scopedExport.dropped);
+              const fixed = scopedExport.kept;
               for (let i = 0; i < fixed.length; i++) {
                 await dispatcher.dispatch({ id: `missexport-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend');
               }
@@ -19001,7 +19121,10 @@ async function noteBuildOutcome(
             writtenFiles.get(p) ?? await actuator.readFile(workspaceId, p).catch(() => null);
           const pkgForTests = await readProject('package.json');
           const buildTsconfig = buildTsconfigPath(pkgForTests);
-          const skeletonsSafe = testSkeletonsCannotBreakTheBuild(pkgForTests, buildTsconfig ? await readProject(buildTsconfig) : null);
+          // …and only where `vitest` is declared, or the skeleton cannot run and fails the project's own
+          // `tsc --noEmit` on the next turn (autopsy eed79815 — see testSkeletonsCanRun).
+          const skeletonsSafe = testSkeletonsCanRun(pkgForTests)
+            && testSkeletonsCannotBreakTheBuild(pkgForTests, buildTsconfig ? await readProject(buildTsconfig) : null);
           const plan = skeletonsSafe ? planAutoTests(sourceFiles, { existingPaths: writtenFiles.keys(), limit: 3 }) : [];
           const scaffolded: string[] = [];
           // 🔴 NAMED, BECAUSE AN UNNAMED PASS IS A REFUSED ONE (autopsy e628efd4). Without `runInPass`
@@ -19149,6 +19272,8 @@ async function noteBuildOutcome(
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 30_000)
       ) {
         try {
+          // This check's own window — see renderCheckConsole.ts (autopsy 7d79254b).
+          const rescueCheckStartedAt = Date.now();
           const shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl');
           // TRUE WHEN WE ARE SURE, `undefined` WHEN WE ARE NOT — never `false`.
           //
@@ -19164,7 +19289,7 @@ async function noteBuildOutcome(
             hasFrontendFiles: hasFrontendSource(writtenFiles.keys()) ? true : undefined,
           }), await starterShownOn(shot.html));
           let consoleErrs: string[] = [];
-          try { if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text); } catch { /* console capture best-effort */ }
+          try { if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: rescueCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text); } catch { /* console capture best-effort */ }
           // A deterministic runtime-crash blocker (a Rules-of-Hooks violation etc.) renders fine on the
           // first paint and crashes on a later re-render — a one-shot snapshot can't see it, so it must
           // veto the rescue (real report 8a6e4585: useMemo@useChartData.ts:86 crashed the preview the
@@ -19223,6 +19348,10 @@ async function noteBuildOutcome(
         let serverRevivals = 0;
         for (let attempt = 0; attempt <= healMax && !abort.signal.aborted; attempt++) {
           let shot: { html: string; painted?: boolean; source?: 'browser' | 'curl' };
+          // 🔴 THIS CHECK IS JUDGED BY ITS OWN CONSOLE, NOT THE WHOLE BUILD'S (autopsy 7d79254b). The log
+          // is append-only, so reading from buildStartedAt let one line recorded before a repair condemn
+          // every check after it — the repair could not succeed by construction. renderCheckConsole.ts.
+          const verifyCheckStartedAt = Date.now();
           try {
             shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl');
           } catch { break; /* couldn't open the preview (no browser / timeout) — skip silently */ }
@@ -19230,7 +19359,7 @@ async function noteBuildOutcome(
           const verdict = withStarterVerdict(analyzePreviewHtml(html, { painted: shot.painted, source: shot.source }), await starterShownOn(html));
           let consoleErrs: string[] = [];
           try {
-            if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text);
+            if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: verifyCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text);
           } catch { /* console capture is best-effort */ }
           if (!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true;
           if (verdict.rendered && consoleErrs.length === 0 && await renderIsOnlyTheStarter()) {
@@ -20073,7 +20202,7 @@ async function noteBuildOutcome(
             const verdict = withStarterVerdict(analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source }), await starterShownOn(shot.html));
             let consoleErrs: string[] = [];
             try {
-              if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text);
+              if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: proofStartedAt, buildStartedAt }))).errors).map((e) => e.text);
             } catch { /* console capture is best-effort — its absence must not invent a verdict */ }
             // The SAME two bars the main verify loop uses, deliberately not a looser pair.
             const starterOnly = verdict.rendered && consoleErrs.length === 0 && await renderIsOnlyTheStarter();
@@ -20921,6 +21050,23 @@ async function noteBuildOutcome(
             // already finished) and drop the build-abort link so it cannot outlive the build.
             reviewAbort.abort();
             abort.signal.removeEventListener('abort', stopReviewWithBuild);
+          }
+          // A CLAIM THE COMPILER ALREADY ANSWERED IS NOT A FINDING (autopsy b10aae9a). The reviewer cannot
+          // run tsc; the platform did. When it passed, a "TypeScript errors are present" finding is an
+          // inference the evidence refutes — dropped BEFORE it can be narrated, offered, repaired or
+          // counted as a critical. Recorded for the admin with what was dropped. See reviewEvidence.ts.
+          if (review) {
+            const checked = refuteReviewByEvidence(review, { typecheck: gateEvidence.typecheck });
+            if (checked.refuted.length > 0) {
+              review = checked.review;
+              try {
+                buildDiag.record({
+                  phase: 'build', severity: 'info', code: 'REVIEW_REFUTED_BY_EVIDENCE', autoResolved: true,
+                  message: `${checked.refuted.length} reviewer finding(s) claimed the project does not compile, after the platform's own typecheck had passed — dropped rather than shown to the user or repaired.`,
+                  detail: checked.refuted.map((i) => i.message.slice(0, 200)).join(' | '),
+                });
+              } catch { /* best-effort */ }
+            }
           }
           const reviewText = review ? formatReview(review) : '';
           if (reviewText) {
@@ -21943,6 +22089,14 @@ async function noteBuildOutcome(
           // "did this build reach the point of having a capability to judge?" — which is NO whether
           // the person or their own sentence stopped it.
           const stopped = buildWasStopped(buildDiag.report().issues) || buildDiag.toolWasUsed('stop_build');
+          // …AND OUR OWN INTERRUPTIONS, which `stopped` above cannot see (2026-09-26). It reads
+          // `USER_STOPPED_BUILD`, which only a user or model stop writes; a deploy draining the build,
+          // a newer build reclaiming its lock, the reaper, or an abort we cannot explain write nothing
+          // there, and each reached this block as though an engine had tried and failed. The cause on
+          // the signal is the one source that cannot be wrong — see `interruptedBeforeAnyVerdict`.
+          // Kept SEPARATE from `stopped` so the record below can say which it was: "you stopped it" and
+          // "our server interrupted it" are different sentences to an admin.
+          const interrupted = !stopped && abort.signal.aborted && interruptedBeforeAnyVerdict(abortCauseOf(abort.signal));
           const refused = !stopped && modelAnswer.declined;
           const degraded = !stopped && !refused && providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
           // (d) OUR OWN CONFIGURATION (build report 58fe8254, 2026-09-15). A rung that rejects every
@@ -21964,7 +22118,7 @@ async function noteBuildOutcome(
           // service — and tested last only because the readings above are strictly more specific.
           const starved = !stopped && !refused && !degraded && !misconfigured
             && buildStarvedItsOutputBudget(buildDiag.providerFailureBreakdown());
-          if (!refused && !stopped) {
+          if (!refused && !stopped && !interrupted) {
             const emptyCause = misconfigured || starved
               ? 'our-configuration'
               : assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
@@ -21975,11 +22129,13 @@ async function noteBuildOutcome(
               ts: Date.now(),
             });
           }
-          if (refused || degraded || misconfigured || starved || stopped) {
+          if (refused || degraded || misconfigured || starved || stopped || interrupted) {
             buildDiag.record({
               phase: 'build', severity: 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: false,
               message: stopped
                 ? 'Did not ask this user to add credits: the build was STOPPED, so no engine was ever asked to build anything. There is no capability limit to sell against — a fuller wallet would have changed nothing.'
+                : interrupted
+                ? `Did not ask this user to add credits: our own platform interrupted this build (${abortCauseOf(abort.signal)}) before any engine could be judged. A deploy, a lock takeover or a cleanup is not a capability limit, and a fuller wallet would have changed nothing.`
                 : refused
                 ? 'Did not ask this user to add credits: the engine REFUSED this request on policy grounds. A refusal is an answer, not a capability limit — selling a stronger engine after one offers to do the very thing we just declined to do.'
                 : starved
@@ -22945,6 +23101,8 @@ async function noteBuildOutcome(
         }
       } catch { /* best-effort — never affects a build */ }
       activeBuilds.delete(buildKey);
+      // The workspace is free on every instance the moment this build ends (autopsy eed79815).
+      releaseBuildLease();
       // Only clear the registry slot if it is STILL this build — a Stop may have already
       // replaced it with a newer run. End every attached stream.
       if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);

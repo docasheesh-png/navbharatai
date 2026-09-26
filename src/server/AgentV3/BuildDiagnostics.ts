@@ -43,10 +43,14 @@ export type IssueSeverity = 'info' | 'warning' | 'error';
  * a human notices them; never a reason to hesitate before shipping the app.
  */
 const PROCESS_ONLY_CODES = new Set([
+  // A repair's out-of-scope answer that OUR guard refused to write (autopsy eed79815): engine housekeeping.
+  'REPAIR_OUT_OF_SCOPE',
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', // measurements of the ENGINE (postGreenWrites.ts), never app findings
   // …and its sibling: how far down OUR ladder a build fell (ladderDepth.ts) is a fact about our
   // routing, never about the user's app.
   'LADDER_DEPTH',
+  // A reviewer finding OUR evidence refuted (reviewEvidence.ts) is a fact about the reviewer, not the app.
+  'REVIEW_REFUTED_BY_EVIDENCE',
   // A file OUR OWN post-build pass repaired is a fact about this engine, not a defect in the user's
   // app (autopsy 53d43c18). It is recorded as a warning so it is legible in the report and so a rising
   // rate is visible, but it must never count against the app or colour the release gate.

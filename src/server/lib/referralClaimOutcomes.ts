@@ -77,6 +77,36 @@ export function deviceRefusalCategory(detail: string | null | undefined): string
   return 'other';
 }
 
+/**
+ * Google's Play Integrity client error codes (`IntegrityErrorCode`), by the number its message carries.
+ * PURE. The code is the diagnosis: -16 is a wrong cloud project number baked into the build, -1 means
+ * the API is not available to this app, -2/-6/-14/-15 are the phone's Play Store or Play services.
+ */
+const INTEGRITY_ERROR_NAMES: Record<string, string> = {
+  '-1': 'api-not-available', '-2': 'play-store-not-found', '-3': 'network-error',
+  '-4': 'play-store-account-not-found', '-5': 'app-not-installed', '-6': 'play-services-not-found',
+  '-7': 'app-uid-mismatch', '-8': 'too-many-requests', '-9': 'cannot-bind-to-service',
+  '-10': 'nonce-too-short', '-11': 'nonce-too-long', '-12': 'google-server-unavailable',
+  '-13': 'nonce-not-base64', '-14': 'play-store-outdated', '-15': 'play-services-outdated',
+  '-16': 'cloud-project-number-invalid', '-17': 'request-hash-too-long', '-18': 'client-transient-error',
+  '-100': 'internal-error',
+};
+
+/** The class of a failure the PHONE reported before any claim was sent. PURE; bounded; never guesses. */
+export function phoneCheckFailureCategory(outcome: string | null | undefined, message: string | null | undefined): string {
+  const o = String(outcome ?? '').trim().toLowerCase();
+  if (o === 'unavailable') return 'plugin-unavailable';
+  if (o === 'not-configured') return 'not-configured-in-this-build';
+  const m = String(message ?? '');
+  const code = /(?:error|code)[^()\d-]{0,20}\((-?\d{1,3})\)|^\s*(-\d{1,3})\s*:/i.exec(m);
+  const n = code ? (code[1] ?? code[2]) : null;
+  if (n && INTEGRITY_ERROR_NAMES[n]) return `google-${INTEGRITY_ERROR_NAMES[n]}`;
+  if (/missing required propert/i.test(m)) return 'request-malformed';
+  if (/identifier/i.test(m)) return 'no-device-id';
+  if (/empty token/i.test(m)) return 'empty-token';
+  return 'phone-check-failed';
+}
+
 /** Only these characters reach a field path — a dot would split it, anything else is noise. */
 function fieldKey(raw: string): string {
   const k = String(raw ?? '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);

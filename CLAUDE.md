@@ -2909,6 +2909,30 @@ the flag entries above promise.
   `revertToGreenSnapshot`, which calls `reconcileCapturedWrites` (`GreenGuard.ts`). It also refuses an
   EMPTY snapshot, because `restorePlan({}, cur)` would delete the whole workspace. Test-locked and
   reversion-proven in `tests/aRealBugInAWorkingAppGetsOneVerifiedRepair.test.ts`.
+- **ONE BUILD PER APP ACROSS SERVERS, AND SCOPED REPAIRS — built ONCE, by #3331 (autopsy eed79815 =
+  "4D Future City Drive", 2026-09-26).** The lease is `AgentV3/workspaceBuildLease.ts` (kill switch
+  `AGENTV3_WORKSPACE_LEASE=off`; see SCALE PLAN §2), the repair scope is `limitRepairToScope` +
+  `pathsNamedInErrors` in `SimpleBuilder.ts`, and the echoed format example is refused in
+  `parseFileBlocks` (`isEchoedFormatExample`).
+  🔴 **THE SAME REPORT WAS AUTOPSIED BY TWO SESSIONS AT ONCE, and each built its own lease, its own repair
+  scope and its own marker fix — same file name, same collection.** #3331 merged first; #3332 was cut
+  back to the two pieces #3331 did not carry (below and the marker sibling in `FastLaneContinuation`).
+  **This is safeguard #6's open-PR check failing in real time:** neither PR existed when the other session
+  started. When a report is pasted into more than one session, the admin's naming of ONE owner is the
+  only thing that prevents this. ⚠️ **Not ported, offered to the admin instead:** following a build that
+  runs on another server live (a `/status` that reports it, an `/attach` that says so), so a dropped
+  connection shows the running build rather than "network error". Today the retry is REFUSED with
+  `BUILD_RUNNING_ELSEWHERE` and a Stop — no second build, but the first screen still reads as an error.
+- **🧊 A GREEN APP MAY RESTORE ITS OWN FILES (same autopsy, 2026-09-26; no flag).** After build C was
+  verified working, copying the app's OWN saved files back into its sandbox was refused one file at a time
+  — **49 `GREEN_FREEZE_DEFERRED` lines**, each telling the user *"Reply if you want this change made"*,
+  one about `.nbai-landing.tar.gz`. A write with no pass name is an unknown writer to the freeze, and the
+  actuator's restore had been named `sandbox-file-restore` on 2026-08-20 while its three route siblings
+  (preview revive, the restore-files route, the build-start data-loss restore) and the shared asset
+  restore never were — the headline class once more. All three now carry the name, and
+  `restoreWorkspaceAssets` **names itself**, so a fourth caller cannot forget it. ⚠️ `writeWorkspaceFiles`
+  is deliberately NOT named inside: it also lands IMPORTS, which are not restores. Source-guarded and
+  reversion-proven in `tests/aGreenAppMayRestoreItsOwnFiles.test.ts`.
 - **`AGENTV3_FASTLANE_REASONING_GATE`** (default ON, `off` reverts — added 2026-09-23, autopsy ac41a924,
   PR #3278). The fast lane is skipped when the build opens on a model that ALWAYS reasons
   (`modelAlwaysReasons`). Its single plan call is capped at 90 s, a cap sized for a rung that answers
@@ -3190,6 +3214,20 @@ the flag entries above promise.
   cancellation may take our margin and never our cost, and the route passes `realCostUsd` /
   `sandboxUsd` in (commit `6844b99f`). Re-grep before re-raising anything this file calls open.
 
+- **⏯️ `AGENTV3_UNFINISHED_RESUME` — A BUILD THAT STOPPED TALKING IS NOT A BUILD THAT FINISHED (autopsy
+  121c2431, 2026-09-26). ⚠️ NOT set, and the code default is ON**; `off` restores the old ending exactly.
+  Read by `src/server/AgentV3/unfinishedResume.ts`; applied in `AgentRunner`'s readiness gate.
+  🔴 **WHY:** the build-nudge fires only for a run with ZERO tool calls, so an architect that worked, then
+  wrote 26,371 characters of deliberation and ended its turn with no tool call, ended the build FAILED at
+  5.4 min with 1,418 s of budget unspent — while the readiness gate, run only to write the failure message,
+  already knew the entry was still the starter. Now the gate's blockers are handed back with "act now", **at
+  most twice**, and **never after a refusal or a question to the user** (the nudge's own two tests, reused —
+  the asymmetry in `nudgeToBuild.ts` holds here too). Admin code `UNFINISHED_BUILD_RESUMED`.
+  🔒 **Two siblings in the same change:** a compile error a later clean compile answered is RESOLVED in
+  project memory instead of being handed to every later agent as a "Recent error" (`markTscClean`,
+  `openErrors`, one output-read door `noteCompileOutput` — the shell path had marked tsc clean on a `| head`
+  exit code of 0); and when the release gate's typecheck passed, a reviewer finding claiming the project does
+  not compile is dropped before the user sees it (`reviewEvidence.ts`, `REVIEW_REFUTED_BY_EVIDENCE`).
 - **🙋 A QUESTION IS AN ANSWER, NOT AN EMPTY BUILD — the retry overrode a correct reply and billed
   ₹196.28 for it (autopsy `e628efd4`, 2026-09-25; no flag, on by construction).** A free-tier user
   asked *"if we don't have a chat in next 2 hours can you send a message to initiate the chat
@@ -3239,9 +3277,17 @@ the flag entries above promise.
   platform sentences stand down when the model answered instead of building; `TURN_DECLINED` records
   it. ⚠️ **Never add a reader that asks `looksLikeRefusal(result.summary)` or `turnAskedTheUser(…)`
   late in the route** — `tests/turnAnswerIsReadOnce.test.ts` fails on either call appearing there.
-  🔴 **STILL OPEN: the `stopped` half.** "Was the build stopped?" has two definitions — the abort
-  signal (retry, run proof) and the stop-aware timeline (the upsell) — and unifying them changes
-  behaviour at three sites, so it is its own decision.
+  ✅ **THE `stopped` HALF IS CLOSED TOO (2026-09-26, the same day) — and the premise first written here
+  was WRONG, which is the part worth keeping.** It said "a model's own `stop_build` call may not raise
+  the abort signal". It does: the Stop button, Unsend and `stop_build` ALL go through
+  `abortBuild(…, 'user-stop')`, so the signal is the complete source, and the retry (abort signal)
+  and the upsell (`USER_STOPPED_BUILD`) are not disagreeing — they ask different questions ("did the
+  run end early at all?" vs "was a capability ever judged?"). **Unifying them would have been wrong.**
+  The one real gap: the upsell's question was answered from `USER_STOPPED_BUILD` alone, which our OWN
+  interruptions (deploy drain, lock takeover, reaper, unknown) never write — so a build OUR server cut
+  short could be told to buy a stronger engine. `interruptedBeforeAnyVerdict(cause)`
+  (`buildAbortCause.ts`, exhaustive over `AbortCause`) now reads the signal's cause, and the upsell
+  stands down on `interrupted` with its own record. It can only suppress an upsell; it moves no money.
   ✅ **`WRITE_TIME_TYPECHECK` now sits AFTER the retry block.** It was above it, so on any retried
   build the line described the ABANDONED attempt — the fourth time that one sentence has been wrong,
   from a third distinct cause. The trace that unblocked it: there is exactly ONE build
@@ -4247,6 +4293,12 @@ and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; 
   `kimi-k2.7-code` ($0.95/$4.00) instead of `glm-4.7-flashx` ($0.07/$0.40) — ~13× the input price for
   THOSE builds. The bet is that a cheap rung which fails is paid twice, once in the wasted call and
   once in the heal. **Watch: the share of builds routed complex, and whether their heal count drops.**
+- 🗺️ **THE PLANNERS ARE THE ONE EXCEPTION (admin chose "A", 2026-09-26, autopsy 7d79254b).** The
+  roadmap, blueprint and project-mode planners are plans, so they climb `planLadder` through
+  `makePlanTextRunner` (#3334) instead of the complex build chain — which had cost a large app 76 s of
+  Kimi reasoning before its first file, and a project decomposition 315 s and a timeout (autopsy
+  eed79815). There is no separate kill switch. The build itself still opens on KIMI. ⚠️ On Weak, with
+  `AGENTV3_NEMOTRON=weak`, the plan rung is Nemotron Ultra — also a reasoning model, speed unmeasured.
 - 🔗 `healLadder` and this router share ONE definition of "the cheap opener"
   (`withoutCheapFlashLead`), applied by `buildTurnRunner` for `heal || complex`. They stay separate
   FLAGS — "this is a repair" and "this is a big app" are different questions with the same answer
@@ -4808,6 +4860,16 @@ infrastructure and no monthly cost — which is why it is the *first* thing to d
 **TRIGGER:** sustained concurrent instances above ~30, OR any Firestore contention error in the logs.
 
 ### 2 · 🟡 Per-instance memory that pretends to be global
+
+✅ **THE BUILD LOCK HALF OF THIS TRIGGER FIRED AND IS BUILT (autopsy eed79815, 2026-09-26) — without
+Redis.** A user's retry after a dropped connection reached another Cloud Run instance, which knew
+nothing of the running build and started a second one in the same workspace, then a third: fourteen
+minutes of two builds overwriting each other's files and running npm into one `node_modules` at once.
+The fix is a **Firestore lease per workspace** (`AgentV3/workspaceBuildLease.ts`, the `jobLease.ts`
+pattern): claimed in a transaction before the stream opens, renewed every 20 s, released when the build
+ends, stale after 90 s, and **fail-open** on a store error. A Stop pressed on any instance reaches the
+build through the lease. Kill switch **`AGENTV3_WORKSPACE_LEASE=off`** (NOT set; default ON). The
+table below is otherwise unchanged — rate limiters and the other rows are still per-instance.
 
 Several things live in one instance's RAM and are therefore wrong the moment there are several:
 

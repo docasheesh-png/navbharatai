@@ -26,6 +26,7 @@ import { abortCauseOf, abortSummary } from './buildAbortCause';
 import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
 import { decideBuildNudge, standDownNote } from './nudgeToBuild';
+import { decideUnfinishedResume, unfinishedResumeNote } from './unfinishedResume';
 import { streamThinkingToChat } from './thinkingStream';
 
 /**
@@ -445,6 +446,8 @@ export class AgentRunner {
     // on its first turn; terminating there is the "model replied without building" bug. We instead
     // push it to ACT, up to this cap (then give up honestly to avoid an endless narration loop).
     let noBuildNudges = 0;
+    /** Times a prose-ended turn was handed the readiness blockers and told to continue (unfinishedResume.ts). */
+    let unfinishedResumes = 0;
     const MAX_BUILD_NUDGES = 2;
 
     const messages: unknown[] = [{ role: 'user', content: userPrompt }];
@@ -872,6 +875,18 @@ export class AgentRunner {
               // Surface the verdict to the UI as a build-health card (R2 §4.6) — pass or fail.
               buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier };
               if (!readiness.ready) {
+                // A MODEL THAT STOPPED IN PROSE WHILE THE APP IS STILL UNBUILT GETS THE GATE'S FINDINGS
+                // AND ANOTHER TURN (autopsy 121c2431 — the build ended FAILED with 1,418 s of budget
+                // unspent). Never after a refusal or a question to the user; at most twice. See
+                // unfinishedResume.ts.
+                const resume = decideUnfinishedResume({ text: turn.text, blockers: readiness.blockers, resumesUsed: unfinishedResumes });
+                if (resume.resume && !this.opts.signal?.aborted) {
+                  unfinishedResumes++;
+                  try { this.opts.onNote?.({ code: 'UNFINISHED_BUILD_RESUMED', message: unfinishedResumeNote(unfinishedResumes, readiness.blockers.length), detail: readiness.blockers.slice(0, 5).join(' | ') }); } catch { /* a note must never fail a build */ }
+                  messages.push({ role: 'user', content: resume.message });
+                  messageTs.push(Date.now());
+                  continue;
+                }
                 ok = false;
                 // USER-FACING SUMMARY = SHORT + PLAIN (admin 2026-08-02: "isko simple short karo"). The raw
                 // technical blockers (file:line, babel code frames like `Duplicate declaration ErrorBoundary`,

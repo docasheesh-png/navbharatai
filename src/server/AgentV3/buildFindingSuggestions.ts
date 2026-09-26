@@ -136,6 +136,8 @@ const NEVER_SUGGEST = new Set([
   'UNBILLED_BARREN_WORK',
   // Whether our own safety net saved a version is not a next move we can offer the user.
   'RESTORE_POINT',
+  // A repair answer our guard refused to write (autopsy eed79815) — nothing for the user to do.
+  'REPAIR_OUT_OF_SCOPE',
 ]);
 
 /**

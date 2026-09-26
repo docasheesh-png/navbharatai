@@ -63,6 +63,8 @@ const PROCESS_ONLY_CODES = new Set([
   // …and the decision NOT to start that lane on a rung that always reasons (fastLaneRung.ts,
   // autopsy ac41a924): a fact about OUR routing, never about the user's app.
   'FAST_LANE_SKIPPED_REASONING_RUNG',
+  // …and the lane HANDING OFF because its chain fell to such a rung mid-lane (autopsy Study-Racer).
+  'FAST_LANE_FELL_TO_REASONING_RUNG',
   // …and its sibling: what OUR calls that returned nothing cost in wall clock (providerWaste.ts).
   'PROVIDER_TIME_WASTED',
   'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',
@@ -2954,7 +2956,10 @@ export function etaAccuracy(
   const band = `${mins(lowMs)}–${mins(highMs)}`;
   const head = evidenced
     ? `The user was shown ${band} (midpoint ${mins(promisedMs)})`
-    : `No figure was shown to the user (unevidenced — they saw the PHASE). The estimator's own midpoint was ${mins(promisedMs)}, band ${band}`;
+    : /rough estimate/i.test(String(promise?.shown ?? ''))
+      // Admin 2026-09-26: an unevidenced estimate is SHOWN, labelled a guess (etaEvidence.ts).
+      ? `The user was shown a ROUGH ESTIMATE, labelled a guess (unevidenced): ${band} (midpoint ${mins(promisedMs)})`
+      : `No figure was shown to the user (unevidenced — they saw the PHASE). The estimator's own midpoint was ${mins(promisedMs)}, band ${band}`;
   const verdict = withinBand
     ? 'the build landed INSIDE that band'
     : `the build took ${mins(actualMs)} — ${ratio.toFixed(1)}× the midpoint and ${actualMs > highMs ? 'OVER' : 'UNDER'} the band`;

@@ -819,6 +819,19 @@ export interface SimpleBuildDeps {
    * See turnDeadline.ts for the report that produced it.
    */
   generate: (system: string, user: string, opts?: { deadlineAt?: number }) => Promise<string>;
+  /**
+   * Asked before every per-file call and after every tier: should the lane stop NOW and hand what it
+   * has to the full builder? Returns the reason, or null to carry on.
+   *
+   * 🔴 WHY (autopsy Study-Racer, 2026-09-25): `fastLaneRungDecision` skips the lane when the build
+   * OPENS on a rung that always reasons — the opener was glm-4.7-flashx, so the lane ran. Flashx then
+   * crawled INSIDE the lane and the chain fell to kimi-k2.7-code, a rung that reasons before every
+   * answer: the next per-file call took 123 s for a 2.3 KB hook (3,427 output tokens for 2,340
+   * characters), and the lane handed off anyway at 157 s with 3 of 13 files. The decision taken once
+   * at the opener needs a sibling taken on every fall. The route answers from the model that served
+   * the last call; a lane that never falls never hears from it.
+   */
+  stopLane?: () => string | null;
   /** Write the generated files (single batch). Throws on a hard failure. */
   writeFiles: (files: OneShotFile[]) => Promise<void>;
   /** Start the dev server + publish the preview. Best-effort. */
@@ -1209,8 +1222,13 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       let filesDone = 0;
       // Generate ONE file (its own call, returns one FILE block). `produced` is the real source of
       // earlier-tier files, injected so this file uses their EXACT exported names.
+      let laneStopReason: string | null = null; // set by deps.stopLane; thrown at the next tier boundary
       const genOne = async (spec: SimpleFileSpec, produced: OneShotFile[]): Promise<OneShotFile | null> => {
         if (lapsed) return null; // the lane already timed out — stop burning tokens on files nobody will use
+        // The lane's chain may have fallen to an engine this lane cannot afford (see SimpleBuildDeps.stopLane).
+        // Refuse BEFORE spending the call; the tier boundary below turns the refusal into a hand-off.
+        const stop = deps.stopLane?.();
+        if (stop) { laneStopReason = laneStopReason ?? stop; return null; }
         try {
           // Fix 69 — feed consumers the producers' EXPORT SURFACE (exact names/shapes/signatures,
           // full-file scan so no export is truncation-hidden) instead of full bodies: same contract
@@ -1286,6 +1304,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         const tierStartedAt = Date.now();
         const gen = await mapWithConcurrency(specs, concurrency, (spec) => genOne(spec, producedSoFar));
         for (const f of gen) if (f && f.content) written.push(f);
+        // "stopped early" ON PURPOSE — the wording that routes to the salvage path, so every finished
+        // file reaches the full builder (see the root-component check below for the same idiom).
+        if (laneStopReason) throw new Error(`simple-build fast lane stopped early — ${laneStopReason}`);
         // EARLY BAIL (admin report 858f6d7b). A tier costs as much as its slowest file, so once ONE tier's
         // real duration is known the rest is predictable. The reported build ground on to the full 240s to
         // produce 4 of 14 files — work the full builder then had to continue anyway. Bailing the moment the

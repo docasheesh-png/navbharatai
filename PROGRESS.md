@@ -81705,3 +81705,47 @@ Admin: *"100*4 ko chor ke sab hata do"*. Follows the backfill removal above, in 
 - Locked by `tests/theReferralLadderIsTheOnlyGift.test.ts`, which runs the real wallet route against an
   in-memory store (proven by reversion: a non-zero opening balance fails two cases) and also asserts
   the referral ladder, its routes, panel and admin card remain.
+## 2026-09-26 — Study-Racer autopsy, part 2: the five open items closed (admin: "sab karo, ETA dikhao andaaza label ke saath")
+
+Part 1 (above, 2026-09-25) fixed six root causes and named five it had left open. Asked "sabhi problem
+root cause se dna level par fix ho gayi?", the honest answer was no — five were open. The admin said do
+all five, and decided the one product question: show the ETA, labelled a guess. Same PR (#3308), second
+commit. Test-locked in `tests/theStudyRacerAutopsyPart2.test.ts`.
+
+- **The fast lane hands off when its chain FALLS to a reasoning rung.** `fastLaneRungDecision` asked
+  "does the opener always reason?" once, at the start; the Study-Racer lane opened on flashx and fell to
+  `kimi-k2.7-code` on the first file, then spent its whole budget on a rung whose 90 s plan cap was sized
+  for a model that answers directly. `SimpleBuildDeps.stopLane` is asked before every per-file call; the
+  route answers it from the model that served the LAST call (`modelAlwaysReasons(servedBy.model)`, under
+  the same `fastLaneReasoningGateEnabled()` kill switch as the opener gate), records
+  `FAST_LANE_FELL_TO_REASONING_RUNG` (process-only), and the lane throws "stopped early — …" so the
+  existing salvage path keeps the files that finished. Behavioural test drives `runSimpleBuild` with a
+  fake `generate` that "falls" after the third call.
+- **Two classifiers disagreeing is a fact, not a tie the dearer one wins.** `scopeDispute(scope, {
+  complex })` in `appScopeAnalyzer.ts`: a famous name USED (not cloned, no other clone signal) + the
+  complexity router saying `simple` + a small-app noun (`smallHint`) ⇒ the roadmap planner stands down,
+  `APP_SCOPE_DISPUTED` recorded, build goes direct. Deliberately narrow: a complex score, heavy infra, a
+  feature list or no small noun all keep the roadmap.
+- **`REQUIREMENT_GAPS` on a fresh build only**: the gate now reads `intent === 'new_build' && !isEditMode`,
+  so the six "questions to confirm" no longer land on an edit turn.
+- **The unevidenced ETA is SHOWN, as a rough estimate, labelled.** `roughEstimateBand(est)` +
+  `ROUGH_ESTIMATE_LABEL` ("a guess from the size of your request, not a measurement") in `etaEvidence.ts`:
+  first line `⏱️ Rough estimate: ~2–5 min — a guess …; I'll replace it with a real figure as soon as I
+  can measure how big your app is`, the live tick carries the band with the same label (budget clause
+  intact), the admin `ETA_BASIS` note says "Shown as a ROUGH ESTIMATE (band), labelled a guess", and the
+  ETA-accuracy line reads the shown text (`/rough estimate/i`) so the ending is measured against what the
+  user actually read. No band ⇒ the old phase-only sentences byte for byte. Two wiring tests re-anchored to
+  the new arguments (`unevidencedFirstEtaLine(est)`, tick `+ etaRoughBand`) — the intent (the budget must
+  reach the line) is unchanged.
+- **The architect is told what the platform verifies after its turn** (`systemPrompt.ts`, build + edit
+  mode): real-browser open, console read, production build, typecheck — call `update_preview` ONCE after
+  the last write, do not re-run tsc / build / a second dev server / screenshot / console_errors as a
+  closing ritual. "Prove it still works" kept. This is the prompt-side half; the shared evidence ledger
+  stays the OPEN root cause behind it.
+- **`GREEN_FREEZE_DEFERRED` wording**: a refused post-green write by the engine's own pass now says it is
+  the engine being held to the freeze, "not something the user asked for; nothing to do" — it no longer
+  invites the user to "Reply if you want this change made" about a file they never asked for.
+
+Still open after part 2 (recorded, not hidden): the shared evidence ledger (why the model re-verifies at
+all); the fast lane's 90 s plan cap is still sized for a direct-answer rung (the hand-off bounds the loss,
+it does not make a reasoning rung fast).

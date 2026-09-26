@@ -81,6 +81,16 @@ on:
         description: 'Include the push-notifications entitlement (needs the one-time Apple Developer + Firebase Console setup in MOBILE_PUBLISHING.md §7.5 first — leave OFF until that''s done)'
         type: boolean
         default: false
+      enable_app_attest:
+        # OPT-IN, default OFF (App Check slice 2, 2026-09-26). App Attest is how the iOS app proves to our
+        # server that it is the genuine app. Same reasoning as push above: its prerequisite — the "App
+        # Attest" capability on the com.navbharat.ai App ID in Apple Developer → Identifiers — is a
+        # one-time manual step, and signing with the entitlement before that is done fails the export.
+        # Without it the app still builds and runs; its requests simply carry no App Check token, which
+        # the server (in monitor mode) counts and never refuses.
+        description: 'Include the App Attest entitlement for App Check (needs Apple Developer → Identifiers → com.navbharat.ai → "App Attest" enabled first — leave OFF until that''s done)'
+        type: boolean
+        default: false
 
 jobs:
   build-ios:
@@ -348,6 +358,36 @@ jobs:
           puts 'OK: App.entitlements wired to the App target (push notifications).'
           RUBY
           echo "Push-notifications entitlement in place."
+
+      # App Attest (OPT-IN — see the workflow_dispatch input above). `production` is the only environment
+      # App Store and TestFlight builds use. PREREQUISITES (one-time, by hand): (1) Apple Developer →
+      # Identifiers → com.navbharat.ai → "App Attest" ✅ so the profile includes the entitlement;
+      # (2) Firebase Console → App Check → the iOS app → App Attest → register (Team ID needed).
+      - name: Enable App Attest entitlement for App Check (opt-in)
+        if: ${{ inputs.enable_app_attest }}
+        run: |
+          set -e
+          ENT="ios/App/App/App.entitlements"
+          if [ ! -f "$ENT" ]; then
+            printf '%s\n' \
+              '<?xml version="1.0" encoding="UTF-8"?>' \
+              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+              '<plist version="1.0"><dict></dict></plist>' > "$ENT"
+          fi
+          /usr/libexec/PlistBuddy -c "Add :com.apple.developer.devicecheck.appattest-environment string production" "$ENT" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :com.apple.developer.devicecheck.appattest-environment production" "$ENT"
+          gem install xcodeproj --no-document --quiet
+          ruby - <<'RUBY'
+          require 'xcodeproj'
+          proj = Xcodeproj::Project.open('ios/App/App.xcodeproj')
+          target = proj.targets.find { |t| t.name == 'App' } or abort('App target not found')
+          target.build_configurations.each do |c|
+            c.build_settings['CODE_SIGN_ENTITLEMENTS'] = 'App/App.entitlements'
+          end
+          proj.save
+          puts 'OK: App.entitlements wired to the App target (App Attest).'
+          RUBY
+          echo "App Attest entitlement in place."
 
       # App Store REQUIRES a purpose string for every device permission the app can request, or review
       # REJECTS the binary (and iOS crashes on the first getUserMedia call without it). The app uses the

@@ -15174,12 +15174,20 @@ async function noteBuildOutcome(
               // requested features or tells the build to stop (TaskForge autopsy 2026-07-18);
               // the genuine "too big for one turn" case is owned by the step-limit auto-resume.
               const health = checkpoint.quickCheck(events);
+              // 🔴 NO RECOVERY FOLLOWS THIS, SO THE USER IS NOT TOLD ONE DOES (autopsy SignBridge,
+              // 2026-09-26). It used to narrate "⚠️ Build health check detected issues — preparing
+              // recovery…" — and nothing anywhere prepares or performs a recovery on this signal. On that
+              // report it fired on an app already verified working, because the post-build reviewer had
+              // three reads in flight at once and the heuristic counts a call in flight as stuck. A status
+              // line must reflect real state (second absolute rule); this one described a process that
+              // does not exist. It is now what it always was: an admin-only observation.
               if (!health.ok && health.broken) {
-                events.emit({
-                  type: 'narration', agent: 'architect',
-                  text: '⚠️ Build health check detected issues — preparing recovery…',
-                  ts: Date.now(),
-                });
+                try {
+                  buildDiag.record({
+                    phase: 'build', severity: 'info', code: 'CHECKPOINT_SIGNAL', autoResolved: true,
+                    message: 'The periodic build checkpoint saw a recent tool error or calls still in flight. Observation only — nothing acts on it.',
+                  });
+                } catch { /* diagnostics best-effort */ }
               }
             }
           }

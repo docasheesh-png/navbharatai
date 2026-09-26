@@ -65,6 +65,8 @@ const PROCESS_ONLY_CODES = new Set([
   'FAST_LANE_SKIPPED_REASONING_RUNG',
   // …and the lane HANDING OFF because its chain fell to such a rung mid-lane (autopsy Study-Racer).
   'FAST_LANE_FELL_TO_REASONING_RUNG',
+  // An observation about OUR checkpoint heuristic (autopsy SignBridge, 2026-09-26) — never the app.
+  'CHECKPOINT_SIGNAL',
   // …and its sibling: what OUR calls that returned nothing cost in wall clock (providerWaste.ts).
   'PROVIDER_TIME_WASTED',
   'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',

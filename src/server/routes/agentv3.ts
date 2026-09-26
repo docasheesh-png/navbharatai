@@ -304,7 +304,7 @@ import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/lane
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled } from '../AgentV3/fastLaneRung';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
-import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
+import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
 import { buildNestedRepoCommand, parseNestedRepoRoots, nestedRepoNote } from '../AgentV3/nestedRepoProbe';
 // The sandbox's workspace root, from the module CLAUDE.md names as this class's one home (the
@@ -3624,12 +3624,14 @@ export function sanitizeSteerMessage(raw: unknown): string | null {
 }
 
 /**
- * Whether the mega-roadmap planner runs on the tier's PLAN rung (admin chose "A", 2026-09-26, autopsy
- * 7d79254b). Default ON; `AGENTV3_ROADMAP_PLAN_RUNG=off` is the no-deploy revert to the build chain.
- * Anything other than the word `off` means on — the switch only ever exists to undo this one change.
+ * Whether the build's PLANNERS run on the tier's PLAN rung — the mega-roadmap planner (admin chose "A",
+ * 2026-09-26, autopsy 7d79254b) and its sibling the project-mode module planner (autopsy eed79815, the
+ * same day: 315 s on two reasoning rungs that each spent their whole allowance thinking, then a
+ * timeout). Default ON; `AGENTV3_PLANNER_PLAN_RUNG=off` is the no-deploy revert of BOTH to the build
+ * chain. Anything other than the word `off` means on — the switch only ever exists to undo this change.
  */
-export function roadmapPlanRungEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return (env.AGENTV3_ROADMAP_PLAN_RUNG ?? '').trim().toLowerCase() !== 'off';
+export function plannerPlanRungEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.AGENTV3_PLANNER_PLAN_RUNG ?? '').trim().toLowerCase() !== 'off';
 }
 
 /**
@@ -13057,6 +13059,8 @@ async function noteBuildOutcome(
           if (scope.decision === 'analyze' && !dispute) {
             const rmStartedAt = Date.now();
             let rmProvider = 'CLAUDE';
+            // Whether any provider actually answered — see fastLaneCallIdentity (autopsy eed79815).
+            let rmReported = false;
             // 🧭 THE ROADMAP IS A PLAN, SO IT RUNS ON THE PLAN RUNG (admin chose "A", 2026-09-26, autopsy
             // 7d79254b). It used to take the BUILD chain, which `complex: buildIsComplex` opens on KIMI —
             // an always-reasoning rung — so a large app waited 76 s (4,574 output tokens) before its
@@ -13064,16 +13068,16 @@ async function noteBuildOutcome(
             // same shape as the plan phase, so it now asks the same runner (`tierPlanRunner` →
             // `planLadder`: the tier's plan rung first, then its own ladder, same no-Claude guard).
             // The BUILD itself still opens on KIMI for a complex app — only this planner moved.
-            // `AGENTV3_ROADMAP_PLAN_RUNG=off` restores the build chain with no deploy.
-            const rmPlanRunner = roadmapPlanRungEnabled()
+            // `AGENTV3_PLANNER_PLAN_RUNG=off` restores the build chain with no deploy.
+            const rmPlanRunner = plannerPlanRungEnabled()
               ? tierPlanRunner(powerLevelReqEffective, noClaudeBuild, {
-                onProviderUsed: (used) => { rmProvider = used; captureProvider(used); },
+                onProviderUsed: (used) => { rmProvider = used; rmReported = true; captureProvider(used); },
                 onProviderError: recordProviderFallback,
                 onProviderBenched: recordProviderBenched,
                 bench: buildBench,
               })
               : null;
-            const rmCall = (rmPlanRunner ?? makeFastTextRunner((used) => { rmProvider = used; })).runTurn({
+            const rmCall = (rmPlanRunner ?? makeFastTextRunner((used) => { rmProvider = used; rmReported = true; })).runTurn({
               model: fastBuildModel(),
               system: megaRoadmapSystemPrompt(),
               messages: [{ role: 'user', content: megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals) }],
@@ -13096,8 +13100,8 @@ async function noteBuildOutcome(
               rmT = await Promise.race([rmCall, rmTimeout]);
             } catch (err) {
               try {
-                const lbl = fastLaneProviderLabel(rmProvider);
-                buildDiag.recordLlmCall({ model: answeringModel({ planned: lbl === 'anthropic' ? fastBuildModel() : null, family: rmProvider }), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - rmStartedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
+                const who = fastLaneCallIdentity(rmReported, rmProvider, fastBuildModel());
+                buildDiag.recordLlmCall({ model: who.model, provider: who.provider, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - rmStartedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
                 buildDiag.record({
                   phase: 'plan', severity: 'info', code: 'MEGA_ROADMAP_FAILED',
                   message: roadmapPlannerFailedMessage(plannerFailureKind(err), rmTimeoutMs, err),
@@ -15685,7 +15689,25 @@ async function noteBuildOutcome(
           const ppGenerate = async (system: string, user: string): Promise<string> => {
             const startedAt = Date.now();
             let ppProvider = 'CLAUDE';
-            const call = makeFastTextRunner((used) => { ppProvider = used; }).runTurn({
+            // Whether any provider actually answered. A planner that timed out on a weak build used to
+            // be recorded as a failed `anthropic / claude-sonnet-4-6` call because `ppProvider` never
+            // left its initialiser (autopsy eed79815) — the class fastLaneCallIdentity already closed
+            // for the fast lane (build 1ef27cd7), never hunted into the planners.
+            let ppReported = false;
+            // 🧭 A PLAN RUNS ON THE PLAN RUNG (autopsy eed79815). This call is the project decomposition —
+            // text only, input-heavy, the same shape as the roadmap planner the admin moved to the plan
+            // rung ("A") the same day. On the build chain a complex prompt opened it on KIMI, which spent
+            // its whole allowance reasoning (122 s), then GLM did the same (172 s), and the planner timed
+            // out at 315 s before the build wrote a line. `AGENTV3_PLANNER_PLAN_RUNG=off` reverts it.
+            const ppRunner = (plannerPlanRungEnabled()
+              ? tierPlanRunner(powerLevelReqEffective, noClaudeBuild, {
+                onProviderUsed: (used) => { ppProvider = used; ppReported = true; captureProvider(used); },
+                onProviderError: recordProviderFallback,
+                onProviderBenched: recordProviderBenched,
+                bench: buildBench,
+              })
+              : null) ?? makeFastTextRunner((used) => { ppProvider = used; ppReported = true; });
+            const call = ppRunner.runTurn({
               model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
             });
             let ppTimer: ReturnType<typeof setTimeout> | undefined;
@@ -15697,8 +15719,8 @@ async function noteBuildOutcome(
               // A planner call that failed is a model call that failed — it belongs on the same ledger
               // as every other one, or the report cannot say whether the key was working at all.
               try {
-                const lbl = fastLaneProviderLabel(ppProvider);
-                buildDiag.recordLlmCall({ model: answeringModel({ planned: lbl === 'anthropic' ? fastBuildModel() : null, family: ppProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
+                const who = fastLaneCallIdentity(ppReported, ppProvider, fastBuildModel());
+                buildDiag.recordLlmCall({ model: who.model, provider: who.provider, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
               } catch { /* diagnostics best-effort */ }
               throw err;
             } finally {
@@ -17039,6 +17061,15 @@ async function noteBuildOutcome(
         // the `.env` we write ourselves used to defeat the size-only guard (see the predicate).
         isImportTurn, aborted: abort.signal.aborted,
       };
+      // A post-build repair that answered with files outside its scope (autopsy eed79815) — said once per
+      // pass, in the admin report, with the paths, so a dropped file is never a silent disappearance.
+      const recordRepairOutOfScope = (pass: string, dropped: string[]): void => {
+        if (dropped.length === 0) return;
+        buildDiag.record({
+          phase: 'build', severity: 'warning', code: 'REPAIR_OUT_OF_SCOPE', autoResolved: true,
+          message: `The ${pass} repair answered with ${dropped.length} file(s) it was neither shown nor named by the errors; they were NOT written: ${dropped.slice(0, 12).join(', ')}${dropped.length > 12 ? ', …' : ''}.`,
+        });
+      };
       const wroteTypeScript = [...writtenFiles.keys()].some(isTypeScriptSourcePath);
       if (postBuildCodeGateShouldRun(tscGateBase) && !wroteTypeScript) {
         // Honest, and cheap: a single-file HTML app (or a CSS/JSON-only edit) has no TypeScript of ours
@@ -17130,7 +17161,13 @@ async function noteBuildOutcome(
             // Same guard the fast lane now carries: a REPAIR aimed at a file we own and that has one
             // correct form is replaced with that form. The restore above already put it back once — this
             // is what stops this very pass from immediately undoing that and starting the loop again.
-            const guarded = protectBoilerplateInRepair(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })));
+            // IN SCOPE ONLY (autopsy eed79815): a file this repair was shown, or one the compiler named.
+            const scoped = limitRepairToScope(
+              parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })),
+              [...currentFiles.map((f) => f.path), ...pathsNamedInErrors(check.errors)],
+            );
+            recordRepairOutOfScope('typecheck', scoped.dropped);
+            const guarded = protectBoilerplateInRepair(scoped.kept);
             const fixes = guarded.files;
             if (guarded.overridden.length > 0) {
               buildDiag.record({
@@ -17333,7 +17370,9 @@ async function noteBuildOutcome(
                 ],
                 tools: [], maxTokens: 8000,
               });
-              const fixed = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
+              const scopedSyntax = limitRepairToScope(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })), brokenPaths);
+              recordRepairOutOfScope('syntax', scopedSyntax.dropped);
+              const fixed = scopedSyntax.kept;
               for (let i = 0; i < fixed.length; i++) {
                 await dispatcher.dispatch({ id: `syntax-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend');
               }
@@ -17403,7 +17442,9 @@ async function noteBuildOutcome(
                 ],
                 tools: [], maxTokens: 8000,
               });
-              const fixed = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
+              const scopedExport = limitRepairToScope(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })), targetFiles.map((f) => f.path));
+              recordRepairOutOfScope('missing-export', scopedExport.dropped);
+              const fixed = scopedExport.kept;
               for (let i = 0; i < fixed.length; i++) {
                 await dispatcher.dispatch({ id: `missexport-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend');
               }

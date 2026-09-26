@@ -10,7 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { roadmapPlanRungEnabled } from '../src/server/routes/agentv3';
+import { plannerPlanRungEnabled } from '../src/server/routes/agentv3';
 import { planLadder, tierLadder, withoutCheapFlashLead } from '../src/server/AgentV3/tierLadder';
 
 const NO_NEMOTRON = {} as NodeJS.ProcessEnv;
@@ -31,10 +31,10 @@ describe('the plan rung is not the complex build opener', () => {
 
 describe('the no-deploy revert', () => {
   it('is on unless the word is off', () => {
-    expect(roadmapPlanRungEnabled({})).toBe(true);
-    expect(roadmapPlanRungEnabled({ AGENTV3_ROADMAP_PLAN_RUNG: 'on' })).toBe(true);
-    expect(roadmapPlanRungEnabled({ AGENTV3_ROADMAP_PLAN_RUNG: 'garbage' })).toBe(true);
-    expect(roadmapPlanRungEnabled({ AGENTV3_ROADMAP_PLAN_RUNG: ' OFF ' })).toBe(false);
+    expect(plannerPlanRungEnabled({})).toBe(true);
+    expect(plannerPlanRungEnabled({ AGENTV3_PLANNER_PLAN_RUNG: 'on' })).toBe(true);
+    expect(plannerPlanRungEnabled({ AGENTV3_PLANNER_PLAN_RUNG: 'garbage' })).toBe(true);
+    expect(plannerPlanRungEnabled({ AGENTV3_PLANNER_PLAN_RUNG: ' OFF ' })).toBe(false);
   });
 });
 
@@ -47,11 +47,27 @@ describe('🔒 the wiring', () => {
     // tsc and vitest cannot see which runner a call site picks — that is how this ran on KIMI.
     expect(block).toMatch(/tierPlanRunner\(powerLevelReqEffective, noClaudeBuild, \{/);
     expect(block).toMatch(/\(rmPlanRunner \?\? makeFastTextRunner\(/);
-    expect(block).toContain('roadmapPlanRungEnabled()');
+    expect(block).toContain('plannerPlanRungEnabled()');
   });
 
   it('the planner still reports the provider that answered, so its cost is priced on the real rung', () => {
-    expect(block).toMatch(/onProviderUsed: \(used\) => \{ rmProvider = used; captureProvider\(used\); \}/);
+    expect(block).toMatch(/onProviderUsed: \(used\) => \{ rmProvider = used; rmReported = true; captureProvider\(used\); \}/);
+  });
+
+  it('the project-mode planner is the same kind of call and asks the same runner (autopsy eed79815)', () => {
+    // The sibling of the roadmap: it opened on KIMI and GLM, both spent their whole allowance thinking,
+    // and it timed out at 315 s before the build wrote a line.
+    const pp = route.slice(route.indexOf('let ppReported = false;'), route.indexOf('let ppReported = false;') + 3000);
+    expect(pp).toContain('plannerPlanRungEnabled()');
+    expect(pp).toMatch(/tierPlanRunner\(powerLevelReqEffective, noClaudeBuild, \{/);
+    expect(pp).toMatch(/const call = ppRunner\.runTurn\(/);
+  });
+
+  it('a planner that nobody answered is never recorded as a Claude call (fastLaneCallIdentity)', () => {
+    // A weak build's timed-out planner was logged `anthropic / claude-sonnet-4-6` — a vendor the build
+    // could not have called. Both planners now record through the helper that says `unknown` instead.
+    expect(route).toMatch(/fastLaneCallIdentity\(rmReported, rmProvider, fastBuildModel\(\)\)/);
+    expect(route).toMatch(/fastLaneCallIdentity\(ppReported, ppProvider, fastBuildModel\(\)\)/);
   });
 
   it('the plan phase itself is untouched', () => {

@@ -135,8 +135,9 @@ describe('🔒 the wiring — the platform proves the preview itself, and the be
     // Three since 2026-09-25 (autopsy Study-Racer): the heal runners report a bench too, now that the
     // bench is one registry per build rather than a memory private to each runner. Four since
     // 2026-09-26 (autopsy 7d79254b, G3): the mega-roadmap planner runs on the plan rung and shares
-    // the same bench, so a family it benches is benched for the build it is planning.
-    expect(route.match(/onProviderBenched: recordProviderBenched,/g) ?? []).toHaveLength(4);
+    // the same bench, so a family it benches is benched for the build it is planning. Five since the
+    // same day (autopsy eed79815): the project-mode planner moved to the plan rung and shares it too.
+    expect(route.match(/onProviderBenched: recordProviderBenched,/g) ?? []).toHaveLength(5);
     expect(route).toContain("code: 'PROVIDER_BENCHED'");
   });
 

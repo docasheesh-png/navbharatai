@@ -81988,7 +81988,7 @@ screenshot + loop nudge; the whole repair pass).
   `tierPlanRunner` (the plan phase's own runner: `planLadder` → the tier's plan rung, then its ladder,
   same `enforceNoClaude`) now builds the roadmap call, with the build chain only as a fallback when no
   plan rung has a key. The BUILD still opens on KIMI for a complex app — only the planner moved. Kill
-  switch `AGENTV3_ROADMAP_PLAN_RUNG=off`. ⚠️ **Honest caveat:** with `AGENTV3_NEMOTRON=weak` live, Weak's
+  switch `AGENTV3_PLANNER_PLAN_RUNG=off`. ⚠️ **Honest caveat:** with `AGENTV3_NEMOTRON=weak` live, Weak's
   plan rung is Nemotron Ultra, itself a reasoning model whose speed here is unmeasured; Normal's is
   `glm-4.7-flashx` (thinking disabled). The next Weak mega-roadmap build's per-call log is the evidence.
   Locked by `tests/theRoadmapIsAPlan.test.ts`, proven by reverting the fix.

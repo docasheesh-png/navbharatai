@@ -112,6 +112,8 @@ const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: string; 
 /** Codes that must never become a suggestion — see the header for why each is excluded. */
 const NEVER_SUGGEST = new Set([
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', 'LADDER_DEPTH',
+  // A repair answer our guard refused to write (autopsy eed79815) — nothing for the user to do.
+  'REPAIR_OUT_OF_SCOPE',
   'RELEASE_GATE', 'TIME_TO_FIRST_CALL', 'RUNTIME_UNCHECKED', 'RUNTIME_VERIFIED', 'APP_RENDERED',
   'TEST_SUITE_UNVERIFIED', 'JOURNEY_NOT_DERIVED', 'JOURNEY_NOT_RUN', 'PAGE_RENDER_NOT_RUN',
   // Our reviewer produced no verdict — nothing the user can act on, and never a mark against their app.

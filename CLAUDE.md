@@ -4241,7 +4241,7 @@ and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; 
   THOSE builds. The bet is that a cheap rung which fails is paid twice, once in the wasted call and
   once in the heal. **Watch: the share of builds routed complex, and whether their heal count drops.**
 - 🗺️ **THE ROADMAP PLANNER IS THE ONE EXCEPTION, BY THE ADMIN'S CHOICE (2026-09-26, "A", autopsy
-  7d79254b). `AGENTV3_ROADMAP_PLAN_RUNG` — ⚠️ NOT set; the code default is ON, and `off` reverts.**
+  7d79254b). `AGENTV3_PLANNER_PLAN_RUNG` — ⚠️ NOT set; the code default is ON, and `off` reverts.**
   The mega-roadmap call is a plan, so it runs on `tierPlanRunner` (the plan rung) instead of the
   complex build chain, which had cost a large app 76 s of Kimi reasoning before its first file. The
   build itself still opens on KIMI. ⚠️ On Weak, with `AGENTV3_NEMOTRON=weak`, the plan rung is Nemotron

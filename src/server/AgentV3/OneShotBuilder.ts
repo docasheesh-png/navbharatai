@@ -132,6 +132,26 @@ export interface OneShotFile { path: string; content: string; }
  * This delimiter survives code that itself contains ``` fences or JSON, so it is far more robust
  * than markdown fences or a single JSON blob for source code. Pure + exported for testing.
  */
+/**
+ * The END of a file block as models actually write it — ONE definition every reader of the format
+ * shares (the parser here, and the truncation checks in FastLaneContinuation.ts).
+ *
+ * 🔴 WHY (autopsy "4D Future City Drive", 2026-09-26): the parser recognised exactly `<<<ENDFILE>>>`.
+ * A model that closed a block with `<<<ENDFILE>>` — one bracket short — had the marker SAVED INTO THE
+ * FILE: the report's `src/index.css` carried "stray markers like `<<<ENDFILE>>`", and the build spent
+ * steps finding and deleting them. The two truncation checks had the same blind spot in the other
+ * direction: they read a block closed that way as never closed, i.e. as a file cut off mid-write.
+ *
+ * Tolerated: two or three `<`, optional spaces, `ENDFILE` / `END FILE` / `END_FILE` / `/FILE`, one to
+ * three `>`, any case. Precision holds because no real source line looks like that.
+ */
+export const END_FILE_MARKER = String.raw`<{2,3}[ \t]*(?:END[ _]?FILE|\/[ \t]*FILE)[ \t]*>{1,3}`;
+
+/** Does `text` contain a file-block end marker at or after `from`? Pure. */
+export function hasEndFileMarker(text: string, from = 0): boolean {
+  return new RegExp(END_FILE_MARKER, 'i').test(String(text ?? '').slice(Math.max(0, from)));
+}
+
 export function parseFileBlocks(text: string): OneShotFile[] {
   const files: OneShotFile[] = [];
   if (!text) return files;
@@ -140,7 +160,7 @@ export function parseFileBlocks(text: string): OneShotFile[] {
   // single missing ENDFILE made file A's content run through the next `<<<FILE b>>>` header until the
   // following ENDFILE — merging two files into one corrupt file and silently DROPPING file B. The
   // `<<<FILE` lookahead + `$` terminator recover file B (and a lone trailing file with no ENDFILE).
-  const re = /<<<FILE\s+(.+?)>>>\r?\n([\s\S]*?)(?:\r?\n?<<<ENDFILE>>>|(?=\r?\n?<<<FILE\s)|$)/g;
+  const re = new RegExp(String.raw`<<<FILE\s+(.+?)>>>\r?\n([\s\S]*?)(?:\r?\n?${END_FILE_MARKER}|(?=\r?\n?<<<FILE\s)|$)`, 'gi');
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const path = m[1].trim().replace(/^["'`]|["'`]$/g, '');

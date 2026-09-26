@@ -81911,6 +81911,27 @@ Still open after part 2 (recorded, not hidden): the shared evidence ledger (why 
 all); the fast lane's 90 s plan cap is still sized for a direct-answer rung (the hand-off bounds the loss,
 it does not make a reasoning rung fast).
 
+## 2026-09-26 — App Check slice 2: the phone apps (admin: "slice 2 shuru karo")
+
+- `@capacitor-firebase/app-check` added, pinned `~8.3.0` (same line as authentication/messaging 8.3.0, so
+  the Android Firebase SDK versions do not diverge). `npx cap sync android` regenerated the two committed
+  Gradle wiring files (only the new plugin's lines changed).
+- `appCheckClient.ts`: on a native shell it starts the native SDK (Play Integrity / App Attest) with
+  auto-refresh — no site key — and attaches the token through the same fetch wrapper. It asks
+  `Capacitor.isPluginAvailable` first, so a binary without the plugin stands down quietly.
+- 🔴 **Bug found in slice 1 on the way:** the "same origin?" check used `URL.origin`, and the URL standard
+  makes the origin of `capacitor://localhost` the string `"null"` — so an iPhone would never have
+  attached a token. Now compared by `scheme://host`, and the production API origin counts as ours.
+- iOS: `capacitor.config.ts` `experimental.ios.spm.packageOptions` symlink (the plugin README's fix for a
+  SwiftPM package-identity collision); `ios-ipa.yml` gains an opt-in `enable_app_attest` input (default
+  OFF — the App ID capability must exist first).
+- Privacy §3.3/§7 now name Play Integrity (Android) and App Attest (iOS).
+- Tests: `tests/appCheck.test.ts` 39 → 46.
+- ⚠️ **NOT verified on a real iOS build** — a session may not cut an `.ipa` unasked. The first `.ipa` after
+  this merge is the first proof that SwiftPM resolves with the new plugin. Android is verified by the
+  debug-APK workflow on this branch (see the PR).
+- ⏳ Still open: enforcement (after a fresh `.aab`/`.ipa` is live and the admin card shows valid ≈ 100%),
+  and the Other-AI tool routes are not yet in the guarded list.
 ## 2026-09-26 — Autopsy of workspace …344af61b (builds 820be124 + f2ff962f, run 2026-09-12): four root causes still open on today's `main`, all closed (PR #3328)
 
 The report was two weeks old, so every item was re-checked against current `main` before touching code.

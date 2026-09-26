@@ -19418,7 +19418,9 @@ async function noteBuildOutcome(
             };
             // Only when the browser really returned results — an empty parse means the script never
             // produced a line, which is "we do not know", not "every page is fine".
-            if (pageResults.length > 0) gateEvidence.pages = pageSummary.ok ? 'passed' : 'failed';
+            // `ran`, not merely "some lines came back": a check whose every route REDIRECTED returned lines and
+            // proved nothing, so it must not reach the gate as a pass (autopsy SignBridge, 2026-09-26).
+            if (pageSummary.ran) gateEvidence.pages = pageSummary.ok ? 'passed' : 'failed';
             // §17/§26 — accessibility and performance were already measured here and already printed,
             // and had no bearing on the verdict. They now cost GREEN (never RED — see QualitySignals).
             gateQuality.a11yIssues = a11yIssueCount(pageResults);

@@ -27,6 +27,19 @@ import { Capacitor } from '@capacitor/core';
 import { RecaptchaVerifier, linkWithCredential, type Auth } from 'firebase/auth';
 import { normalizePhone } from '../lib/phoneNumber';
 import { authJsonHeaders } from '../lib/authHeaders';
+import { otpFailureCategory, otpUserMessage } from '../lib/otpFailure';
+import { otpFailureReport, otpSurface, sendOtpReport, type OtpStage } from '../lib/otpReport';
+
+/** How long the native send may stay silent before the sheet moves on to the code box anyway. */
+export const NATIVE_SEND_WAIT_MS = 45_000;
+
+function ownError(message: string): Error {
+  return Object.assign(new Error(message), { ownMessage: true });
+}
+
+function surface(): string {
+  return otpSurface(() => Capacitor.getPlatform());
+}
 
 /**
  * `linkWithPhoneNumber` and `PhoneAuthProvider` exist at runtime but the v12 umbrella types do not
@@ -107,19 +120,35 @@ export const VerifyPhoneSheet: React.FC<VerifyPhoneSheetProps> = ({ auth, open, 
       if (Capacitor.isNativePlatform()) {
         const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
         await FirebaseAuthentication.removeAllListeners();
-        await FirebaseAuthentication.addListener('phoneCodeSent', (ev: { verificationId?: string }) => {
-          nativeVerificationId.current = ev?.verificationId ?? null;
+        // 🔴 The native send reports its outcome through LISTENERS, and this sheet used to listen only
+        // for success — so a failed send (an app the provider does not recognise, a blocked region, a
+        // quota) moved straight to the code box and waited for an SMS that was never coming, with no
+        // error and no trace (2026-09-26). Wait for EITHER answer; a silent provider still moves on
+        // after NATIVE_SEND_WAIT_MS, exactly as before.
+        const outcome = new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, NATIVE_SEND_WAIT_MS);
+          void FirebaseAuthentication.addListener('phoneCodeSent', (ev: { verificationId?: string }) => {
+            nativeVerificationId.current = ev?.verificationId ?? null;
+            clearTimeout(timer);
+            resolve();
+          });
+          void FirebaseAuthentication.addListener('phoneVerificationFailed', (ev: { message?: string }) => {
+            clearTimeout(timer);
+            reject(Object.assign(new Error(ev?.message || ''), { nativeFailure: true }));
+          });
         });
         await FirebaseAuthentication.linkWithPhoneNumber({ phoneNumber: e164 });
+        await outcome;
       } else {
         if (!verifier.current && recaptchaRef.current) {
           verifier.current = new RecaptchaVerifier(auth, recaptchaRef.current, { size: 'invisible' });
         }
-        if (!auth.currentUser || !verifier.current) throw new Error('Please sign in again and retry.');
+        if (!auth.currentUser || !verifier.current) throw ownError('Please sign in again and retry.');
         const { linkWithPhoneNumber } = await phoneAuthApi();
         confirmation.current = await linkWithPhoneNumber(auth.currentUser, e164, verifier.current);
       }
       setStage('code');
+      sendOtpReport({ outcome: 'sent', surface: surface(), flow: 'link' });
     } catch (err) {
       // Firebase's own one-number-one-account rule, hit at link time. The server check above is the
       // cheap early refusal; THIS is the guarantee, and it must produce the same helpful ending.
@@ -128,7 +157,7 @@ export const VerifyPhoneSheet: React.FC<VerifyPhoneSheetProps> = ({ auth, open, 
         setStage('taken');
         setError('This number is already linked to another NavBharatAI account.');
       } else {
-        setError(readableAuthError(err));
+        setError(otpSheetError(err, 'send'));
       }
     } finally {
       setBusy(false);
@@ -142,13 +171,14 @@ export const VerifyPhoneSheet: React.FC<VerifyPhoneSheetProps> = ({ auth, open, 
     try {
       if (Capacitor.isNativePlatform()) {
         const vid = nativeVerificationId.current;
-        if (!vid || !auth.currentUser) throw new Error('Verification expired. Send the code again.');
+        if (!vid || !auth.currentUser) throw ownError('Verification expired. Send the code again.');
         const { PhoneAuthProvider } = await phoneAuthApi();
         await linkWithCredential(auth.currentUser, PhoneAuthProvider.credential(vid, entered) as never);
       } else {
-        if (!confirmation.current) throw new Error('Verification expired. Send the code again.');
+        if (!confirmation.current) throw ownError('Verification expired. Send the code again.');
         await confirmation.current.confirm(entered);
       }
+      sendOtpReport({ outcome: 'verified', surface: surface(), flow: 'link' });
       onVerified();
       onClose();
     } catch (err) {
@@ -157,7 +187,7 @@ export const VerifyPhoneSheet: React.FC<VerifyPhoneSheetProps> = ({ auth, open, 
         setStage('taken');
         setError('This number is already linked to another NavBharatAI account.');
       } else {
-        setError(readableAuthError(err));
+        setError(otpSheetError(err, 'verify'));
       }
     } finally {
       setBusy(false);
@@ -241,14 +271,22 @@ export const VerifyPhoneSheet: React.FC<VerifyPhoneSheetProps> = ({ auth, open, 
   );
 };
 
+/**
+ * The sheet's sentence for a failure, and a report for the admin. Our OWN thrown sentences stand as
+ * written; everything from the auth provider is classified (otpFailure.ts) — never its raw text, which
+ * used to be printed here verbatim and named the vendor on a user's screen.
+ */
+function otpSheetError(err: unknown, stage: OtpStage): string {
+  if ((err as { ownMessage?: boolean })?.ownMessage) return String((err as Error).message);
+  const s = readableAuthError(err);
+  sendOtpReport(otpFailureReport(err, surface(), 'link', stage));
+  return s;
+}
+
 /** Firebase's error codes are not sentences. Turn the ones a user can act on into ones they can read. */
 export function readableAuthError(err: unknown): string {
   const code = String((err as { code?: string })?.code || '');
-  if (code.includes('invalid-verification-code')) return 'That code did not match. Check the SMS and try again.';
-  if (code.includes('code-expired')) return 'That code has expired. Send a new one.';
-  if (code.includes('invalid-phone-number')) return 'That does not look like a valid mobile number.';
-  if (code.includes('too-many-requests')) return 'Too many attempts. Please wait a few minutes and try again.';
   if (code.includes('requires-recent-login')) return 'For your security, sign in again and then verify your number.';
-  const message = (err as { message?: string })?.message;
-  return typeof message === 'string' && message ? message : 'Verification failed. Please try again.';
+  if ((err as { ownMessage?: boolean })?.ownMessage) return String((err as Error).message);
+  return otpUserMessage(otpFailureCategory(err));
 }

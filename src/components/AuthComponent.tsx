@@ -34,6 +34,8 @@ import { signOutEverywhere } from '../lib/firebase';
 import { markRedirectStarted } from '../lib/redirectSignInMarker';
 import { explainAuthReason, shouldDeepDiagnose } from '../lib/authDiagnostics';
 import { userFacingAuthError, logAuthErrorDetail, type AuthErrorContext } from '../lib/authErrorMessage';
+import { otpFailureCategory, otpUserMessage } from '../lib/otpFailure';
+import { otpFailureReport, otpSurface, sendOtpReport, type OtpStage } from '../lib/otpReport';
 import { popupFailureAction, waitForSignedInUser, settleNativeSignIn, appleSignInFailureMessage, webSignInStrategy, authErrorDetail, shouldOfferAppleSignIn } from './socialSignInPolicy';
 
 /**
@@ -143,6 +145,21 @@ async function diagnoseAuth(email?: string, password?: string): Promise<string> 
 function describeAuthError(err: any, context: AuthErrorContext = 'sign-in'): string {
   logAuthErrorDetail(context, err);
   return userFacingAuthError(err, context);
+}
+
+/**
+ * A failed mobile OTP: the person's sentence, AND a report to the server so the admin can see the real
+ * reason (2026-09-26 — the native plugin reports a failure with no code, so every one of them used to
+ * read "please try again" and leave no trace anyone could see). See src/lib/otpFailure.ts.
+ */
+function describeOtpFailure(err: unknown, stage: OtpStage): string {
+  logAuthErrorDetail('otp', err);
+  sendOtpReport(otpFailureReport(err, otpSurface(() => Capacitor.getPlatform()), 'sign-in', stage));
+  return otpUserMessage(otpFailureCategory(err));
+}
+
+function reportOtpSuccess(outcome: 'sent' | 'verified'): void {
+  sendOtpReport({ outcome, surface: otpSurface(() => Capacitor.getPlatform()), flow: 'sign-in' });
 }
 
 /**
@@ -326,7 +343,8 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       if (!res.ok || !data.success) {
         // Our OWN server's sentence (a cooldown, an hourly cap, "this number already has an account") —
         // written for the person, so it is shown as-is rather than replaced by the generic line below.
-        throw Object.assign(new Error(data.message || 'Verification gateway limits reached. Please wait.'), { ownMessage: true });
+        // `error` too: a refusal from a guard in front of this route (App Check) answers in that key.
+        throw Object.assign(new Error(data.message || data.error || 'Verification gateway limits reached. Please wait.'), { ownMessage: true });
       }
 
       // 2. Security checks passed → dispatch a REAL OTP via Firebase Phone Auth.
@@ -351,6 +369,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
             await signInWithCredential(auth, PhoneAuthProvider.credential(vid, code));
             setIsOtpVerified(true);
             setError('');
+            reportOtpSuccess('verified');
             addTerminalLine(`[AUTH] Authentication successful via Phone (auto-verified)`, 'success');
             onClose();
           } catch (e: any) {
@@ -363,10 +382,11 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
           setIsOtpSent(true);
           setOtpCooldown(30);
           setSuccessMessage('OTP sent to your phone.');
+          reportOtpSuccess('sent');
           addTerminalLine(`[AUTH] Verification code sent to ${phone}`, 'info');
         });
         await FirebaseAuthentication.addListener('phoneVerificationFailed', (event: any) => {
-          setError(describeAuthError(event, 'otp'));
+          setError(describeOtpFailure(event, 'send'));
           setOtpSending(false);
         });
         await FirebaseAuthentication.signInWithPhoneNumber({ phoneNumber: phone });
@@ -383,6 +403,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       setIsOtpSent(true);
       setOtpCooldown(30); // 30-second security cooldown starts
       setSuccessMessage('OTP sent successfully.');
+      reportOtpSuccess('sent');
       addTerminalLine(`[AUTH] Verification code sent to ${phone}`, 'info');
     } catch (err: any) {
       // HONEST failure — NO fake bypass (removed 2026-07-14). The old code force-activated a fake
@@ -390,11 +411,9 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       // sign in as any number with 123456) and a fake feature. Real OTP only; on failure the working
       // Email / Google sign-in options remain.
       console.error('[OTP SEND ERROR]', err);
-      const code = err?.code || err?.message || '';
-      const msg = /operation-not-allowed/.test(code)
-        ? 'Phone OTP sign-in is not enabled for this app yet. Please use Email or Google sign-in.'
-        : err?.ownMessage ? String(err.message) : describeAuthError(err, 'otp');
-      setError(msg);
+      // Our own server's sentence stands as written; everything else is classified (a disabled
+      // provider, an unrecognised app, a blocked region, …) and reported for the admin.
+      setError(err?.ownMessage ? String(err.message) : describeOtpFailure(err, 'send'));
       if (recaptchaVerifier.current) {
         recaptchaVerifier.current.clear();
         recaptchaVerifier.current = null;
@@ -419,10 +438,11 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       }
       setIsOtpVerified(true);
       setError('');
+      reportOtpSuccess('verified');
       addTerminalLine(`[AUTH] Authentication successful via Phone`, 'success');
       onClose(); // Auto close on successful login
     } catch (err: any) {
-      setError(describeAuthError(err, 'otp'));
+      setError(describeOtpFailure(err, 'verify'));
     } finally {
       setLoading(false);
     }

@@ -3,6 +3,7 @@ import { verifyFirebaseToken, getAdminAuthForPhone } from '../lib/authMiddleware
 import { otpSendDecision, phoneOwnerUid, phoneForLog, type OtpPurpose } from '../lib/phoneGate';
 import { consumeDurableRate } from '../lib/DurableRateLimit';
 import { normalizePhoneForGift } from '../lib/giftIdentity';
+import { parseOtpOutcome, recordOtpOutcome } from '../lib/otpOutcomes';
 
 /**
  * Authentication routes extracted from the server.ts monolith (Phase 1).
@@ -52,7 +53,38 @@ function otpGlobalHourlyMax(env: NodeJS.ProcessEnv = process.env): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 500;
 }
 
+/** At most this many OTP-outcome reports per address per hour — a tally, not a firehose. */
+export const OTP_REPORTS_PER_HOUR = 30;
+const otpReportLog = new Map<string, number[]>();
+
+/** Per-address budget for `/api/auth/otp-outcome`. Per instance, like the maps above; it bounds noise. */
+export function otpReportAllowed(ip: string, now: number): boolean {
+  const HOUR = 3_600_000;
+  const recent = (otpReportLog.get(ip) ?? []).filter((t) => now - t < HOUR);
+  if (recent.length >= OTP_REPORTS_PER_HOUR) { otpReportLog.set(ip, recent); return false; }
+  recent.push(now);
+  otpReportLog.set(ip, recent);
+  if (otpReportLog.size > MAX_TRACKED_KEYS) {
+    for (const [k, v] of otpReportLog) if (!v.length || now - v[v.length - 1] > HOUR) otpReportLog.delete(k);
+  }
+  return true;
+}
+
 export function registerAuthRoutes(app: Express): void {
+  // HOW A MOBILE OTP ENDED, reported by the phone or browser (2026-09-26). The native phone-auth plugin
+  // reports a failure only as a message on the handset, so without this the reason an OTP fails was
+  // readable by nobody. Counts plus a scrubbed reason, admin-only on the way out (otpOutcomes.ts).
+  // Unauthenticated on purpose — the person is signed OUT when a sign-in OTP fails — so it is bounded
+  // per address, answers 204 whatever happens, and stores nothing that names anyone.
+  app.post('/api/auth/otp-outcome', (req: Request, res: Response) => {
+    try {
+      const ip = (req.headers['x-forwarded-for'] as string || req.socket?.remoteAddress || 'unknown-ip').split(',')[0].trim();
+      const input = parseOtpOutcome(req.body);
+      if (input && otpReportAllowed(ip, Date.now())) void recordOtpOutcome(input).catch(() => {});
+    } catch { /* a report must never fail the caller */ }
+    res.status(204).end();
+  });
+
   // Secure Send-OTP Pre-Request Security Gateway / Cooldown Checker
   app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
     try {

@@ -135,3 +135,25 @@ export function confirmedContractLabels(plan: FeaturePlan, conf: FeatureConfirma
 export function domainGuidanceStandsDown(conf: FeatureConfirmation | null): boolean {
   return conf !== null;
 }
+
+/**
+ * The live-DOM feature probe (FeaturePresence.ts) names features in its own vocabulary. These are the
+ * card labels that probe also checks — everything else on the card, it never probes, so there is
+ * nothing to stand down.
+ */
+const PRESENCE_FEATURE_FOR_LABEL: Readonly<Record<string, string>> = {
+  'search': 'search',
+  'login / authentication': 'auth',
+};
+
+/** The RequirementCoverage labels the user declined, for the end-of-build audit. */
+export function declinedLabels(conf: FeatureConfirmation | null): ReadonlySet<string> | undefined {
+  return conf && conf.exclude.length ? new Set(conf.exclude) : undefined;
+}
+
+/** The same answer, in the live-DOM probe's vocabulary. */
+export function declinedPresenceFeatures(conf: FeatureConfirmation | null): ReadonlySet<string> | undefined {
+  if (!conf || !conf.exclude.length) return undefined;
+  const ids = conf.exclude.map((l) => PRESENCE_FEATURE_FOR_LABEL[l]).filter((x): x is string => !!x);
+  return ids.length ? new Set(ids) : undefined;
+}

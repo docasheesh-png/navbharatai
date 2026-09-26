@@ -11,7 +11,10 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown,
+  declinedLabels, declinedPresenceFeatures,
 } from '../src/server/AgentV3/featurePlan';
+import { analyzeRequirementCoverage } from '../src/server/AgentV3/RequirementCoverage';
+import { checkFeaturePresence } from '../src/server/AgentV3/FeaturePresence';
 import { shouldOfferFeatureCard, confirmationFrom, initialSelection } from '../src/components/agentv3/featureConfirm';
 
 const src = (p: string) => readFileSync(join(process.cwd(), p), 'utf8');
@@ -90,6 +93,32 @@ describe('what the builder is told', () => {
   });
 });
 
+describe('what the user unticked is never asked for again', () => {
+  const graph = { files: ['src/App.tsx', 'src/pages/Login.tsx'], components: ['App', 'Login'], routes: ['/'] } as never;
+  const request = 'Build a notes app with login and search';
+
+  it('the completeness audit does not report a declined feature missing', () => {
+    const before = analyzeRequirementCoverage(request, graph);
+    expect(before.missing).toContain('search');
+    const after = analyzeRequirementCoverage(request, graph, undefined, declinedLabels({ include: [], exclude: ['search'] }));
+    expect(after.missing).not.toContain('search');
+    expect(after.requested).not.toContain('search');
+  });
+
+  it('the live-DOM probe does not look for it, so the heal cannot add it back', () => {
+    const html = '<div id="root"><h1>Notes</h1><button>Add note</button><button>Log in</button><ul><li>a</li></ul></div>';
+    const declined = declinedPresenceFeatures({ include: [], exclude: ['search'] });
+    expect(declined && [...declined]).toEqual(['search']);
+    expect(checkFeaturePresence(request, html, declined).probes.some((p) => p.feature === 'search')).toBe(false);
+  });
+
+  it('no answer changes nothing', () => {
+    expect(declinedLabels(null)).toBeUndefined();
+    expect(declinedPresenceFeatures(null)).toBeUndefined();
+    expect(declinedPresenceFeatures({ include: [], exclude: ['dashboard'] })).toBeUndefined();
+  });
+});
+
 describe('the client', () => {
   const base = { buildMode: true, hasWorkspace: false, priorTurns: 0, importing: false, hasAttachments: false, programmatic: false, disabled: false };
 
@@ -136,6 +165,12 @@ describe('wiring', () => {
     expect(panel).toContain('if (!plan || !plan.show) { startBuild(fw, resolved); return; }');
     expect(panel).toContain('if (!offerCard) { startBuild(fw, resolved); return; }');
     expect(panel).toContain('<FeatureConfirmCard');
+  });
+
+  it('both audits receive the answer', () => {
+    expect(route).toContain('dispatcher.setDeclinedFeatures(declinedLabels(featureConfirmation));');
+    expect((route.match(/checkFeaturePresence\(prompt, [a-zA-Z]+, declinedPresenceFeatures\(featureConfirmation\)\)/g) || []).length).toBe(3);
+    expect(strip(src('src/server/AgentV3/ToolDispatcher.ts'))).toContain('analyzeRequirementCoverage(requestText, mem.graph(), snap.sources, this.declinedFeatures)');
   });
 
   it('the answer travels with the build', () => {

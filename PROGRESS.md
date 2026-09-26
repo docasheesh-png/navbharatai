@@ -82003,8 +82003,9 @@ that exact prompt, so free text can never be injected into the build prompt as a
 **Deliberate exception**, stated: the 2026-07-20 "no clarifying round-trip" rule — the admin asked for this
 card, and it costs one tap, appears only for new apps, and can be switched off.
 
-**Open:** the end-of-build audit (`analyzeRequirementCoverage` in ToolDispatcher, `FEATURE_COVERAGE`) still
-grades the request text, so a feature the user unticked can still be reported "missing" if the keyword
-matched. Threading the confirmation into the audit is the next step.
+**The audits obey it too.** An unticked feature is not graded by the completeness audit
+(`analyzeRequirementCoverage(..., declined)` via `ToolDispatcher.setDeclinedFeatures`) and not probed in the
+live DOM (`checkFeaturePresence(..., declined)`), so neither the builder's nag nor the feature-heal pass can
+add it back behind the user's answer.
 
 Tests: `tests/theFeatureListIsConfirmedBeforeTheBuild.test.ts` (20).

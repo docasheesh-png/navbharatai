@@ -26,7 +26,7 @@ import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, hardConstraintLines, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
 import { renderRequestedFeatureContract } from '../AgentV3/RequirementCoverage';
-import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown } from '../AgentV3/featurePlan';
+import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenScaffolds/registry';
@@ -15208,6 +15208,9 @@ async function noteBuildOutcome(
       const featureConfirmation = (() => {
         try { return sanitizeConfirmation(req.body?.confirmedFeatures, featureLists); } catch { return null; }
       })();
+      // What the user unticked is not graded by the completeness audit either — otherwise the builder would
+      // be told to add it back.
+      dispatcher.setDeclinedFeatures(declinedLabels(featureConfirmation));
       if (requirementAwareBuildEnabled() && intent === 'new_build' && !isEditMode) {
         try {
           // The second argument answers "did the user ask for an app to be PRODUCED?" — a DIFFERENT
@@ -19201,7 +19204,7 @@ async function noteBuildOutcome(
             // FEATURE_COVERAGE finding in the report (present vs missing); it NEVER blocks a build (a
             // heuristic must never false-fail a working app). Auto-fixing the gaps is the next slice.
             try {
-              let coverage = checkFeaturePresence(prompt, html);
+              let coverage = checkFeaturePresence(prompt, html, declinedPresenceFeatures(featureConfirmation));
               // APP HEALTH CULTURE slice 2 (Phase 1b, opt-in AGENTV3_FEATURE_HEAL=on): the app renders
               // but a REQUESTED control is missing → run ONE bounded heal pass that adds the missing UI,
               // then re-open the running app and re-probe (only a control now in the live DOM counts).
@@ -19248,7 +19251,7 @@ async function noteBuildOutcome(
                     if (vr.kept && healResult?.ok) {
                       result = healResult as typeof result;
                       if (afterHtml) {
-                        const afterCoverage = checkFeaturePresence(prompt, afterHtml);
+                        const afterCoverage = checkFeaturePresence(prompt, afterHtml, declinedPresenceFeatures(featureConfirmation));
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
                       }
                     }
@@ -19258,7 +19261,7 @@ async function noteBuildOutcome(
                       result = healed;
                       try {
                         const after = (await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl')).html;
-                        const afterCoverage = checkFeaturePresence(prompt, after);
+                        const afterCoverage = checkFeaturePresence(prompt, after, declinedPresenceFeatures(featureConfirmation));
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
                       } catch { /* re-open best-effort — keep the pre-heal coverage */ }
                     }

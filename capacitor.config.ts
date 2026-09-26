@@ -33,6 +33,19 @@ const config: CapacitorConfig = {
     // there is exactly one inset (ours), and the content extends to fill the screen.
     contentInset: 'never',
   },
+  // App Check slice 2 (2026-09-26). `@capacitor-firebase/app-check`'s Swift package has the same
+  // identity as Firebase's own `FirebaseAppCheck` product, so SwiftPM refuses to resolve both — the
+  // plugin's README asks for exactly this symlink (capawesome-team/capacitor-firebase#959). Capacitor
+  // CLI 8.4.0+ reads it; without it the next iOS build would fail at package resolution.
+  experimental: {
+    ios: {
+      spm: {
+        packageOptions: {
+          '@capacitor-firebase/app-check': { symlink: true },
+        },
+      },
+    },
+  },
   plugins: {
     // Native Google Sign-In. Google BLOCKS OAuth inside embedded WebViews (their policy), which is
     // why the web signInWithRedirect flow opens an external browser and then fails with "missing

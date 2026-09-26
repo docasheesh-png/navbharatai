@@ -7,6 +7,7 @@ import {
 import { isAppCheckProtected } from '../src/lib/appCheckRoutes';
 import {
   shouldAttachAppCheck, tokenWithin, wrapFetchWithAppCheck, fetchAppCheckSiteKey, installAppCheck, APP_CHECK_HEADER,
+  NATIVE_API_ORIGIN, __resetAppCheckInstall,
 } from '../src/lib/appCheckClient';
 import { PRIVACY_POLICY, PRIVACY_POLICY_UPDATED } from '../src/content/legal/privacyPolicy';
 import { LEGAL_META } from '../src/content/legal/meta';
@@ -196,9 +197,9 @@ describe('6 · the browser half can never stop a request', () => {
     expect(await fetchAppCheckSiteKey((async () => { throw new Error('offline'); }) as never)).toBeNull();
   });
 
-  it('never starts in the phone apps, and never starts without a key', async () => {
+  it('the website never starts without a key', async () => {
+    __resetAppCheckInstall();
     const base = { location: { origin: ORIGIN }, fetch: (async () => new Response('{"appCheckSiteKey":null}')) as never };
-    expect(await installAppCheck({ ...base, Capacitor: { isNativePlatform: () => true } })).toBe('native');
     expect(await installAppCheck(base)).toBe('no-key');
   });
 
@@ -207,13 +208,76 @@ describe('6 · the browser half can never stop a request', () => {
   });
 });
 
-describe('7 · the privacy policy says what reCAPTCHA does', () => {
-  it('discloses it, names Google, and says what we receive', () => {
-    expect(PRIVACY_POLICY).toContain('### 3.3 Bot protection on the website (Google reCAPTCHA Enterprise)');
+describe('7 · the privacy policy says what each check does', () => {
+  it('discloses reCAPTCHA, Play Integrity and App Attest, and says what we receive', () => {
+    expect(PRIVACY_POLICY).toContain('### 3.3 Bot protection (Google reCAPTCHA Enterprise on the website; Play Integrity and App Attest in our apps)');
     expect(PRIVACY_POLICY).toMatch(/Our server receives only the token and whether it is valid/);
-    expect(PRIVACY_POLICY).toMatch(/Bot protection: Google reCAPTCHA Enterprise/);
+    expect(PRIVACY_POLICY).toMatch(/Android app\*\* asks \*\*Google's Play Integrity service/);
+    expect(PRIVACY_POLICY).toMatch(/iOS app\*\* asks \*\*Apple's App Attest service/);
+    expect(PRIVACY_POLICY).toMatch(/Bot protection: Google reCAPTCHA Enterprise, Google Play Integrity and Apple App Attest/);
+    expect(PRIVACY_POLICY).not.toMatch(/does not run inside our Android or iOS apps/);
   });
   it('the Settings tile shows the same date as the policy page', () => {
     expect(LEGAL_META.find((m) => m.id === 'legal_privacy')?.updated).toBe(PRIVACY_POLICY_UPDATED);
+  });
+});
+
+describe('8 · slice 2 — the phone apps (Play Integrity / App Attest)', () => {
+  it('an iPhone request is attached: capacitor:// has a "null" URL origin, so the key is scheme://host', () => {
+    expect(new URL('/api/agentv3/chat', 'capacitor://localhost').origin).toBe('null'); // why originKey exists
+    expect(shouldAttachAppCheck('/api/agentv3/chat', 'POST', ['capacitor://localhost', NATIVE_API_ORIGIN])).toBe(true);
+    expect(shouldAttachAppCheck('/api/chat/navbharat', 'POST', ['https://localhost', NATIVE_API_ORIGIN])).toBe(true);
+  });
+
+  it('an already-absolute production URL from the app is ours too; any other host is not', () => {
+    expect(shouldAttachAppCheck(`${NATIVE_API_ORIGIN}/api/image/generate`, 'POST', ['https://localhost', NATIVE_API_ORIGIN])).toBe(true);
+    expect(shouldAttachAppCheck('https://evil.example/api/image/generate', 'POST', ['https://localhost', NATIVE_API_ORIGIN])).toBe(false);
+  });
+
+  it('starts the native SDK with auto-refresh and attaches its token — no site key needed', async () => {
+    __resetAppCheckInstall();
+    const calls: unknown[] = [];
+    const real = vi.fn(async () => new Response('ok'));
+    const w = { location: { origin: 'capacitor://localhost' }, fetch: real as never, Capacitor: { isNativePlatform: () => true } };
+    const native = {
+      initialize: async (o: unknown) => { calls.push(o); },
+      getToken: async () => ({ token: 'NATIVE_TOKEN' }),
+    };
+    expect(await installAppCheck(w, { loadNative: async () => native })).toBe('installed-native');
+    expect(calls).toEqual([{ isTokenAutoRefreshEnabled: true }]);
+    await w.fetch('/api/agentv3/chat', { method: 'POST' });
+    expect(new Headers((real.mock.calls[0][1] as RequestInit).headers).get(APP_CHECK_HEADER)).toBe('NATIVE_TOKEN');
+    expect(real.mock.calls.some((c) => String(c[0]).includes('public-config'))).toBe(false);
+  });
+
+  it('an app built before the plugin shipped stands down quietly', async () => {
+    __resetAppCheckInstall();
+    const w = { location: { origin: 'https://localhost' }, fetch: (async () => new Response('ok')) as never, Capacitor: { isNativePlatform: () => true } };
+    expect(await installAppCheck(w, { loadNative: async () => null })).toBe('native-unavailable');
+  });
+
+  it('a device Play Integrity will not vouch for still sends the request, just without the header', async () => {
+    __resetAppCheckInstall();
+    const real = vi.fn(async () => new Response('ok'));
+    const w = { location: { origin: 'https://localhost' }, fetch: real as never, Capacitor: { isNativePlatform: () => true } };
+    await installAppCheck(w, { loadNative: async () => ({ initialize: async () => {}, getToken: async () => { throw new Error('Integrity API error (-9)'); } }) });
+    await w.fetch('/api/agentv3/chat', { method: 'POST' });
+    expect(real).toHaveBeenCalledTimes(1);
+    expect(new Headers((real.mock.calls[0][1] as RequestInit).headers).get(APP_CHECK_HEADER)).toBeNull();
+  });
+
+  it('the iOS build keeps the SwiftPM symlink the plugin needs, and App Attest stays opt-in', () => {
+    const cap = readFileSync('capacitor.config.ts', 'utf8');
+    expect(cap).toMatch(/'@capacitor-firebase\/app-check': \{ symlink: true \}/);
+    const wf = readFileSync('.github/workflows/ios-ipa.yml', 'utf8');
+    const input = wf.slice(wf.indexOf('enable_app_attest:'), wf.indexOf('jobs:'));
+    expect(input).toMatch(/default: false/);
+    expect(wf).toMatch(/if: \$\{\{ inputs\.enable_app_attest \}\}/);
+    expect(wf).toMatch(/com\.apple\.developer\.devicecheck\.appattest-environment string production/);
+  });
+
+  it('the plugin is pinned to the same line as the other Firebase plugins', () => {
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+    expect(pkg.dependencies['@capacitor-firebase/app-check']).toMatch(/^~8\.3\./);
   });
 });

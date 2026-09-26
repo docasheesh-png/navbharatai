@@ -81910,3 +81910,38 @@ commit. Test-locked in `tests/theStudyRacerAutopsyPart2.test.ts`.
 Still open after part 2 (recorded, not hidden): the shared evidence ledger (why the model re-verifies at
 all); the fast lane's 90 s plan cap is still sized for a direct-answer rung (the hand-off bounds the loss,
 it does not make a reasoning rung fast).
+
+## 2026-09-26 — Autopsy of workspace …344af61b (builds 820be124 + f2ff962f, run 2026-09-12): four root causes still open on today's `main`, all closed (PR #3328)
+
+The report was two weeks old, so every item was re-checked against current `main` before touching code.
+Already fixed by later work (verified, not redone): the "add credits" upsell after provider timeouts
+(`laneFailure.ts`, 09-13); the 197 s plan call on an always-reasoning rung (flashx lead 09-17, fast-lane
+reasoning gate 09-23); the nudge that overrode an answer and built an app (09-18); the stale snapshot from
+post-green writes (#3313); console never captured (09-21).
+
+Closed in this PR:
+1. **"Mujhe aik aip banana hai" names no app** — the no-object clarifier (#3039) missed the full sentence
+   because pronoun/auxiliary words counted as instruction words. `WANTING_GRAMMAR` is neutral inside
+   `namesNoObject` only (the too-short count is untouched); Roman + Devanagari spellings added.
+2. **A `tsc` that never started counted as a passing typecheck** — `tscNeverRan` (help page OR missing
+   binary) now gates both the command-evidence harvester and the post-build G3 gate; the piped-exit
+   warning recognises bash's `line N: …: No such file or directory`.
+3. **The in-browser preview pre-loaded test tools** (vitest, @testing-library/react, @playwright/test —
+   added by our own post-build passes) — `src/lib/previewNonRuntimeFiles.ts` is one rule both preview
+   builders read; test/spec/e2e/tool-config imports are never pre-loaded.
+4. **Length alone was an order** — chat instructions with no build word became a ₹79 app when the intent
+   reader could not answer. A `long-message` verdict naming nothing buildable now falls to chat on that
+   fallback path only; the reader still decides whenever it answers.
+
+OPEN ROOT CAUSES (rule 6, recorded not guessed):
+- **The CDN fallback can load two Reacts.** `react-dom` entries in both preview import maps are plain
+  (no `?external=react`), so esm.sh may resolve react-dom's React to a different version than the page's
+  when package.json pins an older 18.x. This is a textbook cause of the report's `reading 'useState' of
+  null`. NOT changed: esm.sh is unreachable from the sandbox, so the fix could not be verified, and a
+  wrong import-map change would break every React-19 preview that works today. Needs one real-browser test.
+- **Where the `ai-urdu-app` starter in build 2's sandbox came from** cannot be established from the report
+  (build 1 wrote zero files by its own count; the files are timestamped during build 2's setup).
+- **₹79.15 billed for build 2** — an app the user never asked for. Refund is the admin's decision.
+- **App AI gateway (`APP_AI_GATEWAY`) is still OFF.** The builder already prefers NavBharatAI's own AI for
+  AI features when it is on (`generate_ai`); the admin asked for exactly that on 2026-09-26. Turning it on
+  is a money decision (owner's wallet, ₹20/app/day, ₹2/visitor/day) and works only after publish.

@@ -3158,6 +3158,25 @@ export function dominantProvider(turns: Map<string, number>): string | undefined
  * honesty bug. Unknown names fall back to the name itself (lower-cased) so nothing is silently hidden.
  * Pure + exported for testing.
  */
+/**
+ * Who to name on a FAILED planner call. When no rung ever answered there is nobody to name — and the old
+ * default ('CLAUDE' → 'anthropic' → the planned Sonnet id) wrote "Model call failed (claude-sonnet-4-6)"
+ * into a WEAK build's report (autopsy SignBridge, 2026-09-26), a build on which Sonnet is forbidden and
+ * never ran. That line reads as a no-Claude violation and sends the next autopsy after a leak that did
+ * not happen. The same class 4efab9d7 closed for the build turn's own timeout; these were the siblings.
+ * PURE.
+ */
+export function plannerCallLabel(
+  provider: string | null | undefined,
+  label: (used: string) => string,
+  plannedClaudeModel: string,
+): { provider: string; model: string } {
+  const p = String(provider ?? '').trim();
+  if (!p) return { provider: 'none', model: 'no provider answered' };
+  const lbl = label(p);
+  return { provider: lbl, model: answeringModel({ planned: lbl === 'anthropic' ? plannedClaudeModel : null, family: p }) };
+}
+
 export function fastLaneProviderLabel(used: string | undefined): string {
   switch ((used || '').toUpperCase()) {
     case 'GLM': return 'glm';
@@ -3435,7 +3454,7 @@ function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKey
  * build when the floor was off, which is exactly what the rule forbids. A 429-storm on rung 1 now costs
  * one failed call per cooldown window (the shared bench still sidelines the rung), not a reorder.
  */
-export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void; onAttemptWasted?: (family: string, kind: 'timeout' | 'crawl' | 'rate-limit' | 'error', ms: number) => void;
+export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; plan?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void; onAttemptWasted?: (family: string, kind: 'timeout' | 'crawl' | 'rate-limit' | 'error', ms: number) => void;
   /** Retired-rung memory owned by the CALLER, so it can span several runner instances — the fast
    *  lane's per-file runners share ONE build's map. Omitted ⇒ each runner keeps its own, as before.
    *  See MultiProviderOptions.deadRungs for why this is caller-owned and never a singleton. */
@@ -3450,6 +3469,15 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
   // `heal` and `complex` are different questions with the same answer: skip the cheap flash opener.
   // ONE function answers both (tierLadder.withoutCheapFlashLead), so they can never drift apart.
   let rungs: LadderRung[] = (opts.heal || opts.complex) ? withoutCheapFlashLead(parsed.rungs) : [...parsed.rungs];
+  // 🔴 A PLANNING CALL CLIMBS THE PLAN LADDER, NOT THE BUILD'S (autopsy SignBridge, 2026-09-26). A plan is
+  // ONE structured answer; `complex` exists to open a whole BUILD on a stronger coder, and on Weak that
+  // coder always reasons first. The Project Mode planner took the complex build chain, opened on
+  // kimi-k2.7-code, then glm-5.3 — both spent their full 12,000-token allowance thinking and wrote
+  // nothing, and the planner's clock ran out at 315s: 22% of the build, for no plan. The fast lane had
+  // already learned this (fastLaneRung.ts skips a reasoning opener); the planners were the sibling.
+  // `planLadder` puts the tier's plan rung first (a rung that can be told not to think) and keeps the
+  // tier's own ladder behind it, so nothing another tier forbids can be reached.
+  if (opts.plan) rungs = planLadder(level);
   // `afterLeadRung` is the EMPTY-BUILD RETRY's ladder: the first attempt produced nothing, so the rung
   // that produced nothing is dropped — by POSITION, because a provider can appear twice (Weak carries
   // GLM at two rungs, so `fromProvider` would find the wrong one). Applied to the TIER ladder, not on
@@ -12921,6 +12949,21 @@ async function noteBuildOutcome(
         onProviderBenched: recordProviderBenched,
         onAttemptWasted: recordAttemptWasted,
       });
+      // The PLANNERS' runner — roadmap, blueprint, Project Mode. Same memory and callbacks as the fast
+      // text runner above; only the ladder differs (see `plan` in buildTurnRunner). Repairs stay on the
+      // build ladder: they rewrite code, which is the work that ladder is ordered for.
+      const makePlanTextRunner = (onUsed?: (used: string) => void): TurnRunner => buildTurnRunner({
+        tier: powerLevelReqEffective,
+        noClaude: noClaudeBuild,
+        plan: true,
+        deadRungs: fastLaneDeadRungs,
+        bench: buildBench,
+        onProviderUsed: (used) => { try { onUsed?.(used); } catch { /* caller callback best-effort */ } captureProvider(used); },
+        onTurnComplete: captureShadowUsage,
+        onProviderError: recordProviderFallback,
+        onProviderBenched: recordProviderBenched,
+        onAttemptWasted: recordAttemptWasted,
+      });
       const client = buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
@@ -13020,8 +13063,8 @@ async function noteBuildOutcome(
           }
           if (scope.decision === 'analyze' && !dispute) {
             const rmStartedAt = Date.now();
-            let rmProvider = 'CLAUDE';
-            const rmCall = makeFastTextRunner((used) => { rmProvider = used; }).runTurn({
+            let rmProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
+            const rmCall = makePlanTextRunner((used) => { rmProvider = used; }).runTurn({
               model: fastBuildModel(),
               system: megaRoadmapSystemPrompt(),
               messages: [{ role: 'user', content: megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals) }],
@@ -13044,8 +13087,8 @@ async function noteBuildOutcome(
               rmT = await Promise.race([rmCall, rmTimeout]);
             } catch (err) {
               try {
-                const lbl = fastLaneProviderLabel(rmProvider);
-                buildDiag.recordLlmCall({ model: answeringModel({ planned: lbl === 'anthropic' ? fastBuildModel() : null, family: rmProvider }), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - rmStartedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
+                const who = plannerCallLabel(rmProvider, fastLaneProviderLabel, fastBuildModel());
+                buildDiag.recordLlmCall({ model: who.model, provider: who.provider, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - rmStartedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
                 buildDiag.record({
                   phase: 'plan', severity: 'info', code: 'MEGA_ROADMAP_FAILED',
                   message: roadmapPlannerFailedMessage(plannerFailureKind(err), rmTimeoutMs, err),
@@ -14775,8 +14818,8 @@ async function noteBuildOutcome(
           const bpGenerate = async (system: string, user: string): Promise<string> => {
             const startedAt = Date.now();
             // Cheap-floor-first like every other build text call (admin 2026-07-11 — no direct-Sonnet path).
-            let bpProvider = 'CLAUDE';
-            const call = makeFastTextRunner((used) => { bpProvider = used; }).runTurn({
+            let bpProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
+            const call = makePlanTextRunner((used) => { bpProvider = used; }).runTurn({
               model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 6000,
             });
             // Hard timeout so an up-front step can NEVER hang the build (the losing call is ignored).
@@ -15632,8 +15675,8 @@ async function noteBuildOutcome(
           const ppTimeoutMs = projectPlannerTimeoutMs();
           const ppGenerate = async (system: string, user: string): Promise<string> => {
             const startedAt = Date.now();
-            let ppProvider = 'CLAUDE';
-            const call = makeFastTextRunner((used) => { ppProvider = used; }).runTurn({
+            let ppProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
+            const call = makePlanTextRunner((used) => { ppProvider = used; }).runTurn({
               model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
             });
             let ppTimer: ReturnType<typeof setTimeout> | undefined;
@@ -15645,8 +15688,8 @@ async function noteBuildOutcome(
               // A planner call that failed is a model call that failed — it belongs on the same ledger
               // as every other one, or the report cannot say whether the key was working at all.
               try {
-                const lbl = fastLaneProviderLabel(ppProvider);
-                buildDiag.recordLlmCall({ model: answeringModel({ planned: lbl === 'anthropic' ? fastBuildModel() : null, family: ppProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
+                const who = plannerCallLabel(ppProvider, fastLaneProviderLabel, fastBuildModel());
+                buildDiag.recordLlmCall({ model: who.model, provider: who.provider, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
               } catch { /* diagnostics best-effort */ }
               throw err;
             } finally {

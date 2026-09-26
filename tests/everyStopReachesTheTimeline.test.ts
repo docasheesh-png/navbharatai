@@ -127,9 +127,15 @@ describe('the route wiring — the CODE of the build handler, comments stripped'
     expect(at).toBeGreaterThan(-1);
     // `degraded`, `refused`, `misconfigured` and `starved` all stand down on a stopped build, and the
     // narration itself is gated on it — that ordering is what the original block already claimed.
-    const body = code.slice(at, at + 1400);
+    // ⚠️ WIDENED, NOT WEAKENED (2026-09-26): the narration gate gained a further suppression clause,
+    // `!interrupted` (our own platform cutting the build short — see `interruptedBeforeAnyVerdict`),
+    // and its comment pushed the gate past a fixed 1400-char window. What this guards is unchanged:
+    // a stop still suppresses the narration. Bounded by the next real thing in the file instead.
+    const end = code.indexOf('UPSELL_SUPPRESSED', at);
+    expect(end).toBeGreaterThan(at);
+    const body = code.slice(at, end);
     expect(body).toContain('const degraded = !stopped && !refused');
-    expect(body).toContain('if (!refused && !stopped) {');
+    expect(body).toMatch(/if \(!refused && !stopped(?: && !\w+)*\) \{/);
   });
 
   it('the Stop BUTTON and UNSEND still reach the run only through the one funnel', () => {

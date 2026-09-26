@@ -27,6 +27,7 @@ import { listDailyClaimOutcomes, summariseClaimOutcomes } from '../lib/referralC
 import { runPushPreflight } from '../lib/pushPreflight';
 import { adminEmailList } from '../lib/adminEmails';
 import { mirroredCreditPatch } from '../lib/walletMirror';
+import { welcomeGiftEligible, welcomeGiftRefusal, ADMIN_WELCOME_GIFT_TOKENS, ADMIN_WELCOME_GIFT_RUPEES } from '../lib/adminWelcomeGift';
 import { audit } from '../lib/audit';
 import { buildDiscountStore, BUILD_DISCOUNT_MAX_PCT, BUILD_DISCOUNT_CACHE_MS } from '../lib/buildDiscount';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
@@ -2128,6 +2129,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           // which would be a third answer to "has this person paid?" on the very screen that asks it.
           hasEverPaid: hasEverPaid(u as { totalMoneySpent?: unknown }),
           banned: u.banned || false,
+          // May the admin give this account the one-click ₹50 welcome credit? Decided by the same
+          // predicate the gift route re-checks in its transaction, never re-derived in the browser.
+          welcomeGiftEligible: welcomeGiftEligible(u),
           createdAt: u.updatedAt || u.createdAt || '',
           joinedAt: joined.atMs,
           joinedAtSource: joined.source,
@@ -2285,6 +2289,46 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       audit('ADMIN_TOKEN_ADJUST', { userId, delta, reason, ip: req.ip });
       res.json({ ok: true, newBalance });
     } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
+  });
+
+  /**
+   * ONE-CLICK ₹50 WELCOME CREDIT for a user who has never received any gift (admin 2026-09-26) — the
+   * bridge until an app build whose device check works is live. Rules in `adminWelcomeGift.ts`.
+   * Eligibility is re-read INSIDE the transaction, so two presses (or two admins) pay once.
+   */
+  app.post('/api/admin/users/:userId/welcome-gift', verifyAdminToken, async (req: Request, res: Response) => {
+    const db = getDb() as any;
+    const { userId } = routeParams(req.params);
+    try {
+      const walletRef = doc(db, 'user_token_wallets', userId);
+      const nowIso = new Date().toISOString();
+      const outcome = await runTransaction(db, async (tx: any) => {
+        const fresh = await tx.get(walletRef);
+        if (!fresh.exists()) return { ok: false as const, status: 404, error: 'User not found' };
+        const w = fresh.data();
+        if (!welcomeGiftEligible(w)) return { ok: false as const, status: 409, error: welcomeGiftRefusal(w) };
+        const patch = mirroredCreditPatch(w, ADMIN_WELCOME_GIFT_TOKENS, 'gift');
+        tx.update(walletRef, {
+          ...patch,
+          // Gift money, counted against the ₹400 lifetime gift ceiling like every other gift.
+          freeGiftedTokens: Number(w.freeGiftedTokens || 0) + ADMIN_WELCOME_GIFT_TOKENS,
+          totalTokensPurchased: Number(w.totalTokensPurchased || 0) + ADMIN_WELCOME_GIFT_TOKENS,
+          adminWelcomeGiftAt: nowIso,
+          ...ledgerPatch(w, {
+            type: 'purchase',
+            amountCoinsOrTokens: ADMIN_WELCOME_GIFT_TOKENS,
+            moneySpent: 0,
+            timestamp: nowIso,
+            description: `Welcome credit: ₹${ADMIN_WELCOME_GIFT_RUPEES} added by NavBharatAI`,
+          }),
+          updatedAt: nowIso,
+        });
+        return { ok: true as const, newBalance: patch.tokenBalance };
+      });
+      if (!outcome.ok) return res.status(outcome.status).json({ ok: false, error: outcome.error });
+      audit('ADMIN_WELCOME_GIFT', { userId, tokens: ADMIN_WELCOME_GIFT_TOKENS, ip: req.ip });
+      res.json({ ok: true, newBalance: outcome.newBalance, rupees: ADMIN_WELCOME_GIFT_RUPEES });
+    } catch (e: any) { console.error('[ADMIN] welcome-gift failed:', e?.message); res.status(500).json({ ok: false, error: 'Internal server error.' }); }
   });
 
   // THE BUILD DISCOUNT (admin 2026-09-25) — the percentage taken off every charged build, set from

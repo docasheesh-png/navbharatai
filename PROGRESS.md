@@ -82341,3 +82341,30 @@ web Gmail ₹100 released after mobile OTP, and web Gmail ₹100 instantly with 
 scriptable free-Gmail printer — no device check on the web). Do not re-propose either without a new ask.
 In the app the Gmail ₹100 is automatic from build 135 onward (`useReferralProgress` → `autoClaimIfReady`,
 device-checked); build 134, live on Play today, needs a manual Claim tap.
+
+## 2026-09-26 — The two native checks behind the referral rupees had never run on a phone
+
+The admin tested on their own phone and sent two screenshots: the ₹100 claim said *"We could not check
+this device just now"*, and the mobile OTP said *"Phone sign-in provider is not enabled. Make sure to
+add the provider to the 'providers' list in the Capacitor configuration."*
+
+- **Device check (`DeviceIntegrityPlugin.java`): the classic Play Integrity request was built WITHOUT a
+  nonce**, which Google requires. The builder refuses it, the catch turns that into `failed`, and the
+  client shows its own "could not check" sentence (without "— your account is fine", which is how it was
+  told apart from the server's). Every device, every claim, since the plugin shipped. Now a fresh
+  32-byte web-safe nonce per request.
+- **Phone OTP (`capacitor.config.ts`): 'phone' was never in `FirebaseAuthentication.providers`**, so the
+  native plugin built no phone handler and both native phone login and the Verify-mobile sheet failed.
+  Added; iOS already registers the REVERSED_CLIENT_ID scheme phone auth needs (ios-ipa.yml).
+- **Class lock:** `tests/theNativeChecksNeverRanOnAPhone.test.ts` derives every `FirebaseAuthentication.*`
+  call from `src/` and fails if its provider is not enabled; it also pins the nonce. Reversion-proven.
+- **Diagnosability:** the phone's failure report now carries Google's own message, and the server files
+  it by Google's error code (`phoneCheckFailureCategory`: -16 → cloud-project-number-invalid, …) on the
+  Referral cost card, so a next native failure is named instead of guessed.
+
+⚠️ **Both fixes are native, so they reach users only in a NEW .aab/.ipa** — no server change can do it.
+⚠️ **Not verified on a device from here** (no Android SDK or phone in the session). If the claim still
+fails after the new build, the card now shows Google's reason; the likeliest remaining one would be the
+cloud project number baked in by `PLAY_INTEGRITY_CLOUD_PROJECT`.
+🔴 Open: the server does not bind or check the nonce (a server-issued nonce would stop token replay;
+freshness is still enforced by the timestamp window).

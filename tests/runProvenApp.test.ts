@@ -156,7 +156,8 @@ describe('the route wiring — the CODE of each late flip, comments stripped', (
       "pagesFailed: gateEvidence.pages === 'failed'",
       "journeyFailed: gateEvidence.journeys === 'failed'",
       'runtimeCrashBlocker: buildDiag.hasRuntimeCrashBlocker()',
-      "deliveryRefused: looksLikeRefusal(result?.summary ?? '')",
+      // The model's own answer, captured before any platform rewrite (2026-09-26).
+      'deliveryRefused: modelAnswer.declined',
       'stopped: abort.signal.aborted',
     ]) expect(body).toContain(line);
   });

@@ -54,6 +54,8 @@ const PROCESS_ONLY_CODES = new Set([
   // The decision to leave a turn as the ANSWER it is, rather than rebuild it on a higher rung
   // (autopsy e628efd4): a fact about OUR retry policy, never a defect in the user's app.
   'TURN_ANSWERED_A_QUESTION',
+  // …and its sibling (2026-09-26): the model DECLINED, and its refusal was left standing as the answer.
+  'TURN_DECLINED',
   // Same rule, same reason (autopsy 21b431e1): a dropped backslash that OUR deterministic pass put
   // back is this engine's own housekeeping. The user's app is correct by the time anybody reads it.
   'SCRIPT_INTEGRITY_REPAIRED',

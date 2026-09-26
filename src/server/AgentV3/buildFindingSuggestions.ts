@@ -122,6 +122,8 @@ const NEVER_SUGGEST = new Set([
   // We left a turn as the answer the model gave — our own retry policy working, never a next move
   // for the user (autopsy e628efd4).
   'TURN_ANSWERED_A_QUESTION',
+  // …and a refusal left standing as the answer (2026-09-26) — nothing for the user to fix.
+  'TURN_DECLINED',
   // Our own lane's phase timings — a measurement, never a next move for the user.
   'FAST_LANE_PHASES',
   // What our own failed provider calls cost — our routing's problem, never the user's next move.

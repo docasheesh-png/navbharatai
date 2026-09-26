@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { X, Trash2, CheckSquare, Square, AlertTriangle } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { authJsonHeaders } from '../lib/authHeaders';
@@ -164,9 +164,15 @@ export function useNotificationInbox(user: FirebaseUser | null): NotificationInb
 }
 
 /** The inbox list — opened from the sidebar's Notifications row. Marks the visible messages read on open. */
-export function NotificationPanel({ inbox, onClose, onOpenReports }: {
+export function NotificationPanel({ inbox, onClose, onOpenReports, pinned }: {
   inbox: NotificationInbox;
   onClose: () => void;
+  /**
+   * Rendered as the FIRST item, above every message and never selectable or deletable — it is not a
+   * message. Today: the rewards checklist (admin 2026-09-26: "hamesha 1st notification me dikhna
+   * chahiye"). Hidden while selecting, so a delete can never appear to include it.
+   */
+  pinned?: ReactNode;
   /**
    * Open the Report a problem sheet on the conversation list.
    *
@@ -366,6 +372,8 @@ export function NotificationPanel({ inbox, onClose, onOpenReports }: {
             </div>
           </div>
         )}
+
+        {!selecting && pinned}
 
         {items.length === 0 ? (
           <div className="px-4 py-8 text-center text-[12px] text-muted">No messages yet.</div>

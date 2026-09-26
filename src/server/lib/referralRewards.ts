@@ -16,13 +16,23 @@
 //
 // ── THE FOUR RULES THAT MAKE IT SAFE, each learned from a specific way it would otherwise leak ───
 //
-// 🔒 1. ANDROID ONLY, DEVICE-VERIFIED. Every rupee here requires a genuine Android device (the Play
-//    Integrity + device-id check of `Hissa 2`). There is NO web path, not even for the email and
-//    github steps, and that is not an oversight — it is the whole design. Admin, plainly: *"websites
-//    par kuch bhi nahi dena. website par refral recive chalna hi nahi chahiye."* A free mailbox and a
-//    free GitHub account cost nothing and take three minutes, so ₹200 available on a laptop would be
-//    an unlimited, scriptable money printer that never touches the device check. Half a gate is no
-//    gate: the moment ANY step pays without a device, nobody ever installs the app to farm it.
+// 🔒 1. THE FULL ₹400 LADDER IS ANDROID-ONLY AND DEVICE-VERIFIED; THE WEBSITE EARNS A CAPPED ₹100.
+//    Every rupee of the full ladder requires a genuine Android device (the Play Integrity + device-id
+//    check of `Hissa 2`). The original design had NO web path at all, and the reason still holds: a
+//    free mailbox and a free GitHub account cost nothing and take three minutes, so ₹200 reachable
+//    from a laptop would be an unlimited, scriptable money printer that never touches the device check.
+//    ⚠️ REVERSED IN PART 2026-09-26 (admin, verbatim: *"website par github aur mobile verification par
+//    100-100 maximum 200"*): the flat welcome gift was retired (`giftPolicy.ts`), which left a
+//    website-only user at ₹0 and — with billing on — unable to build even once. So the web now earns
+//    EXACTLY TWO steps (mobile ₹100, github ₹100) under a ₹200 ceiling (`giftPolicy.MAX_WEB_GIFT_TOKENS`):
+//    the mobile SIM is the genuine anti-farm gate, github rides beside it inside the ₹200 so no tunable
+//    can turn either into more than its ₹100, and gmail-login (`email`) and the referral code stay
+//    Android-only. 🔒 AND NO WEB TOKEN IS PAID UNTIL THE MOBILE IS VERIFIED (admin: *"no mobile (otp)
+//    verify no token"*): a free github link is EARNED but HELD at ₹0 until a real number lands, so it
+//    can never pay on its own — the same anchor rule 3 puts under the referrer's money. It is a SUB-cap beneath the ₹400 lifetime self-cap, not a second budget — a user who
+//    took ₹200 on the web still earns the remaining ₹200 on a verified device. Half a gate is still no
+//    gate, which is exactly why the web's exposure is bounded to ₹200 and the rest stays behind the
+//    device check.
 //
 // 🔒 2. THE REFERRER IS PAID FOR VERIFICATIONS, NEVER FOR A REDEMPTION. A's ₹75 is three payments of
 //    ₹25 for B's email, mobile and github — and ₹0 for B merely typing the code. Admin: *"uske refral
@@ -58,12 +68,49 @@
 
 import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
 import { parseEnvFlag } from './envFlag';
-import { capSelfGift, capReferrerPerFriend } from './giftPolicy';
+import { capSelfGift, capReferrerPerFriend, capWebGift } from './giftPolicy';
 
 /** The four things a new user can do, each worth one payment, ever. */
 export type RewardStep = 'referral-code' | 'email' | 'mobile' | 'github';
 
 export const ALL_STEPS: readonly RewardStep[] = ['referral-code', 'email', 'mobile', 'github'];
+
+/**
+ * The steps that may be earned on the WEBSITE (admin 2026-09-26: *"website par bas 2 — github link,
+ * mobile verification"*). The other two are Android-only by design: `email` is the **Gmail-login**
+ * grant (paid the moment a user signs in with Google on the device-checked app), and `referral-code`
+ * needs the device check to bound farming. Deriving `stepAllowedOnWeb` from THIS list — rather than
+ * hard-coding the two ids at every call site — means a fifth step is Android-only until someone
+ * decides otherwise, the same safe-by-default shape `REFERRER_PAYING_STEPS` already uses.
+ *
+ * ⚠️ Order matters for the checklist UI, not for the money: mobile is listed first because it is the
+ * genuine anti-farm gate (a real SIM), and github rides inside the shared ₹200 web ceiling.
+ */
+export const WEB_ELIGIBLE_STEPS: readonly RewardStep[] = ['mobile', 'github'];
+
+/** Is this step claimable on the website at all? (Android earns the full set; web earns only these.) */
+export function stepAllowedOnWeb(step: RewardStep): boolean {
+  return (WEB_ELIGIBLE_STEPS as readonly string[]).includes(step);
+}
+
+/**
+ * May this account still APPLY a referral code? ("refer — only for new user", admin 2026-09-26.)
+ *
+ * 🔴 WHY THIS IS NOT `paidSteps.length === 0` ANY MORE. That was the old "old ko never" test, and it
+ * collides with the Gmail-login grant: `email` is claimed automatically the moment a user signs in on
+ * the app, so under the old rule EVERY Android user became "old" before they could type a code, and the
+ * referral step could never be reached by anyone. The sign-in grant says nothing about an account being
+ * old — it happens on day one by construction — so it alone does not disqualify.
+ *
+ * Any REAL verification (mobile, github) still does: an account that has already earned those before
+ * hearing about a code is exactly the retro-attribution "old ko never" exists to refuse, since the
+ * referrer would otherwise be paid for work that happened before the referral. One definition, read by
+ * both the redeem route (the decision) and the status endpoint (whether to show the step at all), so the
+ * screen can never offer a code box the server would refuse.
+ */
+export function canStillRedeem(paidSteps: unknown): boolean {
+  return readSteps(paidSteps).every((s) => s === 'email');
+}
 
 /**
  * The three steps that pay the REFERRER. `referral-code` is deliberately absent — see rule 2. It is
@@ -134,7 +181,10 @@ export type SelfRewardReason =
   | 'granted'
   | 'already-paid'        // this step has been paid before; a step pays once, ever
   | 'cap-reached'         // the account is at its ₹400 lifetime gift ceiling (giftPolicy.ts)
-  | 'not-android'         // web and iOS earn nothing here (rule 1)
+  | 'not-android'         // iOS and unrecognised platforms earn nothing here
+  | 'web-not-eligible'    // this step is Android-only (email / referral-code); web cannot earn it
+  | 'web-held-until-mobile' // earned on the web but not payable until a real mobile (OTP) is verified
+  | 'web-cap-reached'     // the account is at its ₹200 website ceiling (giftPolicy.ts)
   | 'device-unverified'   // no genuine-device proof ⇒ no money, never a silent skip
   | 'disabled';           // the master flag is off
 
@@ -143,6 +193,12 @@ export interface SelfReward {
   reason: SelfRewardReason;
   /** The step to record as paid, in the SAME transaction as the credit. Null when nothing is paid. */
   recordStep: RewardStep | null;
+  /**
+   * True when this grant was earned on the WEBSITE, so the caller also advances `webGiftedTokens` in
+   * the same transaction. Android grants leave it false — they are bounded by the device check and the
+   * ₹400 self cap, never by the web sub-ceiling.
+   */
+  web?: boolean;
 }
 
 const NOTHING = { tokens: 0, recordStep: null } as const;
@@ -165,27 +221,63 @@ export function decideSelfReward(input: {
    * why `referral.ts` passes it and a test asserts that it does.
    */
   alreadyGiftedTokens?: unknown;
+  /**
+   * What this account has already been paid THROUGH THE WEB (`webGiftedTokens`). Only read on a web
+   * claim, where it enforces the ₹200 website sub-ceiling. Omitted (or on Android) it is treated as 0.
+   */
+  alreadyWebGiftedTokens?: unknown;
+  /**
+   * Has this account verified a real mobile (OTP)? Required for ANY web payout (admin 2026-09-26:
+   * *"no mobile (otp) verify no token"*). On Android it is not read — the device check is the gate.
+   * The caller derives it from the account record (`stepIsProven('mobile')`), never the request body.
+   */
+  mobileVerified?: boolean;
   env?: NodeJS.ProcessEnv;
 }): SelfReward {
   const env = input.env ?? process.env;
   if (!referralRewardsEnabled(env)) return { ...NOTHING, reason: 'disabled' };
-  if (input.platform !== 'android') return { ...NOTHING, reason: 'not-android' };
-  if (!input.deviceVerified) return { ...NOTHING, reason: 'device-unverified' };
-  if (readSteps(input.alreadyPaidSteps).includes(input.step)) return { ...NOTHING, reason: 'already-paid' };
-  /**
-   * 🔒 "EK PAISA JYADA NAHI" IS ENFORCED AGAINST THE TOTAL, NOT ASSUMED FROM THE PARTS.
-   *
-   * Four steps × ₹100 = ₹400 holds only while `REFERRAL_STEP_TOKENS` is 100. Set it to 200 in a
-   * console and the same four steps pay ₹800 with nothing objecting. `capSelfGift` clamps against
-   * what the account has actually received, so the ceiling survives any tunable.
-   */
+
+  const alreadyPaid = readSteps(input.alreadyPaidSteps).includes(input.step);
   const want = stepRewardTokens(env);
-  const tokens = input.alreadyGiftedTokens === undefined ? want : capSelfGift(want, input.alreadyGiftedTokens);
-  // Reported as its own reason rather than folded into 'already-paid': the two are different facts
-  // about a real person, and an admin reading "already paid" for someone who was never paid this
-  // step would be reading a wrong answer to the question they asked.
-  if (tokens <= 0) return { ...NOTHING, reason: 'cap-reached' };
-  return { tokens, reason: 'granted', recordStep: input.step };
+  // 🔒 THE ₹400 LIFETIME SELF-CAP APPLIES ON EVERY PLATFORM, so it is computed once here. "Four steps
+  // × ₹100 = ₹400" holds only while REFERRAL_STEP_TOKENS is 100; `capSelfGift` clamps against what the
+  // account has actually received, so the ceiling survives any tunable. A caller that omits the total
+  // (a legacy call) keeps its old unclamped-by-lifetime behaviour, which a test still asserts.
+  const afterSelfCap = input.alreadyGiftedTokens === undefined ? want : capSelfGift(want, input.alreadyGiftedTokens);
+
+  if (input.platform === 'android') {
+    if (!input.deviceVerified) return { ...NOTHING, reason: 'device-unverified' };
+    if (alreadyPaid) return { ...NOTHING, reason: 'already-paid' };
+    // Reported as its own reason rather than folded into 'already-paid': the two are different facts
+    // about a real person, and an admin reading "already paid" for someone who was never paid this
+    // step would be reading a wrong answer to the question they asked.
+    if (afterSelfCap <= 0) return { ...NOTHING, reason: 'cap-reached' };
+    return { tokens: afterSelfCap, reason: 'granted', recordStep: input.step };
+  }
+
+  if (input.platform === 'web') {
+    // 🔒 WEB IS DELIBERATELY DIFFERENT, AND SMALLER. Only two steps are earnable here (mobile, github),
+    // there is NO device check (the web has none — the mobile SIM is the real gate, and github rides
+    // inside the ₹200 web ceiling), and the total is clamped by BOTH the ₹400 lifetime self-cap above
+    // AND the ₹200 website sub-cap. See giftPolicy.MAX_WEB_GIFT_TOKENS for why the web is capped at all.
+    if (!stepAllowedOnWeb(input.step)) return { ...NOTHING, reason: 'web-not-eligible' };
+    if (alreadyPaid) return { ...NOTHING, reason: 'already-paid' };
+    // 🔒 NO MOBILE (OTP) VERIFY → NO TOKEN ON THE WEB (admin 2026-09-26). A github link is free and
+    // scriptable, so on the web it is EARNED when it happens but HELD, paid ₹0 and recorded as nothing,
+    // until a real number is verified — the same anchor rule 3 puts under the referrer's money. The
+    // `mobile` step carries that proof by definition (you cannot claim it without verifying), so it is
+    // never itself held; claiming it is what later releases a waiting github. Recording nothing here is
+    // load-bearing: a held step must stay claimable, so it is never written to `paidSteps`.
+    if (!input.mobileVerified) return { ...NOTHING, reason: 'web-held-until-mobile' };
+    const tokens = capWebGift(afterSelfCap, input.alreadyWebGiftedTokens);
+    // Distinguish "the web's own ₹100 is spent" from "the whole ₹400 is spent": both pay ₹0, but they
+    // are different facts, and the second is answered by `cap-reached` when the self-cap already bit.
+    if (tokens <= 0) return { ...NOTHING, reason: afterSelfCap <= 0 ? 'cap-reached' : 'web-cap-reached' };
+    return { tokens, reason: 'granted', recordStep: input.step, web: true };
+  }
+
+  // iOS and any unrecognised platform earn nothing here.
+  return { ...NOTHING, reason: 'not-android' };
 }
 
 /** Everything B has earned so far, for the progress checklist. PURE — a view, never a payment. */

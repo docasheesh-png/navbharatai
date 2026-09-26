@@ -1,10 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { AlertCircle, CheckCircle2, Circle, Copy, Gift, Loader2, Share2 } from 'lucide-react';
 import { shareReferral } from '../../lib/shareReferral';
-import { collectDeviceCheck } from '../../lib/deviceIntegrityNative';
+import { postReferral, type ReferralSurface } from '../../lib/referralClaim';
 import { normalizeReferralCodeClient } from '../../lib/referralCodeClient';
 import { STEP_ORDER, type RewardStep } from '../../lib/referralStepNames';
-import { authedHeaders } from '../../lib/authHeaders';
 import type { ChecklistRow } from '../../lib/referralChecklist';
 import { auth as firebaseAuth } from '../../lib/firebase';
 import { sendVerificationEmail, linkGithubAccount, describeLinkGithubError } from '../../lib/accountVerificationActions';
@@ -33,6 +32,12 @@ export const ReferralPanel: React.FC<{
   capRupees: number;
   capReached: boolean;
   referred: boolean;
+  /** Which rule set this account is on: the app's four steps or the website's two (server's answer). */
+  surface: ReferralSurface;
+  /** May this account still apply a friend's code? App only, and only while it is still "new". */
+  canRedeem: boolean;
+  /** The website's own ceiling (₹200), or null in the app. */
+  webCapRupees: number | null;
   /** What the account has actually done, so a row can say what is missing instead of failing. */
   emailVerified: boolean;
   phoneVerified: boolean;
@@ -40,8 +45,7 @@ export const ReferralPanel: React.FC<{
   onRefresh: () => void;
   onToast: (msg: string, kind?: 'success' | 'error') => void;
 }> = (props) => {
-  const { userId, enabled, code, shareMessage, rows, earnedRupees, capRupees, capReached, referred } = props;
-  const [platform, setPlatform] = useState<string>('web');
+  const { userId, enabled, code, shareMessage, rows, earnedRupees, capRupees, capReached, referred, surface, canRedeem } = props;
   const [busy, setBusy] = useState<RewardStep | 'redeem' | null>(null);
   const [codeInput, setCodeInput] = useState('');
   const [notice, setNotice] = useState<{ kind: 'ok' | 'bad'; text: string } | null>(null);
@@ -85,43 +89,19 @@ export const ReferralPanel: React.FC<{
     }
   }, [props]);
 
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const { Capacitor } = await import('@capacitor/core');
-        if (alive) setPlatform(Capacitor.getPlatform());
-      } catch { /* web */ }
-    })();
-    return () => { alive = false; };
-  }, []);
+  const isAndroid = surface === 'android';
 
-  const isAndroid = platform === 'android';
-
-  /** Collect the device evidence and POST it. Shared by claim and redeem — one place, one message. */
-  const post = useCallback(async (path: string, body: Record<string, unknown>) => {
-    const device = await collectDeviceCheck();
-    if (device.outcome !== 'ok') {
-      // Honest and specific: an older shell needs an update, everything else is "try again".
-      throw new Error(device.outcome === 'unavailable'
-        ? 'Update the NavBharatAI app from the Play Store to claim this bonus.'
-        : 'We could not check this device just now. Please try again in a few minutes.');
-    }
-    const res = await fetch(path, {
-      method: 'POST',
-      headers: { ...(await authedHeaders()), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...body, deviceId: device.deviceId, integrityToken: device.integrityToken, platform: 'android' }),
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok || !data?.ok) throw new Error(String(data?.message || 'That did not work. Please try again.'));
-    return data;
-  }, []);
+  /** POST with the evidence this surface can give — one shared module (referralClaim.ts), one message. */
+  const post = useCallback(
+    (path: string, body: Record<string, unknown>) => postReferral(path, body, surface),
+    [surface],
+  );
 
   const claim = useCallback(async (step: RewardStep) => {
     setBusy(step); setNotice(null);
     try {
       const data = await post(`/api/referral/${encodeURIComponent(userId)}/claim`, { step });
-      setNotice({ kind: 'ok', text: `₹${data.rupees} added to your wallet.` });
+      setNotice({ kind: 'ok', text: String(data.message || `₹${data.rupees} added to your wallet.`) });
       props.onRefresh();
     } catch (e) {
       setNotice({ kind: 'bad', text: e instanceof Error ? e.message : 'That did not work.' });
@@ -151,6 +131,9 @@ export const ReferralPanel: React.FC<{
     if (step === 'email' && !props.emailVerified) return 'Verify your email address first';
     if (step === 'mobile' && !props.phoneVerified) return 'Verify your mobile number first';
     if (step === 'github' && !props.githubLinked) return 'Connect your GitHub account first';
+    // On the website nothing pays until a real mobile is verified — say so on GitHub's row, rather than
+    // offering a Claim that the server would answer with ₹0.
+    if (!isAndroid && step === 'github' && !props.phoneVerified) return 'Verify your mobile first to unlock this';
     if (step === 'referral-code' && !referred) return 'Apply a friend’s code below first';
     return null;
   };
@@ -210,8 +193,8 @@ export const ReferralPanel: React.FC<{
           <Share2 className="h-3.5 w-3.5" /> Share
         </button>
         <p className="mt-4 text-xs font-semibold leading-relaxed text-warn">
-          You earn ₹25 for each of your friend&rsquo;s three verifications — ₹75 per friend,
-          up to ₹{capRupees} in total. Your friend must apply it in the Android app.
+          You earn ₹25 for each of your friend&rsquo;s verifications — up to ₹75 per friend and
+          ₹{capRupees} in total. Your friend applies your code in the NavBharatAI Android app.
         </p>
         <p className="mt-2 text-[11px] font-bold text-muted">
           Earned so far: <span className="text-success">₹{earnedRupees}</span> of ₹{capRupees}
@@ -226,11 +209,12 @@ export const ReferralPanel: React.FC<{
         </h4>
 
         {!isAndroid && (
-          // Honest, and the reason is stated rather than hidden. The website has no device check, so
-          // it cannot pay anything — showing a Claim button here would be a button that cannot work.
+          // Honest about exactly what the website can do: two steps, a ceiling, and the mobile first.
+          // The other two rewards are real too, just not here — say where, rather than hide them.
           <p className="mt-3 rounded-xl border border-line bg-well p-3 text-[11px] font-semibold text-muted">
-            These bonuses are claimed in the NavBharatAI Android app, where each one is checked against
-            your device. You can still copy and share your code from here.
+            On the website you earn ₹100 for verifying your mobile and ₹100 for connecting GitHub
+            {props.webCapRupees ? <> — up to ₹{props.webCapRupees}</> : null}. Verify your mobile first: it
+            unlocks both. The Gmail-login and referral-code rewards are in the NavBharatAI Android app.
           </p>
         )}
 
@@ -254,7 +238,7 @@ export const ReferralPanel: React.FC<{
                     {row.label}
                   </span>
                 </span>
-                {!row.claimed && isAndroid && (
+                {!row.claimed && (
                   blocked
                     ? (
                       <span className="flex shrink-0 items-center gap-2">
@@ -287,8 +271,9 @@ export const ReferralPanel: React.FC<{
           })}
         </ul>
 
-        {/* Apply a friend's code — Android only, and only while the account has none. */}
-        {isAndroid && !referred && (
+        {/* Apply a friend's code — the app only (never on the website), and only while the account can
+            still redeem (the server's `canRedeem`: new, and no code applied yet). */}
+        {isAndroid && canRedeem && !referred && (
           <div className="mt-5 border-t border-line pt-5">
             <h5 className="text-[10px] font-black uppercase tracking-widest text-muted">Have a friend&rsquo;s code?</h5>
             {/* Stacked, like the promo code box: side by side the input's minimum width pushed the button

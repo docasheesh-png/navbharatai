@@ -527,11 +527,15 @@ export function formSourcesFor(
 }
 
 /** The route a page file serves, best-effort, or null. Only used for a label and a starting URL. */
-function routeForFile(path: string, knownRoutes: readonly string[]): string {
+export function routeForFile(path: string, knownRoutes: readonly string[]): string {
   const stem = path.replace(/\.(t|j)sx$/, '').split('/').pop() || '';
   const lower = stem.toLowerCase();
   if (/^(home|index|page|app)$/.test(lower)) return '/';
-  const match = knownRoutes.find((r) => r.toLowerCase().replace(/[^a-z]/g, '').includes(lower.replace(/[^a-z]/g, '')));
+  // `ChatPage` serves `/chat`: the suffix names what the FILE is, not the URL. Without dropping it, no
+  // real route contains "chatpage" and the journey fell back to home, where its form is not (SignBridge).
+  const key = lower.replace(/[^a-z]/g, '').replace(/(page|screen|view|route)$/, '') || lower.replace(/[^a-z]/g, '');
+  const flat = (r: string) => r.toLowerCase().replace(/[^a-z]/g, '');
+  const match = knownRoutes.find((r) => flat(r) === key) ?? knownRoutes.find((r) => flat(r).includes(key));
   return match || '/';
 }
 
@@ -900,6 +904,16 @@ export function summarizeJourneys(
       ran: true,
       summary: `${lead} ${failed.map((f) => `${f.route}: ${f.note}`).join('; ')}`
         + (passed.length ? ` (${passed.length} other journey(s) passed.)` : ''),
+    };
+  }
+  // Every journey UNREACHABLE is not a pass: nothing was filled in, so nothing was proven. It used to fall
+  // through to here and be coded JOURNEY_PASSED with the sentence "0 user journey(s) passed" (SignBridge,
+  // 2026-09-26) — the exact two-state-for-three-states defect the empty case above already fixed.
+  if (passed.length === 0) {
+    return {
+      ok: true,
+      ran: false,
+      summary: `No user journey could be completed: ${unreachable.length} could not be reached and were NOT counted either way (${unreachable.map((u) => u.note).join('; ')}).`,
     };
   }
   const parts = [`${passed.length} user journey(s) passed — filled in a real form in a real browser and checked the result.`];

@@ -111,6 +111,8 @@ const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: string; 
 
 /** Codes that must never become a suggestion — see the header for why each is excluded. */
 const NEVER_SUGGEST = new Set([
+  'CHECKPOINT_SIGNAL', // our checkpoint heuristic, never a finding (autopsy SignBridge, 2026-09-26)
+  'REVIEW_SUGGESTIONS_NOT_READY', // a suggest-only review that ran out of time — nothing for the user to do
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', 'LADDER_DEPTH',
   // A repair answer our guard refused to write (autopsy eed79815) — nothing for the user to do.
   'REPAIR_OUT_OF_SCOPE',

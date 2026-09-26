@@ -25,7 +25,8 @@ import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, hardConstraintLines, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
-import { requestedFeatureLabels, renderRequestedFeatureContract } from '../AgentV3/RequirementCoverage';
+import { renderRequestedFeatureContract } from '../AgentV3/RequirementCoverage';
+import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenScaffolds/registry';
@@ -170,7 +171,7 @@ import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySign
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
-import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver } from '../AgentV3/greenFreeze';
+import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver, GreenFreezeError } from '../AgentV3/greenFreeze';
 import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild, IN_BUILD_PROOF_BUDGET_MS, type AttemptOutcome } from '../AgentV3/inBuildGreen';
 import { STARTER_ENTRY_PATHS, isUntouchedStarterEntry, starterEntryIn, starterIsWhatRendered, pageShowsStarter, withStarterVerdict } from '../AgentV3/stillTheStarterApp';
 import { postGreenWritesNote, endVerdictFrom, type PostGreenWrite } from '../AgentV3/postGreenWrites';
@@ -230,7 +231,7 @@ import { makeResilientTurnRunner } from './agentv3Resilient';
 import { GoogleGenAI } from '@google/genai';
 import { scanGeneratedCode, formatCodeScanReport } from '../AgentV3/CodeSafetyScanner';
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
-import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, sharedRateLimitCooldowns, createBuildBenchRegistry, type NamedRunner, type BuildBenchRegistry, type MultiProviderOptions } from '../AgentV3/providers/MultiProviderTurnRunner';
+import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, sharedRateLimitCooldowns, createBuildBenchRegistry, type NamedRunner, type BuildBenchRegistry } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { modelAlwaysReasons } from '../AgentV3/providers/glmThinking';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { buildStreamingEnabled, streamHardCapMs } from '../AgentV3/providers/openAiStream';
@@ -382,7 +383,7 @@ import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionRe
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
-import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, testSkeletonsCanRun } from '../AgentV3/TestGenerationAgent';
+import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, testSkeletonsCanRun, starterTestsNarration } from '../AgentV3/TestGenerationAgent';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from '../AgentV3/appDefaults';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { findingsToDebt } from '../AgentV3/engineeringMemory';
@@ -521,7 +522,7 @@ import { parseIgnoreFile, ignoreRulesBlock, IGNORE_FILE } from '../AgentV3/ignor
 import { terminalDailyLimitSeconds, decideTerminalAccess, type TerminalAccess } from '../AgentV3/terminalQuota';
 import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../AgentV3/terminalMeter';
 import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
-import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../AgentV3/buildQualityLint';
+import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } from '../AgentV3/buildQualityLint';
 import { abortBuild, abortCauseOf } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
@@ -3194,6 +3195,44 @@ export function dominantProvider(turns: Map<string, number>): string | undefined
  * honesty bug. Unknown names fall back to the name itself (lower-cased) so nothing is silently hidden.
  * Pure + exported for testing.
  */
+/**
+ * Who to name on a FAILED planner call. When no rung ever answered there is nobody to name — and the old
+ * default ('CLAUDE' → 'anthropic' → the planned Sonnet id) wrote "Model call failed (claude-sonnet-4-6)"
+ * into a WEAK build's report (autopsy SignBridge, 2026-09-26), a build on which Sonnet is forbidden and
+ * never ran. That line reads as a no-Claude violation and sends the next autopsy after a leak that did
+ * not happen. The same class 4efab9d7 closed for the build turn's own timeout; these were the siblings.
+ * PURE.
+ */
+export function plannerCallLabel(
+  provider: string | null | undefined,
+  label: (used: string) => string,
+  plannedClaudeModel: string,
+): { provider: string; model: string } {
+  const p = String(provider ?? '').trim();
+  if (!p) return { provider: 'none', model: 'no provider answered' };
+  const lbl = label(p);
+  return { provider: lbl, model: answeringModel({ planned: lbl === 'anthropic' ? plannedClaudeModel : null, family: p }) };
+}
+
+/**
+ * Write a deterministic pass's fix to the sandbox, and say whether the change may be KEPT.
+ *
+ * These passes deliberately keep their fix in the saved copy even when the sandbox write fails — a dead
+ * or paused machine must not cost a correct repair ("the store copy is fixed"). The ONE failure that must
+ * not be kept is a Green Freeze refusal: the app was verified working, the freeze said no, and keeping the
+ * change in the saved copy anyway would put an unverified edit into the app the user publishes while the
+ * running preview shows the verified one (autopsy SignBridge, 2026-09-26 — the sibling of the heal-write
+ * leak fixed in ToolDispatcher.landHealWrite). So: refused ⇒ false; written or any other failure ⇒ true.
+ */
+export async function writeUnlessFrozen(write: () => Promise<unknown>): Promise<boolean> {
+  try {
+    await write();
+    return true;
+  } catch (err) {
+    return !(err instanceof GreenFreezeError);
+  }
+}
+
 export function fastLaneProviderLabel(used: string | undefined): string {
   switch ((used || '').toUpperCase()) {
     case 'GLM': return 'glm';
@@ -3471,7 +3510,7 @@ function unavailableTierRunner(level: PowerLevel, ladderText: string, missingKey
  * build when the floor was off, which is exactly what the rule forbids. A 429-storm on rung 1 now costs
  * one failed call per cooldown window (the shared bench still sidelines the rung), not a reorder.
  */
-export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void; onAttemptWasted?: (family: string, kind: 'timeout' | 'crawl' | 'rate-limit' | 'error', ms: number) => void;
+export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | null | undefined; heal?: boolean; complex?: boolean; plan?: boolean; afterLeadRung?: boolean; fromProvider?: LadderProvider; noClaude?: boolean; onProviderError?: (name: string, err: unknown) => void; onProviderUsed?: (used: string, fellBackFrom: string[]) => void; onTurnComplete?: (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number) => void; onChain?: (chain: ChainRung[]) => void; onProviderBenched?: (family: string, reason: string) => void; onAttemptWasted?: (family: string, kind: 'timeout' | 'crawl' | 'rate-limit' | 'error', ms: number) => void;
   /** Retired-rung memory owned by the CALLER, so it can span several runner instances — the fast
    *  lane's per-file runners share ONE build's map. Omitted ⇒ each runner keeps its own, as before.
    *  See MultiProviderOptions.deadRungs for why this is caller-owned and never a singleton. */
@@ -3486,6 +3525,15 @@ export function buildTurnRunner(opts: { tier: PowerLevel | string | boolean | nu
   // `heal` and `complex` are different questions with the same answer: skip the cheap flash opener.
   // ONE function answers both (tierLadder.withoutCheapFlashLead), so they can never drift apart.
   let rungs: LadderRung[] = (opts.heal || opts.complex) ? withoutCheapFlashLead(parsed.rungs) : [...parsed.rungs];
+  // 🔴 A PLANNING CALL CLIMBS THE PLAN LADDER, NOT THE BUILD'S (autopsy SignBridge, 2026-09-26). A plan is
+  // ONE structured answer; `complex` exists to open a whole BUILD on a stronger coder, and on Weak that
+  // coder always reasons first. The Project Mode planner took the complex build chain, opened on
+  // kimi-k2.7-code, then glm-5.3 — both spent their full 12,000-token allowance thinking and wrote
+  // nothing, and the planner's clock ran out at 315s: 22% of the build, for no plan. The fast lane had
+  // already learned this (fastLaneRung.ts skips a reasoning opener); the planners were the sibling.
+  // `planLadder` puts the tier's plan rung first (a rung that can be told not to think) and keeps the
+  // tier's own ladder behind it, so nothing another tier forbids can be reached.
+  if (opts.plan) rungs = planLadder(level);
   // `afterLeadRung` is the EMPTY-BUILD RETRY's ladder: the first attempt produced nothing, so the rung
   // that produced nothing is dropped — by POSITION, because a provider can appear twice (Weak carries
   // GLM at two rungs, so `fromProvider` would find the wrong one). Applied to the TIER ladder, not on
@@ -3647,33 +3695,17 @@ export function workspaceLeaseEnabled(env: NodeJS.ProcessEnv = process.env): boo
 }
 
 /**
- * Whether the build's PLANNERS run on the tier's PLAN rung — the mega-roadmap planner (admin chose "A",
- * 2026-09-26, autopsy 7d79254b) and its sibling the project-mode module planner (autopsy eed79815, the
- * same day: 315 s on two reasoning rungs that each spent their whole allowance thinking, then a
- * timeout). Default ON; `AGENTV3_PLANNER_PLAN_RUNG=off` is the no-deploy revert of BOTH to the build
- * chain. Anything other than the word `off` means on — the switch only ever exists to undo this change.
- */
-export function plannerPlanRungEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return (env.AGENTV3_PLANNER_PLAN_RUNG ?? '').trim().toLowerCase() !== 'off';
-}
-
-/**
  * The PLAN runner for a tier: its plan rung first (glm-5.3-flash / kimi-k2.7-code / Sonnet), then the
  * tier's own ladder — mapped by the same ladderRunners the build uses, guarded by the same
  * enforceNoClaude. Null when nothing in it has a key; the caller then plans on the build client, which
  * is the same tier's ladder anyway. Replaces grokPlanRunner (2026-09-14): Grok is the judge now.
  */
-function tierPlanRunner(
-  level: PowerLevel | string | boolean | null | undefined,
-  noClaude: boolean,
-  hooks: Pick<MultiProviderOptions, 'onProviderUsed' | 'onProviderError' | 'onProviderBenched' | 'bench'> = {},
-): TurnRunner | null {
+function tierPlanRunner(level: PowerLevel | string | boolean | null | undefined, noClaude: boolean): TurnRunner | null {
   try {
     const chain = enforceNoClaude(ladderRunners(planLadder(level)), noClaude);
     if (chain.length === 0) return null;
     return makeMultiProviderTurnRunner(chain, {
       onProviderError: (name, err) => console.log(`[AGENTV3] plan ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
-      ...hooks,
     });
   } catch {
     return null; // misconfigured — caller falls back to the normal build client
@@ -9633,6 +9665,19 @@ async function noteBuildOutcome(
   });
 
   // Build entry — runs the native tool-use loop and streams events as NDJSON.
+  // THE FEATURE LIST, SHOWN BEFORE A FRESH BUILD (admin 2026-09-26). Deterministic: the same two lists
+  // the build would restate to the builder (see featurePlan.ts) — no model call, no workspace, nothing
+  // written. The client shows them as a card; the answer comes back on the build as `confirmedFeatures`.
+  app.post('/api/agentv3/feature-plan', workspaceRateLimiter(), (req: Request, res: Response) => {
+    const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim().slice(0, 20_000) : '';
+    try {
+      res.json(featurePlanFor(prompt, { requirementAware: requirementAwareBuildEnabled() }));
+    } catch {
+      // A card we cannot compute is a card we do not show — never a blocked build.
+      res.json({ show: false, named: [], suggested: [], domain: 'general' });
+    }
+  });
+
   app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     // SECURITY (C1): identity from the VERIFIED token only — never the client-claimed body.userId.
     // Runs before flushHeaders(), so a reject is a clean HTTP 401 (no stream started yet). Skipped
@@ -13052,6 +13097,21 @@ async function noteBuildOutcome(
         onProviderBenched: recordProviderBenched,
         onAttemptWasted: recordAttemptWasted,
       });
+      // The PLANNERS' runner — roadmap, blueprint, Project Mode. Same memory and callbacks as the fast
+      // text runner above; only the ladder differs (see `plan` in buildTurnRunner). Repairs stay on the
+      // build ladder: they rewrite code, which is the work that ladder is ordered for.
+      const makePlanTextRunner = (onUsed?: (used: string) => void): TurnRunner => buildTurnRunner({
+        tier: powerLevelReqEffective,
+        noClaude: noClaudeBuild,
+        plan: true,
+        deadRungs: fastLaneDeadRungs,
+        bench: buildBench,
+        onProviderUsed: (used) => { try { onUsed?.(used); } catch { /* caller callback best-effort */ } captureProvider(used); },
+        onTurnComplete: captureShadowUsage,
+        onProviderError: recordProviderFallback,
+        onProviderBenched: recordProviderBenched,
+        onAttemptWasted: recordAttemptWasted,
+      });
       const client = buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
@@ -13151,26 +13211,8 @@ async function noteBuildOutcome(
           }
           if (scope.decision === 'analyze' && !dispute) {
             const rmStartedAt = Date.now();
-            let rmProvider = 'CLAUDE';
-            // Whether any provider actually answered — see fastLaneCallIdentity (autopsy eed79815).
-            let rmReported = false;
-            // 🧭 THE ROADMAP IS A PLAN, SO IT RUNS ON THE PLAN RUNG (admin chose "A", 2026-09-26, autopsy
-            // 7d79254b). It used to take the BUILD chain, which `complex: buildIsComplex` opens on KIMI —
-            // an always-reasoning rung — so a large app waited 76 s (4,574 output tokens) before its
-            // first file. The roadmap is one text-only call that decides the build's steps, i.e. the
-            // same shape as the plan phase, so it now asks the same runner (`tierPlanRunner` →
-            // `planLadder`: the tier's plan rung first, then its own ladder, same no-Claude guard).
-            // The BUILD itself still opens on KIMI for a complex app — only this planner moved.
-            // `AGENTV3_PLANNER_PLAN_RUNG=off` restores the build chain with no deploy.
-            const rmPlanRunner = plannerPlanRungEnabled()
-              ? tierPlanRunner(powerLevelReqEffective, noClaudeBuild, {
-                onProviderUsed: (used) => { rmProvider = used; rmReported = true; captureProvider(used); },
-                onProviderError: recordProviderFallback,
-                onProviderBenched: recordProviderBenched,
-                bench: buildBench,
-              })
-              : null;
-            const rmCall = (rmPlanRunner ?? makeFastTextRunner((used) => { rmProvider = used; rmReported = true; })).runTurn({
+            let rmProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
+            const rmCall = makePlanTextRunner((used) => { rmProvider = used; }).runTurn({
               model: fastBuildModel(),
               system: megaRoadmapSystemPrompt(),
               messages: [{ role: 'user', content: megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals) }],
@@ -13193,7 +13235,7 @@ async function noteBuildOutcome(
               rmT = await Promise.race([rmCall, rmTimeout]);
             } catch (err) {
               try {
-                const who = fastLaneCallIdentity(rmReported, rmProvider, fastBuildModel());
+                const who = plannerCallLabel(rmProvider, fastLaneProviderLabel, fastBuildModel());
                 buildDiag.recordLlmCall({ model: who.model, provider: who.provider, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - rmStartedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
                 buildDiag.record({
                   phase: 'plan', severity: 'info', code: 'MEGA_ROADMAP_FAILED',
@@ -14924,8 +14966,8 @@ async function noteBuildOutcome(
           const bpGenerate = async (system: string, user: string): Promise<string> => {
             const startedAt = Date.now();
             // Cheap-floor-first like every other build text call (admin 2026-07-11 — no direct-Sonnet path).
-            let bpProvider = 'CLAUDE';
-            const call = makeFastTextRunner((used) => { bpProvider = used; }).runTurn({
+            let bpProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
+            const call = makePlanTextRunner((used) => { bpProvider = used; }).runTurn({
               model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 6000,
             });
             // Hard timeout so an up-front step can NEVER hang the build (the losing call is ignored).
@@ -15280,12 +15322,20 @@ async function noteBuildOutcome(
               // requested features or tells the build to stop (TaskForge autopsy 2026-07-18);
               // the genuine "too big for one turn" case is owned by the step-limit auto-resume.
               const health = checkpoint.quickCheck(events);
+              // 🔴 NO RECOVERY FOLLOWS THIS, SO THE USER IS NOT TOLD ONE DOES (autopsy SignBridge,
+              // 2026-09-26). It used to narrate "⚠️ Build health check detected issues — preparing
+              // recovery…" — and nothing anywhere prepares or performs a recovery on this signal. On that
+              // report it fired on an app already verified working, because the post-build reviewer had
+              // three reads in flight at once and the heuristic counts a call in flight as stuck. A status
+              // line must reflect real state (second absolute rule); this one described a process that
+              // does not exist. It is now what it always was: an admin-only observation.
               if (!health.ok && health.broken) {
-                events.emit({
-                  type: 'narration', agent: 'architect',
-                  text: '⚠️ Build health check detected issues — preparing recovery…',
-                  ts: Date.now(),
-                });
+                try {
+                  buildDiag.record({
+                    phase: 'build', severity: 'info', code: 'CHECKPOINT_SIGNAL', autoResolved: true,
+                    message: 'The periodic build checkpoint saw a recent tool error or calls still in flight. Observation only — nothing acts on it.',
+                  });
+                } catch { /* diagnostics best-effort */ }
               }
             }
           }
@@ -15315,6 +15365,16 @@ async function noteBuildOutcome(
       // "text reply > build app" rule) — the build just comes out richer. Only fires for a new build (never an
       // edit) of a detected domain with genuinely-missing features; a clear/generic prompt yields '' guidance,
       // and with the flag off this whole block is inert, leaving buildPrompt byte-identical to today.
+      // The user's answer to the feature card, if they saw one — checked against the SAME lists the card
+      // was drawn from, so only labels we offered can come back (featurePlan.ts). null ⇒ no card was
+      // answered and every line below behaves exactly as before.
+      const featureLists = featureListsFor(prompt, { requirementAware: requirementAwareBuildEnabled() });
+      const featureConfirmation = (() => {
+        try { return sanitizeConfirmation(req.body?.confirmedFeatures, featureLists); } catch { return null; }
+      })();
+      // What the user unticked is not graded by the completeness audit either — otherwise the builder would
+      // be told to add it back.
+      dispatcher.setDeclinedFeatures(declinedLabels(featureConfirmation));
       if (requirementAwareBuildEnabled() && intent === 'new_build' && !isEditMode) {
         try {
           // The second argument answers "did the user ask for an app to be PRODUCED?" — a DIFFERENT
@@ -15323,7 +15383,11 @@ async function noteBuildOutcome(
           // to new_build and was handed a recruitment-ATS feature list to INCLUDE. The domain half is
           // now withheld unless an app was genuinely asked for; the India half is unaffected.
           const askedForAnApp = userAskedForAnAppToBeBuilt(prompt);
-          const reqGuidance = buildRequirementGuidance(analyzeRequirementGaps(prompt), {
+          // A user who answered the feature card has already accepted or declined every suggestion;
+          // the "include these by default" half must not re-add the declined ones behind their back.
+          const answered = domainGuidanceStandsDown(featureConfirmation);
+          const gaps = analyzeRequirementGaps(prompt);
+          const reqGuidance = buildRequirementGuidance(answered ? { ...gaps, likelyMissing: [] } : gaps, {
             userAskedForAnApp: askedForAnApp,
           });
           if (reqGuidance) buildPrompt = `${reqGuidance}\n\n---\n\n${buildPrompt}`;
@@ -15333,7 +15397,7 @@ async function noteBuildOutcome(
           // nobody enumerated — and ONLY there: a listed domain returns `listed` and is skipped here,
           // so every existing build prompt is byte-identical. It never asks a question (the 2026-07-20
           // friction-free decision is untouched); it only names what such an app usually needs.
-          if (!reqGuidance && askedForAnApp) {
+          if (!reqGuidance && askedForAnApp && !answered) {
             const learned = await learnDomain(prompt);
             if (learned && learned.source === 'generated') {
               buildPrompt = [
@@ -15365,7 +15429,7 @@ async function noteBuildOutcome(
       // what the user themselves said, and only features the end-of-build audit will grade. A request
       // naming no known surface yields '' and leaves buildPrompt byte-identical.
       try {
-        const contract = renderRequestedFeatureContract(requestedFeatureLabels(prompt));
+        const contract = renderRequestedFeatureContract(confirmedContractLabels(featureLists, featureConfirmation));
         if (contract) buildPrompt = `${contract}\n\n---\n\n${buildPrompt}`;
       } catch { /* the contract is best-effort — a fault here must never affect the build */ }
 
@@ -15781,26 +15845,8 @@ async function noteBuildOutcome(
           const ppTimeoutMs = projectPlannerTimeoutMs();
           const ppGenerate = async (system: string, user: string): Promise<string> => {
             const startedAt = Date.now();
-            let ppProvider = 'CLAUDE';
-            // Whether any provider actually answered. A planner that timed out on a weak build used to
-            // be recorded as a failed `anthropic / claude-sonnet-4-6` call because `ppProvider` never
-            // left its initialiser (autopsy eed79815) — the class fastLaneCallIdentity already closed
-            // for the fast lane (build 1ef27cd7), never hunted into the planners.
-            let ppReported = false;
-            // 🧭 A PLAN RUNS ON THE PLAN RUNG (autopsy eed79815). This call is the project decomposition —
-            // text only, input-heavy, the same shape as the roadmap planner the admin moved to the plan
-            // rung ("A") the same day. On the build chain a complex prompt opened it on KIMI, which spent
-            // its whole allowance reasoning (122 s), then GLM did the same (172 s), and the planner timed
-            // out at 315 s before the build wrote a line. `AGENTV3_PLANNER_PLAN_RUNG=off` reverts it.
-            const ppRunner = (plannerPlanRungEnabled()
-              ? tierPlanRunner(powerLevelReqEffective, noClaudeBuild, {
-                onProviderUsed: (used) => { ppProvider = used; ppReported = true; captureProvider(used); },
-                onProviderError: recordProviderFallback,
-                onProviderBenched: recordProviderBenched,
-                bench: buildBench,
-              })
-              : null) ?? makeFastTextRunner((used) => { ppProvider = used; ppReported = true; });
-            const call = ppRunner.runTurn({
+            let ppProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
+            const call = makePlanTextRunner((used) => { ppProvider = used; }).runTurn({
               model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
             });
             let ppTimer: ReturnType<typeof setTimeout> | undefined;
@@ -15812,7 +15858,7 @@ async function noteBuildOutcome(
               // A planner call that failed is a model call that failed — it belongs on the same ledger
               // as every other one, or the report cannot say whether the key was working at all.
               try {
-                const who = fastLaneCallIdentity(ppReported, ppProvider, fastBuildModel());
+                const who = plannerCallLabel(ppProvider, fastLaneProviderLabel, fastBuildModel());
                 buildDiag.recordLlmCall({ model: who.model, provider: who.provider, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
               } catch { /* diagnostics best-effort */ }
               throw err;
@@ -17631,9 +17677,10 @@ async function noteBuildOutcome(
           for (const inj of wired.injected) {
             const newEntry = wired.files[inj.entry];
             if (typeof newEntry === 'string') {
-              integrityFiles[inj.entry] = newEntry;
-              writtenFiles.set(inj.entry, newEntry);
-              try { await actuator.writeFile(workspaceId, inj.entry, newEntry); } catch { /* sandbox write best-effort — the store copy is fixed */ }
+              if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, inj.entry, newEntry))) {
+                integrityFiles[inj.entry] = newEntry;
+                writtenFiles.set(inj.entry, newEntry);
+              }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_CSS_WIRED', message: `"${inj.stylesheet}" was imported by NOTHING (app would render unstyled) — injected its import into ${inj.entry}.`, autoResolved: true });
             }
           }
@@ -17659,9 +17706,11 @@ async function noteBuildOutcome(
           if (env.wired) {
             const patched = env.files[env.wired.entry];
             if (typeof patched === 'string') {
-              integrityFiles[env.wired.entry] = patched;
-              writtenFiles.set(env.wired.entry, patched);
-              try { await actuator.writeFile(workspaceId, env.wired.entry, patched); } catch { /* sandbox write best-effort — the store copy is fixed */ }
+              const entry = env.wired.entry;
+              if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, entry, patched))) {
+                integrityFiles[entry] = patched;
+                writtenFiles.set(entry, patched);
+              }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'ENV_LOADING_WIRED', message: dotenvWiringMessage(env.wired), autoResolved: true });
             }
           }
@@ -17675,10 +17724,12 @@ async function noteBuildOutcome(
         if (process.env.AGENTV3_VITE_ENV_TYPES !== 'off' && !isImportTurn) {
           const dts = missingViteEnvTypes(integrityFiles);
           if (dts) {
-            integrityFiles[dts.path] = dts.content;
-            writtenFiles.set(dts.path, dts.content);
-            try { await actuator.writeFile(workspaceId, dts.path, dts.content); } catch { /* sandbox write best-effort — the store copy is fixed */ }
-            buildDiag.record({ phase: 'build', severity: 'info', code: 'VITE_ENV_TYPES_ADDED', message: viteEnvTypesNote(), autoResolved: true });
+            if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, dts.path, dts.content))) {
+              integrityFiles[dts.path] = dts.content;
+              writtenFiles.set(dts.path, dts.content);
+              // Said only when it landed — a freeze-refused file was not added.
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'VITE_ENV_TYPES_ADDED', message: viteEnvTypesNote(), autoResolved: true });
+            }
           }
         }
         // CREDENTIAL-IN-LOGS — deterministic redaction (SaaS-dashboard autopsy 2026-07-22). The readiness
@@ -17705,9 +17756,10 @@ async function noteBuildOutcome(
             for (const r of redacted.redactions) {
               const newContent = redacted.files[r.file];
               if (typeof newContent !== 'string' || newContent === integrityFiles[r.file]) continue;
-              integrityFiles[r.file] = newContent;
-              writtenFiles.set(r.file, newContent);
-              try { await actuator.writeFile(workspaceId, r.file, newContent); } catch { /* sandbox write best-effort — the store copy is fixed */ }
+              if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, r.file, newContent))) {
+                integrityFiles[r.file] = newContent;
+                writtenFiles.set(r.file, newContent);
+              }
             }
             if (redacted.redactions.length > 0) {
               const files = [...new Set(redacted.redactions.map((r) => r.file))];
@@ -18078,9 +18130,10 @@ async function noteBuildOutcome(
                 const repaired = repairLostEscapes(integrityFiles);
                 if (repaired.repairs.length > 0) {
                   for (const [path, content] of Object.entries(repaired.files)) {
-                    integrityFiles[path] = content;
-                    writtenFiles.set(path, content);
-                    try { await actuator.writeFile(workspaceId, path, content); } catch { /* sandbox write best-effort — the store copy is fixed */ }
+                    if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, path, content))) {
+                      integrityFiles[path] = content;
+                      writtenFiles.set(path, content);
+                    }
                   }
                   buildDiag.record({ phase: 'build', severity: 'info', code: 'SCRIPT_INTEGRITY_REPAIRED', message: scriptRepairSummary(repaired.repairs), autoResolved: true });
                 }
@@ -18161,8 +18214,12 @@ async function noteBuildOutcome(
                 // at runtime is caught later by the preview check and reported, not reverted.
                 const beforeHeal = { ...Object.fromEntries(writtenFiles) };
                 const brokenBefore = (await findSyntaxErrors(beforeHeal).catch(() => [])).map((e) => e.path);
+                // The accessibility failures in the same app ride THIS pass (autopsy SignBridge): a
+                // deterministic re-lint, no extra model call, and only when a repair is running anyway.
+                const a11yBefore = projectHasUserCode(beforeHeal) ? lintBuiltApp(beforeHeal) : null;
+                const a11yAsk = a11yRepairAddendum(a11yBefore);
                 const healed = await runInPass('design-consistency-heal', () => designRunner.run(
-                  `The app is built and compiles. ${designRepairInstruction(design)}`,
+                  `The app is built and compiles. ${designRepairInstruction(design)}${a11yAsk}`,
                 ));
                 try {
                   const afterHeal = Object.fromEntries(writtenFiles);
@@ -18197,6 +18254,19 @@ async function noteBuildOutcome(
                       : `Design repair improved ${design.findings.length - after.findings.length} of ${design.findings.length} page(s); ${after.findings.length} still fall short.`,
                     autoResolved: after.ok,
                   });
+                  if (a11yAsk) {
+                    // The earlier ACCESSIBILITY line describes the app BEFORE this repair; say what is
+                    // true now, either way, rather than leave a fixed finding standing or a failed one hidden.
+                    const a11yAfter = lintBuiltApp(Object.fromEntries(writtenFiles));
+                    const left = a11yAfter?.a11y.violations.length ?? 0;
+                    buildDiag.record({
+                      phase: 'build',
+                      severity: left === 0 ? 'info' : 'warning',
+                      code: left === 0 ? 'ACCESSIBILITY_HEALED' : 'ACCESSIBILITY_PARTIALLY_HEALED',
+                      message: a11yAfter ? `After the repair: ${a11yLintSummary(a11yAfter)}` : 'After the repair: nothing lintable was found.',
+                      autoResolved: left === 0,
+                    });
+                  }
                 }
               } catch { /* design repair is best-effort — the honest warnings stand */ }
             }
@@ -18968,10 +19038,10 @@ async function noteBuildOutcome(
             for (const path of fixedPaths) {
               const stripped = stripCollidingAmbientShims(projectNow[path]);
               if (stripped.source === projectNow[path]) continue;
+              if (!(await writeUnlessFrozen(() => actuator.writeFile(workspaceId, path, stripped.source)))) continue;
               projectNow[path] = stripped.source;
               writtenFiles.set(path, stripped.source);
               noteFinishingWrite(path);
-              try { await actuator.writeFile(workspaceId, path, stripped.source); } catch { /* store copy is fixed */ }
             }
             if (shims.length > 0) {
               buildDiag.record({
@@ -19069,7 +19139,7 @@ async function noteBuildOutcome(
           });
           if (scaffolded.length > 0) {
             await saveWorkspaceFiles(workspaceId, Object.fromEntries(scaffolded.map((p) => [p, writtenFiles.get(p) as string]))).catch(() => {});
-            events.emit({ type: 'narration', agent: 'architect', text: `🧪 Scaffolded ${scaffolded.length} starter test${scaffolded.length > 1 ? 's' : ''} (${scaffolded.join(', ')}) — runnable Vitest skeletons with TODO markers for you to fill in real assertions.`, ts: Date.now() });
+            events.emit({ type: 'narration', agent: 'architect', text: starterTestsNarration(scaffolded, pkgForTests), ts: Date.now() });
           }
         }
       } catch { /* auto-test scaffolding is best-effort — never affects the build result */ }
@@ -19350,7 +19420,7 @@ async function noteBuildOutcome(
             // FEATURE_COVERAGE finding in the report (present vs missing); it NEVER blocks a build (a
             // heuristic must never false-fail a working app). Auto-fixing the gaps is the next slice.
             try {
-              let coverage = checkFeaturePresence(prompt, html);
+              let coverage = checkFeaturePresence(prompt, html, declinedPresenceFeatures(featureConfirmation));
               // APP HEALTH CULTURE slice 2 (Phase 1b, opt-in AGENTV3_FEATURE_HEAL=on): the app renders
               // but a REQUESTED control is missing → run ONE bounded heal pass that adds the missing UI,
               // then re-open the running app and re-probe (only a control now in the live DOM counts).
@@ -19397,7 +19467,7 @@ async function noteBuildOutcome(
                     if (vr.kept && healResult?.ok) {
                       result = healResult as typeof result;
                       if (afterHtml) {
-                        const afterCoverage = checkFeaturePresence(prompt, afterHtml);
+                        const afterCoverage = checkFeaturePresence(prompt, afterHtml, declinedPresenceFeatures(featureConfirmation));
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
                       }
                     }
@@ -19407,7 +19477,7 @@ async function noteBuildOutcome(
                       result = healed;
                       try {
                         const after = (await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl')).html;
-                        const afterCoverage = checkFeaturePresence(prompt, after);
+                        const afterCoverage = checkFeaturePresence(prompt, after, declinedPresenceFeatures(featureConfirmation));
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
                       } catch { /* re-open best-effort — keep the pre-heal coverage */ }
                     }
@@ -19637,7 +19707,9 @@ async function noteBuildOutcome(
             };
             // Only when the browser really returned results — an empty parse means the script never
             // produced a line, which is "we do not know", not "every page is fine".
-            if (pageResults.length > 0) gateEvidence.pages = pageSummary.ok ? 'passed' : 'failed';
+            // `ran`, not merely "some lines came back": a check whose every route REDIRECTED returned lines and
+            // proved nothing, so it must not reach the gate as a pass (autopsy SignBridge, 2026-09-26).
+            if (pageSummary.ran) gateEvidence.pages = pageSummary.ok ? 'passed' : 'failed';
             // §17/§26 — accessibility and performance were already measured here and already printed,
             // and had no bearing on the verdict. They now cost GREEN (never RED — see QualitySignals).
             gateQuality.a11yIssues = a11yIssueCount(pageResults);
@@ -20954,8 +21026,13 @@ async function noteBuildOutcome(
               // `REVIEW_PARTIAL` recovered real findings from the narration. Both DELIVERED something,
               // so both stay billable — "we walked away from it" is not the same fact as "it produced
               // nothing", and only the second is a reason to hand money back.
+              // On a PROVEN-GREEN app the review is suggest-only (greenReviewPlan): whatever it would have
+              // said was an offer, never a repair. Its timing out is a fact about OUR process, so it is not
+              // filed as an unresolved warning against a working app (autopsy SignBridge, 2026-09-26, where
+              // it sat in the app's problem list). Where the review could have REPAIRED, it stays a warning.
+              const suggestOnly = reviewPlan.mode === 'suggest';
               barrenPhases.add(PHASE_POST_BUILD_REVIEW);
-              try { buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${rFiles.length} files — its completeness findings are NOT available for this build` : 'Post-build review errored — its completeness findings are NOT available for this build', autoResolved: false }); } catch { /* best-effort */ }
+              try { buildDiag.record({ phase: 'build', severity: suggestOnly ? 'info' : 'warning', code: suggestOnly ? 'REVIEW_SUGGESTIONS_NOT_READY' : 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${rFiles.length} files — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build` : `Post-build review errored — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build`, autoResolved: suggestOnly }); } catch { /* best-effort */ }
               review = null;
             }
           } finally {

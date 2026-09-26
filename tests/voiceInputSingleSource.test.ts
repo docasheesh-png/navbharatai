@@ -21,6 +21,13 @@ const SRC = fileURLToPath(new URL('../src', import.meta.url));
 /** The three modules that are ALLOWED to know how speech recognition works. */
 const OWNERS = ['hooks/useSpeechInput.ts', 'lib/speechTranscript.ts', 'lib/voiceInput.ts'];
 
+/**
+ * Server files that NAME the API without running it. `tscErrorCause.ts` explains to the build engine why
+ * `webkitSpeechRecognition` does not typecheck in a USER's app (autopsy SignBridge, 2026-09-26) — it is
+ * advice text and a regex over compiler output, and no browser ever runs it.
+ */
+const NAMES_WITHOUT_RUNNING = ['server/AgentV3/tscErrorCause.ts'];
+
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
@@ -35,7 +42,7 @@ const codeOnly = (s: string) =>
   s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\/\/.*$/gm, '');
 
 const files = walk(SRC)
-  .filter((f) => !OWNERS.some((o) => f.endsWith(o.replace(/\//g, require('path').sep)) || f.endsWith(o)))
+  .filter((f) => ![...OWNERS, ...NAMES_WITHOUT_RUNNING].some((o) => f.endsWith(o.replace(/\//g, require('path').sep)) || f.endsWith(o)))
   .map((f) => ({ path: f.slice(SRC.length + 1), code: codeOnly(readFileSync(f, 'utf8')) }));
 
 describe('🔒 only the shared hook may construct a recogniser', () => {

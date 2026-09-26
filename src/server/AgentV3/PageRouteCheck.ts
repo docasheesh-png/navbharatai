@@ -71,6 +71,14 @@ export const SETTLE_TIMEOUT_MS = 3_000;
 export function extractPageRoutes(files: Record<string, string> | null | undefined): string[] {
   const map = files && typeof files === 'object' ? files : {};
   const found = new Set<string>();
+  // 🔴 A `pages/` FOLDER IS A ROUTE TABLE ONLY IN NEXT (autopsy SignBridge, 2026-09-26). A Vite + React
+  // Router app keeps its screens in `src/pages/ChatPage.tsx` and serves them at `/chat`; reading that
+  // folder as Next's Pages Router invented `/ChatPage`, `/MapPage` … — URLs the app does not serve, which
+  // its catch-all redirected HOME. And because uppercase sorts before lowercase, the six invented paths
+  // filled all six slots and pushed the real routes out. The report then said "All 6 page routes opened
+  // in a browser and rendered" about six addresses that were never pages. So the convention applies only
+  // where it is real: a project that is Next, or one that shows no sign of being anything else.
+  const nextPagesRouter = pagesFolderIsRouteTable(map);
 
   const add = (raw: string): void => {
     let p = String(raw || '').trim();
@@ -102,13 +110,39 @@ export function extractPageRoutes(files: Record<string, string> | null | undefin
     }
 
     // Next Pages Router. `api/` is not a page, and `_app`/`_document` are not routes.
-    const pagesRoute = /(?:^|\/)pages\/(.+)\.(?:t|j)sx?$/.exec(path);
+    const pagesRoute = nextPagesRouter ? /(?:^|\/)pages\/(.+)\.(?:t|j)sx?$/.exec(path) : null;
     if (pagesRoute && !/^api\//.test(pagesRoute[1]) && !/(^|\/)_/.test(pagesRoute[1])) {
       add('/' + pagesRoute[1].replace(/\/?index$/, ''));
     }
   }
 
   return Array.from(found).sort().slice(0, MAX_PAGE_ROUTES);
+}
+
+/**
+ * Is this project's `pages/` folder a ROUTE TABLE (Next's Pages Router), or just where it keeps screens?
+ *
+ * Next ⇒ yes. Anything that is visibly NOT Next — a package.json without `next`, a Vite config, or its own
+ * `<Route path>` declarations — ⇒ no: in those apps a page file's name is a component name, never a URL.
+ * With no evidence either way (a bare file map) the old reading stands, so nothing that worked before is
+ * lost. PURE.
+ */
+export function pagesFolderIsRouteTable(files: Record<string, string>): boolean {
+  let sawManifest = false;
+  for (const [path, content] of Object.entries(files)) {
+    if (/(^|\/)node_modules\//.test(path)) continue;
+    if (/(^|\/)next\.config\.(js|cjs|mjs|ts)$/.test(path)) return true;
+    if (/(^|\/)package\.json$/.test(path)) {
+      if (/"next"\s*:/.test(String(content ?? ''))) return true;
+      sawManifest = true;
+    }
+  }
+  if (sawManifest) return false;
+  for (const [path, content] of Object.entries(files)) {
+    if (/(^|\/)vite\.config\.(js|cjs|mjs|ts)$/.test(path)) return false;
+    if (/\.(t|j)sx$/.test(path) && /<Route\b[^>]*\bpath\s*=/.test(String(content ?? ''))) return false;
+  }
+  return true;
 }
 
 /**
@@ -140,7 +174,7 @@ const base = ${JSON.stringify(base)};
 const routes = ${list};
 const browser = await chromium.launch({ args: ['--no-sandbox'] });
 for (const route of routes) {
-  const out = { route, status: null, text: 0, errors: [], settled: false, vitals: null, a11y: [] };
+  const out = { route, status: null, text: 0, errors: [], settled: false, vitals: null, a11y: [], finalPath: null };
   const page = await browser.newPage();
   page.on('pageerror', (e) => { if (out.errors.length < 3) out.errors.push(String(e.message).slice(0, 200)); });
   page.on('console', (m) => { if (m.type() === 'error' && out.errors.length < 3) out.errors.push(String(m.text()).slice(0, 200)); });
@@ -155,6 +189,9 @@ for (const route of routes) {
     // so in practice this is often FASTER than the fixed wait it replaced.
     out.settled = await page.waitForLoadState('networkidle', { timeout: ${SETTLE_TIMEOUT_MS} }).then(() => true).catch(() => false);
     await page.waitForTimeout(300);
+    // WHERE THE BROWSER ENDED UP. A route the app does not serve is usually caught by a catch-all that
+    // sends it HOME — which paints, and would otherwise be reported as this route rendering.
+    try { out.finalPath = new URL(page.url()).pathname; } catch (err) { /* unknown is simply not recorded */ }
     out.text = await page.evaluate(() => (document.body ? document.body.innerText.trim().length : 0));
     // Real Web Vitals, read from the page itself — no Lighthouse, no extra navigation, no dependency.
     // buffered:true hands us the entries that already happened before we started observing.
@@ -201,7 +238,7 @@ NBAI_EOF
 ${browserScriptRunLine({ toolsDir: TOOLS_DIR, scriptPath: '/tmp/nbai-pagecheck.mjs', marker: PAGE_RESULT_MARKER })}`;
 }
 
-export type PageVerdict = 'ok' | 'blank' | 'server-error' | 'script-error' | 'unreachable';
+export type PageVerdict = 'ok' | 'blank' | 'server-error' | 'script-error' | 'unreachable' | 'redirected';
 
 /** What the page reported about itself. Absent when the browser could not measure it. */
 export interface PageVitals {
@@ -238,8 +275,15 @@ export interface PageResult {
  * errors"; and console errors on a page that DID render are worth reporting but are not a broken page —
  * calling them one would fail apps that log a warning, i.e. most of them. PURE.
  */
-export function classifyPage(r: { route: string; status: number | null; text: number; errors: string[] }): PageResult {
+export function classifyPage(r: { route: string; status: number | null; text: number; errors: string[]; finalPath?: string | null }): PageResult {
   const base = { route: r.route, status: r.status, text: r.text, errors: r.errors };
+  // A page the browser was sent AWAY from was not shown. Whatever painted belongs to somewhere else, so it
+  // proves nothing about this route — neither that it works nor that it is broken (a login redirect is a
+  // working app). Checked before everything else: a redirect's status and text describe the destination.
+  const norm = (p: string) => (p.replace(/\/+$/, '') || '/');
+  if (typeof r.finalPath === 'string' && r.finalPath && r.status !== null && norm(r.finalPath) !== norm(r.route)) {
+    return { ...base, verdict: 'redirected', note: `${r.route} redirected to ${norm(r.finalPath)} — that page itself was not shown, so it is not counted` };
+  }
   if (r.status === null) {
     return { ...base, verdict: 'unreachable', note: `${r.route} could not be opened at all${r.errors[0] ? ` (${r.errors[0]})` : ''}` };
   }
@@ -294,7 +338,7 @@ export function parsePageCheck(stdout: string | null | undefined): PageResult[] 
     const at = line.indexOf(PAGE_RESULT_MARKER);
     if (at < 0) continue;
     try {
-      const raw = JSON.parse(line.slice(at + PAGE_RESULT_MARKER.length)) as { route?: unknown; status?: unknown; text?: unknown; errors?: unknown; settled?: unknown; vitals?: unknown; a11y?: unknown };
+      const raw = JSON.parse(line.slice(at + PAGE_RESULT_MARKER.length)) as { route?: unknown; status?: unknown; text?: unknown; errors?: unknown; settled?: unknown; vitals?: unknown; a11y?: unknown; finalPath?: unknown };
       if (typeof raw.route !== 'string' || !raw.route) continue;
       const rv = raw.vitals as { lcp?: unknown; cls?: unknown; ttfb?: unknown } | null | undefined;
       out.push({
@@ -303,6 +347,7 @@ export function parsePageCheck(stdout: string | null | undefined): PageResult[] 
           status: typeof raw.status === 'number' ? raw.status : null,
           text: typeof raw.text === 'number' ? raw.text : 0,
           errors: Array.isArray(raw.errors) ? raw.errors.filter((e): e is string => typeof e === 'string') : [],
+          finalPath: typeof raw.finalPath === 'string' ? raw.finalPath : null,
         }),
         settled: raw.settled === true,
         a11y: Array.isArray(raw.a11y)
@@ -415,7 +460,22 @@ export function summarizePageCheck(
       // false so it can never be coded as evidence the pages work.
       : { ok: true, ran: false, summary: 'No additional page routes were found to check.' };
   }
-  const bad = results.filter((r) => r.verdict !== 'ok');
+  // A REDIRECTED route is neither a pass nor a failure — see classifyPage. It is set aside and named, and
+  // when EVERY route redirected the check proved nothing at all, so it did not run in any sense that
+  // counts: `ran: false`, never "All N page routes rendered".
+  const redirected = results.filter((r) => r.verdict === 'redirected');
+  const moved = redirected.length > 0
+    ? ` ${redirected.length} route${redirected.length === 1 ? '' : 's'} redirected elsewhere and ${redirected.length === 1 ? 'was' : 'were'} not counted (${redirected.map((r) => r.note).join('; ')}).`
+    : '';
+  if (redirected.length === results.length) {
+    return {
+      ok: true,
+      ran: false,
+      summary: `Every page route checked redirected somewhere else, so no page itself was shown and nothing about those pages was verified.${moved}`,
+    };
+  }
+  const counted = results.filter((r) => r.verdict !== 'redirected');
+  const bad = counted.filter((r) => r.verdict !== 'ok');
   // Performance is reported ALONGSIDE the render verdict, never as one: a slow page still renders, and
   // failing a build over a number measured on a 2-vCPU sandbox would be a false alarm about a fine app.
   const slow = results.map((r) => ({ route: r.route, v: vitalsVerdict(r) })).filter((x) => x.v.poor.length > 0);
@@ -426,11 +486,11 @@ export function summarizePageCheck(
   // still rendered, and failing a build over it would be a false alarm about a working app.
   const a11y = a11ySummary(results);
   if (bad.length === 0) {
-    return { ok: true, ran: true, summary: `All ${results.length} page route${results.length === 1 ? '' : 's'} opened in a browser and rendered.${perf}${a11y}` };
+    return { ok: true, ran: true, summary: `All ${counted.length} page route${counted.length === 1 ? '' : 's'} opened in a browser and rendered.${moved}${perf}${a11y}` };
   }
   return {
     ok: false,
     ran: true,
-    summary: `${bad.length} of ${results.length} page route${results.length === 1 ? '' : 's'} did not render correctly: ${bad.map((r) => r.note).join('; ')}.${perf}${a11y}`,
+    summary: `${bad.length} of ${counted.length} page route${counted.length === 1 ? '' : 's'} did not render correctly: ${bad.map((r) => r.note).join('; ')}.${moved}${perf}${a11y}`,
   };
 }

@@ -191,6 +191,25 @@ export function testSkeletonsCanRun(packageJson: string | null | undefined): boo
  * config's text. PRECISION-FIRST in the safe direction: anything not recognised as safe is unsafe,
  * because a missing skeleton costs nothing and a broken release build costs the user the app. Pure.
  */
+/**
+ * What the user is told about the skeletons just written. "Runnable" only when the project really
+ * declares vitest — otherwise the one command that makes them run (autopsy SignBridge, 2026-09-26: the
+ * user read "runnable Vitest skeletons" about files that import a package the project does not have).
+ * PURE.
+ */
+export function starterTestsNarration(paths: readonly string[], packageJson: string | null | undefined): string {
+  const n = paths.length;
+  const list = `${n} starter test${n > 1 ? 's' : ''} (${paths.join(', ')})`;
+  let declared = false;
+  try {
+    const pkg = JSON.parse(String(packageJson ?? '')) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+    declared = !!(pkg?.dependencies?.vitest || pkg?.devDependencies?.vitest);
+  } catch { declared = false; }
+  return declared
+    ? `🧪 Scaffolded ${list} — runnable Vitest skeletons with TODO markers for you to fill in real assertions.`
+    : `🧪 Scaffolded ${list} — Vitest skeletons with TODO markers for you to fill in. Vitest is not installed in this project yet; run \`npm install -D vitest\` and then \`npx vitest\` to run them.`;
+}
+
 export function buildTsconfigPath(packageJson: string | null | undefined): string | null {
   const script = buildScriptOf(packageJson);
   const m = script ? /\btsc\b[^&|;]*?(?:-p|--project)\s+(\S+)/.exec(script) : null;

@@ -322,6 +322,23 @@ const NON_DOMAIN_USES: RegExp[] = [
   /\bjobs?\s+(?:queue|runner|scheduler|id)\b/gi,
   // jobs — "resume the build", "resume from where you left off": continue, not a CV.
   /\bresumes?\s+(?:the|this|that|my|our|it|from|where|building|work|again)\b/gi,
+  // ANY domain — a CODE CALL written into the prompt is an identifier, never a noun. A spec that lists an
+  // API ("speak(text, language) stop() pause() resume()") read as a jobs app off `resume()` (autopsy
+  // SignBridge, 2026-09-26) — and the builder of a sign-language translator was told to INCLUDE employer
+  // roles, interview scheduling and an admin dashboard. The paren must touch the name (`cart (with
+  // checkout)` is prose), and the plural shorthand `product(s)` is prose too, so both are left alone.
+  /\b[A-Za-z_$][\w$]*\((?!e?s\))[^()\n]{0,80}\)/g,
+  // ecommerce — "store X locally / in IndexedDB / on the device" is PERSISTENCE, never a shop. Same
+  // report: "Store translation history locally" was the ecommerce signal.
+  /\bstor(?:e|es|ed|ing)\s+(?:[\w-]+\s+){1,4}?(?:locally|offline|on\s+(?:the\s+)?(?:device|phone|disk)|in\s+(?:local\s*storage|indexeddb|the\s+browser|an?\s+database|the\s+database|firestore|supabase|sqlite|memory))\b/gi,
+  // social — text on a screen is not a social network. "Use clear messages such as …", "clear status
+  // messages", "display messages as chat bubbles" (SignBridge again) describe copy and a visual style;
+  // posting, following and friends are what make a social app, and those keep their meaning.
+  /\b(?:error|status|clear|warning|success|compatibility|validation|toast|helpful|friendly|system|informative|confirmation|feedback|console|log|commit)\s+messages?\b/gi,
+  /\bmessages?\s+(?:such\s+as|like\s*:)/gi,
+  /\b(?:display|show|render)\s+(?:the\s+)?messages?\s+as\b/gi,
+  /\bchat[- ]bubbles?\b/gi,
+  /\bthe\s+following\b|\bas\s+follows\b/gi,
   // ecommerce — purpose, arithmetic, sorting, and "store" as the verb.
   /\bin\s+order\s+to\b/gi,
   /\border(?:ed|s)?\s+(?:by|alphabetically|ascending|descending)\b/gi,

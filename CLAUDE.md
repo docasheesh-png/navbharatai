@@ -4240,13 +4240,11 @@ and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; 
   `kimi-k2.7-code` ($0.95/$4.00) instead of `glm-4.7-flashx` ($0.07/$0.40) — ~13× the input price for
   THOSE builds. The bet is that a cheap rung which fails is paid twice, once in the wasted call and
   once in the heal. **Watch: the share of builds routed complex, and whether their heal count drops.**
-- 🗺️ **THE PLANNERS ARE THE ONE EXCEPTION, BY THE ADMIN'S CHOICE (2026-09-26, "A", autopsy
-  7d79254b). `AGENTV3_PLANNER_PLAN_RUNG` — ⚠️ NOT set; the code default is ON, and `off` reverts.**
-  The mega-roadmap call is a plan, so it runs on `tierPlanRunner` (the plan rung) instead of the
-  complex build chain, which had cost a large app 76 s of Kimi reasoning before its first file. **Its
-  sibling, the project-mode module planner, moved the same day (autopsy eed79815)**: on the build chain
-  KIMI and then GLM each spent their whole allowance thinking, and it timed out at 315 s before the build
-  wrote a line. One switch covers both. The build itself still opens on KIMI. ⚠️ On Weak, with
+- 🗺️ **THE PLANNERS ARE THE ONE EXCEPTION (admin chose "A", 2026-09-26, autopsy 7d79254b).** The
+  roadmap, blueprint and project-mode planners are plans, so they climb `planLadder` through
+  `makePlanTextRunner` (#3334) instead of the complex build chain — which had cost a large app 76 s of
+  Kimi reasoning before its first file, and a project decomposition 315 s and a timeout (autopsy
+  eed79815). There is no separate kill switch. The build itself still opens on KIMI. ⚠️ On Weak, with
   `AGENTV3_NEMOTRON=weak`, the plan rung is Nemotron Ultra — also a reasoning model, speed unmeasured.
 - 🔗 `healLadder` and this router share ONE definition of "the cheap opener"
   (`withoutCheapFlashLead`), applied by `buildTurnRunner` for `heal || complex`. They stay separate

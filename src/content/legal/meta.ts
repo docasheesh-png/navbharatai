@@ -34,7 +34,9 @@ export const LEGAL_META: LegalMeta[] = [
     id: 'legal_privacy',
     title: 'Privacy Policy',
     subtitle: 'What data we collect, why, where it lives, and your rights (DPDP Act)',
-    updated: '2 September 2026',
+    // Kept as a literal because this file must not import the policy BODY (see the header). The two
+    // dates are held equal by tests/appCheck.test.ts instead.
+    updated: '26 September 2026',
     settingsTile: true,
   },
   {

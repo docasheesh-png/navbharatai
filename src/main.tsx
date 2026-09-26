@@ -40,6 +40,7 @@ import { MobileEngagementGate } from './components/MobileEngagementGate';
 import { hasAnalyticsConsent, getConsent, CONSENT_EVENT } from './lib/consent';
 import { isChunkLoadError, shouldReloadForStaleChunk } from './lib/chunkReload';
 import { installNativeApiRewrite } from './lib/apiBase';
+import { installAppCheck } from './lib/appCheckClient';
 import { initMetaPixel, fetchPixelIdFromServer } from './lib/metaPixel';
 import { syncNativeMetaConsent, nativeMetaConsentGranted } from './lib/metaNativeConsent';
 import { installNativeShellPolish, loadNativeShellContext } from './lib/nativeShell';
@@ -131,6 +132,11 @@ window.addEventListener('vite:preloadError', () => recoverFromStaleChunk());
 // and in today's hosted shell (origin already correct). Must run early, before any component/library
 // makes its first API call.
 installNativeApiRewrite(window);
+
+// App Check (2026-09-26) — on the WEBSITE only, and only once the server publishes a site key: attaches a
+// short-lived "this is the real NavBharatAI app" token to the few requests that spend money. Never awaited
+// and never able to stop a request — see src/lib/appCheckClient.ts.
+void installAppCheck();
 
 // 8.6 PWA — register service worker, and AUTO-UPDATE: when a freshly deployed
 // service worker takes control, reload once so the user is never stuck on stale

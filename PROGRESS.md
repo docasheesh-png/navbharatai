@@ -81705,3 +81705,22 @@ Admin: *"100*4 ko chor ke sab hata do"*. Follows the backfill removal above, in 
 - Locked by `tests/theReferralLadderIsTheOnlyGift.test.ts`, which runs the real wallet route against an
   in-memory store (proven by reversion: a non-zero opening balance fails two cases) and also asserts
   the referral ladder, its routes, panel and admin card remain.
+
+## 2026-09-26 — App Check slice 1: website + server MONITOR on the money routes (admin: "App Check shuru karo")
+
+- **What shipped:** `src/server/lib/appCheck.ts` (verify + count, modes off/monitor/enforce, default monitor,
+  fail-open on verifier outage), `src/lib/appCheckRoutes.ts` (ONE guarded list, shared by client and
+  server), `src/lib/appCheckClient.ts` (website only; reCAPTCHA Enterprise provider; token attached to
+  guarded same-origin POSTs; 1.5 s cap; never stops a request), `GET /api/admin/app-check` (counts per
+  web/native), `appCheckSiteKey` on `/api/public-config`, privacy policy §3.3 + §7 disclosure (date
+  26 Sep 2026, tile date held equal by test). Tests: `tests/appCheck.test.ts` (39).
+- **Guarded (POST):** `/api/agentv3/chat`, `/api/chat/navbharat(ai)`, `/api/image/generate`,
+  `/api/professional(s)/:id/chat|exam`, `/api/repo-analyst/chat`, `/api/auth/send-otp`. A test asserts each
+  is a route the server really registers, so a rename fails CI.
+- ⏳ **Admin setup needed before it does anything:** reCAPTCHA Enterprise website key → register the web
+  app in Firebase App Check → `APP_CHECK_SITE_KEY` in Cloud Run. Until then every request counts as
+  `missing` and nothing changes.
+- ⏳ **OPEN — slice 2 (native):** `@capacitor-firebase/app-check` with Play Integrity (Android) / App Attest
+  (iOS), then a fresh `.aab`/`.ipa`. Enforcement must wait for it AND for the admin card showing
+  valid ≈ 100% on both surfaces. Also open: the other AI tool routes (Other-AI tools, App Debugger…) are
+  not in the guarded list yet.

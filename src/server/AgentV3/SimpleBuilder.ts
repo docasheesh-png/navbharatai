@@ -411,6 +411,12 @@ export function contractSystemPrompt(framework: string): string {
     '- These names are FROZEN. Files generated later MUST use these EXACT identifiers — no synonyms,',
     '  no re-casing, no renaming. If a symbol is not here, files must not assume it exists.',
     '- Real declarations only — no `// TODO`, no placeholder shapes. Keep it minimal but complete.',
+    // Autopsy 121c2431: the contract named its data type `StationaryItem` beside a planned component
+    // file `StationaryItem.tsx`; that file then imported the type and declared a component of the same
+    // name, and the collision was one of the errors the build never got past.
+    '- NO NAME MAY BE BOTH A TYPE AND A COMPONENT. A component file `Foo.tsx` exports a component named',
+    '  `Foo`, so no type, interface or enum here may be named after any component in the file list —',
+    '  name the data type for what it IS (e.g. `StationeryRecord` for the data, `StationeryItem` for the card).',
     '- Output ONLY the declarations. No explanation, no markdown fences.',
   ].join('\n');
 }

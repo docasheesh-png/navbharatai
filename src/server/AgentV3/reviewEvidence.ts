@@ -32,7 +32,7 @@ export interface PlatformEvidence {
 const COMPILE_FAILURE_CLAIM_RE = new RegExp(
   [
     // "TypeScript (build) errors are present", "tsc errors", "type errors found", "compile errors"
-    String.raw`\b(type ?script|tsc|type[- ]?check(?:ing)?|type|compil(?:e|er|ation))\b[^.!?\n]{0,30}\berrors?\b`,
+    String.raw`\b(type ?script|tsc|type[- ]?check(?:ing)?|compil(?:e|er|ation))\b[^.!?\n]{0,30}\berrors?\b`,
     // "does not compile", "will fail to typecheck", "fails to build with type errors"
     String.raw`\b(does not|doesn't|do not|don't|won't|will not|would not|fails? to|failed to|cannot|can't)\s+(compile|type[- ]?check)\b`,
   ].join('|'),

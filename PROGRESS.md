@@ -81910,3 +81910,33 @@ commit. Test-locked in `tests/theStudyRacerAutopsyPart2.test.ts`.
 Still open after part 2 (recorded, not hidden): the shared evidence ledger (why the model re-verifies at
 all); the fast lane's 90 s plan cap is still sized for a direct-answer rung (the hand-off bounds the loss,
 it does not make a reasoning rung fast).
+
+## 2026-09-26 — Autopsy: "4D Future City Drive" (3 builds, one workspace, free tier) — one build per app across every server
+
+**What the report showed.** Three builds of one app ran concurrently in ONE sandbox: A (09:24→09:43, ok,
+₹217.57), B ("Fix this error… network error", 09:27→09:29, failed, ₹0), C (a re-prompt, 09:29→09:50, ok,
+₹648.76). A was never stopped — it ran to its own end. Consequences: npm ENOTEMPTY in A and C, C deleted
+A's files mid-build, A's reviewer read C's files, ~45 `GREEN_FREEZE_DEFERRED`, dead A files in the final
+project, and a free user billed ~₹866 for one game.
+
+**Root cause.** The one-build lock was per-PROCESS memory; Cloud Run routes the retry after a dropped
+connection to any instance. The drop probe then read "not running here", showed the raw "network error"
+with a Fix-with-AI button (→ B), and the stall watchdog auto-continued (→ another build).
+
+**Fixed (this PR):** durable workspace lease (`workspaceBuildLease.ts`, flag `AGENTV3_WORKSPACE_BUILD_LEASE`,
+default on, fails open); `/status` `buildRunningElsewhere`, `/attach` 409 `elsewhere`, cross-instance
+`/stop`; client drop probe + watchdog follow the running build via the live mirror. Also: the project and
+roadmap planners recorded a timeout nobody answered as `anthropic / claude-sonnet-4-6` on a WEAK build —
+a mislabel (the variable's initialiser), not a Sonnet call; both now use `fastLaneCallIdentity` (the
+fast-lane fix of 2026-09-14 whose two siblings were never hunted).
+
+**Still open from this report (recorded, not fixed here):**
+- The project planner misfired on a game spec (40 enumerated features, no big-software noun: the ≥14
+  branch), then both rungs starved at 12,000 output tokens — 315 s of a free build's clock.
+- The post-answer type-fix sub-agent wrote generic placeholder files (`relative/path.ext` — the literal
+  example path from `SimpleBuilder.ts`'s output format — plus an auth scaffold) into a game; the integrity
+  pass then wired the stray CSS into `main.tsx`.
+- An npm-install race INSIDE one build: the write-time typecheck command (`package.json -nt node_modules`
+  ⇒ `npm install`), the health-check install and the agent's own installs are not serialised.
+- "Added 1 missing dependency (@playwright/test)" was shown while Green Freeze had refused the write.
+- Billing question for the admin: should a build duplicated by our own concurrency bug be charged at all?

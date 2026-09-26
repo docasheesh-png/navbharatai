@@ -2902,6 +2902,29 @@ the flag entries above promise.
   `revertToGreenSnapshot`, which calls `reconcileCapturedWrites` (`GreenGuard.ts`). It also refuses an
   EMPTY snapshot, because `restorePlan({}, cur)` would delete the whole workspace. Test-locked and
   reversion-proven in `tests/aRealBugInAWorkingAppGetsOneVerifiedRepair.test.ts`.
+- **`AGENTV3_WORKSPACE_BUILD_LEASE`** (default ON, `off` reverts to the in-memory lock alone — added
+  2026-09-26, autopsy "4D Future City Drive") — **one build per app, across every Cloud Run instance.**
+  🔴 The one-build lock (`activeBuilds` / `runningBuilds`) was a Set and a Map in ONE process. After a
+  dropped connection ("network error", "Failed to fetch") the retry reached another instance, found no
+  lock, and started a SECOND build on the same app; a minute later a THIRD. All three shared one sandbox:
+  two `npm install`s collided (ENOTEMPTY), the third deleted the first one's files mid-build, and a free
+  user was billed for two full builds of one game. The same gap made `/status`, `/attach` and `/stop`
+  answer "not running" on the wrong instance, which is why the client's drop probe showed the raw error
+  with a Fix-with-AI button and its watchdog auto-continued with a new build.
+  **Fixed at the class:** `workspaceBuildLease.ts` — a Firestore lease per workspace
+  (`agentv3_build_leases/<workspaceId>`), claimed in a transaction right after the in-memory lock,
+  heartbeated every 15 s, dead after 75 s without one, and released within a second of the in-memory lock
+  going away. 🔒 **It WATCHES that lock rather than being released at each of its seven exit paths**, so a
+  new exit path cannot forget it. A live lease held by another process ⇒ 409 `elsewhere`; `/status` reports
+  `buildRunningElsewhere`, `/attach` answers 409 `elsewhere` instead of a 404 that reads as "finished", and
+  `/stop` flags the lease so the holder aborts on its next heartbeat. The client follows such a build through
+  the existing live mirror instead of starting another. 🔒 **Fails OPEN** (an unreachable Firestore ⇒
+  today's behaviour), like `jobLease.ts`. Test-locked and reversion-proven in
+  `tests/oneBuildPerAppAcrossEveryServer.test.ts`.
+  ⚠️ **What it does not do:** a user watching a build that runs elsewhere sees it through the live
+  mirror's poll (~3 s cadence, last 200 events), not the instant stream, and the Resume/Stop buttons still
+  key off `buildRunningHere`, so none is shown; Stop reaches the build only from a screen whose own stream
+  is attached. **Watch:** 409 `elsewhere` in the logs. Each one is a parallel build that did not happen.
 - **`AGENTV3_FASTLANE_REASONING_GATE`** (default ON, `off` reverts — added 2026-09-23, autopsy ac41a924,
   PR #3278). The fast lane is skipped when the build opens on a model that ALWAYS reasons
   (`modelAlwaysReasons`). Its single plan call is capped at 90 s, a cap sized for a rung that answers

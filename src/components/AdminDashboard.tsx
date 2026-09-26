@@ -29,7 +29,6 @@ import { UnusedCardMark } from './admin/UnusedCardMark';
 import { BuildCostCard } from './admin/BuildCostCard';
 import { ReferralCostCard } from './admin/ReferralCostCard';
 import { PushHealthCard } from './admin/PushHealthCard';
-import { WelcomeBackfillCard } from './admin/WelcomeBackfillCard';
 import { BuildDiscountCard } from './admin/BuildDiscountCard';
 import { FailureCategoryCard } from './admin/FailureCategoryCard';
 import { MobileBuildOutcomeCard } from './admin/MobileBuildOutcomeCard';
@@ -4078,7 +4077,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               <BuildCostCard adminToken={adminToken} />
               {/* BUILD DISCOUNT (admin 2026-09-25): the one % taken off every charged build. */}
               <BuildDiscountCard adminToken={adminToken} />
-              <WelcomeBackfillCard adminToken={adminToken} />
               <ReferralCostCard adminToken={adminToken} />
               {/* NOTIFICATIONS (admin 2026-09-20): the loud half of a feature that fails silently
                   at every link — which one is broken, and a real test send to prove the chain. */}

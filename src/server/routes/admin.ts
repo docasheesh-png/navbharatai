@@ -30,10 +30,6 @@ import { audit } from '../lib/audit';
 import { buildDiscountStore, BUILD_DISCOUNT_MAX_PCT, BUILD_DISCOUNT_CACHE_MS } from '../lib/buildDiscount';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mergeWallets } from '../lib/accountMerge';
-import {
-  decideBackfill, backfillMarkerId, backfillLedgerDescription, backfillTokens, backfillEnabled,
-  emptyTally, tally, type BackfillTally,
-} from '../lib/welcomeBackfill';
 import { serverStats } from '../lib/serverStats';
 import { getProviderStats, getRouterOutcomeStats } from '../AI/Router/AIRouter';
 import { getMetrics } from '../lib/metrics';
@@ -2288,68 +2284,6 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
   });
 
-  // ── THE ₹250 WELCOME BACKFILL (admin 2026-09-20) ──────────────────────────────────────────
-  //
-  // *"woh sare user jinko welcome bonus nahi mila hai, unko sabhi ki 250₹ ke welcome bonus dene hai!
-  //   admin penal me kuch der ke liye aisi vyabasta kar do!"*
-  //
-  // The gap this closes is real: `flatWelcomeGiftAllowed()` has returned a hardcoded `false` since
-  // 2026-09-17 and `REFERRAL_REWARDS` was never set, so for three days every new account received ₹0
-  // from a product whose first run assumes ₹250 of credit. The SIGNUP path is deliberately left alone —
-  // the ladder is still the plan, and it starts when the Play Store build is live.
-  //
-  // 🔒 TWO ROUTES, AND THE SPLIT IS THE SAFETY. The GET counts and never writes, so the admin sees the
-  // bill before agreeing to it; the POST refuses to move a paisa without `confirm: true`. Every grant
-  // writes its own idempotency marker in the SAME transaction as the credit — split across two writes
-  // is precisely how a retry pays twice.
-  //
-  // ⚠️ THE SCREEN IS A PRE-CHECK, NOT THE GUARD. Candidates are narrowed from the wallet docs we have
-  // already read (free), and the two markers are re-read INSIDE each transaction, which is what makes
-  // them preconditions rather than a stale observation. Same discipline as the gift identities in
-  // `routes/wallet.ts`.
-
-  /** Read a candidate's two durable markers. Bounded fan-out — only ever asked about candidates. */
-  const readBackfillMarkers = async (db: any, userId: string): Promise<{ welcome: boolean; backfill: boolean }> => {
-    const [w, b] = await Promise.all([
-      getDoc(doc(db, 'payment_transactions', `welcome_${userId}`)),
-      getDoc(doc(db, 'payment_transactions', backfillMarkerId(userId))),
-    ]);
-    return { welcome: w.exists(), backfill: b.exists() };
-  };
-
-  /**
-   * Screen every wallet, then resolve only the ones that still look owed.
-   *
-   * The wallet-only signals (`walletReceivedWelcome`, `freeGiftedTokens`) settle the overwhelming
-   * majority for free; the markers are read for the small remainder. Returns the tally AND the
-   * candidate ids, so the POST does not scan twice.
-   */
-  const surveyBackfill = async (db: any): Promise<{ tally: BackfillTally; candidates: string[] }> => {
-    const snap = await getDocs(collection(db, 'user_token_wallets'));
-    let t = emptyTally();
-    const maybe: Array<{ id: string; wallet: any }> = [];
-    for (const d of snap.docs as any[]) {
-      const wallet = d.data();
-      // Screened WITHOUT the markers: a refusal here is already final (the markers can only add more
-      // reasons to refuse, never turn a refusal into a payment), so nothing is mis-tallied.
-      const screened = decideBackfill({ wallet, welcomeMarker: false, backfillMarker: false });
-      if (screened.reason === 'owed') maybe.push({ id: d.id, wallet });
-      else t = tally(t, screened);
-    }
-    const candidates: string[] = [];
-    // Chunked so a large candidate set cannot open thousands of concurrent reads at once.
-    for (let i = 0; i < maybe.length; i += 25) {
-      const chunk = maybe.slice(i, i + 25);
-      const marked = await Promise.all(chunk.map(async (c) => ({ c, m: await readBackfillMarkers(db, c.id) })));
-      for (const { c, m } of marked) {
-        const decision = decideBackfill({ wallet: c.wallet, welcomeMarker: m.welcome, backfillMarker: m.backfill });
-        t = tally(t, decision);
-        if (decision.reason === 'owed') candidates.push(c.id);
-      }
-    }
-    return { tally: t, candidates };
-  };
-
   // THE BUILD DISCOUNT (admin 2026-09-25) — the percentage taken off every charged build, set from
   // the admin panel. The rules (0% = today, never below our real cost, the % shown is the % applied)
   // live in `buildDiscount.ts`; these two routes only read and write the one number.
@@ -2380,117 +2314,6 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     } catch (e: any) {
       console.error('[ADMIN] build-discount write failed:', e?.message);
       res.status(500).json({ error: 'The discount could not be saved. Nothing changed — please try again.' });
-    }
-  });
-
-  app.get('/api/admin/welcome-backfill', verifyAdminToken, async (_req: Request, res: Response) => {
-    const db = getDb() as any;
-    try {
-      const { tally: t } = await surveyBackfill(db);
-      res.json({
-        ok: true,
-        enabled: backfillEnabled(),
-        grantTokens: backfillTokens(),
-        grantRupees: backfillTokens() / TOKENS_PER_RUPEE,
-        ...t,
-        owedRupees: t.owedTokens / TOKENS_PER_RUPEE,
-      });
-    } catch (e: any) {
-      console.error('[ADMIN] welcome-backfill preview failed:', e?.message);
-      res.status(500).json({ error: 'Could not read the wallets just now. Please try again.' });
-    }
-  });
-
-  app.post('/api/admin/welcome-backfill/run', verifyAdminToken, async (req: Request, res: Response) => {
-    const db = getDb() as any;
-    if (!backfillEnabled()) return res.status(409).json({ error: 'The welcome backfill is switched off.' });
-    // Never on a bare POST. The preview is the screen the admin reads; this is the signature.
-    if (req.body?.confirm !== true) return res.status(400).json({ error: 'confirm: true is required to credit wallets.' });
-    const askedRaw = Number(req.body?.limit);
-    // Bounded per request so one press is one bounded unit of work — the admin presses again for the
-    // rest, and a run that dies half way has still paid whoever it paid, exactly once each.
-    const limit = Number.isFinite(askedRaw) && askedRaw > 0 ? Math.min(Math.round(askedRaw), 500) : 200;
-    try {
-      const { tally: t, candidates } = await surveyBackfill(db);
-      const batch = candidates.slice(0, limit);
-      let granted = 0;
-      let grantedTokens = 0;
-      let skipped = 0;
-      const failures: string[] = [];
-
-      for (const userId of batch) {
-        try {
-          const walletRef = doc(db, 'user_token_wallets', userId);
-          const markerRef = doc(db, 'payment_transactions', backfillMarkerId(userId));
-          const welcomeRef = doc(db, 'payment_transactions', `welcome_${userId}`);
-          const nowIso = new Date().toISOString();
-          const paid = await runTransaction(db, async (tx: any) => {
-            // THE BINDING READ. Everything the decision rests on is re-read here, so two concurrent
-            // presses contend on the marker instead of both paying.
-            const [wSnap, mSnap, wcSnap] = await Promise.all([tx.get(walletRef), tx.get(markerRef), tx.get(welcomeRef)]);
-            if (!wSnap.exists()) return 0;
-            const wallet = wSnap.data();
-            const decision = decideBackfill({
-              wallet,
-              welcomeMarker: wcSnap.exists(),
-              backfillMarker: mSnap.exists(),
-            });
-            if (decision.reason !== 'owed' || decision.tokens <= 0) return 0;
-
-            // 🔒 Through `mirroredCreditPatch` — the ONE legal wallet writer (money audit 2026-09-12).
-            // A direct update of a balance field is how that whole class of bug comes back.
-            const patch = mirroredCreditPatch(wallet, decision.tokens, 'gift');
-            tx.update(walletRef, {
-              ...patch,
-              freeGiftedTokens: (Number(wallet.freeGiftedTokens) || 0) + decision.tokens,
-              totalTokensPurchased: (Number(wallet.totalTokensPurchased) || 0) + decision.tokens,
-              // Through the shared appender, so whatever rolls off the bounded ledger still lands in
-              // the opening balance and the user's statement reconciles.
-              ...ledgerPatch(wallet, {
-                type: 'purchase',
-                amountCoinsOrTokens: decision.tokens,
-                moneySpent: 0,
-                timestamp: nowIso,
-                description: backfillLedgerDescription(decision.tokens),
-              }),
-              updatedAt: nowIso,
-            });
-            // THE SAME WRITE records the payment. Shaped like the welcome marker beside it so the
-            // payments collection stays readable by the tooling that already scans it.
-            tx.set(markerRef, {
-              transactionId: backfillMarkerId(userId),
-              userId,
-              amountPaid: 0,
-              balanceAdded: decision.tokens / TOKENS_PER_RUPEE,
-              paymentProvider: 'WELCOME_BACKFILL',
-              paymentStatus: 'SUCCESS',
-              paymentReference: 'WELCOME_BACKFILL',
-              createdAt: nowIso,
-            });
-            return decision.tokens;
-          });
-          if (paid > 0) { granted += 1; grantedTokens += paid; } else { skipped += 1; }
-        } catch (e: any) {
-          // One account's failure must not abandon the rest — and it is REPORTED, never swallowed.
-          failures.push(userId);
-          console.error('[ADMIN] welcome-backfill grant failed for', userId, e?.message);
-        }
-      }
-
-      audit('ADMIN_WELCOME_BACKFILL', { granted, grantedTokens, skipped, failed: failures.length, ip: req.ip });
-      res.json({
-        ok: true,
-        granted,
-        grantedTokens,
-        grantedRupees: grantedTokens / TOKENS_PER_RUPEE,
-        skipped,
-        failed: failures.length,
-        // What is still waiting, so the admin knows whether to press again.
-        remaining: Math.max(0, t.owed - granted),
-      });
-    } catch (e: any) {
-      console.error('[ADMIN] welcome-backfill run failed:', e?.message);
-      res.status(500).json({ error: 'The backfill could not run. Nothing further was credited.' });
     }
   });
 

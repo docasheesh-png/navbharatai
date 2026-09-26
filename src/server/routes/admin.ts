@@ -23,6 +23,7 @@ import { summarizeReferrals, selfPayoutTokens } from '../lib/referralAdminSummar
 import { ledgerPatch } from '../lib/walletStatement';
 import { stepRewardTokens, referrerLifetimeCapTokens, referralRewardsEnabled } from '../lib/referralRewards';
 import { runReferralPreflight } from '../lib/referralPreflight';
+import { listDailyClaimOutcomes, summariseClaimOutcomes } from '../lib/referralClaimOutcomes';
 import { runPushPreflight } from '../lib/pushPreflight';
 import { adminEmailList } from '../lib/adminEmails';
 import { mirroredCreditPatch } from '../lib/walletMirror';
@@ -145,6 +146,8 @@ const GROWING_COLLECTIONS: readonly string[] = [
   'metrics_snapshots', 'session_error_hints', 'hosting_usage', 'site_analytics',
   // One small document per finished phone build — the only per-run half of the build counters.
   'mobile_build_counted',
+  // One marker per (person, UTC day) that claimed a referral step — turns attempts into people.
+  'referral_claim_people',
   'workspace_files_v3', 'workspace_assets_v3', 'workspace_checkpoints_v3', 'workspace_embeddings_v3',
   'workspace_memory_v3', 'workspace_diagnostics_v3', 'workspace_manual_edits_v3', 'project_plans_v3',
 ];
@@ -2737,7 +2740,10 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const summary = summarizeReferrals(rows, all.length > MAX);
       const perStep = stepRewardTokens();
       const self = selfPayoutTokens(rows, perStep);
+      // What was TRIED, not only what was paid — last 14 UTC days. Never throws; an empty read is [].
+      const claims = summariseClaimOutcomes(await listDailyClaimOutcomes(14));
       return res.json({
+        claims,
         ok: true,
         enabled: referralRewardsEnabled(),
         ...summary,

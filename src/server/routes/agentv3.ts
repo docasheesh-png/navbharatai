@@ -316,7 +316,7 @@ import { injectDotenvLoad, dotenvWiringMessage } from '../AgentV3/envLoading';
 import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneGate';
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
 import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
-import { hasTscErrors, looksLikeTscHelpOutput } from '../AgentV3/TscGate';
+import { hasTscErrors, tscNeverRan } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, judgeActuallyRan, describeJudgeVerdict, judgeEngineLabel, type JudgeRunTurn, type JudgeVerdict } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
@@ -17136,9 +17136,9 @@ async function noteBuildOutcome(
             const ensureCfg = "if [ ! -f tsconfig.json ] && [ ! -f tsconfig.app.json ] && find src -name '*.ts' -o -name '*.tsx' 2>/dev/null | head -1 | grep -q .; then printf '%s' '{\"compilerOptions\":{\"target\":\"ES2020\",\"lib\":[\"ES2020\",\"DOM\",\"DOM.Iterable\"],\"module\":\"ESNext\",\"moduleResolution\":\"bundler\",\"jsx\":\"react-jsx\",\"strict\":false,\"skipLibCheck\":true,\"noEmit\":true,\"esModuleInterop\":true,\"allowSyntheticDefaultImports\":true,\"isolatedModules\":true},\"include\":[\"src\"]}' > tsconfig.json; fi";
             const r = await actuator.runCommand(workspaceId, `${ensureCfg}; ${TSC_ENSURE}; ${TSC_BIN} --noEmit 2>&1 | tail -200 || true`);
             const out = `${r.stdout || ''}\n${r.stderr || ''}`;
-            // A help-page result means tsc STILL didn't really run (e.g. no src TS files) — treat as
-            // "unverified, don't block", never as a clean pass (no fake success).
-            if (looksLikeTscHelpOutput(out)) return { ok: true, verified: false, errors: '' };
+            // A help-page result, or a shell that could not find the compiler at all, means tsc STILL
+            // didn't really run — treat as "unverified, don't block", never as a clean pass (no fake success).
+            if (tscNeverRan(out)) return { ok: true, verified: false, errors: '' };
             return hasTscErrors(out)
               ? { ok: false, verified: true, errors: out.slice(0, 6000) }
               : { ok: true, verified: true, errors: '' };

@@ -219,6 +219,19 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
   { collection: 'mobile_build_counted', ttlDays: 30, timestampField: 'countedAt', timestampKind: 'epochMs' },
 
   /**
+   * The referral claim tally (`referralClaimOutcomes.ts`): one document per UTC day of COUNTS — no
+   * person in it. Kept as long as the build tally beside it, for the same reason: a trend is read over
+   * months.
+   */
+  { collection: 'referral_claim_outcomes', ttlDays: 400, timestampField: 'day', timestampKind: 'iso' },
+  /**
+   * One marker per (person, UTC day) that made a claim, so the tally counts PEOPLE and not app opens.
+   * A marker is only ever consulted on its own day; seven days is margin, not need. The id is a digest
+   * and the body a timestamp.
+   */
+  { collection: 'referral_claim_people', ttlDays: 7, timestampField: 'countedAt', timestampKind: 'epochMs' },
+
+  /**
    * Visitor counts for published apps — the ONE window this registry promised in PUBLIC and did not keep.
    *
    * 🔴 The Privacy Policy says, in those words: *"These counts … are kept for 30 days."* Nothing deleted

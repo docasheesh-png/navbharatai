@@ -81932,6 +81932,40 @@ it does not make a reasoning rung fast).
   debug-APK workflow on this branch (see the PR).
 - ⏳ Still open: enforcement (after a fresh `.aab`/`.ipa` is live and the admin card shows valid ≈ 100%),
   and the Other-AI tool routes are not yet in the guarded list.
+## 2026-09-26 — Autopsy of workspace …344af61b (builds 820be124 + f2ff962f, run 2026-09-12): four root causes still open on today's `main`, all closed (PR #3328)
+
+The report was two weeks old, so every item was re-checked against current `main` before touching code.
+Already fixed by later work (verified, not redone): the "add credits" upsell after provider timeouts
+(`laneFailure.ts`, 09-13); the 197 s plan call on an always-reasoning rung (flashx lead 09-17, fast-lane
+reasoning gate 09-23); the nudge that overrode an answer and built an app (09-18); the stale snapshot from
+post-green writes (#3313); console never captured (09-21).
+
+Closed in this PR:
+1. **"Mujhe aik aip banana hai" names no app** — the no-object clarifier (#3039) missed the full sentence
+   because pronoun/auxiliary words counted as instruction words. `WANTING_GRAMMAR` is neutral inside
+   `namesNoObject` only (the too-short count is untouched); Roman + Devanagari spellings added.
+2. **A `tsc` that never started counted as a passing typecheck** — `tscNeverRan` (help page OR missing
+   binary) now gates both the command-evidence harvester and the post-build G3 gate; the piped-exit
+   warning recognises bash's `line N: …: No such file or directory`.
+3. **The in-browser preview pre-loaded test tools** (vitest, @testing-library/react, @playwright/test —
+   added by our own post-build passes) — `src/lib/previewNonRuntimeFiles.ts` is one rule both preview
+   builders read; test/spec/e2e/tool-config imports are never pre-loaded.
+4. **Length alone was an order** — chat instructions with no build word became a ₹79 app when the intent
+   reader could not answer. A `long-message` verdict naming nothing buildable now falls to chat on that
+   fallback path only; the reader still decides whenever it answers.
+
+OPEN ROOT CAUSES (rule 6, recorded not guessed):
+- **The CDN fallback can load two Reacts.** `react-dom` entries in both preview import maps are plain
+  (no `?external=react`), so esm.sh may resolve react-dom's React to a different version than the page's
+  when package.json pins an older 18.x. This is a textbook cause of the report's `reading 'useState' of
+  null`. NOT changed: esm.sh is unreachable from the sandbox, so the fix could not be verified, and a
+  wrong import-map change would break every React-19 preview that works today. Needs one real-browser test.
+- **Where the `ai-urdu-app` starter in build 2's sandbox came from** cannot be established from the report
+  (build 1 wrote zero files by its own count; the files are timestamped during build 2's setup).
+- **₹79.15 billed for build 2** — an app the user never asked for. Refund is the admin's decision.
+- **App AI gateway (`APP_AI_GATEWAY`) is still OFF.** The builder already prefers NavBharatAI's own AI for
+  AI features when it is on (`generate_ai`); the admin asked for exactly that on 2026-09-26. Turning it on
+  is a money decision (owner's wallet, ₹20/app/day, ₹2/visitor/day) and works only after publish.
 ## 2026-09-26 — Autopsy: SignBridge (a green build that was told to build things nobody asked for)
 
 Free-tier build `e950c69b`, a 20-section spec for an Indian Sign Language translator. It rendered, typechecked,
@@ -82090,3 +82124,69 @@ run proof reading the overwritten summary; the question note on a built turn).
 - **An enum nobody reads was not built.** The open item named `built/declined/asked/stalled/stopped`.
   Only the answer half has readers today, so only it was built; an enum with no reader would be dead
   code under the second absolute rule.
+
+## 2026-09-26 — Referral claims are COUNTED: who tried, who was paid, why the rest were refused (PR #3328)
+
+Admin, with a screen of ten new accounts all at ₹0: *"abhi bhi token nahi mil rahe"*, then *"han banao counter"*.
+
+**Root cause of the ₹0 screen (verified, no code fault):** the app live on Play is build **134**
+(`5d881757`, 2026-09-25). It predates #3321, so it has NO automatic claim: a user must open the referral
+screen and tap *Claim ₹100* per step. Builds **135/136** (built 2026-09-26) carry the auto-claim and the
+pinned rewards card but are not on Play yet. On the website nothing pays until a mobile is verified by
+OTP — the admin's own rule. **Action for the admin: put build 136 on Play.**
+
+**The gap this closes:** the referral records store only what was PAID, so "nobody tried" and "the
+device check refused every real phone" were indistinguishable — both ₹0, no trace. New:
+- `src/server/lib/referralClaimOutcomes.ts` — one doc per UTC day (`referral_claim_outcomes`, counts
+  only) + one marker per (person, day) (`referral_claim_people`, digest id, 7-day TTL) so the tally
+  counts people, not app opens. Outcomes: paid · nothing-new · held-no-mobile · step-not-done ·
+  device-refused · device-unavailable · device-failed-on-phone · error; device refusals keep their
+  CLASS (`deviceRefusalCategory`: app-not-play-recognized, device-integrity, token-rejected-4xx, …).
+- Wired at every exit of `/api/referral/:uid/claim` (both surfaces), never awaited.
+- `POST /api/referral/:uid/claim-failed` — the phone could not produce a device token, so the claim
+  never reached the server. Counted, pays nothing. The client beacon (`referralClaim.ts`) reaches the
+  Android app only with the NEXT `.aab`; build 134–136 do not send it.
+- Admin → Reports → Referral cost now shows **Claims — last 14 days** with a one-line headline.
+- Test-locked and reversion-proven in `tests/referralClaimsAreCounted.test.ts`, including a ratchet
+  that reads every refusal detail out of `deviceIntegrity.ts` so a new one cannot fall into `other`.
+
+⚠️ **Not counted:** the `/redeem` route's device refusals (applying a code) — attribution, not payment.
+Counting starts at deploy; earlier claims are not in the numbers.
+## 2026-09-26 — The feature list is confirmed before a new app is built (admin: "feature list confirm wala bhi banao")
+
+**Why.** The build is handed two lists nobody showed the user: features read from their words
+(`requestedFeatureLabels` → "not suggestions — build every one of these") and features the app's kind
+"usually needs" (`analyzeRequirementGaps` → "INCLUDE them by default"). A misreading of either became an
+ORDER — autopsy SignBridge built a map from the verb "map" and was told it was a jobs app from `resume()`.
+Fixing each misreading is necessary and never complete, so the user now sees both lists first.
+
+**What.** `POST /api/agentv3/feature-plan` (deterministic, no model call) → `featurePlan.ts`. The panel shows
+`FeatureConfirmCard` before the FIRST build of a new app only (no workspace, no prior turn, not an import, no
+attachments, not a question, ≥2 features). Everything starts ticked — one tap builds. The answer rides the
+build as `confirmedFeatures`; the contract then lists only kept named features + ticked suggestions, and the
+domain "include by default" guidance (and the generated long-tail guidance) stand down. "Don't ask again"
+is a per-viewer localStorage preference. Any failure of the card simply builds, exactly as before.
+
+**The way back (admin: "settings toggle wala bhi banao").** Settings → General → *Confirm features before
+building* (`FeatureConfirmToggle`) switches the card on or off. It reads and writes the SAME per-device key
+the card's "Don't ask again" writes (`featureConfirm.ts`), so the two can never disagree.
+
+**Security.** The answer is untrusted: `sanitizeConfirmation` keeps only labels the server itself offered for
+that exact prompt, so free text can never be injected into the build prompt as a "confirmed feature".
+
+**Deliberate exception**, stated: the 2026-07-20 "no clarifying round-trip" rule — the admin asked for this
+card, and it costs one tap, appears only for new apps, and can be switched off.
+
+**The audits obey it too.** An unticked feature is not graded by the completeness audit
+(`analyzeRequirementCoverage(..., declined)` via `ToolDispatcher.setDeclinedFeatures`) and not probed in the
+live DOM (`checkFeaturePresence(..., declined)`), so neither the builder's nag nor the feature-heal pass can
+add it back behind the user's answer.
+
+Tests: `tests/theFeatureListIsConfirmedBeforeTheBuild.test.ts` (20).
+
+**📌 ADMIN DECISION 2026-09-26 (asked directly, answered "Website par nahi"): the Google/Gmail-login ₹100
+stays ANDROID-APP ONLY.** The website keeps mobile + GitHub (₹200, mobile-anchored). Offered and declined:
+web Gmail ₹100 released after mobile OTP, and web Gmail ₹100 instantly with no mobile (an unbounded
+scriptable free-Gmail printer — no device check on the web). Do not re-propose either without a new ask.
+In the app the Gmail ₹100 is automatic from build 135 onward (`useReferralProgress` → `autoClaimIfReady`,
+device-checked); build 134, live on Play today, needs a manual Claim tap.

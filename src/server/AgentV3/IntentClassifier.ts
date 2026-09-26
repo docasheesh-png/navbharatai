@@ -1025,7 +1025,7 @@ export async function classifyIntentSmartDetailed(
   llmCall: (prompt: string) => Promise<string>,
   context?: IntentContext,
 ): Promise<SmartIntent> {
-  const { intent, confidence } = classifyIntentWithConfidence(message);
+  const { intent, confidence, signal } = classifyIntentWithConfidence(message);
   // The reader is not consulted at all here, so the route's deterministic net still governs.
   if (confidence === 'high') return { intent, unclear: false, readerAnswered: false };
 
@@ -1096,7 +1096,33 @@ export async function classifyIntentSmartDetailed(
   // verdict exactly as before, which is what keeps "add a payment button" an edit when GLM is slow.
   // The reader could not answer (failed, timed out, or an unusable word). Whatever this returns is
   // a FALLBACK, so the route's deterministic net keeps governing it, exactly as it did before.
-  return { intent: readsAsQuestion(message.toLowerCase()) ? 'chat' : intent, unclear: false, readerAnswered: false };
+  const lowerMsg = message.toLowerCase();
+  if (readsAsQuestion(lowerMsg)) return { intent: 'chat', unclear: false, readerAnswered: false };
+  // 🔴 LENGTH ALONE IS NOT AN ORDER EITHER (admin report f2ff962f, 2026-09-12). The prompt was a set of
+  // chat instructions in Hindi — *"be an expert assistant, call me Boss, answer in Hindi, never guess"*
+  // — with no build verb and nothing to build in it. Its ONLY evidence for `new_build` was
+  // `long-message`, the weakest branch in the ladder, and when the reader could not answer, that
+  // guess stood: an app nobody asked for was built and a free user was billed ₹79. The same
+  // asymmetry the question rule above rests on applies: wrong toward chat is one message (and the
+  // reply offers to build), wrong toward build is a whole build. So a long message that NAMES NOTHING
+  // BUILDABLE — no build noun, no Devanagari build verb — falls to chat. A long message that does name
+  // something ("an expense tracker where…") keeps the build verdict exactly as before.
+  if (signal === 'long-message' && !namesSomethingToBuild(message)) {
+    return { intent: 'chat', unclear: false, readerAnswered: false };
+  }
+  return { intent, unclear: false, readerAnswered: false };
+}
+
+/** The `बना-` family ("बनाओ", "बनाना", "बना दो", "बनवाना") — the Devanagari order no Roman list can see. */
+const DEVANAGARI_BUILD_VERB = /बन(?:ा|वा)/;
+
+/**
+ * Does the message name anything to build — a build noun, or a Devanagari build verb? PURE. Used only
+ * where the keyword ladder had nothing but the message's LENGTH to go on.
+ */
+export function namesSomethingToBuild(message: string): boolean {
+  const lower = String(message ?? '').toLowerCase();
+  return mentionsBuildNoun(lower) || DEVANAGARI_BUILD_VERB.test(lower) || firstNewBuildOrder(lower) !== undefined;
 }
 
 /**

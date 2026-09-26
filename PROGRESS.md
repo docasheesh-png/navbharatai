@@ -82314,6 +82314,53 @@ Tests: `tests/aBuildThatStoppedTalkingIsNotFinished.test.ts` (23), reversion-pro
   here (a repair should not open on flash), but the classifier reads the continue prompt, not the project.
 ---
 
+## 2026-09-26 (later) — the `stopped` half, and a correction to the entry above
+
+**Admin: *"ok, stopped wala kaam bhi karo."***
+
+### 🔴 CORRECTION FIRST — the premise I recorded above was false
+
+The entry above says *"A model's own `stop_build` call may not raise the abort signal, so those readers
+can disagree about one build."* **It does raise it.** `ToolDispatcher`'s `stop_build` calls the route's
+`setStopBuild` callback, which records `USER_STOPPED_BUILD` and then calls
+`abortBuild(…, 'user-stop')` — the same funnel as the Stop button (`/stop`) and Unsend. The comment at
+the back-fill (search: EVERY WAY A BUILD IS STOPPED) already said so. I wrote the claim before tracing
+it; the same sentence went into CLAUDE.md and the #3329 PR body. The CLAUDE.md paragraph is corrected in
+this change; this note is the append-only record for PROGRESS.
+
+**So the "two definitions" are not a defect.** The retry and the run proof ask *"did the run end early
+at all?"* — the abort signal, any of nine causes, is exactly right for that. The upsell asks *"was an
+engine's capability ever judged?"* — a narrower question. Unifying them would have made one of them
+wrong.
+
+### The one real gap, and the fix
+
+The upsell answered its question from `USER_STOPPED_BUILD` alone. Only a user or model stop writes
+that; **our own interruptions never do** — a deploy draining in-flight builds (`deploy-drain`), a newer
+build reclaiming the lock (`lock-reclaimed`), the zombie reaper (`reaper`), or an abort with no recorded
+cause (`unknown`). Each reached the free-tier upsell as though an engine had tried and failed.
+
+- `interruptedBeforeAnyVerdict(cause)` in `buildAbortCause.ts` — pure, **exhaustive** over `AbortCause`
+  (a tenth cause fails to compile until it is placed). TRUE for user-stop and the four above; FALSE for
+  `watchdog`, `futile`, `cost-cap` (an engine WAS asked and ran out — left to the upsell's existing
+  readings) and `advisory-cap` (fires only after success).
+- The upsell adds `interrupted`, read from the signal's cause, suppresses on it, and records
+  `UPSELL_SUPPRESSED` with its own sentence naming the cause. `stopped` is untouched and still read
+  first. **It can only suppress an upsell; it moves no money.**
+
+⚠️ **Honest about reach:** these interruptions are rarer than refusals, and a `deploy-drain` build may
+not survive long enough to reach the upsell at all (the process exits within ~6 s). The fix is still
+right — the upsell's evidence was incomplete — but it is a small one, and is described as such.
+
+**Tests:** `tests/ourOwnInterruptionIsNotAnEngineLimit.test.ts` — 15 cases (the full cause table, the
+cause surviving the signal, an unexplained abort, and the wiring), **reversion-proven three ways**
+(the upsell gate ignoring interruptions, `deploy-drain` misfiled as an engine verdict, the suppression
+not recorded). One pinned guard in `autopsyFdd59ef8Remainder.test.ts` was widened to allow a further
+suppression clause, the same way `pornographyBan.test.ts` already does.
+
+**With this, the `turnKind` open root cause from autopsy `e628efd4` is closed in both halves.** No enum
+was built: the readers needed the answer read once and the stop read from the right source, and an enum
+nobody reads would be dead code.
 ## 2026-09-26 — Autopsy eed79815 (car game, 3 builds in one workspace) — root causes fixed on PR #3331
 
 **The report:** a free user asked for a "4D Future City Drive" game. Three builds ran — and for about
@@ -82546,3 +82593,15 @@ would have run two locks on every build, so `main`'s versions stand and #3332 no
 
 **The process lesson (recorded in CLAUDE.md):** safeguard #6's open-PR check cannot catch two sessions
 that start on the same pasted report within minutes of each other. Only the admin naming one owner can.
+## 2026-09-26 — One-click ₹50 welcome credit in the admin Users table (bridge until the fixed .aab is live)
+
+Admin: *"tab tak admin panel se new user jinko kabhi koi token gift nahi mila hai, usko admin 50 ke token
+gift kar sake 1 click par, bina aab ke"*. A **Gift ₹50** button now appears in Admin → Users beside
+Tokens/Ban/Merge, ONLY on accounts the server marks `welcomeGiftEligible` (`adminWelcomeGift.ts`: never
+gifted, never credited, never paid, not merged, not given this before). `POST /api/admin/users/:uid/welcome-gift`
+re-checks eligibility inside the transaction (a double press pays once), credits 5,000 tokens as GIFT money
+(`mirroredCreditPatch(…, 'gift')`), adds them to `freeGiftedTokens` so the ₹400 lifetime gift ceiling still
+holds (such a user can later earn ₹350 from referral steps, not ₹400 on top), stamps `adminWelcomeGiftAt`,
+writes one ledger row "Welcome credit: ₹50 added by NavBharatAI", and audits `ADMIN_WELCOME_GIFT`.
+Server + admin panel only: live on the website admin panel on deploy, no .aab needed. Test-locked in
+`tests/adminWelcomeGift.test.ts`.

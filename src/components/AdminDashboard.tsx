@@ -1557,6 +1557,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } finally { setActionLoading(null); }
   };
 
+  // ONE-CLICK ₹50 WELCOME CREDIT (admin 2026-09-26). The button appears only where the SERVER says the
+  // account has never received a gift; the server re-checks, so a double press pays once.
+  const handleWelcomeGift = async (userId: string, email: string) => {
+    if (!window.confirm(`Give ₹50 welcome credit to\n  ${email}\n?`)) return;
+    setActionLoading(userId + '_gift');
+    try {
+      const r = await adminPost(`/api/admin/users/${userId}/welcome-gift`, {});
+      if (r.ok) { toast(`₹50 added to ${email}`); fetchUsers(); }
+      else toast('Not given: ' + (r.error || 'unknown error'));
+    } finally { setActionLoading(null); }
+  };
+
   // Merge a duplicate account's wallet INTO this user (one person = one wallet). The admin PROVES the
   // two accounts are the same person by supplying the source userId. Debt carries, welcome bonus counts
   // once, real purchases carry (server-side tested mergeWallets). Confirmed before running (irreversible).
@@ -2345,6 +2357,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                   <button onClick={() => handleBan(u.userId, !u.banned)} disabled={actionLoading === u.userId + '_ban'} className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-all border ${u.banned ? 'bg-emerald-500/10 border-emerald-500/20 text-success hover:bg-emerald-500/20' : 'bg-red-500/10 border-red-500/20 text-danger hover:bg-red-500/20'}`}>
                                     {actionLoading === u.userId + '_ban' ? '...' : u.banned ? 'Unban' : 'Ban'}
                                   </button>
+                                  {u.welcomeGiftEligible === true && (
+                                    <button onClick={() => handleWelcomeGift(u.userId, u.email)} disabled={actionLoading === u.userId + '_gift'} title="Give this new user ₹50 welcome credit (only shown to accounts that never received a gift)" className="px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[9px] font-black text-success uppercase hover:bg-emerald-500/20 transition-all">
+                                      {actionLoading === u.userId + '_gift' ? '...' : 'Gift ₹50'}
+                                    </button>
+                                  )}
                                   <button onClick={() => handleMerge(u.userId)} disabled={actionLoading === u.userId + '_merge'} title="Merge a duplicate account's wallet INTO this user" className="px-2 py-1 bg-purple-500/10 border border-purple-500/20 rounded-lg text-[9px] font-black text-accent-text uppercase hover:bg-purple-500/20 transition-all">
                                     {actionLoading === u.userId + '_merge' ? '...' : 'Merge'}
                                   </button>

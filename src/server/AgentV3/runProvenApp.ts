@@ -52,7 +52,11 @@ export interface RunEvidence {
   journeyFailed: boolean;
   /** `buildDiag.hasRuntimeCrashBlocker()` — the deterministic "crashes at runtime" proof. */
   runtimeCrashBlocker: boolean;
-  /** `looksLikeRefusal(result.summary)` — the model declined; whatever rendered is not the user's app. */
+  /**
+   * The model declined; whatever rendered is not the user's app. Read from the model's OWN answer,
+   * captured once before the platform rewrites the summary (`turnAnswer.ts`) — reading
+   * `result.summary` at the flip asks the question of our sentence, not the model's.
+   */
   deliveryRefused: boolean;
   /** The build was aborted (user stop, watchdog, cost stop). */
   stopped: boolean;

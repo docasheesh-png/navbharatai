@@ -32,6 +32,27 @@ export interface E2eScaffoldResult {
 const CONFIG_PATH = 'playwright.config.ts';
 const SMOKE_PATH = 'e2e/smoke.spec.ts';
 
+/**
+ * The first comment line of each file we generate. They are what lets another pass tell OUR scaffold
+ * (written, never run, its runner deliberately not installed) from a Playwright suite the model or the
+ * user wrote on purpose — see `isPlatformE2eScaffold`. Change a template, change these with it.
+ */
+export const E2E_CONFIG_MARKER = '// Auto-generated Playwright E2E config (NavBharatAI).';
+export const E2E_SMOKE_MARKER = '// Auto-generated smoke E2E for ';
+
+/**
+ * True when `content` at `path` is the E2E net NavBharatAI wrote itself (autopsy 7d79254b). Recognised by
+ * its own marker, never by path alone: a model asked for real E2E tests writes `e2e/*.spec.ts` too, and
+ * that suite's runner SHOULD be declared. PURE.
+ */
+export function isPlatformE2eScaffold(path: string, content: string): boolean {
+  const p = String(path ?? '').replace(/^\.\//, '');
+  const c = String(content ?? '');
+  if (/^playwright\.config\.[cm]?[jt]s$/i.test(p)) return c.includes(E2E_CONFIG_MARKER);
+  if (/^e2e\//i.test(p)) return c.includes(E2E_SMOKE_MARKER);
+  return false;
+}
+
 /** Sanitize a route into a safe, unique test title fragment. */
 function routeLabel(route: string): string {
   const r = String(route || '/').trim();
@@ -57,7 +78,7 @@ function safeRoutes(routes: string[] | null | undefined): string[] {
 function configTs(devCommand: string, port: number): string {
   return `import { defineConfig, devices } from '@playwright/test';
 
-// Auto-generated Playwright E2E config (NavBharatAI). Starts your dev server, then runs the specs in ./e2e
+${E2E_CONFIG_MARKER} Starts your dev server, then runs the specs in ./e2e
 // against it. Set E2E_BASE_URL to test a deployed URL instead of the local dev server.
 const PORT = ${port};
 const baseURL = process.env.E2E_BASE_URL || \`http://localhost:\${PORT}\`;
@@ -100,7 +121,7 @@ function smokeSpec(appName: string, routes: string[]): string {
 
   return `import { test, expect } from '@playwright/test';
 
-// Auto-generated smoke E2E for ${appName}. It EARNS the "it works" claim by loading the running app in a
+${E2E_SMOKE_MARKER}${appName}. It EARNS the "it works" claim by loading the running app in a
 // real browser and asserting it renders with no console/page errors — the same render-not-compile bar the
 // build uses. Extend these with real user-flow assertions (click, type, expect visible text).
 test.describe('${appName} — smoke', () => {

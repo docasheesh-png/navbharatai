@@ -150,7 +150,7 @@ export function shouldAutoScaffoldE2e(ctx: E2eAutoScaffoldContext): E2eAutoScaff
  */
 export function e2eAutoScaffoldNote(added: string[]): string {
   return `An end-to-end test suite was written into your project (${added.join(', ')}). `
-    + 'It has not been run here — run it yourself with `npm run test:e2e` after `npm i -D @playwright/test '
+    + 'It has not been run here — run it yourself with `npx playwright test` after `npm i -D @playwright/test '
     + '&& npx playwright install chromium`. It loads your app in a real browser and fails on a blank '
     + 'screen, an error overlay, or a console error.';
 }

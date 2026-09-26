@@ -135,7 +135,7 @@ import { analyzeEffectCleanup, effectCleanupSummary } from './effectCleanupAnaly
 import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
-import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, npmInstallMaskedFailure } from './DependencyAutoFix';
+import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, viteRangeOf, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, npmInstallMaskedFailure } from './DependencyAutoFix';
 import { quoteShellRouteGroupPaths } from './shellCommandSafety';
 import { resolveStringArg, missingArgMessage } from './toolArgRepair';
 import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
@@ -3335,7 +3335,12 @@ export class ToolDispatcher {
         // explicit versions are untouched. This is the ONLY choke point that catches the agent's own install.
         // Quote Next.js route-group paths (`mkdir -p src/app/(auth)/login`) BEFORE running — unquoted
         // parens are a bash subshell → exit 2 syntax error, so the dirs are never made (PulseBoard autopsy).
-        const effectiveCommand = quoteShellRouteGroupPaths(pinKnownDepsInInstallCommand(command));
+        // The vitest family's major follows the PROJECT's Vite, so read it — only when the command names
+        // vitest, so no other command pays for the read (autopsy 7d79254b, DependencyAutoFix.ts).
+        const pinCtx = /(?:^|[\s/])(?:@vitest\/|vitest\b)/.test(command)
+          ? { viteRange: viteRangeOf(await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => undefined)) }
+          : undefined;
+        const effectiveCommand = quoteShellRouteGroupPaths(pinKnownDepsInInstallCommand(command, pinCtx));
         // Inject the user's own vault secrets (Settings → Secrets & API Keys) into the app's .env the first
         // time it installs/builds/runs — so the app runs with real keys the user never pasted in chat.
         await this.ensureUserSecretsEnvFile(effectiveCommand);

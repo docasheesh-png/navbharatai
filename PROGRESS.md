@@ -81984,6 +81984,14 @@ screenshot + loop nudge; the whole repair pass).
   admin-approved Agent × Tier table gives "Plan" its own rung (`PLAN_RUNG`, flashx on Weak/Normal), so
   there is a real alternative. But changing which model runs is a Model Routing Policy change and needs
   the admin's word. Asked, not changed.
+- ✅ **G3 DECIDED BY THE ADMIN ("A", 2026-09-26) AND SHIPPED: the roadmap planner runs on the PLAN rung.**
+  `tierPlanRunner` (the plan phase's own runner: `planLadder` → the tier's plan rung, then its ladder,
+  same `enforceNoClaude`) now builds the roadmap call, with the build chain only as a fallback when no
+  plan rung has a key. The BUILD still opens on KIMI for a complex app — only the planner moved. Kill
+  switch `AGENTV3_ROADMAP_PLAN_RUNG=off`. ⚠️ **Honest caveat:** with `AGENTV3_NEMOTRON=weak` live, Weak's
+  plan rung is Nemotron Ultra, itself a reasoning model whose speed here is unmeasured; Normal's is
+  `glm-4.7-flashx` (thinking disabled). The next Weak mega-roadmap build's per-call log is the evidence.
+  Locked by `tests/theRoadmapIsAPlan.test.ts`, proven by reverting the fix.
 ---
 
 ## 2026-09-26 — THE MODEL'S ANSWER IS READ ONCE, BEFORE THE PLATFORM REWRITES IT (`turnKind`, the answer half)

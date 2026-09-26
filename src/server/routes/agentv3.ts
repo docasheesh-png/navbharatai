@@ -224,7 +224,7 @@ import { makeResilientTurnRunner } from './agentv3Resilient';
 import { GoogleGenAI } from '@google/genai';
 import { scanGeneratedCode, formatCodeScanReport } from '../AgentV3/CodeSafetyScanner';
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
-import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, sharedRateLimitCooldowns, createBuildBenchRegistry, type NamedRunner, type BuildBenchRegistry } from '../AgentV3/providers/MultiProviderTurnRunner';
+import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, sharedRateLimitCooldowns, createBuildBenchRegistry, type NamedRunner, type BuildBenchRegistry, type MultiProviderOptions } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { modelAlwaysReasons } from '../AgentV3/providers/glmThinking';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { buildStreamingEnabled, streamHardCapMs } from '../AgentV3/providers/openAiStream';
@@ -3624,17 +3624,31 @@ export function sanitizeSteerMessage(raw: unknown): string | null {
 }
 
 /**
+ * Whether the mega-roadmap planner runs on the tier's PLAN rung (admin chose "A", 2026-09-26, autopsy
+ * 7d79254b). Default ON; `AGENTV3_ROADMAP_PLAN_RUNG=off` is the no-deploy revert to the build chain.
+ * Anything other than the word `off` means on — the switch only ever exists to undo this one change.
+ */
+export function roadmapPlanRungEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.AGENTV3_ROADMAP_PLAN_RUNG ?? '').trim().toLowerCase() !== 'off';
+}
+
+/**
  * The PLAN runner for a tier: its plan rung first (glm-5.3-flash / kimi-k2.7-code / Sonnet), then the
  * tier's own ladder — mapped by the same ladderRunners the build uses, guarded by the same
  * enforceNoClaude. Null when nothing in it has a key; the caller then plans on the build client, which
  * is the same tier's ladder anyway. Replaces grokPlanRunner (2026-09-14): Grok is the judge now.
  */
-function tierPlanRunner(level: PowerLevel | string | boolean | null | undefined, noClaude: boolean): TurnRunner | null {
+function tierPlanRunner(
+  level: PowerLevel | string | boolean | null | undefined,
+  noClaude: boolean,
+  hooks: Pick<MultiProviderOptions, 'onProviderUsed' | 'onProviderError' | 'onProviderBenched' | 'bench'> = {},
+): TurnRunner | null {
   try {
     const chain = enforceNoClaude(ladderRunners(planLadder(level)), noClaude);
     if (chain.length === 0) return null;
     return makeMultiProviderTurnRunner(chain, {
       onProviderError: (name, err) => console.log(`[AGENTV3] plan ${name} failed: ${err instanceof Error ? err.message : String(err)}`),
+      ...hooks,
     });
   } catch {
     return null; // misconfigured — caller falls back to the normal build client
@@ -13043,7 +13057,23 @@ async function noteBuildOutcome(
           if (scope.decision === 'analyze' && !dispute) {
             const rmStartedAt = Date.now();
             let rmProvider = 'CLAUDE';
-            const rmCall = makeFastTextRunner((used) => { rmProvider = used; }).runTurn({
+            // 🧭 THE ROADMAP IS A PLAN, SO IT RUNS ON THE PLAN RUNG (admin chose "A", 2026-09-26, autopsy
+            // 7d79254b). It used to take the BUILD chain, which `complex: buildIsComplex` opens on KIMI —
+            // an always-reasoning rung — so a large app waited 76 s (4,574 output tokens) before its
+            // first file. The roadmap is one text-only call that decides the build's steps, i.e. the
+            // same shape as the plan phase, so it now asks the same runner (`tierPlanRunner` →
+            // `planLadder`: the tier's plan rung first, then its own ladder, same no-Claude guard).
+            // The BUILD itself still opens on KIMI for a complex app — only this planner moved.
+            // `AGENTV3_ROADMAP_PLAN_RUNG=off` restores the build chain with no deploy.
+            const rmPlanRunner = roadmapPlanRungEnabled()
+              ? tierPlanRunner(powerLevelReqEffective, noClaudeBuild, {
+                onProviderUsed: (used) => { rmProvider = used; captureProvider(used); },
+                onProviderError: recordProviderFallback,
+                onProviderBenched: recordProviderBenched,
+                bench: buildBench,
+              })
+              : null;
+            const rmCall = (rmPlanRunner ?? makeFastTextRunner((used) => { rmProvider = used; })).runTurn({
               model: fastBuildModel(),
               system: megaRoadmapSystemPrompt(),
               messages: [{ role: 'user', content: megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals) }],

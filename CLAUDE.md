@@ -974,6 +974,10 @@ the code (it is actually read somewhere) on 2026-07-11.
   treats an unknown as "no update", so a misconfiguration shows NOTHING rather than a false prompt.
   Automating this needs a Play Developer service account, which this project does not have — until then
   one number is set by hand after each upload, and that is stated plainly rather than pretended away.
+  ✅ **UPDATED by the admin 2026-09-26: `ANDROID_LATEST_VERSION_CODE = 133`** — build 133 is now live on
+  Play, and the admin set this as part of turning the referral ladder on (the referral preflight compares
+  this number against `FIRST_RELEASE_WITH_DEVICE_PLUGIN = 117` to confirm the live app can device-attest;
+  133 ≥ 117 ✓). Recorded hand-to-hand the same session.
   ✅ **SET by the admin 2026-08-25: `ANDROID_LATEST_VERSION_CODE = 91`** — the first PRODUCTION release.
   Verified against the pipeline rather than taken on trust: `android-aab.yml` sets
   `ANDROID_VERSION_CODE: ${{ github.run_number }}`, the run was **#91**, and Play displayed
@@ -1995,7 +1999,10 @@ the code (it is actually read somewhere) on 2026-07-11.
   **Do not add a step without a proof rule**; `stepIsProven` is deliberately total rather than
   defaulting, so a fifth step is unpayable until someone decides how it is proven.
 - **🎁 THE ₹250 WELCOME BACKFILL (built 2026-09-20, admin-asked) — `WELCOME_BACKFILL` and
-  `WELCOME_BACKFILL_TOKENS`. ⚠️ NEITHER is set, and `WELCOME_BACKFILL` DEFAULTS TO **ON**** — the
+  `WELCOME_BACKFILL_TOKENS`.** ✅ **`WELCOME_BACKFILL = off` in Cloud Run (admin, 2026-09-26)** — set the
+  same session the referral ladder went live, on the admin's "4×₹100 ke alawa sab band" instruction, so
+  the ₹250 backfill button no longer runs at all. Recorded hand-to-hand. (History below: the default was
+  ON, but the button only ever paid when the admin pressed it.) ⚠️ **`WELCOME_BACKFILL` DEFAULTS TO **ON**** — the
   opposite of most money flags here, on purpose: the admin asked for the button that day, and a button
   that needs a Cloud Run key before it does anything is the dead button the second absolute rule
   forbids. `WELCOME_BACKFILL=off` is the instant, no-deploy stop. Read by
@@ -2032,6 +2039,17 @@ the code (it is actually read somewhere) on 2026-07-11.
   `tests/nobodyIsPaidTheWelcomeBonusTwice.test.ts`.
   📌 **STANDING DECISION (admin 2026-09-20): the referral code system starts when the new app is LIVE
   on the Play Store — not before. Do NOT set `REFERRAL_REWARDS` until then.**
+  ✅ **THE CONDITION IS MET AND THE ADMIN SET IT ON — `REFERRAL_REWARDS = on` in Cloud Run (admin,
+  2026-09-26), with build `133` now live on Play.** Recorded hand-to-hand the same session, per this
+  registry's rule. Turning it on ALSO stands down every other welcome grant by construction — the flat
+  gift and the weekly ladder are already hardcoded off (`giftPolicy.ts`), and the legacy bonus, the v2
+  plan and the interim gift all read `flatWelcomeGiftSuppressed` (= `referralRewardsEnabled`), so the
+  4×₹100 ladder becomes the SOLE payer with no other key touched. ⚠️ **Enabled ≠ paying:** the device
+  check FAILS CLOSED, so a claim still pays ₹0 unless the Play Integrity chain is right. The admin ran
+  the switch-on before the preflight; verify against **admin → Reports → Referral cost → "Check referral
+  setup"** (`referralPreflight.ts`) rather than assuming it pays. Two links the preflight cannot see stay
+  the admin's to confirm: the `PLAY_INTEGRITY_CLOUD_PROJECT` repo secret at build time, and Play → Data
+  safety.
 - **Play Integrity — the device check (built 2026-09-15). ⚠️ NOT a Cloud Run key:**
   **`PLAY_INTEGRITY_CLOUD_PROJECT`** is a **GitHub REPO SECRET** read at BUILD time by
   `android/app/build.gradle`, because it is baked into the `.aab`. It is the Google Cloud project

@@ -82546,3 +82546,15 @@ would have run two locks on every build, so `main`'s versions stand and #3332 no
 
 **The process lesson (recorded in CLAUDE.md):** safeguard #6's open-PR check cannot catch two sessions
 that start on the same pasted report within minutes of each other. Only the admin naming one owner can.
+## 2026-09-26 — One-click ₹50 welcome credit in the admin Users table (bridge until the fixed .aab is live)
+
+Admin: *"tab tak admin panel se new user jinko kabhi koi token gift nahi mila hai, usko admin 50 ke token
+gift kar sake 1 click par, bina aab ke"*. A **Gift ₹50** button now appears in Admin → Users beside
+Tokens/Ban/Merge, ONLY on accounts the server marks `welcomeGiftEligible` (`adminWelcomeGift.ts`: never
+gifted, never credited, never paid, not merged, not given this before). `POST /api/admin/users/:uid/welcome-gift`
+re-checks eligibility inside the transaction (a double press pays once), credits 5,000 tokens as GIFT money
+(`mirroredCreditPatch(…, 'gift')`), adds them to `freeGiftedTokens` so the ₹400 lifetime gift ceiling still
+holds (such a user can later earn ₹350 from referral steps, not ₹400 on top), stamps `adminWelcomeGiftAt`,
+writes one ledger row "Welcome credit: ₹50 added by NavBharatAI", and audits `ADMIN_WELCOME_GIFT`.
+Server + admin panel only: live on the website admin panel on deploy, no .aab needed. Test-locked in
+`tests/adminWelcomeGift.test.ts`.

@@ -81631,3 +81631,33 @@ Us`, the UPI id) across the whole repo, not only `src/`.
   show, so ☰'s dot still leads somewhere. The label wraps to two lines on a 360 px phone instead of
   touching the tile's edges (checked in a real browser at 360 and 390 px, light and dark). Locked in
   `oneDoorPerThingInTheSidebar.test.ts` and `theRedDotLeadsToTheTopUp.test.ts`.
+
+## 2026-09-26 — Admin promo codes are REAL now, and can be deleted
+
+The admin asked only for a Delete button on Admin → Settings → Promo Code Generator. Tracing it first
+found the bigger fault: **the generator wrote codes to `promo_codes` and nothing ever read them.** The
+user's Promocode box (`/api/payment/redeem-coupon`) asked only the purchased gift codes and the
+`PROMO_COUPONS` env table, so every admin-made code — including the 1,000-token one on the admin's own
+screen — was answered "Invalid or expired". "Used 0/1" could never move, and "Discount %" had no
+reader anywhere. Asked, the admin chose to make them real, with 1,000 tokens = ₹10 (the wallet's own
+100 tokens = ₹1 rate).
+
+- **Redeemable:** the Promocode box now asks the admin codes AFTER the env table (a code in both keeps
+  its env value). One Firestore transaction reads the code, the user's claim and the wallet together
+  and writes all three, so the claim, the use count and the credit cannot disagree and two people
+  cannot both take the last use. Credit is `'gift'` money, like a marketing coupon. One redemption per
+  person, on the same `coupon_<CODE>_<uid>` claim id the env coupons use.
+- **Max uses is a real total cap**; the admin table's status comes from the SAME rule the redemption
+  applies (`adminPromoStatus`), so it can never say "Active" about a code a user would be refused.
+- **Delete** (`DELETE /api/admin/promo/:code`) removes the code; users who already redeemed keep their
+  credit and ledger line.
+- **Create no longer overwrites.** The old plain `setDoc` reset `usedCount` to 0 whenever the same code
+  was typed again, i.e. a used single-use code became a fresh one. It now answers 409.
+- **Discount % removed** from the form and the table — nothing in the product ever applied it.
+- Limits: 1–500,000 tokens (₹5,000, the env coupons' own ceiling), Max uses 1–100,000, code 3–64 chars
+  of letters, digits and `@ . _ -` (the admin already used an email as a code).
+- Codes made BEFORE this change keep working under the new rule (a missing use count reads as 0).
+- Logic: `src/server/lib/adminPromoCodes.ts` (pure) + `adminPromoStore.ts`; tested against an in-memory
+  Firestore in `tests/adminPromoCodesAreReal.test.ts`.
+- ⚠️ The admin screen itself was not opened in a browser here (it needs an admin sign-in); the server
+  half is proven by the tests above.

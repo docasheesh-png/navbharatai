@@ -13,7 +13,9 @@ import type { Express, Request, Response, NextFunction } from 'express';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Admin panel reads/writes admin_mfa +
 // aggregates user_token_wallets / ai_usage_logs / payment_transactions (all server-side).
-import { doc, getDoc, setDoc, updateDoc, collection, getDocs, runTransaction, getServerDb as getDb } from '../lib/serverDb';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, runTransaction, getServerDb as getDb } from '../lib/serverDb';
+import { createAdminPromo, ADMIN_PROMO_COLLECTION } from '../lib/adminPromoStore';
+import { adminPromoStatus, normalizeAdminPromoCode, parseAdminPromoInput } from '../lib/adminPromoCodes';
 import {
   listDailyBuildOutcomes, summariseBuildOutcomes, cureFamily, cureSplit,
 } from '../lib/mobileBuildOutcomeStore';
@@ -3443,27 +3445,47 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   });
 
   // ── Promo code management ─────────────────────────────────────────────────
+  // These codes are REAL since 2026-09-26: `/api/payment/redeem-coupon` credits them. Until then the
+  // generator wrote codes nothing ever read (see adminPromoCodes.ts for the whole story).
   app.post('/api/admin/promo', verifyAdminToken, async (req: Request, res: Response) => {
+    // What the admin typed is judged first, so a typo is answered even when the database is not.
+    const parsed = parseAdminPromoInput(req.body);
+    if (!parsed.ok) return res.status(400).json({ error: parsed.error });
     const db = getDb() as any;
-    const { code, discountPct, freeTokens, maxUses, expiresAt } = req.body;
-    if (!code) return res.status(400).json({ error: 'code required' });
+    if (!db) return res.status(503).json({ error: 'Database unavailable.' });
     try {
-      const promoRef = doc(db, 'promo_codes', code.toUpperCase());
-      await setDoc(promoRef, {
-        code: code.toUpperCase(), discountPct: discountPct || 0, freeTokens: freeTokens || 0,
-        maxUses: maxUses || 1, usedCount: 0, expiresAt: expiresAt || null,
-        active: true, createdAt: new Date().toISOString(),
-      });
-      audit('ADMIN_PROMO_CREATED', { code, ip: req.ip });
-      res.json({ ok: true });
+      const r = await createAdminPromo(db, req.body, new Date().toISOString());
+      if (!r.ok) return res.status(r.status).json({ error: r.error });
+      audit('ADMIN_PROMO_CREATED', { code: r.code, ip: req.ip });
+      res.json({ ok: true, code: r.code });
     } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
   });
 
   app.get('/api/admin/promo', verifyAdminToken, async (_req: Request, res: Response) => {
     const db = getDb() as any;
     try {
-      const snap = await getDocs(collection(db, 'promo_codes'));
-      res.json(snap.docs.map((d: any) => ({ id: d.id, ...d.data() })));
+      const snap = await getDocs(collection(db, ADMIN_PROMO_COLLECTION));
+      const now = Date.now();
+      // `status` comes from the SAME rule the redemption applies, so the admin's table can never say
+      // "Active" about a code a user would be refused.
+      res.json(snap.docs.map((d: any) => ({ id: d.id, ...d.data(), status: adminPromoStatus(d.data() || {}, now) })));
+    } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
+  });
+
+  // DELETE a code (admin 2026-09-26: "promo code delete ka option nahi hai"). The users who already
+  // redeemed it keep their credit and their ledger line — only the code stops working.
+  app.delete('/api/admin/promo/:code', verifyAdminToken, async (req: Request, res: Response) => {
+    const db = getDb() as any;
+    if (!db) return res.status(503).json({ error: 'Database unavailable.' });
+    const code = normalizeAdminPromoCode(req.params.code);
+    if (!code) return res.status(400).json({ error: 'That is not a promo code.' });
+    try {
+      const ref = doc(db, ADMIN_PROMO_COLLECTION, code);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return res.status(404).json({ error: `${code} does not exist.` });
+      await deleteDoc(ref);
+      audit('ADMIN_PROMO_DELETED', { code, ip: req.ip });
+      res.json({ ok: true });
     } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
   });
 }

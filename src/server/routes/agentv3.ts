@@ -382,7 +382,7 @@ import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionRe
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
-import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild } from '../AgentV3/TestGenerationAgent';
+import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, testSkeletonsCanRun } from '../AgentV3/TestGenerationAgent';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from '../AgentV3/appDefaults';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { findingsToDebt } from '../AgentV3/engineeringMemory';
@@ -19044,7 +19044,10 @@ async function noteBuildOutcome(
             writtenFiles.get(p) ?? await actuator.readFile(workspaceId, p).catch(() => null);
           const pkgForTests = await readProject('package.json');
           const buildTsconfig = buildTsconfigPath(pkgForTests);
-          const skeletonsSafe = testSkeletonsCannotBreakTheBuild(pkgForTests, buildTsconfig ? await readProject(buildTsconfig) : null);
+          // …and only where `vitest` is declared, or the skeleton cannot run and fails the project's own
+          // `tsc --noEmit` on the next turn (autopsy eed79815 — see testSkeletonsCanRun).
+          const skeletonsSafe = testSkeletonsCanRun(pkgForTests)
+            && testSkeletonsCannotBreakTheBuild(pkgForTests, buildTsconfig ? await readProject(buildTsconfig) : null);
           const plan = skeletonsSafe ? planAutoTests(sourceFiles, { existingPaths: writtenFiles.keys(), limit: 3 }) : [];
           const scaffolded: string[] = [];
           // 🔴 NAMED, BECAUSE AN UNNAMED PASS IS A REFUSED ONE (autopsy e628efd4). Without `runInPass`

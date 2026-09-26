@@ -57,13 +57,16 @@ export function extractExportedFunctions(content: string): ExportedFn[] {
   const seen = new Set<string>();
   const src = String(content || '');
   // export [default] [async] function NAME(params)
-  const fnRe = /export\s+(?:default\s+)?(async\s+)?function\s+([A-Za-z0-9_$]+)\s*\(([^)]*)\)/g;
+  // `default` is CAPTURED, not skipped (autopsy eed79815): `export default function Game()` is a default
+  // export, and a skeleton that wrote `import { Game } from './Game'` failed to compile (TS2614) on the
+  // very next typecheck — our own starter test breaking the user's project.
+  const fnRe = /export\s+(default\s+)?(async\s+)?function\s+([A-Za-z0-9_$]+)\s*\(([^)]*)\)/g;
   let m: RegExpExecArray | null;
   while ((m = fnRe.exec(src))) {
-    const name = m[2];
+    const name = m[3];
     if (seen.has(name)) continue;
     seen.add(name);
-    out.push({ name, async: !!m[1], params: parseParams(m[3]) });
+    out.push({ name, async: !!m[2], params: parseParams(m[4]), ...(m[1] ? { isDefault: true } : {}) });
   }
   // export const NAME = [async] (params) =>   |   export const NAME = [async] function (params)
   const arrowRe = /export\s+const\s+([A-Za-z0-9_$]+)\s*(?::[^=]+)?=\s*(async\s+)?(?:function\s*[A-Za-z0-9_$]*\s*)?\(([^)]*)\)\s*(?::[^=]*)?=>?/g;
@@ -154,6 +157,23 @@ export function planAutoTests(
       content: generateUnitTest({ modulePath, functions: c.functions }),
     };
   });
+}
+
+/**
+ * CAN A TEST SKELETON EVEN RUN HERE? Only when the project declares `vitest` (autopsy eed79815).
+ *
+ * `testSkeletonsCannotBreakTheBuild` answered a narrower question — the RELEASE build — and the golden
+ * scaffold passes it because `tsconfig.build.json` excludes tests. But the project's own `tsconfig.json`
+ * does not, and that is what every `tsc --noEmit` reads: the agent's, the write-time typecheck's, the
+ * post-build gate's. So on the next turn each skeleton was `TS2307 Cannot find module 'vitest'`, the
+ * model spent its steps deleting files it never asked for, and the "runnable Vitest skeleton" we
+ * announced could not run at all. A skeleton is written only where its first line resolves. Pure.
+ */
+export function testSkeletonsCanRun(packageJson: string | null | undefined): boolean {
+  try {
+    const pkg = JSON.parse(String(packageJson)) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+    return !!(pkg?.dependencies?.vitest || pkg?.devDependencies?.vitest);
+  } catch { return false; }
 }
 
 /**

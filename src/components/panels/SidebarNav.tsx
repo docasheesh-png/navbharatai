@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Info, Lock, Settings, X, Download, Flag, Bell } from 'lucide-react';
+import { Info, Lock, Settings, Wallet, X, Download, Flag, Bell } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { shouldShowDownloadApp, apkDownloadUrl } from '../../lib/appDownload';
 import { TextSizeSlider } from './TextSizeSlider';
@@ -201,18 +201,21 @@ export function SidebarNav({
   // Settings appeared TWICE in the mobile drawer — once in this list, once as a System Matrix tile below
   // (admin 2026-09-19: "sidebar menu me Settings ke 2 option dikh rahe hai — ek list me hai, ek System
   // Matrix me (square). List wala hata do, System Matrix wala rahne do"). Both opened the same view, so
-  // the list row is dropped and the System Matrix tile is the drawer's single door to it.
+  // the list row is dropped and the System Matrix tile is the drawer's single door to it. Wallet &
+  // Billing joined it on 2026-09-26, in the tile the removed Donate option used to fill (admin: "is
+  // donate ki jagaha itna hi bada 'wallet and billing' button bana dena") — so its list row goes for
+  // the same reason, and the tile carries the list row's top-up dot with it.
   //
-  // 🔒 IT IS DROPPED FROM THE DRAWER ONLY, NOT FROM `SIDEBAR_HIDDEN`, AND THAT DISTINCTION IS
+  // 🔒 THEY ARE DROPPED FROM THE DRAWER ONLY, NOT FROM `SIDEBAR_HIDDEN`, AND THAT DISTINCTION IS
   // LOAD-BEARING. The desktop/tablet RAIL renders `visibleItems` and has NO System Matrix section — that
-  // section is drawer-only — so hiding it globally would leave the rail with no entry for it at all. Its
-  // only other door on that surface is TopNav's user dropdown, which renders solely when someone is
-  // signed in, so a signed-out desktop user would have been stranded.
+  // section is drawer-only — so hiding either id globally would leave the rail with no entry for it at
+  // all. Settings' only other door on that surface is TopNav's user dropdown, which renders solely when
+  // someone is signed in, so a signed-out desktop user would have been stranded.
   //
-  // `history` joins it for the OPPOSITE reason: Settings is dropped here because the drawer shows it
-  // twice, History because the phone already carries it in the bottom bar. Same outcome either way —
-  // one door per screen, never two and never none.
-  const DRAWER_HIDDEN = new Set(['settings', 'history']);
+  // `history` joins them for the OPPOSITE reason: those two are dropped here because the drawer shows
+  // them as tiles, History because the phone already carries it in the bottom bar. Same outcome either
+  // way — one door per screen, never two and never none.
+  const DRAWER_HIDDEN = new Set(['settings', 'billing', 'history']);
   const drawerItems = visibleItems.filter(item => !DRAWER_HIDDEN.has(item.id));
 
   // ONE definition of the Notifications row for the rail and the drawer — a signed-in user's inbox,
@@ -463,13 +466,32 @@ export function SidebarNav({
                     System Matrix
                   </div>
                   <div className="px-1 space-y-3">
-                    <button
-                      onClick={() => { toggleTab('settings'); setIsMenuOpen(false); setErrorContext(null); }}
-                      className={`w-full flex flex-col items-center justify-center gap-2 border py-5 rounded-2xl transition-all group shadow-lg ${activeView === 'settings' ? 'bg-indigo-600 border-indigo-500 text-on-accent' : 'bg-card border-line hover:border-indigo-500/50'}`}
-                    >
-                      <Settings className="w-6 h-6 text-accent-text group-hover:rotate-90 transition-transform duration-500" />
-                      <span className={`text-[10px] font-black uppercase tracking-widest ${activeView === 'settings' ? 'text-ink' : 'text-muted'}`}>Settings</span>
-                    </button>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        onClick={() => { toggleTab('settings'); setIsMenuOpen(false); setErrorContext(null); }}
+                        className={`flex flex-col items-center justify-center gap-2 border py-5 rounded-2xl transition-all group shadow-lg ${activeView === 'settings' ? 'bg-indigo-600 border-indigo-500 text-on-accent' : 'bg-card border-line hover:border-indigo-500/50'}`}
+                      >
+                        <Settings className="w-6 h-6 text-accent-text group-hover:rotate-90 transition-transform duration-500" />
+                        <span className={`text-[10px] font-black uppercase tracking-widest ${activeView === 'settings' ? 'text-ink' : 'text-muted'}`}>Settings</span>
+                      </button>
+                      {/* Wallet & Billing, in the tile Donate used to fill (admin 2026-09-26). Its list
+                          row is in DRAWER_HIDDEN, so this tile is the drawer's one door to it — which is
+                          why it carries the top-up dot the row used to show. */}
+                      <button
+                        onClick={() => { toggleTab('billing'); setIsMenuOpen(false); }}
+                        title={walletNeedsTopUp ? TOP_UP_DOT_LABEL : undefined}
+                        className={`relative flex flex-col items-center justify-center gap-2 border py-5 rounded-2xl transition-all group shadow-lg ${activeView === 'billing' ? 'bg-indigo-600 border-indigo-500 text-on-accent' : 'bg-card border-line hover:border-indigo-500/50'}`}
+                      >
+                        {walletNeedsTopUp && (
+                          <span className="absolute top-2.5 right-2.5 flex items-center">
+                            <span aria-hidden className="w-2 h-2 rounded-full bg-danger" />
+                            <span className="sr-only">{TOP_UP_DOT_LABEL}</span>
+                          </span>
+                        )}
+                        <Wallet className="w-6 h-6 text-accent-text group-hover:scale-110 transition-transform" />
+                        <span className={`px-2 text-center leading-tight text-[10px] font-black uppercase tracking-wider ${activeView === 'billing' ? 'text-ink' : 'text-muted'}`}>Wallet &amp; Billing</span>
+                      </button>
+                    </div>
 
                     {/* Text size — one tap from anywhere (admin 2026-08-08). The user who needs this
                         is already struggling to read the screen; three taps into Settings was

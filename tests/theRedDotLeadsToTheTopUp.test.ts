@@ -90,6 +90,13 @@ describe('🔒 the trail — all four steps, one predicate', () => {
     expect(side).toContain('attentionLabel={TOP_UP_DOT_LABEL}');
     // It is the Wallet & Billing row and no other.
     expect(side).not.toMatch(/needsAttention=\{walletNeedsTopUp\}\s*$/m);
+    // Since 2026-09-26 the drawer's door to Wallet & Billing is its System Matrix TILE (the list row is
+    // in DRAWER_HIDDEN), so the tile must carry the same dot — otherwise ☰ would promise a reason the
+    // drawer no longer shows.
+    const tile = side.slice(side.indexOf("toggleTab('billing')"));
+    expect(side).toMatch(/DRAWER_HIDDEN = new Set\(\[[^\]]*'billing'/);
+    expect(tile.slice(0, 900)).toMatch(/\{walletNeedsTopUp && \(/);
+    expect(tile.slice(0, 900)).toContain('{TOP_UP_DOT_LABEL}');
   });
 
   it('STEPS 3 and 4 — the Buy tokens tile and the Purchase button, from the same predicate', () => {

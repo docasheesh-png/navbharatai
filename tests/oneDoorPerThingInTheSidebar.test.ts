@@ -31,6 +31,8 @@ const drawerHalf = code.slice(split);
 // Every id that must appear exactly once in the drawer, as a System Matrix tile rather than a list row.
 const DEDUPED: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'settings', label: 'Settings' },
+  // Wallet & Billing took the tile the removed Donate option used to fill (admin 2026-09-26).
+  { id: 'billing', label: 'Wallet &amp; Billing' },
 ];
 
 describe('one door per thing in the sidebar', () => {

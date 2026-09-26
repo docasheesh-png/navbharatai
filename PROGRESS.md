@@ -81624,3 +81624,10 @@ Us`, the UPI id) across the whole repo, not only `src/`.
   append-only audit trail, so they stay as history; nothing in the running app reads them. And a
   browser that once edited the old page may still hold a `navbharat_donation_v1` key in its own
   localStorage; nothing reads it now.
+- **Same day, follow-up (admin: *"is donate ki jagaha itna hi bada 'wallet and billing' button bana
+  dena"*):** the drawer's System Matrix is two tiles again — Settings and **Wallet & Billing**, the same
+  size. The Wallet & Billing LIST row joins `DRAWER_HIDDEN` (one door per screen, the same rule as
+  Settings; the desktop rail keeps its row), and the tile carries the red top-up dot that row used to
+  show, so ☰'s dot still leads somewhere. The label wraps to two lines on a 360 px phone instead of
+  touching the tile's edges (checked in a real browser at 360 and 390 px, light and dark). Locked in
+  `oneDoorPerThingInTheSidebar.test.ts` and `theRedDotLeadsToTheTopUp.test.ts`.

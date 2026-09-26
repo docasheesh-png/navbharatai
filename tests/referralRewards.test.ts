@@ -122,7 +122,7 @@ describe('🔒 RULE 1 — the full ₹400 ladder is Android-only and device-veri
 // bounded trial so a website-only user is not stranded at ₹0 and unable to build even once.
 const web = (over: Partial<Parameters<typeof decideSelfReward>[0]> = {}) => decideSelfReward({
   step: 'github', alreadyPaidSteps: [], deviceVerified: false, platform: 'web',
-  alreadyGiftedTokens: 0, alreadyWebGiftedTokens: 0, env: ON, ...over,
+  alreadyGiftedTokens: 0, alreadyWebGiftedTokens: 0, mobileVerified: true, env: ON, ...over,
 });
 
 describe('🔒 the website earns only mobile + github, capped at ₹100', () => {
@@ -136,6 +136,21 @@ describe('🔒 the website earns only mobile + github, capped at ₹100', () => 
     }
   });
 
+  it('🔒 NO MOBILE VERIFY → NO TOKEN: a web github link is held (₹0, unrecorded) until a real mobile is verified', () => {
+    const r = web({ step: 'github', mobileVerified: false });
+    expect(r.tokens).toBe(0);
+    expect(r.reason).toBe('web-held-until-mobile');
+    expect(r.recordStep).toBeNull(); // must stay claimable — never burned while held
+  });
+
+  it('verifying the mobile releases the held github: the same github claim now pays ₹100', () => {
+    const held = web({ step: 'github', mobileVerified: false });
+    expect(held.reason).toBe('web-held-until-mobile');
+    const released = web({ step: 'github', mobileVerified: true });
+    expect(released.reason).toBe('granted');
+    expect(released.tokens).toBe(10_000);
+  });
+
   it('refuses the Android-only steps on the web — gmail-login and the referral code never pay here', () => {
     for (const step of ['email', 'referral-code'] as RewardStep[]) {
       const r = web({ step });
@@ -145,8 +160,14 @@ describe('🔒 the website earns only mobile + github, capped at ₹100', () => 
     }
   });
 
-  it('caps the WHOLE website at ₹100 — a second web step after ₹100 already earned pays nothing', () => {
-    const r = web({ step: 'mobile', alreadyWebGiftedTokens: 10_000 });
+  it('both web steps pay ₹100 — the second still pays after the first (the ₹200 ceiling is not yet hit)', () => {
+    const r = web({ step: 'mobile', alreadyWebGiftedTokens: 10_000 }); // ₹100 already earned on the web
+    expect(r.reason).toBe('granted');
+    expect(r.tokens).toBe(10_000); // ₹100 — total web now ₹200
+  });
+
+  it('caps the WHOLE website at ₹200 — a grant once ₹200 is already earned on the web pays nothing', () => {
+    const r = web({ step: 'mobile', alreadyWebGiftedTokens: 20_000 }); // ₹200 already earned on the web
     expect(r.tokens).toBe(0);
     expect(r.reason).toBe('web-cap-reached');
   });
@@ -154,11 +175,11 @@ describe('🔒 the website earns only mobile + github, capped at ₹100', () => 
   it('the web still obeys the ₹400 lifetime self-cap — an account already at ₹400 earns ₹0 on the web', () => {
     const r = web({ step: 'github', alreadyGiftedTokens: 40_000, alreadyWebGiftedTokens: 0 });
     expect(r.tokens).toBe(0);
-    expect(r.reason).toBe('cap-reached'); // the ₹400 total, not the ₹100 web slice, is what bit
+    expect(r.reason).toBe('cap-reached'); // the ₹400 total, not the ₹200 web slice, is what bit
   });
 
-  it('the ₹100 web grant is a SUB-cap: the same account can still earn the remaining ₹300 on Android', () => {
-    const r = android({ step: 'mobile', alreadyGiftedTokens: 10_000 });
+  it('the ₹200 web grant is a SUB-cap: the same account can still earn the remaining ₹200 on Android', () => {
+    const r = android({ step: 'mobile', alreadyGiftedTokens: 20_000 }); // ₹200 already taken on the web
     expect(r.reason).toBe('granted');
     expect(r.tokens).toBe(10_000);
   });

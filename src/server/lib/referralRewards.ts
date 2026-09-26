@@ -21,14 +21,17 @@
 //    free mailbox and a free GitHub account cost nothing and take three minutes, so ₹200 reachable
 //    from a laptop would be an unlimited, scriptable money printer that never touches the device check.
 //    ⚠️ REVERSED IN PART 2026-09-26 (admin, verbatim: *"website par github aur mobile verification par
-//    100-100 maximum 100 only"*): the flat welcome gift was retired (`giftPolicy.ts`), which left a
+//    100-100 maximum 200"*): the flat welcome gift was retired (`giftPolicy.ts`), which left a
 //    website-only user at ₹0 and — with billing on — unable to build even once. So the web now earns
-//    EXACTLY TWO steps (mobile, github) under a SINGLE ₹100 ceiling (`giftPolicy.MAX_WEB_GIFT_TOKENS`):
-//    the mobile SIM is the genuine anti-farm gate, github rides INSIDE the same ₹100 so it can never
-//    become a second scriptable ₹100, and gmail-login (`email`) and the referral code stay Android-only.
-//    It is a SUB-cap beneath the ₹400 lifetime self-cap, not a second budget — a user who took ₹100 on
-//    the web still earns the remaining ₹300 on a verified device. Half a gate is still no gate, which is
-//    exactly why the web's exposure is bounded to ₹100 and the rest stays behind the device check.
+//    EXACTLY TWO steps (mobile ₹100, github ₹100) under a ₹200 ceiling (`giftPolicy.MAX_WEB_GIFT_TOKENS`):
+//    the mobile SIM is the genuine anti-farm gate, github rides beside it inside the ₹200 so no tunable
+//    can turn either into more than its ₹100, and gmail-login (`email`) and the referral code stay
+//    Android-only. 🔒 AND NO WEB TOKEN IS PAID UNTIL THE MOBILE IS VERIFIED (admin: *"no mobile (otp)
+//    verify no token"*): a free github link is EARNED but HELD at ₹0 until a real number lands, so it
+//    can never pay on its own — the same anchor rule 3 puts under the referrer's money. It is a SUB-cap beneath the ₹400 lifetime self-cap, not a second budget — a user who
+//    took ₹200 on the web still earns the remaining ₹200 on a verified device. Half a gate is still no
+//    gate, which is exactly why the web's exposure is bounded to ₹200 and the rest stays behind the
+//    device check.
 //
 // 🔒 2. THE REFERRER IS PAID FOR VERIFICATIONS, NEVER FOR A REDEMPTION. A's ₹75 is three payments of
 //    ₹25 for B's email, mobile and github — and ₹0 for B merely typing the code. Admin: *"uske refral
@@ -80,7 +83,7 @@ export const ALL_STEPS: readonly RewardStep[] = ['referral-code', 'email', 'mobi
  * decides otherwise, the same safe-by-default shape `REFERRER_PAYING_STEPS` already uses.
  *
  * ⚠️ Order matters for the checklist UI, not for the money: mobile is listed first because it is the
- * genuine anti-farm gate (a real SIM), and github rides inside the shared ₹100 web ceiling.
+ * genuine anti-farm gate (a real SIM), and github rides inside the shared ₹200 web ceiling.
  */
 export const WEB_ELIGIBLE_STEPS: readonly RewardStep[] = ['mobile', 'github'];
 
@@ -161,7 +164,8 @@ export type SelfRewardReason =
   | 'cap-reached'         // the account is at its ₹400 lifetime gift ceiling (giftPolicy.ts)
   | 'not-android'         // iOS and unrecognised platforms earn nothing here
   | 'web-not-eligible'    // this step is Android-only (email / referral-code); web cannot earn it
-  | 'web-cap-reached'     // the account is at its ₹100 website ceiling (giftPolicy.ts)
+  | 'web-held-until-mobile' // earned on the web but not payable until a real mobile (OTP) is verified
+  | 'web-cap-reached'     // the account is at its ₹200 website ceiling (giftPolicy.ts)
   | 'device-unverified'   // no genuine-device proof ⇒ no money, never a silent skip
   | 'disabled';           // the master flag is off
 
@@ -200,9 +204,15 @@ export function decideSelfReward(input: {
   alreadyGiftedTokens?: unknown;
   /**
    * What this account has already been paid THROUGH THE WEB (`webGiftedTokens`). Only read on a web
-   * claim, where it enforces the ₹100 website sub-ceiling. Omitted (or on Android) it is treated as 0.
+   * claim, where it enforces the ₹200 website sub-ceiling. Omitted (or on Android) it is treated as 0.
    */
   alreadyWebGiftedTokens?: unknown;
+  /**
+   * Has this account verified a real mobile (OTP)? Required for ANY web payout (admin 2026-09-26:
+   * *"no mobile (otp) verify no token"*). On Android it is not read — the device check is the gate.
+   * The caller derives it from the account record (`stepIsProven('mobile')`), never the request body.
+   */
+  mobileVerified?: boolean;
   env?: NodeJS.ProcessEnv;
 }): SelfReward {
   const env = input.env ?? process.env;
@@ -229,10 +239,17 @@ export function decideSelfReward(input: {
   if (input.platform === 'web') {
     // 🔒 WEB IS DELIBERATELY DIFFERENT, AND SMALLER. Only two steps are earnable here (mobile, github),
     // there is NO device check (the web has none — the mobile SIM is the real gate, and github rides
-    // inside the ₹100 web ceiling), and the total is clamped by BOTH the ₹400 lifetime self-cap above
-    // AND the ₹100 website sub-cap. See giftPolicy.MAX_WEB_GIFT_TOKENS for why the web is capped at all.
+    // inside the ₹200 web ceiling), and the total is clamped by BOTH the ₹400 lifetime self-cap above
+    // AND the ₹200 website sub-cap. See giftPolicy.MAX_WEB_GIFT_TOKENS for why the web is capped at all.
     if (!stepAllowedOnWeb(input.step)) return { ...NOTHING, reason: 'web-not-eligible' };
     if (alreadyPaid) return { ...NOTHING, reason: 'already-paid' };
+    // 🔒 NO MOBILE (OTP) VERIFY → NO TOKEN ON THE WEB (admin 2026-09-26). A github link is free and
+    // scriptable, so on the web it is EARNED when it happens but HELD, paid ₹0 and recorded as nothing,
+    // until a real number is verified — the same anchor rule 3 puts under the referrer's money. The
+    // `mobile` step carries that proof by definition (you cannot claim it without verifying), so it is
+    // never itself held; claiming it is what later releases a waiting github. Recording nothing here is
+    // load-bearing: a held step must stay claimable, so it is never written to `paidSteps`.
+    if (!input.mobileVerified) return { ...NOTHING, reason: 'web-held-until-mobile' };
     const tokens = capWebGift(afterSelfCap, input.alreadyWebGiftedTokens);
     // Distinguish "the web's own ₹100 is spent" from "the whole ₹400 is spent": both pay ₹0, but they
     // are different facts, and the second is answered by `cap-reached` when the self-cap already bit.

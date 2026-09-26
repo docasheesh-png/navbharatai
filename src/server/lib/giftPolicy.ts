@@ -47,18 +47,19 @@ export const MAX_SELF_GIFT_TOKENS = 400 * TOKENS_PER_RUPEE;
 export const MAX_REFERRER_PER_FRIEND_TOKENS = 75 * TOKENS_PER_RUPEE;
 
 /**
- * The most an account may EVER be gifted through the WEBSITE. ₹100 (admin 2026-09-26: *"website par
- * github aur mobile verification par 100-100 maximum 100 only"*).
+ * The most an account may EVER be gifted through the WEBSITE. ₹200 (admin 2026-09-26: *"website par
+ * github aur mobile verification par 100-100 maximum 200"*) — the two web steps, ₹100 each.
  *
  * 🔒 WHY THE WEB HAS ITS OWN, SMALLER CEILING. The full ₹400 ladder is claimed inside the Android app
  * behind the Play Integrity device check, which bounds how many accounts can farm it at once. The web
  * has no such check — a linked GitHub account is free and scriptable — so the web is deliberately
- * capped at a single ₹100 grant per account. The strong web gate is the MOBILE step (a real SIM,
- * TRAI-bounded); GitHub on the web rides inside this same ₹100 so it can never become a second
- * scriptable ₹100. This is a SUB-ceiling: it sits under `MAX_SELF_GIFT_TOKENS`, never above it, so an
- * account that took ₹100 on the web can still earn the remaining ₹300 on a verified Android device.
+ * capped: github ₹100 + mobile ₹100 = ₹200, and NO tunable can push it past that (a step re-priced to
+ * ₹300 in a console still pays only up to this ceiling on the web). The strong web gate is the MOBILE
+ * step (a real SIM, TRAI-bounded); GitHub rides beside it inside this ₹200 total. This is a SUB-ceiling:
+ * it sits under `MAX_SELF_GIFT_TOKENS`, never above it, so an account that took ₹200 on the web can
+ * still earn the remaining ₹200 on a verified Android device (gmail-login + referral code).
  */
-export const MAX_WEB_GIFT_TOKENS = 100 * TOKENS_PER_RUPEE;
+export const MAX_WEB_GIFT_TOKENS = 200 * TOKENS_PER_RUPEE;
 
 /** What acquiring one user may cost NavBharatAI, all in. ₹475. Stated so the sum is checkable. */
 export const MAX_ACQUISITION_COST_TOKENS = MAX_SELF_GIFT_TOKENS + MAX_REFERRER_PER_FRIEND_TOKENS;

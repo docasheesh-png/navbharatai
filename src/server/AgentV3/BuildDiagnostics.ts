@@ -54,6 +54,8 @@ const PROCESS_ONLY_CODES = new Set([
   // The decision to leave a turn as the ANSWER it is, rather than rebuild it on a higher rung
   // (autopsy e628efd4): a fact about OUR retry policy, never a defect in the user's app.
   'TURN_ANSWERED_A_QUESTION',
+  // …and its sibling (2026-09-26): the model DECLINED, and its refusal was left standing as the answer.
+  'TURN_DECLINED',
   // Same rule, same reason (autopsy 21b431e1): a dropped backslash that OUR deterministic pass put
   // back is this engine's own housekeeping. The user's app is correct by the time anybody reads it.
   'SCRIPT_INTEGRITY_REPAIRED',
@@ -65,6 +67,10 @@ const PROCESS_ONLY_CODES = new Set([
   'FAST_LANE_SKIPPED_REASONING_RUNG',
   // …and the lane HANDING OFF because its chain fell to such a rung mid-lane (autopsy Study-Racer).
   'FAST_LANE_FELL_TO_REASONING_RUNG',
+  // An observation about OUR checkpoint heuristic (autopsy SignBridge, 2026-09-26) — never the app.
+  'CHECKPOINT_SIGNAL',
+  // A suggest-only review on a green app that ran out of time — our process, never the app (same autopsy).
+  'REVIEW_SUGGESTIONS_NOT_READY',
   // …and its sibling: what OUR calls that returned nothing cost in wall clock (providerWaste.ts).
   'PROVIDER_TIME_WASTED',
   'GROUNDING_COST', 'POST_ANSWER_TIMING', 'SERVICE_GRAPH_MULTI', 'SERVICE_GRAPH_SINGLE',

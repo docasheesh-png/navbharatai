@@ -111,6 +111,8 @@ const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: string; 
 
 /** Codes that must never become a suggestion — see the header for why each is excluded. */
 const NEVER_SUGGEST = new Set([
+  'CHECKPOINT_SIGNAL', // our checkpoint heuristic, never a finding (autopsy SignBridge, 2026-09-26)
+  'REVIEW_SUGGESTIONS_NOT_READY', // a suggest-only review that ran out of time — nothing for the user to do
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', 'LADDER_DEPTH',
   'RELEASE_GATE', 'TIME_TO_FIRST_CALL', 'RUNTIME_UNCHECKED', 'RUNTIME_VERIFIED', 'APP_RENDERED',
   'TEST_SUITE_UNVERIFIED', 'JOURNEY_NOT_DERIVED', 'JOURNEY_NOT_RUN', 'PAGE_RENDER_NOT_RUN',
@@ -122,6 +124,8 @@ const NEVER_SUGGEST = new Set([
   // We left a turn as the answer the model gave — our own retry policy working, never a next move
   // for the user (autopsy e628efd4).
   'TURN_ANSWERED_A_QUESTION',
+  // …and a refusal left standing as the answer (2026-09-26) — nothing for the user to fix.
+  'TURN_DECLINED',
   // Our own lane's phase timings — a measurement, never a next move for the user.
   'FAST_LANE_PHASES',
   // What our own failed provider calls cost — our routing's problem, never the user's next move.

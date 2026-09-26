@@ -1,9 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { VirtualFileSystem } from '../src/server/project/ProjectModel';
 import { selectArchitecture, manifestContract, forbiddenPathPatterns } from '../src/server/project/ArchitectureManifest';
-import { detectFramework, scaffold, scaffoldSummary } from '../src/server/project/Scaffold';
 import { validateArchitecture, isVueApp } from '../src/server/project/ArchitectureValidator';
-import { verifyProject } from '../src/server/project/ProjectVerifier';
 
 const vfsFrom = (f: Record<string, string>) => VirtualFileSystem.fromRecord(f);
 
@@ -34,24 +32,6 @@ describe('Vue architecture — selection', () => {
     const pats = forbiddenPathPatterns(selectArchitecture('a vue app'));
     expect(pats.some((p) => p.test('src/App.jsx'))).toBe(true);
     expect(pats.some((p) => p.test('src/components/Foo.tsx'))).toBe(true);
-  });
-});
-
-describe('Vue architecture — scaffold', () => {
-  it('detectFramework picks vite-vue for explicit Vue prompts', () => {
-    expect(detectFramework('a vue 3 expense tracker')).toBe('vite-vue');
-    expect(detectFramework('build a vuejs app with vue-router')).toBe('vite-vue');
-  });
-
-  it('seeds a runnable, conformant vite-vue skeleton', () => {
-    const vfs = vfsFrom({});
-    expect(scaffold(vfs, 'vite-vue')).toBe('vite-vue');
-    expect(vfs.has('src/App.vue')).toBe(true);
-    expect(vfs.readText('src/main.js')).toMatch(/createApp\(App\)\.mount\('#app'\)/);
-    expect(vfs.readText('index.html')).toMatch(/<div id="app">/);
-    expect(scaffoldSummary('vite-vue')).toMatch(/Vue 3/);
-    // The seeded skeleton must verify clean (no dangling refs / mount mismatch).
-    expect(verifyProject(vfs).ok).toBe(true);
   });
 });
 

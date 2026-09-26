@@ -250,10 +250,11 @@ describe('braveSearch — paying once for the same question', () => {
 
 describe('wiring — ONE client, and both callers still fall back to the free path', () => {
   const v3 = readFileSync(join(process.cwd(), 'src/server/AgentV3/WebSearch.ts'), 'utf8');
-  const eng = readFileSync(join(process.cwd(), 'src/server/EngineerAI/WebSearchClient.ts'), 'utf8');
+  // `EngineerAI/WebSearchClient.ts` was the second caller; it was removed on 2026-09-25 with the
+  // legacy build engine, so the one remaining caller is checked.
 
   it('🔒 the duplicated private copies are gone — one door is what makes one cache possible', () => {
-    for (const [name, src] of [['AgentV3', v3], ['EngineerAI', eng]] as const) {
+    for (const [name, src] of [['AgentV3', v3]] as const) {
       expect(src, name).toContain("from '../lib/braveSearch'");
       expect(src, name).not.toContain('private async braveSearch(');
       expect(src, name).not.toContain('api.search.brave.com');
@@ -261,7 +262,7 @@ describe('wiring — ONE client, and both callers still fall back to the free pa
   });
 
   it('🔒 both callers route through searchOrder, so neither engine failing leaves the caller with nothing', () => {
-    for (const [name, src] of [['AgentV3', v3], ['EngineerAI', eng]] as const) {
+    for (const [name, src] of [['AgentV3', v3]] as const) {
       expect(src, name).toContain('const order = searchOrder(intent, !!braveKey, cheap);');
       // A throw is swallowed to [] so the loop can try the OTHER engine — never so the caller gets [].
       expect(src, name).toContain('await braveSearch(query, limit, braveKey).catch(() => [])');
@@ -270,7 +271,7 @@ describe('wiring — ONE client, and both callers still fall back to the free pa
   });
 
   it('🔒 nobody reads the raw env any more — the trim lives in one place or it lives nowhere', () => {
-    for (const [name, src] of [['AgentV3', v3], ['EngineerAI', eng]] as const) {
+    for (const [name, src] of [['AgentV3', v3]] as const) {
       expect(src, name).toContain('const braveKey = braveApiKey();');
       expect(src, name).not.toContain('process.env.BRAVE_API_KEY');
     }
@@ -279,12 +280,12 @@ describe('wiring — ONE client, and both callers still fall back to the free pa
   it("🔒 only the chat's grounding asks for the paid engine first — everything else defaults to free", () => {
     const live = readFileSync(join(process.cwd(), 'src/server/lib/liveSearchContext.ts'), 'utf8');
     expect(live).toContain("client.search(query, limit, 'live', opts.cheap)");
-    for (const [name, src] of [['AgentV3', v3], ['EngineerAI', eng]] as const)
+    for (const [name, src] of [['AgentV3', v3]] as const)
       expect(src, name).toContain("intent: SearchIntent = 'reference'");
   });
 
   it('🔒 `cheap` defaults to false in both callers — a caller that forgets it keeps paid behaviour, never free', () => {
-    for (const [name, src] of [['AgentV3', v3], ['EngineerAI', eng]] as const)
+    for (const [name, src] of [['AgentV3', v3]] as const)
       expect(src, name).toContain('cheap = false');
   });
 });

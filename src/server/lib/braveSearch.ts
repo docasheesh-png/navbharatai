@@ -7,6 +7,8 @@
 // CENTRALIZE rather than patch: with two copies there is no single place to put a cache, a counter, or
 // a price, so every cost control would have had to be written twice and would have drifted the first
 // time somebody touched one of them. Now there is one door, and everything below hangs on it.
+// (`EngineerAI/WebSearchClient.ts` was removed on 2026-09-25 with the legacy build engine, so
+// `AgentV3/WebSearch.ts` is the one caller left.)
 //
 // ── WHAT IT COSTS, WHICH IS THE WHOLE POINT ──────────────────────────────────────────────────────
 // Brave's Search plan bills **per request**, not per result: $5.00 per 1,000 searches (~₹0.44 each),

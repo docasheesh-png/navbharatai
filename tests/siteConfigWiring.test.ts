@@ -6,7 +6,6 @@ import { resolve } from 'node:path';
 const src = (rel: string) => readFileSync(resolve(__dirname, '..', rel), 'utf8');
 const deploy = src('src/server/AgentV3/Deployment.ts');
 const routes = src('src/server/routes/agentv3.ts');
-const engineer = src('src/server/EngineerAI/DeploymentService.ts');
 
 describe('🔒 the version config is formed by hostingVersionConfig, never hardcoded', () => {
   it('both first-party publish paths pass the formed config', () => {
@@ -16,10 +15,7 @@ describe('🔒 the version config is formed by hostingVersionConfig, never hardc
     expect(deploy).not.toContain("rewrites: [{ glob: '**', path: '/index.html' }],\n          headers: [{ glob: '/assets/**'");
   });
 
-  it('the Engineer AI deployer (a sibling with the same hardcoded config) uses the same form', () => {
-    expect(engineer).toContain('hostingVersionConfig(');
-    expect(engineer).not.toContain("rewrites: [{ glob: '**', path: '/index.html' }]");
-  });
+  // (The Engineer AI deployer sibling was removed on 2026-09-25 with the legacy build engine.)
 });
 
 describe('🔒 the settings routes', () => {

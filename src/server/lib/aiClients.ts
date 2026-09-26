@@ -21,9 +21,6 @@ export const LEGACY_EMBEDDED_API_KEY = process.env.LEGACY_EMBEDDED_API_KEY || ''
 // AI Clients Initialization (Lazy system-key singletons)
 let geminiClient: GoogleGenAI | null = null;
 let groqClient: OpenAI | null = null;
-let deepseekClient: OpenAI | null = null;
-let openaiClient: OpenAI | null = null;
-let openrouterClient: OpenAI | null = null;
 
 export const isPlaceholder = (key: string | undefined, strict: boolean = true, provider?: string): boolean => {
   if (!key) return true;
@@ -109,34 +106,6 @@ export const getGroq = (userKey?: string): OpenAI | null => {
   return new OpenAI({
     apiKey: key,
     baseURL: 'https://api.groq.com/openai/v1',
-  });
-};
-
-export const getDeepSeek = (userKey?: string): OpenAI | null => {
-  const { key } = resolveApiKey('deepseek', userKey);
-  if (!key) return null;
-  return new OpenAI({
-    apiKey: key,
-    baseURL: 'https://api.deepseek.com',
-  });
-};
-
-export const getOpenAI = (userKey?: string): OpenAI | null => {
-  const { key } = resolveApiKey('openai', userKey);
-  if (!key) return null;
-  return new OpenAI({ apiKey: key });
-};
-
-export const getOpenRouter = (userKey?: string): OpenAI | null => {
-  const { key } = resolveApiKey('openrouter', userKey);
-  if (!key) return null;
-  return new OpenAI({
-    apiKey: key,
-    baseURL: 'https://openrouter.ai/api/v1',
-    defaultHeaders: {
-      'HTTP-Referer': process.env.APP_URL || 'http://localhost:3000',
-      'X-Title': 'navBharatAI',
-    },
   });
 };
 

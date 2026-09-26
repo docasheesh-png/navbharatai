@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { VirtualFileSystem } from '../src/server/project/ProjectModel';
 import { selectArchitecture, manifestContract, forbiddenPathPatterns } from '../src/server/project/ArchitectureManifest';
-import { detectFramework, scaffold, scaffoldSummary } from '../src/server/project/Scaffold';
 import { validateArchitecture, isSvelteApp } from '../src/server/project/ArchitectureValidator';
 import { verifyProject } from '../src/server/project/ProjectVerifier';
 
@@ -41,30 +40,6 @@ describe('Svelte architecture — selection', () => {
     expect(pats.some((p) => p.test('src/App.tsx'))).toBe(true);
     expect(pats.some((p) => p.test('src/Widget.vue'))).toBe(true);
     expect(pats.some((p) => p.test('src/App.svelte'))).toBe(false);
-  });
-});
-
-describe('Svelte architecture — scaffold', () => {
-  it('detectFramework picks vite-svelte for explicit Svelte prompts', () => {
-    expect(detectFramework('build a svelte todo app')).toBe('vite-svelte');
-    expect(detectFramework('create a sveltekit blog')).toBe('vite-svelte');
-  });
-
-  it('scaffold produces a runnable vite-svelte skeleton', () => {
-    const vfs = VirtualFileSystem.fromRecord({});
-    scaffold(vfs, 'vite-svelte');
-    const pkg = JSON.parse(vfs.readText('package.json')!);
-    expect(pkg.dependencies?.svelte).toMatch(/\^4/);
-    expect(pkg.devDependencies?.['@sveltejs/vite-plugin-svelte']).toMatch(/\^3/);
-    expect(vfs.has('src/main.js')).toBe(true);
-    expect(vfs.has('src/App.svelte')).toBe(true);
-    expect(vfs.has('vite.config.js')).toBe(true);
-    const viteConfig = vfs.readText('vite.config.js')!;
-    expect(viteConfig).toMatch(/@sveltejs\/vite-plugin-svelte/);
-  });
-
-  it('scaffoldSummary describes Svelte', () => {
-    expect(scaffoldSummary('vite-svelte')).toMatch(/svelte/i);
   });
 });
 

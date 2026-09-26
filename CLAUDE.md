@@ -4426,6 +4426,12 @@ rung only when it is the known-weak 4.7-flash.
   first) and it does add genuine resilience — which is exactly why it is recorded as an ADMIN DECISION
   here rather than silently gated or silently left. ⚠️ Anyone auditing "what does this key switch on?"
   must check BOTH the ladders AND this legacy chain; reasoning that stops at `tierLadder.ts` misses it.
+  ✅ **CLOSED 2026-09-25 — THE LEGACY CHAIN IS GONE.** The admin asked for unused code to be removed
+  (*"jo jo kaam ka nahi hai, woh hata do"*): `POST /api/build` and `/api/build-stream` answer `410`, and
+  the engine behind them (`src/server/EngineerAI/`, the `project/` pipeline, `pro/` orchestrator, and
+  `callOpenAI`/`callGrok`/`callDeepSeek`/`callOpenRouter`) is deleted. No client had called either
+  endpoint since July. So rung 6 no longer exists; `OPENAI_API_KEY` now powers only the free-chat
+  `gpt-5-nano` rung (`OpenAiChatProvider.ts`). The paragraph above is kept as history.
 - ⚠️ **FOUR COMMENTS SAID GPT WAS ON THE WEAK LADDER, AND THE ADMIN CAUGHT IT BY READING THE CODE
   (2026-09-15).** They were true of the admin's FIRST list on 2026-09-14 and stale within the same day.
   The table was updated; `providerRates.ts`, `routes/agentv3.test.ts` (×2) and `routes/agentv3.ts` were

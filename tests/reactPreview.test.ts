@@ -2,12 +2,31 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { buildReactPreview, isReactProject } from '../src/server/runtime/ReactPreview';
 import { renderPreview } from '../src/server/runtime/renderPreview';
 import { VirtualFileSystem } from '../src/server/project/ProjectModel';
-import { scaffold } from '../src/server/project/Scaffold';
+
+// The minimal Vite + React project the retired `project/Scaffold.ts` produced (removed 2026-09-25 with
+// the legacy build engine). Kept here as a plain fixture: this suite tests the preview renderer, not
+// the scaffold, and needs a realistic project to render.
+const VITE_REACT_FIXTURE: Record<string, string> = {
+  'package.json': JSON.stringify({
+    name: 'app', private: true, version: '0.0.0', type: 'module',
+    scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
+    dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1' },
+    devDependencies: { '@vitejs/plugin-react': '^4.3.1', autoprefixer: '^10.4.20', postcss: '^8.4.47', tailwindcss: '^3.4.14', vite: '^5.4.0' },
+  }, null, 2) + '\n',
+  'index.html':
+    '<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n'
+    + '    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n'
+    + '    <title>App</title>\n  </head>\n  <body>\n    <div id="root"></div>\n'
+    + '    <script type="module" src="/src/main.jsx"></script>\n  </body>\n</html>\n',
+  'src/main.jsx':
+    "import React from 'react';\nimport { createRoot } from 'react-dom/client';\nimport App from './App.jsx';\nimport './index.css';\n\n"
+    + "createRoot(document.getElementById('root')).render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>,\n);\n",
+  'src/App.jsx': 'export default function App() {\n  return <h1>Hello from App</h1>;\n}\n',
+  'src/index.css': '@tailwind base;\n@tailwind components;\n@tailwind utilities;\n\n:root { font-family: system-ui, sans-serif; }\nbody { margin: 0; }\n',
+};
 
 function reactVfs() {
-  const vfs = VirtualFileSystem.fromRecord({});
-  scaffold(vfs, 'vite-react');
-  return vfs;
+  return VirtualFileSystem.fromRecord({ ...VITE_REACT_FIXTURE });
 }
 
 describe('isReactProject', () => {

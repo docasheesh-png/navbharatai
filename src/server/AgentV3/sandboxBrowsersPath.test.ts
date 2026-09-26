@@ -127,7 +127,6 @@ describe('every browser script the PLATFORM runs carries the path too', () => {
 describe('the screenshot / browse family — same class, swept', () => {
   const ACTUATORS = [
     'src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts',
-    'src/server/EngineerAI/actuators/E2BActuator.ts',
   ];
 
   it('every browser invocation carries the path — none of them was missing it, and none may start', () => {

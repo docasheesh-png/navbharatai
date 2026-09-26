@@ -76,8 +76,6 @@ describe('the log tail — npm puts the real cause at the END', () => {
 describe('the SWEEP — no call site may re-invent the lossy version (rule 3)', () => {
   const FILES = [
     'src/server/AgentV3/sandbox/EngineerAI/actuators/E2BActuator.ts',
-    'src/server/EngineerAI/actuators/E2BActuator.ts',
-    'src/server/EngineerAI/EngineerAgentLoop.ts',
   ];
 
   it('the output-discarding handler is gone from every file that had it', () => {
@@ -109,8 +107,11 @@ describe('the SWEEP — no call site may re-invent the lossy version (rule 3)', 
      * said>" was unreachable because the SDK's bare rejection escaped first. The class had been fixed
      * here for the npm-install sites and the browser ones were never hunted — which is the whole point
      * of this tripwire, caught by it on the way in rather than by a report six weeks later.
+     *
+     * 14 → 8 on 2026-09-25: the legacy Engineer AI actuator and agent loop were removed with the retired
+     * /api/build engine, and their six call sites went with them. No live site left the helper.
      */
     const total = FILES.reduce((n, f) => n + (read(f).match(/commandFailureResult\(err\)/g) || []).length, 0);
-    expect(total).toBe(14);
+    expect(total).toBe(8);
   });
 });

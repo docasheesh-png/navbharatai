@@ -80,6 +80,10 @@ const isTest = (p: string) => p.includes('.test.') || p.includes('.spec.');
  * becomes a place to hide the next dead engine.
  */
 const KNOWN_UNREACHABLE = new Set([
+  // Its only caller was the legacy Engineer AI actuator, removed 2026-09-25. Kept on purpose: it is an
+  // npm-install safety scan the LIVE actuator does not run yet, so the right move is to wire it in, not
+  // to delete a working check. Remove this entry in the change that wires it.
+  'src/server/AgentV3/PackageSafetyScanner.ts',
   // Five tests of LIVE template providers import this. Deleting it means editing five tests that
   // cover working code — a worse trade than keeping the file.
   'src/server/AgentV3/FrameworkRegistry.ts',

@@ -81569,3 +81569,35 @@ Weak tier, 8.7 min, ok, rendered in a real browser at 314 s, typecheck clean, pr
   `CartDrawer.tsx` was created and never mounted — a builder-output defect, reported by READINESS, not
   healed. (4) ETA (basis heuristic, confidence 0.4) said ~2.9 min; the build took 8.7 min (3.0×). Not
   investigated in this change.
+
+## 2026-09-25 — The legacy /api/build engine is retired (admin: "jo jo kaam ka nahi hai, woh hata do")
+
+Asked whether a 4-line fix to the Engine AI actuator should stay, the admin answered for the whole
+class: remove what is not used, keep what is. Traced, not assumed (an import-graph walk from
+`server.ts` and `src/main.tsx`, then confirmed by deleting and typechecking):
+
+- **No client calls `POST /api/build` or `POST /api/build-stream`.** `buildAppStream` lost its last
+  caller on 2026-07-05 and `buildApp` on 2026-07-21 (inside `EngineBuilder.tsx`, itself unreachable),
+  both before any Play production release — so no installed bundle calls them either.
+- **They were still a live cost surface:** rate-limited but reachable, and backed by a paid fallback
+  chain on NavBharatAI's accounts (claude → grok → … → **openai `gpt-4o-mini`** → deepseek →
+  openrouter). The OpenAI rung had woken up when `OPENAI_API_KEY` was set on 2026-09-15.
+- **Done:** both routes answer `410` ("retired; apps are built in NavBharatAI Pro"), like the guider
+  routes before them. Removed: `src/server/EngineerAI/` (19 files), ten `project/` pipeline modules,
+  five `pro/` modules, `lib/engineerQuota.ts`, the older duplicate `AppMakerLab/generator/templates/`,
+  `callGrok/callOpenAI/callDeepSeek/callOpenRouter` and their clients, the client's `buildApp` /
+  `buildAppStream`, and the `uuid` production dependency (imported nowhere once they were gone).
+- **Kept, because they are live:** `/api/capabilities`, the guider no-ops, `/api/build-session/:id`
+  (read side; `App.tsx` still restores an old session on mount), `/api/build-history/*` (written by
+  AgentV3's restore points), `/api/versioning/apps`, `/api/user/usage/:userId`, and every file under
+  `src/server/AgentV3/sandbox/EngineerAI/` — those are the LIVE actuators, not legacy.
+- **Tests:** 29 suites that tested only removed code were deleted. The Svelte, Vue and React-preview
+  suites were kept: they test live code and used the old scaffold only as a fixture, so they now carry
+  their own fixture. The two template suites now test the LIVE template copies instead of the removed
+  duplicates. Tripwires updated with the reason (the helper-count sweep 14 → 8, the vulnerable-pin
+  check down to one template copy).
+- ⚠️ **OPEN, recorded rather than deleted: `AgentV3/PackageSafetyScanner.ts`.** Its only caller was the
+  legacy actuator; the live actuator runs no npm-install safety scan. It is on `KNOWN_UNREACHABLE` with
+  that reason — the right fix is to wire it into the live install path, not to delete a working check.
+- ⚠️ **RUNBOOK sections 1–2 replaced.** Old section 2 advised removing `E2B_API_KEY` to "fall back to
+  the in-memory tier"; AgentV3 has no such tier, so following it today would stop every build.

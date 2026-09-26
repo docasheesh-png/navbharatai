@@ -82123,3 +82123,30 @@ Tests: `tests/aBuildThatStoppedTalkingIsNotFinished.test.ts` (23), reversion-pro
 - **GLM `glm-4.7-flashx` ran at ~10 tok/s** (contract 71.6 s for 400 tokens) — the recurring provider ceiling.
 - **"Continue" was classified COMPLEX by the model second opinion** (no app described in the prompt); harmless
   here (a repair should not open on flash), but the classifier reads the continue prompt, not the project.
+## 2026-09-26 — The feature list is confirmed before a new app is built (admin: "feature list confirm wala bhi banao")
+
+**Why.** The build is handed two lists nobody showed the user: features read from their words
+(`requestedFeatureLabels` → "not suggestions — build every one of these") and features the app's kind
+"usually needs" (`analyzeRequirementGaps` → "INCLUDE them by default"). A misreading of either became an
+ORDER — autopsy SignBridge built a map from the verb "map" and was told it was a jobs app from `resume()`.
+Fixing each misreading is necessary and never complete, so the user now sees both lists first.
+
+**What.** `POST /api/agentv3/feature-plan` (deterministic, no model call) → `featurePlan.ts`. The panel shows
+`FeatureConfirmCard` before the FIRST build of a new app only (no workspace, no prior turn, not an import, no
+attachments, not a question, ≥2 features). Everything starts ticked — one tap builds. The answer rides the
+build as `confirmedFeatures`; the contract then lists only kept named features + ticked suggestions, and the
+domain "include by default" guidance (and the generated long-tail guidance) stand down. "Don't ask again"
+is a per-viewer localStorage preference. Any failure of the card simply builds, exactly as before.
+
+**Security.** The answer is untrusted: `sanitizeConfirmation` keeps only labels the server itself offered for
+that exact prompt, so free text can never be injected into the build prompt as a "confirmed feature".
+
+**Deliberate exception**, stated: the 2026-07-20 "no clarifying round-trip" rule — the admin asked for this
+card, and it costs one tap, appears only for new apps, and can be switched off.
+
+**The audits obey it too.** An unticked feature is not graded by the completeness audit
+(`analyzeRequirementCoverage(..., declined)` via `ToolDispatcher.setDeclinedFeatures`) and not probed in the
+live DOM (`checkFeaturePresence(..., declined)`), so neither the builder's nag nor the feature-heal pass can
+add it back behind the user's answer.
+
+Tests: `tests/theFeatureListIsConfirmedBeforeTheBuild.test.ts` (20).

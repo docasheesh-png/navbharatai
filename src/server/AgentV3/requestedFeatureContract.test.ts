@@ -95,7 +95,7 @@ describe('the contract actually reaches the builder', () => {
   const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
 
   it('is prepended to the build prompt', () => {
-    const block = sectionUntil(route, 'renderRequestedFeatureContract(requestedFeatureLabels(prompt))', '\n\n  ');
+    const block = sectionUntil(route, 'renderRequestedFeatureContract(confirmedContractLabels(featureLists, featureConfirmation))', '\n\n  ');
     expect(block).toContain('buildPrompt = `${contract}');
   });
 
@@ -103,7 +103,10 @@ describe('the contract actually reaches the builder', () => {
     // Auditing against the cumulative spec was a real bug (report 1682cd03): a tiny follow-up edit
     // re-judged the whole original build. Promising from a stored spec would resurrect it at the other
     // end — a one-line edit would be handed the first build's entire feature list to rebuild.
-    expect(route).toContain('requestedFeatureLabels(prompt)');
+    // Since 2026-09-26 the lists come through featurePlan.ts (the feature card), which reads the same
+    // prompt with the same function.
+    expect(route).toContain('featureListsFor(prompt,');
+    expect(readFileSync(join(process.cwd(), 'src/server/AgentV3/featurePlan.ts'), 'utf8')).toContain('const named = requestedFeatureLabels(text);');
   });
 
   it('cannot take a build down with it', () => {

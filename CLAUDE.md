@@ -2922,9 +2922,9 @@ the flag entries above promise.
   today's behaviour), like `jobLease.ts`. Test-locked and reversion-proven in
   `tests/oneBuildPerAppAcrossEveryServer.test.ts`.
   ⚠️ **What it does not do:** a user watching a build that runs elsewhere sees it through the live
-  mirror's poll (~3 s cadence, last 200 events), not the instant stream, and the Resume/Stop buttons still
-  key off `buildRunningHere`, so none is shown; Stop reaches the build only from a screen whose own stream
-  is attached. **Watch:** 409 `elsewhere` in the logs. Each one is a parallel build that did not happen.
+  mirror's poll (~3 s cadence, last 200 events), not the instant stream, and no Stop button is shown
+  while following (the buttons key off `buildRunningHere`). A Stop pressed on an attached screen now
+  reaches the build whichever instance receives the request. **Watch:** 409 `elsewhere` in the logs. Each one is a parallel build that did not happen.
 - **`AGENTV3_FASTLANE_REASONING_GATE`** (default ON, `off` reverts — added 2026-09-23, autopsy ac41a924,
   PR #3278). The fast lane is skipped when the build opens on a model that ALWAYS reasons
   (`modelAlwaysReasons`). Its single plan call is capped at 90 s, a cap sized for a rung that answers

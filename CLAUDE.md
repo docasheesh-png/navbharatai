@@ -3219,6 +3219,22 @@ the flag entries above promise.
   in `PROGRESS.md`, deliberately not guessed at here. **The next autopsy that finds a third reader of
   this question should build it.** Four more open items are recorded with it; **two were closed the
   same day** and are recorded here because each is a rule in its own right:
+  ✅ **THE ANSWER HALF IS CLOSED (2026-09-26, `src/server/AgentV3/turnAnswer.ts`) — and building it
+  found two live defects, which is the case for having built it.** The readers did not merely
+  re-derive the kind; they read `result.summary` AFTER the platform had rewritten it. (1) A free
+  build whose model **declined** had its refusal replaced by the empty-build flip with *"please try
+  again"*, and the upsell then asked `looksLikeRefusal` of THAT sentence, found nothing, and offered
+  *"Add credits and I will complete it on the best engine"* — report 03997004's sentence, alive for
+  every refusal the triage does not catch. (2) On an **edit**, a model that **asked** *"navy or sky
+  blue?"* had its question replaced by `verifiedNoChangeSummary` with *"Nothing needed changing — your
+  app works"*. **The rule now: the model's answer is read ONCE (`readTurnAnswer`), right after the
+  last model run and before the platform writes a word, and every verdict reads that capture.** Both
+  platform sentences stand down when the model answered instead of building; `TURN_DECLINED` records
+  it. ⚠️ **Never add a reader that asks `looksLikeRefusal(result.summary)` or `turnAskedTheUser(…)`
+  late in the route** — `tests/turnAnswerIsReadOnce.test.ts` fails on either call appearing there.
+  🔴 **STILL OPEN: the `stopped` half.** "Was the build stopped?" has two definitions — the abort
+  signal (retry, run proof) and the stop-aware timeline (the upsell) — and unifying them changes
+  behaviour at three sites, so it is its own decision.
   ✅ **`WRITE_TIME_TYPECHECK` now sits AFTER the retry block.** It was above it, so on any retried
   build the line described the ABANDONED attempt — the fourth time that one sentence has been wrong,
   from a third distinct cause. The trace that unblocked it: there is exactly ONE build

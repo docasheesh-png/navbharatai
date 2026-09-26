@@ -32,7 +32,7 @@ import { TopNav } from './components/panels/TopNav';
 import { AppModals } from './components/panels/AppModals';
 // AgentV3Launcher removed — v5.0 reached via the two gates (nbi_pro_chat + Professionals), not a floating button.
 import { fetchBuildSession } from './services/buildService';
-import { Bot, Zap, MessageSquare, Heart, Settings, Wallet, GitBranch, Monitor, FolderOpen, MoreHorizontal, History, Smartphone, Briefcase, LayoutGrid, Layers, Store, Info, Package, Wand2, FileDiff } from 'lucide-react';
+import { Bot, Zap, MessageSquare, Settings, Wallet, GitBranch, Monitor, FolderOpen, MoreHorizontal, History, Smartphone, Briefcase, LayoutGrid, Layers, Store, Info, Package, Wand2, FileDiff } from 'lucide-react';
 import { TirangaLoader } from './components/ui/TirangaLoader';
 import { cn } from './lib/utils';
 // Play compliance (admin 2026-08-04): medical-class assistants are hidden inside the Play-distributed
@@ -126,7 +126,6 @@ const ProfessionalsView = _lz(() => import('./components/professionals/Professio
 const ProfessionalChat = _lz(() => import('./components/professionals/ProfessionalChat'), 'ProfessionalChat');
 const ProfilePage = _lz(() => import('./components/profile/ProfilePage'), 'ProfilePage');
 const RepoAnalystTool = _lz(() => import('./components/repoAnalyst/RepoAnalystTool'), 'RepoAnalystTool');
-const DonationPanel = _lz(() => import('./components/panels/DonationPanel'), 'DonationPanel');
 const AboutPanel = _lz(() => import('./components/panels/AboutPanel'), 'AboutPanel');
 const DeploySuccessPanel = _lz(() => import('./components/panels/DeploySuccessPanel'), 'DeploySuccessPanel');
 
@@ -164,7 +163,6 @@ import { type ApnapanProfile, loadApnapanProfile, saveApnapanProfile, updateApna
 import { isZipFile, isTextFile, classifyZipSize } from './lib/uploadClassify';
 import {
   DEFAULT_HOME_DATA,
-  DEFAULT_DONATION_DATA,
   loadPersistedContent,
 } from './config/defaultContent';
 // ZipSizeModal component → moved to ViewPanels.tsx
@@ -934,8 +932,6 @@ export default function App() {
     pollBuildStatus();
     return () => { active = false; clearTimeout(timeoutId); };
   }, [setBuildSteps]);
-  const [isDonationEditing, setIsDonationEditing] = useState(false);
-  const [donationData, setDonationData] = useState(() => loadPersistedContent('navbharat_donation_v1', DEFAULT_DONATION_DATA));
   // ABOUT US — served from the SERVER so every user sees the same page (2026-09-20).
   //
   // 🔴 It used to be `loadPersistedContent('navbharat_about_v1', …)` with a `localStorage.setItem`
@@ -1449,23 +1445,6 @@ export default function App() {
       setUser(null);
     }
   }, [isAdmin, user]);
-
-  const MAX_UPLOAD_BYTES = 2 * 1024 * 1024; // 2 MB
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'logoUrl' | 'qrUrl') => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > MAX_UPLOAD_BYTES) {
-      addLog(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max 2 MB allowed.`, 'error');
-      e.target.value = '';
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      setDonationData(prev => ({ ...prev, [type]: dataUrl }));
-    };
-    reader.readAsDataURL(file);
-  };
 
   /**
    * Open (or focus) a view. Returns whether it navigated — false when a gate refused (Play compliance,
@@ -2625,7 +2604,6 @@ export default function App() {
     { id: 'studio',       label: 'Code Studio',       icon: Smartphone },
     { id: 'git',          label: 'Git',               icon: GitBranch },
     { id: 'billing',      label: 'Wallet & Billing',  icon: Wallet },
-    { id: 'donation',     label: 'Donate',            icon: Heart },
     { id: 'settings',     label: 'Settings',          icon: Settings },
     // 🔎 THE FOUR SIBLINGS OF THE APP MART BUG (admin 2026-09-21, "haan" — ship all four).
     //
@@ -4080,18 +4058,6 @@ export default function App() {
               gates (sidebar "NavBharatAI Pro" = nbi_pro_chat, and Professionals → Pro v5.0),
               both rendering ProV3Surface above. The floating launcher is removed too. */}
 
-          {activeView === 'donation' && (
-            <DonationPanel
-              isAdmin={isAdmin}
-              isDonationEditing={isDonationEditing}
-              donationData={donationData}
-              onToggleEditing={() => setIsDonationEditing(p => !p)}
-              onStartEditing={() => setIsDonationEditing(true)}
-              onDonationDataChange={setDonationData}
-              onFileUpload={handleFileUpload}
-              onCopySuccess={() => addLog('UPI ID copied to clipboard.', 'success')}
-            />
-          )}
 
 
           {/* The Mode sheet (admin 2026-08-25). Selecting navigates through the SAME toggleTab paths

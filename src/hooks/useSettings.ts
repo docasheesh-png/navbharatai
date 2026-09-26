@@ -7,7 +7,7 @@ import { safeLocalJson } from '../lib/safeLocalJson';
 
 const DEFAULT_MODULES: Record<string, boolean> = {
   chat: true, history: true, files: true, preview: true, shell: true,
-  git: true, logs: true, templates: true, donation: true,
+  git: true, logs: true, templates: true,
   studio: true, security: true,
 };
 

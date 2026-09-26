@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Info, Lock, Settings, Heart, X, Download, Flag, Bell } from 'lucide-react';
+import { Info, Lock, Settings, Wallet, X, Download, Flag, Bell } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { shouldShowDownloadApp, apkDownloadUrl } from '../../lib/appDownload';
 import { TextSizeSlider } from './TextSizeSlider';
@@ -198,23 +198,24 @@ export function SidebarNav({
   const SIDEBAR_HIDDEN = new Set(['git', 'preview', 'files', 'professionals', 'about', 'apk', 'diff', 'imagegen']);
   const visibleItems = menuItems.filter(item => !SIDEBAR_HIDDEN.has(item.id) && enabledModules[item.id] !== false);
 
-  // Settings and Donate each appeared TWICE in the mobile drawer — once in this list, once as a System
-  // Matrix tile below (admin 2026-09-19: "sidebar menu me Settings ke 2 option dikh rahe hai — ek list me
-  // hai, ek System Matrix me (square). List wala hata do, System Matrix wala rahne do", then "Donate bhi!
-  // upar wala hatao"). Each pair opened the same view, so the list row is dropped and the System Matrix
-  // tile is the drawer's single door to both.
+  // Settings appeared TWICE in the mobile drawer — once in this list, once as a System Matrix tile below
+  // (admin 2026-09-19: "sidebar menu me Settings ke 2 option dikh rahe hai — ek list me hai, ek System
+  // Matrix me (square). List wala hata do, System Matrix wala rahne do"). Both opened the same view, so
+  // the list row is dropped and the System Matrix tile is the drawer's single door to it. Wallet &
+  // Billing joined it on 2026-09-26, in the tile the removed Donate option used to fill (admin: "is
+  // donate ki jagaha itna hi bada 'wallet and billing' button bana dena") — so its list row goes for
+  // the same reason, and the tile carries the list row's top-up dot with it.
   //
   // 🔒 THEY ARE DROPPED FROM THE DRAWER ONLY, NOT FROM `SIDEBAR_HIDDEN`, AND THAT DISTINCTION IS
   // LOAD-BEARING. The desktop/tablet RAIL renders `visibleItems` and has NO System Matrix section — that
   // section is drawer-only — so hiding either id globally would leave the rail with no entry for it at
   // all. Settings' only other door on that surface is TopNav's user dropdown, which renders solely when
-  // someone is signed in, so a signed-out desktop user would have been stranded; Donate has no other door
-  // there whatsoever. And neither is duplicated on the rail: it lists each exactly once already.
+  // someone is signed in, so a signed-out desktop user would have been stranded.
   //
-  // `history` joins them for the OPPOSITE reason to Settings and Donate: those are dropped here
-  // because the drawer shows them twice, this one because the phone already carries History in the
-  // bottom bar. Same outcome either way — one door per screen, never two and never none.
-  const DRAWER_HIDDEN = new Set(['settings', 'donation', 'history']);
+  // `history` joins them for the OPPOSITE reason: those two are dropped here because the drawer shows
+  // them as tiles, History because the phone already carries it in the bottom bar. Same outcome either
+  // way — one door per screen, never two and never none.
+  const DRAWER_HIDDEN = new Set(['settings', 'billing', 'history']);
   const drawerItems = visibleItems.filter(item => !DRAWER_HIDDEN.has(item.id));
 
   // ONE definition of the Notifications row for the rail and the drawer — a signed-in user's inbox,
@@ -473,12 +474,22 @@ export function SidebarNav({
                         <Settings className="w-6 h-6 text-accent-text group-hover:rotate-90 transition-transform duration-500" />
                         <span className={`text-[10px] font-black uppercase tracking-widest ${activeView === 'settings' ? 'text-ink' : 'text-muted'}`}>Settings</span>
                       </button>
+                      {/* Wallet & Billing, in the tile Donate used to fill (admin 2026-09-26). Its list
+                          row is in DRAWER_HIDDEN, so this tile is the drawer's one door to it — which is
+                          why it carries the top-up dot the row used to show. */}
                       <button
-                        onClick={() => { toggleTab('donation'); setIsMenuOpen(false); }}
-                        className="flex flex-col items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 py-5 rounded-2xl transition-all shadow-xl shadow-indigo-600/30 group text-on-accent"
+                        onClick={() => { toggleTab('billing'); setIsMenuOpen(false); }}
+                        title={walletNeedsTopUp ? TOP_UP_DOT_LABEL : undefined}
+                        className={`relative flex flex-col items-center justify-center gap-2 border py-5 rounded-2xl transition-all group shadow-lg ${activeView === 'billing' ? 'bg-indigo-600 border-indigo-500 text-on-accent' : 'bg-card border-line hover:border-indigo-500/50'}`}
                       >
-                        <Heart className="w-6 h-6 text-ink group-hover:scale-110 transition-transform" />
-                        <span className="text-[10px] font-black text-ink uppercase tracking-widest">Donate</span>
+                        {walletNeedsTopUp && (
+                          <span className="absolute top-2.5 right-2.5 flex items-center">
+                            <span aria-hidden className="w-2 h-2 rounded-full bg-danger" />
+                            <span className="sr-only">{TOP_UP_DOT_LABEL}</span>
+                          </span>
+                        )}
+                        <Wallet className="w-6 h-6 text-accent-text group-hover:scale-110 transition-transform" />
+                        <span className={`px-2 text-center leading-tight text-[10px] font-black uppercase tracking-wider ${activeView === 'billing' ? 'text-ink' : 'text-muted'}`}>Wallet &amp; Billing</span>
                       </button>
                     </div>
 

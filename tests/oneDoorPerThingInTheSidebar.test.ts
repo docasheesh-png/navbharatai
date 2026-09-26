@@ -1,15 +1,13 @@
 /**
- * The sidebar drawer showed Settings AND Donate twice each (admin 2026-09-19: "sidebar menu me 'setting'
- * ke 2 option dikh rahe hai — ek list me hai, ek system matrix me (squire). List wala hata do, system
- * matrix wala squire wala rahne do", then "Donate bhi! upar wala hatao"). Each pair called the same
- * `toggleTab(...)`, so the list row was pure duplication.
+ * The sidebar drawer showed Settings twice (admin 2026-09-19: "sidebar menu me 'setting' ke 2 option
+ * dikh rahe hai — ek list me hai, ek system matrix me (squire). List wala hata do, system matrix wala
+ * squire wala rahne do"). Both called the same `toggleTab(...)`, so the list row was pure duplication.
  *
  * What this suite locks is not just "the rows are gone" — it is WHERE they are gone from. The obvious fix
  * (add the ids to SIDEBAR_HIDDEN) would have removed them from the desktop/tablet RAIL too, and the rail
  * has no System Matrix section: that section lives inside the mobile drawer only. Settings' other door on
- * the rail is TopNav's user dropdown, which renders solely for a signed-in user; Donate has no other door
- * there at all. So a change whose whole purpose was to remove a SECOND door would have removed the ONLY
- * one. Hence one assertion per half: gone from the drawer, still present on the rail.
+ * the rail is TopNav's user dropdown, which renders solely for a signed-in user. So a change whose whole
+ * purpose was to remove a SECOND door would have removed the ONLY one for a signed-out user. Hence one assertion per half: gone from the drawer, still present on the rail.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
@@ -33,7 +31,8 @@ const drawerHalf = code.slice(split);
 // Every id that must appear exactly once in the drawer, as a System Matrix tile rather than a list row.
 const DEDUPED: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'settings', label: 'Settings' },
-  { id: 'donation', label: 'Donate' },
+  // Wallet & Billing took the tile the removed Donate option used to fill (admin 2026-09-26).
+  { id: 'billing', label: 'Wallet &amp; Billing' },
 ];
 
 describe('one door per thing in the sidebar', () => {
@@ -75,11 +74,10 @@ describe('one door per thing in the sidebar', () => {
     }
   });
 
-  it('keeps the entries in menuItems, which other surfaces read by id', () => {
+  it('keeps the entry in menuItems, which other surfaces read by id', () => {
     // TopNav does `menuItems.find(m => m.id === tabId); if (!item) return null`, and the mobile footer
-    // reads the settings entry's icon for its "More" button — deleting either would silently break them.
+    // reads the settings entry's icon for its "More" button — deleting it would silently break them.
     expect(app).toMatch(/\{\s*id: 'settings',\s*label: 'Settings',\s*icon: Settings\s*\}/);
-    expect(app).toMatch(/\{\s*id: 'donation',\s*label: 'Donate',\s*icon: Heart\s*\}/);
     expect(app).toContain("menuItems.find(m => m.id === 'settings')?.icon");
   });
 });

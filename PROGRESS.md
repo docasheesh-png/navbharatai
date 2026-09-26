@@ -81601,3 +81601,33 @@ class: remove what is not used, keep what is. Traced, not assumed (an import-gra
   that reason — the right fix is to wire it into the live install path, not to delete a working check.
 - ⚠️ **RUNBOOK sections 1–2 replaced.** Old section 2 advised removing `E2B_API_KEY` to "fall back to
   the in-memory tier"; AgentV3 has no such tier, so following it today would stop every build.
+
+## 2026-09-26 — The Donate option is removed from NavBharatAI entirely
+
+Admin: *"slide menu me donate wala option hai. isko permanently sabhi jagah se root se delete kar do!
+kabhi bhi traces bachne na paye!!"* Searched by filename and by content (`donat`, `Donate`, `Support
+Us`, the UPI id) across the whole repo, not only `src/`.
+
+- **Removed:** `DonationPanel.tsx`; the `'donation'` view id; its `menuItems` entry (which was also its
+  header chip and its desktop rail row); the System Matrix tile in the mobile drawer (Settings now fills
+  that row alone); its render branch and lazy import in `App.tsx`; its editable page state, the
+  `navbharat_donation_v1` read, and the logo/QR upload handler that only it used; `DonationData` and
+  `DEFAULT_DONATION_DATA` (with the UPI id) from `defaultContent.ts`; the `donation` module toggle in
+  `useSettings`; and the `donate` entry in `AppKnowledgeBase.ts`, so no AI tells a user "Sidebar →
+  Donate" any more. Code comments that described the option were rewritten, not left pointing at it.
+- **Kept, deliberately:** donations as something a USER builds or asks about — the NGO template and
+  generator (80G receipts), the Volunteering & Social-Impact assistant's "donate safely" advice, and
+  the builder's domain knowledge for charity/temple apps. None of them is a way to pay NavBharatAI.
+- **Locked:** `tests/theDonateOptionIsGone.test.ts` fails if the panel, the view id, a menu entry or
+  tile, the seed content, the knowledge-base entry or the old UPI id comes back.
+- ⚠️ **Stated plainly:** older entries in this file still mention the Donate option. This file is the
+  append-only audit trail, so they stay as history; nothing in the running app reads them. And a
+  browser that once edited the old page may still hold a `navbharat_donation_v1` key in its own
+  localStorage; nothing reads it now.
+- **Same day, follow-up (admin: *"is donate ki jagaha itna hi bada 'wallet and billing' button bana
+  dena"*):** the drawer's System Matrix is two tiles again — Settings and **Wallet & Billing**, the same
+  size. The Wallet & Billing LIST row joins `DRAWER_HIDDEN` (one door per screen, the same rule as
+  Settings; the desktop rail keeps its row), and the tile carries the red top-up dot that row used to
+  show, so ☰'s dot still leads somewhere. The label wraps to two lines on a 360 px phone instead of
+  touching the tile's edges (checked in a real browser at 360 and 390 px, light and dark). Locked in
+  `oneDoorPerThingInTheSidebar.test.ts` and `theRedDotLeadsToTheTopUp.test.ts`.

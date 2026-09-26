@@ -1,3 +1,4 @@
+import { toSafeClientMessage } from '../lib/httpError';
 import type { Express, Request, Response } from 'express';
 import { copyName, copyStatus } from '../AgentV3/duplicateApp';
 import { decideMarkupOnProof, markupNeedsPreview } from '../AgentV3/previewEarnsMarkup';
@@ -9014,7 +9015,7 @@ async function noteBuildOutcome(
       // their app on the internet did not get a broken one, whatever they grumbled about on the way.
       void (async () => { await noteBuildOutcome(workspaceId, { invested: true }, await outcomeIdentity(req)); })();
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Could not publish your app. Please try again.' });
+      res.status(500).json({ error: toSafeClientMessage(err, 'Could not publish your app. Please try again.') });
     }
   });
 
@@ -9087,7 +9088,7 @@ async function noteBuildOutcome(
         const { files, skipped } = await collectNamedWorkspaceFiles(actuator, workspaceId, namedPaths);
         res.json({ files, count: Object.keys(files).length, skipped: skipped.length, liveSync: true });
       } catch (err: any) {
-        res.status(500).json({ error: err?.message || 'Failed to read the workspace files.' });
+        res.status(500).json({ error: toSafeClientMessage(err, 'Failed to read the workspace files.') });
       }
       return;
     }
@@ -9096,7 +9097,7 @@ async function noteBuildOutcome(
       const { files, skipped } = await collectFilesWithSavedFallback(actuator, workspaceId, { liveTimeoutMs: 2_500 });
       res.json({ files, count: Object.keys(files).length, skipped: skipped.length });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Failed to read the workspace files.' });
+      res.status(500).json({ error: toSafeClientMessage(err, 'Failed to read the workspace files.') });
     }
   });
 
@@ -9274,7 +9275,7 @@ async function noteBuildOutcome(
       }
       res.json({ html, kind, count: Object.keys(files).length, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed, fidelityNotice: previewFidelityNotice(previewFidelityCaveats(files)), ...copyFields });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Failed to build the in-browser preview.' });
+      res.status(500).json({ error: toSafeClientMessage(err, 'Failed to build the in-browser preview.') });
     }
   });
 
@@ -9358,7 +9359,7 @@ async function noteBuildOutcome(
       await mergeWorkspaceFiles(workspaceId, { [filePath]: newSource });
       res.json({ ok: true, file: filePath, content: newSource, ...(partial.length > 0 ? { failures: partial } : {}) });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Failed to apply the visual edit.' });
+      res.status(500).json({ error: toSafeClientMessage(err, 'Failed to apply the visual edit.') });
     }
   });
 
@@ -9476,7 +9477,7 @@ async function noteBuildOutcome(
       }
       res.json({ imported: written.length, skipped: skipped.length, ...(github ? { github } : {}), ...(needsGithub ? { needsGithub: true } : {}) });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Failed to import the files.' });
+      res.status(500).json({ error: toSafeClientMessage(err, 'Failed to import the files.') });
     }
   });
 
@@ -9510,7 +9511,7 @@ async function noteBuildOutcome(
       const deleted = await removeWorkspaceFiles(workspaceId, paths.slice(0, 5000));
       res.json({ deleted });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Failed to delete the files.' });
+      res.status(500).json({ error: toSafeClientMessage(err, 'Failed to delete the files.') });
     }
   });
 
@@ -9558,7 +9559,7 @@ async function noteBuildOutcome(
       }
       res.json({ files: [], count: 0, restored: false, source: 'none' });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Failed to restore the workspace files.' });
+      res.status(500).json({ error: toSafeClientMessage(err, 'Failed to restore the workspace files.') });
     }
   });
 

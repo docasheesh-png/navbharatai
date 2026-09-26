@@ -81678,3 +81678,35 @@ morning; this removes it from the code:
 - Records it already wrote (`payment_transactions/welcome_backfill_<uid>`, ledger rows) stay as history;
   a credit already paid is not taken back.
 - Locked by `tests/theWelcomeBackfillIsGone.test.ts`, which also asserts the referral ladder remains.
+
+## 2026-09-26 — Security audit (admin asked 4 questions): login errors no longer show internals
+
+Admin: *"1 server side validation 2 login rate limit 3 password me encryption 4 error ko generic karo —
+abhi andar ki coding show ho rahi sayad."* Checked in code, not assumed:
+
+- ✅ **Rate limit — present.** User login rides the auth provider's own throttling
+  (`auth/too-many-requests`); the ADMIN login has a 5/min IP limiter + escalating lockout (1m → 30m)
+  + TOTP MFA + constant-time compare + generic "Invalid credentials." Chat 20/min, payment 5/min, OTP
+  30 s cooldown + 5/hour per phone and per IP + a platform-wide hourly ceiling, plus `adaptiveGuard`.
+- ✅ **Passwords — never stored by us.** User passwords are hashed by the auth provider (salted scrypt);
+  our database never holds one. The admin password is an env value compared by SHA-256 + timing-safe
+  equality. User secrets/API keys are AES-256-GCM encrypted (`lib/secrets.ts`).
+- 🟡 **Server-side validation — partial.** Every data route verifies the user's ID token server-side
+  (`requireUserMatch`, 403 on a uid mismatch) and many validate types (e.g. send-otp), but only 5
+  server files use a schema validator (zod) across 108 route files. Recorded as OPEN below.
+- ❌→✅ **Generic errors — the admin was right.** The email sign-in screen printed the raw SDK error
+  (`[auth/invalid-credential] Firebase: Error (auth/invalid-credential).`), and for unknown failures a
+  second probe's raw server reply plus the auth console path and project id. Fixed at the class:
+  `src/lib/authErrorMessage.ts` (`userFacingAuthError`) is now the ONLY thing that writes a sign-in
+  error to the screen — email, sign-up, reset, OTP and social. Detail goes to the console
+  (`logAuthErrorDetail`). Our own OTP server sentences ("wait 30 seconds") are kept via `ownMessage`.
+- ⚠️ **Pushed back on one part:** separate "incorrect password" / "incorrect email" messages would let
+  anyone test which emails have an account (user enumeration). All wrong-credential shapes now read
+  ONE sentence: "Email or password is incorrect."
+- 🔎 **Sibling:** 8 build/workspace routes in `routes/agentv3.ts` answered a 500 with raw
+  `err.message`; now `toSafeClientMessage` (strips vendor names, links, secrets; keeps our sentences).
+- Tests: `tests/signInErrorsAreGeneric.test.ts` (133), source guard reversion-proven.
+  `tests/authOtpSubmit.test.ts` pin updated to the new shape (same intent: gate before probe).
+- ⏳ **OPEN (admin console, a session cannot do it):** turn on *Email enumeration protection* and a
+  *password policy* in the auth console. ⏳ **OPEN (code):** schema validation on every route body;
+  App Check (0 uses); user-account 2FA (0 uses).

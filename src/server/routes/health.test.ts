@@ -45,8 +45,10 @@ describe('buildPublicConfig — the advertising pixel id, and nothing secret', (
     // purchase screen either way, and the browser needs it to show the split before the user pays.
     // `grievance` was added 2026-09-12 and is safe for a stronger reason: the IT Rules, 2021 REQUIRE
     // a Grievance Officer's name and contact to be published, so these values are public by law.
+    // `appCheckSiteKey` was added 2026-09-26: a reCAPTCHA Enterprise SITE key is public by design (it
+    // is embedded in every page that uses it); its secret half is held by Google, never by us.
     expect(Object.keys(buildPublicConfig('1234567890123456')).sort())
-      .toEqual(['grievance', 'metaPixelId', 'platformFeePct']);
+      .toEqual(['appCheckSiteKey', 'grievance', 'metaPixelId', 'platformFeePct']);
   });
 
   it('the grievance block carries the published contact and nothing beyond it', () => {

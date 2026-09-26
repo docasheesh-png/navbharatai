@@ -15,6 +15,7 @@ import { registerTeamRoutes } from './src/server/routes/team';
 import { registerShareRoutes } from './src/server/routes/share';
 import { audit } from './src/server/lib/audit';
 import { adaptiveGuard } from './src/server/lib/adaptiveRateLimit';
+import { appCheckGuard } from './src/server/lib/appCheck';
 import { securityHeadersConfig } from './src/server/lib/securityHeaders';
 import { responseCompression } from './src/server/lib/responseCompression';
 import { setDb as setSharedDb } from './src/server/lib/db';
@@ -390,6 +391,11 @@ setInterval(() => {
   // fingerprinting with an escalating slow-down, then a short hard block for repeat
   // offenders. Scoped to the /api/ surface (the expensive, abuse-prone endpoints).
   app.use(adaptiveGuard());
+
+  // App Check — "is this the real NavBharatAI app?" on the routes that spend money (build, chat, image,
+  // Professionals, OTP). Default MONITOR: it verifies and counts, and refuses nothing. See appCheck.ts
+  // for why it is scoped to those routes and why `enforce` must wait for the phone apps.
+  app.use(appCheckGuard());
 
   const PORT = Number(process.env.PORT || 8080);
   // aiRouter — shared singleton from src/server/lib/aiRouter.ts (Phase 1, AI-core).

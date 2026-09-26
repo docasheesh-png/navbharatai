@@ -31,7 +31,7 @@
 // ⚠️ NOT LEGAL ADVICE: drafted to be reviewed by a lawyer before being relied on in a dispute.
 
 export const PRIVACY_POLICY_TITLE = 'Privacy Policy';
-export const PRIVACY_POLICY_UPDATED = '2 September 2026';
+export const PRIVACY_POLICY_UPDATED = '26 September 2026';
 
 export const PRIVACY_POLICY = `# Privacy Policy
 
@@ -114,6 +114,16 @@ If you claim one of the free-credit bonuses in our Android app — for verifying
 
 **What this is NOT:** it is not advertising, it is not shared with Meta or any advertising platform, it is not used to track you between apps or across the web, and it is never used to build a profile of you. Nothing here happens on the website, and nothing happens in the app until you actually claim a bonus.
 
+### 3.3 Bot protection on the website (Google reCAPTCHA Enterprise)
+
+When you use the NavBharatAI **website**, a few actions that cost us real money — building an app, sending a chat message, generating an image, asking a Professional assistant, and requesting a mobile OTP — carry a short-lived token that proves the request came from our genuine website and not from an automated script. The token is issued through **Firebase App Check**, using **Google reCAPTCHA Enterprise**.
+
+**What that involves, precisely:** to issue the token, reCAPTCHA Enterprise collects information about your browser and device and how the page is being used (for example your IP address, browser and device characteristics, and interaction signals) and sends it to Google, which returns a risk judgement. Google processes this under its own [Privacy Policy](https://policies.google.com/privacy) and [Terms of Service](https://policies.google.com/terms). **Our server receives only the token and whether it is valid** — not the signals behind it — and we do not store the token.
+
+**Why:** these actions spend money on every request, and without this check a script with a throwaway account could run them endlessly. *(Basis: our legitimate interest in keeping the service secure and affordable.)*
+
+**What this is NOT:** it is not advertising, it is not shared with Meta or any advertising platform, and we do not use it to build a profile of you. It does not run inside our Android or iOS apps.
+
 ### 3.1 Advertising measurement (Meta / Facebook and Instagram)
 
 We advertise NavBharatAI on Facebook and Instagram so people can find it. To know which of those ads actually bring people — rather than guessing and wasting money — we share a **small, fixed set of events** with Meta.
@@ -187,6 +197,7 @@ We share personal data only with the parties below, and only for the purposes de
 - **Cloud infrastructure providers** — host our servers, databases and file storage under strict contracts.
 - **AI infrastructure providers** — process prompts/context to generate output, as described in Section 4, with no training rights.
 - **GitHub** — only if you connect it, and only with the access you granted.
+- **Bot protection: Google reCAPTCHA Enterprise (via Firebase App Check)** — on the website only, for the actions listed in Section 3.3.
 - **Malware scanning** — files uploaded to the Nav App Store are submitted to an anti-malware scanning service before any listing can be approved.
 - **Meta (Facebook / Instagram)** — the advertising-measurement events listed in Section 3.1, and only with your consent. Never your chats, files, clinical data or built apps.
 - **Authorities** — if required by a valid legal order. We check every demand and share the minimum required.

@@ -18,6 +18,7 @@ import { adminRequestOk } from '../lib/adminAuth';
 import { normalizeFeePct } from '../../lib/platformFee';
 import { grievanceOfficerFrom, type GrievanceOfficer } from '../../content/legal/grievance';
 import { grievanceOfficer } from '../lib/grievanceOfficer';
+import { appCheckSiteKey, appCheckStats } from '../lib/appCheck';
 
 // Set true once the server has finished initialization (wired from server.ts).
 let serverReady = false;
@@ -59,6 +60,12 @@ export interface PublicConfig {
    * compliance page is precisely the drift these documents warn about.
    */
   grievance: GrievanceOfficer;
+  /**
+   * The reCAPTCHA Enterprise site key App Check uses on the website, or null (App Check off on the web).
+   * Public by construction — a site key sits in the page of every site that uses one; the matching
+   * SECRET is Google's and never touches this server.
+   */
+  appCheckSiteKey: string | null;
 }
 
 /**
@@ -73,12 +80,14 @@ export function buildPublicConfig(
   rawPixelId: string | undefined | null,
   rawFeePct?: unknown,
   rawGrievance?: Parameters<typeof grievanceOfficerFrom>[0],
+  rawAppCheckSiteKey?: string | null,
 ): PublicConfig {
   const pixel = String(rawPixelId ?? '').trim();
   return {
     metaPixelId: /^\d{8,20}$/.test(pixel) ? pixel : null,
     platformFeePct: normalizeFeePct(rawFeePct),
     grievance: grievanceOfficerFrom(rawGrievance ?? null),
+    appCheckSiteKey: appCheckSiteKey({ APP_CHECK_SITE_KEY: rawAppCheckSiteKey ?? '' } as NodeJS.ProcessEnv),
   };
 }
 
@@ -235,8 +244,15 @@ export function registerHealthRoutes(app: Express): void {
   app.get('/api/public-config', (_req: Request, res: Response) => {
     res.set('Cache-Control', 'public, max-age=300');
     res.json(buildPublicConfig(
-      process.env.META_PIXEL_ID, process.env.PLATFORM_FEE_PCT, grievanceOfficer(),
+      process.env.META_PIXEL_ID, process.env.PLATFORM_FEE_PCT, grievanceOfficer(), process.env.APP_CHECK_SITE_KEY,
     ));
+  });
+
+  // App Check — how much real traffic already carries a valid token, per web and per phone app. This is
+  // the number that says whether `APP_CHECK_MODE=enforce` would lock anybody out. Admin-only.
+  app.get('/api/admin/app-check', (req: Request, res: Response) => {
+    if (!adminOk(req)) { res.status(403).json({ error: 'admin only' }); return; }
+    res.json(appCheckStats());
   });
 
   // U-15 — public status page (self-contained, polls /api/health).

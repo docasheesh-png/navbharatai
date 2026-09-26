@@ -2133,6 +2133,29 @@ the code (it is actually read somewhere) on 2026-07-11.
   set (both certificates), AND the file answering 200 on BOTH hosts without a redirect.** ⚠️ And say
   it plainly when asked: a red Deep-links page is ADVISORY — it never blocks a release. An update that
   "will not publish" has its reason on Publishing overview or the release page, not here.
+- **🛡️ APP CHECK — "is this the real NavBharatAI app?" on the routes that spend money (built 2026-09-26,
+  admin: *"App Check shuru karo"*). Slice 1 = WEBSITE + server monitor.** Two keys, NEITHER set:
+  `APP_CHECK_SITE_KEY` (a **reCAPTCHA Enterprise site key** — public by construction, served by
+  `/api/public-config`; unset or malformed ⇒ the website starts no App Check at all) and `APP_CHECK_MODE`
+  (`monitor` default · `enforce` · `off`; an unreadable value means `monitor`, never `enforce`). Read by
+  `src/server/lib/appCheck.ts` + `src/lib/appCheckClient.ts`; the guarded list is ONE file both sides read,
+  `src/lib/appCheckRoutes.ts` (build, chat, image, Professionals/Exam, Repo Analyst, send-otp — POST only).
+  🔒 **SCOPED TO MONEY ROUTES ON PURPOSE:** navigations (OAuth callbacks, preview iframe, share pages)
+  cannot carry a header, and outside servers call the payment webhook, bot webhooks and the Developer API
+  (`/api/chat/completions`, API-key auth) by design. 🔒 **A verifier that cannot run FAILS OPEN even in
+  enforce** — our outage must never become every user's refusal. 🔒 **The client can never stop a
+  request**: no key / blocked reCAPTCHA / slow token (1.5 s cap) ⇒ sent without the header.
+  ⛔ **DO NOT SET `APP_CHECK_MODE=enforce` YET.** The phone apps do not send tokens until slice 2 (a native
+  Play Integrity / App Attest plugin ⇒ a fresh `.aab`/`.ipa`), so enforce would refuse every installed
+  Android/iOS build on its next build or chat. Read `GET /api/admin/app-check` first — it counts
+  valid/missing/invalid/unverifiable **per web and per native**, per instance since boot.
+  ⛔ **AND DO NOT turn on App Check ENFORCEMENT in the Firebase console for Firestore/Auth** — the phone
+  apps talk to Firestore directly and would lose it. Registering the web app with the site key is safe;
+  the console's *Enforce* buttons are not, until slice 2 ships and the numbers say so.
+  **Admin setup (web):** Google Cloud → Security → reCAPTCHA Enterprise → create a *Website* key for
+  `navbharatai.com` and `www.navbharatai.com` (no localhost) → Firebase console → App Check → register the
+  web app with that key → set `APP_CHECK_SITE_KEY` in Cloud Run. The privacy policy (§3.3, §7) already
+  discloses reCAPTCHA; `tests/appCheck.test.ts` holds that and the shared route list.
 - **Visitor analytics for published apps (shipped 2026-09-10, ROADMAP §13 item 1.1):**
   `AGENTV3_SITE_ANALYTICS` (kill switch — **default ON**; `off` stops the beacon being stamped at
   publish and the hit route recording; apps already published keep their script until republished,

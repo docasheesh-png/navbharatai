@@ -142,18 +142,27 @@ describe('🔒 the failure sentence still fires everywhere it should', () => {
 describe('🔒 REVERSION GUARDS — tsc and vitest cannot see an argument that stopped being passed', () => {
   const route = fs.readFileSync(path.join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
 
+  // ⚠️ WIDENED, NOT WEAKENED (2026-09-26). These pinned `turnAskedTheUser(result.summary)` at each
+  // reader. The retry keeps reading the FIRST attempt's answer; every later reader now reads ONE
+  // capture of the model's final answer (`modelAnswer`, see `turnAnswer.ts`), because the platform
+  // rewrites `result.summary` between the readers. What these guards exist to prove — each reader is
+  // really given the fact — is asserted below against the new spelling.
   it('the retry decision is really given the fact', () => {
-    expect(route).toContain('const firstAttemptAskedTheUser = turnAskedTheUser(result.summary)');
+    expect(route).toContain('const firstAttempt = readTurnAnswer(result.summary);');
+    expect(route).toContain('const firstAttemptAskedTheUser = firstAttempt.asked;');
     expect(route).toContain('modelAskedTheUser: firstAttemptAskedTheUser');
   });
 
-  it('the settle flip is really given the fact', () => {
-    expect(route).toMatch(/emptyBuildFailureSummary\([\s\S]{0,400}?turnAskedTheUser\(result\.summary\),/);
+  it('the settle flip is really given the fact — both halves of it', () => {
+    expect(route).toMatch(/emptyBuildFailureSummary\([\s\S]{0,900}?modelAnswer\.asked,\s*modelAnswer\.declined,\s*\)/);
   });
 
   it('🔑 the predicate is IMPORTED, never re-implemented beside its sibling', () => {
     // A second copy of "does this end on a question mark?" is how the two guards drift back apart.
-    expect(route).toContain("import { turnAskedTheUser } from '../AgentV3/nudgeToBuild'");
+    // The route reaches it only through `readTurnAnswer`, which imports it from `nudgeToBuild`.
+    expect(route).toContain("import { readTurnAnswer, answeredWithoutBuilding } from '../AgentV3/turnAnswer'");
+    const reader = fs.readFileSync(path.join(process.cwd(), 'src/server/AgentV3/turnAnswer.ts'), 'utf8');
+    expect(reader).toContain("import { turnAskedTheUser } from './nudgeToBuild'");
     expect(route).not.toMatch(/const\s+\w*[Aa]skedTheUser\s*=\s*\/.*\?/);
   });
 

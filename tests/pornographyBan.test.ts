@@ -194,7 +194,12 @@ describe('the wiring — both surfaces, and no upsell after a refusal', () => {
     // strictly stronger and this anchor failed anyway. Pinned on the CALL now, which is the intent:
     // the model's own answer is read. How that answer is combined with later readings is exactly the
     // thing that keeps legitimately changing.
-    expect(block).toContain('looksLikeRefusal(result.summary)');
+    // ⚠️ SIXTH, AND THIS ONE IS THE INTENT CATCHING UP WITH ITSELF (2026-09-26). "The model's own answer
+    // is read" was what `looksLikeRefusal(result.summary)` was believed to do — and at this line it did
+    // not: the empty-build flip had already replaced the refusal with "please try again", so the upsell
+    // found no refusal and asked for money. The upsell now reads the capture of the MODEL's answer,
+    // which `turnAnswerIsReadOnce.test.ts` proves is taken before the platform's first rewrite.
+    expect(block).toContain('const refused = !stopped && modelAnswer.declined;');
     // The narration — the upsell OR the degraded notice — is reachable only when there was no refusal.
     //
     // ⚠️ MATCHED AS "the guard STARTS with !refused", not as one exact expression, so a fifth honest
@@ -209,7 +214,8 @@ describe('the wiring — both surfaces, and no upsell after a refusal', () => {
   });
 
   it('the escalation guard reads the model\'s own answer', () => {
-    expect(route).toContain('const firstAttemptRefused = looksLikeRefusal(result.summary);');
+    expect(route).toContain('const firstAttempt = readTurnAnswer(result.summary);');
+    expect(route).toContain('const firstAttemptRefused = firstAttempt.declined;');
     expect(route).toContain('modelRefused: firstAttemptRefused,');
   });
 });

@@ -33,7 +33,7 @@ describe('1 · a STOPPED build is never asked for money', () => {
     expect(route).toContain("const stopped = buildWasStopped(buildDiag.report().issues) || buildDiag.toolWasUsed('stop_build');");
     // Each subsequent reading must stand down when the build was stopped — it is reasoning about
     // evidence that was never gathered.
-    expect(route).toContain('const refused = !stopped && looksLikeRefusal(result.summary);');
+    expect(route).toContain('const refused = !stopped && modelAnswer.declined;');
     expect(route).toContain('const degraded = !stopped && !refused &&');
     expect(route).toContain('const misconfigured = !stopped && !refused && !degraded');
     expect(route).toContain('const starved = !stopped && !refused && !degraded && !misconfigured');

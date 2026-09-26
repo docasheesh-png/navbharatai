@@ -122,11 +122,11 @@ describe('the wiring, in both lanes', () => {
   });
   it('the BUILDER only adds where the list was silent', () => {
     // `!reqGuidance` is what keeps every existing build prompt byte-identical.
-    expect(route).toContain('if (!reqGuidance && askedForAnApp)');
+    expect(route).toContain('if (!reqGuidance && askedForAnApp && !answered)');
     expect(route).toContain("learned.source === 'generated'");
   });
   it('the builder still never asks a question — the 2026-07-20 decision is untouched', () => {
-    const at = route.indexOf('if (!reqGuidance && askedForAnApp)');
+    const at = route.indexOf('if (!reqGuidance && askedForAnApp && !answered)');
     expect(route.slice(at, at + 1200)).toContain('skip it silently rather than asking');
     expect(route.slice(at, at + 1200)).not.toContain('learned.questions');
   });

@@ -2066,6 +2066,11 @@ the code (it is actually read somewhere) on 2026-07-11.
   identifier), NOT a payment blocker: the device check works regardless, but a Data-safety declaration
   that contradicts the policy is a violation. So referral is live and paying end-to-end; only the Play
   declaration is left, and it does not gate a rupee.
+  ✅ **DATA-SAFETY LINK CONFIRMED 2026-09-26 — the admin verified the live public store listing already
+  declares "Device or other IDs" under Data safety** (`play.google.com/store/apps/details?id=com.navbharat.ai`),
+  matching Privacy Policy §3.2. Both hand-verified links are now closed: the referral welcome ladder is
+  live, paying real rupees on a real phone, AND policy-compliant. Nothing about the referral switch-on
+  remains outstanding.
 - **Play Integrity — the device check (built 2026-09-15). ⚠️ NOT a Cloud Run key:**
   **`PLAY_INTEGRITY_CLOUD_PROJECT`** is a **GitHub REPO SECRET** read at BUILD time by
   `android/app/build.gradle`, because it is baked into the `.aab`. It is the Google Cloud project

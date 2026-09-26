@@ -2,6 +2,7 @@ package com.navbharatai.app;
 
 import android.content.Context;
 import android.provider.Settings;
+import android.util.Base64;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -11,6 +12,8 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.google.android.play.core.integrity.IntegrityManager;
 import com.google.android.play.core.integrity.IntegrityManagerFactory;
 import com.google.android.play.core.integrity.IntegrityTokenRequest;
+
+import java.security.SecureRandom;
 
 /**
  * THE DEVICE CHECK behind every rupee of the referral welcome gift.
@@ -70,7 +73,14 @@ public class DeviceIntegrityPlugin extends Plugin {
         try {
             IntegrityManager manager = IntegrityManagerFactory.create(getContext());
             manager.requestIntegrityToken(
-                    IntegrityTokenRequest.builder().setCloudProjectNumber(cloudProject).build()
+                    // 🔴 THE NONCE IS REQUIRED, and its absence failed EVERY phone (2026-09-26). A classic
+                    // request without one never reaches Google: the builder refuses it ("Missing
+                    // required properties: nonce"), the catch below turns that into `failed`, and the
+                    // app said "We could not check this device just now" on every handset.
+                    IntegrityTokenRequest.builder()
+                            .setNonce(freshNonce())
+                            .setCloudProjectNumber(cloudProject)
+                            .build()
             ).addOnSuccessListener(response -> {
                 String token = response.token();
                 if (token == null || token.isEmpty()) {
@@ -107,6 +117,16 @@ public class DeviceIntegrityPlugin extends Plugin {
         result.put("outcome", outcome);
         result.put("message", message);
         call.resolve(result);
+    }
+
+    /**
+     * A fresh random nonce for one request: 32 bytes, base64 web-safe and unwrapped, which is the form
+     * Google requires (16–500 characters). Random rather than empty so no two tokens are ever alike.
+     */
+    private static String freshNonce() {
+        byte[] bytes = new byte[32];
+        new SecureRandom().nextBytes(bytes);
+        return Base64.encodeToString(bytes, Base64.URL_SAFE | Base64.NO_WRAP);
     }
 
     /** The per-app, per-device id. Null rather than a guess if the platform will not give one. */

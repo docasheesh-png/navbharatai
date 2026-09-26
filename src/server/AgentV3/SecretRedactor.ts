@@ -97,9 +97,14 @@ const SECRET_KEY_NAME = /(?:secret|password|passwd|pwd|token|api[_-]?key|apikey|
  * redactor with one that is out of date.
  */
 const MD_EMPHASIS = '(?:\\*{1,2}|_{1,2}|`)?';
+// 🔴 TWO GUARDS ADDED (autopsy SignBridge, 2026-09-26). A user's spec read "Do not expose private
+// credentials." then, on the NEXT line, a divider of fifty "=" signs — and the report showed
+// "credentials.=[REDACTED:secret] 17. DEMO MODE": the section heading after it was eaten. The space
+// before the separator could cross a line break, and a "value" made only of "=" signs passed the
+// six-character minimum. A key and its separator share a line; a secret has at least one letter or digit.
 const ASSIGNMENT_RE = new RegExp(
   // (1:key)(2:md)(3:sep)(4:md)(5:gap-ws)(6:quote)(7:value)(\6:matching close quote)
-  `\\b([A-Za-z0-9_.-]*${SECRET_KEY_NAME.source}[A-Za-z0-9_.-]*)${MD_EMPHASIS}\\s*([=:])${MD_EMPHASIS}(\\s*)(['"\`]?)([^\\s'"\`]{6,})(\\4)`,
+  `\\b([A-Za-z0-9_.-]*${SECRET_KEY_NAME.source}[A-Za-z0-9_.-]*)${MD_EMPHASIS}[ \\t]*([=:])${MD_EMPHASIS}(\\s*)(['"\`]?)((?=[^\\s'"\`]*[A-Za-z0-9])[^\\s'"\`]{6,})(\\4)`,
   'gi',
 );
 

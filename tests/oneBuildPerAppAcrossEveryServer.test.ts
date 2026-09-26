@@ -4,7 +4,7 @@
  * Three builds of one app ran at once in one sandbox: the "one build per app" lock lived in a single
  * process's memory, and after a dropped connection the retry reached a Cloud Run instance where that
  * memory was empty. These tests lock the durable lease that every instance shares, the client's
- * "follow it, do not rebuild it" handling, and the planner-failure label found in the same report.
+ * "follow it, do not rebuild it" handling.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -227,11 +227,5 @@ describe('🔒 reversion guards — the wiring tsc and vitest cannot see', () =>
     const wd = hook.indexOf('const alive = workspaceIdRef.current ? j?.buildRunningHere === true : j?.buildRunning === true;\n          // Alive on ANOTHER server');
     expect(wd).toBeGreaterThan(0);
     expect(hook.slice(wd, wd + 700).indexOf('buildRunningElsewhere')).toBeLessThan(hook.slice(wd, wd + 1400).indexOf('stallWatchdogAction('));
-  });
-
-  it('a planner that timed out is labelled by who ANSWERED — never by the variable\'s initialiser', () => {
-    expect(route).toMatch(/fastLaneCallIdentity\(ppReported, ppProvider, fastBuildModel\(\)\)/);
-    expect(route).toMatch(/fastLaneCallIdentity\(rmReported, rmProvider, fastBuildModel\(\)\)/);
-    expect(route).not.toMatch(/answeringModel\(\{ planned: lbl === 'anthropic' \? fastBuildModel\(\) : null, family: (pp|rm)Provider \}\)/);
   });
 });

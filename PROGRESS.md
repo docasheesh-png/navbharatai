@@ -81925,20 +81925,23 @@ with a Fix-with-AI button (→ B), and the stall watchdog auto-continued (→ an
 
 **Fixed (this PR):** durable workspace lease (`workspaceBuildLease.ts`, flag `AGENTV3_WORKSPACE_BUILD_LEASE`,
 default on, fails open); `/status` `buildRunningElsewhere`, `/attach` 409 `elsewhere`, cross-instance
-`/stop`; client drop probe + watchdog follow the running build via the live mirror. Also: the project and
-roadmap planners recorded a timeout nobody answered as `anthropic / claude-sonnet-4-6` on a WEAK build —
-a mislabel (the variable's initialiser), not a Sonnet call; both now use `fastLaneCallIdentity` (the
-fast-lane fix of 2026-09-14 whose two siblings were never hunted).
+`/stop`; client drop probe + watchdog follow the running build via the live mirror. The planners also
+recorded a timeout nobody answered as `anthropic / claude-sonnet-4-6` on a WEAK build — a mislabel (the
+variable's initialiser), not a Sonnet call. That fix, and the planner starvation itself, are carried by
+the open PR #3330 (`plannerCallLabel`, `makePlanTextRunner`), so this PR does not touch them.
 
 **Still open from this report (recorded, not fixed here):**
 - The project planner misfired on a game spec (40 enumerated features, no big-software noun: the ≥14
-  branch), then both rungs starved at 12,000 output tokens — 315 s of a free build's clock.
+  branch), then both rungs starved at 12,000 output tokens — 315 s of a free build's clock. The
+  starvation is claimed by open PR #3330; whether Project Mode should fire on such a spec is recorded
+  there as an admin decision.
 - The post-answer type-fix sub-agent wrote generic placeholder files (`relative/path.ext` — the literal
   example path from `SimpleBuilder.ts`'s output format — plus an auth scaffold) into a game; the integrity
   pass then wired the stray CSS into `main.tsx`.
 - An npm-install race INSIDE one build: the write-time typecheck command (`package.json -nt node_modules`
   ⇒ `npm install`), the health-check install and the agent's own installs are not serialised.
-- "Added 1 missing dependency (@playwright/test)" was shown while Green Freeze had refused the write.
+- "Added 1 missing dependency (@playwright/test)" was shown while Green Freeze had refused the write —
+  claimed by open PRs #3330 (`landHealWrite`) and #3331 (the E2E scaffold no longer adds the dependency).
 - Billing question for the admin: should a build duplicated by our own concurrency bug be charged at all?
 ---
 

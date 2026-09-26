@@ -13117,8 +13117,7 @@ async function noteBuildOutcome(
           if (scope.decision === 'analyze' && !dispute) {
             const rmStartedAt = Date.now();
             let rmProvider = 'CLAUDE';
-            let rmReported = false;
-            const rmCall = makeFastTextRunner((used) => { rmProvider = used; rmReported = true; }).runTurn({
+            const rmCall = makeFastTextRunner((used) => { rmProvider = used; }).runTurn({
               model: fastBuildModel(),
               system: megaRoadmapSystemPrompt(),
               messages: [{ role: 'user', content: megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals) }],
@@ -13141,9 +13140,8 @@ async function noteBuildOutcome(
               rmT = await Promise.race([rmCall, rmTimeout]);
             } catch (err) {
               try {
-                // Same class as the project planner below: no rung answered ⇒ `unknown`, never `claude-…`.
-                const rmWho = fastLaneCallIdentity(rmReported, rmProvider, fastBuildModel());
-                buildDiag.recordLlmCall({ model: rmWho.model, provider: rmWho.provider, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - rmStartedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
+                const lbl = fastLaneProviderLabel(rmProvider);
+                buildDiag.recordLlmCall({ model: answeringModel({ planned: lbl === 'anthropic' ? fastBuildModel() : null, family: rmProvider }), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - rmStartedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
                 buildDiag.record({
                   phase: 'plan', severity: 'info', code: 'MEGA_ROADMAP_FAILED',
                   message: roadmapPlannerFailedMessage(plannerFailureKind(err), rmTimeoutMs, err),
@@ -15731,8 +15729,7 @@ async function noteBuildOutcome(
           const ppGenerate = async (system: string, user: string): Promise<string> => {
             const startedAt = Date.now();
             let ppProvider = 'CLAUDE';
-            let ppReported = false;
-            const call = makeFastTextRunner((used) => { ppProvider = used; ppReported = true; }).runTurn({
+            const call = makeFastTextRunner((used) => { ppProvider = used; }).runTurn({
               model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
             });
             let ppTimer: ReturnType<typeof setTimeout> | undefined;
@@ -15744,11 +15741,8 @@ async function noteBuildOutcome(
               // A planner call that failed is a model call that failed — it belongs on the same ledger
               // as every other one, or the report cannot say whether the key was working at all.
               try {
-                // `fastLaneCallIdentity`, not the variable's initialiser: a planner that timed out before
-                // any rung answered was recorded as `anthropic / claude-sonnet-4-6` — on WEAK builds, where
-                // Sonnet cannot run (autopsy 2026-09-26, the sibling build 1ef27cd7 fixed in the fast lane).
-                const ppWho = fastLaneCallIdentity(ppReported, ppProvider, fastBuildModel());
-                buildDiag.recordLlmCall({ model: ppWho.model, provider: ppWho.provider, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
+                const lbl = fastLaneProviderLabel(ppProvider);
+                buildDiag.recordLlmCall({ model: answeringModel({ planned: lbl === 'anthropic' ? fastBuildModel() : null, family: ppProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
               } catch { /* diagnostics best-effort */ }
               throw err;
             } finally {

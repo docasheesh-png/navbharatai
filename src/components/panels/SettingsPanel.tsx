@@ -11,6 +11,7 @@ import { LEGAL_META } from '../../content/legal/meta';
 import { LegalDocPage } from './LegalDocPage';
 import { DangerZone } from '../settings/DangerZone';
 import { AdultContentToggle } from '../settings/AdultContentToggle';
+import { FeatureConfirmToggle } from '../settings/FeatureConfirmToggle';
 import { AppLockSettings, AppLockRow } from '../settings/AppLockSettings';
 import { AppLockGate } from '../AppLockGate';
 import {
@@ -850,6 +851,9 @@ export function SettingsPanel({
 
                                           {/* "Made by NavBharatAI" signature toggle — badge on every built app (admin 2026-07-16). */}
                      <AppSignatureToggle />
+
+                     {/* The feature card before a new build (featurePlan.ts) — the way back after "Don't ask again". */}
+                     <FeatureConfirmToggle />
 
                      {/* The +18 setting (admin 2026-09-12). Renders NOTHING in the Android app — see
                          AdultContentToggle for why absent rather than disabled. */}

@@ -82450,6 +82450,24 @@ Tests: `tests/theFeatureListIsConfirmedBeforeTheBuild.test.ts` (20).
   shared tolerant `END_FILE_MARKER` (OneShotBuilder.ts) now serves the parser and the truncation check.
 
 
+## 2026-09-26 — The architect may fix mechanical errors in files the fast lane handed over (admin approved)
+
+Closes the open item recorded in the stationary-log autopsy above ("the architect prompt's 'never write
+application code yourself' conflicts with the fast-lane hand-off — changing it needs the admin"). The
+admin approved the narrow exception the same day.
+
+- **The contradiction:** the system prompt said *"MANDATORY DELEGATION (no exceptions)"*; the hand-off note
+  said *"fix any error in place"*. Build 121c2431's architect fixed one import, then spent 26,371 characters
+  arguing with itself about which instruction it had broken.
+- **The fix (`handoffRule.ts`, one source for both halves):** when the request opens with
+  `SALVAGE_HANDOFF_MARKER`, the architect may make MECHANICAL fixes (an import, a type or props annotation,
+  a name collision, a path) in those files itself; new features, components and pages are still delegated.
+  The prompt now says "one narrow exception, below" instead of "no exceptions", the hand-off note carries the
+  same sentence, and the resume message (`unfinishedResume.ts`) offers the same two routes.
+- Tests: `tests/theArchitectMayFixWhatTheFastLaneHandedOver.test.ts`.
+- ⚠️ **What to watch:** `UNFINISHED_BUILD_RESUMED` after a `SIMPLE_BUILD_SALVAGE`, and the time from hand-off
+  to the first render. If the architect starts writing FEATURES itself after a hand-off, the exception is being
+  over-read and the wording needs tightening.
 **📌 ADMIN DECISION 2026-09-26 (asked directly, answered "Website par nahi"): the Google/Gmail-login ₹100
 stays ANDROID-APP ONLY.** The website keeps mobile + GitHub (₹200, mobile-anchored). Offered and declined:
 web Gmail ₹100 released after mobile OTP, and web Gmail ₹100 instantly with no mobile (an unbounded

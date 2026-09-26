@@ -232,6 +232,13 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
   { collection: 'referral_claim_people', ttlDays: 7, timestampField: 'countedAt', timestampKind: 'epochMs' },
 
   /**
+   * The mobile-OTP tally (`otpOutcomes.ts`): one document per UTC day of counts plus the latest
+   * scrubbed failure reason per category — no phone number, uid or address in it. 90 days: it exists
+   * to diagnose a broken sign-in path, which is read in days, not months.
+   */
+  { collection: 'auth_otp_outcomes', ttlDays: 90, timestampField: 'day', timestampKind: 'iso' },
+
+  /**
    * Visitor counts for published apps — the ONE window this registry promised in PUBLIC and did not keep.
    *
    * 🔴 The Privacy Policy says, in those words: *"These counts … are kept for 30 days."* Nothing deleted

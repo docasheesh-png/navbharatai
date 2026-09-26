@@ -24,6 +24,7 @@ import { ledgerPatch } from '../lib/walletStatement';
 import { stepRewardTokens, referrerLifetimeCapTokens, referralRewardsEnabled } from '../lib/referralRewards';
 import { runReferralPreflight } from '../lib/referralPreflight';
 import { listDailyClaimOutcomes, summariseClaimOutcomes } from '../lib/referralClaimOutcomes';
+import { listDailyOtpOutcomes, summariseOtpOutcomes } from '../lib/otpOutcomes';
 import { runPushPreflight } from '../lib/pushPreflight';
 import { adminEmailList } from '../lib/adminEmails';
 import { mirroredCreditPatch } from '../lib/walletMirror';
@@ -2725,6 +2726,17 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       });
     } catch (e) {
       // A panel that 500s tells the admin nothing. Report the failure AS the answer.
+      return res.json({ ok: false, reason: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  // MOBILE OTP HEALTH (2026-09-26): sent / verified / failed per surface, and the latest real reason
+  // for each kind of failure — the one place a native OTP failure can be read (otpOutcomes.ts).
+  app.get('/api/admin/otp-outcomes', verifyAdminToken, async (req: Request, res: Response) => {
+    try {
+      const days = Math.max(1, Math.min(90, Number(req.query.days) || 14));
+      return res.json({ ok: true, days, ...summariseOtpOutcomes(await listDailyOtpOutcomes(days)) });
+    } catch (e) {
       return res.json({ ok: false, reason: e instanceof Error ? e.message : String(e) });
     }
   });

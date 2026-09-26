@@ -82169,3 +82169,44 @@ web Gmail ₹100 released after mobile OTP, and web Gmail ₹100 instantly with 
 scriptable free-Gmail printer — no device check on the web). Do not re-propose either without a new ask.
 In the app the Gmail ₹100 is automatic from build 135 onward (`useReferralProgress` → `autoClaimIfReady`,
 device-checked); build 134, live on Play today, needs a manual Claim tap.
+
+## 2026-09-26 — A failed mobile OTP says WHY (admin: "Mobile otp send nhi ho raha hai")
+
+The admin's screenshot (Android app): *"Could not verify your phone number. Please try again, or use Email or
+Google sign-in."* That sentence is the GENERIC fallback of `authErrorMessage.ts`, not a diagnosis.
+
+**Root cause of the blind spot (verified in code):** the native phone-auth plugin reports a failed send as
+`phoneVerificationFailed { message }` — there is NO error code (`FirebaseAuthenticationPlugin.java`
+`handlePhoneVerificationFailed`). `userFacingAuthError` switches on `auth/…` codes, so every native failure fell
+to the generic line. And since #3326 (the same morning) the raw detail goes only to `console.error`, which on a
+phone nobody can read. So the reason existed only on the handset that failed. Nothing in the OTP *logic*
+changed between build 134 and `main` (git log over AuthComponent/android/capacitor.config), and our own
+`/api/auth/send-otp` gate cannot have produced that line (its refusals are shown as its own words) — so the
+failure is at the auth provider, almost certainly a configuration fault.
+
+**What shipped:**
+- `src/lib/otpFailure.ts` (pure, shared): one classifier for web codes AND native messages → 14 bounded
+  categories; `otpUserMessage` — a configuration fault (app not recognised, region off, provider off, billing,
+  App Check, reCAPTCHA) now reads *"Mobile OTP sign-in is not available right now. Please use Email or Google
+  sign-in."*, never "try again", which could not help.
+- `src/lib/otpReport.ts` + `POST /api/auth/otp-outcome` (unauthenticated — the user is signed out; 30/hour per
+  address; 204 always) + `src/server/lib/otpOutcomes.ts`: daily counts of sent / verified / failed per
+  android/ios/web, failures by `flow:stage:category`, and the latest scrubbed provider message per category.
+  No number, uid or IP is stored; numbers and tokens are scrubbed on the phone and again on the server.
+- Admin → **Mobile OTP health** card (`OtpHealthCard.tsx`, `GET /api/admin/otp-outcomes`): the headline says
+  plainly e.g. *"android: every send failed (4) — mostly "app-not-authorized", a setting on our side"*, the
+  provider's own words, and where each kind is fixed.
+- 🔴 **Sibling found and fixed:** `VerifyPhoneSheet` (the mobile-verify sheet the referral credit uses) listened
+  only for `phoneCodeSent` on native — a FAILED send moved straight to the code box and waited for an SMS that
+  was never coming, with no error. It now waits for sent OR failed (45 s, then moves on as before). And its
+  `readableAuthError` printed the provider's raw message to the user (a White-Label leak #3326 missed); it now
+  goes through the same classifier.
+- Retention: `auth_otp_outcomes` purged at 90 days; classified in `everyCollectionIsClassified`.
+- Tests: `tests/aFailedOtpSaysWhy.test.ts`.
+
+**🔴 STILL OPEN (rule 6) — the actual cause of today's failure is NOT known yet.** It lives in a console no
+session can read. The Android app is bundled, so this reporting reaches phones only with a fresh `.aab`; the
+WEBSITE reports from the moment this merges. Most likely candidates, in order: (1) the Play app-signing
+SHA-256/SHA-1 not registered on the Android app in Firebase (native phone auth checks it via Play Integrity);
+(2) App Check enforcement switched on for Authentication in the Firebase console (App Check was being set up
+today); (3) SMS region policy not allowing India; (4) SMS quota. The card will name which.

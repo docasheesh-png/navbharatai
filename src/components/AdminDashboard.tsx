@@ -28,6 +28,7 @@ import { EngineReportsPanel } from './admin/EngineReportsPanel';
 import { UnusedCardMark } from './admin/UnusedCardMark';
 import { BuildCostCard } from './admin/BuildCostCard';
 import { ReferralCostCard } from './admin/ReferralCostCard';
+import { OtpHealthCard } from './admin/OtpHealthCard';
 import { PushHealthCard } from './admin/PushHealthCard';
 import { BuildDiscountCard } from './admin/BuildDiscountCard';
 import { FailureCategoryCard } from './admin/FailureCategoryCard';
@@ -4078,6 +4079,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
               {/* BUILD DISCOUNT (admin 2026-09-25): the one % taken off every charged build. */}
               <BuildDiscountCard adminToken={adminToken} />
               <ReferralCostCard adminToken={adminToken} />
+              {/* MOBILE OTP HEALTH (admin 2026-09-26): where a failed OTP's real reason can be read. */}
+              <OtpHealthCard adminToken={adminToken} />
               {/* NOTIFICATIONS (admin 2026-09-20): the loud half of a feature that fails silently
                   at every link — which one is broken, and a real test send to prove the chain. */}
               <PushHealthCard adminToken={adminToken} />

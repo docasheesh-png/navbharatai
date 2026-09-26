@@ -81910,3 +81910,47 @@ commit. Test-locked in `tests/theStudyRacerAutopsyPart2.test.ts`.
 Still open after part 2 (recorded, not hidden): the shared evidence ledger (why the model re-verifies at
 all); the fast lane's 90 s plan cap is still sized for a direct-answer rung (the hand-off bounds the loss,
 it does not make a reasoning rung fast).
+
+## 2026-09-26 — Autopsy 7d79254b (EduHub, Weak, complex): a working app was reported RED on one cancelled request
+
+**What happened.** Mega-roadmap step 1 of an education platform. The app rendered in a real browser at
+229 s (`IN_BUILD_GREEN`), typechecked, built for production (`PROD_BUILD_OK`) and passed 11/11 of its own
+tests. The verify loop then read ONE console line — `…/.vite/deps/react-dom-C2FHna43.js?v=fb0517f8 —
+net::ERR_ABORTED` — as "the preview did not render", spent a ~5-minute repair pass (the model deleted the
+Vite cache and reinstalled), re-checked, read the SAME line again, and gave up: `OUTCOME_PREVIEW_FAILED` →
+`RELEASE_GATE` RED → verdict NOT ok → the user was told the app was "NOT ready to use" and billed ₹0.
+
+**Two defects, either one sufficient (both fixed, `renderCheckConsole.ts`):**
+1. `net::ERR_ABORTED` is a CANCELLED request (Vite reloads the page when it re-optimises deps after
+   package.json changes; an AbortController does it too), never a failure. The recorder no longer writes it
+   down and `filterActionableErrors` drops it for logs an older recorder wrote. A real non-render is still
+   caught by the DOM verdict.
+2. The verify loop, the render rescue and the last-chance proof read the append-only console from
+   `buildStartedAt`, so a line recorded once condemned every later check — a repair could not succeed by
+   construction. Proof from the report itself: after the repair the model's own `console_errors` (120 s
+   window) came back clean, and the gate re-read the identical stale line. They now read from their own
+   start less 15 s of clock slack (`renderCheckConsoleSince`); with `AGENTV3_BROWSE_CONSOLE=off` the old
+   whole-build window is kept, because then there is no first-hand evidence. The runtime auto-fix loop
+   already used an advancing window for exactly this reason — the three render verdicts never got it.
+
+Locked by `tests/aCancelledRequestIsNotABrokenApp.test.ts` (runs the generated recorder against a fake
+Playwright; source guard on all three call sites), reversion-proven three ways.
+
+**Ledger.** ✅ self-healed 3 (LoginScreen↔App type mismatch caught at write time; `vitest` missing for a
+test file; `@playwright/test` added by the dependency sync after our E2E scaffold). 🔀 workaround 1 (the
+model "fixed" a non-bug by nuking the Vite cache — 77 s + ~5 min). ⏭️ skipped 2 (6 dependency
+vulnerabilities left; no user journey derivable — form fields have no name/label). ❌ shipped wrong 2 (the
+false RED + "NOT ready" message + ₹0 bill; `GREEN_GUARD_UNVERIFIED` saying the app "could not be opened").
+🥵 struggle 4 (76 s first call; 77 s `rm -rf` while the health-check restarted the dev server twice; 30 s
+screenshot + loop nudge; the whole repair pass).
+
+**Open root causes (recorded, not fixed here):**
+- **Our own post-build passes change package.json while the app is being verified.** The E2E scaffold's
+  `@playwright/test` import makes the dependency sync add it, which triggers a reinstall and a dev-server
+  restart mid-check; the model's `npm i -D vitest` did the same. A test-only import does not need
+  installing for the app to run — the sync should probably skip deps imported only from test/e2e files.
+- **`npm i -D vitest` resolved to v2.1.9** (nesting an old vite/esbuild), which is where the 2 critical
+  advisories came from. The scaffold ships no test runner that matches its Vite 8, so the model picks one.
+- **The mega-roadmap planner ran on the reasoning rung** (`kimi-k2.7-code`, 76 s, 4,574 output tokens
+  before the build began) — the sibling of `FAST_LANE_SKIPPED_REASONING_RUNG`.
+- **No user journey:** generated forms carry no `name`/label, so the journey check cannot run.

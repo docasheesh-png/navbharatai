@@ -16,6 +16,7 @@
  * Pure + dependency-free (string in → string out) → unit-testable.
  */
 import { jsxDevRuntimeUrl } from '../../lib/jsxDevRuntimeFacade';
+import { NON_RUNTIME_FILE_SOURCE } from '../../lib/previewNonRuntimeFiles';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { VirtualFileSystem } from '../project/ProjectModel';
@@ -816,9 +817,13 @@ ${previewBridgeSource('in-browser')}
     return module.exports;
   }
 
+  var NON_RUNTIME = new RegExp(${JSON.stringify(NON_RUNTIME_FILE_SOURCE)}, 'i');
   function collectBare() {
     var found = {}, re = /(?:from|import|require\\(|import\\()\\s*['"]([^'"]+)['"]/g;
     Object.keys(SOURCES).forEach(function (p) {
+      // Test, spec and tool-config files never run in the app — their imports are never pre-loaded
+      // (see src/lib/previewNonRuntimeFiles.ts).
+      if (NON_RUNTIME.test(p)) return;
       var src = SOURCES[p] || '', m; re.lastIndex = 0;
       // Skip node: builtins (browser can't load them; vite.config imports land here too) and
       // root-local Vite specs ('src/…' — they resolve from THIS project's files, never the CDN).

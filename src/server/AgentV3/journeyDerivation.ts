@@ -27,6 +27,7 @@
 
 import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
 import { rendersDataList } from './DesignCoverage';
+import { scanMarkup, type ScannedTag } from './jsxTags';
 
 /** How a single element is addressed, in the order Playwright should be asked for it. */
 export type SelectorKind = 'testid' | 'name' | 'id' | 'placeholder' | 'label' | 'text' | 'role';
@@ -85,9 +86,73 @@ const ATTR = (tag: string, attr: string): string | null => {
   return m ? m[1] : null;
 };
 
-/** Every `<input …>` / `<textarea …>` / `<select …>` opening tag in a file. */
+/**
+ * Every `<input …>` / `<textarea …>` / `<select …>` opening tag in a file, read with the shared JSX reader.
+ *
+ * 🔴 THIS WAS `source.match(/<(?:input|textarea|select)\b[^>]*>/gi)` UNTIL 2026-09-26 (autopsy 7d79254b),
+ * the fourth reader of the class `jsxTags.ts` exists to end. In JSX the first `>` of
+ * `onChange={(e) => setEmail(e.target.value)}` belongs to the arrow, so the tag "ended" there and every
+ * attribute written after the handler — `name`, `id`, `placeholder`, `aria-label` — was invisible. The
+ * report said the app's forms "carry no name or label", and they did carry them: the ordinary React
+ * input writes `value` and `onChange` first. Every such form was declared unaddressable and no journey
+ * was ever derived. Components (`<Input>`) stay out: their props are not the DOM's attributes.
+ */
+function inputScans(source: string): ScannedTag[] {
+  return scanMarkup(source).filter((t) => t.isElement && /^(?:input|textarea|select)$/.test(t.name));
+}
+
 function inputTags(source: string): string[] {
-  return source.match(/<(?:input|textarea|select)\b[^>]*>/gi) || [];
+  return inputScans(source).map((t) => t.tag);
+}
+
+/**
+ * The visible text of the `<label>` that wraps the control opening at `index`, or null.
+ *
+ * `<label>Title <input value={t} onChange={…} /></label>` is labelled by its text, and Playwright's
+ * `getByLabel` finds it that way. Only a label whose own text is PLAIN is used — no `{expression}` and
+ * no other markup — because the accessible name must be exactly what we type into the selector, and an
+ * interpolated label is text we cannot know. PURE.
+ */
+export function wrappingLabelText(source: string, index: number): string | null {
+  const open = source.lastIndexOf('<label', index);
+  if (open < 0) return null;
+  const close = source.indexOf('</label>', open);
+  if (close < 0 || close < index) return null;
+  const openEnd = scanMarkup(source.slice(open, close)).find((t) => t.name === 'label');
+  if (!openEnd) return null;
+  const inner = source.slice(open + openEnd.tag.length, close);
+  const withoutControls = inputScans(inner).reduce((acc, t) => acc.replace(t.tag, ' '), inner);
+  if (/[{}<>]/.test(withoutControls)) return null;
+  const text = withoutControls.replace(/\s+/g, ' ').trim();
+  return text.length >= 2 && text.length <= 60 ? text : null;
+}
+
+/**
+ * The fields of a form, each with the tag and — when its own attributes cannot address it — the text of
+ * the label wrapping it. A label is used only when no other label in the file shares its text, so
+ * `getByLabel` can never match two controls.
+ */
+function formFields(source: string): Array<{ tag: string; labelText: string | null }> {
+  const scans = inputScans(source).filter((t) => !skippableInput(t.tag));
+  const texts = scans.map((t) => wrappingLabelText(source, t.index));
+  return scans.map((t, i) => {
+    const text = texts[i];
+    const unique = text !== null && texts.filter((x) => x !== null && x.toLowerCase().includes(text.toLowerCase())).length === 1;
+    return { tag: t.tag, labelText: unique ? text : null };
+  });
+}
+
+/** Every `<button>` in a file with its inner text, read with the shared JSX reader (see `inputScans`). */
+function buttonsIn(source: string): Array<{ tag: string; inner: string }> {
+  const out: Array<{ tag: string; inner: string }> = [];
+  for (const t of scanMarkup(source)) {
+    if (!t.isElement || t.name !== 'button') continue;
+    const start = t.index + t.tag.length;
+    const end = source.indexOf('</button>', start);
+    if (end < 0 || end - start > 200) continue;
+    out.push({ tag: t.tag, inner: source.slice(start, end) });
+  }
+  return out;
 }
 
 /**
@@ -173,26 +238,30 @@ const CREATE_WORDS = /\b(add|create|new|save|submit|post|send|register|sign\s*up
  * yields no journey rather than a journey that clicks the wrong thing.
  */
 export function submitTargetIn(source: string): Target | null {
-  const buttons = source.match(/<button\b[^>]*>([\s\S]{0,80}?)<\/button>/gi) || [];
-  for (const b of buttons) {
-    const testid = ATTR(b, 'data-testid');
-    if (testid && (/(submit|save|add|create)/i.test(testid) || /type\s*=\s*["']submit["']/i.test(b))) {
+  // Read with the shared JSX reader — the old `<button\b[^>]*>` stopped at the `>` of `onClick={() => …}`,
+  // missed a `type="submit"` written after the handler, and handed the rest of the tag to Playwright as
+  // the button's "text" (see `inputScans`).
+  const buttons = buttonsIn(source);
+  const plainText = (inner: string): string => inner.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  for (const { tag } of buttons) {
+    const testid = ATTR(tag, 'data-testid');
+    if (testid && (/(submit|save|add|create)/i.test(testid) || /type\s*=\s*["']submit["']/i.test(tag))) {
       return { kind: 'testid', value: testid };
     }
   }
-  for (const b of buttons) {
-    if (/type\s*=\s*["']submit["']/i.test(b)) {
-      const text = b.replace(/<[^>]*>/g, '').trim();
-      if (text && !text.includes('{')) return { kind: 'text', value: text };
+  for (const { tag, inner } of buttons) {
+    if (/type\s*=\s*["']submit["']/i.test(tag)) {
+      const text = plainText(inner);
+      if (text && !/[{}]/.test(text)) return { kind: 'text', value: text };
       return { kind: 'role', value: 'submit' };
     }
   }
-  for (const b of buttons) {
-    const text = b.replace(/<[^>]*>/g, '').trim();
-    if (text && !text.includes('{') && CREATE_WORDS.test(text)) return { kind: 'text', value: text };
+  for (const { inner } of buttons) {
+    const text = plainText(inner);
+    if (text && !/[{}]/.test(text) && CREATE_WORDS.test(text)) return { kind: 'text', value: text };
   }
   // `<input type="submit" value="Add">` — older markup, still real.
-  const inputSubmit = (source.match(/<input\b[^>]*type\s*=\s*["']submit["'][^>]*>/gi) || [])[0];
+  const inputSubmit = inputTags(source).find((t) => /type\s*=\s*["']submit["']/i.test(t));
   if (inputSubmit) {
     const v = ATTR(inputSubmit, 'value');
     if (v && !v.includes('{')) return { kind: 'text', value: v };
@@ -458,11 +527,15 @@ export function formSourcesFor(
 }
 
 /** The route a page file serves, best-effort, or null. Only used for a label and a starting URL. */
-function routeForFile(path: string, knownRoutes: readonly string[]): string {
+export function routeForFile(path: string, knownRoutes: readonly string[]): string {
   const stem = path.replace(/\.(t|j)sx$/, '').split('/').pop() || '';
   const lower = stem.toLowerCase();
   if (/^(home|index|page|app)$/.test(lower)) return '/';
-  const match = knownRoutes.find((r) => r.toLowerCase().replace(/[^a-z]/g, '').includes(lower.replace(/[^a-z]/g, '')));
+  // `ChatPage` serves `/chat`: the suffix names what the FILE is, not the URL. Without dropping it, no
+  // real route contains "chatpage" and the journey fell back to home, where its form is not (SignBridge).
+  const key = lower.replace(/[^a-z]/g, '').replace(/(page|screen|view|route)$/, '') || lower.replace(/[^a-z]/g, '');
+  const flat = (r: string) => r.toLowerCase().replace(/[^a-z]/g, '');
+  const match = knownRoutes.find((r) => flat(r) === key) ?? knownRoutes.find((r) => flat(r).includes(key));
   return match || '/';
 }
 
@@ -502,13 +575,13 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
     let formPath = '';
     for (const candidate of formSourcesFor(path, files)) {
       if (usedForms.has(candidate.path)) continue;
-      const tags = inputTags(candidate.source).filter((t) => !skippableInput(t));
+      const tags = formFields(candidate.source);
       if (tags.length === 0) continue;
 
       const got: JourneyField[] = [];
       let addressable = true;
-      for (const tag of tags.slice(0, 6)) {
-        const target = targetForInput(tag);
+      for (const { tag, labelText } of tags.slice(0, 6)) {
+        const target = targetForInput(tag) ?? (labelText ? { kind: 'label' as const, value: labelText } : null);
         if (!target) { addressable = false; break; }
         const value = valueForInput(tag, marker);
         if (value) got.push({ target, value });
@@ -831,6 +904,16 @@ export function summarizeJourneys(
       ran: true,
       summary: `${lead} ${failed.map((f) => `${f.route}: ${f.note}`).join('; ')}`
         + (passed.length ? ` (${passed.length} other journey(s) passed.)` : ''),
+    };
+  }
+  // Every journey UNREACHABLE is not a pass: nothing was filled in, so nothing was proven. It used to fall
+  // through to here and be coded JOURNEY_PASSED with the sentence "0 user journey(s) passed" (SignBridge,
+  // 2026-09-26) — the exact two-state-for-three-states defect the empty case above already fixed.
+  if (passed.length === 0) {
+    return {
+      ok: true,
+      ran: false,
+      summary: `No user journey could be completed: ${unreachable.length} could not be reached and were NOT counted either way (${unreachable.map((u) => u.note).join('; ')}).`,
     };
   }
   const parts = [`${passed.length} user journey(s) passed — filled in a real form in a real browser and checked the result.`];

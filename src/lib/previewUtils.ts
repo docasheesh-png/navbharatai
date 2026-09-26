@@ -1,4 +1,5 @@
 import { jsxDevRuntimeUrl } from './jsxDevRuntimeFacade';
+import { NON_RUNTIME_FILE_SOURCE } from './previewNonRuntimeFiles';
 import type { FileSystem } from '../types/index';
 
 // ── Preview harness: injected into EVERY preview so it can never silently go blank ──
@@ -164,9 +165,13 @@ export const PREVIEW_BOOTSTRAP = `
     catch(e){throw new Error('Run '+path+': '+e.message);}
     return module.exports;
   }
+  // Test, spec and tool-config files never run in the app, so their imports are never pre-loaded
+  // (see previewNonRuntimeFiles.ts — the preview used to fetch vitest and Testing Library, and a
+  // second copy of React with them).
+  var NON_RUNTIME=new RegExp(window.__NON_RUNTIME||'$^','i');
   function collectBare(){
     var found={},re=/(?:from|import|require\\(|import\\()\\s*['"]([^'"]+)['"]/g;
-    Object.keys(FILES).forEach(function(p){var src=FILES[p]||'',m;re.lastIndex=0;while((m=re.exec(src))){var s=m[1];if(s&&s.charAt(0)!=='.'&&s.charAt(0)!=='/'&&!(s.charAt(0)==='@'&&s.charAt(1)==='/'))found[s]=true;}});
+    Object.keys(FILES).forEach(function(p){if(NON_RUNTIME.test(p))return;var src=FILES[p]||'',m;re.lastIndex=0;while((m=re.exec(src))){var s=m[1];if(s&&s.charAt(0)!=='.'&&s.charAt(0)!=='/'&&!(s.charAt(0)==='@'&&s.charAt(1)==='/'))found[s]=true;}});
     return Object.keys(found);
   }
   // Resolve a bare import spec against an importmap: map hit first, then esm.sh.
@@ -574,7 +579,7 @@ export function buildSourceAppPreview(f: FileSystem): string {
     + '<script type="importmap">' + importmap + '</' + 'script>'
     + '<script src="' + ORIGIN + '/vendor/babel.min.js"></' + 'script>'
     + '</head><body>' + bodyInner
-    + '<script>window.__FILES=' + sj(srcFiles) + ';window.__ENTRY=' + sj(entry) + ';window.__IMAP=' + sj(imapEntries) + ';window.__CDN_IMAP=' + sj(cdnImap) + ';</' + 'script>'
+    + '<script>window.__FILES=' + sj(srcFiles) + ';window.__ENTRY=' + sj(entry) + ';window.__IMAP=' + sj(imapEntries) + ';window.__CDN_IMAP=' + sj(cdnImap) + ';window.__NON_RUNTIME=' + sj(NON_RUNTIME_FILE_SOURCE) + ';</' + 'script>'
     + '<script>' + PREVIEW_BOOTSTRAP + '</' + 'script>'
     + '</body></html>';
 }

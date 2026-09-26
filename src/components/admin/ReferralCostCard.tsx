@@ -32,7 +32,32 @@ interface Summary {
     referrerUserId: string; friends: number; friendsWithMobile: number;
     earnedTokens: number; worthALook: boolean;
   }>;
+  /** What was TRIED, not only what was paid — the server's shape (referralClaimOutcomes.ts). */
+  claims?: {
+    days: number;
+    headline: string;
+    bySurface: Array<{
+      surface: 'android' | 'web';
+      people: number;
+      attempts: number;
+      byOutcome: Record<string, number>;
+      paidTokens: number;
+      reasons: Array<{ key: string; count: number }>;
+    }>;
+  };
 }
+
+/** Plain words for each outcome — the admin reads these, not the keys. */
+const OUTCOME_LABEL: Record<string, string> = {
+  paid: 'Paid',
+  'nothing-new': 'Nothing new to pay',
+  'held-no-mobile': 'Waiting for a mobile number',
+  'step-not-done': 'Step not done yet',
+  'device-refused': 'Device check refused',
+  'device-unavailable': 'Device check not working (our side)',
+  'device-failed-on-phone': 'Device check failed on the phone',
+  error: 'Server error',
+};
 
 /** One line of the setup check — the server's shape (referralPreflight.ts), rendered as is. */
 interface SetupCheck {
@@ -202,6 +227,8 @@ export function ReferralCostCard({ adminToken }: { adminToken: string }): React.
             ))}
           </div>
 
+          <ClaimTally claims={data.claims} />
+
           <div className="mt-5">
             <h4 className="text-[10px] font-black uppercase tracking-widest text-muted">
               Busiest referrers {watch.length > 0 && <span className="text-warn">— {watch.length} worth a look</span>}
@@ -248,6 +275,62 @@ export function ReferralCostCard({ adminToken }: { adminToken: string }): React.
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * WHO TRIED, WHO WAS PAID, AND WHY THE REST WERE NOT. Without this a user who never tried and a user the
+ * device check refused five times look identical: ₹0. Counts only — nothing here acts on anybody.
+ */
+function ClaimTally({ claims }: { claims: Summary['claims'] }): React.ReactElement {
+  const rows = claims?.bySurface ?? [];
+  return (
+    <div className="mt-5">
+      <h4 className="text-[10px] font-black uppercase tracking-widest text-muted">
+        Claims — last {claims?.days || 14} days
+      </h4>
+      {claims?.headline && (
+        <p className="mt-2 rounded-xl border border-line bg-well p-3 text-[11px] font-semibold text-ink">{claims.headline}</p>
+      )}
+      {rows.length > 0 && (
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          {rows.map((t) => (
+            <div key={t.surface} className="rounded-xl border border-line bg-surface p-4">
+              <p className="text-[9px] font-black uppercase tracking-widest text-faint">
+                {t.surface === 'android' ? 'Android app' : 'Website'}
+              </p>
+              <p className="mt-1 text-[11px] font-semibold text-muted">
+                {t.people} person-day{t.people === 1 ? '' : 's'} · {t.attempts} claim{t.attempts === 1 ? '' : 's'} · {rupees(t.paidTokens)} paid
+              </p>
+              <ul className="mt-2 space-y-1">
+                {Object.entries(t.byOutcome).filter(([, n]) => n > 0).map(([o, n]) => (
+                  <li key={o} className="flex justify-between gap-3 text-[11px] font-semibold">
+                    <span className={o === 'paid' ? 'text-success' : 'text-body'}>{OUTCOME_LABEL[o] ?? o}</span>
+                    <span className="font-mono text-ink">{n}</span>
+                  </li>
+                ))}
+              </ul>
+              {t.reasons.length > 0 && (
+                <div className="mt-2 border-t border-line pt-2">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-faint">Why</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {t.reasons.slice(0, 8).map((r) => (
+                      <li key={r.key} className="flex justify-between gap-3 font-mono text-[10px] text-muted">
+                        <span className="truncate">{r.key}</span><span>{r.count}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="mt-2 text-[10px] font-semibold leading-relaxed text-muted">
+        A person-day is one account on one day, so someone who tried on two days counts twice. Counting began
+        on 2026-09-26; earlier claims are not in these numbers.
+      </p>
     </div>
   );
 }

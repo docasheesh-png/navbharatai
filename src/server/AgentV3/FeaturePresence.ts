@@ -263,7 +263,11 @@ export function isUnrenderedSpaShell(html: string): boolean {
  * Check which REQUESTED interactive features are visibly present in the rendered preview HTML.
  * Only features whose keywords appear in the prompt are probed. Pure; never throws.
  */
-export function checkFeaturePresence(prompt: string, html: string): FeaturePresenceResult {
+/**
+ * `declined` — feature ids the user unticked on the feature card (featurePlan.ts). Not probed, so a
+ * declined feature is never reported missing and never "added" by the heal pass behind the user's back.
+ */
+export function checkFeaturePresence(prompt: string, html: string, declined?: ReadonlySet<string>): FeaturePresenceResult {
   const empty: FeaturePresenceResult = { probes: [], missing: [], present: [] };
   if (typeof prompt !== 'string' || typeof html !== 'string' || !html.trim()) return empty;
   // HONESTY GUARD (build #2): never judge features off an un-rendered SPA shell — we literally cannot see
@@ -275,6 +279,7 @@ export function checkFeaturePresence(prompt: string, html: string): FeaturePrese
 
   const probes: FeatureProbeResult[] = [];
   for (const def of FEATURES) {
+    if (declined?.has(def.feature)) continue;
     // Negation-aware (deep-test App #1): a feature the user DECLINED ("no delete", "without search")
     // must not be probed, or we'd false-flag it missing. Shares the RequirementCoverage guard.
     if (!isAffirmativelyRequested(promptLower, def.requested)) continue; // not requested → don't probe

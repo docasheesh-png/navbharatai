@@ -46,6 +46,7 @@ const CLASSIFICATION: Record<string, { kind: 'user' | 'workspace' | 'platform' |
   site_uptime:         { kind: 'workspace', why: 'one record per connected domain, not per user' },
 
   job_leases:          { kind: 'platform', why: 'one doc per job id; a lease that expires by its own clock' },
+  agentv3_build_leases: { kind: 'platform', why: 'one doc per BUILDING workspace, deleted when the build ends and stale after 90 s — holds a uid only while that build runs (workspaceBuildLease.ts)' },
   metrics_timeline:    { kind: 'platform', why: 'one doc per time bucket — see the SCALE-PLAN entry' },
   monitor_alert_state: { kind: 'platform', why: 'a single document holding alert episodes' },
   web_risk_budget:     { kind: 'platform', why: 'one doc per calendar month, replaced in place' },
@@ -67,6 +68,8 @@ const CLASSIFICATION: Record<string, { kind: 'user' | 'workspace' | 'platform' |
 
   mobile_build_outcomes: { kind: 'retained', why: 'one doc per UTC day: how many .apk/.aab/.ipa builds finished and of what — counts only, no person in it, purged at 400 days' },
   mobile_build_counted:  { kind: 'retained', why: 'one marker per finished run so a POLLED status endpoint cannot count it twice; the id is a digest and the body names no owner' },
+  referral_claim_outcomes: { kind: 'retained', why: 'one doc per UTC day: how many referral claims were tried, paid or refused and why — counts only, no person in it, purged at 400 days' },
+  referral_claim_people:   { kind: 'retained', why: 'one marker per (person, day) so the claim tally counts people, not app opens; the id is a digest of (day, uid) and the body a timestamp; purged at 7 days' },
   site_analytics:      { kind: 'retained', why: 'visitor day-counts; the policy promises 30 days' },
   safety_flags:        { kind: 'retained', why: 'flagged messages; the policy promises 180 days' },
   takedown_records:    { kind: 'retained', why: 'removal records; IT Rules 2021 require 180 days' },

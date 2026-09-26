@@ -57,13 +57,16 @@ export function extractExportedFunctions(content: string): ExportedFn[] {
   const seen = new Set<string>();
   const src = String(content || '');
   // export [default] [async] function NAME(params)
-  const fnRe = /export\s+(?:default\s+)?(async\s+)?function\s+([A-Za-z0-9_$]+)\s*\(([^)]*)\)/g;
+  // `default` is CAPTURED, not skipped (autopsy eed79815): `export default function Game()` is a default
+  // export, and a skeleton that wrote `import { Game } from './Game'` failed to compile (TS2614) on the
+  // very next typecheck — our own starter test breaking the user's project.
+  const fnRe = /export\s+(default\s+)?(async\s+)?function\s+([A-Za-z0-9_$]+)\s*\(([^)]*)\)/g;
   let m: RegExpExecArray | null;
   while ((m = fnRe.exec(src))) {
-    const name = m[2];
+    const name = m[3];
     if (seen.has(name)) continue;
     seen.add(name);
-    out.push({ name, async: !!m[1], params: parseParams(m[3]) });
+    out.push({ name, async: !!m[2], params: parseParams(m[4]), ...(m[1] ? { isDefault: true } : {}) });
   }
   // export const NAME = [async] (params) =>   |   export const NAME = [async] function (params)
   const arrowRe = /export\s+const\s+([A-Za-z0-9_$]+)\s*(?::[^=]+)?=\s*(async\s+)?(?:function\s*[A-Za-z0-9_$]*\s*)?\(([^)]*)\)\s*(?::[^=]*)?=>?/g;
@@ -157,6 +160,23 @@ export function planAutoTests(
 }
 
 /**
+ * CAN A TEST SKELETON EVEN RUN HERE? Only when the project declares `vitest` (autopsy eed79815).
+ *
+ * `testSkeletonsCannotBreakTheBuild` answered a narrower question — the RELEASE build — and the golden
+ * scaffold passes it because `tsconfig.build.json` excludes tests. But the project's own `tsconfig.json`
+ * does not, and that is what every `tsc --noEmit` reads: the agent's, the write-time typecheck's, the
+ * post-build gate's. So on the next turn each skeleton was `TS2307 Cannot find module 'vitest'`, the
+ * model spent its steps deleting files it never asked for, and the "runnable Vitest skeleton" we
+ * announced could not run at all. A skeleton is written only where its first line resolves. Pure.
+ */
+export function testSkeletonsCanRun(packageJson: string | null | undefined): boolean {
+  try {
+    const pkg = JSON.parse(String(packageJson)) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+    return !!(pkg?.dependencies?.vitest || pkg?.devDependencies?.vitest);
+  } catch { return false; }
+}
+
+/**
  * CAN A TEST SKELETON BREAK THIS APP'S PRODUCTION BUILD? (review of the 2026-09-25 pass move)
  *
  * Every skeleton imports `vitest`, and nothing installs it. That is harmless only where the release
@@ -171,6 +191,25 @@ export function planAutoTests(
  * config's text. PRECISION-FIRST in the safe direction: anything not recognised as safe is unsafe,
  * because a missing skeleton costs nothing and a broken release build costs the user the app. Pure.
  */
+/**
+ * What the user is told about the skeletons just written. "Runnable" only when the project really
+ * declares vitest — otherwise the one command that makes them run (autopsy SignBridge, 2026-09-26: the
+ * user read "runnable Vitest skeletons" about files that import a package the project does not have).
+ * PURE.
+ */
+export function starterTestsNarration(paths: readonly string[], packageJson: string | null | undefined): string {
+  const n = paths.length;
+  const list = `${n} starter test${n > 1 ? 's' : ''} (${paths.join(', ')})`;
+  let declared = false;
+  try {
+    const pkg = JSON.parse(String(packageJson ?? '')) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+    declared = !!(pkg?.dependencies?.vitest || pkg?.devDependencies?.vitest);
+  } catch { declared = false; }
+  return declared
+    ? `🧪 Scaffolded ${list} — runnable Vitest skeletons with TODO markers for you to fill in real assertions.`
+    : `🧪 Scaffolded ${list} — Vitest skeletons with TODO markers for you to fill in. Vitest is not installed in this project yet; run \`npm install -D vitest\` and then \`npx vitest\` to run them.`;
+}
+
 export function buildTsconfigPath(packageJson: string | null | undefined): string | null {
   const script = buildScriptOf(packageJson);
   const m = script ? /\btsc\b[^&|;]*?(?:-p|--project)\s+(\S+)/.exec(script) : null;

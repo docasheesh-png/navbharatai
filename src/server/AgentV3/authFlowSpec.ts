@@ -20,6 +20,8 @@
 // genuine convention: type="email" and type="password" are what browsers and password managers rely
 // on, so generated login forms have them.
 
+import { scanMarkup } from './jsxTags';
+
 export interface AuthSelectors {
   email: string;
   password: string;
@@ -44,9 +46,16 @@ function attr(tag: string, name: string): string | null {
   return m ? m[1] : null;
 }
 
-/** Every `<input …>` tag in a source file, as raw text. */
+/**
+ * Every `<input …>` tag in a source file, as raw text — read with the shared JSX reader.
+ *
+ * 🔴 THIS WAS `/<input\b[^>]*>/gi` UNTIL 2026-09-26 (autopsy 7d79254b — the journey deriver's sibling).
+ * In JSX the first `>` of `onChange={(e) => setEmail(e.target.value)}` belongs to the arrow, so the
+ * tag "ended" there and `type="password"`, `name` and `id` written after the handler were invisible:
+ * a login form built the ordinary React way yielded no spec at all.
+ */
 function inputTags(source: string): string[] {
-  return String(source ?? '').match(/<input\b[^>]*>/gi) ?? [];
+  return scanMarkup(String(source ?? '')).filter((t) => t.isElement && t.name === 'input').map((t) => t.tag);
 }
 
 /**
@@ -89,10 +98,15 @@ function isPasswordField(tag: string): boolean {
  */
 export function selectorForSubmit(source: string): string | null {
   const src = String(source ?? '');
-  if (/<button\b[^>]*type\s*=\s*["']submit["']/i.test(src)) return 'button[type="submit"]';
-  if (/<input\b[^>]*type\s*=\s*["']submit["']/i.test(src)) return 'input[type="submit"]';
-  const labelled = /<button\b[^>]*>\s*([^<>{}]{2,30}?)\s*</i.exec(src);
-  const text = labelled?.[1]?.trim();
+  const tags = scanMarkup(src).filter((t) => t.isElement);
+  const isSubmit = (tag: string): boolean => /\btype\s*=\s*["']submit["']/i.test(tag);
+  if (tags.some((t) => t.name === 'button' && isSubmit(t.tag))) return 'button[type="submit"]';
+  if (tags.some((t) => t.name === 'input' && isSubmit(t.tag))) return 'input[type="submit"]';
+  // The first button whose own text is plain — the order the old regex searched in.
+  const text = tags
+    .filter((t) => t.name === 'button')
+    .map((t) => /^\s*([^<>{}]{2,30}?)\s*</.exec(src.slice(t.index + t.tag.length))?.[1]?.trim())
+    .find((x): x is string => !!x);
   if (text && /(log ?in|sign ?in|continue|submit|enter)/i.test(text)) {
     return `button:has-text("${text.replace(/"/g, '')}")`;
   }

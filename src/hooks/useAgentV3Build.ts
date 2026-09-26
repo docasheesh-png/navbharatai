@@ -5,7 +5,7 @@ import { carryOverActivity } from '../components/agentv3/activityTimeline';
 import { initialAgentV3State } from '../components/agentv3/agentV3Types';
 import type { AgentV3ClientState, AgentV3WireEvent, GitCheckpoint } from '../components/agentv3/agentV3Types';
 import { conversationToEvents, conversationToUserMessages, isUnfinishedBuild, type PersistedConversation } from '../components/agentv3/agentV3History';
-import { shouldSurfaceStreamError, reconnectOutcome, type ReconnectOutcome } from './agentV3StreamError';
+import { shouldSurfaceStreamError, reconnectOutcome, isHeldElsewhere, FOLLOWING_ELSEWHERE_NOTICE, type ReconnectOutcome } from './agentV3StreamError';
 import { nextLivePollDelayMs, resumeSinceSeq, LIVE_POLL_FAST_MS } from './livePollPolicy';
 import { auth } from '../lib/firebase';
 // FILE-REVEAL PACING (admin 2026-07-23 — "one by one user ko dikhe … har 2 file ke bich ~5–10 sec"):
@@ -906,8 +906,14 @@ export function useAgentV3Build(): UseAgentV3Build {
         const j = await res.json().catch(() => ({}));
         // One coherent decision (pure + tested) for what this reconnect result MEANS, so the user
         // never sees a "re-attached live" promise paired with a "no running build" error.
-        const outcome = reconnectOutcome({ ok: false, status: res.status, resultAlreadySeen: sink.sawResult });
-        if (outcome === 'gone-notice') {
+        const outcome = reconnectOutcome({ ok: false, status: res.status, resultAlreadySeen: sink.sawResult, elsewhere: j?.elsewhere === true });
+        if (outcome === 'elsewhere') {
+          // The build is alive on another server. It cannot be streamed from this one, but the panel's
+          // live mirror follows it once `running` is false — which the lines below set.
+          setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text: FOLLOWING_ELSEWHERE_NOTICE, ts: Date.now() }));
+          setError(null);
+          setErrorBeforeBuildStarted(false);
+        } else if (outcome === 'gone-notice') {
           // The build ended mid-run (the drop tore it down). Honest, calm, in-thread — NOT a red error.
           // The user's files are durable; they simply resend to continue. No contradiction.
           // Calm and additive: with the reset now gated on a CONFIRMED live attach, the finished
@@ -1400,6 +1406,17 @@ export function useAgentV3Build(): UseAgentV3Build {
           // (workspace-scoped — the attach route refuses a different session's build, so this can
           // never hijack another chat). The typed message was NOT queued into the running build —
           // the notice says so honestly, in-thread.
+          // ONE BUILD PER APP (autopsy 2026-09-26): the app is already being built on another server.
+          // Starting a second build is what corrupted the first one; following it is the answer. The
+          // panel's live mirror takes over as soon as `running` is false. Not an error, so no
+          // "Fix with AI" — that button is how a dropped connection became a second build.
+          if (isHeldElsewhere(res.status, body)) {
+            setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text: FOLLOWING_ELSEWHERE_NOTICE, ts: Date.now() }));
+            setError(null);
+            setErrorBeforeBuildStarted(false);
+            setRunning(false);
+            return;
+          }
           if (res.status === 409 && resumable && workspaceIdRef.current) {
             setRunning(false);
             await resume({
@@ -1524,10 +1541,21 @@ export function useAgentV3Build(): UseAgentV3Build {
               // workspace so recovery can never re-attach a different session's build, and time-box it
               // so a still-dead connection fails fast into the next backoff attempt instead of hanging.
               if (workspaceIdRef.current) params.set('workspaceId', workspaceIdRef.current);
-              const probe = await fetch(`/api/agentv3/status?${params.toString()}`, { signal: AbortSignal.timeout(15_000) });
+              // Bearer token: the server answers `buildRunningElsewhere` only for a workspace the VERIFIED
+              // caller owns, so a token-less probe could never learn the build had moved.
+              const probe = await fetch(`/api/agentv3/status?${params.toString()}`, { headers: await authJsonHeaders(), signal: AbortSignal.timeout(15_000) });
               const j = await probe.json().catch(() => ({}));
               if (isStale(gen)) break;
               const aliveHere = workspaceIdRef.current ? j?.buildRunningHere === true : j?.buildRunning === true;
+              if (!aliveHere && !sawResult && j?.buildRunningElsewhere === true) {
+                // THE PATH IN THE 2026-09-26 AUTOPSY: the drop moved this client to another server, the
+                // probe read "not running here", the raw "network error" was shown with a Fix-with-AI
+                // button, and pressing it built the same app a second time on top of the first. The
+                // build is alive — follow it through the live mirror (it starts once `running` is false).
+                reconnected = true;
+                setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text: FOLLOWING_ELSEWHERE_NOTICE, ts: Date.now() }));
+                break;
+              }
               if (aliveHere) {
                 reconnected = true;
                 // Pass whether this build already produced its terminal result. After the result the
@@ -1584,9 +1612,19 @@ export function useAgentV3Build(): UseAgentV3Build {
           // SESSION-SCOPED (audit #4): without workspaceId this account-wide probe could re-attach a
           // DIFFERENT session's build into this panel. Bounded so a dead connection can't hang the net.
           if (workspaceIdRef.current) params.set('workspaceId', workspaceIdRef.current);
-          const r = await fetch(`/api/agentv3/status?${params.toString()}`, { signal: AbortSignal.timeout(15_000) });
+          const r = await fetch(`/api/agentv3/status?${params.toString()}`, { headers: await authJsonHeaders(), signal: AbortSignal.timeout(15_000) });
           const j = await r.json().catch(() => ({}));
           const alive = workspaceIdRef.current ? j?.buildRunningHere === true : j?.buildRunning === true;
+          // Alive on ANOTHER server (autopsy 2026-09-26): "not running here" used to fall through to the
+          // auto-continue below, which started a second build on the same app. Follow it instead.
+          if (!alive && !sawResultRef.current && j?.buildRunningElsewhere === true) {
+            abortRef.current?.abort();
+            setRunning(false);
+            setError(null);
+            setErrorBeforeBuildStarted(false);
+            setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text: FOLLOWING_ELSEWHERE_NOTICE, ts: Date.now() }));
+            return;
+          }
           const action = stallWatchdogAction({ alive, sawResult: sawResultRef.current });
           if (action === 'reconnect') {
             // The build is alive but OUR stream went quiet — reconnect and keep going.

@@ -517,6 +517,8 @@ import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../A
 import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../AgentV3/buildQualityLint';
 import { abortBuild, abortCauseOf } from '../AgentV3/buildAbortCause';
+import { buildLeaseEnabled, claimBuildLease, holdBuildLease, readLiveBuildLease, requestRemoteStop, BUILD_HELD_ELSEWHERE_MESSAGE, type BuildLeaseStore } from '../AgentV3/workspaceBuildLease';
+import { processOwnerId } from '../lib/jobLease';
 import { workspaceHoldsUserApp, userOwnedFileCount } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
@@ -2126,6 +2128,8 @@ export interface RunningBuild {
   lastEventTs?: number;
 }
 const runningBuilds = new Map<string, RunningBuild>();
+/** Which turn's durable lease each in-memory lock key currently belongs to (workspaceBuildLease.ts). */
+const buildLeaseHolders = new Map<string, string>();
 
 /**
  * How many builds this INSTANCE is running right now.
@@ -3842,11 +3846,26 @@ export function registerAgentV3Routes(app: Express): void {
     // cross-user (build presence under a key the caller already supplies), so this never breaks resume.
     const verified = await verifiedIdentity(req);
     const wallet = verified?.uid ? await firestoreWalletReader(getDb())(verified.uid).catch(() => null) : null;
+    // CROSS-INSTANCE (workspaceBuildLease.ts): the registry above is this process's memory only, so a
+    // build running on ANOTHER instance used to read as "not running" — and the client's watchdog then
+    // auto-continued it with a second, parallel build. The durable lease is the answer every instance
+    // shares. Only asked for a workspace the VERIFIED caller owns, and only when this instance has no
+    // local answer, so the ordinary same-instance poll costs nothing extra.
+    let buildRunningElsewhere = false;
+    if (!buildRunningHere && workspaceId && buildLeaseEnabled()) {
+      try {
+        if (verifiedWorkspaceReadOk(await verifyFirebaseToken(req), workspaceId)) {
+          const lease = await readLiveBuildLease(getDb() as unknown as BuildLeaseStore, workspaceId);
+          buildRunningElsewhere = !!lease && lease.owner !== processOwnerId();
+        }
+      } catch { /* best-effort — unknown reads as "not elsewhere", exactly today's answer */ }
+    }
     res.json({
       enabled: isAgentV3Enabled(userId, email),
       ...statusEntitlement(verified, wallet),
       buildRunning,
       buildRunningHere,
+      buildRunningElsewhere,
       ...agentV3Status(),
       team: agentLifecycle.snapshot(),
     });
@@ -6414,7 +6433,17 @@ async function noteBuildOutcome(
       break;
     }
     activeBuilds.delete(candidates[0]);                       // always unblock the caller's own key
-    res.json({ stopped: wasRunning });
+    // CROSS-INSTANCE STOP (workspaceBuildLease.ts): the build may be running on another instance, where
+    // this registry cannot reach it. Flag its durable lease; the holder aborts on its next heartbeat.
+    let remote = false;
+    if (!wasRunning && stopWorkspaceId && buildLeaseEnabled()) {
+      try {
+        if (verifiedWorkspaceReadOk(await verifyFirebaseToken(req), stopWorkspaceId)) {
+          remote = await requestRemoteStop(getDb() as unknown as BuildLeaseStore, { workspaceId: stopWorkspaceId, owner: processOwnerId() });
+        }
+      } catch { /* best-effort */ }
+    }
+    res.json({ stopped: wasRunning || remote, ...(remote ? { remote: true } : {}) });
   });
 
   // ── UNSEND — take back the last message (Slice 2) ──
@@ -6877,6 +6906,20 @@ async function noteBuildOutcome(
       verifiedUid: verifiedAttachUid, workspaceId: requestedWorkspaceId, perWorkspace: perWorkspaceLockEnabled(),
     });
     if (!found) {
+      // CROSS-INSTANCE (workspaceBuildLease.ts): not running HERE is not the same as not running. A build
+      // held by another instance cannot be streamed from this one, but it can be followed through the
+      // shared live mirror — so say so, instead of a 404 the client reads as "that build has ended".
+      if (requestedWorkspaceId && buildLeaseEnabled()) {
+        try {
+          if (verifiedWorkspaceReadOk(verifiedAttachUid, requestedWorkspaceId)) {
+            const lease = await readLiveBuildLease(getDb() as unknown as BuildLeaseStore, requestedWorkspaceId);
+            if (lease && lease.owner !== processOwnerId()) {
+              res.status(409).json({ error: BUILD_HELD_ELSEWHERE_MESSAGE, elsewhere: true });
+              return;
+            }
+          }
+        } catch { /* best-effort — falls through to today's 404 */ }
+      }
       res.status(404).json({ error: 'No running build to resume.' });
       return;
     }
@@ -9873,6 +9916,38 @@ async function noteBuildOutcome(
       return;
     }
     activeBuilds.add(buildKey);
+    // ONE BUILD PER APP ACROSS EVERY SERVER (workspaceBuildLease.ts). The lock above lives in THIS
+    // process only; a retry after a dropped connection can land on another Cloud Run instance, where it
+    // is empty. The durable lease is what that instance sees. Only a STABLE session id names a real
+    // workspace — an unstable one derives a fresh id per request, so nothing can collide with it.
+    if (buildLeaseEnabled() && lockSessionId && SESSION_ID_RE.test(lockSessionId)) {
+      const leaseWorkspaceId = deriveWorkspaceId(userId, lockSessionId);
+      const leaseId = randomUUID();
+      const leaseStore = (() => { try { return getDb() as unknown as BuildLeaseStore; } catch { return null; } })();
+      const claim = await claimBuildLease(leaseStore, { workspaceId: leaseWorkspaceId, leaseId, owner: processOwnerId(), userId: userId ?? null });
+      if (!claim.ok) {
+        activeBuilds.delete(buildKey);
+        res.status(409).json({ error: BUILD_HELD_ELSEWHERE_MESSAGE, resumable: true, elsewhere: true, workspaceId: leaseWorkspaceId });
+        return;
+      }
+      buildLeaseHolders.set(buildKey, leaseId);
+      holdBuildLease(leaseStore, {
+        workspaceId: leaseWorkspaceId,
+        leaseId,
+        stillHeld: () => activeBuilds.has(buildKey) && buildLeaseHolders.get(buildKey) === leaseId,
+        // A Stop pressed on another instance: end this build exactly as the local /stop route does.
+        onStopRequested: () => {
+          if (buildLeaseHolders.get(buildKey) !== leaseId) return;
+          const held = runningBuilds.get(buildKey);
+          if (held && !held.ended) {
+            try { abortBuild(held.abort, 'user-stop'); } catch { /* best-effort */ }
+            try { endBuild(held); } catch { /* best-effort */ }
+            if (runningBuilds.get(buildKey) === held) runningBuilds.delete(buildKey);
+          }
+          activeBuilds.delete(buildKey);
+        },
+      });
+    }
     // Power level (admin tier→model redefinition 2026-07-13): 'weak' (GLM/Kimi, never Claude) |
     // 'off' (Normal, adaptive) | 'mini' (Strong → Sonnet 100%) | 'medium' (Powerful → Opus medium
     // effort) | 'max' (Full Team → Opus max/ultracode). Accepts the new `powerLevel` field; falls
@@ -13021,7 +13096,8 @@ async function noteBuildOutcome(
           if (scope.decision === 'analyze' && !dispute) {
             const rmStartedAt = Date.now();
             let rmProvider = 'CLAUDE';
-            const rmCall = makeFastTextRunner((used) => { rmProvider = used; }).runTurn({
+            let rmReported = false;
+            const rmCall = makeFastTextRunner((used) => { rmProvider = used; rmReported = true; }).runTurn({
               model: fastBuildModel(),
               system: megaRoadmapSystemPrompt(),
               messages: [{ role: 'user', content: megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals) }],
@@ -13044,8 +13120,9 @@ async function noteBuildOutcome(
               rmT = await Promise.race([rmCall, rmTimeout]);
             } catch (err) {
               try {
-                const lbl = fastLaneProviderLabel(rmProvider);
-                buildDiag.recordLlmCall({ model: answeringModel({ planned: lbl === 'anthropic' ? fastBuildModel() : null, family: rmProvider }), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - rmStartedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
+                // Same class as the project planner below: no rung answered ⇒ `unknown`, never `claude-…`.
+                const rmWho = fastLaneCallIdentity(rmReported, rmProvider, fastBuildModel());
+                buildDiag.recordLlmCall({ model: rmWho.model, provider: rmWho.provider, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - rmStartedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
                 buildDiag.record({
                   phase: 'plan', severity: 'info', code: 'MEGA_ROADMAP_FAILED',
                   message: roadmapPlannerFailedMessage(plannerFailureKind(err), rmTimeoutMs, err),
@@ -15633,7 +15710,8 @@ async function noteBuildOutcome(
           const ppGenerate = async (system: string, user: string): Promise<string> => {
             const startedAt = Date.now();
             let ppProvider = 'CLAUDE';
-            const call = makeFastTextRunner((used) => { ppProvider = used; }).runTurn({
+            let ppReported = false;
+            const call = makeFastTextRunner((used) => { ppProvider = used; ppReported = true; }).runTurn({
               model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
             });
             let ppTimer: ReturnType<typeof setTimeout> | undefined;
@@ -15645,8 +15723,11 @@ async function noteBuildOutcome(
               // A planner call that failed is a model call that failed — it belongs on the same ledger
               // as every other one, or the report cannot say whether the key was working at all.
               try {
-                const lbl = fastLaneProviderLabel(ppProvider);
-                buildDiag.recordLlmCall({ model: answeringModel({ planned: lbl === 'anthropic' ? fastBuildModel() : null, family: ppProvider }), provider: lbl, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
+                // `fastLaneCallIdentity`, not the variable's initialiser: a planner that timed out before
+                // any rung answered was recorded as `anthropic / claude-sonnet-4-6` — on WEAK builds, where
+                // Sonnet cannot run (autopsy 2026-09-26, the sibling build 1ef27cd7 fixed in the fast lane).
+                const ppWho = fastLaneCallIdentity(ppReported, ppProvider, fastBuildModel());
+                buildDiag.recordLlmCall({ model: ppWho.model, provider: ppWho.provider, promptPreview: `${system}\n---\n${user}`, promptChars: system.length + user.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) });
               } catch { /* diagnostics best-effort */ }
               throw err;
             } finally {

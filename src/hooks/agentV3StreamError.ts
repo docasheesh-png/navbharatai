@@ -60,6 +60,8 @@ export type ReconnectOutcome =
   | 'gone-silent'
   /** Build is gone mid-run (the drop ended it) → one honest "your files are safe, send again" line. */
   | 'gone-notice'
+  /** The build is alive on ANOTHER server (409 `elsewhere`) → follow it through the live mirror. */
+  | 'elsewhere'
   /** An unexpected, non-404 failure (e.g. 5xx) → surface it honestly as an error. */
   | 'error';
 
@@ -71,8 +73,11 @@ export type ReconnectOutcome =
  * A 404 is NEVER an error here: it is the truthful "that build isn't running anymore", which the
  * caller shows without contradicting an earlier (now-suppressed) "re-attached live" promise.
  */
-export function reconnectOutcome(input: { ok: boolean; status: number; resultAlreadySeen: boolean }): ReconnectOutcome {
+export function reconnectOutcome(input: { ok: boolean; status: number; resultAlreadySeen: boolean; elsewhere?: boolean }): ReconnectOutcome {
   if (input.ok) return 'live';
+  // Checked before the generic failure: a 409 that says "elsewhere" is a build that is ALIVE, and
+  // reporting it as an error is what used to make the client start a second, parallel build.
+  if (input.status === 409 && input.elsewhere === true) return 'elsewhere';
   if (input.status === 404) return input.resultAlreadySeen ? 'gone-silent' : 'gone-notice';
   return 'error';
 }
@@ -102,4 +107,21 @@ export function shouldRestoreFinishedBuild(outcome: ReconnectOutcome | 'aborted'
 export function isBuildBusyError(message: string | null | undefined): boolean {
   if (!message) return false;
   return /\ba build is (?:already|still) running\b/i.test(message);
+}
+
+// ── A build running on another server ────────────────────────────────────────────────────────────
+//
+// Autopsy 2026-09-26: Cloud Run has several instances and no session affinity, so after a dropped
+// connection the next request can land on a server that is not running the build. Every client path
+// that met that case (the stall watchdog, "Fix with AI", a typed retry) concluded the build was dead
+// and started ANOTHER one on the same app — three at once, in one sandbox. The server now says
+// `elsewhere`; the client follows that build through the shared live mirror instead.
+
+/** The in-thread line when this screen switches to following a build that runs elsewhere. */
+export const FOLLOWING_ELSEWHERE_NOTICE =
+  'Your build is still running — the connection moved, so I am following it live here instead of starting it again.';
+
+/** Did the server answer that the build is alive on another instance? PURE. */
+export function isHeldElsewhere(status: number, body: unknown): boolean {
+  return status === 409 && !!body && typeof body === 'object' && (body as Record<string, unknown>).elsewhere === true;
 }

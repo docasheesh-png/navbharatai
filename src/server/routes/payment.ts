@@ -22,6 +22,8 @@ import {
 } from '../professionals/professionalPaid';
 import { splitPayment, platformFeePct } from '../lib/platformFee';
 import { couponValueInr } from '../lib/promoCoupons';
+import { normalizeAdminPromoCode, adminPromoRefusal } from '../lib/adminPromoCodes';
+import { redeemAdminPromo } from '../lib/adminPromoStore';
 import {
   decideGiftPurchase, decideGiftRedemption, isGiftCode as looksLikeGiftCode, normalizeGiftCode,
   MIN_GIFT_INR, MAX_GIFT_INR, GIFT_CODE_COLLECTION,
@@ -621,6 +623,27 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
     // coupon is redeemable at all — see promoCoupons.ts for why that default is the safe one.
     const value = couponValueInr(code);
     if (value === null) {
+      // A CODE THE ADMIN MADE in Admin → Settings → Promo Code Generator (2026-09-26). Until this date
+      // nothing read those codes, so every one was answered with the line below. The env table is
+      // asked first, so a code defined in both places keeps the env value it always had; both share
+      // the `coupon_<CODE>_<uid>` claim id, so one person still redeems it once.
+      const adminCode = normalizeAdminPromoCode(code);
+      if (adminCode) {
+        try {
+          const r = await redeemAdminPromo(db, adminCode, { userId, userEmail, userName }, new Date());
+          if (r.kind === 'credited') {
+            return res.json({ success: true, balanceAdded: r.balanceAddedInr, currentBalance: r.currentBalance });
+          }
+          if (r.kind === 'already') {
+            return res.status(400).json({ error: 'You have already redeemed this promo coupon code!' });
+          }
+          if (r.kind === 'refused') {
+            return res.status(400).json({ error: adminPromoRefusal(r.reason) });
+          }
+        } catch (err: any) {
+          return sendSafeError(res, 500, 'Coupon redemption failed. Please try again.', err, 'admin promo redeem');
+        }
+      }
       return res.status(400).json({ error: 'Invalid or expired promoter voucher card.' });
     }
     const redemptionId = `coupon_${code}_${userId}`;

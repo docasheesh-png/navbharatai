@@ -261,7 +261,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   // Promo form
   const [promoCode, setPromoCode] = useState('');
   const [promoTokens, setPromoTokens] = useState('');
-  const [promoDiscount, setPromoDiscount] = useState('');
   const [promoMaxUses, setPromoMaxUses] = useState('1');
 
   // Announcement / user notification
@@ -1590,9 +1589,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
   const handlePromoCreate = async () => {
     if (!promoCode) return;
-    const r = await adminPost('/api/admin/promo', { code: promoCode, freeTokens: parseInt(promoTokens) || 0, discountPct: parseInt(promoDiscount) || 0, maxUses: parseInt(promoMaxUses) || 1 });
-    if (r.ok) { toast('Promo code created!'); setPromoCode(''); setPromoTokens(''); setPromoDiscount(''); fetchPromos(); }
+    const r = await adminPost('/api/admin/promo', { code: promoCode, freeTokens: Number(promoTokens), maxUses: Number(promoMaxUses) || 1 });
+    if (r.ok) { toast(`Promo code ${r.code} created!`); setPromoCode(''); setPromoTokens(''); fetchPromos(); }
     else toast('Error: ' + r.error);
+  };
+
+  // DELETE a promo code (admin 2026-09-26: "promo code delete ka option nahi hai"). Users who already
+  // redeemed it keep their credit; only the code stops working.
+  const deletePromo = async (code: string) => {
+    if (!window.confirm(`Delete promo code ${code}? Nobody will be able to redeem it after this. People who already redeemed it keep their credit.`)) return;
+    try {
+      const r = await fetch(`/api/admin/promo/${encodeURIComponent(code)}`, { method: 'DELETE', headers });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast('Could not delete: ' + (d.error || r.status)); return; }
+      setPromos((rows) => rows.filter((p) => p.code !== code && p.id !== code));
+      toast(`Promo code ${code} deleted.`);
+    } catch (e) { console.error(e); toast('Could not delete that promo code.'); }
   };
 
   /**
@@ -5068,18 +5080,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 <h3 className="text-sm font-black text-ink uppercase tracking-tight flex items-center gap-2">
                   <Tag className="w-4 h-4 text-accent-text" /> Promo Code Generator
                 </h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <p className="text-[11px] text-muted">
+                  A user types the code in Wallet &amp; Billing → Promocode and the tokens go straight into their wallet (100 tokens = ₹1). Each person can use a code once; Max uses is the total for everyone.
+                </p>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                   <div>
                     <label className="text-[10px] text-accent-text font-black uppercase tracking-widest block mb-2">Code</label>
                     <input value={promoCode} onChange={e => setPromoCode(e.target.value.toUpperCase())} placeholder="SAVE50" className="w-full bg-well border border-line rounded-xl px-3 py-2.5 text-ink font-mono outline-none focus:border-indigo-500 uppercase" />
                   </div>
                   <div>
                     <label className="text-[10px] text-accent-text font-black uppercase tracking-widest block mb-2">Free Tokens</label>
-                    <input type="number" value={promoTokens} onChange={e => setPromoTokens(e.target.value)} placeholder="500" className="w-full bg-well border border-line rounded-xl px-3 py-2.5 text-ink font-mono outline-none focus:border-indigo-500" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-accent-text font-black uppercase tracking-widest block mb-2">Discount %</label>
-                    <input type="number" value={promoDiscount} onChange={e => setPromoDiscount(e.target.value)} placeholder="10" className="w-full bg-well border border-line rounded-xl px-3 py-2.5 text-ink font-mono outline-none focus:border-indigo-500" />
+                    <input type="number" min={1} step={1} value={promoTokens} onChange={e => setPromoTokens(e.target.value)} placeholder="500" className="w-full bg-well border border-line rounded-xl px-3 py-2.5 text-ink font-mono outline-none focus:border-indigo-500" />
+                    <span className="text-[10px] text-muted block mt-1">{Number(promoTokens) > 0 ? `= ₹${(Number(promoTokens) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })} of credit` : '100 tokens = ₹1'}</span>
                   </div>
                   <div>
                     <label className="text-[10px] text-accent-text font-black uppercase tracking-widest block mb-2">Max Uses</label>
@@ -5094,19 +5106,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   <div className="overflow-x-auto mt-2">
                     <table className="w-full text-xs">
                       <thead><tr className="border-b border-line text-muted font-black uppercase tracking-widest text-[9px]">
-                        <th className="py-2 text-left">Code</th><th className="py-2 text-left">Tokens</th><th className="py-2 text-left">Discount</th><th className="py-2 text-left">Used</th><th className="py-2 text-left">Status</th>
+                        <th className="py-2 text-left">Code</th><th className="py-2 text-left">Tokens</th><th className="py-2 text-left">Used</th><th className="py-2 text-left">Status</th><th className="py-2 text-right"><span className="sr-only">Delete</span></th>
                       </tr></thead>
                       <tbody className="divide-y divide-line">
                         {pagedPromos.visible.map((p: any) => (
                           <tr key={p.id} className="hover:bg-raised">
                             <td className="py-2 text-accent-text font-black font-mono">{p.code}</td>
-                            <td className="py-2 text-warn font-mono">{p.freeTokens || 0}</td>
-                            <td className="py-2 text-info font-mono">{p.discountPct || 0}%</td>
+                            <td className="py-2 text-warn font-mono">{p.freeTokens || 0} <span className="text-muted">(₹{((Number(p.freeTokens) || 0) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })})</span></td>
                             <td className="py-2 text-ink font-mono">{p.usedCount || 0}/{p.maxUses || 1}</td>
-                            <td className="py-2"><span className={`text-[9px] font-black uppercase ${p.active ? 'text-success' : 'text-danger'}`}>{p.active ? 'Active' : 'Expired'}</span></td>
+                            <td className="py-2"><span className={`text-[9px] font-black uppercase ${p.status === 'Active' ? 'text-success' : 'text-danger'}`}>{p.status || 'Unknown'}</span></td>
+                            <td className="py-2 text-right">
+                              <button onClick={() => deletePromo(p.code || p.id)} title={`Delete ${p.code || p.id}`} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-line text-danger hover:bg-raised text-[10px] font-black uppercase tracking-wider">
+                                <Trash2 className="w-3.5 h-3.5" /> Delete
+                              </button>
+                            </td>
                           </tr>
                         ))}
-                        <LoadMore list={pagedPromos} label="codes" colSpan={6} />
+                        <LoadMore list={pagedPromos} label="codes" colSpan={5} />
                       </tbody>
                     </table>
                   </div>

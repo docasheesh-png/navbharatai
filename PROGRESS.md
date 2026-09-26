@@ -81954,3 +81954,33 @@ screenshot + loop nudge; the whole repair pass).
 - **The mega-roadmap planner ran on the reasoning rung** (`kimi-k2.7-code`, 76 s, 4,574 output tokens
   before the build began) — the sibling of `FAST_LANE_SKIPPED_REASONING_RUNG`.
 - **No user journey:** generated forms carry no `name`/label, so the journey check cannot run.
+
+**Follow-up the same day (admin: "haan pehla wale ke sath sabhi karo") — three of the four closed, one is a routing question:**
+- ✅ **package.json churn mid-verify (G1).** The reconciler read our own `e2e/smoke.spec.ts` and added
+  `@playwright/test`. Our scaffold's two files now carry a marker (`E2E_CONFIG_MARKER` /
+  `E2E_SMOKE_MARKER`, `isPlatformE2eScaffold`) and are skipped. A Playwright suite the model writes on purpose is still
+  declared (the 2026-08-24 test for that still passes). Skipping it also avoids the BENCHMARK 0 state,
+  where a runner is declared but has no browsers. The E2E note had also said `npm run test:e2e`, a
+  script the auto path never writes; it now says `npx playwright test`.
+- ✅ **vitest 2 on a Vite 8 app (G2). The pin was OURS.** `WELL_KNOWN_DEV_DEPS.vitest` was `'^2'`, and
+  `pinKnownDepsInInstallCommand` rewrote the model's bare `npm i -D vitest @vitest/ui jsdom` to it. The
+  vitest family now follows the project's own Vite (`vitestRangeForVite`: Vite ≤5 → `^3`, else `^5`,
+  from the npm registry's peer ranges). The shell tool passes the app's package.json into the pinner.
+- ✅ **No user journey (G4). The forms were fine; the deriver was blind.** The prompt contract
+  (`systemPrompt.ts`, "EVERY FORM FIELD IS ADDRESSABLE") and `writeTimeQualityCheck` already require a
+  `name` and a label. `journeyDerivation.ts` read tags with `<input\b[^>]*>`, so every attribute after
+  `onChange={(e) => …}` was invisible. This is the fourth reader of the `jsxTags.ts` class, after
+  c847b523 and 8a92e5ed. Its button reader and `authFlowSpec.ts` had the same regex. All three now use
+  `scanMarkup`, and a control wrapped in a plain, unique `<label>` is addressed with `getByLabel`.
+  Measured on our 40 golden scaffolds: journeys derivable 4 → 5 (most scaffolds have no form, so this
+  small number is expected). The real gain is on generated apps, whose inputs put `onChange` before
+  `name`. Locked by `tests/theJourneyReadsJsxNotHtml.test.ts` and `tests/theTestRunnerMatchesTheAppsVite.test.ts`.
+  Both were proven by reverting the fix.
+- ❓ **The 76 s roadmap planner (G3) is NOT a defect — it is the admin's routing, and it stays until
+  they decide.** `makeFastTextRunner` gets `complex: buildIsComplex`, so on a complex build the
+  planners open on KIMI. That was done on purpose after the admin said (2026-09-17) *"kimi ko bade aur
+  complex task dedo — starting me bhi"*, and autopsy e706e068 named the roadmap planner as one of those
+  calls. `kimi-k2.7-code` always reasons, so 76 s / 4,574 tokens is what that choice costs. The
+  admin-approved Agent × Tier table gives "Plan" its own rung (`PLAN_RUNG`, flashx on Weak/Normal), so
+  there is a real alternative. But changing which model runs is a Model Routing Policy change and needs
+  the admin's word. Asked, not changed.

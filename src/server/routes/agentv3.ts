@@ -25,7 +25,8 @@ import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, hardConstraintLines, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
-import { requestedFeatureLabels, renderRequestedFeatureContract } from '../AgentV3/RequirementCoverage';
+import { renderRequestedFeatureContract } from '../AgentV3/RequirementCoverage';
+import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenScaffolds/registry';
@@ -9633,6 +9634,19 @@ async function noteBuildOutcome(
   });
 
   // Build entry — runs the native tool-use loop and streams events as NDJSON.
+  // THE FEATURE LIST, SHOWN BEFORE A FRESH BUILD (admin 2026-09-26). Deterministic: the same two lists
+  // the build would restate to the builder (see featurePlan.ts) — no model call, no workspace, nothing
+  // written. The client shows them as a card; the answer comes back on the build as `confirmedFeatures`.
+  app.post('/api/agentv3/feature-plan', workspaceRateLimiter(), (req: Request, res: Response) => {
+    const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim().slice(0, 20_000) : '';
+    try {
+      res.json(featurePlanFor(prompt, { requirementAware: requirementAwareBuildEnabled() }));
+    } catch {
+      // A card we cannot compute is a card we do not show — never a blocked build.
+      res.json({ show: false, named: [], suggested: [], domain: 'general' });
+    }
+  });
+
   app.post('/api/agentv3/chat', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     // SECURITY (C1): identity from the VERIFIED token only — never the client-claimed body.userId.
     // Runs before flushHeaders(), so a reject is a clean HTTP 401 (no stream started yet). Skipped
@@ -15257,6 +15271,16 @@ async function noteBuildOutcome(
       // "text reply > build app" rule) — the build just comes out richer. Only fires for a new build (never an
       // edit) of a detected domain with genuinely-missing features; a clear/generic prompt yields '' guidance,
       // and with the flag off this whole block is inert, leaving buildPrompt byte-identical to today.
+      // The user's answer to the feature card, if they saw one — checked against the SAME lists the card
+      // was drawn from, so only labels we offered can come back (featurePlan.ts). null ⇒ no card was
+      // answered and every line below behaves exactly as before.
+      const featureLists = featureListsFor(prompt, { requirementAware: requirementAwareBuildEnabled() });
+      const featureConfirmation = (() => {
+        try { return sanitizeConfirmation(req.body?.confirmedFeatures, featureLists); } catch { return null; }
+      })();
+      // What the user unticked is not graded by the completeness audit either — otherwise the builder would
+      // be told to add it back.
+      dispatcher.setDeclinedFeatures(declinedLabels(featureConfirmation));
       if (requirementAwareBuildEnabled() && intent === 'new_build' && !isEditMode) {
         try {
           // The second argument answers "did the user ask for an app to be PRODUCED?" — a DIFFERENT
@@ -15265,7 +15289,11 @@ async function noteBuildOutcome(
           // to new_build and was handed a recruitment-ATS feature list to INCLUDE. The domain half is
           // now withheld unless an app was genuinely asked for; the India half is unaffected.
           const askedForAnApp = userAskedForAnAppToBeBuilt(prompt);
-          const reqGuidance = buildRequirementGuidance(analyzeRequirementGaps(prompt), {
+          // A user who answered the feature card has already accepted or declined every suggestion;
+          // the "include these by default" half must not re-add the declined ones behind their back.
+          const answered = domainGuidanceStandsDown(featureConfirmation);
+          const gaps = analyzeRequirementGaps(prompt);
+          const reqGuidance = buildRequirementGuidance(answered ? { ...gaps, likelyMissing: [] } : gaps, {
             userAskedForAnApp: askedForAnApp,
           });
           if (reqGuidance) buildPrompt = `${reqGuidance}\n\n---\n\n${buildPrompt}`;
@@ -15275,7 +15303,7 @@ async function noteBuildOutcome(
           // nobody enumerated — and ONLY there: a listed domain returns `listed` and is skipped here,
           // so every existing build prompt is byte-identical. It never asks a question (the 2026-07-20
           // friction-free decision is untouched); it only names what such an app usually needs.
-          if (!reqGuidance && askedForAnApp) {
+          if (!reqGuidance && askedForAnApp && !answered) {
             const learned = await learnDomain(prompt);
             if (learned && learned.source === 'generated') {
               buildPrompt = [
@@ -15307,7 +15335,7 @@ async function noteBuildOutcome(
       // what the user themselves said, and only features the end-of-build audit will grade. A request
       // naming no known surface yields '' and leaves buildPrompt byte-identical.
       try {
-        const contract = renderRequestedFeatureContract(requestedFeatureLabels(prompt));
+        const contract = renderRequestedFeatureContract(confirmedContractLabels(featureLists, featureConfirmation));
         if (contract) buildPrompt = `${contract}\n\n---\n\n${buildPrompt}`;
       } catch { /* the contract is best-effort — a fault here must never affect the build */ }
 
@@ -19270,7 +19298,7 @@ async function noteBuildOutcome(
             // FEATURE_COVERAGE finding in the report (present vs missing); it NEVER blocks a build (a
             // heuristic must never false-fail a working app). Auto-fixing the gaps is the next slice.
             try {
-              let coverage = checkFeaturePresence(prompt, html);
+              let coverage = checkFeaturePresence(prompt, html, declinedPresenceFeatures(featureConfirmation));
               // APP HEALTH CULTURE slice 2 (Phase 1b, opt-in AGENTV3_FEATURE_HEAL=on): the app renders
               // but a REQUESTED control is missing → run ONE bounded heal pass that adds the missing UI,
               // then re-open the running app and re-probe (only a control now in the live DOM counts).
@@ -19317,7 +19345,7 @@ async function noteBuildOutcome(
                     if (vr.kept && healResult?.ok) {
                       result = healResult as typeof result;
                       if (afterHtml) {
-                        const afterCoverage = checkFeaturePresence(prompt, afterHtml);
+                        const afterCoverage = checkFeaturePresence(prompt, afterHtml, declinedPresenceFeatures(featureConfirmation));
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
                       }
                     }
@@ -19327,7 +19355,7 @@ async function noteBuildOutcome(
                       result = healed;
                       try {
                         const after = (await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl')).html;
-                        const afterCoverage = checkFeaturePresence(prompt, after);
+                        const afterCoverage = checkFeaturePresence(prompt, after, declinedPresenceFeatures(featureConfirmation));
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
                       } catch { /* re-open best-effort — keep the pre-heal coverage */ }
                     }

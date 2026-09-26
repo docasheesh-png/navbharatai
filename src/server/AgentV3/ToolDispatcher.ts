@@ -686,6 +686,12 @@ export class ToolDispatcher {
   private ignoreRules: IgnoreRule[] = [];
 
   /** Set by the composition root once per build, from the project's own ignore file. */
+  /** Features the user unticked on the feature card — the completeness audit no longer asks for them. */
+  private declinedFeatures: ReadonlySet<string> | undefined;
+  setDeclinedFeatures(labels: ReadonlySet<string> | undefined): void {
+    this.declinedFeatures = labels;
+  }
+
   setIgnoreRules(rules: IgnoreRule[]): void {
     this.ignoreRules = Array.isArray(rules) ? rules : [];
   }
@@ -3832,7 +3838,7 @@ export class ToolDispatcher {
         // and so a feature found in neither names nor bodies is a CONFIRMED absence rather than a
         // guess. Everything readiness needs is already in `snap.sources`; this analyzer simply was
         // never given it.
-        const reqCoverage = analyzeRequirementCoverage(requestText, mem.graph(), snap.sources);
+        const reqCoverage = analyzeRequirementCoverage(requestText, mem.graph(), snap.sources, this.declinedFeatures);
         // Best-effort runnability pass (Phase 6 — Execution Quality): can the app
         // actually start/build? Reads package.json; never throws, never breaks
         // evaluate. "Preview is EARNED" — a build that compiles can still not run.

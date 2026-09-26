@@ -251,6 +251,12 @@ export function analyzeRequirementCoverage(
   request: string,
   graph: ProjectGraph,
   sources?: ReadonlyArray<{ path: string; content: string }>,
+  /**
+   * Features the user UNTICKED on the feature card (featurePlan.ts). They are not requested any more,
+   * so they are neither graded nor reported missing — telling the builder to add one would undo the
+   * user's own answer.
+   */
+  declined?: ReadonlySet<string>,
 ): RequirementCoverageReport {
   const empty: RequirementCoverageReport = { requested: [], covered: [], missing: [], confirmedMissing: [], findings: [] };
   const req = (request || '').toString();
@@ -285,7 +291,9 @@ export function analyzeRequirementCoverage(
   const covered: string[] = [];
   const missing: string[] = [];
   const confirmedMissing: string[] = [];
-  for (const feat of FEATURES) {
+  const graded = declined && declined.size ? FEATURES.filter((f) => !declined.has(f.label)) : FEATURES;
+
+  for (const feat of graded) {
     // Negation-aware (deep-test App #1): "No settings, no other features" must NOT count settings as
     // requested — a plain keyword test flagged a false "Requested feature not found: settings".
     if (!featureAskedFor(req, feat)) continue;

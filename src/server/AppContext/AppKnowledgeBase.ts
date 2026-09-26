@@ -567,6 +567,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     ],
   },
   {
+    id: 'build_feature_confirm',
+    name: 'Confirm the feature list before a new app is built',
+    path: 'NavBharatAI Pro → type what to build → send → the "Here is what I\'ll build" card above the composer',
+    description: 'Before the FIRST build of a new app, NavBharatAI Pro shows the features it is about to build: the ones it read from your message ("From your message") and the ones an app of that kind usually needs ("Usually needed in an app like this"). Everything starts ticked, so one tap on Build accepts it. Untick anything you do not want, or anything it misread from your words, and only the ticked features are built. It appears only for a new app that names or implies at least two features — never for an edit, a question, an import or a follow-up message — and "Don\'t ask again" turns it off on that device. The list is worked out instantly with no AI call, so it costs nothing and adds no wait.',
+    howToUse: 'Describe a new app and send it. When the card appears, untick any feature you don\'t want and tap Build (or Cancel to change your message). Tick "Don\'t ask again" to skip the card on future builds.',
+    relatedFeatures: ['agentv3_builder'],
+    keywords: ['feature list', 'confirm features', 'what will you build', 'features confirm', 'untick feature', 'remove feature', 'feature checklist', 'kya banaoge', 'features dikhao', 'feature hatao', "don't ask again", 'feature card', 'build plan'],
+    aiSurface: 'nbi_chat',
+  },
+  {
     id: 'agentv3_export',
     name: 'Export project (.zip) — your code, no lock-in',
     path: 'NavBharatAI Pro → Files tab → "ZIP" button (top of the file list)',

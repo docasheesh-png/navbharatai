@@ -203,6 +203,16 @@ describe('the WEBSITE path — mobile + github, capped ₹200, held until a real
     expect(stepsOf('W')).not.toContain('referral-code'); // the code is Android-only
     expect(tokensOf('W')).toBe(20_000);
   });
+
+  it('🔗 a friend verifying on the WEB pays the REFERRER too — ₹25 each for mobile + github = ₹50', async () => {
+    // A refers B (B redeems on Android — the website has no code-entry box). B then verifies on the web.
+    const code = (await status('A')).code;
+    await redeem('B', code, 'bbbbbbbbbbbbbbbb');
+    account = { email: 'b@example.com', emailVerified: true, phone: '+919000000000', providers: ['google.com', 'github.com'] };
+    await webClaim('B');
+    expect(tokensOf('B')).toBe(20_000);                                        // B's own ₹200
+    expect(Number(DOCS[key('user_referrals', 'A')]?.earnedTokens || 0)).toBe(5_000); // A's ₹50, mobile-anchored
+  });
 });
 
 describe('the referral code', () => {

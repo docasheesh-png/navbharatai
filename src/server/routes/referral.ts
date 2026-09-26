@@ -135,10 +135,14 @@ function claimedPlatform(req: Request): string {
  * SIM is the gate. Reconciles BOTH steps in one transaction, mobile first, so verifying the mobile
  * releases a github linked earlier, atomically and idempotently.
  *
- * 🔒 Deliberately does NOT pay the REFERRER here. The referrer's ₹25-per-verification reconciliation
- * runs on its own path (`payReferrer`, from the Android claim); extending referrer payouts to web-only
- * verifications is a separate money decision. A web friend's referrer is reconciled the next time that
- * friend claims on a verified Android device.
+ * 🔗 Pays the REFERRER too (admin 2026-09-26: *"website par jo user hai woh refer kar sakta hai, usko
+ * refer token milne chahiye — wahi maximum 1500 ke"*). A web user cannot REDEEM a code (there is no
+ * code-entry box on the website — the redeem/attribution route stays Android-only), so a friend only
+ * ever acquires a referrer on Android; but once they have one, that referrer earns ₹25 for each of the
+ * friend's verifications wherever they happen. `decideReferrerReward` is mobile-anchored (nothing until
+ * the friend's real number lands) and ₹1,500-capped, so a web verification pays the referrer exactly as
+ * a device-verified one does — a real SIM either way. Separate transaction, so it can never roll back
+ * the friend's own credit.
  */
 async function claimWeb(db: any, userId: string, res: Response): Promise<Response> {
   const contact = await resolveAccountContact(userId);
@@ -183,7 +187,7 @@ async function claimWeb(db: any, userId: string, res: Response): Promise<Respons
       lifetimeGifted += reward.tokens;
     }
 
-    if (totalGranted <= 0) return { granted: 0 };
+    if (totalGranted <= 0) return { granted: 0, referrerUserId: rec.referrerUserId ?? null };
 
     // ONE combined credit + ledger row + updated markers, atomically — the same idempotency guarantee
     // the Android path relies on: the credit and the record of what earned it are a single write.
@@ -203,8 +207,16 @@ async function claimWeb(db: any, userId: string, res: Response): Promise<Respons
       updatedAt: nowIso,
     }, { merge: true });
     tx.set(selfRef, { paidSteps, webGiftedTokens: webGifted, updatedAt: nowIso }, { merge: true });
-    return { granted: totalGranted };
+    return { granted: totalGranted, referrerUserId: rec.referrerUserId ?? null };
   });
+
+  // The referrer's half — separate transaction, separate user, never able to undo the credit above.
+  // `decideReferrerReward` reconciles over the friend's state, so it is safe to call after ANY of the
+  // friend's steps and pays ₹0 on a repeat; mobile-anchored and ₹1,500-capped inside it.
+  if (result.granted > 0 && result.referrerUserId) {
+    await payReferrer(db, String(result.referrerUserId), userId, nowIso)
+      .catch(() => { /* re-offered on this friend's next step; never breaks the claimer's reply */ });
+  }
 
   const grantedRupees = result.granted / TOKENS_PER_RUPEE;
   return res.json({

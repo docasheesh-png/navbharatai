@@ -37,6 +37,7 @@ import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { robustTscCommand } from './tscCommand';
 import { parseTscErrors } from './EndgameRepair';
+import { tscOutputProvesClean, looksLikeTypecheckCommand } from './TscGate';
 import { pathMissHint } from './suggestFilePath';
 import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
 import { detectTestPlan, parseTestOutcome, withSandboxBrowsers, withTestFilter } from './testRunner';
@@ -2401,6 +2402,19 @@ export class ToolDispatcher {
     return out;
   }
 
+  /**
+   * ONE door for "a whole-project compile just finished". Every path that runs `tsc --noEmit` — the
+   * write-time check, the `typecheck` tool and a shell `tsc` — reports its OUTPUT here, and a clean
+   * verdict resolves the compile errors memory was holding (`WorkspaceMemory.markTscClean`). Before
+   * this, only the shell path marked clean, it did so on the shell's exit code (a `| head` pipe is
+   * always 0, so a FAILING tsc was recorded as clean), and nothing ever resolved an old error. The
+   * verdict is read from the output, never an exit code. Best-effort: memory must never break a tool.
+   */
+  private noteCompileOutput(output: string): void {
+    try { if (tscOutputProvesClean(output)) getWorkspaceMemory(this.workspaceId).markTscClean(); }
+    catch { /* audit best-effort */ }
+  }
+
   private async writeTypecheckNote(sources: Record<string, string>): Promise<string> {
     const s = this._writeTypecheckStats;
     try {
@@ -2466,6 +2480,7 @@ export class ToolDispatcher {
         try { this.onCommand?.({ command, exitCode: null, stdout: r.stdout || '', stderr: r.stderr || '', durationMs }); }
         catch { /* diagnostics are best-effort */ }
         const combined = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
+        this.noteCompileOutput(combined);
         // A tsc that printed no `error TSxxxx` line is clean; a help page or an install log parses to zero
         // errors too, which is why a clean run here is evidence only through the bridge above, never on its own.
         return parseTscErrors(combined);
@@ -3682,8 +3697,10 @@ export class ToolDispatcher {
           // specialists don't redundantly re-run them (they receive verificationStatus()).
           const mem = getWorkspaceMemory(this.workspaceId);
           if (/\bnpm\s+(ci|install|i)\b/.test(command) || /\b(pnpm|yarn)\s+(install|add)\b/.test(command)) mem.markDepsInstalled();
-          if (/\btsc\b[^&|;]*--noEmit/.test(command)) mem.markTscClean();
         }
+        // Read from the OUTPUT, never the exit code: `tsc --noEmit 2>&1 | head -40` exits with head's 0
+        // whether or not tsc failed, and that used to be recorded as "TypeScript already checked CLEAN".
+        if (looksLikeTypecheckCommand(command) && exitCode === 0) this.noteCompileOutput(`${stdout}\n${stderr}`);
         return out;
       }
 
@@ -4847,6 +4864,7 @@ export class ToolDispatcher {
               tscHeader = `TYPE ERROR(S) — the production build (\`tsc && vite build\`) will FAIL until these are fixed. esbuild's parse-only check does NOT catch them; fix the EXACT file:line locations below:\n${combined}${tscCauseNote(tscErrorCauses(tscErrs))}\n\n`;
             } else {
               tscRanClean = true;
+              this.noteCompileOutput(combined);
             }
           } catch { /* real-tsc pass is best-effort — a toolchain miss must never fake a pass */ }
         }

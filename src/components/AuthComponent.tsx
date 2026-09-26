@@ -33,6 +33,7 @@ import { firebaseConfig } from '../config/firebase';
 import { signOutEverywhere } from '../lib/firebase';
 import { markRedirectStarted } from '../lib/redirectSignInMarker';
 import { explainAuthReason, shouldDeepDiagnose } from '../lib/authDiagnostics';
+import { userFacingAuthError, logAuthErrorDetail, type AuthErrorContext } from '../lib/authErrorMessage';
 import { popupFailureAction, waitForSignedInUser, settleNativeSignIn, appleSignInFailureMessage, webSignInStrategy, authErrorDetail, shouldOfferAppleSignIn } from './socialSignInPolicy';
 
 /**
@@ -132,26 +133,16 @@ async function diagnoseAuth(email?: string, password?: string): Promise<string> 
 }
 
 /**
- * Surface the REAL reason behind a Firebase auth failure. The generic
- * "auth/internal-error" message hides the underlying server response; this digs
- * out the nested detail (customData / serverResponse) so the user can see and
- * report the actual cause without a desktop console.
+ * What the SCREEN says about a failed sign-in: one plain, generic sentence (see authErrorMessage.ts).
+ *
+ * 🔴 This used to print the raw SDK error — `[auth/invalid-credential] Firebase: Error (...)` — plus any
+ * nested server response, straight onto the login screen (admin 2026-09-26: "andar ki coding show ho
+ * rahi"). The full detail still goes to the developer console, where it belongs; the person sees only
+ * what they can act on, and never which auth vendor or project is behind the page.
  */
-function describeAuthError(err: any): string {
-  try {
-    const code = err?.code ? `[${err.code}] ` : '';
-    const msg = err?.message ?? String(err);
-    const cd = err?.customData ?? {};
-    let server = cd?.serverResponse ?? cd?._serverResponse ?? cd?.message ?? '';
-    if (server && typeof server !== 'string') server = JSON.stringify(server);
-    // Avoid repeating the same text twice.
-    const extra = server && !msg.includes(String(server)) ? ` — ${server}` : '';
-    // Best-effort: also log the full object for a desktop console.
-    try { console.error('AUTH_ERROR_FULL', JSON.stringify(err, Object.getOwnPropertyNames(err))); } catch { /* ignore */ }
-    return `${code}${msg}${extra}`.slice(0, 700) || 'Sign-in failed. Try again.';
-  } catch {
-    return err?.message || 'Sign-in failed. Try again.';
-  }
+function describeAuthError(err: any, context: AuthErrorContext = 'sign-in'): string {
+  logAuthErrorDetail(context, err);
+  return userFacingAuthError(err, context);
 }
 
 /**
@@ -164,22 +155,19 @@ function describeAuthError(err: any): string {
 const firebaseAuthModuleForApple = import('firebase/auth');
 
 function describeSocialError(err: any): string {
+  // The two configuration faults used to be explained ON SCREEN with the auth console's menu path
+  // and the project id — useful to an admin, meaningless to a user, and a map for an attacker. They
+  // now read as "not available right now"; the console line names the exact fix for whoever debugs.
   const code = err?.code || '';
-  switch (code) {
-    case 'auth/unauthorized-domain':
-      return `This site's domain isn't authorized for sign-in. Admin: add it under Firebase Console → Authentication → Settings → Authorized domains (project ${firebaseConfig.projectId}).`;
-    case 'auth/operation-not-allowed':
-      return `This sign-in provider isn't enabled. Admin: enable it under Firebase Console → Authentication → Sign-in method (project ${firebaseConfig.projectId}).`;
-    case 'auth/account-exists-with-different-credential':
-      return 'An account already exists with this email using a different sign-in method. Sign in with that method first.';
-    case 'auth/network-request-failed':
-      return 'Network error reaching the sign-in provider. Check your connection and try again.';
-    case 'auth/popup-closed-by-user':
-    case 'auth/cancelled-popup-request':
-      return 'Sign-in was cancelled. Please try again.';
-    default:
-      return describeAuthError(err);
+  if (code === 'auth/unauthorized-domain') {
+    logAuthErrorDetail('social', err, `admin fix: add this domain under Authentication → Settings → Authorized domains (project ${firebaseConfig.projectId})`);
+    return userFacingAuthError(err, 'social');
   }
+  if (code === 'auth/operation-not-allowed') {
+    logAuthErrorDetail('social', err, `admin fix: enable this provider under Authentication → Sign-in method (project ${firebaseConfig.projectId})`);
+    return userFacingAuthError(err, 'social');
+  }
+  return describeAuthError(err, 'social');
 }
 
 /**
@@ -336,7 +324,9 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
 
       const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.message || 'Verification gateway limits reached. Please wait.');
+        // Our OWN server's sentence (a cooldown, an hourly cap, "this number already has an account") —
+        // written for the person, so it is shown as-is rather than replaced by the generic line below.
+        throw Object.assign(new Error(data.message || 'Verification gateway limits reached. Please wait.'), { ownMessage: true });
       }
 
       // 2. Security checks passed → dispatch a REAL OTP via Firebase Phone Auth.
@@ -364,7 +354,8 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
             addTerminalLine(`[AUTH] Authentication successful via Phone (auto-verified)`, 'success');
             onClose();
           } catch (e: any) {
-            setError(e?.message || 'Auto sign-in failed. Enter the code manually.');
+            logAuthErrorDetail('otp', e);
+            setError('Automatic sign-in did not finish. Please enter the code manually.');
           }
         });
         await FirebaseAuthentication.addListener('phoneCodeSent', (event: any) => {
@@ -375,7 +366,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
           addTerminalLine(`[AUTH] Verification code sent to ${phone}`, 'info');
         });
         await FirebaseAuthentication.addListener('phoneVerificationFailed', (event: any) => {
-          setError(event?.message || 'Phone verification failed. Please use Email or Google sign-in.');
+          setError(describeAuthError(event, 'otp'));
           setOtpSending(false);
         });
         await FirebaseAuthentication.signInWithPhoneNumber({ phoneNumber: phone });
@@ -402,7 +393,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       const code = err?.code || err?.message || '';
       const msg = /operation-not-allowed/.test(code)
         ? 'Phone OTP sign-in is not enabled for this app yet. Please use Email or Google sign-in.'
-        : (err?.message || 'Could not send the OTP. Please try again, or use Email / Google sign-in.');
+        : err?.ownMessage ? String(err.message) : describeAuthError(err, 'otp');
       setError(msg);
       if (recaptchaVerifier.current) {
         recaptchaVerifier.current.clear();
@@ -431,7 +422,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       addTerminalLine(`[AUTH] Authentication successful via Phone`, 'success');
       onClose(); // Auto close on successful login
     } catch (err: any) {
-      setError('Invalid OTP code. Please try again.');
+      setError(describeAuthError(err, 'otp'));
     } finally {
       setLoading(false);
     }
@@ -488,9 +479,13 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       // Only run the deep server probe for failures it can actually explain. For a self-explanatory
       // input error the probe's ADMIN_ONLY_OPERATION reply used to be rendered as a Google-provider
       // configuration essay — a confident WRONG diagnosis (see shouldDeepDiagnose).
-      if (!shouldDeepDiagnose(err?.code)) { setError(describeAuthError(err)); return; }
-      setError(`${describeAuthError(err)} · diagnosing…`);
-      setError(`${describeAuthError(err)}\n${await diagnoseAuth(email, password)}`);
+      const context: AuthErrorContext = isLogin ? 'sign-in' : 'sign-up';
+      setError(describeAuthError(err, context));
+      // The deep probe explains a CONFIGURATION fault to whoever is debugging. Its verdict names the
+      // auth console and the project, so it goes to the developer console — never onto the screen.
+      if (shouldDeepDiagnose(err?.code)) {
+        void diagnoseAuth(email, password).then((why) => logAuthErrorDetail(context, err, why)).catch(() => {});
+      }
     } finally {
       setLoading(false);
     }
@@ -514,7 +509,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       // Firebase hides user-not-found by default; surface only real, actionable errors.
       if (err?.code === 'auth/invalid-email') setError('That email address looks invalid. Please check it and try again.');
       else if (err?.code === 'auth/too-many-requests') setError('Too many attempts. Please wait a minute and try again.');
-      else setError(describeAuthError(err));
+      else setError(describeAuthError(err, 'reset'));
     } finally {
       setLoading(false);
     }

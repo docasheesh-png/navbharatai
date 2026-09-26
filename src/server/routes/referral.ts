@@ -31,6 +31,7 @@ import { routeParam } from '../lib/expressCompat';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mirroredCreditPatch } from '../lib/walletMirror';
 import { MAX_WEB_GIFT_TOKENS } from '../lib/giftPolicy';
+import { recordClaimOutcome, deviceRefusalCategory } from '../lib/referralClaimOutcomes';
 import { ledgerPatch } from '../lib/walletStatement';
 import { mintReferralCode, normalizeReferralCode, referralShareMessage } from '../lib/referralCode';
 import { checkDeviceIntegrity, deviceRefusalMessage, type DeviceCheck } from '../lib/deviceIntegrity';
@@ -218,6 +219,11 @@ async function claimWeb(db: any, userId: string, res: Response): Promise<Respons
     await payReferrer(db, String(result.referrerUserId), userId, nowIso)
       .catch(() => { /* re-offered on this friend's next step; never breaks the claimer's reply */ });
   }
+
+  // Counted, never awaited: a refused or empty claim used to leave no trace at all (see referralClaimOutcomes.ts).
+  void recordClaimOutcome(userId, 'web',
+    result.granted > 0 ? 'paid' : (proof.phoneVerified ? 'nothing-new' : 'held-no-mobile'),
+    { tokens: result.granted });
 
   const grantedRupees = result.granted / TOKENS_PER_RUPEE;
   return res.json({
@@ -444,6 +450,11 @@ export function registerReferralRoutes(app: Express): void {
 
       const device = await proveDevice(req);
       if (device.verdict !== 'verified') {
+        // 🔒 The CLASS of refusal is kept, never the raw detail: `unavailable` is our setup, `not-verified`
+        // is this phone — two different fixes, and before this they left the same trace (none).
+        void recordClaimOutcome(userId, 'android',
+          device.verdict === 'unavailable' ? 'device-unavailable' : 'device-refused',
+          { reason: deviceRefusalCategory(device.detail) });
         return res.status(403).json({ ok: false, granted: 0, message: deviceRefusalMessage(device.verdict) });
       }
       const deviceId = device.deviceId as string;
@@ -460,6 +471,7 @@ export function registerReferralRoutes(app: Express): void {
         hasReferrer: Boolean(existing.referrerUserId),
       };
       if (!stepIsProven(step, proof)) {
+        void recordClaimOutcome(userId, 'android', 'step-not-done', { reason: step });
         return res.status(409).json({ ok: false, granted: 0, message: stepNotDoneMessage(step) });
       }
 
@@ -532,6 +544,11 @@ export function registerReferralRoutes(app: Express): void {
           .catch(() => { /* re-offered on this friend's next step; never breaks the claimer's reply */ });
       }
 
+      void recordClaimOutcome(userId, 'android', paid.granted > 0 ? 'paid' : 'nothing-new', {
+        tokens: paid.granted,
+        reason: paid.granted > 0 ? undefined : String(paid.reason ?? ''),
+      });
+
       return res.json({
         ok: paid.granted > 0,
         granted: paid.granted,
@@ -539,8 +556,26 @@ export function registerReferralRoutes(app: Express): void {
         reason: paid.reason,
       });
     } catch (e) {
+      void recordClaimOutcome(routeParam(req.params.userId),
+        claimedPlatform(req) === 'web' ? 'web' : 'android', 'error');
       return sendSafeError(res, 500, 'Could not claim that bonus.', e, 'referral:claim');
     }
+  });
+
+  /**
+   * The phone could not even produce a device token, so the claim above was never sent. COUNTED, never
+   * paid: this route moves no money and trusts nothing but "this signed-in user says it failed", which
+   * is all a count needs. Without it the likeliest failure on a real handset — the Play Integrity call
+   * itself failing on the device — would be the one kind the claim counter could never see.
+   */
+  app.post('/api/referral/:userId/claim-failed', requireUserMatch('userId'), async (req: Request, res: Response) => {
+    if (!referralRewardsEnabled()) return res.json({ ok: true });
+    const raw = String((req.body as { reason?: unknown } | undefined)?.reason ?? '').trim().toLowerCase();
+    const reason = raw === 'unavailable' ? 'plugin-unavailable'
+      : raw === 'not-configured' ? 'not-configured-in-this-build'
+      : 'phone-check-failed';
+    void recordClaimOutcome(routeParam(req.params.userId), 'android', 'device-failed-on-phone', { reason });
+    return res.json({ ok: true });
   });
 }
 

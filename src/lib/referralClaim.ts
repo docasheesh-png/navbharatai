@@ -45,6 +45,19 @@ export async function postReferral(
   if (surface === 'android') {
     const device = await collectDeviceCheck();
     if (device.outcome !== 'ok') {
+      // Tell the server this claim never left the phone — COUNTED there, never paid. Fire-and-forget:
+      // a lost report costs one line of the admin's tally, never the user's message below.
+      if (/\/claim$/.test(path)) {
+        void (async () => {
+          try {
+            await fetch(path.replace(/\/claim$/, '/claim-failed'), {
+              method: 'POST',
+              headers: { ...(await authedHeaders()), 'Content-Type': 'application/json' },
+              body: JSON.stringify({ reason: device.outcome }),
+            });
+          } catch { /* best-effort */ }
+        })();
+      }
       throw new Error(device.outcome === 'unavailable'
         ? 'Update the NavBharatAI app from the Play Store to claim this bonus.'
         : 'We could not check this device just now. Please try again in a few minutes.');

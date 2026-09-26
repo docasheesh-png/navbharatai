@@ -44,6 +44,34 @@ export function looksLikeTscHelpOutput(output: string | null | undefined): boole
 }
 
 /**
+ * True when the shell never found the compiler at all — `tsc` was not installed, or the path was
+ * wrong — so the command printed a SHELL message instead of a compile result.
+ *
+ * WHY THIS EXISTS (admin report, build f2ff962f, 2026-09-12): the agent ran
+ * `./node_modules/.bin/tsc --noEmit 2>&1 | head -40` before `npm install`, got
+ * `/bin/bash: line 1: ./node_modules/.bin/tsc: No such file or directory`, and the pipe reported
+ * exit 0. That output contains no `error TS`, so every reader here scored it as a CLEAN typecheck —
+ * a pass for a compiler that never started. A missing binary is not evidence either way, exactly like
+ * the help page above. Matched on the shell's own phrasings (bash, dash/sh, npm), never on a bare
+ * word, so a real compile result that mentions "not found" in a message is never swallowed. Pure.
+ */
+export function looksLikeMissingTscBinary(output: string | null | undefined): boolean {
+  if (!output) return false;
+  return /(?:^|\n)\s*(?:[\w./-]*sh|bash|zsh):\s*(?:line\s+\d+:\s*|\d+:\s*)?\S*tsc\S*:\s*(?:command\s+)?(?:not found|No such file or directory|Permission denied)/i.test(output)
+    || /\btsc:\s*(?:command\s+)?not found\b/i.test(output)
+    || /could not determine executable to run/i.test(output);
+}
+
+/**
+ * The one question every reader of `tsc --noEmit` output must ask first: did the compiler really run?
+ * The help page and a missing binary are both "no" — neither is a pass and neither is a failure.
+ * Pure.
+ */
+export function tscNeverRan(output: string | null | undefined): boolean {
+  return looksLikeTscHelpOutput(output) || looksLikeMissingTscBinary(output);
+}
+
+/**
  * True when a shell command LOOKS LIKE a stand-alone typecheck run — `tsc` invoked with `--noEmit`
  * (the check-only flag). Deliberately narrow: a build script that merely contains the substring "tsc"
  * (`npm run build` → `tsc && vite build`, which EMITS) is not the same claim as "a check-only compile
@@ -86,7 +114,7 @@ export function typecheckEvidenceFromCommands(
   for (const c of commands) {
     if (!looksLikeTypecheckCommand(c?.command)) continue;
     const out = `${c.stdout ?? ''}\n${c.stderr ?? ''}`;
-    if (looksLikeTscHelpOutput(out)) continue; // never really ran — not evidence either way
+    if (tscNeverRan(out)) continue; // never really ran (help page / missing binary) — not evidence either way
     // Latest wins — a later run supersedes an earlier one (the agent may have fixed errors in between).
     verdict = hasTscErrors(out) ? 'failed' : 'passed';
   }

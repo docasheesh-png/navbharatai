@@ -90,6 +90,8 @@ const BARE_ACTION_WORDS = new Set([
   // was written for).
   'banao', 'bnao', 'banado', 'bnado', 'banade', 'bnade', 'banaao', 'banana', 'bana', 'banaa',
   'banwao', 'bnwao', 'banadijiye', 'likho', 'likhdo', 'likhdijiye',
+  // Devanagari
+  'बनाओ', 'बनाना', 'बना', 'बनादो', 'बनाइए', 'बनाएं', 'बनवाना',
 ]);
 
 /**
@@ -120,6 +122,41 @@ const PLACEHOLDER_NOUNS = new Set([
   'software', 'program', 'project', 'thing', 'something', 'anything',
   // Hindi/Hinglish articles, quantifiers and "some-thing" words that carry no description
   'ek', 'koi', 'kuch', 'kuchh', 'bhi', 'cheez', 'cheeze',
+  // The spellings the category word is really typed in (report 820be124: "Mujhe aik aip banana hai").
+  'aik', 'ik', 'aip', 'ap', 'aap', 'appp', 'aplication', 'applicaton', 'webside', 'websit',
+  // …and in Devanagari, where the same order is just as often written.
+  'एक', 'ऐप', 'एप', 'ऍप', 'वेबसाइट', 'साइट', 'कुछ', 'कोई',
+]);
+
+/**
+ * THE SENTENCE AROUND THE ORDER (admin report 820be124, 2026-09-12). The prompt was
+ * **"Mujhe aik aip banana hai"** — *"I want to make an app"* — and it names no more than "app banao"
+ * does. The rule above caught "app banao" and let this through, because `mujhe` and `hai` are neither
+ * verbs nor placeholders: one pronoun was enough to make a sentence that says NOTHING about what to
+ * build look like an instruction. The engine then planned an app it invented, on a slow provider, for
+ * four minutes, until the user pressed Stop.
+ *
+ * These words are the grammar of wanting — who wants it, that they want it, the tense. They carry no
+ * description of any product, so they are NEUTRAL here: they neither make a prompt buildable nor stop
+ * it being object-less. A prompt made only of them ("mujhe chahiye") is left alone — that is somebody
+ * else's case, and asking "what should I build?" of a sentence with no build word in it would be the
+ * app builder that argues with you. Deliberately used ONLY by `namesNoObject`: the `'too-short'` word
+ * count still counts them, so "calculator chahiye" is exactly as buildable as it was.
+ */
+const WANTING_GRAMMAR = new Set([
+  // who
+  'mujhe', 'muje', 'mjhe', 'mujhko', 'mereko', 'meko', 'hume', 'humein', 'hamein', 'hamko', 'humko',
+  'mera', 'meri', 'mere', 'hamara', 'hamari', 'hamare', 'apna', 'apni', 'apne', 'liye', 'lie', 'liya',
+  'i', 'we', 'you', 'us',
+  // wanting / needing
+  'want', 'wanna', 'need', 'would', 'like', 'chahiye', 'chaiye', 'chahie', 'chahta', 'chahti',
+  'chahte', 'chahiya', 'karna', 'krna', 'karni', 'karwana', 'banwana', 'can', 'could',
+  // the auxiliary and the tense
+  'hai', 'he', 'hain', 'hei', 'hoon', 'hun', 'hu', 'ho', 'tha', 'thi', 'hoga', 'hogi', 'is', 'am',
+  'are', 'to', 'for', 'new', 'naya', 'nayi', 'one', 'now', 'abhi', 'jaldi', 'mai', 'main',
+  // the same, in Devanagari
+  'मुझे', 'मेरे', 'मेरा', 'मेरी', 'लिए', 'हमें', 'है', 'हैं', 'हूँ', 'हूं', 'चाहिए', 'चाहता', 'चाहती',
+  'करना', 'नया', 'नई', 'मैं',
 ]);
 
 /** A word naming a CATEGORY rather than a deliverable ("app", "website", "kuch"). PURE. */
@@ -143,7 +180,11 @@ export function isBareActionWord(word: string): boolean {
 export function namesNoObject(prompt: string): boolean {
   const words = instructionWords(prompt);
   if (words.length === 0) return false; // 'empty' / 'link-only' own that case, with better messages.
-  return words.every((w) => isBareActionWord(w) || isPlaceholderNoun(w));
+  // The grammar of wanting is neutral (see WANTING_GRAMMAR); what is left must still be ALL verbs and
+  // placeholders, and something must be left — a sentence of pure grammar is not an order at all.
+  const meaningful = words.filter((w) => !WANTING_GRAMMAR.has(w));
+  if (meaningful.length === 0) return false;
+  return meaningful.every((w) => isBareActionWord(w) || isPlaceholderNoun(w));
 }
 
 export type UnbuildableReason =

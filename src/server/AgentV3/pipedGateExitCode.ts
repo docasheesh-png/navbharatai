@@ -51,6 +51,11 @@ const REAL_ERROR: RegExp[] = [
   // exit 127, `sh: 1: vite: not found`. So the pipe was the only difference between a lie and a fact.
   /^(?:[\w./-]*sh|bash|zsh):\s*(?:\d+:\s*)?\S+:\s*(?:command\s+)?not found/mi, // sh: 1: tsc: not found
   /\bcommand not found\b/i,                    // bash phrasing
+  // bash's OTHER phrasing for a binary that is not there (admin report f2ff962f, 2026-09-12):
+  // `/bin/bash: line 1: ./node_modules/.bin/tsc: No such file or directory`. The `sh: 1:` pattern above
+  // does not match it — bash writes `line 1:`, and says "No such file", not "not found" — so a piped
+  // `tsc | head` on a project that had not been installed yet exited 0 with nothing to contradict it.
+  /^(?:[\w./-]*sh|bash|zsh):\s*line\s+\d+:\s*\S+:\s*(?:No such file or directory|Permission denied)/mi,
   /^\s*(?:npm\s+)?ERR!\s+.*\bENOENT\b/mi,     // npm could not find the script/binary
 ];
 

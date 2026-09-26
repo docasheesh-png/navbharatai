@@ -1410,6 +1410,16 @@ export function useAgentV3Build(): UseAgentV3Build {
             });
             return;
           }
+          if (res.status === 409 && body.code === 'BUILD_RUNNING_ELSEWHERE') {
+            // THIS app's earlier build is still running on another server instance (autopsy eed79815) —
+            // it cannot be attached from here, but it CAN be stopped: the server flags its workspace and
+            // the build stops itself within seconds. So show the real Stop button, not a dead end.
+            setServerBuildRunning(true);
+            setErrorBeforeBuildStarted(true);
+            setError(msg);
+            setRunning(false);
+            return;
+          }
           if (res.status === 409 && resumable) {
             // A build is running for this account but in a DIFFERENT (or unknown) session — attaching
             // it here would pour another chat's build into this one. But a bare error DEAD-ENDS the user

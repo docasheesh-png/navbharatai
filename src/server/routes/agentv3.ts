@@ -114,6 +114,7 @@ import {
   buildLockKey,
   countActiveBuildsForUser,
   findAttachableBuild,
+  STALE_BUILD_SILENCE_MS,
   acquireDecision,
   buildKeyCandidates,
   workspaceSessionsMatch,
@@ -149,6 +150,11 @@ import {
 // ADMIN-SDK binding (bypasses rules) — getDb() here feeds only the wallet read/debit money path.
 import { getServerDb as getDb } from '../lib/serverDb';
 import { randomUUID } from 'crypto';
+import { processOwnerId } from '../lib/jobLease';
+import {
+  claimWorkspaceBuild, renewWorkspaceBuild, releaseWorkspaceBuild, requestWorkspaceBuildStop,
+  LEASE_HEARTBEAT_MS, BUILD_RUNNING_ELSEWHERE_MESSAGE, BUILD_RUNNING_ELSEWHERE_CODE, type BuildLeaseStore,
+} from '../AgentV3/workspaceBuildLease';
 import { getConnection } from '../lib/supabaseConnectionStore';
 import { provisionDatabaseForUser } from '../lib/supabaseProvisionFlow';
 import { databaseReadiness } from '../AgentV3/databaseNeed';
@@ -2373,10 +2379,18 @@ export function isBuildRunningForWorkspace(rb: RunningBuild | undefined, workspa
  * `runningBuilds` but not the lock) or ABANDONED (its client dropped, so it has NO attached subscriber,
  * and it has been running past the stall window). A build with a live watcher, or a freshly-started one,
  * is genuinely active → keep the honest 409 (the client re-attaches, or the user Stops it). Pure + tested. */
-export function shouldReclaimBuildLock(existing: RunningBuild | undefined, now: number, staleMs = 30_000, hardMaxMs = 0): boolean {
+export function shouldReclaimBuildLock(existing: RunningBuild | undefined, now: number, staleMs = STALE_BUILD_SILENCE_MS, hardMaxMs = 0): boolean {
   if (!existing || existing.ended) return true;
-  // Abandoned: no live watcher AND past the stall window.
-  if (existing.subscribers.size === 0 && now - existing.startedTs > staleMs) return true;
+  // Abandoned: no live watcher AND SILENT past the stall window.
+  //
+  // 🔴 SILENT, NOT MERELY UNWATCHED (autopsy eed79815, 2026-09-26). This read `now - startedTs`, so a
+  // build whose viewer dropped was "abandoned" 30 s after it STARTED, however busy it still was — and
+  // this registry exists precisely so a build survives its viewer ("if it disconnects we keep the build
+  // alive so the user can resume it"). A retry after a network blip therefore aborted a live build it
+  // should have re-attached to. Liveness is `lastEventTs`, stamped on every broadcast; a build that is
+  // still emitting is never abandoned, and the caller's 409 lets the client attach to it instead.
+  const lastSeen = typeof existing.lastEventTs === 'number' ? existing.lastEventTs : existing.startedTs;
+  if (existing.subscribers.size === 0 && now - lastSeen > staleMs) return true;
   // ZOMBIE (GA-2 in-process reaper): a build grossly past the HARD max duration is definitively dead — the
   // AgentRunner aborts at AGENTV3_MAX_BUILD_SECONDS, so a build still "running" well beyond that never fired
   // its cleanup (a hung await / crashed heal gate). Reclaim it even with a lingering subscriber, so a single
@@ -3621,6 +3635,15 @@ export function sanitizeSteerMessage(raw: unknown): string | null {
   const t = raw.trim();
   if (!t) return null;
   return t.length > 2000 ? t.slice(0, 2000) : t;
+}
+
+/**
+ * Whether a build claims its workspace in Firestore so a retry on ANOTHER instance cannot start a
+ * second build in the same workspace (autopsy eed79815 — see workspaceBuildLease.ts). Default ON;
+ * `AGENTV3_WORKSPACE_LEASE=off` reverts to the in-memory lock alone, with no deploy.
+ */
+export function workspaceLeaseEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.AGENTV3_WORKSPACE_LEASE ?? '').trim().toLowerCase() !== 'off';
 }
 
 /**
@@ -6452,6 +6475,13 @@ async function noteBuildOutcome(
       break;
     }
     activeBuilds.delete(candidates[0]);                       // always unblock the caller's own key
+    // Nothing to stop HERE — the build may be running on another instance (autopsy eed79815). Flag its
+    // workspace lease; the holder aborts on its next heartbeat. Only for a workspace the VERIFIED caller
+    // owns: a claimed id must never let one account stop another's build.
+    if (!wasRunning && stopWorkspaceId && verifiedStopUid && workspaceLeaseEnabled()
+      && workspaceOwnershipOk(verifiedStopUid, null, stopWorkspaceId)) {
+      wasRunning = await requestWorkspaceBuildStop(getDb() as unknown as BuildLeaseStore, { workspaceId: stopWorkspaceId }).catch(() => false);
+    }
     res.json({ stopped: wasRunning });
   });
 
@@ -9875,7 +9905,7 @@ async function noteBuildOutcome(
       // A build past its hard max + a 2-min grace is a zombie (the run aborts at maxBuildSeconds) — reclaim
       // it even if a stale subscriber lingers. 0 (max disabled) keeps only the abandoned-lock reclaim.
       const hardMaxMs = maxBuildSeconds() > 0 ? maxBuildSeconds() * 1000 + 120_000 : 0;
-      if (shouldReclaimBuildLock(existing, Date.now(), 30_000, hardMaxMs)) {
+      if (shouldReclaimBuildLock(existing, Date.now(), STALE_BUILD_SILENCE_MS, hardMaxMs)) {
         // Abandoned/zombie lock (its client dropped on a network blip and the build hung, or it crashed
         // without clearing the lock) — RECLAIM it so the account is never trapped until the wall-clock
         // deadline. Tear the old build down cleanly, then fall through to start the fresh one.
@@ -10126,6 +10156,65 @@ async function noteBuildOutcome(
     // A switch that appears to work and quietly does nothing is exactly the fake feature the second
     // absolute rule forbids — so when the answer is no, the user is told why, and where to fix it.
     const appSignatureNoticeText = appSignatureNotice(signatureDecision.reason, hostingPlanPriceInr());
+
+    // 🔒 ONE BUILD PER WORKSPACE — ACROSS EVERY INSTANCE (autopsy eed79815, 2026-09-26). The lock above
+    // is this PROCESS's memory. A user's retry after a dropped connection reached another Cloud Run
+    // instance, which knew nothing of the first build and started a second in the same workspace — then
+    // a third. They overwrote each other's files and ran npm into one node_modules at once for fourteen
+    // minutes. The workspace is now claimed in Firestore before the stream opens (so a refusal is a clean
+    // 409), renewed every LEASE_HEARTBEAT_MS while the build runs, released when it ends, and flagged by
+    // a Stop pressed on any instance. Fails OPEN on a store error; see workspaceBuildLease.ts.
+    const leaseWorkspaceId = lockSessionId && SESSION_ID_RE.test(lockSessionId) ? deriveWorkspaceId(userId, lockSessionId) : null;
+    const buildLeaseStore = leaseWorkspaceId && workspaceLeaseEnabled() ? (getDb() as unknown as BuildLeaseStore) : null;
+    const buildLeaseToken = randomUUID();
+    const buildLeaseClaimedAt = Date.now();
+    let buildLeaseHeld = false;
+    let buildLeaseTimer: ReturnType<typeof setInterval> | undefined;
+    // The build this lease belongs to, once it is registered — the heartbeat acts on THIS build only,
+    // never on whatever later build happens to hold the same in-memory key.
+    let buildLeaseRb: RunningBuild | null = null;
+    const releaseBuildLease = (): void => {
+      if (buildLeaseTimer) { clearInterval(buildLeaseTimer); buildLeaseTimer = undefined; }
+      if (!buildLeaseHeld || !buildLeaseStore || !leaseWorkspaceId) return;
+      buildLeaseHeld = false;
+      void releaseWorkspaceBuild(buildLeaseStore, { workspaceId: leaseWorkspaceId, token: buildLeaseToken }).catch(() => {});
+    };
+    if (buildLeaseStore && leaseWorkspaceId) {
+      const claim = await claimWorkspaceBuild(buildLeaseStore, { workspaceId: leaseWorkspaceId, token: buildLeaseToken, owner: processOwnerId(), userId });
+      if (!claim.ok) {
+        activeBuilds.delete(buildKey);
+        audit('AGENTV3_BUILD_RUNNING_ELSEWHERE', { userId, workspaceId: leaseWorkspaceId }, 'info');
+        // resumable:false on purpose — /attach only reaches builds on THIS instance, so a resumable hint
+        // would send the client to attach, 404, and tell the user the build "isn't live anymore".
+        res.status(409).json({ error: BUILD_RUNNING_ELSEWHERE_MESSAGE, code: BUILD_RUNNING_ELSEWHERE_CODE, resumable: false });
+        return;
+      }
+      buildLeaseHeld = claim.verified;
+      if (buildLeaseHeld) {
+        buildLeaseTimer = setInterval(() => {
+          void (async () => {
+            // Self-terminating, so an exit path that forgets to release cannot keep a dead build's lease
+            // alive: every exit deletes the in-memory lock, and an ended build is ended.
+            if (buildLeaseRb) {
+              if (buildLeaseRb.ended || runningBuilds.get(buildKey) !== buildLeaseRb) { releaseBuildLease(); return; }
+            } else if (!activeBuilds.has(buildKey) || Date.now() - buildLeaseClaimedAt > 5 * 60_000) {
+              releaseBuildLease();
+              return;
+            }
+            const renewal = await renewWorkspaceBuild(buildLeaseStore, { workspaceId: leaseWorkspaceId, token: buildLeaseToken });
+            if (renewal === 'stop-requested' && buildLeaseRb && !buildLeaseRb.ended) {
+              abortBuild(buildLeaseRb.abort, 'user-stop');
+            } else if (renewal === 'lost') {
+              // A newer build owns the workspace now (this lease lapsed). Two builds must not share it.
+              if (buildLeaseRb && !buildLeaseRb.ended) abortBuild(buildLeaseRb.abort, 'lock-reclaimed');
+              buildLeaseHeld = false;
+              releaseBuildLease();
+            }
+          })().catch(() => { /* a heartbeat failure just lets the lease age; the next beat retries */ });
+        }, LEASE_HEARTBEAT_MS);
+        buildLeaseTimer.unref?.();
+      }
+    }
 
     // NDJSON stream (mirrors the Engineer route's streaming contract).
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -10708,6 +10797,7 @@ async function noteBuildOutcome(
           }), 8_000, 'persistChatTurn');
         } catch { /* persistence is best-effort — never blocks the reply */ }
         activeBuilds.delete(buildKey);
+        releaseBuildLease();
         if (!res.writableEnded) res.end();
         return;
       } catch {
@@ -10728,6 +10818,7 @@ async function noteBuildOutcome(
       send({ type: 'error', message: 'Build sandbox (E2B) is not configured on the server — refusing to run the build on the host for safety.' });
       send({ type: 'result', ok: false, summary: 'Build sandbox not configured on the server.', steps: 0, billedUsd: 0, billedInr: 0 });
       activeBuilds.delete(buildKey);
+      releaseBuildLease();
       if (!res.writableEnded) res.end();
       return;
     }
@@ -10749,6 +10840,7 @@ async function noteBuildOutcome(
     };
     rb.subscribers.add(primary);
     runningBuilds.set(buildKey, rb);
+    buildLeaseRb = rb;
     req.on('close', () => { rb.subscribers.delete(primary); });
     // ETERNAL SESSIONS: tap every outgoing build event into a compact durable timeline (tool
     // calls, file changes, diffs, preview, terminal facts). Persisted once in the finally below
@@ -12114,6 +12206,7 @@ async function noteBuildOutcome(
       await persistSessionTimeline();
       try { clearGreenLatch(workspaceId); } catch { /* best-effort */ }
       activeBuilds.delete(buildKey);
+      releaseBuildLease();
       if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);
       endBuild(rb);
     };
@@ -22894,6 +22987,8 @@ async function noteBuildOutcome(
         }
       } catch { /* best-effort — never affects a build */ }
       activeBuilds.delete(buildKey);
+      // The workspace is free on every instance the moment this build ends (autopsy eed79815).
+      releaseBuildLease();
       // Only clear the registry slot if it is STILL this build — a Stop may have already
       // replaced it with a newer run. End every attached stream.
       if (runningBuilds.get(buildKey) === rb) runningBuilds.delete(buildKey);

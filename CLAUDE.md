@@ -974,10 +974,11 @@ the code (it is actually read somewhere) on 2026-07-11.
   treats an unknown as "no update", so a misconfiguration shows NOTHING rather than a false prompt.
   Automating this needs a Play Developer service account, which this project does not have — until then
   one number is set by hand after each upload, and that is stated plainly rather than pretended away.
-  ✅ **UPDATED by the admin 2026-09-26: `ANDROID_LATEST_VERSION_CODE = 133`** — build 133 is now live on
-  Play, and the admin set this as part of turning the referral ladder on (the referral preflight compares
-  this number against `FIRST_RELEASE_WITH_DEVICE_PLUGIN = 117` to confirm the live app can device-attest;
-  133 ≥ 117 ✓). Recorded hand-to-hand the same session.
+  ✅ **UPDATED by the admin 2026-09-26: `ANDROID_LATEST_VERSION_CODE = 134`** — the live referral preflight
+  read the env back as **134** (the admin said "133" in chat; the running server's value is the ground
+  truth). Set as part of turning the referral ladder on; the preflight compares this against
+  `FIRST_RELEASE_WITH_DEVICE_PLUGIN = 117` to confirm the live app can device-attest — 134 ≥ 117 ✓, so the
+  release row is green either way. Recorded hand-to-hand the same session.
   ✅ **SET by the admin 2026-08-25: `ANDROID_LATEST_VERSION_CODE = 91`** — the first PRODUCTION release.
   Verified against the pipeline rather than taken on trust: `android-aab.yml` sets
   `ANDROID_VERSION_CODE: ${{ github.run_number }}`, the run was **#91**, and Play displayed
@@ -2040,7 +2041,7 @@ the code (it is actually read somewhere) on 2026-07-11.
   📌 **STANDING DECISION (admin 2026-09-20): the referral code system starts when the new app is LIVE
   on the Play Store — not before. Do NOT set `REFERRAL_REWARDS` until then.**
   ✅ **THE CONDITION IS MET AND THE ADMIN SET IT ON — `REFERRAL_REWARDS = on` in Cloud Run (admin,
-  2026-09-26), with build `133` now live on Play.** Recorded hand-to-hand the same session, per this
+  2026-09-26), with build `134` now live on Play (preflight-verified).** Recorded hand-to-hand the same session, per this
   registry's rule. Turning it on ALSO stands down every other welcome grant by construction — the flat
   gift and the weekly ladder are already hardcoded off (`giftPolicy.ts`), and the legacy bonus, the v2
   plan and the interim gift all read `flatWelcomeGiftSuppressed` (= `referralRewardsEnabled`), so the
@@ -2050,6 +2051,13 @@ the code (it is actually read somewhere) on 2026-07-11.
   setup"** (`referralPreflight.ts`) rather than assuming it pays. Two links the preflight cannot see stay
   the admin's to confirm: the `PLAY_INTEGRITY_CLOUD_PROJECT` repo secret at build time, and Play → Data
   safety.
+  ✅ **PREFLIGHT RAN 2026-09-26 → "READY TO PAY", all six rows green** (admin screenshot): package
+  `com.navbharat.ai`, service account configured, SA can mint a Play Integrity token, Play Integrity API
+  refused the probe token as intended, release 134 carries the device check, `REFERRAL_REWARDS` on. The
+  two `manual` links above were STILL outstanding at that moment (the release row is green only "provided
+  the repo secret was set when it was built" — the preflight cannot see that), so a real-phone claim can
+  still pay ₹0 until the admin confirms both. Counters read ₹0 / 0 referred, as expected before anyone
+  completes a step.
 - **Play Integrity — the device check (built 2026-09-15). ⚠️ NOT a Cloud Run key:**
   **`PLAY_INTEGRITY_CLOUD_PROJECT`** is a **GitHub REPO SECRET** read at BUILD time by
   `android/app/build.gradle`, because it is baked into the `.aab`. It is the Google Cloud project

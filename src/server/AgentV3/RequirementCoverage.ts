@@ -58,6 +58,12 @@ interface FeatureSpec {
    * evidence pattern with nothing distinctive to match on would only add false negatives.
    */
   evidence?: RegExp;
+  /**
+   * Phrases that CONTAIN the request keyword without asking for the surface — the verb "map X to Y", a
+   * "chat bubble" as a display style, "clear error messages". They are blanked out before `request` is
+   * tested. See `featureAskedFor` for why this matters more than a false audit line.
+   */
+  notRequest?: RegExp;
 }
 
 // Curated, high-signal app surfaces only. Each `artifact` is deliberately broad
@@ -81,7 +87,15 @@ const FEATURES: FeatureSpec[] = [
   { label: 'checkout', request: /\bcheckout\b/i, artifact: /checkout/i },
   { label: 'payment', request: /\b(payment|payments|billing)\b/i, artifact: /(payment|pay|billing|checkout)/i },
   { label: 'admin panel', request: /\badmin\b/i, artifact: /admin/i },
-  { label: 'chat / messaging', request: /\b(chat|messaging|messages)\b/i, artifact: /(chat|message|messaging|conversation)/i },
+  // "messages" alone is NOT a messaging feature: "clear status messages", "error messages" and "display
+  // messages as chat bubbles" (SignBridge, 2026-09-26) all describe text on a screen, not people talking
+  // to each other. Only words that name the SURFACE count.
+  {
+    label: 'chat / messaging',
+    request: /\b(chat|messaging|messenger|inbox|direct messages?|send (?:a |them )?messages?|post (?:a )?messages?|messages? (?:between|to each other))\b/i,
+    notRequest: /\bchat[- ]bubbles?\b/gi,
+    artifact: /(chat|message|messaging|conversation)/i,
+  },
   { label: 'notifications', request: /\bnotification/i, artifact: /(notification|toast|snackbar)/i, evidence: /\b(?:toast\.(?:success|error|info)|useToast|notify\(|showNotification|enqueueSnackbar)\b/i },
   { label: 'contact page', request: /\bcontact\b/i, artifact: /contact/i },
   { label: 'about page', request: /\babout\b/i, artifact: /about/i },
@@ -93,7 +107,16 @@ const FEATURES: FeatureSpec[] = [
   { label: 'reviews / ratings', request: /\b(review|reviews|rating|ratings)\b/i, artifact: /(review|rating|star)/i },
   { label: 'comments', request: /\bcomments?\b/i, artifact: /(comment|discuss|reply|replies)/i },
   { label: 'wishlist / favorites', request: /\b(wishlist|favou?rites?|saved items?|bookmarks?)\b/i, artifact: /(wishlist|favou?rite|saved|bookmark)/i, evidence: /\b(?:toggleFavou?rite|isFavou?rite|addToWishlist|toggleBookmark)\b/i },
-  { label: 'map / location', request: /\b(maps?|location|geolocation)\b/i, artifact: /(map|leaflet|mapbox|googlemap|location|geo)/i },
+  // "Map recognized labels to the sign dictionary" is the VERB (SignBridge, 2026-09-26). Read as a request
+  // for a map, it was handed to the builder as a feature it MUST build — and it built a Leaflet map of
+  // invented "nearby ISL schools" in an app whose user wrote "do not fake". An imperative "map … to/onto/
+  // into …" is the verb; "a map", "the map", "map view", "Google Maps" stay the noun.
+  {
+    label: 'map / location',
+    request: /\b(maps?|location|geolocation)\b/i,
+    notRequest: /(?:^|[.!?:;\n]\s*|\b(?:to|and|then|also|must|should|will|can)\s+)maps?\b(?=[^.\n]{1,80}?\b(?:to|onto|into)\b)/gim,
+    artifact: /(map|leaflet|mapbox|googlemap|location|geo)/i,
+  },
   { label: 'blog / articles', request: /\b(blog|articles?)\b/i, artifact: /(blog|article|post|feed)/i },
   { label: 'analytics / reports / charts', request: /\b(analytics|reports?|charts?|graphs?|statistics)\b/i, artifact: /(analytic|report|chart|graph|stat|metric|dashboard)/i },
   { label: 'gallery / portfolio', request: /\b(gallery|portfolio)\b/i, artifact: /(gallery|portfolio|lightbox)/i },
@@ -172,7 +195,26 @@ export function requestedFeatureLabels(request: string): string[] {
   const req = (request || '').toString();
   if (!req.trim()) return [];
   // Negation-aware, exactly like the audit — "no login" must not become a requirement to build one.
-  return FEATURES.filter((f) => isAffirmativelyRequested(req, f.request)).map((f) => f.label);
+  return FEATURES.filter((f) => featureAskedFor(req, f)).map((f) => f.label);
+}
+
+/**
+ * Did the user ask for THIS feature? The ONE test both the up-front contract and the end-of-build audit
+ * use, so what the build is told to make and what it is graded on cannot drift apart.
+ *
+ * 🔴 A FALSE POSITIVE HERE IS NOT A NOISY REPORT LINE — IT IS AN ORDER. `renderRequestedFeatureContract`
+ * hands these labels to the builder as "not suggestions … build every one of these". So a keyword read in
+ * the wrong sense makes the engine build something nobody asked for, and then grade the build on it.
+ * That is why a feature may carry `notRequest`: the phrases that use the word in another sense are
+ * blanked out first, and only what remains can ask for the feature. PURE.
+ */
+export function featureAskedFor(request: string, feature: { request: RegExp; notRequest?: RegExp }): boolean {
+  let text = (request || '').toString();
+  if (feature.notRequest) {
+    const flags = feature.notRequest.flags.includes('g') ? feature.notRequest.flags : feature.notRequest.flags + 'g';
+    text = text.replace(new RegExp(feature.notRequest.source, flags), (m) => ' '.repeat(m.length));
+  }
+  return isAffirmativelyRequested(text, feature.request);
 }
 
 /**
@@ -209,6 +251,12 @@ export function analyzeRequirementCoverage(
   request: string,
   graph: ProjectGraph,
   sources?: ReadonlyArray<{ path: string; content: string }>,
+  /**
+   * Features the user UNTICKED on the feature card (featurePlan.ts). They are not requested any more,
+   * so they are neither graded nor reported missing — telling the builder to add one would undo the
+   * user's own answer.
+   */
+  declined?: ReadonlySet<string>,
 ): RequirementCoverageReport {
   const empty: RequirementCoverageReport = { requested: [], covered: [], missing: [], confirmedMissing: [], findings: [] };
   const req = (request || '').toString();
@@ -243,10 +291,12 @@ export function analyzeRequirementCoverage(
   const covered: string[] = [];
   const missing: string[] = [];
   const confirmedMissing: string[] = [];
-  for (const feat of FEATURES) {
+  const graded = declined && declined.size ? FEATURES.filter((f) => !declined.has(f.label)) : FEATURES;
+
+  for (const feat of graded) {
     // Negation-aware (deep-test App #1): "No settings, no other features" must NOT count settings as
     // requested — a plain keyword test flagged a false "Requested feature not found: settings".
-    if (!isAffirmativelyRequested(req, feat.request)) continue;
+    if (!featureAskedFor(req, feat)) continue;
     requested.push(feat.label);
     if (feat.artifact.test(surface)) { covered.push(feat.label); continue; }
     // Named nowhere — but it may be built INLINE. Check the bodies before calling it missing.

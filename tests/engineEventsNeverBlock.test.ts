@@ -134,7 +134,9 @@ describe('🔒 the wiring — the platform proves the preview itself, and the be
   it('both build-turn runners record a benched provider family', () => {
     // Three since 2026-09-25 (autopsy Study-Racer): the heal runners report a bench too, now that the
     // bench is one registry per build rather than a memory private to each runner.
-    expect(route.match(/onProviderBenched: recordProviderBenched,/g) ?? []).toHaveLength(3);
+    // Four since 2026-09-26 (autopsy SignBridge): the planners got their own runner on the plan ladder,
+    // and it reports a bench through the same recorder as the other three.
+    expect(route.match(/onProviderBenched: recordProviderBenched,/g) ?? []).toHaveLength(4);
     expect(route).toContain("code: 'PROVIDER_BENCHED'");
   });
 

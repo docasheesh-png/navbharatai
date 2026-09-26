@@ -43,6 +43,8 @@ import { combineScreenshotPrompt } from '../../lib/screenshotPrompt';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import type { ConversationMeta, QueueItemView } from '../../hooks/useAgentV3Build';
 import { useAgentV3Build } from '../../hooks/useAgentV3Build';
+import { FeatureConfirmCard } from './FeatureConfirmCard';
+import { type FeaturePlanView, featureConfirmDisabled, setFeatureConfirmDisabled, shouldOfferFeatureCard } from './featureConfirm';
 import { isBuildBusyError, shouldRestoreFinishedBuild } from '../../hooks/agentV3StreamError';
 import { sessionStatusMeta, groupSessionsByDate, legacyPrependMessages, filterSessionsByQuery, partitionPinnedSessions } from './agentV3History';
 import { HISTORY_TAB_NOTE } from './versionHelp';
@@ -750,6 +752,9 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // different framework B — confirm which one BEFORE building, never silently build the wrong stack.
   // `launch(fw)` re-runs the held build with the chosen framework (resolved, so it won't re-prompt).
   const [fwConflict, setFwConflict] = useState<{ picked: string; detected: string; launch: (fw: string) => void } | null>(null);
+  // The feature card shown before the first build of a new app (featurePlan.ts). `launch` resumes the
+  // paused send with the user's answer.
+  const [featureConfirm, setFeatureConfirm] = useState<{ plan: FeaturePlanView; launch: (answer?: { include: string[]; exclude: string[] }) => void } | null>(null);
   const fwName = useCallback((id: string) => FRAMEWORKS.find((f) => f.id === id)?.name ?? id, []);
   const [importUrl, setImportUrl] = useState('');
   const [showFrameworkPicker, setShowFrameworkPicker] = useState(false);
@@ -1645,14 +1650,42 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
     // Run the build with a concrete framework. `resolved` marks the choice as final so neither the client
     // nor the server re-prompts on the same conflict.
-    const launch = (fw: string, resolved: boolean) => start(msgText, {
+    const startBuild = (fw: string, resolved: boolean, confirmedFeatures?: { include: string[]; exclude: string[] }) => start(msgText, {
       userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, attachments,
       framework: fw, frameworkExplicit: frameworkExplicit || resolved, frameworkResolved: resolved, appSignature: appSignaturePref(),
       importUrl: pendingImportUrl || undefined,
       // 3-role model (FIX #6): Plan/Advise send the message down the read-only role lane instead of
       // the builder — same session, same workspace, so proposed steps land in THIS app's queue.
       chatRole: chatMode === 'build' ? undefined : chatMode,
+      confirmedFeatures,
     });
+    // THE FEATURE CARD (admin 2026-09-26). Before the FIRST build of a new app, show what the build is
+    // about to be told to make — the features read from the message and the ones the app's kind usually
+    // needs — so a misread never becomes an order. Deterministic on the server and fast; any failure
+    // (network, non-JSON, nothing to show) simply builds, exactly as before this card existed.
+    const offerCard = shouldOfferFeatureCard({
+      buildMode: chatMode === 'build',
+      hasWorkspace: !!state.workspaceId,
+      priorTurns: agentHistory.length + state.narration.length,
+      importing: !!pendingImportUrl,
+      hasAttachments: !!attachments && attachments.length > 0,
+      programmatic: !!override,
+      disabled: featureConfirmDisabled(),
+    });
+    const launch = async (fw: string, resolved: boolean) => {
+      if (!offerCard) { startBuild(fw, resolved); return; }
+      let plan: FeaturePlanView | null = null;
+      try {
+        const res = await fetch('/api/agentv3/feature-plan', {
+          method: 'POST',
+          headers: await authJsonHeaders(),
+          body: JSON.stringify({ prompt: msgText }),
+        });
+        if (res.ok) plan = (await res.json()) as FeaturePlanView;
+      } catch { plan = null; }
+      if (!plan || !plan.show) { startBuild(fw, resolved); return; }
+      setFeatureConfirm({ plan, launch: (answer) => startBuild(fw, resolved, answer) });
+    };
     // FRAMEWORK CONFLICT CONFIRM (admin 2026-07-20): only for a BUILD turn, and only when the user PICKED
     // one framework but the message NAMES a different one — pause and ask which to use instead of building
     // the wrong stack. A plan/advise turn or a no-conflict build proceeds immediately.
@@ -4927,6 +4960,17 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 middle of the message stream, where a long narration pushed them out of sight and a
                 reload lost them. They are now rows in the ❓ tray in the header — the SAME card and
                 the SAME `respond` call, mounted somewhere the user can find them again. */}
+            {featureConfirm && (
+              <FeatureConfirmCard
+                plan={featureConfirm.plan}
+                onBuild={(answer, dontAskAgain) => {
+                  if (dontAskAgain) setFeatureConfirmDisabled(true);
+                  featureConfirm.launch(answer);
+                  setFeatureConfirm(null);
+                }}
+                onCancel={() => setFeatureConfirm(null)}
+              />
+            )}
             {fwConflict && (
               <div className="px-3 py-2.5 bg-indigo-500/10 border border-indigo-800 rounded">
                 <div className="flex items-center gap-2 text-xs text-accent-text mb-1">

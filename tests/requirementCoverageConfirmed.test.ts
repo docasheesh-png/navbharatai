@@ -140,7 +140,8 @@ describe('WIRING — readiness passes the bodies, and says what actually happene
   const dispatcher = readFileSync(join(process.cwd(), 'src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
 
   it('the analyzer is given snap.sources — the bodies readiness already had in hand', () => {
-    expect(dispatcher).toContain('analyzeRequirementCoverage(requestText, mem.graph(), snap.sources)');
+    // Since 2026-09-26 it also receives the features the user unticked on the feature card (featurePlan.ts).
+    expect(dispatcher).toContain('analyzeRequirementCoverage(requestText, mem.graph(), snap.sources, this.declinedFeatures)');
   });
 
   it('a confirmed absence reads "NOT BUILT", not "not found"', () => {

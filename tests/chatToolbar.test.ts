@@ -37,14 +37,31 @@ describe('the Enter preference — one key, every AI', () => {
     expect(readSendOnEnter(() => { throw new Error('private mode'); })).toBe(true);
   });
 
-  it('the label says what the key does; the tooltip explains both halves', () => {
+  it('the label is constant (colour carries the state); the tooltip explains both halves', () => {
     expect(sendToggleLabel(true)).toBe('↵ Send');
-    expect(sendToggleLabel(false)).toBe('⇧↵ Send');
+    expect(sendToggleLabel(false)).toBe('↵ Send');
+    expect(sendToggleLabel(true)).not.toContain('⇧');
     expect(sendToggleTitle(true)).toMatch(/Enter sends/i);
     expect(sendToggleTitle(true)).toMatch(/new line/i);
     expect(sendToggleTitle(false)).toMatch(/Shift\+Enter sends/i);
     // ENGLISH ONLY (admin 2026-09-14) — the Hindi variant of this tooltip was removed.
     expect(sendToggleTitle(true)).not.toMatch(/[\u0900-\u097F]/);
+  });
+
+  it('the send toggle is BLUE when Enter sends and GRAY when it does not — the colour IS the state', () => {
+    /**
+     * The redesign (admin 2026-09-26): "blue send → enter = send / gray send → enter = new line".
+     * The old `⇧↵` Shift glyph is replaced by the button's colour. tsc and vitest cannot see a
+     * Tailwind class, so this reads the shell's source and asserts the accent (blue) fill is applied
+     * ONLY in the Enter-sends state, keyed on `sendOnEnter`. Reverting the button to one fixed style,
+     * or swapping the branch, fails here rather than silently losing the redesign.
+     */
+    const src = read('src/components/chat/ChatToolbar.tsx');
+    expect(src).toMatch(/PILL_SEND_ON\s*=\s*`\$\{PILL\}\s*bg-accent text-on-accent`/);
+    expect(src).toContain('sendOnEnter ? PILL_SEND_ON : PILL_SEND_OFF');
+    // The label glyph no longer carries the state — the Shift variant must be gone from the source too.
+    const lib = read('src/lib/chatToolbar.ts');
+    expect(lib).not.toContain("'⇧↵ Send'");
   });
 });
 

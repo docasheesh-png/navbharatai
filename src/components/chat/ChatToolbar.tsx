@@ -49,6 +49,14 @@ export interface ChatToolbarProps {
 const PILL = 'text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-lg transition-all active:scale-95';
 const PILL_IDLE = `${PILL} bg-raised text-muted hover:text-ink hover:bg-raised`;
 const PILL_ON = `${PILL} bg-indigo-600/20 text-accent-text`;
+/**
+ * The send toggle's TWO looks — the colour IS the state (admin 2026-09-26):
+ *   BLUE  (solid accent) → Enter sends the message
+ *   GRAY  (idle)         → Enter starts a new line
+ * A solid fill, not the faint `PILL_ON` tint, so "is Enter armed?" is legible at a glance on a phone.
+ */
+const PILL_SEND_ON = `${PILL} bg-accent text-on-accent`;
+const PILL_SEND_OFF = PILL_IDLE;
 
 export function ChatToolbar({
   messageCount, sendOnEnter, onSendOnEnterChange, searchQuery, onSearchQueryChange,
@@ -102,7 +110,13 @@ export function ChatToolbar({
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          <button onClick={toggleSend} title={sendToggleTitle(sendOnEnter)} className={PILL_IDLE}>
+          <button
+            onClick={toggleSend}
+            title={sendToggleTitle(sendOnEnter)}
+            aria-pressed={sendOnEnter}
+            // BLUE while Enter sends, GRAY while Enter starts a new line — the colour is the state.
+            className={sendOnEnter ? PILL_SEND_ON : PILL_SEND_OFF}
+          >
             {sendToggleLabel(sendOnEnter)}
           </button>
           {showActions && (

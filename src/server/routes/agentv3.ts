@@ -470,8 +470,7 @@ import { liveSearchContext } from '../lib/liveSearchContext';
 import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild, userAskedForAnAppToBeBuilt } from '../AgentV3/IntentClassifier';
 import { fastLanePhaseSummary, dominantFastLanePhase } from '../AgentV3/fastLanePhases';
 import { emptyWasteLedger, recordWaste, wasteSummary, totalWasteCalls, type WasteKind } from '../AgentV3/providerWaste';
-import { looksLikeRefusal } from '../lib/promptSafety';
-import { turnAskedTheUser } from '../AgentV3/nudgeToBuild';
+import { readTurnAnswer, answeredWithoutBuilding } from '../AgentV3/turnAnswer';
 import { assessBuildInput } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
@@ -1220,6 +1219,15 @@ export function emptyBuildFailureSummary(
    * declines to call an ANSWER an empty build.
    */
   askedTheUser = false,
+  /**
+   * Did the model DECLINE? The sibling `askedTheUser` was given in e628efd4 and this one was not
+   * (2026-09-26). A declined zero-file turn had its refusal REPLACED with "please try again" — an
+   * instruction to retry something the engine will decline again — and that replacement is what
+   * the free-tier upsell then read, finding no refusal in it and asking the user for money. A
+   * refusal is a FINAL answer (`shouldRetryEmptyBuild` already says so), so it is left standing,
+   * exactly as a question is. See `turnAnswer.ts`.
+   */
+  declined = false,
 ): string | null {
   if (!expectsArtifacts) return null;
   // SANDBOX DOWN ⇒ FAILURE regardless of file count (deep-test App #11, 2026-07-14). When the sandbox
@@ -1236,6 +1244,7 @@ export function emptyBuildFailureSummary(
   // AN ANSWER IS NOT AN EMPTY BUILD. Checked after `sandboxUnavailable` for the same reason as
   // `appRenders`: a dead sandbox is an infrastructure fact that must still win.
   if (askedTheUser) return null;
+  if (declined) return null;
   // A WORKING APP IS NOT AN EMPTY BUILD. Checked after `sandboxUnavailable` on purpose: a dead sandbox
   // can never have rendered anything, so that verdict must still win if the two ever disagree.
   if (appRenders) return null;
@@ -1344,8 +1353,20 @@ export function verifiedNoChangeSummary(opts: {
    * sentence byte-identical to what it has always said.
    */
   openFindings?: readonly string[];
+  /**
+   * Did the model answer the user — decline, or ask them something — instead of building?
+   *
+   * 🔴 THE SIBLING e628efd4 NEVER REACHED (2026-09-26). On an existing, working app, *"make the header
+   * blue"* → the model asks *"navy or sky blue?"* → zero files → this function REPLACED that question
+   * with *"Nothing needed changing — I checked your app from end to end and it works."* The request
+   * was dropped and the user was told it had been handled. The sentence below is a claim that
+   * nothing needed doing; a model that asked or declined has said the opposite, so the model's own
+   * words stand. See `turnAnswer.ts`.
+   */
+  modelAnsweredTheUser?: boolean;
 }): string | null {
   if (!opts.expectsArtifacts || opts.filesWritten > 0) return null;
+  if (opts.modelAnsweredTheUser) return null;            // the model's own answer stands
   if (opts.sandboxUnavailable) return null;              // nothing could have been verified either
   if (!opts.isEditMode || opts.existingProjectFiles <= 0) return null; // no app to have been fine already
   if (opts.userAskedToBuildAnApp) return null;           // they wanted an app produced; none was
@@ -16871,13 +16892,18 @@ async function noteBuildOutcome(
       }
       // A policy refusal is not a capability failure — see `modelRefused`. Read from the answer the
       // model actually gave, so it holds for any refusal rather than only the pornography one.
-      const firstAttemptRefused = looksLikeRefusal(result.summary);
+      const firstAttempt = readTurnAnswer(result.summary);
+      const firstAttemptRefused = firstAttempt.declined;
       // …and its SIBLING, read from the same answer by the same module that already decided this
       // exact question for the nudge, 156ms earlier in this turn (autopsy e628efd4). Never a second
       // copy of the test: `turnAskedTheUser` is `nudgeToBuild`'s own, so the two cannot drift apart
       // into disagreeing about whether the model asked the user something.
-      const firstAttemptAskedTheUser = turnAskedTheUser(result.summary);
-      if (firstAttemptAskedTheUser) {
+      const firstAttemptAskedTheUser = firstAttempt.asked;
+      // Recorded only where its own sentence is true: "not retried, and not reported as an empty
+      // build" describes a zero-file turn that was meant to produce an app. A turn that BUILT and
+      // then offered more ("Want me to add dark mode?") ends on a question too, and used to be
+      // reported as if it had answered one instead of building (2026-09-26).
+      if (firstAttemptAskedTheUser && expectsArtifacts && writtenFiles.size === 0) {
         try {
           buildDiag.record({
             phase: 'build', severity: 'info', code: 'TURN_ANSWERED_A_QUESTION', autoResolved: true,
@@ -16963,6 +16989,24 @@ async function noteBuildOutcome(
         } catch (e) {
           console.log(`[AGENTV3] empty-build Claude retry failed: ${e instanceof Error ? e.message : String(e)}`);
         }
+      }
+      // 🔑 THE MODEL'S ANSWER, READ ONCE (2026-09-26, the `turnKind` open root cause — see
+      // `turnAnswer.ts`). Here, right after the last MODEL run and before the platform writes a single
+      // sentence of its own into `result.summary`. Every verdict below that asks "did the model
+      // decline, or ask the user something?" reads THIS — the run proof, the verified-no-change
+      // sentence, the empty-build flip and the free-tier upsell. They used to read `result.summary`
+      // at their own moment, and the platform had by then overwritten it: the upsell found no refusal
+      // in our own "please try again" and asked a user whose request the engine had declined for money.
+      const modelAnswer = readTurnAnswer(result.summary);
+      if (expectsArtifacts && writtenFiles.size === 0 && modelAnswer.declined && !abort.signal.aborted) {
+        try {
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'TURN_DECLINED', autoResolved: true,
+            message: 'The model declined this request and wrote no files, so its answer was left as the answer — '
+              + 'not retried, not replaced with "please try again", and no upsell was offered. Before 2026-09-26 the '
+              + 'empty-build flip overwrote the refusal and the free-tier upsell then asked the user to add credits.',
+          });
+        } catch { /* a note must never fail a build */ }
       }
       // WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068): how many compiles ran at
       // write time and how many errors were caught while the model still held the file. Reported
@@ -18528,7 +18572,8 @@ async function noteBuildOutcome(
         pagesFailed: gateEvidence.pages === 'failed',
         journeyFailed: gateEvidence.journeys === 'failed',
         runtimeCrashBlocker: buildDiag.hasRuntimeCrashBlocker(),
-        deliveryRefused: looksLikeRefusal(result?.summary ?? ''),
+        // The model's OWN answer, captured before any platform rewrite — see `modelAnswer`.
+        deliveryRefused: modelAnswer.declined,
         stopped: abort.signal.aborted,
       });
       /** Record that a flip was HELD — admin-only, process-only code, never counted against the app. */
@@ -21170,6 +21215,7 @@ async function noteBuildOutcome(
           // files" — the sentence this argument exists to prevent.
           appRendered: renderProvenNow(),
           openFindings,
+          modelAnsweredTheUser: answeredWithoutBuilding(modelAnswer),
         });
         if (verifiedNoChange) {
           result = { ...result, summary: verifiedNoChange };
@@ -21194,10 +21240,14 @@ async function noteBuildOutcome(
           // free either way (`effectiveBilledUsd = 0` a few hundred lines below, unconditionally).
           const emptyFail = emptyBuildFailureSummary(
             expectsArtifacts, writtenFiles.size, sandboxUnavailable, buildObs.previewRendered,
-            // The same question, the same module, read from the summary as it stands at the flip —
-            // never cached earlier, for the reason `runProof` is a closure: the summary can be
-            // rewritten between the retry decision and here.
-            turnAskedTheUser(result.summary),
+            // 🔴 CORRECTED 2026-09-26. This comment used to say the answer is read "from the summary as
+            // it stands at the flip — never cached earlier, because the summary can be rewritten
+            // between the retry decision and here". The second half was the reason to do the
+            // OPPOSITE: what rewrites it is the PLATFORM (this flip, the verified-no-change sentence),
+            // and a question asked of our own sentence is not a question about the model's answer.
+            // So it is read once, after the last model run — `modelAnswer` — and both halves go in.
+            modelAnswer.asked,
+            modelAnswer.declined,
           );
           if (emptyFail) {
             // THE FLIP RECORDS ITS OWN OUTCOME (2026-09-17) — see `emptyBuildOutcomeIssue`. Without it
@@ -21864,7 +21914,7 @@ async function noteBuildOutcome(
           // "did this build reach the point of having a capability to judge?" — which is NO whether
           // the person or their own sentence stopped it.
           const stopped = buildWasStopped(buildDiag.report().issues) || buildDiag.toolWasUsed('stop_build');
-          const refused = !stopped && looksLikeRefusal(result.summary);
+          const refused = !stopped && modelAnswer.declined;
           const degraded = !stopped && !refused && providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
           // (d) OUR OWN CONFIGURATION (build report 58fe8254, 2026-09-15). A rung that rejects every
           // call with the same PERMANENT error is neither an engine limit nor an outage to ride out —

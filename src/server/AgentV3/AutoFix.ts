@@ -11,6 +11,7 @@ import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { appSourceFrame, siteTag } from './runtimeErrorSite';
 import { renderRepairGuidance } from './RuntimeErrorClassify';
 import { envFlag } from '../lib/envFlag';
+import { CANCELLED_REQUEST_RE } from './renderCheckConsole';
 
 export interface RuntimeError {
   t: number;
@@ -168,6 +169,9 @@ const NOISE = [
   /Slow network is detected/i,
   /was preloaded using link preload but not used/i,
   /\[HMR\]/i, // hot-module-reload chatter
+  // A request the browser ABANDONED (a reload mid-flight, Vite re-optimising its deps, an AbortController)
+  // is not a failure. Filtered here as well as at the recorder, for logs an older recorder wrote.
+  CANCELLED_REQUEST_RE,
 ];
 
 // M3-S3.1 — signatures that mean the RUNNING app actually crashed (white-screen / thrown render error /

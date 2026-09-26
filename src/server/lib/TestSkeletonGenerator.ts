@@ -25,14 +25,22 @@ export interface FunctionDef {
   /** Parameter names (used to scaffold the call). */
   params?: string[];
   async?: boolean;
+  /** The module's DEFAULT export — imported as `import Name from`, never `{ Name }`. */
+  isDefault?: boolean;
 }
 
 /** Generate a Vitest unit-test skeleton for a module's functions. */
 export function generateUnitTest(input: { modulePath: string; functions: FunctionDef[] }): string {
   const modulePath = clean(input.modulePath) || './module';
   const fns = (input.functions || []).filter((f) => clean(f.name));
-  const names = fns.map((f) => ident(f.name));
-  const importNames = names.length ? `{ ${[...new Set(names)].join(', ')} }` : '{}';
+  // A default export is imported as one (autopsy eed79815: `import { Game }` against
+  // `export default function Game` is TS2614). At most one default can exist in a module.
+  const defaultFn = fns.find((f) => f.isDefault);
+  const named = [...new Set(fns.filter((f) => !f.isDefault).map((f) => ident(f.name)))];
+  const importNames = [
+    ...(defaultFn ? [ident(defaultFn.name)] : []),
+    ...(named.length || !defaultFn ? [`{ ${named.join(', ')} }`.replace('{  }', '{}')] : []),
+  ].join(', ');
   const lines: string[] = [
     "import { describe, it, expect } from 'vitest';",
     `import ${importNames} from '${modulePath}';`,

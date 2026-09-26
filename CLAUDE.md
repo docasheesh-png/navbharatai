@@ -4240,12 +4240,14 @@ and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; 
   `kimi-k2.7-code` ($0.95/$4.00) instead of `glm-4.7-flashx` ($0.07/$0.40) — ~13× the input price for
   THOSE builds. The bet is that a cheap rung which fails is paid twice, once in the wasted call and
   once in the heal. **Watch: the share of builds routed complex, and whether their heal count drops.**
-- 🗺️ **THE ROADMAP PLANNER IS THE ONE EXCEPTION, BY THE ADMIN'S CHOICE (2026-09-26, "A", autopsy
+- 🗺️ **THE PLANNERS ARE THE ONE EXCEPTION, BY THE ADMIN'S CHOICE (2026-09-26, "A", autopsy
   7d79254b). `AGENTV3_PLANNER_PLAN_RUNG` — ⚠️ NOT set; the code default is ON, and `off` reverts.**
   The mega-roadmap call is a plan, so it runs on `tierPlanRunner` (the plan rung) instead of the
-  complex build chain, which had cost a large app 76 s of Kimi reasoning before its first file. The
-  build itself still opens on KIMI. ⚠️ On Weak, with `AGENTV3_NEMOTRON=weak`, the plan rung is Nemotron
-  Ultra — also a reasoning model, speed unmeasured.
+  complex build chain, which had cost a large app 76 s of Kimi reasoning before its first file. **Its
+  sibling, the project-mode module planner, moved the same day (autopsy eed79815)**: on the build chain
+  KIMI and then GLM each spent their whole allowance thinking, and it timed out at 315 s before the build
+  wrote a line. One switch covers both. The build itself still opens on KIMI. ⚠️ On Weak, with
+  `AGENTV3_NEMOTRON=weak`, the plan rung is Nemotron Ultra — also a reasoning model, speed unmeasured.
 - 🔗 `healLadder` and this router share ONE definition of "the cheap opener"
   (`withoutCheapFlashLead`), applied by `buildTurnRunner` for `heal || complex`. They stay separate
   FLAGS — "this is a repair" and "this is a big app" are different questions with the same answer
@@ -4807,6 +4809,16 @@ infrastructure and no monthly cost — which is why it is the *first* thing to d
 **TRIGGER:** sustained concurrent instances above ~30, OR any Firestore contention error in the logs.
 
 ### 2 · 🟡 Per-instance memory that pretends to be global
+
+✅ **THE BUILD LOCK HALF OF THIS TRIGGER FIRED AND IS BUILT (autopsy eed79815, 2026-09-26) — without
+Redis.** A user's retry after a dropped connection reached another Cloud Run instance, which knew
+nothing of the running build and started a second one in the same workspace, then a third: fourteen
+minutes of two builds overwriting each other's files and running npm into one `node_modules` at once.
+The fix is a **Firestore lease per workspace** (`AgentV3/workspaceBuildLease.ts`, the `jobLease.ts`
+pattern): claimed in a transaction before the stream opens, renewed every 20 s, released when the build
+ends, stale after 90 s, and **fail-open** on a store error. A Stop pressed on any instance reaches the
+build through the lease. Kill switch **`AGENTV3_WORKSPACE_LEASE=off`** (NOT set; default ON). The
+table below is otherwise unchanged — rate limiters and the other rows are still per-instance.
 
 Several things live in one instance's RAM and are therefore wrong the moment there are several:
 

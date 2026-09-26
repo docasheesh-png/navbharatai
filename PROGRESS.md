@@ -82062,3 +82062,67 @@ run proof reading the overwritten summary; the question note on a built turn).
 - **An enum nobody reads was not built.** The open item named `built/declined/asked/stalled/stopped`.
   Only the answer half has readers today, so only it was built; an enum with no reader would be dead
   code under the second absolute rule.
+
+---
+
+## 2026-09-26 — Autopsy eed79815 (car game, 3 builds in one workspace) — root causes fixed on PR #3331
+
+**The report:** a free user asked for a "4D Future City Drive" game. Three builds ran — and for about
+fourteen minutes two of them ran **at the same time in the same workspace**: the first (the long
+prompt, 18.9 min, billed ₹217.57), the "Fix this error and continue: network error" retry (₹0), and a
+re-sent short prompt (still running when reported).
+
+### Ledger
+- ✅ **Self-healed (2):** the tsc gate "fixed" the type errors; the integrity pass wired orphan CSS.
+  Both healed things that should not have existed, and the second made things worse (below).
+- 🔀 **Workaround (2):** the project planner timed out → "building in one go instead"; KIMI and GLM each
+  starved on reasoning and fell to the next rung.
+- ⏭️ **Skipped (1):** the post-build review timed out (45 s + grace) on 43 files.
+- ❌ **Shipped broken (4):** a login page, auth context, router and two placeholder stylesheets written
+  into a car game; `...content... <<<ENDFILE>>` in a stylesheet that broke the next production build;
+  three starter tests that failed `tsc --noEmit`; files of one build deleted by the other.
+- 🥵 **Struggle:** 315 s before the first build call (planner); ENOTEMPTY on four `npm install`s and a
+  half-extracted `three` (no package.json) — two builds installing into one node_modules.
+
+### Root causes and fixes
+1. **The build lock was per-process (the DNA root).** The retry landed on another instance with no
+   record of the first build. Proof: the in-process reclaim aborts the old build, and the first build
+   ran fifty more calls to a green finish. → `workspaceBuildLease.ts`: a Firestore lease per workspace,
+   claimed before the stream opens (clean 409 `BUILD_RUNNING_ELSEWHERE`), 20 s heartbeat, 90 s stale,
+   released at the build's end and in the deadline finalizer, fail-open. Stop reaches another instance
+   through the lease (owner-verified). The client shows Stop on that refusal. Kill switch
+   `AGENTV3_WORKSPACE_LEASE=off`. SCALE-PLAN §2's trigger — "duplicated work across instances".
+   - **Sibling, same-instance:** `shouldReclaimBuildLock` called a build abandoned 30 s after it
+     STARTED if nobody was watching, so a retry after a blip would abort a live build. It is now
+     silence-based (`lastEventTs`, `STALE_BUILD_SILENCE_MS`), so the retry gets a resumable 409 and
+     re-attaches.
+2. **The parser accepted the output-format example as a file.** `parseFileBlocks` now drops a `.ext`
+   path or an all-ellipsis body (`isEchoedFormatExample`) and ends a file at `<<<ENDFILE>>`/`>` too.
+   And the typecheck, syntax and missing-export repairs keep only files they were shown or the errors
+   name (`limitRepairToScope`); dropped paths are recorded as `REPAIR_OUT_OF_SCOPE` (process-only).
+3. **The project-mode planner ran on the reasoning build chain** — the sibling of the roadmap planner
+   the admin moved ("A"). Now on `tierPlanRunner`; one switch `AGENTV3_PLANNER_PLAN_RUNG` covers both
+   (renamed before #3331 merged). Its timeout was logged as `anthropic / claude-sonnet-4-6` on a weak
+   build — the 1ef27cd7 class, fixed at one site then; now the roadmap and project planners record
+   through `fastLaneCallIdentity` too.
+4. **Our starter tests broke the project's own typecheck.** Written only where `vitest` is declared
+   (`testSkeletonsCanRun`), and a default export is imported as a default.
+
+Also seen, and already fixed on this PR: `@playwright/test` added mid-verify and the `npm run
+test:e2e` note (G1) — this report is a second instance.
+
+**Tests:** `aPlaceholderIsNeverAFile`, `oneBuildPerWorkspaceAcrossInstances`, `ourStarterTestsCompile`,
+`theRoadmapIsAPlan` (extended), reclaim cases in `agentv3.test.ts`. Reversion-proven for the parser and
+the lease decision.
+
+### 🔴 STILL OPEN (rule 6)
+- **Project mode fired on a game.** 40 bulleted features, no big-software noun → the ≥14 rule. APP_SCOPE
+  called the same prompt "single-purpose, one shot". Two scope analyzers disagree; which should win is a
+  product decision — not changed here.
+- **Why the client showed "network error"** at minute ~3 is not in the report. The stream did emit a
+  line every ~2 minutes during the planner; a mobile client losing the socket is the likeliest cause.
+  With the lease, the retry no longer starts a second build — but the drop itself is unexplained.
+- **A cross-instance build cannot be WATCHED from the retrying instance**, only stopped. `/attach` reads
+  this process's memory; the Firestore live channel exists but the retry path does not subscribe to it.
+- **The reviewer chased files from "Recent errors"** (paths the syntax gate had refused, which never
+  existed) — three wasted reads. Minor; the garbage no longer reaches memory once the parser drops it.

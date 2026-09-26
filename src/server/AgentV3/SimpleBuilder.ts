@@ -35,7 +35,6 @@ import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 import { wireOrphanPages } from './orphanPageWiring';
 import { injectGlobalStylesheetImport } from './ProjectIntegrityChecks';
 import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, canAffordSharedContract, preambleBailReason } from './FastLaneBudget';
-import { scopeRepairFiles, repairScopeNote } from './repairScope';
 
 export interface SimpleFileSpec {
   path: string;
@@ -714,18 +713,50 @@ export function repairStrategyForAttempt(attempt: number): RepairStrategy {
  * extract that leading path and keep only ones present in `known`. Pure; order follows first appearance.
  */
 export function offendingFiles(errors: string, known: string[]): string[] {
-  if (!errors || typeof errors !== 'string') return [];
   const knownSet = new Set(known);
+  return pathsNamedInErrors(errors).filter((p) => knownSet.has(p));
+}
+
+/**
+ * Every source path a compiler error blob names, whether or not this build wrote it. Same token rule
+ * as `offendingFiles` (a path-like token right before `(l,c)` or `:l:c`), which is now built on this;
+ * a leading `./` is dropped so the answer compares with workspace paths. Pure; first-appearance order.
+ */
+export function pathsNamedInErrors(errors: string): string[] {
+  if (!errors || typeof errors !== 'string') return [];
   const seen = new Set<string>();
   const out: string[] = [];
   // Match a path-like token (has a slash or a dotted extension) immediately before `(l,c)` or `:l:c`.
   const re = /(^|\s)([\w./-]+\.[a-zA-Z]{1,5})(?=\s*[(:]\s*\d+)/gm;
   let m: RegExpExecArray | null;
   while ((m = re.exec(errors)) !== null) {
-    const p = m[2];
-    if (knownSet.has(p) && !seen.has(p)) { seen.add(p); out.push(p); }
+    const p = m[2].replace(/^\.\//, '');
+    if (!seen.has(p)) { seen.add(p); out.push(p); }
   }
   return out;
+}
+
+/**
+ * Keep only the repair files that are IN SCOPE — a file the repair was shown, or one the errors name.
+ *
+ * Autopsy eed79815 (2026-09-26): the post-build typecheck repair was handed this build's files and a
+ * list of errors, and answered with SEVENTEEN files, none of which it had been shown or the compiler
+ * had named — a login page, an auth context, a router, two stylesheets — for a car game. A repair has
+ * exactly one job: change the files that are wrong. A path outside that set is not a fix, it is a new
+ * app, and writing it is how a finished game gained somebody else's scaffold. `dropped` is returned so
+ * the caller can say so rather than discard silently. Pure.
+ */
+export function limitRepairToScope<T extends { path: string }>(fixes: T[], scope: Iterable<string>): { kept: T[]; dropped: string[] } {
+  const norm = (p: string) => p.trim().replace(/^\.\//, '');
+  const allowed = new Set<string>();
+  for (const p of scope) allowed.add(norm(p));
+  const kept: T[] = [];
+  const dropped: string[] = [];
+  for (const f of fixes) {
+    if (allowed.has(norm(f.path))) kept.push(f);
+    else dropped.push(f.path);
+  }
+  return { kept, dropped };
 }
 
 /** System prompt for the auto-repair pass — fixes real compiler errors in files just generated. */
@@ -1650,19 +1681,6 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       try { fixed = await deps.repair(repairErrors, [...byPath.values()], contract, strategy, contractPath || undefined); } catch { fixed = []; }
       finally { clock.repairMs += Date.now() - repairStartedAt; clock.repairRuns++; }
       fixed = fixed.filter((f) => f && f.path && f.content);
-      // SCOPE (repairScope.ts, autopsy 2026-09-26): the same rule the agentic gates apply — a repair
-      // writes the files it was shown or the compiler named, and a NEW file only when an error or an
-      // import points at it. A template path (`relative/path.ext`, copied from this lane's own output
-      // format) or an invented file nobody imports is refused, never written.
-      {
-        const scoped = scopeRepairFiles(fixed, {
-          allowed: [...byPath.keys(), ...offendingFiles(repairErrors, [...byPath.keys()])],
-          errors: repairErrors,
-          existing: new Map([...byPath].map(([p, f]) => [p, f.content])),
-        });
-        if (scoped.refused.length > 0) deps.log?.(repairScopeNote('compile', scoped.refused));
-        fixed = scoped.kept as OneShotFile[];
-      }
       if (!fixed.length) break;
       // PREVENTION BY CONSTRUCTION, not by persuasion. A repair aimed at a file we own and that has one
       // correct form is replaced with that form — the model may propose it, it cannot land it. This is

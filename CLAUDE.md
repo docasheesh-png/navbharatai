@@ -2909,47 +2909,20 @@ the flag entries above promise.
   `revertToGreenSnapshot`, which calls `reconcileCapturedWrites` (`GreenGuard.ts`). It also refuses an
   EMPTY snapshot, because `restorePlan({}, cur)` would delete the whole workspace. Test-locked and
   reversion-proven in `tests/aRealBugInAWorkingAppGetsOneVerifiedRepair.test.ts`.
-- **`AGENTV3_WORKSPACE_BUILD_LEASE`** (default ON, `off` reverts to the in-memory lock alone — added
-  2026-09-26, autopsy "4D Future City Drive") — **one build per app, across every Cloud Run instance.**
-  🔴 The one-build lock (`activeBuilds` / `runningBuilds`) was a Set and a Map in ONE process. After a
-  dropped connection ("network error", "Failed to fetch") the retry reached another instance, found no
-  lock, and started a SECOND build on the same app; a minute later a THIRD. All three shared one sandbox:
-  two `npm install`s collided (ENOTEMPTY), the third deleted the first one's files mid-build, and a free
-  user was billed for two full builds of one game. The same gap made `/status`, `/attach` and `/stop`
-  answer "not running" on the wrong instance, which is why the client's drop probe showed the raw error
-  with a Fix-with-AI button and its watchdog auto-continued with a new build.
-  **Fixed at the class:** `workspaceBuildLease.ts` — a Firestore lease per workspace
-  (`agentv3_build_leases/<workspaceId>`), claimed in a transaction right after the in-memory lock,
-  heartbeated every 15 s, dead after 75 s without one, and released within a second of the in-memory lock
-  going away. 🔒 **It WATCHES that lock rather than being released at each of its seven exit paths**, so a
-  new exit path cannot forget it. A live lease held by another process ⇒ 409 `elsewhere`; `/status` reports
-  `buildRunningElsewhere`, `/attach` answers 409 `elsewhere` instead of a 404 that reads as "finished", and
-  `/stop` flags the lease so the holder aborts on its next heartbeat. The client follows such a build through
-  the existing live mirror instead of starting another. 🔒 **Fails OPEN** (an unreachable Firestore ⇒
-  today's behaviour), like `jobLease.ts`. Test-locked and reversion-proven in
-  `tests/oneBuildPerAppAcrossEveryServer.test.ts`.
-  ⚠️ **What it does not do:** a user watching a build that runs elsewhere sees it through the live
-  mirror's poll (~3 s cadence, last 200 events), not the instant stream. Stop IS offered while following
-  (`followingElsewhere` in `useAgentV3Build`, set from `/status`), and `/stop` reaches the build whichever
-  instance receives the request — the holder aborts on its next heartbeat, so up to ~15 s later. **Watch:** 409 `elsewhere` in the logs. Each one is a parallel build that did not happen.
-- **🧰 A REPAIR WRITES ONLY WHAT IT WAS ASKED TO REPAIR (autopsy "4D Future City Drive", 2026-09-26; no
-  flag, on by construction).** The post-build typecheck repair on a finished Three.js game answered with a
-  file literally named `relative/path.ext` — the example path in `repairSystemPrompt`'s own OUTPUT FORMAT —
-  plus `App.jsx`, Navbar, Sidebar, useAuth, AuthContext, Login/Dashboard pages and two stylesheets the game
-  never had, and **every block was written**; the integrity pass then wired the stray CSS into `main.tsx`.
-  🔑 **Five passes ask a model to repair files and wrote whatever paths came back** (typecheck gate,
-  missing-files, syntax, missing-export, the fast lane's repair). Each prompt said "only the files you
-  change"; none enforced it. `src/server/AgentV3/repairScope.ts` decides once: a path the pass was shown or
-  the compiler named is kept; a NEW path only when an error names it or an import that does NOT already
-  resolve points at it (`./App` → `App.tsx` does not license `App.jsx`) — read from the existing files AND
-  the repair's own in-scope rewrites (splitting a component is legitimate), never from a refused block;
-  a template path never. Refusals are
-  recorded as `REPAIR_WRITE_REFUSED` (process-only). Test-locked and reversion-proven in
-  `tests/aRepairWritesOnlyWhatItWasAskedToRepair.test.ts`.
-  ⚠️ **What the repair was handed is NOT in that report** (it fell in the 10 model calls truncated for
-  storage), so why the model gave up on the real errors is not established. The same minutes show the
-  parallel build's `npm install` rewriting `node_modules` (`tsc: No such file or directory` at 09:41) — the
-  lease above closes that cause; this guard is what makes the next unknown cause harmless.
+- **ONE BUILD PER APP ACROSS SERVERS, AND SCOPED REPAIRS — built ONCE, by #3331 (autopsy eed79815 =
+  "4D Future City Drive", 2026-09-26).** The lease is `AgentV3/workspaceBuildLease.ts` (kill switch
+  `AGENTV3_WORKSPACE_LEASE=off`; see SCALE PLAN §2), the repair scope is `limitRepairToScope` +
+  `pathsNamedInErrors` in `SimpleBuilder.ts`, and the echoed format example is refused in
+  `parseFileBlocks` (`isEchoedFormatExample`).
+  🔴 **THE SAME REPORT WAS AUTOPSIED BY TWO SESSIONS AT ONCE, and each built its own lease, its own repair
+  scope and its own marker fix — same file name, same collection.** #3331 merged first; #3332 was cut
+  back to the two pieces #3331 did not carry (below and the marker sibling in `FastLaneContinuation`).
+  **This is safeguard #6's open-PR check failing in real time:** neither PR existed when the other session
+  started. When a report is pasted into more than one session, the admin's naming of ONE owner is the
+  only thing that prevents this. ⚠️ **Not ported, offered to the admin instead:** following a build that
+  runs on another server live (a `/status` that reports it, an `/attach` that says so), so a dropped
+  connection shows the running build rather than "network error". Today the retry is REFUSED with
+  `BUILD_RUNNING_ELSEWHERE` and a Stop — no second build, but the first screen still reads as an error.
 - **🧊 A GREEN APP MAY RESTORE ITS OWN FILES (same autopsy, 2026-09-26; no flag).** After build C was
   verified working, copying the app's OWN saved files back into its sandbox was refused one file at a time
   — **49 `GREEN_FREEZE_DEFERRED` lines**, each telling the user *"Reply if you want this change made"*,
@@ -4298,6 +4271,12 @@ and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; 
   `kimi-k2.7-code` ($0.95/$4.00) instead of `glm-4.7-flashx` ($0.07/$0.40) — ~13× the input price for
   THOSE builds. The bet is that a cheap rung which fails is paid twice, once in the wasted call and
   once in the heal. **Watch: the share of builds routed complex, and whether their heal count drops.**
+- 🗺️ **THE PLANNERS ARE THE ONE EXCEPTION (admin chose "A", 2026-09-26, autopsy 7d79254b).** The
+  roadmap, blueprint and project-mode planners are plans, so they climb `planLadder` through
+  `makePlanTextRunner` (#3334) instead of the complex build chain — which had cost a large app 76 s of
+  Kimi reasoning before its first file, and a project decomposition 315 s and a timeout (autopsy
+  eed79815). There is no separate kill switch. The build itself still opens on KIMI. ⚠️ On Weak, with
+  `AGENTV3_NEMOTRON=weak`, the plan rung is Nemotron Ultra — also a reasoning model, speed unmeasured.
 - 🔗 `healLadder` and this router share ONE definition of "the cheap opener"
   (`withoutCheapFlashLead`), applied by `buildTurnRunner` for `heal || complex`. They stay separate
   FLAGS — "this is a repair" and "this is a big app" are different questions with the same answer
@@ -4859,6 +4838,16 @@ infrastructure and no monthly cost — which is why it is the *first* thing to d
 **TRIGGER:** sustained concurrent instances above ~30, OR any Firestore contention error in the logs.
 
 ### 2 · 🟡 Per-instance memory that pretends to be global
+
+✅ **THE BUILD LOCK HALF OF THIS TRIGGER FIRED AND IS BUILT (autopsy eed79815, 2026-09-26) — without
+Redis.** A user's retry after a dropped connection reached another Cloud Run instance, which knew
+nothing of the running build and started a second one in the same workspace, then a third: fourteen
+minutes of two builds overwriting each other's files and running npm into one `node_modules` at once.
+The fix is a **Firestore lease per workspace** (`AgentV3/workspaceBuildLease.ts`, the `jobLease.ts`
+pattern): claimed in a transaction before the stream opens, renewed every 20 s, released when the build
+ends, stale after 90 s, and **fail-open** on a store error. A Stop pressed on any instance reaches the
+build through the lease. Kill switch **`AGENTV3_WORKSPACE_LEASE=off`** (NOT set; default ON). The
+table below is otherwise unchanged — rate limiters and the other rows are still per-instance.
 
 Several things live in one instance's RAM and are therefore wrong the moment there are several:
 

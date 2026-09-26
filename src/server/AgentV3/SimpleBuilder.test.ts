@@ -1047,10 +1047,7 @@ describe('the repair loop refuses a repair that makes the app worse', () => {
       },
       repair: async () => {
         repairCalls++;
-        // App.tsx imports the new file, so the creation is a legitimate one (repairScope.ts refuses a new
-        // file nothing points at — the 2026-09-26 autopsy's invented auth app). This test is about the
-        // acceptance judge's keep-and-stop branch for a repair that created a file, not about scope.
-        return [{ path: 'src/App.tsx', content: "import { Brand } from './Brand';\n// WORSE" }, { path: 'src/Brand.tsx', content: '// NEW FILE' }];
+        return [{ path: 'src/App.tsx', content: '// WORSE' }, { path: 'src/Brand.tsx', content: '// NEW FILE' }];
       },
     }) as never);
 

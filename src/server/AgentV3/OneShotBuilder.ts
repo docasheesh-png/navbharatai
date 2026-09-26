@@ -125,6 +125,44 @@ export function oneShotEnabled(): boolean {
 export interface OneShotFile { path: string; content: string; }
 
 /**
+ * Is this block the OUTPUT-FORMAT EXAMPLE copied back, rather than a file?
+ *
+ * Autopsy eed79815 (2026-09-26): a repair pass answered with the format example from its own prompt —
+ * `<<<FILE relative/path.ext>>>` with the body `...content...` — followed by a skeleton of an app nobody
+ * asked for (`src/pages/LoginPage.jsx`, `src/styles/globals.css`, …), every body a placeholder. The
+ * parser accepted all of it: the JS files were refused later by the syntax gate, but the stylesheets and
+ * `relative/path.ext` were written, one stylesheet was wired into `main.tsx`, and the next turn's
+ * production build failed on `...content...`. A placeholder is never a file, so it is refused here,
+ * where every reader of model file blocks passes.
+ *
+ * Two tests, either one sufficient:
+ *   - the extension is `.ext` — not a real file type, only ever the example's;
+ *   - every non-blank line of the body is an ellipsis line (`...content...`, `… rest unchanged …`).
+ *     A real file always has at least one line of code; a spread like `...state,` sits among others.
+ * An EMPTY body is not treated as a placeholder: an empty file can be legitimate (`.gitkeep`). PURE.
+ */
+export function isEchoedFormatExample(path: string, content: string): boolean {
+  if (/\.ext$/i.test(path.trim())) return true;
+  const lines = content.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+  if (lines.length === 0) return false;
+  const ellipsisLine = /^(?:\/\/|\/\*|#|<!--|\{\/\*)?\s*(?:\.{3}|\u2026)[^\n]{0,80}$/;
+  return lines.every((l) => ellipsisLine.test(l));
+}
+
+/**
+ * The end-of-file marker as every reader of a model's file blocks must recognise it: `<<<ENDFILE>>>`, and
+ * the one-bracket-short `<<<ENDFILE>>` / `<<<ENDFILE>` (autopsy eed79815). ONE definition, because the
+ * truncation check in FastLaneContinuation kept the exact spelling after the parser was widened — so a
+ * block the parser had closed was read there as a file cut off mid-write. A regex SOURCE, not a RegExp.
+ */
+export const END_FILE_MARKER = '<<<ENDFILE>{1,3}';
+
+/** Does `text` contain an end-of-file marker at or after `from`? Pure. */
+export function hasEndFileMarker(text: string, from = 0): boolean {
+  return new RegExp(END_FILE_MARKER).test(String(text ?? '').slice(Math.max(0, from)));
+}
+
+/**
  * Parse the model's one-shot output into files. The model is instructed to emit each file as:
  *   <<<FILE path/to/file.ext>>>
  *   ...content...
@@ -132,26 +170,6 @@ export interface OneShotFile { path: string; content: string; }
  * This delimiter survives code that itself contains ``` fences or JSON, so it is far more robust
  * than markdown fences or a single JSON blob for source code. Pure + exported for testing.
  */
-/**
- * The END of a file block as models actually write it — ONE definition every reader of the format
- * shares (the parser here, and the truncation checks in FastLaneContinuation.ts).
- *
- * 🔴 WHY (autopsy "4D Future City Drive", 2026-09-26): the parser recognised exactly `<<<ENDFILE>>>`.
- * A model that closed a block with `<<<ENDFILE>>` — one bracket short — had the marker SAVED INTO THE
- * FILE: the report's `src/index.css` carried "stray markers like `<<<ENDFILE>>`", and the build spent
- * steps finding and deleting them. The two truncation checks had the same blind spot in the other
- * direction: they read a block closed that way as never closed, i.e. as a file cut off mid-write.
- *
- * Tolerated: two or three `<`, optional spaces, `ENDFILE` / `END FILE` / `END_FILE` / `/FILE`, one to
- * three `>`, any case. Precision holds because no real source line looks like that.
- */
-export const END_FILE_MARKER = String.raw`<{2,3}[ \t]*(?:END[ _]?FILE|\/[ \t]*FILE)[ \t]*>{1,3}`;
-
-/** Does `text` contain a file-block end marker at or after `from`? Pure. */
-export function hasEndFileMarker(text: string, from = 0): boolean {
-  return new RegExp(END_FILE_MARKER, 'i').test(String(text ?? '').slice(Math.max(0, from)));
-}
-
 export function parseFileBlocks(text: string): OneShotFile[] {
   const files: OneShotFile[] = [];
   if (!text) return files;
@@ -160,13 +178,19 @@ export function parseFileBlocks(text: string): OneShotFile[] {
   // single missing ENDFILE made file A's content run through the next `<<<FILE b>>>` header until the
   // following ENDFILE — merging two files into one corrupt file and silently DROPPING file B. The
   // `<<<FILE` lookahead + `$` terminator recover file B (and a lone trailing file with no ENDFILE).
-  const re = new RegExp(String.raw`<<<FILE\s+(.+?)>>>\r?\n([\s\S]*?)(?:\r?\n?${END_FILE_MARKER}|(?=\r?\n?<<<FILE\s)|$)`, 'gi');
+  //
+  // The terminator also accepts `<<<ENDFILE>>` and `<<<ENDFILE>` (autopsy eed79815, 2026-09-26): a model
+  // that dropped one `>` left the marker INSIDE the file, and a stylesheet ending in `<<<ENDFILE>>`
+  // broke the production build on the next turn.
+  const re = new RegExp(String.raw`<<<FILE\s+(.+?)>>>\r?\n([\s\S]*?)(?:\r?\n?${END_FILE_MARKER}|(?=\r?\n?<<<FILE\s)|$)`, 'g');
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const path = m[1].trim().replace(/^["'`]|["'`]$/g, '');
     const content = m[2];
     // Reject empty / unsafe paths (no absolute, no traversal).
     if (!path || path.startsWith('/') || path.includes('..') || path.length > 300) continue;
+    // Reject the FORMAT EXAMPLE echoed back as if it were a file — see isEchoedFormatExample.
+    if (isEchoedFormatExample(path, content)) continue;
     files.push({ path, content });
   }
   // De-dupe by path — the LAST block for a path wins (model may correct itself).

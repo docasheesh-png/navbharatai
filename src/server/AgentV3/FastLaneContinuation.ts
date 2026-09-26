@@ -226,7 +226,7 @@ export function unterminatedTailPath(text: string): string | null {
   if (!text) return null;
   const lastHeader = text.lastIndexOf('<<<FILE');
   if (lastHeader === -1) return null;
-  // The shared marker definition (OneShotBuilder.ts): a block closed `<<<ENDFILE>>` is closed, not cut off.
+  // The parser's own terminator (END_FILE_MARKER): a block it closed is never a file cut off here.
   if (hasEndFileMarker(text, lastHeader)) return null;
   const m = /^<<<FILE\s+(.+?)>>>/.exec(text.slice(lastHeader));
   if (!m) return null;

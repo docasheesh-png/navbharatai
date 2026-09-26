@@ -5,7 +5,7 @@ import { carryOverActivity } from '../components/agentv3/activityTimeline';
 import { initialAgentV3State } from '../components/agentv3/agentV3Types';
 import type { AgentV3ClientState, AgentV3WireEvent, GitCheckpoint } from '../components/agentv3/agentV3Types';
 import { conversationToEvents, conversationToUserMessages, isUnfinishedBuild, type PersistedConversation } from '../components/agentv3/agentV3History';
-import { shouldSurfaceStreamError, reconnectOutcome, isHeldElsewhere, FOLLOWING_ELSEWHERE_NOTICE, type ReconnectOutcome } from './agentV3StreamError';
+import { shouldSurfaceStreamError, reconnectOutcome, type ReconnectOutcome } from './agentV3StreamError';
 import { nextLivePollDelayMs, resumeSinceSeq, LIVE_POLL_FAST_MS } from './livePollPolicy';
 import { auth } from '../lib/firebase';
 // FILE-REVEAL PACING (admin 2026-07-23 — "one by one user ko dikhe … har 2 file ke bich ~5–10 sec"):
@@ -83,10 +83,6 @@ export interface UseAgentV3Build {
   /** True when a build is running server-side but this UI is NOT attached to it
    *  (e.g. the original connection was lost) — the panel offers "Resume". */
   serverBuildRunning: boolean;
-  /** True while this screen is FOLLOWING a build that runs on another server (autopsy 2026-09-26): it
-   *  cannot be streamed from here, so the panel shows its progress through the live mirror and offers
-   *  Stop, which the server forwards to whichever instance holds the build. */
-  followingElsewhere: boolean;
   /** Re-attach to a build that is already running for this account (replays its events so the UI
    *  catches up, then streams live). Pass `workspaceId` (the caller's current session) so the server
    *  refuses to attach a build that belongs to a DIFFERENT session under the same account. */
@@ -332,7 +328,6 @@ export function useAgentV3Build(): UseAgentV3Build {
   const [state, setState] = useState<AgentV3ClientState>(initialAgentV3State);
   const [running, setRunning] = useState(false);
   const [serverBuildRunning, setServerBuildRunning] = useState(false);
-  const [followingElsewhere, setFollowingElsewhere] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /**
    * Did this error come from an HTTP refusal raised BEFORE the build stream opened?
@@ -403,7 +398,6 @@ export function useAgentV3Build(): UseAgentV3Build {
     abortRef.current = null;
     resumeInFlightRef.current = false;
     setRunning(false);
-    setFollowingElsewhere(false);
     setState(initialAgentV3State());
     setError(null);
     setErrorBeforeBuildStarted(false);
@@ -416,7 +410,6 @@ export function useAgentV3Build(): UseAgentV3Build {
     abortRef.current = null;
     setRunning(false);
     setServerBuildRunning(false);
-    setFollowingElsewhere(false);
     // Clear any "a build is already running" error — Stop is exactly its resolution, so the banner must
     // not linger and re-tempt the user into the "Fix with AI" retry loop it produced.
     setError(null);
@@ -611,8 +604,6 @@ export function useAgentV3Build(): UseAgentV3Build {
             idlePolls = 0;
             hadActivity = true;
             setState((cur) => events.reduce((s, e) => agentV3Reducer(s, e), cur));
-            // The followed build delivered its result — there is nothing left to stop.
-            if (events.some((e) => (e as { type?: string }).type === 'result')) setFollowingElsewhere(false);
           } else if (j.running !== true) {
             idlePolls += 1; // no activity + not provably running → wind down so an idle open panel stops polling
           }
@@ -647,9 +638,6 @@ export function useAgentV3Build(): UseAgentV3Build {
       const r = await fetch(`/api/agentv3/status?${params.toString()}`, { headers: await authJsonHeaders() });
       const j = await r.json().catch(() => ({}));
       const serverSaysRunning = opts?.workspaceId ? j?.buildRunningHere === true : j?.buildRunning === true;
-      // Held by another server (workspaceBuildLease.ts): the status poll is the truth either way, so a
-      // reopened screen starts following, and a build that ended elsewhere stops offering Stop.
-      if (opts?.workspaceId && typeof j?.buildRunningElsewhere === 'boolean') setFollowingElsewhere(j.buildRunningElsewhere && !sawResultRef.current);
       // NOT a blind overwrite: the server keeps saying "running" through the post-result tail, and
       // this session already knows whether the build delivered. See serverBuildNeedsAttention.
       setServerBuildRunning(serverBuildNeedsAttention({
@@ -918,15 +906,8 @@ export function useAgentV3Build(): UseAgentV3Build {
         const j = await res.json().catch(() => ({}));
         // One coherent decision (pure + tested) for what this reconnect result MEANS, so the user
         // never sees a "re-attached live" promise paired with a "no running build" error.
-        const outcome = reconnectOutcome({ ok: false, status: res.status, resultAlreadySeen: sink.sawResult, elsewhere: j?.elsewhere === true });
-        if (outcome === 'elsewhere') {
-          // The build is alive on another server. It cannot be streamed from this one, but the panel's
-          // live mirror follows it once `running` is false — which the lines below set.
-          setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text: FOLLOWING_ELSEWHERE_NOTICE, ts: Date.now() }));
-          setFollowingElsewhere(true);
-          setError(null);
-          setErrorBeforeBuildStarted(false);
-        } else if (outcome === 'gone-notice') {
+        const outcome = reconnectOutcome({ ok: false, status: res.status, resultAlreadySeen: sink.sawResult });
+        if (outcome === 'gone-notice') {
           // The build ended mid-run (the drop tore it down). Honest, calm, in-thread — NOT a red error.
           // The user's files are durable; they simply resend to continue. No contradiction.
           // Calm and additive: with the reset now gated on a CONFIRMED live attach, the finished
@@ -1421,18 +1402,6 @@ export function useAgentV3Build(): UseAgentV3Build {
           // (workspace-scoped — the attach route refuses a different session's build, so this can
           // never hijack another chat). The typed message was NOT queued into the running build —
           // the notice says so honestly, in-thread.
-          // ONE BUILD PER APP (autopsy 2026-09-26): the app is already being built on another server.
-          // Starting a second build is what corrupted the first one; following it is the answer. The
-          // panel's live mirror takes over as soon as `running` is false. Not an error, so no
-          // "Fix with AI" — that button is how a dropped connection became a second build.
-          if (isHeldElsewhere(res.status, body)) {
-            setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text: FOLLOWING_ELSEWHERE_NOTICE, ts: Date.now() }));
-            setFollowingElsewhere(true);
-            setError(null);
-            setErrorBeforeBuildStarted(false);
-            setRunning(false);
-            return;
-          }
           if (res.status === 409 && resumable && workspaceIdRef.current) {
             setRunning(false);
             await resume({
@@ -1441,6 +1410,16 @@ export function useAgentV3Build(): UseAgentV3Build {
               workspaceId: workspaceIdRef.current,
               notice: 'Your build from before the reload was still running — I re-attached to it live below. The message you just typed was NOT sent to it; once the build finishes, send it again.',
             });
+            return;
+          }
+          if (res.status === 409 && body.code === 'BUILD_RUNNING_ELSEWHERE') {
+            // THIS app's earlier build is still running on another server instance (autopsy eed79815) —
+            // it cannot be attached from here, but it CAN be stopped: the server flags its workspace and
+            // the build stops itself within seconds. So show the real Stop button, not a dead end.
+            setServerBuildRunning(true);
+            setErrorBeforeBuildStarted(true);
+            setError(msg);
+            setRunning(false);
             return;
           }
           if (res.status === 409 && resumable) {
@@ -1557,22 +1536,10 @@ export function useAgentV3Build(): UseAgentV3Build {
               // workspace so recovery can never re-attach a different session's build, and time-box it
               // so a still-dead connection fails fast into the next backoff attempt instead of hanging.
               if (workspaceIdRef.current) params.set('workspaceId', workspaceIdRef.current);
-              // Bearer token: the server answers `buildRunningElsewhere` only for a workspace the VERIFIED
-              // caller owns, so a token-less probe could never learn the build had moved.
-              const probe = await fetch(`/api/agentv3/status?${params.toString()}`, { headers: await authJsonHeaders(), signal: AbortSignal.timeout(15_000) });
+              const probe = await fetch(`/api/agentv3/status?${params.toString()}`, { signal: AbortSignal.timeout(15_000) });
               const j = await probe.json().catch(() => ({}));
               if (isStale(gen)) break;
               const aliveHere = workspaceIdRef.current ? j?.buildRunningHere === true : j?.buildRunning === true;
-              if (!aliveHere && !sawResult && j?.buildRunningElsewhere === true) {
-                // THE PATH IN THE 2026-09-26 AUTOPSY: the drop moved this client to another server, the
-                // probe read "not running here", the raw "network error" was shown with a Fix-with-AI
-                // button, and pressing it built the same app a second time on top of the first. The
-                // build is alive — follow it through the live mirror (it starts once `running` is false).
-                reconnected = true;
-                setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text: FOLLOWING_ELSEWHERE_NOTICE, ts: Date.now() }));
-                setFollowingElsewhere(true);
-                break;
-              }
               if (aliveHere) {
                 reconnected = true;
                 // Pass whether this build already produced its terminal result. After the result the
@@ -1629,20 +1596,9 @@ export function useAgentV3Build(): UseAgentV3Build {
           // SESSION-SCOPED (audit #4): without workspaceId this account-wide probe could re-attach a
           // DIFFERENT session's build into this panel. Bounded so a dead connection can't hang the net.
           if (workspaceIdRef.current) params.set('workspaceId', workspaceIdRef.current);
-          const r = await fetch(`/api/agentv3/status?${params.toString()}`, { headers: await authJsonHeaders(), signal: AbortSignal.timeout(15_000) });
+          const r = await fetch(`/api/agentv3/status?${params.toString()}`, { signal: AbortSignal.timeout(15_000) });
           const j = await r.json().catch(() => ({}));
           const alive = workspaceIdRef.current ? j?.buildRunningHere === true : j?.buildRunning === true;
-          // Alive on ANOTHER server (autopsy 2026-09-26): "not running here" used to fall through to the
-          // auto-continue below, which started a second build on the same app. Follow it instead.
-          if (!alive && !sawResultRef.current && j?.buildRunningElsewhere === true) {
-            abortRef.current?.abort();
-            setRunning(false);
-            setError(null);
-            setErrorBeforeBuildStarted(false);
-            setState((prev) => agentV3Reducer(prev, { type: 'narration', agent: 'architect', text: FOLLOWING_ELSEWHERE_NOTICE, ts: Date.now() }));
-            setFollowingElsewhere(true);
-            return;
-          }
           const action = stallWatchdogAction({ alive, sawResult: sawResultRef.current });
           if (action === 'reconnect') {
             // The build is alive but OUR stream went quiet — reconnect and keep going.
@@ -1681,5 +1637,5 @@ export function useAgentV3Build(): UseAgentV3Build {
 
   const clearBillingBlock = useCallback(() => setBillingBlock(null), []);
 
-  return { state, running, error, errorBeforeBuildStarted, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, followingElsewhere, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
+  return { state, running, error, errorBeforeBuildStarted, start, respond, restore, previewVersion, getCheckpoints, getGitStatus, restoreAllFiles, stop, unsend, reset, serverBuildRunning, resume, shipToMain, readReviewFeedback, replyToReview, revertLastMerge, queueNext, queueComplete, queueEnqueue, queueList, queueCancel, checkRunning, loadConversation, conversationLoadDiag, listConversations, deleteConversation, duplicateConversation, pinConversation, subscribeLive, billingBlock, clearBillingBlock };
 }

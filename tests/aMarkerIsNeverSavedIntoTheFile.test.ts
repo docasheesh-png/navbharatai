@@ -2,8 +2,9 @@
  * A FORMAT MARKER IS NEVER SAVED INTO THE FILE — autopsy "4D Future City Drive" (2026-09-26).
  *
  * The build found `src/index.css` carrying "stray markers like `<<<ENDFILE>>`" and spent steps deleting
- * them. The parser recognised exactly `<<<ENDFILE>>>`; a block closed one bracket short kept the marker
- * as content. The truncation check read the same block as never closed (a file cut off mid-write).
+ * them. #3331 widened the parser to accept that spelling; the truncation check in FastLaneContinuation
+ * kept the exact `<<<ENDFILE>>>`, so it still read a block the parser had closed as a file cut off
+ * mid-write. Both now read one END_FILE_MARKER.
  */
 import { describe, it, expect } from 'vitest';
 import { parseFileBlocks, hasEndFileMarker } from '../src/server/AgentV3/OneShotBuilder';
@@ -18,8 +19,8 @@ describe('🔒 the end marker as models actually write it', () => {
     expect(files.every((f) => !/ENDFILE/i.test(f.content))).toBe(true);
   });
 
-  it('the other spellings close a block too, and the canonical one is unchanged', () => {
-    for (const end of ['<<<ENDFILE>>>', '<<<ENDFILE>>', '<<< END FILE >>>', '<<<END_FILE>>>', '<<</FILE>>>', '<<<endfile>>>']) {
+  it('every spelling the parser accepts closes a block, and the canonical one is unchanged', () => {
+    for (const end of ['<<<ENDFILE>>>', '<<<ENDFILE>>', '<<<ENDFILE>']) {
       const [f] = parseFileBlocks(`<<<FILE a.ts>>>\nexport const x = 1;\n${end}\nprose after`);
       expect(f.content, end).toBe('export const x = 1;');
     }

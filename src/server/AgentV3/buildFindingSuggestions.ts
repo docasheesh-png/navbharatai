@@ -113,7 +113,7 @@ const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: string; 
 const NEVER_SUGGEST = new Set([
   'CHECKPOINT_SIGNAL', // our checkpoint heuristic, never a finding (autopsy SignBridge, 2026-09-26)
   'REVIEW_SUGGESTIONS_NOT_READY', // a suggest-only review that ran out of time — nothing for the user to do
-  'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', 'LADDER_DEPTH', 'REPAIR_WRITE_REFUSED',
+  'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', 'LADDER_DEPTH',
   'RELEASE_GATE', 'TIME_TO_FIRST_CALL', 'RUNTIME_UNCHECKED', 'RUNTIME_VERIFIED', 'APP_RENDERED',
   'TEST_SUITE_UNVERIFIED', 'JOURNEY_NOT_DERIVED', 'JOURNEY_NOT_RUN', 'PAGE_RENDER_NOT_RUN',
   // Our reviewer produced no verdict — nothing the user can act on, and never a mark against their app.
@@ -136,6 +136,8 @@ const NEVER_SUGGEST = new Set([
   'UNBILLED_BARREN_WORK',
   // Whether our own safety net saved a version is not a next move we can offer the user.
   'RESTORE_POINT',
+  // A repair answer our guard refused to write (autopsy eed79815) — nothing for the user to do.
+  'REPAIR_OUT_OF_SCOPE',
 ]);
 
 /**

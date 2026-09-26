@@ -74,6 +74,7 @@ import { shellQuote } from '../../../../lib/shellQuote';
 import { needsLegacyPeerDeps } from '../../../npmInstallFallback';
 import { buildOutputCandidates, configDumpCommand, parseConfigDump } from '../../../builtSiteCheck';
 import { injectPreviewBridge, withoutPreviewBridge, PREVIEW_BRIDGE_MARKER } from '../../../previewBridge';
+import { browseConsoleCaptureEnabled, CANCELLED_REQUEST_RE } from '../../../renderCheckConsole';
 import { gunzipSync } from 'zlib';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
@@ -398,7 +399,7 @@ function recSessionExisted(){ try{ __nbaiFs.appendFileSync(__nbaiLog,''); }catch
 const attachConsoleJs = (page: string): string => `
   ${page}.on('console',m=>{ if(m.type()==='error') rec('console',m.text()); });
   ${page}.on('pageerror',e=>rec('pageerror',e&&e.message||e,e&&e.stack));
-  ${page}.on('requestfailed',r=>{ const f=r.failure(); rec('requestfailed',r.url()+' — '+(f&&f.errorText||'failed')); });
+  ${page}.on('requestfailed',r=>{ const f=r.failure(); const why=(f&&f.errorText)||'failed'; if(/${CANCELLED_REQUEST_RE.source}/.test(why)) return; rec('requestfailed',r.url()+' — '+why); });
   ${page}.on('response',res=>{ try{ const s=res.status(); if(s>=500) rec('httperror','HTTP '+s+' from '+res.url()); }catch(e){} });
 `;
 
@@ -446,9 +447,9 @@ ${record ? '  if(painted) recSessionExisted();' : ''}
  * spends a repair pass it previously could not. That is the feature working, and on the Weak tier
  * NavBharatAI pays for it, so the operator gets one value to turn it off with.
  */
-export function browseConsoleCaptureEnabled(): boolean {
-  return (process.env['AGENTV3_BROWSE_CONSOLE'] ?? '').trim().toLowerCase() !== 'off';
-}
+// The switch itself lives in renderCheckConsole.ts, beside the render-check window that depends on it,
+// so the recorder and the window read ONE value. Re-exported here for every existing caller.
+export { browseConsoleCaptureEnabled };
 
 export const BROWSER_DAEMON_SCRIPT = `
 const {chromium}=require('playwright');

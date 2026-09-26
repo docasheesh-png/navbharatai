@@ -179,3 +179,20 @@ export function a11yLintSummary(r: BuildQualityLint): string {
   if (v.length === 0) return `Accessibility ${r.a11y.score}/100 (${r.a11y.grade}) — no common WCAG failures found across ${r.fileCount} file(s).`;
   return `Accessibility ${r.a11y.score}/100 (${r.a11y.grade}) across ${r.fileCount} file(s)${r.truncated ? ', partially scanned' : ''}. ${v.map((x) => `WCAG ${x.wcag}: ${x.message}${offenderNote(r, x.type)}`).join(' ')}`;
 }
+
+/**
+ * The accessibility failures to hand to a repair pass that is ALREADY running on the app's pages — or
+ * '' when there are none (autopsy SignBridge, 2026-09-26). That build ran a paid design repair over its
+ * pages and shipped an unlabelled field and an unnamed icon button in the same pages, because nothing
+ * told the repair about them: the accessibility linter only ever wrote its verdict into the report.
+ *
+ * It never STARTS a pass (two labels are not worth a model call on their own); it only makes the pass
+ * that is already paid for fix what a screen-reader user would meet. Each line is the linter's own
+ * ready-to-send `fix`, plus the files it attributed. PURE.
+ */
+export function a11yRepairAddendum(r: BuildQualityLint | null | undefined): string {
+  const v = r?.a11y?.violations ?? [];
+  if (!r || v.length === 0) return '';
+  const lines = v.map((x) => `- WCAG ${x.wcag}: ${x.fix}${offenderNote(r, x.type)}`);
+  return `\n\nWhile you are in these pages, also fix these accessibility failures (a screen-reader user cannot use the app with them):\n${lines.join('\n')}`;
+}

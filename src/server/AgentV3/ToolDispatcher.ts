@@ -774,6 +774,29 @@ export class ToolDispatcher {
    * sentence, so a new line is translatable by construction and no call site can forget the
    * language. Best-effort like every other narration — it must never be able to break a build.
    */
+  /**
+   * Write ONE deterministic heal, and report whether it LANDED.
+   *
+   * 🔴 WHY THIS EXISTS (autopsy SignBridge, 2026-09-26). Every heal site here wrote with
+   * `try { writeFile } catch {}` and then carried on as if it had: it recorded the file through
+   * `onFileWrite`, indexed it, noted the heal and told the user it was done. On a verified-working app
+   * Green Freeze REFUSES such a write — so the user read "Added 2 missing dependencies" twice about a
+   * package.json that never changed, and, worse, `onFileWrite` fed the refused content into the set the
+   * final save persists. The freeze held in the sandbox and was bypassed in the saved app, which is why
+   * that report's saved copy no longer matched the snapshot. Nothing after a refused write may pretend.
+   */
+  private async landHealWrite(file: string, content: string, before: string | undefined): Promise<boolean> {
+    try {
+      await this.actuator.writeFile(this.workspaceId, file, content);
+    } catch {
+      return false; // refused (freeze) or failed — nothing is recorded, indexed or announced
+    }
+    try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
+    try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
+    try { noteHeal(this.workspaceId, file, content, before); } catch { /* best-effort */ }
+    return true;
+  }
+
   private narrate<K extends NarrationId>(id: K, params: NarrationParams[K], agent: AgentRole = 'architect'): void {
     this.events?.emit({ type: 'narration', agent, text: narrationText(id, params), ts: Date.now() });
   }
@@ -4042,6 +4065,7 @@ export class ToolDispatcher {
           try {
             const rec = await reconcileImportExports(astFiles);
             if (rec.fixes.length) {
+              let landed = 0;
               for (const fx of rec.fixes) {
                 const content = rec.files[fx.file];
                 if (typeof content !== 'string') continue;
@@ -4053,13 +4077,9 @@ export class ToolDispatcher {
                 // file; if two disagree about a symbol it goes X → Y → X for as many passes as the
                 // build allows, costing a write and a step every round and converging on nothing.
                 if (healWouldOscillate(this.workspaceId, fx.file, content)) continue;
-                astFiles[fx.file] = content;
-                try { await this.actuator.writeFile(this.workspaceId, fx.file, content); } catch { /* best-effort */ }
-                try { this.onFileWrite?.(fx.file, content); } catch { /* best-effort */ }
-                try { getWorkspaceMemory(this.workspaceId).indexFile(fx.file, content); } catch { /* best-effort */ }
-                noteHeal(this.workspaceId, fx.file, content, before);
+                if (await this.landHealWrite(fx.file, content, before)) { astFiles[fx.file] = content; landed += 1; }
               }
-              this.narrate('fix.importKind', { count: rec.fixes.length });
+              if (landed > 0) this.narrate('fix.importKind', { count: landed });
             }
           } catch { /* reconcile is best-effort — a failure just leaves the honest blocker below */ }
           // MISSING-IMPORT SELF-HEAL (root cause — admin jungle-game report 104f5b09): a generated file
@@ -4071,6 +4091,7 @@ export class ToolDispatcher {
             const addRes = await addMissingProjectImports(astFiles);
             if (addRes.added.length) {
               const changedFiles = new Set(addRes.added.map((a) => a.file));
+              let landed = 0;
               for (const file of changedFiles) {
                 const content = addRes.files[file];
                 if (typeof content !== 'string') continue;
@@ -4078,16 +4099,13 @@ export class ToolDispatcher {
                 // Same oscillation guard as the reconcile above — every heal site, or the loop survives
                 // through whichever one was left out.
                 if (healWouldOscillate(this.workspaceId, file, content)) continue;
-                astFiles[file] = content;
-                try { await this.actuator.writeFile(this.workspaceId, file, content); } catch { /* best-effort */ }
-                try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
-                try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
                 // This heal was MISSING from the ledger, and it is the one the 2026-08-09 report showed
                 // repeating first ("Added 2 missing import(s)" at t=126s/216s/313s) — so the very
                 // evidence the ledger exists to capture was being dropped for it.
-                noteHeal(this.workspaceId, file, content, before);
+                if (await this.landHealWrite(file, content, before)) { astFiles[file] = content; landed += 1; }
               }
-              this.narrate('fix.missingImports', { count: addRes.added.length });
+              // Counted per IMPORT, as before — but only for files whose write actually landed.
+              if (landed > 0) this.narrate('fix.missingImports', { count: addRes.added.filter((a) => astFiles[a.file] === addRes.files[a.file]).length });
             }
           } catch { /* best-effort — a failure just leaves the honest finding below */ }
           // WRONG-SOURCE SELF-HEAL (Kanban build 2026-07-13): a NAMED import points at a module that does
@@ -4097,6 +4115,7 @@ export class ToolDispatcher {
             const wrongRes = await fixWrongSourceImports(astFiles);
             if (wrongRes.fixes.length) {
               const changedFiles = new Set(wrongRes.fixes.map((f) => f.file));
+              let landed = 0;
               for (const file of changedFiles) {
                 const content = wrongRes.files[file];
                 if (typeof content !== 'string') continue;
@@ -4104,13 +4123,9 @@ export class ToolDispatcher {
                 // Same oscillation guard as the reconcile above — every heal site, or the loop survives
                 // through whichever one was left out.
                 if (healWouldOscillate(this.workspaceId, file, content)) continue;
-                astFiles[file] = content;
-                try { await this.actuator.writeFile(this.workspaceId, file, content); } catch { /* best-effort */ }
-                try { this.onFileWrite?.(file, content); } catch { /* best-effort */ }
-                try { getWorkspaceMemory(this.workspaceId).indexFile(file, content); } catch { /* best-effort */ }
-                noteHeal(this.workspaceId, file, content, before);
+                if (await this.landHealWrite(file, content, before)) { astFiles[file] = content; landed += 1; }
               }
-              this.narrate('fix.repointedImports', { count: wrongRes.fixes.length });
+              if (landed > 0) this.narrate('fix.repointedImports', { count: wrongRes.fixes.filter((f) => astFiles[f.file] === wrongRes.files[f.file]).length });
             }
           } catch { /* best-effort — a failure just leaves the honest finding below */ }
           // DUPLICATE-IMPORT SELF-HEAL (build-report autopsy 2026-08-02, RECURRING): the double
@@ -4128,14 +4143,12 @@ export class ToolDispatcher {
               const deduped = dedupeSameModuleImports(file, content);
               // Same oscillation guard as the reconcile above — whichever pair disagrees, the loop ends.
               if (deduped !== content && !healWouldOscillate(this.workspaceId, file, deduped)) {
-                astFiles[file] = deduped;
-                try { await this.actuator.writeFile(this.workspaceId, file, deduped); } catch { /* best-effort */ }
-                try { this.onFileWrite?.(file, deduped); } catch { /* best-effort */ }
-                try { getWorkspaceMemory(this.workspaceId).indexFile(file, deduped); } catch { /* best-effort */ }
                 // Evidence for the "a heal did not survive" root cause — see HealLedger's header.
                 // This one already holds both halves: `content` is what it read, `deduped` what it wrote.
-                noteHeal(this.workspaceId, file, deduped, content);
-                this.narrate('fix.duplicateImport', { file });
+                if (await this.landHealWrite(file, deduped, content)) {
+                  astFiles[file] = deduped;
+                  this.narrate('fix.duplicateImport', { file });
+                }
               }
             }
           } catch { /* best-effort — a failure just leaves the honest blocker below */ }
@@ -4153,9 +4166,12 @@ export class ToolDispatcher {
                 const depRes = applyWellKnownMissingDeps({ 'package.json': pkgJson, ...astFiles });
                 if (depRes.added.length) {
                   const newPkg = depRes.files['package.json'];
-                  try { await this.actuator.writeFile(this.workspaceId, 'package.json', newPkg); } catch { /* best-effort */ }
-                  try { this.onFileWrite?.('package.json', newPkg); } catch { /* best-effort */ }
-                  this.narrate('fix.missingDeps', { count: depRes.added.length, packages: depRes.added.map((d) => d.package).join(', ') });
+                  // Said only when it LANDED (autopsy SignBridge, 2026-09-26): on a verified-working app
+                  // Green Freeze refuses this write, and the user was told twice that two packages had
+                  // been added while package.json never changed.
+                  if (await this.landHealWrite('package.json', newPkg, pkgJson)) {
+                    this.narrate('fix.missingDeps', { count: depRes.added.length, packages: depRes.added.map((d) => d.package).join(', ') });
+                  }
                 }
               }
             } catch { /* best-effort — a failure just leaves the honest 'missing dependency' finding below */ }

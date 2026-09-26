@@ -164,7 +164,7 @@ import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySign
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
-import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver } from '../AgentV3/greenFreeze';
+import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver, GreenFreezeError } from '../AgentV3/greenFreeze';
 import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild, IN_BUILD_PROOF_BUDGET_MS, type AttemptOutcome } from '../AgentV3/inBuildGreen';
 import { STARTER_ENTRY_PATHS, isUntouchedStarterEntry, starterEntryIn, starterIsWhatRendered, pageShowsStarter, withStarterVerdict } from '../AgentV3/stillTheStarterApp';
 import { postGreenWritesNote, endVerdictFrom, type PostGreenWrite } from '../AgentV3/postGreenWrites';
@@ -376,7 +376,7 @@ import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionRe
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
-import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild } from '../AgentV3/TestGenerationAgent';
+import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, starterTestsNarration } from '../AgentV3/TestGenerationAgent';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from '../AgentV3/appDefaults';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { findingsToDebt } from '../AgentV3/engineeringMemory';
@@ -3175,6 +3175,25 @@ export function plannerCallLabel(
   if (!p) return { provider: 'none', model: 'no provider answered' };
   const lbl = label(p);
   return { provider: lbl, model: answeringModel({ planned: lbl === 'anthropic' ? plannedClaudeModel : null, family: p }) };
+}
+
+/**
+ * Write a deterministic pass's fix to the sandbox, and say whether the change may be KEPT.
+ *
+ * These passes deliberately keep their fix in the saved copy even when the sandbox write fails — a dead
+ * or paused machine must not cost a correct repair ("the store copy is fixed"). The ONE failure that must
+ * not be kept is a Green Freeze refusal: the app was verified working, the freeze said no, and keeping the
+ * change in the saved copy anyway would put an unverified edit into the app the user publishes while the
+ * running preview shows the verified one (autopsy SignBridge, 2026-09-26 — the sibling of the heal-write
+ * leak fixed in ToolDispatcher.landHealWrite). So: refused ⇒ false; written or any other failure ⇒ true.
+ */
+export async function writeUnlessFrozen(write: () => Promise<unknown>): Promise<boolean> {
+  try {
+    await write();
+    return true;
+  } catch (err) {
+    return !(err instanceof GreenFreezeError);
+  }
 }
 
 export function fastLaneProviderLabel(used: string | undefined): string {
@@ -17473,9 +17492,10 @@ async function noteBuildOutcome(
           for (const inj of wired.injected) {
             const newEntry = wired.files[inj.entry];
             if (typeof newEntry === 'string') {
-              integrityFiles[inj.entry] = newEntry;
-              writtenFiles.set(inj.entry, newEntry);
-              try { await actuator.writeFile(workspaceId, inj.entry, newEntry); } catch { /* sandbox write best-effort — the store copy is fixed */ }
+              if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, inj.entry, newEntry))) {
+                integrityFiles[inj.entry] = newEntry;
+                writtenFiles.set(inj.entry, newEntry);
+              }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_CSS_WIRED', message: `"${inj.stylesheet}" was imported by NOTHING (app would render unstyled) — injected its import into ${inj.entry}.`, autoResolved: true });
             }
           }
@@ -17501,9 +17521,11 @@ async function noteBuildOutcome(
           if (env.wired) {
             const patched = env.files[env.wired.entry];
             if (typeof patched === 'string') {
-              integrityFiles[env.wired.entry] = patched;
-              writtenFiles.set(env.wired.entry, patched);
-              try { await actuator.writeFile(workspaceId, env.wired.entry, patched); } catch { /* sandbox write best-effort — the store copy is fixed */ }
+              const entry = env.wired.entry;
+              if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, entry, patched))) {
+                integrityFiles[entry] = patched;
+                writtenFiles.set(entry, patched);
+              }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'ENV_LOADING_WIRED', message: dotenvWiringMessage(env.wired), autoResolved: true });
             }
           }
@@ -17517,9 +17539,10 @@ async function noteBuildOutcome(
         if (process.env.AGENTV3_VITE_ENV_TYPES !== 'off' && !isImportTurn) {
           const dts = missingViteEnvTypes(integrityFiles);
           if (dts) {
-            integrityFiles[dts.path] = dts.content;
-            writtenFiles.set(dts.path, dts.content);
-            try { await actuator.writeFile(workspaceId, dts.path, dts.content); } catch { /* sandbox write best-effort — the store copy is fixed */ }
+            if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, dts.path, dts.content))) {
+              integrityFiles[dts.path] = dts.content;
+              writtenFiles.set(dts.path, dts.content);
+            }
             buildDiag.record({ phase: 'build', severity: 'info', code: 'VITE_ENV_TYPES_ADDED', message: viteEnvTypesNote(), autoResolved: true });
           }
         }
@@ -17547,9 +17570,10 @@ async function noteBuildOutcome(
             for (const r of redacted.redactions) {
               const newContent = redacted.files[r.file];
               if (typeof newContent !== 'string' || newContent === integrityFiles[r.file]) continue;
-              integrityFiles[r.file] = newContent;
-              writtenFiles.set(r.file, newContent);
-              try { await actuator.writeFile(workspaceId, r.file, newContent); } catch { /* sandbox write best-effort — the store copy is fixed */ }
+              if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, r.file, newContent))) {
+                integrityFiles[r.file] = newContent;
+                writtenFiles.set(r.file, newContent);
+              }
             }
             if (redacted.redactions.length > 0) {
               const files = [...new Set(redacted.redactions.map((r) => r.file))];
@@ -17920,9 +17944,10 @@ async function noteBuildOutcome(
                 const repaired = repairLostEscapes(integrityFiles);
                 if (repaired.repairs.length > 0) {
                   for (const [path, content] of Object.entries(repaired.files)) {
-                    integrityFiles[path] = content;
-                    writtenFiles.set(path, content);
-                    try { await actuator.writeFile(workspaceId, path, content); } catch { /* sandbox write best-effort — the store copy is fixed */ }
+                    if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, path, content))) {
+                      integrityFiles[path] = content;
+                      writtenFiles.set(path, content);
+                    }
                   }
                   buildDiag.record({ phase: 'build', severity: 'info', code: 'SCRIPT_INTEGRITY_REPAIRED', message: scriptRepairSummary(repaired.repairs), autoResolved: true });
                 }
@@ -18809,10 +18834,10 @@ async function noteBuildOutcome(
             for (const path of fixedPaths) {
               const stripped = stripCollidingAmbientShims(projectNow[path]);
               if (stripped.source === projectNow[path]) continue;
+              if (!(await writeUnlessFrozen(() => actuator.writeFile(workspaceId, path, stripped.source)))) continue;
               projectNow[path] = stripped.source;
               writtenFiles.set(path, stripped.source);
               noteFinishingWrite(path);
-              try { await actuator.writeFile(workspaceId, path, stripped.source); } catch { /* store copy is fixed */ }
             }
             if (shims.length > 0) {
               buildDiag.record({
@@ -18907,7 +18932,7 @@ async function noteBuildOutcome(
           });
           if (scaffolded.length > 0) {
             await saveWorkspaceFiles(workspaceId, Object.fromEntries(scaffolded.map((p) => [p, writtenFiles.get(p) as string]))).catch(() => {});
-            events.emit({ type: 'narration', agent: 'architect', text: `🧪 Scaffolded ${scaffolded.length} starter test${scaffolded.length > 1 ? 's' : ''} (${scaffolded.join(', ')}) — runnable Vitest skeletons with TODO markers for you to fill in real assertions.`, ts: Date.now() });
+            events.emit({ type: 'narration', agent: 'architect', text: starterTestsNarration(scaffolded, pkgForTests), ts: Date.now() });
           }
         }
       } catch { /* auto-test scaffolding is best-effort — never affects the build result */ }
@@ -20788,8 +20813,13 @@ async function noteBuildOutcome(
               // `REVIEW_PARTIAL` recovered real findings from the narration. Both DELIVERED something,
               // so both stay billable — "we walked away from it" is not the same fact as "it produced
               // nothing", and only the second is a reason to hand money back.
+              // On a PROVEN-GREEN app the review is suggest-only (greenReviewPlan): whatever it would have
+              // said was an offer, never a repair. Its timing out is a fact about OUR process, so it is not
+              // filed as an unresolved warning against a working app (autopsy SignBridge, 2026-09-26, where
+              // it sat in the app's problem list). Where the review could have REPAIRED, it stays a warning.
+              const suggestOnly = reviewPlan.mode === 'suggest';
               barrenPhases.add(PHASE_POST_BUILD_REVIEW);
-              try { buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${rFiles.length} files — its completeness findings are NOT available for this build` : 'Post-build review errored — its completeness findings are NOT available for this build', autoResolved: false }); } catch { /* best-effort */ }
+              try { buildDiag.record({ phase: 'build', severity: suggestOnly ? 'info' : 'warning', code: suggestOnly ? 'REVIEW_SUGGESTIONS_NOT_READY' : 'REVIEW_INCOMPLETE', message: timedOut ? `Post-build review timed out after ${reviewBudget}ms (+${graceMs}ms grace) on ${rFiles.length} files — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build` : `Post-build review errored — its ${suggestOnly ? 'suggestions are' : 'completeness findings are'} NOT available for this build`, autoResolved: suggestOnly }); } catch { /* best-effort */ }
               review = null;
             }
           } finally {

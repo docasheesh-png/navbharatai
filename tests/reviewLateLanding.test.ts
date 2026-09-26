@@ -108,11 +108,16 @@ describe('WIRING — the timeout stops us waiting, not looking', () => {
      * problem had been handled. Nothing was handled: the completeness net was DOWN for that build,
      * and the health card showed no trace of it.
      */
-    const at = route.indexOf("code: 'REVIEW_INCOMPLETE'");
+    const at = route.indexOf(": 'REVIEW_INCOMPLETE'");
     expect(at).toBeGreaterThan(-1);
     const rec = route.slice(route.lastIndexOf('buildDiag.record', at), at + 400);
-    expect(rec).toContain("severity: 'warning'");
-    expect(rec).toContain('autoResolved: false');
+    // Since 2026-09-26 (autopsy SignBridge) the SUGGEST-ONLY review on a proven-green app has its own
+    // process-only code — an offer that ran out of time is not a problem with the app. Where the review
+    // could have repaired, the original rule holds exactly: a warning, and never "resolved".
+    expect(rec).toContain("severity: suggestOnly ? 'info' : 'warning'");
+    expect(rec).toContain("code: suggestOnly ? 'REVIEW_SUGGESTIONS_NOT_READY' : 'REVIEW_INCOMPLETE'");
+    expect(rec).toContain('autoResolved: suggestOnly');
+    expect(route).toContain("const suggestOnly = reviewPlan.mode === 'suggest';");
     expect(rec).toMatch(/NOT available for this build/);
   });
 
@@ -120,7 +125,7 @@ describe('WIRING — the timeout stops us waiting, not looking', () => {
     // buildHealthFromDiagnostics gates `ready` on ERRORS only. Our own inability to review is a
     // caveat about US, not evidence of a defect in the user's app — blocking on it would be the
     // #2267 mistake (failing a good build over an ambiguity in our own tooling).
-    const at = route.indexOf("code: 'REVIEW_INCOMPLETE'");
+    const at = route.indexOf(": 'REVIEW_INCOMPLETE'");
     expect(route.slice(route.lastIndexOf('buildDiag.record', at), at)).not.toContain("severity: 'error'");
   });
 

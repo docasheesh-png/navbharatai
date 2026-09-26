@@ -58,7 +58,18 @@ const LIST_OPENER =
 // would score Indic PROSE as a feature list while identical English prose scores nothing. This
 // counter gates Software Project Mode and the mega-roadmap, so a false 8 there spends a planner call
 // on somebody describing their shop in six sentences.
-const ITEM_SEPARATOR = /\s*(?:[,;/|]|\band\b|&|\baur\b|\btatha\b|\bplus\b)\s*/i;
+// ⚠️ A SLASH SEPARATES ONLY WITH SPACE ON BOTH SIDES (autopsy SignBridge, 2026-09-26). Unspaced it
+// joins alternatives of ONE thing — "image/video/animation", "build/test process" — or names a path,
+// "src/ components/ pages/": that folder listing alone counted as ten features.
+const ITEM_SEPARATOR = /\s*(?:[,;|]|\s\/\s|\band\b|&|\baur\b|\btatha\b|\bplus\b)\s*/i;
+
+/** Code or data pasted into a prompt — `{ sign: "HELLO", confidence: 0.92 }` — enumerates no parts. */
+const CODE_LINE = /[{}]|=>/;
+/** Quoted text is a string the app shows ("Connecting Signs, Voice and People."), never a list of parts. */
+const QUOTED = /"[^"\n]*"|“[^”\n]*”|'[^'\n]{3,}'/g;
+/** A sentence this long with no list opener is PROSE: its commas are pauses, not a list. */
+const PROSE_WORDS = 12;
+const SENTENCE_END = /[.!?।]\s*$/;
 
 /** A bullet or numbered list marker at the head of a line. */
 const LINE_MARKER = /^\s*(?:[-*•]|\d{1,3}[.)])\s+\S/;
@@ -118,8 +129,13 @@ function isRecordAttribute(item: string): boolean {
  * ⚠️ It counts ASKS, never words: a long, flowery prompt for a todo app still counts one or two.
  */
 export function countEnumeratedFeatures(prompt: string): number {
+  return Math.min(enumeratedFeatureItems(prompt).length, MAX_COUNTED);
+}
+
+/** The items themselves, in first-seen order — what `countEnumeratedFeatures` counts. PURE. */
+export function enumeratedFeatureItems(prompt: string): string[] {
   const text = String(prompt ?? '');
-  if (!text.trim()) return 0;
+  if (!text.trim()) return [];
 
   const seen = new Set<string>();
   const add = (raw: string): void => {
@@ -138,16 +154,25 @@ export function countEnumeratedFeatures(prompt: string): number {
       continue;
     }
 
+    // Code/data and quoted strings enumerate nothing (autopsy SignBridge, 2026-09-26: a pasted JSON
+    // example and a quoted tagline were counted as features of a one-app spec, and the prompt was
+    // decomposed as a mega project whose planner then burned 315 seconds).
+    if (CODE_LINE.test(line)) continue;
+    const plain = line.replace(QUOTED, ' ');
+
     // An inline run. Whatever sits before a list opener is the REQUEST ("ek hospital management
     // system banao jisme …"); the list is what follows it.
-    const opener = line.search(LIST_OPENER);
-    const opened = line.match(LIST_OPENER);
-    const tail = opener >= 0 && opened ? line.slice(opener + opened[0].length) : line;
+    const opener = plain.search(LIST_OPENER);
+    const opened = plain.match(LIST_OPENER);
+    // No opener, a sentence end and a sentence's length ⇒ prose ("Before finalizing, run the build and
+    // fix …", "इसके बाद जो build error, preview error … मिले").
+    if (!(opener >= 0 && opened) && SENTENCE_END.test(plain.trim()) && words(plain) > PROSE_WORDS) continue;
+    const tail = opener >= 0 && opened ? plain.slice(opener + opened[0].length) : plain;
 
     const pieces = tail.split(ITEM_SEPARATOR).map((p) => p.trim()).filter(Boolean);
     if (pieces.length < MIN_RUN_ITEMS) continue;
     for (const piece of pieces) add(piece);
   }
 
-  return Math.min(seen.size, MAX_COUNTED);
+  return [...seen];
 }

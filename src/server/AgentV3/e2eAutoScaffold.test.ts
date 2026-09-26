@@ -141,7 +141,9 @@ describe('e2eAutoScaffoldNote — says WRITTEN, never "passed"', () => {
   });
 
   it('tells the user exactly how to run it themselves', () => {
-    expect(note).toContain('npm run test:e2e');
+    expect(note).toContain('npx playwright test');
+    // The auto path never writes a `test:e2e` script, so naming one would send the user to a command that does not exist.
+    expect(note).not.toContain('npm run test:e2e');
     expect(note).toContain('playwright install chromium');
   });
 

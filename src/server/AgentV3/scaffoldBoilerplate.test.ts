@@ -185,7 +185,8 @@ describe('both repair paths carry the guard — the drift that cost the seven mi
   });
 
   it('the agentic lane guards its repair output too', () => {
-    expect(route).toContain('protectBoilerplateInRepair(parseFileBlocks(t.text)');
+    // Scoped first (autopsy eed79815: only files the repair was shown or the errors name), then guarded.
+    expect(route).toContain('const guarded = protectBoilerplateInRepair(scoped.kept);');
   });
 
   it('boilerplate is dropped from the plan, so the FIRST pass cannot overwrite it either', () => {

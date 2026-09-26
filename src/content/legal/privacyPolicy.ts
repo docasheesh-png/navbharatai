@@ -114,7 +114,7 @@ If you claim one of the free-credit bonuses in our Android app — for verifying
 
 **What this is NOT:** it is not advertising, it is not shared with Meta or any advertising platform, it is not used to track you between apps or across the web, and it is never used to build a profile of you. Nothing here happens on the website, and nothing happens in the app until you actually claim a bonus.
 
-### 3.3 Bot protection on the website (Google reCAPTCHA Enterprise)
+### 3.3 Bot protection (Google reCAPTCHA Enterprise on the website; Play Integrity and App Attest in our apps)
 
 When you use the NavBharatAI **website**, a few actions that cost us real money — building an app, sending a chat message, generating an image, asking a Professional assistant, and requesting a mobile OTP — carry a short-lived token that proves the request came from our genuine website and not from an automated script. The token is issued through **Firebase App Check**, using **Google reCAPTCHA Enterprise**.
 
@@ -122,7 +122,7 @@ When you use the NavBharatAI **website**, a few actions that cost us real money 
 
 **Why:** these actions spend money on every request, and without this check a script with a throwaway account could run them endlessly. *(Basis: our legitimate interest in keeping the service secure and affordable.)*
 
-**What this is NOT:** it is not advertising, it is not shared with Meta or any advertising platform, and we do not use it to build a profile of you. It does not run inside our Android or iOS apps.
+**What this is NOT:** it is not advertising, it is not shared with Meta or any advertising platform, and we do not use it to build a profile of you. In our apps it works differently: the **Android app** asks **Google's Play Integrity service**, and the **iOS app** asks **Apple's App Attest service**, to confirm the app is genuine and unmodified. That check is about the app and the device, not about you — it sends no chats, files or contact details, and our server again receives only the resulting token and whether it is valid.
 
 ### 3.1 Advertising measurement (Meta / Facebook and Instagram)
 
@@ -197,7 +197,7 @@ We share personal data only with the parties below, and only for the purposes de
 - **Cloud infrastructure providers** — host our servers, databases and file storage under strict contracts.
 - **AI infrastructure providers** — process prompts/context to generate output, as described in Section 4, with no training rights.
 - **GitHub** — only if you connect it, and only with the access you granted.
-- **Bot protection: Google reCAPTCHA Enterprise (via Firebase App Check)** — on the website only, for the actions listed in Section 3.3.
+- **Bot protection: Google reCAPTCHA Enterprise, Google Play Integrity and Apple App Attest (via Firebase App Check)** — for the actions listed in Section 3.3.
 - **Malware scanning** — files uploaded to the Nav App Store are submitted to an anti-malware scanning service before any listing can be approved.
 - **Meta (Facebook / Instagram)** — the advertising-measurement events listed in Section 3.1, and only with your consent. Never your chats, files, clinical data or built apps.
 - **Authorities** — if required by a valid legal order. We check every demand and share the minimum required.

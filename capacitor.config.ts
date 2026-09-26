@@ -33,6 +33,19 @@ const config: CapacitorConfig = {
     // there is exactly one inset (ours), and the content extends to fill the screen.
     contentInset: 'never',
   },
+  // App Check slice 2 (2026-09-26). `@capacitor-firebase/app-check`'s Swift package has the same
+  // identity as Firebase's own `FirebaseAppCheck` product, so SwiftPM refuses to resolve both — the
+  // plugin's README asks for exactly this symlink (capawesome-team/capacitor-firebase#959). Capacitor
+  // CLI 8.4.0+ reads it; without it the next iOS build would fail at package resolution.
+  experimental: {
+    ios: {
+      spm: {
+        packageOptions: {
+          '@capacitor-firebase/app-check': { symlink: true },
+        },
+      },
+    },
+  },
   plugins: {
     // Native Google Sign-In. Google BLOCKS OAuth inside embedded WebViews (their policy), which is
     // why the web signInWithRedirect flow opens an external browser and then fails with "missing
@@ -46,7 +59,12 @@ const config: CapacitorConfig = {
       // with Apple" capability in Xcode + the Apple provider enabled in Firebase (Console-side setup).
       // 'github.com' added 2026-07-18 (admin: "github login bhi fix karo") — the native GitHub OAuth
       // flow (Firebase SDK in-app browser sheet); the web popup cannot run inside the WebView.
-      providers: ['google.com', 'apple.com', 'github.com'],
+      // 'phone' added 2026-09-26: the phone sign-in (AuthComponent) and the Verify-your-mobile sheet
+      // both call the NATIVE phone methods on Android/iOS, and the plugin only builds a handler for a
+      // provider named here — without it every native phone OTP failed with "Phone sign-in provider is
+      // not enabled", on login and on the ₹100 mobile step alike. tests/nativeAuthProvidersMatchCalls
+      // derives the required list from the code, so a new native method cannot ship without its provider.
+      providers: ['google.com', 'apple.com', 'github.com', 'phone'],
     },
     // Splash screen: show app icon while loading, auto-hide once React mounts.
     //

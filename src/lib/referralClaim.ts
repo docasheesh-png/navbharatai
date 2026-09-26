@@ -53,7 +53,9 @@ export async function postReferral(
             await fetch(path.replace(/\/claim$/, '/claim-failed'), {
               method: 'POST',
               headers: { ...(await authedHeaders()), 'Content-Type': 'application/json' },
-              body: JSON.stringify({ reason: device.outcome }),
+              // Google's own message names the cause (an error code such as -16); bounded, and never
+              // shown to the user — only the server's count keeps its class.
+              body: JSON.stringify({ reason: device.outcome, message: String(device.message ?? '').slice(0, 300) }),
             });
           } catch { /* best-effort */ }
         })();

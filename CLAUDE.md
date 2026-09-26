@@ -2145,9 +2145,16 @@ the code (it is actually read somewhere) on 2026-07-11.
   (`/api/chat/completions`, API-key auth) by design. 🔒 **A verifier that cannot run FAILS OPEN even in
   enforce** — our outage must never become every user's refusal. 🔒 **The client can never stop a
   request**: no key / blocked reCAPTCHA / slow token (1.5 s cap) ⇒ sent without the header.
-  ⛔ **DO NOT SET `APP_CHECK_MODE=enforce` YET.** The phone apps do not send tokens until slice 2 (a native
-  Play Integrity / App Attest plugin ⇒ a fresh `.aab`/`.ipa`), so enforce would refuse every installed
-  Android/iOS build on its next build or chat. Read `GET /api/admin/app-check` first — it counts
+  ⛔ **DO NOT SET `APP_CHECK_MODE=enforce` YET.** Slice 2 (2026-09-26) added the phone half —
+  `@capacitor-firebase/app-check` (pinned `~8.3.0` like the other Firebase plugins): Play Integrity on
+  Android, App Attest on iOS — but it reaches users only through a FRESH `.aab`/`.ipa`, and every build
+  already installed sends no token. Enforce would refuse all of those on their next build or chat.
+  ⚠️ iOS needs TWO one-time admin steps before its tokens are real: Apple Developer → Identifiers →
+  com.navbharat.ai → **App Attest** ✅, then the `ios-ipa.yml` input **`enable_app_attest`** (default OFF —
+  signing with the entitlement before the capability exists fails the export). Android needs Firebase
+  console → App Check → the Android app → **Play Integrity** registered with the app's SHA-256 (the same
+  fingerprints `ANDROID_CERT_SHA256` holds). `capacitor.config.ts` carries the SwiftPM `symlink` option the
+  plugin's README requires (a package-identity collision with Firebase's own `FirebaseAppCheck`). Read `GET /api/admin/app-check` first — it counts
   valid/missing/invalid/unverifiable **per web and per native**, per instance since boot.
   ⛔ **AND DO NOT turn on App Check ENFORCEMENT in the Firebase console for Firestore/Auth** — the phone
   apps talk to Firestore directly and would lose it. Registering the web app with the site key is safe;
@@ -4254,6 +4261,12 @@ and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; 
   `kimi-k2.7-code` ($0.95/$4.00) instead of `glm-4.7-flashx` ($0.07/$0.40) — ~13× the input price for
   THOSE builds. The bet is that a cheap rung which fails is paid twice, once in the wasted call and
   once in the heal. **Watch: the share of builds routed complex, and whether their heal count drops.**
+- 🗺️ **THE PLANNERS ARE THE ONE EXCEPTION (admin chose "A", 2026-09-26, autopsy 7d79254b).** The
+  roadmap, blueprint and project-mode planners are plans, so they climb `planLadder` through
+  `makePlanTextRunner` (#3334) instead of the complex build chain — which had cost a large app 76 s of
+  Kimi reasoning before its first file, and a project decomposition 315 s and a timeout (autopsy
+  eed79815). There is no separate kill switch. The build itself still opens on KIMI. ⚠️ On Weak, with
+  `AGENTV3_NEMOTRON=weak`, the plan rung is Nemotron Ultra — also a reasoning model, speed unmeasured.
 - 🔗 `healLadder` and this router share ONE definition of "the cheap opener"
   (`withoutCheapFlashLead`), applied by `buildTurnRunner` for `heal || complex`. They stay separate
   FLAGS — "this is a repair" and "this is a big app" are different questions with the same answer
@@ -4815,6 +4828,16 @@ infrastructure and no monthly cost — which is why it is the *first* thing to d
 **TRIGGER:** sustained concurrent instances above ~30, OR any Firestore contention error in the logs.
 
 ### 2 · 🟡 Per-instance memory that pretends to be global
+
+✅ **THE BUILD LOCK HALF OF THIS TRIGGER FIRED AND IS BUILT (autopsy eed79815, 2026-09-26) — without
+Redis.** A user's retry after a dropped connection reached another Cloud Run instance, which knew
+nothing of the running build and started a second one in the same workspace, then a third: fourteen
+minutes of two builds overwriting each other's files and running npm into one `node_modules` at once.
+The fix is a **Firestore lease per workspace** (`AgentV3/workspaceBuildLease.ts`, the `jobLease.ts`
+pattern): claimed in a transaction before the stream opens, renewed every 20 s, released when the build
+ends, stale after 90 s, and **fail-open** on a store error. A Stop pressed on any instance reaches the
+build through the lease. Kill switch **`AGENTV3_WORKSPACE_LEASE=off`** (NOT set; default ON). The
+table below is otherwise unchanged — rate limiters and the other rows are still per-instance.
 
 Several things live in one instance's RAM and are therefore wrong the moment there are several:
 

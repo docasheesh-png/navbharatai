@@ -110,7 +110,7 @@ describe('WIRING — the timeout stops us waiting, not looking', () => {
      */
     const at = route.indexOf(": 'REVIEW_INCOMPLETE'");
     expect(at).toBeGreaterThan(-1);
-    const rec = route.slice(route.lastIndexOf('buildDiag.record', at), at + 400);
+    const rec = route.slice(route.lastIndexOf('buildDiag.record', at), at + 700);
     // Since 2026-09-26 (autopsy SignBridge) the SUGGEST-ONLY review on a proven-green app has its own
     // process-only code — an offer that ran out of time is not a problem with the app. Where the review
     // could have repaired, the original rule holds exactly: a warning, and never "resolved".

@@ -81964,3 +81964,38 @@ of a false finding).
   pasted ChatGPT-style spec is a "mega project" is an admin question, not a threshold to move quietly.
 - Write-time typecheck quotes `Cannot find module './pages/X'` for pages not yet written (top-down order) — noise.
 - The shared evidence ledger (the model re-verifies with tsc/build/screenshot) — unchanged, still open.
+
+## 2026-09-26 — SignBridge autopsy, round two (the ledger items #3330 left open)
+
+Admin asked whether every small problem in report e950c69b was root-caused. Round one (#3330) had not;
+this closes the rest, and says which items were examined and deliberately left.
+
+**Fixed:**
+- **Project Mode fired on ONE app** — `enumeratedFeatures` counted 35 "features" in a 7-part spec: every
+  prose sentence, every quoted UI string, every line of example code, and unspaced slashes ("image/video",
+  a folder listing). Now: code lines and quoted strings enumerate nothing, a long sentence with no list
+  opener is prose, a slash separates only with spaces. SignBridge counts 7; the school-ERP corpus still fires.
+- **Found on the way, pre-existing since `80b1d3f3e`:** `tidy()` deleted a bullet's FIRST LETTER with its
+  marker ("- Date" → "ate"), so a bulleted list of a record's columns slipped past the record-attribute
+  filter and counted as features.
+- **Speech-recognition types** — the model met `Cannot find name 'webkitSpeechRecognition'` four times and
+  was never told why. `tscErrorCause` now explains it once, with the shape that compiles under strict.
+- **"Runnable Vitest skeletons"** said about files importing a package the project lacks —
+  `starterTestsNarration` says runnable only when vitest is declared, else gives the install command.
+- **Six store-direct passes kept a fix Green Freeze had REFUSED** (the sibling of round one's heal-write
+  leak): `writeUnlessFrozen` returns false only on `GreenFreezeError`; a dead machine still keeps the fix.
+- **A suggest-only review that timed out was a WARNING about the app** — now `REVIEW_SUGGESTIONS_NOT_READY`,
+  process-only. Where the review could repair, `REVIEW_INCOMPLETE` stays a warning, never resolved.
+- **Two accessibility failures shipped while a paid design repair was running over the same pages** —
+  `a11yRepairAddendum` hands the linter's own fixes to THAT pass (no extra model call, never starts one),
+  and the result is recorded as `ACCESSIBILITY_HEALED` / `_PARTIALLY_HEALED`.
+
+**Examined, no change (and why):**
+- `edit_file` old_string misses (×2): the tool already returns the nearest match; the model recovered in one retry.
+- "README written twice": the report shows ONE write (a call/done pair), not two.
+- `@mediapipe/tasks-vision` unused: the model's own declaration; the `INTEGRITY_UNUSED_DEP` advisory is honest,
+  and auto-removal is unsafe (a runtime string-load is invisible to an import scan).
+- **Open:** accessibility failures on an app whose design is already clean get no repair — a pass for two
+  labels alone is not worth a model call; they stay an honest report line.
+
+Tests: `tests/theSignBridgeAutopsyRoundTwo.test.ts` (22).

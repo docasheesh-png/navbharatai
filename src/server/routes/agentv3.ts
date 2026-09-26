@@ -515,7 +515,7 @@ import { parseIgnoreFile, ignoreRulesBlock, IGNORE_FILE } from '../AgentV3/ignor
 import { terminalDailyLimitSeconds, decideTerminalAccess, type TerminalAccess } from '../AgentV3/terminalQuota';
 import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../AgentV3/terminalMeter';
 import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
-import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../AgentV3/buildQualityLint';
+import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } from '../AgentV3/buildQualityLint';
 import { abortBuild, abortCauseOf } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
@@ -18028,8 +18028,12 @@ async function noteBuildOutcome(
                 // at runtime is caught later by the preview check and reported, not reverted.
                 const beforeHeal = { ...Object.fromEntries(writtenFiles) };
                 const brokenBefore = (await findSyntaxErrors(beforeHeal).catch(() => [])).map((e) => e.path);
+                // The accessibility failures in the same app ride THIS pass (autopsy SignBridge): a
+                // deterministic re-lint, no extra model call, and only when a repair is running anyway.
+                const a11yBefore = projectHasUserCode(beforeHeal) ? lintBuiltApp(beforeHeal) : null;
+                const a11yAsk = a11yRepairAddendum(a11yBefore);
                 const healed = await runInPass('design-consistency-heal', () => designRunner.run(
-                  `The app is built and compiles. ${designRepairInstruction(design)}`,
+                  `The app is built and compiles. ${designRepairInstruction(design)}${a11yAsk}`,
                 ));
                 try {
                   const afterHeal = Object.fromEntries(writtenFiles);
@@ -18064,6 +18068,19 @@ async function noteBuildOutcome(
                       : `Design repair improved ${design.findings.length - after.findings.length} of ${design.findings.length} page(s); ${after.findings.length} still fall short.`,
                     autoResolved: after.ok,
                   });
+                  if (a11yAsk) {
+                    // The earlier ACCESSIBILITY line describes the app BEFORE this repair; say what is
+                    // true now, either way, rather than leave a fixed finding standing or a failed one hidden.
+                    const a11yAfter = lintBuiltApp(Object.fromEntries(writtenFiles));
+                    const left = a11yAfter?.a11y.violations.length ?? 0;
+                    buildDiag.record({
+                      phase: 'build',
+                      severity: left === 0 ? 'info' : 'warning',
+                      code: left === 0 ? 'ACCESSIBILITY_HEALED' : 'ACCESSIBILITY_PARTIALLY_HEALED',
+                      message: a11yAfter ? `After the repair: ${a11yLintSummary(a11yAfter)}` : 'After the repair: nothing lintable was found.',
+                      autoResolved: left === 0,
+                    });
+                  }
                 }
               } catch { /* design repair is best-effort — the honest warnings stand */ }
             }

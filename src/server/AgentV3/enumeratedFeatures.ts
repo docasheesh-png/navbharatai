@@ -84,7 +84,6 @@ function words(s: string): number {
 /** Strip the marker, the filler and the punctuation a real sentence leaves around an item. */
 function tidy(raw: string): string {
   return String(raw ?? '')
-    .replace(LINE_MARKER, (m) => m.replace(/\S.*$/, '')) // keep the text, drop the marker
     .replace(/^\s*(?:[-*•]|\d{1,3}[.)])\s+/, '')
     .replace(TRAILING_FILLER, ' ')
     .replace(/[.!?]+\s*$/, '')

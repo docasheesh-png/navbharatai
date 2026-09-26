@@ -2909,6 +2909,30 @@ the flag entries above promise.
   `revertToGreenSnapshot`, which calls `reconcileCapturedWrites` (`GreenGuard.ts`). It also refuses an
   EMPTY snapshot, because `restorePlan({}, cur)` would delete the whole workspace. Test-locked and
   reversion-proven in `tests/aRealBugInAWorkingAppGetsOneVerifiedRepair.test.ts`.
+- **ONE BUILD PER APP ACROSS SERVERS, AND SCOPED REPAIRS — built ONCE, by #3331 (autopsy eed79815 =
+  "4D Future City Drive", 2026-09-26).** The lease is `AgentV3/workspaceBuildLease.ts` (kill switch
+  `AGENTV3_WORKSPACE_LEASE=off`; see SCALE PLAN §2), the repair scope is `limitRepairToScope` +
+  `pathsNamedInErrors` in `SimpleBuilder.ts`, and the echoed format example is refused in
+  `parseFileBlocks` (`isEchoedFormatExample`).
+  🔴 **THE SAME REPORT WAS AUTOPSIED BY TWO SESSIONS AT ONCE, and each built its own lease, its own repair
+  scope and its own marker fix — same file name, same collection.** #3331 merged first; #3332 was cut
+  back to the two pieces #3331 did not carry (below and the marker sibling in `FastLaneContinuation`).
+  **This is safeguard #6's open-PR check failing in real time:** neither PR existed when the other session
+  started. When a report is pasted into more than one session, the admin's naming of ONE owner is the
+  only thing that prevents this. ⚠️ **Not ported, offered to the admin instead:** following a build that
+  runs on another server live (a `/status` that reports it, an `/attach` that says so), so a dropped
+  connection shows the running build rather than "network error". Today the retry is REFUSED with
+  `BUILD_RUNNING_ELSEWHERE` and a Stop — no second build, but the first screen still reads as an error.
+- **🧊 A GREEN APP MAY RESTORE ITS OWN FILES (same autopsy, 2026-09-26; no flag).** After build C was
+  verified working, copying the app's OWN saved files back into its sandbox was refused one file at a time
+  — **49 `GREEN_FREEZE_DEFERRED` lines**, each telling the user *"Reply if you want this change made"*,
+  one about `.nbai-landing.tar.gz`. A write with no pass name is an unknown writer to the freeze, and the
+  actuator's restore had been named `sandbox-file-restore` on 2026-08-20 while its three route siblings
+  (preview revive, the restore-files route, the build-start data-loss restore) and the shared asset
+  restore never were — the headline class once more. All three now carry the name, and
+  `restoreWorkspaceAssets` **names itself**, so a fourth caller cannot forget it. ⚠️ `writeWorkspaceFiles`
+  is deliberately NOT named inside: it also lands IMPORTS, which are not restores. Source-guarded and
+  reversion-proven in `tests/aGreenAppMayRestoreItsOwnFiles.test.ts`.
 - **`AGENTV3_FASTLANE_REASONING_GATE`** (default ON, `off` reverts — added 2026-09-23, autopsy ac41a924,
   PR #3278). The fast lane is skipped when the build opens on a model that ALWAYS reasons
   (`modelAlwaysReasons`). Its single plan call is capped at 90 s, a cap sized for a rung that answers

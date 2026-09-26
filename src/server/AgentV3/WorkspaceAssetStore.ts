@@ -30,6 +30,7 @@ import { pool } from './WorkspaceFiles';
 const ASSET_WRITE_CONCURRENCY = Math.max(1, Math.min(32, Number(process.env.AGENTV3_ASSET_WRITE_CONCURRENCY) || 16));
 import { notePersistenceFailure } from '../lib/persistenceHealth';
 import { parseDataUri } from './ProjectImport';
+import { runInPass } from './greenFreeze';
 
 const COLLECTION = 'workspace_assets_v3';
 /** Firestore's hard per-document limit is 1 MB; a base64 data URI for a ≤200KB asset is ~270KB. */
@@ -310,7 +311,10 @@ export async function restoreWorkspaceAssets(sink: BinaryFileSink, workspaceId: 
   try {
     const assets = await loadWorkspaceAssets(workspaceId);
     if (Object.keys(assets).length === 0) return 0;
-    return await materializeAssets(sink, workspaceId, assets);
+    // Named HERE, not at each caller (autopsy 2026-09-26): every use of this function is a restore of the
+    // app's own saved bytes, which Green Freeze allows by name — and three of its four callers forgot
+    // the name, so a green app refused its own logo and icons. Nesting inside a caller's pass is harmless.
+    return await runInPass('sandbox-file-restore', () => materializeAssets(sink, workspaceId, assets));
   } catch {
     return 0;
   }

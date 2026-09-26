@@ -81911,6 +81911,38 @@ Still open after part 2 (recorded, not hidden): the shared evidence ledger (why 
 all); the fast lane's 90 s plan cap is still sized for a direct-answer rung (the hand-off bounds the loss,
 it does not make a reasoning rung fast).
 
+## 2026-09-26 — Autopsy: "4D Future City Drive" (3 builds, one workspace, free tier) — one build per app across every server
+
+**What the report showed.** Three builds of one app ran concurrently in ONE sandbox: A (09:24→09:43, ok,
+₹217.57), B ("Fix this error… network error", 09:27→09:29, failed, ₹0), C (a re-prompt, 09:29→09:50, ok,
+₹648.76). A was never stopped — it ran to its own end. Consequences: npm ENOTEMPTY in A and C, C deleted
+A's files mid-build, A's reviewer read C's files, ~45 `GREEN_FREEZE_DEFERRED`, dead A files in the final
+project, and a free user billed ~₹866 for one game.
+
+**Root cause.** The one-build lock was per-PROCESS memory; Cloud Run routes the retry after a dropped
+connection to any instance. The drop probe then read "not running here", showed the raw "network error"
+with a Fix-with-AI button (→ B), and the stall watchdog auto-continued (→ another build).
+
+**Fixed (this PR):** durable workspace lease (`workspaceBuildLease.ts`, flag `AGENTV3_WORKSPACE_BUILD_LEASE`,
+default on, fails open); `/status` `buildRunningElsewhere`, `/attach` 409 `elsewhere`, cross-instance
+`/stop`; client drop probe + watchdog follow the running build via the live mirror. The planners also
+recorded a timeout nobody answered as `anthropic / claude-sonnet-4-6` on a WEAK build — a mislabel (the
+variable's initialiser), not a Sonnet call. That fix, and the planner starvation itself, are carried by
+the open PR #3330 (`plannerCallLabel`, `makePlanTextRunner`), so this PR does not touch them.
+
+**Still open from this report (recorded, not fixed here):**
+- The project planner misfired on a game spec (40 enumerated features, no big-software noun: the ≥14
+  branch), then both rungs starved at 12,000 output tokens — 315 s of a free build's clock. The
+  starvation is claimed by open PR #3330; whether Project Mode should fire on such a spec is recorded
+  there as an admin decision.
+- The post-answer type-fix sub-agent wrote generic placeholder files (`relative/path.ext` — the literal
+  example path from `SimpleBuilder.ts`'s output format — plus an auth scaffold) into a game; the integrity
+  pass then wired the stray CSS into `main.tsx`.
+- An npm-install race INSIDE one build: the write-time typecheck command (`package.json -nt node_modules`
+  ⇒ `npm install`), the health-check install and the agent's own installs are not serialised.
+- "Added 1 missing dependency (@playwright/test)" was shown while Green Freeze had refused the write —
+  claimed by open PRs #3330 (`landHealWrite`) and #3331 (the E2E scaffold no longer adds the dependency).
+- Billing question for the admin: should a build duplicated by our own concurrency bug be charged at all?
 ## 2026-09-26 — Autopsy 7d79254b (EduHub, Weak, complex): a working app was reported RED on one cancelled request
 
 **What happened.** Mega-roadmap step 1 of an education platform. The app rendered in a real browser at
@@ -82206,6 +82238,27 @@ run proof reading the overwritten summary; the question note on a built turn).
   Only the answer half has readers today, so only it was built; an enum with no reader would be dead
   code under the second absolute rule.
 
+### 2026-09-26 (same autopsy, continued) — two more of its open items closed, one downgraded honestly
+- **Closed — the junk repair files.** `repairScope.ts`: all five repair passes now write only what they
+  were asked to repair; a template path (`relative/path.ext`) and an invented file nobody imports are
+  refused (`REPAIR_WRITE_REFUSED`). What the repair was handed is not in the report (truncated middle), so
+  the model's reason is recorded as unknown rather than guessed.
+- **Closed — no Stop while following a build elsewhere.** `followingElsewhere` in the hook, a Stop branch
+  in the panel; `/stop` forwards through the lease.
+- **Downgraded — "npm install is not serialised within one build".** Every `npm` collision in this report
+  came from the PARALLEL builds (ENOTEMPTY in A and C; `tsc` vanishing at 09:41 while C installed), which
+  the lease closes. The report holds no evidence of a collision inside ONE build, so no queue was built
+  on a guess. Re-open it only with a report showing one.
+- **Claimed by other open PRs, not touched here:** the planner starvation + mislabel (#3330), the false
+  "Added @playwright/test" (#3330 `landHealWrite`, #3331 E2E scaffold marker).
+- **Still open:** 109 steps after READY in build C and 13–14 min to first render (struggle, not yet
+  root-caused); design grades D/C; an unused drei/fiber pair; the ₹648.76 refund decision (admin's).
+- **Closed — 49 refused restore writes after green (build C, 09:49:37–09:50:26).** Three route restores
+  of the durable store and the shared asset restore ran without the `sandbox-file-restore` pass name, so
+  Green Freeze refused the app's own files and asked the user to "reply" about each. Named at all four
+  (the asset restore names itself). Which caller fired at 09:49 is not in the report; all four were
+  unnamed, so all four are fixed.
+
 ## 2026-09-26 — Autopsy 121c2431 + b10aae9a (stationary log): a build that stopped talking, and a reviewer that read old errors
 
 Free tier, "Make me an app for maintaining stationary items log". **Build 1 FAILED** at 5.4 min (₹0, $0.16
@@ -82434,6 +82487,15 @@ live DOM (`checkFeaturePresence(..., declined)`), so neither the builder's nag n
 add it back behind the user's answer.
 
 Tests: `tests/theFeatureListIsConfirmedBeforeTheBuild.test.ts` (20).
+- **Explained — build C's 109 steps after READY (09:39:48 → 09:48:32).** The command log shows C deleting
+  build A's files from the shared sandbox (`Game.tsx`, `carPhysics.ts`, `traffic.ts`, A's tests), emptying
+  A's `objects.ts`, and cleaning `index.css`; A wrote there until 09:43. The struggle was the parallel-build
+  class the lease closes, not a separate loop. Likewise both first-render times (A 853 s, C 759 s) include
+  the collision and A's 315 s planner (fixed on `main` by #3334), so neither is evidence of a slow engine
+  on its own — the next single-build report is what can measure it.
+- **Closed — `<<<ENDFILE>>` saved into `src/index.css`.** The parser knew only the exact marker; one
+  shared tolerant `END_FILE_MARKER` (OneShotBuilder.ts) now serves the parser and the truncation check.
+
 
 ## 2026-09-26 — The architect may fix mechanical errors in files the fast lane handed over (admin approved)
 
@@ -82459,6 +82521,22 @@ web Gmail ₹100 released after mobile OTP, and web Gmail ₹100 instantly with 
 scriptable free-Gmail printer — no device check on the web). Do not re-propose either without a new ask.
 In the app the Gmail ₹100 is automatic from build 135 onward (`useReferralProgress` → `autoClaimIfReady`,
 device-checked); build 134, live on Play today, needs a manual Claim tap.
+- **Assessed, no engine change — the remaining quality items of this report.**
+  - Design grade D (build A): inflated by the invented `globals.css` / `theme.css` from the junk repair,
+    which `repairScope.ts` now refuses. Design grade C (build C) and its "no CSS variables": C rewrote
+    `src/index.css` to clear A's `<<<ENDFILE>>` markers and dropped the scaffold's palette variables —
+    both causes fixed above. What remains is 14 colours in a game's own `src/ui/hud.css`; the architect
+    prompt already tells the model to reuse the palette vars and kit, a game HUD legitimately uses more
+    hues than a form, and the grade is advisory. Not a platform defect on this evidence.
+  - `vite@5.4.21` / `vitest@2.1.9` advisories: our own `vitest` `^2` pin nesting an old Vite — owned by
+    open PR #3331 (G2, `vitestRangeForVite`).
+  - Unused `@react-three/fiber@8` / `drei@9`: the model installed them speculatively (the first install
+    failed on a peer conflict that `| tail -20` reported as exit 0; the existing install-honesty note then
+    advised `--legacy-peer-deps`) and wrote the game in plain `three`. They are never imported, so they
+    are not in the bundle. An automatic prune was considered and NOT built: it must also resync the
+    lockfile, and a package.json write after green is exactly what Green Freeze refuses. Recorded as a
+    low-impact open item; re-open with a report where an unused dependency costs the user something.
+
 
 ## 2026-09-26 — The two native checks behind the referral rupees had never run on a phone
 
@@ -82487,6 +82565,34 @@ cloud project number baked in by `PLAY_INTEGRITY_CLOUD_PROJECT`.
 🔴 Open: the server does not bind or check the nonce (a server-issued nonce would stop token replay;
 freshness is still enforced by the timestamp window).
 
+## 2026-09-26 — CORRECTION: #3332 cut back after #3331 merged the same autopsy
+
+The entries above for #3332 (autopsy "4D Future City Drive") describe a `workspaceBuildLease.ts` with flag
+`AGENTV3_WORKSPACE_BUILD_LEASE`, `/status` `buildRunningElsewhere`, `/attach` 409 `elsewhere`, a
+`followingElsewhere` client state, `repairScope.ts` and `REPAIR_WRITE_REFUSED`. **None of that reached
+`main`.** Another session autopsied the SAME report (its id `eed79815`) in parallel and merged #3331
+first, with its own lease (same file name, same collection, flag `AGENTV3_WORKSPACE_LEASE`), its own
+repair scope (`limitRepairToScope`, three repair sites) and its own tolerant ENDFILE parser. Merging both
+would have run two locks on every build, so `main`'s versions stand and #3332 now carries only:
+
+- **Green-app restores named** (`sandbox-file-restore` at the three route restores; `restoreWorkspaceAssets`
+  names itself). Not in #3331. Test: `tests/aGreenAppMayRestoreItsOwnFiles.test.ts`.
+- **The marker's sibling**: #3331 widened `parseFileBlocks` to `<<<ENDFILE>{1,3}` but
+  `FastLaneContinuation.unterminatedTailPath` kept the exact `<<<ENDFILE>>>`, so a block the parser had
+  closed was still read as a file cut off. One `END_FILE_MARKER` in `OneShotBuilder.ts` now serves both.
+  Test: `tests/aMarkerIsNeverSavedIntoTheFile.test.ts`, reversion-proven.
+
+**Open, offered to the admin rather than raced into freshly merged code:**
+1. Following a build that runs on another server live (`/status` + `/attach` aware of the lease). Today a
+   retry is refused with `BUILD_RUNNING_ELSEWHERE` and a Stop — no second build — but the drop still
+   first shows "network error".
+2. #3331's repair scope covers the typecheck, syntax and missing-export passes; the missing-files pass
+   and the fast lane's repair loop are unscoped. And its rule is strict (shown or named only), so a
+   typecheck repair that legitimately creates a missing module (`Cannot find module './engine'` names the
+   importer, not `engine.ts`) is refused — the missing-files pass still covers that case.
+
+**The process lesson (recorded in CLAUDE.md):** safeguard #6's open-PR check cannot catch two sessions
+that start on the same pasted report within minutes of each other. Only the admin naming one owner can.
 ## 2026-09-26 — One-click ₹50 welcome credit in the admin Users table (bridge until the fixed .aab is live)
 
 Admin: *"tab tak admin panel se new user jinko kabhi koi token gift nahi mila hai, usko admin 50 ke token

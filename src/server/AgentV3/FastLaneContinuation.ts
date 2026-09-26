@@ -21,6 +21,8 @@
 //
 // PURE + unit-tested. The impure LLM round trip lives at the call site in routes/agentv3.ts.
 
+import { hasEndFileMarker } from './OneShotBuilder';
+
 /** Provider stop reasons that mean "I ran out of output budget", not "I finished". */
 export function isTruncatedStop(stopReason: string | null | undefined): boolean {
   return stopReason === 'max_tokens' || stopReason === 'length';
@@ -224,7 +226,8 @@ export function unterminatedTailPath(text: string): string | null {
   if (!text) return null;
   const lastHeader = text.lastIndexOf('<<<FILE');
   if (lastHeader === -1) return null;
-  if (text.indexOf('<<<ENDFILE>>>', lastHeader) !== -1) return null;
+  // The parser's own terminator (END_FILE_MARKER): a block it closed is never a file cut off here.
+  if (hasEndFileMarker(text, lastHeader)) return null;
   const m = /^<<<FILE\s+(.+?)>>>/.exec(text.slice(lastHeader));
   if (!m) return null;
   const path = m[1].trim().replace(/^["'`]|["'`]$/g, '');

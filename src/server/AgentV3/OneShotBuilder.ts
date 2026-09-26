@@ -150,6 +150,19 @@ export function isEchoedFormatExample(path: string, content: string): boolean {
 }
 
 /**
+ * The end-of-file marker as every reader of a model's file blocks must recognise it: `<<<ENDFILE>>>`, and
+ * the one-bracket-short `<<<ENDFILE>>` / `<<<ENDFILE>` (autopsy eed79815). ONE definition, because the
+ * truncation check in FastLaneContinuation kept the exact spelling after the parser was widened — so a
+ * block the parser had closed was read there as a file cut off mid-write. A regex SOURCE, not a RegExp.
+ */
+export const END_FILE_MARKER = '<<<ENDFILE>{1,3}';
+
+/** Does `text` contain an end-of-file marker at or after `from`? Pure. */
+export function hasEndFileMarker(text: string, from = 0): boolean {
+  return new RegExp(END_FILE_MARKER).test(String(text ?? '').slice(Math.max(0, from)));
+}
+
+/**
  * Parse the model's one-shot output into files. The model is instructed to emit each file as:
  *   <<<FILE path/to/file.ext>>>
  *   ...content...
@@ -169,7 +182,7 @@ export function parseFileBlocks(text: string): OneShotFile[] {
   // The terminator also accepts `<<<ENDFILE>>` and `<<<ENDFILE>` (autopsy eed79815, 2026-09-26): a model
   // that dropped one `>` left the marker INSIDE the file, and a stylesheet ending in `<<<ENDFILE>>`
   // broke the production build on the next turn.
-  const re = /<<<FILE\s+(.+?)>>>\r?\n([\s\S]*?)(?:\r?\n?<<<ENDFILE>{1,3}|(?=\r?\n?<<<FILE\s)|$)/g;
+  const re = new RegExp(String.raw`<<<FILE\s+(.+?)>>>\r?\n([\s\S]*?)(?:\r?\n?${END_FILE_MARKER}|(?=\r?\n?<<<FILE\s)|$)`, 'g');
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const path = m[1].trim().replace(/^["'`]|["'`]$/g, '');

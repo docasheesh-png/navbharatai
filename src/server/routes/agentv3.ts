@@ -5781,7 +5781,10 @@ async function noteBuildOutcome(
               }
             } catch { /* best-effort — a bad tsconfig extends just falls through as before */ }
           }
-          await writeWorkspaceFiles(actuator, workspaceId, saved);
+          // Named as the restore it is (greenFreeze.ts ALLOWED_PASSES): copying the app's OWN saved bytes
+          // back alters nothing. Unnamed, a verified-green app refused every file of its own restore, one
+          // "Reply if you want this change made" line per file (autopsy 2026-09-26 — 49 of them).
+          await runInPass('sandbox-file-restore', () => writeWorkspaceFiles(actuator, workspaceId, saved));
         }
         // Re-materialize durable binary assets (logo/icons/fonts) into the re-seeded sandbox.
         await restoreWorkspaceAssets(actuator, workspaceId).catch(() => 0);
@@ -9654,7 +9657,8 @@ async function noteBuildOutcome(
       // Cold sandbox → genuinely restore the last durably-saved files into it.
       const saved = await loadWorkspaceFiles(workspaceId);
       if (saved && Object.keys(saved).length > 0) {
-        const { written } = await writeWorkspaceFiles(actuator, workspaceId, saved);
+        // The same restore, the same name — see the revive path above.
+        const { written } = await runInPass('sandbox-file-restore', () => writeWorkspaceFiles(actuator, workspaceId, saved));
         // Also re-materialize the durable binary assets so a restored app isn't full of broken images.
         await restoreWorkspaceAssets(actuator, workspaceId).catch(() => 0);
         res.json({ files: written, count: written.length, restored: true, source: 'saved' });
@@ -14027,7 +14031,8 @@ async function noteBuildOutcome(
               );
             } catch { /* diagnostics are best-effort */ }
             const writeT0 = Date.now();
-            await writeWorkspaceFiles(actuator, workspaceId, plan.restore);
+            // Restoring files the sandbox LOST from the durable store — the same restore as above.
+            await runInPass('sandbox-file-restore', () => writeWorkspaceFiles(actuator, workspaceId, plan.restore));
             // A recycled sandbox loses binary assets too (they aren't in the text-file store or the
             // sandbox scan) — re-materialize them from the durable asset store alongside the files.
             await restoreWorkspaceAssets(actuator, workspaceId).catch(() => 0);

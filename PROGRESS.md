@@ -82231,3 +82231,19 @@ web Gmail ₹100 released after mobile OTP, and web Gmail ₹100 instantly with 
 scriptable free-Gmail printer — no device check on the web). Do not re-propose either without a new ask.
 In the app the Gmail ₹100 is automatic from build 135 onward (`useReferralProgress` → `autoClaimIfReady`,
 device-checked); build 134, live on Play today, needs a manual Claim tap.
+- **Assessed, no engine change — the remaining quality items of this report.**
+  - Design grade D (build A): inflated by the invented `globals.css` / `theme.css` from the junk repair,
+    which `repairScope.ts` now refuses. Design grade C (build C) and its "no CSS variables": C rewrote
+    `src/index.css` to clear A's `<<<ENDFILE>>` markers and dropped the scaffold's palette variables —
+    both causes fixed above. What remains is 14 colours in a game's own `src/ui/hud.css`; the architect
+    prompt already tells the model to reuse the palette vars and kit, a game HUD legitimately uses more
+    hues than a form, and the grade is advisory. Not a platform defect on this evidence.
+  - `vite@5.4.21` / `vitest@2.1.9` advisories: our own `vitest` `^2` pin nesting an old Vite — owned by
+    open PR #3331 (G2, `vitestRangeForVite`).
+  - Unused `@react-three/fiber@8` / `drei@9`: the model installed them speculatively (the first install
+    failed on a peer conflict that `| tail -20` reported as exit 0; the existing install-honesty note then
+    advised `--legacy-peer-deps`) and wrote the game in plain `three`. They are never imported, so they
+    are not in the bundle. An automatic prune was considered and NOT built: it must also resync the
+    lockfile, and a package.json write after green is exactly what Green Freeze refuses. Recorded as a
+    low-impact open item; re-open with a report where an unused dependency costs the user something.
+

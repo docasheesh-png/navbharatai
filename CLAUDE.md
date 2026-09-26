@@ -2922,9 +2922,25 @@ the flag entries above promise.
   today's behaviour), like `jobLease.ts`. Test-locked and reversion-proven in
   `tests/oneBuildPerAppAcrossEveryServer.test.ts`.
   ⚠️ **What it does not do:** a user watching a build that runs elsewhere sees it through the live
-  mirror's poll (~3 s cadence, last 200 events), not the instant stream, and no Stop button is shown
-  while following (the buttons key off `buildRunningHere`). A Stop pressed on an attached screen now
-  reaches the build whichever instance receives the request. **Watch:** 409 `elsewhere` in the logs. Each one is a parallel build that did not happen.
+  mirror's poll (~3 s cadence, last 200 events), not the instant stream. Stop IS offered while following
+  (`followingElsewhere` in `useAgentV3Build`, set from `/status`), and `/stop` reaches the build whichever
+  instance receives the request — the holder aborts on its next heartbeat, so up to ~15 s later. **Watch:** 409 `elsewhere` in the logs. Each one is a parallel build that did not happen.
+- **🧰 A REPAIR WRITES ONLY WHAT IT WAS ASKED TO REPAIR (autopsy "4D Future City Drive", 2026-09-26; no
+  flag, on by construction).** The post-build typecheck repair on a finished Three.js game answered with a
+  file literally named `relative/path.ext` — the example path in `repairSystemPrompt`'s own OUTPUT FORMAT —
+  plus `App.jsx`, Navbar, Sidebar, useAuth, AuthContext, Login/Dashboard pages and two stylesheets the game
+  never had, and **every block was written**; the integrity pass then wired the stray CSS into `main.tsx`.
+  🔑 **Five passes ask a model to repair files and wrote whatever paths came back** (typecheck gate,
+  missing-files, syntax, missing-export, the fast lane's repair). Each prompt said "only the files you
+  change"; none enforced it. `src/server/AgentV3/repairScope.ts` decides once: a path the pass was shown or
+  the compiler named is kept; a NEW path only when an error names it or an import that does NOT already
+  resolve points at it (`./App` → `App.tsx` does not license `App.jsx`); a template path never. Refusals are
+  recorded as `REPAIR_WRITE_REFUSED` (process-only). Test-locked and reversion-proven in
+  `tests/aRepairWritesOnlyWhatItWasAskedToRepair.test.ts`.
+  ⚠️ **What the repair was handed is NOT in that report** (it fell in the 10 model calls truncated for
+  storage), so why the model gave up on the real errors is not established. The same minutes show the
+  parallel build's `npm install` rewriting `node_modules` (`tsc: No such file or directory` at 09:41) — the
+  lease above closes that cause; this guard is what makes the next unknown cause harmless.
 - **`AGENTV3_FASTLANE_REASONING_GATE`** (default ON, `off` reverts — added 2026-09-23, autopsy ac41a924,
   PR #3278). The fast lane is skipped when the build opens on a model that ALWAYS reasons
   (`modelAlwaysReasons`). Its single plan call is capped at 90 s, a cap sized for a rung that answers

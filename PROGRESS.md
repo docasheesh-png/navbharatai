@@ -82013,3 +82013,19 @@ run proof reading the overwritten summary; the question note on a built turn).
 - **An enum nobody reads was not built.** The open item named `built/declined/asked/stalled/stopped`.
   Only the answer half has readers today, so only it was built; an enum with no reader would be dead
   code under the second absolute rule.
+
+### 2026-09-26 (same autopsy, continued) — two more of its open items closed, one downgraded honestly
+- **Closed — the junk repair files.** `repairScope.ts`: all five repair passes now write only what they
+  were asked to repair; a template path (`relative/path.ext`) and an invented file nobody imports are
+  refused (`REPAIR_WRITE_REFUSED`). What the repair was handed is not in the report (truncated middle), so
+  the model's reason is recorded as unknown rather than guessed.
+- **Closed — no Stop while following a build elsewhere.** `followingElsewhere` in the hook, a Stop branch
+  in the panel; `/stop` forwards through the lease.
+- **Downgraded — "npm install is not serialised within one build".** Every `npm` collision in this report
+  came from the PARALLEL builds (ENOTEMPTY in A and C; `tsc` vanishing at 09:41 while C installed), which
+  the lease closes. The report holds no evidence of a collision inside ONE build, so no queue was built
+  on a guess. Re-open it only with a report showing one.
+- **Claimed by other open PRs, not touched here:** the planner starvation + mislabel (#3330), the false
+  "Added @playwright/test" (#3330 `landHealWrite`, #3331 E2E scaffold marker).
+- **Still open:** 109 steps after READY in build C and 13–14 min to first render (struggle, not yet
+  root-caused); design grades D/C; an unused drei/fiber pair; the ₹648.76 refund decision (admin's).

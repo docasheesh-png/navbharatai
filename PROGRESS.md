@@ -82158,3 +82158,10 @@ live DOM (`checkFeaturePresence(..., declined)`), so neither the builder's nag n
 add it back behind the user's answer.
 
 Tests: `tests/theFeatureListIsConfirmedBeforeTheBuild.test.ts` (20).
+
+**📌 ADMIN DECISION 2026-09-26 (asked directly, answered "Website par nahi"): the Google/Gmail-login ₹100
+stays ANDROID-APP ONLY.** The website keeps mobile + GitHub (₹200, mobile-anchored). Offered and declined:
+web Gmail ₹100 released after mobile OTP, and web Gmail ₹100 instantly with no mobile (an unbounded
+scriptable free-Gmail printer — no device check on the web). Do not re-propose either without a new ask.
+In the app the Gmail ₹100 is automatic from build 135 onward (`useReferralProgress` → `autoClaimIfReady`,
+device-checked); build 134, live on Play today, needs a manual Claim tap.

@@ -2058,6 +2058,14 @@ the code (it is actually read somewhere) on 2026-07-11.
   the repo secret was set when it was built" — the preflight cannot see that), so a real-phone claim can
   still pay ₹0 until the admin confirms both. Counters read ₹0 / 0 referred, as expected before anyone
   completes a step.
+  ✅ **REPO-SECRET LINK CONFIRMED 2026-09-26 — the admin verified `PLAY_INTEGRITY_CLOUD_PROJECT` was set
+  BEFORE build 134 was built**, so the project number is baked into that `.aab` and build 134 genuinely
+  device-attests on a real phone (a claim pays the real ₹, not ₹0). This closes the first of the two
+  hand links; **the second, Play Console → App content → Data safety declaring the device identifier,
+  remains outstanding** — it is a Play-policy compliance item (Privacy Policy §3.2 already discloses the
+  identifier), NOT a payment blocker: the device check works regardless, but a Data-safety declaration
+  that contradicts the policy is a violation. So referral is live and paying end-to-end; only the Play
+  declaration is left, and it does not gate a rupee.
 - **Play Integrity — the device check (built 2026-09-15). ⚠️ NOT a Cloud Run key:**
   **`PLAY_INTEGRITY_CLOUD_PROJECT`** is a **GitHub REPO SECRET** read at BUILD time by
   `android/app/build.gradle`, because it is baked into the `.aab`. It is the Google Cloud project

@@ -8,7 +8,6 @@ import {
 import { computePlanPurchase } from '../src/server/lib/hostingPlan';
 import { computeDebitedWallet } from '../src/server/lib/walletDebit';
 import { mirroredCreditPatch } from '../src/server/lib/walletMirror';
-import { buildInitialWallet } from '../src/server/lib/welcomeBonus';
 import { TOKENS_PER_RUPEE } from '../src/lib/walletPricing';
 import { HOSTING_TIERS } from '../src/lib/hostingTiers';
 
@@ -131,13 +130,15 @@ describe('a plan is bought with paid money only', () => {
     expect(r.reason).toBe('insufficient');
   });
 
-  it('a brand-new wallet cannot buy a plan with its welcome bonus', () => {
-    const fresh = buildInitialWallet({ userId: 'u1', email: 'a@b.c', name: 'A', welcomeTokens: 50_000, nowIso: '2026-09-13T00:00:00.000Z' });
-    expect(fresh.giftTokensRemaining).toBe(50_000);
-    const r = computePlanPurchase(fresh as Record<string, unknown>, '2026-09-13T00:00:00.000Z', 'starter', AGREED);
+  it('a brand-new wallet starts with no gift, and no balance to buy a plan with', async () => {
+    const { buildEmptyWallet } = await import('../src/server/lib/newWallet');
+    const fresh = buildEmptyWallet({ userId: 'u1', email: 'a@b.c', name: 'A', nowIso: '2026-09-26T00:00:00.000Z' });
+    expect(fresh.giftTokensRemaining).toBe(0);
+    expect(fresh.freeGiftedTokens).toBe(0);
+    const r = computePlanPurchase(fresh as Record<string, unknown>, '2026-09-26T00:00:00.000Z', 'starter', AGREED);
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error('unreachable');
-    expect(r.reason).toBe('gift_only');
+    expect(r.reason).toBe('insufficient');
   });
 });
 

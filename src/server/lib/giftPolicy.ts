@@ -12,26 +12,16 @@
 //   ─────────────────────────────────────────────────────────────────────────────────
 //   TOTAL COST OF ACQUIRING ONE USER                                             = ₹475
 //
-// ⚠️ WHY THIS IS A MODULE AND NOT THREE EDITS. Before today the payouts lived in FOUR places that
-// did not know about each other — `welcomeBonus.ts` (the legacy flat ₹500), `giftPlan.ts` (the v2
-// ₹250/₹500, through TWO separate decisions), `weeklyTopUp.ts` (₹200 a rung to a ₹650 lifetime cap)
-// and `referralRewards.ts`. The rule that they must not stack existed only as a COMMENT inside the
-// last one. A real account could therefore collect ₹650 of flat-and-weekly gifts AND ₹400 of referral
-// steps — over ₹1,050, with nothing failing and no screen showing a wrong number.
+// 🔴 AND NOW IT IS THE ONLY WAY (admin 2026-09-26: *"100*4 ko chor ke sab hata do"*). The retired
+// grants — the legacy flat bonus, the ₹250/₹500 v2 plan and its phone claim, the weekly ladder, the
+// ₹50 interim credit and the ₹250 backfill — were deleted from the code, not just switched off. A new
+// wallet is created empty (`newWallet.ts`), and the referral ladder is the one thing that gifts.
 //
 // 🔒 AND A CEILING THAT IS ONLY ARITHMETIC IS NOT A CEILING. "4 steps × ₹100 = ₹400" holds until
 // somebody sets `REFERRAL_STEP_TOKENS=200` in a console, at which point the same four steps pay ₹800
 // and nothing objects. "Ek paisa jyada nahi" has to be enforced against the TOTAL, not assumed from
 // the parts — so the cap below is applied to what an account has ALREADY been given, at the moment of
 // granting, whatever the per-step value happens to be.
-
-// 🔗 HOW THIS RELATES TO `welcomeGiftExclusion.ts`, so neither is deleted as a duplicate of the other.
-// That module answers a CONDITIONAL question — "is the referral ladder paying instead?" — and is
-// asked INSIDE `welcomeBonus.ts` and `giftPlan.ts`. This one answers an UNCONDITIONAL one: the admin
-// retired the flat gift outright, so it is off whatever any env key says, and the stand-down is
-// applied at `routes/wallet.ts`, the single place either plan moves money. Two nets, deliberately at
-// different heights: if the flat gift is ever re-enabled here, that module still stops it stacking
-// with the ladder.
 
 import { TOKENS_PER_RUPEE } from './payments';
 
@@ -63,23 +53,6 @@ export const MAX_WEB_GIFT_TOKENS = 200 * TOKENS_PER_RUPEE;
 
 /** What acquiring one user may cost NavBharatAI, all in. ₹475. Stated so the sum is checkable. */
 export const MAX_ACQUISITION_COST_TOKENS = MAX_SELF_GIFT_TOKENS + MAX_REFERRER_PER_FRIEND_TOKENS;
-
-/**
- * Is the flat WELCOME gift allowed? **No.** Retired by the ruling above.
- *
- * Kept as a named function rather than deleting `welcomeBonus.ts` and `giftPlan.ts` outright: those
- * modules also carry the identity markers and the ledger shapes that existing wallets were written
- * with, and an account mid-way through the old plan still has to read back correctly. What changes is
- * that they GRANT nothing from now on.
- */
-export function flatWelcomeGiftAllowed(): boolean {
-  return false;
-}
-
-/** Is the WEEKLY top-up ladder allowed? **No.** Same ruling. */
-export function weeklyTopUpAllowed(): boolean {
-  return false;
-}
 
 /**
  * Clamp a self-gift so an account's LIFETIME total can never pass ₹400.
@@ -129,32 +102,4 @@ export function capReferrerPerFriend(grantTokens: number, alreadyPaidForThisFrie
   const room = MAX_REFERRER_PER_FRIEND_TOKENS - paid;
   if (room <= 0) return 0;
   return Math.min(Math.floor(want), room);
-}
-
-/**
- * What the wallet screen should say about the flat gift once it is retired: nothing at all.
- *
- * 🔒 `capTokens: 0` IS THE POINT, not an oversight. `FreeGiftBanner` renders nothing when the cap is
- * not a positive number, so a retired programme disappears from the screen instead of describing
- * itself in zeroes ("₹0 of ₹500 free credit received — ₹500 still to come" is a promise, not a
- * status). Every other field is the truth about an account that can no longer be gifted: nothing is
- * coming, nothing is claimable, no date. `giftedTokens` still reports what the account really
- * received, because retiring a gift never rewrites the history of one already given.
- *
- * ⚠️ `phoneBonusClaimable` MUST stay 0. It is the single field that draws the "Claim ₹500" card, and
- * offering a claim that `/claim-phone-bonus` will refuse is exactly the confident-and-wrong status
- * this codebase forbids.
- */
-export function retiredGiftSummary(alreadyGifted: unknown): Record<string, unknown> {
-  const raw = Number(alreadyGifted);
-  const gifted = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
-  return {
-    plan: 'retired',
-    giftedTokens: gifted,
-    capTokens: 0,
-    remainingTokens: 0,
-    exhausted: true,
-    nextCreditAt: null,
-    phoneBonusClaimable: 0,
-  };
 }

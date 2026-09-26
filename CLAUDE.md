@@ -1999,45 +1999,30 @@ the code (it is actually read somewhere) on 2026-07-11.
   `github.com` among the linked providers) and our store for the referrer, never the request body.
   **Do not add a step without a proof rule**; `stepIsProven` is deliberately total rather than
   defaulting, so a fifth step is unpayable until someone decides how it is proven.
-- **🎁 THE ₹250 WELCOME BACKFILL (built 2026-09-20, admin-asked) — `WELCOME_BACKFILL` and
-  `WELCOME_BACKFILL_TOKENS`.** ✅ **`WELCOME_BACKFILL = off` in Cloud Run (admin, 2026-09-26)** — set the
-  same session the referral ladder went live, on the admin's "4×₹100 ke alawa sab band" instruction, so
-  the ₹250 backfill button no longer runs at all. Recorded hand-to-hand. (History below: the default was
-  ON, but the button only ever paid when the admin pressed it.) ⚠️ **`WELCOME_BACKFILL` DEFAULTS TO **ON**** — the
-  opposite of most money flags here, on purpose: the admin asked for the button that day, and a button
-  that needs a Cloud Run key before it does anything is the dead button the second absolute rule
-  forbids. `WELCOME_BACKFILL=off` is the instant, no-deploy stop. Read by
-  `src/server/lib/welcomeBackfill.ts`; the routes are `GET /api/admin/welcome-backfill` (counts, writes
-  nothing) and `POST /api/admin/welcome-backfill/run` (refuses without `confirm: true`, ≤200 accounts a
-  press); the card is admin → Reports, beside Referral cost.
-  🔴 **WHY IT EXISTS — a gap at the seam between two CORRECT decisions.** `flatWelcomeGiftAllowed()`
-  has returned a hardcoded `false` since 2026-09-17 (the admin's own ruling), and the referral ladder
-  meant to pay instead is gated on `REFERRAL_REWARDS`, **which was never set**. So **every account
-  created since then received ₹0**, from a product whose own design says *"₹250 is what funds a
-  COMPLETE first app"*. Nothing could detect it: each module's guard was locally right.
-  ⚠️ **THE SIGNUP PATH IS UNTOUCHED.** This is a backfill, not a re-opening of the flat gift — a new
-  account still receives nothing, because the ladder is still the plan.
-  🎯 **SCOPE: ONLY ACCOUNTS OPENED IN THE GAP** (admin's own signal, same day: *"old walo ka 00 nahi
-  hoga, ya + me kuch hoga ya -ve ne. aap new user kar do, jinko bonus nhi mila"*). `RETIREMENT_ISO`
-  = 2026-09-17; `WELCOME_BACKFILL_SINCE` overrides it and an unreadable value falls back to that date,
-  never to "no cutoff". A wallet with **no `createdAt` reads as OLD** (only `buildInitialWallet`
-  creates a wallet and it always stamps that field). This is what RETIRES the residual risk below —
-  an old wallet whose welcome row rolled off its bounded ledger is excluded by DATE, not by guesswork.
-  ⚠️ **₹400 is the instruction, not an inheritance** (*"kaise bhi jaye, maximum ₹400!!!"*) — and the
-  ceiling is really enforced by the clamp inside `backfillTokens`; the `capSelfGift` call in
-  `decideBackfill` is unreachable defence in depth, proven by reversion, and the code says so.
-  🔒 **NEVER PAYS TWICE — four signals, any one refuses:** its OWN marker
-  `payment_transactions/welcome_backfill_<uid>` (checked FIRST, before any wallet reasoning, and
-  written in the SAME transaction as the credit), the durable `welcome_<uid>` marker, the wallet
-  ledger row via `walletReceivedWelcome`, and `freeGiftedTokens`. Credits go through
-  `mirroredCreditPatch` — the one legal wallet writer — with `capSelfGift` still applied, so this
-  credit **counts toward the admin's own ₹400 lifetime ceiling** (a later referral ladder tops the
-  same account to ₹400, not ₹650).
-  ⚠️ **Residual risk, stated not hidden:** no signal is complete alone (the marker post-dates
-  2026-07-12, the ledger is bounded, `freeGiftedTokens` is newer than the oldest wallets), so a
-  pre-2026-07 wallet with 500+ ledger entries could in principle read as never-gifted. That is why the
-  preview is separate and the run needs a confirmation. Test-locked and reversion-proven five ways in
-  `tests/nobodyIsPaidTheWelcomeBonusTwice.test.ts`.
+- **🎁 THE REFERRAL LADDER IS THE ONLY WELCOME CREDIT — the ₹250 welcome backfill is DELETED (admin
+  2026-09-26: *"ab isko har jagah se hata do, bas referral wala chhor do, 100*4 chhorna hai"*).** The
+  backfill (built 2026-09-20 for accounts opened while no welcome credit existed, already switched off
+  with `WELCOME_BACKFILL=off` the same morning) is removed from the code: `welcomeBackfill.ts`, the
+  `/api/admin/welcome-backfill` routes, the admin card and its test. **`WELCOME_BACKFILL`,
+  `WELCOME_BACKFILL_TOKENS` and `WELCOME_BACKFILL_SINCE` are now read by nothing** and may be deleted
+  from Cloud Run. Any `payment_transactions/welcome_backfill_<uid>` records and ledger rows it wrote stay
+  as history — a paid credit is never taken back. Do not rebuild it: the 4 × ₹100 referral ladder below
+  is the plan.
+  🔴 **AND EVERY OTHER WELCOME GRANT IS DELETED TOO, the same day (admin: *"100*4 ko chor ke sab hata
+  do"*).** Gone from the code, not switched off: the legacy flat bonus (`welcomeBonus.ts`), the ₹250/₹500
+  v2 plan and its phone-bonus claim (`giftPlan.ts`, `POST /api/wallet/:uid/claim-phone-bonus`,
+  `PhoneBonusCard`), the weekly top-up ladder (`weeklyTopUp.ts`), the ₹50 interim credit
+  (`interimWelcomeGift.ts`), `welcomeGiftExclusion.ts`, and the wallet screen's `FreeGiftBanner`. **A new
+  wallet opens at ₹0** (`newWallet.ts`), and the wallet response no longer carries a `freeGift` field.
+  **`WALLET_GIFT_V2`, `GIFT_UNVERIFIED_TOKENS`, `GIFT_VERIFIED_TOTAL_TOKENS`, `WEEKLY_TOPUP_TOKENS`,
+  `INTERIM_WELCOME_TOKENS` and `GIFT_ID_PEPPER` are now read by nothing** and may be deleted from Cloud
+  Run. ⚠️ **`WELCOME_BONUS_TOKENS` is the one exception — keep it if it is set:** `accountMerge.ts` still
+  reads it to tell how much of an OLD wallet's `totalTokensPurchased` was a past welcome gift rather than
+  money paid. ⚠️ **What this makes true, said plainly:** with `REFERRAL_REWARDS` off, a new account
+  receives nothing at all — the ₹50 interim credit existed because a Play reviewer on a ₹0 account hit
+  a paid image rung and Google rejected a release (2026-09-22). The ladder is on today, so that is not
+  the live state; switching it off would re-create that condition. Test-locked in
+  `tests/theReferralLadderIsTheOnlyGift.test.ts`, which also asserts the ladder itself survived.
   📌 **STANDING DECISION (admin 2026-09-20): the referral code system starts when the new app is LIVE
   on the Play Store — not before. Do NOT set `REFERRAL_REWARDS` until then.**
   ✅ **THE CONDITION IS MET AND THE ADMIN SET IT ON — `REFERRAL_REWARDS = on` in Cloud Run (admin,
@@ -2698,7 +2683,8 @@ the flag entries above promise.
   free-tier cheap-only path also needs a real cheap floor configured (`AGENTV3_CHEAP_FLOOR` naming a provider
   with its key present); with the floor off it stays inert even for the canary user.
 - Legacy per-feature overrides (normally NOT needed — the master covers both): `AGENTV3_FREE_TIER_CHEAP`,
-  `AGENTV3_PER_TIER_BILLING`. `WELCOME_BONUS_TOKENS` (default 50000) tunes the new-wallet bonus.
+  `AGENTV3_PER_TIER_BILLING`. `WELCOME_BONUS_TOKENS` no longer grants anything (2026-09-26 — a new wallet
+  opens at ₹0); it is read only by `accountMerge.ts` to recognise past welcome gifts.
 - **`AGENTV3_INTEGRITY_GATE`** (= `on`) — **SET to `on` by the admin 2026-07-11 (canary).** After a build,
   auto-fix two deterministic defect classes the analyzer suite missed: multiple mount-focus owners (broke
   "auto-focus") and a stylesheet imported by 2+ modules. Default OFF only RECORDS the findings honestly;

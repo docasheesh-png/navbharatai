@@ -9,7 +9,6 @@
  * via explicit typed props. No behavior change.
  */
 import { cn } from '../../lib/utils';
-import { FreeGiftBanner } from './FreeGiftBanner';
 import { HostingPlanCard } from './HostingPlanCard';
 import { ReferralPanel } from './ReferralPanel';
 import { WalletStatementPanel } from './WalletStatementPanel';
@@ -183,21 +182,6 @@ export function BillingPanel(props: BillingPanelProps) {
               </button>
             </div>
           </div>
-
-          {/* THE FREE GIFT LADDER, made visible (2026-07-28). It used to grant silently: credit
-              appeared, a ledger row was written that nothing rendered, and no screen said how much was
-              left or when the next one arrived. Placed ABOVE the balance cards because it explains the
-              number in them — and because "this was your last free credit" is the moment someone
-              decides to recharge. */}
-          <FreeGiftBanner
-            freeGift={wallet?.freeGift}
-            tokensPerRupee={wallet?.tokensPerRupee}
-            onRecharge={() => onSetActiveBillingDetailTab('purchase')}
-            /* A claim moves real money, so the balance beside it must be re-read from the server
-               rather than adjusted locally — a number this screen computed itself could disagree
-               with the wallet, and on a billing screen that is the one thing it must never do. */
-            onClaimed={onFetchWallet}
-          />
 
           {/*
             THE THREE WALLET CAPSULES — one horizontal row (admin 2026-09-22: "wallet and billing me

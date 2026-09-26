@@ -48,9 +48,6 @@ function codeWithoutComments(src: string): string {
 const ALLOWED: Record<string, string> = {
   // It IS the appender.
   'src/server/lib/walletStatement.ts': 'owns appendLedgerEntry and ledgerPatch',
-  // Builds a BRAND-NEW wallet: there is no prior ledger to append to or trim, and the one row it
-  // writes is the opening balance itself.
-  'src/server/lib/welcomeBonus.ts': 'constructs the initial wallet; its single row IS the opening balance',
   // Merges two wallets into one. It concatenates two whole ledgers and applies the cap itself, which
   // is a genuinely different operation from appending one row.
   // ⚠️ THIS ENTRY'S ORIGINAL REASON WAS FALSE and is corrected here rather than quietly rewritten:

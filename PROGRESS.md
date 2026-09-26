@@ -82150,3 +82150,12 @@ live DOM (`checkFeaturePresence(..., declined)`), so neither the builder's nag n
 add it back behind the user's answer.
 
 Tests: `tests/theFeatureListIsConfirmedBeforeTheBuild.test.ts` (20).
+- **Explained — build C's 109 steps after READY (09:39:48 → 09:48:32).** The command log shows C deleting
+  build A's files from the shared sandbox (`Game.tsx`, `carPhysics.ts`, `traffic.ts`, A's tests), emptying
+  A's `objects.ts`, and cleaning `index.css`; A wrote there until 09:43. The struggle was the parallel-build
+  class the lease closes, not a separate loop. Likewise both first-render times (A 853 s, C 759 s) include
+  the collision and A's 315 s planner (fixed on `main` by #3334), so neither is evidence of a slow engine
+  on its own — the next single-build report is what can measure it.
+- **Closed — `<<<ENDFILE>>` saved into `src/index.css`.** The parser knew only the exact marker; one
+  shared tolerant `END_FILE_MARKER` (OneShotBuilder.ts) now serves the parser and the truncation check.
+

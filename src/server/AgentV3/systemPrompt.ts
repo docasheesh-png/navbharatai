@@ -6,6 +6,7 @@
 // finishes. The specialist roster (the "AI team") is injected from the
 // AgentRegistry so the Architect always delegates by real, current capability.
 
+import { HANDOFF_MECHANICAL_FIX_RULE } from './handoffRule';
 import { rosterBriefing } from './AgentRegistry';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
 import { isBinaryAsset } from './fileClassification';
@@ -925,7 +926,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '- After you start a dev server, call update_preview with its port so the user',
     '  sees the app live in the preview while it is still being built.',
     '- Use read_file, grep and glob to inspect the workspace before changing it.',
-    '- MANDATORY DELEGATION (no exceptions): as Architect you coordinate; specialists build.',
+    '- MANDATORY DELEGATION (one narrow exception, below): as Architect you coordinate; specialists build.',
     '  Route work by file/domain — never write application code yourself:',
     '    • src/components/**, src/pages/**, src/hooks/**, src/ui/** → task(frontend)',
     '    • src/server/**, src/api/**, *.sql, prisma/**, supabase/** → task(backend)',
@@ -935,6 +936,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  Emit ALL independent task() calls in ONE turn so workers run in parallel.',
     '  You (Architect) write ONLY: package.json, tsconfig.json, vite.config.ts,',
     '  .env.example, README.md, and top-level config. Nothing else.',
+    ...HANDOFF_MECHANICAL_FIX_RULE,
     '',
     '- Delegate focused work to the right specialist with the task tool.',
     '  The full team and what each role is best at:',

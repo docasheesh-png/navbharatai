@@ -68,7 +68,7 @@ export function decideUnfinishedResume(input: UnfinishedResumeInput): Unfinished
       + `${listed.join('\n')}${more}\n\n`
       + 'There is still build time left. Do not describe what you will do next — act with tool calls NOW: '
       + 'hand the fixes to the right specialist with task() (one task per file group, all in this turn), '
-      + 'or use the edit tools for files you own, then typecheck. Keep going until the app works. '
+      + 'or make MECHANICAL fixes (imports, types, props, names, paths) yourself with edit_file, then typecheck. Keep going until the app works. '
       + 'If something genuinely stops you, say what it is in one sentence instead.',
   };
 }

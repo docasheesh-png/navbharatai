@@ -133,9 +133,10 @@ window.addEventListener('vite:preloadError', () => recoverFromStaleChunk());
 // makes its first API call.
 installNativeApiRewrite(window);
 
-// App Check (2026-09-26) — on the WEBSITE only, and only once the server publishes a site key: attaches a
-// short-lived "this is the real NavBharatAI app" token to the few requests that spend money. Never awaited
-// and never able to stop a request — see src/lib/appCheckClient.ts.
+// App Check (2026-09-26) — attaches a short-lived "this is the real NavBharatAI app" token to the few
+// requests that spend money: reCAPTCHA Enterprise on the website (once the server publishes a site key),
+// Play Integrity / App Attest in the phone apps. Installed AFTER the native API rewrite above so it sees
+// the original `/api/...` URL. Never awaited and never able to stop a request — see appCheckClient.ts.
 void installAppCheck();
 
 // 8.6 PWA — register service worker, and AUTO-UPDATE: when a freshly deployed

@@ -81945,3 +81945,73 @@ OPEN ROOT CAUSES (rule 6, recorded not guessed):
 - **App AI gateway (`APP_AI_GATEWAY`) is still OFF.** The builder already prefers NavBharatAI's own AI for
   AI features when it is on (`generate_ai`); the admin asked for exactly that on 2026-09-26. Turning it on
   is a money decision (owner's wallet, ₹20/app/day, ₹2/visitor/day) and works only after publish.
+---
+
+## 2026-09-26 — THE MODEL'S ANSWER IS READ ONCE, BEFORE THE PLATFORM REWRITES IT (`turnKind`, the answer half)
+
+**Admin: *"ipa banao, aur aage ka kaam shuru karwao."*** The `.ipa` (run #97, uploaded to TestFlight)
+and the `.aab` (run #135) were built from `main` at `fce71fff` — which carries #3323, the App Mart
+iOS gate — per the standing both-builds instruction. "Aage ka kaam" was the one item left open and
+put to the admin as a question: the `turnKind` open root cause from autopsy `e628efd4` (item 1 in
+that entry's list).
+
+### What building it found — two live defects, both reproduced before any change
+
+The open item was framed as *"each subsystem re-derives the kind"*. Tracing the four readers showed
+something worse: **they read `result.summary` after the platform had REWRITTEN it.** The empty-build
+flip, the verified-no-change sentence and the release gate all replace the summary, so a reader that
+ran after them was asking its question of our own sentence.
+
+1. **A refusal was sold a stronger engine.** A free build whose model declined wrote no files.
+   `emptyBuildFailureSummary` did not know about refusals (e628efd4 taught it only about questions),
+   so it replaced the refusal with *"The build produced no files. Please try again"* and set
+   `ok:false`. The upsell block, 650 lines later, then computed
+   `refused = !stopped && looksLikeRefusal(result.summary)` — of THAT sentence. Measured:
+   `looksLikeRefusal(model's refusal) = true`, `looksLikeRefusal(our sentence) = false`. So it emitted
+   *"Add credits and I will complete it on the best engine"* — **report 03997004's sentence**, for
+   every refusal the safety triage does not catch (the triage stops pornography before a build; a model
+   that declines anything else still reached this path).
+2. **An edit's question was answered for the user.** `verifiedNoChangeSummary` fires on an edit of a
+   working app that wrote no files. When the model ASKED (*"navy or sky blue?"*), it replaced the
+   question with *"Nothing needed changing — I checked your app from end to end and it works."* The
+   request was dropped and the user was told it had been handled. Clarifying questions on edits are
+   common, so this was the more frequent of the two.
+
+Both are the headline class again: e628efd4 fixed the empty-build flip for `asked`, and neither the
+`declined` sibling in the same function nor the `asked` sibling one screen up was hunted.
+
+### The fix
+
+- **`src/server/AgentV3/turnAnswer.ts`** (pure): `readTurnAnswer` → `{ declined, asked }`, both
+  predicates imported, never re-implemented; `answeredWithoutBuilding`.
+- **Read once:** `const modelAnswer = readTurnAnswer(result.summary)` right after the empty-build
+  retry (the last MODEL run) and before any platform rewrite. The run proof, the verified-no-change
+  sentence, the empty-build flip and the upsell all read it. The retry still reads the FIRST
+  attempt's answer, through the same reader.
+- **Both platform sentences stand down** when the model answered instead of building
+  (`emptyBuildFailureSummary(…, askedTheUser, declined)`,
+  `verifiedNoChangeSummary({ modelAnsweredTheUser })`). A refusal and a question are both FINAL
+  answers, as `shouldRetryEmptyBuild` already said. **The bill is unchanged** — a zero-file turn is ₹0
+  either way.
+- `TURN_DECLINED` (process-only, never suggested) records a refusal left standing, because the
+  upsell's `UPSELL_SUPPRESSED(refused)` line no longer fires on that path.
+- `TURN_ANSWERED_A_QUESTION` is now recorded only on a zero-file turn — its sentence (*"not retried,
+  and not reported as an empty build"*) was false on a turn that built and then offered more.
+
+Five pinned guards were **widened, not weakened**: each pinned the old spelling of "the model's own
+answer is read" (`looksLikeRefusal(result.summary)`), which is exactly what was untrue at those lines.
+
+**Tests:** `tests/turnAnswerIsReadOnce.test.ts` — 16 cases, **reversion-proven six ways** (the flip
+ignoring a refusal; the verified sentence ignoring an answer, or not being given it; the upsell and the
+run proof reading the overwritten summary; the question note on a built turn).
+
+### 🔴 STILL OPEN (rule 6)
+
+- **The `stopped` half of `turnKind`.** "Was the build stopped?" has two definitions: the abort signal
+  (retry, run proof) and the stop-aware timeline, `buildWasStopped(…) || toolWasUsed('stop_build')`
+  (the upsell). A model's own `stop_build` call may not raise the abort signal, so those readers can
+  disagree about one build. Unifying them changes behaviour at three sites, so it is deliberately a
+  separate decision rather than folded in here.
+- **An enum nobody reads was not built.** The open item named `built/declined/asked/stalled/stopped`.
+  Only the answer half has readers today, so only it was built; an enum with no reader would be dead
+  code under the second absolute rule.

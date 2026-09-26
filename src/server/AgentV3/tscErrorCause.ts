@@ -266,6 +266,9 @@ export function packageOfSpecifier(specifier: string): string {
  * causes apart"; it is a live input to a third cause since 2026-09-19.) Deduplicated by `id`, so ten
  * errors from one missing package produce one line, and capped at `MAX_CAUSES`. PURE, never throws.
  */
+/** The recognition half of the Web Speech API, as the compiler reports it missing. */
+const WEB_SPEECH_RECOGNITION_RE = /(?:Cannot find name|Property) '(?:webkit)?(?:SpeechRecognition|SpeechRecognitionEvent|SpeechRecognitionErrorEvent|SpeechGrammarList)'/;
+
 export function tscErrorCauses(
   errors: readonly TscError[] | null | undefined,
   sources: Readonly<Record<string, string>> = {},
@@ -288,6 +291,25 @@ export function tscErrorCauses(
   for (const e of errors || []) {
     if (out.length >= MAX_CAUSES) break;
     const message = String(e?.message ?? '');
+
+    // THE WEB SPEECH API'S RECOGNITION HALF IS NOT IN TYPESCRIPT'S DOM TYPES (autopsy SignBridge,
+    // 2026-09-26: `src/lib/speech.ts` was written four times — each rewrite moved the same missing name
+    // somewhere else). `speechSynthesis` IS typed, so a model reasonably expects its sibling to be too.
+    // The browser has it; the compiler does not, and no package the app needs will add it. Said once,
+    // with the one shape that compiles, so the first error ends the loop instead of starting it.
+    if (WEB_SPEECH_RECOGNITION_RE.test(message)) {
+      add('web-speech-recognition-types',
+        'TypeScript ships no types for speech RECOGNITION (speechSynthesis is typed; SpeechRecognition, '
+        + 'webkitSpeechRecognition and SpeechRecognitionEvent are not). The browser API is real — the code '
+        + 'is not wrong, the compiler just has no declaration. Do not use those global names as types. Read '
+        + 'the constructor as `const Ctor = (window as unknown as { SpeechRecognition?: new () => SpeechRec; '
+        + 'webkitSpeechRecognition?: new () => SpeechRec }).SpeechRecognition ?? (window as unknown as { '
+        + 'webkitSpeechRecognition?: new () => SpeechRec }).webkitSpeechRecognition;` and declare a small '
+        + 'local `interface SpeechRec { lang: string; continuous: boolean; interimResults: boolean; '
+        + 'start(): void; stop(): void; onresult: ((e: any) => void) | null; onerror: ((e: any) => void) | '
+        + 'null; onend: (() => void) | null }` in the same file.');
+      continue;
+    }
 
     // Vite's client types — checked BEFORE the React member rule, because `ImportMeta` matches neither
     // but shares the "Property 'x' does not exist" shape and a reader would expect the specific one to win.

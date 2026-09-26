@@ -131,15 +131,24 @@ describe('wiring — every deterministic heal reports, and the route turns it in
     // Was 3 until 2026-08-10. The missing-import heal wrote files and never reported, and it is the
     // one the 2026-08-09 report showed repeating FIRST ("Added 2 missing import(s)" at t=126s, 216s
     // and 313s) — so the ledger was blind to the very case it was built to capture.
-    expect((dispatcher.match(/noteHeal\(this\.workspaceId,/g) || []).length).toBe(4);
+    // Since 2026-09-26 (autopsy SignBridge) every heal writes through ONE helper, `landHealWrite`, which
+    // notes the heal only when the write LANDED — a refused write used to be recorded, saved and announced.
+    // So the ledger call lives once, inside that helper, and the heals are counted at its call sites: the
+    // four file heals above plus the package.json dependency sync.
+    expect((dispatcher.match(/noteHeal\(this\.workspaceId,/g) || []).length).toBe(1);
+    expect((dispatcher.match(/await this\.landHealWrite\(/g) || []).length).toBe(5);
   });
 
   it('every heal hands over the content it READ, not just what it wrote', () => {
     // Without the before-content there is nothing to compare against and the cause is always unknown,
     // which is the state this whole change exists to leave behind.
-    const calls = dispatcher.match(/noteHeal\(this\.workspaceId,[^;]*\)/g) || [];
-    expect(calls).toHaveLength(4);
-    for (const call of calls) expect(call.split(',').length).toBeGreaterThanOrEqual(4);
+    const note = dispatcher.match(/noteHeal\(this\.workspaceId,[^;]*\)/g) || [];
+    expect(note).toHaveLength(1);
+    expect(note[0].split(',').length).toBeGreaterThanOrEqual(4);
+    // …and every call site hands the helper what it READ as its third argument.
+    const calls = dispatcher.match(/await this\.landHealWrite\([^)]*\)/g) || [];
+    expect(calls).toHaveLength(5);
+    for (const call of calls) expect(call.split(',').length).toBe(3);
   });
 
   it('it needed NO new dispatcher parameter — the reviewer runs on a CHILD dispatcher', () => {

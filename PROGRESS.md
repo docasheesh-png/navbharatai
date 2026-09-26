@@ -81943,6 +81943,94 @@ the open PR #3330 (`plannerCallLabel`, `makePlanTextRunner`), so this PR does no
 - "Added 1 missing dependency (@playwright/test)" was shown while Green Freeze had refused the write —
   claimed by open PRs #3330 (`landHealWrite`) and #3331 (the E2E scaffold no longer adds the dependency).
 - Billing question for the admin: should a build duplicated by our own concurrency bug be charged at all?
+## 2026-09-26 — Autopsy: SignBridge (a green build that was told to build things nobody asked for)
+
+Free-tier build `e950c69b`, a 20-section spec for an Indian Sign Language translator. It rendered, typechecked,
+built for production and was billed ₹409.68 (real cost $1.09 + VM). 22.7 minutes, rung 2 of 5 (complex → KIMI).
+Tests: `tests/theSignBridgeAutopsy.test.ts` (26), against the real prompt saved as `tests/fixtures/promptSignbridge.txt`.
+
+**Ledger.** ✅ self-healed 2 (1 missing import, design pages) · 🔀 workaround 2 (KIMI and GLM starved on the planner;
+Project Mode fell back to one-shot) · ⏭️ skipped 2 (review timed out at 45 s; journey unreachable) · ❌ shipped
+imperfect 6 (invented Map + Chat features with fake "nearby ISL schools"; an unused `@mediapipe/tasks-vision`;
+2 a11y findings; 41 off-grid spacing values the model added to `index.css`; tests that import `vitest` with no
+runner declared) · 🥵 struggle 5 (315 s planner for nothing; `speech.ts` written 4× over `SpeechRecognition`
+types; `App.tsx` written before its 7 pages → 9 write-time errors; 2 failed `edit_file`; a 239 s design repair
+of a false finding).
+
+**Fixed at the class (nine):**
+1. **The builder was ORDERED to build a map and a chat app.** `RequirementCoverage` read the verb "Map recognized
+   labels to …" and "clear status messages" as requests, and `renderRequestedFeatureContract` hands those labels
+   over as "not suggestions — build every one". `notRequest` + `featureAskedFor` (one test for the contract AND
+   the audit): the verb, "chat bubbles" and copy-messages ask for nothing; the noun still does.
+2. **Told it was a JOBS app** (off `resume()`), then social (status messages), then ecommerce ("Store … locally").
+   With `AGENTV3_REQUIREMENT_AWARE` on, that told the builder to INCLUDE employer roles and interview scheduling.
+   Three idiom rules in `NON_DOMAIN_USES`: a code call, "store X locally/in IndexedDB", copy-messages/chat bubbles.
+   The real prompt is now `general`; real jobs/social/shop prompts are unchanged (corpus + new cases).
+3. **Planners climbed the complex BUILD chain.** Project Mode's planner opened on `kimi-k2.7-code`, then `glm-5.3`;
+   both always reason and spent their 12 000-token allowance thinking → 315 s, no plan. `buildTurnRunner({ plan })`
+   climbs `planLadder`; roadmap, blueprint and Project Mode planners use `makePlanTextRunner`. The fast lane had
+   learned this; the planners were the sibling.
+4. **A failed planner blamed `claude-sonnet-4-6` on a weak build** (a false no-Claude alarm): the provider defaulted
+   to `'CLAUDE'`. `plannerCallLabel` says "no provider answered". Sibling of 4efab9d7.
+5. **"All 6 page routes rendered" — about six URLs the app does not serve.** A Vite app's `src/pages/ChatPage.tsx`
+   was read as Next's Pages Router (`/ChatPage`), uppercase sorted first and filled all six slots, and the catch-all
+   sent each home. `pagesFolderIsRouteTable` (Next only), and a new `redirected` verdict — neither pass nor fail;
+   all-redirected ⇒ `ran: false`; the gate reads `ran`.
+6. **`JOURNEY_PASSED` with 0 passed.** All-unreachable ⇒ `ran: false` (`JOURNEY_NOT_RUN`); `routeForFile` drops the
+   `Page/Screen/View` suffix so ChatPage finds `/chat`.
+7. **"Added 2 missing dependencies" — twice, for a write Green Freeze refused — and the refused content was SAVED.**
+   Five heal sites in `ToolDispatcher` swallowed the write and still called `onFileWrite`, which feeds the durable
+   save: the freeze held in the sandbox and was bypassed in the saved app (why the snapshot read STALE).
+   `landHealWrite` records, indexes and announces only a write that landed.
+8. **"⚠️ Build health check detected issues — preparing recovery…"** on a green app — the reviewer's parallel reads
+   counted as "stuck", and no recovery exists anywhere. Now the admin-only `CHECKPOINT_SIGNAL`.
+9. **A Settings page's literal option list** was sent to a 239 s paid repair for lacking an empty state. A list bound
+   to a literal in the same file is static. And the report redactor no longer eats a `=====` divider as a secret.
+
+**Still open, recorded rather than guessed:**
+- 🔴 **Passes that write the durable store directly** ("the store copy is fixed" — `routes/agentv3.ts` ~9384,
+  17453–17544, 17917, 18807, 21423) persist even when the sandbox write is refused by Green Freeze. Each needs its
+  own look; the class is the same as fix 7.
+- **Project Mode fired on a detailed ONE-app spec** (35 enumerated parts: "Complete source code", "README/setup
+  instructions" …). With the planner now fast, such a prompt would really be built module by module. Whether a
+  pasted ChatGPT-style spec is a "mega project" is an admin question, not a threshold to move quietly.
+- Write-time typecheck quotes `Cannot find module './pages/X'` for pages not yet written (top-down order) — noise.
+- The shared evidence ledger (the model re-verifies with tsc/build/screenshot) — unchanged, still open.
+
+## 2026-09-26 — SignBridge autopsy, round two (the ledger items #3330 left open)
+
+Admin asked whether every small problem in report e950c69b was root-caused. Round one (#3330) had not;
+this closes the rest, and says which items were examined and deliberately left.
+
+**Fixed:**
+- **Project Mode fired on ONE app** — `enumeratedFeatures` counted 35 "features" in a 7-part spec: every
+  prose sentence, every quoted UI string, every line of example code, and unspaced slashes ("image/video",
+  a folder listing). Now: code lines and quoted strings enumerate nothing, a long sentence with no list
+  opener is prose, a slash separates only with spaces. SignBridge counts 7; the school-ERP corpus still fires.
+- **Found on the way, pre-existing since `80b1d3f3e`:** `tidy()` deleted a bullet's FIRST LETTER with its
+  marker ("- Date" → "ate"), so a bulleted list of a record's columns slipped past the record-attribute
+  filter and counted as features.
+- **Speech-recognition types** — the model met `Cannot find name 'webkitSpeechRecognition'` four times and
+  was never told why. `tscErrorCause` now explains it once, with the shape that compiles under strict.
+- **"Runnable Vitest skeletons"** said about files importing a package the project lacks —
+  `starterTestsNarration` says runnable only when vitest is declared, else gives the install command.
+- **Six store-direct passes kept a fix Green Freeze had REFUSED** (the sibling of round one's heal-write
+  leak): `writeUnlessFrozen` returns false only on `GreenFreezeError`; a dead machine still keeps the fix.
+- **A suggest-only review that timed out was a WARNING about the app** — now `REVIEW_SUGGESTIONS_NOT_READY`,
+  process-only. Where the review could repair, `REVIEW_INCOMPLETE` stays a warning, never resolved.
+- **Two accessibility failures shipped while a paid design repair was running over the same pages** —
+  `a11yRepairAddendum` hands the linter's own fixes to THAT pass (no extra model call, never starts one),
+  and the result is recorded as `ACCESSIBILITY_HEALED` / `_PARTIALLY_HEALED`.
+
+**Examined, no change (and why):**
+- `edit_file` old_string misses (×2): the tool already returns the nearest match; the model recovered in one retry.
+- "README written twice": the report shows ONE write (a call/done pair), not two.
+- `@mediapipe/tasks-vision` unused: the model's own declaration; the `INTEGRITY_UNUSED_DEP` advisory is honest,
+  and auto-removal is unsafe (a runtime string-load is invisible to an import scan).
+- **Open:** accessibility failures on an app whose design is already clean get no repair — a pass for two
+  labels alone is not worth a model call; they stay an honest report line.
+
+Tests: `tests/theSignBridgeAutopsyRoundTwo.test.ts` (22).
 ---
 
 ## 2026-09-26 — THE MODEL'S ANSWER IS READ ONCE, BEFORE THE PLATFORM REWRITES IT (`turnKind`, the answer half)

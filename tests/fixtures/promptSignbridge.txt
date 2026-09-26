@@ -1,0 +1,214 @@
+Writing
+Build a complete, production-ready, mobile-first web application called:
+SIGNBRIDGE — Indian Sign Language + Voice Translator
+GOAL: Create a two-way communication application between a person using Indian Sign Language (ISL) and a person using spoken language.
+The application must have these five core capabilities:
+SIGN LANGUAGE → TEXT → VOICE
+VOICE → TEXT
+TEXT → SIGN LANGUAGE
+CAMERA-BASED SIGN RECOGNITION
+TWO-WAY REAL-TIME TRANSLATION
+IMPORTANT: Do not create a static mockup. Build a functional application with working UI, camera permission handling, microphone permission handling, speech recognition, text-to-speech, sign recognition architecture, sign library, and persistent local history.
+TECHNOLOGY: Use the platform's supported modern full-stack web technology. Use React/TypeScript if supported. Use browser APIs where available. Do not require Flutter. Keep the application responsive on Android mobile screens.
+==================================================
+HOME SCREEN ==================================================
+Create a clean home screen with:
+SIGNBRIDGE Indian Sign Language + Voice Translator
+Large buttons:
+[ SIGN → VOICE ] [ VOICE → SIGN ] [ TEXT → SIGN ] [ TWO-WAY MODE ]
+Additional buttons:
+[ Sign Library ] [ History ] [ Settings ]
+Show microphone and camera permission status.
+================================================== 2. SIGN → VOICE
+Create a camera-based sign recognition screen.
+UI:
+Camera preview Recognition status Detected sign Translated text Confidence Speak button Clear button
+Flow:
+Camera → hand/sign detection → recognized sign → text → text-to-speech
+Use the browser/device camera through getUserMedia where supported.
+Request camera permission properly.
+If the recognition model is unavailable, show:
+"Sign recognition model is not installed yet."
+Do NOT fake recognition.
+Create a modular SignRecognizer interface so a real ML model can be connected later.
+Example architecture:
+SignRecognizer ├── initialize() ├── startCamera() ├── recognizeFrame() ├── stop() └── dispose()
+Keep the recognition engine separate from the UI.
+================================================== 3. SIGN RECOGNITION MODEL ADAPTER
+Create a replaceable model adapter.
+Create:
+SignRecognitionEngine
+with support for:
+MediaPipe-compatible hand landmarks
+TensorFlow.js-compatible models
+Custom trained ISL model
+The application must be designed so that a trained model can later be inserted without rewriting the UI.
+Expected recognition result:
+{ sign: "HELLO", confidence: 0.92, timestamp: ... }
+Only accept a sign when confidence passes a configurable threshold.
+Do not invent a recognition result when no model is available.
+================================================== 4. VOICE → TEXT
+Use Web Speech API where supported.
+Create:
+SpeechRecognitionManager
+Functions:
+startListening() stopListening() isSupported()
+Display:
+Listening... Recognized speech Language
+Support:
+English Hindi
+Add language selector.
+English: en-IN
+Hindi: hi-IN
+If Speech Recognition is unsupported, show a clear compatibility message.
+================================================== 5. TEXT → VOICE
+Use SpeechSynthesis API.
+Create:
+TextToSpeechManager
+Functions:
+speak(text, language) stop() pause() resume()
+Provide:
+[ Speak ] [ Stop ]
+Use Indian English and Hindi voices where available.
+Do not crash if a particular voice is unavailable.
+================================================== 6. TEXT → SIGN LANGUAGE
+Create a sign-language animation system.
+Input:
+Hello
+Output:
+HELLO sign animation
+Create a Sign Library data structure:
+Sign { id word language category animationUrl videoUrl imageUrl description }
+Initially include a small starter vocabulary such as:
+HELLO THANK YOU YES NO PLEASE SORRY HELP GOOD BAD WATER FOOD HOME NAME WHAT WHERE COME GO STOP WAIT
+IMPORTANT: Do not claim that an invented animation is an authentic ISL sign.
+If an authentic sign asset is unavailable, display:
+"Sign asset not available."
+Create the system so authentic ISL videos/animations can be added later.
+================================================== 7. TWO-WAY MODE
+Create a split-screen communication interface.
+Person A:
+Camera → Sign → Text → Voice
+Person B:
+Microphone → Voice → Text → Sign
+Allow continuous conversation.
+Display messages as chat bubbles.
+Example:
+Person A: [HELLO]
+Person B: [Hello!]
+Add:
+[Start Conversation] [Pause] [Clear]
+================================================== 8. SIGN LIBRARY
+Create searchable sign library.
+Categories:
+Greetings Daily Communication Food Travel Emergency Family Numbers Education Work
+Each sign card should contain:
+Word Meaning Sign image/video/animation if available Play button
+Search bar:
+Search signs...
+================================================== 9. HISTORY
+Store translation history locally.
+Each record:
+id inputType inputText outputText language timestamp
+Provide:
+Delete Clear all history
+Use localStorage or IndexedDB.
+Do not send private conversation data to a server unless explicitly enabled by the user.
+================================================== 10. PRIVACY
+Create a Privacy section.
+Clearly explain:
+Camera is used for sign recognition. Microphone is used for speech recognition. Local history stays on the device unless cloud storage is explicitly enabled.
+Never secretly record audio/video.
+Do not upload camera frames unless the user has explicitly enabled a server/model that requires it.
+================================================== 11. SETTINGS
+Settings:
+Language: English Hindi
+Speech speed: 0.75x 1x 1.25x 1.5x
+Recognition confidence threshold: Adjustable
+Auto speak: ON/OFF
+Auto translation: ON/OFF
+Dark mode: ON/OFF
+Clear history
+Reset application
+================================================== 12. ERROR HANDLING
+Handle:
+Camera denied Microphone denied Camera unavailable Microphone unavailable Speech recognition unsupported Speech synthesis unsupported No sign model installed No sign asset available Network unavailable Browser incompatibility
+Never show fake successful recognition.
+Use clear messages such as:
+"Camera permission is required for sign recognition."
+"Your browser does not support speech recognition."
+"No trained sign-recognition model is connected."
+================================================== 13. ACCESSIBILITY
+Make the application accessible.
+Include:
+Large buttons High contrast Keyboard navigation ARIA labels Readable typography Clear status messages
+The app must remain usable on mobile.
+================================================== 14. UI DESIGN
+Design style:
+Modern Clean Professional Accessible Minimal
+Main colors:
+White Dark navy Blue accent
+Use rounded cards and large touch targets.
+Home screen should immediately show the two main actions:
+SIGN → VOICE
+VOICE → SIGN
+================================================== 15. PROJECT STRUCTURE
+Organize the project cleanly:
+src/ components/ pages/ services/ recognition/ speech/ signs/ storage/ types/ utils/
+Important files:
+SignRecognizer SpeechRecognitionManager TextToSpeechManager SignAnimationManager TranslationService HistoryService CameraManager
+================================================== 16. SECURITY
+Never place private API keys directly in frontend source code.
+Use environment variables for server-side secrets.
+Validate user input.
+Do not expose private credentials.
+================================================== 17. DEMO MODE
+Create an optional clearly labelled:
+DEMO MODE
+Demo mode must NOT pretend to be real AI recognition.
+It can allow the user to select a sign manually from the Sign Library to demonstrate:
+Sign → Text → Voice
+Label everything clearly as:
+DEMO — MANUAL SIGN SELECTION
+================================================== 18. MODEL INTEGRATION
+Create a documented integration point for a real trained ISL model.
+The application should accept a model that returns:
+label confidence
+Example:
+{ "label": "HELLO", "confidence": 0.94 }
+Map recognized labels to the sign dictionary.
+Use a debounce/stability mechanism so one gesture held for multiple camera frames does not repeatedly create dozens of translations.
+================================================== 19. PERFORMANCE
+Optimize camera processing.
+Do not process every frame unnecessarily.
+Use a configurable recognition interval.
+Release camera tracks when leaving the camera screen.
+Prevent memory leaks.
+Stop speech recognition when leaving the page.
+================================================== 20. FINAL REQUIREMENT
+Generate the COMPLETE APPLICATION.
+Do not return only a design. Do not return pseudocode. Do not return placeholder buttons that do nothing.
+Every possible feature should be functional.
+Where external ML model files or authentic ISL sign assets are genuinely required, create the complete integration interface and clearly identify exactly where those assets must be added.
+Include:
+Complete source code
+Complete project structure
+Configuration files
+Responsive UI
+Camera functionality
+Microphone functionality
+Speech recognition
+Text-to-speech
+Sign library
+Translation history
+Two-way mode
+Model integration layer
+Error handling
+Accessibility
+Privacy controls
+README/setup instructions
+Before finalizing, run the application's available build/test process and fix compilation/runtime errors that are detectable in the generated environment.
+APPLICATION NAME: SIGNBRIDGE
+TAGLINE: "Connecting Signs, Voice and People."
+इसे पूरा का पूरा एक साथ NavBharat AI में paste करो।
+इसके बाद जो build error, preview error, या generated project मिले, उसका screenshot यहाँ भेज देना—मैं उसी के हिसाब से अगला code/fix दूँगा।

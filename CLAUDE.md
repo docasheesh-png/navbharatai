@@ -3232,9 +3232,17 @@ the flag entries above promise.
   platform sentences stand down when the model answered instead of building; `TURN_DECLINED` records
   it. ⚠️ **Never add a reader that asks `looksLikeRefusal(result.summary)` or `turnAskedTheUser(…)`
   late in the route** — `tests/turnAnswerIsReadOnce.test.ts` fails on either call appearing there.
-  🔴 **STILL OPEN: the `stopped` half.** "Was the build stopped?" has two definitions — the abort
-  signal (retry, run proof) and the stop-aware timeline (the upsell) — and unifying them changes
-  behaviour at three sites, so it is its own decision.
+  ✅ **THE `stopped` HALF IS CLOSED TOO (2026-09-26, the same day) — and the premise first written here
+  was WRONG, which is the part worth keeping.** It said "a model's own `stop_build` call may not raise
+  the abort signal". It does: the Stop button, Unsend and `stop_build` ALL go through
+  `abortBuild(…, 'user-stop')`, so the signal is the complete source, and the retry (abort signal)
+  and the upsell (`USER_STOPPED_BUILD`) are not disagreeing — they ask different questions ("did the
+  run end early at all?" vs "was a capability ever judged?"). **Unifying them would have been wrong.**
+  The one real gap: the upsell's question was answered from `USER_STOPPED_BUILD` alone, which our OWN
+  interruptions (deploy drain, lock takeover, reaper, unknown) never write — so a build OUR server cut
+  short could be told to buy a stronger engine. `interruptedBeforeAnyVerdict(cause)`
+  (`buildAbortCause.ts`, exhaustive over `AbortCause`) now reads the signal's cause, and the upsell
+  stands down on `interrupted` with its own record. It can only suppress an upsell; it moves no money.
   ✅ **`WRITE_TIME_TYPECHECK` now sits AFTER the retry block.** It was above it, so on any retried
   build the line described the ABANDONED attempt — the fourth time that one sentence has been wrong,
   from a third distinct cause. The trace that unblocked it: there is exactly ONE build

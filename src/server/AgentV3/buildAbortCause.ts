@@ -162,3 +162,50 @@ export function abortSummary(cause: AbortCause, ctx: AbortSummaryContext = {}): 
 export function isUserInitiated(cause: AbortCause): boolean {
   return cause === 'user-stop';
 }
+
+/**
+ * Did this abort end the build BEFORE an engine's capability could be judged?
+ *
+ * 🔴 THE QUESTION THE FREE-TIER UPSELL ASKS, AND THE EVIDENCE IT USED WAS INCOMPLETE (2026-09-26).
+ * The upsell may say *"your app needs our strongest engine — add credits"* only when an engine was
+ * really asked to build and could not. `buildWasStopped`'s own docblock names that question —
+ * *"did this build reach the point of having a capability to judge?"* — and answers it from
+ * `USER_STOPPED_BUILD` alone, which only a user or model stop writes. Our OWN interruptions never
+ * write it: a deploy draining in-flight builds, a newer build reclaiming the lock, the zombie reaper.
+ * Each of those reached the upsell as though an engine had tried and failed, and could be told to
+ * buy a stronger one for a build OUR server cut short.
+ *
+ * The cause on the signal is the one source that cannot be wrong about why a build ended (every stop
+ * path goes through `abortBuild`), so this reads that.
+ *
+ * TRUE — nothing to judge: the user or the model stopped it, our infrastructure interrupted it, or
+ *   the cause is unknown (an abort we cannot explain must never be sold as an engine limit).
+ * FALSE — the engine WAS asked and ran out: the wall-clock watchdog, the futility breaker and the
+ *   cost ceiling. Those are left to the upsell's own readings (degraded / misconfigured / starved /
+ *   engine), exactly as before. `advisory-cap` fires only after a build already succeeded, so it never
+ *   reaches the upsell; it is FALSE for the same reason.
+ *
+ * ⚠️ It can only SUPPRESS an upsell, never open one, and it moves no money: every one of these builds
+ * is billed by the rules that already applied to it.
+ */
+export function interruptedBeforeAnyVerdict(cause: AbortCause): boolean {
+  switch (cause) {
+    case 'user-stop':
+    case 'deploy-drain':
+    case 'lock-reclaimed':
+    case 'reaper':
+    case 'unknown':
+      return true;
+    case 'watchdog':
+    case 'futile':
+    case 'cost-cap':
+    case 'advisory-cap':
+      return false;
+    default: {
+      // Exhaustive: a tenth cause added to `AbortCause` fails to compile here until someone decides
+      // which side of this line it belongs on.
+      const unreachable: never = cause;
+      return unreachable;
+    }
+  }
+}

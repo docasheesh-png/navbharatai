@@ -47,6 +47,9 @@ const PROCESS_ONLY_CODES = new Set([
   // …and its sibling: how far down OUR ladder a build fell (ladderDepth.ts) is a fact about our
   // routing, never about the user's app.
   'LADDER_DEPTH',
+  // A repair write OUR guard refused (repairScope.ts) is a fact about our repair pass — the file on
+  // disk was left as it was — never a finding against the user's app.
+  'REPAIR_WRITE_REFUSED',
   // A file OUR OWN post-build pass repaired is a fact about this engine, not a defect in the user's
   // app (autopsy 53d43c18). It is recorded as a warning so it is legible in the report and so a rising
   // rate is visible, but it must never count against the app or colour the release gate.

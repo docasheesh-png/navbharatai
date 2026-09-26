@@ -304,7 +304,7 @@ import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/lane
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled } from '../AgentV3/fastLaneRung';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
-import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, type RepairStrategy } from '../AgentV3/SimpleBuilder';
+import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, offendingFiles, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
 import { buildNestedRepoCommand, parseNestedRepoRoots, nestedRepoNote } from '../AgentV3/nestedRepoProbe';
 // The sandbox's workspace root, from the module CLAUDE.md names as this class's one home (the
@@ -516,6 +516,7 @@ import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../A
 import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary } from '../AgentV3/buildQualityLint';
 import { abortBuild, abortCauseOf } from '../AgentV3/buildAbortCause';
+import { scopeRepairFiles, repairScopeNote, type RepairFile } from '../AgentV3/repairScope';
 import { buildLeaseEnabled, claimBuildLease, holdBuildLease, readLiveBuildLease, requestRemoteStop, BUILD_HELD_ELSEWHERE_MESSAGE, type BuildLeaseStore } from '../AgentV3/workspaceBuildLease';
 import { processOwnerId } from '../lib/jobLease';
 import { workspaceHoldsUserApp, userOwnedFileCount } from '../AgentV3/userProjectFiles';
@@ -17174,7 +17175,18 @@ async function noteBuildOutcome(
             // Same guard the fast lane now carries: a REPAIR aimed at a file we own and that has one
             // correct form is replaced with that form. The restore above already put it back once — this
             // is what stops this very pass from immediately undoing that and starting the loop again.
-            const guarded = protectBoilerplateInRepair(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })));
+            // SCOPE FIRST (repairScope.ts): the pass may write the files it was shown and the files the
+            // compiler named; a new file only when an error or an import points at it. The 2026-09-26
+            // autopsy's repair wrote `relative/path.ext` and a whole invented auth app into a game.
+            const tscScoped = scopeRepairFiles(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })), {
+              allowed: [...currentFiles.map((f) => f.path), ...offendingFiles(check.errors, [...writtenFiles.keys()])],
+              errors: check.errors,
+              existing: writtenFiles,
+            });
+            if (tscScoped.refused.length > 0) {
+              buildDiag.record({ phase: 'build', severity: 'warning', code: 'REPAIR_WRITE_REFUSED', message: repairScopeNote('typecheck', tscScoped.refused), autoResolved: true });
+            }
+            const guarded = protectBoilerplateInRepair(tscScoped.kept);
             const fixes = guarded.files;
             if (guarded.overridden.length > 0) {
               buildDiag.record({
@@ -17312,7 +17324,17 @@ async function noteBuildOutcome(
                 ],
                 tools: [], maxTokens: 8000,
               });
-              const created = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
+              const createdScoped = scopeRepairFiles(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })), {
+                // The importers (whose wrong paths it may correct) are in scope; a missing module is created
+                // only because an importer points at it — `missing` is extensionless, so the import check,
+                // not an exact path, is what recognises `src/hooks/useAuth.ts`.
+                allowed: importerPaths,
+                existing: writtenFiles,
+              });
+              if (createdScoped.refused.length > 0) {
+                buildDiag.record({ phase: 'build', severity: 'warning', code: 'REPAIR_WRITE_REFUSED', message: repairScopeNote('missing-files', createdScoped.refused), autoResolved: true });
+              }
+              const created: RepairFile[] = createdScoped.kept;
               for (let i = 0; i < created.length; i++) {
                 await dispatcher.dispatch({ id: `missfiles-w${i}`, name: 'write_file', input: { path: created[i].path, content: created[i].content } }, 'frontend');
               }
@@ -17377,7 +17399,13 @@ async function noteBuildOutcome(
                 ],
                 tools: [], maxTokens: 8000,
               });
-              const fixed = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
+              const syntaxScoped = scopeRepairFiles(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })), {
+                allowed: brokenPaths, allowCreate: false,
+              });
+              if (syntaxScoped.refused.length > 0) {
+                buildDiag.record({ phase: 'build', severity: 'warning', code: 'REPAIR_WRITE_REFUSED', message: repairScopeNote('syntax', syntaxScoped.refused), autoResolved: true });
+              }
+              const fixed: RepairFile[] = syntaxScoped.kept;
               for (let i = 0; i < fixed.length; i++) {
                 await dispatcher.dispatch({ id: `syntax-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend');
               }
@@ -17447,7 +17475,13 @@ async function noteBuildOutcome(
                 ],
                 tools: [], maxTokens: 8000,
               });
-              const fixed = parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content }));
+              const exportScoped = scopeRepairFiles(parseFileBlocks(t.text).map((b) => ({ path: b.path, content: b.content })), {
+                allowed: targets.map((x) => x.target), allowCreate: false,
+              });
+              if (exportScoped.refused.length > 0) {
+                buildDiag.record({ phase: 'build', severity: 'warning', code: 'REPAIR_WRITE_REFUSED', message: repairScopeNote('missing-export', exportScoped.refused), autoResolved: true });
+              }
+              const fixed: RepairFile[] = exportScoped.kept;
               for (let i = 0; i < fixed.length; i++) {
                 await dispatcher.dispatch({ id: `missexport-w${i}`, name: 'write_file', input: { path: fixed[i].path, content: fixed[i].content } }, 'frontend');
               }

@@ -35,6 +35,7 @@ import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 import { wireOrphanPages } from './orphanPageWiring';
 import { injectGlobalStylesheetImport } from './ProjectIntegrityChecks';
 import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, canAffordSharedContract, preambleBailReason } from './FastLaneBudget';
+import { scopeRepairFiles, repairScopeNote } from './repairScope';
 
 export interface SimpleFileSpec {
   path: string;
@@ -1649,6 +1650,19 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       try { fixed = await deps.repair(repairErrors, [...byPath.values()], contract, strategy, contractPath || undefined); } catch { fixed = []; }
       finally { clock.repairMs += Date.now() - repairStartedAt; clock.repairRuns++; }
       fixed = fixed.filter((f) => f && f.path && f.content);
+      // SCOPE (repairScope.ts, autopsy 2026-09-26): the same rule the agentic gates apply — a repair
+      // writes the files it was shown or the compiler named, and a NEW file only when an error or an
+      // import points at it. A template path (`relative/path.ext`, copied from this lane's own output
+      // format) or an invented file nobody imports is refused, never written.
+      {
+        const scoped = scopeRepairFiles(fixed, {
+          allowed: [...byPath.keys(), ...offendingFiles(repairErrors, [...byPath.keys()])],
+          errors: repairErrors,
+          existing: new Map([...byPath].map(([p, f]) => [p, f.content])),
+        });
+        if (scoped.refused.length > 0) deps.log?.(repairScopeNote('compile', scoped.refused));
+        fixed = scoped.kept as OneShotFile[];
+      }
       if (!fixed.length) break;
       // PREVENTION BY CONSTRUCTION, not by persuasion. A repair aimed at a file we own and that has one
       // correct form is replaced with that form — the model may propose it, it cannot land it. This is

@@ -82015,3 +82015,31 @@ run proof reading the overwritten summary; the question note on a built turn).
 - **An enum nobody reads was not built.** The open item named `built/declined/asked/stalled/stopped`.
   Only the answer half has readers today, so only it was built; an enum with no reader would be dead
   code under the second absolute rule.
+
+## 2026-09-26 — Referral claims are COUNTED: who tried, who was paid, why the rest were refused (PR #3328)
+
+Admin, with a screen of ten new accounts all at ₹0: *"abhi bhi token nahi mil rahe"*, then *"han banao counter"*.
+
+**Root cause of the ₹0 screen (verified, no code fault):** the app live on Play is build **134**
+(`5d881757`, 2026-09-25). It predates #3321, so it has NO automatic claim: a user must open the referral
+screen and tap *Claim ₹100* per step. Builds **135/136** (built 2026-09-26) carry the auto-claim and the
+pinned rewards card but are not on Play yet. On the website nothing pays until a mobile is verified by
+OTP — the admin's own rule. **Action for the admin: put build 136 on Play.**
+
+**The gap this closes:** the referral records store only what was PAID, so "nobody tried" and "the
+device check refused every real phone" were indistinguishable — both ₹0, no trace. New:
+- `src/server/lib/referralClaimOutcomes.ts` — one doc per UTC day (`referral_claim_outcomes`, counts
+  only) + one marker per (person, day) (`referral_claim_people`, digest id, 7-day TTL) so the tally
+  counts people, not app opens. Outcomes: paid · nothing-new · held-no-mobile · step-not-done ·
+  device-refused · device-unavailable · device-failed-on-phone · error; device refusals keep their
+  CLASS (`deviceRefusalCategory`: app-not-play-recognized, device-integrity, token-rejected-4xx, …).
+- Wired at every exit of `/api/referral/:uid/claim` (both surfaces), never awaited.
+- `POST /api/referral/:uid/claim-failed` — the phone could not produce a device token, so the claim
+  never reached the server. Counted, pays nothing. The client beacon (`referralClaim.ts`) reaches the
+  Android app only with the NEXT `.aab`; build 134–136 do not send it.
+- Admin → Reports → Referral cost now shows **Claims — last 14 days** with a one-line headline.
+- Test-locked and reversion-proven in `tests/referralClaimsAreCounted.test.ts`, including a ratchet
+  that reads every refusal detail out of `deviceIntegrity.ts` so a new one cannot fall into `other`.
+
+⚠️ **Not counted:** the `/redeem` route's device refusals (applying a code) — attribution, not payment.
+Counting starts at deploy; earlier claims are not in the numbers.

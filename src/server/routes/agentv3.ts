@@ -386,6 +386,7 @@ import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates, lastGroundingCost } from '../AgentV3/ContextReranker';
 import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextBudget';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
+import { renderCheckConsoleSince } from '../AgentV3/renderCheckConsole';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, partitionServerDown, type RuntimeError } from '../AgentV3/AutoFix';
 import { provenFromTimeline } from '../AgentV3/provenFromTimeline';
 import { appRenderedRecord } from '../AgentV3/renderProof';
@@ -18982,6 +18983,8 @@ async function noteBuildOutcome(
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 30_000)
       ) {
         try {
+          // This check's own window — see renderCheckConsole.ts (autopsy 7d79254b).
+          const rescueCheckStartedAt = Date.now();
           const shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl');
           // TRUE WHEN WE ARE SURE, `undefined` WHEN WE ARE NOT — never `false`.
           //
@@ -18997,7 +19000,7 @@ async function noteBuildOutcome(
             hasFrontendFiles: hasFrontendSource(writtenFiles.keys()) ? true : undefined,
           }), await starterShownOn(shot.html));
           let consoleErrs: string[] = [];
-          try { if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text); } catch { /* console capture best-effort */ }
+          try { if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: rescueCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text); } catch { /* console capture best-effort */ }
           // A deterministic runtime-crash blocker (a Rules-of-Hooks violation etc.) renders fine on the
           // first paint and crashes on a later re-render — a one-shot snapshot can't see it, so it must
           // veto the rescue (real report 8a6e4585: useMemo@useChartData.ts:86 crashed the preview the
@@ -19056,6 +19059,10 @@ async function noteBuildOutcome(
         let serverRevivals = 0;
         for (let attempt = 0; attempt <= healMax && !abort.signal.aborted; attempt++) {
           let shot: { html: string; painted?: boolean; source?: 'browser' | 'curl' };
+          // 🔴 THIS CHECK IS JUDGED BY ITS OWN CONSOLE, NOT THE WHOLE BUILD'S (autopsy 7d79254b). The log
+          // is append-only, so reading from buildStartedAt let one line recorded before a repair condemn
+          // every check after it — the repair could not succeed by construction. renderCheckConsole.ts.
+          const verifyCheckStartedAt = Date.now();
           try {
             shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl');
           } catch { break; /* couldn't open the preview (no browser / timeout) — skip silently */ }
@@ -19063,7 +19070,7 @@ async function noteBuildOutcome(
           const verdict = withStarterVerdict(analyzePreviewHtml(html, { painted: shot.painted, source: shot.source }), await starterShownOn(html));
           let consoleErrs: string[] = [];
           try {
-            if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text);
+            if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: verifyCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text);
           } catch { /* console capture is best-effort */ }
           if (!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true;
           if (verdict.rendered && consoleErrs.length === 0 && await renderIsOnlyTheStarter()) {
@@ -19904,7 +19911,7 @@ async function noteBuildOutcome(
             const verdict = withStarterVerdict(analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source }), await starterShownOn(shot.html));
             let consoleErrs: string[] = [];
             try {
-              if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, buildStartedAt)).errors).map((e) => e.text);
+              if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: proofStartedAt, buildStartedAt }))).errors).map((e) => e.text);
             } catch { /* console capture is best-effort — its absence must not invent a verdict */ }
             // The SAME two bars the main verify loop uses, deliberately not a looser pair.
             const starterOnly = verdict.rendered && consoleErrs.length === 0 && await renderIsOnlyTheStarter();

@@ -82029,3 +82029,9 @@ run proof reading the overwritten summary; the question note on a built turn).
   "Added @playwright/test" (#3330 `landHealWrite`, #3331 E2E scaffold marker).
 - **Still open:** 109 steps after READY in build C and 13–14 min to first render (struggle, not yet
   root-caused); design grades D/C; an unused drei/fiber pair; the ₹648.76 refund decision (admin's).
+- **Closed — 49 refused restore writes after green (build C, 09:49:37–09:50:26).** Three route restores
+  of the durable store and the shared asset restore ran without the `sandbox-file-restore` pass name, so
+  Green Freeze refused the app's own files and asked the user to "reply" about each. Named at all four
+  (the asset restore names itself). Which caller fired at 09:49 is not in the report; all four were
+  unnamed, so all four are fixed.
+

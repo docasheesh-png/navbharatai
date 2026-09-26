@@ -2941,6 +2941,16 @@ the flag entries above promise.
   storage), so why the model gave up on the real errors is not established. The same minutes show the
   parallel build's `npm install` rewriting `node_modules` (`tsc: No such file or directory` at 09:41) — the
   lease above closes that cause; this guard is what makes the next unknown cause harmless.
+- **🧊 A GREEN APP MAY RESTORE ITS OWN FILES (same autopsy, 2026-09-26; no flag).** After build C was
+  verified working, copying the app's OWN saved files back into its sandbox was refused one file at a time
+  — **49 `GREEN_FREEZE_DEFERRED` lines**, each telling the user *"Reply if you want this change made"*,
+  one about `.nbai-landing.tar.gz`. A write with no pass name is an unknown writer to the freeze, and the
+  actuator's restore had been named `sandbox-file-restore` on 2026-08-20 while its three route siblings
+  (preview revive, the restore-files route, the build-start data-loss restore) and the shared asset
+  restore never were — the headline class once more. All three now carry the name, and
+  `restoreWorkspaceAssets` **names itself**, so a fourth caller cannot forget it. ⚠️ `writeWorkspaceFiles`
+  is deliberately NOT named inside: it also lands IMPORTS, which are not restores. Source-guarded and
+  reversion-proven in `tests/aGreenAppMayRestoreItsOwnFiles.test.ts`.
 - **`AGENTV3_FASTLANE_REASONING_GATE`** (default ON, `off` reverts — added 2026-09-23, autopsy ac41a924,
   PR #3278). The fast lane is skipped when the build opens on a model that ALWAYS reasons
   (`modelAlwaysReasons`). Its single plan call is capped at 90 s, a cap sized for a rung that answers

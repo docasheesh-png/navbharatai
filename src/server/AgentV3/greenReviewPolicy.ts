@@ -163,6 +163,9 @@ export function toReviewSuggestions(
     String(t ?? '')
       .replace(/^\s*\[(critical|warning|major|minor|high|low)\]\s*/i, '')
       .replace(/^\s*(critical|warning)\s*:\s*/i, '')
+      // "(confidence: high)" is the reviewer's instruction to US (M4-S4.1), not a sentence for the user:
+      // autopsy b10aae9a's user read "1. (confidence: high) TypeScript build errors are present."
+      .replace(/^\s*\(confidence:\s*\w+\)\s*/i, '')
       .trim();
   const out: ReviewSuggestion[] = [];
   for (const it of items || []) {

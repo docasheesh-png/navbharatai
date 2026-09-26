@@ -710,6 +710,11 @@ describe('AgentRunner — mandatory readiness gate (R2 §1.1)', () => {
     const client = new ClaudeClient(scriptedClient([
       { content: [{ type: 'tool_use', id: 'w', name: 'write_file', input: { path: 'src/App.tsx', content: 'x' } }], stop_reason: 'tool_use', usage: { input_tokens: 10, output_tokens: 5 } },
       { content: [{ type: 'text', text: 'Build complete.' }], stop_reason: 'end_turn', usage: { input_tokens: 5, output_tokens: 5 } },
+      // A NOT-READY prose ending is now handed the gate's blockers and resumed, at most twice
+      // (unfinishedResume.ts, autopsy 121c2431) — this model says the same thing both times, so the
+      // build still ends exactly where these tests expect it to.
+      { content: [{ type: 'text', text: 'Build complete.' }], stop_reason: 'end_turn', usage: { input_tokens: 5, output_tokens: 5 } },
+      { content: [{ type: 'text', text: 'Build complete.' }], stop_reason: 'end_turn', usage: { input_tokens: 5, output_tokens: 5 } },
     ]));
     return new AgentRunner({
       client, dispatcher: dispatcher as never, state, events: stream,

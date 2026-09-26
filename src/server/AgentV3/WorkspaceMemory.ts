@@ -61,6 +61,24 @@ export interface Episode {
   kind: EpisodeKind;
   text: string;
   file?: string;
+  /**
+   * When a later check proved this error gone. Only COMPILE-class errors get one (see
+   * `isCompileErrorText`), set by `markTscClean`. The episode is KEPT — the mistake ledger and the
+   * reflection pass learn from the history — but it is no longer shown to an agent as a current error.
+   */
+  resolvedAt?: number;
+}
+
+/**
+ * Is this recorded error one a clean, whole-project compile makes stale? The texts are the ones this
+ * repo writes (`ToolDispatcher`): the write-time check, the `typecheck` tool, the syntax pass, a refused
+ * syntax-breaking write, and a shell `tsc` that failed. A lint, package or API-graph error is NOT
+ * resolved by tsc passing, so it is deliberately not matched. PURE.
+ */
+export function isCompileErrorText(text: string): boolean {
+  const t = String(text ?? '');
+  return /^(write-typecheck:|typecheck:|syntax:|\[BLOCKED-SYNTAX\])/.test(t)
+    || /^bash failed \(exit \d+\): [^\n]*\btsc\b/.test(t);
 }
 
 export interface MemorySnapshot {
@@ -317,7 +335,24 @@ export class WorkspaceMemory {
   private lastWriteAt = 0;
 
   markDepsInstalled(): void { this.depsInstalledAt = Date.now(); }
-  markTscClean(): void { this.tscCleanAt = Date.now(); }
+  /**
+   * A whole-project compile came back clean. Besides the verification ledger, it RESOLVES every
+   * compile-class error recorded before it — without this, `projectMap()` kept handing those errors to
+   * every later agent as "Recent errors" for ever. Autopsy b10aae9a: the reviewer read two builds' worth
+   * of fixed `write-typecheck` errors, after `tsc` and `npm run build` had both passed, and reported
+   * "[CRITICAL] TypeScript build errors are present" — which reached the user's summary as a thing to fix.
+   */
+  markTscClean(ts: number = Date.now()): void {
+    this.tscCleanAt = ts;
+    for (const e of this.episodes) {
+      if (e.kind === 'error' && e.resolvedAt === undefined && e.ts <= ts && isCompileErrorText(e.text)) e.resolvedAt = ts;
+    }
+  }
+
+  /** Errors still open — what an agent may be told is currently wrong. */
+  openErrors(): Episode[] {
+    return this.episodes.filter((e) => e.kind === 'error' && e.resolvedAt === undefined);
+  }
 
   /** Prompt-ready shared verification state; '' when nothing is verified yet. */
   verificationStatus(): string {
@@ -340,8 +375,11 @@ export class WorkspaceMemory {
   // `ts` is optional so a RESTORE from durable storage can preserve each episode's ORIGINAL time
   // instead of re-stamping it to now() — otherwise recency ranking in recall() treats every restored
   // episode as brand-new, inflating old errors/lessons and corrupting cross-session confidence.
-  private episode(kind: EpisodeKind, text: string, file?: string, ts?: number): void {
-    this.episodes.push({ ts: typeof ts === 'number' && ts > 0 ? ts : Date.now(), kind, text: text.slice(0, 2000), file });
+  private episode(kind: EpisodeKind, text: string, file?: string, ts?: number, resolvedAt?: number): void {
+    const ep: Episode = { ts: typeof ts === 'number' && ts > 0 ? ts : Date.now(), kind, text: text.slice(0, 2000), file };
+    // Set only when real: an `undefined` field is a value Firestore refuses to store.
+    if (typeof resolvedAt === 'number' && resolvedAt > 0) ep.resolvedAt = resolvedAt;
+    this.episodes.push(ep);
     if (this.episodes.length > MAX_EPISODES) this.episodes.splice(0, this.episodes.length - MAX_EPISODES);
   }
   recordRequest(text: string, ts?: number): void { this.episode('request', text, undefined, ts); }
@@ -362,7 +400,7 @@ export class WorkspaceMemory {
   recentRequests(limit = 3): string[] {
     return this.episodes.filter((e) => e.kind === 'request').slice(-Math.max(1, limit)).map((e) => e.text);
   }
-  recordError(text: string, file?: string, ts?: number): void { this.episode('error', text, file, ts); }
+  recordError(text: string, file?: string, ts?: number, resolvedAt?: number): void { this.episode('error', text, file, ts, resolvedAt); }
   recordFix(text: string, file?: string, ts?: number): void { this.episode('fix', text, file, ts); }
   recordNote(text: string, file?: string, ts?: number): void { this.episode('note', text, file, ts); }
   /** Governance decision-audit trail (Layer 58). Recorded but NOT fed back as a
@@ -541,7 +579,8 @@ export class WorkspaceMemory {
   projectMap(): string {
     const g = this.graph();
     if (g.files.length === 0 && this.episodes.length === 0) return '';
-    const recentErrors = this.episodes.filter((e) => e.kind === 'error').slice(-3).map((e) => `  - ${e.text.slice(0, 100)}`);
+    // OPEN errors only: an error a later clean compile resolved is history, not a current fact.
+    const recentErrors = this.openErrors().slice(-3).map((e) => `  - ${e.text.slice(0, 100)}`);
     const lines = [
       `Project memory: ${g.files.length} files, ${g.symbols.length} symbols.`,
       g.components.length ? `Components: ${g.components.slice(0, 20).join(', ')}` : '',

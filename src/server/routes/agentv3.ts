@@ -525,7 +525,7 @@ import { terminalDailyLimitSeconds, decideTerminalAccess, type TerminalAccess } 
 import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../AgentV3/terminalMeter';
 import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } from '../AgentV3/buildQualityLint';
-import { abortBuild, abortCauseOf } from '../AgentV3/buildAbortCause';
+import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
@@ -22084,6 +22084,14 @@ async function noteBuildOutcome(
           // "did this build reach the point of having a capability to judge?" — which is NO whether
           // the person or their own sentence stopped it.
           const stopped = buildWasStopped(buildDiag.report().issues) || buildDiag.toolWasUsed('stop_build');
+          // …AND OUR OWN INTERRUPTIONS, which `stopped` above cannot see (2026-09-26). It reads
+          // `USER_STOPPED_BUILD`, which only a user or model stop writes; a deploy draining the build,
+          // a newer build reclaiming its lock, the reaper, or an abort we cannot explain write nothing
+          // there, and each reached this block as though an engine had tried and failed. The cause on
+          // the signal is the one source that cannot be wrong — see `interruptedBeforeAnyVerdict`.
+          // Kept SEPARATE from `stopped` so the record below can say which it was: "you stopped it" and
+          // "our server interrupted it" are different sentences to an admin.
+          const interrupted = !stopped && abort.signal.aborted && interruptedBeforeAnyVerdict(abortCauseOf(abort.signal));
           const refused = !stopped && modelAnswer.declined;
           const degraded = !stopped && !refused && providerFailuresLookDegraded(buildDiag.providerFailureBreakdown());
           // (d) OUR OWN CONFIGURATION (build report 58fe8254, 2026-09-15). A rung that rejects every
@@ -22105,7 +22113,7 @@ async function noteBuildOutcome(
           // service — and tested last only because the readings above are strictly more specific.
           const starved = !stopped && !refused && !degraded && !misconfigured
             && buildStarvedItsOutputBudget(buildDiag.providerFailureBreakdown());
-          if (!refused && !stopped) {
+          if (!refused && !stopped && !interrupted) {
             const emptyCause = misconfigured || starved
               ? 'our-configuration'
               : assessBuildInput(prompt).buildable ? 'engine' : 'no-instruction';
@@ -22116,11 +22124,13 @@ async function noteBuildOutcome(
               ts: Date.now(),
             });
           }
-          if (refused || degraded || misconfigured || starved || stopped) {
+          if (refused || degraded || misconfigured || starved || stopped || interrupted) {
             buildDiag.record({
               phase: 'build', severity: 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: false,
               message: stopped
                 ? 'Did not ask this user to add credits: the build was STOPPED, so no engine was ever asked to build anything. There is no capability limit to sell against — a fuller wallet would have changed nothing.'
+                : interrupted
+                ? `Did not ask this user to add credits: our own platform interrupted this build (${abortCauseOf(abort.signal)}) before any engine could be judged. A deploy, a lock takeover or a cleanup is not a capability limit, and a fuller wallet would have changed nothing.`
                 : refused
                 ? 'Did not ask this user to add credits: the engine REFUSED this request on policy grounds. A refusal is an answer, not a capability limit — selling a stronger engine after one offers to do the very thing we just declined to do.'
                 : starved

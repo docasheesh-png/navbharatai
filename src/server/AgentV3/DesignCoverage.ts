@@ -133,6 +133,26 @@ export function hasStylingSignal(content: string): boolean {
  *   - a map whose body renders `<option>` — a select's choices, whatever they come from.
  * Anything else — `expenses.map`, `items.map`, `props.rows.map` — is data and still counts. PURE.
  */
+/**
+ * Is the thing being mapped a LITERAL written in this same file — `const languages = [...]`,
+ * `Object.entries(labels)` over `const labels = {...}`? Such a list is the same on the user's first day
+ * as on their thousandth, so it can never be empty and an empty state for it is dead code.
+ *
+ * 🔴 THE CASE THAT MADE THIS NECESSARY (autopsy SignBridge, 2026-09-26): a Settings page mapping its
+ * own list of options was flagged LIST_WITHOUT_EMPTY_STATE. The repair model said, in its own words,
+ * "SettingsPage doesn't actually have a list", was held to the finding anyway, and spent about four
+ * minutes of a paid build inventing an empty state no user can ever reach. SCREAMING_CASE constants
+ * were already recognised; a camelCase name bound to a literal is the same fact spelled the way most
+ * generated code spells it. PURE.
+ */
+function boundToLiteral(content: string, before: string): boolean {
+  const obj = /\bObject\.(?:keys|values|entries)\(\s*([A-Za-z_$][\w$]*)\s*\)\s*$/.exec(before);
+  if (obj) return new RegExp(`\\b(?:const|let|var)\\s+${obj[1]}\\s*(?::[^=\\n]{1,120})?=\\s*\\{`).test(content);
+  const id = /\b([A-Za-z_$][\w$]*)\s*$/.exec(before);
+  if (!id) return false;
+  return new RegExp(`\\b(?:const|let|var)\\s+${id[1]}\\s*(?::[^=\\n]{1,120})?=\\s*\\[`).test(content);
+}
+
 export function rendersDataList(content: string): boolean {
   const re = /\.map\s*\(/g;
   let m: RegExpExecArray | null;
@@ -142,7 +162,8 @@ export function rendersDataList(content: string): boolean {
     const staticReceiver =
       /\b[A-Z][A-Z0-9_]{1,}\s*$/.test(before)
       || /\]\s*$/.test(before)
-      || /\bObject\.(?:keys|values|entries)\(\s*[A-Z][A-Z0-9_]{1,}\s*\)\s*$/.test(before);
+      || /\bObject\.(?:keys|values|entries)\(\s*[A-Z][A-Z0-9_]{1,}\s*\)\s*$/.test(before)
+      || boundToLiteral(content, before);
     const rendersOptions = /^\.map\s*\([^]*?<option\b/.test(after) && !/<(?:li|tr|article|section|div)\b/.test(after.slice(0, after.search(/<option\b/)));
     if (!staticReceiver && !rendersOptions) return true;
   }

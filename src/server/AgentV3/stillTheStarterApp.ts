@@ -225,9 +225,17 @@ export function starterSummary(modelText: string | null | undefined): string {
   const head = '⚠️ Nothing has been built yet — this project still holds only the empty starter page, so there is no app to use or preview.';
   const said = String(modelText ?? '').trim();
   if (!said) return head;
-  const cap = 1_500;
-  const body = said.length > cap ? `${said.slice(0, cap).replace(/\s+\S*$/, '')}…` : said;
-  return `${head}\n\n${body}`;
+  // 🔴 FIRST PARAGRAPH ONLY (autopsy 121c2431). The whole reply used to be kept, up to 1,500 characters,
+  // and that reply was the model DELIBERATING with itself — *"The rules say: MANDATORY DELEGATION (no
+  // exceptions)… But I already started…"* — so a user who asked for a stationery log read our own
+  // system prompt quoted back as the explanation. A finding (0d297b25's "the project is not in this
+  // workspace") is stated first; the deliberation, the plan and the quoted rules come after it.
+  const paragraphs = said.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  const first = paragraphs[0] ?? said;
+  const cap = 600;
+  const cut = first.length > cap;
+  const body = cut ? first.slice(0, cap).replace(/\s+\S*$/, '') : first;
+  return `${head}\n\n${body}${cut || paragraphs.length > 1 ? '…' : ''}`;
 }
 
 /** Is this readiness blocker the "nothing has been built" one? Compared against the ONE producer. */

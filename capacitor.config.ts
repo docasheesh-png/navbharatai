@@ -46,7 +46,12 @@ const config: CapacitorConfig = {
       // with Apple" capability in Xcode + the Apple provider enabled in Firebase (Console-side setup).
       // 'github.com' added 2026-07-18 (admin: "github login bhi fix karo") — the native GitHub OAuth
       // flow (Firebase SDK in-app browser sheet); the web popup cannot run inside the WebView.
-      providers: ['google.com', 'apple.com', 'github.com'],
+      // 'phone' added 2026-09-26: the phone sign-in (AuthComponent) and the Verify-your-mobile sheet
+      // both call the NATIVE phone methods on Android/iOS, and the plugin only builds a handler for a
+      // provider named here — without it every native phone OTP failed with "Phone sign-in provider is
+      // not enabled", on login and on the ₹100 mobile step alike. tests/nativeAuthProvidersMatchCalls
+      // derives the required list from the code, so a new native method cannot ship without its provider.
+      providers: ['google.com', 'apple.com', 'github.com', 'phone'],
     },
     // Splash screen: show app icon while loading, auto-hide once React mounts.
     //

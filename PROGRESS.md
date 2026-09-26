@@ -82085,6 +82085,10 @@ build as `confirmedFeatures`; the contract then lists only kept named features +
 domain "include by default" guidance (and the generated long-tail guidance) stand down. "Don't ask again"
 is a per-viewer localStorage preference. Any failure of the card simply builds, exactly as before.
 
+**The way back (admin: "settings toggle wala bhi banao").** Settings → General → *Confirm features before
+building* (`FeatureConfirmToggle`) switches the card on or off. It reads and writes the SAME per-device key
+the card's "Don't ask again" writes (`featureConfirm.ts`), so the two can never disagree.
+
 **Security.** The answer is untrusted: `sanitizeConfirmation` keeps only labels the server itself offered for
 that exact prompt, so free text can never be injected into the build prompt as a "confirmed feature".
 

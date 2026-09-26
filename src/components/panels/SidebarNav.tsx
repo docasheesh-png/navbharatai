@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Info, Lock, Settings, Heart, X, Download, Flag, Bell } from 'lucide-react';
+import { Info, Lock, Settings, X, Download, Flag, Bell } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { shouldShowDownloadApp, apkDownloadUrl } from '../../lib/appDownload';
 import { TextSizeSlider } from './TextSizeSlider';
@@ -198,23 +198,21 @@ export function SidebarNav({
   const SIDEBAR_HIDDEN = new Set(['git', 'preview', 'files', 'professionals', 'about', 'apk', 'diff', 'imagegen']);
   const visibleItems = menuItems.filter(item => !SIDEBAR_HIDDEN.has(item.id) && enabledModules[item.id] !== false);
 
-  // Settings and Donate each appeared TWICE in the mobile drawer — once in this list, once as a System
-  // Matrix tile below (admin 2026-09-19: "sidebar menu me Settings ke 2 option dikh rahe hai — ek list me
-  // hai, ek System Matrix me (square). List wala hata do, System Matrix wala rahne do", then "Donate bhi!
-  // upar wala hatao"). Each pair opened the same view, so the list row is dropped and the System Matrix
-  // tile is the drawer's single door to both.
+  // Settings appeared TWICE in the mobile drawer — once in this list, once as a System Matrix tile below
+  // (admin 2026-09-19: "sidebar menu me Settings ke 2 option dikh rahe hai — ek list me hai, ek System
+  // Matrix me (square). List wala hata do, System Matrix wala rahne do"). Both opened the same view, so
+  // the list row is dropped and the System Matrix tile is the drawer's single door to it.
   //
-  // 🔒 THEY ARE DROPPED FROM THE DRAWER ONLY, NOT FROM `SIDEBAR_HIDDEN`, AND THAT DISTINCTION IS
+  // 🔒 IT IS DROPPED FROM THE DRAWER ONLY, NOT FROM `SIDEBAR_HIDDEN`, AND THAT DISTINCTION IS
   // LOAD-BEARING. The desktop/tablet RAIL renders `visibleItems` and has NO System Matrix section — that
-  // section is drawer-only — so hiding either id globally would leave the rail with no entry for it at
-  // all. Settings' only other door on that surface is TopNav's user dropdown, which renders solely when
-  // someone is signed in, so a signed-out desktop user would have been stranded; Donate has no other door
-  // there whatsoever. And neither is duplicated on the rail: it lists each exactly once already.
+  // section is drawer-only — so hiding it globally would leave the rail with no entry for it at all. Its
+  // only other door on that surface is TopNav's user dropdown, which renders solely when someone is
+  // signed in, so a signed-out desktop user would have been stranded.
   //
-  // `history` joins them for the OPPOSITE reason to Settings and Donate: those are dropped here
-  // because the drawer shows them twice, this one because the phone already carries History in the
-  // bottom bar. Same outcome either way — one door per screen, never two and never none.
-  const DRAWER_HIDDEN = new Set(['settings', 'donation', 'history']);
+  // `history` joins it for the OPPOSITE reason: Settings is dropped here because the drawer shows it
+  // twice, History because the phone already carries it in the bottom bar. Same outcome either way —
+  // one door per screen, never two and never none.
+  const DRAWER_HIDDEN = new Set(['settings', 'history']);
   const drawerItems = visibleItems.filter(item => !DRAWER_HIDDEN.has(item.id));
 
   // ONE definition of the Notifications row for the rail and the drawer — a signed-in user's inbox,
@@ -465,22 +463,13 @@ export function SidebarNav({
                     System Matrix
                   </div>
                   <div className="px-1 space-y-3">
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        onClick={() => { toggleTab('settings'); setIsMenuOpen(false); setErrorContext(null); }}
-                        className={`flex flex-col items-center justify-center gap-2 border py-5 rounded-2xl transition-all group shadow-lg ${activeView === 'settings' ? 'bg-indigo-600 border-indigo-500 text-on-accent' : 'bg-card border-line hover:border-indigo-500/50'}`}
-                      >
-                        <Settings className="w-6 h-6 text-accent-text group-hover:rotate-90 transition-transform duration-500" />
-                        <span className={`text-[10px] font-black uppercase tracking-widest ${activeView === 'settings' ? 'text-ink' : 'text-muted'}`}>Settings</span>
-                      </button>
-                      <button
-                        onClick={() => { toggleTab('donation'); setIsMenuOpen(false); }}
-                        className="flex flex-col items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 py-5 rounded-2xl transition-all shadow-xl shadow-indigo-600/30 group text-on-accent"
-                      >
-                        <Heart className="w-6 h-6 text-ink group-hover:scale-110 transition-transform" />
-                        <span className="text-[10px] font-black text-ink uppercase tracking-widest">Donate</span>
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => { toggleTab('settings'); setIsMenuOpen(false); setErrorContext(null); }}
+                      className={`w-full flex flex-col items-center justify-center gap-2 border py-5 rounded-2xl transition-all group shadow-lg ${activeView === 'settings' ? 'bg-indigo-600 border-indigo-500 text-on-accent' : 'bg-card border-line hover:border-indigo-500/50'}`}
+                    >
+                      <Settings className="w-6 h-6 text-accent-text group-hover:rotate-90 transition-transform duration-500" />
+                      <span className={`text-[10px] font-black uppercase tracking-widest ${activeView === 'settings' ? 'text-ink' : 'text-muted'}`}>Settings</span>
+                    </button>
 
                     {/* Text size — one tap from anywhere (admin 2026-08-08). The user who needs this
                         is already struggling to read the screen; three taps into Settings was

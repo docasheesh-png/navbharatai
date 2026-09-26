@@ -14,7 +14,7 @@
  *   asserts that against the real policy text — the same discipline `privacyPolicyTruth.test.ts`
  *   already applies to the Meta pixel.
  * - "Working app or free" is a real billing rule (`zeroBillForFailedBuild`), not a slogan.
- * - The founder text is the admin's OWN wording, already shipped in `DEFAULT_DONATION_DATA`.
+ * - The founder text is the admin's OWN wording, not a story invented here.
  *
  * ⚠️ WHAT MUST NEVER BE ADDED: a team size, a user count, an investor, a certification, an award, or
  * a company name before one legally exists. About Us looks like marketing and is in fact a PUBLIC
@@ -103,7 +103,7 @@ export const DEFAULT_ABOUT: AboutContent = {
   ],
 
   teamHeading: 'Who builds it',
-  // The admin's own words, already shipped inside the app's donation panel — not a story invented here.
+  // The admin's own words — not a story invented here.
   team:
     'NavBharatAI is built by Dr. Asheesh, a doctor by profession, who started building it alone and '
     + 'through sheer hard work — because India deserved an AI app builder made for India, not a '

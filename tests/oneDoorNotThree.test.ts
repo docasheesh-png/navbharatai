@@ -15,7 +15,7 @@
  *
  * So this is not a feature being taken away; it is a duplicate entrance. The two that remain sit
  * where someone is already thinking about their app. The one removed sat in a general navigation
- * menu beside "About Us" and "Donate", where a domain is not on anyone's mind.
+ * menu beside "About Us", where a domain is not on anyone's mind.
  *
  * ## Why the view goes too, not just the button
  *

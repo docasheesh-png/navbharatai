@@ -1443,9 +1443,7 @@ export function SettingsPanel({
                                  and a "Publish to Community Store" button with no onClick. The real
                                  publish surfaces (the v5.0 Publish sheet and the Nav App Store) both
                                  exist and work; this was a fake third one.
-                  • 'deploy'   — "Support Us". Its Donate button was genuinely wired, but donations
-                                 already have their own sidebar tile and view ('donation'), so no
-                                 door is lost. Beside it sat "ZIP Export" and "Android Build (BETA)",
+                  • 'deploy'   — "Support Us". Beside it sat "ZIP Export" and "Android Build (BETA)",
                                  both with no onClick — and both name capabilities that really exist
                                  elsewhere (Git & Deployment, and the APK Builder tile above).
                   • 'access'   — "Permissions", listing a HARDCODED collaborator: the string

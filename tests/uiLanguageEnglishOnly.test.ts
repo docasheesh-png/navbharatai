@@ -154,7 +154,6 @@ describe('🔴 the seven surfaces that were in Devanagari on 2026-09-14', () => 
       'src/lib/chatToolbar.ts',
       'src/lib/apkChargeNotice.ts',
       'src/lib/chatMessageActions.ts',
-      'src/components/panels/DonationPanel.tsx',
       'src/config/defaultContent.ts',
     ]) {
       const code = codeWithoutComments(read(f));

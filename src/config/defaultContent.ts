@@ -1,5 +1,5 @@
 /**
- * Default editable content for the Home, About, and Donation panels.
+ * Default editable content for the Home panel.
  * Extracted from App.tsx. These are the seed values used when nothing is
  * persisted in localStorage yet (admins can edit them at runtime).
  */
@@ -25,17 +25,6 @@ export interface HomeData {
 // `src/content/about.ts` and is served from the server (`/api/site/about`), because the old shape was
 // persisted only to this browser's localStorage and therefore reached no other user. Nothing else read
 // them — a grep for either name returns this comment.
-
-export interface DonationData {
-  headline: string;
-  subHeadline: string;
-  upiId: string;
-  name: string;
-  missionStatement: string;
-  dreamStatement: string;
-  qrUrl: string;
-  logoUrl: string;
-}
 
 export const DEFAULT_HOME_DATA: HomeData = {
   heroTitle: 'navBharatAI Architect',
@@ -75,17 +64,6 @@ export const DEFAULT_HOME_DATA: HomeData = {
   ],
 };
 
-
-export const DEFAULT_DONATION_DATA: DonationData = {
-  headline: '🇮🇳 Support NavBharat AI',
-  subHeadline: 'Empowering Bharat with Intelligence',
-  upiId: 'doc.asheesh@oksbi',
-  name: 'Dr. Asheesh',
-  missionStatement: 'I began building NavBharat AI on my own, through sheer hard work.',
-  dreamStatement: 'My dream is that one day NavBharat AI becomes the most powerful, most intelligent and most useful AI — not only in India, but in the world.',
-  qrUrl: '',
-  logoUrl: '',
-};
 
 /**
  * Read JSON from localStorage and fall back to a default when missing or

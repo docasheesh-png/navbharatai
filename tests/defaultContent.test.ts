@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   DEFAULT_HOME_DATA,
-  DEFAULT_DONATION_DATA,
   loadPersistedContent,
 } from '../src/config/defaultContent';
 // MOVED 2026-09-20: the About page's content left this module for `src/content/about.ts` when it
@@ -28,11 +27,6 @@ describe('default content constants', () => {
     expect(DEFAULT_ABOUT.team).toBeTruthy();
     expect(DEFAULT_ABOUT.vision).toBeTruthy();
   });
-
-  it('donation data has a UPI id and name', () => {
-    expect(DEFAULT_DONATION_DATA.upiId).toContain('@');
-    expect(DEFAULT_DONATION_DATA.name).toBeTruthy();
-  });
 });
 
 describe('loadPersistedContent', () => {
@@ -58,7 +52,7 @@ describe('loadPersistedContent', () => {
 
   it('returns fallback when stored JSON is corrupt', () => {
     localStorage.setItem('k', 'not-valid-json{');
-    const result = loadPersistedContent('k', DEFAULT_DONATION_DATA);
-    expect(result).toBe(DEFAULT_DONATION_DATA);
+    const result = loadPersistedContent('k', DEFAULT_HOME_DATA);
+    expect(result).toBe(DEFAULT_HOME_DATA);
   });
 });

@@ -458,7 +458,7 @@ export function formSourcesFor(
 }
 
 /** The route a page file serves, best-effort, or null. Only used for a label and a starting URL. */
-function routeForFile(path: string, knownRoutes: readonly string[]): string {
+export function routeForFile(path: string, knownRoutes: readonly string[]): string {
   const stem = path.replace(/\.(t|j)sx$/, '').split('/').pop() || '';
   const lower = stem.toLowerCase();
   if (/^(home|index|page|app)$/.test(lower)) return '/';

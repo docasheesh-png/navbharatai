@@ -93,6 +93,9 @@ describe('REVERSION GUARD — the route must read `ran`', () => {
 
   it('the release gate still guards its own evidence independently', () => {
     // The gate was already right, and must stay right on its own rather than relying on this fix.
-    expect(route).toContain("if (pageResults.length > 0) gateEvidence.pages =");
+    // Tightened 2026-09-26 (autopsy SignBridge): `ran` is false for an empty result set AND for a check
+    // whose every route redirected elsewhere, so it is strictly stronger than "some lines came back".
+    expect(route).toContain("if (pageSummary.ran) gateEvidence.pages =");
+    expect(route).not.toContain("if (pageResults.length > 0) gateEvidence.pages =");
   });
 });

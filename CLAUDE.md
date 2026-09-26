@@ -3214,6 +3214,20 @@ the flag entries above promise.
   cancellation may take our margin and never our cost, and the route passes `realCostUsd` /
   `sandboxUsd` in (commit `6844b99f`). Re-grep before re-raising anything this file calls open.
 
+- **⏯️ `AGENTV3_UNFINISHED_RESUME` — A BUILD THAT STOPPED TALKING IS NOT A BUILD THAT FINISHED (autopsy
+  121c2431, 2026-09-26). ⚠️ NOT set, and the code default is ON**; `off` restores the old ending exactly.
+  Read by `src/server/AgentV3/unfinishedResume.ts`; applied in `AgentRunner`'s readiness gate.
+  🔴 **WHY:** the build-nudge fires only for a run with ZERO tool calls, so an architect that worked, then
+  wrote 26,371 characters of deliberation and ended its turn with no tool call, ended the build FAILED at
+  5.4 min with 1,418 s of budget unspent — while the readiness gate, run only to write the failure message,
+  already knew the entry was still the starter. Now the gate's blockers are handed back with "act now", **at
+  most twice**, and **never after a refusal or a question to the user** (the nudge's own two tests, reused —
+  the asymmetry in `nudgeToBuild.ts` holds here too). Admin code `UNFINISHED_BUILD_RESUMED`.
+  🔒 **Two siblings in the same change:** a compile error a later clean compile answered is RESOLVED in
+  project memory instead of being handed to every later agent as a "Recent error" (`markTscClean`,
+  `openErrors`, one output-read door `noteCompileOutput` — the shell path had marked tsc clean on a `| head`
+  exit code of 0); and when the release gate's typecheck passed, a reviewer finding claiming the project does
+  not compile is dropped before the user sees it (`reviewEvidence.ts`, `REVIEW_REFUTED_BY_EVIDENCE`).
 - **🙋 A QUESTION IS AN ANSWER, NOT AN EMPTY BUILD — the retry overrode a correct reply and billed
   ₹196.28 for it (autopsy `e628efd4`, 2026-09-25; no flag, on by construction).** A free-tier user
   asked *"if we don't have a chat in next 2 hours can you send a message to initiate the chat

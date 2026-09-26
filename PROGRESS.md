@@ -82259,6 +82259,59 @@ run proof reading the overwritten summary; the question note on a built turn).
   (the asset restore names itself). Which caller fired at 09:49 is not in the report; all four were
   unnamed, so all four are fixed.
 
+## 2026-09-26 — Autopsy 121c2431 + b10aae9a (stationary log): a build that stopped talking, and a reviewer that read old errors
+
+Free tier, "Make me an app for maintaining stationary items log". **Build 1 FAILED** at 5.4 min (₹0, $0.16
+real cost absorbed); **build 2** ("continue") succeeded in 5.4 min, billed ₹94.77.
+
+### Tally
+- ✅ **Self-healed 3:** GLM crawl benched (glm-4.7-flashx at ~10 tok/s); fast lane salvaged 9 files into the
+  full builder; a missing shared import was auto-added.
+- 🔀 **Worked around 3:** GLM → KIMI fallback three times (2 × 60 s timeouts + 1 crawl, 149 s = 46% of the
+  build's clock wasted); fast lane handed off to the full builder after its budget ran out.
+- ⏭️ **Skipped 2:** the fast lane's verify + repair never ran (0 runs — generation used the budget); build 2's
+  journey check derived nothing (forms without names — **#3331 owns this**).
+- ❌ **Still broken / shipped imperfect 4:** build 1 ended with the entry still the starter and an import of a
+  file never written; the user's summary quoted our own system prompt ("MANDATORY DELEGATION…"); build 2's
+  reviewer told the user "TypeScript build errors are present" after tsc + `npm run build` passed; build 2's
+  design score D (26 ad-hoc colours in model-written CSS — **verified real**, the kit itself scores 100).
+- 🥵 **Struggles 4:** the 71.6 s contract call; Kimi's 82–95 s per-file calls (always-reasoning); the architect's
+  71 s, 26,371-char deliberation turn; `src/index.css` read in four windows (model-chosen ranges).
+
+### Fixed (root causes)
+1. **A turn that stops in prose while the app is unbuilt is resumed** (`unfinishedResume.ts`, wired in
+   `AgentRunner`'s readiness gate). The nudge only fired for a run with ZERO tool calls; a model that worked
+   and then stalled ended the build FAILED with 1,418 s unspent. Now the gate's own blockers are handed back
+   with "act now", at most twice, never after a refusal or a question (the nudge's own tests, reused).
+   Kill switch `AGENTV3_UNFINISHED_RESUME=off`; admin code `UNFINISHED_BUILD_RESUMED`.
+2. **A fixed compile error stops being a "Recent error"** (`WorkspaceMemory.markTscClean` resolves
+   compile-class episodes; `projectMap()` shows only `openErrors()`). The episode is kept (mistake ledger and
+   reflection still learn from it); `resolvedAt` persists across restore. Every compile path now reports its
+   OUTPUT through one door (`ToolDispatcher.noteCompileOutput`, `tscOutputProvesClean`). **Sibling fixed:** the
+   shell path marked "TypeScript already checked CLEAN" on the exit code, and a `| head` pipe is always 0 — a
+   FAILING tsc was told to every specialist as clean.
+3. **The compiler outranks the reviewer's inference** (`reviewEvidence.ts`). When the release gate's typecheck
+   passed, a finding whose first sentence claims a compile failure is dropped before it is narrated, offered,
+   repaired or counted as a critical (`REVIEW_REFUTED_BY_EVIDENCE`, admin-only). Precision-first: behaviour
+   findings that merely mention TypeScript are kept. Also: "(confidence: high)" no longer reaches the user's
+   suggestion list.
+4. **The starter summary keeps only the model's first paragraph** — the deliberation and quoted rules come after.
+5. **The contract prompt forbids a type named after a component** (the `StationaryItem` type/component collision).
+
+Tests: `tests/aBuildThatStoppedTalkingIsNotFinished.test.ts` (23), reversion-proven four ways;
+`AgentRunner.test.ts`'s gate script gained the two resume replies a real model would give.
+
+### 🔴 STILL OPEN (rule 6)
+- **The reviewer's live narration still reaches the timeline** before the evidence check runs (it narrates as it
+  works); only the summary, the offer, the repair and the verdict are protected.
+- **The fast lane spends its whole budget generating and never verifies**, and generates `App.tsx` LAST, so a
+  budget stop leaves no app. Ordering/verify-reserve is a design change to `SimpleBuilder`, not done here.
+- **The architect prompt's "never write application code yourself"** conflicts with the fast-lane hand-off,
+  where the architect is expected to finish partial files; build 1's paralysis came from that conflict.
+  Changing the delegation rule needs the admin.
+- **GLM `glm-4.7-flashx` ran at ~10 tok/s** (contract 71.6 s for 400 tokens) — the recurring provider ceiling.
+- **"Continue" was classified COMPLEX by the model second opinion** (no app described in the prompt); harmless
+  here (a repair should not open on flash), but the classifier reads the continue prompt, not the project.
 ---
 
 ## 2026-09-26 — Autopsy eed79815 (car game, 3 builds in one workspace) — root causes fixed on PR #3331

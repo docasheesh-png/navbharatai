@@ -492,6 +492,7 @@ import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from 
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
 import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable } from '../AgentV3/ReviewerAgent';
+import { refuteReviewByEvidence } from '../AgentV3/reviewEvidence';
 import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
 import {
   saveWorkspaceMemoryFor,
@@ -21048,6 +21049,23 @@ async function noteBuildOutcome(
             // already finished) and drop the build-abort link so it cannot outlive the build.
             reviewAbort.abort();
             abort.signal.removeEventListener('abort', stopReviewWithBuild);
+          }
+          // A CLAIM THE COMPILER ALREADY ANSWERED IS NOT A FINDING (autopsy b10aae9a). The reviewer cannot
+          // run tsc; the platform did. When it passed, a "TypeScript errors are present" finding is an
+          // inference the evidence refutes — dropped BEFORE it can be narrated, offered, repaired or
+          // counted as a critical. Recorded for the admin with what was dropped. See reviewEvidence.ts.
+          if (review) {
+            const checked = refuteReviewByEvidence(review, { typecheck: gateEvidence.typecheck });
+            if (checked.refuted.length > 0) {
+              review = checked.review;
+              try {
+                buildDiag.record({
+                  phase: 'build', severity: 'info', code: 'REVIEW_REFUTED_BY_EVIDENCE', autoResolved: true,
+                  message: `${checked.refuted.length} reviewer finding(s) claimed the project does not compile, after the platform's own typecheck had passed — dropped rather than shown to the user or repaired.`,
+                  detail: checked.refuted.map((i) => i.message.slice(0, 200)).join(' | '),
+                });
+              } catch { /* best-effort */ }
+            }
           }
           const reviewText = review ? formatReview(review) : '';
           if (reviewText) {

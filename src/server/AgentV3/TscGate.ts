@@ -72,6 +72,21 @@ export function tscNeverRan(output: string | null | undefined): boolean {
 }
 
 /**
+ * Does this `tsc --noEmit` output PROVE the project compiles? Stricter than `!hasTscErrors` on purpose:
+ * zero `error TS` lines is also what a help page, a missing binary and a failed install print, and a
+ * "clean" read off any of those would resolve real errors from memory and tell agents "tsc already
+ * checked clean" — the claim the verification ledger acts on. Only an output that is none of those
+ * counts. An EMPTY output is the genuinely clean case (tsc prints nothing on success). Pure.
+ */
+export function tscOutputProvesClean(output: string | null | undefined): boolean {
+  const out = String(output ?? '');
+  // "Did the compiler run?" is asked ONCE, by `tscNeverRan` (help page, missing binary) — this adds only
+  // what that question does not cover: an install that failed before tsc could start.
+  if (hasTscErrors(out) || tscNeverRan(out)) return false;
+  return !/command not found|: not found|No such file or directory|ENOENT|Cannot find module 'typescript'|npm ERR!|npm error/i.test(out);
+}
+
+/**
  * True when a shell command LOOKS LIKE a stand-alone typecheck run — `tsc` invoked with `--noEmit`
  * (the check-only flag). Deliberately narrow: a build script that merely contains the substring "tsc"
  * (`npm run build` → `tsc && vite build`, which EMITS) is not the same claim as "a check-only compile

@@ -237,7 +237,7 @@ export async function restoreWorkspaceMemory(
     // Replay episodes into the live memory object — PRESERVING each episode's original timestamp so
     // recency ranking stays honest across a restore (re-stamping to now() made old lessons look fresh).
     for (const ep of snapshot.episodes) {
-      if (ep.kind === 'error') mem.recordError(ep.text, ep.file, ep.ts);
+      if (ep.kind === 'error') mem.recordError(ep.text, ep.file, ep.ts, ep.resolvedAt);
       else if (ep.kind === 'fix') mem.recordFix(ep.text, ep.file, ep.ts);
       else if (ep.kind === 'note') mem.recordNote(ep.text, ep.file, ep.ts);
       else if (ep.kind === 'request') mem.recordRequest(ep.text, ep.ts);

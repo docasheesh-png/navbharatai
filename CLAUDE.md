@@ -650,7 +650,16 @@ the code (it is actually read somewhere) on 2026-07-11.
   next key before dropping quality. A single key = today's behaviour. Buy the extra keys, then just set the
   comma list — no redeploy logic needed. See ROADMAP Tier-4 "GLM KEY POOL".
   ✅ **LIVE 2026-07-21: the admin SET the GLM comma-pool in Cloud Run** (multiple Z.ai keys) as part of the
-  GLM-429-storm response — key rotation is now genuinely active in prod.)
+  GLM-429-storm response — key rotation is now genuinely active in prod.
+  🔴 **CORRECTED 2026-09-27 — "genuinely active" was true of the BUILD ENGINE ONLY.** The pool parser
+  lived inside `routes/agentv3.ts`; the FREE CHAT leader (`GlmProvider`) and the free vision rung
+  (`visionChain.tryGlm`) sent the whole comma string as ONE bearer token, so from 2026-07-21 every free
+  chat, Professional and Doctor AI turn was refused by Z.ai and fell through to a PAID rung — the admin
+  Diagnostics page read *"GLM 8 requests · 8 errors"* and *"0% served by the free model"*, and nothing
+  looked broken because the fallback worked. **Every reader of a pooled key now goes through
+  `src/server/lib/keyPool.ts`** (`parseKeyPool` / `firstPoolKey` / `nextPoolKey`, round-robin); a new
+  reader that passes `process.env.GLM_API_KEY` straight to a client re-opens this. Test-locked and
+  reversion-proven in `tests/theDiagnosticsPageToldThreeUntruths.test.ts`.)
 - **Sandbox (E2B):** `E2B_API_KEY`, `E2B_TEMPLATE_ID`, `FULLSTACK_E2B_TEMPLATE_ID`, `E2B_PREVIEW_DOMAIN`
   (⚠️ CORRECTION 2026-08-02: the admin verified in the live Cloud Run console that `E2B_PREVIEW_DOMAIN`
   is **NOT set** — so v5.0 previews use the raw `*.e2b.app` host by code default (`PreviewDomain.ts`

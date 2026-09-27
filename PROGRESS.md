@@ -83077,3 +83077,31 @@ YELLOW (PR #3331's area).
 - **A tested template opens on the first rung.** `scaffoldedComplexityDecision`: a starter chip whose golden scaffold will be seeded is routed `simple`, with no model call. This closes the first open item above.
 - **A reviewer claim a file can answer is checked first.** `reviewEvidence.ts` `missingClassClaim` / `classIsDefined`: a finding whose first sentence says named classes are not defined is refuted only when EVERY named class has a selector in the real stylesheets. A finding resting on "the missing classes" falls with them only when every class claim fell. Stylesheets are read only when a finding makes the claim. This closes the second open item.
 - **Vite dev CSS leaves the capture only when the page would not fit.** `style[data-vite-dev-id]` text is replaced with a note when `outerHTML` is over 30,000 characters; a page that fits is read as before. This closes the third open item.
+
+## 2026-09-27 — Autopsy: the admin Diagnostics page, read against the code (three untruths)
+
+The admin pasted the whole Diagnostics page. Read line by line against the routes that produce it,
+three numbers were false and one was a real, months-old money leak:
+
+1. 🔴 **Free chat has not been free since 2026-07-21.** `GLM_API_KEY` became a 51-key comma pool that
+   day; only the build engine parsed it. `GlmProvider` (free chat leader) and `visionChain.tryGlm` sent
+   the comma string as one bearer token → every call refused → every free chat / Professional / Doctor
+   AI turn served by a PAID Vertex rung. Page evidence: *"GLM 8 requests · 8 errors, half_open"*,
+   *"0% of assistant turns were served by the free model"*. Fixed at the class: `lib/keyPool.ts` is the
+   one parser (the route re-exports it), chat rotates round-robin across the pool, `mobileBuildAiRepair`'s
+   private `split(',')[0]` (which missed the whitespace separator) replaced. Sibling hunt: every other
+   reader of the key only tests presence.
+2. 🔴 **"Real cost absorbed $570.09"** was the Sonnet-equivalent BASELINE, the number the usage card
+   stopped calling a loss on 2026-09-23 — the sibling card was never hunted. The same 208 builds really
+   cost $1.30. `summarizeLosses` now leads with measured spend plus coverage; the baseline is a labelled
+   comparison. And the usage card's **"$294.99 margin"** was billed-of-508 minus spend-of-28 — a margin
+   of no real set of builds. `measuredBilledUsd` is now recorded per day, and `realMarginUsd` is taken
+   over builds whose bill AND spend are both known (old partly-measured days contribute nothing rather
+   than a mismatch). One existing test had encoded the defect (4 − 0.5) and was corrected with the reason.
+3. **"Latest day 2026-08-28"** on 2026-09-27: `metricsStore.list` is newest-first and the card took the
+   last element. `latestDay` picks the maximum date.
+
+**Open, not fixed here (proactive, raised with the admin):** the stuck-projects list counts user-stopped
+builds as failures; a stuck project's "root cause" can be the upsell note; ladder depth shows 41 of 44
+builds opening on rung 2 (the complexity router sends most apps to KIMI — worth re-measuring its line
+now that the free-first premise is being checked); the Build event log card reads 0 events.

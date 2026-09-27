@@ -17,7 +17,9 @@
 
 /** Shell prefix that guarantees a runnable local `tsc` binary exists (installs typescript if genuinely absent). */
 export const TSC_ENSURE =
-  'if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install >/dev/null 2>&1; fi; ' +
+  // `&& touch node_modules`: an "up to date" install leaves the directory's mtime alone, so without the
+  // stamp a rewritten package.json kept this re-running `npm install` before every typecheck.
+  'if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install >/dev/null 2>&1 && touch node_modules; fi; ' +
   'if [ ! -x node_modules/.bin/tsc ]; then npm install typescript --no-save >/dev/null 2>&1; fi';
 
 /**

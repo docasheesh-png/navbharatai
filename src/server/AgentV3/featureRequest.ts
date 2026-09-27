@@ -6,8 +6,10 @@
 // it flagged a feature the user EXPLICITLY declined. A plain keyword test cannot tell "add settings"
 // from "no settings". This shared helper checks that at least ONE mention of the feature is affirmative
 // (not immediately preceded by a negation cue), so an explicitly-declined feature is never treated as
-// requested. Pure + dependency-free; used by both RequirementCoverage and FeaturePresence so the two
+// requested. Pure (its one import is a pure string contract); used by both RequirementCoverage and FeaturePresence so the two
 // keyword detectors can never drift on this (rule 2 — one shared implementation).
+
+import { isPlatformFixRequest } from '../../lib/platformFixRequest';
 
 // Negation cues that, appearing just before a feature keyword, mean the user is DECLINING it.
 const NEGATION_CUES = /\b(no|not|without|never|except|exclude|excluding|omit|omitting|skip|skipping|remove|removing|don'?t|doesn'?t|avoid|avoiding|disable|disabled|disabling|minus)\b/i;
@@ -35,13 +37,37 @@ const DEFERRED_CUES = /\b(later|afterwards?|eventually|subsequent(?:ly)?|future|
 const DEFER_WINDOW = 40;
 
 /**
+ * 🔴 MACHINE TEXT IS NOT A REQUEST (autopsy "Lekhan Sahyak", 2026-09-27).
+ *
+ * The preview's "Fix with AI" request quoted a stack trace, and one of its frames was
+ * `eval at requireModule (about:srcdoc:739:12)`. `\babout\b` matched it, and four builds were told —
+ * and then graded on — "Requested feature not found: about page". The requirement contract hands
+ * these labels to the builder as ORDERS, so a word inside a URL can make the engine build a page
+ * nobody asked for.
+ *
+ * So a URL, a `scheme:` token and a stack-frame line are blanked before any feature is read. A person
+ * asking for an About page writes the word in a sentence; nobody asks for one inside `about:blank`.
+ * PURE.
+ */
+export function withoutMachineText(text: string): string {
+  return String(text ?? '')
+    // Stack frames: "    at App (eval at requireModule (about:srcdoc:739:12), <anonymous>:22:46)".
+    .replace(/^[ \t]*at [^\n]*$/gm, (m) => ' '.repeat(m.length))
+    // URLs and scheme tokens: https://…, about:srcdoc, blob:…, data:…, file:…, chrome-extension://…
+    .replace(/\b(?:[a-z][a-z0-9+.-]*:\/\/|(?:about|blob|data|file|javascript|webpack|node):(?=[^\s]))[^\s)'"]*/gi, (m) => ' '.repeat(m.length));
+}
+
+/**
  * True when `feature` (a RegExp matching the feature keyword) is requested AFFIRMATIVELY at least once
  * in `prompt` — i.e. there is a mention that is NOT immediately preceded by a negation cue. Returns
  * false when the feature is absent, or when EVERY mention is negated ("No settings, no other features").
  * Pure; never throws. The passed RegExp does not need the global flag — a fresh global copy is used.
  */
-export function isAffirmativelyRequested(prompt: string, feature: RegExp): boolean {
-  if (typeof prompt !== 'string' || !prompt) return false;
+export function isAffirmativelyRequested(rawPrompt: string, feature: RegExp): boolean {
+  if (typeof rawPrompt !== 'string' || !rawPrompt) return false;
+  // A request NavBharatAI composed around a captured error asks for no feature at all (see below).
+  if (isPlatformFixRequest(rawPrompt)) return false;
+  const prompt = withoutMachineText(rawPrompt);
   let g: RegExp;
   try {
     g = new RegExp(feature.source, feature.flags.includes('g') ? feature.flags : feature.flags + 'g');

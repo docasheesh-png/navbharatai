@@ -272,8 +272,19 @@ function labelInSource(label: string, source: string): 'present' | 'absent' | 'u
   const words = cleaned.split(/\s+/).filter((w) => w.length >= 3);
   if (words.length === 0) return 'unknown'; // too short to mean anything either way
   const lower = source.toLowerCase();
-  return words.some((w) => lower.includes(w.toLowerCase())) ? 'present' : 'absent';
+  if (words.some((w) => lower.includes(w.toLowerCase()))) return 'present';
+  // 🔴 A TRANSLITERATION IS NOT A FABRICATION (autopsy "Lekhan Sahyak", 2026-09-27). The app's screens
+  // were written in Hindi script and the summary named them in Latin letters — "Lekhan Shaili",
+  // "Kirdaar", "Adhyay" — as Hinglish readers do. A substring test cannot see that "Kirdaar" is
+  // किरदार, so the user was told eight real screens "were not on the screen". A Latin label is
+  // therefore unjudgeable, never absent, in an app whose source carries an Indic script: the check
+  // must be certain before it accuses.
+  if (!INDIC_SCRIPT.test(cleaned) && INDIC_SCRIPT.test(source)) return 'unknown';
+  return 'absent';
 }
+
+/** Any character of the Indic scripts (Devanagari through Malayalam). */
+const INDIC_SCRIPT = /[\u0900-\u0DFF]/;
 
 /**
  * How many labels must be listed before "none of them exist" is evidence rather than noise.

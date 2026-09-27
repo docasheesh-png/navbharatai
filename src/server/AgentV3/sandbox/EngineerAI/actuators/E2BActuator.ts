@@ -7,7 +7,7 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure } from './devServerHost';
 import { buildPortSweepCommand, parsePortSweep, portCandidates, shouldSweep, sweepFoundSummary } from './portSweep';
 import { appPortsFrom } from '../../../appPorts';
 import type { DevFramework } from './devServerHost';
@@ -170,6 +170,9 @@ export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promis
 const IGNORED_LIST_DIRS = new Set([
   'node_modules', '.git', 'dist', '.next', 'build',
   '__pycache__', '.venv', '.cache', 'coverage', 'out', '.e-checkpoints',
+  // Test-runner OUTPUT, never source (autopsy "Lekhan Sahyak", 2026-09-27): Playwright's run left
+  // `test-results/.last-run.json` in the workspace and the build's save kept it as a project file.
+  'test-results', 'playwright-report',
 ]);
 
 /** True if a workspace-relative path lives under an ignored dir (any path segment matches).
@@ -805,13 +808,29 @@ export class E2BActuator implements IEngineerActuator {
       }
     };
 
-    // Step 1: npm ci when a lock file exists (clean, reproducible install)
+    // A successful install stamps node_modules, so `[ package.json -nt node_modules ]` — the stale test
+    // every install decision reads — goes quiet once the tree is reconciled. An "up to date" npm install
+    // changes nothing in the directory itself, so without the stamp a package.json rewritten by an edit
+    // read as stale for the rest of the build (autopsy "Lekhan Sahyak", 2026-09-27).
+    const settled = async (r: { success: boolean; log: string }): Promise<{ success: boolean; log: string }> => {
+      if (r.success) await sandbox.commands.run('touch node_modules', { cwd: WORKSPACE_ROOT, timeoutMs: 5_000 }).catch(() => {});
+      return r;
+    };
+
+    // Step 1: npm ci when a lock file exists (clean, reproducible install) — and ONLY into an EMPTY tree.
+    //
+    // 🔴 `npm ci` DELETES node_modules before installing. Run over a tree that already exists it is not a
+    // reconcile, it is a wipe — and a wipe that other commands on the same machine (the write-time
+    // typecheck, the model's own `npm run build`) can meet half-done: in that report a turn began with
+    // `tsc: not found` and a missing react after a dev-server start re-ran `npm ci` over a healthy tree.
+    // A present tree is reconciled by `npm install` below, which honours the same lock without deleting.
     const hasLock = await sandbox.files.exists(`${WORKSPACE_ROOT}/package-lock.json`).catch(() => false);
-    if (hasLock) {
+    const treePresent = await sandbox.files.exists(`${WORKSPACE_ROOT}/node_modules`).catch(() => false);
+    if (hasLock && !treePresent) {
       const ci = await sandbox.commands.run('npm ci', {
         cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
       }).catch((err: any) => commandFailureResult(err));
-      if (ci.exitCode === 0) return { success: true, log: await withAuditFix(ci.stdout + ci.stderr) };
+      if (ci.exitCode === 0) return settled({ success: true, log: await withAuditFix(ci.stdout + ci.stderr) });
       // npm ci failed (stale lock, missing lock entry) — fall through to npm install
     }
 
@@ -820,7 +839,7 @@ export class E2BActuator implements IEngineerActuator {
       cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
     }).catch((err: any) => commandFailureResult(err));
     const installLog = install.stdout + install.stderr;
-    if (install.exitCode === 0) return { success: true, log: await withAuditFix(installLog) };
+    if (install.exitCode === 0) return settled({ success: true, log: await withAuditFix(installLog) });
 
     // Step 2.5: TRANSIENT FS RACE (Mitrify report a876b7bb — `ENOTEMPTY … rmdir node_modules/yargs/…`,
     // exit 217, on overlayfs, with nothing wrong in the project; the identical install succeeded
@@ -833,7 +852,7 @@ export class E2BActuator implements IEngineerActuator {
         cwd: WORKSPACE_ROOT, timeoutMs: COMMAND_TIMEOUT_MS,
       }).catch((err: any) => commandFailureResult(err));
       const againLog = installLog + '\n[transient fs-race retry]\n' + again.stdout + again.stderr;
-      if (again.exitCode === 0) return { success: true, log: await withAuditFix(againLog) };
+      if (again.exitCode === 0) return settled({ success: true, log: await withAuditFix(againLog) });
       // Fell through: let the ERESOLVE branch below look at the ORIGINAL log too.
     }
 
@@ -844,12 +863,12 @@ export class E2BActuator implements IEngineerActuator {
       }).catch((err: any) => commandFailureResult(err));
       const retryLog = retry.stdout + retry.stderr;
       const combined = installLog + '\n[--legacy-peer-deps retry]\n' + retryLog;
-      return {
+      return settled({
         success: retry.exitCode === 0,
         // Only a SUCCESSFUL install gets the remediation pass — running it over a broken tree would
         // spend two minutes on a dependency graph that does not resolve in the first place.
         log: retry.exitCode === 0 ? await withAuditFix(combined) : combined,
-      };
+      });
     }
 
     return { success: false, log: installLog };
@@ -1914,7 +1933,13 @@ export class E2BActuator implements IEngineerActuator {
       // Next/Astro/Nuxt/Angular scaffold no longer gets Vite-only flags (`--strictPort`, Vite-style
       // `--host`) that its dev server rejects on boot → blank preview ("preview never comes up").
       // Any failure falls back to the raw command (today's Vite-assumption behaviour).
-      const strippedForResolve = stripDevServerBackgrounding(command);
+      // A script whose later lines probe the server it just backgrounded is reduced to its setup lines
+      // plus the server — the launcher below does the probing (see dropProbesAfterDevServer).
+      const serverOnly = dropProbesAfterDevServer(command);
+      if (serverOnly !== command) {
+        stdout += `\n[health-check] ran only the dev-server part of this command; the lines after it were not run. The dev server's output is in ${DEV_SERVER_LOG_PATH}.`;
+      }
+      const strippedForResolve = stripDevServerBackgrounding(serverOnly);
       let resolvedCommand = strippedForResolve;
       try {
         const pkgRaw = await sandbox.files.read(`${WORKSPACE_ROOT}/package.json`);

@@ -47,7 +47,8 @@ import { nemotronRungOk, nemotronKey, nemotronBaseUrl, nemotronUltraModel, nemot
 import { composeJudgeChain, describeJudgeAttempts, type JudgeCandidate, type JudgeChain, type JudgeKind } from '../AgentV3/judgeChain';
 import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
-import { devicePowerNotice, devicePowerRecord } from '../AgentV3/devicePowers';
+import { deviceSummaryNotice, deviceSummaryRecord } from '../AgentV3/devicePowers';
+import { nativeCapabilityBrief, requestedCapabilities } from '../AgentV3/nativeCapabilities';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction, simulatedDataIssues, simulatedDataNotice } from '../AgentV3/AuthenticityAnalysis';
 import { isUnreachable } from '../AgentV3/appReachability';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
@@ -15371,6 +15372,24 @@ async function noteBuildOutcome(
       // '' (coherent, or flag off) leaves buildPrompt unchanged.
       if (frameworkCoherenceMsg) buildPrompt = `${frameworkCoherenceMsg}\n\n---\n\n${buildPrompt}`;
 
+      // 📱 PHONE FEATURES ARE BUILT FOR REAL, NOT IMITATED (autopsy 6bae5835, admin 2026-09-27). A request
+      // for reminders that ring when the app is closed, voice commands, calling or the torch gets the exact
+      // plugin at the exact version the phone build accepts (nativeCapabilities.ts) — only the ones asked
+      // for, so an ordinary app is never handed a plugin list. JS web frameworks only: a Python or API
+      // project cannot carry a Capacitor plugin.
+      try {
+        if (/react|vue|nuxt|next|remix|svelte|angular|astro|solid|static|html/i.test(String(framework))) {
+          const nativeBrief = nativeCapabilityBrief(prompt);
+          if (nativeBrief) {
+            buildPrompt = `${nativeBrief}\n\n---\n\n${buildPrompt}`;
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: 'NATIVE_CAPABILITY_BRIEF', autoResolved: true,
+              message: `The builder was given the exact phone plugins for: ${requestedCapabilities(prompt).map((c) => c.id).join(', ')}.`,
+            });
+          }
+        }
+      } catch { /* a brief is best-effort — never blocks a build */ }
+
       // REQUIREMENT-AWARE BUILD (admin-approved option A, 2026-07-20; flag AGENTV3_REQUIREMENT_AWARE, default
       // OFF): on a FRESH build of an ambiguous domain prompt, proactively tell the builder to INCLUDE the
       // features that domain almost always needs but the prompt left implicit (RBAC/audit/EMR for a hospital,
@@ -20713,20 +20732,20 @@ async function noteBuildOutcome(
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }
 
-      // 🔴 A POWER A WEB APP DOES NOT HAVE IS SAID, NOT IMITATED (autopsy 6bae5835, 2026-09-27). Asked for
-      // an assistant that "manages everything on my phone" and "works on the lock screen", a clean build
-      // offered a lock-screen-LIKE welcome screen and never said an app built here can do neither. The
-      // rule in the system prompt asks the model to say so; this is the last line of defence when it does
-      // not — read from the USER's words, silent when the summary already said it. Never a failed build:
-      // everything that can work inside the app was built, and saying what cannot is the honest outcome.
+      // 📱 WHAT WORKS WHERE, SAID PLAINLY (autopsy 6bae5835; admin 2026-09-27: "user ko saaf bataya jaye ki
+      // webapp me kaam nahi karega, github connect kar ke apk banana hoga"). A clean build offered a
+      // lock-screen-LIKE welcome screen and never said what an app built here can do on a phone. Now the
+      // summary names (1) the phone features the build ACTUALLY installed — read from the app's own
+      // package.json in the sandbox, where npm wrote it, never guessed from the prompt — and how to get the
+      // phone app, and (2) what the request asked for that no app built here can do. Each half stands down
+      // when the model's own summary already said it. Never a failed build.
       try {
         if (result.ok && expectsArtifacts && !isImportTurn && writtenFiles.size > 0) {
-          const powerRec = devicePowerRecord(prompt);
-          if (powerRec) {
-            const note = devicePowerNotice(prompt, result.summary);
-            if (note) result = { ...result, summary: `${result.summary}${note}` };
-            buildDiag.record({ phase: 'readiness', severity: 'info', autoResolved: true, ...powerRec, detail: note ? 'notice added to the summary' : 'the model\u2019s own summary already said it' });
-          }
+          const packageJson = await actuator.readFile(workspaceId, 'package.json').catch(() => writtenFiles.get('package.json') ?? null);
+          const note = deviceSummaryNotice({ prompt, summary: result.summary, packageJson });
+          if (note) result = { ...result, summary: `${result.summary}${note}` };
+          const rec = deviceSummaryRecord({ prompt, packageJson, noticeAdded: note !== '' });
+          if (rec) buildDiag.record({ phase: 'readiness', severity: 'info', autoResolved: true, ...rec });
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }
 

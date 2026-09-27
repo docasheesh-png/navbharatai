@@ -136,7 +136,7 @@ import { analyzeEffectCleanup, effectCleanupSummary } from './effectCleanupAnaly
 import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
-import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, viteRangeOf, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, npmInstallMaskedFailure } from './DependencyAutoFix';
+import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, manifestRewrittenBy, viteRangeOf, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, npmInstallMaskedFailure } from './DependencyAutoFix';
 import { quoteShellRouteGroupPaths } from './shellCommandSafety';
 import { resolveStringArg, missingArgMessage } from './toolArgRepair';
 import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
@@ -3434,6 +3434,17 @@ export class ToolDispatcher {
           } catch { /* best-effort — the reactive DB-unreachable net below still catches a dead DB honestly */ }
         }
         let { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, effectiveCommand);
+        // WHAT npm WROTE IS WHAT GETS SAVED (2026-09-27). A shell install edits package.json behind the
+        // captured writes, and a package.json the model wrote earlier would otherwise win at the final
+        // save — dropping the dependency just installed (see manifestRewrittenBy). Read it back and record
+        // it, exactly as the prisma-format self-heal below does for schema.prisma. Best-effort.
+        if (exitCode === 0) {
+          const rewritten = manifestRewrittenBy(effectiveCommand);
+          if (rewritten) {
+            try { this.onFileWrite?.(rewritten, await this.actuator.readFile(this.workspaceId, rewritten)); }
+            catch { /* the sandbox scan at the final save still sees it */ }
+          }
+        }
         // PRISMA RELATION SELF-HEAL (ShopKhata autopsy 2026-07-17): an LLM-written schema routinely
         // ships a HALF-relation ("user User?" with no opposite field / no references) — prisma
         // generate then fails with a validation error whose OWN message says the fix: "run `prisma

@@ -128,7 +128,8 @@ const NEVER_SUGGEST = new Set([
   'TURN_DECLINED',
   // A device power a web app cannot have (autopsy 6bae5835) — "add a lock screen" is not a next move
   // anyone can make here, so it must never be offered as one.
-  'DEVICE_POWER_NOT_POSSIBLE',
+  'DEVICE_CAPABILITIES_TOLD',
+  'NATIVE_CAPABILITY_BRIEF',
   // Our own lane's phase timings — a measurement, never a next move for the user.
   'FAST_LANE_PHASES',
   // What our own failed provider calls cost — our routing's problem, never the user's next move.

@@ -62,7 +62,9 @@ const PROCESS_ONLY_CODES = new Set([
   'TURN_DECLINED',
   // The REQUEST asked for a device power a web app does not have (autopsy 6bae5835) — a fact about what
   // the platform can deliver, told to the user in the summary, never a defect in the app that was built.
-  'DEVICE_POWER_NOT_POSSIBLE',
+  'DEVICE_CAPABILITIES_TOLD',
+  // The builder was handed the exact phone plugins the request needs — our own routing, not a finding.
+  'NATIVE_CAPABILITY_BRIEF',
   // Same rule, same reason (autopsy 21b431e1): a dropped backslash that OUR deterministic pass put
   // back is this engine's own housekeeping. The user's app is correct by the time anybody reads it.
   'SCRIPT_INTEGRITY_REPAIRED',

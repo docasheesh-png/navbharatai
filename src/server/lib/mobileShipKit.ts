@@ -29,6 +29,7 @@
 
 import { generateMobileExport, type MobileExportResult } from './MobileExportGenerator';
 import { toolchainForMajor } from './capacitorToolchain';
+import { nativePermissionScript } from '../AgentV3/nativeCapabilities';
 // The publishing walkthrough is embedded from the ONE structured source that also drives the in-app
 // checklist and the AI's answers, so the three can never drift (rule 4).
 import { renderPublishGuideText } from './storePublishGuide';
@@ -154,6 +155,12 @@ const IOS_SECRETS: RequiredSecret[] = [
 // user with no stage and no explanation, and the self-repair loop had no NBAI_FAILED_STAGE to read.
 // Bolting the Android version onto iOS would have been worse than nothing: it tests `-d android`, which
 // is never present on an iOS build, so every iOS failure would have been labelled `capacitor`.
+/** Indent every line of an embedded script to sit inside a YAML `run: |` block. */
+function indentLines(lines: readonly string[], spaces: number): string {
+  const pad = ' '.repeat(spaces);
+  return lines.map((l) => `${pad}${l}`).join('\n');
+}
+
 const FAILURE_DIAGNOSTIC = (platform: 'android' | 'ios' = 'android'): string => `
       # Runs only when something above failed. See mobileShipKit.ts for why this exists.
       - name: Explain what stopped the build
@@ -355,6 +362,12 @@ ${ENSURE_WEB_PAGE_GUARD}          if [ ! -d android ]; then
             echo "::warning::round launcher icon missing — falling back to the standard icon"
             sed -i 's#@mipmap/ic_launcher_round#@mipmap/ic_launcher#g' "$MANIFEST"
           fi
+          # PHONE FEATURES (2026-09-27): the permissions the app's own plugins need and do not declare
+          # themselves (camera, contacts, location, fingerprint), read from ITS package.json on this runner
+          # — nativeCapabilities.ts is the one table. A permission already present is never added twice.
+          node - <<'NBAI_NATIVE_PERMS'
+${indentLines(nativePermissionScript('android'), 10)}
+          NBAI_NATIVE_PERMS
           # G5: a plugin can declare a higher minSdkVersion than Capacitor's default, and the manifest
           # merger then fails with "uses-sdk:minSdkVersion X cannot be smaller than version Y". Raise the
           # project floor to a safe modern minimum (23) so common plugins merge cleanly. Only ever RAISES,
@@ -881,6 +894,12 @@ ${ENSURE_WEB_PAGE_GUARD}          if [ ! -d ios ]; then
             || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string \${{ github.run_number }}" "$PLIST"
           /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST" 2>/dev/null \\
             || /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$PLIST"
+          # PHONE FEATURES (2026-09-27): Apple rejects — and iOS crashes — an app that asks for the camera,
+          # microphone, contacts or location without saying why. The descriptions for the app's own
+          # plugins, read from its package.json (nativeCapabilities.ts).
+          node - <<'NBAI_NATIVE_PERMS'
+${indentLines(nativePermissionScript('ios'), 10)}
+          NBAI_NATIVE_PERMS
 
       # Rebuild a canonical PEM from whatever was pasted (single-line, space-mangled, or base64) so a
       # copy-paste mishap cannot masquerade as "invalid credentials" later.

@@ -48,7 +48,7 @@ export { signalsMatchedNothing } from './RequestAnalyser';
 
 export type ComplexityVerdict = 'simple' | 'complex';
 /** Where a verdict came from — recorded in the build report so a routing choice is never a mystery. */
-export type ComplexitySource = 'deterministic' | 'model' | 'model-unavailable' | 'disabled';
+export type ComplexitySource = 'deterministic' | 'model' | 'model-unavailable' | 'disabled' | 'scaffold';
 
 export interface ComplexityDecision {
   verdict: ComplexityVerdict;
@@ -198,6 +198,23 @@ export function complexityPrompt(userPrompt: string): string {
  */
 export function fallbackVerdict(deterministic: ComplexityVerdict, couldNotTell: boolean): ComplexityVerdict {
   return couldNotTell ? 'simple' : deterministic;
+}
+
+/**
+ * 🧩 A TESTED TEMPLATE IS NOT A BIG BUILD (admin-approved 2026-09-27, autopsy 15151196). A golden
+ * scaffold is seeded only when the prompt is a starter chip's prompt VERBATIM
+ * (`goldenScaffoldForPrompt`), so the template already delivers the whole request and the build's job
+ * is to verify and polish it. The memory-match chip still scored 63 — the prompt names many features —
+ * and opened on KIMI at ~13× the lead rung's input price, for 21 calls that changed one line. So a
+ * scaffolded build opens on the ladder's first rung, and the ladder still climbs if that rung fails.
+ * No model call is bought to decide it. PURE.
+ */
+export function scaffoldedComplexityDecision(score: number): ComplexityDecision {
+  const s = Number.isFinite(score) ? score : 0;
+  return {
+    verdict: 'simple', score: s, source: 'scaffold',
+    reason: `a tested template for this exact request is seeded, so the job is to verify and polish it — score ${s} does not decide the routing`,
+  };
 }
 
 /**

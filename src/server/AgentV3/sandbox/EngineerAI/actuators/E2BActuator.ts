@@ -447,8 +447,16 @@ ${dropBridgeJs('p')}
  * removing its node changes nothing on the page — only what we read back. Matched by the bridge's own
  * marker, never by position.
  */
+//
+// ⚖️ AND VITE'S DEV CSS, ONLY WHEN THE PAGE WOULD NOT FIT (admin-approved 2026-09-27). In dev, Vite
+// inlines every stylesheet as `<style data-vite-dev-id>` — ~10 KB on that app, more on a CSS-heavy
+// one — ahead of the body. Every reader that looks at this DOM strips `<style>` anyway (PreviewVerify,
+// FeaturePresence), so its text buys nothing and costs the body. It is emptied ONLY when the page is
+// over the budget; a page that fits is read byte for byte as before. The tag stays, with a note.
 const dropBridgeJs = (page: string): string =>
-  `  await ${page}.evaluate(m=>{for(const s of Array.from(document.querySelectorAll('script')))if((s.textContent||'').includes(m))s.remove();},${JSON.stringify(PREVIEW_BRIDGE_MARKER)}).catch(()=>{});`;
+  `  await ${page}.evaluate(m=>{for(const s of Array.from(document.querySelectorAll('script')))if((s.textContent||'').includes(m))s.remove();`
+  + `if(document.documentElement.outerHTML.length>30000)for(const st of Array.from(document.querySelectorAll('style[data-vite-dev-id]'))){const n=(st.textContent||'').length;st.textContent='/* '+n+' bytes of dev CSS omitted from this capture */';}`
+  + `},${JSON.stringify(PREVIEW_BRIDGE_MARKER)}).catch(()=>{});`;
 
 /**
  * `AGENTV3_BROWSE_CONSOLE=off` — the no-deploy revert for the lane-C recorder.

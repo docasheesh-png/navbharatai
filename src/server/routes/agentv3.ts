@@ -36,7 +36,7 @@ import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary }
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
-import { decideComplexity } from '../AgentV3/complexityRouting';
+import { decideComplexity, scaffoldedComplexityDecision } from '../AgentV3/complexityRouting';
 import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite, writeQualitySummary } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary, repairLostEscapes, scriptRepairSummary } from '../AgentV3/scriptIntegrity';
 import { answeringModel } from '../AgentV3/answeringModel';
@@ -497,7 +497,7 @@ import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from 
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
 import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable } from '../AgentV3/ReviewerAgent';
-import { refuteReviewByEvidence } from '../AgentV3/reviewEvidence';
+import { refuteReviewByEvidence, missingClassClaim } from '../AgentV3/reviewEvidence';
 import { SALVAGE_HANDOFF_MARKER, HANDOFF_NOTE_FIX_LINE } from '../AgentV3/handoffRule';
 import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
 import {
@@ -12613,7 +12613,11 @@ async function noteBuildOutcome(
        * ⚠️ `isEditMode` is not known yet here — deliberately. This only decides which rung OPENS a
        * build, and an edit that reaches this point is routed by the same ladder as any other turn.
        */
-      const complexityDecision = await decideComplexity(
+      // A starter chip whose tested template will be seeded is verify-and-polish, not a big build — see
+      // scaffoldedComplexityDecision. The same four conditions the seeding below checks up front
+      // (flag, a fresh build, not an import, a template for this exact prompt).
+      const scaffoldWillSeed = process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !isImportTurn && !!goldenScaffoldForPrompt(prompt);
+      const complexityDecision = scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(
         { prompt, score: analysis?.complexityScore ?? 0 },
         (p) => AIRouterManager.getRouter('free')
           .route(p, 'You are a classifier. Reply with one word only.')
@@ -21206,13 +21210,26 @@ async function noteBuildOutcome(
           // inference the evidence refutes — dropped BEFORE it can be narrated, offered, repaired or
           // counted as a critical. Recorded for the admin with what was dropped. See reviewEvidence.ts.
           if (review) {
-            const checked = refuteReviewByEvidence(review, { typecheck: gateEvidence.typecheck });
+            // A CLAIM A FILE CAN ANSWER (autopsy 15151196): "these classes are not defined in
+            // src/index.css" is checked against the real stylesheets before any repair is spent. They
+            // are read only when some finding makes that claim, so an ordinary review costs nothing.
+            let stylesheets: Record<string, string> | undefined;
+            if (review.issues.some((i) => missingClassClaim(i.message))) {
+              try {
+                const paths = (await actuator.listFiles(workspaceId))
+                  .filter((p) => /\.(css|scss|sass|less)$/i.test(p) && !/(^|\/)(node_modules|dist|build|\.git)\//.test(p))
+                  .slice(0, 40);
+                stylesheets = {};
+                for (const p of paths) { try { stylesheets[p] = await actuator.readFile(workspaceId, p); } catch { /* unreadable ⇒ not evidence */ } }
+              } catch { stylesheets = undefined; /* could not look ⇒ the findings stand */ }
+            }
+            const checked = refuteReviewByEvidence(review, { typecheck: gateEvidence.typecheck, stylesheets });
             if (checked.refuted.length > 0) {
               review = checked.review;
               try {
                 buildDiag.record({
                   phase: 'build', severity: 'info', code: 'REVIEW_REFUTED_BY_EVIDENCE', autoResolved: true,
-                  message: `${checked.refuted.length} reviewer finding(s) claimed the project does not compile, after the platform's own typecheck had passed — dropped rather than shown to the user or repaired.`,
+                  message: `${checked.refuted.length} reviewer finding(s) were contradicted by the platform's own evidence (a passing typecheck, or the stylesheets that define the classes named) — dropped rather than shown to the user or repaired.`,
                   detail: checked.refuted.map((i) => i.message.slice(0, 200)).join(' | '),
                 });
               } catch { /* best-effort */ }

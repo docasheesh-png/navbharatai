@@ -27,7 +27,50 @@ import type { ReviewIssue, ReviewResult } from './ReviewerAgent';
 export interface PlatformEvidence {
   /** The release gate's typecheck verdict ('passed' only after a real compile came back clean). */
   typecheck?: string;
+  /**
+   * The project's stylesheets, path → content, read from the workspace at review time. Present only
+   * when a finding claims a CSS class is missing — see `missingClassClaim`.
+   */
+  stylesheets?: Record<string, string>;
 }
+
+// ── A CLAIM A FILE CAN ANSWER (autopsy 15151196, 2026-09-27) ──────────────────────────────────────
+// The reviewer reported, at `high` confidence, that `badge`, `alert`, `alert-success`, `muted` and
+// `primary` were "used in src/App.tsx, but none of these classes are defined in src/index.css". All five
+// were there (lines 64–137); its grep had been run in the wrong regex dialect. The claim is a FACT
+// about a file, which the platform can check in microseconds, and it was instead handed to a repair
+// agent — which checked, found them, and changed nothing, while the user was told two bugs were fixed.
+// So a finding whose first sentence says named classes are not defined is checked against the real
+// stylesheets first. Refuted only when EVERY class it names has a selector; one missing class and the
+// finding stands, whole.
+
+const MISSING_CLAIM_RE = /\b(?:not|never|nowhere|isn'?t|aren'?t)\s+(?:be\s+)?(?:defined|declared|present|found|styled)\b|\bnone\s+of\s+(?:these|those|the|them)\b[^.!?]{0,40}\b(?:is|are)\s+(?:defined|declared|present|styled)\b|\b(?:is|are)\s+(?:missing|undefined)\b|\bmissing\s+(?:css\s+)?class|\bundefined\s+(?:css\s+)?class|\bdo(?:es)?\s+not\s+exist\b|\bdon'?t\s+exist\b/i;
+
+/**
+ * The class names a finding claims are not defined, or null when it makes no such claim. Names come
+ * only from `className="…"` / `class="…"` values and backticked `.selectors` in the FIRST sentence —
+ * never guessed from prose. PURE.
+ */
+export function missingClassClaim(message: string): string[] | null {
+  const claim = claimOf(message);
+  if (!/\bclass(?:es|name)?\b/i.test(claim) || !MISSING_CLAIM_RE.test(claim)) return null;
+  const names = new Set<string>();
+  for (const m of claim.matchAll(/\bclass(?:Name)?\s*=\s*\\?["'{`]([^"'`}]+)["'`}]/g)) {
+    for (const n of m[1].split(/\s+/)) if (/^[A-Za-z_][\w-]*$/.test(n)) names.add(n);
+  }
+  for (const m of claim.matchAll(/`\.([A-Za-z_][\w-]*)`/g)) names.add(m[1]);
+  return names.size > 0 ? [...names] : null;
+}
+
+/** Is there a selector for `.name` anywhere in these stylesheets? PURE. */
+export function classIsDefined(name: string, stylesheets: Record<string, string>): boolean {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`\\.${esc}(?![\\w-])`);
+  return Object.values(stylesheets).some((css) => re.test(String(css ?? '')));
+}
+
+/** A finding that only restates a refuted class claim ("the missing classes still leave…"). */
+const DERIVED_CLASS_CLAIM_RE = /\bthe\s+missing\s+(?:css\s+)?class(?:es|names)?\b/i;
 
 const COMPILE_FAILURE_CLAIM_RE = new RegExp(
   [
@@ -67,14 +110,29 @@ export function refuteReviewByEvidence(
   review: ReviewResult,
   evidence: PlatformEvidence,
 ): { review: ReviewResult; refuted: ReviewIssue[] } {
-  if (!review || evidence?.typecheck !== 'passed') return { review, refuted: [] };
-  const refuted = review.issues.filter((i) => claimsCompileFailure(i.message));
+  if (!review) return { review, refuted: [] };
+  const sheets = evidence?.stylesheets && Object.keys(evidence.stylesheets).length > 0 ? evidence.stylesheets : null;
+  const refutedSet = new Set<ReviewIssue>();
+  if (evidence?.typecheck === 'passed') {
+    for (const i of review.issues) if (claimsCompileFailure(i.message)) refutedSet.add(i);
+  }
+  if (sheets) {
+    const classClaims = review.issues.map((i) => ({ i, names: missingClassClaim(i.message) })).filter((c) => c.names);
+    const standing = classClaims.filter((c) => !c.names!.every((n) => classIsDefined(n, sheets)));
+    for (const c of classClaims) if (!standing.includes(c)) refutedSet.add(c.i);
+    // A follow-on finding that rests on "the missing classes" falls with them — but only when every
+    // class claim in this review was refuted, so it can never lean on one that stands.
+    if (classClaims.length > 0 && standing.length === 0) {
+      for (const i of review.issues) if (DERIVED_CLASS_CLAIM_RE.test(i.message)) refutedSet.add(i);
+    }
+  }
+  const refuted = review.issues.filter((i) => refutedSet.has(i));
   if (refuted.length === 0) return { review, refuted: [] };
   const kept = review.issues.filter((i) => !refuted.includes(i));
   const summaryRepeatsRefuted = refuted.some((i) => {
     const claim = claimOf(i.message).slice(0, 40).toLowerCase();
     return claim.length > 0 && String(review.summary ?? '').toLowerCase().includes(claim);
-  }) || claimsCompileFailure(review.summary ?? '');
+  }) || (evidence?.typecheck === 'passed' && claimsCompileFailure(review.summary ?? ''));
   const summary = summaryRepeatsRefuted
     ? (kept[0]?.message ?? 'No finding the platform could confirm.')
     : review.summary;

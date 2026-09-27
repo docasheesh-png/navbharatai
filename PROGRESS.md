@@ -83275,3 +83275,71 @@ Asked after #3350 whether games should join reminder/planner apps on the cheap o
 - Tests: `tests/aGameOpensOnTheCheapEngineWhereItCan.test.ts` (19), reversion-proven in both halves.
 - ⚠️ **What to watch:** heal count and first-render time on Weak/Normal game builds. If ordinary games start
   needing heals the cheap rung cannot give, the fix is to widen `HEAVY_GAME_SIGNAL`, not to revert.
+
+## 2026-09-27 — The three open items of autopsy 2720e553, root-caused and fixed (admin: "dna level par ja kar")
+
+The earlier entry for that build listed three items it could not explain from the report. All three are
+explained now, and each is closed as a class rather than as one occurrence.
+
+**1. A pressed Stop did not stop the build.** The Stop button, Unsend and a lease stop all abort the
+build's signal (`abortBuild(…, 'user-stop')`).
+- **The defect:**
+  - The fast lane (`runSimpleBuild`, the one-shot lane, and the route's verify, repair and preview
+    helpers) never read that signal. A lane that was stopped kept calling models, kept repairing, and
+    started a dev server. Stop was recorded only when the lane ran out of work. That is why that report
+    shows `USER_STOPPED_BUILD` 143 ms after the preview published: the timestamp is when the stop was
+    NOTICED, not when it was pressed.
+  - The agentic loop noticed a stop only BETWEEN turns, after paying for the call in flight.
+    `CLAUDE.md` had recorded this as an open item since 2026-09-13.
+- **The fix:**
+  - `stopSignal.ts` is one definition of a stop: `BuildStoppedError`, `raceStop`, `withStopSignal`.
+  - `RunTurnParams.signal` carries the stop to the provider ladder. On a stop, the ladder asks no
+    further rung, benches nobody, counts no wasted provider time, and still attributes a stopped call's
+    cost to us (never to the user).
+  - The GLM/Kimi runner closes its stream, so the provider stops generating and billing.
+  - The Claude request is cancelled through the SDK, and never retried after a stop.
+  - `AgentRunner` passes its signal into the call it waits on, and ends through the same abort summary.
+  - The route's two text-runner factories are wrapped with `withStopSignal`, so every direct call site
+    (planners, post-build repairs, the fast lane) carries the signal without anyone having to remember.
+  - `runSimpleBuild` checks the signal before every file call and at every tier, repair round and
+    preview start. A repair that finishes after a stop is not written. The lane returns
+    `stopped: true`, saves the files it finished, and starts no one-shot lane.
+  - Every OTHER abort cause (watchdog, cost cap, deploy drain, reaper) now cancels in-flight calls
+    too, because each of them already means "this build is over".
+
+**2. The foundation guard overwrote a working `package.json`.**
+- **The defect:**
+  - The lane listed the sandbox once and kept `.slice(0, 80)` of an unsorted `find` listing, so which
+    80 files survived was chance.
+  - `ensureViteReactFoundation` then called `package.json`, `vite.config.ts` and both tsconfigs
+    "missing" and wrote generic ones over the scaffold's. The build had to restore a plugin that was
+    already installed.
+- **The fix:**
+  - The listing is no longer capped. Prompts that show it cap it themselves at 60.
+  - `foundationFilesStillAbsent` asks the disk immediately before writing, so a file that exists is
+    never overwritten (`FOUNDATION_KEPT_EXISTING`).
+  - The Diagnose/restore call site is left as it was, on purpose: there, the durable store IS the whole
+    project, and the sandbox holds only the template's generic files.
+
+**3. The dev server "did not start and the log had no recognisable error" twice, then came up.**
+- **The defect:**
+  - The recovery loop waited 25 s, then killed and relaunched with a 20 s wait, twice: 70 s in all.
+  - The port was listening 17 s later.
+  - A clean log from a living process is a server still starting (a cold `vite` after a fresh install
+    pre-bundles before it prints). Each restart killed it and reset its clock.
+- **The fix:**
+  - For an unrecognised failure, the loop first waits on the SAME process
+    (`buildStillStartingWaitCommand`, 40 s, bounded).
+  - A process that has exited answers `PROC_GONE` within about a second, so a real crash is restarted
+    exactly as before. A named failure keeps its own recovery.
+
+Tests (all reversion-proven by removing each fix and watching its test fail):
+- `tests/aPressedStopStopsTheBuild.test.ts` (19)
+- `tests/theDiskDecidesWhatIsMissing.test.ts` (5)
+- `tests/aStartingServerIsNotADeadOne.test.ts` (9); its shell command is run for real
+
+**Still open:**
+- Gemini's runner has no cancel handle. A stop there stops the WAITING (the ladder races it), not the
+  call itself.
+- Why the dev server's log was silent for that long is not established. A git message ("On branch
+  master") appears in that output, and its source was not traced here.

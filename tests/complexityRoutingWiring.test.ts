@@ -81,7 +81,7 @@ describe('🔒 the route HANDS the verdict to the chain builder — the wiring t
   };
 
   it('the fast-lane / planner runner carries `complex: buildIsComplex`', () => {
-    expect(blockFrom('const makeFastTextRunner = (onUsed?: (used: string) => void): TurnRunner => buildTurnRunner({'))
+    expect(blockFrom('const makeFastTextRunner = (onUsed?: (used: string) => void): TurnRunner => withStopSignal(buildTurnRunner({'))
       .toContain('complex: buildIsComplex');
   });
 

@@ -1160,6 +1160,40 @@ export function buildPortWaitCommand(port: number, maxSeconds: number): string {
 }
 
 /**
+ * How long a dev server that is ALIVE and has logged no error is given, on the same process, before a
+ * restart. See `buildStillStartingWaitCommand`.
+ */
+export const STILL_STARTING_EXTRA_SECONDS = 40;
+
+/**
+ * Wait on the dev server we already launched, while its process lives: `PORT_UP` when the port opens,
+ * `PROC_GONE` the moment the process exits (so a real crash costs about one second here, not the whole
+ * window), `PORT_DOWN` when it is still alive and still not serving after `maxSeconds`.
+ *
+ * 🔴 WHY (autopsy 2720e553, 2026-09-27). The recovery loop read "no recognisable error in the log" as a
+ * failure and restarted: a 25 s wait, then kill-and-relaunch with 20 s, twice — 70 s — and it reported
+ * "did not come up after automatic recovery". Seventeen seconds later the port was open. A log with no
+ * error and a live process is a server still STARTING (a cold `vite` after a fresh install
+ * pre-bundles dependencies before it prints anything), and each restart killed it and reset its clock.
+ * Restarting was the one thing guaranteed not to help.
+ */
+export function buildStillStartingWaitCommand(pid: number, port: number, maxSeconds: number): string {
+  const iterations = Math.max(1, Math.floor(maxSeconds));
+  const safePid = Math.max(1, Math.floor(Number(pid) || 0));
+  const check = `nc -z 127.0.0.1 ${port} 2>/dev/null || curl -s -o /dev/null --max-time 2 http://127.0.0.1:${port} 2>/dev/null || (exec 3<>/dev/tcp/127.0.0.1/${port}) 2>/dev/null`;
+  return `for i in $(seq 1 ${iterations}); do if ${check}; then echo PORT_UP; exit 0; fi; if ! kill -0 ${safePid} 2>/dev/null; then echo PROC_GONE; exit 0; fi; sleep 1; done; echo PORT_DOWN`;
+}
+
+/**
+ * Give a quiet, living dev server more time instead of restarting it? Only when the log shows NO
+ * recognisable failure (a named failure has its own correct recovery) and we know which process we
+ * launched. PURE.
+ */
+export function shouldWaitOnStartingServer(cause: string | undefined, pid: number | undefined): boolean {
+  return cause === 'unknown' && typeof pid === 'number' && Number.isFinite(pid) && pid > 0;
+}
+
+/**
  * True when an npm install failed on a TRANSIENT filesystem race, not on anything about the project.
  *
  * THE REAL CASE (Mitrify report a876b7bb, 2026-08-15): the pre-migration install died with

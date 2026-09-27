@@ -7,7 +7,7 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure, buildStillStartingWaitCommand, shouldWaitOnStartingServer, STILL_STARTING_EXTRA_SECONDS } from './devServerHost';
 import { buildPortSweepCommand, parsePortSweep, portCandidates, shouldSweep, sweepFoundSummary } from './portSweep';
 import { appPortsFrom } from '../../../appPorts';
 import type { DevFramework } from './devServerHost';
@@ -2166,11 +2166,13 @@ export class E2BActuator implements IEngineerActuator {
       // free a busy port, STOP on a code error the agent must fix (a restart can never help it), or
       // plain-retry a transient crash. This replaces the old single blind restart and yields an HONEST
       // root cause when it still can't come up (instead of a generic "check the logs").
+      let lastLaunchPid: number | undefined;
       const launchAndWait = async (seconds: number): Promise<boolean> => {
         const h = await sandbox.commands.run(devCommand, {
           cwd: WORKSPACE_ROOT, background: true,
           onStdout: s => { stdout += s; }, onStderr: s => { stderr += s; },
         });
+        lastLaunchPid = typeof (h as { pid?: unknown }).pid === 'number' ? (h as { pid: number }).pid : undefined;
         const w = await sandbox.commands.run(buildPortWaitCommand(port, seconds), { timeoutMs: (seconds + 5) * 1000 })
           .catch(() => ({ stdout: 'PORT_DOWN' } as { stdout: string }));
         await h.disconnect().catch(() => {});
@@ -2209,6 +2211,20 @@ export class E2BActuator implements IEngineerActuator {
         if (diag.recovery === 'code_fix') {
           stdout += `\n[health-check] ${diag.detail}`;
           break;
+        }
+        // A LIVING server with a clean log is still starting — give it more time on the SAME process
+        // before any restart (autopsy 2720e553: two restarts killed a server that came up 17 s later).
+        // A process that has exited answers PROC_GONE within a second, so a real crash restarts as before.
+        if (shouldWaitOnStartingServer(diag.cause, lastLaunchPid)) {
+          const w = await sandbox.commands
+            .run(buildStillStartingWaitCommand(lastLaunchPid as number, port, STILL_STARTING_EXTRA_SECONDS), { timeoutMs: (STILL_STARTING_EXTRA_SECONDS + 5) * 1000 })
+            .catch(() => ({ stdout: 'PORT_DOWN' } as { stdout: string }));
+          if (w.stdout.includes('PORT_UP')) {
+            await armKeepalive(port);
+            portUp = true;
+            stdout += `\n[health-check] the dev server was still starting (its process was alive and its log showed no error) — it came up after more time on the same process, with no restart.`;
+            break;
+          }
         }
         stdout += `\n[health-check] attempt ${attempt} — ${diag.detail}`;
         if (diag.recovery === 'reinstall') {

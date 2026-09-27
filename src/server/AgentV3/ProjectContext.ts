@@ -7,6 +7,7 @@
 // continuing an existing project and resumes instead of asking. Pure + dependency-free (testable).
 
 import type { TodoItem, TodoStatus } from './types';
+import { isListPrunedPath } from '../lib/generatedDirs';
 
 export interface ProjectContextInput {
   /** Current workspace file paths (the durable, cross-instance signal of what exists). */
@@ -23,14 +24,13 @@ export interface ProjectContextInput {
   lastPlan?: string;
 }
 
-const HEAVY = /^(node_modules|\.git|dist|build|\.next|__pycache__|coverage)\//;
 
 /**
  * Build the project-memory context block, or '' when there is genuinely nothing to remember
  * (a brand-new empty workspace). Caller prepends it to the build prompt.
  */
 export function buildProjectContext(input: ProjectContextInput): string {
-  const files = (input.files ?? []).filter((p) => p && !HEAVY.test(p)).slice(0, 60);
+  const files = (input.files ?? []).filter((p) => p && !isListPrunedPath(p)).slice(0, 60);
   const requests = (input.recentRequests ?? []).map((r) => r.trim()).filter(Boolean);
   const map = (input.projectMap ?? '').trim();
   const plan = (input.lastPlan ?? '').trim();

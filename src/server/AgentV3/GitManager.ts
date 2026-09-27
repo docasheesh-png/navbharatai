@@ -1,4 +1,5 @@
 import type { GitCheckpoint } from './types';
+import { LIST_PRUNE_DIRS } from '../lib/generatedDirs';
 
 /** The slice of the actuator GitManager needs (real sandboxes only). */
 export interface CommandRunner {
@@ -120,9 +121,11 @@ function sanitizeMessage(message: string): string {
  * makes a checkpoint cost milliseconds instead of ~45s. POSIX sh: `grep -qxF` = exact full-line
  * match, so a pattern is added at most once.
  */
+// Derived from the ONE listing prune (lib/generatedDirs.ts) — this copy lacked `venv/`, so a build's
+// Python virtualenv (~1,900 files) was committed to the user's own repository (autopsy e1c21ad8).
 const GITIGNORE_PATTERNS = [
-  'node_modules/', 'dist/', 'build/', '.next/', 'out/', 'coverage/',
-  '.venv/', '__pycache__/', '.cache/', '.e-checkpoints/', '.DS_Store', '*.log',
+  ...LIST_PRUNE_DIRS.filter((d) => d !== '.git').map((d) => `${d}/`),
+  '.DS_Store', '*.log',
 ];
 const ENSURE_GITIGNORE_CMD =
   'touch .gitignore; ' +

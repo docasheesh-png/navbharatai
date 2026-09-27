@@ -142,6 +142,21 @@ export function essentialManifestsToCarry(existingPaths: string[], incomingPaths
 }
 
 /**
+ * The paths of a stored index that a load would actually return: normalized, de-duplicated, and without
+ * anything `toDurableFileKey` refuses. PURE.
+ */
+export function liveIndexPaths(paths: unknown): string[] {
+  if (!Array.isArray(paths)) return [];
+  const seen = new Set<string>();
+  for (const p of paths) {
+    if (typeof p !== 'string' || p.length === 0) continue;
+    const key = toDurableFileKey(p);
+    if (key !== null) seen.add(key);
+  }
+  return Array.from(seen);
+}
+
+/**
  * Persist the current set of workspace source files. The `paths` metadata list is authoritative:
  * a file removed from `files` won't be returned by loadWorkspaceFiles even if its content doc
  * lingers. GUARDED: a drastically-smaller partial set is MERGED, never a wipe (savePlanForFileSet).
@@ -165,7 +180,10 @@ export async function saveWorkspaceFiles(workspaceId: string, files: Record<stri
     let guardMeta: FirebaseFirestore.DocumentSnapshot | null = null;
     let guardRead: 'ok' | 'failed' = 'ok';
     try { guardMeta = await root.get(); } catch { guardRead = 'failed'; }
-    const existingPaths: string[] = guardMeta?.exists && Array.isArray(guardMeta.data()?.paths) ? guardMeta.data()!.paths : [];
+    // Only paths a load would return count as "the project" — an index polluted with installed
+    // packages (autopsy e1c21ad8: 1,930 paths, ~1,900 of them a Python virtualenv) must not make every
+    // real save look like a drastic shrink and route it to a merge that keeps the pollution for ever.
+    const existingPaths: string[] = liveIndexPaths(guardMeta?.exists ? guardMeta.data()?.paths : undefined);
     const existingCount: number | 'unknown' = guardRead === 'ok' ? existingPaths.length : 'unknown';
     if (savePlanForFileSet(existingCount, entries.length) === 'merge') {
       notePersistenceFailure('workspace_files', 'write', new Error(`shrink-guard: a save of ${entries.length} path(s) would have wiped an index of ${existingCount} — merged instead`));
@@ -257,7 +275,7 @@ export async function mergeWorkspaceFiles(workspaceId: string, partial: Record<s
     if (commits.length) await Promise.all(commits);
     // 2) UNION the authoritative path list (never drop unchanged files).
     const meta = await root.get();
-    const existing: string[] = meta.exists && Array.isArray(meta.data()?.paths) ? meta.data()!.paths : [];
+    const existing: string[] = liveIndexPaths(meta.exists ? meta.data()?.paths : undefined);
     const union = Array.from(new Set([...existing, ...entries.map(([p]) => p)]));
     const safe = capPathsToDocLimit(union);
     if (safe.capped > 0) notePersistenceFailure('workspace_files', 'write', new Error(`durable path index capped: ${safe.capped} of ${union.length} paths exceeded the 1MB metadata-doc limit (files remain in the sandbox / git)`));
@@ -379,8 +397,11 @@ export async function countWorkspaceFiles(workspaceId: string): Promise<number> 
     const meta = await db.collection(COLLECTION).doc(workspaceId).get();
     if (!meta.exists) return 0;
     const data = meta.data();
+    // The path list, when present, is what a load returns; `count` is only what the last writer
+    // stored, and an index written before e1c21ad8 counted a virtualenv's packages as project files.
+    if (Array.isArray(data?.paths)) return liveIndexPaths(data!.paths).length;
     if (typeof data?.count === 'number' && data.count >= 0) return data.count;
-    return Array.isArray(data?.paths) ? data!.paths.length : 0;
+    return 0;
   } catch {
     return 0;
   }

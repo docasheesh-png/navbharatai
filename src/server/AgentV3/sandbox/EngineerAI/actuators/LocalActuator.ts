@@ -6,6 +6,7 @@ import { WorkspaceManager } from '../../AppMakerLab/WorkspaceManager';
 import { FileSanitizer } from '../../AppMakerLab/FileSanitizer';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { assertLocalActuatorExecAllowed } from '../../../../lib/actuatorGuard';
+import { LIST_PRUNE_DIRS } from '../../../../lib/generatedDirs';
 
 const rawExec = util.promisify(exec);
 // SECURITY Phase 2.3 — single exec choke point: every shell command this actuator runs passes the
@@ -29,11 +30,8 @@ const MAX_LIST_FILES = 500;
 
 // Directories skipped at the walk level — never entered, so node_modules with
 // 50 k+ files cannot cause a multi-minute hang on every agent step.
-const IGNORED_DIRS = new Set([
-  'node_modules', '.git', 'dist', '.next', 'build',
-  '__pycache__', '.venv', '.cache', 'coverage', 'out',
-  'test-results', 'playwright-report',
-]);
+// The same list every actuator uses — see lib/generatedDirs.ts (autopsy e1c21ad8).
+const IGNORED_DIRS: ReadonlySet<string> = new Set(LIST_PRUNE_DIRS);
 
 /**
  * Process-level actuator (Cloud Run / local dev).

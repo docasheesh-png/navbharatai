@@ -382,6 +382,7 @@ import { envKillSwitch } from '../lib/envFlag';
 import { webFetchUrl, formatWebFetchResult } from './webFetch';
 import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ignoreRules';
 import { withoutPreviewBridge, bridgeShellNote } from './previewBridge';
+import { LIST_PRUNE_DIRS, isListPrunedPath } from '../lib/generatedDirs';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -1586,10 +1587,9 @@ export class ToolDispatcher {
       // as before, so the add path is byte-identical.
       const listed = await this.actuator.listFiles(this.workspaceId).catch(() => null);
       const tree = listed ?? [];
-      const EXCLUDE = /(^|\/)(node_modules|\.git|dist|build|\.next|__pycache__|coverage)\//;
       // Code (for import resolution) + index.html (runnability/SEO) + key configs.
       const INDEXABLE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|astro|html?|css|scss|json)$/i;
-      const indexable = (p: string): boolean => !EXCLUDE.test(p) && INDEXABLE.test(p);
+      const indexable = (p: string): boolean => !isListPrunedPath(p) && INDEXABLE.test(p);
       const known = new Set(mem.graph().files);
       // THE GRAPH MUST MATCH THE DISK, HOWEVER A FILE LEFT IT (autopsy c6e4c6ff — a deleted
       // `src/routes/orders.ts` failed a rendering app on its own dead imports and made it free).
@@ -3804,7 +3804,9 @@ export class ToolDispatcher {
          * "not the user's code", not two. An explicit path is still searched as given — only the
          * unqualified walk is bounded, which is the case that produced this.
          */
-        const EXCLUDED_DIRS = ['node_modules', '.git', 'dist', 'build', 'coverage', 'vendor', '.next', '__pycache__'];
+        // The shared listing prune (lib/generatedDirs.ts) plus `vendor`, which only a search skips: a
+        // build's own Python virtualenv made an unqualified grep walk ~1,900 library files (autopsy e1c21ad8).
+        const EXCLUDED_DIRS = [...LIST_PRUNE_DIRS, 'vendor'];
         const excludes = EXCLUDED_DIRS.map((d) => `--exclude-dir=${shellQuote(d)}`).join(' ');
         const { stdout } = await this.actuator.runCommand(
           this.workspaceId,

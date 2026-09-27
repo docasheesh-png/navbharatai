@@ -526,8 +526,61 @@ export function formSourcesFor(
   return out;
 }
 
+/**
+ * The path the app's OWN router maps a page file to, or null when no router declaration names it.
+ *
+ * 🔴 WHY (autopsy e1c21ad8, 2026-09-27). A novel-writing app's only form lives in `NewNovel.tsx`, and
+ * its router says `<Route path="/new" element={<NewNovel />} />`. The filename heuristic below looked
+ * for a route containing "newnovel", found none, and sent the journey to `/` — where the form is not —
+ * so the report read *"No user journey could be completed … none of the form fields were present"*
+ * and the release gate stayed YELLOW for a form that was never looked for where it lives. The router
+ * already states the answer; guessing from a filename is what you do when it does not.
+ *
+ * Reads the binding the router file imports the page under (default, named, or `lazy(() => import())`),
+ * then the `<Route path element={<X …}>` / `Component={X}` or `{ path, element: <X … }` that uses it.
+ * Only an ABSOLUTE path is returned: a nested relative child route would need its parents joined, and a
+ * wrong URL is worse than the heuristic. Deterministic: files in key order, first match wins. Pure.
+ */
+export function routeFromRouter(page: string, files: Record<string, string>): string | null {
+  for (const [file, src] of Object.entries(files ?? {})) {
+    if (typeof src !== 'string' || !/\.(t|j)sx?$/.test(file)) continue;
+    if (!/<Route\b|\bpath\s*:/.test(src)) continue;
+    const bindings = new Set<string>();
+    const bind = (name: string | undefined, spec: string | undefined): void => {
+      if (name && spec && resolveLocalImport(file, spec, files) === page) bindings.add(name);
+    };
+    for (const m of src.matchAll(/\bimport\s+([A-Za-z_$][\w$]*)\s*(?:,\s*\{[^}]*\})?\s*from\s*["']([^"']+)["']/g)) bind(m[1], m[2]);
+    for (const m of src.matchAll(/\bimport\s*(?:[A-Za-z_$][\w$]*\s*,\s*)?\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)) {
+      for (const part of m[1].split(',')) {
+        const alias = /^\s*[\w$]+\s+as\s+([\w$]+)\s*$/.exec(part)?.[1] ?? /^\s*([\w$]+)\s*$/.exec(part)?.[1];
+        bind(alias, m[2]);
+      }
+    }
+    for (const m of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:React\s*\.\s*)?lazy\s*\(\s*\(\s*\)\s*=>\s*import\s*\(\s*["']([^"']+)["']\s*\)/g)) bind(m[1], m[2]);
+    for (const name of bindings) {
+      const n = name.replace(/\$/g, '\\$');
+      const pathValue = String.raw`path\s*[=:]\s*(?:\{\s*)?["'\x60]([^"'\x60]+)["'\x60]`;
+      const usesIt = String.raw`(?:element\s*[=:]\s*\{?\s*<\s*${n}\b|Component\s*[=:]\s*\{?\s*${n}\b)`;
+      // Either attribute order, inside one <Route …> or one { … } route object (no nested braces/tags
+      // between them beyond the element's own `<X`).
+      const both = [
+        new RegExp(String.raw`${pathValue}[^<{]{0,200}?${usesIt}`),
+        new RegExp(String.raw`${usesIt}[^<{]{0,200}?${pathValue}`),
+      ];
+      for (const re of both) {
+        const hit = re.exec(src)?.[1];
+        if (hit && hit.startsWith('/')) return hit;
+      }
+    }
+  }
+  return null;
+}
+
 /** The route a page file serves, best-effort, or null. Only used for a label and a starting URL. */
-export function routeForFile(path: string, knownRoutes: readonly string[]): string {
+export function routeForFile(path: string, knownRoutes: readonly string[], files?: Record<string, string>): string {
+  // The router's own declaration, when there is one, is the answer — see routeFromRouter.
+  const declared = files ? routeFromRouter(path, files) : null;
+  if (declared) return declared;
   const stem = path.replace(/\.(t|j)sx$/, '').split('/').pop() || '';
   const lower = stem.toLowerCase();
   if (/^(home|index|page|app)$/.test(lower)) return '/';
@@ -600,7 +653,7 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
     if (!submit || fields.length === 0) continue;
     usedForms.add(formPath);
 
-    const route = routeForFile(path, routes);
+    const route = routeForFile(path, routes, files);
     const listed = rendersList(source);
     // The marker has to actually be typed somewhere, or "did it appear" is unanswerable.
     const markerTyped = fields.some((f) => f.value.includes(marker));

@@ -82646,3 +82646,39 @@ holds (such a user can later earn ₹350 from referral steps, not ₹400 on top)
 writes one ledger row "Welcome credit: ₹50 added by NavBharatAI", and audits `ADMIN_WELCOME_GIFT`.
 Server + admin panel only: live on the website admin panel on deploy, no .aab needed. Test-locked in
 `tests/adminWelcomeGift.test.ts`.
+
+## 2026-09-27 — Admin: ₹150 to every new user in one press; the ₹50 per-user button is retired
+
+The admin's instructions, in order:
+- *"ek ek kar ke du? 1000 user hai?"*
+- then *"50₹ wala system hatao aur 1 click me new user ko 150₹ gift de aisa button bana do! only new user ke liye"*.
+
+**What changed:**
+- **Removed:** the per-row "Gift ₹50" button (#3340), its route `POST /api/admin/users/:userId/welcome-gift`,
+  and the `welcomeGiftEligible` field on the users list.
+- **Added:** Admin → Users now has one button, **"Gift ₹150 to new users"**.
+  - Press 1 asks the server how many new users are eligible and shows the total ("N users × ₹150 = ₹X").
+  - Press 2 sends that N as `expectedCount`. The server refuses a run that would pay more users than
+    the admin confirmed, because people sign up between the two clicks.
+- **The rules:**
+  - Every account is paid through ONE transaction (`grantWelcomeGift`). It re-reads eligibility, so no
+    account is ever paid twice.
+  - Banned accounts are excluded.
+  - At most 2,000 accounts per press; the response says how many remain.
+- **Route:** `POST /api/admin/welcome-gift/bulk` (`dryRun` / `expectedCount`). Rules are in
+  `adminWelcomeGift.ts`; tests are in `tests/adminWelcomeGift.test.ts`.
+
+**What "new user" means, decided on the server:**
+- never received any gift (`freeGiftedTokens`);
+- never received any credit (`totalTokensPurchased`, which includes every old welcome bonus);
+- never paid;
+- not merged away;
+- not already given this credit (`adminWelcomeGiftAt`).
+
+So accounts opened before the welcome grants were deleted (they received one) are excluded by
+construction, and so is anyone who already got the old ₹50 or a referral step.
+
+⚠️ **This is real money.** 1,000 × ₹150 = ₹1,50,000 of gift credit, and spending it costs real provider
+money.
+⚠️ **It counts against the ₹400 lifetime gift ceiling** (`freeGiftedTokens`, read by `routes/referral.ts`).
+A user given ₹150 here can earn at most ₹250 more from the referral ladder.

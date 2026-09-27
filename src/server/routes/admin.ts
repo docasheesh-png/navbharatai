@@ -29,8 +29,8 @@ import { runPushPreflight } from '../lib/pushPreflight';
 import { adminEmailList } from '../lib/adminEmails';
 import { mirroredCreditPatch } from '../lib/walletMirror';
 import {
-  welcomeGiftEligible, welcomeGiftRefusal, ADMIN_WELCOME_GIFT_TOKENS, ADMIN_WELCOME_GIFT_RUPEES,
-  bulkWelcomeGiftCandidates, bulkWelcomeGiftRefusal, BULK_WELCOME_GIFT_MAX,
+  welcomeGiftEligible, walletRefusal, planWelcomeGift, parseNewUserDays, bulkWelcomeGiftRefusal,
+  ADMIN_WELCOME_GIFT_TOKENS, ADMIN_WELCOME_GIFT_RUPEES, BULK_WELCOME_GIFT_MAX, NEW_USER_MAX_DAYS,
 } from '../lib/adminWelcomeGift';
 import { audit } from '../lib/audit';
 import { buildDiscountStore, BUILD_DISCOUNT_MAX_PCT, BUILD_DISCOUNT_CACHE_MS } from '../lib/buildDiscount';
@@ -2303,7 +2303,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const fresh = await tx.get(walletRef);
       if (!fresh.exists()) return { ok: false as const, status: 404, error: 'User not found' };
       const w = fresh.data();
-      if (!welcomeGiftEligible(w)) return { ok: false as const, status: 409, error: welcomeGiftRefusal(w) };
+      // Rules 2 and 3 re-read HERE, inside the transaction: a gift that landed since the check, or a
+      // second press, finds the wallet no longer eligible and pays nothing.
+      if (!welcomeGiftEligible(w)) return { ok: false as const, status: 409, error: walletRefusal(w) ?? 'not-eligible' };
       const patch = mirroredCreditPatch(w, ADMIN_WELCOME_GIFT_TOKENS, 'gift');
       tx.update(walletRef, {
         ...patch,
@@ -2325,27 +2327,45 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   };
 
   /**
-   * ₹150 TO EVERY NEW USER IN ONE PRESS (admin 2026-09-27). `{ dryRun: true }` answers how many new
-   * users are eligible and what it totals; a real press must carry that count as `expectedCount` and is
-   * refused if it would pay more. Each account goes through `grantWelcomeGift`, so none is paid twice.
+   * ₹150 TO NEW USERS IN ONE PRESS (admin 2026-09-27). Rules in `adminWelcomeGift.ts`: joined within
+   * the chosen number of days, ₹0 gift balance, never given before.
+   * `{ dryRun: true, days }` answers who would be paid and why everyone else is skipped; a real press
+   * must carry that count as `expectedCount` and is refused if it would pay more. Each account goes
+   * through `grantWelcomeGift`, so none is paid twice.
    */
   app.post('/api/admin/welcome-gift/bulk', verifyAdminToken, async (req: Request, res: Response) => {
     const db = getDb() as any;
+    const days = parseNewUserDays(req.body?.days);
+    if (days === null) {
+      return res.status(400).json({ ok: false, error: `Choose how new: a whole number of days from 1 to ${NEW_USER_MAX_DAYS}.` });
+    }
     try {
       const snap = await getDocs(collection(db, 'user_token_wallets'));
-      const candidates = bulkWelcomeGiftCandidates(snap.docs.map((d: any) => ({ id: d.id, ...d.data() })));
-      const eligible = candidates.length;
-      if (req.body?.dryRun === true) {
-        return res.json({
-          ok: true, eligible, rupeesEach: ADMIN_WELCOME_GIFT_RUPEES,
-          totalRupees: eligible * ADMIN_WELCOME_GIFT_RUPEES, maxPerPress: BULK_WELCOME_GIFT_MAX,
-        });
-      }
-      const refusal = bulkWelcomeGiftRefusal(req.body?.expectedCount, eligible);
-      if (refusal) return res.status(409).json({ ok: false, error: refusal, eligible });
+      const wallets = snap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as Array<{ id: string } & Record<string, unknown>>;
+      // The join date is the users list's own ("Joined" column): Firebase Auth, else the wallet's
+      // createdAt. Looked up only for wallets the money rules would allow, so a press costs few calls.
+      const payable = wallets.filter((w) => walletRefusal(w) === null).map((w) => w.id);
+      const authMeta = await fetchAuthMetadata(payable, await firebaseAuthBatch(), payable.length);
+      const nowMs = Date.now();
+      const plan = planWelcomeGift(
+        wallets,
+        (id, w) => resolveJoinedAt(authMeta.get(id) ?? null, w.createdAt).atMs,
+        nowMs,
+        days,
+      );
+      const eligible = plan.payIds.length;
+      const summary = {
+        days, eligible, checked: plan.checked, skipped: plan.skipped,
+        rupeesEach: ADMIN_WELCOME_GIFT_RUPEES, totalRupees: eligible * ADMIN_WELCOME_GIFT_RUPEES,
+        maxPerPress: BULK_WELCOME_GIFT_MAX,
+      };
+      if (req.body?.dryRun === true) return res.json({ ok: true, ...summary });
 
-      const batch = candidates.slice(0, BULK_WELCOME_GIFT_MAX);
-      const nowIso = new Date().toISOString();
+      const refusal = bulkWelcomeGiftRefusal(req.body?.expectedCount, eligible);
+      if (refusal) return res.status(409).json({ ok: false, error: refusal, ...summary });
+
+      const batch = plan.payIds.slice(0, BULK_WELCOME_GIFT_MAX);
+      const nowIso = new Date(nowMs).toISOString();
       let paid = 0, skipped = 0, failed = 0;
       // A few at a time: each is its own transaction on its own wallet, so they do not contend.
       for (let i = 0; i < batch.length; i += 8) {
@@ -2356,9 +2376,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           else skipped++;
         }
       }
-      audit('ADMIN_WELCOME_GIFT_BULK', { paid, skipped, failed, tokensEach: ADMIN_WELCOME_GIFT_TOKENS, ip: req.ip });
+      audit('ADMIN_WELCOME_GIFT_BULK', { days, paid, skipped, failed, tokensEach: ADMIN_WELCOME_GIFT_TOKENS, ip: req.ip });
       res.json({
-        ok: true, paid, skipped, failed, remaining: eligible - batch.length,
+        ok: true, days, paid, skipped, failed, remaining: eligible - batch.length,
         rupeesEach: ADMIN_WELCOME_GIFT_RUPEES, totalRupees: paid * ADMIN_WELCOME_GIFT_RUPEES,
       });
     } catch (e: any) { console.error('[ADMIN] bulk welcome-gift failed:', e?.message); res.status(500).json({ ok: false, error: 'Internal server error.' }); }

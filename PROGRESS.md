@@ -82748,6 +82748,40 @@ money.
 ⚠️ **It counts against the ₹400 lifetime gift ceiling** (`freeGiftedTokens`, read by `routes/referral.ts`).
 A user given ₹150 here can earn at most ₹250 more from the referral ladder.
 
+## 2026-09-27 (later) — ₹150 for NEW users: the admin's three rules, and the bug #3342 shipped
+
+The admin looked at #3342's button and said *"yeh 150₹ sabhi user ko kar rahe hai!"*. Their rules:
+1. *"user new hona chahiye"*
+2. *"balance gift 00 hona chahiye (₹ se purchase kiye huye alag)"*
+3. *"ek bar 150₹ mil gaye, wapas na mile, chahe admin one click kitni bhi baar kare"*
+
+**The bug.** #3342 treated "has never received any credit" as meaning "new". Every account opened after
+the flat welcome gift was retired on 2026-09-17 (#3030) fits that, whatever its age, so ten days of
+sign-ups were all offered ₹150. "Never credited" describes a wallet; "new" describes a person.
+
+**The fix** (`adminWelcomeGift.ts`):
+- **Rule 1 — new.** The account joined within N days. The admin picks N from 1, 3, 7, 15 or 30 (default 7)
+  beside the button. The join date comes from the same reader the users list's "Joined" column uses
+  (`resolveJoinedAt`: Firebase Auth, then the wallet's `createdAt`). A join date that cannot be read
+  counts as not new.
+- **Rule 2 — ₹0 gift balance.** Checked with `giftRemaining`. Paid money is separate: someone who
+  recharged but holds no gift credit is eligible.
+- **Rule 3 — once only.** The `adminWelcomeGiftAt` stamp is written and re-read inside the same
+  transaction, so repeated or simultaneous presses pay an account once. Accounts that received the old
+  ₹50 already carry this stamp and are skipped.
+- **Kept guards.** Banned and merged accounts are never paid. The ₹400 lifetime gift ceiling holds: an
+  account with no room for the full ₹150 is skipped, not part-paid.
+
+**What the admin sees.** The popup shows who gets it and why everyone else is skipped (already received,
+still holds gift balance, joined too long ago, banned/merged/at the limit). The count shown is sent back
+with the press, and the server refuses a press that would pay more users than that.
+
+Tests: `tests/adminWelcomeGift.test.ts` (21). Deleting the join-date check makes the reported-bug case
+fail, confirming the test guards it.
+
+⚠️ **Unknown to this session:** whether the #3342 button was pressed before this fix. If it was, the ₹150
+credits carry the ledger line "Welcome credit: ₹150 added by NavBharatAI" and the `adminWelcomeGiftAt`
+stamp, and the admin audit log has an `ADMIN_WELCOME_GIFT_BULK` entry with the paid count.
 ## 2026-09-27 — The testing notice left the home screen and moved into Notifications
 
 Admin, with a screenshot of the card over the home screen: *"isko popup se hat kar notifications me kar

@@ -10,7 +10,7 @@ import { sendVerificationEmail, linkGithubAccount, describeLinkGithubError } fro
 import { VerifyPhoneSheet } from '../VerifyPhoneSheet';
 
 /**
- * REFER A FRIEND — the screen where the four steps are actually claimed.
+ * REFER A FRIEND — the screen where the five free-credit steps are actually claimed.
  *
  * 🔒 IT NEVER SHOWS A BUTTON THAT CANNOT WORK. That is the whole design brief, and it is the second
  * absolute rule applied to a screen: a row whose prerequisite is unmet shows what to do ("Verify your
@@ -32,7 +32,7 @@ export const ReferralPanel: React.FC<{
   capRupees: number;
   capReached: boolean;
   referred: boolean;
-  /** Which rule set this account is on: the app's four steps or the website's two (server's answer). */
+  /** Which rule set this account is on: the app's five steps or the website's three (server's answer). */
   surface: ReferralSurface;
   /** May this account still apply a friend's code? App only, and only while it is still "new". */
   canRedeem: boolean;
@@ -131,9 +131,6 @@ export const ReferralPanel: React.FC<{
     if (step === 'email' && !props.emailVerified) return 'Verify your email address first';
     if (step === 'mobile' && !props.phoneVerified) return 'Verify your mobile number first';
     if (step === 'github' && !props.githubLinked) return 'Connect your GitHub account first';
-    // On the website nothing pays until a real mobile is verified — say so on GitHub's row, rather than
-    // offering a Claim that the server would answer with ₹0.
-    if (!isAndroid && step === 'github' && !props.phoneVerified) return 'Verify your mobile first to unlock this';
     if (step === 'referral-code' && !referred) return 'Apply a friend’s code below first';
     return null;
   };
@@ -157,7 +154,7 @@ export const ReferralPanel: React.FC<{
         auth={firebaseAuth}
         open={phoneSheetOpen}
         onClose={() => setPhoneSheetOpen(false)}
-        reason="A verified number is one of your three referral steps, worth ₹100."
+        reason="A verified mobile number earns ₹100 of free credit."
         onVerified={() => { setPhoneSheetOpen(false); props.onRefresh(); }}
         onSignInInstead={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { signIn: 'phone' } }))}
       />
@@ -202,7 +199,7 @@ export const ReferralPanel: React.FC<{
         </p>
       </div>
 
-      {/* The four steps. */}
+      {/* The free-credit steps. */}
       <div className="rounded-2xl border border-line bg-well p-6">
         <h4 className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-ink">
           <Gift className="h-4 w-4 text-success" /> Your free credit
@@ -212,9 +209,9 @@ export const ReferralPanel: React.FC<{
           // Honest about exactly what the website can do: two steps, a ceiling, and the mobile first.
           // The other two rewards are real too, just not here — say where, rather than hide them.
           <p className="mt-3 rounded-xl border border-line bg-well p-3 text-[11px] font-semibold text-muted">
-            On the website you earn ₹100 for verifying your mobile and ₹100 for connecting GitHub
-            {props.webCapRupees ? <> — up to ₹{props.webCapRupees}</> : null}. Verify your mobile first: it
-            unlocks both. The Gmail-login and referral-code rewards are in the NavBharatAI Android app.
+            On the website you earn ₹50 for signing up, ₹50 for logging in with a verified email and
+            ₹100 for verifying your mobile{props.webCapRupees ? <> — up to ₹{props.webCapRupees}</> : null}. The
+            referral-code and GitHub rewards are in the NavBharatAI Android app.
           </p>
         )}
 

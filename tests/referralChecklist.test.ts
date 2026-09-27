@@ -66,14 +66,15 @@ describe('building the rows', () => {
 
 describe('the words', () => {
   it('say claimed or pending, with the amount, as the admin’s example does', () => {
-    expect(checklistLabel('email', true, 100)).toBe('Gmail / email verified — ₹100 claimed');
+    expect(checklistLabel('email', true, 50)).toBe('Logged in with a verified email — ₹50 claimed');
+    expect(checklistLabel('signup', true, 50)).toBe('Account created — ₹50 claimed');
     expect(checklistLabel('github', false, 100)).toBe('GitHub not connected — ₹100 pending');
     expect(checklistLabel('mobile', false, 100)).toBe('Mobile number not verified — ₹100 pending');
     expect(checklistLabel('referral-code', true, 100)).toBe('Referral code applied — ₹100 claimed');
   });
 
   it('are English only — the CLAUDE.md language standard, enforced in CI elsewhere too', () => {
-    for (const step of ['referral-code', 'email', 'mobile', 'github'] as const) {
+    for (const step of ['signup', 'referral-code', 'email', 'mobile', 'github'] as const) {
       for (const claimed of [true, false]) {
         expect(checklistLabel(step, claimed, 100)).not.toMatch(/[ऀ-ॿ]/);
       }

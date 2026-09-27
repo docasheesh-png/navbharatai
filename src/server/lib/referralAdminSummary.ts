@@ -134,7 +134,15 @@ export function summarizeReferrals(rows: ReferralRow[], capped = false): Referra
  * approximation of history — which is why the admin card says "at today's rate" rather than
  * presenting it as a ledger total.
  */
-export function selfPayoutTokens(rows: ReferralRow[], perStepTokens: number): number {
-  const rate = Number.isFinite(perStepTokens) && perStepTokens > 0 ? perStepTokens : 0;
-  return rows.reduce((sum, r) => sum + steps(r.paidSteps).length * rate, 0);
+export function selfPayoutTokens(
+  rows: ReferralRow[],
+  // One rate for every step, or — since the steps stopped being worth the same (2026-09-27) — a
+  // function that prices each one. An unreadable price counts as 0: never invent a cost.
+  perStepTokens: number | ((step: string) => number),
+): number {
+  const priceOf = (step: string): number => {
+    const n = typeof perStepTokens === 'function' ? perStepTokens(step) : perStepTokens;
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  return rows.reduce((sum, r) => sum + steps(r.paidSteps).reduce((s, step) => s + priceOf(step), 0), 0);
 }

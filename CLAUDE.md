@@ -1820,6 +1820,11 @@ the code (it is actually read somewhere) on 2026-07-11.
   Report code: `COST_CEILING_REACHED` (admin-only). Test-locked in `tests/buildCostCeiling.test.ts`.
   🔴 **STILL OPEN:** an abandoned provider call is not cancelled by this stop — the loop ends between
   turns, so a call already in flight runs to completion on the provider's side and is paid for.
+  ✅ **CLOSED 2026-09-27 (autopsy 2720e553):** every abort of the build's signal — this cost stop, the
+  Stop button, the watchdog, a deploy drain — now reaches the call in flight. `RunTurnParams.signal`
+  runs through the provider ladder (which neither benches a vendor nor falls to the next rung for it),
+  closes a GLM/Kimi stream, and cancels the Claude request and its retries; `stopSignal.ts` is the one
+  definition. The fast lane, which never read the signal at all, checks it at every step.
 
 - **🐢 THE SLOW-PROVIDER FIX — streamed build calls (built 2026-09-16; ✅ **SET `on` in Cloud Run by the
   admin the SAME DAY**):** `AGENTV3_STREAM_BUILD_CALLS` = `on`, so streamed reading is LIVE on every

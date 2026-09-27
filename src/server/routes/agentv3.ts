@@ -14488,11 +14488,16 @@ async function noteBuildOutcome(
               ? { kind: 'nothing-to-save' }
               : judged;
           const elapsedMs = Date.now() - buildStartedAt;
+          // A RACED render is still a render (autopsy 6bae5835): the app painted in a real browser; only
+          // the SNAPSHOT is refused, because the bytes moved underneath it. The clock measures when the
+          // user could first have seen their app, so it stops here too — never on a starter page.
+          if (outcome.kind === 'proven' || (outcome.kind === 'raced' && !starterIsWhatRendered(starterEntryIn(files), shot.html))) {
+            try { buildDiag.recordTimeToFirstRender(elapsedMs); } catch { /* best-effort */ }
+          }
           if (outcome.kind === 'proven') {
             // The same key the end-of-build GreenGuard reads — no second store, no second rule.
             await saveWorkspaceFiles(greenWorkspaceKey(workspaceId), files);
             inBuildGreenAt = Date.now();
-            try { buildDiag.recordTimeToFirstRender(elapsedMs); } catch { /* best-effort */ }
             events.emit({ type: 'narration', agent: 'architect', text: inBuildGreenNarration(), ts: Date.now() });
           }
           try { buildDiag.record({ phase: 'preview', ...inBuildGreenNote(outcome, { elapsedMs, fileCount: Object.keys(files).length }) }); } catch { /* best-effort */ }
@@ -18768,6 +18773,10 @@ async function noteBuildOutcome(
         // …and the third copy, on the stricter rule it has always had: a curl fallback's empty-shell
         // "render" is not proof, so only a real browser may hold a late flip (the Green Freeze rule).
         if (source === 'browser') browserRenderProven = true;
+        // THE FIRST-RENDER CLOCK READS THE ONE PROOF, NOT ONE PASS (autopsy 6bae5835). It was written only
+        // by the in-build snapshot path, so a build whose render rescue proved the app at 303 s reported
+        // 323 s — the moment a SNAPSHOT was saved, not the moment the app was seen. First writer wins.
+        if (source === 'browser') { try { buildDiag.recordTimeToFirstRender(Date.now() - buildStartedAt); } catch { /* best-effort */ } }
         try {
           const proof = appRenderedRecord(source, where);
           if (proof) buildDiag.record(proof);

@@ -1216,7 +1216,9 @@ export class BuildDiagnostics {
 
   private firstRenderRecorded = false;
   /**
-   * TIME_TO_FIRST_RENDER — when the app first rendered in a real browser during the build (inBuildGreen.ts).
+   * TIME_TO_FIRST_RENDER — when the app first rendered in a real browser during the build. Written by
+   * whichever real-browser proof comes first (the render ledger `markAppRendered`, or an in-build attempt,
+   * raced or not) — never by the snapshot save that may follow it (autopsy 6bae5835).
    * The render-side sibling of TIME_TO_FIRST_CALL and of #3084's READY_BEFORE_END: "4 minutes" was a
    * feeling until this line; now it is a number. Recorded once, on the first proof only.
    */

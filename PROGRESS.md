@@ -83077,3 +83077,29 @@ YELLOW (PR #3331's area).
 - **A tested template opens on the first rung.** `scaffoldedComplexityDecision`: a starter chip whose golden scaffold will be seeded is routed `simple`, with no model call. This closes the first open item above.
 - **A reviewer claim a file can answer is checked first.** `reviewEvidence.ts` `missingClassClaim` / `classIsDefined`: a finding whose first sentence says named classes are not defined is refuted only when EVERY named class has a selector in the real stylesheets. A finding resting on "the missing classes" falls with them only when every class claim fell. Stylesheets are read only when a finding makes the claim. This closes the second open item.
 - **Vite dev CSS leaves the capture only when the page would not fit.** `style[data-vite-dev-id]` text is replaced with a note when `outerHTML` is over 30,000 characters; a page that fits is read as before. This closes the third open item.
+
+## 2026-09-27 — Admin Monitor capture: three false numbers on the main panel, and one legal item still open
+
+The admin pasted the Monitor page with no comment. Read against the code, four things on it were not what they looked like.
+
+1. **"Builds 0 · last 6 hours" beside "AI cost ₹10.95 · kimi".**
+   - **Cause:** `recordPlatformBuild` records a build's model calls first and the build last. On a quiet instance the FIRST `recordModelCall` flushed, the build counter landed in the fresh pending map, and nothing flushed it before the next deploy killed the instance.
+   - **Fix (`metricsTimeline.ts`):**
+     - The flush check runs on the next tick, so one build and its cost leave together.
+     - An unref'd idle timer flushes pending deltas.
+     - `server.ts` graceful shutdown flushes after the drain, before exit (bounded 2.5 s inside the 9 s backstop).
+2. **"Platform health — critical · Health 0 · Risk 100"** on servers "keeping up comfortably". Both admin routes built the inputs by hand from the per-PROVIDER counters.
+   - **Errors** were counted per ladder rung: a fallback that worked read as an error. This is the 2026-09-18 AI-load mistake, and this sibling was never hunted.
+   - **Latency** was the model's generation time (3–4 s) scored on a web scale where 2 s is zero.
+   - **Fix:** one builder, `platformHealthInputs`, for both routes. It uses per-request outcomes (`getRouterOutcomeStats`, with the same `AI_MIN_SAMPLE`) and our own server's wait (event-loop p99).
+3. **"AI load 15% unanswered"** was measured on everything EXCEPT streamed chat, the main path. This is the fourth time the streaming path has been forgotten.
+   - **Fix:** `routeStream` now records one outcome per turn. A user abort is not counted. The tile's note names the denominator ("3 of 20 requests").
+4. 🔴 **Grievance Officer still not named.** The Monitor shows the warning, so the running revision has no `GRIEVANCE_OFFICER_NAME`. CLAUDE.md's queue row said this was done; that row is corrected in place.
+
+- Tests: `tests/theMonitorCountsWhatItCosts.test.ts` (9). Reversion-proven: the old flush fails 2 of them and removing the stream outcome fails 1.
+
+**Observed, not changed (the admin's decisions):**
+- `AGENTV3_BUILD_BLOCKED_NO_CREDITS` repeats in the log (7 times in 2 days).
+- +126 registered users today, but Active (24h) = 1.
+- Since the welcome grants were removed, a WEBSITE signup has ₹0 and the referral ladder pays only in the Android app. So a web user can sign up and never build anything.
+- 892 chat rows log provider "unknown" and 1,103 calls "could not be priced" on the Business panel. Not investigated in this change.

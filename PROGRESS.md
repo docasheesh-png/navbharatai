@@ -83105,6 +83105,28 @@ three numbers were false and one was a real, months-old money leak:
 builds as failures; a stuck project's "root cause" can be the upsell note; ladder depth shows 41 of 44
 builds opening on rung 2 (the complexity router sends most apps to KIMI — worth re-measuring its line
 now that the free-first premise is being checked); the Build event log card reads 0 events.
+## 2026-09-27 — Phone features PROVEN up to the Gradle step (admin: "jo apke karne ka hai karo")
+
+The "phone features built for real" entry above says *"No real phone build with these plugins has been run."*
+This session ran as much of one as this environment allows, with the registry's own plugin set at its own
+pinned versions (all 14, every plugin in `NATIVE_CAPABILITIES`), through the pipeline's own steps:
+
+| Step | Result |
+|---|---|
+| `npm install` — Capacitor 7.6.9 core + CLI/Android 7 + all 14 plugins | ✅ clean, no peer conflict (every plugin's peer is `@capacitor/core >=7`) |
+| `npx cap add android` / `cap sync android` | ✅ "Found 14 Capacitor plugins for android" |
+| the generated `nativePermissionScript('android')`, run twice | ✅ 7 permissions added, second run adds nothing, manifest parses as XML |
+| each plugin's own manifest vs the table's "declares it itself" comments | ✅ true for speech (RECORD_AUDIO + queries), TTS (queries), local notifications (POST_NOTIFICATIONS, WAKE_LOCK, BOOT), haptics (VIBRATE), Bluetooth (all six) |
+| `./gradlew assembleDebug` | ⛔ **not run** — Google's SDK host (dl.google.com) is blocked from this environment, so there is no Android SDK. This is the one step only a real phone build can prove. |
+
+**❌ One real defect, fixed:** the QR scanner. On Android `BarcodeScanner.scan()` runs Google's code scanner, a
+Play-services module downloaded separately; the plugin README says to check
+`isGoogleBarcodeScannerModuleAvailable()` first, and to add `<meta-data android:name="com.google.mlkit.vision.DEPENDENCIES"
+android:value="barcode_ui"/>` inside `<application>`. The builder was told `requestPermissions(); scan()` — a QR
+button that fails on its first press on a phone without the module. Now: the builder's `api` line gives the full
+check → install → wait-for-state-4 → scan sequence, and the registry gained `androidMetaData`, which the same
+generated script writes inside `<application>` (idempotent, only for apps that use the plugin).
+`tests/theQrScannerNeedsItsModule.test.ts` runs the real generated script on a real manifest.
 ## 2026-09-27 — Admin Monitor capture: three false numbers on the main panel, and one legal item still open
 
 The admin pasted the Monitor page with no comment. Read against the code, four things on it were not what they looked like.

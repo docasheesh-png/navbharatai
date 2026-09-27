@@ -15,6 +15,7 @@
 // result and the caller is expected to refuse rather than ship a mystery.
 
 import * as zlib from 'zlib';
+import { LIST_PRUNE_DIRS } from '../lib/generatedDirs';
 
 const BLOCK = 512;
 
@@ -25,10 +26,11 @@ const BLOCK = 512;
  * copy would upload hundreds of megabytes to produce a WORSE image (the wrong platform's native
  * binaries). The rest are build output and version-control noise — bytes with no effect on the result.
  */
-export const ARCHIVE_EXCLUDES: readonly string[] = [
-  'node_modules/', '.git/', 'dist/', 'build/', '.next/', '.nuxt/', 'out/', 'coverage/',
-  '.venv/', 'venv/', '__pycache__/', '.cache/', '.turbo/', '.vercel/', '.netlify/',
-];
+export const ARCHIVE_EXCLUDES: readonly string[] = Array.from(new Set([
+  // The shared listing prune (lib/generatedDirs.ts), plus the framework and host caches only a
+  // container build has reason to name.
+  ...LIST_PRUNE_DIRS, '.nuxt', '.turbo', '.vercel', '.netlify',
+])).map((d) => `${d}/`);
 
 /** Is this path one we deliberately do not ship to the builder? PURE. */
 export function isExcludedFromArchive(path: string): boolean {

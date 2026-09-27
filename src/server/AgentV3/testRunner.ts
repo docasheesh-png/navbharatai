@@ -10,6 +10,7 @@ import { detectPackageManager, pmRun, pmExec } from '../lib/packageManager';
 import { shellQuote } from '../lib/shellQuote';
 import { inFlagRollout } from './escalationRollout';
 import { envFlag } from '../lib/envFlag';
+import { isListPrunedPath } from '../lib/generatedDirs';
 
 export type TestFramework =
   | 'vitest'
@@ -231,7 +232,7 @@ function jsRunnerOf(scriptOrDep: string): TestFramework | undefined {
 export function suitePresentButRunnerMissing(files: string[], packageJsonRaw?: string): string | null {
   const { testScript, deps } = parsePackageJson(packageJsonRaw);
   if (testScript) return null; // the project's own script wins; it was planned above
-  const has = (re: RegExp) => (files || []).some((f) => re.test(f));
+  const has = (re: RegExp) => (files || []).some((f) => re.test(f) && !isListPrunedPath(f));
   const cases: Array<{ present: boolean; pkg: string; label: string }> = [
     { present: has(/(^|\/)playwright\.config\.[cm]?[jt]s$/), pkg: '@playwright/test', label: 'Playwright' },
     { present: has(/(^|\/)vitest\.config\.[cm]?[jt]s$/), pkg: 'vitest', label: 'Vitest' },
@@ -260,7 +261,10 @@ export function playwrightOwnsE2e(files: string[]): boolean {
 }
 
 export function detectTestPlan(files: string[], packageJsonRaw?: string): TestPlan | null {
-  const has = (re: RegExp) => files.some(f => re.test(f));
+  // A library's own tests are not the project's (autopsy e1c21ad8): a `backend/venv` held pydantic's and
+  // anyio's `test_*.py`, and the platform reported "this project HAS a pytest suite" about an app with no
+  // tests at all. The listing no longer returns those paths; this keeps any other caller's map honest.
+  const has = (re: RegExp) => files.some(f => re.test(f) && !isListPrunedPath(f));
   const { testScript, deps } = parsePackageJson(packageJsonRaw);
   // Run under the project's OWN package manager (pnpm/yarn/bun/npm), not a hardcoded npm — otherwise a
   // pnpm/yarn/bun workspace's tests run under the wrong manager (D11 / P-PIPE-runtime).

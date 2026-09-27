@@ -57,7 +57,10 @@ export function extractEndpoints(files: { path: string; content: string }[]): En
   };
   for (const { path: file, content } of files) {
     // Express / Fastify / Koa-ish: app.get('/x'), router.post("/x"), api.delete('/x')
-    for (const m of content.matchAll(/\b(?:app|router|api|server|route[rs]?)\s*\.\s*(get|post|put|patch|delete|options|head|all)\s*\(\s*['"`]([^'"`]+)['"`]/gi)) {
+    // `(?<!@)`: a FastAPI/Flask DECORATOR (`@app.post("/x")`) is the next rule's, and matching it here as
+    // well counted every Python route twice — the report listed "SKIPPED POST /v1/write" twice for one
+    // route (autopsy e1c21ad8).
+    for (const m of content.matchAll(/(?<!@)\b(?:app|router|api|server|route[rs]?)\s*\.\s*(get|post|put|patch|delete|options|head|all)\s*\(\s*['"`]([^'"`]+)['"`]/gi)) {
       push(m[1], m[2], file);
     }
     // FastAPI / Flask decorators: @app.get("/x"), @router.post('/x')

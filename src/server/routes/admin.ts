@@ -49,7 +49,7 @@ import { listSafetyFlags, SAFETY_FLAG_RETENTION_DAYS } from '../lib/safetyFlagSt
 import { officerIsNamed, OFFICER_MISSING_WARNING } from '../../content/legal/grievance';
 import { serverLoad } from '../lib/serverLoad';
 import { usdInrRate } from '../lib/UsdInrRate';
-import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
+import { agentV3CostTelemetry, buildUsageReport, summarizeLosses } from '../AgentV3/AgentV3CostTelemetry';
 import { assistantSpendStore } from '../lib/AssistantSpendStore';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
@@ -834,10 +834,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     try {
       const days = Math.min(Math.max(parseInt(String(req.query.days ?? '30'), 10) || 30, 1), 365);
       const history = await agentV3CostTelemetry.list(days);
-      const perDay = history.map(d => ({ date: d.date, lossBuilds: d.lossBuilds ?? 0, lossRealCostUsd: d.lossRealCostUsd ?? 0 }));
-      const totalLossBuilds = perDay.reduce((s, d) => s + d.lossBuilds, 0);
-      const totalLossRealCostUsd = Math.round(perDay.reduce((s, d) => s + d.lossRealCostUsd, 0) * 1_000_000) / 1_000_000;
-      res.json({ totalLossBuilds, totalLossRealCostUsd, perDay });
+      // Measured spend first, baseline as a labelled comparison — see summarizeLosses.
+      res.json(summarizeLosses(history));
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to read AgentV3 losses.' });
     }

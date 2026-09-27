@@ -30,6 +30,7 @@ import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContrac
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenScaffolds/registry';
+import { parseKeyPool } from '../lib/keyPool';
 import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAuthored';
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
@@ -2566,21 +2567,11 @@ export function parseModelLadder(env: string | undefined, fallback: string[]): s
 }
 
 /**
- * Parse a provider API-key env into a POOL of keys for rotation (ROADMAP Tier-4). Accepts a comma- or
- * whitespace-separated list (`key1,key2 key3`) so the cheap floor can fail over from a 429-throttled
- * key to a fresh one on the SAME model — the deep-test App #9/#10 GLM-saturation lever. A single key
- * stays valid (a list of one → today's exact behaviour). Blanks are dropped and duplicates de-duped
- * (a copy-paste repeat never doubles a rung). Pure + exported for testing.
+ * Parse a provider API-key env into a POOL of keys for rotation (ROADMAP Tier-4). The one shared
+ * implementation lives in `lib/keyPool.ts` since 2026-09-27 — the chat and vision callers could not
+ * reach it here, and sent a 51-key pool as one bearer token. Re-exported so existing imports hold.
  */
-export function parseKeyPool(env: string | undefined): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const k of (env || '').split(/[\s,]+/)) {
-    const key = k.trim();
-    if (key && !seen.has(key)) { seen.add(key); out.push(key); }
-  }
-  return out;
-}
+export { parseKeyPool } from '../lib/keyPool';
 
 /**
  * NavBharatAI Pro — optional CHEAP BUILD FLOOR (admin cost-down lever, DEFAULT OFF).

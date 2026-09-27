@@ -62,6 +62,10 @@ export const SNAPSHOT_CHANNEL_PREFIX = 'sn-';
  * the Publish Capacity card described 37 build copies as *"Its chat and record are gone, but the app
  * is still live"*. That sends the admin hunting a deleted app. It is a cache entry, and reclaiming one
  * is harmless because the next green build writes it again.
+ *
+ * ⚠️ CORRECTED 2026-09-27: it was NOT harmless. The channel was deleted and the sandbox record kept
+ * its URL, so the preview of every app not rebuilt since framed "Site Not Found". The reclaim route
+ * now clears those records, and `deadSnapshotCopies.ts` heals the ones earlier reclaims left behind.
  */
 export function isSnapshotChannelId(channelId: string | null | undefined): boolean {
   return String(channelId ?? '').trim().toLowerCase().startsWith(SNAPSHOT_CHANNEL_PREFIX);

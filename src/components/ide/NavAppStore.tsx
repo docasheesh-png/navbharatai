@@ -18,6 +18,7 @@ import { adultBadge } from '../../lib/adultContent';
 import { mergeReviewQueue, pendingReviewCount, reviewStatusLabel, reviewActionsFor } from './storeReviewQueue';
 import { publishableApps, publishBlockedReason, type PublishableApp } from './publishablePicker';
 import { readStoreIcon, readStoreIconFromClipboard, type IconCheck } from '../../lib/appIcon';
+import { creatorLine } from './storeCreatorLine';
 
 // Nav App Store — publish your Android app, and install other people's.
 //
@@ -73,6 +74,21 @@ function fmtSize(b: number): string {
   return `${(b / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/** The creator corner of an instant-app card. Draws only the fields the server actually sent. */
+function CreatorCorner({ app }: { app: { creatorName?: string; creatorId?: string; publishedAt?: number } }) {
+  const line = creatorLine(app);
+  if (!line.name && !line.id && !line.date) return null;
+  return (
+    // Brand blue (admin 2026-09-27: "jis colour me header me window hai") — the accent TOKEN, not the
+    // literal, so it stays readable on every theme: indigo on Light, a lighter indigo on Dark.
+    <div className="flex-1 min-w-0 text-right text-[10px] leading-tight text-accent-text pt-0.5">
+      {line.name && <p className="font-semibold truncate" title={line.name}>{line.name}</p>}
+      {line.id && <p className="font-mono truncate" title="Creator code">{line.id}</p>}
+      {line.date && <p title="Published on">{line.date}</p>}
+    </div>
+  );
+}
+
 /** A browser-run store app (Kadam 1 of the web-app ecosystem — see navStoreWeb.ts). */
 interface WebApp {
   id: string;
@@ -92,6 +108,9 @@ interface WebApp {
   safetyFindings?: Array<{ severity: string; rule: string; description: string; matchSnippet: string }>;
   /** PUBLIC, unlike the findings: a viewer has to be able to see that an app is 18+. */
   contentClass?: 'general' | 'adult';
+  /** Who made it — a display name and a public creator code (never the account uid). */
+  creatorName?: string;
+  creatorId?: string;
 }
 
 export interface NavAppStoreProps {
@@ -636,8 +655,14 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                     className="flex flex-col items-start gap-2 p-3 pb-2 flex-1 min-w-0 text-left"
                     title="See details & screenshots"
                   >
-                    <div className="w-14 h-14 rounded-2xl bg-raised flex items-center justify-center overflow-hidden flex-shrink-0">
-                      {a.iconDataUrl ? <img src={a.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Globe size={22} className="text-faint" />}
+                    <div className="flex items-start gap-2 w-full min-w-0">
+                      <div className="w-14 h-14 rounded-2xl bg-raised flex items-center justify-center overflow-hidden flex-shrink-0">
+                        {a.iconDataUrl ? <img src={a.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Globe size={22} className="text-faint" />}
+                      </div>
+                      {/* WHO MADE IT (admin 2026-09-27): the empty corner beside the icon carries the
+                          creator's name, their public creator code and the publish date. The code is
+                          NOT the account id — see storeCreator.ts for why that must never be public. */}
+                      <CreatorCorner app={a} />
                     </div>
                     {/* TWO lines, not one truncated one. Most names here are a fragment of the
                         creator's prompt, and one line of those is unreadable — see the cap in

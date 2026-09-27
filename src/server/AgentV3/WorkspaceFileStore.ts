@@ -17,8 +17,7 @@
 import * as admin from 'firebase-admin';
 import { getServerDb } from '../lib/serverDb';
 import { notePersistenceFailure } from '../lib/persistenceHealth';
-import { isGreenSnapshotKey } from './GreenGuard';
-import { workspacePrefixFor } from '../lib/workspaceIdentity';
+import { workspacePrefixFor, isAppWorkspaceKey } from '../lib/workspaceIdentity';
 import { toDurableFileKey, normalizeFileMapKeys } from '../lib/workspacePath';
 
 const COLLECTION = 'workspace_files_v3';
@@ -501,8 +500,9 @@ export async function listUserWorkspaceApps(uid: string, limit = 50): Promise<Us
       // GreenGuard.greenWorkspaceKey — reusing this store is what keeps a snapshot safe from the 1 MB
       // document limit). It shares the user's `agentv3-<uid>-` prefix, so this prefix scan would list
       // it as a SECOND app with the same name — the user would see their app twice and could open the
-      // backup by mistake. A snapshot is a safety copy, never an app.
-      if (isGreenSnapshotKey(d.id)) continue;
+      // backup by mistake. A snapshot is a safety copy, never an app — and neither is the rolled-back
+      // attempt or the route fingerprint beside it, which `isGreenSnapshotKey` alone let through.
+      if (!isAppWorkspaceKey(d.id)) continue;
       apps.push({ workspaceId: d.id, fileCount, savedAt: typeof data.savedAt === 'number' ? data.savedAt : 0 });
     }
     apps.sort((a, b) => b.savedAt - a.savedAt);
@@ -560,7 +560,7 @@ export async function listWorkspaceAppsPage(opts: { limit: number; afterDocId?: 
         const data = d.data() || {};
         const fileCount = typeof data.count === 'number' ? data.count : (Array.isArray(data.paths) ? data.paths.length : 0);
         if (fileCount <= 0) continue;           // an emptied index is not an app
-        if (isGreenSnapshotKey(d.id)) continue; // a safety copy, never an app
+        if (!isAppWorkspaceKey(d.id)) continue; // a derived record (::green / ::attempt / ::greenmeta), never an app
         apps.push({ workspaceId: d.id, fileCount, savedAt: typeof data.savedAt === 'number' ? data.savedAt : 0 });
         if (apps.length >= size) break;
       }

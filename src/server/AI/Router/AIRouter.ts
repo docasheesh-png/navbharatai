@@ -320,7 +320,26 @@ export class AIRouter {
     return { ok: false, reason: 'all-failed' };
   }
 
+  /**
+   * 🔴 THE STREAMED TURN WAS INVISIBLE TO "AI LOAD" (admin Monitor capture, 2026-09-27). Chat streams,
+   * and `recordRouterOutcome` was called only from `execute` and `routeRaced` — so the platform's "how
+   * often did a user get no answer" figure was measured on everything EXCEPT the path that carries
+   * nearly all the traffic. The fourth time the streaming path has been forgotten (see CLAUDE.md's money
+   * audit). One outcome per streamed turn now; a turn the USER aborted is not counted either way,
+   * because nothing was refused.
+   */
   async routeStream(
+    prompt: string,
+    systemPrompt: string | undefined,
+    onChunk: (text: string) => void,
+    signal?: AbortSignal,
+  ): Promise<StreamOutcome> {
+    const outcome = await this.routeStreamInner(prompt, systemPrompt, onChunk, signal);
+    if (!(outcome.ok === false && outcome.reason === 'aborted')) recordRouterOutcome(outcome.ok === true);
+    return outcome;
+  }
+
+  private async routeStreamInner(
     prompt: string,
     systemPrompt: string | undefined,
     onChunk: (text: string) => void,

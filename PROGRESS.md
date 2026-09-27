@@ -83146,6 +83146,80 @@ its tests failed. The f152c1ab tests now assert `STYLESHEET_TIER` and count requ
   those four files counted as "missing" on a warm sandbox is not established.
 - **Stop 143 ms after the preview published.** It was recorded from the abort signal (Stop / Unsend / lease stop).
   That it was the user is likely but not proven from this report.
+## 2026-09-27 — Autopsy: the admin Diagnostics page, read against the code (three untruths)
+
+The admin pasted the whole Diagnostics page. Read line by line against the routes that produce it,
+three numbers were false and one was a real, months-old money leak:
+
+1. 🔴 **Free chat has not been free since 2026-07-21.** `GLM_API_KEY` became a 51-key comma pool that
+   day; only the build engine parsed it. `GlmProvider` (free chat leader) and `visionChain.tryGlm` sent
+   the comma string as one bearer token → every call refused → every free chat / Professional / Doctor
+   AI turn served by a PAID Vertex rung. Page evidence: *"GLM 8 requests · 8 errors, half_open"*,
+   *"0% of assistant turns were served by the free model"*. Fixed at the class: `lib/keyPool.ts` is the
+   one parser (the route re-exports it), chat rotates round-robin across the pool, `mobileBuildAiRepair`'s
+   private `split(',')[0]` (which missed the whitespace separator) replaced. Sibling hunt: every other
+   reader of the key only tests presence.
+2. 🔴 **"Real cost absorbed $570.09"** was the Sonnet-equivalent BASELINE, the number the usage card
+   stopped calling a loss on 2026-09-23 — the sibling card was never hunted. The same 208 builds really
+   cost $1.30. `summarizeLosses` now leads with measured spend plus coverage; the baseline is a labelled
+   comparison. And the usage card's **"$294.99 margin"** was billed-of-508 minus spend-of-28 — a margin
+   of no real set of builds. `measuredBilledUsd` is now recorded per day, and `realMarginUsd` is taken
+   over builds whose bill AND spend are both known (old partly-measured days contribute nothing rather
+   than a mismatch). One existing test had encoded the defect (4 − 0.5) and was corrected with the reason.
+3. **"Latest day 2026-08-28"** on 2026-09-27: `metricsStore.list` is newest-first and the card took the
+   last element. `latestDay` picks the maximum date.
+
+**Open, not fixed here (proactive, raised with the admin):** the stuck-projects list counts user-stopped
+builds as failures; a stuck project's "root cause" can be the upsell note; ladder depth shows 41 of 44
+builds opening on rung 2 (the complexity router sends most apps to KIMI — worth re-measuring its line
+now that the free-first premise is being checked); the Build event log card reads 0 events.
+## 2026-09-27 — Phone features PROVEN up to the Gradle step (admin: "jo apke karne ka hai karo")
+
+The "phone features built for real" entry above says *"No real phone build with these plugins has been run."*
+This session ran as much of one as this environment allows, with the registry's own plugin set at its own
+pinned versions (all 14, every plugin in `NATIVE_CAPABILITIES`), through the pipeline's own steps:
+
+| Step | Result |
+|---|---|
+| `npm install` — Capacitor 7.6.9 core + CLI/Android 7 + all 14 plugins | ✅ clean, no peer conflict (every plugin's peer is `@capacitor/core >=7`) |
+| `npx cap add android` / `cap sync android` | ✅ "Found 14 Capacitor plugins for android" |
+| the generated `nativePermissionScript('android')`, run twice | ✅ 7 permissions added, second run adds nothing, manifest parses as XML |
+| each plugin's own manifest vs the table's "declares it itself" comments | ✅ true for speech (RECORD_AUDIO + queries), TTS (queries), local notifications (POST_NOTIFICATIONS, WAKE_LOCK, BOOT), haptics (VIBRATE), Bluetooth (all six) |
+| `./gradlew assembleDebug` | ⛔ **not run** — Google's SDK host (dl.google.com) is blocked from this environment, so there is no Android SDK. This is the one step only a real phone build can prove. |
+
+**❌ One real defect, fixed:** the QR scanner. On Android `BarcodeScanner.scan()` runs Google's code scanner, a
+Play-services module downloaded separately; the plugin README says to check
+`isGoogleBarcodeScannerModuleAvailable()` first, and to add `<meta-data android:name="com.google.mlkit.vision.DEPENDENCIES"
+android:value="barcode_ui"/>` inside `<application>`. The builder was told `requestPermissions(); scan()` — a QR
+button that fails on its first press on a phone without the module. Now: the builder's `api` line gives the full
+check → install → wait-for-state-4 → scan sequence, and the registry gained `androidMetaData`, which the same
+generated script writes inside `<application>` (idempotent, only for apps that use the plugin).
+`tests/theQrScannerNeedsItsModule.test.ts` runs the real generated script on a real manifest.
+## 2026-09-27 — Admin Monitor capture: three false numbers on the main panel, and one legal item still open
+
+The admin pasted the Monitor page with no comment. Read against the code, four things on it were not what they looked like.
+
+1. **"Builds 0 · last 6 hours" beside "AI cost ₹10.95 · kimi".**
+   - **Cause:** `recordPlatformBuild` records a build's model calls first and the build last. On a quiet instance the FIRST `recordModelCall` flushed, the build counter landed in the fresh pending map, and nothing flushed it before the next deploy killed the instance.
+   - **Fix (`metricsTimeline.ts`):**
+     - The flush check runs on the next tick, so one build and its cost leave together.
+     - An unref'd idle timer flushes pending deltas.
+     - `server.ts` graceful shutdown flushes after the drain, before exit (bounded 2.5 s inside the 9 s backstop).
+2. **"Platform health — critical · Health 0 · Risk 100"** on servers "keeping up comfortably". Both admin routes built the inputs by hand from the per-PROVIDER counters.
+   - **Errors** were counted per ladder rung: a fallback that worked read as an error. This is the 2026-09-18 AI-load mistake, and this sibling was never hunted.
+   - **Latency** was the model's generation time (3–4 s) scored on a web scale where 2 s is zero.
+   - **Fix:** one builder, `platformHealthInputs`, for both routes. It uses per-request outcomes (`getRouterOutcomeStats`, with the same `AI_MIN_SAMPLE`) and our own server's wait (event-loop p99).
+3. **"AI load 15% unanswered"** was measured on everything EXCEPT streamed chat, the main path. This is the fourth time the streaming path has been forgotten.
+   - **Fix:** `routeStream` now records one outcome per turn. A user abort is not counted. The tile's note names the denominator ("3 of 20 requests").
+4. 🔴 **Grievance Officer still not named.** The Monitor shows the warning, so the running revision has no `GRIEVANCE_OFFICER_NAME`. CLAUDE.md's queue row said this was done; that row is corrected in place.
+
+- Tests: `tests/theMonitorCountsWhatItCosts.test.ts` (9). Reversion-proven: the old flush fails 2 of them and removing the stream outcome fails 1.
+
+**Observed, not changed (the admin's decisions):**
+- `AGENTV3_BUILD_BLOCKED_NO_CREDITS` repeats in the log (7 times in 2 days).
+- +126 registered users today, but Active (24h) = 1.
+- Since the welcome grants were removed, a WEBSITE signup has ₹0 and the referral ladder pays only in the Android app. So a web user can sign up and never build anything.
+- 892 chat rows log provider "unknown" and 1,103 calls "could not be priced" on the Business panel. Not investigated in this change.
 ## 2026-09-27 — Games open on the cheap engine, where it can (admin decision)
 
 Asked after #3350 whether games should join reminder/planner apps on the cheap opening rung, the admin said:

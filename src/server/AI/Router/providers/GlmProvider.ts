@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { AIProvider, AIProviderResponse, readProviderUsage } from '../ProviderTypes';
+import { nextPoolKey, parseKeyPool } from '../../../lib/keyPool';
 
 /**
  * GLM (Z.AI) provider — used as a FREE, fast top-of-chain option for Free Chat.
@@ -37,17 +38,26 @@ export class GlmProvider implements AIProvider {
   // Lazily constructed: `new OpenAI({ apiKey: '' })` throws, which would crash
   // server boot whenever the GLM key is absent (e.g. CI). Build the client only
   // when actually used (the router skips GLM via healthCheck when no key).
-  private _client?: OpenAI;
+  //
+  // 🔴 ONE CLIENT PER KEY OF THE POOL, ROTATED PER CALL (2026-09-27). `GLM_API_KEY` is a comma
+  // separated POOL (51 Z.ai keys when this was found), and this client used to be built with the
+  // whole string as ONE bearer token — so every free chat turn was refused before it reached a
+  // model and fell through to a PAID rung (admin Diagnostics: "GLM 8 requests · 8 errors", "0% of
+  // assistant turns were served by the free model"). See lib/keyPool.ts.
+  private readonly _clients = new Map<string, OpenAI>();
   private get client(): OpenAI {
-    if (!this._client) {
-      this._client = new OpenAI({
-        apiKey: process.env.GLM_API_KEY || 'missing-key',
+    const key = nextPoolKey(process.env.GLM_API_KEY) || 'missing-key';
+    let c = this._clients.get(key);
+    if (!c) {
+      c = new OpenAI({
+        apiKey: key,
         baseURL: process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4',
         timeout: GlmProvider.timeoutMs(), // fail fast so the router falls through quickly
         maxRetries: 0,
       });
+      this._clients.set(key, c);
     }
-    return this._client;
+    return c;
   }
 
   async execute(prompt: string, _schema?: any, modelOverride?: string, systemPrompt?: string, images?: string[]): Promise<AIProviderResponse> {
@@ -104,6 +114,6 @@ export class GlmProvider implements AIProvider {
   }
 
   async healthCheck(): Promise<boolean> {
-    return !!process.env.GLM_API_KEY;
+    return parseKeyPool(process.env.GLM_API_KEY).length > 0;
   }
 }

@@ -43,6 +43,8 @@
 // committed, whatever round it was; a fix that could not be verified at all is committed exactly as
 // before and is LABELLED unverified, so the caller and the user know which kind of fix they got.
 
+import { firstPoolKey } from './keyPool';
+
 export interface AiRepairContext {
   /** The failing step's log — already narrowed by failedStepSection, already timestamp-stripped. */
   log: string;
@@ -188,7 +190,8 @@ export function aiRepairAllowedPaths(workflowPath: string, log: string): string[
  * powerful/max = Opus→Sonnet→GLM→Kimi. Missing paid keys fall through to the cheap coders (never break).
  */
 export function aiRepairModelChain(env: NodeJS.ProcessEnv = process.env, tier: RepairTier = 'weak'): AiRepairModel[] {
-  const firstKey = (raw?: string): string => (raw || '').split(',')[0].trim();
+  // The shared pool reader (lib/keyPool.ts): a private `split(',')` missed the whitespace separator.
+  const firstKey = (raw?: string): string => firstPoolKey(raw);
 
   const glm = (): AiRepairModel | null => {
     const key = firstKey(env.GLM_API_KEY);

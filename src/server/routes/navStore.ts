@@ -65,6 +65,7 @@ import { escapeHtml } from '../../lib/escapeHtml';
 import { bakeIsCurrent } from '../runtime/previewRuntimeSignature';
 import { assessPublishSafety } from '../lib/storePublishSafety';
 import { userProfileStore } from '../lib/UserProfileStore';
+import { resolveCreators, realCreatorLookupDeps } from '../lib/storeCreator';
 import { adultPreferenceFrom, hiddenFromBrowse } from '../../lib/adultContent';
 import { isNativeRequest } from '../lib/cors';
 import { audit } from '../lib/audit';
@@ -898,7 +899,8 @@ export function registerNavStoreRoutes(app: Express): void {
       // The detail view is the ONE place the screenshot bytes ship — never on the browse list, so a
       // gallery of listings stays light. Best-effort: a screenshot read failure still returns the app.
       const screenshots = (found.screenshotCount ?? 0) > 0 ? await getWebAppScreenshots(found.id).catch(() => []) : [];
-      res.json({ app: toPublicWebApp(found), screenshots });
+      const creators = await resolveCreators([found.uid], realCreatorLookupDeps).catch(() => new Map());
+      res.json({ app: toPublicWebApp(found, creators.get(found.uid)), screenshots });
     } catch (e) {
       logStoreError('web/app meta', e);
       res.status(502).json({ error: 'Could not load that app.' });
@@ -998,7 +1000,10 @@ export function registerNavStoreRoutes(app: Express): void {
         .then((uid) => (uid ? userProfileStore.get(uid) : null))
         .then((p) => adultPreferenceFrom({ optedIn: p?.adultOptIn, optedInAt: p?.adultOptInAt }))
         .catch(() => adultPreferenceFrom(null));
-      const listed = (await listListedWebApps()).map(toPublicWebApp);
+      const rows = await listListedWebApps();
+      // Who made each app (admin 2026-09-27). A lookup failure costs the creator line, never the list.
+      const creators = await resolveCreators(rows.map((a) => a.uid), realCreatorLookupDeps).catch(() => new Map());
+      const listed = rows.map((a) => toPublicWebApp(a, creators.get(a.uid)));
       res.json({
         apps: listed.filter((a) => !hiddenFromBrowse({ contentClass: a.contentClass }, {
           optedIn: viewer.optedIn,
@@ -1019,7 +1024,8 @@ export function registerNavStoreRoutes(app: Express): void {
     if (!me?.uid) return res.status(401).json({ error: 'Sign in first.' });
     try {
       const mine = await listMyWebApps(me.uid);
-      res.json({ apps: mine.map((a) => ({ ...toPublicWebApp(a), status: a.status, workspaceId: a.workspaceId })) });
+      const creators = await resolveCreators([me.uid], realCreatorLookupDeps).catch(() => new Map());
+      res.json({ apps: mine.map((a) => ({ ...toPublicWebApp(a, creators.get(a.uid)), status: a.status, workspaceId: a.workspaceId })) });
     } catch (e) {
       logStoreError('web/mine', e);
       res.status(502).json({ error: 'Could not load your apps.' });

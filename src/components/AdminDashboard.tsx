@@ -1570,6 +1570,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } finally { setActionLoading(null); }
   };
 
+  // BULK ₹50 (admin 2026-09-27: "ek ek kar ke du? 1000 user hai?"). First asks the server how many are
+  // eligible, shows the total, and sends that count with the press — the server refuses a run that
+  // would pay more users than the admin confirmed.
+  const handleBulkWelcomeGift = async () => {
+    setActionLoading('bulk_gift');
+    try {
+      const check = await adminPost('/api/admin/welcome-gift/bulk', { dryRun: true });
+      if (!check.ok) { toast('Could not check: ' + (check.error || 'unknown error')); return; }
+      if (!check.eligible) { toast('No user is eligible — everyone has already received credit.'); return; }
+      const now = Math.min(check.eligible, check.maxPerPress);
+      const more = check.eligible > now ? `\n\n${check.eligible - now} more will remain for the next press.` : '';
+      if (!window.confirm(
+        `Give ₹${check.rupeesEach} welcome credit to ${now.toLocaleString()} user(s)?\n\n` +
+        `Total credit: ₹${(now * check.rupeesEach).toLocaleString()}\n` +
+        `Only users who never received any credit and never paid. Nobody is paid twice.${more}`,
+      )) return;
+      const r = await adminPost('/api/admin/welcome-gift/bulk', { expectedCount: check.eligible });
+      if (!r.ok) { toast('Not given: ' + (r.error || 'unknown error')); return; }
+      toast(`₹${r.totalRupees.toLocaleString()} given to ${r.paid} user(s)` +
+        (r.skipped ? ` · ${r.skipped} skipped` : '') + (r.failed ? ` · ${r.failed} failed — press again` : '') +
+        (r.remaining ? ` · ${r.remaining} remaining` : ''));
+      fetchUsers();
+    } finally { setActionLoading(null); }
+  };
+
   // Merge a duplicate account's wallet INTO this user (one person = one wallet). The admin PROVES the
   // two accounts are the same person by supplying the source userId. Debt carries, welcome bonus counts
   // once, real purchases carry (server-side tested mergeWallets). Confirmed before running (irreversible).
@@ -2243,6 +2268,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 >
                   {effectiveUserDir === 'desc' ? <ArrowDown className="w-3.5 h-3.5" /> : <ArrowUp className="w-3.5 h-3.5" />}
                   {effectiveUserDir === 'desc' ? 'Desc' : 'Asc'}
+                </button>
+                <button
+                  onClick={handleBulkWelcomeGift}
+                  disabled={actionLoading === 'bulk_gift'}
+                  title="Give ₹50 to every user who never received any credit and never paid"
+                  className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-on-accent rounded-xl text-[10px] font-black uppercase tracking-wider hover:bg-emerald-500 transition-all active:scale-95 disabled:opacity-50"
+                >
+                  {actionLoading === 'bulk_gift' ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                  Gift ₹50 to all eligible
                 </button>
                 <button onClick={fetchUsers} className="flex items-center gap-2 px-4 py-2.5 bg-raised border border-line rounded-xl text-[10px] font-black uppercase tracking-wider text-ink hover:border-indigo-500 transition-all active:scale-95">
                   <RefreshCw className={`w-3.5 h-3.5 ${usersLoading ? 'animate-spin' : ''}`} /> Load

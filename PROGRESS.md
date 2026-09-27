@@ -82646,3 +82646,20 @@ holds (such a user can later earn ₹350 from referral steps, not ₹400 on top)
 writes one ledger row "Welcome credit: ₹50 added by NavBharatAI", and audits `ADMIN_WELCOME_GIFT`.
 Server + admin panel only: live on the website admin panel on deploy, no .aab needed. Test-locked in
 `tests/adminWelcomeGift.test.ts`.
+
+## 2026-09-27 — Admin: bulk ₹50 welcome credit ("ek ek kar ke du? 1000 user hai?")
+
+The per-user **Gift ₹50** button (#3340) meant ~1,000 separate clicks. Admin → Users now has
+**"Gift ₹50 to all eligible"**:
+- Press 1 asks the server how many accounts are eligible and shows the total ("N users × ₹50 = ₹X").
+- Press 2 sends that N as `expectedCount`. The server refuses a run that would pay more users than
+  that, because people sign up between the two clicks.
+- Every account is paid through the SAME `grantWelcomeGift` transaction as the single button. That
+  transaction re-reads eligibility, so no account is ever paid twice.
+- Banned accounts are excluded.
+- A press pays at most 2,000 accounts (`BULK_WELCOME_GIFT_MAX`) and reports how many remain.
+- Route: `POST /api/admin/welcome-gift/bulk` (`dryRun` / `expectedCount`). The rules live in
+  `adminWelcomeGift.ts`, with tests in `tests/adminWelcomeGift.test.ts`.
+
+⚠️ This is real money: ₹50 × 1,000 = ₹50,000 of gift credit, and each user who spends it costs real
+provider cost. It still counts against the ₹400 lifetime gift ceiling.

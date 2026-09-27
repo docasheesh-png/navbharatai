@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   welcomeGiftEligible, welcomeGiftRefusal, ADMIN_WELCOME_GIFT_TOKENS,
+  bulkWelcomeGiftCandidates, bulkWelcomeGiftRefusal, BULK_WELCOME_GIFT_MAX,
 } from '../src/server/lib/adminWelcomeGift';
 
 /**
@@ -40,8 +41,8 @@ describe('who may receive it', () => {
 
 describe('the route and the button', () => {
   const route = read('src/server/routes/admin.ts');
-  const start = route.indexOf("'/api/admin/users/:userId/welcome-gift'");
-  const body = route.slice(start, route.indexOf('\n  });', start));
+  const start = route.indexOf('const grantWelcomeGift = async');
+  const body = route.slice(start, route.indexOf('\n  };', start));
 
   it('re-checks eligibility INSIDE the transaction, so two presses pay once', () => {
     expect(start).toBeGreaterThan(0);
@@ -64,5 +65,72 @@ describe('the route and the button', () => {
   it('the panel shows the button only where the server says the account is eligible', () => {
     expect(route).toMatch(/welcomeGiftEligible: welcomeGiftEligible\(u\)/);
     expect(read('src/components/AdminDashboard.tsx')).toMatch(/u\.welcomeGiftEligible === true && \(/);
+  });
+});
+
+describe('the bulk press (admin 2026-09-27: "ek ek kar ke du? 1000 user hai?")', () => {
+  it('picks every eligible account and nobody else', () => {
+    const ids = bulkWelcomeGiftCandidates([
+      { id: 'new-1' },
+      { id: 'new-2', tokenBalance: 0 },
+      { id: 'gifted', freeGiftedTokens: 10000 },
+      { id: 'paid', totalMoneySpent: 99 },
+      { id: 'had-50', adminWelcomeGiftAt: '2026-09-26T16:00:00Z' },
+      { id: 'merged', mergedInto: 'x' },
+      { id: '' },
+    ]);
+    expect(ids).toEqual(['new-1', 'new-2']);
+  });
+
+  it('🔒 a banned account is never gifted', () => {
+    expect(bulkWelcomeGiftCandidates([{ id: 'b', banned: true }])).toEqual([]);
+  });
+
+  it('🔒 it never pays more users than the admin confirmed', () => {
+    expect(bulkWelcomeGiftRefusal(1000, 1000)).toBeNull();
+    expect(bulkWelcomeGiftRefusal(1000, 990)).toBeNull();
+    expect(bulkWelcomeGiftRefusal(1000, 1003)).toMatch(/3 more user/);
+  });
+
+  it('a missing or malformed count is a refusal, never "no limit"', () => {
+    for (const bad of [undefined, null, '', 'all', -1, 2.5, NaN]) {
+      expect(bulkWelcomeGiftRefusal(bad, 5)).toMatch(/Check the eligible count/);
+    }
+  });
+
+  it('is bounded per press', () => {
+    expect(BULK_WELCOME_GIFT_MAX).toBeGreaterThan(0);
+    expect(BULK_WELCOME_GIFT_MAX).toBeLessThanOrEqual(5000);
+  });
+
+  const route = read('src/server/routes/admin.ts');
+  const bulk = route.slice(route.indexOf("'/api/admin/welcome-gift/bulk'"));
+  const bulkBody = bulk.slice(0, bulk.indexOf('\n  });'));
+
+  it('is admin-only', () => {
+    expect(route).toMatch(/app\.post\('\/api\/admin\/welcome-gift\/bulk', verifyAdminToken,/);
+  });
+
+  it('🔒 pays through the same transaction as the single button — never its own write', () => {
+    expect(bulkBody).toMatch(/grantWelcomeGift\(db, uid, nowIso\)/);
+    expect(bulkBody).not.toMatch(/tx\.update|updateDoc|setDoc|mirroredCreditPatch/);
+    expect(route).toMatch(/app\.post\('\/api\/admin\/users\/:userId\/welcome-gift'[\s\S]{0,300}grantWelcomeGift\(db, userId,/);
+  });
+
+  it('checks the confirmed count before paying anyone, and a dry run pays nobody', () => {
+    const refuse = bulkBody.indexOf('bulkWelcomeGiftRefusal(req.body?.expectedCount');
+    const pay = bulkBody.indexOf('grantWelcomeGift(');
+    const dry = bulkBody.indexOf('dryRun === true');
+    expect(refuse).toBeGreaterThan(0);
+    expect(pay).toBeGreaterThan(refuse);
+    expect(dry).toBeGreaterThan(0);
+    expect(dry).toBeLessThan(pay);
+  });
+
+  it('the panel shows the total and sends the count it showed', () => {
+    const panel = read('src/components/AdminDashboard.tsx');
+    expect(panel).toMatch(/adminPost\('\/api\/admin\/welcome-gift\/bulk', \{ dryRun: true \}\)/);
+    expect(panel).toMatch(/adminPost\('\/api\/admin\/welcome-gift\/bulk', \{ expectedCount: check\.eligible \}\)/);
+    expect(panel).toMatch(/Total credit: ₹/);
   });
 });

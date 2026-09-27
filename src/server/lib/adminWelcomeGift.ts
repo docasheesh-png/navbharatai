@@ -48,3 +48,44 @@ export function welcomeGiftRefusal(wallet: Record<string, unknown> | null | unde
   if (num(wallet.totalTokensPurchased) > 0) return 'This user has already received credit before.';
   return '';
 }
+
+// ── BULK: "ek ek kar ke du? 1000 user hai?" (admin 2026-09-27) ────────────────────────────────────
+//
+// The same credit, to every eligible account in one press. It changes WHO decides, not WHAT is paid:
+// every account still goes through the single-user transaction, which re-reads eligibility, so an
+// account can never be paid twice — not by two presses, not by a press racing the per-user button.
+//
+// 🔒 THE ADMIN CONFIRMS A NUMBER, AND THE SERVER HOLDS THEM TO IT. The panel first asks how many are
+// eligible and shows "N users × ₹50 = ₹X". The press then carries that N, and a run that would pay MORE
+// than the admin saw is refused — people keep signing up between the two clicks, and "₹50,000" must
+// never quietly become "₹60,000". Fewer is fine: somebody got the single button meanwhile.
+//
+// 🔒 A banned account is never in the list: gift credit to an account we have shut out is a gift to
+// the abuse we shut out.
+
+/** At most this many accounts are paid per press; the rest are reported as remaining. */
+export const BULK_WELCOME_GIFT_MAX = 2000;
+
+/** PURE: the accounts one bulk press may pay, by wallet id. */
+export function bulkWelcomeGiftCandidates(
+  wallets: Array<{ id: string } & Record<string, unknown>>,
+): string[] {
+  return wallets
+    .filter((w) => !!w.id && !w.banned && welcomeGiftEligible(w))
+    .map((w) => w.id);
+}
+
+/**
+ * PURE: may a bulk press pay `actual` accounts when the admin confirmed `expected`? `null` = yes,
+ * otherwise the refusal. A missing or malformed number is a refusal, never "no limit".
+ */
+export function bulkWelcomeGiftRefusal(expected: unknown, actual: number): string | null {
+  const n = Number(expected);
+  if (expected === undefined || expected === null || expected === '' || !Number.isInteger(n) || n < 0) {
+    return 'Check the eligible count first, then confirm it.';
+  }
+  if (actual > n) {
+    return `${actual - n} more user(s) became eligible since you checked. Check again and confirm the new total.`;
+  }
+  return null;
+}

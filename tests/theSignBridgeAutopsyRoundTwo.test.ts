@@ -168,7 +168,9 @@ describe('6 · the repair already running also fixes what a screen reader meets'
 
   it('it rides the design repair, never starts a pass of its own, and reports the result', () => {
     const route = strip(src('src/server/routes/agentv3.ts'));
-    expect(route).toContain('`The app is built and compiles. ${designRepairInstruction(design)}${a11yAsk}`');
+    // Since autopsy "Universal Remote" the same pass also carries the undefined-CSS-classes request.
+    expect(route).toContain("const designAsk = designRepair ? designRepairInstruction(design) : '';");
+    expect(route).toContain('`The app is built and compiles. ${designAsk}${cssAsk}${a11yAsk}`');
     expect((route.match(/a11yRepairAddendum\(/g) || []).length).toBe(1);
     expect(route).toContain("'ACCESSIBILITY_HEALED' : 'ACCESSIBILITY_PARTIALLY_HEALED'");
   });

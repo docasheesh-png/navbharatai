@@ -162,3 +162,56 @@ describe("2 · a journey starts where the app's own router puts the form", () =>
     expect(routeFromRouter('src/pages/Workspace.tsx', files)).toBe('/workspace/:novelId');
   });
 });
+
+import {
+  classifySmokeStatus, summarizeSmoke, parseCurlStatus, parseFrontendShell, planSmokeChecks, smokeCurlCommand,
+} from '../src/server/AgentV3/RouteSmokeCheck';
+
+describe("3 · a 200 from the frontend's page is not the API answering", () => {
+  it('🔴 the report: /health "PASS" was the Vite dev server serving index.html', () => {
+    expect(parseCurlStatus('200 NBAI_FRONTEND_SHELL')).toBe(200);
+    expect(parseFrontendShell('200 NBAI_FRONTEND_SHELL')).toBe(true);
+    expect(parseFrontendShell('200')).toBe(false);
+    const r = classifySmokeStatus('/health', 200, { frontendShell: true });
+    expect(r.verdict).toBe('unverified');
+    const s = summarizeSmoke([r, classifySmokeStatus('/', 200, { frontendShell: true })], 8);
+    expect(s.headline).not.toMatch(/checked and working/);
+    expect(s.headline).toMatch(/No route could be checked/);
+    expect(s.hasFailures).toBe(false);
+  });
+
+  it('a real API answer is unchanged, and a mix says which is which', () => {
+    expect(classifySmokeStatus('/api/x', 200).verdict).toBe('pass');
+    const s = summarizeSmoke([classifySmokeStatus('/api/x', 200), classifySmokeStatus('/health', 200, { frontendShell: true })]);
+    expect(s.headline).toBe("1 route checked and working, 1 not checked (1 answered by the frontend's page instead of your API).");
+  });
+
+  it('the body is grepped for the marker and deleted — never printed', () => {
+    const cmd = smokeCurlCommand('http://h', '/health');
+    expect(cmd).toContain("grep -qsF '/@vite/client'");
+    expect(cmd).toContain('rm -f "$f"');
+    expect(cmd).not.toMatch(/cat\s/);
+  });
+
+  it('each skipped route is listed once, however many times the extractor saw it', () => {
+    const main = 'app = FastAPI()\n@app.post("/v1/write")\ndef w(): pass\n@app.post("/v1/write")\ndef w2(): pass\n';
+    const plan = planSmokeChecks([{ path: 'backend/main.py', content: main }]);
+    expect(plan.skipped.filter((x) => x.path === '/v1/write')).toHaveLength(1);
+  });
+});
+
+import { extractEndpoints } from '../src/server/AgentV3/apiGraph';
+
+describe('4 · a FastAPI route is one route', () => {
+  it('🔴 the report: @app.post("/v1/write") was extracted twice', () => {
+    const main = 'app = FastAPI()\n@app.post("/v1/write")\ndef w(): pass\n@app.get("/health")\ndef h(): pass\n';
+    expect(extractEndpoints([{ path: 'backend/main.py', content: main }])).toEqual([
+      { method: 'POST', path: '/v1/write', file: 'backend/main.py' },
+      { method: 'GET', path: '/health', file: 'backend/main.py' },
+    ]);
+  });
+
+  it('an Express route is still found exactly once', () => {
+    expect(extractEndpoints([{ path: 'server.js', content: "app.get('/api/x', h); router.post('/api/y', h);" }])).toHaveLength(2);
+  });
+});

@@ -305,7 +305,7 @@ import { withE2eExcluded, e2eExcludeNote } from '../AgentV3/e2eTypecheck';
 import { findAmbientShimCollisions, stripCollidingAmbientShims, ambientShimNote } from '../AgentV3/ambientModuleShim';
 import { shapeConflict } from '../AgentV3/appIdentity';
 import {
-  planSmokeChecks, classifySmokeStatus, summarizeSmoke, smokeCurlCommand, parseCurlStatus,
+  planSmokeChecks, classifySmokeStatus, parseFrontendShell, summarizeSmoke, smokeCurlCommand, parseCurlStatus,
   type SmokePlan, type SmokeResult,
 } from '../AgentV3/RouteSmokeCheck';
 import { classifyBuildOutcome } from '../AgentV3/BuildOutcome';
@@ -19759,14 +19759,16 @@ async function noteBuildOutcome(
             for (const target of plan.targets) {
               if (abort.signal.aborted) break;
               let status: number | null = null;
+              let frontendShell = false;
               try {
                 const out = await withTimeout(
                   actuator.runCommand(workspaceId, smokeCurlCommand(lastPreviewUrl, target)),
                   15_000, 'route-smoke',
                 );
                 status = parseCurlStatus(out.stdout);
+                frontendShell = parseFrontendShell(out.stdout);
               } catch { status = null; }
-              results.push(classifySmokeStatus(target, status));
+              results.push(classifySmokeStatus(target, status, { frontendShell }));
             }
             const summary = summarizeSmoke(results, plan.skipped.length);
             buildDiag.record({

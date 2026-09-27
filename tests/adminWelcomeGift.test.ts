@@ -3,12 +3,13 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   welcomeGiftEligible, welcomeGiftRefusal, ADMIN_WELCOME_GIFT_TOKENS,
+  bulkWelcomeGiftCandidates, bulkWelcomeGiftRefusal, BULK_WELCOME_GIFT_MAX,
 } from '../src/server/lib/adminWelcomeGift';
 
 /**
- * THE ADMIN'S ONE-CLICK ₹50 (2026-09-26): *"new user jinko kabhi koi token gift nahi mila hai, usko
- * admin 50 ke token gift kar sake 1 click par"*. It moves real money, so the locks are about who may
- * receive it and how many times.
+ * THE ADMIN'S ONE PRESS (2026-09-27): *"50₹ wala system hatao aur 1 click me new user ko 150₹ gift de
+ * aisa button bana do! only new user ke liye"*. It moves real money, so the locks are about who may
+ * receive it, how many times, and how many at once.
  */
 const root = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -19,10 +20,10 @@ describe('who may receive it', () => {
     expect(welcomeGiftEligible({})).toBe(true);
   });
 
-  it('🔒 a second press pays nothing', () => {
+  it('🔒 a second press pays nothing — nor does one after the retired ₹50 button', () => {
     const w = { adminWelcomeGiftAt: '2026-09-26T16:00:00Z' };
     expect(welcomeGiftEligible(w)).toBe(false);
-    expect(welcomeGiftRefusal(w)).toMatch(/already received the ₹50/);
+    expect(welcomeGiftRefusal(w)).toMatch(/already received the admin welcome credit/);
   });
 
   it('anyone already gifted, credited, paying or merged away is not eligible', () => {
@@ -33,15 +34,15 @@ describe('who may receive it', () => {
     expect(welcomeGiftEligible(null)).toBe(false);
   });
 
-  it('it is exactly ₹50', () => {
-    expect(ADMIN_WELCOME_GIFT_TOKENS).toBe(5000);
+  it('it is exactly ₹150', () => {
+    expect(ADMIN_WELCOME_GIFT_TOKENS).toBe(15000);
   });
 });
 
 describe('the route and the button', () => {
   const route = read('src/server/routes/admin.ts');
-  const start = route.indexOf("'/api/admin/users/:userId/welcome-gift'");
-  const body = route.slice(start, route.indexOf('\n  });', start));
+  const start = route.indexOf('const grantWelcomeGift = async');
+  const body = route.slice(start, route.indexOf('\n  };', start));
 
   it('re-checks eligibility INSIDE the transaction, so two presses pay once', () => {
     expect(start).toBeGreaterThan(0);
@@ -57,12 +58,79 @@ describe('the route and the button', () => {
     expect(body).toMatch(/adminWelcomeGiftAt: nowIso/);
   });
 
-  it('is admin-only', () => {
-    expect(route).toMatch(/app\.post\('\/api\/admin\/users\/:userId\/welcome-gift', verifyAdminToken,/);
+  it('🔒 the retired ₹50 per-user button and its route are gone — one press is the only way in', () => {
+    expect(route).not.toMatch(/\/api\/admin\/users\/:userId\/welcome-gift/);
+    expect(route).not.toMatch(/welcomeGiftEligible: welcomeGiftEligible\(u\)/);
+    const panel = read('src/components/AdminDashboard.tsx');
+    expect(panel).not.toMatch(/handleWelcomeGift\b/);
+    expect(panel).not.toMatch(/Gift ₹50/);
+    expect(panel).not.toMatch(/\/welcome-gift`/);
+  });
+});
+
+describe('the one press (admin 2026-09-27)', () => {
+  it('picks every eligible account and nobody else', () => {
+    const ids = bulkWelcomeGiftCandidates([
+      { id: 'new-1' },
+      { id: 'new-2', tokenBalance: 0 },
+      { id: 'gifted', freeGiftedTokens: 10000 },
+      { id: 'paid', totalMoneySpent: 99 },
+      { id: 'had-50', adminWelcomeGiftAt: '2026-09-26T16:00:00Z' },
+      { id: 'merged', mergedInto: 'x' },
+      { id: '' },
+    ]);
+    expect(ids).toEqual(['new-1', 'new-2']);
   });
 
-  it('the panel shows the button only where the server says the account is eligible', () => {
-    expect(route).toMatch(/welcomeGiftEligible: welcomeGiftEligible\(u\)/);
-    expect(read('src/components/AdminDashboard.tsx')).toMatch(/u\.welcomeGiftEligible === true && \(/);
+  it('🔒 a banned account is never gifted', () => {
+    expect(bulkWelcomeGiftCandidates([{ id: 'b', banned: true }])).toEqual([]);
+  });
+
+  it('🔒 it never pays more users than the admin confirmed', () => {
+    expect(bulkWelcomeGiftRefusal(1000, 1000)).toBeNull();
+    expect(bulkWelcomeGiftRefusal(1000, 990)).toBeNull();
+    expect(bulkWelcomeGiftRefusal(1000, 1003)).toMatch(/3 more user/);
+  });
+
+  it('a missing or malformed count is a refusal, never "no limit"', () => {
+    for (const bad of [undefined, null, '', 'all', -1, 2.5, NaN]) {
+      expect(bulkWelcomeGiftRefusal(bad, 5)).toMatch(/Check the eligible count/);
+    }
+  });
+
+  it('is bounded per press', () => {
+    expect(BULK_WELCOME_GIFT_MAX).toBeGreaterThan(0);
+    expect(BULK_WELCOME_GIFT_MAX).toBeLessThanOrEqual(5000);
+  });
+
+  const route = read('src/server/routes/admin.ts');
+  const bulk = route.slice(route.indexOf("'/api/admin/welcome-gift/bulk'"));
+  const bulkBody = bulk.slice(0, bulk.indexOf('\n  });'));
+
+  it('is admin-only', () => {
+    expect(route).toMatch(/app\.post\('\/api\/admin\/welcome-gift\/bulk', verifyAdminToken,/);
+  });
+
+  it('🔒 pays each account through the one transaction that re-checks it — never its own write', () => {
+    expect(bulkBody).toMatch(/grantWelcomeGift\(db, uid, nowIso\)/);
+    expect(bulkBody).not.toMatch(/tx\.update|updateDoc|setDoc|mirroredCreditPatch/);
+  });
+
+  it('checks the confirmed count before paying anyone, and a dry run pays nobody', () => {
+    const refuse = bulkBody.indexOf('bulkWelcomeGiftRefusal(req.body?.expectedCount');
+    const pay = bulkBody.indexOf('grantWelcomeGift(');
+    const dry = bulkBody.indexOf('dryRun === true');
+    expect(refuse).toBeGreaterThan(0);
+    expect(pay).toBeGreaterThan(refuse);
+    expect(dry).toBeGreaterThan(0);
+    expect(dry).toBeLessThan(pay);
+  });
+
+  it('the panel shows the total and sends the count it showed', () => {
+    const panel = read('src/components/AdminDashboard.tsx');
+    expect(panel).toMatch(/adminPost\('\/api\/admin\/welcome-gift\/bulk', \{ dryRun: true \}\)/);
+    expect(panel).toMatch(/adminPost\('\/api\/admin\/welcome-gift\/bulk', \{ expectedCount: check\.eligible \}\)/);
+    expect(panel).toMatch(/Total credit: ₹/);
+    expect(panel).toMatch(/Gift ₹150 to new users/);
   });
 });

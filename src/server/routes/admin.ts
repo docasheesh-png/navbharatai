@@ -28,7 +28,10 @@ import { listDailyOtpOutcomes, summariseOtpOutcomes } from '../lib/otpOutcomes';
 import { runPushPreflight } from '../lib/pushPreflight';
 import { adminEmailList } from '../lib/adminEmails';
 import { mirroredCreditPatch } from '../lib/walletMirror';
-import { welcomeGiftEligible, welcomeGiftRefusal, ADMIN_WELCOME_GIFT_TOKENS, ADMIN_WELCOME_GIFT_RUPEES } from '../lib/adminWelcomeGift';
+import {
+  welcomeGiftEligible, welcomeGiftRefusal, ADMIN_WELCOME_GIFT_TOKENS, ADMIN_WELCOME_GIFT_RUPEES,
+  bulkWelcomeGiftCandidates, bulkWelcomeGiftRefusal, BULK_WELCOME_GIFT_MAX,
+} from '../lib/adminWelcomeGift';
 import { audit } from '../lib/audit';
 import { buildDiscountStore, BUILD_DISCOUNT_MAX_PCT, BUILD_DISCOUNT_CACHE_MS } from '../lib/buildDiscount';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
@@ -2130,9 +2133,6 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           // which would be a third answer to "has this person paid?" on the very screen that asks it.
           hasEverPaid: hasEverPaid(u as { totalMoneySpent?: unknown }),
           banned: u.banned || false,
-          // May the admin give this account the one-click ₹50 welcome credit? Decided by the same
-          // predicate the gift route re-checks in its transaction, never re-derived in the browser.
-          welcomeGiftEligible: welcomeGiftEligible(u),
           createdAt: u.updatedAt || u.createdAt || '',
           joinedAt: joined.atMs,
           joinedAtSource: joined.source,
@@ -2293,43 +2293,75 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   });
 
   /**
-   * ONE-CLICK ₹50 WELCOME CREDIT for a user who has never received any gift (admin 2026-09-26) — the
-   * bridge until an app build whose device check works is live. Rules in `adminWelcomeGift.ts`.
-   * Eligibility is re-read INSIDE the transaction, so two presses (or two admins) pay once.
+   * The ONE transaction that pays the admin's welcome credit to one NEW user (rules in
+   * `adminWelcomeGift.ts`). Eligibility is re-read inside it, so any account is paid once — whether
+   * the press is repeated or two admins press at once.
    */
-  app.post('/api/admin/users/:userId/welcome-gift', verifyAdminToken, async (req: Request, res: Response) => {
-    const db = getDb() as any;
-    const { userId } = routeParams(req.params);
-    try {
-      const walletRef = doc(db, 'user_token_wallets', userId);
-      const nowIso = new Date().toISOString();
-      const outcome = await runTransaction(db, async (tx: any) => {
-        const fresh = await tx.get(walletRef);
-        if (!fresh.exists()) return { ok: false as const, status: 404, error: 'User not found' };
-        const w = fresh.data();
-        if (!welcomeGiftEligible(w)) return { ok: false as const, status: 409, error: welcomeGiftRefusal(w) };
-        const patch = mirroredCreditPatch(w, ADMIN_WELCOME_GIFT_TOKENS, 'gift');
-        tx.update(walletRef, {
-          ...patch,
-          // Gift money, counted against the ₹400 lifetime gift ceiling like every other gift.
-          freeGiftedTokens: Number(w.freeGiftedTokens || 0) + ADMIN_WELCOME_GIFT_TOKENS,
-          totalTokensPurchased: Number(w.totalTokensPurchased || 0) + ADMIN_WELCOME_GIFT_TOKENS,
-          adminWelcomeGiftAt: nowIso,
-          ...ledgerPatch(w, {
-            type: 'purchase',
-            amountCoinsOrTokens: ADMIN_WELCOME_GIFT_TOKENS,
-            moneySpent: 0,
-            timestamp: nowIso,
-            description: `Welcome credit: ₹${ADMIN_WELCOME_GIFT_RUPEES} added by NavBharatAI`,
-          }),
-          updatedAt: nowIso,
-        });
-        return { ok: true as const, newBalance: patch.tokenBalance };
+  const grantWelcomeGift = async (db: any, userId: string, nowIso: string) => {
+    const walletRef = doc(db, 'user_token_wallets', userId);
+    return runTransaction(db, async (tx: any) => {
+      const fresh = await tx.get(walletRef);
+      if (!fresh.exists()) return { ok: false as const, status: 404, error: 'User not found' };
+      const w = fresh.data();
+      if (!welcomeGiftEligible(w)) return { ok: false as const, status: 409, error: welcomeGiftRefusal(w) };
+      const patch = mirroredCreditPatch(w, ADMIN_WELCOME_GIFT_TOKENS, 'gift');
+      tx.update(walletRef, {
+        ...patch,
+        // Gift money, counted against the ₹400 lifetime gift ceiling like every other gift.
+        freeGiftedTokens: Number(w.freeGiftedTokens || 0) + ADMIN_WELCOME_GIFT_TOKENS,
+        totalTokensPurchased: Number(w.totalTokensPurchased || 0) + ADMIN_WELCOME_GIFT_TOKENS,
+        adminWelcomeGiftAt: nowIso,
+        ...ledgerPatch(w, {
+          type: 'purchase',
+          amountCoinsOrTokens: ADMIN_WELCOME_GIFT_TOKENS,
+          moneySpent: 0,
+          timestamp: nowIso,
+          description: `Welcome credit: ₹${ADMIN_WELCOME_GIFT_RUPEES} added by NavBharatAI`,
+        }),
+        updatedAt: nowIso,
       });
-      if (!outcome.ok) return res.status(outcome.status).json({ ok: false, error: outcome.error });
-      audit('ADMIN_WELCOME_GIFT', { userId, tokens: ADMIN_WELCOME_GIFT_TOKENS, ip: req.ip });
-      res.json({ ok: true, newBalance: outcome.newBalance, rupees: ADMIN_WELCOME_GIFT_RUPEES });
-    } catch (e: any) { console.error('[ADMIN] welcome-gift failed:', e?.message); res.status(500).json({ ok: false, error: 'Internal server error.' }); }
+      return { ok: true as const, newBalance: patch.tokenBalance };
+    });
+  };
+
+  /**
+   * ₹150 TO EVERY NEW USER IN ONE PRESS (admin 2026-09-27). `{ dryRun: true }` answers how many new
+   * users are eligible and what it totals; a real press must carry that count as `expectedCount` and is
+   * refused if it would pay more. Each account goes through `grantWelcomeGift`, so none is paid twice.
+   */
+  app.post('/api/admin/welcome-gift/bulk', verifyAdminToken, async (req: Request, res: Response) => {
+    const db = getDb() as any;
+    try {
+      const snap = await getDocs(collection(db, 'user_token_wallets'));
+      const candidates = bulkWelcomeGiftCandidates(snap.docs.map((d: any) => ({ id: d.id, ...d.data() })));
+      const eligible = candidates.length;
+      if (req.body?.dryRun === true) {
+        return res.json({
+          ok: true, eligible, rupeesEach: ADMIN_WELCOME_GIFT_RUPEES,
+          totalRupees: eligible * ADMIN_WELCOME_GIFT_RUPEES, maxPerPress: BULK_WELCOME_GIFT_MAX,
+        });
+      }
+      const refusal = bulkWelcomeGiftRefusal(req.body?.expectedCount, eligible);
+      if (refusal) return res.status(409).json({ ok: false, error: refusal, eligible });
+
+      const batch = candidates.slice(0, BULK_WELCOME_GIFT_MAX);
+      const nowIso = new Date().toISOString();
+      let paid = 0, skipped = 0, failed = 0;
+      // A few at a time: each is its own transaction on its own wallet, so they do not contend.
+      for (let i = 0; i < batch.length; i += 8) {
+        const results = await Promise.allSettled(batch.slice(i, i + 8).map((uid) => grantWelcomeGift(db, uid, nowIso)));
+        for (const r of results) {
+          if (r.status === 'rejected') failed++;
+          else if (r.value.ok) paid++;
+          else skipped++;
+        }
+      }
+      audit('ADMIN_WELCOME_GIFT_BULK', { paid, skipped, failed, tokensEach: ADMIN_WELCOME_GIFT_TOKENS, ip: req.ip });
+      res.json({
+        ok: true, paid, skipped, failed, remaining: eligible - batch.length,
+        rupeesEach: ADMIN_WELCOME_GIFT_RUPEES, totalRupees: paid * ADMIN_WELCOME_GIFT_RUPEES,
+      });
+    } catch (e: any) { console.error('[ADMIN] bulk welcome-gift failed:', e?.message); res.status(500).json({ ok: false, error: 'Internal server error.' }); }
   });
 
   // THE BUILD DISCOUNT (admin 2026-09-25) — the percentage taken off every charged build, set from

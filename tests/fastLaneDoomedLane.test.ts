@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { canFinishAfterPreamble, preambleBailReason, canFinishRemainingTiers } from '../src/server/AgentV3/FastLaneBudget';
+import { requiredStageCount } from '../src/server/AgentV3/SimpleBuilder';
 
 /**
  * ADMIN REPORT 2026-08-12 — the dukaan stock app. A lane that sat for its entire budget and produced
@@ -95,8 +96,11 @@ describe('WIRING — measured from the real call, counted from the real manifest
   it('it counts only the tiers that actually HAVE files', () => {
     // A manifest whose files are all foundation-tier runs one stage; charging it for three would bail
     // lanes that were going to finish.
-    expect(src).toContain('const populatedTiers = depOrder');
-    expect(src).toContain('manifest.some((s) => generationTier(s.path) === t)');
+    // Since autopsy 2720e553 the counting lives in requiredStageCount, which also leaves out the
+    // deferrable stylesheet stage; the wiring and the rule are both asserted.
+    expect(src).toContain('const populatedTiers = depOrder ? requiredStageCount(manifest.map((s) => s.path)) : 1;');
+    expect(requiredStageCount(['src/types.ts', 'src/utils/format.ts', 'src/hooks/useX.ts'])).toBe(1);
+    expect(requiredStageCount(['src/types.ts', 'src/components/A.tsx', 'src/App.tsx'])).toBe(3);
   });
 
   it('it runs BEFORE the first file is generated', () => {

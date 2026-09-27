@@ -3,6 +3,7 @@ import { callGemini } from '../lib/aiCalls';
 import { getSecurityContext } from '../lib/prompts';
 import { sendSafeError } from '../lib/httpError';
 import { SCAN_STAGES, secretFindings, configFindings, countFindings, scanVerdict, type ScanFinding } from '../lib/securityScan';
+import { guestDailyQuota } from '../lib/guestDailyQuota';
 
 /**
  * Security-scan + website-audit routes.
@@ -27,7 +28,7 @@ import { SCAN_STAGES, secretFindings, configFindings, countFindings, scanVerdict
  * exact lie this change removes.
  */
 export function registerAuditRoutes(app: Express): void {
-  app.post('/api/security/scan', async (req: Request, res: Response) => {
+  app.post('/api/security/scan', guestDailyQuota('security-scan'), async (req: Request, res: Response) => {
     const { target, files } = req.body ?? {};
     const geminiKey = req.headers['x-gemini-key'] as string | undefined;
 

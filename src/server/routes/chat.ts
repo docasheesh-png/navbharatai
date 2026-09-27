@@ -19,6 +19,7 @@ import { fetchPollinationsImage, imageMarkdown, IMAGE_REFUSAL_MESSAGE } from '..
 import { looksLikeImageEdit } from '../../lib/imageEdit';
 import { requireAccountForCostlyAi } from '../lib/costlyAiAccess';
 import { gateToolAction, burnToolAction } from '../tools/toolGate';
+import { guestDailyQuota } from '../lib/guestDailyQuota';
 
 /**
  * Chat routes (the general/FREE chat) extracted from the server.ts monolith
@@ -741,6 +742,6 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     }
   };
 
-  app.post('/api/chat/navbharat',       chatLimiter, (req, res) => chatHandler(req, res, 'navbharat'));
-  app.post('/api/chat/navbharatai',     chatLimiter, (req, res) => chatHandler(req, res, 'navbharat'));
+  app.post('/api/chat/navbharat',       chatLimiter, guestDailyQuota('chat'), (req, res) => chatHandler(req, res, 'navbharat'));
+  app.post('/api/chat/navbharatai',     chatLimiter, guestDailyQuota('chat'), (req, res) => chatHandler(req, res, 'navbharat'));
 }

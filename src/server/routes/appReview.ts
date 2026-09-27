@@ -6,6 +6,7 @@ import { reviewCode } from '../pro/ProCodeReview';
 import { aiRouter } from '../lib/aiRouter';
 import { sendSafeError } from '../lib/httpError';
 import type { ModelCall } from '../project/aiEdits';
+import { guestDailyQuota } from '../lib/guestDailyQuota';
 
 /**
  * Connect-App Code Review — POST /api/app-review/review
@@ -52,7 +53,7 @@ const schema = vobject({
 const reviewModelCall: ModelCall = (system, user) => aiRouter.route(user, [], 'navbharat', undefined, system);
 
 export function registerAppReviewRoutes(app: Express): void {
-  app.post('/api/app-review/review', buildRateLimiter(), enforceNotBanned(), validateBody(schema), async (req: Request, res: Response) => {
+  app.post('/api/app-review/review', buildRateLimiter(), enforceNotBanned(), guestDailyQuota('app-review'), validateBody(schema), async (req: Request, res: Response) => {
     const files = filesForReview((req.body as { files?: Record<string, unknown> }).files);
     if (Object.keys(files).length === 0) {
       return res.status(400).json({ error: 'No source files to review. Pick an app that actually contains code.' });

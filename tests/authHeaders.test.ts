@@ -35,24 +35,27 @@ describe('authHeader', () => {
     expect(await authHeader()).toEqual({ Authorization: 'Bearer tok-123' });
   });
 
-  it('returns {} when nobody is signed in — the caller lets the SERVER answer 401', async () => {
+  // Signed out: never a token — only this device's guest id, which the server counts a visitor's daily
+  // free messages by (guestDailyQuota.ts, admin 2026-09-27). The server still answers 401 wherever an
+  // account is required.
+  it('carries no token when nobody is signed in — only the guest id', async () => {
     const { authHeader } = await import('../src/lib/authHeaders');
     currentUser = null;
-    expect(await authHeader()).toEqual({});
+    expect(await authHeader()).toEqual({ 'x-nb-guest': expect.stringMatching(/^[A-Za-z0-9-]{16,64}$/) });
   });
 
   it('never throws when the token fetch fails — a sign-out race must not break a screen', async () => {
     const { authHeader } = await import('../src/lib/authHeaders');
     getIdToken.mockRejectedValue(new Error('network'));
     currentUser = { getIdToken };
-    await expect(authHeader()).resolves.toEqual({});
+    await expect(authHeader()).resolves.toEqual({ 'x-nb-guest': expect.stringMatching(/^[A-Za-z0-9-]{16,64}$/) });
   });
 
   it('omits the header for an empty token rather than sending `Bearer `', async () => {
     const { authHeader } = await import('../src/lib/authHeaders');
     getIdToken.mockResolvedValue('');
     currentUser = { getIdToken };
-    expect(await authHeader()).toEqual({});
+    expect(await authHeader()).toEqual({ 'x-nb-guest': expect.stringMatching(/^[A-Za-z0-9-]{16,64}$/) });
   });
 });
 
@@ -60,7 +63,7 @@ describe('authJsonHeaders', () => {
   it('adds the JSON content type, signed in or not', async () => {
     const { authJsonHeaders } = await import('../src/lib/authHeaders');
     currentUser = null;
-    expect(await authJsonHeaders()).toEqual({ 'Content-Type': 'application/json' });
+    expect(await authJsonHeaders()).toEqual({ 'Content-Type': 'application/json', ...{ 'x-nb-guest': expect.stringMatching(/^[A-Za-z0-9-]{16,64}$/) } });
     getIdToken.mockResolvedValue('tok-9');
     currentUser = { getIdToken };
     expect(await authJsonHeaders()).toEqual({ 'Content-Type': 'application/json', Authorization: 'Bearer tok-9' });

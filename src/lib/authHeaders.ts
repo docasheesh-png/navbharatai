@@ -10,6 +10,7 @@
 // the bundler could not split ANY of it. `App.tsx` never created `auth`; it only re-exported it from
 // here, so this was always the correct source. See tests/appModuleGraph.test.ts.
 import { auth } from './firebase';
+import { GUEST_ID_HEADER, guestId } from './guestId';
 
 /**
  * JSON headers plus `Authorization: Bearer <idToken>` when a user is signed in. Never throws — a
@@ -22,6 +23,8 @@ export async function authJsonHeaders(forceRefresh = false): Promise<Record<stri
     const tok = await auth.currentUser?.getIdToken(forceRefresh);
     if (tok) headers.Authorization = `Bearer ${tok}`;
   } catch { /* no token — server degrades to an anonymous path (never hard-blocks) */ }
+  // A signed-out visitor is counted by this device's guest id (guestId.ts), never by account.
+  if (!headers.Authorization) headers[GUEST_ID_HEADER] = guestId();
   return headers;
 }
 
@@ -38,9 +41,9 @@ export async function authJsonHeaders(forceRefresh = false): Promise<Record<stri
 export async function authHeader(forceRefresh = false): Promise<Record<string, string>> {
   try {
     const tok = await auth.currentUser?.getIdToken(forceRefresh);
-    return tok ? { Authorization: `Bearer ${tok}` } : {};
+    return tok ? { Authorization: `Bearer ${tok}` } : { [GUEST_ID_HEADER]: guestId() };
   } catch {
-    return {}; // signed out / Firebase not ready — the server answers 401, which the caller surfaces
+    return { [GUEST_ID_HEADER]: guestId() }; // signed out / Firebase not ready — counted as a guest
   }
 }
 
@@ -63,5 +66,6 @@ export async function authedHeaders(extra?: Record<string, string>): Promise<Rec
     const tok = await auth.currentUser?.getIdToken();
     if (tok) headers.Authorization = `Bearer ${tok}`;
   } catch { /* token unavailable — header omitted */ }
+  if (!headers.Authorization) headers[GUEST_ID_HEADER] = guestId();
   return headers;
 }

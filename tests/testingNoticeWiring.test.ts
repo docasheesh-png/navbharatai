@@ -1,12 +1,13 @@
 /**
  * The wiring, pinned — because every part of this fails silently.
  *
- * Drop the render and nothing errors: the app just stops telling anyone it is in testing. Drop the
- * `onReport` and the button becomes decoration. Let the label drift from the sidebar's and the
- * notice starts naming a menu entry that does not exist by that name. None of it breaks a build.
+ * Put the popup back and nothing errors: the home screen is simply covered again on every app open,
+ * the thing the admin asked to be rid of (2026-09-27). Drop the card from the panel and the app stops
+ * telling anyone it is in testing. Drop the `onReport` and the button becomes decoration. Point the
+ * badges back at the raw inbox count and a new user is never led to the card. None of it breaks a build.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { TESTING_NOTICE_COPY } from '../src/lib/testingNotice';
 
@@ -16,85 +17,60 @@ const codeOnly = (src: string) =>
   src.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 const app = codeOnly(read('src/App.tsx'));
-const notice = codeOnly(read('src/components/TestingNotice.tsx'));
+const card = codeOnly(read('src/components/TestingNotice.tsx'));
 const sidebar = read('src/components/panels/SidebarNav.tsx');
-const css = read('src/index.css');
 
-describe('it is actually rendered, and only where it should be', () => {
-  it('the decision comes from the tested helper, not a hand-rolled condition in the view', () => {
-    expect(app).toMatch(/shouldShowTestingNotice\(\{\s*activeView,\s*alreadyShown:\s*!testingNoticeOpen\s*\}\)/);
+describe('🔒 it is no longer a popup', () => {
+  it('App renders no floating notice over the home screen', () => {
+    // The old render was `<TestingNotice …/>` gated on the home view. The card is the only form left.
+    expect(app).not.toMatch(/<TestingNotice[\s/>]/);
+    expect(app).not.toMatch(/testingNoticeOpen/);
+    expect(app).not.toMatch(/shouldShowTestingNotice/);
   });
 
-  it('the "already shown" seed is read ONCE, in the initialiser', () => {
-    // A re-render must never resurrect a notice the user just dismissed.
-    expect(app).toMatch(/useState\(\(\)\s*=>\s*!testingNoticeAlreadyShown\(\)\)/);
+  it('the card carries no countdown and no fixed positioning of its own', () => {
+    expect(card).not.toMatch(/setTimeout/);
+    expect(card).not.toMatch(/\bfixed\b/);
+  });
+
+  it('the popup animation left the stylesheet with it', () => {
+    expect(read('src/index.css')).not.toContain('nb-testing-notice');
+    expect(existsSync(join(process.cwd(), 'tests/testingNoticeCentering.test.ts'))).toBe(false);
+  });
+});
+
+describe('it lives in the Notifications panel', () => {
+  it('pinned inside the panel, after the rewards checklist the admin keeps first', () => {
+    const panel = app.slice(app.indexOf('<NotificationPanel'));
+    const rewards = panel.indexOf('<RewardsChecklistCard');
+    const testing = panel.indexOf('<TestingNoticeCard');
+    expect(rewards).toBeGreaterThan(-1);
+    expect(testing).toBeGreaterThan(rewards);
+  });
+
+  it('🔒 the ☰ dot and the Notifications row both read the count that includes the card', () => {
+    expect(app).toMatch(/const notificationUnread = unreadWithTestingNotice\(\{\s*inboxUnread: inbox\.unread,\s*signedIn: !!user,\s*seen: testingSeen\s*\}\)/);
+    expect(app.match(/unreadNotifications=\{notificationUnread\}/g)).toHaveLength(2);
+    expect(app).not.toMatch(/unreadNotifications=\{inbox\.unread\}/);
+  });
+
+  it('opening the panel is what marks the card seen', () => {
+    expect(app).toMatch(/if \(notificationsOpen && !testingSeen\) \{ markTestingNoticeSeen\(\); setTestingSeen\(true\); \}/);
+    expect(app).toMatch(/useState\(\(\)\s*=>\s*testingNoticeSeen\(\)\)/);
   });
 });
 
 describe('the button opens the REAL report sheet', () => {
   it('App wires onReport to the same state the sidebar and the shake gesture open', () => {
-    // ⚠️ THE HANDLER GAINED A LINE, AND THE ASSERTION HAD TO STOP BEING A TRANSCRIPT (2026-09-17).
-    // It matched the handler's exact body, so adding `setReportMode('choose')` — which opens the
-    // sheet on its new chooser rather than wherever it was left — failed a test that has no opinion
-    // about which screen it opens on. What it PROTECTS is unchanged and is asserted below: this
-    // button opens the same `reportOpen` state the sidebar and the shake gesture use, not a second
-    // sheet of its own. The mode is checked too, so the notice cannot silently land somewhere else.
-    expect(app).toMatch(/onReport=\{\(\)\s*=>\s*\{[^}]*setReportOpen\(true\)/);
-    expect(app).toMatch(/onReport=\{\(\)\s*=>\s*\{\s*setReportMode\('choose'\)/);
-    // …and that state is the one ReportSheet actually reads.
+    expect(app).toMatch(/onReport=\{\(\)\s*=>\s*\{\s*setNotificationsOpen\(false\);\s*setReportMode\('choose'\);\s*setReportOpen\(true\);\s*\}\}/);
     expect(app).toMatch(/<ReportSheet open=\{reportOpen\}/);
   });
 
-  it('the notice calls it, and closes itself when it does', () => {
-    expect(notice).toMatch(/onClick=\{\(\)\s*=>\s*\{\s*close\(\);\s*onReport\(\);\s*\}\}/);
+  it('the card calls it', () => {
+    expect(card).toMatch(/onClick=\{onReport\}/);
   });
-});
 
-describe('🔒 SESSION storage, asserted against the real default', () => {
-  // The unit tests inject a fake store, so they prove the LOGIC and cannot see which store the code
-  // actually reaches for. Swapping sessionStorage for localStorage passed every one of them while
-  // silently changing the feature to "shown once per device, ever" — the exact bug that would make
-  // the admin's "whenever the user opens the app" false. Caught by reading the source, which is the
-  // only place that fact exists.
-  const mod = codeOnly(read('src/lib/testingNotice.ts'));
-
-  it('reaches for sessionStorage, never localStorage', () => {
-    expect(mod).toMatch(/typeof sessionStorage !== 'undefined' \? sessionStorage : null/);
-    expect(mod).not.toMatch(/\blocalStorage\b/);
-  });
-});
-
-describe('🔒 the label names a menu entry that really exists', () => {
-  it('matches the sidebar’s own visible text', () => {
-    // The notice tells the user where to go. If these two ever drift, it is sending them somewhere
-    // by a name nothing in the app carries.
+  it('🔒 the label names a menu entry that really exists', () => {
     expect(sidebar).toContain(`>${TESTING_NOTICE_COPY.action}<`);
-  });
-});
-
-describe('accessibility and motion', () => {
-  it('announces politely as status, never as an alert', () => {
-    expect(notice).toMatch(/role="status"/);
-    expect(notice).toMatch(/aria-live="polite"/);
-  });
-
-  it('the dismiss control is labelled for a screen reader', () => {
-    expect(notice).toMatch(/aria-label=\{TESTING_NOTICE_COPY\.dismiss\}/);
-  });
-
-  it('🔒 the countdown PAUSES on hover, focus and touch', () => {
-    // Three seconds is the ask; a message that asks the reader to act must not vanish mid-sentence,
-    // and a button must not disappear from under a finger.
-    for (const h of ['onMouseEnter={hold}', 'onMouseLeave={release}', 'onFocus={hold}', 'onBlur={release}', 'onTouchStart={hold}', 'onTouchEnd={release}'])
-      expect(notice, h).toContain(h);
-  });
-
-  it('🔒 motion is CSS, so Reduce Animations switches it off by construction', () => {
-    // index.css already clamps every animation under .nb-reduce-motion. Using a CSS animation means
-    // the accessibility setting cannot be forgotten by a prop nobody passed.
-    expect(notice).toMatch(/nb-testing-notice-(in|out)/);
-    expect(css).toContain('.nb-testing-notice-in');
-    expect(css).toContain('.nb-testing-notice-out');
-    expect(css).toMatch(/\.nb-reduce-motion \*[\s\S]{0,200}animation-duration: 0\.01ms !important/);
   });
 });

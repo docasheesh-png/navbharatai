@@ -645,6 +645,71 @@ export function isLongRunningCommand(rawCommand: string): boolean {
  * and normal foreground commands are left byte-for-byte unchanged. PURE +
  * unit-testable.
  */
+/**
+ * A DEV-SERVER LINE FOLLOWED BY THE MODEL'S OWN PROBES IS REDUCED TO THE SERVER — the probes after it are
+ * dropped (autopsy "Lekhan Sahyak", 2026-09-27).
+ *
+ * The model wrote a small script, one command per line:
+ *
+ *     npm run dev -- --host 0.0.0.0 --port 5173 > /tmp/dev.log 2>&1 &
+ *     echo "started pid $!"
+ *     sleep 4
+ *     tail -30 /tmp/dev.log
+ *
+ * `stripDevServerBackgrounding` acts only on a TRAILING `&`, and `pipesOrChainsToAnotherCommand` knows
+ * `|`, `&&` and `;` but not a NEWLINE — which is a command separator in every shell. So the whole script
+ * became "the dev command": the host/port flags were appended to `tail`, the server's output went to the
+ * model's own log instead of ours, and the health check reported "did not start and the log had no
+ * recognisable error" twice before giving up. Ten seconds later a plain `npm run dev` came up at once.
+ *
+ * The managed launcher already does what those trailing lines were for — it waits for the port and
+ * reads the log — so the segments AFTER the one dev-server segment are dropped, and the dev segment is
+ * marked backgrounded so its own redirect is stripped. Segments BEFORE it (`cd frontend`, `export X=1`,
+ * `pkill -f vite`) are kept: they set up the server rather than probe it.
+ *
+ * 🔒 Deliberately narrow. It splits only on a NEWLINE or a real backgrounding `&` (never `&&`, `2>&1`,
+ * `&>`), it acts only when exactly ONE segment starts a dev server, and a command whose dev segment is
+ * already last is returned byte-for-byte — so every single-line command behaves exactly as before.
+ * Quotes are respected, so a `;` or newline inside a quoted argument never splits. PURE.
+ */
+export function dropProbesAfterDevServer(command: string): string {
+  if (!command) return command;
+  const segments: Array<{ text: string; backgrounded: boolean }> = [];
+  let cur = '';
+  let quote: string | null = null;
+  const push = (backgrounded: boolean) => { segments.push({ text: cur, backgrounded }); cur = ''; };
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (quote) {
+      cur += ch;
+      if (ch === '\\' && quote === '"' && i + 1 < command.length) { cur += command[++i]; continue; }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') { quote = ch; cur += ch; continue; }
+    if (ch === '\n') { push(false); continue; }
+    if (ch === '&') {
+      const prev = command[i - 1];
+      const next = command[i + 1];
+      // `&&` (a chain), `>&` / `2>&1` (a redirect) and `&>` (a redirect) are not backgrounding.
+      if (next === '&') { cur += '&&'; i++; continue; }
+      if (prev === '>' || next === '>') { cur += ch; continue; }
+      push(true);
+      continue;
+    }
+    cur += ch;
+  }
+  push(false);
+  const meaningful = segments.map((seg, idx) => ({ ...seg, idx })).filter((seg) => seg.text.trim());
+  const dev = meaningful.filter((seg) => isLongRunningCommand(seg.text));
+  if (dev.length !== 1) return command;
+  const devSeg = dev[0];
+  const after = meaningful.filter((seg) => seg.idx > devSeg.idx);
+  if (after.length === 0) return command; // already last — nothing to drop, byte-identical
+  const before = meaningful.filter((seg) => seg.idx < devSeg.idx).map((seg) => seg.text.trim() + (seg.backgrounded ? ' &' : ''));
+  return [...before, `${devSeg.text.trim()} &`].join('\n');
+}
+
 export function stripDevServerBackgrounding(command: string): string {
   if (!command) return command;
   let c = command.trim();
@@ -711,9 +776,18 @@ export function buildDepsStaleCheckCommand(): string {
   // React plugin) its browserslist→caniuse-lite DATA chain, which vite only needs at transform time. A
   // pure resolve probe over the app's own package.json catches an incomplete tree that mtime can't. Any
   // probe failure just triggers a reinstall (safe); a healthy tree passes instantly (no latency added).
+  //
+  // 🔴 THE PROBE ITSELF WAS THE STALENESS (autopsy "Lekhan Sahyak", 2026-09-27). It asked
+  // `require.resolve(k + '/package.json')` — and a package whose `exports` map does not list
+  // `./package.json` refuses that request however completely it is installed. `@vitejs/plugin-react`
+  // is one of them, and every vite-react app declares it (measured on this repo's own tree: 21 installed
+  // packages refuse). So the check answered STALE on EVERY healthy tree, every dev-server start ran an
+  // install, and with a lock file that install was `npm ci` — which DELETES node_modules first. Commands
+  // on the next turn met `tsc: not found` and a missing react, and the model spent calls reinstalling.
+  // Installed means the file is on disk; that is what is asked now.
   const integrity =
-    `node -e "try{var p=require('./package.json');var d=Object.assign({},p.dependencies,p.devDependencies);` +
-    `Object.keys(d).forEach(function(k){require.resolve(k+'/package.json')});` +
+    `node -e "try{var fs=require('fs');var p=require('./package.json');var d=Object.assign({},p.dependencies,p.devDependencies);` +
+    `Object.keys(d).forEach(function(k){if(!fs.existsSync('node_modules/'+k+'/package.json'))throw new Error(k)});` +
     `if(d['@vitejs/plugin-react']){require.resolve('caniuse-lite/dist/unpacker/agents')}}catch(e){process.exit(1)}"`;
   return `if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then echo STALE; elif ! ${integrity} 2>/dev/null; then echo STALE; fi; true`;
 }

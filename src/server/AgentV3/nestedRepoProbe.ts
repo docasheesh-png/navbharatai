@@ -55,6 +55,7 @@
 export const NESTED_REPO_PRUNE_DIRS: readonly string[] = [
   'node_modules', 'dist', '.next', 'build',
   '__pycache__', '.venv', '.cache', 'coverage', 'out', '.e-checkpoints',
+  'test-results', 'playwright-report',
 ];
 
 /** How deep to look. Matches `buildListFilesCommand`, so the probe and the file list see one tree. */

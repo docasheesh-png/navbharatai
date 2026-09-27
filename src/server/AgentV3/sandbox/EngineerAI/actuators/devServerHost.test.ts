@@ -605,7 +605,10 @@ describe('buildDepsStaleCheckCommand', () => {
   it('also STALEs a present-but-INCOMPLETE node_modules via a resolve probe (the caniuse-lite fix)', () => {
     const cmd = buildDepsStaleCheckCommand();
     // Every declared dep must resolve — catches a pre-baked/pruned image tree that mtime reads as "fresh".
-    expect(cmd).toContain("require.resolve(k+'/package.json')");
+    // …by the FILE on disk, never by require.resolve — a package whose exports map omits ./package.json
+    // (@vitejs/plugin-react is one) refuses that request however installed it is (autopsy "Lekhan Sahyak").
+    expect(cmd).toContain("fs.existsSync('node_modules/'+k+'/package.json')");
+    expect(cmd).not.toContain("require.resolve(k+'/package.json')");
     // For the babel React plugin, its browserslist→caniuse-lite DATA chain (the exact missing module in
     // "[plugin:vite:react-babel] Cannot find module 'caniuse-lite/dist/unpacker/agents'") must resolve too.
     expect(cmd).toContain("require.resolve('caniuse-lite/dist/unpacker/agents')");

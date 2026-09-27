@@ -32,6 +32,7 @@ const MAX_LIST_FILES = 500;
 const IGNORED_DIRS = new Set([
   'node_modules', '.git', 'dist', '.next', 'build',
   '__pycache__', '.venv', '.cache', 'coverage', 'out',
+  'test-results', 'playwright-report',
 ]);
 
 /**

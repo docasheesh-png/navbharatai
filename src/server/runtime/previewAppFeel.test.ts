@@ -95,7 +95,7 @@ describe('a painted app is never wiped by a later runtime error (the game-over h
     const html = shells[0][1];
     expect(html).toContain('var nbaiPainted = false');
     // the guard is the FIRST statement of showError, before hideBoot/innerHTML
-    expect(html).toMatch(/function showError\(msg\) \{[\s\S]{0,700}?if \(nbaiPainted\) return;/);
+    expect(html).toMatch(/function showError\(msg(?:, platform)?\) \{[\s\S]{0,700}?if \(nbaiPainted\) return;/);
     // both paint paths set the flag: the #root MutationObserver and the portal/canvas fallback
     expect(html).toContain('nbaiPainted = true; hideBoot();');
     expect(html).toContain('nbaiPainted = true; hideBoot(); }, 300)');
@@ -104,7 +104,7 @@ describe('a painted app is never wiped by a later runtime error (the game-over h
   it('Vue shell: same guard, same order', () => {
     const html = shells[1][1];
     expect(html).toContain('var nbaiPainted = false');
-    expect(html).toMatch(/function showError\(msg\) \{[\s\S]{0,300}?if \(nbaiPainted\) return;/);
+    expect(html).toMatch(/function showError\(msg(?:, platform)?\) \{[\s\S]{0,300}?if \(nbaiPainted\) return;/);
     expect(html).toContain('nbaiPainted = true; }, 300)');
   });
 });

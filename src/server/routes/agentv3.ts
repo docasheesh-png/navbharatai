@@ -2,7 +2,7 @@ import { toSafeClientMessage } from '../lib/httpError';
 import type { Express, Request, Response } from 'express';
 import { copyName, copyStatus } from '../AgentV3/duplicateApp';
 import { decideMarkupOnProof, markupNeedsPreview } from '../AgentV3/previewEarnsMarkup';
-import { isPlatformFixRequest } from '../../lib/platformFixRequest';
+import { isPlatformFixRequest, inBrowserPreviewFixGuidance } from '../../lib/platformFixRequest';
 import { buildRateLimiter, rateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import express from 'express';
 import { HIT_PATH, parseHit, parseBytesReport, requestOptsOut, siteAnalyticsEnabled } from '../lib/siteAnalytics';
@@ -15373,6 +15373,11 @@ async function noteBuildOutcome(
       // reconciles to ONE framework before writing features. Applies to any turn on an incoherent workspace;
       // '' (coherent, or flag off) leaves buildPrompt unchanged.
       if (frameworkCoherenceMsg) buildPrompt = `${frameworkCoherenceMsg}\n\n---\n\n${buildPrompt}`;
+      // WHICH PREVIEW BROKE (autopsy "Lekhan Sahyak", 2026-09-27): a fix request from the in-browser
+      // preview now says so, so the builder does not "fix" our renderer's fault in the user's files.
+      // Outside every best-effort try below on purpose — a context-loading fault must not drop it.
+      const previewFixHint = inBrowserPreviewFixGuidance(prompt);
+      if (previewFixHint) buildPrompt = `${previewFixHint}\n\n---\n\n${buildPrompt}`;
 
       // 📱 PHONE FEATURES ARE BUILT FOR REAL, NOT IMITATED (autopsy 6bae5835, admin 2026-09-27). A request
       // for reminders that ring when the app is closed, voice commands, calling or the torch gets the exact

@@ -65,6 +65,10 @@ const PROCESS_ONLY_CODES = new Set([
   'DEVICE_CAPABILITIES_TOLD',
   // The builder was handed the exact phone plugins the request needs — our own routing, not a finding.
   'NATIVE_CAPABILITY_BRIEF',
+  // Our own deterministic label repair — housekeeping, never a finding against the app.
+  'LABELS_REPAIRED',
+  // A measurement of our own write-time notes — never a finding against the app.
+  'WRITE_TIME_QUALITY',
   // Same rule, same reason (autopsy 21b431e1): a dropped backslash that OUR deterministic pass put
   // back is this engine's own housekeeping. The user's app is correct by the time anybody reads it.
   'SCRIPT_INTEGRITY_REPAIRED',

@@ -2745,7 +2745,15 @@ export class ToolDispatcher {
     const typecheck = await this.writeTypecheckNote(files);
     let quality = '';
     for (const p of paths) {
-      try { quality += qualityNote(p, files[p]); } catch { /* a note is best-effort */ }
+      try {
+        const q = qualityNote(p, files[p]);
+        if (q) {
+          quality += q;
+          // Counted so the end-of-build lint can tell "noted and ignored" from "never noted".
+          const noted = this._writeTypecheckStats.qualityNotedFiles;
+          if (!noted.includes(p)) noted.push(p);
+        }
+      } catch { /* a note is best-effort */ }
     }
     return hooks + imports + typecheck + quality;
   }

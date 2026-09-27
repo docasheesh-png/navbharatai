@@ -37,7 +37,7 @@ import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
 import { decideComplexity } from '../AgentV3/complexityRouting';
-import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite } from '../AgentV3/writeTimeTypecheck';
+import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite, writeQualitySummary } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary, repairLostEscapes, scriptRepairSummary } from '../AgentV3/scriptIntegrity';
 import { answeringModel } from '../AgentV3/answeringModel';
 import { tierLadder, openingRung, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
@@ -50,6 +50,7 @@ import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRules
 import { deviceSummaryNotice, deviceSummaryRecord } from '../AgentV3/devicePowers';
 import { nativeCapabilityBrief, requestedCapabilities } from '../AgentV3/nativeCapabilities';
 import { starterSuiteOnly, starterSuiteNote } from '../AgentV3/e2eAutoScaffold';
+import { labelFieldsFromPlaceholder } from '../AppMakerLab/intelligence/A11yLinter';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction, simulatedDataIssues, simulatedDataNotice } from '../AgentV3/AuthenticityAnalysis';
 import { isUnreachable } from '../AgentV3/appReachability';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
@@ -18124,6 +18125,26 @@ async function noteBuildOutcome(
             // that is not, byte for byte, something WE seeded? See platformAuthored.ts for why this is
             // answered by content rather than by a flag (a flag cannot survive the next "continue").
             const hasUserApp = projectHasUserCode(integrityFiles);
+            // 🔧 AN UNLABELLED FIELD WHOSE OWN PLACEHOLDER NAMES IT (autopsy 6bae5835). Deterministic, no
+            // model call, only files THIS build wrote, and it adds nothing the author did not already
+            // write (`labelFieldsFromPlaceholder`). Before the lint, so ACCESSIBILITY describes what
+            // shipped; before the green latch, so the render check proves it. Kill: AGENTV3_LABEL_REPAIR=off.
+            if (hasUserApp && process.env.AGENTV3_LABEL_REPAIR !== 'off' && !isImportTurn) {
+              let labelled = 0;
+              for (const path of [...writtenFiles.keys()]) {
+                if (!/\.(?:tsx|jsx|html?)$/i.test(path) || typeof integrityFiles[path] !== 'string') continue;
+                const r = labelFieldsFromPlaceholder(integrityFiles[path]);
+                if (r.repaired > 0 && await writeUnlessFrozen(() => actuator.writeFile(workspaceId, path, r.code))) {
+                  integrityFiles[path] = r.code;
+                  writtenFiles.set(path, r.code);
+                  labelled += r.repaired;
+                }
+              }
+              if (labelled > 0) {
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'LABELS_REPAIRED', autoResolved: true,
+                  message: `${labelled} form field(s) had no label but a placeholder that named them — the placeholder text is now their accessible name too.` });
+              }
+            }
             const quality = hasUserApp ? lintBuiltApp(integrityFiles) : null;
             // `null` means nothing lintable was found. Recording a perfect score there would claim we
             // checked when we did not — the same lie in the other direction.
@@ -18138,6 +18159,12 @@ async function noteBuildOutcome(
                 // cannot be told apart from a check that never ran.
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'ACCESSIBILITY', message: a11yLintSummary(quality), autoResolved: true });
               }
+              // DID THE WRITE-TIME NOTE REACH THE FILE, AND WAS IT IGNORED? (autopsy 6bae5835 could not say.)
+              try {
+                const flagged = [...new Set(Object.values(quality.offenders ?? {}).flat().map((o) => o.path))];
+                const wq = writeQualitySummary(dispatcher.writeTypecheckStats().qualityNotedFiles ?? [], flagged);
+                if (wq) buildDiag.record({ phase: 'build', severity: 'info', code: 'WRITE_TIME_QUALITY', message: wq, autoResolved: true });
+              } catch { /* a measurement is best-effort */ }
             }
             // A LABEL IN THE USER'S OWN LANGUAGE MUST NOT ARRIVE BROKEN (autopsy 3ce8459b).
             // The three checks above read STRUCTURE; none of them reads the TEXT, which is how

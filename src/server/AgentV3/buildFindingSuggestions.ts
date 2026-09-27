@@ -130,6 +130,10 @@ const NEVER_SUGGEST = new Set([
   // anyone can make here, so it must never be offered as one.
   'DEVICE_CAPABILITIES_TOLD',
   'NATIVE_CAPABILITY_BRIEF',
+  // Our own deterministic label repair — housekeeping, never a finding against the app.
+  'LABELS_REPAIRED',
+  // A measurement of our own write-time notes — never a finding against the app.
+  'WRITE_TIME_QUALITY',
   // Our own lane's phase timings — a measurement, never a next move for the user.
   'FAST_LANE_PHASES',
   // What our own failed provider calls cost — our routing's problem, never the user's next move.

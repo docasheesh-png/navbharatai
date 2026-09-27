@@ -82689,3 +82689,26 @@ a paid live machine).
 cannot be told from the report — nothing counts the notes issued. And our own E2E scaffold still lands
 without `@playwright/test`, which is what turns "we added a suite" into "the project has a suite we could
 not run" on the release gate.
+
+## 2026-09-27 — Phone features built for real (admin: "jarwis jaisa app … navbharatai banayega … yeh sab chahiye") + the three accepted follow-ups
+
+**1. Native capability registry** (`src/server/AgentV3/nativeCapabilities.ts`). One table, read in three places:
+- **Builder:** `nativeCapabilityBrief` hands it the exact plugin and exact version, for only the features the request asks for. The brief is injected for JS web frameworks, and the web preview must show a "works in the phone app" note, never a dead button.
+- **Summary:** `deviceSummaryNotice` reads the app's REAL `package.json` from the sandbox. It says which features need the phone app and how to get it (More → Download APK, connect GitHub), and what no app can do (lock screen, reading SMS/call history, controlling other apps or settings, listening while closed). Each half stands down if the model's own summary already said it.
+- **Phone build:** `alignNativePlugins` puts every plugin on the app's Capacitor major. A generated Node step, in all three workflows, adds the Android permissions and iOS usage strings the app's own plugins need. It reads `package.json` on the runner, so a repaired workflow in an old repo applies it too.
+
+🔒 **Every version was read from npm on 2026-09-27.** Most plugins' latest releases need Capacitor ≥ 8, while the phone build defaults to 7; each row pins the last release that accepts 7. `REGISTRY_CAPACITOR_MAJOR` is test-locked to `DEFAULT_CAPACITOR_MAJOR`, so moving the default fails CI until the table is re-verified.
+
+⚠️ **Permissions came from each package's own manifest, README and native source.** Play-restricted permissions are test-locked out: READ_SMS, READ_CALL_LOG, READ_MEDIA_*, exact alarms, background location, Accessibility, QUERY_ALL_PACKAGES. Push notifications are left out because they need the user's own Firebase project file.
+
+**2. What npm wrote is what gets saved.** `manifestRewrittenBy` + ToolDispatcher: after a successful shell install or uninstall, the rewritten `package.json` is read back and recorded. Previously, a `package.json` the model had written earlier won at the final save and dropped the new dependency. The phone build keeps only plugins that `package.json` lists, so the APK would have shipped without the plugin.
+
+**3. Our starter test suite is not the project's.** The gate and the report now say the Playwright suite NavBharatAI adds is a starter for the user's own CI (`starterSuiteOnly`, `testSuiteIsOurStarter`). This changes wording only.
+⚠️ **I had recommended RUNNING it, pinned to the sandbox's Playwright 1.49.1, and the admin accepted. I reversed that after reading the spec.** It fails on ANY console error, including dev-server noise the runtime check filters, and this exact suite has produced false "tests fail" verdicts three times. Running it would also put the vaccine's repair budget onto working apps. **OPEN:** run it once the spec uses the platform's own actionable-error filter.
+
+**4. Labels.** `labelFieldsFromPlaceholder` (deterministic, before the lint and the green latch, only files this build wrote; kill switch `AGENTV3_LABEL_REPAIR=off`) shares one verdict with the linter (`controlLabelVerdict`). `WRITE_TIME_QUALITY` joins the write-time notes (now counted on the object every lane shares) with what is still flagged at the end, to separate "noted and ignored" from "never noted".
+
+**NOT done, said plainly:**
+- Always-on "Hey Jarwis" listening while the app is closed is still not supported. It needs a foreground service and a Play declaration.
+- No real phone build with these plugins has been run from this session; the first real APK is the proof.
+- iOS usage strings are applied, but no iOS build has been run with them yet.

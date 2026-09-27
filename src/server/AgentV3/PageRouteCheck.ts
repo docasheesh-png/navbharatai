@@ -94,6 +94,8 @@ export function extractPageRoutes(files: Record<string, string> | null | undefin
     // anchor on a path START as well as a slash — the first version required `/dist/` and therefore let
     // a top-level `dist/App.tsx` through, which is the common case. Caught by its own test.
     if (/(^|\/)(node_modules|dist|build|out|coverage|\.next|\.output)\//.test(path)) continue;
+    // A test file is never a page, whatever folder it sits in (build 75ea6136 checked `/Home.test`).
+    if (/\.(test|spec)\.(t|j)sx?$/.test(path) || /(^|\/)__tests__\//.test(path)) continue;
 
     // React Router — the element is what makes it a page, so a bare `path` string elsewhere is ignored.
     if (/\.(t|j)sx$/.test(path)) {

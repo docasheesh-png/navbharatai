@@ -65,7 +65,7 @@ const VEHICLES_LAND: CatalogEntry[] = [
     parts: ['bogies (wheel trucks) under each END, not wheels along the body', 'a long unbroken flank', 'cab windows only at the ends', 'couplings between units', 'rails on sleepers on ballast beneath'],
     tell: 'Length to height is about 5:1 and the wheels are grouped into bogies. Evenly spaced wheels along the body reads as a toy train.' },
   { id: 'jeep', name: 'jeep / off-roader', category: 'vehicle-land',
-    words: 'jeep|off\\s*-?\\s*roader|4x4|thar|land\\s*rover|pickup', hi: 'जीप',
+    words: 'jeep|off\\s*-?\\s*roader|4x4(?!\\s*(?:grid|board|matrix|tiles?|puzzle|layout|cards?|squares?))|thar|land\\s*rover|pickup', hi: 'जीप',
     dims: '4.2 m long, 1.9 m wide, 1.85 m tall, wheelbase 2.45 m, wheel radius 0.40 m, ground clearance 0.22 m',
     parts: ['high ground clearance with visible suspension', 'flat upright windscreen', 'exposed wheel arches and chunky tread', 'a spare wheel on the back', 'roll bar or hard top', 'a flat slab bonnet'],
     tell: 'It is TALL and upright with big gaps around the wheels. A car silhouette with big tyres is not a jeep.' },

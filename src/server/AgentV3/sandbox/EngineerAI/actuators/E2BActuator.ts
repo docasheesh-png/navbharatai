@@ -435,11 +435,24 @@ ${record ? attachConsoleJs('p').trimEnd() : ''}
 ${paintWaitJs('p')}
 ${record ? '  if(painted) recSessionExisted();' : ''}
   console.log('NBAI_PAINTED:'+painted);
+${dropBridgeJs('p')}
   console.log((await p.content()).slice(0,30000));
   await b.close();
 })().catch(e=>{process.stderr.write(e.message);process.exit(1)});
 `;
 }
+
+/**
+ * 🔴 OUR OWN SCRIPT ATE THE APP'S DOM (build 15151196, 2026-09-27). The captured page is cut at 30,000
+ * characters, and the preview bridge we inject into the head is ~18 KB of it — before Vite's dev CSS.
+ * The memory-match game's capture came back `html=30001B inputs=0 buttons=0` for an app with 17
+ * buttons: the body never made it into the budget, so the feature probe, and every other reader of
+ * this DOM, judged a page that was mostly our debugging code. The bridge has already run by now, so
+ * removing its node changes nothing on the page — only what we read back. Matched by the bridge's own
+ * marker, never by position.
+ */
+const dropBridgeJs = (page: string): string =>
+  `  await ${page}.evaluate(m=>{for(const s of Array.from(document.querySelectorAll('script')))if((s.textContent||'').includes(m))s.remove();},${JSON.stringify(PREVIEW_BRIDGE_MARKER)}).catch(()=>{});`;
 
 /**
  * `AGENTV3_BROWSE_CONSOLE=off` — the no-deploy revert for the lane-C recorder.

@@ -234,7 +234,7 @@ import { generateCommentsIntegration } from '../lib/CommentsGenerator';
 import { generateMessagingIntegration } from '../lib/MessagingGenerator';
 import { generateListingsIntegration } from '../lib/ListingsGenerator';
 import { generateJobBoardIntegration } from '../lib/JobBoardGenerator';
-import { shellQuote } from '../lib/shellQuote';
+import { grepCommand, readGrepOutput } from './grepTool';
 import { generateWishlistIntegration } from '../lib/WishlistGenerator';
 import { generateAddressesIntegration } from '../lib/AddressesGenerator';
 import { generateCouponsIntegration } from '../lib/CouponsGenerator';
@@ -3805,13 +3805,13 @@ export class ToolDispatcher {
          * unqualified walk is bounded, which is the case that produced this.
          */
         const EXCLUDED_DIRS = ['node_modules', '.git', 'dist', 'build', 'coverage', 'vendor', '.next', '__pycache__'];
-        const excludes = EXCLUDED_DIRS.map((d) => `--exclude-dir=${shellQuote(d)}`).join(' ');
-        const { stdout } = await this.actuator.runCommand(
-          this.workspaceId,
-          `grep -rn ${excludes} ${shellQuote(pattern)} ${shellQuote(path)} || true`,
-        );
+        // 🔴 WHAT THE MODEL MEANT, AND AN HONEST MISS (build 15151196): a bare `grep -rn` is a BASIC
+        // regex, so `\.badge|\.alert` could never match and a reviewer filed two false criticals on a
+        // working app. See grepTool.ts — extended, then basic, then literal, and "(no matches)" only
+        // when grep itself said so.
+        const { stdout } = await this.actuator.runCommand(this.workspaceId, grepCommand(pattern, path, EXCLUDED_DIRS));
         // T1-sec-redact: grep can surface a secret sitting in a matched line (e.g. `grep KEY .env`).
-        return redactSecrets(stdout.trim()) || '(no matches)';
+        return redactSecrets(readGrepOutput(stdout, pattern).text);
       }
 
       case 'glob': {

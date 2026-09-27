@@ -283,6 +283,45 @@ export function toolUseCouldProduceWork(toolUse: ToolUse): boolean {
   return !PARALLEL_SAFE_TOOLS.has(String(toolUse?.name ?? ''));
 }
 
+/**
+ * The deterministic reads whose second identical call in one turn is pure waste: same input, same
+ * workspace, same answer. LLM-backed tools (second_opinion, consensus) and sub-agents are deliberately
+ * NOT here — two of those are not guaranteed to answer the same.
+ */
+const DEDUPABLE_READS = new Set<string>(['read_file', 'grep', 'glob', 'recall']);
+
+/** A stable key for a tool input — object keys sorted, so `{a,b}` and `{b,a}` are the same call. */
+function stableInputKey(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stableInputKey).join(',')}]`;
+  if (v && typeof v === 'object') {
+    return `{${Object.keys(v as Record<string, unknown>).sort().map((k) => `${JSON.stringify(k)}:${stableInputKey((v as Record<string, unknown>)[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v ?? null);
+}
+
+/**
+ * 🔴 ONE TURN, THE SAME FILE READ FOUR TIMES (build 15151196, 2026-09-27). The model asked for
+ * `read_file src/App.tsx` four times in one turn and `src/theme.tsx` three times; the reviewer did it
+ * again. Every copy was dispatched, and every copy then rode in the context of every later turn — the
+ * build's 422k input tokens paid for the same file over and over. Returns, for each index in `idxs`
+ * that repeats an EARLIER identical deterministic read in the same turn, the index of that first one.
+ * The repeat still gets a tool_result (the API requires one per call) — a short pointer, not the file.
+ * PURE.
+ */
+export function duplicateReadsInTurn(toolUses: readonly ToolUse[], idxs: readonly number[]): Map<number, number> {
+  const firstByKey = new Map<string, number>();
+  const dupes = new Map<number, number>();
+  for (const i of idxs) {
+    const tu = toolUses[i];
+    if (!tu || !DEDUPABLE_READS.has(tu.name)) continue;
+    const key = `${tu.name}\u0000${stableInputKey(tu.input)}`;
+    const first = firstByKey.get(key);
+    if (first === undefined) firstByKey.set(key, i);
+    else dupes.set(i, first);
+  }
+  return dupes;
+}
+
 /** Run `fn` over `items` with at most `limit` in flight; results keep input order. */
 async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
@@ -1036,9 +1075,17 @@ export class AgentRunner {
           resultBlocks[i] = toBlock(await dispatchWithBudget(turn.toolUses[i]));
         }
         if (parallelIdx.length > 0) {
-          await mapWithConcurrency(parallelIdx, toolConcurrency, async (i) => {
+          const dupes = duplicateReadsInTurn(turn.toolUses, parallelIdx);
+          await mapWithConcurrency(parallelIdx.filter((i) => !dupes.has(i)), toolConcurrency, async (i) => {
             resultBlocks[i] = toBlock(await dispatchWithBudget(turn.toolUses[i]));
           });
+          for (const [i, first] of dupes) {
+            resultBlocks[i] = toBlock({
+              tool_use_id: turn.toolUses[i].id,
+              content: `This is the same ${turn.toolUses[i].name} call as ${turn.toolUses[first].id} earlier in this turn — its result is above, so it was not run twice.`,
+              is_error: false,
+            });
+          }
         }
         // TRUNCATION GUARD (ShopKhata autopsy 2026-07-17): a turn cut off at max_tokens can write a
         // file whose tail is missing — the LLM_TRUNCATED warning was recorded but nothing ACTED on it,

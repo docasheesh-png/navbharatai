@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { heroObjectContract, heroObjectIds, HERO_OBJECTS } from '../src/server/lib/heroObjectSpec';
+import { heroObjectContract, heroObjectIds, HERO_OBJECTS, wantsSceneObjects } from '../src/server/lib/heroObjectSpec';
 
 describe('🔴 the reported game gets a bike spec, and it names the builder', () => {
   it('THE SCREENSHOT: "bike racing game"', () => {
@@ -133,7 +133,7 @@ describe('the wiring — it reaches a real build, behind the SAME 3D gate as the
   });
 
   it('🔒 lives INSIDE the 3D/game gate — a billing app that mentions a "cab" must not get wheel radii', () => {
-    const gateAt = route.indexOf("if (/\\b(?:3\\s*-?\\s*d|three\\s*-?\\s*dimensional|game|khel)\\b/i.test(prompt)) {");
+    const gateAt = route.indexOf('if (wantsSceneObjects(prompt)) {');
     const heroAt = route.indexOf('const hero = heroObjectContract(prompt);');
     expect(gateAt).toBeGreaterThan(-1);
     expect(heroAt).toBeGreaterThan(gateAt);
@@ -159,4 +159,23 @@ describe('the wiring — it reaches a real build, behind the SAME 3D gate as the
       if (s.builder) expect(gen).toContain(s.builder.replace(/\(.*/, ''));
     }
   });
+});
+
+describe('🔴 a flat game is not a scene (build 15151196, 2026-09-27)', () => {
+  const MEMORY = 'Build a memory match card game: a 4x4 grid of face-down cards hiding eight pairs, flip two at a time, matched pairs stay face up, count the moves taken, celebrate when the board is cleared, and remember the best (lowest) score in the browser. Big tappable cards, smooth flip feel, light/dark mode, works on a phone.';
+  it('the report’s own prompt gets no 3D guidance and no jeep', () => {
+    expect(wantsSceneObjects(MEMORY)).toBe(false);
+    expect(heroObjectContract(MEMORY).specs.map((s) => s.id)).not.toContain('jeep');
+  });
+  it('an off-road 4x4 is still a jeep', () => {
+    expect(heroObjectContract('a 4x4 off road racing game in the hills').specs.map((s) => s.id)).toContain('jeep');
+    expect(heroObjectContract('a 4x4 grid puzzle').specs.map((s) => s.id)).not.toContain('jeep');
+  });
+  for (const p of ['sudoku app', 'a quiz game for kids', 'tic tac toe game', 'ludo game for 4 players', 'word search game', '2d platformer game', 'chess game']) {
+    it(`flat: ${p}`, () => expect(wantsSceneObjects(p)).toBe(false));
+  }
+  for (const p of ['bike racing game', 'a village game with cows and a river', 'ek car wala khel banao', '3d chess game', 'make me a 3d racing game', 'a 3D memory card game']) {
+    it(`scene: ${p}`, () => expect(wantsSceneObjects(p)).toBe(true));
+  }
+  it('an app that is not a game is untouched', () => expect(wantsSceneObjects('a billing app for my cab business')).toBe(false));
 });

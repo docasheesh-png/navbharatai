@@ -958,7 +958,15 @@ describe('every path that yields a live dev server arms the keepalive', () => {
 
   it('arming lives in ONE helper — two call sites cannot arm differently, or one not at all', () => {
     expect(code).toContain('const armKeepalive =');
-    expect((code.match(/await armKeepalive\(/g) || []).length).toBe(2);
+    // Three paths yield a live server: adopted, freshly launched, and (autopsy 2720e553) a slow start
+    // that came up on the same process instead of being restarted.
+    expect((code.match(/await armKeepalive\(/g) || []).length).toBe(3);
+  });
+
+  it('the still-starting path arms it too', () => {
+    const at = code.indexOf('shouldWaitOnStartingServer(diag.cause, lastLaunchPid)');
+    expect(at).toBeGreaterThan(-1);
+    expect(code.slice(at, at + 900)).toContain('await armKeepalive(port);');
   });
 
   it('the ADOPTED-server path arms it — this is the one that was missing', () => {

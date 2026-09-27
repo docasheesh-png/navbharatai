@@ -110,8 +110,13 @@ import { deploymentStore, isLiveDeployment, type DeploymentStatus } from '../Age
 import { listWorkspaceAppsPage, getWorkspaceAppsMany, listUserWorkspaceApps, loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import {
   BUILT_APPS_PAGE_SIZE, clampPageSize, parseAppsQuery, joinBuiltAppRows, builtAppRow, encodeCursor, decodeCursor,
-  sliceOwnerPage, type BuiltAppRow,
+  sliceOwnerPage, annotateBuiltAppRows, liveOrphans, type BuiltAppRow, type BuiltAppOwnerIdentity,
 } from '../AgentV3/adminBuiltApps';
+import { readConversationNamesMany } from '../AgentV3/FirestoreConversationStore';
+import {
+  channelInventory, forgetChannelInventory, snapshotCopyIsDead,
+  healDeadSnapshotRecordsThrottled, type ChannelInventory, type HealDeps,
+} from '../AgentV3/deadSnapshotCopies';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { renderPreview } from '../runtime/renderPreview';
 import { isReactProject } from '../runtime/ReactPreview';
@@ -218,6 +223,28 @@ async function getAdminMfa(): Promise<AdminMfaState> {
     console.error('[ADMIN_MFA] state read failed:', err);
   }
   return { enabled: false, secret: null, envManaged: false };
+}
+
+/**
+ * The hosting site's channel list for the saved-copy check, cached five minutes and bounded at four
+ * seconds: a slow Hosting API must not hold the admin's page, and a read that did not finish is
+ * INCOMPLETE, which judges nothing dead (see deadSnapshotCopies.ts).
+ */
+async function boundedInventory(): Promise<ChannelInventory> {
+  const incomplete: ChannelInventory = { channels: [], complete: false };
+  return Promise.race([
+    channelInventory(() => new FirebaseHostingDeployer().listChannelsWithCompleteness()),
+    new Promise<ChannelInventory>((resolve) => setTimeout(() => resolve(incomplete), 4_000)),
+  ]).catch(() => incomplete);
+}
+
+/** The I/O the saved-copy heal runs on — the real inventory and the real sandbox records. */
+function snapshotHealDeps(): HealDeps {
+  return {
+    inventory: () => channelInventory(() => new FirebaseHostingDeployer().listChannelsWithCompleteness()),
+    listSnapshotRecords: () => sandboxStore.listSnapshotRecords(),
+    clearSnapshot: (ws, url) => sandboxStore.clearSnapshot(ws, url),
+  };
 }
 
 export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequestHandler): void {
@@ -2477,6 +2504,27 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         const [deployments, sandboxes] = await Promise.all([deploymentStore.getMany(ids), sandboxStore.getMany(ids)]);
         return { deployments, sandboxes };
       };
+      // WHO and WHAT, plus an honest saved copy, for every row that leaves this route (admin
+      // 2026-09-27). Two batched reads (the owners' wallets, the apps' conversation names) and one
+      // cached channel inventory — never a read per row. A copy whose channel was reclaimed is dropped
+      // here so Preview falls through to a source that works, and the durable heal is nudged (at most
+      // once per ten minutes) so the user's own preview stops pointing at it too.
+      const finish = async (rows: BuiltAppRow[]): Promise<BuiltAppRow[]> => {
+        if (rows.length === 0) return rows;
+        const uids = rows.map((r) => r.userId || r.ownerUid);
+        const [identities, names, inv] = await Promise.all([
+          resolveUserIdentities(uids, getDb() as never).catch(() => new Map()),
+          readConversationNamesMany(rows.map((r) => r.workspaceId)),
+          boundedInventory(),
+        ]);
+        const owners = new Map<string, BuiltAppOwnerIdentity>();
+        for (const [uid, id] of identities) owners.set(uid, { email: id.email, name: id.name, anonymous: id.anonymous, label: identityLabel(id) });
+        const out = annotateBuiltAppRows(rows, owners, names).map((r) => (
+          r.snapshotUrl && snapshotCopyIsDead(r.snapshotUrl, inv) ? { ...r, snapshotUrl: null, snapshotAt: 0 } : r
+        ));
+        if (inv.complete) healDeadSnapshotRecordsThrottled(snapshotHealDeps());
+        return out;
+      };
 
       if (query.mode === 'text') {
         res.json({ ok: true, mode: 'text', rows: [], nextCursor: null, pageSize: limit });
@@ -2488,7 +2536,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         const [metas, { deployments, sandboxes }] = await Promise.all([getWorkspaceAppsMany([id]), enrich([id])]);
         const meta = metas.get(id) ?? null;
         const rec = deployments.get(id) ?? null;
-        const rows: BuiltAppRow[] = meta || rec ? [builtAppRow(meta, rec, sandboxes.get(id), id)] : [];
+        const rows: BuiltAppRow[] = meta || rec ? await finish([builtAppRow(meta, rec, sandboxes.get(id), id)]) : [];
         res.json({ ok: true, mode: 'exact', rows, nextCursor: null, pageSize: limit });
         return;
       }
@@ -2497,7 +2545,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         const rec = await deploymentStore.findByUrl(query.url);
         if (!rec) { res.json({ ok: true, mode: 'url', rows: [], nextCursor: null, pageSize: limit }); return; }
         const [metas, { sandboxes }] = await Promise.all([getWorkspaceAppsMany([rec.workspaceId]), enrich([rec.workspaceId])]);
-        res.json({ ok: true, mode: 'url', rows: [builtAppRow(metas.get(rec.workspaceId) ?? null, rec, sandboxes.get(rec.workspaceId))], nextCursor: null, pageSize: limit });
+        res.json({ ok: true, mode: 'url', rows: await finish([builtAppRow(metas.get(rec.workspaceId) ?? null, rec, sandboxes.get(rec.workspaceId))]), nextCursor: null, pageSize: limit });
         return;
       }
 
@@ -2508,7 +2556,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         const { page, nextOffset } = sliceOwnerPage(all, rawCursor, limit);
         const ids = page.map((a) => a.workspaceId);
         const { deployments, sandboxes } = await enrich(ids);
-        res.json({ ok: true, mode: 'owner', rows: joinBuiltAppRows(page, deployments, sandboxes), nextCursor: nextOffset, pageSize: limit });
+        res.json({ ok: true, mode: 'owner', rows: await finish(joinBuiltAppRows(page, deployments, sandboxes)), nextCursor: nextOffset, pageSize: limit });
         return;
       }
 
@@ -2519,7 +2567,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         if (!pageRes.ok) { res.status(502).json({ ok: false, error: 'Could not read the published-app registry.' }); return; }
         const ids = pageRes.records.map((r) => r.workspaceId);
         const [metas, sandboxes] = await Promise.all([getWorkspaceAppsMany(ids), sandboxStore.getMany(ids)]);
-        const rows = pageRes.records.map((r) => builtAppRow(metas.get(r.workspaceId) ?? null, r, sandboxes.get(r.workspaceId), r.workspaceId));
+        const rows = await finish(pageRes.records.map((r) => builtAppRow(metas.get(r.workspaceId) ?? null, r, sandboxes.get(r.workspaceId), r.workspaceId)));
         res.json({ ok: true, mode: 'status', order: pageRes.order, rows, nextCursor: encodeCursor(pageRes.nextAfterDocId), pageSize: limit });
         return;
       }
@@ -2530,11 +2578,16 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       if (!pageRes.ok) { res.status(502).json({ ok: false, error: 'Could not read the built-app list.' }); return; }
       const ids = pageRes.apps.map((a) => a.workspaceId);
       const { deployments, sandboxes } = await enrich(ids);
-      const rows = joinBuiltAppRows(pageRes.apps, deployments, sandboxes);
       // Published apps whose owner deleted the workspace have no durable files left, so this list cannot
       // reach them — and a live site nobody can moderate is the hole markOrphaned exists to close. They
-      // ride the FIRST page only, as their own strip.
-      const orphaned = after ? [] : (await deploymentStore.listOrphaned(50)).map((r) => builtAppRow(null, r, undefined, r.workspaceId));
+      // ride the FIRST page only, as their own strip — and only the ones still LIVE (`liveOrphans`):
+      // the flag is set on every record of a deleted workspace, offline and never-published included,
+      // and a strip headed "Live" must not list apps that are not.
+      const orphanRecs = after ? [] : liveOrphans(await deploymentStore.listOrphaned(200)).slice(0, 50);
+      const [rows, orphaned] = await Promise.all([
+        finish(joinBuiltAppRows(pageRes.apps, deployments, sandboxes)),
+        finish(orphanRecs.map((r) => builtAppRow(null, r, undefined, r.workspaceId))),
+      ]);
       res.json({ ok: true, mode: 'all', rows, orphaned, nextCursor: encodeCursor(pageRes.nextAfterDocId), pageSize: limit });
     } catch (e: any) {
       console.error('[ADMIN] built-apps list error:', e?.message);
@@ -3221,7 +3274,19 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       }
       await new FirebaseHostingDeployer().deleteChannelById(channelId);
       audit('ADMIN_CHANNEL_RECLAIMED', { channelId, state: target.state, workspaceId: target.workspaceId || '', ip: req.ip });
-      res.json({ ok: true, channelId, state: target.state });
+      // The channel is gone, so every record still pointing at it points at nothing. Reclaiming a build
+      // copy was called "harmless — the next green build writes it again", and the records were never
+      // told: an app not rebuilt kept framing "Site Not Found" in its preview. Clear exactly the records
+      // that name this channel's URL (conditional, so a newer copy is never touched), then forget the
+      // cached inventory so the next list judges against the site as it is now.
+      forgetChannelInventory();
+      let copiesCleared = 0;
+      if (target.url) {
+        for (const ws of await sandboxStore.findBySnapshotUrl(target.url)) {
+          if (await sandboxStore.clearSnapshot(ws, target.url)) copiesCleared += 1;
+        }
+      }
+      res.json({ ok: true, channelId, state: target.state, copiesCleared });
     } catch (e: any) {
       console.error('[ADMIN] Channel reclaim error:', e?.message);
       res.status(502).json({ error: 'Reclaim failed — the channel was NOT confirmed removed.', detail: e?.message || String(e) });

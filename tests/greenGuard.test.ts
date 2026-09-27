@@ -6,6 +6,7 @@ import {
   greenWorkspaceKey, isGreenSnapshotKey, greenGuardEnabled, buildRemoveCommand,
   wantsAttemptBack, attemptWorkspaceKey, attemptRestoredMessage, KEEP_CHANGES_PHRASE,
 } from '../src/server/AgentV3/GreenGuard';
+import { isAppWorkspaceKey } from '../src/server/lib/workspaceIdentity';
 
 /**
  * ADMIN 2026-08-09: "pehli build me 4-5 min me working app ban jati hai — baad me 20 min tak use edit
@@ -215,7 +216,10 @@ describe('where a snapshot lives — and why it must never look like an app', ()
     // without this the user would see their app TWICE and could open the backup by mistake.
     const store = readFileSync(join(process.cwd(), 'src/server/AgentV3/WorkspaceFileStore.ts'), 'utf8');
     const at = store.indexOf('export async function listUserWorkspaceApps');
-    expect(store.slice(at, at + 1600)).toContain('isGreenSnapshotKey(d.id)');
+    // Since 2026-09-27 the question is the CLASS one — every derived key (`::green`, `::attempt`,
+    // `::greenmeta`), not `::green` alone, which is how the other two reached both app lists.
+    expect(store.slice(at, at + 2000)).toContain('!isAppWorkspaceKey(d.id)');
+    expect(isAppWorkspaceKey(greenWorkspaceKey('agentv3-u1-s1'))).toBe(false);
   });
 });
 

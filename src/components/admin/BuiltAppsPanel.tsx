@@ -139,7 +139,7 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
   const openPreview = useCallback(async (row: BuiltAppRow) => {
     const plan = previewPlan(row);
     if (plan.source === 'none') { setPreview({ row, html: null, loading: false, error: plan.label, kind: '' }); return; }
-    if (plan.source === 'copy') { setPreview({ row, html: null, loading: false, error: '', kind: 'copy' }); return; }
+    if (plan.source === 'copy' || plan.source === 'live') { setPreview({ row, html: null, loading: false, error: '', kind: plan.source }); return; }
     setPreview({ row, html: null, loading: true, error: '', kind: '' });
     try {
       const r = await fetch(`/api/admin/apps/${encodeURIComponent(row.workspaceId)}/preview`, {
@@ -159,6 +159,15 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
     const view = publishStateView(d.publish);
     const plan = previewPlan(d);
     const owner = d.userId || d.ownerUid;
+    // WHO built WHAT, before any id (admin 2026-09-27: "admin ko dikhna chahiye kon kya bana raha hai").
+    // The id stays on the row — it is what a report or a support ticket quotes — but underneath.
+    const name = d.appName || null;
+    const ownerLabel = d.owner?.label || (owner ? `id ${owner.slice(0, 8)}` : 'Signed-out user');
+    // The orphan line is judged from the row's OWN state. It used to be a fixed "Still live …" on every
+    // orphan, beside badges reading "Not published" and "Offline".
+    const orphanLine = d.publish === 'live'
+      ? 'Still live, but the owner deleted the workspace — its files are gone; only the site remains.'
+      : `The owner deleted the workspace. ${view.meaning}`;
     return (
       <div key={d.workspaceId} className="rounded-xl bg-well border border-line px-3 py-2.5">
         <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -171,10 +180,23 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
                 : 'bg-raised border-line text-muted'}`}>
                 {view.label}
               </span>
-              <span className="text-[11px] font-mono text-body truncate">{d.workspaceId}</span>
+              <span className={`text-[12px] font-bold truncate ${name ? 'text-ink' : 'text-muted italic'}`}>
+                {name || 'Name not recorded'}
+              </span>
             </div>
+            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+              <span className="text-[10px] text-faint">by</span>
+              {owner ? (
+                <button onClick={() => openAccount(owner)} className="text-[11px] text-body hover:text-ink underline decoration-dotted truncate max-w-full">
+                  {ownerLabel}
+                </button>
+              ) : (
+                <span className="text-[11px] text-body">{ownerLabel}</span>
+              )}
+            </div>
+            <p className="text-[10px] font-mono text-faint truncate mt-0.5">{d.workspaceId}</p>
             <p className="text-[10px] text-muted mt-1 leading-relaxed">
-              {opts.orphan ? 'Still live, but the owner deleted the workspace — its files are gone; only the site remains.' : view.meaning}
+              {opts.orphan || d.orphaned ? orphanLine : view.meaning}
             </p>
             <div className="flex items-center gap-2.5 mt-1 flex-wrap">
               {d.fileCount > 0 && <span className="text-[10px] text-faint">{d.fileCount} files</span>}
@@ -184,9 +206,6 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
                 <a href={d.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[10px] text-info hover:underline">
                   <ExternalLink size={10} /> Open the live app
                 </a>
-              )}
-              {owner && (
-                <button onClick={() => openAccount(owner)} className="text-[10px] text-muted hover:text-ink underline">Owner</button>
               )}
             </div>
           </div>
@@ -246,7 +265,8 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
         </button>
       </div>
       <p className="text-[11px] text-muted leading-relaxed">
-        Every app any user has built — published or not — newest first, {PAGE_SIZE} at a time.{' '}
+        Every app any user has built — published or not — newest first, {PAGE_SIZE} at a time, with its name and
+        who built it.{' '}
         <span className="text-body">Preview</span> shows the app without waking its owner&apos;s machine.{' '}
         <span className="text-body">Unpublish</span> takes a live site off the internet and the owner can publish
         it again themselves. <span className="text-danger">Ban</span> removes it and stops that workspace publishing
@@ -260,7 +280,7 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
             value={queryInput}
             onChange={(e) => setQueryInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') submitSearch(); }}
-            placeholder="App id, owner uid or link — press Enter"
+            placeholder="App id, owner uid or link — press Enter; a name or email filters what is shown"
             className="w-full bg-well border border-line rounded-lg pl-8 pr-3 py-1.5 text-[11px] text-ink placeholder:text-faint focus:outline-none focus:border-sky-500/40"
           />
         </div>
@@ -355,15 +375,19 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
                 viewport and against a screen that still owes space to the notch. The overlay's box
                 IS the visible area now, so "as tall as it can be" is the honest height — and the
                 iframe below is already `flex-1 min-h-0`, so it fills whatever it is given. */}
-            <div role="dialog" aria-modal="true" aria-label={`Preview of ${preview.row.workspaceId}`}
+            <div role="dialog" aria-modal="true" aria-label={`Preview of ${preview.row.appName || preview.row.workspaceId}`}
                  className="nb-sheet w-full max-w-[1100px] h-full rounded-2xl bg-card border border-line shadow-2xl flex flex-col overflow-hidden">
               <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-line">
                 <div className="min-w-0">
-                  <p className="text-[11px] font-mono text-body truncate">{preview.row.workspaceId}</p>
+                  <p className="text-[12px] font-bold text-ink truncate">
+                    {preview.row.appName || 'Name not recorded'}
+                    {preview.row.owner?.label ? <span className="font-normal text-muted"> · {preview.row.owner.label}</span> : null}
+                  </p>
+                  <p className="text-[10px] font-mono text-faint truncate">{preview.row.workspaceId}</p>
                   <p className="text-[10px] text-muted truncate">{preview.error || plan.label}</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {plan.source === 'copy' && (
+                  {(plan.source === 'copy' || plan.source === 'live') && (
                     <a href={plan.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[10px] text-info hover:underline">
                       <ExternalLink size={10} /> Open in a tab
                     </a>
@@ -375,8 +399,11 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
                 </div>
               </div>
               <div className="flex-1 min-h-0">
-                {plan.source === 'copy' && (
-                  <iframe title={`Saved copy of ${preview.row.workspaceId}`} src={plan.url} className="w-full h-full border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox={IFRAME_SANDBOX} />
+                {(plan.source === 'copy' || plan.source === 'live') && (
+                  <iframe
+                    title={`${plan.source === 'copy' ? 'Saved copy' : 'Published app'} of ${preview.row.workspaceId}`}
+                    src={plan.url} className="w-full h-full border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox={IFRAME_SANDBOX}
+                  />
                 )}
                 {plan.source === 'render' && preview.html && (
                   <iframe title={`In-browser render of ${preview.row.workspaceId}`} srcDoc={preview.html} className="w-full h-full border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox={IFRAME_SANDBOX} />

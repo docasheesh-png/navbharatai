@@ -83078,6 +83078,108 @@ YELLOW (PR #3331's area).
 - **A reviewer claim a file can answer is checked first.** `reviewEvidence.ts` `missingClassClaim` / `classIsDefined`: a finding whose first sentence says named classes are not defined is refuted only when EVERY named class has a selector in the real stylesheets. A finding resting on "the missing classes" falls with them only when every class claim fell. Stylesheets are read only when a finding makes the claim. This closes the second open item.
 - **Vite dev CSS leaves the capture only when the page would not fit.** `style[data-vite-dev-id]` text is replaced with a note when `outerHTML` is over 30,000 characters; a page that fits is read as before. This closes the third open item.
 
+## 2026-09-27 — Admin Security → Built apps: who built what, and previews that work
+
+Admin, with the panel's own copy pasted: *"isko fix karo. kuch app ke preview chal hi nahi rahe! admin ko
+dikhna chahiye kon kya bana raha hai!!"* Five defects on one screen, each root-caused from code:
+
+1. **`…::greenmeta` listed as an app.** The file store holds three DERIVED keys beside each workspace
+   (`::green`, `::attempt`, `::greenmeta`); both listings excluded `::green` only (`isGreenSnapshotKey`).
+   The same hole reached the USER's Full-App Debugger list (`listUserWorkspaceApps`). Class fix:
+   `isAppWorkspaceKey` (workspaceIdentity.ts) refuses any key containing the `::` separator — a session
+   id can never hold a colon, so a fourth derived key is excluded by construction.
+2. **Previews framing "Site Not Found".** Reclaiming an `sn-` snapshot channel (Reclaim / Reclaim all,
+   2026-09-18) deleted the channel and never told the sandbox record, whose `snapshotUrl` kept pointing at
+   it — for the admin's Preview AND the user's own sleeping-app preview door. `previewSnapshot.ts` had
+   called that reclaim "harmless" (corrected in place). Now the reclaim route clears exactly the records
+   naming that channel URL (transactional, so a newer copy is never touched), and
+   `deadSnapshotCopies.ts` heals the records PAST reclaims left behind — judged only against a COMPLETE
+   channel inventory, only for a `--sn-` host on this site, run at most once per 10 min from the admin
+   list. A bucket copy or a published URL can never be judged dead.
+3. **Preview greyed out on live orphans.** An app whose owner deleted the workspace has no saved files,
+   so the render had nothing to compile — beside a working public link. `previewPlan` gains the live site
+   as its second source: copy → live site → render → none.
+4. **The orphan strip contradicted itself.** `markOrphaned` flags every record of a deleted workspace
+   (offline, banned, never-published ghosts included) and the strip said "Still live" on all of them.
+   The strip now holds only `liveOrphans` (read from up to 200 flagged records, not the first 50), and the
+   row's line is judged from its own state.
+5. **No "who" and no "what".** Every row leaves the route through `finish`: owner name/email in one
+   batched wallet read (`resolveUserIdentities`, the All-builds resolver), app name in one field-masked
+   `getAll` over the conversation docs (`readConversationNamesMany`) — chosen name, else the first
+   prompt's title, else an honest "Name not recorded". A name or email fragment now filters too.
+
+Tests: `tests/theAdminSeesWhoBuiltWhat.test.ts` (source guards on both listings, the reclaim route and
+every list mode; the orphan line). `everyBuiltAppHasAPreview.test.ts` updated to the new truth.
+⚠️ Not verified against production: how many records the heal will clear (it logs the count). The
+in-browser render of a full-stack app still shows the frontend only — unchanged, and labelled so.
+## 2026-09-27 — Autopsy "secret calculator" (build 2720e553): the stylesheet was written beside its screens, then emptied, then "verified"
+
+A free user (weak tier) asked for a calculator that hides files, photos and videos behind the code `0000`. The fast lane
+planned four files and finished at 13.7 min against a 2–4 min estimate. It said "Build verified — the app compiles ✓"
+about an app whose stylesheet had been reduced to `{ }`. The user was billed ₹15.44 at real cost (margin waived — no
+render proof) and stopped the build 143 ms after the preview address was published.
+
+**Ledger:**
+- ✅ Self-healed: 2
+  - the deterministic heal added four foundational files (package.json, vite.config.ts, tsconfig ×2)
+  - it put back `vite-tsconfig-paths`, which that rewrite had dropped
+- 🔀 Workaround: 3
+  - GLM flashx crawled on the plan call (17 s) and was benched
+  - repair round 2 fell KIMI → GLM-5.3 → Nemotron
+- ⏭️ Skipped: 0
+- ❌ Shipped wrong: 2
+  - the app shipped with no styles at all
+  - "verified ✓" was said about it
+- 🥵 Struggle: 4
+  - 494 s (61%) of the lane went to three repair rounds, each rewriting only `src/index.css`, each with a different
+    palette
+  - 240 s wasted on two reasoning rungs that spent a 12,000-token ceiling thinking (`OUTPUT_BUDGET_STARVED`)
+  - the dev server failed twice with "no recognisable error" before it came up (70 s)
+  - the ETA was 4.7× over its band
+
+**Root causes, all fixed here:**
+1. **The stylesheet was in the SHELL's tier.** f152c1ab (2026-09-20) moved stylesheets from tier 0 to "last", but
+   last was tier 2 — the tier of `App.tsx` and `main.tsx`.
+   - In any app whose screens live in `App.tsx`, the stylesheet was generated at the same moment as the only file
+     whose classes it styles. It invented its own; the class check failed; three repairs followed.
+   - Even a later tier would not have been enough: the export surface a stylesheet was handed drops JSX bodies, so
+     it never saw one `className`.
+   - Fix: stylesheets are now their own final stage (`STYLESHEET_TIER = 3`), and the call is handed the exact
+     class names the written screens use (`stylesheetClassContext`, built on `classNamesUsedBy`). That reader also
+     reads classes chosen by a ternary or a template literal, which the precision-first check's reader skips.
+   - The stage is DEFERRABLE: `requiredStageCount` leaves it out of the budget projection, so f152c1ab's
+     stage-count win stands. A lane out of time stops before it with the app written, and the existing root-written
+     break rule already allows that.
+2. **A continuation replaced a 4,669-character stylesheet with `{ }`.** `continuationRestartsFile` judged "too
+   little to preserve" by the FIRST LINE's length. A stylesheet's first line is `:root {` — seven characters, one
+   under the bar. So the continuation counted as a restart, and the parser's LAST-wins rule threw the whole partial
+   file away.
+   - It now compares the file's head with whitespace collapsed. `{ }` is welded onto the partial instead; the
+     brace gate then reports the truncated rule honestly.
+3. **The class check treated an EMPTIED stylesheet as "nothing to check against".** `defined.size === 0` returned
+   no findings, which made deleting every rule the one edit that always passes.
+   - The check stays silent only when there is no stylesheet at all.
+   - Its error now says that removing rules never fixes it.
+   - This reaches the architect lane's CSS heal (#3346) too, because it reads the same `findUndefinedClasses`.
+
+Tests: `tests/theStylesheetWasWrittenBesideItsScreens.test.ts` (13). Each of the three fixes was reverted alone and
+its tests failed. The f152c1ab tests now assert `STYLESHEET_TIER` and count required stages.
+
+**Open — for the admin, not decided here:**
+- **The lane's reasoning-rung stop (`stopLane`, Study-Racer 2026-09-25) cannot fire for GLM or Kimi.**
+  - `fastLaneCallIdentity` returns the FAMILY label (`kimi`, `glm`) as the model, so `modelAlwaysReasons('kimi')` is
+    false. This build ran its whole lane on `kimi-k2.7-code`, a rung that always reasons.
+  - Making the stop real is a behaviour change: every build whose flashx crawls would hand off to the full builder.
+  - This build's own evidence cuts the other way: Kimi generated all four files in 115 s, and the waste was the
+    repair, not the per-file calls. Left as found, with the question put to the admin.
+  - The per-call log's `model` field shows the family, not the id, for the same reason.
+- **The dev server "did not start and its log had no recognisable error" twice**, then came up. A git message ("On
+  branch master nothing to commit") appears in the health-check output. This is the same open class as the earlier
+  dev-server entries; the cause is not in this report.
+- **The foundational-file heal rewrote a working scaffold `package.json`** (it had to restore a dropped plugin). Why
+  those four files counted as "missing" on a warm sandbox is not established.
+- **Stop 143 ms after the preview published.** It was recorded from the abort signal (Stop / Unsend / lease stop).
+  That it was the user is likely but not proven from this report.
 ## 2026-09-27 — Autopsy: the admin Diagnostics page, read against the code (three untruths)
 
 The admin pasted the whole Diagnostics page. Read line by line against the routes that produce it,
@@ -83208,3 +83310,70 @@ Play.** The referral preflight compared the live release against 117 (when the p
 **Still open — only the admin can do these:**
 - Roll out build 137/138 (or a fresh `.aab`) on Play, then set `ANDROID_LATEST_VERSION_CODE`. Until then, users on 134 earn signup, login and web-rule mobile, but not the referral code, GitHub or an in-app mobile OTP.
 - The website ₹50 + ₹50 can be farmed with scripted accounts. The admin accepted that. The lever is ready if it happens.
+## 2026-09-27 — The three open items of autopsy 2720e553, root-caused and fixed (admin: "dna level par ja kar")
+
+The earlier entry for that build listed three items it could not explain from the report. All three are
+explained now, and each is closed as a class rather than as one occurrence.
+
+**1. A pressed Stop did not stop the build.** The Stop button, Unsend and a lease stop all abort the
+build's signal (`abortBuild(…, 'user-stop')`).
+- **The defect:**
+  - The fast lane (`runSimpleBuild`, the one-shot lane, and the route's verify, repair and preview
+    helpers) never read that signal. A lane that was stopped kept calling models, kept repairing, and
+    started a dev server. Stop was recorded only when the lane ran out of work. That is why that report
+    shows `USER_STOPPED_BUILD` 143 ms after the preview published: the timestamp is when the stop was
+    NOTICED, not when it was pressed.
+  - The agentic loop noticed a stop only BETWEEN turns, after paying for the call in flight.
+    `CLAUDE.md` had recorded this as an open item since 2026-09-13.
+- **The fix:**
+  - `stopSignal.ts` is one definition of a stop: `BuildStoppedError`, `raceStop`, `withStopSignal`.
+  - `RunTurnParams.signal` carries the stop to the provider ladder. On a stop, the ladder asks no
+    further rung, benches nobody, counts no wasted provider time, and still attributes a stopped call's
+    cost to us (never to the user).
+  - The GLM/Kimi runner closes its stream, so the provider stops generating and billing.
+  - The Claude request is cancelled through the SDK, and never retried after a stop.
+  - `AgentRunner` passes its signal into the call it waits on, and ends through the same abort summary.
+  - The route's two text-runner factories are wrapped with `withStopSignal`, so every direct call site
+    (planners, post-build repairs, the fast lane) carries the signal without anyone having to remember.
+  - `runSimpleBuild` checks the signal before every file call and at every tier, repair round and
+    preview start. A repair that finishes after a stop is not written. The lane returns
+    `stopped: true`, saves the files it finished, and starts no one-shot lane.
+  - Every OTHER abort cause (watchdog, cost cap, deploy drain, reaper) now cancels in-flight calls
+    too, because each of them already means "this build is over".
+
+**2. The foundation guard overwrote a working `package.json`.**
+- **The defect:**
+  - The lane listed the sandbox once and kept `.slice(0, 80)` of an unsorted `find` listing, so which
+    80 files survived was chance.
+  - `ensureViteReactFoundation` then called `package.json`, `vite.config.ts` and both tsconfigs
+    "missing" and wrote generic ones over the scaffold's. The build had to restore a plugin that was
+    already installed.
+- **The fix:**
+  - The listing is no longer capped. Prompts that show it cap it themselves at 60.
+  - `foundationFilesStillAbsent` asks the disk immediately before writing, so a file that exists is
+    never overwritten (`FOUNDATION_KEPT_EXISTING`).
+  - The Diagnose/restore call site is left as it was, on purpose: there, the durable store IS the whole
+    project, and the sandbox holds only the template's generic files.
+
+**3. The dev server "did not start and the log had no recognisable error" twice, then came up.**
+- **The defect:**
+  - The recovery loop waited 25 s, then killed and relaunched with a 20 s wait, twice: 70 s in all.
+  - The port was listening 17 s later.
+  - A clean log from a living process is a server still starting (a cold `vite` after a fresh install
+    pre-bundles before it prints). Each restart killed it and reset its clock.
+- **The fix:**
+  - For an unrecognised failure, the loop first waits on the SAME process
+    (`buildStillStartingWaitCommand`, 40 s, bounded).
+  - A process that has exited answers `PROC_GONE` within about a second, so a real crash is restarted
+    exactly as before. A named failure keeps its own recovery.
+
+Tests (all reversion-proven by removing each fix and watching its test fail):
+- `tests/aPressedStopStopsTheBuild.test.ts` (19)
+- `tests/theDiskDecidesWhatIsMissing.test.ts` (5)
+- `tests/aStartingServerIsNotADeadOne.test.ts` (9); its shell command is run for real
+
+**Still open:**
+- Gemini's runner has no cancel handle. A stop there stops the WAITING (the ladder races it), not the
+  call itself.
+- Why the dev server's log was silent for that long is not established. A git message ("On branch
+  master") appears in that output, and its source was not traced here.

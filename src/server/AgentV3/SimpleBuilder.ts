@@ -30,6 +30,8 @@ import { generateMissingCssModules } from './CssModuleGenerator';
 import { missingViteEnvTypes } from './viteEnvTypes';
 import { generateMissingBarrels } from './BarrelGenerator';
 import { signatureContextEnabled, signatureDependencyContext } from './exportSurface';
+import { classNamesUsedBy } from './CssConsistency';
+import { BUILD_STOPPED_MESSAGE, isBuildStoppedError, throwIfStopped } from './stopSignal';
 import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 import { wireOrphanPages } from './orphanPageWiring';
@@ -157,9 +159,46 @@ export function cssBraceImbalance(css: string): number {
  *   2 = shell: the entry (main/index), App, pages/routes/router, and *Page/*Screen/*View files
  *       (they compose the components below, so they generate LAST with the real component source).
  *   1 = everything else (leaf/mid components).
+ *   3 = stylesheets (STYLESHEET_TIER) — after the shell, so they style the class names the screens chose.
  * PURE + unit-testable. With only one effective tier present, the staged build collapses to today's
  * single parallel batch.
  */
+/** The last generation stage: stylesheets, after every file whose class names they must style. */
+export const STYLESHEET_TIER = 3;
+
+/** A stylesheet the fast lane writes as ordinary CSS (a CSS module is keyed by `styles.x`, not class names). */
+export function isStylesheetPath(path: string): boolean {
+  return /\.(css|scss|sass|less|styl)$/i.test(path);
+}
+
+/**
+ * How many generation stages the lane MUST run to produce an app: every populated tier except the
+ * stylesheet stage, which the lane may skip when out of time (the app renders without it, and the
+ * verify gate's class check then asks for the rules). Never less than one. PURE.
+ */
+export function requiredStageCount(paths: readonly string[]): number {
+  const tiers = new Set(paths.map((p) => generationTier(p)).filter((t) => t !== STYLESHEET_TIER));
+  return Math.max(1, tiers.size);
+}
+
+/**
+ * The block a STYLESHEET's generation call is given instead of the components' export signatures:
+ * the exact class names the already-written screens put on elements. An export surface drops JSX
+ * bodies, so it carries no className at all — the stylesheet was styling classes it had to guess.
+ * Empty when there is nothing to style. PURE.
+ */
+export function stylesheetClassContext(produced: readonly OneShotFile[]): string {
+  const classes = classNamesUsedBy(Object.fromEntries(produced.map((f) => [f.path, f.content])));
+  if (classes.length === 0) return '';
+  return [
+    '',
+    'CLASS NAMES THE SCREENS ALREADY USE — these files are written and will not change. Style EVERY one',
+    'of these exact class names with a real rule (same spelling, same case); do not rename them and do',
+    'not invent different ones. Add element and state rules as the design needs:',
+    classes.map((c) => `.${c}`).join(', '),
+  ].join('\n');
+}
+
 export function generationTier(path: string): number {
   const p = path.toLowerCase();
   // Shell / entry / pages — generated last (they import the components + foundation).
@@ -194,8 +233,18 @@ export function generationTier(path: string): number {
    * already landing in tier 1 by fall-through, and the same argument applies to every one of them —
    * a stylesheet follows the markup it styles, whatever its syntax. A CSS MODULE follows it too: a
    * component referencing `styles.card` is the thing that decides `.card` exists.
+   *
+   * 🔴 AND "LAST" MUST MEAN AFTER THE SHELL, NOT BESIDE IT (autopsy 2720e553, 2026-09-27). The line
+   * below used to return 2 — the SHELL's tier — so in any app whose screens live in `App.tsx` (most
+   * small apps) the stylesheet was generated CONCURRENTLY with the only file that uses its classes.
+   * A secret-calculator build did exactly that: `src/index.css` invented one set of class names,
+   * `src/App.tsx` chose another, the class check failed, and three repair rounds spent 494 s — 61% of
+   * the lane — rewriting the stylesheet three different ways. The last one left `{ }`.
+   * It is its own final stage now, and is handed the exact class names the screens use
+   * (`stylesheetClassContext`). That stage is DEFERRABLE: the budget projection does not count it
+   * (`requiredStageCount`), and a lane out of time stops before it with the app written.
    */
-  if (/\.(css|scss|sass|less|styl)$/.test(p)) return 2;
+  if (isStylesheetPath(p)) return STYLESHEET_TIER;
   // Foundation — generated first.
   if (/\.d\.ts$/.test(p)) return 0;
   if (/(^|\/)(types?|interfaces?|models?|constants?|config|utils?|lib|helpers?|hooks?|contexts?|stores?|services?|api)(\/|\.)/.test(p)) return 0;
@@ -870,6 +919,13 @@ export interface SimpleBuildDeps {
    * the last call; a lane that never falls never hears from it.
    */
   stopLane?: () => string | null;
+  /**
+   * The BUILD's stop signal (Stop / Unsend / a lease stop). Read before every model call, tier,
+   * verify and repair round and before the preview starts; a stopped lane saves the files it
+   * finished and returns `stopped: true` (autopsy 2720e553 — the lane used to ignore Stop entirely
+   * and ran another nine minutes of model calls after it). Absent → today's behaviour.
+   */
+  signal?: AbortSignal;
   /** Write the generated files (single batch). Throws on a hard failure. */
   writeFiles: (files: OneShotFile[]) => Promise<void>;
   /** Start the dev server + publish the preview. Best-effort. */
@@ -984,6 +1040,8 @@ export interface SimpleBuildResult {
    * and passed; undefined = verify was not wired at all.
    */
   typecheckRan?: boolean;
+  /** TRUE when the lane ended because the build was asked to stop — never a failure of the app. */
+  stopped?: boolean;
   /**
    * WHERE THE FAST LANE'S MINUTES WENT (autopsy `21b431e1`, 2026-09-22). Measurement only — nothing
    * reads it to make a decision.
@@ -1175,10 +1233,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // the OPTIONAL contract pass is affordable at all. Computed once and reused by the doomed check
       // further down, so the two can never disagree about how many tiers this build runs.
       const depOrder = deps.depOrder !== false;
-      const tiers = depOrder ? [0, 1, 2] : [0];
-      const populatedTiers = depOrder
-        ? tiers.filter((t) => manifest.some((s) => generationTier(s.path) === t)).length
-        : 1;
+      const tiers = depOrder ? [0, 1, 2, STYLESHEET_TIER] : [0];
+      // The stages the lane cannot finish WITHOUT — the deferrable stylesheet stage is not one of them.
+      const populatedTiers = depOrder ? requiredStageCount(manifest.map((s) => s.path)) : 1;
       // 🔴 THE BEST-EFFORT PASS MUST NOT BE WHAT DOOMS THE LANE. On the reported build the lane could
       // finish after planning (49 + 147 = 196s of 240s) and could not after the contract (96 + 147 =
       // 243s) — so the optional pass bought the bail that then threw the contract away with everything
@@ -1265,6 +1322,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         if (lapsed) return null; // the lane already timed out — stop burning tokens on files nobody will use
         // The lane's chain may have fallen to an engine this lane cannot afford (see SimpleBuildDeps.stopLane).
         // Refuse BEFORE spending the call; the tier boundary below turns the refusal into a hand-off.
+        if (deps.signal?.aborted) return null; // stopped — the tier boundary below ends the lane
         const stop = deps.stopLane?.();
         if (stop) { laneStopReason = laneStopReason ?? stop; return null; }
         try {
@@ -1272,9 +1330,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           // full-file scan so no export is truncation-hidden) instead of full bodies: same contract
           // information at a fraction of the input tokens. AGENTV3_SIGNATURE_CONTEXT=off restores
           // the old full-body dump verbatim.
-          const depBlock = produced.length
-            ? (signatureContextEnabled() ? signatureDependencyContext(produced) : dependencyContext(produced))
-            : '';
+          const depBlock = !produced.length
+            ? ''
+            : isStylesheetPath(spec.path) && !/\.module\./i.test(spec.path) && stylesheetClassContext(produced)
+              ? stylesheetClassContext(produced)
+              : (signatureContextEnabled() ? signatureDependencyContext(produced) : dependencyContext(produced));
           // 🔴 THE SAME INVERSION THE PLAN CALL ALREADY CLOSED (line ~697), MISSED HERE — this is the
           // highest-volume call site in the whole lane and the one a real report caught running away
           // (build 782da7b7, 2026-09-16): a file's OWN truncation-continuation loop (fastGenerate's
@@ -1342,6 +1402,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         const tierStartedAt = Date.now();
         const gen = await mapWithConcurrency(specs, concurrency, (spec) => genOne(spec, producedSoFar));
         for (const f of gen) if (f && f.content) written.push(f);
+        throwIfStopped(deps.signal);
         // "stopped early" ON PURPOSE — the wording that routes to the salvage path, so every finished
         // file reaches the full builder (see the root-component check below for the same idiom).
         if (laneStopReason) throw new Error(`simple-build fast lane stopped early — ${laneStopReason}`);
@@ -1505,6 +1566,22 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   } catch (e) {
     lapsed = true; // from this instant the orphaned closure can neither write files nor burn more tokens
     const reason = e instanceof Error ? e.message : String(e);
+    // A STOP IS NOT A HANDOFF. Keep what finished — the user was promised their files are saved — and
+    // say nothing about "carrying on": nothing carries on after a stop.
+    if (deps.signal?.aborted || isBuildStoppedError(e)) {
+      const finished = [...generatedSoFar];
+      let saved: string[] = [];
+      if (finished.length > 0) {
+        try { await withTimeout(deps.writeFiles(finished), 30_000, 'simple-build-stop-save'); saved = finished.map((f) => f.path); }
+        catch { /* best-effort — a failed save leaves the workspace as it was */ }
+      }
+      return {
+        ok: false, stopped: true, filesWritten: saved.length,
+        summary: 'Stopped, as asked — the files finished so far are saved.',
+        reason: BUILD_STOPPED_MESSAGE, outcome: 'BUILD_FAILED', salvagedPaths: saved.length ? saved : undefined,
+        plannedFiles, phases: phasesNow(), plannedPaths,
+      };
+    }
     // SALVAGE (timeout only): hand the full builder the files that DID finish, so it continues from
     // real work instead of an empty tree. Written once, synchronously, BEFORE the fallback returns —
     // there is no later writer (the zombie is dead), so the workspace the full builder first reads is
@@ -1654,7 +1731,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       } catch { /* a free fix is best-effort — fall through to the model repair below */ }
     }
     let promptingErrors = verdict.errors;
-    while (!verdict.ok && attempt < maxRepairs && deps.repair) {
+    while (!verdict.ok && attempt < maxRepairs && deps.repair && !deps.signal?.aborted) {
       attempt++;
       // GA-8: each attempt climbs the ordered strategy ladder so a retry is a genuinely DIFFERENT push
       // (contract-full → focus-offenders → contract-authority), not the identical prompt re-fired.
@@ -1686,6 +1763,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       const repairStartedAt = Date.now();
       try { fixed = await deps.repair(repairErrors, [...byPath.values()], contract, strategy, contractPath || undefined); } catch { fixed = []; }
       finally { clock.repairMs += Date.now() - repairStartedAt; clock.repairRuns++; }
+      // Stopped while the repair ran: its answer is not written. The workspace stays as it was when the
+      // user pressed Stop — an unverified rewrite nobody will check is not a kinder place to leave it.
+      if (deps.signal?.aborted) break;
       fixed = fixed.filter((f) => f && f.path && f.content);
       if (!fixed.length) break;
       // PREVENTION BY CONSTRUCTION, not by persuasion. A repair aimed at a file we own and that has one
@@ -1744,6 +1824,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       }
       promptingErrors = verdict.errors;
     }
+    if (deps.signal?.aborted) {
+      return {
+        ok: false, stopped: true, filesWritten: files.length,
+        summary: 'Stopped, as asked — the files finished so far are saved.',
+        reason: BUILD_STOPPED_MESSAGE, outcome: classifyBuildOutcome({ filesWritten: files.length, typecheckOk: null }),
+        typecheckRan: verdict.ran !== false, plannedFiles, phases: phasesNow(),
+      };
+    }
     if (!verdict.ok) {
       deps.log?.('The app still has build errors — staying on it until it builds.');
       return {
@@ -1768,6 +1856,16 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     }
   }
 
+  // Stopped during verify or repair: the files are already written, and nothing more is started — not
+  // another repair, not an install, not a dev server.
+  if (deps.signal?.aborted) {
+    return {
+      ok: false, stopped: true, filesWritten: files.length,
+      summary: 'Stopped, as asked — the files finished so far are saved.',
+      reason: BUILD_STOPPED_MESSAGE, outcome: classifyBuildOutcome({ filesWritten: files.length, typecheckOk: null }),
+      typecheckRan, plannedFiles, phases: phasesNow(),
+    };
+  }
   // VERIFIED (or verify not wired) → success; the preview is a best-effort bonus.
   if (deps.startPreview) {
     try { await withTimeout(deps.startPreview(), deps.previewTimeoutMs ?? 90_000, 'simple-preview'); }

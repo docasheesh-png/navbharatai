@@ -131,6 +131,18 @@ export interface BuiltAppRow {
   snapshotAt: number;
   /** The owner deleted the workspace while the app was live (registry flag). */
   orphaned: boolean;
+  /**
+   * WHAT the app is — the name the owner chose, else the title derived from their first prompt.
+   * Null when no conversation record carries one ("not recorded"), never a made-up name. Filled by
+   * `annotateBuiltAppRows`; `builtAppRow` alone leaves it null.
+   */
+  appName: string | null;
+  /**
+   * WHO built it — resolved from the owner uid in one batched read. Null when the row has no owner
+   * uid; a uid with no wallet record still gets a row (label "id abc123"), because an id the admin can
+   * click is more use than a blank.
+   */
+  owner: { name: string; email: string; label: string; anonymous: boolean } | null;
 }
 
 /**
@@ -162,7 +174,54 @@ export function builtAppRow(
     snapshotUrl,
     snapshotAt: snapshotUrl && Number.isFinite(copy?.snapshotAt) ? Number(copy!.snapshotAt) : 0,
     orphaned: rec?.orphaned === true,
+    appName: null,
+    owner: null,
   };
+}
+
+/** The owner facts `annotateBuiltAppRows` needs — a subset of adminUserLookup's UserIdentity. */
+export interface BuiltAppOwnerIdentity { email: string; name: string; anonymous: boolean; label: string }
+
+/**
+ * Put a NAME and an OWNER on every row (admin 2026-09-27: "admin ko dikhna chahiye kon kya bana raha
+ * hai"). Pure: the two maps are the batched reads for exactly these rows. A workspace id alone told a
+ * moderator nothing — neither what the app was nor whose it was — so every page is now joined against
+ * the owner's identity and the app's own name before it leaves the server.
+ */
+export function annotateBuiltAppRows(
+  rows: BuiltAppRow[],
+  identities: Map<string, BuiltAppOwnerIdentity>,
+  names: Map<string, { appName: string | null; title: string | null }>,
+): BuiltAppRow[] {
+  const clean = (v: string | null | undefined) => {
+    const t = (v ?? '').replace(/\s+/g, ' ').trim();
+    return t ? t.slice(0, 120) : null;
+  };
+  return rows.map((r) => {
+    const n = names.get(r.workspaceId);
+    const uid = r.userId || r.ownerUid;
+    const id = uid ? identities.get(uid) : undefined;
+    return {
+      ...r,
+      appName: clean(n?.appName) ?? clean(n?.title),
+      owner: id ? { name: id.name, email: id.email, label: id.label, anonymous: id.anonymous } : null,
+    };
+  });
+}
+
+/**
+ * The orphans worth their own strip: a published app whose owner deleted the workspace AND that is
+ * still reachable. PURE.
+ *
+ * 🔴 WHY THE FILTER (admin 2026-09-27). `markOrphaned` flags EVERY registry record of a deleted
+ * workspace — an already-offline app, a banned one, and the status-only ghost that was never a
+ * publish — because the flag means "the owner deleted it", and that is true of all of them. The strip
+ * is headed "Live, owner deleted the workspace" and every row said "Still live", so most of what the
+ * admin saw there contradicted its own badge ("Not published … Still live"). An offline orphan has no
+ * files and no site: there is nothing left to see or to moderate. Only a LIVE one is a hole.
+ */
+export function liveOrphans<T extends Pick<DeploymentRecord, 'url' | 'status'>>(records: T[]): T[] {
+  return records.filter((r) => isLiveDeployment(r));
 }
 
 /**

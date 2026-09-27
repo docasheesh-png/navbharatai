@@ -3027,15 +3027,16 @@ Every other admin entry's path (for example "Admin Dashboard \u2192 Revenue") st
     path: 'Admin Dashboard → Security tab → Built apps (admin only)',
     description: `The moderation list of EVERY app any user has built with NavBharatAI Pro — published or not — newest first, 12 at a time:
 • Lists all users' built apps from the durable file store (an app that was built and never published is listed too), with its publish state: Live, Offline, Banned, Held, Paused or Not published
+• Every row shows WHAT the app is (the name the owner chose, else the title of their first prompt) and WHO built it (name and email); the owner opens their account, and the app id sits underneath
 • Loads 12 at a time with a "Load 12 more" button — never the whole list at once
-• PREVIEW on every row, live or offline: shows the saved copy of the last successful build when one exists, else renders the app's saved files in the admin's own browser — without waking the owner's machine
-• Search by full app id, owner uid or public link (looked up directly); a fragment filters the apps already loaded
+• PREVIEW on every row, live or offline: shows the saved copy of the last successful build when one exists, else the published app itself at its public link, else renders the app's saved files in the admin's own browser — without waking the owner's machine
+• Search by full app id, owner uid or public link (looked up directly); a fragment — including part of the app's name or the owner's name or email — filters the apps already loaded
 • Filter by state (Live / Offline / Banned / Held / Paused)
 • Unpublish takes a live site offline (the owner can publish again); Ban removes it permanently (the workspace can never publish again)
-• Live apps whose owner deleted the workspace are shown in their own strip so they can still be moderated`,
+• Live apps whose owner deleted the workspace are shown in their own strip so they can still be moderated — and previewed at their public link`,
     howToUse: 'Admin login required. Open the Admin Dashboard → Security tab → Built apps. Press Preview on any row to see the app; press "Load 12 more" for the next page; type a full app id, owner uid or link and press Enter to look one up; use the state dropdown to filter. Unpublish or Ban ask for confirmation (Ban needs a reason).',
     relatedFeatures: ['admin-metrics', 'admin-mfa', 'admin-monitor'],
-    keywords: ['built apps', 'published apps', 'all apps', 'sabhi apps', 'preview app', 'admin preview', 'unpublish', 'ban app', 'takedown', 'moderation', 'security tab', 'user apps', 'load more', '12 at a time', 'offline app preview'],
+    keywords: ['built apps', 'published apps', 'all apps', 'sabhi apps', 'preview app', 'admin preview', 'unpublish', 'ban app', 'takedown', 'moderation', 'security tab', 'user apps', 'load more', '12 at a time', 'offline app preview', 'who built this app', 'kisne banaya', 'app owner', 'owner email', 'app name'],
   },
   {
     id: 'admin-audience',

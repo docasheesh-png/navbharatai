@@ -368,3 +368,33 @@ export function sanitizeTsconfigExtends(files: Record<string, string>): Tsconfig
   }
   return { patch, fixes };
 }
+
+/**
+ * The foundation's files that are REALLY absent, decided by asking the disk at write time.
+ *
+ * 🔴 WHY (autopsy 2720e553, 2026-09-27). `ensureViteReactFoundation` decides "missing" from a path
+ * list, and the fast lane's list was captured once at the start of the lane and cut to 80 entries of
+ * an UNSORTED `find` listing. A working scaffold `package.json` fell outside it, so the guard wrote a
+ * generic one over it — the build then had to put back a plugin that was already installed, and the
+ * dev server started against config files changed seconds earlier. A list is a hint; the disk is the
+ * fact, and the promise this guard makes ("never overwriting an on-disk file") can only be kept by
+ * asking the disk right before the write.
+ *
+ * `exists` answering false (or throwing) means absent — the same answer a missing file gives, so a
+ * probe that cannot run leaves today's behaviour. Order preserved.
+ */
+export async function foundationFilesStillAbsent(
+  foundation: FoundationResult,
+  exists: (path: string) => Promise<boolean>,
+): Promise<{ files: Record<string, string>; added: string[]; keptExisting: string[] }> {
+  const files: Record<string, string> = {};
+  const keptExisting: string[] = [];
+  for (const [path, content] of Object.entries(foundation.files)) {
+    let there = false;
+    try { there = await exists(path); } catch { there = false; }
+    if (there) keptExisting.push(path);
+    else files[path] = content;
+  }
+  const added = foundation.added.filter((label) => !keptExisting.includes(label));
+  return { files, added, keptExisting };
+}

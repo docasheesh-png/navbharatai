@@ -79,8 +79,10 @@ function CreatorCorner({ app }: { app: { creatorName?: string; creatorId?: strin
   const line = creatorLine(app);
   if (!line.name && !line.id && !line.date) return null;
   return (
-    <div className="flex-1 min-w-0 text-right text-[10px] leading-tight text-muted pt-0.5">
-      {line.name && <p className="font-semibold text-body truncate" title={line.name}>{line.name}</p>}
+    // Brand blue (admin 2026-09-27: "jis colour me header me window hai") — the accent TOKEN, not the
+    // literal, so it stays readable on every theme: indigo on Light, a lighter indigo on Dark.
+    <div className="flex-1 min-w-0 text-right text-[10px] leading-tight text-accent-text pt-0.5">
+      {line.name && <p className="font-semibold truncate" title={line.name}>{line.name}</p>}
       {line.id && <p className="font-mono truncate" title="Creator code">{line.id}</p>}
       {line.date && <p title="Published on">{line.date}</p>}
     </div>

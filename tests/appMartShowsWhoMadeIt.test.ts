@@ -88,6 +88,8 @@ describe('the card corner', () => {
     expect(creatorLine({ creatorId: 'Has Spaces' }).id).toBeNull();
   });
   it('the browse card renders the corner, and every store route passes the creator (source guard)', () => {
+    // Blue, from the accent token (admin 2026-09-27).
+    expect(readFileSync(join(ROOT, "src/components/ide/NavAppStore.tsx"), "utf8")).toMatch(/text-right text-\[10px\] leading-tight text-accent-text/);
     const ui = readFileSync(join(ROOT, 'src/components/ide/NavAppStore.tsx'), 'utf8');
     expect(ui).toMatch(/<CreatorCorner app=\{a\} \/>/);
     const routes = readFileSync(join(ROOT, 'src/server/routes/navStore.ts'), 'utf8');

@@ -42,21 +42,18 @@
  * PURE: a command builder and a parser. No I/O, no clock, never throws.
  */
 
+import { LIST_PRUNE_DIRS } from '../lib/generatedDirs';
+
 /**
  * Directories never searched — a dependency tree routinely vendors its own `.git`, and a nested
  * repository inside `node_modules` is the package manager's business, not the user's project.
  *
- * ⚠️ **`.git` IS DELIBERATELY ABSENT, and that is the whole point of this module.** This list is
- * `E2BActuator`'s `IGNORED_LIST_DIRS` minus the one entry that destroys the signal. It is written out
- * rather than imported because that constant lives beside the e2b SDK and this file must stay pure —
- * `tests/theNestedRepoLooksLikeAFolder.test.ts` asserts the relationship against the exported
- * `isIgnoredListPath`, so the two cannot drift without CI saying so.
+ * ⚠️ **`.git` IS DELIBERATELY ABSENT, and that is the whole point of this module.** This list is the
+ * shared listing prune (`lib/generatedDirs.ts`, which this pure file CAN import) minus the one entry that
+ * destroys the signal. It used to be written out by hand, and had already drifted from the actuators'
+ * copy once — see that module (autopsy e1c21ad8).
  */
-export const NESTED_REPO_PRUNE_DIRS: readonly string[] = [
-  'node_modules', 'dist', '.next', 'build',
-  '__pycache__', '.venv', '.cache', 'coverage', 'out', '.e-checkpoints',
-  'test-results', 'playwright-report',
-];
+export const NESTED_REPO_PRUNE_DIRS: readonly string[] = LIST_PRUNE_DIRS.filter((d) => d !== '.git');
 
 /** How deep to look. Matches `buildListFilesCommand`, so the probe and the file list see one tree. */
 export const NESTED_REPO_MAX_DEPTH = 10;

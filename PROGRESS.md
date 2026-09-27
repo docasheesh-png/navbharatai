@@ -82930,6 +82930,7 @@ do! isi ux me. same bas alag popup ki jagah notification me aye! jisse user dist
 - **Siblings hunted:** every other fixed top overlay (`OfflineBanner`, `TestingNotice`, `.nb-float-top`) is either below the header or above it in z-order. No other instance.
 - **Test:** `tests/appUpdate.test.ts` — the banner is never positioned, never re-derives the inset, and stays before `<TopNav` inside the padded root. Reversion-proven.
 - ⚠️ **Reaches phones only through a fresh `.aab`** (bundled mode). The banner exists only in the installed app.
+## 2026-09-27 — Autopsy d829b523 ("water drinking reminder", Weak): three defects still live on `main`
 
 ## 2026-09-27 — AUTOPSY 15151196 (memory match card game, Weak, complex-routed to KIMI, golden scaffold) — the review found two bugs that did not exist, and the user was told they were fixed
 Build was green in 82 s and ended ok in 3.2 min, billed ₹61.03 on real cost $0.150 + sandbox $0.009.
@@ -82946,6 +82947,109 @@ Build was green in 82 s and ended ok in 3.2 min, billed ₹61.03 on real cost $0
 - Complexity routing scored a memory game 63 and opened on KIMI ($0.95/$4.00) although a golden scaffold was pre-seeded and the job was verify-and-polish. Whether a scaffolded build should open on the cheap rung is a routing-policy decision.
 - Reviewer findings that name a checkable fact ("class X is not defined in file Y") could be refuted deterministically before any repair is spent. That is not built.
 - Vite's dev CSS still takes ~10 KB of the 30 KB capture on a CSS-heavy app.
+## 2026-09-27 — Autopsy `e1c21ad8` ("limitless writer", weak tier, 25.1 min, ₹488) — a Python venv became the project
+
+**What happened.** A free user imported a FastAPI backend with a Kotlin Android shell and said "Ise build karo ek app ke roop mein". The engine built a React + Vite + FastAPI app. It rendered, typechecked and passed a production build. Then, to test the backend, it ran `python3 -m venv venv` inside `backend/`.
+
+**Ledger (honest counts):**
+- ✅ Self-healed: 3. Write-time typecheck caught `api.ts` and `App.tsx` unused symbols. The repeated-step nudge fired three times.
+- 🔀 Worked around: 1. The backend has no OpenAI key, so every AI feature runs on canned DEMO_MODE text. The client also has its own fake fallback. Disclosed in the summary, but it is the same fake-AI class as Lekhan Sahyak build 1 (`APP_AI_GATEWAY`).
+- ⏭️ Skipped: 2. `JOURNEY_NOT_RUN`. `pytest` "could not run".
+- ❌ Shipped imperfect: 4.
+  - ~1,900 venv files were saved durably and committed to the user's GitHub repository.
+  - The release gate claimed "this project HAS a test suite".
+  - "96 fake/incomplete code issues in 24 files this build did not touch" were third-party library code.
+  - `PASS /health (200)` was the Vite dev server's page, not the API.
+- 🥵 Struggle: about 13 dev-server restarts in 5 minutes (min 16–21). Each one reinstalled npm packages (the stale-check bug fixed in #3347, which merged after this build ran). The ETA was 2–4 min against 25.1 min actual (8.7×).
+
+**Root causes fixed:**
+1. **One never-source list** (`src/server/lib/generatedDirs.ts`).
+   - Ten drifted copies knew `.venv` and none knew `venv`.
+   - The actuators (E2B/Local/Docker), nested-repo probe, git ignore, grep and graph excludes, project context, source archive and test detection now all read one list.
+   - `site-packages` catches a virtualenv of any name.
+   - The durable store refuses the unambiguous tier in `toDurableFileKey`. It HEALS stored indexes on read, and a polluted index no longer makes every real save look like a shrink (`liveIndexPaths`).
+   - `build/`, `dist/` and the like stay pruned from listings but are never deleted from a stored project.
+2. **The journey starts where the router puts the form** (`routeFromRouter`). `<Route path="/new" element={<NewNovel />}>` is read before the filename guess.
+3. **Route smoke:**
+   - A 200 whose body carries Vite's `/@vite/client` is the frontend's page shell. It is reported as not checked, never as a pass. The body is grepped in a temp file and deleted, never printed.
+   - `extractEndpoints` counted every `@app.post(...)` twice, because the Express rule also matched the decorator.
+- Tests: `tests/theVenvWasNeverTheProject.test.ts`. The durable filter and the router mapping are reversion-proven. One pinned test in `RouteSmokeCheck.test.ts` was updated from `-o /dev/null` to the new temp-file contract.
+
+**Still open:**
+- **Old commits keep the venv.** Venv files already committed to a user's repository stay in its history; `.gitignore` stops new commits only. Untracking them in a user's own repo was not done automatically.
+- **Backend not seen, so no real API check.** `SERVICE_GRAPH_SINGLE` did not see the FastAPI backend. Until it does, no smoke check reaches a separate API port.
+- **Billing.** This weak-tier build billed ₹488 on $1.29 real cost (tiered markup, preview proven). That is policy, but it is large for a free-tier user.
+- **ETA.** The ETA ignores the COMPLEX verdict and the size of the existing project on an edit turn.
+The build succeeded in 341 s (release gate YELLOW). **Most of the report had already been fixed the same
+afternoon it was run**, and is recorded here so nobody rebuilds it:
+- "🔧 Auto-fixed 1 import(s)" / "Added 2 missing dependency(ies)" said four times about writes Green Freeze
+  refused, `HEAL_NOT_DURABLE` on `GoalSummary.test.tsx`, and `PREVIEW_SNAPSHOT_STALE` → **e22028a2**
+  (`landHealWrite`: a refused heal is not recorded, saved or announced).
+- The starter test importing a default export as named, written into a project with no `vitest` →
+  **3d04a737**. Reconcile adding `@playwright/test` from our own E2E net → **6c1f04dd**.
+- `JOURNEY_PASSED` with "0 journeys passed" → SignBridge (`summarizeJourneys`, all-unreachable is not a pass).
+
+**Fixed in this change:**
+1. **The app was named after the order.** `production-defaults` used `deriveTitle(prompt)`, so the published
+   app shipped manifest `short_name: "Build a wate"`, meta/og description = the prompt word for word, and an
+   icon monogram of "B" — while the model had named it HydroTrack in its own `<title>`. New pure
+   `src/server/AgentV3/appDisplayName.ts` (`resolveAppDisplayName`): the user's chosen name (the rename card)
+   → the app's own `<title>` unless it is a template placeholder → the order without its verb (English and
+   Hinglish), plus a whole-word `short_name` and a visitor-facing description ("reminds me" → "reminds you").
+   Both callers use it (the route and the `generate_app_defaults` tool); `planAppDefaults` takes
+   `{ description, shortName }`.
+   ⚠️ I first wrote this module as `appIdentity.ts`, and Write said **"updated"**. That file already existed
+   (the app *shape* check, imported by the route). Safeguard #6's stop fired; it was restored from git
+   untouched before anything else ran.
+2. **A reminder app was sized as a hospital ERP.** `namesBusinessDomain` promoted every domain the
+   requirement analyser labels, including `productivity`, whose regex begins with `todo`. So "build a
+   reminder app", "habit tracker", "daily planner", "kanban board" all scored **58 / complex_app**, while
+   "a todo app" scored 15. The build opened on the always-reasoning rung, skipped the fast lane, and first
+   rendered at 237 s. `PERSONAL_TOOL_DOMAINS` (`appComplexitySignals.ts`) now keeps them out of the business
+   promotion, and `namesPersonalTool` answers `simple_app` in `classify`. Scope words still win
+   (`isComplexAppPrompt` is asked first). **`game` is deliberately untouched** — its complex verdict is
+   pinned by the Indic-language tests and is an admin decision.
+3. **The journey check typed into a dropdown.** The runner called `fill()` on every field, and on the
+   onboarding form's `<select>` Playwright threw *"Element is not an <input>, <textarea> or [contenteditable]
+   element"* — the journey went unreachable and the gate said no journey was proven. It now chooses the
+   first real option. The same form's `type="time"` fields would have failed next (the marker string is a
+   "Malformed value"); `time`, `datetime-local`, `month`, `week` and `color` get values of their own shape,
+   `number` respects its literal `min`/`max`, and `range` is skipped. Verified in a real Chromium against a
+   local page with the same fields: old code reproduces the report's exact error; new code fills, submits
+   and reaches the persistence check.
+
+Tests: `tests/theWaterReminderAutopsy.test.ts` (20), each fix reversion-proven.
+
+⚠️ **Open, not decided here:**
+- `game` → complex_app (58). A snake game is guarded by `SIMPLE_APP_SIGNAL`; "a car racing game" opens on
+  KIMI. Whether games belong with the business domains is the admin's call.
+- The release gate's reason for an unreachable journey is always *"a login wall or a route needing seeded
+  data"*, even when the real reason was ours (this report). The JOURNEY line carries the true note; the
+  gate sentence does not.
+- `SANDBOX_CMD` lines for the write-time typecheck record `exit ?` (no exit code captured).
+
+## 2026-09-27 — "Universal Remote" follow-up: our starter test suite is ours on every build, not only the first
+
+The admin re-sent the "Universal Remote" report (builds 7026c09b · f59ce4dd · 18274327). It had already been
+autopsied and fixed in #3346 the same day, so that work was **not** redone. One of its open items was checked
+against `main` and found to be live and unowned:
+
+- **CORRECTION to the #3346 entry above:** it says the release gate held at YELLOW by our own E2E scaffold "is
+  being reworked in open PR #3331". #3331 had already MERGED (2026-09-26) before these builds ran, and build 3
+  still reported it. Nobody owned it.
+- **Root cause:** `starterSuiteOnly` (autopsy 6bae5835, same day) decided "is this test suite NavBharatAI's
+  starter?" from `finishingPaths` — the files the finishing pass wrote THIS build. Build 2 wrote the suite and
+  was told the truth; build 3 had not written it, so it called the same two files the user's own suite:
+  *"this project HAS a test suite, but it could not be run here"*. Every later build of every app would say it.
+- **Fix:** whether a file is ours is a fact about its content. `isPlatformE2eScaffold` already reads the marker
+  our templates carry (autopsy 7d79254b); the route now reads the project's test files (at most 12) and
+  `starterSuiteOnly` accepts a file that is either written this build OR carries our marker. A file it cannot
+  read is judged theirs, so a real user suite is never hidden. Wording only — the gate's verdict rules are
+  unchanged.
+- Tests: `tests/ourStarterSuiteStaysOursOnLaterBuilds.test.ts` (6), reversion-proven.
+- The other open items #3346 recorded (cut-off prompts, a render proof that cannot see an unstyled app, the
+  readiness scorer not reading the user's complaint, billing a defect our check should have caught) stay open
+  and unclaimed; not guessed at here.
 ## 2026-09-27 — Autopsy "NavRide / ride sharing like Rapido" (build 75ea6136, run 2026-09-26 08:09 UTC)
 
 A weak-tier build that succeeded (10.7 min, ₹179.99, KIMI throughout, preview proven, every page rendered).

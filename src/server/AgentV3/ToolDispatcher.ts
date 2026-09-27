@@ -55,6 +55,7 @@ import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
 import { assessFullRewrite } from './rewriteRisk';
 import { analyzeToolchain } from './toolchainPins';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from './appDefaults';
+import { resolveAppDisplayName } from './appDisplayName';
 import { computeMove, type MoveFile } from './codemodMoveFile';
 import { buildArchitectureMap, renderArchitectureMap } from './architectureMap';
 import { findUnwiredFiles, unwiredFilesSummary } from './deadCode';
@@ -382,6 +383,7 @@ import { envKillSwitch } from '../lib/envFlag';
 import { webFetchUrl, formatWebFetchResult } from './webFetch';
 import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ignoreRules';
 import { withoutPreviewBridge, bridgeShellNote } from './previewBridge';
+import { LIST_PRUNE_DIRS, isListPrunedPath } from '../lib/generatedDirs';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -1586,10 +1588,9 @@ export class ToolDispatcher {
       // as before, so the add path is byte-identical.
       const listed = await this.actuator.listFiles(this.workspaceId).catch(() => null);
       const tree = listed ?? [];
-      const EXCLUDE = /(^|\/)(node_modules|\.git|dist|build|\.next|__pycache__|coverage)\//;
       // Code (for import resolution) + index.html (runnability/SEO) + key configs.
       const INDEXABLE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|astro|html?|css|scss|json)$/i;
-      const indexable = (p: string): boolean => !EXCLUDE.test(p) && INDEXABLE.test(p);
+      const indexable = (p: string): boolean => !isListPrunedPath(p) && INDEXABLE.test(p);
       const known = new Set(mem.graph().files);
       // THE GRAPH MUST MATCH THE DISK, HOWEVER A FILE LEFT IT (autopsy c6e4c6ff — a deleted
       // `src/routes/orders.ts` failed a rendering app on its own dead imports and made it free).
@@ -3804,11 +3805,13 @@ export class ToolDispatcher {
          * "not the user's code", not two. An explicit path is still searched as given — only the
          * unqualified walk is bounded, which is the case that produced this.
          */
-        const EXCLUDED_DIRS = ['node_modules', '.git', 'dist', 'build', 'coverage', 'vendor', '.next', '__pycache__'];
+        // The shared listing prune (lib/generatedDirs.ts) plus `vendor`, which only a search skips: a
+        // build's own Python virtualenv made an unqualified grep walk ~1,900 library files (autopsy e1c21ad8).
+        const EXCLUDED_DIRS = [...LIST_PRUNE_DIRS, 'vendor'];
         // 🔴 WHAT THE MODEL MEANT, AND AN HONEST MISS (build 15151196): a bare `grep -rn` is a BASIC
         // regex, so `\.badge|\.alert` could never match and a reviewer filed two false criticals on a
         // working app. See grepTool.ts — extended, then basic, then literal, and "(no matches)" only
-        // when grep itself said so.
+        // when grep itself said so. Every dialect it tries carries the same excludes.
         const { stdout } = await this.actuator.runCommand(this.workspaceId, grepCommand(pattern, path, EXCLUDED_DIRS));
         // T1-sec-redact: grep can surface a secret sitting in a matched line (e.g. `grep KEY .env`).
         return redactSecrets(readGrepOutput(stdout, pattern).text);
@@ -4567,14 +4570,17 @@ export class ToolDispatcher {
       case 'generate_app_defaults': {
         // U-2 — apply the quality basics BY DEFAULT (SEO/OG meta, viewport, html lang, web manifest,
         // robots.txt), adding only what's missing. Idempotent planning lives in appDefaults.ts.
-        const appName = (optStr(input, 'app_name') || 'App').trim() || 'App';
         // Find a standard index.html to patch (Vite/CRA/static). If none, only the standalone files apply.
         let htmlPath: string | null = null;
         let indexHtml: string | null = null;
         for (const p of ['index.html', 'public/index.html']) {
           try { indexHtml = await this.actuator.readFile(this.workspaceId, p); htmlPath = p; break; } catch { /* try next */ }
         }
-        const plan = planAppDefaults(indexHtml, appName);
+        // The name the model passed wins; without one, the app's own <title> — never a bare "App" when
+        // the app already says what it is called (autopsy d829b523).
+        const display = resolveAppDisplayName({ chosenName: optStr(input, 'app_name'), indexHtml });
+        const appName = display.name;
+        const plan = planAppDefaults(indexHtml, appName, { shortName: display.shortName });
         const written: string[] = [];
         // Patch index.html only if the planner actually changed it.
         if (htmlPath && plan.indexHtml && plan.indexHtml !== indexHtml) {

@@ -130,10 +130,15 @@ describe('summarizeSmoke — never claims more than happened', () => {
 });
 
 describe('the call itself', () => {
-  it('asks for the status code and discards the body', () => {
+  it('asks for the status code and never prints the body', () => {
     // The body could be the user's own data, and this runs inside a build whose output is logged.
+    // Since autopsy e1c21ad8 it goes to a private temp file that is only GREPPED for the frontend
+    // shell's marker and then deleted — still never printed, still never logged.
     const cmd = smokeCurlCommand('http://localhost:3000', '/api/health');
-    expect(cmd).toContain('-o /dev/null');
+    expect(cmd).toContain('-o "$f"');
+    expect(cmd).toContain('f=$(mktemp)');
+    expect(cmd).toContain('rm -f "$f"');
+    expect(cmd).not.toMatch(/\bcat\b/);
     expect(cmd).toContain("%{http_code}");
     expect(cmd).toContain('http://localhost:3000/api/health');
     expect(cmd).toContain('--max-time');
@@ -159,7 +164,7 @@ describe('wired into the build, as evidence and not as a gate', () => {
   it('runs after a successful build and calls the app\'s own routes', () => {
     expect(route).toContain("process.env.AGENTV3_ROUTE_SMOKE !== 'off'");
     expect(route).toContain('smokeCurlCommand(lastPreviewUrl, target)');
-    expect(route).toContain('classifySmokeStatus(target, status)');
+    expect(route).toContain('classifySmokeStatus(target, status, { frontendShell })');
   });
 
   it('records the clean run too — "we checked and it worked" is the evidence this phase is for', () => {

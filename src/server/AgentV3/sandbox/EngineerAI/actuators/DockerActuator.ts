@@ -7,6 +7,7 @@ import { exec as execCb } from 'child_process';
 import { promisify } from 'util';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { toWorkspaceRelPath } from '../../../../lib/workspacePath';
+import { LIST_PRUNE_DIRS } from '../../../../lib/generatedDirs';
 
 const exec = promisify(execCb);
 
@@ -39,10 +40,8 @@ const BUILD_TIMEOUT_MS = 5 * 60_000;
 const CKPT_DIR_INSIDE = '/workspace/.e-checkpoints';
 const MAX_LIST_FILES = 500;
 
-const IGNORED_DIRS = [
-  'node_modules', '.git', 'dist', '.next', 'build',
-  '__pycache__', '.venv', '.cache', 'coverage', 'out', '.e-checkpoints',
-];
+// The same list every actuator uses — see lib/generatedDirs.ts (autopsy e1c21ad8).
+const IGNORED_DIRS: readonly string[] = LIST_PRUNE_DIRS;
 
 /**
  * Docker-based actuator for Engineer AI.

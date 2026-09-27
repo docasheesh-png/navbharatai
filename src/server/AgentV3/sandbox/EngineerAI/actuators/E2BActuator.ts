@@ -76,6 +76,7 @@ import { buildOutputCandidates, configDumpCommand, parseConfigDump } from '../..
 import { injectPreviewBridge, withoutPreviewBridge, PREVIEW_BRIDGE_MARKER } from '../../../previewBridge';
 import { browseConsoleCaptureEnabled, CANCELLED_REQUEST_RE } from '../../../renderCheckConsole';
 import { gunzipSync } from 'zlib';
+import { LIST_PRUNE_DIRS, isListPrunedPath } from '../../../../lib/generatedDirs';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -166,19 +167,14 @@ export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promis
 }
 
 // Directories excluded from listFiles — dependency/build/VCS output the agent never edits.
-// Mirrors LocalActuator's IGNORED_DIRS so both actuators present the same (small) file tree.
-const IGNORED_LIST_DIRS = new Set([
-  'node_modules', '.git', 'dist', '.next', 'build',
-  '__pycache__', '.venv', '.cache', 'coverage', 'out', '.e-checkpoints',
-  // Test-runner OUTPUT, never source (autopsy "Lekhan Sahyak", 2026-09-27): Playwright's run left
-  // `test-results/.last-run.json` in the workspace and the build's save kept it as a project file.
-  'test-results', 'playwright-report',
-]);
+// ONE list for every copy in the repo: see lib/generatedDirs.ts for why it had to stop being ten
+// (autopsy e1c21ad8 — a `backend/venv` of ~1,900 files was listed, saved and pushed as source).
+const IGNORED_LIST_DIRS: ReadonlySet<string> = new Set(LIST_PRUNE_DIRS);
 
 /** True if a workspace-relative path lives under an ignored dir (any path segment matches).
  *  Exported for unit testing. */
 export function isIgnoredListPath(relPath: string): boolean {
-  return relPath.split('/').some(seg => IGNORED_LIST_DIRS.has(seg));
+  return isListPrunedPath(relPath);
 }
 
 /**

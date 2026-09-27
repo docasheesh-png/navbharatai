@@ -12,6 +12,8 @@
 // resolves to the correct relative path. A relative path is unchanged. Traversal ("..") can still never
 // escape the root. Pure + unit-tested; shared so the four actuator copies can't drift.
 
+import { isNeverSourcePath } from './generatedDirs';
+
 /**
  * Normalize an agent-supplied file path to a workspace-RELATIVE path (no leading slash), safe to join
  * under `workspaceRoot`. Accepts BOTH a relative path ("src/App.tsx") and an absolute path that points
@@ -46,11 +48,21 @@ export const SANDBOX_WORKSPACE_ROOT = '/home/user/workspace';
  * A phantom is worse than a missing file: a missing file is noticed, a phantom is BELIEVED.
  */
 export function toDurableFileKey(filePath: string): string | null {
+  let key: string;
   try {
-    return toWorkspaceRelPath(filePath, SANDBOX_WORKSPACE_ROOT);
+    key = toWorkspaceRelPath(filePath, SANDBOX_WORKSPACE_ROOT);
   } catch {
     return null;
   }
+  // 🔴 A FILE NOBODY WROTE IS NOT A PROJECT FILE (autopsy e1c21ad8, 2026-09-27). A build ran
+  // `python3 -m venv venv` in `backend/`, and ~1,900 installed-package files reached this store,
+  // because the listing that fed the save did not know the name `venv`. The listing is fixed too, but
+  // this is the door every save and every import passes through — so the rule lives here as well, where
+  // no future caller can walk around it. Rejecting here also HEALS a store that already holds such
+  // files: `loadWorkspaceFiles` and `listWorkspaceFilePaths` read through this function, exactly as they
+  // do for the phantom paths above. Only the unambiguous tier (`NEVER_SOURCE_DIRS`) is refused — a
+  // folder called `build` can hold hand-written files and stays stored.
+  return isNeverSourcePath(key) ? null : key;
 }
 
 /**

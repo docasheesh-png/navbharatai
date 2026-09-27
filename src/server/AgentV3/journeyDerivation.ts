@@ -208,13 +208,28 @@ export function targetForInput(tag: string): Target | null {
   return null;
 }
 
-/** A value appropriate to the field, so an email input is not filled with the word "test". */
+/**
+ * A value appropriate to the field, so an email input is not filled with the word "test".
+ *
+ * 🔴 THE BROWSER IS STRICT ABOUT FIVE INPUT TYPES, AND A WRONG VALUE IS NOT A FAILED APP (autopsy
+ * d829b523, 2026-09-27). Playwright sets `time`, `date`, `datetime-local`, `month`, `week` and `color`
+ * directly and throws `Malformed value` for anything the browser would not accept — so a water
+ * reminder's wake-up time received the marker string, the journey died at the fill step, and the
+ * release gate reported "no user journey was proven" about a form nobody had managed to fill. Each of
+ * them gets a value of its own shape. A `number` also respects the field's own `min`/`max`: typing 7
+ * into `min="30"` makes the browser refuse to submit, which is our input failing, not the app.
+ */
 export function valueForInput(tag: string, marker: string): string {
   const type = (ATTR(tag, 'type') || '').toLowerCase();
   const hint = `${ATTR(tag, 'name') || ''} ${ATTR(tag, 'placeholder') || ''} ${ATTR(tag, 'id') || ''}`.toLowerCase();
+  if (type === 'time') return '08:00';
+  if (type === 'datetime-local') return '2030-01-01T08:00';
+  if (type === 'month') return '2030-01';
+  if (type === 'week') return '2030-W01';
+  if (type === 'color') return '#336699';
   if (type === 'email' || /e-?mail/.test(hint)) return `${marker}@example.com`;
   if (type === 'password' || /password|passwd/.test(hint)) return 'Test-Passw0rd!';
-  if (type === 'number' || /amount|price|qty|quantity|count|age/.test(hint)) return '7';
+  if (type === 'number' || /amount|price|qty|quantity|count|age/.test(hint)) return numberWithinBounds(tag, 7);
   if (type === 'tel' || /phone|mobile|contact/.test(hint)) return '9876543210';
   if (type === 'url' || /url|website|link/.test(hint)) return 'https://example.com';
   if (type === 'date') return '2030-01-01';
@@ -222,10 +237,33 @@ export function valueForInput(tag: string, marker: string): string {
   return marker;
 }
 
-/** Inputs that must not be typed into — a file picker, a hidden field, a submit button. */
+/**
+ * `preferred`, moved inside the field's own literal `min`/`max` when it declares them. A bound written
+ * as an expression (`min={MIN_AGE}`) cannot be read here and is left to the browser, exactly as before.
+ */
+function numberWithinBounds(tag: string, preferred: number): string {
+  const num = (name: string): number | null => {
+    const raw = ATTR(tag, name);
+    if (!raw || raw.includes('{')) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  };
+  let v = preferred;
+  const min = num('min');
+  const max = num('max');
+  if (min !== null && v < min) v = min;
+  if (max !== null && v > max) v = max;
+  return String(v);
+}
+
+/**
+ * Inputs that must not be typed into — a file picker, a hidden field, a submit button. A `range` is on
+ * the list because it always holds a value already, and any number we chose could fall outside its
+ * bounds and be refused as malformed.
+ */
 function skippableInput(tag: string): boolean {
   const type = (ATTR(tag, 'type') || '').toLowerCase();
-  return ['hidden', 'file', 'submit', 'reset', 'button', 'image', 'checkbox', 'radio'].includes(type);
+  return ['hidden', 'file', 'submit', 'reset', 'button', 'image', 'checkbox', 'radio', 'range'].includes(type);
 }
 
 const CREATE_WORDS = /\b(add|create|new|save|submit|post|send|register|sign\s*up|signup)\b/i;
@@ -526,8 +564,61 @@ export function formSourcesFor(
   return out;
 }
 
+/**
+ * The path the app's OWN router maps a page file to, or null when no router declaration names it.
+ *
+ * 🔴 WHY (autopsy e1c21ad8, 2026-09-27). A novel-writing app's only form lives in `NewNovel.tsx`, and
+ * its router says `<Route path="/new" element={<NewNovel />} />`. The filename heuristic below looked
+ * for a route containing "newnovel", found none, and sent the journey to `/` — where the form is not —
+ * so the report read *"No user journey could be completed … none of the form fields were present"*
+ * and the release gate stayed YELLOW for a form that was never looked for where it lives. The router
+ * already states the answer; guessing from a filename is what you do when it does not.
+ *
+ * Reads the binding the router file imports the page under (default, named, or `lazy(() => import())`),
+ * then the `<Route path element={<X …}>` / `Component={X}` or `{ path, element: <X … }` that uses it.
+ * Only an ABSOLUTE path is returned: a nested relative child route would need its parents joined, and a
+ * wrong URL is worse than the heuristic. Deterministic: files in key order, first match wins. Pure.
+ */
+export function routeFromRouter(page: string, files: Record<string, string>): string | null {
+  for (const [file, src] of Object.entries(files ?? {})) {
+    if (typeof src !== 'string' || !/\.(t|j)sx?$/.test(file)) continue;
+    if (!/<Route\b|\bpath\s*:/.test(src)) continue;
+    const bindings = new Set<string>();
+    const bind = (name: string | undefined, spec: string | undefined): void => {
+      if (name && spec && resolveLocalImport(file, spec, files) === page) bindings.add(name);
+    };
+    for (const m of src.matchAll(/\bimport\s+([A-Za-z_$][\w$]*)\s*(?:,\s*\{[^}]*\})?\s*from\s*["']([^"']+)["']/g)) bind(m[1], m[2]);
+    for (const m of src.matchAll(/\bimport\s*(?:[A-Za-z_$][\w$]*\s*,\s*)?\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)) {
+      for (const part of m[1].split(',')) {
+        const alias = /^\s*[\w$]+\s+as\s+([\w$]+)\s*$/.exec(part)?.[1] ?? /^\s*([\w$]+)\s*$/.exec(part)?.[1];
+        bind(alias, m[2]);
+      }
+    }
+    for (const m of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:React\s*\.\s*)?lazy\s*\(\s*\(\s*\)\s*=>\s*import\s*\(\s*["']([^"']+)["']\s*\)/g)) bind(m[1], m[2]);
+    for (const name of bindings) {
+      const n = name.replace(/\$/g, '\\$');
+      const pathValue = String.raw`path\s*[=:]\s*(?:\{\s*)?["'\x60]([^"'\x60]+)["'\x60]`;
+      const usesIt = String.raw`(?:element\s*[=:]\s*\{?\s*<\s*${n}\b|Component\s*[=:]\s*\{?\s*${n}\b)`;
+      // Either attribute order, inside one <Route …> or one { … } route object (no nested braces/tags
+      // between them beyond the element's own `<X`).
+      const both = [
+        new RegExp(String.raw`${pathValue}[^<{]{0,200}?${usesIt}`),
+        new RegExp(String.raw`${usesIt}[^<{]{0,200}?${pathValue}`),
+      ];
+      for (const re of both) {
+        const hit = re.exec(src)?.[1];
+        if (hit && hit.startsWith('/')) return hit;
+      }
+    }
+  }
+  return null;
+}
+
 /** The route a page file serves, best-effort, or null. Only used for a label and a starting URL. */
-export function routeForFile(path: string, knownRoutes: readonly string[]): string {
+export function routeForFile(path: string, knownRoutes: readonly string[], files?: Record<string, string>): string {
+  // The router's own declaration, when there is one, is the answer — see routeFromRouter.
+  const declared = files ? routeFromRouter(path, files) : null;
+  if (declared) return declared;
   const stem = path.replace(/\.(t|j)sx$/, '').split('/').pop() || '';
   const lower = stem.toLowerCase();
   if (/^(home|index|page|app)$/.test(lower)) return '/';
@@ -600,7 +691,7 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
     if (!submit || fields.length === 0) continue;
     usedForms.add(formPath);
 
-    const route = routeForFile(path, routes);
+    const route = routeForFile(path, routes, files);
     const listed = rendersList(source);
     // The marker has to actually be typed somewhere, or "did it appear" is unanswerable.
     const markerTyped = fields.some((f) => f.value.includes(marker));
@@ -785,6 +876,18 @@ for (const j of journeys) {
     for (const f of j.fields(page)) {
       const el = f.locator().first();
       if (await el.count() === 0) continue;
+      // A dropdown is CHOSEN from, never typed into: fill() on a select throws "Element is not an
+      // <input>, <textarea> or [contenteditable] element", which is how a working onboarding form was
+      // once reported as a journey nobody could reach (autopsy d829b523). The first real option is
+      // picked; a select with no real option is left as it is.
+      const tag = await el.evaluate((n) => n.tagName.toLowerCase()).catch(() => '');
+      if (tag === 'select') {
+        const options = await el.locator('option').evaluateAll((os) => os.map((o) => o.value).filter((v) => v !== '')).catch(() => []);
+        if (options.length === 0) continue;
+        await el.selectOption(options[0], { timeout: 4000 });
+        filled++;
+        continue;
+      }
       await el.fill(f.value, { timeout: 4000 });
       filled++;
     }

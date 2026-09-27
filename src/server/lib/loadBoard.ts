@@ -350,11 +350,14 @@ export function loadBoard(r: LoadReadings | null | undefined): LoadTile[] {
         ? `Too few requests since this server started (${aiSample}) to mean anything. The count resets on every `
           + 'deploy, so this fills in as normal traffic arrives.'
         : 'Could not read how often requests went unanswered.')
-      : aiLevel === 'ok'
+      : (aiLevel === 'ok'
         ? 'The AI engines are answering. A request that fell back to a second engine still counts as answered, '
           + 'because the user got their reply.'
         : 'Requests are ending with no answer from ANY engine, which is what a user actually feels. At scale the '
-          + 'answer is more API keys in rotation, not more code.',
+          + 'answer is more API keys in rotation, not more code.')
+        // A percentage without its denominator cannot be weighed (admin Monitor, 2026-09-27: "15%
+        // unanswered" — of how many?). The counters are per instance and reset on every deploy.
+        + ` Measured on this server since it started: ${Math.round(Number(x.providerErrorRate) * Number(aiSample))} of ${aiSample} requests went unanswered.`,
   });
 
   // 9 · MONEY — the load that decides whether the rest is worth carrying.

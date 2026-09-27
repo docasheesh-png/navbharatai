@@ -367,11 +367,58 @@ class MetricsTimeline {
     } catch { /* never break a build on telemetry */ }
   }
 
+  /**
+   * 🔴 A BUILD AND ITS COST MUST LEAVE TOGETHER (admin Monitor capture, 2026-09-27: "Builds 0" beside
+   * "AI cost ₹10.95 · kimi").
+   *
+   * `recordPlatformBuild` records a build's model calls FIRST and the build itself LAST, synchronously.
+   * This used to flush from inside the first `recordModelCall` whenever a minute had passed — which,
+   * on a quiet instance, is the FIRST call of every build. The flush swapped in a fresh pending map, so
+   * the cost went to Firestore and the build counter landed in the new map, where it waited for the
+   * NEXT record on that instance. With no further build it never came: the next deploy killed the
+   * instance and the build was gone, leaving the Monitor to show money spent on zero builds.
+   *
+   * Two changes, both needed:
+   *   1. The flush check runs on the NEXT tick, after every synchronous record of the current call has
+   *      landed — so one build's count and its cost always travel in one write.
+   *   2. A pending delta never waits on future traffic: an unref'd timer flushes on the interval, and
+   *      `flushNow` lets graceful shutdown write what is left before the instance goes.
+   */
   private maybeFlush(): void {
-    const now = Date.now();
-    if (now - this.lastFlushAt < flushIntervalMs()) return;
-    // Fire-and-forget: a build must never wait on the monitor's write.
-    void this.flush();
+    this.armIdleFlush();
+    if (this.flushCheckQueued) return;
+    this.flushCheckQueued = true;
+    setImmediate(() => {
+      this.flushCheckQueued = false;
+      if (Date.now() - this.lastFlushAt < flushIntervalMs()) return;
+      // Fire-and-forget: a build must never wait on the monitor's write.
+      void this.flush();
+    });
+  }
+
+  private flushCheckQueued = false;
+  private idleTimer: NodeJS.Timeout | null = null;
+
+  /** Flush whatever is pending one interval from now, whether or not anything else is recorded. */
+  private armIdleFlush(): void {
+    if (this.idleTimer) return;
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      if (this.pending.size > 0) void this.flush().catch(() => {});
+    }, flushIntervalMs());
+    // Never keeps the process alive on its own: shutdown flushes explicitly (flushNow).
+    this.idleTimer.unref?.();
+  }
+
+  /**
+   * Write everything pending now, bounded. For graceful shutdown: an instance that is being stopped
+   * must not take the last minute of builds with it. Never throws; resolves on timeout.
+   */
+  async flushNow(timeoutMs = 3000): Promise<void> {
+    await Promise.race([
+      this.flush().catch(() => {}),
+      new Promise<void>((resolve) => { const t = setTimeout(resolve, Math.max(0, timeoutMs)); t.unref?.(); }),
+    ]);
   }
 
   /** Write the pending deltas. Safe to call concurrently — a second call joins the first. */

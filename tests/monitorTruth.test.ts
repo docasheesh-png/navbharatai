@@ -20,7 +20,9 @@ describe('/api/admin/monitor — the analysers read the same data the charts dra
   });
 
   it('the health score’s success rate comes from the scoped snapshot too', () => {
-    expect(monitorRoute).toMatch(/successRatePct: scoped\.snapshot\.builds\.total > 0/);
+    // The success rate is computed inside `platformHealthInputs` (Monitor capture, 2026-09-27); what
+    // this route must still do is hand it the SCOPED snapshot's builds, not the since-boot one.
+    expect(monitorRoute).toMatch(/platformHealthInputs\(\{\s*builds: scoped\.snapshot\.builds,/);
   });
 
   it('tells the client which source it used', () => {

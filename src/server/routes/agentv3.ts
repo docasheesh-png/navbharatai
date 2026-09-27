@@ -49,6 +49,7 @@ import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } f
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { deviceSummaryNotice, deviceSummaryRecord } from '../AgentV3/devicePowers';
 import { nativeCapabilityBrief, requestedCapabilities } from '../AgentV3/nativeCapabilities';
+import { starterSuiteOnly, starterSuiteNote } from '../AgentV3/e2eAutoScaffold';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction, simulatedDataIssues, simulatedDataNotice } from '../AgentV3/AuthenticityAnalysis';
 import { isUnreachable } from '../AgentV3/appReachability';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
@@ -20048,9 +20049,14 @@ async function noteBuildOutcome(
                 // `detectTestPlan` found no RUNNABLE plan, but the suite is on disk — that is exactly
                 // the case whose absence the gate used to announce as the project's own gap.
                 gateEvidence.testSuitePresent = true;
+                // OURS OR THEIRS? (autopsy 6bae5835). A suite whose every file this build's own finishing
+                // pass wrote is NavBharatAI's starter, not the user's project — say so, in both places.
+                const ours = starterSuiteOnly(files, finishingPaths);
+                if (ours) gateEvidence.testSuiteIsOurStarter = true;
                 buildDiag.record({
                   phase: 'readiness', severity: 'info', code: 'TEST_SUITE_UNVERIFIED',
-                  message: missing, autoResolved: true, // not an app defect — nothing for the build to resolve
+                  message: ours ? starterSuiteNote() : missing,
+                  autoResolved: true, // not an app defect — nothing for the build to resolve
                 });
               }
               break; // no real suite — honest no-op, never a fake pass

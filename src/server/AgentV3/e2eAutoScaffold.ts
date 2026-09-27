@@ -154,3 +154,25 @@ export function e2eAutoScaffoldNote(added: string[]): string {
     + '&& npx playwright install chromium`. It loads your app in a real browser and fails on a blank '
     + 'screen, an error overlay, or a console error.';
 }
+
+/**
+ * Is every test file in the project one NavBharatAI's finishing pass wrote THIS build? PURE.
+ *
+ * Asked by the vaccine when a suite exists but its runner does not (autopsy 6bae5835): our starter
+ * Playwright suite is written, deliberately not installed and not run, and must not then be reported
+ * as "this project has a test suite that could not be run". A project with ANY test file of its own
+ * answers false, so the user's real suite is always described as theirs.
+ */
+export function starterSuiteOnly(files: readonly string[], ourPaths: ReadonlySet<string>): boolean {
+  const TEST_FILE = /(^|\/)(?:playwright|vitest|jest)\.config\.[cm]?[jt]s(?:on)?$|(^|\/)(?:e2e|tests?|__tests__)\/|\.(?:spec|test)\.[cm]?[jt]sx?$/;
+  const tests = (files || []).map((f) => String(f ?? '').replace(/^\.\//, ''))
+    .filter((f) => !/(^|\/)node_modules\//.test(f) && TEST_FILE.test(f));
+  return tests.length > 0 && tests.every((f) => ourPaths.has(f));
+}
+
+/** The report line for our unrun starter suite. */
+export function starterSuiteNote(): string {
+  return 'The only test suite here is the starter end-to-end suite NavBharatAI added for you (e2e/). It is '
+    + 'not run in this build — run it in your own CI with `npm i -D @playwright/test && npx playwright test`. '
+    + 'Nothing about it passed or failed here.';
+}

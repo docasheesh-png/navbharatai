@@ -26,7 +26,12 @@ const OWNERS = ['hooks/useSpeechInput.ts', 'lib/speechTranscript.ts', 'lib/voice
  * `webkitSpeechRecognition` does not typecheck in a USER's app (autopsy SignBridge, 2026-09-26) — it is
  * advice text and a regex over compiler output, and no browser ever runs it.
  */
-const NAMES_WITHOUT_RUNNING = ['server/AgentV3/tscErrorCause.ts'];
+const NAMES_WITHOUT_RUNNING = [
+  'server/AgentV3/tscErrorCause.ts',
+  // The native capability registry (2026-09-27) names the speech-recognition PLUGIN and the browser
+  // fallback in the instruction it hands the builder for a USER's app — text, never run by NavBharatAI.
+  'server/AgentV3/nativeCapabilities.ts',
+];
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {

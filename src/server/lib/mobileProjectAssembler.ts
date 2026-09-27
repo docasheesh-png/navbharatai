@@ -37,6 +37,7 @@ import { sanitizeReservedSegments } from './appId';
 // The SAME data-uri parser the asset store writes with — a second local regex here would be a second
 // definition of what a stored asset looks like, and the two would drift.
 import { parseDataUri } from '../AgentV3/ProjectImport';
+import { alignNativePlugins } from '../AgentV3/nativeCapabilities';
 // ONE definition of "which asset imports will not resolve" — shared with the App Store's publish gate.
 // See assetImports.ts for why the two callers treat the same fact differently (a note vs a refusal).
 import { unshippableAssetImports } from './assetImports';
@@ -378,8 +379,12 @@ export function buildPackageJson(
   deps['@capacitor/core'] = alignCapacitor(deps['@capacitor/core'], major, range);
   deps['@capacitor/android'] = alignCapacitor(deps['@capacitor/android'], major, range);
 
-  pkg.devDependencies = devDeps;
-  pkg.dependencies = deps;
+  // …AND EVERY PLUGIN ON THAT SAME MAJOR (2026-09-27). Core, CLI and platform were aligned; the plugins
+  // were not, so a builder that ran `npm install @capacitor/local-notifications` pulled 8.x onto a
+  // Capacitor 7 app and the phone build failed on a peer mismatch. Official plugins follow the major;
+  // a plugin from the native capability registry is set to the version verified for it.
+  pkg.devDependencies = alignNativePlugins(devDeps, major);
+  pkg.dependencies = alignNativePlugins(deps, major);
 
   return `${JSON.stringify(pkg, null, 2)}\n`;
 }

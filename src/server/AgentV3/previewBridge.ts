@@ -408,12 +408,30 @@ export function hasPreviewBridge(html: string): boolean {
  * reach a user's shipped app.
  *
  * Idempotent, and a no-op for a document that never had one. PURE.
+ *
+ * 🔴 IT IS THE EXACT INVERSE OF `injectPreviewBridge`, AND FOR TWO WEEKS IT WAS NOT (autopsy 6bae5835,
+ * 2026-09-27). The injector puts the tag straight after `<head>` with NO whitespace of its own; this
+ * used to remove the tag AND the `[ \t]*\n` after it — which, in every real Vite `index.html`
+ * (`<head>\n    <meta charset…`), is the USER's newline, not ours. So a stripped sandbox document never
+ * equalled the saved one, and `identitySource` (the Study-Racer fix) could not make the two hashes
+ * meet: the copy was declared STALE on every ordinary app, and the model's `read_file` of `index.html`
+ * saw `<head>    <meta` — a document its own author never wrote. Every fixture that proved the round
+ * trip had `<head><title>` on one line, so the one shape that matters was never tested.
+ * Now the trailing line break goes only when the tag stood on a line of ITS OWN (a model that moved
+ * it and reformatted around it) — a whole line that was ours, removed whole. Anywhere else, only the
+ * tag, so `strip(inject(doc)) === doc` for every document.
  */
 export function stripPreviewBridge(html: string): string {
   if (typeof html !== 'string' || !html || !html.includes(PREVIEW_BRIDGE_MARKER)) return html;
   return html.replace(
-    new RegExp(`<script\\b[^>]*>(?:(?!<\\/script>)[\\s\\S])*?${PREVIEW_BRIDGE_MARKER}(?:(?!<\\/script>)[\\s\\S])*?<\\/script>[ \\t]*\\n?`, 'gi'),
-    '',
+    new RegExp(`([ \\t]*)<script\\b[^>]*>(?:(?!<\\/script>)[\\s\\S])*?${PREVIEW_BRIDGE_MARKER}(?:(?!<\\/script>)[\\s\\S])*?<\\/script>([ \\t]*\\r?\\n)?`, 'gi'),
+    (_match: string, lead: string, trail: string | undefined, offset: number, whole: string) => {
+      const atLineStart = offset === 0 || whole[offset - 1] === '\n';
+      // Our tag occupied the whole line: drop the line, indentation and break included.
+      if (atLineStart && trail !== undefined) return '';
+      // Inline (the injector's own placement): drop the tag only, keep the user's whitespace.
+      return `${lead}${trail ?? ''}`;
+    },
   );
 }
 

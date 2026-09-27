@@ -136,7 +136,7 @@ import { analyzeEffectCleanup, effectCleanupSummary } from './effectCleanupAnaly
 import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
-import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, viteRangeOf, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, npmInstallMaskedFailure } from './DependencyAutoFix';
+import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, manifestRewrittenBy, viteRangeOf, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, npmInstallMaskedFailure } from './DependencyAutoFix';
 import { quoteShellRouteGroupPaths } from './shellCommandSafety';
 import { resolveStringArg, missingArgMessage } from './toolArgRepair';
 import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
@@ -2720,6 +2720,44 @@ export class ToolDispatcher {
     } catch { return content; }
   }
 
+  /**
+   * EVERY WRITE DOOR GETS THE SAME STEERING (autopsy 6bae5835, 2026-09-27).
+   *
+   * The write-time typecheck reached all four doors (`write_file`, `write_files_batch`, `edit_file`,
+   * `replace_symbol`); the accessibility/design note (autopsy 31dc61fd) and the test-import check
+   * reached ONE — `write_file` — and the hooks guard three. So a label the model left out in an
+   * `edit_file`, the dominant door on every edit build, was never mentioned while the file was open,
+   * and the release gate found it after the app had been proven green, when Green Freeze forbids the
+   * repair. The instance was fixed on one lane; this is the class: ONE list of notes, every door asks
+   * it, and a fifth note added here reaches all four by construction.
+   *
+   * Order is the one `write_file` always used (hooks → imports → typecheck → quality). Each part is
+   * best-effort on its own and can only append a sentence — never block, fail or change a write.
+   */
+  private async writeSteeringNotes(files: Record<string, string>): Promise<string> {
+    const paths = Object.keys(files ?? {});
+    if (paths.length === 0) return '';
+    const hooks = await this.hookWriteNote(files);
+    let imports = '';
+    for (const p of paths) {
+      imports += await importCheckNote(p, files[p], { readFile: (f: string) => this.actuator.readFile(this.workspaceId, f) });
+    }
+    const typecheck = await this.writeTypecheckNote(files);
+    let quality = '';
+    for (const p of paths) {
+      try {
+        const q = qualityNote(p, files[p]);
+        if (q) {
+          quality += q;
+          // Counted so the end-of-build lint can tell "noted and ignored" from "never noted".
+          const noted = this._writeTypecheckStats.qualityNotedFiles;
+          if (!noted.includes(p)) noted.push(p);
+        }
+      } catch { /* a note is best-effort */ }
+    }
+    return hooks + imports + typecheck + quality;
+  }
+
   private async hookWriteNote(files: Record<string, string>): Promise<string> {
     if (envKillSwitch('AGENTV3_HOOKS_WRITE_GUARD')) return '';
     if (!files || Object.keys(files).length === 0) return '';
@@ -2998,21 +3036,10 @@ export class ToolDispatcher {
         // fixer both already existed but ran at the END, by which time "the agent's intent was
         // elsewhere and these files are never revisited". Told here, it is fixed in the same turn.
         // Never blocks the write; any failure inside it yields no note at all.
-        const importNote = await importCheckNote(path, content, {
-          readFile: (p: string) => this.actuator.readFile(this.workspaceId, p),
-        });
-        // M1-S1.1 (prevent-not-heal): write-time Rules-of-Hooks guard — steer the model to fix a
-        // runtime-crashing hook THIS turn, before the build ships it (readiness gate stays the backstop).
-        const hooksNote = await this.hookWriteNote({ [path]: content });
-        // WRITE → TYPECHECK → NEXT (autopsy e706e068): the compiler's verdict on THIS file, now, while
-        // the model still holds it — not twelve minutes later as one line of twenty-one.
-        const typecheckNote = await this.writeTypecheckNote({ [path]: content });
-        // THE CONTRACT WAS WRITTEN BUT NOBODY TOLD THE MODEL IN TIME (autopsy 31dc61fd). The architect
-        // prompt has ALWAYS demanded a label on every input and 4/8/12/16/24px spacing — and an app
-        // still shipped with an unlabelled field and 38 off-grid values, because the prompt is read
-        // once, before any code exists. The same rule, delivered while the model holds the file.
-        // Pure, no model call, no shell, no edit; it can only ever append a sentence.
-        const qualNote = qualityNote(path, content);
+        // THE WRITE-TIME STEERING — hooks, test imports, the compiler, labels/spacing — while the model
+        // still holds the file (autopsies e706e068, 31dc61fd and the 2026-08-11 import report). ONE
+        // helper, shared by all four write doors: see `writeSteeringNotes` for why it is not inlined.
+        const steeringNotes = await this.writeSteeringNotes({ [path]: content });
         if (kind === 'modify') {
           // write_file replaced an EXISTING file wholesale. For anything except a
           // deliberate full-rewrite, this risks silently dropping unrelated code.
@@ -3030,10 +3057,10 @@ export class ToolDispatcher {
           return (
             `Updated ${path} (${content.length} bytes).\n` +
             `${risk.message} The file content BEFORE this overwrite was:\n\`\`\`\n${preview}\n\`\`\`` +
-            reviewNote + cascadeNote + testHint + hooksNote + importNote + typecheckNote + qualNote
+            reviewNote + cascadeNote + testHint + steeringNotes
           );
         }
-        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + hooksNote + importNote + typecheckNote + qualNote;
+        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + steeringNotes;
       }
 
       case 'write_files_batch': {
@@ -3175,10 +3202,9 @@ export class ToolDispatcher {
         const writtenSet = new Set(written);
         const writtenRecord: Record<string, string> = {};
         for (const f of parsedFiles) if (writtenSet.has(f.path)) writtenRecord[f.path] = f.content;
-        const batchHooksNote = await this.hookWriteNote(writtenRecord);
-        // ONE compile for the whole batch (the queue coalesces anyway); the note names each file's errors.
-        const batchTypecheckNote = await this.writeTypecheckNote(writtenRecord);
-        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchHooksNote}${batchTypecheckNote}`;
+        // ONE compile for the whole batch (the queue coalesces anyway); each note names its own file.
+        const batchSteeringNotes = await this.writeSteeringNotes(writtenRecord);
+        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchSteeringNotes}`;
       }
 
       case 'edit_file': {
@@ -3233,9 +3259,8 @@ export class ToolDispatcher {
         // Level 6: test file hint.
         const editTestHint = testFileHint(path);
         // M1-S1.1 (prevent-not-heal): write-time Rules-of-Hooks guard on the edited content.
-        const editHooksNote = await this.hookWriteNote({ [path]: updated });
-        const editTypecheckNote = await this.writeTypecheckNote({ [path]: updated });
-        return `Edited ${path}.${note}` + editReviewNote + editCascadeNote + editTestHint + editHooksNote + editTypecheckNote;
+        const editSteeringNotes = await this.writeSteeringNotes({ [path]: updated });
+        return `Edited ${path}.${note}` + editReviewNote + editCascadeNote + editTestHint + editSteeringNotes;
       }
 
       case 'bash': {
@@ -3417,6 +3442,17 @@ export class ToolDispatcher {
           } catch { /* best-effort — the reactive DB-unreachable net below still catches a dead DB honestly */ }
         }
         let { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, effectiveCommand);
+        // WHAT npm WROTE IS WHAT GETS SAVED (2026-09-27). A shell install edits package.json behind the
+        // captured writes, and a package.json the model wrote earlier would otherwise win at the final
+        // save — dropping the dependency just installed (see manifestRewrittenBy). Read it back and record
+        // it, exactly as the prisma-format self-heal below does for schema.prisma. Best-effort.
+        if (exitCode === 0) {
+          const rewritten = manifestRewrittenBy(effectiveCommand);
+          if (rewritten) {
+            try { this.onFileWrite?.(rewritten, await this.actuator.readFile(this.workspaceId, rewritten)); }
+            catch { /* the sandbox scan at the final save still sees it */ }
+          }
+        }
         // PRISMA RELATION SELF-HEAL (ShopKhata autopsy 2026-07-17): an LLM-written schema routinely
         // ships a HALF-relation ("user User?" with no opposite field / no references) — prisma
         // generate then fails with a validation error whose OWN message says the fix: "run `prisma
@@ -8648,8 +8684,8 @@ export class ToolDispatcher {
         this.state?.recordFileChange({ path, kind: 'modify' }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, result.content);
         this.scheduleCheckpoint(`replace ${symbol} in ${path}`);
-        const symbolTypecheckNote = await this.writeTypecheckNote({ [path]: result.content });
-        return `Replaced top-level symbol "${symbol}" in ${path} (AST-safe — surrounding code untouched).` + symbolTypecheckNote;
+        const symbolSteeringNotes = await this.writeSteeringNotes({ [path]: result.content });
+        return `Replaced top-level symbol "${symbol}" in ${path} (AST-safe — surrounding code untouched).` + symbolSteeringNotes;
       }
 
       case 'check_conventions': {

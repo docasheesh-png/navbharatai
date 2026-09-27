@@ -2832,6 +2832,14 @@ the flag entries above promise.
   says so, `null` means *not supplied* and never zero, and `writeTypecheckUntouched` makes the
   silence unrepresentable as a fact about the build. Test-locked and reversion-proven four ways in
   `tests/theCounterWatchedOneLaneOfTwo.test.ts`.
+- **📱 PHONE FEATURES — `nativeCapabilities.ts` is the ONE table (built 2026-09-27, admin: *"jarwis jaisa
+  app … navbharatai banayega"*).** It feeds the builder's brief, the user's summary (web / phone app / impossible,
+  with More → Download APK + connect GitHub) and the phone build (plugin versions aligned to the app's
+  Capacitor major; Android permissions + iOS usage strings added on the runner from the app's own package.json).
+  🔒 **Every plugin version was verified on npm against Capacitor 7, the phone build's default** — most plugins'
+  latest releases need 8. A test fails if `DEFAULT_CAPACITOR_MAJOR` moves, so re-verify the table before bumping it.
+  Play-restricted permissions are test-locked out. **`AGENTV3_LABEL_REPAIR`** (NOT set, default ON; `off`
+  reverts) — an unlabelled field whose literal placeholder names it gets that text as its `aria-label`.
 - **`AGENTV3_ARCH_INVARIANTS`** (default ON, set `off` to disable) — before EDITING an existing app, the
   engine reads that app's OWN rules out of its code (styling system, import style, where network calls
   go, where pages live) and hands them to the builder before it writes a line; after the build it checks

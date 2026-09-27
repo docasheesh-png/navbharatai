@@ -135,18 +135,21 @@ describe('🔒 it is actually wired — on BOTH write return paths', () => {
     // A note computed and then dropped on one branch is the class this repo has hit five times
     // (onFileWrite, the framework id, onCommand, writeTypecheckStats, the reviewer's read ledger):
     // a measurement that never reaches a reader.
+    // WIDENED 2026-09-27 (autopsy 6bae5835): the note now lives in `writeSteeringNotes`, shared by all
+    // four write doors — it had reached only `write_file`, so an `edit_file` never heard it.
     const code = codeOnly(DISPATCHER);
-    expect(code).toContain('const qualNote = qualityNote(path, content)');
-    const appends = code.split('\n').filter((l) => l.includes('+ qualNote'));
+    expect(code).toContain('const steeringNotes = await this.writeSteeringNotes({ [path]: content })');
+    const appends = code.split('\n').filter((l) => l.includes('+ steeringNotes'));
     expect(appends.length).toBe(2);
   });
 
-  it('it sits beside the other two write-time checks, not somewhere else', () => {
+  it('it sits beside the other write-time checks, inside the one shared helper', () => {
     const code = codeOnly(DISPATCHER);
-    const typecheck = code.indexOf('const typecheckNote =');
-    const quality = code.indexOf('const qualNote =');
+    const helper = code.slice(code.indexOf('private async writeSteeringNotes('), code.indexOf('private async hookWriteNote('));
+    const typecheck = helper.indexOf('await this.writeTypecheckNote(files)');
+    const quality = helper.indexOf('qualityNote(p, files[p])');
     expect(typecheck).toBeGreaterThan(-1);
     expect(quality).toBeGreaterThan(typecheck);
-    expect(quality - typecheck).toBeLessThan(400);
+    expect(helper).toContain('return hooks + imports + typecheck + quality;');
   });
 });

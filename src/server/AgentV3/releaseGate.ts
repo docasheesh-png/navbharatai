@@ -83,6 +83,18 @@ export interface RuntimeEvidence {
   testSuitePresent?: boolean;
 
   /**
+   * Is the ONLY test suite the starter one NavBharatAI wrote into the project this build?
+   *
+   * 🔴 WHY (autopsy 6bae5835, 2026-09-27). The gate said *"this project HAS a test suite, but it could not
+   * be run here"* about a suite the platform had added eighteen seconds earlier and deliberately does not
+   * run (it fails on ANY console error, including the dev-server noise the platform's own runtime check
+   * filters, and has produced false "tests fail" verdicts three times). That sentence describes the
+   * user's project; the truth is about ours. Like `testSuitePresent`, it changes only the WORDING of an
+   * unproven check, never the verdict.
+   */
+  testSuiteIsOurStarter?: boolean;
+
+  /**
    * Was this build STOPPED BY THE USER rather than failed?
    *
    * 🔴 ROOT CAUSE (autopsy 2b0a3ed5, 2026-09-17). A user pressed Stop 66 seconds into a calculator
@@ -157,7 +169,7 @@ export interface GateVerdict {
 // ⚠️ Every field added to RuntimeEvidence that is NOT a runtime CHECK must be excluded here, or it
 // silently becomes a row the gate tries to label and grade. tsc catches the omission, which is
 // how `stoppedByUser` was caught the moment it was added.
-export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'testSuitePresent' | 'stoppedByUser'>;
+export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser'>;
 
 /** What a PASS means. Phrased as a completed fact, because that is what `proven` is a list of. */
 const RUNTIME_LABEL: Record<CheckKey, string> = {
@@ -242,6 +254,9 @@ export function whyMissing(key: CheckKey, ev: RuntimeEvidence): string {
     return 'the app came up, but its individual page routes were never render-checked here';
   }
   // The suite exists; our sandbox could not run it. That is OUR gap, not the project's.
+  if (key === 'tests' && e.testSuiteIsOurStarter) {
+    return 'the only test suite is the starter one NavBharatAI added for you to run in your own CI — it is not run here';
+  }
   if (key === 'tests' && e.testSuitePresent) {
     return 'this project HAS a test suite, but it could not be run here — so nothing about it passed or failed';
   }

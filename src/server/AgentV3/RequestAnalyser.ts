@@ -15,7 +15,7 @@
 // cheap start costs ~₹0 and the evaluate-gate catches failures and escalates, so leaning
 // cheap is safe AND is the whole point (a new user's calculator must not cost a fortune).
 
-import { isComplexAppPrompt, namesBusinessDomain, SIMPLE_APP_SIGNAL } from '../lib/appComplexitySignals';
+import { isComplexAppPrompt, namesBusinessDomain, namesPersonalTool, SIMPLE_APP_SIGNAL } from '../lib/appComplexitySignals';
 import { userAskedForAnAppToBeBuilt, describesWorkAlreadyStarted, type BuildIntent } from './IntentClassifier';
 
 export type StartTier = 'gemini' | 'haiku' | 'sonnet' | 'opus';
@@ -187,7 +187,9 @@ function classify(p: string): { type: TaskType; matched: boolean } {
   // word on a one-page ask ("SaaS landing page") no longer forces complex_app — the 29-min bug.
   if (isComplexAppPrompt(p)) return { type: 'complex_app', matched: true };
   if (RE.debugging.test(p)) return { type: 'debugging', matched: true };
-  if (RE.simpleApp.test(p)) return { type: 'simple_app', matched: true };
+  // A personal tool (reminder, planner, habit tracker…) is the todo family, named by the domain
+  // analyser rather than a keyword here — see PERSONAL_TOOL_DOMAINS (autopsy d829b523).
+  if (RE.simpleApp.test(p) || namesPersonalTool(p)) return { type: 'simple_app', matched: true };
   if (RE.summary.test(p)) return { type: 'summary', matched: true };
   if (RE.translate.test(p)) return { type: 'translate', matched: true };
   if (RE.coding.test(p)) return { type: 'coding', matched: true };

@@ -82930,6 +82930,55 @@ do! isi ux me. same bas alag popup ki jagah notification me aye! jisse user dist
 - **Siblings hunted:** every other fixed top overlay (`OfflineBanner`, `TestingNotice`, `.nb-float-top`) is either below the header or above it in z-order. No other instance.
 - **Test:** `tests/appUpdate.test.ts` — the banner is never positioned, never re-derives the inset, and stays before `<TopNav` inside the padded root. Reversion-proven.
 - ⚠️ **Reaches phones only through a fresh `.aab`** (bundled mode). The banner exists only in the installed app.
+## 2026-09-27 — Autopsy d829b523 ("water drinking reminder", Weak): three defects still live on `main`
+
+The build succeeded in 341 s (release gate YELLOW). **Most of the report had already been fixed the same
+afternoon it was run**, and is recorded here so nobody rebuilds it:
+- "🔧 Auto-fixed 1 import(s)" / "Added 2 missing dependency(ies)" said four times about writes Green Freeze
+  refused, `HEAL_NOT_DURABLE` on `GoalSummary.test.tsx`, and `PREVIEW_SNAPSHOT_STALE` → **e22028a2**
+  (`landHealWrite`: a refused heal is not recorded, saved or announced).
+- The starter test importing a default export as named, written into a project with no `vitest` →
+  **3d04a737**. Reconcile adding `@playwright/test` from our own E2E net → **6c1f04dd**.
+- `JOURNEY_PASSED` with "0 journeys passed" → SignBridge (`summarizeJourneys`, all-unreachable is not a pass).
+
+**Fixed in this change:**
+1. **The app was named after the order.** `production-defaults` used `deriveTitle(prompt)`, so the published
+   app shipped manifest `short_name: "Build a wate"`, meta/og description = the prompt word for word, and an
+   icon monogram of "B" — while the model had named it HydroTrack in its own `<title>`. New pure
+   `src/server/AgentV3/appDisplayName.ts` (`resolveAppDisplayName`): the user's chosen name (the rename card)
+   → the app's own `<title>` unless it is a template placeholder → the order without its verb (English and
+   Hinglish), plus a whole-word `short_name` and a visitor-facing description ("reminds me" → "reminds you").
+   Both callers use it (the route and the `generate_app_defaults` tool); `planAppDefaults` takes
+   `{ description, shortName }`.
+   ⚠️ I first wrote this module as `appIdentity.ts`, and Write said **"updated"**. That file already existed
+   (the app *shape* check, imported by the route). Safeguard #6's stop fired; it was restored from git
+   untouched before anything else ran.
+2. **A reminder app was sized as a hospital ERP.** `namesBusinessDomain` promoted every domain the
+   requirement analyser labels, including `productivity`, whose regex begins with `todo`. So "build a
+   reminder app", "habit tracker", "daily planner", "kanban board" all scored **58 / complex_app**, while
+   "a todo app" scored 15. The build opened on the always-reasoning rung, skipped the fast lane, and first
+   rendered at 237 s. `PERSONAL_TOOL_DOMAINS` (`appComplexitySignals.ts`) now keeps them out of the business
+   promotion, and `namesPersonalTool` answers `simple_app` in `classify`. Scope words still win
+   (`isComplexAppPrompt` is asked first). **`game` is deliberately untouched** — its complex verdict is
+   pinned by the Indic-language tests and is an admin decision.
+3. **The journey check typed into a dropdown.** The runner called `fill()` on every field, and on the
+   onboarding form's `<select>` Playwright threw *"Element is not an <input>, <textarea> or [contenteditable]
+   element"* — the journey went unreachable and the gate said no journey was proven. It now chooses the
+   first real option. The same form's `type="time"` fields would have failed next (the marker string is a
+   "Malformed value"); `time`, `datetime-local`, `month`, `week` and `color` get values of their own shape,
+   `number` respects its literal `min`/`max`, and `range` is skipped. Verified in a real Chromium against a
+   local page with the same fields: old code reproduces the report's exact error; new code fills, submits
+   and reaches the persistence check.
+
+Tests: `tests/theWaterReminderAutopsy.test.ts` (20), each fix reversion-proven.
+
+⚠️ **Open, not decided here:**
+- `game` → complex_app (58). A snake game is guarded by `SIMPLE_APP_SIGNAL`; "a car racing game" opens on
+  KIMI. Whether games belong with the business domains is the admin's call.
+- The release gate's reason for an unreachable journey is always *"a login wall or a route needing seeded
+  data"*, even when the real reason was ours (this report). The JOURNEY line carries the true note; the
+  gate sentence does not.
+- `SANDBOX_CMD` lines for the write-time typecheck record `exit ?` (no exit code captured).
 
 ## 2026-09-27 — "Universal Remote" follow-up: our starter test suite is ours on every build, not only the first
 

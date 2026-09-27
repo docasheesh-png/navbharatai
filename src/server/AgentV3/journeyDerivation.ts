@@ -208,13 +208,28 @@ export function targetForInput(tag: string): Target | null {
   return null;
 }
 
-/** A value appropriate to the field, so an email input is not filled with the word "test". */
+/**
+ * A value appropriate to the field, so an email input is not filled with the word "test".
+ *
+ * 🔴 THE BROWSER IS STRICT ABOUT FIVE INPUT TYPES, AND A WRONG VALUE IS NOT A FAILED APP (autopsy
+ * d829b523, 2026-09-27). Playwright sets `time`, `date`, `datetime-local`, `month`, `week` and `color`
+ * directly and throws `Malformed value` for anything the browser would not accept — so a water
+ * reminder's wake-up time received the marker string, the journey died at the fill step, and the
+ * release gate reported "no user journey was proven" about a form nobody had managed to fill. Each of
+ * them gets a value of its own shape. A `number` also respects the field's own `min`/`max`: typing 7
+ * into `min="30"` makes the browser refuse to submit, which is our input failing, not the app.
+ */
 export function valueForInput(tag: string, marker: string): string {
   const type = (ATTR(tag, 'type') || '').toLowerCase();
   const hint = `${ATTR(tag, 'name') || ''} ${ATTR(tag, 'placeholder') || ''} ${ATTR(tag, 'id') || ''}`.toLowerCase();
+  if (type === 'time') return '08:00';
+  if (type === 'datetime-local') return '2030-01-01T08:00';
+  if (type === 'month') return '2030-01';
+  if (type === 'week') return '2030-W01';
+  if (type === 'color') return '#336699';
   if (type === 'email' || /e-?mail/.test(hint)) return `${marker}@example.com`;
   if (type === 'password' || /password|passwd/.test(hint)) return 'Test-Passw0rd!';
-  if (type === 'number' || /amount|price|qty|quantity|count|age/.test(hint)) return '7';
+  if (type === 'number' || /amount|price|qty|quantity|count|age/.test(hint)) return numberWithinBounds(tag, 7);
   if (type === 'tel' || /phone|mobile|contact/.test(hint)) return '9876543210';
   if (type === 'url' || /url|website|link/.test(hint)) return 'https://example.com';
   if (type === 'date') return '2030-01-01';
@@ -222,10 +237,33 @@ export function valueForInput(tag: string, marker: string): string {
   return marker;
 }
 
-/** Inputs that must not be typed into — a file picker, a hidden field, a submit button. */
+/**
+ * `preferred`, moved inside the field's own literal `min`/`max` when it declares them. A bound written
+ * as an expression (`min={MIN_AGE}`) cannot be read here and is left to the browser, exactly as before.
+ */
+function numberWithinBounds(tag: string, preferred: number): string {
+  const num = (name: string): number | null => {
+    const raw = ATTR(tag, name);
+    if (!raw || raw.includes('{')) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  };
+  let v = preferred;
+  const min = num('min');
+  const max = num('max');
+  if (min !== null && v < min) v = min;
+  if (max !== null && v > max) v = max;
+  return String(v);
+}
+
+/**
+ * Inputs that must not be typed into — a file picker, a hidden field, a submit button. A `range` is on
+ * the list because it always holds a value already, and any number we chose could fall outside its
+ * bounds and be refused as malformed.
+ */
 function skippableInput(tag: string): boolean {
   const type = (ATTR(tag, 'type') || '').toLowerCase();
-  return ['hidden', 'file', 'submit', 'reset', 'button', 'image', 'checkbox', 'radio'].includes(type);
+  return ['hidden', 'file', 'submit', 'reset', 'button', 'image', 'checkbox', 'radio', 'range'].includes(type);
 }
 
 const CREATE_WORDS = /\b(add|create|new|save|submit|post|send|register|sign\s*up|signup)\b/i;
@@ -785,6 +823,18 @@ for (const j of journeys) {
     for (const f of j.fields(page)) {
       const el = f.locator().first();
       if (await el.count() === 0) continue;
+      // A dropdown is CHOSEN from, never typed into: fill() on a select throws "Element is not an
+      // <input>, <textarea> or [contenteditable] element", which is how a working onboarding form was
+      // once reported as a journey nobody could reach (autopsy d829b523). The first real option is
+      // picked; a select with no real option is left as it is.
+      const tag = await el.evaluate((n) => n.tagName.toLowerCase()).catch(() => '');
+      if (tag === 'select') {
+        const options = await el.locator('option').evaluateAll((os) => os.map((o) => o.value).filter((v) => v !== '')).catch(() => []);
+        if (options.length === 0) continue;
+        await el.selectOption(options[0], { timeout: 4000 });
+        filled++;
+        continue;
+      }
       await el.fill(f.value, { timeout: 4000 });
       filled++;
     }

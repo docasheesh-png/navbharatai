@@ -55,6 +55,7 @@ import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
 import { assessFullRewrite } from './rewriteRisk';
 import { analyzeToolchain } from './toolchainPins';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from './appDefaults';
+import { resolveAppDisplayName } from './appDisplayName';
 import { computeMove, type MoveFile } from './codemodMoveFile';
 import { buildArchitectureMap, renderArchitectureMap } from './architectureMap';
 import { findUnwiredFiles, unwiredFilesSummary } from './deadCode';
@@ -4567,14 +4568,17 @@ export class ToolDispatcher {
       case 'generate_app_defaults': {
         // U-2 — apply the quality basics BY DEFAULT (SEO/OG meta, viewport, html lang, web manifest,
         // robots.txt), adding only what's missing. Idempotent planning lives in appDefaults.ts.
-        const appName = (optStr(input, 'app_name') || 'App').trim() || 'App';
         // Find a standard index.html to patch (Vite/CRA/static). If none, only the standalone files apply.
         let htmlPath: string | null = null;
         let indexHtml: string | null = null;
         for (const p of ['index.html', 'public/index.html']) {
           try { indexHtml = await this.actuator.readFile(this.workspaceId, p); htmlPath = p; break; } catch { /* try next */ }
         }
-        const plan = planAppDefaults(indexHtml, appName);
+        // The name the model passed wins; without one, the app's own <title> — never a bare "App" when
+        // the app already says what it is called (autopsy d829b523).
+        const display = resolveAppDisplayName({ chosenName: optStr(input, 'app_name'), indexHtml });
+        const appName = display.name;
+        const plan = planAppDefaults(indexHtml, appName, { shortName: display.shortName });
         const written: string[] = [];
         // Patch index.html only if the planner actually changed it.
         if (htmlPath && plan.indexHtml && plan.indexHtml !== indexHtml) {

@@ -389,6 +389,7 @@ import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
 import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, testSkeletonsCanRun, starterTestsNarration } from '../AgentV3/TestGenerationAgent';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from '../AgentV3/appDefaults';
+import { resolveAppDisplayName } from '../AgentV3/appDisplayName';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { findingsToDebt } from '../AgentV3/engineeringMemory';
 import { selectZombieBuilds } from '../AgentV3/buildWatchdog';
@@ -19297,8 +19298,13 @@ async function noteBuildOutcome(
             // into the sandbox copy every time the dev server starts, which is the one place it belongs.
             try { indexHtml = withoutPreviewBridge(idxPath, await actuator.readFile(workspaceId, idxPath)); } catch { indexHtml = null; }
           }
-          const appName = deriveTitle(prompt) || 'App';
-          const defaults = planAppDefaults(indexHtml, appName);
+          // The app's OWN name — the user's chosen name, else its <title>, else the order without its verb —
+          // never the order itself (autopsy d829b523: a phone showed "Build a wate" under the icon).
+          let chosenAppName: string | null = null;
+          try { chosenAppName = (await getConversationStore().get(workspaceId))?.appName ?? null; } catch { chosenAppName = null; }
+          const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt });
+          const appName = display.name;
+          const defaults = planAppDefaults(indexHtml, appName, { description: display.description, shortName: display.shortName });
           const savedDefaults: Record<string, string> = {};
           // Did the index.html patch actually LAND? `defaults.added` lists the TAGS the generator
           // intended, and the files are a separate set — so the two must be reported separately.

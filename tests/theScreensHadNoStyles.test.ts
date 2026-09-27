@@ -13,6 +13,7 @@ import { isBinaryAsset } from '../src/server/AgentV3/fileClassification';
 import { serverLaunchCommand, recordDevServerLaunch, lastDevServerLaunch, __resetDevServerLaunchLog } from '../src/server/AgentV3/devServerLaunchLog';
 import { repeatedCommandNotice, commandKey, READ_LOOP_LIMIT } from '../src/server/AgentV3/repeatedReads';
 import { globToRegExp } from '../src/server/AgentV3/ToolDispatcher';
+import { extractPageRoutes } from '../src/server/AgentV3/PageRouteCheck';
 
 const scaffoldCss = goldenBaseFiles('NavBharatAI App', '')['src/index.css'];
 const components = {
@@ -128,5 +129,17 @@ describe('6 · the wiring (source guards — tsc cannot see which lane runs a ch
   });
   it('the fast lane reads the project\'s stylesheets, not only this turn\'s writes', () => {
     expect(route).toMatch(/filter\(isProjectStylesheet\)[\s\S]{0,300}cssConsistencyError\(\{ \.\.\.sheets, \.\.\.written \}\)/);
+  });
+});
+
+describe('7 · a test file is never a page (build 75ea6136 opened /Home.test in a browser)', () => {
+  it('is skipped even where the pages folder IS the route table', () => {
+    const routes = extractPageRoutes({
+      'package.json': '{"dependencies":{"next":"15"}}',
+      'pages/about.tsx': 'export default function A(){}',
+      'pages/Home.test.tsx': 'test()',
+      'pages/__tests__/x.tsx': 'test()',
+    });
+    expect(routes).toEqual(['/about']);
   });
 });

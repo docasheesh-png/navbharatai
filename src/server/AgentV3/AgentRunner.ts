@@ -23,6 +23,7 @@ import { envFlag, envKillSwitch } from '../lib/envFlag';
 import { missingFeatureNotice } from './missingFeatureNotice';
 import { describeContextUsage, shouldEmitContextUsage, type ContextUsage } from './contextUsage';
 import { abortCauseOf, abortSummary } from './buildAbortCause';
+import { isBuildStoppedError } from './stopSignal';
 import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
 import { decideBuildNudge, standDownNote } from './nudgeToBuild';
@@ -603,6 +604,7 @@ export class AgentRunner {
         system: repairSystemPrompt(dispatcher.frameworkId),
         messages: [{ role: 'user', content: repairUserPrompt(userPrompt, errorText, files) }],
         maxTokens: maxTokensPerTurn,
+        signal: this.opts.signal,
       });
       return parseFileBlocks(turn.text ?? '');
     };
@@ -623,6 +625,18 @@ export class AgentRunner {
       const doneCfg = doneSignalConfig();
       let readyMark: ReadyMark | null = null;
       let doneSignalled = false;
+      // The ONE ending for an aborted build — reached between turns, and (since autopsy 2720e553) also
+      // from INSIDE a turn, when the stop cancelled the model call this loop was waiting on.
+      const endAborted = async () => {
+        const cause = abortCauseOf(this.opts.signal as AbortSignal);
+        const summary = abortSummary(cause, {
+          minutes: maxBuildMs ? Math.round(maxBuildMs / 60000) : undefined,
+          builtSomething: builtSomethingNow(),
+        });
+        await persist('stopped');
+        events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
+        return { ok: false, summary, steps, usage, billedUsd: billed() };
+      };
       while (steps < stepCap) {
         steps++;
 
@@ -639,16 +653,7 @@ export class AgentRunner {
         // `abortSummary` now carries that recovery line for every cause where it is TRUE, which is what
         // `totalToolUses > 0` decides: claiming saved work when none was written would be the same
         // dishonesty pointing the other way.
-        if (this.opts.signal?.aborted) {
-          const cause = abortCauseOf(this.opts.signal);
-          const summary = abortSummary(cause, {
-            minutes: maxBuildMs ? Math.round(maxBuildMs / 60000) : undefined,
-            builtSomething: builtSomethingNow(),
-          });
-          await persist('stopped');
-          events.emit({ type: 'done', ok: false, summary, ts: Date.now() });
-          return { ok: false, summary, steps, usage, billedUsd: billed() };
-        }
+        if (this.opts.signal?.aborted) return endAborted();
 
         // WATCHDOG — wall-clock cap. Once the build has run past its time limit, stop honestly with
         // whatever was produced instead of looping for 20-30 minutes. A build that DID write files is
@@ -715,6 +720,9 @@ export class AgentRunner {
             maxTokens: maxTokensPerTurn,
             thinking,
             effort,
+            // A Stop cancels THIS call, not only the next one (stopSignal.ts). Before this the loop
+            // noticed a stop only between turns, after paying for the call already in flight.
+            signal: this.opts.signal,
             onText: (delta) =>
               events.emit({ type: 'stream_delta', agent: agentRole, id: turnId, kind: 'text', delta, ts: Date.now() }),
             // The reasoning channel reaches the user's chat ONLY when it is switched on — default off
@@ -746,6 +754,8 @@ export class AgentRunner {
             stopWorkingHeartbeat();
           }
         } catch (err) {
+          // A stop that cancelled this call is the build ending as asked — not a failed model turn.
+          if (this.opts.signal?.aborted && isBuildStoppedError(err)) return endAborted();
           // #4 — capture the FAILED model turn before it propagates (provider error, timeout, …).
           try {
             this.opts.onLlmCall?.({

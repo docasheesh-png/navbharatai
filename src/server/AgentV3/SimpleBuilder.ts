@@ -30,6 +30,7 @@ import { generateMissingCssModules } from './CssModuleGenerator';
 import { missingViteEnvTypes } from './viteEnvTypes';
 import { generateMissingBarrels } from './BarrelGenerator';
 import { signatureContextEnabled, signatureDependencyContext } from './exportSurface';
+import { BUILD_STOPPED_MESSAGE, isBuildStoppedError, throwIfStopped } from './stopSignal';
 import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 import { wireOrphanPages } from './orphanPageWiring';
@@ -870,6 +871,13 @@ export interface SimpleBuildDeps {
    * the last call; a lane that never falls never hears from it.
    */
   stopLane?: () => string | null;
+  /**
+   * The BUILD's stop signal (Stop / Unsend / a lease stop). Read before every model call, tier,
+   * verify and repair round and before the preview starts; a stopped lane saves the files it
+   * finished and returns `stopped: true` (autopsy 2720e553 — the lane used to ignore Stop entirely
+   * and ran another nine minutes of model calls after it). Absent → today's behaviour.
+   */
+  signal?: AbortSignal;
   /** Write the generated files (single batch). Throws on a hard failure. */
   writeFiles: (files: OneShotFile[]) => Promise<void>;
   /** Start the dev server + publish the preview. Best-effort. */
@@ -984,6 +992,8 @@ export interface SimpleBuildResult {
    * and passed; undefined = verify was not wired at all.
    */
   typecheckRan?: boolean;
+  /** TRUE when the lane ended because the build was asked to stop — never a failure of the app. */
+  stopped?: boolean;
   /**
    * WHERE THE FAST LANE'S MINUTES WENT (autopsy `21b431e1`, 2026-09-22). Measurement only — nothing
    * reads it to make a decision.
@@ -1265,6 +1275,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         if (lapsed) return null; // the lane already timed out — stop burning tokens on files nobody will use
         // The lane's chain may have fallen to an engine this lane cannot afford (see SimpleBuildDeps.stopLane).
         // Refuse BEFORE spending the call; the tier boundary below turns the refusal into a hand-off.
+        if (deps.signal?.aborted) return null; // stopped — the tier boundary below ends the lane
         const stop = deps.stopLane?.();
         if (stop) { laneStopReason = laneStopReason ?? stop; return null; }
         try {
@@ -1342,6 +1353,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         const tierStartedAt = Date.now();
         const gen = await mapWithConcurrency(specs, concurrency, (spec) => genOne(spec, producedSoFar));
         for (const f of gen) if (f && f.content) written.push(f);
+        throwIfStopped(deps.signal);
         // "stopped early" ON PURPOSE — the wording that routes to the salvage path, so every finished
         // file reaches the full builder (see the root-component check below for the same idiom).
         if (laneStopReason) throw new Error(`simple-build fast lane stopped early — ${laneStopReason}`);
@@ -1505,6 +1517,22 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   } catch (e) {
     lapsed = true; // from this instant the orphaned closure can neither write files nor burn more tokens
     const reason = e instanceof Error ? e.message : String(e);
+    // A STOP IS NOT A HANDOFF. Keep what finished — the user was promised their files are saved — and
+    // say nothing about "carrying on": nothing carries on after a stop.
+    if (deps.signal?.aborted || isBuildStoppedError(e)) {
+      const finished = [...generatedSoFar];
+      let saved: string[] = [];
+      if (finished.length > 0) {
+        try { await withTimeout(deps.writeFiles(finished), 30_000, 'simple-build-stop-save'); saved = finished.map((f) => f.path); }
+        catch { /* best-effort — a failed save leaves the workspace as it was */ }
+      }
+      return {
+        ok: false, stopped: true, filesWritten: saved.length,
+        summary: 'Stopped, as asked — the files finished so far are saved.',
+        reason: BUILD_STOPPED_MESSAGE, outcome: 'BUILD_FAILED', salvagedPaths: saved.length ? saved : undefined,
+        plannedFiles, phases: phasesNow(), plannedPaths,
+      };
+    }
     // SALVAGE (timeout only): hand the full builder the files that DID finish, so it continues from
     // real work instead of an empty tree. Written once, synchronously, BEFORE the fallback returns —
     // there is no later writer (the zombie is dead), so the workspace the full builder first reads is
@@ -1654,7 +1682,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       } catch { /* a free fix is best-effort — fall through to the model repair below */ }
     }
     let promptingErrors = verdict.errors;
-    while (!verdict.ok && attempt < maxRepairs && deps.repair) {
+    while (!verdict.ok && attempt < maxRepairs && deps.repair && !deps.signal?.aborted) {
       attempt++;
       // GA-8: each attempt climbs the ordered strategy ladder so a retry is a genuinely DIFFERENT push
       // (contract-full → focus-offenders → contract-authority), not the identical prompt re-fired.
@@ -1686,6 +1714,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       const repairStartedAt = Date.now();
       try { fixed = await deps.repair(repairErrors, [...byPath.values()], contract, strategy, contractPath || undefined); } catch { fixed = []; }
       finally { clock.repairMs += Date.now() - repairStartedAt; clock.repairRuns++; }
+      // Stopped while the repair ran: its answer is not written. The workspace stays as it was when the
+      // user pressed Stop — an unverified rewrite nobody will check is not a kinder place to leave it.
+      if (deps.signal?.aborted) break;
       fixed = fixed.filter((f) => f && f.path && f.content);
       if (!fixed.length) break;
       // PREVENTION BY CONSTRUCTION, not by persuasion. A repair aimed at a file we own and that has one
@@ -1744,6 +1775,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       }
       promptingErrors = verdict.errors;
     }
+    if (deps.signal?.aborted) {
+      return {
+        ok: false, stopped: true, filesWritten: files.length,
+        summary: 'Stopped, as asked — the files finished so far are saved.',
+        reason: BUILD_STOPPED_MESSAGE, outcome: classifyBuildOutcome({ filesWritten: files.length, typecheckOk: null }),
+        typecheckRan: verdict.ran !== false, plannedFiles, phases: phasesNow(),
+      };
+    }
     if (!verdict.ok) {
       deps.log?.('The app still has build errors — staying on it until it builds.');
       return {
@@ -1768,6 +1807,16 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     }
   }
 
+  // Stopped during verify or repair: the files are already written, and nothing more is started — not
+  // another repair, not an install, not a dev server.
+  if (deps.signal?.aborted) {
+    return {
+      ok: false, stopped: true, filesWritten: files.length,
+      summary: 'Stopped, as asked — the files finished so far are saved.',
+      reason: BUILD_STOPPED_MESSAGE, outcome: classifyBuildOutcome({ filesWritten: files.length, typecheckOk: null }),
+      typecheckRan, plannedFiles, phases: phasesNow(),
+    };
+  }
   // VERIFIED (or verify not wired) → success; the preview is a best-effort bonus.
   if (deps.startPreview) {
     try { await withTimeout(deps.startPreview(), deps.previewTimeoutMs ?? 90_000, 'simple-preview'); }

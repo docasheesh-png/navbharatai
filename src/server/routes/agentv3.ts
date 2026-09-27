@@ -360,6 +360,7 @@ import {
 } from '../AgentV3/ProviderUsageLedger';
 import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
+import { withStopSignal } from '../AgentV3/stopSignal';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { redactPII, redactEventForUser } from '../AgentV3/SecretRedactor';
@@ -471,7 +472,7 @@ import { userStorageContext } from '../AgentV3/userStorageContext';
 import { userAuthContext } from '../AgentV3/userAuthContext';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
 import { findMissingDependencies, phantomAliasDependencies, removeDependenciesFromPackageJson } from '../AgentV3/DependencyReconciler';
-import { ensureViteReactFoundation, sanitizeTsconfigExtends } from '../AgentV3/FrameworkFoundation';
+import { foundationFilesStillAbsent, ensureViteReactFoundation, sanitizeTsconfigExtends } from '../AgentV3/FrameworkFoundation';
 import { TSC_ENSURE, TSC_BIN } from '../AgentV3/tscCommand';
 import { renderPreview } from '../runtime/renderPreview';
 import { wakePublicState, sanitizeWakeError, type TerminalWakeState } from '../AgentV3/terminalWake';
@@ -5768,6 +5769,9 @@ async function noteBuildOutcome(
         // healed files to the durable store so the fix STICKS across future sandboxes, not just this boot.
         if (Object.keys(saved).length > 0) {
           try {
+            // No disk check here, unlike the fast lane (foundationFilesStillAbsent): `saved` is the WHOLE
+            // project, and the sandbox at this point holds only the template's generic files, which a
+            // package.json derived from the app's real imports is better than.
             const foundation = ensureViteReactFoundation(saved, { framework });
             if (foundation.added.length > 0) {
               Object.assign(saved, foundation.files);
@@ -13094,7 +13098,7 @@ async function noteBuildOutcome(
       // 11-feature ERP scored 63 (complex) and still made 83 calls on the cheapest flash rung; KIMI
       // sat one rung away for 26 minutes. "Starting me bhi" means THIS runner too: the roadmap
       // planner, the project planner and the fast lane's manifest are the first calls a build makes.
-      const makeFastTextRunner = (onUsed?: (used: string) => void): TurnRunner => buildTurnRunner({
+      const makeFastTextRunner = (onUsed?: (used: string) => void): TurnRunner => withStopSignal(buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
         complex: buildIsComplex, // a complex app opens past the flash rung — see the note above
@@ -13111,11 +13115,11 @@ async function noteBuildOutcome(
         onProviderError: recordProviderFallback,
         onProviderBenched: recordProviderBenched,
         onAttemptWasted: recordAttemptWasted,
-      });
+      }), abort.signal);
       // The PLANNERS' runner — roadmap, blueprint, Project Mode. Same memory and callbacks as the fast
       // text runner above; only the ladder differs (see `plan` in buildTurnRunner). Repairs stay on the
       // build ladder: they rewrite code, which is the work that ladder is ordered for.
-      const makePlanTextRunner = (onUsed?: (used: string) => void): TurnRunner => buildTurnRunner({
+      const makePlanTextRunner = (onUsed?: (used: string) => void): TurnRunner => withStopSignal(buildTurnRunner({
         tier: powerLevelReqEffective,
         noClaude: noClaudeBuild,
         plan: true,
@@ -13126,7 +13130,7 @@ async function noteBuildOutcome(
         onProviderError: recordProviderFallback,
         onProviderBenched: recordProviderBenched,
         onAttemptWasted: recordAttemptWasted,
-      });
+      }), abort.signal);
       const client = buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
@@ -16147,8 +16151,11 @@ async function noteBuildOutcome(
       if (fastLaneWouldRun && !fastLaneRung.skip) {
         // Usage ACCUMULATES across every cheap call (manifest + each per-file call), so billing is honest.
         const osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
+        // The WHOLE listing: this list answers "does this file exist?" for the missing-files gate and the
+        // foundation guard, and a capped answer is a wrong one (`find` output is unsorted, so which 80
+        // survived was chance — autopsy 2720e553). Prompts that show it cap it themselves (60).
         const scaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
-          .filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
+          .filter((p) => !/^(node_modules|\.git)\//.test(p));
         // Shared side-effects for both fast lanes (Simple Builder + OneShot).
         // ONE fast-lane model round trip. Returns the provider's stop reason alongside the text so the
         // continuation wrapper below can tell "the model finished" from "the model ran out of budget"
@@ -16194,6 +16201,9 @@ async function noteBuildOutcome(
               // outlive the wait (turnDeadline.ts). Undefined for every caller that does not set one,
               // which is every lane except the fast lane's plan and contract calls today.
               deadlineAt,
+              // Stop cancels this call and every later one (stopSignal.ts). The lane never read the
+              // build's signal before autopsy 2720e553, so a pressed Stop ran on for minutes.
+              signal: abort.signal,
               // The SIBLING of AgentRunner's own reasoning emit — gated by the same one switch, so the
               // two lanes cannot drift into showing the user different things (thinkingStream.ts).
               ...(streamThinkingToChat()
@@ -16334,7 +16344,19 @@ async function noteBuildOutcome(
           // Deterministic + unit-tested (FrameworkFoundation.ts). Kill switch: AGENTV3_FOUNDATION_GUARD=off.
           if (process.env.AGENTV3_FOUNDATION_GUARD !== 'off') {
             try {
-              const foundation = ensureViteReactFoundation(Object.fromEntries(writtenFiles), { framework, existingPaths: scaffold });
+              const planned = ensureViteReactFoundation(Object.fromEntries(writtenFiles), { framework, existingPaths: scaffold });
+              // The list above is a hint; the disk decides. A file already in the sandbox is never
+              // overwritten (autopsy 2720e553 — a working package.json was replaced from a stale list).
+              const foundation = Object.keys(planned.files).length === 0
+                ? { ...planned, keptExisting: [] as string[] }
+                : await foundationFilesStillAbsent(planned, (p) => actuator.readFile(workspaceId, p).then(() => true, () => false));
+              if (foundation.keptExisting.length > 0) {
+                buildDiag.record({
+                  phase: 'build', severity: 'info', code: 'FOUNDATION_KEPT_EXISTING', autoResolved: true,
+                  message: `Kept ${foundation.keptExisting.length} foundational file(s) that already existed on disk instead of replacing them: ${foundation.keptExisting.join(', ')}.`,
+                  detail: 'The pre-listed paths did not include them; the sandbox did.',
+                });
+              }
               if (foundation.added.length > 0) {
                 fastLog(`🩹 Added ${foundation.added.length} missing foundational file(s) so the app can install & boot: ${foundation.added.join(', ')}`);
                 // Route through write_file so each lands in the sandbox AND is recorded in writtenFiles
@@ -16573,7 +16595,8 @@ async function noteBuildOutcome(
           stopLane: () => (fastLaneReasoningRung
             ? `the lane's engine fell to ${fastLaneReasoningRung}, which reasons before every answer; the lane's per-file budget cannot carry that, so the files finished so far go to the full builder now`
             : null),
-          writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
+          writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3,
+          signal: abort.signal });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         // WHERE THE FAST LANE'S MINUTES WENT (autopsy 21b431e1). Measurement only — nothing reads it.
         // Recorded on BOTH outcomes, because a lane that handed off is exactly the one whose time
@@ -16613,7 +16636,7 @@ async function noteBuildOutcome(
         // builder rebuilt a PARALLEL module tree (src/utils + src/types beside the fast lane's src/lib)
         // → 4 broken imports → a dead app. The note travels in buildPrompt so EVERY fallback runner
         // (start-tier, escalation, default) sees it.
-        if (!sb.ok && sb.salvagedPaths?.length) {
+        if (!sb.ok && !sb.stopped && sb.salvagedPaths?.length) {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_SALVAGE', message: `Fast lane salvaged ${sb.salvagedPaths.length} finished file(s) into the workspace for the full builder to continue from.`, autoResolved: true, detail: sb.salvagedPaths.join(', ') });
           buildPrompt =
             `${SALVAGE_HANDOFF_MARKER} A faster build lane already generated ${sb.salvagedPaths.length} file(s) of THIS app before running out of time; ` +
@@ -16633,7 +16656,7 @@ async function noteBuildOutcome(
         // "continue from" files that are not there is precisely the confident-and-wrong instruction
         // this codebase forbids. So it is a starting point it may change, and it is only offered when
         // nothing was salvaged (salvaged work is the stronger signal and already carries its own).
-        if (!sb.ok && !sb.salvagedPaths?.length && sb.plannedPaths?.length) {
+        if (!sb.ok && !sb.stopped && !sb.salvagedPaths?.length && sb.plannedPaths?.length) {
           buildDiag.record({
             phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_PLAN_HANDOFF',
             message: `Fast lane planned ${sb.plannedPaths.length} file(s) before it stopped — the plan was handed to the full builder instead of being thrown away.`,
@@ -16647,7 +16670,7 @@ async function noteBuildOutcome(
         }
         // HONESTY (rule 5): a lane we DECIDED not to run must say so, and say why. Silence here would
         // read in the report as "the one-shot was never eligible", which is a different fact.
-        if (!sb.ok && classifyForOneShot(analysis?.startTier) && !oneShotStillViable(sb)) {
+        if (!sb.ok && !sb.stopped && classifyForOneShot(analysis?.startTier) && !oneShotStillViable(sb)) {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: oneShotSkipReason(sb) ?? 'Skipped the one-shot fast lane — going straight to the full builder.', autoResolved: true });
         }
         // 🔴 THE SECOND WAY THIS LANE WAS WASTED, and the one the file-count gate above cannot see
@@ -16656,7 +16679,7 @@ async function noteBuildOutcome(
         // viable. It then ran for 150 seconds on the SAME degraded provider chain that had just
         // failed three times, and failed the same way. Re-running a lane against a provider that is
         // timing out is not a retry; it is the identical failure at full price.
-        else if (!sb.ok && classifyForOneShot(analysis?.startTier) && !anotherLaneWorthTrying(sb.reason)) {
+        else if (!sb.ok && !sb.stopped && classifyForOneShot(analysis?.startTier) && !anotherLaneWorthTrying(sb.reason)) {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: 'Skipped the one-shot fast lane: the previous lane failed because the engine did not respond in time, not because of the app — a second lane on the same engine would fail the same way. Going straight to the full builder.', autoResolved: true, detail: sb.reason });
         }
         if (sb.ok) {
@@ -16664,7 +16687,7 @@ async function noteBuildOutcome(
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'VERIFY_DID_NOT_RUN', message: 'The fast-lane type-check could not execute in the sandbox (after one retry) — the app shipped unverified; the agentic readiness gate stays ON.', autoResolved: false });
           }
           fastResult(sb.summary, sb.filesWritten, sb.typecheckRan !== false);
-        } else if (classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb) && anotherLaneWorthTrying(sb.reason)) {
+        } else if (!sb.stopped && !abort.signal.aborted && classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb) && anotherLaneWorthTrying(sb.reason)) {
           // 2) ONE-SHOT (secondary) — a single call still suits a TRIVIAL one-file app the manifest
           //    skips. Gated to the simple tiers only: a sonnet-tier (complex) prompt can never fit in
           //    one 8k-token call — it falls straight through to the agentic loop instead.

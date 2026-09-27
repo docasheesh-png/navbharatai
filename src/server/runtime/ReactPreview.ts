@@ -29,6 +29,8 @@ import { proveBackendRunnable } from './browserBackend/capability';
 import { EXPRESS_SHIM_SOURCE, BACKEND_BRIDGE_SOURCE, EXPRESS_SHIM_PATH, BACKEND_BRIDGE_PATH } from './browserBackend/expressShim';
 import { pgShimSource, pgliteDataDir, PG_SHIM_PATH, PGLITE_VERSION } from './browserBackend/pgShim';
 import { previewBridgeSource } from '../AgentV3/previewBridge';
+import { REACT_CORE_SPECS, REACT_CORE_LOADER_SOURCE } from './reactCoreLoader';
+import { REACT_SPLIT_FAULT_MESSAGE } from '../../lib/previewPlatformFault';
 
 // Compiler is self-hosted on NavBharatAI's own origin (served from public/vendor)
 // so it is never blocked by a third-party CDN; CDNs are only a fallback chain.
@@ -469,6 +471,9 @@ ${babelTag}
   // flag, so a React library loaded via the fallback may bundle its own React; acceptable only when
   // esm.sh is down anyway, and strictly better than a dead preview.)
   var ESM_ALT = 'https://esm.run/';
+  // React's core loads as ONE unit from ONE rung, and is proven to be one React before the app runs —
+  // see src/server/runtime/reactCoreLoader.ts for the report that cost a user five builds.
+${REACT_CORE_LOADER_SOURCE}
   var cache = {};
   var bareCache = {};
   var bareLoadErrors = {}; // spec → the REAL reason its CDN import failed (surfaced in the error)
@@ -600,7 +605,9 @@ ${babelTag}
     }).observe(document.getElementById('root'), { childList: true });
   } catch (e) { /* observer unavailable — the explicit post-mount hide below still fires */ }
 
-  function showError(msg) {
+  // \`platform\` marks a fault that is the PREVIEW's own (see src/lib/previewPlatformFault.ts): the host
+  // then knows not to offer a paid repair of the user's files for it.
+  function showError(msg, platform) {
     // THE GAME-OVER CRASH (store's first real play report, 2026-08-15): this handler used to wipe
     // #root on EVERY uncaught error, forever. Right during boot — a failed boot must show its reason.
     // Wrong after the app painted: a mid-game throw (a storage write at game over) replaced the
@@ -613,7 +620,7 @@ ${babelTag}
       String(msg).replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</pre>';
     // Report the REAL preview error up to the host so it can be captured into the build report
     // (cross-origin srcdoc → postMessage is the only channel). Best-effort; the iframe still shows it.
-    try { (window.parent || window.top).postMessage({ __nbaiPreviewError: true, source: 'in-browser', message: String(msg) }, '*'); } catch (e) {}
+    try { (window.parent || window.top).postMessage({ __nbaiPreviewError: true, source: 'in-browser', message: String(msg), platform: platform === true }, '*'); } catch (e) {}
   }
   // CONSOLE MIRROR + FAILED-NETWORK MIRROR — the shared bridge (see AgentV3/previewBridge.ts).
   //
@@ -871,6 +878,35 @@ ${previewBridgeSource('in-browser')}
       var bare = collectBare();
       forced.forEach(function (s) { if (bare.indexOf(s) < 0) bare.push(s); });
       nbaiPkgsTotal = bare.length; nbaiProgress();
+      // REACT'S CORE FIRST, AS ONE UNIT (autopsy "Lekhan Sahyak", 2026-09-27). Each core spec used to
+      // walk its own rung ladder, so \`react\` could land on jsdelivr while \`react-dom/client\` came
+      // from the mirror — two Reacts, a null hook dispatcher, and a crash the user was offered a paid
+      // repair for. The group moves between rungs together, and a probe proves one React before the
+      // app runs. Pinned rungs only: the unpinned "plain" rung below could serve a different major.
+      var REACT_CORE = ${JSON.stringify(REACT_CORE_SPECS)};
+      var coreRungs = [specUrl, specUrlAlt];
+      if (DEP_BASE !== ESM) coreRungs.push(function (s) { var u = specUrl(s); return u.indexOf(DEP_BASE) === 0 ? ESM + u.slice(DEP_BASE.length) : u; });
+      var core = { mods: null, single: false, rung: -1, errors: [] };
+      nbaiPending++;
+      try {
+        core = await nbaiLoadReactCore(REACT_CORE, coreRungs, function (u) { return import(u); }, nbaiPkgDeadline, interop, function () { return document.createElement('div'); });
+      } catch (e) {
+        core.errors.push((e && e.message) ? e.message : String(e));
+      } finally {
+        nbaiPending--; nbaiPkgsDone += REACT_CORE.length; nbaiProgress();
+      }
+      if (core.mods) {
+        REACT_CORE.forEach(function (s) { bareCache[s] = core.mods[s]; });
+        if (core.rung > 0) console.warn('[preview] loaded React from fallback rung', core.rung + 1, '—', core.errors.join(' | '));
+      } else {
+        REACT_CORE.forEach(function (s) { bareLoadErrors[s] = core.errors.join(' | ') || 'could not be loaded'; });
+      }
+      if (core.mods && !core.single) {
+        console.warn('[preview] no rung served one consistent React —', core.errors.join(' | '));
+        showError(${JSON.stringify(REACT_SPLIT_FAULT_MESSAGE)}, true);
+        return;
+      }
+      bare = bare.filter(function (s) { return REACT_CORE.indexOf(s) < 0; });
       await Promise.all(bare.map(async function (spec) {
         // An npm package's CSS file ('simplebar-react/dist/simplebar.min.css') is a STYLESHEET, not
         // an ES module — dynamic import() of it fails outright (the CoreUI failure). Load it as a

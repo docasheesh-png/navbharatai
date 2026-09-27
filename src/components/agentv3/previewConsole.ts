@@ -1,5 +1,7 @@
 // The preview console drawer's rules — which rows exist, and which of them are worth handing to the
-// AI. Pure and dependency-free so the decisions are unit-tested without mounting the preview surface.
+// AI. Pure (its one import is a pure string contract) so the decisions are unit-tested without mounting the preview surface.
+
+import { isPreviewPlatformFault } from '../../lib/previewPlatformFault';
 
 export type ConsoleLevel = 'log' | 'info' | 'warn' | 'error';
 
@@ -54,6 +56,9 @@ const FIXABLE_WARN_PATTERNS: readonly RegExp[] = [
  * real code defect. PURE.
  */
 export function consoleRowFixable(level: string, text: string): boolean {
+  // A fault the preview itself declared as OURS is never offered as a paid repair of the user's files
+  // (autopsy "Lekhan Sahyak": five builds, ₹208, for a React the preview's own loader split in two).
+  if (isPreviewPlatformFault(text)) return false;
   if (level === 'error') return true;
   if (level !== 'warn') return false;
   const t = (text || '').trim();

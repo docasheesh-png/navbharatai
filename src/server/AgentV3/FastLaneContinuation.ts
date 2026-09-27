@@ -119,15 +119,6 @@ function unterminatedTail(text: string): { path: string; body: string } | null {
   return m ? { path, body: m[2] } : { path, body: '' };
 }
 
-/** The first line with anything on it, trimmed. '' when the text is blank. */
-function firstMeaningfulLine(body: string): string {
-  for (const line of body.split('\n')) {
-    const t = line.trim();
-    if (t) return t;
-  }
-  return '';
-}
-
 /**
  * How much of a first line must agree before two bodies are judged to be the SAME file started
  * twice. Below `MIN_RESTART_PREFIX` there is too little of the partial file to preserve for the
@@ -148,12 +139,23 @@ const RESTART_COMPARE_CHARS = 60;
  * is nothing to preserve and that is exactly today's behaviour).
  */
 export function continuationRestartsFile(partialBody: string, continuationBody: string): boolean {
-  const a = firstMeaningfulLine(partialBody);
-  const b = firstMeaningfulLine(continuationBody);
+  // 🔴 THE HEAD OF THE FILE, NOT ITS FIRST LINE (autopsy 2720e553, 2026-09-27). "Too little to
+  // preserve" was judged by the first line's length, and a stylesheet's first line is `:root {` — SEVEN
+  // characters, one under the bar. So a 4,669-character stylesheet cut off at the output ceiling was
+  // declared "nothing to preserve", the continuation's `{ }` was taken as a restart, and the parser's
+  // LAST-wins rule replaced the whole file with it. The app shipped with no styles. The file's head,
+  // whitespace collapsed, measures what is really there, and compares like with like across lines.
+  const a = normalizedHead(partialBody);
+  const b = normalizedHead(continuationBody);
   if (a.length < MIN_RESTART_PREFIX) return true;
   if (b.startsWith(a.slice(0, RESTART_COMPARE_CHARS))) return true;
   if (b.length >= MIN_RESTART_PREFIX && a.startsWith(b.slice(0, RESTART_COMPARE_CHARS))) return true;
   return false;
+}
+
+/** The start of a body with every run of whitespace collapsed to one space, trimmed. */
+function normalizedHead(body: string): string {
+  return String(body ?? '').slice(0, RESTART_COMPARE_CHARS * 8).replace(/\s+/g, ' ').trim();
 }
 
 /**

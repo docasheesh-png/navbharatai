@@ -49,7 +49,7 @@ import { listSafetyFlags, SAFETY_FLAG_RETENTION_DAYS } from '../lib/safetyFlagSt
 import { officerIsNamed, OFFICER_MISSING_WARNING } from '../../content/legal/grievance';
 import { serverLoad } from '../lib/serverLoad';
 import { usdInrRate } from '../lib/UsdInrRate';
-import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
+import { agentV3CostTelemetry, buildUsageReport, summarizeLosses } from '../AgentV3/AgentV3CostTelemetry';
 import { assistantSpendStore } from '../lib/AssistantSpendStore';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
@@ -89,7 +89,7 @@ let lastUpdateBroadcast: { versionCode: number | null; at: number; devices: numb
 import { saveNotification, normalizeTarget } from '../lib/AdminNotificationStore';
 import { sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { evaluateAlerts } from '../lib/metricsAlerts';
-import { computeHealthScore } from '../lib/HealthScore';
+import { computeHealthScore, platformHealthInputs } from '../lib/HealthScore';
 import { summariseUsage, marginInr } from '../lib/usageLedger';
 import { realRateFor, usageCostUsd } from '../AgentV3/providerRates';
 import { usdToInr } from '../lib/UsdInrRate';
@@ -129,7 +129,7 @@ import { classifyHostedServices, hostingCapacity } from '../AgentV3/hostedServic
 import {
   appsProject, appsRegion, buildListServicesRequest, parseServiceList, SERVICES_PER_PROJECT_CAP,
 } from '../AgentV3/cloudRunHosting';
-import { loadBoard, worstLevel, type LoadReadings } from '../lib/loadBoard';
+import { loadBoard, worstLevel, AI_MIN_SAMPLE, type LoadReadings } from '../lib/loadBoard';
 import { tierLadder, availableRungs, rungHasKey, tierDisplayName, tierEngineAvailable } from '../AgentV3/tierLadder';
 import { readEngineUse, engineUseDayKey } from '../AgentV3/engineUseStore';
 import { reportStatus, openReportCount } from '../AgentV3/reportTriage';
@@ -504,45 +504,23 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // with no real data drops out (reported in `missing`); none is fabricated.
   app.get('/api/admin/health-score', verifyAdminToken, (_req: Request, res: Response) => {
     const snap = getMetrics().snapshot();
-    const provider = getProviderStats();
-
-    // Aggregate provider error rate + request-weighted average latency from real counters.
-    let totalReq = 0;
-    let totalErr = 0;
-    let latencyWeighted = 0;
-    for (const s of Object.values(provider)) {
-      totalReq += s.requestCount || 0;
-      totalErr += s.errorCount || 0;
-      latencyWeighted += (s.avgLatencyMs || 0) * (s.requestCount || 0);
-    }
-    const inputs = {
-      // Build success rate is real only once at least one build has run.
-      successRatePct: snap.builds.total > 0 ? snap.builds.successRate * 100 : null,
-      // Provider error rate + latency are real only once at least one AI call has run.
-      errorRatePct: totalReq > 0 ? (totalErr / totalReq) * 100 : null,
-      avgLatencyMs: totalReq > 0 ? latencyWeighted / totalReq : null,
-      // 🔴 UPTIME IS NOT REPORTED, AND THAT IS THE FIX (2026-09-12).
-      //
-      // This passed `process.uptime()`, which `scoreUptime` divides by 24 HOURS. NavBharatAI deploys on
-      // every merge to main, and Cloud Run recycles instances on its own — so the process is routinely
-      // minutes old while nothing whatsoever is wrong. A server deployed 50 minutes ago scored 3.5/100
-      // on this component and, at its 15% weight, lost the platform ~14 health points for the crime of
-      // having shipped. That is how a healthy platform came to read CRITICAL.
-      //
-      // "Seconds since this process started" was never uptime on a serverless host; it is deploy
-      // recency wearing uptime's name. `computeHealthScore` already renormalises over the components
-      // it HAS and lists the rest under `missing`, so omitting it removes a misleading signal and
-      // claims nothing in its place — which is the honest state until a real uptime measurement
-      // (the outside-in probe `siteUptime.ts` already does for user domains) exists for the platform.
-      uptimeSeconds: null,
-    };
+    // ONE builder for both admin health scores — see `platformHealthInputs` for why the per-provider
+    // counters and the model's generation time were the wrong inputs (admin Monitor, 2026-09-27).
+    // Process uptime stays unmeasured: process age is deploy recency on a host that deploys on every
+    // merge (2026-09-12).
+    const inputs = platformHealthInputs({
+      builds: snap.builds,
+      router: getRouterOutcomeStats(),
+      serverWaitMs: serverLoad.snapshot().eventLoopP99Ms,
+      minRequests: AI_MIN_SAMPLE,
+    });
     res.json({
       score: computeHealthScore(inputs),
       inputs,
       sources: {
         successRatePct: 'metrics.builds (live build outcomes)',
-        errorRatePct: 'AIRouter provider circuit stats',
-        avgLatencyMs: 'AIRouter provider circuit stats (request-weighted)',
+        errorRatePct: 'AIRouter request outcomes — requests no engine answered (not per-rung failures)',
+        avgLatencyMs: "this server's worst-case request wait (event-loop p99), not the model's generation time",
         // Not fed at all — see the note on `uptimeSeconds` above. Process age is deploy recency,
         // not uptime, and NavBharatAI deploys on every merge.
         uptimeSeconds: 'not measured (process age is not uptime on a serverless host)',
@@ -706,23 +684,13 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     // The same composite health inputs the dedicated /health-score endpoint reports, from the same
     // real signals. Kept identical on purpose — two health numbers would be worse than none.
     const health = guard(() => {
-      const provider = providerStats.value ?? {};
-      let totalReq = 0;
-      let totalErr = 0;
-      let latencyWeighted = 0;
-      for (const st of Object.values(provider) as any[]) {
-        totalReq += st.requestCount || 0;
-        totalErr += st.errorCount || 0;
-        latencyWeighted += (st.avgLatencyMs || 0) * (st.requestCount || 0);
-      }
-      const inputs = {
-        successRatePct: scoped.snapshot.builds.total > 0 ? scoped.snapshot.builds.successRate * 100 : null,
-        errorRatePct: totalReq > 0 ? (totalErr / totalReq) * 100 : null,
-        avgLatencyMs: totalReq > 0 ? latencyWeighted / totalReq : null,
-        // Same reason as the live endpoint above: process age is deploy recency, and scoring it made a
-        // freshly-deployed platform read CRITICAL. Omitted rather than guessed.
-        uptimeSeconds: null,
-      };
+      // The SAME builder the /health-score endpoint uses — two health numbers would be worse than none.
+      const inputs = platformHealthInputs({
+        builds: scoped.snapshot.builds,
+        router: getRouterOutcomeStats(),
+        serverWaitMs: serverLoad.snapshot().eventLoopP99Ms,
+        minRequests: AI_MIN_SAMPLE,
+      });
       return { score: computeHealthScore(inputs), inputs };
     });
 
@@ -861,10 +829,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     try {
       const days = Math.min(Math.max(parseInt(String(req.query.days ?? '30'), 10) || 30, 1), 365);
       const history = await agentV3CostTelemetry.list(days);
-      const perDay = history.map(d => ({ date: d.date, lossBuilds: d.lossBuilds ?? 0, lossRealCostUsd: d.lossRealCostUsd ?? 0 }));
-      const totalLossBuilds = perDay.reduce((s, d) => s + d.lossBuilds, 0);
-      const totalLossRealCostUsd = Math.round(perDay.reduce((s, d) => s + d.lossRealCostUsd, 0) * 1_000_000) / 1_000_000;
-      res.json({ totalLossBuilds, totalLossRealCostUsd, perDay });
+      // Measured spend first, baseline as a labelled comparison — see summarizeLosses.
+      res.json(summarizeLosses(history));
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to read AgentV3 losses.' });
     }

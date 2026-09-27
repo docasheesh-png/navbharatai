@@ -1111,15 +1111,23 @@ setInterval(() => {
       if (draining) return; // a second signal must not re-run the drain
       draining = true;
       try {
+        // The Monitor's pending counters live in this process's memory until their next flush. Write
+        // them AFTER the drain (a drained build records its own telemetry as it ends) and BEFORE exit,
+        // or the builds of the last minute vanish with the instance (admin Monitor capture 2026-09-27:
+        // AI cost beside "0 builds"). Bounded at 2.5s so grace (≤6s) + flush stays inside the 9s backstop.
+        const flushTelemetry = (): Promise<void> => import('./src/server/lib/metricsTimeline')
+          .then(({ metricsTimeline }) => metricsTimeline.flushNow(2500))
+          .catch(() => { /* telemetry never blocks shutdown */ });
+        const exitNow = () => { try { server.close(); } catch { /* already closing */ } process.exit(0); };
         void import('./src/server/routes/agentv3')
           .then(({ drainRunningBuilds, shutdownGraceMs }) => {
             let n = 0;
             try { n = drainRunningBuilds(); } catch { /* best-effort */ }
             const grace = shutdownGraceMs(n);
             if (n) console.log(`[VAJRA V4-1c] ${signal}: draining ${n} in-flight build(s), grace ${grace}ms`);
-            setTimeout(() => { try { server.close(); } catch { /* already closing */ } process.exit(0); }, grace).unref();
+            setTimeout(() => { void flushTelemetry().finally(exitNow); }, grace).unref();
           })
-          .catch(() => { try { server.close(); } catch { /* noop */ } process.exit(0); });
+          .catch(() => { void flushTelemetry().finally(exitNow); });
       } catch { process.exit(0); }
       // Absolute backstop: never let shutdown hang past the platform's grace window.
       setTimeout(() => process.exit(0), 9_000).unref();

@@ -262,6 +262,24 @@ describe('it is actually wired into the app and the server', () => {
   it('the Update button is thumb-sized', () => {
     expect(read('src/components/UpdateBanner.tsx')).toContain('minHeight: 44');
   });
+
+  it('🔴 the banner is a ROW of the app shell, never a layer over the header (admin 2026-09-27)', () => {
+    // "update notification ki position theek nahi hai, upar se crop ho jata hai": floating at
+    // `--nb-safe-top + 8px` it covered the header's top row and re-derived the status-bar inset on its
+    // own. In the flow it sits inside the root's safe-area padding and pushes the header down.
+    const banner = read('src/components/UpdateBanner.tsx').replace(/\/\/.*$/gm, '');
+    expect(banner).not.toMatch(/position:\s*'(?:fixed|absolute|sticky)'/);
+    expect(banner).not.toContain('--nb-safe-top');
+    expect(banner).toContain('flexShrink: 0');
+    // It must stay the FIRST row: before the header, inside the padded root.
+    const app = read('src/App.tsx');
+    const root = app.indexOf("paddingTop: 'var(--nb-safe-top)'");
+    const bannerAt = app.indexOf('<UpdateBanner />');
+    const header = app.indexOf('<TopNav', bannerAt);
+    expect(root).toBeGreaterThan(-1);
+    expect(bannerAt).toBeGreaterThan(root);
+    expect(header).toBeGreaterThan(bannerAt);
+  });
 });
 
 // ADMIN REPORT 2026-08-21: "update kar lene ke bad bhi update ka button aa raha hai." The banner

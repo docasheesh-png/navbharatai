@@ -60,6 +60,15 @@ const PROCESS_ONLY_CODES = new Set([
   'TURN_ANSWERED_A_QUESTION',
   // …and its sibling (2026-09-26): the model DECLINED, and its refusal was left standing as the answer.
   'TURN_DECLINED',
+  // The REQUEST asked for a device power a web app does not have (autopsy 6bae5835) — a fact about what
+  // the platform can deliver, told to the user in the summary, never a defect in the app that was built.
+  'DEVICE_CAPABILITIES_TOLD',
+  // The builder was handed the exact phone plugins the request needs — our own routing, not a finding.
+  'NATIVE_CAPABILITY_BRIEF',
+  // Our own deterministic label repair — housekeeping, never a finding against the app.
+  'LABELS_REPAIRED',
+  // A measurement of our own write-time notes — never a finding against the app.
+  'WRITE_TIME_QUALITY',
   // Same rule, same reason (autopsy 21b431e1): a dropped backslash that OUR deterministic pass put
   // back is this engine's own housekeeping. The user's app is correct by the time anybody reads it.
   'SCRIPT_INTEGRITY_REPAIRED',
@@ -1213,7 +1222,9 @@ export class BuildDiagnostics {
 
   private firstRenderRecorded = false;
   /**
-   * TIME_TO_FIRST_RENDER — when the app first rendered in a real browser during the build (inBuildGreen.ts).
+   * TIME_TO_FIRST_RENDER — when the app first rendered in a real browser during the build. Written by
+   * whichever real-browser proof comes first (the render ledger `markAppRendered`, or an in-build attempt,
+   * raced or not) — never by the snapshot save that may follow it (autopsy 6bae5835).
    * The render-side sibling of TIME_TO_FIRST_CALL and of #3084's READY_BEFORE_END: "4 minutes" was a
    * feeling until this line; now it is a number. Recorded once, on the first proof only.
    */

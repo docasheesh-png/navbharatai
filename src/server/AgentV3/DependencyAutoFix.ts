@@ -196,6 +196,34 @@ export function viteRangeOf(packageJson: string | null | undefined): string | un
 const INSTALL_SUBCOMMAND_RE = /(?:^|\s)(?:npm\s+(?:install|i|add)|pnpm\s+(?:install|i|add)|yarn\s+add)\b/;
 
 /**
+ * The package.json a successful shell install or uninstall REWROTE, or null. PURE.
+ *
+ * 🔴 WHY (2026-09-27, found while wiring phone plugins). `npm install <pkg>` edits package.json in the
+ * sandbox behind the model's back — no `write_file`, so the build's captured writes never hear of it.
+ * The final save scans the sandbox, which usually rescues it, but CAPTURED WRITES WIN THERE: a model
+ * that wrote package.json itself and then ran `npm install @capacitor/local-notifications@7.0.7` saved
+ * its OWN older package.json over the one npm wrote. The dependency then exists in the sandbox and
+ * nowhere else — a cold restore cannot install it, and the phone build, which keeps only the plugins
+ * package.json lists, ships an APK without the plugin. The dispatcher reads the named file back after
+ * such a command, the way it already does after `prisma format`.
+ *
+ * `cd <dir> && npm install x` names that directory's manifest. `npm ci` rewrites nothing (it installs
+ * FROM the lock), and a bare `npm install` changes no declaration, so neither is reported.
+ */
+export function manifestRewrittenBy(command: string): string | null {
+  if (typeof command !== 'string' || !command) return null;
+  let dir = '';
+  for (const segment of command.split(/\s*(?:&&|;)\s*/)) {
+    const cd = /^\s*cd\s+([^\s&;|]+)\s*$/.exec(segment);
+    if (cd) { dir = cd[1].replace(/^\.\/?/, '').replace(/\/+$/, ''); continue; }
+    const adds = INSTALL_SUBCOMMAND_RE.test(segment) && /(?:install|i|add)\s+(?:-[\w-]+\s+)*[@\w]/.test(segment);
+    const removes = /(?:^|\s)(?:npm\s+(?:uninstall|remove|rm|un)|pnpm\s+(?:remove|rm|uninstall)|yarn\s+remove)\s+[@\w]/.test(segment);
+    if (adds || removes) return dir ? `${dir}/package.json` : 'package.json';
+  }
+  return null;
+}
+
+/**
  * Pin BARE installs of known-volatile packages to their known-good range, in-place in a shell command.
  *
  * ROOT CAUSE this closes (EventHive/MelodyBox autopsies): the agent types `npm install prisma vue-router`

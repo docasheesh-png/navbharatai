@@ -10,7 +10,7 @@
 // route + UI are thin. Checks are deliberately CONSERVATIVE (regex on the HTML string, not a parser) so
 // a real issue is flagged but false positives are rare — a linter that cries wolf gets ignored.
 
-import { scanMarkup, hasAttr } from '../../AgentV3/jsxTags';
+import { scanMarkup, hasAttr, type ScannedTag } from '../../AgentV3/jsxTags';
 
 export type A11yViolationType = 'img-alt' | 'input-label' | 'control-name' | 'html-lang' | 'positive-tabindex';
 
@@ -62,28 +62,71 @@ export function imagesMissingAlt(code: string): [number, number] {
  * inputs. Returns [total, unlabelled]. Pure.
  */
 export function inputsMissingLabel(code: string): [number, number] {
-  const CONTROLS = new Set(['input', 'textarea', 'select']);
   let total = 0;
   let missing = 0;
   for (const t of scanMarkup(code)) {
-    // A COMPONENT is not an HTML control (autopsy 8a92e5ed / c847b523). `<Select label="Category" />`
-    // has a real, working label; judging it by the rules for HTML `<select>` is a false finding
-    // against anybody using a design system, and we cannot know a component's contract.
-    if (!t.isElement || !CONTROLS.has(t.name)) continue;
-    const typeMatch = /\btype\s*=\s*["']?([a-z]+)/i.exec(t.tag);
-    const type = typeMatch ? typeMatch[1].toLowerCase() : '';
-    if (['hidden', 'submit', 'button', 'reset', 'image'].includes(type)) continue;
+    const verdict = controlLabelVerdict(t);
+    if (verdict === 'not-a-control') continue;
     total++;
-    const labelled =
-      // A WRAPPING `<label>` names the control by its own text — the commonest React form shape
-      // there is, and the reason a correct golden scaffold was reported as having three unlabelled
-      // fields in autopsy 8a92e5ed.
-      t.insideLabel ||
-      hasAttr(t.tag, 'aria-label') || hasAttr(t.tag, 'aria-labelledby') ||
-      hasAttr(t.tag, 'id') || hasAttr(t.tag, 'title');
-    if (!labelled) missing++;
+    if (verdict === 'unlabelled') missing++;
   }
   return [total, missing];
+}
+
+const LABELLABLE_CONTROLS = new Set(['input', 'textarea', 'select']);
+
+/**
+ * THE ONE ANSWER to "does this form control need a label it does not have?" — shared by the linter
+ * above and the repair below, so the two can never disagree about which field is unlabelled.
+ */
+export function controlLabelVerdict(t: ScannedTag): 'not-a-control' | 'labelled' | 'unlabelled' {
+  // A COMPONENT is not an HTML control (autopsy 8a92e5ed / c847b523). `<Select label="Category" />`
+  // has a real, working label; judging it by the rules for HTML `<select>` is a false finding
+  // against anybody using a design system, and we cannot know a component's contract.
+  if (!t.isElement || !LABELLABLE_CONTROLS.has(t.name)) return 'not-a-control';
+  const typeMatch = /\btype\s*=\s*["']?([a-z]+)/i.exec(t.tag);
+  const type = typeMatch ? typeMatch[1].toLowerCase() : '';
+  if (['hidden', 'submit', 'button', 'reset', 'image'].includes(type)) return 'not-a-control';
+  const labelled =
+    // A WRAPPING `<label>` names the control by its own text — the commonest React form shape
+    // there is, and the reason a correct golden scaffold was reported as having three unlabelled
+    // fields in autopsy 8a92e5ed.
+    t.insideLabel ||
+    hasAttr(t.tag, 'aria-label') || hasAttr(t.tag, 'aria-labelledby') ||
+    hasAttr(t.tag, 'id') || hasAttr(t.tag, 'title');
+  return labelled ? 'labelled' : 'unlabelled';
+}
+
+/**
+ * REPAIR THE ONE SHAPE THAT NEEDS NO GUESS: an unlabelled field whose own placeholder says what it is.
+ *
+ * 🔴 WHY (autopsy 6bae5835, 2026-09-27). One `<input>` in a working app shipped without a label, found
+ * only after the app had been proven green, when Green Freeze forbids a repair. A write-time note now
+ * reaches every write tool; this is the last line of defence, and it is deterministic, costs no model
+ * call, and adds nothing the author did not already write: `placeholder="Search tasks"` becomes
+ * `aria-label="Search tasks" placeholder="Search tasks"` — the name a screen reader should announce.
+ *
+ * Only a LITERAL placeholder is used (`placeholder={t('x')}` is left alone — its text is not known here),
+ * only an HTML element (never a component), and only a control this linter calls unlabelled. PURE.
+ */
+export function labelFieldsFromPlaceholder(code: string): { code: string; repaired: number } {
+  const edits: Array<{ at: number; insert: string }> = [];
+  for (const t of scanMarkup(code)) {
+    if (controlLabelVerdict(t) !== 'unlabelled') continue;
+    const ph = /\splaceholder\s*=\s*("([^"{}]+)"|'([^'{}]+)')/.exec(t.tag);
+    if (!ph) continue;
+    const text = (ph[2] ?? ph[3] ?? '').trim();
+    if (!text) continue;
+    const quote = ph[1][0];
+    // Insert straight after the element name, so the rest of the tag is untouched byte for byte.
+    const at = t.index + 1 + t.rawName.length;
+    if (code.slice(t.index + 1, at) !== t.rawName) continue;
+    edits.push({ at, insert: ` aria-label=${quote}${text}${quote}` });
+  }
+  if (!edits.length) return { code, repaired: 0 };
+  let out = code;
+  for (const e of edits.sort((a, b) => b.at - a.at)) out = out.slice(0, e.at) + e.insert + out.slice(e.at);
+  return { code: out, repaired: edits.length };
 }
 
 /**

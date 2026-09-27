@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { normalizeReferralCode, CODE_ALPHABET, CODE_LENGTH, mintReferralCode } from '../src/server/lib/referralCode';
 import { normalizeReferralCodeClient } from '../src/lib/referralCodeClient';
-import { ALL_STEPS } from '../src/server/lib/referralRewards';
-import { STEP_ORDER } from '../src/lib/referralStepNames';
+import { ALL_STEPS, WEB_ELIGIBLE_STEPS } from '../src/server/lib/referralRewards';
+import { STEP_ORDER, WEB_STEPS } from '../src/lib/referralStepNames';
 
 /**
  * TWO HAND-KEPT COPIES THAT MUST NOT DRIFT.
@@ -22,8 +22,12 @@ import { STEP_ORDER } from '../src/lib/referralStepNames';
  */
 
 describe('the step names agree', () => {
-  it('are the same four steps, in the same order', () => {
+  it('are the same five steps, in the same order', () => {
     expect([...STEP_ORDER]).toEqual([...ALL_STEPS]);
+  });
+
+  it('agree on which steps the website pays — the client falls back to exactly these', () => {
+    expect([...WEB_STEPS]).toEqual([...WEB_ELIGIBLE_STEPS]);
   });
 });
 

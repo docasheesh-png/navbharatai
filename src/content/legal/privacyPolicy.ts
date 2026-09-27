@@ -103,7 +103,7 @@ We do not buy data about you from data brokers.
 
 ### 3.2 Device check for the referral bonus (Android app only)
 
-If you claim one of the free-credit bonuses in our Android app — for verifying your email, your mobile number, connecting GitHub, or applying a friend's referral code — the app checks, at that moment, that it is running on a genuine Android device.
+If you claim one of the free-credit bonuses in our Android app — for signing up, logging in with a verified email, verifying your mobile number, connecting GitHub, or applying a friend's referral code — the app checks, at that moment, that it is running on a genuine Android device. If the check cannot be completed, the signup, login and mobile bonuses are paid under the same rules as on our website, and the referral-code and GitHub bonuses wait until it can.
 
 **What that involves, precisely:**
 

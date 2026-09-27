@@ -2203,6 +2203,16 @@ the code (it is actually read somewhere) on 2026-07-11.
   `navbharatai.com` and `www.navbharatai.com` (no localhost) → Firebase console → App Check → register the
   web app with that key → set `APP_CHECK_SITE_KEY` in Cloud Run. The privacy policy (§3.3, §7) already
   discloses reCAPTCHA; `tests/appCheck.test.ts` holds that and the shared route list.
+- **🔒 TEN FREE MESSAGES A DAY WITHOUT SIGNING IN, ALL SURFACES TOGETHER (admin 2026-09-27, built the same day).**
+  `GUEST_DAILY_MESSAGES` (NOT set; code default **10**; `0` = sign-in from the first message; `off` = no limit;
+  unreadable ⇒ 10, never unlimited) and `GUEST_DAILY_IP_CAP` (NOT set; default **100**, never below the per-device
+  limit). Read by `src/server/lib/guestDailyQuota.ts`, mounted on every AI route a signed-out visitor can reach
+  (free chat, Repo Analyst, App Review, Security Scan, AI Debugger, App Scan, design tools); the census in
+  `tests/tenFreeMessagesThenSignIn.test.ts` fails when a new anonymous AI route lacks it. The visitor is the random
+  device id the app sends (`x-nb-guest`, `src/lib/guestId.ts`), because Indian mobile networks share one IP among
+  many phones; the IP (the LAST `X-Forwarded-For` entry) is only the backstop. The day is India's. Refusal is
+  **403 `guest_limit_reached`** — never 401, which the free-chat client reads as an expired session.
+  ⚠️ **The old browser counter (`FREE_DAILY_MESSAGES`) is gone on purpose; do not reintroduce a client-side count.**
 - **Visitor analytics for published apps (shipped 2026-09-10, ROADMAP §13 item 1.1):**
   `AGENTV3_SITE_ANALYTICS` (kill switch — **default ON**; `off` stops the beacon being stamped at
   publish and the hit route recording; apps already published keep their script until republished,

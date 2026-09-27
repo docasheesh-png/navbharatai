@@ -3,6 +3,7 @@ import { buildRateLimiter, enforceNotBanned } from '../lib/authMiddleware';
 import { runRepoAnalystChat, type AnalystTurn } from '../repoAnalyst/analyst';
 import { runRepoImprovementGen } from '../repoAnalyst/generate';
 import { sendSafeError } from '../lib/httpError';
+import { guestDailyQuota } from '../lib/guestDailyQuota';
 
 /**
  * GitHub Repo Analyst & Improver route.
@@ -13,7 +14,7 @@ import { sendSafeError } from '../lib/httpError';
  *    repos; the feature works fully on public repos without one.
  */
 export function registerRepoAnalystRoutes(app: Express): void {
-  app.post('/api/repo-analyst/chat', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+  app.post('/api/repo-analyst/chat', buildRateLimiter(), enforceNotBanned(), guestDailyQuota('repo-analyst'), async (req: Request, res: Response) => {
     const { message, history } = req.body || {};
     if (typeof message !== 'string' || !message.trim()) {
       res.status(400).json({ error: 'message is required.' });
@@ -34,7 +35,7 @@ export function registerRepoAnalystRoutes(app: Express): void {
   });
 
   // "Improver" — generate concrete improvement files for the referenced repo.
-  app.post('/api/repo-analyst/generate', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
+  app.post('/api/repo-analyst/generate', buildRateLimiter(), enforceNotBanned(), guestDailyQuota('repo-analyst'), async (req: Request, res: Response) => {
     const { message, history } = req.body || {};
     const token = req.headers.authorization?.split(' ')[1];
     const turns: AnalystTurn[] = Array.isArray(history)

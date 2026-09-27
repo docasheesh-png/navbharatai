@@ -83377,3 +83377,61 @@ Tests (all reversion-proven by removing each fix and watching its test fail):
   call itself.
 - Why the dev server's log was silent for that long is not established. A git message ("On branch
   master") appears in that output, and its source was not traced here.
+
+## 2026-09-27 — Ten free messages a day without signing in, all surfaces together (admin-mandated)
+
+Admin, verbatim: *"without login only 10 messages per day! iske bad login compulsory!! 11th message login ke bad
+ya next day! sabhi mila kar!!"*
+
+**What was there before, measured rather than assumed:**
+- The only "10 a day" rule was a **browser localStorage counter** (`usePaymentEngine.ts`). It counted free chat
+  alone, and clearing site data, a private window or a second browser reset it.
+- **Free chat never sent the signed-in user's token**, so the server treated every free-chat caller as anonymous.
+  A server-side limit added without fixing that would have limited signed-in users too.
+- Anonymous callers could reach free chat, Repo Analyst (which runs on the system keys up to Claude), App Review,
+  the Security Scan (no rate limiter at all), the AI Debugger, App Scan and the design tools. They were bounded only
+  by per-minute/per-hour IP limiters.
+
+**What it is now:**
+- **`src/server/lib/guestDailyQuota.ts`** is ONE daily budget for a signed-out visitor.
+  - 10 messages (`GUEST_DAILY_MESSAGES`), counted TOGETHER across every surface above.
+  - The day is India's calendar day, so the eleventh goes through after midnight IST.
+  - A verified account is never counted.
+  - The over-limit reply is **403 `guest_limit_reached`**, not 401: the free-chat client reads a 401 as an
+    expired session and signs the user out.
+  - Fail-open on a store error, like every limiter here.
+- **Who "one visitor" is:**
+  - A random **device id** the app mints (`src/lib/guestId.ts`), sent as `x-nb-guest` only while signed out,
+    stored server-side only as a hash.
+  - An IP alone would lock out every stranger on the same Indian mobile address (CGNAT).
+  - The IP is kept as a **backstop** of 100/day (`GUEST_DAILY_IP_CAP`). It is read from the LAST
+    `X-Forwarded-For` entry (the one Cloud Run appends), not `req.ip`, which under `trust proxy` is whatever the
+    caller claimed. A script minting a fresh id per message stops there.
+  - A request with no device id is held to the backstop alone. That is deliberate: app builds from before this
+    change do not send it, and holding them to ten would reintroduce the CGNAT lockout.
+- **The client:**
+  - `authHeader` / `authJsonHeaders` / `authedHeaders` carry the token, or the guest id when signed out.
+  - Free chat, Bot Build Help, Live Collaboration, Repo Analyst, Security Scan, AI Debugger, App Scan, App Review
+    and the palette tool now send it.
+  - On the refusal, every one of them opens the existing sign-in screen (`navbharat:navigate {signIn:'phone'}`) and
+    shows the sentence. Free chat shows it as a reply, not as an outage.
+  - Professionals maps it to its existing login card.
+- The localStorage gate (`isFreeLimitReached`, `FREE_DAILY_MESSAGES`) is removed. The server is the one count.
+- The Privacy Policy §11 discloses the guest identifier. `AppKnowledgeBase` has `guest_free_messages`.
+
+**Untouched on purpose:**
+- Pro builds, image generation, screenshot→code, voice, Professionals and Doctor AI already require an account
+  from the first message.
+- The published-app AI gateway serves other people's visitors on the owner's wallet.
+
+Tests:
+- `tests/tenFreeMessagesThenSignIn.test.ts` (30), reversion-proven on the device limit, the signed-in skip, the
+  route census and the free-chat token. It includes the census that fails when an anonymous AI route lacks the
+  budget, and the CORS preflight check for the native app.
+- `tests/authHeaders.test.ts` was updated to the new contract: signed out still sends no token, only the guest id.
+
+**Still open:**
+- Anonymous identity is weak by nature: clearing site data mints a new device id. The backstop bounds that; only an
+  account removes it.
+- Existing per-IP limiters still read `req.ip` (the spoofable first forwarded entry). That is a separate, older
+  finding that this change does not widen.

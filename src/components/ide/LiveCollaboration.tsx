@@ -5,6 +5,8 @@ import { doc, setDoc, getDoc, deleteDoc, onSnapshot, collection, addDoc, query, 
 import { lineOfOffset, offsetRangeOfLine, buildAnnotation, sortAnnotations, type CommentAnnotation } from '../../lib/collabAnnotations';
 import { isNativeApp } from '../../lib/mobileNative';
 import { medicalFeaturesHidden } from '../../lib/playCompliance';
+import { authJsonHeaders } from '../../lib/authHeaders';
+import { guestLimitReached } from '../../lib/guestId';
 
 /** A shared in-room AI message — every member sees the same AI thread (Phase 1a). */
 interface AiMessage {
@@ -218,13 +220,15 @@ export function LiveCollaboration({ onCodeUpdate, userId, userName, userEmail }:
       const res = await fetch('/api/chat/navbharat', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          ...(await authJsonHeaders()),
           'x-user-id': myId,
           'x-user-email': userEmail || '',
           'x-user-name': myName,
         },
         body: JSON.stringify({ message: text, history, agent: 'navbharatai', stream: false }),
       });
+      const guestLimit = await guestLimitReached(res);
+      if (guestLimit) throw new Error(guestLimit);
       const data = await res.json().catch(() => null);
       const reply = data && typeof data.reply === 'string' ? data.reply.trim() : '';
       if (!res.ok || !reply) {

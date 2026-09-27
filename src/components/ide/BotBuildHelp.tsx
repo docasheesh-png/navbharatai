@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Bot, X, ChevronDown, Send, ImagePlus, User } from 'lucide-react';
+import { authJsonHeaders } from '../../lib/authHeaders';
+import { guestLimitReached } from '../../lib/guestId';
 
 // Bot-Builder Help widget (admin 2026-07-23): a floating helper that IS NavBharatAI Free (same /api/chat/
 // navbharatai brain — vision-capable, so a non-technical user can send SCREENSHOTS and get 1-by-1 steps),
@@ -86,9 +88,15 @@ export const BotBuildHelp: React.FC<Props> = ({ mode, onModeChange }) => {
       };
       const res = await fetch('/api/chat/navbharatai', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authJsonHeaders(),
         body: JSON.stringify(body),
       });
+      const guestLimit = await guestLimitReached(res);
+      if (guestLimit) {
+        setMessages(m => [...m, { sender: 'ai', text: guestLimit }]);
+        setBusy(false);
+        return;
+      }
       const data = (await res.json().catch(() => ({}))) as { reply?: string };
       setMessages(m => [...m, { sender: 'ai', text: data.reply || "Sorry, I couldn't respond just now — please try again in a moment." }]);
     } catch {

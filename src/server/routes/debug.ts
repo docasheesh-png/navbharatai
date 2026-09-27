@@ -7,6 +7,7 @@ import { gateToolAction, burnToolAction, chargeToolAction } from '../tools/toolG
 import {
   buildDebugSystemPrompt, buildDebugUserPrompt, parseDebugResponse, isValidDebugRequest,
 } from '../lib/debugAnalysis';
+import { guestDailyQuota } from '../lib/guestDailyQuota';
 
 /**
  * AI Debugger — the REAL /api/debug route (admin autopsy 2026-07-20).
@@ -30,7 +31,7 @@ const schema = vobject({
 });
 
 export function registerDebugRoutes(app: Express): void {
-  app.post('/api/debug', workspaceRateLimiter(), validateBody(schema), inAiSpendZone(async (req: Request, res: Response) => {
+  app.post('/api/debug', workspaceRateLimiter(), guestDailyQuota('debug'), validateBody(schema), inAiSpendZone(async (req: Request, res: Response) => {
     if (!isValidDebugRequest(req.body)) {
       res.status(400).json({ error: 'A non-empty "error" text is required.' });
       return;

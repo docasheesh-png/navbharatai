@@ -6,6 +6,8 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 import { AppScanPanel } from './AppScanPanel';
 import { AddCreditNotice } from '../common/AddCreditNotice';
 import { walletEmptyRefusalMessage } from '../../lib/walletEmptyRefusal';
+import { authJsonHeaders } from '../../lib/authHeaders';
+import { guestLimitReached } from '../../lib/guestId';
 
 interface AIDebuggerProps {
   files?: Record<string, string>;
@@ -124,13 +126,15 @@ export const AIDebugger: React.FC<AIDebuggerProps> = ({ files, onAutoFixInV5 }) 
     try {
       const res = await fetch('/api/debug', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authJsonHeaders(),
         body: JSON.stringify({
           error: errorText,
           code: codeContext,
           errorType: activeTab,
         }),
       });
+      const guestLimit = await guestLimitReached(res);
+      if (guestLimit) throw new Error(guestLimit);
       const data = await res.json().catch(() => null);
       // An empty wallet is a PRICE, not a fault. It must be read BEFORE the generic throw, or the
       // catch turns a bill into a red error beside a **Try again** that the same gate will refuse.

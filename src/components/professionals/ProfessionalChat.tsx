@@ -243,7 +243,8 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
       // Professional Pass gate: show the paywall / login prompt instead of a raw error bubble.
       if (data?.code === 'wallet_empty') { setWalletFreeUsedUp(data?.freeUsedUp === true); setPaywall('wallet'); refreshPass(); return; }
       if (res.status === 402 || data?.code === 'professional_paywall') { setPaywall('paywall'); refreshPass(); return; }
-      if (res.status === 401 || data?.code === 'login_required') { setPaywall('login'); return; }
+      // `guest_limit_reached`: a signed-out visitor's shared daily messages are used up (guestDailyQuota.ts).
+      if (res.status === 401 || data?.code === 'login_required' || data?.code === 'guest_limit_reached') { setPaywall('login'); return; }
       if (!res.ok) throw new Error(data?.error || 'Request failed.');
       setMessages((m) => [...m, { role: 'assistant', content: data.reply || '(no reply)' }]);
       refreshPass(); // update the "X/limit free today" counter

@@ -3,6 +3,8 @@ import { Code, Bug, Shield, Zap, AlertCircle, CheckCircle2, ChevronRight, Chevro
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import type { ChatSession } from '../../types';
+import { authJsonHeaders } from '../../lib/authHeaders';
+import { guestLimitReached } from '../../lib/guestId';
 
 type Severity = 'critical' | 'warning' | 'info' | 'suggestion';
 type Category = 'bugs' | 'performance' | 'security' | 'bestpractice' | 'accessibility';
@@ -472,9 +474,11 @@ export function AICodeReview({ generatedCode, onCodeUpdate, sessions, githubToke
     try {
       const rr = await fetch('/api/app-review/review', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authJsonHeaders(),
         body: JSON.stringify({ files }),
       });
+      const guestLimit = await guestLimitReached(rr);
+      if (guestLimit) throw new Error(guestLimit);
       const rd = await rr.json().catch(() => null);
       if (!rr.ok || !rd) {
         throw new Error((rd && rd.error) || 'Code review could not complete. Please try again.');

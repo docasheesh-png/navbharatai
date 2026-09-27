@@ -76,6 +76,28 @@ export function workspaceIdFor(uid: string | null | undefined, sessionId: string
   return prefix ? `${prefix}${sessionId}` : null;
 }
 
+/**
+ * The separator every DERIVED key in the workspace file store carries: `<ws>::green` (GreenGuard's
+ * last-known-good snapshot), `<ws>::attempt` (the rolled-back attempt), `<ws>::greenmeta` (the route
+ * fingerprint). Named once so a listing never has to know each suffix.
+ */
+export const DERIVED_KEY_SEPARATOR = '::';
+
+/**
+ * Is this document key an APP — a workspace a user built — rather than one of the derived records
+ * stored beside it under the same `agentv3-<uid>-` prefix? Pure.
+ *
+ * 🔴 WHY THIS IS ONE QUESTION AND NOT A LIST OF SUFFIXES (admin 2026-09-27, Security → Built apps
+ * showed `…::greenmeta` as an app). The listings asked `isGreenSnapshotKey` — `::green` only — so the
+ * two siblings written into the same collection later (`::attempt`, `::greenmeta`) reached the
+ * admin's moderation list AND the user's own Full-App Debugger as apps. A session id can never hold a
+ * colon (every rule that validates one is `[A-Za-z0-9_-]`), so the separator itself is the answer and
+ * a fourth derived key is excluded by construction.
+ */
+export function isAppWorkspaceKey(v: unknown): v is string {
+  return isWorkspaceId(v) && !v.includes(DERIVED_KEY_SEPARATOR);
+}
+
 /** Is this string shaped like a Pro v5 workspace id at all? Pure. */
 export function isWorkspaceId(v: unknown): v is string {
   return typeof v === 'string' && v.startsWith(WORKSPACE_PREFIX) && v.length > WORKSPACE_PREFIX.length;

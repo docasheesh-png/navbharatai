@@ -375,3 +375,33 @@ export class FirestoreConversationStore implements ConversationStore {
     return out;
   }
 }
+
+/**
+ * WHAT EACH APP IS CALLED, for a SET of workspaces in ONE `getAll` (admin Security → Built apps,
+ * 2026-09-27: "admin ko dikhna chahiye kon kya bana raha hai"). The conversation id IS the workspace id
+ * (`conversationIdForWorkspace`), so the main doc of each workspace's chat carries the name the user
+ * chose (`appName`) and the title derived from their first prompt (`title`). Only those two fields are
+ * read (a field mask), never the transcript.
+ *
+ * A workspace with no conversation doc (a duplicated app keyed by its own session id, a deleted chat)
+ * is simply ABSENT from the map — "not recorded", which the caller must not turn into a made-up name.
+ * Never throws.
+ */
+export async function readConversationNamesMany(
+  workspaceIds: Array<string | null | undefined>,
+): Promise<Map<string, { appName: string | null; title: string | null }>> {
+  const out = new Map<string, { appName: string | null; title: string | null }>();
+  const ids = [...new Set(workspaceIds.filter((id): id is string => typeof id === 'string' && id.length > 0 && !id.includes('/')))].slice(0, 100);
+  if (ids.length === 0) return out;
+  try {
+    const db = getServerDb();
+    if (!db) return out;
+    const snaps = await db.getAll(...ids.map((id) => db.collection(COLLECTION).doc(id)), { fieldMask: ['appName', 'title'] });
+    for (const s of snaps) {
+      if (!s.exists) continue;
+      const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+      out.set(s.id, { appName: str(s.get('appName')), title: str(s.get('title')) });
+    }
+  } catch { /* best-effort — a short map means "name not recorded", never a thrown page */ }
+  return out;
+}

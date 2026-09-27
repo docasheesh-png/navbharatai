@@ -4301,6 +4301,12 @@ and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; 
   `kimi-k2.7-code` ($0.95/$4.00) instead of `glm-4.7-flashx` ($0.07/$0.40) — ~13× the input price for
   THOSE builds. The bet is that a cheap rung which fails is paid twice, once in the wasted call and
   once in the heal. **Watch: the share of builds routed complex, and whether their heal count drops.**
+- 🧩 **A TESTED TEMPLATE OPENS ON THE FIRST RUNG (admin accepted 2026-09-27, autopsy 15151196).** A
+  golden scaffold is seeded only for a starter chip's prompt VERBATIM, so the template already is the
+  request and the job is verify-and-polish. The memory-match chip still scored 63 and opened on KIMI for
+  21 calls that changed one line. `scaffoldedComplexityDecision` makes it `simple` (source `scaffold`)
+  with no model call; the ladder still climbs if the first rung fails. No flag of its own —
+  `AGENTV3_GOLDEN_SCAFFOLD=off` turns the scaffold, and so this, off.
 - 🗺️ **THE PLANNERS ARE THE ONE EXCEPTION (admin chose "A", 2026-09-26, autopsy 7d79254b).** The
   roadmap, blueprint and project-mode planners are plans, so they climb `planLadder` through
   `makePlanTextRunner` (#3334) instead of the complex build chain — which had cost a large app 76 s of

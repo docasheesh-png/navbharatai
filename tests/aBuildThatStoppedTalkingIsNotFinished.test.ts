@@ -159,7 +159,7 @@ describe('3 · the compiler outranks the reviewer\'s inference', () => {
 
   it('the route checks the review against the gate BEFORE narrating, offering or repairing it', () => {
     const src = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    const at = src.indexOf('refuteReviewByEvidence(review, { typecheck: gateEvidence.typecheck })');
+    const at = src.indexOf('refuteReviewByEvidence(review, { typecheck: gateEvidence.typecheck, stylesheets })');
     expect(at).toBeGreaterThan(0);
     expect(at).toBeLessThan(src.indexOf("const reviewText = review ? formatReview(review) : '';"));
     expect(at).toBeLessThan(src.indexOf("const criticals = (review?.issues ?? []).filter((i) => i.severity === 'critical')"));

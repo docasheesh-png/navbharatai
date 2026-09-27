@@ -82647,6 +82647,71 @@ writes one ledger row "Welcome credit: ₹50 added by NavBharatAI", and audits `
 Server + admin panel only: live on the website admin panel on deploy, no .aab needed. Test-locked in
 `tests/adminWelcomeGift.test.ts`.
 
+---
+
+## 2026-09-27 — Autopsy `6bae5835` ("Jarwis", weak tier, 5.9 min, ₹104.56) — four root-cause fixes
+
+The prompt: *"an AI assistant named Jarwis that manages everything on my phone, whatever I say, and works
+well on the lock screen too"*. A clean build by every gate (rendered, typechecked, a real journey passed,
+production build OK, runtime verified), and still five things worth mining.
+
+**Ledger.** ✅ self-healed 1 (5 write-time type errors on the Web Speech API types, fixed by the model
+at write time). 🔀 workaround 0. ⏭️ skipped 1 (our own E2E scaffold was written without its runner, so
+the release gate reported "this project HAS a test suite, but it could not be run here" about a suite we
+added). ❌ shipped imperfect 2 (one input with no label in `TasksPanel.tsx`; a summary that promised a
+"lock-screen-like welcome screen" and never said a web app cannot manage the phone or run on the lock
+screen). 🥵 struggle 2 (the model never started a dev server, so the app was first seen at ~303 s, after
+generation had finished; the saved preview copy was declared STALE, which sends every later preview to
+a paid live machine).
+
+**Fixes (branch `claude/new-session-5z26qp`, each reversion-proven):**
+1. **The preview bridge's stripper was not the inverse of its injector.** Inject puts the tag straight
+   after `<head>`; strip removed the tag AND the newline after it — the USER's newline in every real Vite
+   `index.html`. So `identitySource` (the Study-Racer fix, 2026-09-25) could never make the two hashes
+   meet, and the copy was stale on every ordinary app. Every fixture had `<head><title>` on one line.
+   `stripPreviewBridge` now removes a trailing break only when the tag stood on its own line.
+   `tests/theBridgeComesOffTheWayItWentOn.test.ts`.
+2. **Device powers a web app does not have** (`AgentV3/devicePowers.ts`): the sibling of
+   `NO_INVENTED_PEOPLE_RULE` (f15a9bcc), which fixed one instance of the class. `DEVICE_POWERS_RULE` in the
+   stable system prompt, plus a precision-first check on the USER's prompt that appends one honest line to
+   the summary when the model stayed silent (`DEVICE_POWER_NOT_POSSIBLE`, process-only). It never offers
+   the phone-app build as the answer — packaging does not grant those powers.
+   `tests/aWebAppSaysWhatItCannotDo.test.ts` (13-prompt precision corpus).
+3. **Every write door gets the same write-time steering.** The label/spacing note (31dc61fd) and the
+   test-import check reached `write_file` only; `edit_file`, `write_files_batch` and `replace_symbol` got
+   the typecheck alone. One helper, `writeSteeringNotes`, now serves all four.
+   `tests/everyWriteDoorGetsTheSameSteering.test.ts`; two source guards widened.
+4. **The first-render clock reads the proof, not one pass.** `TIME_TO_FIRST_RENDER` was written only by
+   the in-build snapshot path (323 s here) while the render rescue proved the app at 303 s.
+   `tests/theFirstRenderClockReadsTheProof.test.ts`.
+
+**Still open (rule 6):** whether the write-time label note FIRED on `TasksPanel.tsx` and was ignored
+cannot be told from the report — nothing counts the notes issued. And our own E2E scaffold still lands
+without `@playwright/test`, which is what turns "we added a suite" into "the project has a suite we could
+not run" on the release gate.
+
+## 2026-09-27 — Phone features built for real (admin: "jarwis jaisa app … navbharatai banayega … yeh sab chahiye") + the three accepted follow-ups
+
+**1. Native capability registry** (`src/server/AgentV3/nativeCapabilities.ts`). One table, read in three places:
+- **Builder:** `nativeCapabilityBrief` hands it the exact plugin and exact version, for only the features the request asks for. The brief is injected for JS web frameworks, and the web preview must show a "works in the phone app" note, never a dead button.
+- **Summary:** `deviceSummaryNotice` reads the app's REAL `package.json` from the sandbox. It says which features need the phone app and how to get it (More → Download APK, connect GitHub), and what no app can do (lock screen, reading SMS/call history, controlling other apps or settings, listening while closed). Each half stands down if the model's own summary already said it.
+- **Phone build:** `alignNativePlugins` puts every plugin on the app's Capacitor major. A generated Node step, in all three workflows, adds the Android permissions and iOS usage strings the app's own plugins need. It reads `package.json` on the runner, so a repaired workflow in an old repo applies it too.
+
+🔒 **Every version was read from npm on 2026-09-27.** Most plugins' latest releases need Capacitor ≥ 8, while the phone build defaults to 7; each row pins the last release that accepts 7. `REGISTRY_CAPACITOR_MAJOR` is test-locked to `DEFAULT_CAPACITOR_MAJOR`, so moving the default fails CI until the table is re-verified.
+
+⚠️ **Permissions came from each package's own manifest, README and native source.** Play-restricted permissions are test-locked out: READ_SMS, READ_CALL_LOG, READ_MEDIA_*, exact alarms, background location, Accessibility, QUERY_ALL_PACKAGES. Push notifications are left out because they need the user's own Firebase project file.
+
+**2. What npm wrote is what gets saved.** `manifestRewrittenBy` + ToolDispatcher: after a successful shell install or uninstall, the rewritten `package.json` is read back and recorded. Previously, a `package.json` the model had written earlier won at the final save and dropped the new dependency. The phone build keeps only plugins that `package.json` lists, so the APK would have shipped without the plugin.
+
+**3. Our starter test suite is not the project's.** The gate and the report now say the Playwright suite NavBharatAI adds is a starter for the user's own CI (`starterSuiteOnly`, `testSuiteIsOurStarter`). This changes wording only.
+⚠️ **I had recommended RUNNING it, pinned to the sandbox's Playwright 1.49.1, and the admin accepted. I reversed that after reading the spec.** It fails on ANY console error, including dev-server noise the runtime check filters, and this exact suite has produced false "tests fail" verdicts three times. Running it would also put the vaccine's repair budget onto working apps. **OPEN:** run it once the spec uses the platform's own actionable-error filter.
+
+**4. Labels.** `labelFieldsFromPlaceholder` (deterministic, before the lint and the green latch, only files this build wrote; kill switch `AGENTV3_LABEL_REPAIR=off`) shares one verdict with the linter (`controlLabelVerdict`). `WRITE_TIME_QUALITY` joins the write-time notes (now counted on the object every lane shares) with what is still flagged at the end, to separate "noted and ignored" from "never noted".
+
+**NOT done, said plainly:**
+- Always-on "Hey Jarwis" listening while the app is closed is still not supported. It needs a foreground service and a Play declaration.
+- No real phone build with these plugins has been run from this session; the first real APK is the proof.
+- iOS usage strings are applied, but no iOS build has been run with them yet.
 ## 2026-09-27 — Admin: ₹150 to every new user in one press; the ₹50 per-user button is retired
 
 The admin's instructions, in order:
@@ -82755,3 +82820,9 @@ Both are reversion-proven.
   call.
 - **Why `react` alone failed on the mirror rung** is not visible in the report. The loader now makes that
   failure harmless rather than explained.
+## 2026-09-27 — The update banner was painted UNDER the header (admin: "update notification ki position theek nahi hai, upar se crop ho jata hai")
+- **Root cause:** `UpdateBanner` was `position: fixed` at `--nb-safe-top + 8px` with `zIndex: 60`, in the same strip as the header (`TopNav`, `z-[100]`). The header painted over it, hiding the message's first line and the top of the Update button. Reproduced in a 412×915 render before the change.
+- **Fix:** the banner is now the first row of the app shell (`flexShrink: 0`, in the flow). It sits inside the root's safe-area padding and pushes the header down, so there is no stacking contest and no inset of its own to get wrong. The shell's content is `flex-1 min-h-0`, so the height comes out of the page, never the bottom bar.
+- **Siblings hunted:** every other fixed top overlay (`OfflineBanner`, `TestingNotice`, `.nb-float-top`) is either below the header or above it in z-order. No other instance.
+- **Test:** `tests/appUpdate.test.ts` — the banner is never positioned, never re-derives the inset, and stays before `<TopNav` inside the padded root. Reversion-proven.
+- ⚠️ **Reaches phones only through a fresh `.aab`** (bundled mode). The banner exists only in the installed app.

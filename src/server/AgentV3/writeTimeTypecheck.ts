@@ -166,6 +166,12 @@ export class WriteTypecheckQueue<R> {
 }
 
 export interface WriteTypecheckStats {
+  /**
+   * Files that were handed a write-time label/design note (writeTimeQualityCheck.ts), across every lane
+   * that shares this object. The end-of-build lint joins it against what is STILL flagged, so a report
+   * can say "noted and ignored" apart from "never noted" (autopsy 6bae5835 — it could not).
+   */
+  qualityNotedFiles: string[];
   /** Compiles actually run at write time. */
   runs: number;
   /** Runs that found no error anywhere. */
@@ -235,7 +241,7 @@ export function emptyWriteTypecheckStats(): WriteTypecheckStats {
   return {
     runs: 0, cleanRuns: 0, ownErrorsSurfaced: 0, elapsedMs: 0, timeouts: 0,
     skipped: 0, skippedNotTs: 0, skippedNoTsconfig: 0, probeFailures: 0,
-    compiledUnprobed: 0, projectVerdict: null, disabledReason: null,
+    compiledUnprobed: 0, projectVerdict: null, disabledReason: null, qualityNotedFiles: [],
   };
 }
 
@@ -397,4 +403,18 @@ export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean, 
       : '')
     + (s.disabledReason ? ` — then stood down: ${s.disabledReason}` : '')
     + '.';
+}
+
+/**
+ * The admin line joining the write-time notes with the end-of-build lint. PURE; '' when neither side
+ * has anything to say. `stillFlagged` = files the final lint still names for a label/design rule.
+ */
+export function writeQualitySummary(noted: readonly string[], stillFlagged: readonly string[]): string {
+  const n = new Set(noted);
+  const ignored = stillFlagged.filter((f) => n.has(f));
+  const neverNoted = stillFlagged.filter((f) => !n.has(f));
+  if (!n.size && !stillFlagged.length) return '';
+  const names = (xs: readonly string[]) => (xs.length ? ` (${xs.slice(0, 4).join(', ')}${xs.length > 4 ? ', …' : ''})` : '');
+  return `Write-time label/design notes went to ${n.size} file(s). At the end ${stillFlagged.length} file(s) were still flagged: `
+    + `${ignored.length} had been noted and not fixed${names(ignored)}, ${neverNoted.length} never got a note${names(neverNoted)}.`;
 }

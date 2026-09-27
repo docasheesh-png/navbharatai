@@ -11,6 +11,7 @@ import { rosterBriefing } from './AgentRegistry';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
 import { isBinaryAsset } from './fileClassification';
 import { EMOJI_RULE } from '../lib/responseEmoji';
+import { DEVICE_POWERS_RULE } from './devicePowers';
 import { LISTENING_PORTS_COMMAND } from './PortDiscovery';
 
 /**
@@ -450,6 +451,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     EMOJI_RULE,
     '',
     NO_INVENTED_PEOPLE_RULE,
+    DEVICE_POWERS_RULE,
     '',
     'Conversation:',
     '- Reply to anything the user says. If they greet you (e.g. "hello") or ask a',

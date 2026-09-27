@@ -83124,3 +83124,38 @@ Asked after #3350 whether games should join reminder/planner apps on the cheap o
 - Tests: `tests/aGameOpensOnTheCheapEngineWhereItCan.test.ts` (19), reversion-proven in both halves.
 - ⚠️ **What to watch:** heal count and first-render time on Weak/Normal game builds. If ordinary games start
   needing heals the cheap rung cannot give, the fix is to widen `HEAVY_GAME_SIGNAL`, not to revert.
+
+## 2026-09-27 — The free-credit steps, final plan; and why phones were not being recognised
+
+**Admin, verbatim:** *"sabhi pahle 50₹ do! (mobile + website) · fir refral code ke 100₹ (only mobile') · fir
+login par 50₹ (dono par) · fir mobile otp verification par 100₹ (dono par) · fir github connect (100₹ mobile
+only) — ab yeh final hai. isko fix karo! aur mobile recognition aapko 100% fix karna hai, abhi problem aa
+rahi hai!!"*
+
+**Correction of my own earlier line (same day):** I told the admin a website signup "has ₹0 and the referral
+ladder pays only in the Android app". Not quite: since 2026-09-26 the website paid mobile ₹100 + GitHub ₹100,
+but nothing at all until the mobile was verified by OTP — so a new website user did still start at ₹0.
+
+**The plan, shipped:** signup ₹50 (both) · referral code ₹100 (app) · login with a verified email ₹50 (both) ·
+mobile OTP ₹100 (both) · GitHub ₹100 (app). App ₹400 / website ₹200, which are exactly the two ceilings that
+already existed. `STEP_RUPEES` replaces the single `REFERRAL_STEP_TOKENS`, which is no longer read. The
+2026-09-26 OTP hold is now the lever `REFERRAL_WEB_HOLD_UNTIL_MOBILE` (default off). The referrer is never paid
+for a signup.
+
+**Mobile recognition — root cause:** the build live on Play is **134** (built 2026-09-25). Builds 117–136 send a
+classic Play Integrity request with **no nonce**, which the SDK refuses before it reaches Google, so every
+device check on every phone failed. They also did not list the `phone` sign-in provider, so every in-app
+mobile OTP failed as well. #3338 fixed both on 2026-09-26, and it is in builds **137 and 138. Neither is on
+Play.** The referral preflight compared the live release against 117 (when the plugin *shipped*, not when it
+*worked*), so it showed build 134 green. It now compares against `FIRST_RELEASE_THAT_ATTESTS = 137`.
+
+**What makes three of the five steps independent of the phone being recognised:**
+1. The sign-in settle that every client already calls, build 134 included (`/api/payment/reconcile`), now pays the day-one signup + login. It never pays the mobile there, because that would make a new app user "old" before the referral code they typed is applied.
+2. A failed device check falls back to the web rules for signup, login and mobile. This works on the server for any client that sends a token, and in the client for builds from this change onward.
+3. The phone retries a transient Play Integrity failure (-3/-8/-9/-12/-17/-100) twice before reporting it.
+
+**Tests:** `tests/aPhoneWeCannotRecogniseStillEarns.test.ts`, plus the new-plan tests in `referralRewards`, `referralRoutes` (59), `giftPolicy`, `referralPreflight` and the checklist suites. Reversion-proven: removing any one of the three fixes fails its test.
+
+**Still open — only the admin can do these:**
+- Roll out build 137/138 (or a fresh `.aab`) on Play, then set `ANDROID_LATEST_VERSION_CODE`. Until then, users on 134 earn signup, login and web-rule mobile, but not the referral code, GitHub or an in-app mobile OTP.
+- The website ₹50 + ₹50 can be farmed with scripted accounts. The admin accepted that. The lever is ready if it happens.

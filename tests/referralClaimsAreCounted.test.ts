@@ -138,7 +138,8 @@ describe('the wiring — every way a claim can end is counted', () => {
   });
 
   it('the website claim is counted, and a missing mobile is told apart from nothing-new', () => {
-    expect(route).toMatch(/recordClaimOutcome\(userId, 'web',[\s\S]{0,120}'held-no-mobile'/);
+    // One call serves the website and the unrecognised-phone fallback, so the surface is a variable.
+    expect(route).toMatch(/recordClaimOutcome\(userId, surface,[\s\S]{0,160}'held-no-mobile'/);
   });
 
   it('🔒 counting is never awaited on the money path', () => {

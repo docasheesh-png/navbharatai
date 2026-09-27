@@ -1,18 +1,36 @@
 // THE REFERRAL REWARD LEDGER — who is owed what, and why it can only ever be paid once.
 //
-// ── THE PLAN THE ADMIN APPROVED (2026-09-15) ─────────────────────────────────────────────────────
-// The welcome gift stops being one lump handed over at sign-up and becomes FOUR earned steps, each
-// behind a thing that is genuinely hard to fake:
+// ── THE PLAN THE ADMIN APPROVED (2026-09-27, "ab yeh final hai") ──────────────────────────────────
 //
-//   B (the new user)  referral code ₹100 · email ₹100 · mobile ₹100 · github ₹100   =  ₹400
-//   A (the referrer)  ₹25 for each of B's THREE verifications                       =  ₹75
-//   ─────────────────────────────────────────────────────────────────────────────────────
-//   One referred user costs                                                            ₹475
+//   step            what earns it                         app (Android)   website
+//   signup          having a real account                 ₹50             ₹50
+//   referral-code   a friend's code applied               ₹100            —
+//   email (login)   signing in with a verified email      ₹50             ₹50
+//   mobile          a mobile number verified by OTP       ₹100            ₹100
+//   github          a GitHub account connected            ₹100            —
+//   ──────────────────────────────────────────────────────────────────────────────────────────────
+//   the most one account can earn                         ₹400            ₹200
 //
-// It replaced a flat ₹500 welcome gift, so it is CHEAPER per referred user and cheaper still for an
-// organic one (₹300 — no code, so no code step). The point was never to spend more on growth; it was
-// to make every rupee land behind a verified person. Since 2026-09-26 it is the ONLY welcome credit:
-// every other grant was deleted from the code, and a new wallet opens at ₹0 (`newWallet.ts`).
+//   A (the referrer)  ₹25 for each of B's THREE verifications (login, mobile, github)   =  ₹75
+//
+// Admin, verbatim: *"sabhi pahle 50₹ do! (mobile + website) · fir refral code ke 100₹ (only mobile) ·
+// fir login par 50₹ (dono par) · fir mobile otp verification par 100₹ (dono par) · fir github connect
+// (100₹ mobile only)"*. The two ceilings did not move: ₹400 per account (`MAX_SELF_GIFT_TOKENS`) is
+// exactly the app's five steps and ₹200 (`MAX_WEB_GIFT_TOKENS`) is exactly the website's three.
+//
+// 🔴 WHY IT CHANGED. The 2026-09-26 plan paid the website NOTHING until a mobile was verified by OTP,
+// and paid a new app user nothing until the device check passed. The Monitor that day showed +126
+// signups and ONE active user: a new account opened at ₹0 and could not build once. The ₹50 for
+// signing up is what lets a new person try the product before being asked for anything.
+//
+// ⚠️ WHAT THAT COSTS, stated rather than discovered: the ₹50 signup and the ₹50 login are earned on the
+// website with no phone and no device check, so a script that creates accounts can collect ₹100 per
+// account. The credit only buys builds (it cannot be withdrawn), both ceilings still hold, and
+// `REFERRAL_WEB_HOLD_UNTIL_MOBILE=on` puts the website's money back behind the OTP without a deploy if
+// the Monitor ever shows it being farmed.
+//
+// ⚠️ THE PARAGRAPHS BELOW describe the rules as they were written; where a step list or an amount in
+// them disagrees with the table above, the table is the plan.
 //
 // ── THE FOUR RULES THAT MAKE IT SAFE, each learned from a specific way it would otherwise leak ───
 //
@@ -70,23 +88,37 @@ import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
 import { parseEnvFlag } from './envFlag';
 import { capSelfGift, capReferrerPerFriend, capWebGift } from './giftPolicy';
 
-/** The four things a new user can do, each worth one payment, ever. */
-export type RewardStep = 'referral-code' | 'email' | 'mobile' | 'github';
+/** The five things a new user can do, each worth one payment, ever. In the admin's order. */
+export type RewardStep = 'signup' | 'referral-code' | 'email' | 'mobile' | 'github';
 
-export const ALL_STEPS: readonly RewardStep[] = ['referral-code', 'email', 'mobile', 'github'];
+export const ALL_STEPS: readonly RewardStep[] = ['signup', 'referral-code', 'email', 'mobile', 'github'];
 
 /**
- * The steps that may be earned on the WEBSITE (admin 2026-09-26: *"website par bas 2 — github link,
- * mobile verification"*). The other two are Android-only by design: `email` is the **Gmail-login**
- * grant (paid the moment a user signs in with Google on the device-checked app), and `referral-code`
- * needs the device check to bound farming. Deriving `stepAllowedOnWeb` from THIS list — rather than
- * hard-coding the two ids at every call site — means a fifth step is Android-only until someone
- * decides otherwise, the same safe-by-default shape `REFERRER_PAYING_STEPS` already uses.
+ * What each step is worth, in rupees (admin 2026-09-27). A TABLE rather than one per-step figure:
+ * the steps are no longer worth the same, and a single tunable would have to be wrong for two of them.
  *
- * ⚠️ Order matters for the checklist UI, not for the money: mobile is listed first because it is the
- * genuine anti-farm gate (a real SIM), and github rides inside the shared ₹200 web ceiling.
+ * ⚠️ `REFERRAL_STEP_TOKENS` is no longer read. It made every step one price, which is no longer the
+ * plan, and it was unset in Cloud Run. The ceilings in `giftPolicy.ts` hold whatever this table says.
  */
-export const WEB_ELIGIBLE_STEPS: readonly RewardStep[] = ['mobile', 'github'];
+export const STEP_RUPEES: Readonly<Record<RewardStep, number>> = {
+  signup: 50,
+  'referral-code': 100,
+  email: 50,
+  mobile: 100,
+  github: 100,
+};
+
+/**
+ * The steps that may be earned on the WEBSITE (admin 2026-09-27: signup, login and mobile OTP are paid
+ * "dono par"; the referral code and GitHub are "only mobile"). Deriving `stepAllowedOnWeb` from THIS
+ * list — rather than hard-coding ids at every call site — means a new step is Android-only until
+ * someone decides otherwise, the same safe-by-default shape `REFERRER_PAYING_STEPS` uses.
+ *
+ * 🔒 These three are also what an Android phone earns when its device check cannot run (an older app,
+ * an unusual handset): they pay the same on both surfaces, so the web rules pay them there too. Only
+ * the referral code and GitHub need the device check.
+ */
+export const WEB_ELIGIBLE_STEPS: readonly RewardStep[] = ['signup', 'email', 'mobile'];
 
 /** Is this step claimable on the website at all? (Android earns the full set; web earns only these.) */
 export function stepAllowedOnWeb(step: RewardStep): boolean {
@@ -109,15 +141,23 @@ export function stepAllowedOnWeb(step: RewardStep): boolean {
  * screen can never offer a code box the server would refuse.
  */
 export function canStillRedeem(paidSteps: unknown): boolean {
-  return readSteps(paidSteps).every((s) => s === 'email');
+  return readSteps(paidSteps).every((s) => DAY_ONE_STEPS.includes(s));
 }
 
 /**
- * The three steps that pay the REFERRER. `referral-code` is deliberately absent — see rule 2. It is
- * derived from ALL_STEPS rather than written out again, so adding a fifth step cannot silently create
- * a referrer payout nobody decided on: a new step pays the referrer only if it is a verification.
+ * The steps every account earns on its first day by construction — having an account, and signing in
+ * with a verified email. Neither says the account is OLD, so neither stops a referral code; and neither
+ * is a verification a referrer could have caused, so neither pays the referrer.
  */
-export const REFERRER_PAYING_STEPS: readonly RewardStep[] = ALL_STEPS.filter((s) => s !== 'referral-code');
+export const DAY_ONE_STEPS: readonly RewardStep[] = ['signup', 'email'];
+
+/**
+ * The steps that pay the REFERRER: the friend's login, mobile and GitHub. `referral-code` is absent
+ * (rule 2) and so is `signup` — an account existing is not something a referrer brought about beyond
+ * the code itself. Written as an allow-list so a new step pays the referrer only when someone decides
+ * it should.
+ */
+export const REFERRER_PAYING_STEPS: readonly RewardStep[] = ['email', 'mobile', 'github'];
 
 function isStep(v: unknown): v is RewardStep {
   return typeof v === 'string' && (ALL_STEPS as readonly string[]).includes(v);
@@ -153,9 +193,19 @@ export function referralRewardsEnabled(env: NodeJS.ProcessEnv = process.env): bo
   return parseEnvFlag((env.REFERRAL_REWARDS || '').trim().toLowerCase()) === true;
 }
 
-/** What ONE step is worth to the new user. ₹100. */
-export function stepRewardTokens(env: NodeJS.ProcessEnv = process.env): number {
-  return tokensFromEnv(env.REFERRAL_STEP_TOKENS, 100);
+/** What ONE step is worth to the new user, from `STEP_RUPEES`. An unknown step is worth nothing. */
+export function stepRewardTokens(step: RewardStep): number {
+  const rupees = STEP_RUPEES[step];
+  return Number.isFinite(rupees) && rupees > 0 ? rupees * TOKENS_PER_RUPEE : 0;
+}
+
+/**
+ * Hold the website's money until a mobile is verified by OTP? Default OFF — the admin's plan pays the
+ * ₹50 signup and ₹50 login at once (2026-09-27). `on` restores the 2026-09-26 rule ("no mobile (otp)
+ * verify no token") for the web path without a deploy, if accounts are being created to farm it.
+ */
+export function webHoldUntilMobile(env: NodeJS.ProcessEnv = process.env): boolean {
+  return parseEnvFlag((env.REFERRAL_WEB_HOLD_UNTIL_MOBILE || '').trim().toLowerCase()) === true;
 }
 
 /** What ONE of B's verifications is worth to A. ₹25. */
@@ -227,9 +277,9 @@ export function decideSelfReward(input: {
    */
   alreadyWebGiftedTokens?: unknown;
   /**
-   * Has this account verified a real mobile (OTP)? Required for ANY web payout (admin 2026-09-26:
-   * *"no mobile (otp) verify no token"*). On Android it is not read — the device check is the gate.
-   * The caller derives it from the account record (`stepIsProven('mobile')`), never the request body.
+   * Has this account verified a real mobile (OTP)? Read on the web only, and only while
+   * `REFERRAL_WEB_HOLD_UNTIL_MOBILE` is on. The caller derives it from the account record
+   * (`stepIsProven('mobile')`), never the request body.
    */
   mobileVerified?: boolean;
   env?: NodeJS.ProcessEnv;
@@ -238,7 +288,7 @@ export function decideSelfReward(input: {
   if (!referralRewardsEnabled(env)) return { ...NOTHING, reason: 'disabled' };
 
   const alreadyPaid = readSteps(input.alreadyPaidSteps).includes(input.step);
-  const want = stepRewardTokens(env);
+  const want = stepRewardTokens(input.step);
   // 🔒 THE ₹400 LIFETIME SELF-CAP APPLIES ON EVERY PLATFORM, so it is computed once here. "Four steps
   // × ₹100 = ₹400" holds only while REFERRAL_STEP_TOKENS is 100; `capSelfGift` clamps against what the
   // account has actually received, so the ceiling survives any tunable. A caller that omits the total
@@ -256,19 +306,19 @@ export function decideSelfReward(input: {
   }
 
   if (input.platform === 'web') {
-    // 🔒 WEB IS DELIBERATELY DIFFERENT, AND SMALLER. Only two steps are earnable here (mobile, github),
-    // there is NO device check (the web has none — the mobile SIM is the real gate, and github rides
-    // inside the ₹200 web ceiling), and the total is clamped by BOTH the ₹400 lifetime self-cap above
-    // AND the ₹200 website sub-cap. See giftPolicy.MAX_WEB_GIFT_TOKENS for why the web is capped at all.
+    // 🔒 WEB IS DELIBERATELY DIFFERENT, AND SMALLER. Only three steps are earnable here (signup, login,
+    // mobile), there is NO device check (the web has none), and the total is clamped by BOTH the ₹400
+    // lifetime self-cap above AND the ₹200 website sub-cap. See giftPolicy.MAX_WEB_GIFT_TOKENS.
     if (!stepAllowedOnWeb(input.step)) return { ...NOTHING, reason: 'web-not-eligible' };
     if (alreadyPaid) return { ...NOTHING, reason: 'already-paid' };
-    // 🔒 NO MOBILE (OTP) VERIFY → NO TOKEN ON THE WEB (admin 2026-09-26). A github link is free and
-    // scriptable, so on the web it is EARNED when it happens but HELD, paid ₹0 and recorded as nothing,
-    // until a real number is verified — the same anchor rule 3 puts under the referrer's money. The
-    // `mobile` step carries that proof by definition (you cannot claim it without verifying), so it is
-    // never itself held; claiming it is what later releases a waiting github. Recording nothing here is
-    // load-bearing: a held step must stay claimable, so it is never written to `paidSteps`.
-    if (!input.mobileVerified) return { ...NOTHING, reason: 'web-held-until-mobile' };
+    // 🔒 THE OTP HOLD IS NOW A LEVER, OFF BY DEFAULT (admin 2026-09-27: the ₹50 signup and ₹50 login are
+    // paid at once, on both surfaces). With `REFERRAL_WEB_HOLD_UNTIL_MOBILE=on` the 2026-09-26 rule is
+    // back: a web step is EARNED but HELD — paid ₹0 and recorded as nothing, so it stays claimable —
+    // until a real number is verified. The `mobile` step carries that proof by definition, so it is
+    // never itself held; claiming it is what releases the others.
+    if (input.step !== 'mobile' && !input.mobileVerified && webHoldUntilMobile(env)) {
+      return { ...NOTHING, reason: 'web-held-until-mobile' };
+    }
     const tokens = capWebGift(afterSelfCap, input.alreadyWebGiftedTokens);
     // Distinguish "the web's own ₹100 is spent" from "the whole ₹400 is spent": both pay ₹0, but they
     // are different facts, and the second is answered by `cap-reached` when the self-cap already bit.
@@ -281,12 +331,11 @@ export function decideSelfReward(input: {
 }
 
 /** Everything B has earned so far, for the progress checklist. PURE — a view, never a payment. */
-export function selfProgress(paidSteps: unknown, env: NodeJS.ProcessEnv = process.env): {
+export function selfProgress(paidSteps: unknown): {
   step: RewardStep; claimed: boolean; tokens: number;
 }[] {
   const paid = readSteps(paidSteps);
-  const each = stepRewardTokens(env);
-  return ALL_STEPS.map((step) => ({ step, claimed: paid.includes(step), tokens: each }));
+  return ALL_STEPS.map((step) => ({ step, claimed: paid.includes(step), tokens: stepRewardTokens(step) }));
 }
 
 // ── A's reward ───────────────────────────────────────────────────────────────────────────────────
@@ -475,6 +524,11 @@ export function attributionRefusalMessage(reason: AttributionReason): string {
 
 /** What the server independently knows about an account. Every field is a fact it looked up. */
 export interface StepProof {
+  /**
+   * Firebase holds an email address or a phone number for this account — i.e. it is a real sign-in,
+   * not an anonymous session. The signup ₹50 is paid on this and nothing else.
+   */
+  hasIdentity: boolean;
   /** Firebase says this mailbox is verified (a Google or GitHub sign-in implies it). */
   emailVerified: boolean;
   /** Firebase holds a verified phone number for this account. */
@@ -494,6 +548,7 @@ export interface StepProof {
  */
 export function stepIsProven(step: RewardStep, proof: StepProof): boolean {
   switch (step) {
+    case 'signup': return proof.hasIdentity === true;
     case 'email': return proof.emailVerified === true;
     case 'mobile': return proof.phoneVerified === true;
     case 'github': return proof.githubLinked === true;
@@ -505,6 +560,7 @@ export function stepIsProven(step: RewardStep, proof: StepProof): boolean {
 /** What the user is told when a step is not yet done. Actionable, never an accusation. */
 export function stepNotDoneMessage(step: RewardStep): string {
   switch (step) {
+    case 'signup': return 'Sign in with your email or mobile number first, then claim this bonus.';
     case 'email': return 'Verify your email address first, then claim this bonus.';
     case 'mobile': return 'Verify your mobile number first, then claim this bonus.';
     case 'github': return 'Connect your GitHub account first, then claim this bonus.';

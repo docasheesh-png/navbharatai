@@ -51,9 +51,19 @@ describe('what is ready to be paid right now', () => {
     expect(readyReferralSteps(claimedSome, 'android')).toEqual(['referral-code', 'mobile', 'github']);
   });
 
-  it('🔒 on the website nothing is ready until the mobile is verified — a github link alone sends no request', () => {
-    expect(readyReferralSteps(facts({ githubLinked: true }), 'web')).toEqual([]);
-    expect(readyReferralSteps(facts({ githubLinked: true, phoneVerified: true }), 'web')).toEqual(['mobile', 'github']);
+  it('🔒 the website is offered only what it can be paid for — never GitHub or the code (2026-09-27)', () => {
+    expect(readyReferralSteps(facts({ githubLinked: true, referred: true }), 'web')).toEqual([]);
+    expect(readyReferralSteps(facts({ githubLinked: true, phoneVerified: true, emailVerified: true }), 'web'))
+      .toEqual(['email', 'mobile']);
+  });
+
+  it('🎁 the ₹50 signup is ready for every signed-in account, on both surfaces', () => {
+    const withSignup = {
+      ...facts(),
+      steps: [{ step: 'signup' as const, claimed: false }, ...facts().steps],
+    };
+    expect(readyReferralSteps(withSignup, 'web')).toEqual(['signup']);
+    expect(readyReferralSteps(withSignup, 'android')).toEqual(['signup']);
   });
 });
 
@@ -63,10 +73,10 @@ describe('the card', () => {
     expect(rewardsChecklistModel(input({ rows: [] }))).toBeNull();
   });
 
-  it('uses the admin’s names: Referral code, Gmail login, Mobile verification, GitHub link', () => {
-    const m = rewardsChecklistModel(input())!;
+  it('uses the admin’s names: Signup bonus, Referral code, Login, Mobile verification, GitHub link', () => {
+    const m = rewardsChecklistModel(input({ rows: rows([], ['signup', 'referral-code', 'email', 'mobile', 'github']) }))!;
     expect(m.rows.map((r) => r.name)).toEqual([
-      REWARD_STEP_NAMES['referral-code'], 'Gmail login', 'Mobile verification', 'GitHub link',
+      'Signup bonus', REWARD_STEP_NAMES['referral-code'], 'Login', 'Mobile verification', 'GitHub link',
     ]);
   });
 
@@ -89,14 +99,16 @@ describe('the card', () => {
     for (const s of ['email', 'mobile', 'github'] as const) expect(m.rows.find((r) => r.step === s)!.target).toBe('profile');
   });
 
-  it('📱 the website card has only its two rows, says why, and tells GitHub to wait for the mobile', () => {
+  it('📱 the website card has its three rows and says where the other two rewards are', () => {
     const m = rewardsChecklistModel(input({
-      surface: 'web', rows: rows([], ['mobile', 'github']), githubLinked: true, webCapRupees: 200,
+      surface: 'web', rows: rows([], ['signup', 'email', 'mobile']), emailVerified: true, webCapRupees: 200,
     }))!;
-    expect(m.rows.map((r) => r.step)).toEqual(['mobile', 'github']);
-    expect(m.rows.find((r) => r.step === 'github')!.state).toBe('complete');
-    expect(m.rows.find((r) => r.step === 'github')!.hint).toMatch(/mobile first/i);
+    expect(m.rows.map((r) => r.step)).toEqual(['signup', 'email', 'mobile']);
+    expect(m.rows.find((r) => r.step === 'signup')!.state).toBe('claim');
+    expect(m.rows.find((r) => r.step === 'email')!.state).toBe('claim');
+    expect(m.rows.find((r) => r.step === 'mobile')!.state).toBe('complete');
     expect(m.surfaceNote).toMatch(/up to ₹200/);
+    expect(m.surfaceNote).toMatch(/GitHub rewards are in the Android app/);
   });
 
   it('all claimed collapses to one line, and still says what was earned', () => {

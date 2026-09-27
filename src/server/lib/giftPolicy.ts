@@ -7,8 +7,10 @@
 // SO THERE IS EXACTLY ONE WAY TO BE GIVEN MONEY: earn it by verifying. Nothing is handed over for
 // merely arriving.
 //
-//   New user, own steps  — ₹100 × 4 (apply a code, email, mobile, GitHub)        = ₹400
-//   Their referrer       — ₹25 × 3 (that friend's email, mobile, GitHub)         = ₹75
+//   New user, own steps  — signup ₹50 · code ₹100 · login ₹50 · mobile ₹100 · GitHub ₹100 = ₹400
+//                          (the website: signup, login and mobile only            = ₹200)
+//   Their referrer       — ₹25 × 3 (that friend's login, mobile, GitHub)                = ₹75
+//   (Amounts revised 2026-09-27 — see the table in `referralRewards.ts`. The ceilings did not move.)
 //   ─────────────────────────────────────────────────────────────────────────────────
 //   TOTAL COST OF ACQUIRING ONE USER                                             = ₹475
 //
@@ -37,8 +39,8 @@ export const MAX_SELF_GIFT_TOKENS = 400 * TOKENS_PER_RUPEE;
 export const MAX_REFERRER_PER_FRIEND_TOKENS = 75 * TOKENS_PER_RUPEE;
 
 /**
- * The most an account may EVER be gifted through the WEBSITE. ₹200 (admin 2026-09-26: *"website par
- * github aur mobile verification par 100-100 maximum 200"*) — the two web steps, ₹100 each.
+ * The most an account may EVER be gifted through the WEBSITE. ₹200 — since 2026-09-27 the three web
+ * steps: signup ₹50, login ₹50, mobile ₹100 (before that: mobile and GitHub, ₹100 each).
  *
  * 🔒 WHY THE WEB HAS ITS OWN, SMALLER CEILING. The full ₹400 ladder is claimed inside the Android app
  * behind the Play Integrity device check, which bounds how many accounts can farm it at once. The web

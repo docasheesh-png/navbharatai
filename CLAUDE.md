@@ -979,6 +979,14 @@ the code (it is actually read somewhere) on 2026-07-11.
   truth). Set as part of turning the referral ladder on; the preflight compares this against
   `FIRST_RELEASE_WITH_DEVICE_PLUGIN = 117` to confirm the live app can device-attest — 134 ≥ 117 ✓, so the
   release row is green either way. Recorded hand-to-hand the same session.
+  🔴 **CORRECTED 2026-09-27 — "134 ≥ 117 ✓" WAS THE WRONG COMPARISON, AND BUILD 134 CANNOT ATTEST.**
+  117 is when the plugin SHIPPED, not when it WORKED: builds 117–136 send a classic Play Integrity
+  request with no nonce (the SDK refuses it before it reaches Google) and do not list the `phone` sign-in
+  provider, so on build 134 every device check and every in-app mobile OTP fails — the admin's "mobile
+  recognition" problem. Both were fixed in #3338, first built by run **#137** (138 is built from main
+  too), and **neither is on Play**. The preflight now compares against `FIRST_RELEASE_THAT_ATTESTS =
+  137` and shows 134 as failed. ⚠️ **To actually fix it: roll out build 137/138 (or a fresh one) on
+  Play, then set this key to its run number.** No server change can make build 134 attest.
   ✅ **SET by the admin 2026-08-25: `ANDROID_LATEST_VERSION_CODE = 91`** — the first PRODUCTION release.
   Verified against the pipeline rather than taken on trust: `android-aab.yml` sets
   `ANDROID_VERSION_CODE: ${{ github.run_number }}`, the run was **#91**, and Play displayed
@@ -1957,6 +1965,24 @@ the code (it is actually read somewhere) on 2026-07-11.
   ✅ **AND THIS REPORT SETTLED THE STREAMING ENTRY'S ONE OPEN QUESTION: Z.ai DOES honour
   `stream_options.include_usage`** — real per-call input/output/cache token counts came back on every
   streamed call. The "0 in / 0 out" risk that entry warns to watch for did not materialise.
+- **🎁 THE FREE-CREDIT STEPS, FINAL PLAN (admin 2026-09-27, verbatim: *"sabhi pahle 50₹ do! (mobile +
+  website) · fir refral code ke 100₹ (only mobile') · fir login par 50₹ (dono par) · fir mobile otp
+  verification par 100₹ (dono par) · fir github connect (100₹ mobile only) — ab yeh final hai"*). SUPERSEDES
+  the step amounts in the two entries below.** Signup ₹50 (both) · referral code ₹100 (app) · login with a
+  verified email ₹50 (both) · mobile OTP ₹100 (both) · GitHub ₹100 (app). App ₹400, website ₹200 — exactly
+  the two ceilings that already existed, so neither moved. Referrer still ₹25 × (login, mobile, GitHub),
+  never for the signup. Amounts live in `STEP_RUPEES` (`referralRewards.ts`); **`REFERRAL_STEP_TOKENS` is
+  no longer read.** New key **`REFERRAL_WEB_HOLD_UNTIL_MOBILE`** (NOT set; default OFF): `on` puts the
+  website's signup/login money back behind the OTP, the 2026-09-26 rule, without a deploy.
+  ⚠️ **THE COST THE ADMIN ACCEPTED, stated:** the ₹50 + ₹50 are earnable on the website with no phone and
+  no device check, so scripted accounts can collect ₹100 each (credit only — it cannot be withdrawn).
+  Watch the Referral cost card; the lever above is the answer if it is farmed.
+  📱 **Three steps no longer need the phone to be recognised:** the sign-in settle every client already
+  calls (`/api/payment/reconcile`, including build 134) pays the day-one two (signup, login — never the
+  mobile, which would make a new app user "old" before their typed code is applied), and a failed device
+  check on the phone falls back to the web rules for signup/login/mobile on both the client and the server.
+  Only the referral code and GitHub still need a device that can be checked. The phone also retries a
+  transient Play Integrity failure (-3/-8/-9/-12/-17/-100) twice before reporting it.
 - **The referral welcome gift — four earned steps (built 2026-09-15, NOT live yet):**
   `REFERRAL_REWARDS` (the master switch — ⚠️ **UNSET, and unset means today's behaviour exactly**:
   no code is minted, no money moves, and not one document is written). Tunables, all with working

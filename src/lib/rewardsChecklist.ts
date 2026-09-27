@@ -48,17 +48,18 @@ export interface RewardChecklistModel {
 
 /** The admin's words for each step (the labels a user reads on this card). */
 export const REWARD_STEP_NAMES: Record<RewardStep, string> = {
+  signup: 'Signup bonus',
   'referral-code': 'Referral code',
-  email: 'Gmail login',
+  email: 'Login',
   mobile: 'Mobile verification',
   github: 'GitHub link',
 };
 
-function hintFor(step: RewardStep, state: RewardRowState, surface: ReferralSurface, phoneVerified: boolean): string {
+function hintFor(step: RewardStep, state: RewardRowState): string {
   if (state === 'done') return 'Claimed';
   if (state === 'claim') return 'Done — tap Claim to add it to your wallet';
-  if (surface === 'web' && step === 'github' && !phoneVerified) return 'Verify your mobile first — it unlocks this';
   switch (step) {
+    case 'signup': return 'Added when you sign in';
     case 'referral-code': return 'Apply a friend’s code in your Wallet';
     case 'email': return 'Sign in with Gmail, or verify your email';
     case 'mobile': return 'Verify your mobile number with an OTP';
@@ -100,7 +101,7 @@ export function rewardsChecklistModel(p: RewardChecklistInput): RewardChecklistM
       rupees: r.rupees,
       state,
       target: r.step === 'referral-code' ? 'wallet' : 'profile',
-      hint: hintFor(r.step, state, p.surface, p.phoneVerified),
+      hint: hintFor(r.step, state),
     };
   });
 
@@ -111,7 +112,7 @@ export function rewardsChecklistModel(p: RewardChecklistInput): RewardChecklistM
     ? `All rewards claimed — ₹${earnedRupees} earned`
     : `₹${pendingRupees} free credit waiting for you`;
   const surfaceNote = p.surface === 'web'
-    ? `On the website: mobile + GitHub${p.webCapRupees ? `, up to ₹${p.webCapRupees}` : ''}. Gmail-login and referral rewards are in the Android app.`
+    ? `On the website: signup, login and mobile${p.webCapRupees ? `, up to ₹${p.webCapRupees}` : ''}. The referral-code and GitHub rewards are in the Android app.`
     : null;
 
   return { rows, pendingRupees, earnedRupees, allDone, headline, surfaceNote };

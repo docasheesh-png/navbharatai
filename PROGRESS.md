@@ -83078,6 +83078,55 @@ YELLOW (PR #3331's area).
 - **A reviewer claim a file can answer is checked first.** `reviewEvidence.ts` `missingClassClaim` / `classIsDefined`: a finding whose first sentence says named classes are not defined is refuted only when EVERY named class has a selector in the real stylesheets. A finding resting on "the missing classes" falls with them only when every class claim fell. Stylesheets are read only when a finding makes the claim. This closes the second open item.
 - **Vite dev CSS leaves the capture only when the page would not fit.** `style[data-vite-dev-id]` text is replaced with a note when `outerHTML` is over 30,000 characters; a page that fits is read as before. This closes the third open item.
 
+## 2026-09-27 — Autopsy: the admin Diagnostics page, read against the code (three untruths)
+
+The admin pasted the whole Diagnostics page. Read line by line against the routes that produce it,
+three numbers were false and one was a real, months-old money leak:
+
+1. 🔴 **Free chat has not been free since 2026-07-21.** `GLM_API_KEY` became a 51-key comma pool that
+   day; only the build engine parsed it. `GlmProvider` (free chat leader) and `visionChain.tryGlm` sent
+   the comma string as one bearer token → every call refused → every free chat / Professional / Doctor
+   AI turn served by a PAID Vertex rung. Page evidence: *"GLM 8 requests · 8 errors, half_open"*,
+   *"0% of assistant turns were served by the free model"*. Fixed at the class: `lib/keyPool.ts` is the
+   one parser (the route re-exports it), chat rotates round-robin across the pool, `mobileBuildAiRepair`'s
+   private `split(',')[0]` (which missed the whitespace separator) replaced. Sibling hunt: every other
+   reader of the key only tests presence.
+2. 🔴 **"Real cost absorbed $570.09"** was the Sonnet-equivalent BASELINE, the number the usage card
+   stopped calling a loss on 2026-09-23 — the sibling card was never hunted. The same 208 builds really
+   cost $1.30. `summarizeLosses` now leads with measured spend plus coverage; the baseline is a labelled
+   comparison. And the usage card's **"$294.99 margin"** was billed-of-508 minus spend-of-28 — a margin
+   of no real set of builds. `measuredBilledUsd` is now recorded per day, and `realMarginUsd` is taken
+   over builds whose bill AND spend are both known (old partly-measured days contribute nothing rather
+   than a mismatch). One existing test had encoded the defect (4 − 0.5) and was corrected with the reason.
+3. **"Latest day 2026-08-28"** on 2026-09-27: `metricsStore.list` is newest-first and the card took the
+   last element. `latestDay` picks the maximum date.
+
+**Open, not fixed here (proactive, raised with the admin):** the stuck-projects list counts user-stopped
+builds as failures; a stuck project's "root cause" can be the upsell note; ladder depth shows 41 of 44
+builds opening on rung 2 (the complexity router sends most apps to KIMI — worth re-measuring its line
+now that the free-first premise is being checked); the Build event log card reads 0 events.
+## 2026-09-27 — Phone features PROVEN up to the Gradle step (admin: "jo apke karne ka hai karo")
+
+The "phone features built for real" entry above says *"No real phone build with these plugins has been run."*
+This session ran as much of one as this environment allows, with the registry's own plugin set at its own
+pinned versions (all 14, every plugin in `NATIVE_CAPABILITIES`), through the pipeline's own steps:
+
+| Step | Result |
+|---|---|
+| `npm install` — Capacitor 7.6.9 core + CLI/Android 7 + all 14 plugins | ✅ clean, no peer conflict (every plugin's peer is `@capacitor/core >=7`) |
+| `npx cap add android` / `cap sync android` | ✅ "Found 14 Capacitor plugins for android" |
+| the generated `nativePermissionScript('android')`, run twice | ✅ 7 permissions added, second run adds nothing, manifest parses as XML |
+| each plugin's own manifest vs the table's "declares it itself" comments | ✅ true for speech (RECORD_AUDIO + queries), TTS (queries), local notifications (POST_NOTIFICATIONS, WAKE_LOCK, BOOT), haptics (VIBRATE), Bluetooth (all six) |
+| `./gradlew assembleDebug` | ⛔ **not run** — Google's SDK host (dl.google.com) is blocked from this environment, so there is no Android SDK. This is the one step only a real phone build can prove. |
+
+**❌ One real defect, fixed:** the QR scanner. On Android `BarcodeScanner.scan()` runs Google's code scanner, a
+Play-services module downloaded separately; the plugin README says to check
+`isGoogleBarcodeScannerModuleAvailable()` first, and to add `<meta-data android:name="com.google.mlkit.vision.DEPENDENCIES"
+android:value="barcode_ui"/>` inside `<application>`. The builder was told `requestPermissions(); scan()` — a QR
+button that fails on its first press on a phone without the module. Now: the builder's `api` line gives the full
+check → install → wait-for-state-4 → scan sequence, and the registry gained `androidMetaData`, which the same
+generated script writes inside `<application>` (idempotent, only for apps that use the plugin).
+`tests/theQrScannerNeedsItsModule.test.ts` runs the real generated script on a real manifest.
 ## 2026-09-27 — Admin Monitor capture: three false numbers on the main panel, and one legal item still open
 
 The admin pasted the Monitor page with no comment. Read against the code, four things on it were not what they looked like.

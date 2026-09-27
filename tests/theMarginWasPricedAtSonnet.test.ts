@@ -105,13 +105,17 @@ describe('the margin was priced at Sonnet', () => {
   });
 
   it('the real margin is billed minus (tokens + VM), and coverage says how much of the window it covers', () => {
+    // 🔴 CORRECTED 2026-09-27: this used to expect 4 − 0.5 — the bill of BOTH builds minus the spend
+    // of ONE — which is the admin's "$294.99 margin" (508 builds billed, 28 costed). The margin is
+    // now taken over the builds whose bill AND spend are known: the measured one alone, 2 − 0.5.
     const doc = fold([
       { ...BASE, billedUsd: 2, realCostUsd: 0.4, sandboxUsd: 0.1 },
       { ...BASE, billedUsd: 2 },
     ]);
     const report = buildUsageReport([doc], sonnetEquivalentUsd);
     expect(report.totalRealSpendUsd).toBeCloseTo(0.5, 6);
-    expect(report.realMarginUsd).toBeCloseTo(4 - 0.5, 6);
+    expect(report.realMarginUsd).toBeCloseTo(2 - 0.5, 6);
+    expect(report.marginBuilds).toBe(1);
     expect(report.realCostBuilds).toBe(1);
     expect(report.realCostCoverage).toBeCloseTo(0.5, 6);
   });

@@ -174,6 +174,15 @@ export interface DailyCostTelemetryDoc {
   realCostBuilds?: number;
   /** What the ZEROED builds really cost (USD, tokens + VM) — the measured twin of lossRealCostUsd. */
   lossSpendUsd?: number;
+  /**
+   * 🔴 THE BILLED SIDE OF THE SAME POPULATION (2026-09-27). What the builds that reported a real cost
+   * were BILLED. Margin is billed − spend, and until this field existed the report subtracted the
+   * spend of the MEASURED builds (28) from the bill of ALL builds (508), which printed a $294.99
+   * margin that described no set of builds at all. Absent on days written before it existed.
+   */
+  measuredBilledUsd?: number;
+  /** How many of today's zeroed builds reported a real cost — the coverage of `lossSpendUsd`. */
+  lossMeasuredBuilds?: number;
   /** P-PE.2 — the most recent architect prompt version id recorded today (traceability). */
   lastPromptVersion?: string;
   updatedAt: number;
@@ -319,6 +328,8 @@ export function foldCostTelemetry(
     lossBuilds: (doc.lossBuilds ?? 0) + (entry.wasLoss ? 1 : 0),
     lossRealCostUsd: round6((doc.lossRealCostUsd ?? 0) + (entry.wasLoss ? (entry.lossRealCostUsd ?? 0) : 0)),
     lossSpendUsd: round6((doc.lossSpendUsd ?? 0) + (entry.wasLoss ? buildRealUsd : 0)),
+    measuredBilledUsd: round6((doc.measuredBilledUsd ?? 0) + (measuredReal ? Math.max(0, entry.billedUsd || 0) : 0)),
+    lossMeasuredBuilds: (doc.lossMeasuredBuilds ?? 0) + (entry.wasLoss && measuredReal ? 1 : 0),
     // Carry the latest prompt version when present; otherwise keep the prior value.
     lastPromptVersion: entry.promptVersion ?? doc.lastPromptVersion,
     updatedAt: now,
@@ -365,8 +376,18 @@ export interface UsageReport {
   totalSandboxUsd: number | null;
   /** Tokens + VM. The one figure to compare against `totalBilledUsd`. */
   totalRealSpendUsd: number | null;
-  /** billed − real spend. The ACTUAL margin, and `null` while nothing is measured. */
+  /**
+   * billed − real spend, over the SAME builds on both sides (see `marginBuilds`). `null` while no
+   * build can be matched — never billed-of-all minus spend-of-some.
+   */
   realMarginUsd: number | null;
+  /** How many builds `realMarginUsd` is computed over (both their bill and their spend are known). */
+  marginBuilds: number;
+  /** What those `marginBuilds` were billed, and what they really cost. */
+  marginBilledUsd: number | null;
+  marginSpendUsd: number | null;
+  /** Zeroed builds whose real cost is known — the coverage of `lossSpendUsd`. */
+  lossMeasuredBuilds: number;
   /** How many builds in the window reported a real cost, out of `totalBuilds`. */
   realCostBuilds: number;
   /**
@@ -396,6 +417,73 @@ export interface UsageReportModelRow {
 }
 
 /**
+ * The part of one day whose BILL and SPEND are both known, so a margin can be taken over it. PURE.
+ *
+ * A day written since 2026-09-27 carries `measuredBilledUsd`, the bill of exactly the builds that
+ * reported a real cost. An older day does not — but when EVERY build that day reported one, its whole
+ * bill is that bill. A partly measured older day cannot be split, so it contributes nothing to the
+ * margin rather than a spend that belongs to some builds against a bill that belongs to all of them.
+ */
+export function matchedMarginSlice(doc: DailyCostTelemetryDoc): { builds: number; billedUsd: number; spendUsd: number } | null {
+  const measured = doc.realCostBuilds ?? 0;
+  if (measured <= 0) return null;
+  const spendUsd = (doc.totalRealCostUsd ?? 0) + (doc.totalSandboxUsd ?? 0);
+  if (typeof doc.measuredBilledUsd === 'number') return { builds: measured, billedUsd: doc.measuredBilledUsd, spendUsd };
+  if (measured === (doc.totalBuilds || 0)) return { builds: measured, billedUsd: doc.totalBilledUsd || 0, spendUsd };
+  return null;
+}
+
+/** Zeroed builds of this day whose real cost is known, by the same rule. PURE. */
+export function measuredLossBuilds(doc: DailyCostTelemetryDoc): number {
+  if (typeof doc.lossMeasuredBuilds === 'number') return doc.lossMeasuredBuilds;
+  const measured = doc.realCostBuilds ?? 0;
+  return measured > 0 && measured === (doc.totalBuilds || 0) ? (doc.lossBuilds ?? 0) : 0;
+}
+
+/**
+ * The Absorbed-losses card's numbers. PURE.
+ *
+ * 🔴 WHY (admin Diagnostics capture, 2026-09-27): the card showed `lossRealCostUsd` as "Real cost
+ * absorbed: $570.09" while the usage card, over the same 208 builds, said they cost $1.30. The
+ * $570 is the SONNET-EQUIVALENT BASELINE — every token priced at the top engine's rate — which is
+ * exactly the number the usage card stopped calling a loss on 2026-09-23. The sibling was never
+ * hunted. What we really paid is `lossSpendUsd`, shown with how many of the loss builds it covers;
+ * the baseline stays, labelled as a comparison.
+ */
+export function summarizeLosses(docs: DailyCostTelemetryDoc[]): {
+  totalLossBuilds: number;
+  lossMeasuredBuilds: number;
+  totalLossSpendUsd: number | null;
+  totalLossBaselineUsd: number;
+  /** Kept for any old reader; the SAME value as totalLossBaselineUsd, despite its name. */
+  totalLossRealCostUsd: number;
+  perDay: Array<{ date: string; lossBuilds: number; lossRealCostUsd: number; lossSpendUsd: number | null }>;
+} {
+  let totalLossBuilds = 0;
+  let lossMeasured = 0;
+  let spend = 0;
+  let baseline = 0;
+  let anyMeasured = false;
+  const perDay = docs.map((d) => {
+    totalLossBuilds += d.lossBuilds ?? 0;
+    baseline += d.lossRealCostUsd ?? 0;
+    const m = measuredLossBuilds(d);
+    lossMeasured += m;
+    const daySpend = (d.realCostBuilds ?? 0) > 0 ? (d.lossSpendUsd ?? 0) : null;
+    if (daySpend !== null) { anyMeasured = true; spend += daySpend; }
+    return { date: d.date, lossBuilds: d.lossBuilds ?? 0, lossRealCostUsd: d.lossRealCostUsd ?? 0, lossSpendUsd: daySpend };
+  });
+  return {
+    totalLossBuilds,
+    lossMeasuredBuilds: lossMeasured,
+    totalLossSpendUsd: anyMeasured ? round6(spend) : null,
+    totalLossBaselineUsd: round6(baseline),
+    totalLossRealCostUsd: round6(baseline),
+    perDay,
+  };
+}
+
+/**
  * PURE — fold a window of daily telemetry docs into the admin usage-report. Given the day docs and a
  * cost-baseline function (injected so the module stays decoupled from pricing), sum per-provider
  * tokens, price each provider's tokens at the baseline, and compute the achieved margin vs the total
@@ -415,6 +503,10 @@ export function buildUsageReport(
   let realCostBuilds = 0;
   let lossSpendUsd = 0;
   let anyRealCost = false;
+  let marginBuilds = 0;
+  let marginBilledUsd = 0;
+  let marginSpendUsd = 0;
+  let lossMeasuredBuilds = 0;
   const perModelTokens = new Map<string, { builds: number; inputTokens: number; outputTokens: number; cacheReadInputTokens: number }>();
   const byLadderDepth: Record<string, number> = {};
   const dates = docs.map(d => d.date).filter(Boolean).sort();
@@ -431,6 +523,13 @@ export function buildUsageReport(
     sandboxUsd += doc.totalSandboxUsd ?? 0;
     realCostBuilds += doc.realCostBuilds ?? 0;
     lossSpendUsd += doc.lossSpendUsd ?? 0;
+    const matched = matchedMarginSlice(doc);
+    if (matched) {
+      marginBuilds += matched.builds;
+      marginBilledUsd += matched.billedUsd;
+      marginSpendUsd += matched.spendUsd;
+    }
+    lossMeasuredBuilds += measuredLossBuilds(doc);
     for (const [key, u] of Object.entries(doc.byModelUsage ?? {})) {
       const slot = perModelTokens.get(key) ?? { builds: 0, inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0 };
       slot.builds += u.builds || 0;
@@ -477,7 +576,11 @@ export function buildUsageReport(
     totalRealCostUsd: anyRealCost ? round6(realCostUsd) : null,
     totalSandboxUsd: anyRealCost ? round6(sandboxUsd) : null,
     totalRealSpendUsd: anyRealCost ? round6(realCostUsd + sandboxUsd) : null,
-    realMarginUsd: anyRealCost ? round6(totalBilledUsd - (realCostUsd + sandboxUsd)) : null,
+    realMarginUsd: marginBuilds > 0 ? round6(marginBilledUsd - marginSpendUsd) : null,
+    marginBuilds,
+    marginBilledUsd: marginBuilds > 0 ? round6(marginBilledUsd) : null,
+    marginSpendUsd: marginBuilds > 0 ? round6(marginSpendUsd) : null,
+    lossMeasuredBuilds,
     realCostBuilds,
     realCostCoverage: totalBuilds > 0 ? round6(realCostBuilds / totalBuilds) : 0,
     lossSpendUsd: anyRealCost ? round6(lossSpendUsd) : null,

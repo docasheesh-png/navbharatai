@@ -173,7 +173,7 @@ import {
 } from '../AgentV3/journeyDerivation';
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
-import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine } from '../AgentV3/greenReviewPolicy';
+import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver, GreenFreezeError } from '../AgentV3/greenFreeze';
 import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild, IN_BUILD_PROOF_BUDGET_MS, type AttemptOutcome } from '../AgentV3/inBuildGreen';
@@ -488,7 +488,7 @@ import { assessBuildInput } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
 import { realismIntent } from '../lib/realismIntent';
-import { heroObjectContract } from '../lib/heroObjectSpec';
+import { heroObjectContract, wantsSceneObjects } from '../lib/heroObjectSpec';
 import { BuildCheckpoint } from '../AgentV3/BuildCheckpoints';
 import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { recordEngineUse } from '../AgentV3/engineUseStore';
@@ -15538,7 +15538,8 @@ async function noteBuildOutcome(
          * Only ever added to a prompt that is actually about 3D: a to-do app must not carry a
          * paragraph about dune slip faces.
          */
-        if (/\b(?:3\s*-?\s*d|three\s*-?\s*dimensional|game|khel)\b/i.test(prompt)) {
+        // A FLAT game (cards, a board, a grid, a quiz) is not a scene — see wantsSceneObjects.
+        if (wantsSceneObjects(prompt)) {
           const realism = realismIntent(prompt);
           buildPrompt = `OBJECT DETAIL TIER: ${realism.tier.toUpperCase()} — ${realism.reason}\n`
             + `Call setDetailLevel('${realism.tier}') once at start-up, and build every object with `
@@ -21282,12 +21283,14 @@ async function noteBuildOutcome(
               const canVerify = verifyAfterFixEnabled() && isGreenLatched(workspaceId) && !!lastPreviewUrl && !!actuator.browseUrl;
               if (plan.repairMs > 0 && canVerify && !abort.signal.aborted) {
                 armAdvisoryCap(plan.capMs);
-                events.emit({ type: 'narration', agent: 'architect', text: `🔧 Your app works — fixing ${greenRepairable.length} real problem(s) the review found, then checking it still works…`, ts: Date.now() });
+                events.emit({ type: 'narration', agent: 'architect', text: `🔧 Your app works — checking ${greenRepairable.length} problem(s) the review reported and fixing any that are real, then checking it still works…`, ts: Date.now() });
                 const repairAbort = new AbortController();
                 const stopRepairWithBuild = () => repairAbort.abort();
                 abort.signal.addEventListener('abort', stopRepairWithBuild);
                 let repairOk = false;
                 let repairTimedOut = false;
+                // What the pass really changed, measured against the snapshot — never its own report.
+                let repairChanged: number | undefined;
                 try {
                   // The snapshot is taken HERE, not inside verifyAfterFix: when its own snapshot fails it
                   // runs the change without a net and keeps it — right for a crash fix, never for an edit
@@ -21320,24 +21323,29 @@ async function noteBuildOutcome(
                         return;
                       }
                       repairOk = outcome.ok;
+                      if (repairOk) {
+                        try { repairChanged = changedWorkspacePaths(greenSnap, (await collectWorkspaceFiles(actuator, workspaceId)).files).length; }
+                        catch { repairChanged = undefined; /* could not count ⇒ the old reading, re-verified below */ }
+                      }
                     },
                     reverify: async () => {
                       if (!repairOk) return false; // unfinished or failed ⇒ undo
+                      if (repairChanged === 0) return true; // nothing changed ⇒ it is the version that rendered
                       const shot = await withTimeout(actuator.browseUrl!(workspaceId, lastPreviewUrl), 35_000, 'green-repair-verify');
                       const v = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
                       return v.rendered && !v.inconclusive && !v.serverDown; // unproven ⇒ undo
                     },
                     revert: revertToGreenSnapshot,
                   });
-                  if (vr.kept && repairOk) {
+                  if (vr.kept && repairOk && repairChanged !== 0) {
                     greenRepaired = greenRepairable.slice();
-                    result = { ...result, summary: `${result.summary || ''}${greenRepairUserLine(greenRepaired.length)}` };
+                    result = { ...result, summary: `${result.summary || ''}${greenRepairUserLine(greenRepaired.length, repairChanged)}` };
                     if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
                   }
                   try {
                     buildDiag.record({
                       phase: 'build',
-                      ...greenRepairOutcome({ kept: vr.kept && repairOk, reverted: vr.reverted, timedOut: repairTimedOut, finished: repairOk, count: greenRepairable.length, budgetMs: plan.repairMs }),
+                      ...greenRepairOutcome({ kept: vr.kept && repairOk, reverted: vr.reverted, timedOut: repairTimedOut, finished: repairOk, count: greenRepairable.length, budgetMs: plan.repairMs, changed: repairChanged }),
                     });
                   } catch { /* best-effort */ }
                 } catch (e) {

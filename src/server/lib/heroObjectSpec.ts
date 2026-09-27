@@ -65,6 +65,31 @@ export interface HeroObjectContract {
 const MAX_SPECS = 6;
 const MAX_PLACEMENT = 4;
 
+/**
+ * Does this prompt want a SCENE built from 3D objects — the objects.ts detail tier and the hero-object
+ * contract? PURE.
+ *
+ * 🔴 WHY IT IS NOT JUST "SAYS GAME" (build 15151196, 2026-09-27). The gate was `3d | game | khel`, so a
+ * 2D memory card game was told to "build every object with objects.ts (createCar / createTree …)" and
+ * handed a JEEP spec — real-world dimensions and a part list — because "a 4x4 grid" matched the
+ * off-roader. The golden scaffold saved that build; a build without one would have been steered into
+ * three.js for a grid of cards. A game that is plainly FLAT — cards, a board, a grid, a word or quiz
+ * game, or one that says 2D — gets neither, unless the prompt also says 3D.
+ *
+ * Precision-first in the direction that matters: a bike-racing or a village game (the reports this
+ * block exists for) name no flat marker, so they keep it exactly as before.
+ */
+const SCENE_WORDS = /\b(?:3\s*-?\s*d|three\s*-?\s*dimensional|game|khel)\b/i;
+const SAYS_3D = /\b(?:3\s*-?\s*d|three\s*-?\s*dimensional)\b/i;
+const FLAT_GAME = /\b(?:2\s*-?\s*d|two\s*-?\s*dimensional|memory\s*(?:card|match|game)|card\s*(?:game|matching)|matching\s*(?:cards?|pairs?|game)|board\s*game|puzzle|jigsaw|sudoku|crossword|word\s*(?:game|search|puzzle)|wordle|quiz|trivia|tic\s*-?\s*tac\s*-?\s*toe|chess|ludo|carrom|snakes?\s*(?:and|&|n)\s*ladders?|2048|tetris|solitaire|minesweeper|flash\s*cards?|\d+\s*[x×]\s*\d+\s*(?:grid|board))\b/i;
+
+export function wantsSceneObjects(prompt: string | null | undefined): boolean {
+  const text = String(prompt ?? '');
+  if (!SCENE_WORDS.test(text)) return false;
+  if (SAYS_3D.test(text)) return true;
+  return !FLAT_GAME.test(text);
+}
+
 /** Which hero objects does this prompt need, what must be true of each, and how are they placed? */
 export function heroObjectContract(prompt: string | null | undefined): HeroObjectContract {
   const text = String(prompt ?? '');

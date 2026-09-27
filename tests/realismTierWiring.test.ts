@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { realismIntent } from '../src/server/lib/realismIntent';
+import { wantsSceneObjects } from '../src/server/lib/heroObjectSpec';
 
 /**
  * REALISM-TIER WIRING — the half of the decision that lives outside the tested function.
@@ -42,12 +43,11 @@ describe('the tier decision reaches the model', () => {
      * The gate is the reason this block is affordable at all: it is added to every build's prompt, and
      * a prompt is billed tokens. Without the gate every CRUD app would pay for game guidance.
      */
-    const gate = route.match(/if \((\/[^\n]*?\/i)\.test\(prompt\)\) \{\n\s*const realism = realismIntent/);
-    expect(gate, 'the 3D gate immediately before realismIntent() has moved or gone').toBeTruthy();
-    const re = new RegExp(gate![1].slice(1, -2), 'i');
-    expect(re.test('make me a 3d racing game')).toBe(true);
-    expect(re.test('ek 3D game banao')).toBe(true);
-    expect(re.test('a todo list app with dark mode')).toBe(false);
+    expect(route, 'the 3D gate immediately before realismIntent() has moved or gone')
+      .toMatch(/if \(wantsSceneObjects\(prompt\)\) \{\n\s*const realism = realismIntent/);
+    expect(wantsSceneObjects('make me a 3d racing game')).toBe(true);
+    expect(wantsSceneObjects('ek 3D game banao')).toBe(true);
+    expect(wantsSceneObjects('a todo list app with dark mode')).toBe(false);
   });
 
   it('the REAL tier is told to say "real-looking", never "photorealistic"', () => {

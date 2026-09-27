@@ -82932,6 +82932,21 @@ do! isi ux me. same bas alag popup ki jagah notification me aye! jisse user dist
 - ⚠️ **Reaches phones only through a fresh `.aab`** (bundled mode). The banner exists only in the installed app.
 ## 2026-09-27 — Autopsy d829b523 ("water drinking reminder", Weak): three defects still live on `main`
 
+## 2026-09-27 — AUTOPSY 15151196 (memory match card game, Weak, complex-routed to KIMI, golden scaffold) — the review found two bugs that did not exist, and the user was told they were fixed
+Build was green in 82 s and ended ok in 3.2 min, billed ₹61.03 on real cost $0.150 + sandbox $0.009.
+**Ledger:** ✅ self-healed 0 · 🔀 workaround 0 · ⏭️ skipped 1 (the Playwright starter suite, not run by design) · ❌ shipped wrong 2 (a false "fixed 2 real problems" line in the user's summary; a false 65/100 review with two CRITICALs) · 🥵 struggle 3 (the reviewer ran past its 45 s budget on a 38 s reasoning call; seven duplicate reads in two turns; a review → repair → re-verify detour on a working app).
+**Root causes and fixes (all in one PR):**
+1. **The `grep` tool spoke the wrong dialect.** It ran `grep -rn` (a BASIC regex, where `|` is a literal bar) and turned every non-zero exit into "(no matches)". The reviewer's `\.badge|\.alert|…` could never match, so it filed two CRITICALs for classes at lines 64–137. `grepTool.ts` now tries extended, then basic, then literal in ONE shell command. It says "(no matches)" only on grep's own exit 1, and any other failure is reported with grep's words.
+2. **A repair that changed nothing was reported as a repair.** `repairOk` came from the pass's own `ok`. The repair agent found the classes, said "false alarm", and wrote nothing, yet the user read "They were fixed". The route now measures `changedWorkspacePaths` against the pass's own snapshot. With zero changes the outcome is `REVIEW_FUNCTIONAL_NO_CHANGE`, with no user line and no 35 s re-browse. The narration no longer calls a claim "real" before it is checked.
+3. **Every game was a 3D scene.** The gate was `3d|game|khel`, so a 2D card game got the objects.ts tier line and a JEEP spec (`4x4` in "a 4x4 grid"). `wantsSceneObjects` skips flat games (cards, board, grid, quiz, word, 2D…) unless 3D is said, and the jeep's `4x4` no longer matches before grid/board/tiles/cards.
+4. **Our bridge ate the app's DOM budget.** `browseUrl` cuts the page at 30,000 chars, and the 18 KB preview bridge sat first, so the capture showed `buttons=0` for a 17-button app. The bridge node is removed by its marker before the read.
+5. **The same file was read four times in one turn**, and each copy rode in every later turn's context. `duplicateReadsInTurn` runs identical deterministic reads (read_file/grep/glob/recall) once; each repeat gets a one-line pointer.
+6. **The report hid what a scoped grep searched for.** `toolCallTarget` now shows `"<pattern>" in <path>`.
+**Already fixed before this report reached us:** `PREVIEW_SNAPSHOT_STALE` and the starter-suite wording ("this project HAS a test suite") both came from #3343, which deployed after this build ran.
+**OPEN (for the admin, not changed):**
+- Complexity routing scored a memory game 63 and opened on KIMI ($0.95/$4.00) although a golden scaffold was pre-seeded and the job was verify-and-polish. Whether a scaffolded build should open on the cheap rung is a routing-policy decision.
+- Reviewer findings that name a checkable fact ("class X is not defined in file Y") could be refuted deterministically before any repair is spent. That is not built.
+- Vite's dev CSS still takes ~10 KB of the 30 KB capture on a CSS-heavy app.
 ## 2026-09-27 — Autopsy `e1c21ad8` ("limitless writer", weak tier, 25.1 min, ₹488) — a Python venv became the project
 
 **What happened.** A free user imported a FastAPI backend with a Kotlin Android shell and said "Ise build karo ek app ke roop mein". The engine built a React + Vite + FastAPI app. It rendered, typechecked and passed a production build. Then, to test the backend, it ran `python3 -m venv venv` inside `backend/`.

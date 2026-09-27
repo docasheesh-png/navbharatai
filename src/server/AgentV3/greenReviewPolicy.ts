@@ -314,6 +314,24 @@ export interface GreenRepairFacts {
   finished: boolean;
   count: number;
   budgetMs: number;
+  /**
+   * How many files the repair pass actually changed. 🔴 A pass that finished and changed NOTHING is
+   * not a repair (build 15151196, 2026-09-27): the reviewer's two "missing CSS class" criticals were
+   * false, the repair agent checked, said so, and wrote no file — and the user was told "2 real
+   * problems were fixed". `undefined` keeps the old reading for a caller that cannot count.
+   */
+  changed?: number;
+}
+
+/**
+ * The paths whose content differs between two workspace snapshots — added, removed or edited. PURE.
+ * This is what a repair DID, measured, rather than what the pass reported about itself.
+ */
+export function changedWorkspacePaths(before: Record<string, string>, after: Record<string, string>): string[] {
+  const out: string[] = [];
+  for (const [path, content] of Object.entries(after)) if (before[path] !== content) out.push(path);
+  for (const path of Object.keys(before)) if (!(path in after)) out.push(path);
+  return out.sort();
 }
 
 /**
@@ -322,6 +340,12 @@ export interface GreenRepairFacts {
  */
 export function greenRepairOutcome(f: GreenRepairFacts): { severity: 'info' | 'warning'; code: string; message: string; autoResolved: boolean } {
   const n = Math.max(0, f.count | 0);
+  if (f.kept && f.finished && f.changed === 0) {
+    return {
+      severity: 'info', code: 'REVIEW_FUNCTIONAL_NO_CHANGE', autoResolved: true,
+      message: `The repair pass checked ${n} functional reviewer finding(s) on the working app and changed no file — nothing was claimed as fixed, and the app is exactly the version that rendered.`,
+    };
+  }
   if (f.kept) {
     return {
       severity: 'info', code: 'REVIEW_FUNCTIONAL_REPAIRED', autoResolved: true,
@@ -345,9 +369,12 @@ export function greenRepairOutcome(f: GreenRepairFacts): { severity: 'info' | 'w
   };
 }
 
-/** The line the USER reads when a green repair was kept. Branded, no engine or vendor named. PURE. */
-export function greenRepairUserLine(count: number): string {
+/**
+ * The line the USER reads when a green repair was kept. Branded, no engine or vendor named. PURE.
+ * `changed` is how many files the pass really changed: 0 ⇒ nothing was fixed, so nothing is claimed.
+ */
+export function greenRepairUserLine(count: number, changed?: number): string {
   const n = Math.max(0, count | 0);
-  if (n === 0) return '';
+  if (n === 0 || changed === 0) return '';
   return `\n\n🔧 After the app was working, a final review found ${n} real problem${n === 1 ? '' : 's'}. ${n === 1 ? 'It was' : 'They were'} fixed, and the app was checked again: it still works.`;
 }

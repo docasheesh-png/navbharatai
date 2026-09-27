@@ -235,7 +235,7 @@ import { generateCommentsIntegration } from '../lib/CommentsGenerator';
 import { generateMessagingIntegration } from '../lib/MessagingGenerator';
 import { generateListingsIntegration } from '../lib/ListingsGenerator';
 import { generateJobBoardIntegration } from '../lib/JobBoardGenerator';
-import { shellQuote } from '../lib/shellQuote';
+import { grepCommand, readGrepOutput } from './grepTool';
 import { generateWishlistIntegration } from '../lib/WishlistGenerator';
 import { generateAddressesIntegration } from '../lib/AddressesGenerator';
 import { generateCouponsIntegration } from '../lib/CouponsGenerator';
@@ -3808,13 +3808,13 @@ export class ToolDispatcher {
         // The shared listing prune (lib/generatedDirs.ts) plus `vendor`, which only a search skips: a
         // build's own Python virtualenv made an unqualified grep walk ~1,900 library files (autopsy e1c21ad8).
         const EXCLUDED_DIRS = [...LIST_PRUNE_DIRS, 'vendor'];
-        const excludes = EXCLUDED_DIRS.map((d) => `--exclude-dir=${shellQuote(d)}`).join(' ');
-        const { stdout } = await this.actuator.runCommand(
-          this.workspaceId,
-          `grep -rn ${excludes} ${shellQuote(pattern)} ${shellQuote(path)} || true`,
-        );
+        // 🔴 WHAT THE MODEL MEANT, AND AN HONEST MISS (build 15151196): a bare `grep -rn` is a BASIC
+        // regex, so `\.badge|\.alert` could never match and a reviewer filed two false criticals on a
+        // working app. See grepTool.ts — extended, then basic, then literal, and "(no matches)" only
+        // when grep itself said so. Every dialect it tries carries the same excludes.
+        const { stdout } = await this.actuator.runCommand(this.workspaceId, grepCommand(pattern, path, EXCLUDED_DIRS));
         // T1-sec-redact: grep can surface a secret sitting in a matched line (e.g. `grep KEY .env`).
-        return redactSecrets(stdout.trim()) || '(no matches)';
+        return redactSecrets(readGrepOutput(stdout, pattern).text);
       }
 
       case 'glob': {

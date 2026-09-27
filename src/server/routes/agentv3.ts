@@ -49,7 +49,7 @@ import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } f
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { deviceSummaryNotice, deviceSummaryRecord } from '../AgentV3/devicePowers';
 import { nativeCapabilityBrief, requestedCapabilities } from '../AgentV3/nativeCapabilities';
-import { starterSuiteOnly, starterSuiteNote } from '../AgentV3/e2eAutoScaffold';
+import { starterSuiteOnly, starterSuiteNote, testFilesIn } from '../AgentV3/e2eAutoScaffold';
 import { labelFieldsFromPlaceholder } from '../AppMakerLab/intelligence/A11yLinter';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction, simulatedDataIssues, simulatedDataNotice } from '../AgentV3/AuthenticityAnalysis';
 import { isUnreachable } from '../AgentV3/appReachability';
@@ -389,6 +389,7 @@ import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
 import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, testSkeletonsCanRun, starterTestsNarration } from '../AgentV3/TestGenerationAgent';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from '../AgentV3/appDefaults';
+import { resolveAppDisplayName } from '../AgentV3/appDisplayName';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { findingsToDebt } from '../AgentV3/engineeringMemory';
 import { selectZombieBuilds } from '../AgentV3/buildWatchdog';
@@ -19297,8 +19298,13 @@ async function noteBuildOutcome(
             // into the sandbox copy every time the dev server starts, which is the one place it belongs.
             try { indexHtml = withoutPreviewBridge(idxPath, await actuator.readFile(workspaceId, idxPath)); } catch { indexHtml = null; }
           }
-          const appName = deriveTitle(prompt) || 'App';
-          const defaults = planAppDefaults(indexHtml, appName);
+          // The app's OWN name — the user's chosen name, else its <title>, else the order without its verb —
+          // never the order itself (autopsy d829b523: a phone showed "Build a wate" under the icon).
+          let chosenAppName: string | null = null;
+          try { chosenAppName = (await getConversationStore().get(workspaceId))?.appName ?? null; } catch { chosenAppName = null; }
+          const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt });
+          const appName = display.name;
+          const defaults = planAppDefaults(indexHtml, appName, { description: display.description, shortName: display.shortName });
           const savedDefaults: Record<string, string> = {};
           // Did the index.html patch actually LAND? `defaults.added` lists the TAGS the generator
           // intended, and the files are a separate set — so the two must be reported separately.
@@ -20136,7 +20142,13 @@ async function noteBuildOutcome(
                 gateEvidence.testSuitePresent = true;
                 // OURS OR THEIRS? (autopsy 6bae5835). A suite whose every file this build's own finishing
                 // pass wrote is NavBharatAI's starter, not the user's project — say so, in both places.
-                const ours = starterSuiteOnly(files, finishingPaths);
+                // Read the test files themselves: our starter is recognised by its own marker, not only by
+                // having been written THIS build — a later build must not call it the user's suite.
+                const testContents: Record<string, string> = {};
+                for (const tf of testFilesIn(files).slice(0, 12)) {
+                  try { testContents[tf] = await actuator.readFile(workspaceId, tf); } catch { /* unreadable ⇒ judged as theirs */ }
+                }
+                const ours = starterSuiteOnly(files, finishingPaths, testContents);
                 if (ours) gateEvidence.testSuiteIsOurStarter = true;
                 buildDiag.record({
                   phase: 'readiness', severity: 'info', code: 'TEST_SUITE_UNVERIFIED',

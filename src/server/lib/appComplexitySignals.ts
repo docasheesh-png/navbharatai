@@ -123,7 +123,41 @@ export function namesBusinessDomain(prompt: string): boolean {
   // The same guard, in the script the domain regexes already read — see DOCUMENT_DELIVERABLE_SIGNAL.
   if (DOCUMENT_DELIVERABLE_SIGNAL.test(p)) return false;
   if (SIMPLE_APP_SIGNAL.test(p)) return false;
-  return analyzeRequirementGaps(p).domain !== GENERAL_DOMAIN;
+  const domain = analyzeRequirementGaps(p).domain;
+  return domain !== GENERAL_DOMAIN && !PERSONAL_TOOL_DOMAINS.has(domain);
+}
+
+/**
+ * Domains the requirement analyser recognises that are NOT a business: the personal tools a single
+ * person uses — a todo list, a reminder, a planner, a habit tracker, a checklist, notes.
+ *
+ * 🔴 AUTOPSY d829b523 (2026-09-27). *"Build a water drinking reminder app…"* scored **58, complex_app** —
+ * the score of a hospital ERP — because the requirement analyser correctly labelled it `productivity`
+ * and `namesBusinessDomain` promoted EVERY labelled domain. The build opened on the always-reasoning
+ * rung, skipped the fast lane, and first rendered at 237 s for a one-screen localStorage app. Even
+ * *"build a reminder app"* alone scored 58, while *"a todo app"* scored 15 — the same family, split only
+ * by which of its words happened to be in `SIMPLE_APP_SIGNAL`.
+ *
+ * 🔑 This is `namesBusinessDomain`'s OWN second guard, not a new rule: its docblock says *"a todo app
+ * for my restaurant is a todo app, and promoting it would over-spend on exactly the builds the cheap
+ * lane exists for."* The `productivity` domain's own regex begins with `todo`. A set rather than a
+ * keyword list, so the analyser stays the single owner of the vocabulary.
+ *
+ * ⚠️ Scope-bearing words still win, because `isComplexAppPrompt` is asked FIRST in `detectTaskType`:
+ * *"a team task manager with login and a database"* is still complex. `game` is deliberately NOT here —
+ * its complex verdict is pinned in the Indic-language tests and deserves its own decision.
+ */
+export const PERSONAL_TOOL_DOMAINS: ReadonlySet<string> = new Set(['productivity']);
+
+/**
+ * True when the prompt names one of the personal-tool domains above — the simple family, recognised by
+ * the same analyser that recognises the business domains, so the two can never overlap. Carries the
+ * page/document guards of `namesBusinessDomain` for the same reason. PURE.
+ */
+export function namesPersonalTool(prompt: string): boolean {
+  const p = String(prompt || '');
+  if (PAGE_DELIVERABLE_SIGNAL.test(p) || DOCUMENT_DELIVERABLE_SIGNAL.test(p)) return false;
+  return PERSONAL_TOOL_DOMAINS.has(analyzeRequirementGaps(p).domain);
 }
 
 export function isComplexAppPrompt(prompt: string): boolean {

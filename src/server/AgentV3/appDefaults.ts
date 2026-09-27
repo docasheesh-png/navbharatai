@@ -20,11 +20,11 @@ const MANIFEST_HREF = '/manifest.webmanifest';
 const ICON_HREF = '/icon.svg';
 const SW_HREF = '/sw.js';
 
-function manifestJson(appName: string): string {
+function manifestJson(appName: string, shortName?: string): string {
   return JSON.stringify(
     {
       name: appName,
-      short_name: appName.length > 12 ? appName.slice(0, 12) : appName,
+      short_name: shortName || (appName.length > 12 ? appName.slice(0, 12) : appName),
       start_url: '/',
       display: 'standalone',
       background_color: '#ffffff',
@@ -214,12 +214,20 @@ export function defaultAssetPath(rel: string, framework: string | null | undefin
  * Plan the app-scaffold defaults. Pure + idempotent. `indexHtml` may be null (no index.html found):
  * then only the standalone files (manifest, robots) are returned and `indexHtml` stays null.
  */
-export function planAppDefaults(indexHtml: string | null, appName = 'App'): AppDefaultsResult {
+export function planAppDefaults(
+  indexHtml: string | null,
+  appName = 'App',
+  /**
+   * What the app does, for `description` / `og:description`. Omitted ⇒ the name, as before. Both come
+   * from `resolveAppDisplayName` at the two call sites (autopsy d829b523 — they used to be the prompt).
+   */
+  opts: { description?: string; shortName?: string } = {},
+): AppDefaultsResult {
   const added: string[] = [];
   const files: Record<string, string> = {};
 
   // Standalone files, added only if absent from the workspace (the tool checks existence before writing).
-  files[MANIFEST_HREF.replace(/^\//, '')] = manifestJson(appName);
+  files[MANIFEST_HREF.replace(/^\//, '')] = manifestJson(appName, opts.shortName);
   files['robots.txt'] = ROBOTS_TXT;
   files[ICON_HREF.replace(/^\//, '')] = iconSvg(appName); // real installable icon (referenced by the manifest)
   files[SW_HREF.replace(/^\//, '')] = swJs();             // network-first service worker (PWA, works offline)
@@ -234,16 +242,17 @@ export function planAppDefaults(indexHtml: string | null, appName = 'App'): AppD
   if (langAdded) added.push('html lang="en"');
 
   // Tags to ensure in <head>, each guarded by a presence test so this is idempotent.
-  // The name comes from the user's prompt; a quote or an angle bracket in it would otherwise break the
-  // attribute it sits in, or the document.
+  // The name and description are derived from text the user wrote; a quote or an angle bracket in them
+  // would otherwise break the attribute they sit in, or the document.
   const safeName = escapeHtml(appName);
+  const safeDescription = escapeHtml(opts.description || appName);
   const ensures: Array<{ test: RegExp; tag: string; label: string }> = [
     { test: /<meta[^>]+charset/i, tag: '<meta charset="UTF-8" />', label: 'charset' },
     { test: /name=["']viewport["']/i, tag: '<meta name="viewport" content="width=device-width, initial-scale=1.0" />', label: 'viewport' },
     { test: /<title>/i, tag: `<title>${safeName}</title>`, label: 'title' },
-    { test: /name=["']description["']/i, tag: `<meta name="description" content="${safeName}" />`, label: 'meta description' },
+    { test: /name=["']description["']/i, tag: `<meta name="description" content="${safeDescription}" />`, label: 'meta description' },
     { test: /property=["']og:title["']/i, tag: `<meta property="og:title" content="${safeName}" />`, label: 'og:title' },
-    { test: /property=["']og:description["']/i, tag: `<meta property="og:description" content="${safeName}" />`, label: 'og:description' },
+    { test: /property=["']og:description["']/i, tag: `<meta property="og:description" content="${safeDescription}" />`, label: 'og:description' },
     { test: /name=["']twitter:card["']/i, tag: '<meta name="twitter:card" content="summary_large_image" />', label: 'twitter:card' },
     { test: /name=["']theme-color["']/i, tag: '<meta name="theme-color" content="#0f172a" />', label: 'theme-color' },
     { test: /rel=["']manifest["']/i, tag: `<link rel="manifest" href="${MANIFEST_HREF}" />`, label: 'manifest link' },

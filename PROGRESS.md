@@ -83105,3 +83105,49 @@ three numbers were false and one was a real, months-old money leak:
 builds as failures; a stuck project's "root cause" can be the upsell note; ladder depth shows 41 of 44
 builds opening on rung 2 (the complexity router sends most apps to KIMI — worth re-measuring its line
 now that the free-first premise is being checked); the Build event log card reads 0 events.
+## 2026-09-27 — Admin Monitor capture: three false numbers on the main panel, and one legal item still open
+
+The admin pasted the Monitor page with no comment. Read against the code, four things on it were not what they looked like.
+
+1. **"Builds 0 · last 6 hours" beside "AI cost ₹10.95 · kimi".**
+   - **Cause:** `recordPlatformBuild` records a build's model calls first and the build last. On a quiet instance the FIRST `recordModelCall` flushed, the build counter landed in the fresh pending map, and nothing flushed it before the next deploy killed the instance.
+   - **Fix (`metricsTimeline.ts`):**
+     - The flush check runs on the next tick, so one build and its cost leave together.
+     - An unref'd idle timer flushes pending deltas.
+     - `server.ts` graceful shutdown flushes after the drain, before exit (bounded 2.5 s inside the 9 s backstop).
+2. **"Platform health — critical · Health 0 · Risk 100"** on servers "keeping up comfortably". Both admin routes built the inputs by hand from the per-PROVIDER counters.
+   - **Errors** were counted per ladder rung: a fallback that worked read as an error. This is the 2026-09-18 AI-load mistake, and this sibling was never hunted.
+   - **Latency** was the model's generation time (3–4 s) scored on a web scale where 2 s is zero.
+   - **Fix:** one builder, `platformHealthInputs`, for both routes. It uses per-request outcomes (`getRouterOutcomeStats`, with the same `AI_MIN_SAMPLE`) and our own server's wait (event-loop p99).
+3. **"AI load 15% unanswered"** was measured on everything EXCEPT streamed chat, the main path. This is the fourth time the streaming path has been forgotten.
+   - **Fix:** `routeStream` now records one outcome per turn. A user abort is not counted. The tile's note names the denominator ("3 of 20 requests").
+4. 🔴 **Grievance Officer still not named.** The Monitor shows the warning, so the running revision has no `GRIEVANCE_OFFICER_NAME`. CLAUDE.md's queue row said this was done; that row is corrected in place.
+
+- Tests: `tests/theMonitorCountsWhatItCosts.test.ts` (9). Reversion-proven: the old flush fails 2 of them and removing the stream outcome fails 1.
+
+**Observed, not changed (the admin's decisions):**
+- `AGENTV3_BUILD_BLOCKED_NO_CREDITS` repeats in the log (7 times in 2 days).
+- +126 registered users today, but Active (24h) = 1.
+- Since the welcome grants were removed, a WEBSITE signup has ₹0 and the referral ladder pays only in the Android app. So a web user can sign up and never build anything.
+- 892 chat rows log provider "unknown" and 1,103 calls "could not be priced" on the Business panel. Not investigated in this change.
+## 2026-09-27 — Games open on the cheap engine, where it can (admin decision)
+
+Asked after #3350 whether games should join reminder/planner apps on the cheap opening rung, the admin said:
+*"han, agar saste module me ho sakte hai to, hona chahiye"*.
+- **Before:** every prompt labelled `game` by the requirement analyser scored **58 / complex_app** (the
+  hospital-ERP score), because `namesBusinessDomain` promoted every labelled domain. "Build a car racing
+  game" opened on the always-reasoning rung and skipped the fast lane; "snake game" scored 15 only because
+  it is named in `SIMPLE_APP_SIGNAL`.
+- **Now:** `game` joins `PERSONAL_TOOL_DOMAINS` (`appComplexitySignals.ts`), so an ordinary game is
+  `simple_app` / 15 and opens on the cheap rung, keeping the fast lane.
+- **The admin's condition ("where it can")** is `HEAVY_GAME_SIGNAL`: 3D / three.js / WebGL, multiplayer,
+  online play or PvP, an MMO, a physics engine or physics-based play, an open world, Unity/Unreal — those
+  keep the complex opening. Login/database/real-time were already caught earlier by `isComplexAppPrompt`.
+  "Physics" alone (a school subject) and "3d ball" (a named simple app) do not count.
+- One predicate (`isPersonalTool`) now answers for both `namesBusinessDomain` and `namesPersonalTool`, so
+  the two can never disagree about the same prompt.
+- `tests/theLanguagesOfTheMarketNameTheirDomain.test.ts` pinned Indic game prompts to complex_app/58; it now
+  expects `simple_app` for the game rows (still recognised as games, never chat), per the admin's decision.
+- Tests: `tests/aGameOpensOnTheCheapEngineWhereItCan.test.ts` (19), reversion-proven in both halves.
+- ⚠️ **What to watch:** heal count and first-render time on Weak/Normal game builds. If ordinary games start
+  needing heals the cheap rung cannot give, the fix is to widen `HEAVY_GAME_SIGNAL`, not to revert.

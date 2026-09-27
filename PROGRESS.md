@@ -82964,3 +82964,26 @@ do! isi ux me. same bas alag popup ki jagah notification me aye! jisse user dist
 - **Backend not seen, so no real API check.** `SERVICE_GRAPH_SINGLE` did not see the FastAPI backend. Until it does, no smoke check reaches a separate API port.
 - **Billing.** This weak-tier build billed ₹488 on $1.29 real cost (tiered markup, preview proven). That is policy, but it is large for a free-tier user.
 - **ETA.** The ETA ignores the COMPLEX verdict and the size of the existing project on an edit turn.
+## 2026-09-27 — Autopsy "NavRide / ride sharing like Rapido" (build 75ea6136, run 2026-09-26 08:09 UTC)
+
+A weak-tier build that succeeded (10.7 min, ₹179.99, KIMI throughout, preview proven, every page rendered).
+**It ran before most of the 2026-09-26 afternoon fixes landed, so each item was re-checked against today's
+`main` before anything was touched** — and most were already closed:
+- Starter tests imported default exports by name, and used vitest without declaring it → fixed 3d04a737b
+  (15:22 that day). That is why the evaluate heals then fired on them.
+- "🔧 Auto-fixed 3 import(s)" / "🔧 Added 2 missing dependency(ies)" said while Green Freeze REFUSED the writes,
+  and HEAL_NOT_DURABLE blaming a lost write → fixed in the SignBridge round (`landHealWrite` narrates and
+  records only what landed).
+- `/Drive.test`, `/Home.test` rendered as "pages" in a Vite app, and "0 journeys passed" coded JOURNEY_PASSED
+  → fixed d01fc9282 (pages folder is a route table only in Next; all-unreachable is not a pass).
+- The reviewer's `glob **/*.{ts,tsx,html,css,scss}` → "no files" → fixed in #3346 today.
+
+**New here (PR on `claude/autopsy-ride-sharing`):**
+1. The revival recipe stored `npm run dev … | head -20 &\nsleep 4 && node -e '<port probe>'` — #3346's
+   `serverLaunchCommand` split only on `&&`/`;`. It now also splits on newlines and a lone `&`.
+2. A test file (`*.test.*`, `*.spec.*`, `__tests__/`) is never a page route, even in a real Next pages folder.
+
+**Still open (recorded, not new):** the in-build `evaluate` tool said *"Nothing here was ever proven to RUN — no
+preview"* (confidence 35%) seconds after the preview was proven — the shared-evidence-ledger open root cause;
+the ETA estimator was 3.7× under (heuristic, unevidenced, and labelled so); our E2E scaffold keeps the gate
+YELLOW (PR #3331's area).

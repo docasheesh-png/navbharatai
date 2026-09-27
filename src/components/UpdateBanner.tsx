@@ -112,10 +112,17 @@ export function UpdateBanner({ apiBase = '' }: { apiBase?: string }) {
     <div
       role="status"
       style={{
-        position: 'fixed',
-        // Below the notch: the app owns its own insets (see nativeShellInvariants).
-        top: 'calc(var(--nb-safe-top, 0px) + 8px)',
-        left: 12, right: 12, zIndex: 60,
+        // IN THE LAYOUT, NOT FLOATING OVER IT (admin 2026-09-27: "update notification ki position
+        // theek nahi hai, upar se crop ho jata hai"). It used to be `position: fixed` at
+        // `--nb-safe-top + 8px` with `zIndex: 60` — in the same strip of screen as the header, whose
+        // stacking level is `z-[100]` (panels/TopNav.tsx). So the header painted OVER the banner and
+        // hid its top row: the message's first line and the top of the Update button were under the
+        // header. Reproduced in a phone-sized render before this change. As the first row of the app
+        // shell it has no stacking contest to lose: it sits inside the root's safe-area padding (the
+        // one inset that already keeps the header whole) and pushes the header down instead. The shell is a flex column whose content is `flex-1 min-h-0`, so the
+        // banner's height is taken from the page, never pushed off the bottom.
+        flexShrink: 0,
+        margin: '8px 12px 0',
         display: 'flex', alignItems: 'center', gap: 12,
         padding: '12px 14px', borderRadius: 12,
         background: 'var(--surface-card)', color: 'var(--text-body)',

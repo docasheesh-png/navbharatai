@@ -82747,3 +82747,10 @@ construction, and so is anyone who already got the old ₹50 or a referral step.
 money.
 ⚠️ **It counts against the ₹400 lifetime gift ceiling** (`freeGiftedTokens`, read by `routes/referral.ts`).
 A user given ₹150 here can earn at most ₹250 more from the referral ladder.
+
+## 2026-09-27 — The update banner was painted UNDER the header (admin: "update notification ki position theek nahi hai, upar se crop ho jata hai")
+- **Root cause:** `UpdateBanner` was `position: fixed` at `--nb-safe-top + 8px` with `zIndex: 60`, in the same strip as the header (`TopNav`, `z-[100]`). The header painted over it, hiding the message's first line and the top of the Update button. Reproduced in a 412×915 render before the change.
+- **Fix:** the banner is now the first row of the app shell (`flexShrink: 0`, in the flow). It sits inside the root's safe-area padding and pushes the header down, so there is no stacking contest and no inset of its own to get wrong. The shell's content is `flex-1 min-h-0`, so the height comes out of the page, never the bottom bar.
+- **Siblings hunted:** every other fixed top overlay (`OfflineBanner`, `TestingNotice`, `.nb-float-top`) is either below the header or above it in z-order. No other instance.
+- **Test:** `tests/appUpdate.test.ts` — the banner is never positioned, never re-derives the inset, and stays before `<TopNav` inside the padded root. Reversion-proven.
+- ⚠️ **Reaches phones only through a fresh `.aab`** (bundled mode). The banner exists only in the installed app.

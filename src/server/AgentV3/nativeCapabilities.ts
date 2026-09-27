@@ -54,6 +54,11 @@ export interface NativeCapability {
   webFallback?: string;
   /** Permissions the APP must add — the plugin does not declare them itself. */
   androidPermissions: readonly AndroidPermission[];
+  /**
+   * `<meta-data>` the app's `<application>` must carry — a plugin setting that is not a permission.
+   * (Proven 2026-09-27: the barcode plugin's README requires one, and the table had no way to say so.)
+   */
+  androidMetaData?: readonly { name: string; value: string }[];
   /** iOS Info.plist usage strings the app must carry, key → text shown to the user. */
   iosUsage: Readonly<Record<string, string>>;
   /** Does the user's request ask for this? Precision-first: a miss costs a hint, a false hit adds a plugin. */
@@ -167,10 +172,15 @@ export const NATIVE_CAPABILITIES: readonly NativeCapability[] = [
     label: 'scanning QR codes and barcodes',
     pkg: '@capacitor-mlkit/barcode-scanning',
     version: '7.5.0',
-    api: 'BarcodeScanner.requestPermissions(); BarcodeScanner.scan()',
+    // 🔴 PROVEN 2026-09-27 against the plugin's own README: on Android `scan()` runs Google's code
+    // scanner, which is a separately downloaded Play-services module. Calling it before the module is
+    // present fails — a QR button that errors on its first press. So the builder is told the full
+    // sequence, and the phone build asks Android to fetch the module at install time (meta-data below).
+    api: "on Android first: const { available } = await BarcodeScanner.isGoogleBarcodeScannerModuleAvailable(); if (!available) { await BarcodeScanner.installGoogleBarcodeScannerModule(); wait for the 'googleBarcodeScannerModuleInstallProgress' event with state 4 (COMPLETED; 5 is FAILED — tell the user) } — then BarcodeScanner.scan() on every platform",
     web: 'none',
     webFallback: 'let the user type or paste the code',
     androidPermissions: [{ name: 'CAMERA' }],
+    androidMetaData: [{ name: 'com.google.mlkit.vision.DEPENDENCIES', value: 'barcode_ui' }],
     iosUsage: { NSCameraUsageDescription: 'The app scans QR codes and barcodes with your camera.' },
     asks: /\b(qr|barcode|scan(?:ner)?)\b/i,
   },
@@ -354,11 +364,12 @@ export function nativeCapabilityNotice(used: readonly NativeCapability[], imposs
 // ── the phone build's half: permissions, applied on the runner from the app's own package.json ────
 
 /** plugin package → what the app must add for it. Only rows that need something are listed. */
-export function nativePermissionMap(): Record<string, { android: AndroidPermission[]; ios: Record<string, string> }> {
-  const out: Record<string, { android: AndroidPermission[]; ios: Record<string, string> }> = {};
+export function nativePermissionMap(): Record<string, { android: AndroidPermission[]; meta: { name: string; value: string }[]; ios: Record<string, string> }> {
+  const out: Record<string, { android: AndroidPermission[]; meta: { name: string; value: string }[]; ios: Record<string, string> }> = {};
   for (const c of NATIVE_CAPABILITIES) {
-    if (!c.androidPermissions.length && !Object.keys(c.iosUsage).length) continue;
-    out[c.pkg] = { android: [...c.androidPermissions], ios: { ...c.iosUsage } };
+    const meta = [...(c.androidMetaData ?? [])];
+    if (!c.androidPermissions.length && !meta.length && !Object.keys(c.iosUsage).length) continue;
+    out[c.pkg] = { android: [...c.androidPermissions], meta, ios: { ...c.iosUsage } };
   }
   return out;
 }
@@ -395,9 +406,19 @@ export function nativePermissionScript(platform: 'android' | 'ios'): string[] {
       '  }); });',
       '  if (lines.length) {',
       "    xml = xml.replace('</manifest>', lines.join('\\n') + '\\n</manifest>');",
-      '    fs.writeFileSync(f, xml);',
       "    console.log('NavBharatAI: added ' + lines.length + ' permission(s) the app\\'s phone features need');",
       '  }',
+      '  const metas = [];',
+      '  used.forEach(function (n) { (MAP[n].meta || []).forEach(function (m) {',
+      "    if (xml.indexOf('android:name=\"' + m.name + '\"') >= 0) return;",
+      "    if (metas.some(function (l) { return l.indexOf('\"' + m.name + '\"') >= 0; })) return;",
+      "    metas.push('        <meta-data android:name=\"' + m.name + '\" android:value=\"' + m.value + '\" />');",
+      '  }); });',
+      "  if (metas.length && xml.indexOf('</application>') >= 0) {",
+      "    xml = xml.replace('</application>', metas.join('\\n') + '\\n    </application>');",
+      "    console.log('NavBharatAI: added ' + metas.length + ' plugin setting(s) the app\\'s phone features need');",
+      '  }',
+      '  if (lines.length || metas.length) fs.writeFileSync(f, xml);',
       '}',
     ];
   }

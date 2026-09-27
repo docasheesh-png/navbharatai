@@ -24,6 +24,8 @@
 // passing test run would be exactly the fake success the constitution forbids. The rendering evidence in
 // the report comes from PageRouteCheck, which really did run.
 
+import { isPlatformE2eScaffold } from './e2eScaffold';
+
 /** What the decision needs to know. Kept tiny so the caller cannot accidentally widen it. */
 export interface E2eAutoScaffoldContext {
   /** Every file in the project after the build. */
@@ -155,19 +157,40 @@ export function e2eAutoScaffoldNote(added: string[]): string {
     + 'screen, an error overlay, or a console error.';
 }
 
+/** What counts as a test file for the ours-or-theirs question. node_modules is never the project's. */
+const TEST_FILE_RE = /(^|\/)(?:playwright|vitest|jest)\.config\.[cm]?[jt]s(?:on)?$|(^|\/)(?:e2e|tests?|__tests__)\/|\.(?:spec|test)\.[cm]?[jt]sx?$/;
+
+/** The project's test files — the only files `starterSuiteOnly` may need to read. PURE. */
+export function testFilesIn(files: readonly string[]): string[] {
+  return (files || []).map((f) => String(f ?? '').replace(/^\.\//, ''))
+    .filter((f) => !/(^|\/)node_modules\//.test(f) && TEST_FILE_RE.test(f));
+}
+
 /**
- * Is every test file in the project one NavBharatAI's finishing pass wrote THIS build? PURE.
+ * Is every test file in the project NavBharatAI's own starter suite? PURE.
  *
  * Asked by the vaccine when a suite exists but its runner does not (autopsy 6bae5835): our starter
  * Playwright suite is written, deliberately not installed and not run, and must not then be reported
  * as "this project has a test suite that could not be run". A project with ANY test file of its own
  * answers false, so the user's real suite is always described as theirs.
+ *
+ * 🔴 "OURS" USED TO MEAN "WRITTEN BY THIS BUILD" (autopsy "Universal Remote", 2026-09-27). Build 2 wrote
+ * the starter suite and was told the truth; build 3 — the next message in the same app — found the same
+ * two files, had not written them itself, and reported them as the user's own suite: *"this project HAS
+ * a test suite, but it could not be run here"*, RELEASE_GATE YELLOW. Every later build of every app would
+ * have said the same, for ever. Who wrote a file this build is a fact about the build; whether the file
+ * is ours is a fact about its CONTENT, and `isPlatformE2eScaffold` already reads the marker our
+ * templates carry. `contents` supplies it; a file we cannot read is judged by `ourPaths` alone, which
+ * can only make the answer "theirs" — the direction that never hides a real suite.
  */
-export function starterSuiteOnly(files: readonly string[], ourPaths: ReadonlySet<string>): boolean {
-  const TEST_FILE = /(^|\/)(?:playwright|vitest|jest)\.config\.[cm]?[jt]s(?:on)?$|(^|\/)(?:e2e|tests?|__tests__)\/|\.(?:spec|test)\.[cm]?[jt]sx?$/;
-  const tests = (files || []).map((f) => String(f ?? '').replace(/^\.\//, ''))
-    .filter((f) => !/(^|\/)node_modules\//.test(f) && TEST_FILE.test(f));
-  return tests.length > 0 && tests.every((f) => ourPaths.has(f));
+export function starterSuiteOnly(
+  files: readonly string[],
+  ourPaths: ReadonlySet<string>,
+  contents: Readonly<Record<string, string>> = {},
+): boolean {
+  const tests = testFilesIn(files);
+  return tests.length > 0 && tests.every((f) => ourPaths.has(f)
+    || (typeof contents[f] === 'string' && isPlatformE2eScaffold(f, contents[f])));
 }
 
 /** The report line for our unrun starter suite. */

@@ -82646,3 +82646,46 @@ holds (such a user can later earn ₹350 from referral steps, not ₹400 on top)
 writes one ledger row "Welcome credit: ₹50 added by NavBharatAI", and audits `ADMIN_WELCOME_GIFT`.
 Server + admin panel only: live on the website admin panel on deploy, no .aab needed. Test-locked in
 `tests/adminWelcomeGift.test.ts`.
+
+---
+
+## 2026-09-27 — Autopsy `6bae5835` ("Jarwis", weak tier, 5.9 min, ₹104.56) — four root-cause fixes
+
+The prompt: *"an AI assistant named Jarwis that manages everything on my phone, whatever I say, and works
+well on the lock screen too"*. A clean build by every gate (rendered, typechecked, a real journey passed,
+production build OK, runtime verified), and still five things worth mining.
+
+**Ledger.** ✅ self-healed 1 (5 write-time type errors on the Web Speech API types, fixed by the model
+at write time). 🔀 workaround 0. ⏭️ skipped 1 (our own E2E scaffold was written without its runner, so
+the release gate reported "this project HAS a test suite, but it could not be run here" about a suite we
+added). ❌ shipped imperfect 2 (one input with no label in `TasksPanel.tsx`; a summary that promised a
+"lock-screen-like welcome screen" and never said a web app cannot manage the phone or run on the lock
+screen). 🥵 struggle 2 (the model never started a dev server, so the app was first seen at ~303 s, after
+generation had finished; the saved preview copy was declared STALE, which sends every later preview to
+a paid live machine).
+
+**Fixes (branch `claude/new-session-5z26qp`, each reversion-proven):**
+1. **The preview bridge's stripper was not the inverse of its injector.** Inject puts the tag straight
+   after `<head>`; strip removed the tag AND the newline after it — the USER's newline in every real Vite
+   `index.html`. So `identitySource` (the Study-Racer fix, 2026-09-25) could never make the two hashes
+   meet, and the copy was stale on every ordinary app. Every fixture had `<head><title>` on one line.
+   `stripPreviewBridge` now removes a trailing break only when the tag stood on its own line.
+   `tests/theBridgeComesOffTheWayItWentOn.test.ts`.
+2. **Device powers a web app does not have** (`AgentV3/devicePowers.ts`): the sibling of
+   `NO_INVENTED_PEOPLE_RULE` (f15a9bcc), which fixed one instance of the class. `DEVICE_POWERS_RULE` in the
+   stable system prompt, plus a precision-first check on the USER's prompt that appends one honest line to
+   the summary when the model stayed silent (`DEVICE_POWER_NOT_POSSIBLE`, process-only). It never offers
+   the phone-app build as the answer — packaging does not grant those powers.
+   `tests/aWebAppSaysWhatItCannotDo.test.ts` (13-prompt precision corpus).
+3. **Every write door gets the same write-time steering.** The label/spacing note (31dc61fd) and the
+   test-import check reached `write_file` only; `edit_file`, `write_files_batch` and `replace_symbol` got
+   the typecheck alone. One helper, `writeSteeringNotes`, now serves all four.
+   `tests/everyWriteDoorGetsTheSameSteering.test.ts`; two source guards widened.
+4. **The first-render clock reads the proof, not one pass.** `TIME_TO_FIRST_RENDER` was written only by
+   the in-build snapshot path (323 s here) while the render rescue proved the app at 303 s.
+   `tests/theFirstRenderClockReadsTheProof.test.ts`.
+
+**Still open (rule 6):** whether the write-time label note FIRED on `TasksPanel.tsx` and was ignored
+cannot be told from the report — nothing counts the notes issued. And our own E2E scaffold still lands
+without `@playwright/test`, which is what turns "we added a suite" into "the project has a suite we could
+not run" on the release gate.

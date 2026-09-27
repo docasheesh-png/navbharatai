@@ -49,7 +49,9 @@ const TRUNCATING_PIPE = /\s*\|\s*(head|tail|grep|sed|awk|cut|less|more)\b.*$/;
 export function serverLaunchCommand(command: string): string {
   const cmd = String(command || '').trim();
   if (!cmd) return '';
-  const segments = cmd.split(/\s*(?:&&|;)\s*/).map((x) => x.trim()).filter(Boolean);
+  // Newlines and a lone `&` separate commands too: a model backgrounds the server with `… &` and
+  // then runs a port probe on the next line (build 75ea6136 stored both as one recipe).
+  const segments = cmd.split(/\s*(?:&&|;|\n|(?<![&>|])&(?!&))\s*/).map((x) => x.trim()).filter(Boolean);
   const serverAt = segments.findIndex((seg) => SERVER_SEGMENT.test(seg.replace(TRUNCATING_PIPE, '')));
   if (serverAt < 0) return cmd;
   const setup = segments.slice(0, serverAt).filter((seg) => SETUP_SEGMENT.test(seg));

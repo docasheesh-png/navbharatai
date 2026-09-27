@@ -83073,7 +83073,7 @@ A weak-tier build that succeeded (10.7 min, ₹179.99, KIMI throughout, preview 
 preview"* (confidence 35%) seconds after the preview was proven — the shared-evidence-ledger open root cause;
 the ETA estimator was 3.7× under (heuristic, unevidenced, and labelled so); our E2E scaffold keeps the gate
 YELLOW (PR #3331's area).
-**Follow-ups accepted by the admin the same day ("apki sabhi salah accepted") — built into #3352:**
+**Follow-ups accepted by the admin the same day ("apki sabhi salah accepted") — #3352 merged before this commit reached it, so these ship in the next PR:**
 - **A tested template opens on the first rung.** `scaffoldedComplexityDecision`: a starter chip whose golden scaffold will be seeded is routed `simple`, with no model call. This closes the first open item above.
 - **A reviewer claim a file can answer is checked first.** `reviewEvidence.ts` `missingClassClaim` / `classIsDefined`: a finding whose first sentence says named classes are not defined is refuted only when EVERY named class has a selector in the real stylesheets. A finding resting on "the missing classes" falls with them only when every class claim fell. Stylesheets are read only when a finding makes the claim. This closes the second open item.
 - **Vite dev CSS leaves the capture only when the page would not fit.** `style[data-vite-dev-id]` text is replaced with a note when `outerHTML` is over 30,000 characters; a page that fits is read as before. This closes the third open item.

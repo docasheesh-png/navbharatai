@@ -39,6 +39,7 @@ import { viteEnvVarsUsed } from '../runtime/previewImportMeta';
 import { unshippableAssetImports } from './assetImports';
 import { PAID_REMIX_ENABLED } from './navStoreRemixPurchase';
 import { previewRuntimeSignature, bakeIsCurrent } from '../runtime/previewRuntimeSignature';
+import type { CreatorInfo } from './storeCreator';
 
 /** Lifecycle: live-via-link → admin lists it → or an admin/owner takes it down. */
 export type WebAppStatus = 'unlisted' | 'listed' | 'removed';
@@ -110,10 +111,15 @@ export interface WebStoreApp {
 /** What a viewer may see. No uid, no password material, no internals. */
 export type PublicWebStoreApp = Pick<WebStoreApp,
   'id' | 'name' | 'description' | 'iconDataUrl' | 'visibility' | 'fileCount' | 'runs' | 'remixes' | 'publishedAt' | 'version' | 'contentClass'
-> & { requiresPassword: boolean; priceInr: number; apiVarsUsed: string[]; screenshotCount: number };
+> & {
+  requiresPassword: boolean; priceInr: number; apiVarsUsed: string[]; screenshotCount: number;
+  /** Who made it (storeCreator.ts): a display name and a PUBLIC creator code — never the uid. */
+  creatorName?: string; creatorId?: string;
+};
 
-export function toPublicWebApp(a: WebStoreApp): PublicWebStoreApp {
+export function toPublicWebApp(a: WebStoreApp, creator?: CreatorInfo): PublicWebStoreApp {
   return {
+    ...(creator ? { creatorName: creator.name, creatorId: creator.id } : {}),
     id: a.id, name: a.name, description: a.description, iconDataUrl: a.iconDataUrl,
     visibility: a.visibility, fileCount: a.fileCount, runs: a.runs, remixes: a.remixes,
     contentClass: a.contentClass ?? 'general',

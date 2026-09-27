@@ -29,7 +29,12 @@ describe('a tool call records what it was aimed at', () => {
   });
 
   it('returns ONE target, not several — a timeline entry is scanned, not read', () => {
-    expect(toolCallTarget({ path: 'a.ts', pattern: 'x', url: 'http://y' })).toBe('a.ts');
+    expect(toolCallTarget({ path: 'a.ts', url: 'http://y' })).toBe('a.ts');
+  });
+
+  it('a search scoped to a path shows WHAT it searched for, in one entry (build 15151196)', () => {
+    expect(toolCallTarget({ path: 'src/index.css', pattern: '\\.badge|\\.alert' })).toBe('"\\\\.badge|\\\\.alert" in src/index.css');
+    expect(toolCallTarget({ path: 'a.ts', pattern: 'x', url: 'http://y' })).toBe('"x" in a.ts');
   });
 
   it('clips a very long path rather than flooding the timeline', () => {

@@ -45,6 +45,15 @@ export function toolCallTarget(input: unknown): string {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return '';
   const o = input as Record<string, unknown>;
 
+  // A SEARCH IS ITS PATTERN (build 15151196, 2026-09-27). A reviewer's `grep` in src/index.css came
+  // back empty twice and produced two false criticals — and the report showed only
+  // `agent=reviewer · src/index.css`, so what it had searched FOR could not be read back. For a
+  // pattern scoped to a path, the pattern is the question and the path is where; show both, still one
+  // entry. (A pattern alone falls through to the loop below, as before.)
+  if (typeof o.pattern === 'string' && o.pattern.trim() && typeof o.path === 'string' && o.path.trim()) {
+    return clip(`${JSON.stringify(o.pattern.trim())} in ${o.path.trim()}`);
+  }
+
   for (const key of TARGET_FIELDS) {
     const v = o[key];
     if (typeof v === 'string' && v.trim()) return clip(v.trim());

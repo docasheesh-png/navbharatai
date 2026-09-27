@@ -82682,3 +82682,76 @@ construction, and so is anyone who already got the old ₹50 or a referral step.
 money.
 ⚠️ **It counts against the ₹400 lifetime gift ceiling** (`freeGiftedTokens`, read by `routes/referral.ts`).
 A user given ₹150 here can earn at most ₹250 more from the referral ladder.
+
+## 2026-09-27 — Autopsy "Lekhan Sahyak" (6 builds): the preview's React split in two, and the user paid ₹208 to "fix" it
+
+A free user built a Hindi writing assistant (build 1, ₹106, green). Then the in-browser preview crashed with
+`Cannot read properties of null (reading 'useState')`, with the stack inside `cdn.jsdelivr.net/npm/react@18.3.1/+esm`.
+The user pressed "Fix with AI" five times:
+- Builds 2, 3 and 6 each "fixed" it with a different invented cause: a clean restart, `resolve.dedupe`,
+  and a hard React alias in `vite.config.ts`. They billed ₹95.55, ₹41.65 and ₹71.08.
+- Builds 4 and 5 honestly found nothing (zero-billed).
+
+The live preview rendered the app the whole time.
+
+**Ledger:**
+- ✅ Self-healed / honestly handled: 2
+  - two verified-no-change turns, zero-billed
+  - build 1's disclosure that its "AI chat" is on-device rules, plus its offer of real AI
+- 🔀 Workaround: 2
+  - two `vite.config.ts` edits aimed at a fault that was not in the project
+- ⏭️ Skipped: 0
+- ❌ Shipped wrong: 3
+  - the in-browser crash itself
+  - `CLAIM_UNSUPPORTED` telling the user 8 real screens "were not on the screen"
+  - "Requested feature not found: about page"
+- 🥵 Struggle: 3
+  - node_modules vanishing between turns (`tsc: not found`, react missing)
+  - a 60 s dev-server give-up on a multi-line start script
+  - `test-results/` saved as project files
+
+**Root causes, all fixed in this change:**
+1. **The in-browser preview loaded React's core packages one by one.** `react` fell to the jsdelivr rung while
+   `react-dom/client` came from the mirror, so the page had two Reacts.
+   - Fix: `reactCoreLoader.ts` loads `react` / `react-dom` / `react-dom/client` / `jsx-runtime` as ONE unit
+     from ONE rung.
+   - A probe then renders a throwaway component through the app's React and react-dom, and requires one
+     hook dispatcher. It is tested against two real React copies.
+   - No consistent rung: the page shows a platform-marked fault (`previewPlatformFault.ts`) and does not
+     mount the app. The console drawer never offers "Fix with AI" for a platform-marked row.
+2. **The builder was never told which preview broke.** `inBrowserPreviewFixGuidance` now adds this to every
+   in-browser fix request:
+   - This renderer is separate and never reads `vite.config`.
+   - A fault that exists only there means change NOTHING.
+   - Real bugs in the app's own files are still fixed.
+3. **The dependency staleness probe was the staleness.**
+   - `require.resolve(k + '/package.json')` is refused by any package whose exports map omits it, and
+     `@vitejs/plugin-react` is one (21 packages in this repo's own tree). Measured: every healthy tree read
+     STALE, so every dev start reinstalled.
+   - With a lock file that install was `npm ci`, which deletes node_modules.
+   - Fix: the probe checks the file on disk; `npm ci` only installs into an EMPTY tree; every successful
+     install touches `node_modules`, and so does the typecheck prelude.
+4. **A multi-line "start, sleep, tail" script became the dev command whole.** A newline is a separator the
+   helpers did not know. `dropProbesAfterDevServer` keeps the setup lines and the server line and drops the
+   probes after it. Single-line commands are byte-identical.
+5. **`test-results/` and `playwright-report/` were listed as project files.** They are now pruned in all three
+   ignored-dir lists.
+6. **`about:srcdoc` in a stack frame became an "about page" request.** `withoutMachineText` blanks URLs,
+   scheme tokens and stack frames, and a platform-composed request names no features at all.
+7. **Latin names for Hindi-script screens counted as fabrication.** In an app whose source carries an Indic
+   script, a Latin label is now unjudgeable, never absent.
+
+Tests:
+- `tests/oneReactInThePreview.test.ts` (18)
+- `tests/theStaleCheckWasTheStaleness.test.ts` (15)
+
+Both are reversion-proven.
+
+**Still open:**
+- **Libraries can still bring their own React.** A third-party React library whose own import fails on the
+  mirror falls to jsdelivr, which resolves `react` from the library's peer range. The core probe cannot see
+  inside a library's graph.
+- **The ₹208 for builds 2, 3 and 6** was charged for a platform fault. Whether to refund it is the admin's
+  call.
+- **Why `react` alone failed on the mirror rung** is not visible in the report. The loader now makes that
+  failure harmless rather than explained.

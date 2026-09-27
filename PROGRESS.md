@@ -82930,3 +82930,37 @@ do! isi ux me. same bas alag popup ki jagah notification me aye! jisse user dist
 - **Siblings hunted:** every other fixed top overlay (`OfflineBanner`, `TestingNotice`, `.nb-float-top`) is either below the header or above it in z-order. No other instance.
 - **Test:** `tests/appUpdate.test.ts` — the banner is never positioned, never re-derives the inset, and stays before `<TopNav` inside the padded root. Reversion-proven.
 - ⚠️ **Reaches phones only through a fresh `.aab`** (bundled mode). The banner exists only in the installed app.
+
+## 2026-09-27 — Autopsy `e1c21ad8` ("limitless writer", weak tier, 25.1 min, ₹488) — a Python venv became the project
+
+**What happened.** A free user imported a FastAPI backend with a Kotlin Android shell and said "Ise build karo ek app ke roop mein". The engine built a React + Vite + FastAPI app. It rendered, typechecked and passed a production build. Then, to test the backend, it ran `python3 -m venv venv` inside `backend/`.
+
+**Ledger (honest counts):**
+- ✅ Self-healed: 3. Write-time typecheck caught `api.ts` and `App.tsx` unused symbols. The repeated-step nudge fired three times.
+- 🔀 Worked around: 1. The backend has no OpenAI key, so every AI feature runs on canned DEMO_MODE text. The client also has its own fake fallback. Disclosed in the summary, but it is the same fake-AI class as Lekhan Sahyak build 1 (`APP_AI_GATEWAY`).
+- ⏭️ Skipped: 2. `JOURNEY_NOT_RUN`. `pytest` "could not run".
+- ❌ Shipped imperfect: 4.
+  - ~1,900 venv files were saved durably and committed to the user's GitHub repository.
+  - The release gate claimed "this project HAS a test suite".
+  - "96 fake/incomplete code issues in 24 files this build did not touch" were third-party library code.
+  - `PASS /health (200)` was the Vite dev server's page, not the API.
+- 🥵 Struggle: about 13 dev-server restarts in 5 minutes (min 16–21). Each one reinstalled npm packages (the stale-check bug fixed in #3347, which merged after this build ran). The ETA was 2–4 min against 25.1 min actual (8.7×).
+
+**Root causes fixed:**
+1. **One never-source list** (`src/server/lib/generatedDirs.ts`).
+   - Ten drifted copies knew `.venv` and none knew `venv`.
+   - The actuators (E2B/Local/Docker), nested-repo probe, git ignore, grep and graph excludes, project context, source archive and test detection now all read one list.
+   - `site-packages` catches a virtualenv of any name.
+   - The durable store refuses the unambiguous tier in `toDurableFileKey`. It HEALS stored indexes on read, and a polluted index no longer makes every real save look like a shrink (`liveIndexPaths`).
+   - `build/`, `dist/` and the like stay pruned from listings but are never deleted from a stored project.
+2. **The journey starts where the router puts the form** (`routeFromRouter`). `<Route path="/new" element={<NewNovel />}>` is read before the filename guess.
+3. **Route smoke:**
+   - A 200 whose body carries Vite's `/@vite/client` is the frontend's page shell. It is reported as not checked, never as a pass. The body is grepped in a temp file and deleted, never printed.
+   - `extractEndpoints` counted every `@app.post(...)` twice, because the Express rule also matched the decorator.
+- Tests: `tests/theVenvWasNeverTheProject.test.ts`. The durable filter and the router mapping are reversion-proven. One pinned test in `RouteSmokeCheck.test.ts` was updated from `-o /dev/null` to the new temp-file contract.
+
+**Still open:**
+- **Old commits keep the venv.** Venv files already committed to a user's repository stay in its history; `.gitignore` stops new commits only. Untracking them in a user's own repo was not done automatically.
+- **Backend not seen, so no real API check.** `SERVICE_GRAPH_SINGLE` did not see the FastAPI backend. Until it does, no smoke check reaches a separate API port.
+- **Billing.** This weak-tier build billed ₹488 on $1.29 real cost (tiered markup, preview proven). That is policy, but it is large for a free-tier user.
+- **ETA.** The ETA ignores the COMPLEX verdict and the size of the existing project on an edit turn.

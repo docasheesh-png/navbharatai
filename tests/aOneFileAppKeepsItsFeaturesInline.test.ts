@@ -100,8 +100,12 @@ describe('the agent grep tool is bounded to the user\'s own code', () => {
     );
     const grepCase = src.slice(src.indexOf("case 'grep': {"), src.indexOf("case 'glob': {"));
     expect(grepCase).toContain('--exclude-dir=');
-    for (const dir of ['node_modules', 'dist', 'build', 'coverage', '.git']) {
-      expect(grepCase, dir).toContain(`'${dir}'`);
+    // Since autopsy e1c21ad8 the set is the ONE shared list (lib/generatedDirs.ts) plus `vendor`, not a
+    // hand-written copy — the copies had drifted, and a build's `backend/venv` was grepped as source.
+    expect(grepCase).toContain("[...LIST_PRUNE_DIRS, 'vendor']");
+    const { LIST_PRUNE_DIRS } = await import('../src/server/lib/generatedDirs');
+    for (const dir of ['node_modules', 'dist', 'build', 'coverage', '.git', 'venv']) {
+      expect(LIST_PRUNE_DIRS, dir).toContain(dir);
     }
     // The command that actually runs must carry them, not merely a list sitting beside it.
     expect(grepCase).toMatch(/grep -rn \$\{excludes\}/);

@@ -185,6 +185,65 @@ class SandboxStore {
     } catch { /* best-effort — a fallback copy must never be able to fail a build */ }
   }
 
+  /**
+   * Every record that carries a saved-copy URL, projected to just that URL. A single-field range on
+   * `snapshotUrl` (the automatic index), bounded — see deadSnapshotCopies.ts. Never throws.
+   */
+  async listSnapshotRecords(limit = 2000): Promise<Array<{ workspaceId: string; snapshotUrl: string }>> {
+    const db = this.getDb();
+    if (!db) return [];
+    try {
+      const snap = await db.collection('agentv3_sandboxes')
+        .where('snapshotUrl', '>', '')
+        .select('snapshotUrl')
+        .limit(Math.max(1, Math.min(5000, limit)))
+        .get();
+      return snap.docs
+        .map((d) => ({ workspaceId: d.id, snapshotUrl: String(d.get('snapshotUrl') ?? '') }))
+        .filter((r) => r.snapshotUrl.length > 0);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Forget a saved copy whose host no longer exists — ONLY while the record still names exactly that
+   * URL. A green build between the read and this write has saved a NEW copy, and clearing that one
+   * would take a working copy away. Transactional for that reason. Returns whether it cleared.
+   */
+  async clearSnapshot(workspaceId: string, expectedUrl: string): Promise<boolean> {
+    const db = this.getDb();
+    if (!db || !workspaceId || !expectedUrl) return false;
+    try {
+      const ref = db.collection('agentv3_sandboxes').doc(workspaceId);
+      return await db.runTransaction(async (tx) => {
+        const cur = await tx.get(ref);
+        if (!cur.exists || cur.get('snapshotUrl') !== expectedUrl) return false;
+        tx.update(ref, {
+          snapshotUrl: admin.firestore.FieldValue.delete(),
+          snapshotAt: admin.firestore.FieldValue.delete(),
+          snapshotFilesHash: admin.firestore.FieldValue.delete(),
+          updatedAt: Date.now(),
+        });
+        return true;
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  /** Every record that still points at exactly this copy URL — what a channel reclaim must clear. */
+  async findBySnapshotUrl(url: string): Promise<string[]> {
+    const db = this.getDb();
+    if (!db || !url) return [];
+    try {
+      const snap = await db.collection('agentv3_sandboxes').where('snapshotUrl', '==', url).limit(20).get();
+      return snap.docs.map((d) => d.id);
+    } catch {
+      return [];
+    }
+  }
+
   /** Remember the port this app declares. Merged — it must outlive builds that produce no preview. */
   async saveDeclaredPort(workspaceId: string, port: number): Promise<void> {
     const db = this.getDb();

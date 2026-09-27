@@ -83078,6 +83078,40 @@ YELLOW (PR #3331's area).
 - **A reviewer claim a file can answer is checked first.** `reviewEvidence.ts` `missingClassClaim` / `classIsDefined`: a finding whose first sentence says named classes are not defined is refuted only when EVERY named class has a selector in the real stylesheets. A finding resting on "the missing classes" falls with them only when every class claim fell. Stylesheets are read only when a finding makes the claim. This closes the second open item.
 - **Vite dev CSS leaves the capture only when the page would not fit.** `style[data-vite-dev-id]` text is replaced with a note when `outerHTML` is over 30,000 characters; a page that fits is read as before. This closes the third open item.
 
+## 2026-09-27 — Admin Security → Built apps: who built what, and previews that work
+
+Admin, with the panel's own copy pasted: *"isko fix karo. kuch app ke preview chal hi nahi rahe! admin ko
+dikhna chahiye kon kya bana raha hai!!"* Five defects on one screen, each root-caused from code:
+
+1. **`…::greenmeta` listed as an app.** The file store holds three DERIVED keys beside each workspace
+   (`::green`, `::attempt`, `::greenmeta`); both listings excluded `::green` only (`isGreenSnapshotKey`).
+   The same hole reached the USER's Full-App Debugger list (`listUserWorkspaceApps`). Class fix:
+   `isAppWorkspaceKey` (workspaceIdentity.ts) refuses any key containing the `::` separator — a session
+   id can never hold a colon, so a fourth derived key is excluded by construction.
+2. **Previews framing "Site Not Found".** Reclaiming an `sn-` snapshot channel (Reclaim / Reclaim all,
+   2026-09-18) deleted the channel and never told the sandbox record, whose `snapshotUrl` kept pointing at
+   it — for the admin's Preview AND the user's own sleeping-app preview door. `previewSnapshot.ts` had
+   called that reclaim "harmless" (corrected in place). Now the reclaim route clears exactly the records
+   naming that channel URL (transactional, so a newer copy is never touched), and
+   `deadSnapshotCopies.ts` heals the records PAST reclaims left behind — judged only against a COMPLETE
+   channel inventory, only for a `--sn-` host on this site, run at most once per 10 min from the admin
+   list. A bucket copy or a published URL can never be judged dead.
+3. **Preview greyed out on live orphans.** An app whose owner deleted the workspace has no saved files,
+   so the render had nothing to compile — beside a working public link. `previewPlan` gains the live site
+   as its second source: copy → live site → render → none.
+4. **The orphan strip contradicted itself.** `markOrphaned` flags every record of a deleted workspace
+   (offline, banned, never-published ghosts included) and the strip said "Still live" on all of them.
+   The strip now holds only `liveOrphans` (read from up to 200 flagged records, not the first 50), and the
+   row's line is judged from its own state.
+5. **No "who" and no "what".** Every row leaves the route through `finish`: owner name/email in one
+   batched wallet read (`resolveUserIdentities`, the All-builds resolver), app name in one field-masked
+   `getAll` over the conversation docs (`readConversationNamesMany`) — chosen name, else the first
+   prompt's title, else an honest "Name not recorded". A name or email fragment now filters too.
+
+Tests: `tests/theAdminSeesWhoBuiltWhat.test.ts` (source guards on both listings, the reclaim route and
+every list mode; the orphan line). `everyBuiltAppHasAPreview.test.ts` updated to the new truth.
+⚠️ Not verified against production: how many records the heal will clear (it logs the count). The
+in-browser render of a full-stack app still shows the frontend only — unchanged, and labelled so.
 ## 2026-09-27 — Autopsy "secret calculator" (build 2720e553): the stylesheet was written beside its screens, then emptied, then "verified"
 
 A free user (weak tier) asked for a calculator that hides files, photos and videos behind the code `0000`. The fast lane

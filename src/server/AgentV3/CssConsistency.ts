@@ -18,7 +18,8 @@
 // Pure + dependency-free → fully unit-testable.
 
 const SRC_RE = /\.(t|j)sx?$/;
-const CSS_RE = /\.css$/;
+/** Every stylesheet dialect whose `.class` selectors define a class (autopsy "Universal Remote": scss/less were invisible). */
+const CSS_RE = /\.(css|scss|sass|less)$/;
 /** Minimum undefined custom classes before we treat it as a real mismatch (avoids odd one-offs). */
 const MISMATCH_THRESHOLD = 3;
 
@@ -54,6 +55,20 @@ export function collectDefinedClasses(files: Record<string, string>): { defined:
   return { defined, cssFiles };
 }
 
+/**
+ * Styles that live OUTSIDE the project (a `<link rel="stylesheet" href="https://…">` to a CDN theme, or
+ * an `@import url(https://…)`) define classes this check cannot see. Say nothing then — a check we
+ * cannot perform must never report "missing".
+ */
+function usesExternalStylesheet(files: Record<string, string>): boolean {
+  for (const [path, content] of Object.entries(files)) {
+    if (/\.html?$/.test(path) && /<link\b[^>]*rel=["']?stylesheet[^>]*href=["']?(https?:)?\/\//i.test(content)) return true;
+    if (/\.html?$/.test(path) && /<link\b[^>]*href=["']?(https?:)?\/\/[^>]*rel=["']?stylesheet/i.test(content)) return true;
+    if (CSS_RE.test(path) && /@import\s+(url\()?["']?(https?:)?\/\//i.test(content)) return true;
+  }
+  return false;
+}
+
 function usesTailwind(files: Record<string, string>): boolean {
   for (const [path, content] of Object.entries(files)) {
     if (/tailwind\.config\.[cm]?[jt]s$/.test(path)) return true;
@@ -74,7 +89,7 @@ function isCustomClass(c: string): boolean {
  * when Tailwind is used, or when the project has no CSS selectors to check against.
  */
 export function findUndefinedClasses(files: Record<string, string>): string[] {
-  if (usesTailwind(files)) return [];
+  if (usesTailwind(files) || usesExternalStylesheet(files)) return [];
   const { defined, cssFiles } = collectDefinedClasses(files);
   if (cssFiles === 0 || defined.size === 0) return []; // nothing to check against → don't guess
   const used = collectUsedClasses(files);
@@ -98,4 +113,26 @@ export function cssConsistencyError(files: Record<string, string>): string | nul
     missing.map((c) => `  .${c}`).join('\n'),
     'Fix by making the components and the stylesheet AGREE — either add these classes to the CSS with real styles, or rename the className usages to the classes the CSS actually defines. Keep them consistent across all files.',
   ].join('\n');
+}
+
+/**
+ * The architect lane's repair switch (autopsy "Universal Remote", 2026-09-27). Default ON — an app
+ * whose screens have no styles is broken, not "less designed". `AGENTV3_CSS_HEAL=off` records the
+ * finding and skips the repair.
+ */
+export function cssHealEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.AGENTV3_CSS_HEAL ?? '').trim().toLowerCase() !== 'off';
+}
+
+/** The admin line for `CSS_CLASSES_UNDEFINED`. PURE. */
+export function undefinedClassesNote(missing: readonly string[]): string {
+  const shown = missing.slice(0, 12).map((c) => `.${c}`).join(', ');
+  const more = missing.length > 12 ? ` and ${missing.length - 12} more` : '';
+  return `${missing.length} class name(s) used by the screens have no style rule in any stylesheet, so those screens render unstyled: ${shown}${more}.`;
+}
+
+/** Stylesheets that are part of the app — never dependencies, build output or git internals. PURE. */
+export function isProjectStylesheet(path: string): boolean {
+  const p = String(path ?? '').replace(/^\.?\/+/, '');
+  return CSS_RE.test(p) && !/^(node_modules|dist|build|\.git|coverage)\//.test(p) && !/\/node_modules\//.test(p);
 }

@@ -82820,6 +82820,110 @@ Both are reversion-proven.
   call.
 - **Why `react` alone failed on the mirror rung** is not visible in the report. The loader now makes that
   failure harmless rather than explained.
+## 2026-09-27 — Autopsy "Universal Remote" (builds 7026c09b · f59ce4dd · 18274327): the screens had no styles
+
+Three builds, one user, weak tier, all on KIMI. Build 1: a cut-off prompt ("…all ACs, T"), the model asked
+to finish it, the user stopped (₹0). Build 2: the app, 6.7 min, ₹111.15. Build 3: *"App made but not
+working"* — 7.6 min, billed ₹289.71 (₹88.85 actually debited; the overdraft floor absorbed the rest).
+
+**Ledger.** ✅ self-healed 2 (three TS2322 errors on `RemoteHeader.status`, quoted back by the write-time
+typecheck and fixed in ~35 s; the build-3 read nudge at 392 s) · 🔀 worked around 1 (GLM flashx crawled
+56.6 s, benched, KIMI took over — the slow-rung bench working) · ⏭️ skipped 2 (our own E2E suite written but
+never run; no user journey derivable) · ❌ shipped broken 1 (**build 2's screens were unstyled** — the thing
+the user reported) · 🥵 struggle 4 (build 3's 62 steps after "complete at step 10", three minutes of `grep`
+over `src/index.css` and a no-op `: > /tmp/empty.css` ×7; reviewer's brace glob returning "no files";
+80 s first call; the build-2 fresh request run as an edit).
+
+**Root causes fixed (PR on `claude/autopsy-universal-remote`):**
+1. ❌ **Unstyled screens.** `CssConsistency.ts` has detected exactly this since the DigitalWatch bug — but
+   it ran ONLY in the fast lane's verify, and only over THIS turn's writes, so the scaffold's untouched
+   `src/index.css` was invisible and it answered "no CSS to compare against". The same one-lane-of-two class
+   as the HTML boot guard. Now: the architect lane checks the WHOLE project (`integrityFiles`) and a real
+   mismatch rides the design repair pass (`CSS_CLASSES_UNDEFINED` → `_HEALED` / `_PARTIALLY_HEALED`,
+   kill switch `AGENTV3_CSS_HEAL=off`); the fast lane reads the project's stylesheets too. scss/sass/less
+   now define classes; an external (CDN) stylesheet makes the check say nothing rather than "missing".
+2. 🥵 **`.gitignore` + an empty `Minecraft.apk` = "Editing your existing app (2 source files)".** `.apk`
+   was missing from the binary list, and `userOwnedFileCount` counted housekeeping files. `couldBeAppCode`
+   now excludes binaries (apk/aab/ipa/…), git housekeeping, dependencies and build output — so that order
+   is a fresh build (plan + feature confirmation), and an unreadable listing still means "yes".
+3. **The revival recipe stored `: > /tmp/empty.css && echo done && npm run dev … | head -40`.** Replayed on
+   every wake-up, and `head -40` can SIGPIPE the server. `serverLaunchCommand` at the one recording door
+   keeps set-up + the server segment and drops a truncating pipe; unrecognised commands are kept as-is.
+4. 🥵 **The loop breaker watched `read_file` only.** An identical `bash` command with identical output and
+   no write in between now escalates to the same STOP at `READ_LOOP_LIMIT` (output still returned in full).
+5. 🥵 **`glob('src/**/*.{ts,tsx,css}')` → "(no files match)".** Braces were escaped as literals; now `{a,b}`.
+- Tests: `tests/theScreensHadNoStyles.test.ts` (18).
+
+**🔴 STILL OPEN (rule 6), recorded not guessed:**
+- **Two of three prompts arrived cut off mid-sentence** ("…all ACs, T", "…that it recognises and"). The
+  build received exactly that text (the model said so in build 1). Voice input does NOT auto-send
+  (`useSpeechInput` only fills the box), and "T.V. s" in build 2 reads like dictation — the likeliest cause
+  is dictation stopping on a pause and the user pressing Send, but that is not proven from this report.
+- **The render proof cannot see an unstyled app.** Fix 1 kills this CLASS at the source, but "rendered" still
+  means "the root had content"; a screenshot-based "does it look designed" check is a separate decision.
+- **Our own E2E scaffold holds the release gate at YELLOW** ("HAS a test suite, but it could not be run") on
+  every later build, because `@playwright/test` is not installed in the sandbox. Not changed here: the gate
+  wording is being reworked in open PR #3331.
+- **The readiness checkpoint said "complete, 100/100" at step 10 of a build whose prompt was "not working".**
+  The model correctly ignored it; the scorer does not read the user's complaint.
+- **Billing:** build 2 was charged ₹111 for an app whose screens were unstyled, then build 3 charged for the
+  repair. By the current rule (a proven render earns the bill) both are correct; whether a defect OUR check
+  should have caught ought to be billed is the admin's decision.
+## 2026-09-27 (later) — ₹150 for NEW users: the admin's three rules, and the bug #3342 shipped
+
+The admin looked at #3342's button and said *"yeh 150₹ sabhi user ko kar rahe hai!"*. Their rules:
+1. *"user new hona chahiye"*
+2. *"balance gift 00 hona chahiye (₹ se purchase kiye huye alag)"*
+3. *"ek bar 150₹ mil gaye, wapas na mile, chahe admin one click kitni bhi baar kare"*
+
+**The bug.** #3342 treated "has never received any credit" as meaning "new". Every account opened after
+the flat welcome gift was retired on 2026-09-17 (#3030) fits that, whatever its age, so ten days of
+sign-ups were all offered ₹150. "Never credited" describes a wallet; "new" describes a person.
+
+**The fix** (`adminWelcomeGift.ts`):
+- **Rule 1 — new.** The account joined within N days. The admin picks N from 1, 3, 7, 15 or 30 (default 7)
+  beside the button. The join date comes from the same reader the users list's "Joined" column uses
+  (`resolveJoinedAt`: Firebase Auth, then the wallet's `createdAt`). A join date that cannot be read
+  counts as not new.
+- **Rule 2 — ₹0 gift balance.** Checked with `giftRemaining`. Paid money is separate: someone who
+  recharged but holds no gift credit is eligible.
+- **Rule 3 — once only.** The `adminWelcomeGiftAt` stamp is written and re-read inside the same
+  transaction, so repeated or simultaneous presses pay an account once. Accounts that received the old
+  ₹50 already carry this stamp and are skipped.
+- **Kept guards.** Banned and merged accounts are never paid. The ₹400 lifetime gift ceiling holds: an
+  account with no room for the full ₹150 is skipped, not part-paid.
+
+**What the admin sees.** The popup shows who gets it and why everyone else is skipped (already received,
+still holds gift balance, joined too long ago, banned/merged/at the limit). The count shown is sent back
+with the press, and the server refuses a press that would pay more users than that.
+
+Tests: `tests/adminWelcomeGift.test.ts` (21). Deleting the join-date check makes the reported-bug case
+fail, confirming the test guards it.
+
+⚠️ **Unknown to this session:** whether the #3342 button was pressed before this fix. If it was, the ₹150
+credits carry the ledger line "Welcome credit: ₹150 added by NavBharatAI" and the `adminWelcomeGiftAt`
+stamp, and the admin audit log has an `ADMIN_WELCOME_GIFT_BULK` entry with the paid count.
+## 2026-09-27 — The testing notice left the home screen and moved into Notifications
+
+Admin, with a screenshot of the card over the home screen: *"isko popup se hat kar notifications me kar
+do! isi ux me. same bas alag popup ki jagah notification me aye! jisse user disturb na ho!"*
+
+- **What changed:** the "NavBharatAI is in active testing" card no longer floats over Home on every app
+  open. The same icon, words and **Report a problem** button now sit pinned in the Notifications panel,
+  under the rewards checklist (which the admin keeps first). It cannot be selected or deleted.
+- **How a new user still finds it:** until Notifications has been opened once on the device, the card
+  counts as ONE unread notification, so the ☰ dot and the Notifications row's number appear as for any
+  message. Opening the panel clears it for good (`localStorage`, `nbai_testing_notice_seen`). Blocked
+  storage reads as "seen", because an unclearable red dot is worse than a missing one.
+  Logic: `src/lib/testingNotice.ts` (`unreadWithTestingNotice`); card: `src/components/TestingNotice.tsx`.
+- **Signed-out visitors no longer see it.** They have no Notifications row, and the report sheet the
+  button opened asks them to sign in anyway.
+- **Removed with it:** the popup's state and Android-Back entry in `App.tsx`, its CSS animation, and
+  `tests/testingNoticeCentering.test.ts` (its subject is gone). The Tailwind v4 lesson that test carried
+  is still worth knowing: `-translate-x-1/2` compiles to the standalone `translate` property, which
+  composes with a keyframe's `transform` instead of being replaced by it.
+- The reward rows the popup used to show while money was unclaimed were already in the panel's rewards
+  checklist (2026-09-26), so nothing about money was lost in the move.
 ## 2026-09-27 — The update banner was painted UNDER the header (admin: "update notification ki position theek nahi hai, upar se crop ho jata hai")
 - **Root cause:** `UpdateBanner` was `position: fixed` at `--nb-safe-top + 8px` with `zIndex: 60`, in the same strip as the header (`TopNav`, `z-[100]`). The header painted over it, hiding the message's first line and the top of the Update button. Reproduced in a 412×915 render before the change.
 - **Fix:** the banner is now the first row of the app shell (`flexShrink: 0`, in the flow). It sits inside the root's safe-area padding and pushes the header down, so there is no stacking contest and no inset of its own to get wrong. The shell's content is `flex-1 min-h-0`, so the height comes out of the page, never the bottom bar.

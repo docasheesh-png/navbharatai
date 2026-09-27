@@ -16,7 +16,7 @@
  * never drift apart again.
  */
 const BINARY_ASSET_RE =
-  /\.(png|jpe?g|gif|webp|avif|bmp|tiff?|ico|icns|woff2?|ttf|otf|eot|mp3|mp4|wav|ogg|webm|mov|avi|mkv|flac|aac|zip|tar|gz|tgz|rar|7z|pdf|psd|ai|sketch|fig|exe|dll|so|dylib|wasm|bin|jar|class|pyc|db|sqlite)$/i;
+  /\.(png|jpe?g|gif|webp|avif|bmp|tiff?|ico|icns|woff2?|ttf|otf|eot|mp3|mp4|wav|ogg|webm|mov|avi|mkv|flac|aac|zip|tar|gz|tgz|rar|7z|pdf|psd|ai|sketch|fig|exe|dll|so|dylib|wasm|bin|jar|class|pyc|db|sqlite|apk|aab|apks|xapk|ipa|dmg|deb|rpm|msi|iso)$/i;
 
 /** True for a binary / non-text-editable asset (image, font, media, archive, compiled artefact). Pure. */
 export function isBinaryAsset(path: string): boolean {

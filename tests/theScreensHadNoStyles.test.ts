@@ -83,6 +83,12 @@ describe('3 · the stored preview command is the server, not the model\'s whole 
     expect(serverLaunchCommand('vite build && vite preview --port 4173')).toBe('vite preview --port 4173');
     expect(serverLaunchCommand('./run-my-thing.sh')).toBe('./run-my-thing.sh');
   });
+  it('a server backgrounded with & and a probe on the next line (build 75ea6136) keeps only the server', () => {
+    expect(serverLaunchCommand("npm run dev -- --host 0.0.0.0 --port 5173 2>&1 | head -20 &\nsleep 4 && node -e 'probe'"))
+      .toBe('npm run dev -- --host 0.0.0.0 --port 5173');
+    expect(serverLaunchCommand('npm run dev -- --port 5173 --host 2>&1 &\nsleep 3\necho "dev server started"'))
+      .toBe('npm run dev -- --port 5173 --host');
+  });
   it('the one door that records a launch cleans it', () => {
     __resetDevServerLaunchLog();
     recordDevServerLaunch('ws', 'echo hi && npm run dev | tail -5', 5173);

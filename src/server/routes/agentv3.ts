@@ -47,6 +47,7 @@ import { nemotronRungOk, nemotronKey, nemotronBaseUrl, nemotronUltraModel, nemot
 import { composeJudgeChain, describeJudgeAttempts, type JudgeCandidate, type JudgeChain, type JudgeKind } from '../AgentV3/judgeChain';
 import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
+import { devicePowerNotice, devicePowerRecord } from '../AgentV3/devicePowers';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction, simulatedDataIssues, simulatedDataNotice } from '../AgentV3/AuthenticityAnalysis';
 import { isUnreachable } from '../AgentV3/appReachability';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
@@ -20699,6 +20700,23 @@ async function noteBuildOutcome(
               message: `The app shows made-up data about other people or places in ${invented.length} place(s) — disclosed to the user in the summary.`,
               detail: invented.slice(0, 5).map((i) => `${i.file}:${i.line} ${i.snippet}`).join(' · '),
             });
+          }
+        }
+      } catch { /* the disclosure is best-effort — it must never break the build */ }
+
+      // 🔴 A POWER A WEB APP DOES NOT HAVE IS SAID, NOT IMITATED (autopsy 6bae5835, 2026-09-27). Asked for
+      // an assistant that "manages everything on my phone" and "works on the lock screen", a clean build
+      // offered a lock-screen-LIKE welcome screen and never said an app built here can do neither. The
+      // rule in the system prompt asks the model to say so; this is the last line of defence when it does
+      // not — read from the USER's words, silent when the summary already said it. Never a failed build:
+      // everything that can work inside the app was built, and saying what cannot is the honest outcome.
+      try {
+        if (result.ok && expectsArtifacts && !isImportTurn && writtenFiles.size > 0) {
+          const powerRec = devicePowerRecord(prompt);
+          if (powerRec) {
+            const note = devicePowerNotice(prompt, result.summary);
+            if (note) result = { ...result, summary: `${result.summary}${note}` };
+            buildDiag.record({ phase: 'readiness', severity: 'info', autoResolved: true, ...powerRec, detail: note ? 'notice added to the summary' : 'the model\u2019s own summary already said it' });
           }
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }

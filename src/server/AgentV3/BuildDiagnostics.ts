@@ -60,6 +60,9 @@ const PROCESS_ONLY_CODES = new Set([
   'TURN_ANSWERED_A_QUESTION',
   // …and its sibling (2026-09-26): the model DECLINED, and its refusal was left standing as the answer.
   'TURN_DECLINED',
+  // The REQUEST asked for a device power a web app does not have (autopsy 6bae5835) — a fact about what
+  // the platform can deliver, told to the user in the summary, never a defect in the app that was built.
+  'DEVICE_POWER_NOT_POSSIBLE',
   // Same rule, same reason (autopsy 21b431e1): a dropped backslash that OUR deterministic pass put
   // back is this engine's own housekeeping. The user's app is correct by the time anybody reads it.
   'SCRIPT_INTEGRITY_REPAIRED',

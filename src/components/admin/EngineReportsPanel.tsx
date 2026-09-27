@@ -75,6 +75,17 @@ const LABEL = 'text-[10px] font-black uppercase tracking-wider text-muted';
 const VALUE = 'text-lg font-black text-ink tabular-nums';
 const NOTE = 'text-[11px] text-muted leading-relaxed';
 
+/** The newest day of a metrics history, by its `date` (YYYY-MM-DD), whatever order it arrived in. PURE. */
+export function latestDay<T extends { date?: unknown }>(hist: readonly T[]): T | null {
+  let best: T | null = null;
+  for (const row of hist) {
+    const d = typeof row?.date === 'string' ? row.date : '';
+    if (!d) continue;
+    if (!best || d > String(best.date)) best = row;
+  }
+  return best;
+}
+
 function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
     <div className="bg-well rounded-xl px-3 py-2">
@@ -274,12 +285,34 @@ export function EngineReportsPanel({ adminToken, onStatus }: EngineReportsPanelP
         state={s('losses')} onRefresh={() => void load('losses')} onStatus={onStatus}
         note="What 'working app or free' actually costs: builds that were not charged and whose provider cost NavBharatAI paid."
       >
-        {(d) => (
-          <div className="grid grid-cols-2 gap-2">
-            <Stat label="Loss builds" value={num(d.totalLossBuilds)} tone="text-warn" />
-            <Stat label="Real cost absorbed" value={usd(d.totalLossRealCostUsd)} tone="text-danger" />
-          </div>
-        )}
+        {(d) => {
+          // 🔴 THIS CARD USED TO SAY "Real cost absorbed: $570.09" (admin capture, 2026-09-27) while the
+          // usage card said the same builds cost $1.30. The $570 is the TOP-ENGINE BASELINE — every
+          // token priced at the dearest rate — not what we paid. Measured spend leads, with its
+          // coverage; the baseline stays as a comparison, the way the usage card already shows it.
+          const measured = typeof d?.totalLossSpendUsd === 'number';
+          const baseline = typeof d?.totalLossBaselineUsd === 'number' ? d.totalLossBaselineUsd : d?.totalLossRealCostUsd;
+          return (
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <Stat label="Loss builds" value={num(d?.totalLossBuilds)} tone="text-warn" />
+                <Stat label="Real cost absorbed" value={usd(d?.totalLossSpendUsd)} tone={measured ? 'text-danger' : undefined} />
+              </div>
+              {measured ? (
+                <p className={NOTE}>
+                  Measured on {num(d?.lossMeasuredBuilds)} of {num(d?.totalLossBuilds)} loss builds. The rest were
+                  recorded before a build kept its real cost, so this is a PART of the window, not all of it.
+                </p>
+              ) : (
+                <p className={NOTE}>No loss build in this window recorded what it really cost.</p>
+              )}
+              <p className={NOTE}>
+                Reference: at the top engine's rate the same builds would have cost {usd(baseline)}. A comparison,
+                never our cost.
+              </p>
+            </div>
+          );
+        }}
       </ReportCard>
 
       <ReportCard
@@ -338,6 +371,21 @@ export function EngineReportsPanel({ adminToken, onStatus }: EngineReportsPanelP
                   The rest are days recorded before the real cost was kept, so the spend above is a
                   PART of the window, not all of it.
                 </p>
+              ) : null}
+              {measured ? (
+                // The margin is taken over the builds whose bill AND spend are both known — never the
+                // bill of every build minus the spend of some (which printed $294.99 for 28 of 508).
+                typeof d?.realMarginUsd === 'number' ? (
+                  <p className={NOTE}>
+                    Margin is over the {num(d?.marginBuilds)} build(s) whose bill and real cost are both
+                    known: billed {usd(d?.marginBilledUsd)}, cost {usd(d?.marginSpendUsd)}.
+                  </p>
+                ) : (
+                  <p className={NOTE}>
+                    Margin needs a build whose bill and real cost were recorded together; none in this
+                    window yet, so it is not shown.
+                  </p>
+                )
               ) : null}
               <p className={NOTE}>
                 Reference: at the top engine's rate the same tokens would have cost{' '}
@@ -436,7 +484,9 @@ export function EngineReportsPanel({ adminToken, onStatus }: EngineReportsPanelP
       >
         {(d) => {
           const hist: any[] = Array.isArray(d?.history) ? d.history : [];
-          const last = hist.length > 0 ? hist[hist.length - 1] : null;
+          // The store returns the NEWEST day first, so the last element was the OLDEST — the card
+          // read "Latest day 2026-08-28" on 2026-09-27. Pick the maximum date, whatever the order.
+          const last = latestDay(hist);
           return (
             <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2">

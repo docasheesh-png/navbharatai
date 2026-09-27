@@ -34,7 +34,7 @@ describe('the gate and the report say it plainly — wording only, never the ver
   });
   it('the route asks it where the vaccine finds a suite without its runner', () => {
     const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    expect(route).toContain('const ours = starterSuiteOnly(files, finishingPaths);');
+    expect(route).toContain('const ours = starterSuiteOnly(files, finishingPaths, testContents);');
     expect(route).toContain('if (ours) gateEvidence.testSuiteIsOurStarter = true;');
   });
 });

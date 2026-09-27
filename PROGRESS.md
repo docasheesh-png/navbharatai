@@ -82931,6 +82931,28 @@ do! isi ux me. same bas alag popup ki jagah notification me aye! jisse user dist
 - **Test:** `tests/appUpdate.test.ts` — the banner is never positioned, never re-derives the inset, and stays before `<TopNav` inside the padded root. Reversion-proven.
 - ⚠️ **Reaches phones only through a fresh `.aab`** (bundled mode). The banner exists only in the installed app.
 
+## 2026-09-27 — "Universal Remote" follow-up: our starter test suite is ours on every build, not only the first
+
+The admin re-sent the "Universal Remote" report (builds 7026c09b · f59ce4dd · 18274327). It had already been
+autopsied and fixed in #3346 the same day, so that work was **not** redone. One of its open items was checked
+against `main` and found to be live and unowned:
+
+- **CORRECTION to the #3346 entry above:** it says the release gate held at YELLOW by our own E2E scaffold "is
+  being reworked in open PR #3331". #3331 had already MERGED (2026-09-26) before these builds ran, and build 3
+  still reported it. Nobody owned it.
+- **Root cause:** `starterSuiteOnly` (autopsy 6bae5835, same day) decided "is this test suite NavBharatAI's
+  starter?" from `finishingPaths` — the files the finishing pass wrote THIS build. Build 2 wrote the suite and
+  was told the truth; build 3 had not written it, so it called the same two files the user's own suite:
+  *"this project HAS a test suite, but it could not be run here"*. Every later build of every app would say it.
+- **Fix:** whether a file is ours is a fact about its content. `isPlatformE2eScaffold` already reads the marker
+  our templates carry (autopsy 7d79254b); the route now reads the project's test files (at most 12) and
+  `starterSuiteOnly` accepts a file that is either written this build OR carries our marker. A file it cannot
+  read is judged theirs, so a real user suite is never hidden. Wording only — the gate's verdict rules are
+  unchanged.
+- Tests: `tests/ourStarterSuiteStaysOursOnLaterBuilds.test.ts` (6), reversion-proven.
+- The other open items #3346 recorded (cut-off prompts, a render proof that cannot see an unstyled app, the
+  readiness scorer not reading the user's complaint, billing a defect our check should have caught) stay open
+  and unclaimed; not guessed at here.
 ## 2026-09-27 — Autopsy "NavRide / ride sharing like Rapido" (build 75ea6136, run 2026-09-26 08:09 UTC)
 
 A weak-tier build that succeeded (10.7 min, ₹179.99, KIMI throughout, preview proven, every page rendered).

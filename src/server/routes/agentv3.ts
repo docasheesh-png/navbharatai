@@ -49,7 +49,7 @@ import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } f
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
 import { deviceSummaryNotice, deviceSummaryRecord } from '../AgentV3/devicePowers';
 import { nativeCapabilityBrief, requestedCapabilities } from '../AgentV3/nativeCapabilities';
-import { starterSuiteOnly, starterSuiteNote } from '../AgentV3/e2eAutoScaffold';
+import { starterSuiteOnly, starterSuiteNote, testFilesIn } from '../AgentV3/e2eAutoScaffold';
 import { labelFieldsFromPlaceholder } from '../AppMakerLab/intelligence/A11yLinter';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction, simulatedDataIssues, simulatedDataNotice } from '../AgentV3/AuthenticityAnalysis';
 import { isUnreachable } from '../AgentV3/appReachability';
@@ -20134,7 +20134,13 @@ async function noteBuildOutcome(
                 gateEvidence.testSuitePresent = true;
                 // OURS OR THEIRS? (autopsy 6bae5835). A suite whose every file this build's own finishing
                 // pass wrote is NavBharatAI's starter, not the user's project — say so, in both places.
-                const ours = starterSuiteOnly(files, finishingPaths);
+                // Read the test files themselves: our starter is recognised by its own marker, not only by
+                // having been written THIS build — a later build must not call it the user's suite.
+                const testContents: Record<string, string> = {};
+                for (const tf of testFilesIn(files).slice(0, 12)) {
+                  try { testContents[tf] = await actuator.readFile(workspaceId, tf); } catch { /* unreadable ⇒ judged as theirs */ }
+                }
+                const ours = starterSuiteOnly(files, finishingPaths, testContents);
                 if (ours) gateEvidence.testSuiteIsOurStarter = true;
                 buildDiag.record({
                   phase: 'readiness', severity: 'info', code: 'TEST_SUITE_UNVERIFIED',

@@ -5,7 +5,7 @@ import {
   INDIC_DOMAIN_TERMS, indicDomainKeys, indicDomainMatches, usesIndicScript,
 } from '../src/server/lib/indicDomainTerms';
 import { analyzeRequirementGaps, detectIndiaContext } from '../src/server/lib/RequirementGapAnalyzer';
-import { namesBusinessDomain } from '../src/server/lib/appComplexitySignals';
+import { namesBusinessDomain, namesPersonalTool } from '../src/server/lib/appComplexitySignals';
 import { analyzeRequest } from '../src/server/AgentV3/RequestAnalyser';
 
 /**
@@ -164,9 +164,18 @@ describe('a domain named in the language of the market IS a domain', () => {
   });
 
   it('🔑 so the build is SIZED as the app it is: complex_app, not a greeting', () => {
-    for (const [, prompt] of POSITIVES) {
-      expect(namesBusinessDomain(prompt), prompt).toBe(true);
+    // A GAME is sized as the simple family since 2026-09-27 (admin: "han, agar saste module me ho sakte
+    // hai to, hona chahiye") — recognised in every language all the same, and never scored as chat.
+    for (const [domain, prompt] of POSITIVES) {
       const a = analyzeRequest({ prompt });
+      expect(a.taskType, prompt).not.toBe('chat');
+      if (domain === 'game') {
+        expect(namesBusinessDomain(prompt), prompt).toBe(false);
+        expect(namesPersonalTool(prompt), prompt).toBe(true);
+        expect(a.taskType, prompt).toBe('simple_app');
+        continue;
+      }
+      expect(namesBusinessDomain(prompt), prompt).toBe(true);
       expect(a.taskType, prompt).toBe('complex_app');
       expect(a.complexityScore, prompt).toBe(58);
       expect(a.startTier, prompt).toBe('sonnet');

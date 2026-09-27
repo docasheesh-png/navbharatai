@@ -124,8 +124,28 @@ export function namesBusinessDomain(prompt: string): boolean {
   if (DOCUMENT_DELIVERABLE_SIGNAL.test(p)) return false;
   if (SIMPLE_APP_SIGNAL.test(p)) return false;
   const domain = analyzeRequirementGaps(p).domain;
-  return domain !== GENERAL_DOMAIN && !PERSONAL_TOOL_DOMAINS.has(domain);
+  return domain !== GENERAL_DOMAIN && !isPersonalTool(domain, p);
 }
+
+/**
+ * THE ONE ANSWER to "is this a personal tool rather than a business?", asked by both predicates so the
+ * two can never disagree about the same prompt.
+ */
+function isPersonalTool(domain: string, prompt: string): boolean {
+  if (!PERSONAL_TOOL_DOMAINS.has(domain)) return false;
+  return !(domain === 'game' && HEAVY_GAME_SIGNAL.test(prompt));
+}
+
+/**
+ * A game that names real engineering is not the simple family: 3D rendering, an online or multiplayer
+ * mode, a physics engine, an open world. "Physics" alone is a school subject ("a physics quiz game"), so
+ * only a physics ENGINE or physics-BASED gameplay counts. Those keep today's complex opening (admin 2026-09-27: games go
+ * to the cheap engine *"agar saste module me ho sakte hai"* — only where it can). Scope words such as
+ * login, database or real-time are already caught earlier by `isComplexAppPrompt`.
+ * `3d ball` is deliberately NOT here: it is a named simple app in `SIMPLE_APP_SIGNAL`.
+ */
+export const HEAVY_GAME_SIGNAL =
+  /\b3d\b(?!\s+ball\b)|three\.?js|webgl|babylon|\bmulti[- ]?player\b|\bonline\s+(?:game|play|match|mode|battle)|\bpvp\b|\bmmo\b|physics[- ](?:engine|based)|realistic\s+physics|open[- ]world|\bunity\b|\bunreal\b/i;
 
 /**
  * Domains the requirement analyser recognises that are NOT a business: the personal tools a single
@@ -144,10 +164,15 @@ export function namesBusinessDomain(prompt: string): boolean {
  * keyword list, so the analyser stays the single owner of the vocabulary.
  *
  * ⚠️ Scope-bearing words still win, because `isComplexAppPrompt` is asked FIRST in `detectTaskType`:
- * *"a team task manager with login and a database"* is still complex. `game` is deliberately NOT here —
- * its complex verdict is pinned in the Indic-language tests and deserves its own decision.
+ * *"a team task manager with login and a database"* is still complex.
+ *
+ * 🎮 `game` JOINED 2026-09-27, on the admin's decision (*"han, agar saste module me ho sakte hai to, hona
+ * chahiye"*). A snake, memory or racing game is one screen of canvas code; it was opening on the
+ * always-reasoning rung only because `namesBusinessDomain` promoted every labelled domain. The admin's
+ * condition — *only where it can* — is `HEAVY_GAME_SIGNAL`: 3D, multiplayer/online, a physics engine or
+ * an open world keep the complex opening.
  */
-export const PERSONAL_TOOL_DOMAINS: ReadonlySet<string> = new Set(['productivity']);
+export const PERSONAL_TOOL_DOMAINS: ReadonlySet<string> = new Set(['productivity', 'game']);
 
 /**
  * True when the prompt names one of the personal-tool domains above — the simple family, recognised by
@@ -157,7 +182,7 @@ export const PERSONAL_TOOL_DOMAINS: ReadonlySet<string> = new Set(['productivity
 export function namesPersonalTool(prompt: string): boolean {
   const p = String(prompt || '');
   if (PAGE_DELIVERABLE_SIGNAL.test(p) || DOCUMENT_DELIVERABLE_SIGNAL.test(p)) return false;
-  return PERSONAL_TOOL_DOMAINS.has(analyzeRequirementGaps(p).domain);
+  return isPersonalTool(analyzeRequirementGaps(p).domain, p);
 }
 
 export function isComplexAppPrompt(prompt: string): boolean {

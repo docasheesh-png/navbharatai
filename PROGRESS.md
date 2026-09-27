@@ -83077,3 +83077,24 @@ YELLOW (PR #3331's area).
 - **A tested template opens on the first rung.** `scaffoldedComplexityDecision`: a starter chip whose golden scaffold will be seeded is routed `simple`, with no model call. This closes the first open item above.
 - **A reviewer claim a file can answer is checked first.** `reviewEvidence.ts` `missingClassClaim` / `classIsDefined`: a finding whose first sentence says named classes are not defined is refuted only when EVERY named class has a selector in the real stylesheets. A finding resting on "the missing classes" falls with them only when every class claim fell. Stylesheets are read only when a finding makes the claim. This closes the second open item.
 - **Vite dev CSS leaves the capture only when the page would not fit.** `style[data-vite-dev-id]` text is replaced with a note when `outerHTML` is over 30,000 characters; a page that fits is read as before. This closes the third open item.
+## 2026-09-27 — Games open on the cheap engine, where it can (admin decision)
+
+Asked after #3350 whether games should join reminder/planner apps on the cheap opening rung, the admin said:
+*"han, agar saste module me ho sakte hai to, hona chahiye"*.
+- **Before:** every prompt labelled `game` by the requirement analyser scored **58 / complex_app** (the
+  hospital-ERP score), because `namesBusinessDomain` promoted every labelled domain. "Build a car racing
+  game" opened on the always-reasoning rung and skipped the fast lane; "snake game" scored 15 only because
+  it is named in `SIMPLE_APP_SIGNAL`.
+- **Now:** `game` joins `PERSONAL_TOOL_DOMAINS` (`appComplexitySignals.ts`), so an ordinary game is
+  `simple_app` / 15 and opens on the cheap rung, keeping the fast lane.
+- **The admin's condition ("where it can")** is `HEAVY_GAME_SIGNAL`: 3D / three.js / WebGL, multiplayer,
+  online play or PvP, an MMO, a physics engine or physics-based play, an open world, Unity/Unreal — those
+  keep the complex opening. Login/database/real-time were already caught earlier by `isComplexAppPrompt`.
+  "Physics" alone (a school subject) and "3d ball" (a named simple app) do not count.
+- One predicate (`isPersonalTool`) now answers for both `namesBusinessDomain` and `namesPersonalTool`, so
+  the two can never disagree about the same prompt.
+- `tests/theLanguagesOfTheMarketNameTheirDomain.test.ts` pinned Indic game prompts to complex_app/58; it now
+  expects `simple_app` for the game rows (still recognised as games, never chat), per the admin's decision.
+- Tests: `tests/aGameOpensOnTheCheapEngineWhereItCan.test.ts` (19), reversion-proven in both halves.
+- ⚠️ **What to watch:** heal count and first-render time on Weak/Normal game builds. If ordinary games start
+  needing heals the cheap rung cannot give, the fix is to widen `HEAVY_GAME_SIGNAL`, not to revert.

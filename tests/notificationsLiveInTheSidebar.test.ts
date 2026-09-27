@@ -24,8 +24,10 @@ const inbox = codeOnly(read('src/components/NotificationBell.tsx'));
 describe('one inbox, three readers', () => {
   it('App owns the inbox hook, so the unread count exists while the panel is closed', () => {
     expect(app).toContain('const inbox = useNotificationInbox(user);');
-    expect(app).toContain('unreadNotifications={inbox.unread}');
-    expect(app.match(/unreadNotifications=\{inbox\.unread\}/g)?.length).toBe(2); // TopNav + SidebarNav
+    // Both readers get ONE number. Since 2026-09-27 that number is the inbox's count plus the pinned
+    // testing card while it is unseen (lib/testingNotice.ts), still derived from `inbox.unread`.
+    expect(app).toContain('inboxUnread: inbox.unread');
+    expect(app.match(/unreadNotifications=\{notificationUnread\}/g)?.length).toBe(2); // TopNav + SidebarNav
     expect(app).toContain('onOpenNotifications={() => setNotificationsOpen(true)}');
     expect(app).toMatch(/<NotificationPanel[\s\S]{0,200}?inbox=\{inbox\}/);
   });

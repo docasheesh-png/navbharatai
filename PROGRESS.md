@@ -82682,3 +82682,25 @@ construction, and so is anyone who already got the old ₹50 or a referral step.
 money.
 ⚠️ **It counts against the ₹400 lifetime gift ceiling** (`freeGiftedTokens`, read by `routes/referral.ts`).
 A user given ₹150 here can earn at most ₹250 more from the referral ladder.
+
+## 2026-09-27 — The testing notice left the home screen and moved into Notifications
+
+Admin, with a screenshot of the card over the home screen: *"isko popup se hat kar notifications me kar
+do! isi ux me. same bas alag popup ki jagah notification me aye! jisse user disturb na ho!"*
+
+- **What changed:** the "NavBharatAI is in active testing" card no longer floats over Home on every app
+  open. The same icon, words and **Report a problem** button now sit pinned in the Notifications panel,
+  under the rewards checklist (which the admin keeps first). It cannot be selected or deleted.
+- **How a new user still finds it:** until Notifications has been opened once on the device, the card
+  counts as ONE unread notification, so the ☰ dot and the Notifications row's number appear as for any
+  message. Opening the panel clears it for good (`localStorage`, `nbai_testing_notice_seen`). Blocked
+  storage reads as "seen", because an unclearable red dot is worse than a missing one.
+  Logic: `src/lib/testingNotice.ts` (`unreadWithTestingNotice`); card: `src/components/TestingNotice.tsx`.
+- **Signed-out visitors no longer see it.** They have no Notifications row, and the report sheet the
+  button opened asks them to sign in anyway.
+- **Removed with it:** the popup's state and Android-Back entry in `App.tsx`, its CSS animation, and
+  `tests/testingNoticeCentering.test.ts` (its subject is gone). The Tailwind v4 lesson that test carried
+  is still worth knowing: `-translate-x-1/2` compiles to the standalone `translate` property, which
+  composes with a keyframe's `transform` instead of being replaced by it.
+- The reward rows the popup used to show while money was unclaimed were already in the panel's rewards
+  checklist (2026-09-26), so nothing about money was lost in the move.

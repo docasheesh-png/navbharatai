@@ -82748,6 +82748,55 @@ money.
 ⚠️ **It counts against the ₹400 lifetime gift ceiling** (`freeGiftedTokens`, read by `routes/referral.ts`).
 A user given ₹150 here can earn at most ₹250 more from the referral ladder.
 
+## 2026-09-27 — Autopsy "Universal Remote" (builds 7026c09b · f59ce4dd · 18274327): the screens had no styles
+
+Three builds, one user, weak tier, all on KIMI. Build 1: a cut-off prompt ("…all ACs, T"), the model asked
+to finish it, the user stopped (₹0). Build 2: the app, 6.7 min, ₹111.15. Build 3: *"App made but not
+working"* — 7.6 min, billed ₹289.71 (₹88.85 actually debited; the overdraft floor absorbed the rest).
+
+**Ledger.** ✅ self-healed 2 (three TS2322 errors on `RemoteHeader.status`, quoted back by the write-time
+typecheck and fixed in ~35 s; the build-3 read nudge at 392 s) · 🔀 worked around 1 (GLM flashx crawled
+56.6 s, benched, KIMI took over — the slow-rung bench working) · ⏭️ skipped 2 (our own E2E suite written but
+never run; no user journey derivable) · ❌ shipped broken 1 (**build 2's screens were unstyled** — the thing
+the user reported) · 🥵 struggle 4 (build 3's 62 steps after "complete at step 10", three minutes of `grep`
+over `src/index.css` and a no-op `: > /tmp/empty.css` ×7; reviewer's brace glob returning "no files";
+80 s first call; the build-2 fresh request run as an edit).
+
+**Root causes fixed (PR on `claude/autopsy-universal-remote`):**
+1. ❌ **Unstyled screens.** `CssConsistency.ts` has detected exactly this since the DigitalWatch bug — but
+   it ran ONLY in the fast lane's verify, and only over THIS turn's writes, so the scaffold's untouched
+   `src/index.css` was invisible and it answered "no CSS to compare against". The same one-lane-of-two class
+   as the HTML boot guard. Now: the architect lane checks the WHOLE project (`integrityFiles`) and a real
+   mismatch rides the design repair pass (`CSS_CLASSES_UNDEFINED` → `_HEALED` / `_PARTIALLY_HEALED`,
+   kill switch `AGENTV3_CSS_HEAL=off`); the fast lane reads the project's stylesheets too. scss/sass/less
+   now define classes; an external (CDN) stylesheet makes the check say nothing rather than "missing".
+2. 🥵 **`.gitignore` + an empty `Minecraft.apk` = "Editing your existing app (2 source files)".** `.apk`
+   was missing from the binary list, and `userOwnedFileCount` counted housekeeping files. `couldBeAppCode`
+   now excludes binaries (apk/aab/ipa/…), git housekeeping, dependencies and build output — so that order
+   is a fresh build (plan + feature confirmation), and an unreadable listing still means "yes".
+3. **The revival recipe stored `: > /tmp/empty.css && echo done && npm run dev … | head -40`.** Replayed on
+   every wake-up, and `head -40` can SIGPIPE the server. `serverLaunchCommand` at the one recording door
+   keeps set-up + the server segment and drops a truncating pipe; unrecognised commands are kept as-is.
+4. 🥵 **The loop breaker watched `read_file` only.** An identical `bash` command with identical output and
+   no write in between now escalates to the same STOP at `READ_LOOP_LIMIT` (output still returned in full).
+5. 🥵 **`glob('src/**/*.{ts,tsx,css}')` → "(no files match)".** Braces were escaped as literals; now `{a,b}`.
+- Tests: `tests/theScreensHadNoStyles.test.ts` (18).
+
+**🔴 STILL OPEN (rule 6), recorded not guessed:**
+- **Two of three prompts arrived cut off mid-sentence** ("…all ACs, T", "…that it recognises and"). The
+  build received exactly that text (the model said so in build 1). Voice input does NOT auto-send
+  (`useSpeechInput` only fills the box), and "T.V. s" in build 2 reads like dictation — the likeliest cause
+  is dictation stopping on a pause and the user pressing Send, but that is not proven from this report.
+- **The render proof cannot see an unstyled app.** Fix 1 kills this CLASS at the source, but "rendered" still
+  means "the root had content"; a screenshot-based "does it look designed" check is a separate decision.
+- **Our own E2E scaffold holds the release gate at YELLOW** ("HAS a test suite, but it could not be run") on
+  every later build, because `@playwright/test` is not installed in the sandbox. Not changed here: the gate
+  wording is being reworked in open PR #3331.
+- **The readiness checkpoint said "complete, 100/100" at step 10 of a build whose prompt was "not working".**
+  The model correctly ignored it; the scorer does not read the user's complaint.
+- **Billing:** build 2 was charged ₹111 for an app whose screens were unstyled, then build 3 charged for the
+  repair. By the current rule (a proven render earns the bill) both are correct; whether a defect OUR check
+  should have caught ought to be billed is the admin's decision.
 ## 2026-09-27 (later) — ₹150 for NEW users: the admin's three rules, and the bug #3342 shipped
 
 The admin looked at #3342's button and said *"yeh 150₹ sabhi user ko kar rahe hai!"*. Their rules:

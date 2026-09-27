@@ -31,6 +31,7 @@
  * PURE. No I/O, no clock, no env.
  */
 import { goldenBaseFiles } from './goldenScaffolds/base';
+import { isBinaryAsset } from './fileClassification';
 
 /** Every path the platform's own starter project writes. Derived from its single source of truth. */
 export const SCAFFOLD_PATHS: ReadonlySet<string> = new Set(
@@ -40,6 +41,31 @@ export const SCAFFOLD_PATHS: ReadonlySet<string> = new Set(
 /** `./src/App.tsx`, `/src/App.tsx` and `src/App.tsx` are one file. */
 function normalize(raw: string): string {
   return String(raw ?? '').trim().replace(/^\.?\/+/, '').replace(/\\/g, '/');
+}
+
+/**
+ * Repository housekeeping: files that sit beside an app but are never one. `.gitignore` is created by
+ * the GitHub connection itself, before a line of the app exists.
+ */
+const HOUSEKEEPING = /^(\.gitignore|\.gitattributes|\.gitkeep|\.keep|\.editorconfig|\.ds_store|thumbs\.db|license(\.[a-z]+)?|licence(\.[a-z]+)?)$/i;
+
+/**
+ * 🔴 COULD THIS FILE BE PART OF AN APPLICATION? (autopsy "Universal Remote", 2026-09-27.)
+ *
+ * A workspace holding `.gitignore` and a ZERO-BYTE `Minecraft.apk` was told *"✏️ Editing your existing
+ * app (2 source files)"*, and the order *"Build an app which contain an IR blaster…"* was run as an EDIT
+ * — no plan, no feature confirmation, and a model told to make "targeted changes" to an app that did
+ * not exist. Neither file can be app code: one is git housekeeping, the other a binary package (and
+ * `.apk` was missing from the binary list, so every count called it "source"). Dependency, build-output
+ * and git internals are excluded for the same reason. PURE.
+ */
+export function couldBeAppCode(path: string): boolean {
+  const p = normalize(path);
+  if (!p) return false;
+  if (/^(node_modules|dist|build|\.git|coverage)\//.test(p) || /\/node_modules\//.test(p)) return false;
+  const base = p.split('/').pop() ?? p;
+  if (HOUSEKEEPING.test(base)) return false;
+  return !isBinaryAsset(p);
 }
 
 /**
@@ -57,7 +83,7 @@ export function userOwnedFileCount(paths: readonly string[] | null | undefined):
   for (const raw of paths) {
     if (typeof raw !== 'string') continue;
     const p = normalize(raw);
-    if (!p || SCAFFOLD_PATHS.has(p)) continue;
+    if (!p || SCAFFOLD_PATHS.has(p) || !couldBeAppCode(p)) continue;
     seen.add(p);
   }
   return seen.size;

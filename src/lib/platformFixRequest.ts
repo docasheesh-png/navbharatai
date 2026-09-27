@@ -155,3 +155,33 @@ export function errorCanBeFixedByEditingTheApp(opts: {
   if (opts.beforeBuildStarted) return false;
   return String(opts.message ?? '').trim() !== '';
 }
+
+/**
+ * 🔴 THE BUILDER WAS NEVER TOLD WHICH PREVIEW BROKE (autopsy "Lekhan Sahyak", 2026-09-27).
+ *
+ * The in-browser preview is a SEPARATE renderer from the app's own dev server: it downloads React from
+ * a CDN and compiles the app inside the browser. In that report its loader split React in two, the app
+ * crashed there and nowhere else, and the button above composed "fix it so the app builds" five times.
+ * The builder opened the project, found nothing wrong (the live dev server rendered the app), and —
+ * told to find the cause in the project files — twice invented one: a `resolve.dedupe` and then a hard
+ * React alias in `vite.config.ts`, neither of which the in-browser renderer ever reads. ₹208 for edits
+ * that could not reach the fault.
+ *
+ * The loader itself is fixed (src/server/runtime/reactCoreLoader.ts). This is the second net: the
+ * request now carries the one fact the builder could not know — where the error came from — and the
+ * rule that follows from it. It does NOT tell the builder to ignore preview errors: most of them are
+ * real bugs in the app's own files, and those must still be fixed.
+ *
+ * Returns '' for any message that is not this platform's in-browser-preview fix request. PURE.
+ */
+export function inBrowserPreviewFixGuidance(message: string | null | undefined): string {
+  const text = String(message ?? '').trim().toLowerCase();
+  if (!text.startsWith(PLATFORM_FIX_REQUEST_PREFIX.toLowerCase())) return '';
+  return [
+    'WHERE THIS ERROR CAME FROM — read before changing anything:',
+    '- It was raised by NavBharatAI\'s QUICK IN-BROWSER PREVIEW: a separate renderer that loads React from a CDN and compiles the app inside the browser. It is NOT the app\'s own dev server and it does NOT read vite.config, tsconfig paths or node_modules.',
+    '- First establish whether the app builds and renders on its OWN dev server (typecheck, production build, start the dev server, look at it).',
+    '- If the error\'s stack points into the app\'s own files and the code there is really wrong (a missing import, a bad prop, a runtime TypeError in app code), it is a real bug: fix it.',
+    '- If the app builds and renders on its own server and the error exists only in the quick preview — for example a hook failing inside a CDN copy of React ("Cannot read properties of null (reading \'useState\')") — the fault is in the preview renderer, not in this project. Change NOTHING, never edit bundler config (vite.config, aliases, dedupe) to work around it, and tell the user plainly that their app is fine and the quick preview had a loading problem.',
+  ].join('\n');
+}

@@ -11,7 +11,7 @@
  * These tests run the loader's REAL browser source against REAL copies of React: one copy must pass
  * the probe, two copies must fail it, and the loader must never hand the app a mixed group.
  */
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -20,6 +20,7 @@ import { buildReactPreview } from '../src/server/runtime/ReactPreview';
 import { VirtualFileSystem } from '../src/server/project/ProjectModel';
 import { isPreviewPlatformFault, REACT_SPLIT_FAULT_MESSAGE, PREVIEW_PLATFORM_FAULT_PREFIX } from '../src/lib/previewPlatformFault';
 import { consoleRowFixable } from '../src/components/agentv3/previewConsole';
+import { platformFixRequestPrompt, fixErrorAndContinuePrompt, inBrowserPreviewFixGuidance } from '../src/lib/platformFixRequest';
 
 const req = createRequire(import.meta.url);
 type Mods = Record<string, unknown>;
@@ -61,9 +62,8 @@ beforeAll(() => {
   expect(copyB).not.toBe(react);
 });
 
-afterAll(() => {
-  if (!hadWindow) delete (globalThis as Record<string, unknown>).window;
-});
+// The stub window is deliberately left in place: react-dom's scheduler may still run a task after the
+// last test, and vitest isolates this file's globals anyway.
 
 describe('the probe measures, it does not assume', () => {
   it('one React passes', () => {
@@ -154,6 +154,35 @@ describe('a fault that is ours is never offered as a paid repair', () => {
     expect(REACT_SPLIT_FAULT_MESSAGE.startsWith(PREVIEW_PLATFORM_FAULT_PREFIX)).toBe(true);
     expect(REACT_SPLIT_FAULT_MESSAGE).toMatch(/not the cause/);
     expect(REACT_SPLIT_FAULT_MESSAGE).not.toMatch(/jsdelivr|esm\.sh|cdn|vite/i);
+  });
+});
+
+describe('the builder is told WHICH preview broke', () => {
+  const REPORTED = "Cannot read properties of null (reading 'useState')\nTypeError: Cannot read properties of null (reading 'useState')\n    at X.r.useState (https://cdn.jsdelivr.net/npm/react@18.3.1/+esm:7:6304)";
+
+  it("the report's own request carries the guidance: a renderer-only fault changes nothing", () => {
+    const g = inBrowserPreviewFixGuidance(platformFixRequestPrompt(REPORTED));
+    expect(g).toMatch(/QUICK IN-BROWSER PREVIEW/);
+    expect(g).toMatch(/does NOT read vite\.config/);
+    expect(g).toMatch(/Change NOTHING/);
+    expect(g).toMatch(/never edit bundler config/);
+  });
+
+  it('it never tells the builder to ignore a real bug in the app\'s own files', () => {
+    expect(inBrowserPreviewFixGuidance(platformFixRequestPrompt('x'))).toMatch(/it is a real bug: fix it/);
+  });
+
+  it('nothing else gets it — not a typed message, not the other platform templates', () => {
+    expect(inBrowserPreviewFixGuidance('my app shows a blank screen, fix it')).toBe('');
+    expect(inBrowserPreviewFixGuidance(fixErrorAndContinuePrompt('boom'))).toBe('');
+    expect(inBrowserPreviewFixGuidance(null)).toBe('');
+  });
+
+  it('the route prepends it outside every best-effort block', () => {
+    const route = readFileSync(join(__dirname, '..', 'src/server/routes/agentv3.ts'), 'utf8');
+    expect(route).toMatch(/const previewFixHint = inBrowserPreviewFixGuidance\(prompt\);\n\s+if \(previewFixHint\) buildPrompt = `\$\{previewFixHint\}/);
+    const at = route.indexOf('const previewFixHint = inBrowserPreviewFixGuidance(prompt);');
+    expect(route.lastIndexOf('let buildPrompt = prompt;', at)).toBeGreaterThan(route.lastIndexOf('      try {\n', at));
   });
 });
 

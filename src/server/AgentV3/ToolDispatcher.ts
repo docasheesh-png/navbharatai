@@ -1,4 +1,4 @@
-import { repeatedReadNotice, READ_LOOP_LIMIT } from './repeatedReads';
+import { repeatedReadNotice, READ_LOOP_LIMIT, repeatedCommandNotice, commandKey } from './repeatedReads';
 import { healWouldOscillate } from './HealLedger';
 import type { AgentEventStream } from './AgentEventStream';
 import { parseNpmAuditSummary, looksLikeDependencyInstall } from './npmAuditSummary';
@@ -2268,6 +2268,8 @@ export class ToolDispatcher {
    * told STOP three times and the report said "No read reached the no-progress limit").
    */
   private _readLoopStops: { n: number } = { n: 0 };
+  /** This agent's own shell commands, for the bash half of the loop breaker (never shared: a sub-agent starts fresh). */
+  private _ownCommands = new Map<string, { output: string; writeSeq: number; stalls: number }>();
 
   private _readLedger: ReadLedger = new Map();
   /** THIS agent's own reads — never shared, because it answers "what is in MY context?". See read_file. */
@@ -3721,6 +3723,18 @@ export class ToolDispatcher {
           );
           out = `${governanceNote(risk)}\n${out}`;
         }
+        // THE SAME COMMAND, AGAIN, WITH NOTHING CHANGED — the bash half of the read-loop breaker
+        // (autopsy "Universal Remote": a no-op ran seven times). See repeatedReads.ts.
+        try {
+          const key = commandKey(command);
+          const printed = `${exitCode}\u0000${stdout}\u0000${stderr}`;
+          const prior = this._ownCommands.get(key);
+          const stalled = prior && prior.output === printed && prior.writeSeq === this._writeSeq ? prior.stalls + 1 : 0;
+          this._ownCommands.set(key, { output: printed, writeSeq: this._writeSeq, stalls: stalled });
+          if (this._ownCommands.size > 200) this._ownCommands.delete(this._ownCommands.keys().next().value as string);
+          const notice = repeatedCommandNotice(stalled);
+          if (notice) { out = `${notice}${out}`; this._readLoopStops.n++; }
+        } catch { /* the breaker is advisory — the output is still returned */ }
         this.state?.appendTerminal(out);
         // Remember real failures so the team can recall what went wrong (error memory) — redacted, since
         // recalled lessons are shown back to the model/user later.
@@ -9559,11 +9573,27 @@ export function applyEdit(existing: string, oldStr: string, newStr: string, path
 }
 
 
-function globToRegExp(glob: string): RegExp {
+/**
+ * A glob as the tool's own callers write it. 🔴 BRACES (autopsy "Universal Remote", 2026-09-27): the
+ * reviewer asked for `src/**\/*.{ts,tsx,css}` and was told "(no files match)" in a project full of
+ * them — `{` and `}` were escaped as literals, so the most common multi-extension glob there is
+ * matched nothing and the reviewer spent three steps finding its own files. `{a,b}` now means either
+ * (one level, which is every form a model writes); an unclosed `{` is still a literal.
+ */
+export function globToRegExp(glob: string): RegExp {
   let re = '';
+  let inBrace = false;
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i];
-    if (c === '*') {
+    if (c === '{' && !inBrace && glob.indexOf('}', i) > i) {
+      re += '(?:';
+      inBrace = true;
+    } else if (c === '}' && inBrace) {
+      re += ')';
+      inBrace = false;
+    } else if (c === ',' && inBrace) {
+      re += '|';
+    } else if (c === '*') {
       if (glob[i + 1] === '*') {
         re += '.*';
         i++;

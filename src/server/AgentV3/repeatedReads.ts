@@ -134,3 +134,28 @@ export function repeatedReadSummary(reads: Map<string, number>, unchangedRereads
     + `a file that had not changed. Worst: ${worst}. Each one costs a step of the build's budget.`
   );
 }
+
+/**
+ * 🔴 THE SAME SHELL COMMAND, AGAIN, WITH NOTHING CHANGED (autopsy "Universal Remote", 2026-09-27).
+ *
+ * The read breaker above watches `read_file` only. That build's loop was in `bash`: `grep` over
+ * `src/index.css` for the same class names, and `: > /tmp/empty.css && wc -l /tmp/empty.css` — a
+ * no-op — seven times, for three minutes, while the user waited on an app they had been told was
+ * broken. Same rule, same threshold, same provable definition of no progress: the command is
+ * IDENTICAL, its output is IDENTICAL, and not one file was written since it last ran. The output is
+ * always returned in full. PURE.
+ */
+export function repeatedCommandNotice(stalled: number): string {
+  if (stalled < READ_LOOP_LIMIT) return '';
+  return (
+    `[STOP — you have run this exact command ${stalled + 1} times, it printed exactly the same thing each ` +
+    'time, and NOTHING in the project has changed in between. Running it again cannot tell you anything ' +
+    'new. Either change the code (write the file you need), run a DIFFERENT check, or say plainly what is ' +
+    'blocking you.]\n'
+  );
+}
+
+/** Two spellings of one command are one command. PURE. */
+export function commandKey(command: string): string {
+  return String(command ?? '').trim().replace(/\s+/g, ' ');
+}

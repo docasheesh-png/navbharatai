@@ -555,7 +555,7 @@ import { shouldAttemptPlatformPreview, platformPreviewBudgetMs, platformPreviewP
 import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
 import { readyOverrunNote } from '../AgentV3/doneSignal';
 import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
-import { cssConsistencyError } from '../AgentV3/CssConsistency';
+import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, isProjectStylesheet } from '../AgentV3/CssConsistency';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
 import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPolicy';
 import { buildServiceGraph } from '../AgentV3/serviceGraph';
@@ -16460,7 +16460,16 @@ async function noteBuildOutcome(
             // auto-repair pass makes the components and stylesheet agree. Conservative (Tailwind-aware,
             // kebab-case only, thresholded) so a consistent app is never flagged.
             try {
-              const cssErr = cssConsistencyError(Object.fromEntries(writtenFiles));
+              // The WHOLE project's stylesheets, not only this turn's writes: the scaffold's
+              // src/index.css is rarely rewritten, and without it the check saw "no CSS" and stayed
+              // silent on an app whose screens had no styles at all (autopsy "Universal Remote").
+              const written = Object.fromEntries(writtenFiles);
+              const sheets: Record<string, string> = {};
+              for (const path of (await actuator.listFiles(workspaceId).catch(() => [] as string[])).filter(isProjectStylesheet).slice(0, 20)) {
+                if (written[path] !== undefined) continue;
+                try { sheets[path] = await actuator.readFile(workspaceId, path); } catch { /* unreadable ⇒ not counted */ }
+              }
+              const cssErr = cssConsistencyError({ ...sheets, ...written });
               if (cssErr) return { ok: false, errors: cssErr };
             } catch { /* css check is best-effort — never blocks on its own failure */ }
             if (!out.includes('__TSC_CLEAN__')) {
@@ -18192,7 +18201,28 @@ async function noteBuildOutcome(
 
           const designFiles = Object.fromEntries(writtenFiles);
           const design = analyzeDesignCoverage(designFiles);
-          if (!design.ok) {
+          /**
+           * 🔴 CLASS NAMES THE STYLESHEET NEVER DEFINES (autopsy "Universal Remote", 2026-09-27).
+           *
+           * A build wrote eleven components using `app-shell`, `device-list`, `remote-header`… and not
+           * one rule for them. tsc was clean, the preview "rendered", accessibility scored 100, and the
+           * user's next message was *"App made but not working"* — then paid a second build to have
+           * the styles written. `CssConsistency.ts` has detected exactly this since the DigitalWatch
+           * bug, but it ran ONLY in the fast lane's verify, and only over THIS turn's writes — so the
+           * scaffold's `src/index.css`, never rewritten, was invisible and the check answered "no CSS
+           * to compare against". Here it reads the WHOLE project (`integrityFiles`), in the lane that
+           * builds most apps, and a real mismatch rides the same repair pass as the design findings.
+           */
+          const projectForCss = { ...integrityFiles, ...designFiles };
+          const cssErr = (() => { try { return cssConsistencyError(projectForCss); } catch { return null; } })();
+          if (cssErr) {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'CSS_CLASSES_UNDEFINED',
+              ...obs(undefinedClassesNote(findUndefinedClasses(projectForCss))),
+            });
+          }
+          const cssRepair = !!cssErr && cssHealEnabled() && result.ok && expectsArtifacts && !abort.signal.aborted;
+          if (!design.ok || cssRepair) {
             for (const finding of design.findings.slice(0, 8)) {
               buildDiag.record({
                 phase: 'build',
@@ -18201,8 +18231,14 @@ async function noteBuildOutcome(
                 ...obs(`${finding.file} does not match the app's own design standard (${finding.defects.join(', ')}; ${Math.round(finding.classedRatio * 100)}% of its elements carry a class). ${designCoverageSummary(design)}`),
               });
             }
-            if (shouldRunIntegrityHeal({ gateEnabled: envFlag('AGENTV3_DESIGN_GATE'), resultOk: result.ok, expectsArtifacts, aborted: abort.signal.aborted })) {
-              events.emit({ type: 'narration', agent: 'architect', text: `🎨 Bringing ${design.findings.length} page(s) up to the app's design standard…`, ts: Date.now() });
+            const designRepair = !design.ok && shouldRunIntegrityHeal({ gateEnabled: envFlag('AGENTV3_DESIGN_GATE'), resultOk: result.ok, expectsArtifacts, aborted: abort.signal.aborted });
+            if (designRepair || cssRepair) {
+              events.emit({
+                type: 'narration', agent: 'architect', ts: Date.now(),
+                text: designRepair
+                  ? `🎨 Bringing ${design.findings.length} page(s) up to the app's design standard…`
+                  : '🎨 Adding the styles your screens use but the stylesheet is missing…',
+              });
               try {
                 const designRunner = new AgentRunner({
                   ...baseRunnerOpts,
@@ -18225,8 +18261,10 @@ async function noteBuildOutcome(
                 // deterministic re-lint, no extra model call, and only when a repair is running anyway.
                 const a11yBefore = projectHasUserCode(beforeHeal) ? lintBuiltApp(beforeHeal) : null;
                 const a11yAsk = a11yRepairAddendum(a11yBefore);
+                const designAsk = designRepair ? designRepairInstruction(design) : '';
+                const cssAsk = cssRepair && cssErr ? `\n\n${cssErr}` : '';
                 const healed = await runInPass('design-consistency-heal', () => designRunner.run(
-                  `The app is built and compiles. ${designRepairInstruction(design)}${a11yAsk}`,
+                  `The app is built and compiles. ${designAsk}${cssAsk}${a11yAsk}`,
                 ));
                 try {
                   const afterHeal = Object.fromEntries(writtenFiles);
@@ -18250,8 +18288,21 @@ async function noteBuildOutcome(
                   // Same honesty rule as the integrity heal: keep the REAL build summary, take only the
                   // edits. A no-op heal must never replace the user's build result with its own chatter.
                   result = { ...healed, summary: result.summary };
+                  if (cssRepair) {
+                    // Say what is true AFTER the repair, either way — the warning above describes the app before it.
+                    const left = findUndefinedClasses({ ...integrityFiles, ...Object.fromEntries(writtenFiles) });
+                    buildDiag.record({
+                      phase: 'build',
+                      severity: left.length < 3 ? 'info' : 'warning',
+                      code: left.length < 3 ? 'CSS_CLASSES_HEALED' : 'CSS_CLASSES_PARTIALLY_HEALED',
+                      message: left.length < 3
+                        ? 'Every class the screens use now has a style rule.'
+                        : `After the repair ${left.length} class name(s) still have no style rule: ${left.slice(0, 12).join(', ')}.`,
+                      autoResolved: left.length < 3,
+                    });
+                  }
                   const after = analyzeDesignCoverage(Object.fromEntries(writtenFiles));
-                  buildDiag.record({
+                  if (designRepair) buildDiag.record({
                     phase: 'build',
                     severity: after.ok ? 'info' : 'warning',
                     code: after.ok ? 'DESIGN_HEALED' : 'DESIGN_PARTIALLY_HEALED',

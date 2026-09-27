@@ -28,9 +28,38 @@ const LAUNCH_TTL_MS = 60 * 60 * 1000;
 
 const launches = new Map<string, DevServerLaunch>();
 
+/** A segment that starts a server. */
+const SERVER_SEGMENT = /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(dev|start|serve|preview)\b|\b(npx\s+)?(vite(?!\s+build)|next\s+(dev|start)|serve|http-server|nodemon|tsx|ts-node)\b|\bpython3?\s+(-m\s+http\.server|manage\.py\s+runserver)|\bnode\s+\S+/;
+/** A segment that sets up the environment the server needs, so it must be replayed with it. */
+const SETUP_SEGMENT = /^(cd\s|export\s|source\s|\.\s|set\s+-a)/;
+/** A pipe into a reader that EXITS (head/tail/grep/…) — it can kill a long-running server by SIGPIPE. */
+const TRUNCATING_PIPE = /\s*\|\s*(head|tail|grep|sed|awk|cut|less|more)\b.*$/;
+
+/**
+ * The part of a command that really starts the server (autopsy "Universal Remote", 2026-09-27).
+ *
+ * A model ran `: > /tmp/empty.css && echo done && npm run dev -- --host 0.0.0.0 --port 5173 2>&1 |
+ * head -40`, and that whole line became the stored REVIVAL recipe — so every later wake-up would
+ * truncate an empty temp file, echo "done", and pipe the dev server into `head -40`, which exits after
+ * 40 lines and can take the server down with SIGPIPE. The recipe is replayed for the life of the app, so
+ * noise in it is permanent. Keep the environment set-up (`cd`, `export`, `source`), the server itself,
+ * and nothing else; drop a trailing pipe into a reader that exits. A command with no recognisable server
+ * segment is kept exactly as it was — never guessed. PURE.
+ */
+export function serverLaunchCommand(command: string): string {
+  const cmd = String(command || '').trim();
+  if (!cmd) return '';
+  const segments = cmd.split(/\s*(?:&&|;)\s*/).map((x) => x.trim()).filter(Boolean);
+  const serverAt = segments.findIndex((seg) => SERVER_SEGMENT.test(seg.replace(TRUNCATING_PIPE, '')));
+  if (serverAt < 0) return cmd;
+  const setup = segments.slice(0, serverAt).filter((seg) => SETUP_SEGMENT.test(seg));
+  const server = segments[serverAt].replace(TRUNCATING_PIPE, '').replace(/\s*2>&1\s*$/, '').trim();
+  return [...setup, server].join(' && ');
+}
+
 /** Record a dev-server launch that was observed to come up. Never throws. */
 export function recordDevServerLaunch(workspaceId: string, command: string, port: number, now = Date.now()): void {
-  const cmd = String(command || '').trim();
+  const cmd = serverLaunchCommand(command);
   if (!workspaceId || !cmd) return;
   if (!Number.isInteger(port) || port <= 0 || port >= 65536) return;
   launches.set(workspaceId, { command: cmd, port, at: now });

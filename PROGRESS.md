@@ -82797,6 +82797,61 @@ over `src/index.css` and a no-op `: > /tmp/empty.css` ×7; reviewer's brace glob
 - **Billing:** build 2 was charged ₹111 for an app whose screens were unstyled, then build 3 charged for the
   repair. By the current rule (a proven render earns the bill) both are correct; whether a defect OUR check
   should have caught ought to be billed is the admin's decision.
+## 2026-09-27 (later) — ₹150 for NEW users: the admin's three rules, and the bug #3342 shipped
+
+The admin looked at #3342's button and said *"yeh 150₹ sabhi user ko kar rahe hai!"*. Their rules:
+1. *"user new hona chahiye"*
+2. *"balance gift 00 hona chahiye (₹ se purchase kiye huye alag)"*
+3. *"ek bar 150₹ mil gaye, wapas na mile, chahe admin one click kitni bhi baar kare"*
+
+**The bug.** #3342 treated "has never received any credit" as meaning "new". Every account opened after
+the flat welcome gift was retired on 2026-09-17 (#3030) fits that, whatever its age, so ten days of
+sign-ups were all offered ₹150. "Never credited" describes a wallet; "new" describes a person.
+
+**The fix** (`adminWelcomeGift.ts`):
+- **Rule 1 — new.** The account joined within N days. The admin picks N from 1, 3, 7, 15 or 30 (default 7)
+  beside the button. The join date comes from the same reader the users list's "Joined" column uses
+  (`resolveJoinedAt`: Firebase Auth, then the wallet's `createdAt`). A join date that cannot be read
+  counts as not new.
+- **Rule 2 — ₹0 gift balance.** Checked with `giftRemaining`. Paid money is separate: someone who
+  recharged but holds no gift credit is eligible.
+- **Rule 3 — once only.** The `adminWelcomeGiftAt` stamp is written and re-read inside the same
+  transaction, so repeated or simultaneous presses pay an account once. Accounts that received the old
+  ₹50 already carry this stamp and are skipped.
+- **Kept guards.** Banned and merged accounts are never paid. The ₹400 lifetime gift ceiling holds: an
+  account with no room for the full ₹150 is skipped, not part-paid.
+
+**What the admin sees.** The popup shows who gets it and why everyone else is skipped (already received,
+still holds gift balance, joined too long ago, banned/merged/at the limit). The count shown is sent back
+with the press, and the server refuses a press that would pay more users than that.
+
+Tests: `tests/adminWelcomeGift.test.ts` (21). Deleting the join-date check makes the reported-bug case
+fail, confirming the test guards it.
+
+⚠️ **Unknown to this session:** whether the #3342 button was pressed before this fix. If it was, the ₹150
+credits carry the ledger line "Welcome credit: ₹150 added by NavBharatAI" and the `adminWelcomeGiftAt`
+stamp, and the admin audit log has an `ADMIN_WELCOME_GIFT_BULK` entry with the paid count.
+## 2026-09-27 — The testing notice left the home screen and moved into Notifications
+
+Admin, with a screenshot of the card over the home screen: *"isko popup se hat kar notifications me kar
+do! isi ux me. same bas alag popup ki jagah notification me aye! jisse user disturb na ho!"*
+
+- **What changed:** the "NavBharatAI is in active testing" card no longer floats over Home on every app
+  open. The same icon, words and **Report a problem** button now sit pinned in the Notifications panel,
+  under the rewards checklist (which the admin keeps first). It cannot be selected or deleted.
+- **How a new user still finds it:** until Notifications has been opened once on the device, the card
+  counts as ONE unread notification, so the ☰ dot and the Notifications row's number appear as for any
+  message. Opening the panel clears it for good (`localStorage`, `nbai_testing_notice_seen`). Blocked
+  storage reads as "seen", because an unclearable red dot is worse than a missing one.
+  Logic: `src/lib/testingNotice.ts` (`unreadWithTestingNotice`); card: `src/components/TestingNotice.tsx`.
+- **Signed-out visitors no longer see it.** They have no Notifications row, and the report sheet the
+  button opened asks them to sign in anyway.
+- **Removed with it:** the popup's state and Android-Back entry in `App.tsx`, its CSS animation, and
+  `tests/testingNoticeCentering.test.ts` (its subject is gone). The Tailwind v4 lesson that test carried
+  is still worth knowing: `-translate-x-1/2` compiles to the standalone `translate` property, which
+  composes with a keyframe's `transform` instead of being replaced by it.
+- The reward rows the popup used to show while money was unclaimed were already in the panel's rewards
+  checklist (2026-09-26), so nothing about money was lost in the move.
 ## 2026-09-27 — The update banner was painted UNDER the header (admin: "update notification ki position theek nahi hai, upar se crop ho jata hai")
 - **Root cause:** `UpdateBanner` was `position: fixed` at `--nb-safe-top + 8px` with `zIndex: 60`, in the same strip as the header (`TopNav`, `z-[100]`). The header painted over it, hiding the message's first line and the top of the Update button. Reproduced in a 412×915 render before the change.
 - **Fix:** the banner is now the first row of the app shell (`flexShrink: 0`, in the flow). It sits inside the root's safe-area padding and pushes the header down, so there is no stacking contest and no inset of its own to get wrong. The shell's content is `flex-1 min-h-0`, so the height comes out of the page, never the bottom bar.

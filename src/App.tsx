@@ -64,8 +64,8 @@ import type { ActionTone } from './lib/actionNavigator';
 import { isModeSurface, FREE_MODE_ID, IMAGE_MODE_ID, recentTargetFromId, startsFreshOnPick, recentModeEntries, recentRowClosable, nextRecentAfterClose, lastChatClosed, activeModeId } from './components/chat/modePicker';
 import { headerTabFor, hiddenHeaderTabs } from './lib/headerTab';
 import { ReportSheet } from './components/ReportSheet';
-import { TestingNotice } from './components/TestingNotice';
-import { shouldShowTestingNotice, testingNoticeAlreadyShown } from './lib/testingNotice';
+import { TestingNoticeCard } from './components/TestingNotice';
+import { markTestingNoticeSeen, testingNoticeSeen, unreadWithTestingNotice } from './lib/testingNotice';
 import { useReferralProgress } from './hooks/useReferralProgress';
 import { REFERRAL_GRANTED_EVENT } from './lib/referralClaim';
 import { useHeldReferralCode } from './hooks/useHeldReferralCode';
@@ -283,6 +283,15 @@ export default function App() {
   // existed while open could not carry it. One hook, three readers, one number.
   const inbox = useNotificationInbox(user);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  // 🧪 THE TESTING NOTICE LIVES IN NOTIFICATIONS, NOT IN A POPUP (admin 2026-09-27: "popup ki jagah
+  // notification me aye, jisse user disturb na ho"). Until the panel has been opened once on this
+  // device it counts as one unread notification, so the ☰ dot and the row's number lead a new user to
+  // it without anything covering the screen. Opening the panel is what clears it. See lib/testingNotice.ts.
+  const [testingSeen, setTestingSeen] = useState(() => testingNoticeSeen());
+  useEffect(() => {
+    if (notificationsOpen && !testingSeen) { markTestingNoticeSeen(); setTestingSeen(true); }
+  }, [notificationsOpen, testingSeen]);
+  const notificationUnread = unreadWithTestingNotice({ inboxUnread: inbox.unread, signedIn: !!user, seen: testingSeen });
   const [isAdmin, setIsAdmin] = useState(() => {
     return localStorage.getItem('navbharat_admin_v1') === 'true';
   });
@@ -1600,12 +1609,6 @@ export default function App() {
 
   // A shake anywhere in the app opens the report sheet. The hook is a no-op on desktop and wherever
   // the device will not give a page motion access — see useShakeToReport for why iOS is deliberate.
-  /**
-   * The testing notice, for THIS app open. Seeded from sessionStorage so a reload or a fresh app
-   * launch shows it again while tapping Home a second time does not — see lib/testingNotice.ts.
-   * Read once, in the initialiser, so a re-render can never resurrect a notice the user dismissed.
-   */
-  const [testingNoticeOpen, setTestingNoticeOpen] = useState(() => !testingNoticeAlreadyShown());
 
   /**
    * 🔴 ANDROID'S HARDWARE BACK BUTTON (admin 2026-09-17: *"kisi bhi page par back press karne se
@@ -1636,7 +1639,6 @@ export default function App() {
       if (reportOpen) openOverlays.push('report');
       if (zipSizeModal) openOverlays.push('zip-size');
       if (showAuth) openOverlays.push('auth');
-      if (testingNoticeOpen) openOverlays.push('testing-notice');
 
       const action = decideBackAction({ exitPromptOpen, openOverlays, isHome: activeView === 'home' });
       switch (action.type) {
@@ -1651,7 +1653,6 @@ export default function App() {
             case 'report': setReportOpen(false); return;
             case 'zip-size': setZipSizeModal(null); return;
             case 'auth': setShowAuth(false); return;
-            case 'testing-notice': setTestingNoticeOpen(false); return;
             // An id with no closer would be a Back press that does nothing — the one outcome
             // `androidBack.ts` refuses to produce. Falling through to Home keeps Back meaningful.
             default: toggleTab('home'); return;
@@ -1665,7 +1666,7 @@ export default function App() {
   }, [
     exitPromptOpen, activeView, toggleTab,
     isMenuOpen, showDeployPanel, showModePicker, historyPopupOpen,
-    showContinueModal, reportOpen, zipSizeModal, showAuth, testingNoticeOpen,
+    showContinueModal, reportOpen, zipSizeModal, showAuth,
   ]);
 
   /**
@@ -3441,7 +3442,7 @@ export default function App() {
       {/* Focus Mode hides the header entirely — the floating corner button (below) or Esc bring it back. */}
       {!focusMode && (
         <TopNav
-          unreadNotifications={inbox.unread}
+          unreadNotifications={notificationUnread}
           walletNeedsTopUp={needsTopUp}
           effectiveDeviceMode={effectiveDeviceMode}
           isSidebarCollapsed={isSidebarCollapsed}
@@ -3484,7 +3485,7 @@ export default function App() {
         // scope, the popup-vs-tab decision and the sign-in gate can never disagree between them.
         onOpenHistory={openHistoryForCurrentSurface}
         unreadReports={unreadReports}
-        unreadNotifications={inbox.unread}
+        unreadNotifications={notificationUnread}
         walletNeedsTopUp={needsTopUp}
         onOpenNotifications={() => setNotificationsOpen(true)}
         effectiveDeviceMode={effectiveDeviceMode}
@@ -3671,21 +3672,6 @@ export default function App() {
             onExit={confirmExitApp}
             onCancel={() => setExitPromptOpen(false)}
           />
-
-          {/* WE ARE STILL TESTING — say so once per app open, on the home screen, and hand over the
-              way to report rather than only asking for it. Rendered beside the sheet it opens, so
-              the notice and its destination are one change. See lib/testingNotice.ts. */}
-          {shouldShowTestingNotice({ activeView, alreadyShown: !testingNoticeOpen }) && (
-            <TestingNotice
-              theme={theme}
-              onReport={() => { setReportMode('choose'); setReportOpen(true); }}
-              onDone={() => setTestingNoticeOpen(false)}
-              // Empty everywhere but a signed-in Android app with something unclaimed, so the notice
-              // behaves exactly as it did before for everyone else. See lib/referralChecklist.ts.
-              rewardRows={referralProgress.rows}
-              onOpenRewards={() => { setActiveView('billing'); setActiveBillingDetailTab('gift'); }}
-            />
-          )}
 
           {shouldRenderV3Surface(activeView, v3Preview.running === true, openTabs.includes('nbi_pro_chat')) && (
             /* NavBharatAI Pro — replaces the retired Pro v2.0 builder. ProV3Surface shows the
@@ -4084,12 +4070,19 @@ export default function App() {
               onClose={() => setNotificationsOpen(false)}
               onOpenReports={() => { setReportMode('list'); setReportOpen(true); }}
               pinned={user ? (
-                <RewardsChecklistCard
-                  userId={user.uid}
-                  progress={referralProgress}
-                  onRefresh={referralProgress.refresh}
-                  onNavigate={() => setNotificationsOpen(false)}
-                />
+                <>
+                  <RewardsChecklistCard
+                    userId={user.uid}
+                    progress={referralProgress}
+                    onRefresh={referralProgress.refresh}
+                    onNavigate={() => setNotificationsOpen(false)}
+                  />
+                  {/* Second, under the rewards card the admin asked to keep first ("hamesha 1st"). The
+                      button opens the SAME report sheet the sidebar row and a phone shake open. */}
+                  <TestingNoticeCard
+                    onReport={() => { setNotificationsOpen(false); setReportMode('choose'); setReportOpen(true); }}
+                  />
+                </>
               ) : null}
             />
           )}

@@ -1,86 +1,82 @@
-// THE TESTING NOTICE — shown once per app open, on the home screen (admin 2026-09-14).
+// THE TESTING NOTICE — a pinned card in Notifications, never a popup (admin 2026-09-27).
 //
-// Admin's ask, verbatim: *"home page par hi jab bhi user app open kare, 3 seconds ke liye ek popup
-// aa jaye — 'abhi ham testing phase me hai, is liye failure ko please report kare, jisse ham aur
-// strong ban sake. thanks!'"*, and then: *"isko aur acche se professionally likho. english me"*.
+// History, because the reason for the shape is the admin's own words twice over:
 //
-// 🔒 IT ASKS FOR SOMETHING, SO IT MUST HAND OVER THE WAY TO DO IT. A notice that says "please report
-// failures" and leaves the person to find out how is the half-built state the second absolute rule
-// forbids — the instruction is real, the means is missing. NavBharatAI already has a genuine,
-// app-wide reporting sheet (`ReportSheet`, reachable from the sidebar's "Report a problem" and by
-// shaking the phone, which attaches the screen, the device, the build and any recorded error by
-// itself). So the notice carries a BUTTON that opens that exact sheet: one tap, not a scavenger hunt.
+// • 2026-09-14 — *"home page par hi jab bhi user app open kare, 3 seconds ke liye ek popup aa jaye —
+//   'abhi ham testing phase me hai, is liye failure ko please report kare…'"*. It shipped as a card
+//   floating over the home screen, once per app open, with a "Report a problem" button.
+// • 2026-09-27 — *"isko popup se hat kar notifications me kar do! isi ux me. same bas alag popup ki
+//   jagah notification me aye! jisse user disturb na ho!"*. The message and the button are unchanged;
+//   only WHERE it lives changed. A popup interrupts every app open; a notification waits to be read.
 //
-// ⚠️ THREE SECONDS IS SHORT FOR A MESSAGE THAT ASKS THE READER TO ACT, and that is worth saying
-// plainly rather than quietly overriding. The admin asked for three, so three is the default — but
-// the countdown PAUSES while the notice is hovered, touched or focused, so nobody who is actually
-// reading it gets cut off mid-sentence, and nobody reaching for the button has it vanish under their
-// finger. That keeps the instruction intact and removes its one sharp edge.
+// 🔒 IT STILL ASKS FOR SOMETHING, SO IT STILL HANDS OVER THE WAY TO DO IT. The card carries the same
+// button that opens the app-wide `ReportSheet` — the sheet the sidebar's "Report a problem" and a phone
+// shake open. A notice that says "please report" with no way to do it is the half-built state the
+// second absolute rule forbids.
 //
-// Reduced motion needs no code here: `index.css` disables every animation and transition under
-// `.nb-reduce-motion`, which Settings → General → Accessibility already toggles. Using a plain CSS
-// animation rather than a JS one means the accessibility setting is honoured by construction.
+// 🔔 HOW ANYONE FINDS IT WITHOUT BEING INTERRUPTED. It counts as ONE unread notification until the user
+// has opened Notifications once on this device, so the ☰ button carries its usual red dot and the
+// Notifications row its usual number. Opening the panel is what clears it — the same moment every other
+// notification is marked read. After that the card stays pinned (so it can always be found) but raises
+// no dot again. That is `localStorage` on purpose: "seen once on this device" is the promise, and a
+// dot on every app open would be the popup's nagging in a quieter form.
 //
-// PURE — no clock, no DOM, no React.
-
-/** How long the notice stays up when nobody is interacting with it. The admin's three seconds. */
-export const TESTING_NOTICE_MS = 3000;
-
-/**
- * One app OPEN, not one page view.
- *
- * `sessionStorage` is the right store precisely because it is emptied when the tab or the app
- * closes: a cold launch of the Android/iOS shell, a new tab, or a reload each begin a new session
- * and therefore show the notice again — which is what "whenever the user opens the app" means.
- * `localStorage` would have shown it once in the lifetime of the device, and a plain in-memory flag
- * would have re-shown it every time the user tapped Home, which is the annoying reading of the ask.
- */
-export const TESTING_NOTICE_SESSION_KEY = 'nbai_testing_notice_shown';
+// ⚠️ SIGNED-IN ONLY, AND THAT LOSES NOTHING. The Notifications row exists only for a signed-in user, and
+// the report sheet it opens requires sign-in too (a report nobody can be asked about cannot be followed
+// up). The old popup did show to a signed-out visitor — and handed them a button whose sheet then asked
+// them to sign in first.
+//
+// PURE — no clock, no DOM, no React. Storage access is injected and guarded.
 
 /** The copy, in one place so a test can pin it and a translation never has to hunt for it. */
 export const TESTING_NOTICE_COPY = {
   /** Short enough to land in a glance; the detail is in the body. */
   title: 'NavBharatAI is in active testing',
   body: "If something doesn't work, please report it — that's how we make it stronger. Thank you.",
-  /** The exact label of the sheet this opens, so the notice and the menu entry name one thing. */
+  /** The exact label of the sheet this opens, so the card and the menu entry name one thing. */
   action: 'Report a problem',
-  dismiss: 'Dismiss',
 } as const;
 
+/** Set once the user has opened Notifications and so has had the chance to read the card. */
+export const TESTING_NOTICE_SEEN_KEY = 'nbai_testing_notice_seen';
+
 /**
- * Has this app-open already shown the notice?
+ * Has the user already seen the card on this device?
  *
- * Storage can throw (private mode, blocked site data) and can come back empty. Both are treated as
- * "not shown yet": a notice that fails to appear is a worse outcome than one that appears twice, and
- * neither may ever break the home screen. PURE apart from the storage read, which is guarded.
+ * Storage can throw (private mode, blocked site data) or come back empty. Both read as "seen": the
+ * worst outcome of guessing wrong that way is one missing dot on a card that is still pinned in the
+ * panel, whereas guessing "unseen" would pin a red dot on the menu that no amount of opening the panel
+ * could ever clear — the storage that would record it is the thing that failed.
  */
-export function testingNoticeAlreadyShown(store?: Pick<Storage, 'getItem'> | null): boolean {
+export function testingNoticeSeen(store?: Pick<Storage, 'getItem'> | null): boolean {
   try {
-    const s = store ?? (typeof sessionStorage !== 'undefined' ? sessionStorage : null);
-    return s?.getItem(TESTING_NOTICE_SESSION_KEY) === '1';
+    const s = store ?? (typeof localStorage !== 'undefined' ? localStorage : null);
+    if (!s) return true;
+    return s.getItem(TESTING_NOTICE_SEEN_KEY) === '1';
   } catch {
-    return false;
+    return true;
   }
 }
 
-/** Remember that this app-open has shown it. Never throws — forgetting only costs a second showing. */
-export function markTestingNoticeShown(store?: Pick<Storage, 'setItem'> | null): void {
+/** Remember that the card has been seen. Never throws — forgetting only costs one more dot. */
+export function markTestingNoticeSeen(store?: Pick<Storage, 'setItem'> | null): void {
   try {
-    const s = store ?? (typeof sessionStorage !== 'undefined' ? sessionStorage : null);
-    s?.setItem(TESTING_NOTICE_SESSION_KEY, '1');
-  } catch { /* nothing to remember with — it simply shows again next time */ }
+    const s = store ?? (typeof localStorage !== 'undefined' ? localStorage : null);
+    s?.setItem(TESTING_NOTICE_SEEN_KEY, '1');
+  } catch { /* nothing to remember with — the dot simply shows again next time */ }
 }
 
 /**
- * Should the notice be shown right now?
- *
- * Home only (the admin asked for the home page), once per app open, and never while the app is
- * still deciding what to render. PURE.
+ * The unread number the ☰ dot and the Notifications row show: the inbox's own count, plus one while the
+ * testing card is unseen. Only a signed-in user has a Notifications row, so only they are counted —
+ * a dot pointing at a row that is not there would be a dot nothing can clear. PURE.
  */
-export function shouldShowTestingNotice(opts: {
-  activeView: string;
-  alreadyShown: boolean;
-}): boolean {
-  if (!opts || opts.alreadyShown) return false;
-  return opts.activeView === 'home';
+export function unreadWithTestingNotice(opts: {
+  inboxUnread: number;
+  signedIn: boolean;
+  seen: boolean;
+}): number {
+  const base = Number.isFinite(opts?.inboxUnread) && opts.inboxUnread > 0 ? Math.floor(opts.inboxUnread) : 0;
+  if (!opts?.signedIn) return base;
+  return base + (opts.seen ? 0 : 1);
 }

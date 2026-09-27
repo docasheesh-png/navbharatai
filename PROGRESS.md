@@ -83077,3 +83077,72 @@ YELLOW (PR #3331's area).
 - **A tested template opens on the first rung.** `scaffoldedComplexityDecision`: a starter chip whose golden scaffold will be seeded is routed `simple`, with no model call. This closes the first open item above.
 - **A reviewer claim a file can answer is checked first.** `reviewEvidence.ts` `missingClassClaim` / `classIsDefined`: a finding whose first sentence says named classes are not defined is refuted only when EVERY named class has a selector in the real stylesheets. A finding resting on "the missing classes" falls with them only when every class claim fell. Stylesheets are read only when a finding makes the claim. This closes the second open item.
 - **Vite dev CSS leaves the capture only when the page would not fit.** `style[data-vite-dev-id]` text is replaced with a note when `outerHTML` is over 30,000 characters; a page that fits is read as before. This closes the third open item.
+
+## 2026-09-27 — Autopsy "secret calculator" (build 2720e553): the stylesheet was written beside its screens, then emptied, then "verified"
+
+A free user (weak tier) asked for a calculator that hides files, photos and videos behind the code `0000`. The fast lane
+planned four files and finished at 13.7 min against a 2–4 min estimate. It said "Build verified — the app compiles ✓"
+about an app whose stylesheet had been reduced to `{ }`. The user was billed ₹15.44 at real cost (margin waived — no
+render proof) and stopped the build 143 ms after the preview address was published.
+
+**Ledger:**
+- ✅ Self-healed: 2
+  - the deterministic heal added four foundational files (package.json, vite.config.ts, tsconfig ×2)
+  - it put back `vite-tsconfig-paths`, which that rewrite had dropped
+- 🔀 Workaround: 3
+  - GLM flashx crawled on the plan call (17 s) and was benched
+  - repair round 2 fell KIMI → GLM-5.3 → Nemotron
+- ⏭️ Skipped: 0
+- ❌ Shipped wrong: 2
+  - the app shipped with no styles at all
+  - "verified ✓" was said about it
+- 🥵 Struggle: 4
+  - 494 s (61%) of the lane went to three repair rounds, each rewriting only `src/index.css`, each with a different
+    palette
+  - 240 s wasted on two reasoning rungs that spent a 12,000-token ceiling thinking (`OUTPUT_BUDGET_STARVED`)
+  - the dev server failed twice with "no recognisable error" before it came up (70 s)
+  - the ETA was 4.7× over its band
+
+**Root causes, all fixed here:**
+1. **The stylesheet was in the SHELL's tier.** f152c1ab (2026-09-20) moved stylesheets from tier 0 to "last", but
+   last was tier 2 — the tier of `App.tsx` and `main.tsx`.
+   - In any app whose screens live in `App.tsx`, the stylesheet was generated at the same moment as the only file
+     whose classes it styles. It invented its own; the class check failed; three repairs followed.
+   - Even a later tier would not have been enough: the export surface a stylesheet was handed drops JSX bodies, so
+     it never saw one `className`.
+   - Fix: stylesheets are now their own final stage (`STYLESHEET_TIER = 3`), and the call is handed the exact
+     class names the written screens use (`stylesheetClassContext`, built on `classNamesUsedBy`). That reader also
+     reads classes chosen by a ternary or a template literal, which the precision-first check's reader skips.
+   - The stage is DEFERRABLE: `requiredStageCount` leaves it out of the budget projection, so f152c1ab's
+     stage-count win stands. A lane out of time stops before it with the app written, and the existing root-written
+     break rule already allows that.
+2. **A continuation replaced a 4,669-character stylesheet with `{ }`.** `continuationRestartsFile` judged "too
+   little to preserve" by the FIRST LINE's length. A stylesheet's first line is `:root {` — seven characters, one
+   under the bar. So the continuation counted as a restart, and the parser's LAST-wins rule threw the whole partial
+   file away.
+   - It now compares the file's head with whitespace collapsed. `{ }` is welded onto the partial instead; the
+     brace gate then reports the truncated rule honestly.
+3. **The class check treated an EMPTIED stylesheet as "nothing to check against".** `defined.size === 0` returned
+   no findings, which made deleting every rule the one edit that always passes.
+   - The check stays silent only when there is no stylesheet at all.
+   - Its error now says that removing rules never fixes it.
+   - This reaches the architect lane's CSS heal (#3346) too, because it reads the same `findUndefinedClasses`.
+
+Tests: `tests/theStylesheetWasWrittenBesideItsScreens.test.ts` (13). Each of the three fixes was reverted alone and
+its tests failed. The f152c1ab tests now assert `STYLESHEET_TIER` and count required stages.
+
+**Open — for the admin, not decided here:**
+- **The lane's reasoning-rung stop (`stopLane`, Study-Racer 2026-09-25) cannot fire for GLM or Kimi.**
+  - `fastLaneCallIdentity` returns the FAMILY label (`kimi`, `glm`) as the model, so `modelAlwaysReasons('kimi')` is
+    false. This build ran its whole lane on `kimi-k2.7-code`, a rung that always reasons.
+  - Making the stop real is a behaviour change: every build whose flashx crawls would hand off to the full builder.
+  - This build's own evidence cuts the other way: Kimi generated all four files in 115 s, and the waste was the
+    repair, not the per-file calls. Left as found, with the question put to the admin.
+  - The per-call log's `model` field shows the family, not the id, for the same reason.
+- **The dev server "did not start and its log had no recognisable error" twice**, then came up. A git message ("On
+  branch master nothing to commit") appears in the health-check output. This is the same open class as the earlier
+  dev-server entries; the cause is not in this report.
+- **The foundational-file heal rewrote a working scaffold `package.json`** (it had to restore a dropped plugin). Why
+  those four files counted as "missing" on a warm sandbox is not established.
+- **Stop 143 ms after the preview published.** It was recorded from the abort signal (Stop / Unsend / lease stop).
+  That it was the user is likely but not proven from this report.

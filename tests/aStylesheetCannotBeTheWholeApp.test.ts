@@ -12,7 +12,7 @@
  * dependency ran backwards, and the budget paid for it.
  */
 import { describe, it, expect } from 'vitest';
-import { generationTier } from '../src/server/AgentV3/SimpleBuilder';
+import { generationTier, requiredStageCount, STYLESHEET_TIER } from '../src/server/AgentV3/SimpleBuilder';
 
 /** The manifest the reported build actually planned, in the order the plan call emitted it. */
 const REPORTED_MANIFEST: readonly string[] = [
@@ -25,9 +25,11 @@ const REPORTED_MANIFEST: readonly string[] = [
   'src/App.css',
 ];
 
-/** How many distinct waves this manifest costs — the number the budget projection multiplies. */
-const stageCount = (paths: readonly string[]): number =>
-  new Set(paths.map((p) => generationTier(p))).size;
+/**
+ * How many waves this manifest MUST run — the number the budget projection multiplies. Since autopsy
+ * 2720e553 the stylesheet is its own final, DEFERRABLE stage (after the shell), so it is not counted.
+ */
+const stageCount = (paths: readonly string[]): number => requiredStageCount(paths);
 
 describe('a stylesheet is generated last', () => {
   it('every stylesheet syntax lands in the last tier, not the first', () => {
@@ -41,7 +43,7 @@ describe('a stylesheet is generated last', () => {
       'src/theme.less',
       'src/theme.styl',
     ]) {
-      expect(generationTier(path), path).toBe(2);
+      expect(generationTier(path), path).toBe(STYLESHEET_TIER);
     }
   });
 

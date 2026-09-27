@@ -30,6 +30,7 @@ import { generateMissingCssModules } from './CssModuleGenerator';
 import { missingViteEnvTypes } from './viteEnvTypes';
 import { generateMissingBarrels } from './BarrelGenerator';
 import { signatureContextEnabled, signatureDependencyContext } from './exportSurface';
+import { classNamesUsedBy } from './CssConsistency';
 import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 import { wireOrphanPages } from './orphanPageWiring';
@@ -157,9 +158,46 @@ export function cssBraceImbalance(css: string): number {
  *   2 = shell: the entry (main/index), App, pages/routes/router, and *Page/*Screen/*View files
  *       (they compose the components below, so they generate LAST with the real component source).
  *   1 = everything else (leaf/mid components).
+ *   3 = stylesheets (STYLESHEET_TIER) — after the shell, so they style the class names the screens chose.
  * PURE + unit-testable. With only one effective tier present, the staged build collapses to today's
  * single parallel batch.
  */
+/** The last generation stage: stylesheets, after every file whose class names they must style. */
+export const STYLESHEET_TIER = 3;
+
+/** A stylesheet the fast lane writes as ordinary CSS (a CSS module is keyed by `styles.x`, not class names). */
+export function isStylesheetPath(path: string): boolean {
+  return /\.(css|scss|sass|less|styl)$/i.test(path);
+}
+
+/**
+ * How many generation stages the lane MUST run to produce an app: every populated tier except the
+ * stylesheet stage, which the lane may skip when out of time (the app renders without it, and the
+ * verify gate's class check then asks for the rules). Never less than one. PURE.
+ */
+export function requiredStageCount(paths: readonly string[]): number {
+  const tiers = new Set(paths.map((p) => generationTier(p)).filter((t) => t !== STYLESHEET_TIER));
+  return Math.max(1, tiers.size);
+}
+
+/**
+ * The block a STYLESHEET's generation call is given instead of the components' export signatures:
+ * the exact class names the already-written screens put on elements. An export surface drops JSX
+ * bodies, so it carries no className at all — the stylesheet was styling classes it had to guess.
+ * Empty when there is nothing to style. PURE.
+ */
+export function stylesheetClassContext(produced: readonly OneShotFile[]): string {
+  const classes = classNamesUsedBy(Object.fromEntries(produced.map((f) => [f.path, f.content])));
+  if (classes.length === 0) return '';
+  return [
+    '',
+    'CLASS NAMES THE SCREENS ALREADY USE — these files are written and will not change. Style EVERY one',
+    'of these exact class names with a real rule (same spelling, same case); do not rename them and do',
+    'not invent different ones. Add element and state rules as the design needs:',
+    classes.map((c) => `.${c}`).join(', '),
+  ].join('\n');
+}
+
 export function generationTier(path: string): number {
   const p = path.toLowerCase();
   // Shell / entry / pages — generated last (they import the components + foundation).
@@ -194,8 +232,18 @@ export function generationTier(path: string): number {
    * already landing in tier 1 by fall-through, and the same argument applies to every one of them —
    * a stylesheet follows the markup it styles, whatever its syntax. A CSS MODULE follows it too: a
    * component referencing `styles.card` is the thing that decides `.card` exists.
+   *
+   * 🔴 AND "LAST" MUST MEAN AFTER THE SHELL, NOT BESIDE IT (autopsy 2720e553, 2026-09-27). The line
+   * below used to return 2 — the SHELL's tier — so in any app whose screens live in `App.tsx` (most
+   * small apps) the stylesheet was generated CONCURRENTLY with the only file that uses its classes.
+   * A secret-calculator build did exactly that: `src/index.css` invented one set of class names,
+   * `src/App.tsx` chose another, the class check failed, and three repair rounds spent 494 s — 61% of
+   * the lane — rewriting the stylesheet three different ways. The last one left `{ }`.
+   * It is its own final stage now, and is handed the exact class names the screens use
+   * (`stylesheetClassContext`). That stage is DEFERRABLE: the budget projection does not count it
+   * (`requiredStageCount`), and a lane out of time stops before it with the app written.
    */
-  if (/\.(css|scss|sass|less|styl)$/.test(p)) return 2;
+  if (isStylesheetPath(p)) return STYLESHEET_TIER;
   // Foundation — generated first.
   if (/\.d\.ts$/.test(p)) return 0;
   if (/(^|\/)(types?|interfaces?|models?|constants?|config|utils?|lib|helpers?|hooks?|contexts?|stores?|services?|api)(\/|\.)/.test(p)) return 0;
@@ -1175,10 +1223,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // the OPTIONAL contract pass is affordable at all. Computed once and reused by the doomed check
       // further down, so the two can never disagree about how many tiers this build runs.
       const depOrder = deps.depOrder !== false;
-      const tiers = depOrder ? [0, 1, 2] : [0];
-      const populatedTiers = depOrder
-        ? tiers.filter((t) => manifest.some((s) => generationTier(s.path) === t)).length
-        : 1;
+      const tiers = depOrder ? [0, 1, 2, STYLESHEET_TIER] : [0];
+      // The stages the lane cannot finish WITHOUT — the deferrable stylesheet stage is not one of them.
+      const populatedTiers = depOrder ? requiredStageCount(manifest.map((s) => s.path)) : 1;
       // 🔴 THE BEST-EFFORT PASS MUST NOT BE WHAT DOOMS THE LANE. On the reported build the lane could
       // finish after planning (49 + 147 = 196s of 240s) and could not after the contract (96 + 147 =
       // 243s) — so the optional pass bought the bail that then threw the contract away with everything
@@ -1272,9 +1319,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           // full-file scan so no export is truncation-hidden) instead of full bodies: same contract
           // information at a fraction of the input tokens. AGENTV3_SIGNATURE_CONTEXT=off restores
           // the old full-body dump verbatim.
-          const depBlock = produced.length
-            ? (signatureContextEnabled() ? signatureDependencyContext(produced) : dependencyContext(produced))
-            : '';
+          const depBlock = !produced.length
+            ? ''
+            : isStylesheetPath(spec.path) && !/\.module\./i.test(spec.path) && stylesheetClassContext(produced)
+              ? stylesheetClassContext(produced)
+              : (signatureContextEnabled() ? signatureDependencyContext(produced) : dependencyContext(produced));
           // 🔴 THE SAME INVERSION THE PLAN CALL ALREADY CLOSED (line ~697), MISSED HERE — this is the
           // highest-volume call site in the whole lane and the one a real report caught running away
           // (build 782da7b7, 2026-09-16): a file's OWN truncation-continuation loop (fastGenerate's

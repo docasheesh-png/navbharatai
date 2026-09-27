@@ -7,9 +7,9 @@ import {
 } from '../src/server/lib/adminWelcomeGift';
 
 /**
- * THE ADMIN'S ONE-CLICK ₹50 (2026-09-26): *"new user jinko kabhi koi token gift nahi mila hai, usko
- * admin 50 ke token gift kar sake 1 click par"*. It moves real money, so the locks are about who may
- * receive it and how many times.
+ * THE ADMIN'S ONE PRESS (2026-09-27): *"50₹ wala system hatao aur 1 click me new user ko 150₹ gift de
+ * aisa button bana do! only new user ke liye"*. It moves real money, so the locks are about who may
+ * receive it, how many times, and how many at once.
  */
 const root = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -20,10 +20,10 @@ describe('who may receive it', () => {
     expect(welcomeGiftEligible({})).toBe(true);
   });
 
-  it('🔒 a second press pays nothing', () => {
+  it('🔒 a second press pays nothing — nor does one after the retired ₹50 button', () => {
     const w = { adminWelcomeGiftAt: '2026-09-26T16:00:00Z' };
     expect(welcomeGiftEligible(w)).toBe(false);
-    expect(welcomeGiftRefusal(w)).toMatch(/already received the ₹50/);
+    expect(welcomeGiftRefusal(w)).toMatch(/already received the admin welcome credit/);
   });
 
   it('anyone already gifted, credited, paying or merged away is not eligible', () => {
@@ -34,8 +34,8 @@ describe('who may receive it', () => {
     expect(welcomeGiftEligible(null)).toBe(false);
   });
 
-  it('it is exactly ₹50', () => {
-    expect(ADMIN_WELCOME_GIFT_TOKENS).toBe(5000);
+  it('it is exactly ₹150', () => {
+    expect(ADMIN_WELCOME_GIFT_TOKENS).toBe(15000);
   });
 });
 
@@ -58,17 +58,17 @@ describe('the route and the button', () => {
     expect(body).toMatch(/adminWelcomeGiftAt: nowIso/);
   });
 
-  it('is admin-only', () => {
-    expect(route).toMatch(/app\.post\('\/api\/admin\/users\/:userId\/welcome-gift', verifyAdminToken,/);
-  });
-
-  it('the panel shows the button only where the server says the account is eligible', () => {
-    expect(route).toMatch(/welcomeGiftEligible: welcomeGiftEligible\(u\)/);
-    expect(read('src/components/AdminDashboard.tsx')).toMatch(/u\.welcomeGiftEligible === true && \(/);
+  it('🔒 the retired ₹50 per-user button and its route are gone — one press is the only way in', () => {
+    expect(route).not.toMatch(/\/api\/admin\/users\/:userId\/welcome-gift/);
+    expect(route).not.toMatch(/welcomeGiftEligible: welcomeGiftEligible\(u\)/);
+    const panel = read('src/components/AdminDashboard.tsx');
+    expect(panel).not.toMatch(/handleWelcomeGift\b/);
+    expect(panel).not.toMatch(/Gift ₹50/);
+    expect(panel).not.toMatch(/\/welcome-gift`/);
   });
 });
 
-describe('the bulk press (admin 2026-09-27: "ek ek kar ke du? 1000 user hai?")', () => {
+describe('the one press (admin 2026-09-27)', () => {
   it('picks every eligible account and nobody else', () => {
     const ids = bulkWelcomeGiftCandidates([
       { id: 'new-1' },
@@ -111,10 +111,9 @@ describe('the bulk press (admin 2026-09-27: "ek ek kar ke du? 1000 user hai?")',
     expect(route).toMatch(/app\.post\('\/api\/admin\/welcome-gift\/bulk', verifyAdminToken,/);
   });
 
-  it('🔒 pays through the same transaction as the single button — never its own write', () => {
+  it('🔒 pays each account through the one transaction that re-checks it — never its own write', () => {
     expect(bulkBody).toMatch(/grantWelcomeGift\(db, uid, nowIso\)/);
     expect(bulkBody).not.toMatch(/tx\.update|updateDoc|setDoc|mirroredCreditPatch/);
-    expect(route).toMatch(/app\.post\('\/api\/admin\/users\/:userId\/welcome-gift'[\s\S]{0,300}grantWelcomeGift\(db, userId,/);
   });
 
   it('checks the confirmed count before paying anyone, and a dry run pays nobody', () => {
@@ -132,5 +131,6 @@ describe('the bulk press (admin 2026-09-27: "ek ek kar ke du? 1000 user hai?")',
     expect(panel).toMatch(/adminPost\('\/api\/admin\/welcome-gift\/bulk', \{ dryRun: true \}\)/);
     expect(panel).toMatch(/adminPost\('\/api\/admin\/welcome-gift\/bulk', \{ expectedCount: check\.eligible \}\)/);
     expect(panel).toMatch(/Total credit: ₹/);
+    expect(panel).toMatch(/Gift ₹150 to new users/);
   });
 });

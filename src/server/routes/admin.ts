@@ -2133,9 +2133,6 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           // which would be a third answer to "has this person paid?" on the very screen that asks it.
           hasEverPaid: hasEverPaid(u as { totalMoneySpent?: unknown }),
           banned: u.banned || false,
-          // May the admin give this account the one-click ₹50 welcome credit? Decided by the same
-          // predicate the gift route re-checks in its transaction, never re-derived in the browser.
-          welcomeGiftEligible: welcomeGiftEligible(u),
           createdAt: u.updatedAt || u.createdAt || '',
           joinedAt: joined.atMs,
           joinedAtSource: joined.source,
@@ -2296,13 +2293,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   });
 
   /**
-   * ONE-CLICK ₹50 WELCOME CREDIT for a user who has never received any gift (admin 2026-09-26) — the
-   * bridge until an app build whose device check works is live. Rules in `adminWelcomeGift.ts`.
-   * Eligibility is re-read INSIDE the transaction, so two presses (or two admins) pay once.
-   */
-  /**
-   * The ONE transaction that pays the welcome credit — the per-user button and the bulk press both
-   * call it, so they cannot drift. Eligibility is re-read inside it, so any account is paid once.
+   * The ONE transaction that pays the admin's welcome credit to one NEW user (rules in
+   * `adminWelcomeGift.ts`). Eligibility is re-read inside it, so any account is paid once — whether
+   * the press is repeated or two admins press at once.
    */
   const grantWelcomeGift = async (db: any, userId: string, nowIso: string) => {
     const walletRef = doc(db, 'user_token_wallets', userId);
@@ -2331,20 +2324,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     });
   };
 
-  app.post('/api/admin/users/:userId/welcome-gift', verifyAdminToken, async (req: Request, res: Response) => {
-    const db = getDb() as any;
-    const { userId } = routeParams(req.params);
-    try {
-      const outcome = await grantWelcomeGift(db, userId, new Date().toISOString());
-      if (!outcome.ok) return res.status(outcome.status).json({ ok: false, error: outcome.error });
-      audit('ADMIN_WELCOME_GIFT', { userId, tokens: ADMIN_WELCOME_GIFT_TOKENS, ip: req.ip });
-      res.json({ ok: true, newBalance: outcome.newBalance, rupees: ADMIN_WELCOME_GIFT_RUPEES });
-    } catch (e: any) { console.error('[ADMIN] welcome-gift failed:', e?.message); res.status(500).json({ ok: false, error: 'Internal server error.' }); }
-  });
-
   /**
-   * BULK ₹50 (admin 2026-09-27: "ek ek kar ke du? 1000 user hai?"). `{ dryRun: true }` answers how
-   * many are eligible and what it totals; a real press must carry that count as `expectedCount` and is
+   * ₹150 TO EVERY NEW USER IN ONE PRESS (admin 2026-09-27). `{ dryRun: true }` answers how many new
+   * users are eligible and what it totals; a real press must carry that count as `expectedCount` and is
    * refused if it would pay more. Each account goes through `grantWelcomeGift`, so none is paid twice.
    */
   app.post('/api/admin/welcome-gift/bulk', verifyAdminToken, async (req: Request, res: Response) => {

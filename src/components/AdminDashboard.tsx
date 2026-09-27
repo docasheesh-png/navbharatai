@@ -1558,33 +1558,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } finally { setActionLoading(null); }
   };
 
-  // ONE-CLICK ₹50 WELCOME CREDIT (admin 2026-09-26). The button appears only where the SERVER says the
-  // account has never received a gift; the server re-checks, so a double press pays once.
-  const handleWelcomeGift = async (userId: string, email: string) => {
-    if (!window.confirm(`Give ₹50 welcome credit to\n  ${email}\n?`)) return;
-    setActionLoading(userId + '_gift');
-    try {
-      const r = await adminPost(`/api/admin/users/${userId}/welcome-gift`, {});
-      if (r.ok) { toast(`₹50 added to ${email}`); fetchUsers(); }
-      else toast('Not given: ' + (r.error || 'unknown error'));
-    } finally { setActionLoading(null); }
-  };
-
-  // BULK ₹50 (admin 2026-09-27: "ek ek kar ke du? 1000 user hai?"). First asks the server how many are
-  // eligible, shows the total, and sends that count with the press — the server refuses a run that
-  // would pay more users than the admin confirmed.
+  // ONE PRESS, EVERY NEW USER (admin 2026-09-27: "50₹ wala system hatao aur 1 click me new user ko 150₹
+  // gift de"). First asks the server how many new users are eligible and shows the total, then sends that
+  // count with the press — the server refuses a run that would pay more users than the admin confirmed.
   const handleBulkWelcomeGift = async () => {
     setActionLoading('bulk_gift');
     try {
       const check = await adminPost('/api/admin/welcome-gift/bulk', { dryRun: true });
       if (!check.ok) { toast('Could not check: ' + (check.error || 'unknown error')); return; }
-      if (!check.eligible) { toast('No user is eligible — everyone has already received credit.'); return; }
+      if (!check.eligible) { toast('No new user is waiting — everyone has already received credit.'); return; }
       const now = Math.min(check.eligible, check.maxPerPress);
       const more = check.eligible > now ? `\n\n${check.eligible - now} more will remain for the next press.` : '';
       if (!window.confirm(
         `Give ₹${check.rupeesEach} welcome credit to ${now.toLocaleString()} user(s)?\n\n` +
         `Total credit: ₹${(now * check.rupeesEach).toLocaleString()}\n` +
-        `Only users who never received any credit and never paid. Nobody is paid twice.${more}`,
+        `Only new users: never received any credit and never paid. Nobody is paid twice.${more}`,
       )) return;
       const r = await adminPost('/api/admin/welcome-gift/bulk', { expectedCount: check.eligible });
       if (!r.ok) { toast('Not given: ' + (r.error || 'unknown error')); return; }
@@ -2272,11 +2260,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 <button
                   onClick={handleBulkWelcomeGift}
                   disabled={actionLoading === 'bulk_gift'}
-                  title="Give ₹50 to every user who never received any credit and never paid"
+                  title="Give ₹150 to every new user — never received any credit and never paid"
                   className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-on-accent rounded-xl text-[10px] font-black uppercase tracking-wider hover:bg-emerald-500 transition-all active:scale-95 disabled:opacity-50"
                 >
                   {actionLoading === 'bulk_gift' ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
-                  Gift ₹50 to all eligible
+                  Gift ₹150 to new users
                 </button>
                 <button onClick={fetchUsers} className="flex items-center gap-2 px-4 py-2.5 bg-raised border border-line rounded-xl text-[10px] font-black uppercase tracking-wider text-ink hover:border-indigo-500 transition-all active:scale-95">
                   <RefreshCw className={`w-3.5 h-3.5 ${usersLoading ? 'animate-spin' : ''}`} /> Load
@@ -2392,11 +2380,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                   <button onClick={() => handleBan(u.userId, !u.banned)} disabled={actionLoading === u.userId + '_ban'} className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-all border ${u.banned ? 'bg-emerald-500/10 border-emerald-500/20 text-success hover:bg-emerald-500/20' : 'bg-red-500/10 border-red-500/20 text-danger hover:bg-red-500/20'}`}>
                                     {actionLoading === u.userId + '_ban' ? '...' : u.banned ? 'Unban' : 'Ban'}
                                   </button>
-                                  {u.welcomeGiftEligible === true && (
-                                    <button onClick={() => handleWelcomeGift(u.userId, u.email)} disabled={actionLoading === u.userId + '_gift'} title="Give this new user ₹50 welcome credit (only shown to accounts that never received a gift)" className="px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[9px] font-black text-success uppercase hover:bg-emerald-500/20 transition-all">
-                                      {actionLoading === u.userId + '_gift' ? '...' : 'Gift ₹50'}
-                                    </button>
-                                  )}
                                   <button onClick={() => handleMerge(u.userId)} disabled={actionLoading === u.userId + '_merge'} title="Merge a duplicate account's wallet INTO this user" className="px-2 py-1 bg-purple-500/10 border border-purple-500/20 rounded-lg text-[9px] font-black text-accent-text uppercase hover:bg-purple-500/20 transition-all">
                                     {actionLoading === u.userId + '_merge' ? '...' : 'Merge'}
                                   </button>

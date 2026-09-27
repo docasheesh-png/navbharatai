@@ -147,14 +147,22 @@ describe('🔒 the dispatcher asks after EVERY write path, and the route reports
   // call site already held it. Asserted as `{ … }` rather than `[path]` precisely so a future edit that
   // drops back to paths fails here instead of silently downgrading the advice to the hedged form.
   it('write_file, write_files_batch, edit_file and replace_symbol all append the note, WITH the content', () => {
-    expect(dispatcher).toContain('const typecheckNote = await this.writeTypecheckNote({ [path]: content });');
-    expect(dispatcher).toContain('const batchTypecheckNote = await this.writeTypecheckNote(writtenRecord);');
-    expect(dispatcher).toContain('const editTypecheckNote = await this.writeTypecheckNote({ [path]: updated });');
-    expect(dispatcher).toContain('const symbolTypecheckNote = await this.writeTypecheckNote({ [path]: result.content });');
-    for (const v of ['typecheckNote', 'batchTypecheckNote', 'editTypecheckNote', 'symbolTypecheckNote']) {
+    // WIDENED 2026-09-27 (autopsy 6bae5835): all four doors now ask ONE helper, `writeSteeringNotes`,
+    // which runs this typecheck beside the hooks, import and quality notes — the quality note had
+    // reached only `write_file`. The four spellings still pin that each door passes its CONTENT.
+    expect(dispatcher).toContain('const steeringNotes = await this.writeSteeringNotes({ [path]: content });');
+    expect(dispatcher).toContain('const batchSteeringNotes = await this.writeSteeringNotes(writtenRecord);');
+    expect(dispatcher).toContain('const editSteeringNotes = await this.writeSteeringNotes({ [path]: updated });');
+    expect(dispatcher).toContain('const symbolSteeringNotes = await this.writeSteeringNotes({ [path]: result.content });');
+    for (const v of ['steeringNotes', 'batchSteeringNotes', 'editSteeringNotes', 'symbolSteeringNotes']) {
       // Each note variable is used in a return, not only computed.
-      expect(dispatcher).toMatch(new RegExp(`return [^;]*\\b${v}\\b`));
+      expect(dispatcher).toMatch(new RegExp(`(?:return [^;]*|\\+ )\\b${v}\\b`));
     }
+    const helper = dispatcher.slice(dispatcher.indexOf('private async writeSteeringNotes('), dispatcher.indexOf('private async hookWriteNote('));
+    expect(helper).toContain('const typecheck = await this.writeTypecheckNote(files);');
+    // The shared helper is the ONLY caller of the typecheck note — a door that calls it directly has
+    // stepped outside the shared list and will miss the next note added to it.
+    expect(dispatcher.split('this.writeTypecheckNote(').length - 1).toBe(1);
   });
 
   it('the helper hands that content to the analysis — otherwise the advice can only ever hedge', () => {

@@ -37,7 +37,7 @@ import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
 import { decideComplexity } from '../AgentV3/complexityRouting';
-import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite } from '../AgentV3/writeTimeTypecheck';
+import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite, writeQualitySummary } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary, repairLostEscapes, scriptRepairSummary } from '../AgentV3/scriptIntegrity';
 import { answeringModel } from '../AgentV3/answeringModel';
 import { tierLadder, openingRung, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
@@ -47,6 +47,10 @@ import { nemotronRungOk, nemotronKey, nemotronBaseUrl, nemotronUltraModel, nemot
 import { composeJudgeChain, describeJudgeAttempts, type JudgeCandidate, type JudgeChain, type JudgeKind } from '../AgentV3/judgeChain';
 import { describeRunnerChain, chainProviders, firstRungLabel, type ChainRung } from '../AgentV3/runnerChainSummary';
 import { analyzeHooksRules, hooksRepairInstruction } from '../AgentV3/HooksRulesAnalysis';
+import { deviceSummaryNotice, deviceSummaryRecord } from '../AgentV3/devicePowers';
+import { nativeCapabilityBrief, requestedCapabilities } from '../AgentV3/nativeCapabilities';
+import { starterSuiteOnly, starterSuiteNote } from '../AgentV3/e2eAutoScaffold';
+import { labelFieldsFromPlaceholder } from '../AppMakerLab/intelligence/A11yLinter';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction, simulatedDataIssues, simulatedDataNotice } from '../AgentV3/AuthenticityAnalysis';
 import { isUnreachable } from '../AgentV3/appReachability';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
@@ -14487,11 +14491,16 @@ async function noteBuildOutcome(
               ? { kind: 'nothing-to-save' }
               : judged;
           const elapsedMs = Date.now() - buildStartedAt;
+          // A RACED render is still a render (autopsy 6bae5835): the app painted in a real browser; only
+          // the SNAPSHOT is refused, because the bytes moved underneath it. The clock measures when the
+          // user could first have seen their app, so it stops here too — never on a starter page.
+          if (outcome.kind === 'proven' || (outcome.kind === 'raced' && !starterIsWhatRendered(starterEntryIn(files), shot.html))) {
+            try { buildDiag.recordTimeToFirstRender(elapsedMs); } catch { /* best-effort */ }
+          }
           if (outcome.kind === 'proven') {
             // The same key the end-of-build GreenGuard reads — no second store, no second rule.
             await saveWorkspaceFiles(greenWorkspaceKey(workspaceId), files);
             inBuildGreenAt = Date.now();
-            try { buildDiag.recordTimeToFirstRender(elapsedMs); } catch { /* best-effort */ }
             events.emit({ type: 'narration', agent: 'architect', text: inBuildGreenNarration(), ts: Date.now() });
           }
           try { buildDiag.record({ phase: 'preview', ...inBuildGreenNote(outcome, { elapsedMs, fileCount: Object.keys(files).length }) }); } catch { /* best-effort */ }
@@ -15364,6 +15373,24 @@ async function noteBuildOutcome(
       // reconciles to ONE framework before writing features. Applies to any turn on an incoherent workspace;
       // '' (coherent, or flag off) leaves buildPrompt unchanged.
       if (frameworkCoherenceMsg) buildPrompt = `${frameworkCoherenceMsg}\n\n---\n\n${buildPrompt}`;
+
+      // 📱 PHONE FEATURES ARE BUILT FOR REAL, NOT IMITATED (autopsy 6bae5835, admin 2026-09-27). A request
+      // for reminders that ring when the app is closed, voice commands, calling or the torch gets the exact
+      // plugin at the exact version the phone build accepts (nativeCapabilities.ts) — only the ones asked
+      // for, so an ordinary app is never handed a plugin list. JS web frameworks only: a Python or API
+      // project cannot carry a Capacitor plugin.
+      try {
+        if (/react|vue|nuxt|next|remix|svelte|angular|astro|solid|static|html/i.test(String(framework))) {
+          const nativeBrief = nativeCapabilityBrief(prompt);
+          if (nativeBrief) {
+            buildPrompt = `${nativeBrief}\n\n---\n\n${buildPrompt}`;
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: 'NATIVE_CAPABILITY_BRIEF', autoResolved: true,
+              message: `The builder was given the exact phone plugins for: ${requestedCapabilities(prompt).map((c) => c.id).join(', ')}.`,
+            });
+          }
+        }
+      } catch { /* a brief is best-effort — never blocks a build */ }
 
       // REQUIREMENT-AWARE BUILD (admin-approved option A, 2026-07-20; flag AGENTV3_REQUIREMENT_AWARE, default
       // OFF): on a FRESH build of an ambiguous domain prompt, proactively tell the builder to INCLUDE the
@@ -18107,6 +18134,26 @@ async function noteBuildOutcome(
             // that is not, byte for byte, something WE seeded? See platformAuthored.ts for why this is
             // answered by content rather than by a flag (a flag cannot survive the next "continue").
             const hasUserApp = projectHasUserCode(integrityFiles);
+            // 🔧 AN UNLABELLED FIELD WHOSE OWN PLACEHOLDER NAMES IT (autopsy 6bae5835). Deterministic, no
+            // model call, only files THIS build wrote, and it adds nothing the author did not already
+            // write (`labelFieldsFromPlaceholder`). Before the lint, so ACCESSIBILITY describes what
+            // shipped; before the green latch, so the render check proves it. Kill: AGENTV3_LABEL_REPAIR=off.
+            if (hasUserApp && process.env.AGENTV3_LABEL_REPAIR !== 'off' && !isImportTurn) {
+              let labelled = 0;
+              for (const path of [...writtenFiles.keys()]) {
+                if (!/\.(?:tsx|jsx|html?)$/i.test(path) || typeof integrityFiles[path] !== 'string') continue;
+                const r = labelFieldsFromPlaceholder(integrityFiles[path]);
+                if (r.repaired > 0 && await writeUnlessFrozen(() => actuator.writeFile(workspaceId, path, r.code))) {
+                  integrityFiles[path] = r.code;
+                  writtenFiles.set(path, r.code);
+                  labelled += r.repaired;
+                }
+              }
+              if (labelled > 0) {
+                buildDiag.record({ phase: 'build', severity: 'info', code: 'LABELS_REPAIRED', autoResolved: true,
+                  message: `${labelled} form field(s) had no label but a placeholder that named them — the placeholder text is now their accessible name too.` });
+              }
+            }
             const quality = hasUserApp ? lintBuiltApp(integrityFiles) : null;
             // `null` means nothing lintable was found. Recording a perfect score there would claim we
             // checked when we did not — the same lie in the other direction.
@@ -18121,6 +18168,12 @@ async function noteBuildOutcome(
                 // cannot be told apart from a check that never ran.
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'ACCESSIBILITY', message: a11yLintSummary(quality), autoResolved: true });
               }
+              // DID THE WRITE-TIME NOTE REACH THE FILE, AND WAS IT IGNORED? (autopsy 6bae5835 could not say.)
+              try {
+                const flagged = [...new Set(Object.values(quality.offenders ?? {}).flat().map((o) => o.path))];
+                const wq = writeQualitySummary(dispatcher.writeTypecheckStats().qualityNotedFiles ?? [], flagged);
+                if (wq) buildDiag.record({ phase: 'build', severity: 'info', code: 'WRITE_TIME_QUALITY', message: wq, autoResolved: true });
+              } catch { /* a measurement is best-effort */ }
             }
             // A LABEL IN THE USER'S OWN LANGUAGE MUST NOT ARRIVE BROKEN (autopsy 3ce8459b).
             // The three checks above read STRUCTURE; none of them reads the TEXT, which is how
@@ -18818,6 +18871,10 @@ async function noteBuildOutcome(
         // …and the third copy, on the stricter rule it has always had: a curl fallback's empty-shell
         // "render" is not proof, so only a real browser may hold a late flip (the Green Freeze rule).
         if (source === 'browser') browserRenderProven = true;
+        // THE FIRST-RENDER CLOCK READS THE ONE PROOF, NOT ONE PASS (autopsy 6bae5835). It was written only
+        // by the in-build snapshot path, so a build whose render rescue proved the app at 303 s reported
+        // 323 s — the moment a SNAPSHOT was saved, not the moment the app was seen. First writer wins.
+        if (source === 'browser') { try { buildDiag.recordTimeToFirstRender(Date.now() - buildStartedAt); } catch { /* best-effort */ } }
         try {
           const proof = appRenderedRecord(source, where);
           if (proof) buildDiag.record(proof);
@@ -20070,9 +20127,14 @@ async function noteBuildOutcome(
                 // `detectTestPlan` found no RUNNABLE plan, but the suite is on disk — that is exactly
                 // the case whose absence the gate used to announce as the project's own gap.
                 gateEvidence.testSuitePresent = true;
+                // OURS OR THEIRS? (autopsy 6bae5835). A suite whose every file this build's own finishing
+                // pass wrote is NavBharatAI's starter, not the user's project — say so, in both places.
+                const ours = starterSuiteOnly(files, finishingPaths);
+                if (ours) gateEvidence.testSuiteIsOurStarter = true;
                 buildDiag.record({
                   phase: 'readiness', severity: 'info', code: 'TEST_SUITE_UNVERIFIED',
-                  message: missing, autoResolved: true, // not an app defect — nothing for the build to resolve
+                  message: ours ? starterSuiteNote() : missing,
+                  autoResolved: true, // not an app defect — nothing for the build to resolve
                 });
               }
               break; // no real suite — honest no-op, never a fake pass
@@ -20751,6 +20813,23 @@ async function noteBuildOutcome(
               detail: invented.slice(0, 5).map((i) => `${i.file}:${i.line} ${i.snippet}`).join(' · '),
             });
           }
+        }
+      } catch { /* the disclosure is best-effort — it must never break the build */ }
+
+      // 📱 WHAT WORKS WHERE, SAID PLAINLY (autopsy 6bae5835; admin 2026-09-27: "user ko saaf bataya jaye ki
+      // webapp me kaam nahi karega, github connect kar ke apk banana hoga"). A clean build offered a
+      // lock-screen-LIKE welcome screen and never said what an app built here can do on a phone. Now the
+      // summary names (1) the phone features the build ACTUALLY installed — read from the app's own
+      // package.json in the sandbox, where npm wrote it, never guessed from the prompt — and how to get the
+      // phone app, and (2) what the request asked for that no app built here can do. Each half stands down
+      // when the model's own summary already said it. Never a failed build.
+      try {
+        if (result.ok && expectsArtifacts && !isImportTurn && writtenFiles.size > 0) {
+          const packageJson = await actuator.readFile(workspaceId, 'package.json').catch(() => writtenFiles.get('package.json') ?? null);
+          const note = deviceSummaryNotice({ prompt, summary: result.summary, packageJson });
+          if (note) result = { ...result, summary: `${result.summary}${note}` };
+          const rec = deviceSummaryRecord({ prompt, packageJson, noticeAdded: note !== '' });
+          if (rec) buildDiag.record({ phase: 'readiness', severity: 'info', autoResolved: true, ...rec });
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }
 

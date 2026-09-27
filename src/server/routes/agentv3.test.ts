@@ -2469,7 +2469,13 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      gated on `result.ok && expectsArtifacts && writtenFiles.size > 0` like the artifact passes
     //      above; it rewrites only NavBharatAI's own exact v1 `sw.js` (upgradeGeneratedServiceWorker
     //      returns null for any other content), never a file the user wrote. Considered ✓.
-    expect(count).toBe(23);
+    //   1× the LABEL repair (autopsy 6bae5835, 2026-09-27) — gated on `hasUserApp && !isImportTurn` and
+    //      its own kill switch, in the same advisory quality block as the dropped-backslash repair and
+    //      before the green latch (writes go through `writeUnlessFrozen`). It touches only files THIS
+    //      build wrote, and only an HTML form field the linter calls unlabelled that carries a LITERAL
+    //      placeholder, to which it adds that same text as `aria-label` — nothing is removed and nothing
+    //      is invented (labelFieldsFromPlaceholder). Considered ✓.
+    expect(count).toBe(24);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

@@ -83587,3 +83587,25 @@ entry (e.g. src/main.jsx) referenced by index.html"*, with *"user app bana hi na
 **Still open:**
 - **The Weak allowance of 100/day is a starting point, not a measurement.** Read the `EXPLORE_REPAIR*` codes on real builds before changing it.
 - **The repair can only fix what the explorer may press.** Delete, pay, send, upload and logout controls are never pressed, so a broken one is neither found nor repaired. That is the design, and it is a real limit.
+
+---
+
+## 2026-09-28 — Google Play rejection: the free image generator drew a nude picture
+
+**What Google sent:** "Sexual Content and Profanity policy: Violation of Sexual Content and Profanity and AI-Generated Content policy", enforced 28 Sept. The evidence was a screenshot of "Image Generator AI FREE", style "Photograph", showing a realistic nude woman.
+
+**Root cause (two gaps that met):**
+- `triagePrompt` / `ADULT_CONTENT` is written for app-building prompts and needs a porn noun AND "site/app/stream". An image prompt never has the second half, so `nude woman`, `naked girl on beach`, `topless woman` and even `porn` returned `allow` (measured on the real function).
+- The Pollinations link never sent `safe=true`, so the provider's own NSFW filter was off. The image model does not refuse; it draws.
+
+**Fix (admin: "pollination ai ki api call se pahle ek scanning ki jaye, sensitive words par ban, sirf pollination ai ke liye"):**
+- New `src/server/lib/pollinationsGuard.ts`: a word ban for sexual content, nudity and profanity. It covers English, Hinglish, Devanagari, and spaced-out or look-alike spellings (`n u d e`, `p0rn`, `$exy`, zero-width characters). Words with common innocent readings are deliberately left out and listed in the file, for example chicken breast, a rooster, a comic strip, lustrous hair and "chod do".
+- The choke point is `pollinationsImageUrl`, which throws for a banned prompt, so no caller can build a link for one. The image route and free chat also scan first and show a branded refusal.
+- Every link now carries `safe=true`.
+- **The long list (admin, the same day):** the list covers English, Hinglish and 13 Indian scripts (Hindi, Marathi, Nepali, Bengali, Assamese, Gujarati, Punjabi, Odia, Tamil, Telugu, Kannada, Malayalam, Urdu), plus about 25 world languages. It also covers sexual-violence and child-abuse terms and a MINORS rule (a child together with anything revealing). Every word left out is named with its reason and pinned by a test, for example Brahmin, Nagaland, Vasna, Sunni, tanga, "baby shower" and "kids bedroom".
+- **Picture edits are scanned too**, before any model sees the photo.
+- **Website vs app:** the admin asked to leave the website as it is. The scan still runs on BOTH, pending their decision: generating nude images of realistic people (including minors) is a legal exposure in India (IT Act s.67/67A, POCSO), and the admin's 2026-09-13 ruling bans pornography on all of NavBharatAI.
+- Tests: `tests/theImageGeneratorDrawsNoNudity.test.ts`. The choke point and `safe=true` are reversion-proven.
+
+**Still open, and required before resubmitting to Play:** Google's AI-Generated Content policy also requires an in-app way to report or flag offensive AI output without leaving the app. The Report sheet can report an app, a person or a bug, but there is no report button on a generated image or an AI reply. That is the next change.
+

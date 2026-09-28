@@ -21,6 +21,7 @@ import { IMAGE_TICKET_TTL_MS, isAllowedImageHost } from '../../lib/imageDelivery
 import { extractImageText, noTextDirection } from '../../lib/imageTextFromPrompt';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
 import { initImageTooLarge, parseDataUrl } from '../lib/imageDataUrl';
+import { scanPollinationsPrompt, POLLINATIONS_BLOCK_MESSAGE } from '../lib/pollinationsGuard';
 
 /**
  * AI Image Gen — the REAL /api/image/generate route (admin autopsy 2026-07-20).
@@ -260,6 +261,7 @@ export function registerImageGenRoutes(app: Express): void {
       if (editing) {
         if (!(await allowPaidRung())) return;
         const out = await runImageEdit(rawInit, editWords, { timeoutMs: ROUTE_TIMEOUT_MS });
+        if (out.blocked) { res.status(422).json({ error: POLLINATIONS_BLOCK_MESSAGE, code: 'blocked' }); return; }
         if (out.image) { deliver(out.image, true); return; }
         if (out.refusal) { res.status(422).json({ error: IMAGE_REFUSAL_MESSAGE }); return; }
         diag.push(...(out.diag || []));
@@ -272,6 +274,14 @@ export function registerImageGenRoutes(app: Express): void {
       // the old raw client hot-link, the route PROXIES it — the bytes are fetched here and re-served as a
       // data URL, so the user never talks to a third party and the result is branded NavBharatAI.
       if (pollinationsEnabled() && !editing) {
+        // 🔒 THE POLLINATIONS WORD SCAN (Play rejection 2026-09-28 — Google's evidence was a nude
+        // "Photograph" from this screen). Run on the FINISHED prompt, the exact text the link would
+        // carry, so a word added by the style/craft layer is scanned too. A banned prompt is refused
+        // here and never reaches the provider or a paid rung.
+        if (!scanPollinationsPrompt(prompt).ok) {
+          res.status(422).json({ error: POLLINATIONS_BLOCK_MESSAGE, code: 'blocked' });
+          return;
+        }
         // 🔑 THE BROWSER FETCHES IT, NOT US (admin 2026-09-21: "free wale me user ki ip").
         // The provider allows one request every 15 seconds PER ADDRESS, and this server is ONE
         // address — so at any real scale every free user on the platform queues behind every other

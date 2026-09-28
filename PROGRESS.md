@@ -83626,3 +83626,65 @@ entry (e.g. src/main.jsx) referenced by index.html"*, with *"user app bana hi na
 
 **Still open, and required before resubmitting to Play:** Google's AI-Generated Content policy also requires an in-app way to report or flag offensive AI output without leaving the app. The Report sheet can report an app, a person or a bug, but there is no report button on a generated image or an AI reply. That is the next change.
 
+
+## 2026-09-28 — The chat-ID system is gone; History works like ChatGPT, Claude and Grok
+
+**Admin, verbatim:** *"chat id wala system hata kar, baki ai me jo system hota hai, wahi wala yaha bana do!
+history me jaisa (chatgpt, claude, grok) karte hai, waise hi navbharatai ka ui/ux ho. yeh chat id wala
+system band karo."* It followed a user report (build 134, 2026-09-25): *"when we close the app and reopen
+it, it doesn't show, and when we tried to search it asks chat id. Also who remembers chat id to search,
+also chat id doesn't show."*
+
+**Root causes, verified in code before touching it:**
+- The free chat reopens on a NEW chat every launch, and the first control on an empty chat was
+  "Resume Previous Session", which asked for a "Universal Chat ID". No screen showed that id: the copy and
+  share buttons existed as functions with no button, the share link's `?uci=` was read by nothing, and the
+  History row's id chip was removed on 2026-09-20. The box could only fail.
+- Reopening a chat collapsed it into a "Previous Conversation (<id>)" block, drew a "Continuation Workspace"
+  divider and wrote a canned *"Previous workspace context has been successfully loaded"* line into the
+  transcript — and re-dated the chat, so merely looking at it moved it to the top of History.
+- History read the cloud only; the cloud write waited 2 s of quiet; the device copy was read only when the
+  cloud ERRORED. A chat closed inside those 2 s existed on the phone and nowhere History looked.
+- "New chat" saved a blank session (welcome line only) and the cloud writer then wrote it, so History filled
+  with "New Conversation" rows nobody typed in. The empty-state "Start a New Chat" button called the restore
+  handler with the id `'new'` and could only answer "Session not found".
+- Sibling found: App.tsx carried a second, drifted restore (`resumeSession`) wired only to two SidebarNav
+  props the component never read — dead code, deleted.
+- Sibling found: pin changed only the device copy; the cloud learned of it only if that chat was the open
+  one, so pinning any other chat did nothing History could show. The Doctor AI writer wrote `isPinned: false`
+  in a whole-document write on every autosave.
+
+**Fixed (one pure module, `src/lib/chatHistory.ts`, read by every surface):**
+- The ID box, the continue modal, the copy/share code, `generateUCI`, every stored `uci` field and the id in
+  History search are removed. `openSession(sessionId)` replaces the typed-ID restore; the cloud fallback is a
+  `getDoc` by id with an owner check.
+- `openedTranscript`: the whole thread, in order, restore split folded back, canned lines dropped; opening
+  does not touch `lastUpdated`, and the autosave skips an unchanged transcript (`sameTranscript`,
+  `sameFileMap`).
+- A chat is saved from its first USER message (`isEmptyConversation` is the one rule for list and writers).
+- The two cloud writers became one (`writeSessionDoc`), and every pending write is flushed on
+  `visibilitychange: hidden` and `pagehide`. History merges the device's saved chats with the cloud's
+  (`mergeDeviceSessions`, newer copy wins).
+- History: "New chat" on top, the open chat marked (`aria-current`), ⋮ → Pin / Rename / Delete, a "Pinned"
+  group above the dates. Pin and rename write the device copy and the cloud (`updateDoc`), never re-date the
+  chat, and a rename is `customTitle` so no automatic writer can undo it. The Doctor AI writer now merges.
+- The memory summary no longer invents the milestone "Workspace initiation under UCI protocol".
+
+- 🔴 **Privacy sibling found on the way, fixed in the same change:** `navbharat_sessions` (every saved chat
+  on the device) was never cleared or labelled on sign-out — `localStorageSafe.ts` claimed App.tsx cleared
+  it and App.tsx never did — so on a shared phone the next account's sign-in loaded the previous account's
+  chats into its list and its cloud sync uploaded them into the new account's workspace. `lib/deviceSessions.ts`
+  stamps the owner; a different account signing in removes the previous one's chats and History index, and
+  both readers (the sign-in load, History) read only the owner's. Stamp-less devices are adopted once, which
+  is what happened before.
+
+**Tests:** `tests/theChatIdSystemIsGone.test.ts` (33 cases: the pure rules, `useSessionManager` called for
+real, source guards on every surface). Reversion-proven five ways (device-only chats hidden, canned greeting
+kept, blank chat saved, opening re-dates, owner check removed). Six older tests updated to the new behaviour, each with its reason.
+
+**Open, stated plainly:**
+- A chat deleted on ANOTHER device can still be listed on a device that kept a copy, until deleted there
+  too. Losing a chat the user can see was judged the worse error.
+- The free chat still opens on a new chat at launch, as ChatGPT, Claude and Grok do; the previous chat is
+  first in History. If the admin wants the last chat reopened on launch instead, that is a one-line decision.
+- Phone users get this with the next `.aab`/`.ipa` (bundled mode).

@@ -11,6 +11,7 @@ import { professionalRows, sortMergedRows, type ProfessionalPseudoSession } from
 import { shapeSessions, messagesOf } from '../lib/sessionShape';
 import { readHistoryIndex, buildHistoryIndex, writeHistoryIndex } from '../lib/historyIndex';
 import { groupSessionsByRecency } from './history/historyGroups';
+import { readDeviceSessionsFor } from '../lib/deviceSessions';
 import { mergeDeviceSessions, isEmptyConversation, displayTitle, cleanTitle, MAX_TITLE_LENGTH } from '../lib/chatHistory';
 import { sessionIsPro, sessionIsDoctor, sessionOwnerOf } from '../lib/sessionRouting';
 
@@ -25,16 +26,12 @@ function cachedRowsOnce() {
 }
 
 /**
- * THIS DEVICE's saved chats (`navbharat_sessions`, written by App.tsx on every message). They belong to
- * the signed-in account only — the key is cleared on sign-out — so listing them beside the cloud's rows
- * is listing the same user's chats. Unreadable ⇒ none, never a thrown error on the list's first frame.
+ * THIS DEVICE's saved chats (`navbharat_sessions`, written by App.tsx on every message) — and only when
+ * they belong to the account whose History this is (lib/deviceSessions.ts). Another account's chats on a
+ * shared phone read as none. Unreadable ⇒ none, never a thrown error on the list's first frame.
  */
-function readDeviceSessions() {
-  try {
-    return shapeSessions(JSON.parse(localStorage.getItem('navbharat_sessions') || '[]'));
-  } catch {
-    return [];
-  }
+function readDeviceSessions(uid: string | undefined) {
+  return shapeSessions(readDeviceSessionsFor(uid));
 }
 
 // ⚠️ THIS IS NOT THE SURFACE RULE — that is `sessionIsPro` in sessionRouting.ts, and it is the only
@@ -167,7 +164,7 @@ export const HistoryView = ({
       // phone's copy only when the cloud ERRORED, never when it was merely behind. Now both are one
       // list, the newer copy of each chat winning (lib/chatHistory.ts mergeDeviceSessions).
       const cloud = shapeSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      const data = mergeDeviceSessions(cloud, readDeviceSessions());
+      const data = mergeDeviceSessions(cloud, readDeviceSessions(user?.uid));
       setSessions(data);
       setLoading(false);
       setHydrated(true);
@@ -185,7 +182,7 @@ export const HistoryView = ({
         // is unreachable the richer local copy is the best we have — the index is only a head start
         // for the online case. A cached index already on screen is left alone rather than replaced by
         // a shorter list.
-        const local = mergeDeviceSessions([], readDeviceSessions());
+        const local = mergeDeviceSessions([], readDeviceSessions(user?.uid));
         if (local.length > 0) setSessions(local);
       } catch { /* empty */ }
       setLoading(false);

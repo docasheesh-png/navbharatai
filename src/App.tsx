@@ -148,6 +148,7 @@ import { useNetworkStatus } from './hooks/useNetworkStatus';
 import OfflineBanner from './components/OfflineBanner';
 import { Message, ChatSession, ApiKeys, ViewType, SettingsScreen, FileSystem, ErrorContext } from './types';
 import { isEmptyConversation, sameTranscript, sameFileMap, cleanTitle } from './lib/chatHistory';
+import { claimDeviceSessions, readDeviceSessionsFor } from './lib/deviceSessions';
 import { sanitizeFirestoreData } from './lib/firestoreUtils';
 import { safeLocalJson } from './lib/safeLocalJson';
 
@@ -730,12 +731,11 @@ export default function App() {
 
     cloudSyncReady.current = false;
 
-    // 1) Instant: show whatever is cached locally
-    let local: ChatSession[] = [];
-    try {
-      const saved = localStorage.getItem('navbharat_sessions');
-      if (saved) local = JSON.parse(saved);
-    } catch {}
+    // 1) Instant: show whatever is cached locally — but only THIS account's. The device keeps one
+    //    account's chats; another account's are removed here, before anything reads them (see
+    //    lib/deviceSessions.ts — they used to be loaded into, and synced up for, whoever signed in next).
+    claimDeviceSessions(user.uid);
+    const local = readDeviceSessionsFor(user.uid) as ChatSession[];
     setSessions(local);
 
     // 2) Cloud: pull cross-device workspace and merge (newer lastUpdated wins)

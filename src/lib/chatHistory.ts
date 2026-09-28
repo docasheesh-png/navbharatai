@@ -208,11 +208,9 @@ export function sameTranscript(saved: unknown, next: unknown): boolean {
   const a = arr(saved);
   const b = arr(next);
   if (a.length !== b.length) return false;
-  if (a.length === 0) return true;
-  const last = (l: MessageLike[]) => l[l.length - 1] ?? {};
-  const x = last(a);
-  const y = last(b);
-  return str(x.id) === str(y.id) && str(x.text) === str(y.text) && str(a[0]?.id) === str(b[0]?.id);
+  // Every message, id AND text: an edit to any one of them is a change worth saving. Comparing only the
+  // ends would let an edit in the middle of a chat go unsaved, which is worse than a wasted write.
+  return a.every((m, i) => str(m?.id) === str(b[i]?.id) && str(m?.text) === str(b[i]?.text));
 }
 
 /**

@@ -31,6 +31,7 @@ import {
 } from '../src/lib/chatHistory';
 import { useSessionManager } from '../src/hooks/useSessionManager';
 import { recencyLabel, groupSessionsByRecency } from '../src/components/history/historyGroups';
+import { claimDeviceSessions, readDeviceSessionsFor, DEVICE_SESSIONS_KEY, DEVICE_SESSIONS_OWNER_KEY } from '../src/lib/deviceSessions';
 
 const read = (p: string) => readFileSync(resolve(__dirname, '..', p), 'utf8');
 /** Comments stripped — several comments quote what was removed, by name. */
@@ -121,6 +122,56 @@ describe('2 · History lists what is on this phone, not only what reached the cl
   });
 });
 
+describe('2b · 🔴 one account\'s chats are never shown to another account on the same phone', () => {
+  // Found while building the merge above: the saved chats survived sign-out, and App.tsx loaded them for
+  // whoever signed in next — so listing "this device's chats" in History would have shown account A's
+  // conversations to account B.
+  const mem = (init: Record<string, string> = {}) => {
+    const m = new Map(Object.entries(init));
+    return {
+      getItem: (k: string) => (m.has(k) ? m.get(k)! : null),
+      setItem: (k: string, v: string) => { m.set(k, v); },
+      removeItem: (k: string) => { m.delete(k); },
+      has: (k: string) => m.has(k),
+    };
+  };
+  const chats = JSON.stringify([{ id: 'a1', messages: [u('1', "A's private chat")] }]);
+
+  it('a different account signing in removes the previous account\'s chats and the History index', () => {
+    const store = mem({ [DEVICE_SESSIONS_KEY]: chats, [DEVICE_SESSIONS_OWNER_KEY]: 'uid-A', navbharat_history_index_v1: '[]' });
+    expect(claimDeviceSessions('uid-B', store)).toBe('cleared');
+    expect(store.has(DEVICE_SESSIONS_KEY)).toBe(false);
+    expect(store.has('navbharat_history_index_v1')).toBe(false);
+    expect(readDeviceSessionsFor('uid-B', store)).toEqual([]);
+  });
+
+  it('the same account keeps its chats; a stamp-less device is adopted by whoever signs in (the old behaviour)', () => {
+    const same = mem({ [DEVICE_SESSIONS_KEY]: chats, [DEVICE_SESSIONS_OWNER_KEY]: 'uid-A' });
+    expect(claimDeviceSessions('uid-A', same)).toBe('kept');
+    expect(readDeviceSessionsFor('uid-A', same)).toHaveLength(1);
+    const legacy = mem({ [DEVICE_SESSIONS_KEY]: chats });
+    expect(claimDeviceSessions('uid-A', legacy)).toBe('adopted');
+    expect(readDeviceSessionsFor('uid-A', legacy)).toHaveLength(1);
+  });
+
+  it('reading is refused for anyone who is not the recorded owner, even before a sign-in claims it', () => {
+    const store = mem({ [DEVICE_SESSIONS_KEY]: chats, [DEVICE_SESSIONS_OWNER_KEY]: 'uid-A' });
+    expect(readDeviceSessionsFor('uid-B', store)).toEqual([]);
+    expect(readDeviceSessionsFor(undefined, store)).toEqual([]);
+    expect(readDeviceSessionsFor('uid-A', mem({ [DEVICE_SESSIONS_KEY]: '{broken', [DEVICE_SESSIONS_OWNER_KEY]: 'uid-A' }))).toEqual([]);
+  });
+
+  it('both doors read through the owner check — the sign-in load and History', () => {
+    const app = code('src/App.tsx');
+    expect(app).toContain('claimDeviceSessions(user.uid);');
+    expect(app).toContain('readDeviceSessionsFor(user.uid)');
+    expect(app).not.toContain("localStorage.getItem('navbharat_sessions')");
+    const view = code('src/components/HistoryView.tsx');
+    expect(view).toContain('readDeviceSessionsFor(uid)');
+    expect(view).not.toContain("localStorage.getItem('navbharat_sessions')");
+  });
+});
+
 describe('3 · opening a chat shows the conversation as it was', () => {
   it('🔴 folds the old restoredMessages split back into ONE thread and drops the canned restore lines', () => {
     const t = openedTranscript({
@@ -148,6 +199,9 @@ describe('3 · opening a chat shows the conversation as it was', () => {
     expect(sameTranscript(m, [...m])).toBe(true);
     expect(sameTranscript(m, [...m, u('3', 'z')])).toBe(false);
     expect(sameTranscript(m, [m[0], a('2', 'edited')])).toBe(false);
+    // An edit in the MIDDLE, same length, same last message, is still a change.
+    const three = [u('1', 'x'), a('2', 'y'), u('3', 'z')];
+    expect(sameTranscript(three, [three[0], a('2', 'edited'), three[2]])).toBe(false);
     expect(sameFileMap({ a: '1' }, { a: '1' })).toBe(true);
     expect(sameFileMap({ a: '1' }, { a: '2' })).toBe(false);
     expect(sameFileMap(undefined, {})).toBe(true);
@@ -323,7 +377,7 @@ describe('6 · 🔒 the chat-ID system is gone, read from the source', () => {
 
   it('History: device + cloud in one list, empty chats hidden, New chat on top, the open chat marked, Pin / Rename / Delete', () => {
     const c = code('src/components/HistoryView.tsx');
-    expect(c).toContain('mergeDeviceSessions(cloud, readDeviceSessions())');
+    expect(c).toContain('mergeDeviceSessions(cloud, readDeviceSessions(user?.uid))');
     expect(c).toContain('sessions.filter((s) => !isEmptyConversation(s))');
     expect(c).toContain('New chat');
     expect(c).toContain("aria-current={isCurrent ? 'true' : undefined}");

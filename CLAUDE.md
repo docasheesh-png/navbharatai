@@ -183,6 +183,18 @@ promised to build it.** Every model refused — the model's virtue, never our de
   one model refusal, which already works; insulting a doctor loses a user forever.**
 - The `adult` CONTENT CLASS is unchanged for the publish scanner (tagging still works); only the
   PROMPT verdict changed.
+- 🔴 **PICTURES ARE A DIFFERENT SURFACE, AND THIS RULE DID NOT COVER THEM (Play rejection 2026-09-28).**
+  `ADULT_CONTENT` waits for a porn noun AND "site / app / stream", so an IMAGE prompt has no second
+  half to match: measured, `nude woman`, `naked girl on beach` and the bare word `porn` all returned
+  **allow**. And "missing a request costs one model refusal" is **false for the image model — it does
+  not refuse, it draws.** Google rejected the Android update with a screenshot of "Image Generator AI
+  FREE" → "Photograph" showing a nude woman. Every prompt bound for Pollinations now passes
+  `pollinationsGuard.ts` — a word ban (English, Hinglish, Devanagari, spaced/leet disguises, plus
+  profanity) run INSIDE `pollinationsImageUrl`, so no path can build a link for a banned prompt — and
+  every link carries `safe=true`, the provider's own NSFW filter, which is OFF unless asked for.
+  ⚠️ **Scoped to Pollinations on purpose** (admin: *"sirf pollination ai ke liye"*): chat and build keep
+  their precision-first triage. Do NOT widen the word list into chat — a sexual-health question must
+  still get an answer. Test-locked and reversion-proven in `tests/theImageGeneratorDrawsNoNudity.test.ts`.
 
 ### 🙋 READ THE MOOD FIRST — a question gets an answer, not an app (admin-mandated 2026-09-13)
 

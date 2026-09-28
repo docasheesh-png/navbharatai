@@ -20,6 +20,7 @@ import { looksLikeImageEdit } from '../../lib/imageEdit';
 import { requireAccountForCostlyAi } from '../lib/costlyAiAccess';
 import { gateToolAction, burnToolAction } from '../tools/toolGate';
 import { guestDailyQuota } from '../lib/guestDailyQuota';
+import { POLLINATIONS_BLOCK_MESSAGE } from '../lib/pollinationsGuard';
 
 /**
  * Chat routes (the general/FREE chat) extracted from the server.ts monolith
@@ -482,7 +483,9 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       }
       console.log(`[CHAT/IMAGE-EDIT] tier=${tier} editing an attached picture`);
       const out = await runImageEdit(dataUrl, message);
-      if (out.image) {
+      if (out.blocked) {
+        sendEdit(POLLINATIONS_BLOCK_MESSAGE);
+      } else if (out.image) {
         if (gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
         sendEdit(`Ye rahi aapki badli hui picture 🎨\n\n${imageMarkdown(out.image, 'edited image')}\n\nAur kuch badalna ho to bata dein.\n\n${imageGenToolPointer()}`);
       } else if (out.refusal) {
@@ -550,7 +553,11 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         if (isFree) {
           console.log(`[CHAT/IMAGE] tier=${tier} free image intent — prompt="${imgIntent.prompt.slice(0, 80)}"`);
           const pr = await fetchPollinationsImage(imgIntent.prompt, 'square');
-          if (pr.image) {
+          if (pr.blocked) {
+            // The Pollinations word scan refused the picture (Play rejection 2026-09-28). Said plainly —
+            // never "try again later", which would invite the same request.
+            send(POLLINATIONS_BLOCK_MESSAGE);
+          } else if (pr.image) {
             send(`Ye rahi aapki image 🎨\n\n${imageMarkdown(pr.image, imgIntent.prompt.slice(0, 60))}\n\nKuch aur banwana ho to bas bata dein — bilkul free!\n\n${imageGenToolPointer()}`);
           } else {
             // Honest failure — never a fake/placeholder image; guide to the full tool + let the user retry.

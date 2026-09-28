@@ -89,6 +89,23 @@ export async function verifyAfterFix<S>(hooks: VerifyAfterFixHooks<S>): Promise<
   }
 }
 
+/**
+ * A reverify for an EDIT TO A WORKING APP: a check that throws is a check that proved nothing, and on
+ * a working app an unproven edit is undone, not kept.
+ *
+ * `verifyAfterFix` deliberately KEEPS a change whose reverify throws — right for a crash fix the user
+ * can already see (the app was broken before; the change may well be the fix), wrong for a repair
+ * applied to an app that already worked. The reviewer's green repair promised "an unproven result is
+ * UNDONE" and relied on this helper for it, so a browser timeout during its check kept the edit
+ * unverified (found 2026-09-28 while building the explorer repair). Wrapping the reverify, rather than
+ * changing `verifyAfterFix`, leaves the crash-fix callers exactly as they were.
+ */
+export function strictReverify(fn: () => Promise<boolean>): () => Promise<boolean> {
+  return async () => {
+    try { return (await fn()) === true; } catch { return false; }
+  };
+}
+
 /** Kill switch — default ON. `off` runs allowed passes without the verify/revert net (today's behaviour). */
 export function verifyAfterFixEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.AGENTV3_VERIFY_AFTER_FIX !== 'off';

@@ -83435,3 +83435,26 @@ Tests:
   account removes it.
 - Existing per-IP limiters still read `req.ip` (the spoofable first forwarded entry). That is a separate, older
   finding that this change does not widen.
+
+## 2026-09-28 — Competitor refresh + the click explorer (gap G1)
+
+**Asked (admin):** *"navbharatai ko sabhi compatitors ke sath compare karo! architecture, systems, design, skill gaps ko list karo. best solution jo gaps ko fill kar ke navbharatai ko compatitors se aage la jaye banao"*.
+
+**Comparison:** `COMPETITIVE_ANALYSIS_2026.md` §5, appended (the August sections are kept as the record). It covers Lovable, Bolt, v0, Replit, Cursor and Google AI Studio, web-verified with sources; gaps by architecture / systems / design / skill; a ranked lever list; and the honest ahead-list. It records one new opening: Lovable trains on Free/Pro content by default from 2026-09-09, while our Privacy Policy already forbids training on users' chats, documents or apps.
+
+**Built:** `src/server/AgentV3/clickExplorer.ts`, wired into `routes/agentv3.ts` beside the journey check. Flag `AGENTV3_CLICK_EXPLORE` (default on).
+- **What it does:** after a successful build it presses up to 12 visible, safe controls in the sandbox's pre-baked browser, each on a fresh load.
+- **What it reports:** a crash overlay, a blank screen, an in-app link to a missing page, or an uncaught error, naming the control.
+- **Cost:** no model call.
+- **What it will not press:** anything named for delete, pay, send, upload, download or log out; a form's submit; a link that leaves the app; an unnamed control. When the app writes to the user's own database, it also skips creating verbs.
+- **Outcomes:** three, never two. `EXPLORE_NOT_RUN` and `EXPLORE_NOTHING_TO_PRESS` are process-only.
+- **Build card:** the card has one slot, so the journey's proof is now held and emitted once, merged with the explorer's (`mergeUserProofs`). A second event would have erased the first.
+- **Verified in real Chromium** against a page carrying every verdict. Tests: `tests/theAppIsPressedNotOnlyPainted.test.ts` (25), reversion-proven on the "could not look ≠ pass" rule and on blank detection. The real-browser half skips in CI, which has no browser.
+
+**Still open (next levers, not started):**
+- Explorer → verified repair pass. This is a spend decision for the admin, because NavBharatAI pays on Weak.
+- Controls inside modals and on other pages are not reached.
+- A one-button security report.
+- A live ₹ figure during the build (G10).
+- Connectors via short-lived credentials (G6).
+- Expo/native UI (G7).

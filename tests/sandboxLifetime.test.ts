@@ -235,7 +235,8 @@ describe('wiring — the saved copy is raised by the route, cleared by every wri
 
   it('the reducer clears the copy when a NEW build starts, and only then', () => {
     expect(reducer).toContain("case 'snapshot':");
-    expect(reducer).toMatch(/isNewBuild \? \{ todos: \[\], agents: \{\}, snapshotUrl: undefined, snapshotNote: undefined \}/);
+    // Other per-build state may be cleared beside it (the live cost, since 2026-09-28) — never before it.
+    expect(reducer).toMatch(/isNewBuild \? \{ todos: \[\], agents: \{\}, snapshotUrl: undefined, snapshotNote: undefined(, [^}]*)? \}/);
   });
 });
 

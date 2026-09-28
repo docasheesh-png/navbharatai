@@ -53,6 +53,7 @@ const CLASSIFICATION: Record<string, { kind: 'user' | 'workspace' | 'platform' |
   agentv3_engine_use:  { kind: 'platform', why: 'one doc per day of engine use' },
   platform_settings:   { kind: 'platform', why: 'admin-set platform knobs (the build discount, buildDiscount.ts); one doc per setting, no person in it' },
   image_free_paid_daily: { kind: 'platform', why: 'one doc per UTC day — the platform-wide count of free-tier images a PAID engine served; no person in it' },
+  explorer_repair_weak_daily: { kind: 'platform', why: 'one doc per UTC day — the platform-wide count of free-tier explorer repairs attempted; no person in it' },
   fleet_mistakes_v3:   { kind: 'platform', why: 'cross-fleet learning, keyed by the mistake, not a person' },
   /**
    * 🔴 `gift_codes` IS DELIBERATELY NOT USER-SCOPED, for the same shape of reason `takedown_records`

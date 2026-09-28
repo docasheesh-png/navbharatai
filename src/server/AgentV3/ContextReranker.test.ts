@@ -34,7 +34,9 @@ describe('contentSearchTerms (content-based file retrieval for large repos)', ()
 });
 
 // ── Retrieval v2 (Mitrify autopsy: grounding picked BackButton.tsx for a survey) ──────────────────
-import { isOverviewRequest, structuralAnchors, centralFiles, selectGroundingCandidates, buildGroundedContext, groundableFile, pathTokenize } from './ContextReranker';
+// selectGroundingCandidates and groundableFile are already imported at the top of this file; importing a
+// binding twice is a SyntaxError that the older esbuild transform tolerated and Vite 8's Oxc does not.
+import { isOverviewRequest, structuralAnchors, centralFiles, buildGroundedContext, pathTokenize } from './ContextReranker';
 
 /** A Mitrify-shaped tree: many alphabetically-early leaf components + the real structural files. */
 const MITRIFY_TREE = [

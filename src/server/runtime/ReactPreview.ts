@@ -898,7 +898,10 @@ ${previewBridgeSource('in-browser')}
       }
       if (core.mods && !core.single) {
         console.warn('[preview] no rung served one consistent React —', core.errors.join(' | '));
-        showError(${JSON.stringify(REACT_SPLIT_FAULT_MESSAGE)}, true);
+        // What each rung did, in words that name no vendor — so the admin's report says WHICH rung
+        // refused instead of only that one did (autopsy 1a32248f carried no per-rung evidence at all).
+        var rungWhy = nbaiRungSummary(core.errors);
+        showError(${JSON.stringify(REACT_SPLIT_FAULT_MESSAGE)} + (rungWhy ? ' (' + rungWhy + ')' : ''), true);
         return;
       }
       bare = bare.filter(function (s) { return REACT_CORE.indexOf(s) < 0; });

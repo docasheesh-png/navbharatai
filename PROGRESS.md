@@ -83710,6 +83710,37 @@ kept, blank chat saved, opening re-dates, owner check removed). Six older tests 
   first in History. If the admin wants the last chat reopened on launch instead, that is a one-line decision.
 - Phone users get this with the next `.aab`/`.ipa` (bundled mode).
 
+## 2026-09-28 — Autopsy 1a32248f ("polished login and signup page", weak tier, built 2026-08-20; preview fault 2026-09-28)
+
+The admin pasted a month-old build report. The build itself (Login-page golden scaffold, 522 s, ₹88.30)
+was re-checked item by item against current `main` before anything was claimed:
+
+- **Already fixed on main (7):** FEATURE_COVERAGE false positives ("show/hide password toggle" no longer
+  requests mark-complete; the ThemeToggle's aria-label satisfies dark mode — so the heal that added an
+  unrequested todo list cannot fire); READINESS "login/sign-up not found" (contents are read now);
+  HEAL_NOT_DURABLE import heals (idempotent on every scaffold + `healWouldOscillate`); the scaffold's
+  ErrorBoundary TS2339 (`@types/react` in the template); unlabelled Login fields + JOURNEY_NOT_DERIVED;
+  `plannedModel` = the first real rung; a design score can never be rootCause; vite 8 + honest `npm audit fix`.
+- **FIXED HERE — the live defect:** the report's last line is a `PREVIEW_ERROR` from TODAY, after #3347
+  shipped: *"could not load one consistent copy of React"* on a working React 18 app. Root cause, measured
+  against real react@18.3.1 and react@19: the one-React probe flushed its render with the `flushSync`
+  exported by `react-dom`, and read "no verdict" as "two Reacts". When a CDN gives `react-dom/client` its
+  own copy of react-dom, that flushSync flushes the OTHER reconciler, the probe never renders in time, and
+  ONE React was refused on every rung. The probe now awaits the render (bounded, 1.5 s) and only a hook that
+  really found no dispatcher counts as two Reacts. The fault message also carries a vendor-free line
+  (`r1 timed out · r2 two copies · r3 did not load`) so the next report says which rung refused — this one
+  carried no per-rung evidence at all. `tests/oneReactInThePreview.test.ts`, reversion-proven.
+- **FIXED HERE:** "social-login buttons" classified the app as SOCIAL (feed, moderation, media upload
+  injected as requirements). New idiom in `NON_DOMAIN_USES`; `tests/domainKeywordIdioms.test.ts`,
+  reversion-proven, genuine social prompts still classify.
+- **Checked and NOT a defect:** a journey field that exists only in Sign-up mode is skipped (`count() === 0
+  → continue`), not failed.
+- **Open (proactive, not a defect today):** nothing type-checks the golden scaffolds with `tsc` — the
+  ErrorBoundary break was caught only by the builder's own first `tsc`. A scaffold tsc test needs React 18
+  types in CI, which the repo does not carry.
+- ⚠️ **Honest limit:** the CDN behaviour itself could not be observed from a session (esm.sh / jsdelivr are
+  refused by the egress proxy). The probe defect is proven in Node; that it is exactly what the admin's
+  browser hit is inferred, and the new per-rung line is what will confirm or refute it.
 ## 2026-09-28 — Exam settings: the language dropdown closed after about a second
 
 Admin: Teacher AI → Exam mode → Settings → the language dropdown *"bas 1 second ke liye khulta hai"*.

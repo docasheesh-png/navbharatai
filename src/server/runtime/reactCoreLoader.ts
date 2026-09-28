@@ -25,6 +25,13 @@
 //      A dispatcher that is null is two Reacts, and the group moves to the next rung. It costs one
 //      synchronous render of a component that returns nothing.
 //
+// 🔴 THE PROBE ITSELF LIED ONCE (autopsy 1a32248f, 2026-09-28). It flushed the probe's render with the
+// flushSync exported by `react-dom` and read "no verdict" as "two Reacts". On React 18 a CDN can give
+// `react-dom/client` its own copy of react-dom (it `require`s its own package); that flushSync then flushes
+// the OTHER reconciler, the probe never renders in time, and ONE React was refused — so a working app got
+// the platform-fault screen on every rung. Measured against real react@18.3.1 before the fix. The probe
+// now awaits the render (bounded) and only a hook that really failed is two Reacts.
+//
 // 🔒 THE PROBE NEVER SPEAKS. React's development build prints "Invalid hook call" before throwing, and
 // the preview's console mirror would forward that to the parent as an APP error row carrying a
 // "Fix with AI" button — the exact button this module exists to take away. So `console.error` is muted
@@ -45,7 +52,7 @@
 export const REACT_CORE_SPECS: readonly string[] = ['react', 'react-dom', 'react-dom/client', 'react/jsx-runtime'];
 
 /**
- * Browser source defining `nbaiReactIsSingle(mods, makeContainer)` and
+ * Browser source defining `nbaiReactIsSingle(mods, makeContainer, waitMs?)` (async), `nbaiRungSummary(errors)` and
  * `nbaiLoadReactCore(specs, rungs, importFn, deadlineFn, interopFn, makeContainer)`.
  *
  * - `rungs` is an array of functions spec → URL, tried in order.
@@ -53,38 +60,60 @@ export const REACT_CORE_SPECS: readonly string[] = ['react', 'react-dom', 'react
  * - `deadlineFn(spec)` returns a promise that rejects when that spec's shared budget is spent.
  * - `makeContainer()` returns the element the probe renders into (the page passes a detached div).
  *
- * Resolves to `{ mods, single, rung, errors }`: `single` is true only when the probe PROVED one React;
- * `mods` is null when no rung loaded the whole group.
+ * Resolves to `{ mods, single, rung, errors }`: `single` is false only when the probe MEASURED two Reacts (a
+ * hook that found no dispatcher) or no rung loaded; a render that could not be observed is trusted, because
+ * the group came from one rung. `mods` is null when no rung loaded the whole group.
  */
 export const REACT_CORE_LOADER_SOURCE = `
-function nbaiReactIsSingle(mods, makeContainer) {
+async function nbaiReactIsSingle(mods, makeContainer, waitMs) {
   var R = mods && mods['react'];
   var C = mods && mods['react-dom/client'];
   var D = mods && mods['react-dom'];
   if (!R || !C || typeof R.useState !== 'function' || typeof R.createElement !== 'function' || typeof C.createRoot !== 'function') return false;
-  // Without flushSync the render is asynchronous and cannot be read here. That is "could not measure",
-  // not "two copies" — the group is still from one rung, so it is trusted rather than rejected.
+  // flushSync is only a SHORTCUT to a synchronous render. It belongs to the react-dom instance that
+  // exported it, and a CDN may hand \`react-dom/client\` its own inlined react-dom — then this flushSync
+  // runs the callback but flushes a DIFFERENT reconciler, the probe's render stays scheduled, and the
+  // verdict is still unknown when flushSync returns. That is "not measured yet", never "two copies":
+  // the render is awaited below instead of being read as a failure (autopsy 1a32248f, 2026-09-28).
   var flush = D && typeof D.flushSync === 'function' ? D.flushSync : null;
-  if (!flush) return true;
+  var limit = typeof waitMs === 'number' ? waitMs : 1500;
   var ok = null;
+  var root = null;
   var muted = console.error;
   console.error = function () {};
   try {
-    var root = C.createRoot(makeContainer());
+    root = C.createRoot(makeContainer());
     function NbaiReactProbe() {
       try { R.useState(0); ok = true; } catch (e) { ok = false; }
       return null;
     }
-    // The verdict is taken DURING render; a commit-phase failure after it (never seen in a browser) does
-    // not change what the render measured.
-    try { flush(function () { root.render(R.createElement(NbaiReactProbe)); }); } catch (e) {}
-    try { root.unmount(); } catch (e) {}
+    var el = R.createElement(NbaiReactProbe);
+    // The verdict is taken DURING render; a commit-phase failure after it does not change what the
+    // render measured.
+    if (flush) { try { flush(function () { root.render(el); }); } catch (e) {} }
+    else root.render(el);
+    for (var waited = 0; ok === null && waited < limit; waited += 25) {
+      await new Promise(function (r) { setTimeout(r, 25); });
+    }
   } catch (e) {
     if (ok === null) ok = false;
   } finally {
+    try { if (root) root.unmount(); } catch (e) {}
     console.error = muted;
   }
-  return ok === true;
+  // A render that never ran inside the wait could not be measured. The group still came from ONE rung,
+  // so it is trusted — only a hook that actually found no dispatcher is two Reacts.
+  return ok !== false;
+}
+
+/** A vendor-free line naming what each rung did, for the platform-fault message the admin reads. */
+function nbaiRungSummary(errors) {
+  return (errors || []).map(function (e) {
+    var m = /^rung (\\d+): (.*)$/.exec(String(e));
+    if (!m) return 'did not load';
+    var why = /two copies/.test(m[2]) ? 'two copies' : /timed out|deadline/i.test(m[2]) ? 'timed out' : 'did not load';
+    return 'r' + m[1] + ' ' + why;
+  }).join(' · ');
 }
 
 async function nbaiLoadReactCore(specs, rungs, importFn, deadlineFn, interopFn, makeContainer) {
@@ -103,7 +132,7 @@ async function nbaiLoadReactCore(specs, rungs, importFn, deadlineFn, interopFn, 
       continue;
     }
     if (!firstLoaded) firstLoaded = mods;
-    if (nbaiReactIsSingle(mods, makeContainer)) return { mods: mods, single: true, rung: ri, errors: errors };
+    if (await nbaiReactIsSingle(mods, makeContainer)) return { mods: mods, single: true, rung: ri, errors: errors };
     errors.push('rung ' + (ri + 1) + ': two copies of React');
   }
   return { mods: firstLoaded, single: false, rung: -1, errors: errors };

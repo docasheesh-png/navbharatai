@@ -375,6 +375,11 @@ const NON_DOMAIN_USES: RegExp[] = [
   /\bpropert(?:y|ies)\s+(?:name|value|key|of|is|are|on)\b/gi,
   /\bflat\s+(?:design|list|structure|file|rate|array|layout|colou?rs?|hierarchy|style|ui)\b/gi,
   /\b(?:file|code|command|feature|price|product|task|item)\s+listings?\b/gi,
+  // social — "social login" / "social sign-in buttons" is a WAY TO SIGN IN (Google, GitHub), and
+  // "social icons / links" is a footer. Neither is a social network (autopsy 1a32248f: a login page with
+  // "social-login buttons" was read as SOCIAL and told to include a realtime feed, moderation and media
+  // upload). "a social network", "social feed", "social app" keep their domain.
+  /\bsocial[\s-]*(?:log[\s-]?ins?|sign[\s-]?(?:ins?|ons?|ups?)|auth(?:entication)?|oauth|providers?|buttons?|icons?|links?|handles?|share\s+buttons?|media\s+(?:icons?|links?|handles?|buttons?))\b/gi,
   // social — following instructions, an HTTP POST, a user's own profile, and "message" as output.
   /\bfollow(?:s|ing|ed)?\s+(?:the|these|this|those|my|our|your|a|an|it|them|up|along|instructions?|steps?|guidelines?|conventions?|patterns?|rules?)\b/gi,
   /\b(?:http|api|rest|ajax|fetch|axios|curl|a|the)\s+post\s+(?:request|endpoint|route|method|call|body|handler|api)\b/gi,

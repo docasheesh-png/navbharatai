@@ -4,7 +4,7 @@
 // disclaimers, same gating.
 //
 // TWO GROUPS SINCE 2026-09-22 (admin: "upar recent chat, niche new chat … 2 alag alag group hi bana
-// do"): RECENT CHAT — every chat that is open, one row each, each with its own ✕; a line; NEW CHAT —
+// do"): RECENT CHAT — every chat window that is open, one row each, each with its own ✕; a line; NEW CHAT —
 // everything that starts something. The per-row "Recent" / "New chat" tags are gone because the group
 // heading now says it once. This sheet is ALSO the window switcher: the header no longer draws a chip
 // per open chat, so a recent row is the way to get back to "Teacher AI (2)".
@@ -18,8 +18,10 @@ import type { ChatWindow } from '../../lib/chatWindows';
 export function ModePickerSheet({
   activeView,
   activeChatId,
+  activeViewWindowId,
   openViews,
   openChats,
+  viewWindows,
   hideMedical,
   onPick,
   onCloseRecent,
@@ -33,6 +35,10 @@ export function ModePickerSheet({
   openViews: readonly string[];
   /** The open professional windows, in the order they were opened. */
   openChats: readonly ChatWindow[];
+  /** The window on screen when the current view is the FREE chat, the image studio or Doctor AI. */
+  activeViewWindowId?: string | null;
+  /** The windows of the FREE chat, the image studio and Doctor AI (lib/chatWindows.ts). */
+  viewWindows?: readonly ChatWindow[];
   /** Native-shell Play compliance: hides the medical-class experts (same rule as the hub). */
   hideMedical: boolean;
   /**
@@ -55,11 +61,11 @@ export function ModePickerSheet({
 }) {
   const [query, setQuery] = useState('');
   const entries = useMemo(
-    () => modePickerEntries({ hideMedical, activeView, openViews, openChats }),
-    [hideMedical, activeView, openViews, openChats],
+    () => modePickerEntries({ hideMedical, activeView, openViews, openChats, viewWindows }),
+    [hideMedical, activeView, openViews, openChats, viewWindows],
   );
   const visible = useMemo(() => filterModeEntries(entries, query), [entries, query]);
-  const current = activeModeId(activeView, activeChatId);
+  const current = activeModeId(activeView, activeChatId, activeViewWindowId);
   const recent = visible.filter((e) => e.kind === 'recent');
   const fresh = visible.filter((e) => e.kind !== 'recent');
 
@@ -76,11 +82,13 @@ export function ModePickerSheet({
   // the WORD, so the recent row gets it too when the open AI happens to be the free chat — otherwise the
   // same name would be painted two different ways in one list.
   const rowLabel = (e: ModeEntry) => {
-    if (e.name === 'NavBharatAI FREE') {
+    // A second FREE window is "NavBharatAI FREE (2)" — still the free chat, still painted as one.
+    if (e.name.startsWith('NavBharatAI FREE')) {
       return (
         <span className="text-[13px] text-ink">
           NavBharatAI{' '}
           <span className="font-black italic tracking-tight bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent">FREE</span>
+          {e.name.slice('NavBharatAI FREE'.length)}
         </span>
       );
     }
@@ -108,11 +116,10 @@ export function ModePickerSheet({
         <span className="flex-1 min-w-0 truncate">{rowLabel(e)}</span>
         {current === e.id && <Check className="w-4 h-4 text-accent-text shrink-0" aria-label="Current mode" />}
       </button>
-      {/* CLOSE THAT CHAT, from the row that names it. Only a recent row gets it: every New row STARTS
-          something, and there is nothing yet to close. NavBharatAI FREE never gets it (admin 2026-09-22,
-          `recentRowClosable`): it is the home the other chats live in, and a fresh FREE chat is one tap
-          away under "New chat". Absent when the caller supplies no handler, so a surface that cannot
-          close a chat shows no control that pretends it can. */}
+      {/* CLOSE THAT CHAT, from the row that names it. Every recent row gets it, FREE included (admin
+          2026-09-28, `recentRowClosable`); a New row STARTS something, so there is nothing yet to close.
+          Absent when the caller supplies no handler, so a surface that cannot close a chat shows no
+          control that pretends it can. */}
       {e.kind === 'recent' && onCloseRecent && recentRowClosable(e.id) && (
         <button
           onClick={() => onCloseRecent(e.id)}

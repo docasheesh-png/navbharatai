@@ -57,7 +57,7 @@
 
 import { PROFESSIONAL_CHATS } from '../professionals/professionalConfigs';
 import { isMedicalProfessionalId } from '../../lib/playCompliance';
-import { windowLabel, type ChatWindow } from '../../lib/chatWindows';
+import { windowLabel, viewWindowsFor, DEFAULT_VIEW_WINDOW, type ChatWindow } from '../../lib/chatWindows';
 
 export type ModeKind = 'recent' | 'free' | 'image' | 'professional';
 
@@ -181,21 +181,24 @@ export interface ModePickerInput {
   openViews?: readonly string[];
   /** The open professional windows, in the order they were opened. */
   openChats?: readonly ChatWindow[];
+  /** The windows of the FREE chat, the image studio and Doctor AI (see `viewWindowsFor`). */
+  viewWindows?: readonly ChatWindow[];
 }
 
+/** A single-chat view's window as a row id: the implicit first window keeps the plain id it always had. */
+const viewWindowRowId = (view: string, windowId: string): string =>
+  recentModeId(view, windowId === DEFAULT_VIEW_WINDOW ? undefined : windowId);
+
 /**
- * Does this recent row carry a ✕? Every row does EXCEPT NavBharatAI FREE (admin 2026-09-22: *"navbharatai
- * free, chat ke age se X hi hata den!!!"*). The FREE tab is the HOME of every chat opened through its Mode
- * button, so "close FREE" from inside its own list either closes the tab and every AI inside it (the bug
- * of that morning) or needs a second, tab-less notion of "closed" (the first fix, a flag plus an effect
- * plus a shared reset). Neither is needed: a fresh FREE chat is one tap away under "New chat", and the
- * header tab's ✕ still closes the whole thing. ONE rule, read by the sheet (whether to render the ✕) and
- * by App (whether to act on a close for that id), so the two cannot disagree. A non-recent id is never
- * closable — there is nothing open to close.
+ * Does this recent row carry a ✕? EVERY recent row does (admin 2026-09-28: *"sabhi ke end me x (close)
+ * button bana do"*). This reverses 2026-09-22, when the FREE row had none because closing it closed the
+ * whole tab and every AI inside it. It no longer does: a FREE row's ✕ closes that ONE FREE window, and
+ * when it is the only one the chat restarts fresh (the conversation stays in History) — the tab and the
+ * other chats are never touched. ONE rule, read by the sheet (whether to render the ✕) and by App
+ * (whether to act on a close for that id). A non-recent id is never closable — nothing is open to close.
  */
 export function recentRowClosable(id: string): boolean {
-  const target = recentTargetFromId(id);
-  return target !== null && target.view !== 'nbi_chat';
+  return recentTargetFromId(id) !== null;
 }
 
 /** The single-chat views the Recent group lists, in the order the New group lists them too. */
@@ -218,7 +221,18 @@ export function recentModeEntries(opts: ModePickerInput): ModeEntry[] {
     if (opts.hideMedical && (view === 'sda_chat' || isMedicalProfessionalId(view))) continue;
     const name = modeNameFor(view);
     if (!name) continue;
-    entries.push({ id: recentModeId(view), name, kind: 'recent', emoji: modeEmojiFor(view), view });
+    // One row per WINDOW, numbered like a professional's ("NavBharatAI FREE (2)") once there are two.
+    const own = viewWindowsFor(opts.viewWindows ?? [], openViews, view);
+    for (const win of own) {
+      entries.push({
+        id: viewWindowRowId(view, win.id),
+        name: windowLabel(own, win.id, name),
+        kind: 'recent',
+        emoji: modeEmojiFor(view),
+        view,
+        ...(win.id === DEFAULT_VIEW_WINDOW ? {} : { conversationId: win.id }),
+      });
+    }
   }
   for (const win of windows) {
     const cfg = PROFESSIONAL_CHATS[win.professionalId];
@@ -256,11 +270,13 @@ export function nextRecentAfterClose(recent: readonly ModeEntry[], closedId: str
  * Was that the LAST chat in the list? (admin 2026-09-22: *"agar mode me kebal ek hi AI open hai, aur user
  * usko bhi band kar de! to mode list band ho jaye aur navbharatai free ka page open ho jaye"*). PURE.
  *
- * True when nothing but the FREE row (which has no ✕ — see `recentRowClosable`) remains after the close,
- * or nothing at all. The caller dismisses the list and shows FREE.
+ * True when, after the close, at most ONE row remains and it is a FREE window — or nothing at all. The
+ * caller dismisses the list and shows FREE. Two FREE windows left is not "the last chat": there is still
+ * a choice to make in the list.
  */
 export function lastChatClosed(recent: readonly ModeEntry[], closedId: string): boolean {
-  return recent.every((e) => e.id === closedId || e.view === 'nbi_chat');
+  const remaining = recent.filter((e) => e.id !== closedId);
+  return remaining.length === 0 || (remaining.length === 1 && remaining[0].view === 'nbi_chat');
 }
 
 /**
@@ -347,12 +363,14 @@ export function filterModeEntries(entries: ModeEntry[], query: string): ModeEntr
  * is not the state the user is in. When no AI is open there is no recent row and nothing is ticked.
  * For a professional the ✓ is on the window on screen (`activeConversationId`), never its sibling.
  */
-export function activeModeId(activeView: string, activeConversationId?: string | null): string {
+export function activeModeId(activeView: string, activeConversationId?: string | null, activeViewWindowId?: string | null): string {
   if (!modeNameFor(activeView)) return '';
-  // A windowed professional's ✓ names the WINDOW on screen; a single-chat view names itself.
-  return activeView in PROFESSIONAL_CHATS && activeConversationId
-    ? recentModeId(activeView, activeConversationId)
-    : recentModeId(activeView);
+  // A windowed professional's ✓ names the WINDOW on screen; so does a single-chat view's, once it has
+  // more than its implicit first window.
+  if (activeView in PROFESSIONAL_CHATS) {
+    return activeConversationId ? recentModeId(activeView, activeConversationId) : recentModeId(activeView);
+  }
+  return viewWindowRowId(activeView, activeViewWindowId || DEFAULT_VIEW_WINDOW);
 }
 
 /** Every view id whose footer carries the live Mode button (the chat surfaces this picker serves). */

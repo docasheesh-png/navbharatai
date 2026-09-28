@@ -261,6 +261,7 @@ export function registerImageGenRoutes(app: Express): void {
       if (editing) {
         if (!(await allowPaidRung())) return;
         const out = await runImageEdit(rawInit, editWords, { timeoutMs: ROUTE_TIMEOUT_MS });
+        if (out.blocked) { res.status(422).json({ error: POLLINATIONS_BLOCK_MESSAGE, code: 'blocked' }); return; }
         if (out.image) { deliver(out.image, true); return; }
         if (out.refusal) { res.status(422).json({ error: IMAGE_REFUSAL_MESSAGE }); return; }
         diag.push(...(out.diag || []));

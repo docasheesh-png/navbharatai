@@ -483,7 +483,9 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       }
       console.log(`[CHAT/IMAGE-EDIT] tier=${tier} editing an attached picture`);
       const out = await runImageEdit(dataUrl, message);
-      if (out.image) {
+      if (out.blocked) {
+        sendEdit(POLLINATIONS_BLOCK_MESSAGE);
+      } else if (out.image) {
         if (gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
         sendEdit(`Ye rahi aapki badli hui picture 🎨\n\n${imageMarkdown(out.image, 'edited image')}\n\nAur kuch badalna ho to bata dein.\n\n${imageGenToolPointer()}`);
       } else if (out.refusal) {

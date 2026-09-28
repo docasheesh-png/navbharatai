@@ -18,6 +18,7 @@ import {
   parseImagePartsResponse, type GeneratedImage,
 } from './imageGen';
 import { initImageTooLarge, parseDataUrl } from './imageDataUrl';
+import { scanPollinationsPrompt } from './pollinationsGuard';
 
 export interface ImageEditOutcome {
   /** The edited picture. Present only on success. */
@@ -30,6 +31,12 @@ export interface ImageEditOutcome {
   badInput?: string;
   /** True when no rung on this server can edit a picture at all. */
   unavailable?: boolean;
+  /**
+   * The words asked for a nude, sexual or vulgar change ("remove her clothes") and were refused
+   * BEFORE any model saw the picture — the image word scan (`pollinationsGuard.ts`). An edit of a
+   * real person's photo is the worst case this scan exists for.
+   */
+  blocked?: boolean;
 }
 
 /** How long one edit may take before we give up. Matches the generator route's own ceiling. */
@@ -64,10 +71,13 @@ export async function runImageEdit(
   words: string,
   opts: { timeoutMs?: number } = {},
 ): Promise<ImageEditOutcome> {
+  const said = String(words || '').trim();
+  // The word scan runs FIRST, so a banned request is always answered as banned — never as
+  // "unavailable" or "bad picture", which would invite trying again.
+  if (!scanPollinationsPrompt(said).ok) return { blocked: true };
   const editable = checkEditable(dataUrl);
   if (!editable.ok) return editable.outcome;
   const parsed = parseDataUrl(dataUrl)!;
-  const said = String(words || '').trim();
   const prompt = buildEditInstruction(said, editIntentFor(said));
 
   const { GoogleGenAI } = await import('@google/genai');

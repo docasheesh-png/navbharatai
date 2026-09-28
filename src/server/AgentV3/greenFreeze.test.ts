@@ -103,7 +103,7 @@ describe('the allowlist — the user\'s own requests still write to a green app'
   //   • on the normal path it runs BEFORE the preview is browsed, so no latch exists yet and this entry
   //     is not what lets it write — it is here so a RESUMED already-green session behaves the same way
   //     instead of silently doing nothing on one path and working on the other.
-  it('the allowlist is exactly the six user-request / safety / restore / verified-repair passes', () => {
+  it('the allowlist is exactly the seven user-request / safety / restore / verified-repair passes', () => {
     // This test IS the deliberate act the module header asks for — the list may only grow when someone
     // has to come here and say why. 'sandbox-file-restore' was added 2026-08-20 after the freeze broke
     // a real publish: re-seeding an EMPTY sandbox from the durable store writes through the same
@@ -121,8 +121,13 @@ describe('the allowlist — the user\'s own requests still write to a green app'
     // suggest. It is the one entry here with a history of harm (the 2026-08-12 .env erasure), so it
     // carries three restraints no other pass needs: functional findings only, verifyAfterFix with an
     // unproven result UNDONE rather than kept, and a hard refusal of every .env file (asserted below).
+    //
+    // 'explorer-repair' was added 2026-09-28 (admin: "han dono ho jaye … world class banao") — a control
+    // the click explorer PRESSED in a real browser and saw break. Same restraints as the reviewer repair:
+    // an unproven result is undone (strictReverify), every button is pressed again before the change is
+    // kept, and no .env file (asserted below).
     expect([...ALLOWED_PASSES].sort()).toEqual([
-      'design-consistency-heal', 'feature-presence-heal', 'green-guard-restore',
+      'design-consistency-heal', 'explorer-repair', 'feature-presence-heal', 'green-guard-restore',
       'reviewer-functional-repair', 'runtime-error-autofix', 'sandbox-file-restore',
     ]);
   });

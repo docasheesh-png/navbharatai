@@ -2051,6 +2051,29 @@ export class BuildDiagnostics {
    * re-running `assessBuildReadiness()` and only on `verdict.ready`. This clears blockers because the
    * same gate that raised them has looked again and passed — never because a repair "probably worked".
    */
+  /**
+   * Clear every unresolved finding of `code` because THE CHECK THAT RAISED IT LOOKED AGAIN AND PASSED.
+   *
+   * The explorer's sibling of `recordReadinessRecovery` (2026-09-28). `EXPLORE_FAILED` is recorded as an
+   * unresolved warning before the explorer's verified repair runs; when that repair is kept and the
+   * explorer, pressing every button again, finds NOTHING broken, the old finding describes buttons that
+   * now work — and left open it would count in `shippingIssueCount` and hold the release gate at yellow
+   * over a problem that no longer exists. The same class as build 1ef27cd7.
+   *
+   * 🔒 THE CALLER'S OBLIGATION: reach here only when the SAME check re-ran over the whole app and found
+   * no failure at all — never because a repair "probably worked", and never on a partial fix.
+   */
+  resolveOnRecheck(code: string): number {
+    let cleared = 0;
+    for (const issue of this.issues) {
+      if (issue.code !== code || issue.autoResolved === true) continue;
+      issue.autoResolved = true;
+      cleared++;
+    }
+    if (cleared > 0) this.notify();
+    return cleared;
+  }
+
   recordReadinessRecovery(code: string, message: string): number {
     const cleared = this.resolveReadinessBlockersOnRejudge();
     this.record({ phase: 'build', severity: 'info', code, message, autoResolved: true });

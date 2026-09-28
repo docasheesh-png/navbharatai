@@ -3087,6 +3087,38 @@ the flag entries above promise.
   half runs wherever Chromium exists (`/opt/pw-browsers`) and is skipped in CI, which has none.
   **What to watch:** `EXPLORE_FAILED` on real builds — each is a button a user would have found broken in
   their first minute. A crop of `EXPLORE_NOT_RUN` means the runner, not the apps, needs looking at.
+  🔧 **AND NOW IT FIXES WHAT IT FINDS — `AGENTV3_EXPLORER_REPAIR` (2026-09-28, admin: *"han dono ho jaye …
+  real engineering kar ke, world class banao"*). ⚠️ NOT set; code default ON; `off` restores report-only.**
+  `explorerRepair.ts`. One bounded repair pass (allowlisted pass `explorer-repair`, refused every `.env`),
+  then EVERY button is pressed again. **Kept only if the app renders, a broken control now WORKS (pressed,
+  not merely present — deleting the button is not a fix) and no control that worked broke.** Anything
+  else — timeout, a failed pass, a re-check that threw, a regression — is undone to the green snapshot, and
+  the pass's billing phase (`PHASE_EXPLORER_REPAIR`) goes barren, so **an undone repair is never billed.**
+  A kept repair whose re-press found nothing broken clears the earlier `EXPLORE_FAILED`
+  (`BuildDiagnostics.resolveOnRecheck`) so the release gate is not held yellow by buttons that now work.
+  Report codes `EXPLORE_REPAIRED` / `_NO_CHANGE` / `_UNDONE` / `_SKIPPED`.
+  💸 **Normal/Strong always. Weak under `AGENTV3_EXPLORER_REPAIR_WEAK_DAILY`** (NOT set; default **100
+  repairs a day, platform-wide**; `0` = never on Weak; `off` = no cap; unreadable ⇒ 100, never unlimited).
+  Counted per ATTEMPT in `explorer_repair_weak_daily`, and it **fails closed** — an unreadable counter
+  refuses the repair and the broken button is reported exactly as before. Free-listed accounts are neither
+  counted nor refused. ⚠️ **100 is a starting point, not a measurement**: nobody has measured one Weak
+  repair's cost yet. `[AGENTV3] free-tier explorer repair allowance reached` in the log (once per day) is
+  what says whether it is right.
+  🔴 **SIBLING FIXED IN THE SAME CHANGE:** `verifyAfterFix` KEEPS a change whose re-check throws (right for
+  a crash fix), and the reviewer's green repair — which promises "an unproven result is UNDONE" — relied on
+  it, so a browser timeout during its check kept the edit. Both repairs now wrap their re-check in
+  `strictReverify`; the crash-fix callers are untouched.
+- **💰 `AGENTV3_LIVE_COST` — the build shows what it has cost SO FAR (2026-09-28, admin approved "build ke
+  dauraan live ₹ kharcha"). ⚠️ NOT set; code default ON; `off` sends no figure.** `liveBuildCost.ts` +
+  `liveCostLabel.ts`. The live strip reads **"₹12.40 so far"**, tappable for a one-line explanation.
+  🔒 **ONE PRICE, TWO READINGS:** it is `decideBuildBilledUsd` — the final bill's own function — over the
+  same live ledger, with the same sandbox measure and the same build discount (read once, up front). A
+  source guard fails CI if the live path's arguments or its "who is charged" predicate drift from the
+  settle's. 🔒 **Shown only to someone who will be charged** (the settle's `billingActive`), and never
+  while `AGENTV3_FREE_ONBOARDING_BUILDS` could zero the bill. Throttled to one update per 2.5 s and
+  computed only after the throttle allows it; the event (`cost_so_far`) carries one rupee number, no
+  vendor, no split. The label says what can still move it: more work adds to it, the checks at the end
+  can only lower it, a build that fails is free.
 
 - **`AGENTV3_CONTRACT_FILE`** (default ON, set `off` to disable — added 2026-09-17, autopsy 57875eb3) —
   the fast lane's SHARED CONTRACT (the enums / interfaces / types every per-file call is handed) is now

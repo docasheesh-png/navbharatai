@@ -83502,3 +83502,30 @@ entry (e.g. src/main.jsx) referenced by index.html"*, with *"user app bana hi na
 - ⚠️ **Not proven from the report alone:** whether that user's *live* build also failed, or only renders
   from the saved files did. A running sandbox still had `src/main.tsx` on disk. The build report for that
   workspace would settle it.
+## 2026-09-28 — Broken buttons get a verified repair; the build shows its cost live
+
+**Asked (admin):** approving both open decisions — *"han dono ho jaye to bahut accha rahe! aap isko real engineering kar ke, world class banao"*.
+
+**1. Explorer → verified repair** (`src/server/AgentV3/explorerRepair.ts`, flag `AGENTV3_EXPLORER_REPAIR`, default on).
+- **The repair:** one bounded pass fixes the controls the click explorer proved broken.
+- **The re-check:** EVERY button is then pressed again.
+- **Keep rule:** kept only if the app renders, a broken control now works (pressed, not merely present), and nothing that worked broke.
+- **Otherwise:** undone to the green snapshot, and the pass's billing phase goes barren, so an undone repair is never billed.
+- **Tiers:** Normal and Strong always. Weak runs under a platform daily allowance (`AGENTV3_EXPLORER_REPAIR_WEAK_DAILY`, default 100), counted per attempt; the allowance fails closed.
+- **Report honesty:** when the re-press finds nothing broken, the earlier `EXPLORE_FAILED` is cleared (`resolveOnRecheck`), so the release gate is not held yellow.
+
+**Sibling found and fixed:** `verifyAfterFix` keeps a change whose re-check throws. The reviewer's green repair relied on it while promising to undo unproven edits, so a browser timeout kept an unverified edit. Both repairs now use `strictReverify`.
+
+**2. Live ₹ during a build (G10)** (`liveBuildCost.ts`, `liveCostLabel.ts`, flag `AGENTV3_LIVE_COST`, default on).
+- **What the user sees:** "₹X so far" on the live strip, tappable for an explanation; a tooltip alone never shows on a phone.
+- **How it is priced:** by `decideBuildBilledUsd`, the final bill's own function, with the same sandbox measure and discount.
+- **Who sees it:** only someone the settle would charge. It is never shown while the first-build-free credit could zero the bill.
+- **Guards:** source guards fail CI if the live path's pricing arguments or its "who is charged" predicate drift from the settle's.
+
+**Verification:**
+- Tests: `tests/aBrokenButtonGetsOneVerifiedRepair.test.ts` (27) and `tests/theBuildShowsWhatItCostsSoFar.test.ts` (16).
+- Reversion-proven: the strict re-check, the barren-phase billing, and the charged predicate.
+
+**Still open:**
+- **The Weak allowance of 100/day is a starting point, not a measurement.** Read the `EXPLORE_REPAIR*` codes on real builds before changing it.
+- **The repair can only fix what the explorer may press.** Delete, pay, send, upload and logout controls are never pressed, so a broken one is neither found nor repaired. That is the design, and it is a real limit.

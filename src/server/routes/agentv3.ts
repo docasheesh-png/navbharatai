@@ -176,6 +176,12 @@ import {
   clickExplorerEnabled, clickExplorerScript, parseExploreOutput, summarizeExplore, exploreUserSummary,
   mergeUserProofs, EXPLORE_BUDGET_MS, type UserProof,
 } from '../AgentV3/clickExplorer';
+import {
+  explorerRepairEnabled, repairTargets, explorerRepairPlan, explorerRepairTierGate, runExplorerRepair,
+  explorerRepairOutcomeRecord, explorerRepairProof, explorerRepairUserLine, EXPLORER_REPAIR_PASS,
+} from '../AgentV3/explorerRepair';
+import { explorerRepairBudget } from '../lib/explorerRepairBudget';
+import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS } from '../AgentV3/liveBuildCost';
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths } from '../AgentV3/greenReviewPolicy';
@@ -185,7 +191,7 @@ import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, at
 import { STARTER_ENTRY_PATHS, isUntouchedStarterEntry, starterEntryIn, starterIsWhatRendered, pageShowsStarter, withStarterVerdict } from '../AgentV3/stillTheStarterApp';
 import { postGreenWritesNote, endVerdictFrom, type PostGreenWrite } from '../AgentV3/postGreenWrites';
 import { offTopicSummaryNotice } from '../AgentV3/offTopicSummary';
-import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote } from '../AgentV3/verifyAfterFix';
+import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote, strictReverify } from '../AgentV3/verifyAfterFix';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
@@ -353,7 +359,7 @@ import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, r
 import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel } from '../AgentV3/pricing';
 import { tieredMarkupUsd, realProviderCostUsd } from '../AgentV3/providerRates';
 import { splitUnbilledCost } from '../AgentV3/unbilledTurns';
-import { runInBillingPhase, currentBillingPhase, PHASE_POST_BUILD_REVIEW, NO_BARREN_PHASES, type BarrenPhases } from '../AgentV3/billingPhase';
+import { runInBillingPhase, currentBillingPhase, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, NO_BARREN_PHASES, type BarrenPhases } from '../AgentV3/billingPhase';
 import { createUsageSink } from '../AgentV3/UsageSink';
 import {
   createProviderUsageLedger,
@@ -12877,6 +12883,20 @@ async function noteBuildOutcome(
         shadowFastLaneLedger.add(used, usage, model);
       };
       billingCtx.providerLedger = providerLedger; // Fix 67 — expose to the wall-clock/advisory finalizer
+      // THE LIVE ₹ FIGURE (admin 2026-09-28 — liveBuildCost.ts). Decided once per build: will this bill
+      // reach the wallet at all (the settle's own `billingActive`), and could the first-build-free credit
+      // zero it? Either "no" ⇒ no figure is ever sent. The discount is read ONCE, up front, so the live
+      // number is priced exactly like the final bill; until it has been read nothing is sent.
+      const liveCostCharged = !!userId && (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email);
+      const liveCostOnboarding = freeOnboardingLimit() > 0;
+      let liveCostDiscountPct: number | null = null;
+      let liveCostLast: { inr: number; at: number } | null = null;
+      if (liveCostEnabled() && liveCostCharged && !liveCostOnboarding) {
+        buildDiscountStore.readWithin().then(
+          (setting) => { liveCostDiscountPct = setting.pct > 0 ? setting.pct : 0; },
+          () => { liveCostDiscountPct = 0; }, // unreadable ⇒ 0% — the ordinary price, as at settle
+        );
+      }
       const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number): void => {
         // 🔴 SAY IT WHEN WE DO NOT KNOW. A provider that returns no token counts contributes zeros to
         // the ledger, and zeros are indistinguishable from a turn that genuinely cost nothing — the
@@ -12965,6 +12985,27 @@ async function noteBuildOutcome(
           } catch {
             // A ceiling we could not evaluate must never end somebody's build. Failing OPEN here is
             // the same call the affordability gate makes on an unreadable balance.
+          }
+        }
+        // THE LIVE ₹ FIGURE. Priced by `decideBuildBilledUsd` — the function the final bill uses — over
+        // this same ledger, with the same sandbox measure and the same discount. Throttled BEFORE it is
+        // computed, so a burst of quick turns costs nothing. Never a gate: any failure sends nothing.
+        if (liveCostDiscountPct !== null) {
+          const now = Date.now();
+          if (!liveCostLast || now - liveCostLast.at >= LIVE_COST_MIN_GAP_MS) {
+            try {
+              const vm = billableSandboxDetail(actuator, workspaceId, buildStartedAt);
+              const d = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, vm.usd, barrenPhases);
+              const inr = liveCostInr({
+                charged: liveCostCharged, onboardingFreeBuildPossible: liveCostOnboarding,
+                billedUsd: d.effectiveBilledUsd, floorUsd: d.realCostUsd + d.sandboxUsd,
+                discountPct: liveCostDiscountPct, usdInr: usdInrRate(),
+              });
+              if (inr !== null && shouldEmitLiveCost(liveCostLast, inr, now)) {
+                liveCostLast = { inr, at: now };
+                emit({ type: 'cost_so_far', inr, ts: now });
+              }
+            } catch { /* a live figure we could not price is simply not shown */ }
           }
         }
       };
@@ -20000,7 +20041,8 @@ async function noteBuildOutcome(
             actuator.runCommand(workspaceId, clickExplorerScript(lastPreviewUrl, { blockWrites: writesToUserDatabase(exploreFiles) })),
             EXPLORE_BUDGET_MS + 20_000, 'click-explorer',
           );
-          const explored = summarizeExplore(parseExploreOutput(out.stdout));
+          const exploreRun = parseExploreOutput(out.stdout);
+          const explored = summarizeExplore(exploreRun);
           buildDiag.record({
             phase: 'preview',
             severity: explored.outcome === 'failed' ? 'warning' : 'info',
@@ -20011,6 +20053,101 @@ async function noteBuildOutcome(
           });
           const proof = exploreUserSummary(explored);
           if (proof.headline) exploreProof = proof;
+
+          // A BROKEN BUTTON GETS ONE VERIFIED REPAIR (admin 2026-09-28: "han dono ho jaye … world class
+          // banao" — explorerRepair.ts). The explorer's evidence is the strongest this platform has: a
+          // real browser pressed one control and saw it break. One pass fixes the named controls, then
+          // EVERY button is pressed again; the change is kept only if the app renders, a broken control
+          // now works, and nothing that worked broke. Otherwise it is undone, and its cost is ours
+          // (PHASE_EXPLORER_REPAIR goes barren). Normal/Strong always; Weak under the platform's daily
+          // allowance (explorerRepairBudget.ts). Kill switch AGENTV3_EXPLORER_REPAIR=off.
+          const targets = explored.outcome === 'failed' && explorerRepairEnabled() && !abort.signal.aborted
+            ? repairTargets(exploreRun)
+            : [];
+          const previewUrl = lastPreviewUrl;
+          if (targets.length > 0 && previewUrl) {
+            const skip = (why: string) => {
+              try {
+                buildDiag.record({
+                  phase: 'preview', severity: 'info', code: 'EXPLORE_REPAIR_SKIPPED', autoResolved: true,
+                  message: `${targets.length} broken control(s) were reported, not repaired: ${why}.`,
+                });
+              } catch { /* best-effort */ }
+            };
+            try {
+              const headroomMs = effectiveBuildSeconds === 0 ? Number.POSITIVE_INFINITY : effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt);
+              const plan = explorerRepairPlan(headroomMs);
+              const canVerify = verifyAfterFixEnabled() && isGreenLatched(workspaceId) && !!actuator.browseUrl;
+              const freeListed = isAgentV3FreeUser(userId, email);
+              const weakTier = String(powerLevelReqEffective) === 'weak';
+              if (plan.repairMs <= 0) skip('not enough build time left for a repair and its check');
+              else if (!canVerify) skip('the result of a repair could not have been checked in a real browser');
+              else {
+                // The allowance is read only when it can matter: a Weak build by a non-free-listed user.
+                const weakAllowed = weakTier && !freeListed ? await explorerRepairBudget.allowed().catch(() => null) : true;
+                const gate = explorerRepairTierGate({ tier: String(powerLevelReqEffective), freeListed, weakAllowed });
+                if (!gate.attempt) skip(gate.reason);
+                else {
+                  // The snapshot is taken HERE and never inside the net — a repair to a working app with
+                  // no way back is not attempted (the green repair's own rule).
+                  const snap = (await collectWorkspaceFiles(actuator, workspaceId)).files;
+                  if (Object.keys(snap).length === 0) skip('no snapshot of the working app could be taken');
+                  else {
+                    if (gate.countAgainstWeakBudget) void explorerRepairBudget.record();
+                    events.emit({ type: 'narration', agent: 'architect', text: `🔧 ${targets.length === 1 ? 'One button' : `${targets.length} buttons`} in your app did not work — fixing ${targets.length === 1 ? 'it' : 'them'}, then pressing every button again to check…`, ts: Date.now() });
+                    const blockWrites = writesToUserDatabase(exploreFiles);
+                    const outcome = await runExplorerRepair(targets, exploreRun, {
+                      repairMs: plan.repairMs,
+                      snapshot: snap,
+                      buildSignal: abort.signal,
+                      repair: async (findings, signal) => {
+                        const runner = new AgentRunner({
+                          ...baseRunnerOpts,
+                          signal,
+                          client: buildTurnRunner(healRunnerOpts()),
+                          model: resolveModel(powerLevelReqEffective),
+                          persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
+                        });
+                        const r = await runInBillingPhase(PHASE_EXPLORER_REPAIR, () => runInPass(EXPLORER_REPAIR_PASS, () => runner.run(judgeRepairPrompt(prompt, findings))));
+                        return !!r?.ok;
+                      },
+                      changedSince: async (s0) => changedWorkspacePaths(s0, (await collectWorkspaceFiles(actuator, workspaceId)).files).length,
+                      renders: async () => {
+                        const shot = await withTimeout(actuator.browseUrl!(workspaceId, previewUrl), 35_000, 'explorer-repair-verify');
+                        const v = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
+                        return v.rendered && !v.inconclusive && !v.serverDown;
+                      },
+                      explore: async () => {
+                        const again = await withTimeout(
+                          actuator.runCommand(workspaceId, clickExplorerScript(previewUrl, { blockWrites })),
+                          EXPLORE_BUDGET_MS + 20_000, 'click-explorer-recheck',
+                        );
+                        return parseExploreOutput(again.stdout);
+                      },
+                      revert: revertToGreenSnapshot,
+                    });
+                    // Only a KEPT repair is the user's to pay for; anything else left their app as it was.
+                    if (!outcome.kept) barrenPhases.add(PHASE_EXPLORER_REPAIR);
+                    try { buildDiag.record({ phase: 'preview', ...explorerRepairOutcomeRecord(outcome) }); } catch { /* best-effort */ }
+                    // Pressed every button again and saw NOTHING broken ⇒ the earlier EXPLORE_FAILED is about
+                    // buttons that now work; clear it so the release gate is not held yellow by it.
+                    if (outcome.kept && outcome.judgement && outcome.judgement.remaining.length === 0) {
+                      try { buildDiag.resolveOnRecheck('EXPLORE_FAILED'); } catch { /* best-effort */ }
+                    }
+                    if (outcome.kept) {
+                      const line = explorerRepairUserLine(outcome);
+                      if (line) result = { ...result, summary: `${result.summary || ''}${line}` };
+                      if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
+                    }
+                    const card = explorerRepairProof(exploreProof ?? proof, outcome);
+                    if (card.headline) exploreProof = card;
+                  }
+                }
+              }
+            } catch (e) {
+              skip(`the repair could not run (${e instanceof Error ? e.message : String(e)})`);
+            }
+          }
         } catch { /* evidence, never a gate — a failure here changes nothing about the build verdict */ }
       }
       try {
@@ -21410,13 +21547,15 @@ async function noteBuildOutcome(
                         catch { repairChanged = undefined; /* could not count ⇒ the old reading, re-verified below */ }
                       }
                     },
-                    reverify: async () => {
+                    // STRICT: a check that THROWS (a browser timeout) proves nothing, and on a working app
+                    // an unproven edit is undone — `verifyAfterFix` alone would KEEP it (strictReverify).
+                    reverify: strictReverify(async () => {
                       if (!repairOk) return false; // unfinished or failed ⇒ undo
                       if (repairChanged === 0) return true; // nothing changed ⇒ it is the version that rendered
                       const shot = await withTimeout(actuator.browseUrl!(workspaceId, lastPreviewUrl), 35_000, 'green-repair-verify');
                       const v = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
                       return v.rendered && !v.inconclusive && !v.serverDown; // unproven ⇒ undo
-                    },
+                    }),
                     revert: revertToGreenSnapshot,
                   });
                   if (vr.kept && repairOk && repairChanged !== 0) {

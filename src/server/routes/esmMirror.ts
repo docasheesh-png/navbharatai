@@ -94,16 +94,22 @@ export async function rewriteAbsoluteImports(body: string): Promise<string> {
   let out = '';
   let last = 0;
   for (const imp of imports) {
-    if (imp.d === -2) continue;                    // import.meta — no specifier
-    // n = the decoded specifier when it is a static string (also set for import("literal")).
-    const spec = imp.n;
+    if (imp.type === 'import-meta') continue;      // import.meta — no specifier
+    // 🔴 A TEMPLATE LITERAL IS NOT A PATH (es-module-lexer 3). v3 reports `import(\`/v135/${x}.mjs\`)` as a
+    // GLOB — each `${…}` collapsed to `*` — where v2 reported no specifier at all. Rewriting it would
+    // replace a path computed at run time with the literal string "/api/esm/v135/*.mjs", and that app's
+    // lazy import would break silently. Only a literal specifier is rewritten, exactly as under v2.
+    if (imp.type === 'dynamic' && imp.glob) continue;
+    // `specifier` = the decoded specifier when it is a static string (also set for import("literal")).
+    const spec = imp.specifier;
     if (!spec || !spec.startsWith('/') || spec.startsWith('//')) continue;
-    // Range convention differs by kind: a STATIC import's [s,e) sits INSIDE the quotes; a DYNAMIC
-    // import("…")'s [s,e) spans the whole argument INCLUDING its quotes — so the dynamic form must
-    // write its own quotes back or the emitted call is import(/path) — a syntax error.
-    const replacement = imp.d >= 0 ? `"/api/esm${spec}"` : `/api/esm${spec}`;
-    out += body.slice(last, imp.s) + replacement;
-    last = imp.e;
+    // Range convention differs by kind: a STATIC import's [start,end) sits INSIDE the quotes; a DYNAMIC
+    // import("…")'s [start,end) spans the whole argument INCLUDING its quotes — so the dynamic form must
+    // write its own quotes back or the emitted call is import(/path) — a syntax error. (Measured against
+    // both 2.3.2 and 3.0.2: the ranges are identical; only the field names and the glob changed.)
+    const replacement = imp.type === 'dynamic' ? `"/api/esm${spec}"` : `/api/esm${spec}`;
+    out += body.slice(last, imp.start) + replacement;
+    last = imp.end;
   }
   if (last === 0) return body;
   return out + body.slice(last);

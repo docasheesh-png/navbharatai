@@ -50,6 +50,14 @@ import { AsyncLocalStorage } from 'node:async_hooks';
  */
 export const PHASE_POST_BUILD_REVIEW = 'post-build-review';
 
+/**
+ * The click explorer's verified repair (explorerRepair.ts, 2026-09-28). Its "delivered nothing" rule
+ * is the repair's own verdict, which exists before the phase does: a repair that is UNDONE — it did
+ * not finish, broke something, or could not be shown to fix anything — left the user's app exactly as
+ * it was, so what it spent is ours. A repair that is kept is billed like the rest of the build.
+ */
+export const PHASE_EXPLORER_REPAIR = 'explorer-repair';
+
 const storage = new AsyncLocalStorage<{ name: string }>();
 
 /**

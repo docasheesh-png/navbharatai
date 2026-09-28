@@ -19,6 +19,12 @@
 //   • did an in-app link land on a page that does not exist?
 //   • did the press throw an uncaught error (or log a real one)?
 //
+// ONE LEVEL DEEPER (same day): a press that worked and changed the screen — a tab, a menu, an in-app
+// link — may have opened an inner screen, and that is where "the first page works, the rest is broken"
+// lives. The controls it revealed (never ones the first screen already had) are pressed too, bounded by
+// MAX_SECOND_LEVEL_CLICKS and MAX_SECOND_LEVEL_PER_PARENT, each reached by pressing its parent UNARMED
+// on a fresh load so nothing the parent does is blamed on the child.
+//
 // 🔒 IT MUST NEVER HARM THE APP OR ITS OWNER, so what it will NOT press is the design, not a detail:
 //   • anything whose name says it deletes, clears, pays, buys, sends, shares, logs out, uploads or
 //     downloads — a check that empties somebody's list to prove the button works is a check nobody
@@ -51,8 +57,18 @@ export const EXPLORE_TOOLS_DIR = '/home/user/.e-tools';
 /** Every result line starts with this — named once, so the parser and the script cannot drift. */
 export const EXPLORE_RESULT_MARKER = 'NBAI_EXPLORE ';
 
-/** How many controls one build may press. Enough to cover a real app's surface; small enough to be quick. */
+/** How many controls on the FIRST screen one build may press. */
 export const MAX_EXPLORE_CLICKS = 12;
+
+/**
+ * How many SECOND-LEVEL controls may be pressed — the buttons that only appear after a tab, a menu or
+ * an in-app link has been opened (2026-09-28). A generated app's inner screens are where "the first
+ * page is fine and everything else is broken" lives, and the first-screen pass never saw them.
+ */
+export const MAX_SECOND_LEVEL_CLICKS = 8;
+
+/** At most this many second-level presses under any one first-level control, so one busy tab cannot spend the budget. */
+export const MAX_SECOND_LEVEL_PER_PARENT = 2;
 
 /** How long one fresh page load may take before that control is given up on. */
 export const EXPLORE_LOAD_TIMEOUT_MS = 12_000;
@@ -120,6 +136,16 @@ export interface PressResult {
   errors: string[];
   /** Whether anything on the page visibly changed — recorded, never judged (a Copy button changes nothing). */
   changed: boolean;
+  /**
+   * The first-screen control pressed to REACH this one, when it is a second-level control. Absent on
+   * a first-screen press. It is a name a person can follow ("open Settings, then press Save").
+   */
+  via?: string;
+}
+
+/** How a press is named to a person: the control, and the screen it was found on when that is not the first. */
+export function pressName(p: Pick<PressResult, 'label' | 'via'>): string {
+  return p.via ? `"${p.label}" (on the "${p.via}" screen)` : `"${p.label}"`;
 }
 
 export interface ExploreSummaryLine {
@@ -172,6 +198,7 @@ export function parseExploreOutput(stdout: string | null | undefined): ExploreRu
         note: String(o.note ?? '').slice(0, 200),
         errors: Array.isArray(o.errors) ? o.errors.slice(0, 3).map((e: unknown) => String(e).slice(0, 200)) : [],
         changed: o.changed === true,
+        ...(typeof o.via === 'string' && o.via.trim() ? { via: o.via.slice(0, 60) } : {}),
       });
     } else if (o.type === 'out-of-time') {
       run.outOfTime = true;
@@ -201,7 +228,7 @@ export function summarizeExplore(run: ExploreRun): ExploreVerdict {
   const presses = run.presses.filter((p) => p.verdict !== 'skipped');
   const failures = presses.filter((p) => FAILING.has(p.verdict));
   const detail = [
-    ...run.presses.map((p) => `${p.verdict.toUpperCase()} "${p.label}" — ${p.note}${p.errors.length ? ` [${p.errors[0]}]` : ''}${p.verdict === 'ok' && !p.changed ? ' (nothing visibly changed)' : ''}`),
+    ...run.presses.map((p) => `${p.verdict.toUpperCase()} ${pressName(p)} — ${p.note}${p.errors.length ? ` [${p.errors[0]}]` : ''}${p.verdict === 'ok' && !p.changed ? ' (nothing visibly changed)' : ''}`),
     ...(run.summary?.skipped ?? []).map((s) => `NOT PRESSED "${s.label}" — ${s.why}`),
     ...(run.outOfTime ? ['Stopped starting new presses: the check reached its own time limit.'] : []),
   ].join('\n');
@@ -222,7 +249,7 @@ export function summarizeExplore(run: ExploreRun): ExploreVerdict {
     };
   }
   if (failures.length > 0) {
-    const names = failures.slice(0, 3).map((f) => `"${f.label}"`).join(', ');
+    const names = failures.slice(0, 3).map(pressName).join(', ');
     return {
       outcome: 'failed', code: 'EXPLORE_FAILED', pressed: presses.length, failures, detail,
       message: `Pressed ${presses.length} control(s) in a real browser; ${failures.length} broke the app: ${names}.`,
@@ -242,10 +269,10 @@ export interface UserProof {
 
 function failureSentence(p: PressResult): string {
   switch (p.verdict) {
-    case 'crashed': return `Pressing "${p.label}" crashed the app into an error screen.`;
-    case 'blank': return `Pressing "${p.label}" left the screen blank.`;
-    case 'broken-link': return `"${p.label}" leads to a page that does not exist.`;
-    default: return `Pressing "${p.label}" caused an error in the app.`;
+    case 'crashed': return `Pressing ${pressName(p)} crashed the app into an error screen.`;
+    case 'blank': return `Pressing ${pressName(p)} left the screen blank.`;
+    case 'broken-link': return `${pressName(p)} leads to a page that does not exist.`;
+    default: return `Pressing ${pressName(p)} caused an error in the app.`;
   }
 }
 
@@ -302,6 +329,8 @@ export function clickExplorerScript(previewUrl: string, opts: { blockWrites: boo
     base,
     marker: EXPLORE_RESULT_MARKER,
     maxClicks: Math.max(1, Math.min(MAX_EXPLORE_CLICKS, opts.maxClicks ?? MAX_EXPLORE_CLICKS)),
+    maxSecond: MAX_SECOND_LEVEL_CLICKS,
+    perParent: MAX_SECOND_LEVEL_PER_PARENT,
     budgetMs: Math.max(10_000, opts.budgetMs ?? EXPLORE_BUDGET_MS),
     loadMs: EXPLORE_LOAD_TIMEOUT_MS,
     blockWrites: opts.blockWrites === true,
@@ -328,6 +357,8 @@ const noise = new RegExp(cfg.noiseSrc, cfg.noiseFlags);
 
 // Runs INSIDE the page. It must mirror pressDecision() exactly — the same regexes are passed in.
 function collect(a) {
+  // A previous collect on this page left its marks; a stale mark would point a press at the wrong control.
+  for (const old of Array.from(document.querySelectorAll('[data-nbai-x]'))) old.removeAttribute('data-nbai-x');
   const never = new RegExp(a.neverSrc, a.neverFlags);
   const writes = new RegExp(a.writeSrc, a.writeFlags);
   const nodes = Array.from(document.querySelectorAll('button, a[href], [role=button], [role=tab], [role=menuitem], [role=link], summary'));
@@ -364,7 +395,7 @@ function collect(a) {
       chosen.push({ i: chosen.length, tag, label, key });
     }
   }
-  return { found: nodes.length, chosen, skipped };
+  return { found: nodes.length, chosen, skipped, keys: Array.from(seen) };
 }
 
 function measure() {
@@ -387,6 +418,72 @@ async function load(page) {
   return resp;
 }
 
+// Wide enough to find controls a first-level press revealed, which may sit beyond the first-screen cap.
+const wide = Object.assign({}, cfg, { maxClicks: 40 });
+
+async function settle(page) {
+  await page.waitForLoadState('networkidle', { timeout: 2500 }).catch(() => {});
+  await page.waitForTimeout(500);
+}
+
+// Presses one control on a fresh load. A second-level control is reached by first pressing its
+// parent, UNARMED: the parent's own behaviour was judged on its own press, so nothing it does here is
+// attributed to the child. Returns the new controls this press revealed when asked to.
+async function pressOne(browser, target, discoverAgainst) {
+  const res = { type: 'press', label: target.label, tag: target.tag, verdict: 'skipped', note: '', errors: [], changed: false };
+  if (target.via) res.via = target.via;
+  const page = await freshPage(browser);
+  let armed = false;
+  let navStatus = 0;
+  let revealed = [];
+  page.on('pageerror', (e) => { if (armed && res.errors.length < 3) res.errors.push(String(e && e.message || e).slice(0, 200)); });
+  page.on('console', (m) => { if (armed && m.type() === 'error') { const t = String(m.text()); if (!noise.test(t) && res.errors.length < 3) res.errors.push(t.slice(0, 200)); } });
+  page.on('response', (r) => { try { if (armed && r.request().isNavigationRequest() && r.frame() === page.mainFrame()) navStatus = r.status(); } catch {} });
+  try {
+    await load(page);
+    if (target.parentKey) {
+      const first = await page.evaluate(collect, wide);
+      const parent = first.chosen.find((c) => c.key === target.parentKey);
+      if (!parent) { res.note = 'the screen it lives on could not be reopened'; await page.close().catch(() => {}); return { res, revealed }; }
+      await page.locator('[data-nbai-x="' + parent.i + '"]').first().click({ timeout: 4000 });
+      await settle(page);
+    }
+    const again = await page.evaluate(collect, target.parentKey ? wide : cfg);
+    const hit = again.chosen.find((c) => c.key === target.key);
+    if (!hit) { res.note = 'the control was not there on a fresh load'; await page.close().catch(() => {}); return { res, revealed }; }
+    const before = await page.evaluate(measure);
+    const beforeUrl = page.url();
+    armed = true;
+    await page.locator('[data-nbai-x="' + hit.i + '"]').first().click({ timeout: 4000 });
+    await settle(page);
+    const overlay = await page.locator('vite-error-overlay, #nextjs-portal, .react-error-overlay').count().catch(() => 0);
+    const after = await page.evaluate(measure).catch(() => null);
+    const moved = page.url() !== beforeUrl;
+    res.changed = moved || !after || after.sig !== before.sig;
+    const missingPage = moved && (navStatus >= 400 || (after && after.len < 300 && /^(cannot get|404\\b|page not found|not found)/i.test(after.head)));
+    if (overlay > 0) { res.verdict = 'crashed'; res.note = 'the app crashed into an error overlay'; }
+    else if (before.len > 0 && after && after.len === 0 && !after.rich) { res.verdict = 'blank'; res.note = 'the screen went blank'; }
+    else if (missingPage) { res.verdict = 'broken-link'; res.note = 'it opened a page that does not exist'; }
+    else if (res.errors.length > 0) { res.verdict = 'error'; res.note = 'the app threw an error when it was pressed'; }
+    else { res.verdict = 'ok'; res.note = moved ? 'it opened another page, which loaded' : 'it responded'; }
+    armed = false;
+    // Only a press that WORKED and CHANGED the screen can open a new screen worth exploring; a broken
+    // one has already been reported, and exploring past it would report its damage a second time.
+    if (discoverAgainst && res.verdict === 'ok' && res.changed) {
+      const next = await page.evaluate(collect, wide).catch(() => null);
+      if (next) revealed = next.chosen.filter((c) => !discoverAgainst.has(c.key));
+    }
+  } catch (e) {
+    // The press itself could not complete (covered, detached, timed out). That is our instrument,
+    // not the app — reported as skipped, never as a failure.
+    res.verdict = 'skipped';
+    res.note = 'could not be pressed: ' + String(e && e.message || e).split('\\n')[0].slice(0, 120);
+  }
+  armed = false;
+  await page.close().catch(() => {});
+  return { res, revealed };
+}
+
 const browser = await chromium.launch({ args: ['--no-sandbox'] });
 try {
   let plan;
@@ -404,46 +501,30 @@ try {
   }
   if (plan) {
     say({ type: 'summary', loaded: true, note: '', found: plan.found, chosen: plan.chosen.length, skipped: plan.skipped });
+    // Every control the first screen carries, pressed or not: a second-level control is one that was
+    // NOT already there, so a header button present on every screen is never pressed twice.
+    const firstScreen = new Set(plan.keys);
+    const second = [];
+    const queued = new Set();
+    let outOfTime = false;
     for (const target of plan.chosen) {
-      if (Date.now() - started > cfg.budgetMs - 8000) { say({ type: 'out-of-time' }); break; }
-      const res = { type: 'press', label: target.label, tag: target.tag, verdict: 'skipped', note: '', errors: [], changed: false };
-      const page = await freshPage(browser);
-      let armed = false;
-      let navStatus = 0;
-      page.on('pageerror', (e) => { if (armed && res.errors.length < 3) res.errors.push(String(e && e.message || e).slice(0, 200)); });
-      page.on('console', (m) => { if (armed && m.type() === 'error') { const t = String(m.text()); if (!noise.test(t) && res.errors.length < 3) res.errors.push(t.slice(0, 200)); } });
-      page.on('response', (r) => { try { if (armed && r.request().isNavigationRequest() && r.frame() === page.mainFrame()) navStatus = r.status(); } catch {} });
-      try {
-        await load(page);
-        const again = await page.evaluate(collect, cfg);
-        const hit = again.chosen.find((c) => c.key === target.key);
-        if (!hit) { res.note = 'the control was not there on a fresh load'; say(res); await page.close().catch(() => {}); continue; }
-        const before = await page.evaluate(measure);
-        const beforeUrl = page.url();
-        armed = true;
-        await page.locator('[data-nbai-x="' + hit.i + '"]').first().click({ timeout: 4000 });
-        await page.waitForLoadState('networkidle', { timeout: 2500 }).catch(() => {});
-        await page.waitForTimeout(500);
-        const overlay = await page.locator('vite-error-overlay, #nextjs-portal, .react-error-overlay').count().catch(() => 0);
-        const after = await page.evaluate(measure).catch(() => null);
-        const moved = page.url() !== beforeUrl;
-        res.changed = moved || !after || after.sig !== before.sig;
-        const missingPage = moved && (navStatus >= 400 || (after && after.len < 300 && /^(cannot get|404\\b|page not found|not found)/i.test(after.head)));
-        if (overlay > 0) { res.verdict = 'crashed'; res.note = 'the app crashed into an error overlay'; }
-        else if (before.len > 0 && after && after.len === 0 && !after.rich) { res.verdict = 'blank'; res.note = 'the screen went blank'; }
-        else if (missingPage) { res.verdict = 'broken-link'; res.note = 'it opened a page that does not exist'; }
-        else if (res.errors.length > 0) { res.verdict = 'error'; res.note = 'the app threw an error when it was pressed'; }
-        else { res.verdict = 'ok'; res.note = moved ? 'it opened another page, which loaded' : 'it responded'; }
-      } catch (e) {
-        // The press itself could not complete (covered, detached, timed out). That is our instrument,
-        // not the app — reported as skipped, never as a failure.
-        res.verdict = 'skipped';
-        res.note = 'could not be pressed: ' + String(e && e.message || e).split('\\n')[0].slice(0, 120);
-      }
-      armed = false;
+      if (Date.now() - started > cfg.budgetMs - 8000) { outOfTime = true; break; }
+      const { res, revealed } = await pressOne(browser, target, firstScreen);
       say(res);
-      await page.close().catch(() => {});
+      let taken = 0;
+      for (const c of revealed) {
+        if (taken >= cfg.perParent || queued.has(c.key)) continue;
+        queued.add(c.key);
+        second.push({ key: c.key, label: c.label, tag: c.tag, parentKey: target.key, via: target.label });
+        taken++;
+      }
     }
+    for (const target of second.slice(0, cfg.maxSecond)) {
+      if (outOfTime || Date.now() - started > cfg.budgetMs - 8000) { outOfTime = true; break; }
+      const { res } = await pressOne(browser, target, null);
+      say(res);
+    }
+    if (outOfTime) say({ type: 'out-of-time' });
   }
 } finally {
   await browser.close().catch(() => {});

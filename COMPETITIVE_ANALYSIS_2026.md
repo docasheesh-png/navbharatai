@@ -158,7 +158,7 @@ Every check we ran after a build watched the app **paint**, or drove **one** der
   - Its **safety rules are written down and tested**: it never presses delete, pay, send, upload or log out, never submits forms, never leaves the app, and never writes to a database the user owns.
   - The user sees a **per-button** result, in plain language.
 - **Behind on:** Replit's tester also **fixes** what it finds. Ours reports it and offers the fix as the next step, one tap. Wiring the finding into a bounded, verified repair pass is the obvious follow-up, and it is a **spend decision** for the admin (on Weak, NavBharatAI pays).
-- **Not covered yet:** only the home screen's controls are pressed. Controls inside a modal or on another page are not reached, and multi-step flows are the journey check's job.
+- **Not covered yet:** ~~only the home screen's controls are pressed~~ — since the second-level pass (same day) the controls a tab, menu or in-app link reveals are pressed too, up to 8, two per parent. Still not reached: a third level, and multi-step flows, which are the journey check's job.
 
 ### 5.4 Where NavBharatAI is ahead now (re-verified against code 2026-09-28)
 

@@ -79,7 +79,9 @@ describe('the shape is fixed AT THE DOOR, not at each reader', () => {
   it('both session sources are normalized as they arrive', () => {
     // Firestore and localStorage. Neither is under our control at read time.
     expect(history).toContain('shapeSessions(snapshot.docs.map(');
-    expect(history).toContain("shapeSessions(JSON.parse(localStorage.getItem('navbharat_sessions')");
+    // The device copy is read through the owner check since 2026-09-28 (lib/deviceSessions.ts), and it is
+    // still shaped at the door — the same guarantee, one step further from raw storage.
+    expect(history).toContain('shapeSessions(readDeviceSessionsFor(uid))');
   });
 
   it('the crash site reads the normalized value', () => {

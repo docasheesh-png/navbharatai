@@ -3409,7 +3409,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     >
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-line text-muted">
-                          {r.target?.kind === 'app' ? 'App' : r.target?.kind === 'user' ? 'User' : problemKindLabel(r.problemKind) || 'Problem'}
+                          {r.target?.kind === 'app' ? 'App' : r.target?.kind === 'user' ? 'User' : r.target?.kind === 'ai' ? 'AI content' : problemKindLabel(r.problemKind) || 'Problem'}
                         </span>
                         {/* 🔴 THE REPLY BADGE OUTRANKS THE STATUS BADGE, and that ordering is the
                             point: a report the admin marked "reviewed" and the user then answered is

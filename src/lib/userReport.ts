@@ -11,7 +11,13 @@
 import type { OverflowFinding } from './reportDiagnostics';
 
 /** What is being reported. */
-export type ReportTargetKind = 'app' | 'user' | 'bug';
+/**
+ * `ai` — a piece of AI-GENERATED content (a picture or a reply) the user found offensive. Google Play's
+ * AI-Generated Content policy requires in-app reporting of exactly this (rejection 2026-09-28: "we
+ * allow apps that prohibit and prevent the generation of Restricted Content AND contain in-app user
+ * reporting/flagging features"). It carries no `id`: the content is attached to the report itself.
+ */
+export type ReportTargetKind = 'app' | 'user' | 'bug' | 'ai';
 
 export interface ReportTarget {
   kind: ReportTargetKind;
@@ -292,7 +298,7 @@ export function validateReport(input: {
   }
 
   const kindRaw = typeof input.targetKind === 'string' ? input.targetKind : 'bug';
-  if (kindRaw !== 'app' && kindRaw !== 'user' && kindRaw !== 'bug') {
+  if (kindRaw !== 'app' && kindRaw !== 'user' && kindRaw !== 'bug' && kindRaw !== 'ai') {
     return { ok: false, error: 'That is not something that can be reported.' };
   }
   const kind = kindRaw as ReportTargetKind;
@@ -334,7 +340,10 @@ export function validateReport(input: {
  */
 export function reportHeadline(r: Pick<UserReport, 'target' | 'message'> & { problemKind?: ProblemKind }): string {
   const kindLabel = problemKindLabel(r.problemKind);
-  const what = r.target.kind === 'app' ? 'App' : r.target.kind === 'user' ? 'User' : (kindLabel || 'Problem');
+  const what = r.target.kind === 'app' ? 'App'
+    : r.target.kind === 'user' ? 'User'
+      : r.target.kind === 'ai' ? 'AI content'
+        : (kindLabel || 'Problem');
   const first = r.message.replace(/\s+/g, ' ').trim().slice(0, 80);
   return `${what} · ${first}${r.message.length > 80 ? '…' : ''}`;
 }
@@ -411,3 +420,45 @@ export function unreadReportCount(reports: readonly Pick<UserReport, 'messages' 
 export function sortReportsByActivity<T extends Pick<UserReport, 'at' | 'messages'>>(reports: readonly T[]): T[] {
   return [...reports].sort((a, b) => lastActivityAt(b) - lastActivityAt(a));
 }
+
+/**
+ * Why a person flags AI output. The first is what Google rejected the app over; the rest are the other
+ * classes of Restricted Content its policy names. One tap, so the admin sees the reason without reading.
+ */
+export const AI_REPORT_REASONS = [
+  { id: 'sexual', label: 'Sexual or nude' },
+  { id: 'hateful', label: 'Hateful or abusive' },
+  { id: 'violent', label: 'Violent or dangerous' },
+  { id: 'false', label: 'False or misleading' },
+  { id: 'other', label: 'Something else' },
+] as const;
+
+export type AiReportReason = typeof AI_REPORT_REASONS[number]['id'];
+
+/** Longest excerpt of the flagged content carried in the message — enough to recognise it, bounded. */
+export const AI_REPORT_EXCERPT_MAX = 1200;
+
+/**
+ * The report text for a flagged piece of AI output. PURE. Always at least `MESSAGE_MIN` long, so a
+ * person who only taps a reason still sends a valid report — the reason IS the report.
+ */
+export function aiReportMessage(input: {
+  surface: 'image' | 'reply';
+  reason: AiReportReason;
+  note?: string;
+  /** The prompt behind an image, or the reply's own text. */
+  content?: string;
+}): string {
+  const label = AI_REPORT_REASONS.find((r) => r.id === input.reason)?.label ?? 'Something else';
+  const what = input.surface === 'image' ? 'AI image' : 'AI reply';
+  const lines = [`Reported ${what}: ${label}.`];
+  const note = String(input.note ?? '').trim();
+  if (note) lines.push(`Note: ${note}`);
+  const content = String(input.content ?? '').replace(/\s+/g, ' ').trim();
+  if (content) {
+    const cut = content.length > AI_REPORT_EXCERPT_MAX ? `${content.slice(0, AI_REPORT_EXCERPT_MAX)}…` : content;
+    lines.push(`${input.surface === 'image' ? 'Prompt' : 'Reply'}: ${cut}`);
+  }
+  return lines.join('\n').slice(0, MESSAGE_MAX);
+}
+

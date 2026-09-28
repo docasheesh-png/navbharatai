@@ -38,6 +38,7 @@ import { ComposerShell, COMPOSER_PANEL_CLASS, COMPOSER_ICON_CLASS, COMPOSER_SEND
 import { AttachMenu } from '../AttachMenu';
 import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
 import { MessageEditActions } from '../chat/MessageEditActions';
+import { ReportAiContent } from '../chat/ReportAiContent';
 import { filterMessages, enterShouldSend, readSendOnEnter, searchActive } from '../../lib/chatToolbar';
 import { deleteMessage, editMessage } from '../../lib/chatMessageActions';
 
@@ -1168,9 +1169,21 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
                     <Wallet className="w-3.5 h-3.5" /> Add credit
                   </button>
                 )}
-                <p className="text-[8px] text-faint mt-2 text-right">
-                  {msg.timestamp instanceof Date ? msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                </p>
+                <div className="mt-2 flex items-center justify-end gap-2">
+                  {/* REPORT an AI reply (Play AI-Generated Content policy, rejection 2026-09-28). */}
+                  {msg.sender === 'sda' && (
+                    <ReportAiContent
+                      surface="reply"
+                      content={String(msg.text ?? '')}
+                      view="sda_chat"
+                      className="p-0.5 rounded text-faint hover:text-danger opacity-70"
+                      iconClassName="w-2.5 h-2.5"
+                    />
+                  )}
+                  <p className="text-[8px] text-faint text-right">
+                    {msg.timestamp instanceof Date ? msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                  </p>
+                </div>
               </div>
               {msg.sender === 'doctor' && (
                 <div className="flex flex-col items-center shrink-0 ml-2.5 mt-0.5 group/msg">

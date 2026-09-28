@@ -83458,3 +83458,25 @@ Tests:
 - A live ₹ figure during the build (G10).
 - Connectors via short-lived credentials (G6).
 - Expo/native UI (G7).
+
+## 2026-09-28 — The click explorer goes one screen deeper
+
+**Asked (admin):** *"continue"* — after #3368 merged. Chosen: the explorer's own open item, "controls on another page are not reached". It is the zero-spend lever; the two others are the admin's decisions (below).
+
+**Built:** second-level exploration in `clickExplorer.ts`.
+- **How it works:** a first-screen press that worked and changed the screen is collected again. The controls it revealed, never ones the first screen had, are queued.
+- **Limits:** up to 8 of them, at most 2 per parent.
+- **Each press:** a fresh load, the parent pressed unarmed, then the child judged by the same four questions.
+- **Reporting:** a failure names its screen (`pressName`: *"Refresh" (on the "Reports" screen)*).
+- **What did not change:** budget, codes, wiring, and the never-press rules.
+
+**Caught before it shipped:** the first draft wrote `404\b` and `'\n'` with single backslashes in the TypeScript template. That became a backspace and a raw newline in the generated script. The backspace breaks the missing-page regex silently, and `node --check` cannot see it. Fixed, and a test now rejects any raw control character in the module.
+
+**Verified in real Chromium:** "Tab two" reveals Refresh (throws → `error`), Sort by name (`ok`), Remove row (never pressed) and Show more (past the per-parent cap). The Help page reveals a throwing button (`error`). No first-screen control is pressed twice.
+- Tests: 28.
+- Reversion-proven: removing discovery fails the real-browser test and a source guard; a single backslash fails the control-character test.
+
+**Still open — admin decisions, not started:**
+- **Explorer → verified repair.** This is spend: NavBharatAI pays on Weak.
+- **A live ₹ figure during the build (G10).** This is a billing-display product decision.
+

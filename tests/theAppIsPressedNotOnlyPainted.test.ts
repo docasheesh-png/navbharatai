@@ -7,8 +7,9 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
   pressDecision, parseExploreOutput, summarizeExplore, exploreUserSummary, mergeUserProofs,
-  clickExplorerScript, clickExplorerModule, clickExplorerEnabled,
+  clickExplorerScript, clickExplorerModule, clickExplorerEnabled, pressName,
   EXPLORE_RESULT_MARKER, NEVER_PRESS, WRITE_VERBS, CONSOLE_NOISE,
+  MAX_SECOND_LEVEL_CLICKS, MAX_SECOND_LEVEL_PER_PARENT,
 } from '../src/server/AgentV3/clickExplorer';
 
 /**
@@ -113,6 +114,19 @@ describe('three outcomes, never two', () => {
     expect(card.steps[1]).toContain('other 1');
   });
 
+  it('a control found on an inner screen is named with the screen it was on', () => {
+    const run = parseExploreOutput([summaryLine(), press(), press({ label: 'Refresh', verdict: 'error', via: 'Reports' })].join('\n'));
+    expect(run.presses[0].via).toBeUndefined();
+    expect(run.presses[1].via).toBe('Reports');
+    expect(pressName(run.presses[1])).toBe('"Refresh" (on the "Reports" screen)');
+    const v = summarizeExplore(run);
+    expect(v.message).toContain('"Refresh" (on the "Reports" screen)');
+    expect(exploreUserSummary(v).steps[0]).toBe('Pressing "Refresh" (on the "Reports" screen) caused an error in the app.');
+    // A blank or non-string via is not a screen name.
+    expect(parseExploreOutput(press({ via: '   ' })).presses[0].via).toBeUndefined();
+    expect(parseExploreOutput(press({ via: 7 })).presses[0].via).toBeUndefined();
+  });
+
   it('drops malformed lines rather than guessing', () => {
     const run = parseExploreOutput([`${EXPLORE_RESULT_MARKER}{not json`, press({ verdict: 'exploded' }), summaryLine()].join('\n'));
     expect(run.presses).toHaveLength(0);
@@ -145,8 +159,26 @@ describe('the runner itself', () => {
   it('the generated module is valid JavaScript (node --check)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'nbai-explore-'));
     const file = join(dir, 'run.mjs');
-    writeFileSync(file, clickExplorerModule({ base: 'http://x/', marker: EXPLORE_RESULT_MARKER, maxClicks: 3, budgetMs: 10_000, loadMs: 1000, blockWrites: false, neverSrc: NEVER_PRESS.source, neverFlags: 'i', writeSrc: WRITE_VERBS.source, writeFlags: 'i', noiseSrc: CONSOLE_NOISE.source, noiseFlags: 'i' }));
+    writeFileSync(file, clickExplorerModule({ base: 'http://x/', marker: EXPLORE_RESULT_MARKER, maxClicks: 3, maxSecond: 2, perParent: 1, budgetMs: 10_000, loadMs: 1000, blockWrites: false, neverSrc: NEVER_PRESS.source, neverFlags: 'i', writeSrc: WRITE_VERBS.source, writeFlags: 'i', noiseSrc: CONSOLE_NOISE.source, noiseFlags: 'i' }));
     expect(() => execFileSync(process.execPath, ['--check', file])).not.toThrow();
+  });
+  it('carries no raw control character — a single backslash in the source template becomes one', () => {
+    // `node --check` cannot see this: "\\b" written as "\b" in the TypeScript template is a BACKSPACE in
+    // the generated regex, which parses fine and silently never matches "404".
+    const mod = clickExplorerModule({ base: 'http://x/' });
+    expect(mod).not.toMatch(/[\u0000-\u0008\u000b-\u001f]/);
+    expect(mod).toContain('404\\b');
+  });
+  it('explores one level deeper, bounded, and never re-presses a control the first screen already had', () => {
+    const cfg = JSON.parse(clickExplorerScript('http://x/', { blockWrites: false }).match(/const cfg = (\{.*\});/)![1]);
+    expect(cfg.maxSecond).toBe(MAX_SECOND_LEVEL_CLICKS);
+    expect(cfg.perParent).toBe(MAX_SECOND_LEVEL_PER_PARENT);
+    expect(MAX_SECOND_LEVEL_PER_PARENT).toBeLessThan(MAX_SECOND_LEVEL_CLICKS);
+    const mod = clickExplorerModule({ base: 'http://x/' });
+    expect(mod).toContain('pressOne(browser, target, firstScreen)');
+    expect(mod).toContain('second.slice(0, cfg.maxSecond)');
+    // Only a press that worked and changed the screen is explored past.
+    expect(mod).toMatch(/discoverAgainst && res\.verdict === 'ok' && res\.changed/);
   });
   it('runs through the shared run line, so the browser path and the diagnostic tail come with it', () => {
     const script = clickExplorerScript('http://x/', { blockWrites: false });
@@ -193,7 +225,7 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
   const pages: Record<string, string> = {
     '/': `<!doctype html><html lang="en"><head><title>t</title></head><body><div id="root">
 <h1>Demo</h1><p id="msg">home</p>
-<button onclick="document.getElementById('msg').textContent='two'">Tab two</button>
+<button onclick="openTab()">Tab two</button>
 <button onclick="null.boom()">Open stats</button>
 <button onclick="document.getElementById('root').innerHTML=''">Settings</button>
 <button onclick="document.body.appendChild(document.createElement('vite-error-overlay'))">Reports view</button>
@@ -203,8 +235,18 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
 <button onclick="document.getElementById('msg').textContent='added'">Add item</button>
 <form><input name="q" aria-label="q"><button>Go</button></form>
 <a href="https://example.com">Docs</a>
-</div></body></html>`,
-    '/help': '<!doctype html><html><body><div id="root"><h1>Help page</h1></div></body></html>',
+<div id="panel"></div>
+</div>
+<script>
+function openTab() {
+  document.getElementById('msg').textContent = 'two';
+  // An inner screen: one control that throws, one that is fine, one that must never be pressed, a
+  // third safe one past the per-screen cap, and a first-screen control repeated (must not be re-pressed).
+  document.getElementById('panel').innerHTML = '<button id="r">Refresh</button><button>Sort by name</button><button>Remove row</button><button>Show more</button>';
+  document.getElementById('r').onclick = function () { null.refresh(); };
+}
+</script></body></html>`,
+    '/help': '<!doctype html><html><body><div id="root"><h1>Help page</h1><button onclick="window.nope()">Show answers</button></div></body></html>',
   };
   beforeAll(async () => {
     server = http.createServer((q, r) => {
@@ -221,7 +263,7 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
     const dir = mkdtempSync(join(tmpdir(), 'nbai-explore-real-'));
     const file = join(dir, 'run.mjs');
     writeFileSync(file, clickExplorerModule({
-      base, marker: EXPLORE_RESULT_MARKER, maxClicks: 12, budgetMs: 60_000, loadMs: 10_000, blockWrites,
+      base, marker: EXPLORE_RESULT_MARKER, maxClicks: 12, maxSecond: MAX_SECOND_LEVEL_CLICKS, perParent: MAX_SECOND_LEVEL_PER_PARENT, budgetMs: 60_000, loadMs: 10_000, blockWrites,
       neverSrc: NEVER_PRESS.source, neverFlags: NEVER_PRESS.flags, writeSrc: WRITE_VERBS.source, writeFlags: WRITE_VERBS.flags,
       noiseSrc: CONSOLE_NOISE.source, noiseFlags: CONSOLE_NOISE.flags,
     }, `import playwright from '${PW}';\nconst { chromium } = playwright;`));
@@ -233,11 +275,15 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
 
   it('judges each control correctly and never presses the unsafe ones', async () => {
     const run = await explore(false);
-    const by = Object.fromEntries(run.presses.map((p) => [p.label, p.verdict]));
+    const by = Object.fromEntries(run.presses.map((p) => [p.via ? `${p.via} > ${p.label}` : p.label, p.verdict]));
     expect(by).toEqual({
       'Tab two': 'ok', 'Open stats': 'error', Settings: 'blank', 'Reports view': 'crashed',
       'About us': 'broken-link', Help: 'ok', 'Add item': 'ok',
+      // The second level: what "Tab two" and the Help page revealed. "Remove row" is never pressed,
+      // "Show more" is past the per-screen cap, and no first-screen control is pressed twice.
+      'Tab two > Refresh': 'error', 'Tab two > Sort by name': 'ok', 'Help > Show answers': 'error',
     });
+    expect(run.presses.map((p) => p.label)).not.toContain('Remove row');
     const skipped = run.summary!.skipped.map((s) => s.label);
     expect(skipped).toEqual(expect.arrayContaining(['Delete all', 'Go', 'Docs']));
     expect(summarizeExplore(run).code).toBe('EXPLORE_FAILED');

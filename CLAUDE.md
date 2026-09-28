@@ -3056,6 +3056,16 @@ the flag entries above promise.
   failure belongs to exactly one control), recording an error overlay, a blank root, an in-app link that
   lands on a missing page, or an uncaught error. **No model call.** Measured on a local test page: seven
   presses in ~10 s.
+  🪜 **ONE LEVEL DEEPER (2026-09-28, same day):** a first-screen press that WORKED and CHANGED the screen
+  (a tab, a menu, an in-app link) is looked at again, and the controls it revealed — never ones the first
+  screen already had — are pressed too: up to **8** more (`MAX_SECOND_LEVEL_CLICKS`), at most **2** under
+  any one parent (`MAX_SECOND_LEVEL_PER_PARENT`), each on a fresh load with the parent pressed UNARMED
+  first so nothing the parent does is blamed on the child. The same never-press rules apply. A failure is
+  named with its screen (*"Pressing "Refresh" (on the "Reports" screen) …"*). The 75 s budget is
+  unchanged, so first-screen presses always go first and a slow app loses depth, never coverage.
+  ⚠️ **THE RUNNER IS A TS TEMPLATE, SO EVERY BACKSLASH IS DOUBLED** — a single `\b` reaches the page as a
+  backspace, parses fine, and silently never matches. `node --check` cannot see it; a test now fails on
+  any raw control character in the generated module.
   🔒 **WHAT IT WILL NOT PRESS IS THE DESIGN:** any name matching `NEVER_PRESS` (delete, clear, pay, buy,
   checkout, send, share, upload, download, log out, …), a form's submit (the journey owns forms), a link
   out of the app (another origin, `mailto:`/`tel:`, a new tab, a download), a control with no readable

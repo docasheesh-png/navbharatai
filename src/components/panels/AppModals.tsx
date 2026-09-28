@@ -1,7 +1,6 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { ExternalLink, ShieldCheck, Sparkles, X, Clock, Link as LinkIcon, AlertCircle, Settings, Globe, Lock } from 'lucide-react';
+import { ExternalLink, ShieldCheck, Sparkles, X, AlertCircle, Settings, Globe, Lock } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
-import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
 import { AuthComponent } from '../AuthComponent';
 import { PROVIDER_CONFIG } from '../../types';
@@ -18,15 +17,6 @@ export interface AppModalsProps {
   githubRedirectingMessage: string | null;
   githubDebugData: { oauthUrl?: string; redirectUri?: string; currentDomain?: string; callbackUrl?: string } | null;
   setGithubRedirectingMessage: (v: string | null) => void;
-  // UCI continuation modal
-  showContinueModal: boolean;
-  setShowContinueModal: (v: boolean) => void;
-  setRestoreUciError: (v: string) => void;
-  setResumeUciInputState: (v: string) => void;
-  resumeUciInputState: string;
-  restoreUciError: string;
-  handleRestoreByUci: () => void;
-  isRestoringUci: boolean;
   // Firebase OAuth error
   firebaseOauthError: { errorType: string; message: string; suggestions: string } | null;
   setFirebaseOauthError: (v: { errorType: string; message: string; suggestions: string } | null) => void;
@@ -59,8 +49,6 @@ export interface AppModalsProps {
 export function AppModals({
   showAuth, auth, setUser, onCloseAuth,
   githubRedirectingMessage, githubDebugData, setGithubRedirectingMessage,
-  showContinueModal, setShowContinueModal, setRestoreUciError, setResumeUciInputState,
-  resumeUciInputState, restoreUciError, handleRestoreByUci, isRestoringUci,
   firebaseOauthError, setFirebaseOauthError,
   pendingProvider, setPendingProvider, pendingKey, setPendingKey, handleKeySave,
   showCheckoutModal, setShowCheckoutModal, paymentSession, user, verifyBillingPayment,
@@ -153,84 +141,6 @@ export function AppModals({
                     className="px-4 py-3 bg-raised hover:bg-raised-hover active:scale-95 border border-line text-ink rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer text-center"
                   >
                     Dismiss
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* UCI Continuation Modal */}
-      <AnimatePresence>
-        {showContinueModal && (
-          <div className="absolute inset-0 bg-surface backdrop-blur-md flex items-center justify-center p-4 z-50">
-            <motion.div
-              initial={{ scale: 0.95, y: 15, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              exit={{ scale: 0.95, y: 15, opacity: 0 }}
-              className="w-full max-w-sm bg-card border border-indigo-500/15 rounded-3xl p-6 space-y-4 shadow-3xl relative select-none"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-accent-text animate-pulse" />
-                  <span className="text-[10px] font-black uppercase tracking-[0.15em] text-ink">Restore Previous Session</span>
-                </div>
-                <button
-                  onClick={() => {
-                    setShowContinueModal(false);
-                    setRestoreUciError('');
-                    setResumeUciInputState('');
-                  }}
-                  className="p-1.5 hover:bg-raised rounded-lg text-muted hover:text-ink transition-all text-sm font-bold"
-                >
-                  ✕
-                </button>
-              </div>
-
-              <div className="space-y-1.5">
-                <p className="text-[9px] text-muted leading-relaxed">
-                  Enter your encrypted representation chat ID. This restores complete historic context, matching memory parameters, and file configurations in an instant.
-                </p>
-              </div>
-
-              <div className="space-y-3">
-                <input
-                  type="text"
-                  placeholder="Paste Universal Chat ID (UCI) ..."
-                  value={resumeUciInputState}
-                  onChange={(e) => setResumeUciInputState(e.target.value)}
-                  className="w-full bg-surface border border-line rounded-xl p-3 text-xs font-mono text-accent-text placeholder:text-faint focus:border-indigo-500 outline-none transition-all shadow-inner"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleRestoreByUci();
-                  }}
-                  autoFocus
-                />
-
-                {restoreUciError && (
-                  <p className="text-[9px] text-danger font-bold tracking-wide animate-pulse flex items-center gap-1">
-                    ⚠️ {restoreUciError}
-                  </p>
-                )}
-
-                <div className="flex items-center justify-end gap-2 pt-2">
-                  <button
-                    onClick={() => {
-                      setShowContinueModal(false);
-                      setRestoreUciError('');
-                      setResumeUciInputState('');
-                    }}
-                    className="px-3.5 py-2 hover:bg-raised text-muted hover:text-ink rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleRestoreByUci}
-                    disabled={isRestoringUci || !resumeUciInputState.trim()}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-on-accent rounded-xl text-[9px] font-black uppercase tracking-widest transition-all disabled:opacity-30 disabled:pointer-events-none active:scale-95 flex items-center gap-1"
-                  >
-                    {isRestoringUci ? <TirangaLoader className="w-3.5 h-3.5" /> : <LinkIcon className="w-3.5 h-3.5" />}
-                    Restore Workspace
                   </button>
                 </div>
               </div>

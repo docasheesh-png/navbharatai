@@ -5,7 +5,7 @@ import { cn } from '../../lib/utils';
 import { shouldShowDownloadApp, apkDownloadUrl } from '../../lib/appDownload';
 import { TextSizeSlider } from './TextSizeSlider';
 import type { ThemeMode } from '../../lib/theme';
-import type { ViewType, ChatSession } from '../../types';
+import type { ViewType } from '../../types';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { TOP_UP_DOT_LABEL } from '../../lib/walletNeedsTopUp';
 
@@ -67,11 +67,6 @@ export interface SidebarNavProps {
    * `walletNeedsTopUp`, so this row, the ☰ button and the Billing screen cannot disagree.
    */
   walletNeedsTopUp?: boolean;
-  /** Reopen a past chat (routes v5.0 → Pro v5.0, others → their own surface). Unused by this
-   *  component (the "Recent Chats" menu block was removed 2026-07-01, admin request) — kept on the
-   *  props interface only so App.tsx's existing call site doesn't need touching. */
-  sessions?: ChatSession[];
-  onResumeSession?: (session: ChatSession) => void;
 }
 
 function NavItem({

@@ -349,6 +349,9 @@ declare module 'lucide-react' {
   export const Building2: Icon;
   export const GripVertical: Icon;
   export const Pencil: Icon;
+  export const Pin: Icon;
+  export const PinOff: Icon;
+  export const SquarePen: Icon;
   export const Lightbulb: Icon;
   export const BarChart: Icon;
   export const PieChart: Icon;

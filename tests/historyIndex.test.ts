@@ -64,10 +64,11 @@ describe('the index carries no user CONTENT — that is what makes it small', ()
 
   it('keeps every field the list actually filters on', () => {
     const row = toIndexRow(session({
-      uci: 'u-1', agent: 'agentv3', current_agent: 'pro', original_agent: 'free',
+      customTitle: 'My chat', agent: 'agentv3', current_agent: 'pro', original_agent: 'free',
       tab: 'engine_builder', mode: 'build', isPinned: true,
     }))!;
-    for (const k of ['uci', 'agent', 'current_agent', 'original_agent', 'tab', 'mode'] as const) {
+    // `uci` is gone with the chat-ID system (2026-09-28); `customTitle` is what a Rename writes.
+    for (const k of ['customTitle', 'agent', 'current_agent', 'original_agent', 'tab', 'mode'] as const) {
       expect(row[k], `${k} is read by a filter and must survive`).toBeTruthy();
     }
     expect(row.isPinned).toBe(true);

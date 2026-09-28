@@ -131,6 +131,9 @@ export interface ViewPanelsProps {
   toggleTab: (view: ViewType) => void;
   /** Open the ONE mode picker (admin 2026-09-21); undefined on a phone, where the bottom bar has it. */
   onOpenModePicker?: (() => void) | undefined;
+  /** The image studio's windows (admin 2026-09-28) and the one on screen — see lib/chatWindows.ts. */
+  imageWindowIds?: readonly string[];
+  imageWindowOnScreen?: string;
   /** Opens chat history from a composer's left column; absent while the phone's bottom bar carries it. */
   onOpenHistory?: (() => void) | undefined;
   updatePreview: (files: any) => void;
@@ -197,6 +200,7 @@ export function ViewPanels({
   user, activeAgent, mode, setMode, isAppBuilt, theme, setTheme,
   messages, input, setInput, setProInput, isLoading, activeIntent,
   handleSendForTab, toggleTab, onOpenModePicker, onOpenHistory, updatePreview, addLog, addToast,
+  imageWindowIds, imageWindowOnScreen,
   handleAgentChange, githubToken, githubUser, githubRepoContext, isGHSyncing,
   pendingGHEdit, handleGHConfirmPush, isPushing, connectGitHub, disconnectGitHub,
   pushToRepo, firebaseToken, firebaseUser, connectFirebase, disconnectFirebase,
@@ -651,13 +655,15 @@ export function ViewPanels({
       )}
 
       {/* Phase 9 — AI Image Generator */}
-      {activeView === 'imagegen' && (
-        <div className="flex-1 h-full overflow-hidden">
+      {/* One window is exactly today's screen. Several (admin 2026-09-28) are all mounted while the studio
+          is on screen, one visible, so switching between them keeps each window's prompt and pictures. */}
+      {activeView === 'imagegen' && (imageWindowIds && imageWindowIds.length > 0 ? imageWindowIds : ['main']).map((wid) => (
+        <div key={wid} className={imageWindowIds && imageWindowIds.length > 1 && wid !== imageWindowOnScreen ? 'hidden' : 'flex-1 h-full overflow-hidden'}>
           <AIImageGenerator onOpenModePicker={onOpenModePicker} onOpenHistory={onOpenHistory} onImageGenerated={(url: string, prompt: string) => {
             setGeneratedCode(generatedCode + `\n<!-- Generated Image: ${prompt} -->\n<img src="${url}" alt="${prompt}" style="max-width:100%;border-radius:12px;" />`);
           }} />
         </div>
-      )}
+      ))}
 
       {/* Phase 9 — Code Versioning */}
       {activeView === 'versioning' && (

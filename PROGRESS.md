@@ -83588,6 +83588,27 @@ entry (e.g. src/main.jsx) referenced by index.html"*, with *"user app bana hi na
 - **The Weak allowance of 100/day is a starting point, not a measurement.** Read the `EXPLORE_REPAIR*` codes on real builds before changing it.
 - **The repair can only fix what the explorer may press.** Delete, pay, send, upload and logout controls are never pressed, so a broken one is neither found nor repaired. That is the design, and it is a real limit.
 
+## 2026-09-28 — Every AI opens several windows, and every Recent row has an ✕
+
+Admin (screenshot of the Mode list): *"navbharatai free aur image generate ai free, bas 1 hi open ho rhe hai,
+waki sabhi professional 2-2 open ho ja rahe hai. sabhi ko ek jaisa karo! aur sabhi ke end me x (close)
+button bana do"*. Asked which way to make them alike, the admin chose **several windows for every AI**.
+
+- `lib/chatWindows.ts`: FREE, the image studio and Doctor AI hold windows in their own list (`viewWindows`),
+  same shape as a professional's. A view with no entry has one implicit window (`DEFAULT_VIEW_WINDOW`), so
+  nothing changes until a second is opened. The five-chat cap counts every window except the first FREE one.
+- `modePicker.ts`: Recent lists one row per window, numbered ("NavBharatAI FREE (2)"); **every row is
+  closable** — this reverses 2026-09-22's "FREE has no ✕". A FREE ✕ closes that one window, and when it is
+  the only one the chat restarts fresh; it never closes the FREE tab or the chats inside it.
+- `App.tsx`: FREE's state lives in App, so a second FREE window is a **swap** of that state (snapshots in a
+  ref), refused while a reply is still arriving (the reply writes into the one state). A FREE chat with
+  nothing typed is reused rather than duplicated. Image and Doctor windows stay mounted while there are
+  several; Doctor AI's first window's case pointer is restored when it is the only one again.
+- Verified in a real browser (mobile viewport): two image windows with ✕ each; two FREE windows keep their
+  own conversation and switch back; closing the one on screen shows the other.
+- Test: `tests/everyAiOpensSeveralWindows.test.ts`; pinned tests updated to the new rules.
+- ⚠️ Windows are not kept across a reload (true of professional windows too); a signed-in user's FREE
+  conversations remain in History.
 ---
 
 ## 2026-09-28 — "Report" on every piece of AI output (Play AI-Generated Content policy)

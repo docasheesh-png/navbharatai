@@ -6753,6 +6753,7 @@ function WorkingIndicator({ activity, running, progress, costInr }: { activity: 
   const startTs = activity.length ? activity[0].ts : mountTsRef.current;
   const endTs = running ? nowTick : (activity.length ? activity[activity.length - 1].ts : startTs);
   const cost = liveCostLabel(costInr);
+  const [costInfoOpen, setCostInfoOpen] = useState(false);
   const elapsed = fmtElapsed(endTs - startTs);
 
   // Current action: the newest still-in-flight tool, else the newest entry.
@@ -6778,10 +6779,24 @@ function WorkingIndicator({ activity, running, progress, costInr }: { activity: 
         {/* WHAT IT HAS COST SO FAR (admin 2026-09-28). Sent by the server only to someone who will be
             charged, priced by the final bill's own function — see liveBuildCost.ts and liveCostLabel.ts. */}
         {running && cost && (
-          <span className="shrink-0 tabular-nums text-muted" title={cost.explanation} aria-label={cost.explanation}>{cost.text}</span>
+          <button
+            type="button"
+            onClick={() => setCostInfoOpen((v) => !v)}
+            aria-expanded={costInfoOpen}
+            aria-label={cost.explanation}
+            title={cost.explanation}
+            className="shrink-0 tabular-nums text-muted underline decoration-dotted underline-offset-2"
+          >
+            {cost.text}
+          </button>
         )}
         <span className="shrink-0 tabular-nums text-faint">{elapsed}</span>
       </div>
+      {/* A tooltip never appears on a phone, so the explanation opens on a TAP — the place most
+          users will read it. */}
+      {running && cost && costInfoOpen && (
+        <div className="mt-1 text-[11px] leading-snug text-muted">{cost.explanation}</div>
+      )}
     </div>
   );
 }

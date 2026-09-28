@@ -136,7 +136,7 @@ best gap-filling solution to be BUILT, not only listed. This section appends; §
 - ✅ **G1 · Whole-app browser self-test**: closed in part by this refresh (5.3).
 - 🟡 **Visible deep security report.** Publish safety is real (secret refusal with file and line, CVE gate, APK scan + human review), but there is no one-button report of the kind Lovable shows ("your tables are readable by anyone").
 - ❌ **G6 · Connectors.** v0's short-lived-credential model is the one to adapt, not per-service OAuth plumbing.
-- ❌ **G5 · Scheduled runs**, ❌ **G10 · live ₹ during a build**, ❌ **G4 · PR / security review trigger.** All three are unchanged since August.
+- ❌ **G5 · Scheduled runs**, ❌ **G4 · PR / security review trigger.** Unchanged since August. ✅ **G10 · live ₹ during a build** — built 2026-09-28 (`liveBuildCost.ts`): "₹X so far" on the live strip, priced by the final bill's own function.
 - 🟡 **Analytics.** Visitor analytics for published apps exist (§13 item 1.1). Funnels and custom events (Replit) do not.
 
 **Design**
@@ -170,9 +170,9 @@ Every check we ran after a build watched the app **paint**, or drove **one** der
 
 ### 5.5 The next levers, ranked (value to the user ÷ cost to us)
 
-1. **Explorer → verified repair** (small; a spend decision). Close the "Replit fixes it" gap with the `verifyAfterFix` wrapper the heals already use.
+1. ✅ **Explorer → verified repair** — BUILT 2026-09-28 (`explorerRepair.ts`): one repair, every button pressed again, kept only if something broken now works and nothing broke; an undone repair is not billed.
 2. **One-button security report** (medium). Most of the probes exist already (secret scan, CVE gate, headers). Add a Supabase access-rule probe **against the user's own project, read-only**, and show the result as a card.
-3. **Live ₹ during a build (G10)** (small–medium). The ledger already accumulates real cost mid-build (`buildCostCeiling.ts` reads it). Surfacing it needs only a branded, provider-free line.
+3. ✅ **Live ₹ during a build (G10)** — BUILT 2026-09-28 (`liveBuildCost.ts`), shown only to someone who will be charged.
 4. **Connectors via short-lived credentials (G6)** (medium). Start with WhatsApp Business and Google Sheets for our audience.
 5. **Expo / native UI (G7)** (large). The deepest product gap, and an infra item. It needs its own admin decision.
 

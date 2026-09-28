@@ -13,9 +13,9 @@ describe('previewFidelityCaveats — say what is approximate, and nothing else',
     })).toEqual([]);
   });
 
-  it('flags CSS Modules, whose class names come out blank', () => {
+  it('says NOTHING about CSS Modules any more — both renderers scope them for real now (2026-09-28)', () => {
     expect(ids({ 'src/Card.module.css': '.card{color:red}', 'src/Card.tsx': "import s from './Card.module.css';" }))
-      .toContain('css-modules');
+      .toEqual([]);
   });
 
   it('flags Sass/Less, which is not compiled in the page at all', () => {
@@ -67,7 +67,7 @@ describe('previewFidelityNotice — one sentence, never a wall', () => {
   });
 
   it('summarises several rather than listing them — a wall of caveats reads as "this is broken"', () => {
-    const c = previewFidelityCaveats({ 'src/a.scss': 'a{}', 'src/b.module.css': '.b{}', 'public/logo.png': 'x' });
+    const c = previewFidelityCaveats({ 'src/a.scss': 'a{}', 'src/w.ts': 'new Worker(new URL("./w", import.meta.url))', 'public/logo.png': 'x' });
     const line = previewFidelityNotice(c);
     expect(line).toContain('and 2 other differences');
     expect(line.split('.').length).toBeLessThan(5);

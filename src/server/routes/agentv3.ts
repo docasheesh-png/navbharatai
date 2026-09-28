@@ -184,6 +184,7 @@ import { explorerRepairBudget } from '../lib/explorerRepairBudget';
 import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS } from '../AgentV3/liveBuildCost';
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
+import { judgeRenderStyle, renderStyleNote, unstyledRenderUserNote, type RenderStyleVerdict, type RenderStyleEvidence } from '../AgentV3/renderStyle';
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver, GreenFreezeError } from '../AgentV3/greenFreeze';
@@ -18830,6 +18831,25 @@ async function noteBuildOutcome(
        * and never on a dead dev server (a process problem no code edit can fix). See greenReviewPolicy.
        */
       let previewProvenBroken = false;
+      /**
+       * DID THE RENDERED APP CARRY ANY STYLING? (renderStyle.ts, admin 2026-09-28 — the "secret
+       * calculator" that was "verified ✓" as raw HTML.) Judged from the real browser's own measurement
+       * on every render check that saw the app paint; the latest verdict is what the summary and the
+       * claim audit read. Evidence only — it never fails a build and never moves money.
+       */
+      let renderStyleVerdict: RenderStyleVerdict | null = null;
+      // Read through a function: the verdict is assigned inside the closure below, which TypeScript's
+      // flow analysis cannot see, so a direct read later in this handler narrows to `null`.
+      const currentRenderStyle = (): RenderStyleVerdict | null => renderStyleVerdict;
+      const noteRenderStyle = (shot: { source?: 'browser' | 'curl'; style?: RenderStyleEvidence }, where: string): void => {
+        if (shot.source !== 'browser') return; // a curl snapshot never ran the app's CSS
+        const v = judgeRenderStyle(shot.style);
+        if (v.verdict === 'unknown') return;
+        if (renderStyleVerdict && renderStyleVerdict.verdict === v.verdict) return; // one line per verdict, not per check
+        renderStyleVerdict = v;
+        const note = renderStyleNote(v, where);
+        if (note) { try { buildDiag.record({ phase: 'preview', ...note }); } catch { /* diagnostics best-effort */ } }
+      };
       // THE WAKE-UP GUARANTEE, as a fact rather than a hope. `true` = the revival recipe is stored AND
       // was read back, so this preview can be brought up again without guessing. `false` = the preview
       // works but the recipe could not be stored, which the user is told plainly at the only moment it
@@ -19479,6 +19499,7 @@ async function noteBuildOutcome(
           // admin actually saw, yet the rescue upgraded to success). The full-workspace readiness result
           // that found it is already on the diagnostics timeline — no re-analysis.
           const runtimeCrashBlocker = buildDiag.hasRuntimeCrashBlocker();
+          if (verdict.rendered) noteRenderStyle(shot, 'render rescue');
           // We looked, the answer was conclusive, and the app did not render. That — and only that — is
           // evidence a repair has something real to aim at.
           if (!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true;
@@ -19530,7 +19551,7 @@ async function noteBuildOutcome(
         const MAX_SERVER_REVIVALS = 2;
         let serverRevivals = 0;
         for (let attempt = 0; attempt <= healMax && !abort.signal.aborted; attempt++) {
-          let shot: { html: string; painted?: boolean; source?: 'browser' | 'curl' };
+          let shot: { html: string; painted?: boolean; source?: 'browser' | 'curl'; style?: RenderStyleEvidence };
           // 🔴 THIS CHECK IS JUDGED BY ITS OWN CONSOLE, NOT THE WHOLE BUILD'S (autopsy 7d79254b). The log
           // is append-only, so reading from buildStartedAt let one line recorded before a repair condemn
           // every check after it — the repair could not succeed by construction. renderCheckConsole.ts.
@@ -19545,6 +19566,7 @@ async function noteBuildOutcome(
             if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: verifyCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text);
           } catch { /* console capture is best-effort */ }
           if (!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true;
+          if (verdict.rendered) noteRenderStyle(shot, 'preview verify');
           if (verdict.rendered && consoleErrs.length === 0 && await renderIsOnlyTheStarter()) {
             // Rendered — but the starter page, not an app. Not a proof, and not a defect a repair pass
             // could fix either (there is nothing to repair), so the loop ends here without spending one.
@@ -21012,6 +21034,8 @@ async function noteBuildOutcome(
           // starts at 'not-run' and is only ever moved by a check that actually ran, so this cannot
           // claim a typecheck happened when it did not.
           typecheckRan: gateEvidence.typecheck !== 'not-run',
+          // "A beautiful, polished UI" about a page the browser painted as raw HTML (renderStyle.ts).
+          renderUnstyled: currentRenderStyle()?.verdict === 'unstyled',
         });
         if (contradictions.length > 0) {
           result = { ...result, summary: `${result.summary}${claimCorrection(contradictions)}` };
@@ -21021,6 +21045,17 @@ async function noteBuildOutcome(
           });
         }
       } catch { /* the audit reports on the summary; it must never break the build */ }
+
+      // THE USER IS TOLD, IN THE REPLY, WHEN THEIR APP RENDERED AS RAW HTML (renderStyle.ts, admin
+      // 2026-09-28: "user ko aise farzi app na mile"). Strong verdict only — not one CSS rule reached the
+      // page — and only on a successful build that was meant to produce an app; the finding card carries
+      // the one-tap repair either way.
+      try {
+        const styleVerdict = currentRenderStyle();
+        if (result.ok && expectsArtifacts && !isImportTurn && styleVerdict) {
+          result = { ...result, summary: `${result.summary}${unstyledRenderUserNote(styleVerdict)}` };
+        }
+      } catch { /* a note about styling must never break the build */ }
 
       // 🔴 MADE-UP PEOPLE ARE DISCLOSED, NOT SHIPPED AS REAL (autopsy f15a9bcc, 2026-09-23). That build
       // listed four generated "nearby vendors" as real and the user was told the feature was done. The

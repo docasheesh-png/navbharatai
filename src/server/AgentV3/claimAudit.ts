@@ -93,9 +93,14 @@ export interface MeasuredFacts {
   filesWritten?: number;
   /** Did the USER ask for an app to be built or changed on this turn? (Not: "explain this code".) */
   buildWasRequested?: boolean;
+  /**
+   * The real browser opened the app and it carried no styling — raw HTML (renderStyle.ts, 2026-09-28).
+   * `true` only on a measured unstyled verdict; omitted or `false` means nothing is contradicted.
+   */
+  renderUnstyled?: boolean;
 }
 
-export type ClaimKind = 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered';
+export type ClaimKind = 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed';
 
 export interface ClaimContradiction {
   kind: ClaimKind;
@@ -300,10 +305,32 @@ const INDIC_SCRIPT = /[\u0900-\u0DFF]/;
 export const MIN_LABELS_FOR_FABRICATION = 4;
 
 /** Check the model's summary against what the platform actually measured. Pure. */
+/**
+ * Phrases that assert the app LOOKS designed. Narrow on purpose: "responsive" or "clean code" is not a
+ * claim about looks; "beautiful", "polished", "professionally designed", "modern UI", and the Hinglish
+ * "sundar"/"khubsurat" are. Checked only when the browser measured the page as unstyled.
+ */
+const DESIGN_CLAIMED = new RegExp([
+  /\b(beautiful(ly)?|polished|sleek|elegant|stunning|gorgeous)\b[^.!\n]{0,40}\b(design|designed|ui|interface|look|looking|styled?|styling|theme|layout)\b/,
+  /\b(professional(ly)?|modern|premium)[- ](designed|design|ui|interface|look|styling)\b/,
+  /\b(fully|nicely|carefully|well)[- ]styled\b/,
+  /\b(sundar|khubsurat|खूबसूरत|सुंदर)\b/,
+].map((r) => r.source).join('|'), 'i');
+
 export function auditSummaryClaims(summary: string, facts: MeasuredFacts): ClaimContradiction[] {
   const text = String(summary ?? '');
   if (!text.trim()) return [];
   const out: ClaimContradiction[] = [];
+
+  // "A beautiful, polished UI" about a page the browser painted with the UA stylesheet alone (admin
+  // 2026-09-28, the unstyled "secret calculator" that was "verified ✓").
+  if (facts.renderUnstyled === true && DESIGN_CLAIMED.test(text)) {
+    out.push({
+      kind: 'design-claimed',
+      claimed: 'that the app is styled and looks designed',
+      measured: 'when the app was opened in a real browser, none of its own styling had reached the page — it rendered as plain HTML',
+    });
+  }
 
   if (!facts.consoleCaptured && CONSOLE_CLEAN.test(text)) {
     out.push({

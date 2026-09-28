@@ -2896,6 +2896,24 @@ the flag entries above promise.
   the changed files against the rules derived from the project as it was BEFORE the build. Costs no file
   reads (it uses the already-warm graph) and no model call. Purely advisory — it can never fail a build.
   Report codes: `ARCHITECTURE_INVARIANTS_HELD` (clean) / `ARCHITECTURE_INVARIANT_VIOLATED`.
+- **🎨 THE IN-BROWSER PREVIEW RENDERS CSS MODULES AND TAILWIND v4, AND THE REAL BROWSER MEASURES STYLING (admin
+  2026-09-28: *"user ko aise farzi app na mile! … sundar aur real cheez bane fake/farzi nahi!!"*; no flag).** Both
+  in-browser renderers (`src/server/runtime/ReactPreview.ts` — the preview pane, the admin Built-apps preview, every
+  App Mart web player; and `src/lib/previewUtils.ts`) answered every `.css` import with `exports: {}`, so a CSS-Module
+  app rendered with every class blank, and only Tailwind v3 was detected, so a v4 app got a compiler that emits
+  nothing. `previewFidelity.ts` KNEW and said so in a caveat. **A well-built app was shown as raw HTML, and the label
+  made that feel handled.** Now: `src/lib/cssModules.ts` (ONE pure transform, both renderers, path-hash scope +
+  class map shipped in the bundle) and `src/lib/previewTailwind.ts` (ONE detector: v3 → Play CDN + shadcn config,
+  v4 → `@tailwindcss/browser@4`). ⚠️ A NEW reader of `.css` in either loader must go through `cssModuleExportsJs`
+  and `TAILWIND_DIRECTIVE_RE_SOURCE`; a second copy is the drifted-copy class. And `renderStyle.ts`: the browse
+  script measures a painted page (author rules, font rule, default-looking buttons) and the route records
+  `UNSTYLED_RENDER` / `RENDER_STYLE`, tells the user in plain words with a one-tap repair, and the claim audit
+  contradicts "beautiful, polished UI" about a raw-HTML page. **Evidence, not a gate — it fails no build and moves no
+  money**; a post-render styling heal is deliberately NOT wired until `UNSTYLED_RENDER` has appeared on real builds.
+  The fast lane's convention now names ONE global stylesheet as the default (CSS Modules only where the project
+  already uses them) — it used to say "CSS Modules (default)" a paragraph after the design contract said the
+  opposite. Test-locked and reversion-proven in `tests/theCssModulesCameOutBlank.test.ts` and
+  `tests/theRenderedAppLookedLikeRawHtml.test.ts`.
 - **`AGENTV3_PREVIEW_DOOR`** (default ON, set `off` to disable — added 2026-08-22) — the live-preview
   iframe points at OUR OWN workspace-stable route (`/api/agentv3/preview-door`, HMAC-tokened) instead of
   a stored sandbox URL; the route resolves "which machine, which port" at REQUEST time (proven recipe

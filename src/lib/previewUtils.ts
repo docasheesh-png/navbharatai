@@ -1,6 +1,8 @@
 import { jsxDevRuntimeUrl } from './jsxDevRuntimeFacade';
 import { NON_RUNTIME_FILE_SOURCE } from './previewNonRuntimeFiles';
 import type { FileSystem } from '../types/index';
+import { bundleCssModules, cssModuleExportsJs } from './cssModules';
+import { detectTailwindFlavour, tailwindHeadTags, tailwindStyleBody, TAILWIND_DIRECTIVE_RE_SOURCE } from './previewTailwind';
 
 // ── Preview harness: injected into EVERY preview so it can never silently go blank ──
 // Catches runtime errors + detects empty render → shows a friendly overlay instead of a white page.
@@ -107,6 +109,8 @@ export const PREVIEW_HARNESS = `<style>
 export const PREVIEW_BOOTSTRAP = `
 (function(){
   var FILES=window.__FILES||{};var ENTRY=window.__ENTRY||'';var IMAP=window.__IMAP||{};var ESM='https://esm.sh/';
+  // path → { writtenClass: scopedClass } for every CSS Module (src/lib/cssModules.ts) — so styles.card is a real class, not undefined.
+  var CSSM=window.__CSS_MODULES||{};
   // Polyfill import.meta.env (Vite) and process.env (Node/CRA) so apps don't throw on startup
   if(typeof process==='undefined')window.process={env:{NODE_ENV:'production'}};
   window.__importMetaEnv__=window.__importMetaEnv__||{};
@@ -120,7 +124,17 @@ export const PREVIEW_BOOTSTRAP = `
     for(var i=0;i<t.length;i++){if(Object.prototype.hasOwnProperty.call(FILES,t[i]))return t[i];}
     return base;
   }
-  function injectCss(src){var s=document.createElement('style');s.textContent=src;document.head.appendChild(s);}
+  // Tailwind directives (v3 @tailwind/@apply, v4 @import "tailwindcss"/@theme) must reach the
+  // runtime compiler's <style type="text/tailwindcss"> block — in a plain <style> they are inert and the
+  // app renders unstyled. Same rule as the server renderer (src/lib/previewTailwind.ts).
+  var twStyleEl;
+  function injectCss(src){
+    if(/${TAILWIND_DIRECTIVE_RE_SOURCE}/.test(src||'')){
+      if(!twStyleEl){twStyleEl=document.getElementById('__nbai-tw');if(!twStyleEl){twStyleEl=document.createElement('style');twStyleEl.setAttribute('type','text/tailwindcss');document.head.appendChild(twStyleEl);}}
+      twStyleEl.appendChild(document.createTextNode('\n'+src));return;
+    }
+    var s=document.createElement('style');s.textContent=src;document.head.appendChild(s);
+  }
   function interop(ns){
     if(!ns)return{__esModule:true,default:ns};
     var m={__esModule:true};
@@ -136,6 +150,7 @@ export const PREVIEW_BOOTSTRAP = `
     if(cache[path])return cache[path].exports;
     var src=FILES[path];
     if(src==null)throw new Error('Module not found: '+path);
+    if(/\\.module\\.css$/.test(path)){injectCss(src);cache[path]={exports:${cssModuleExportsJs('CSSM[path]')}};return cache[path].exports;}
     if(/\\.css$/.test(path)){injectCss(src);cache[path]={exports:{}};return cache[path].exports;}
     if(/\\.json$/.test(path)){cache[path]={exports:JSON.parse(src)};return cache[path].exports;}
     if(/\\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/.test(path)){cache[path]={exports:{default:src,__esModule:true}};return cache[path].exports;}
@@ -459,8 +474,15 @@ export function stripFences(s: string): string {
 export function buildSourceAppPreview(f: FileSystem): string {
   const rawHtml = f['index.html'] || '';
   const srcExtRe = /\.(jsx|tsx|ts|js|mjs|cjs|css|json|png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i;
-  const srcFiles: Record<string, string> = {};
-  Object.keys(f).forEach(k => { if (srcExtRe.test(k) && !k.includes('node_modules')) srcFiles[k] = f[k]; });
+  const gathered: Record<string, string> = {};
+  Object.keys(f).forEach(k => { if (srcExtRe.test(k) && !k.includes('node_modules')) gathered[k] = f[k]; });
+  // CSS Modules scoped + their class maps (src/lib/cssModules.ts); Tailwind detected (v3 or v4) so the
+  // right runtime compiler is loaded — the same two rules the server renderer applies (admin 2026-09-28:
+  // a styled app must never be shown as raw HTML because the preview dropped its styling).
+  const cssBundle = bundleCssModules(gathered);
+  const srcFiles: Record<string, string> = cssBundle.files;
+  const twFlavour = detectTailwindFlavour({ ...gathered, ...(typeof f['package.json'] === 'string' ? { 'package.json': f['package.json'] } : {}), ...Object.fromEntries(Object.keys(f).filter((k) => /(^|\/)tailwind\.config\.[cm]?[jt]s$/.test(k)).map((k) => [k, f[k] ?? ''])) });
+  const twHead = twFlavour ? tailwindHeadTags(twFlavour) + '<style id="__nbai-tw" type="text/tailwindcss">' + tailwindStyleBody(twFlavour, '') + '</style>' : '';
 
   // Preview-only: react-router's BrowserRouter needs real History/URL which the
   // sandboxed iframe doesn't have → blank screen. Rewrite to HashRouter so routed
@@ -575,11 +597,12 @@ export function buildSourceAppPreview(f: FileSystem): string {
   const importmap = JSON.stringify({ imports: imapEntries });
   return '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
     + PREVIEW_HARNESS
+    + twHead
     + vendorScripts
     + '<script type="importmap">' + importmap + '</' + 'script>'
     + '<script src="' + ORIGIN + '/vendor/babel.min.js"></' + 'script>'
     + '</head><body>' + bodyInner
-    + '<script>window.__FILES=' + sj(srcFiles) + ';window.__ENTRY=' + sj(entry) + ';window.__IMAP=' + sj(imapEntries) + ';window.__CDN_IMAP=' + sj(cdnImap) + ';window.__NON_RUNTIME=' + sj(NON_RUNTIME_FILE_SOURCE) + ';</' + 'script>'
+    + '<script>window.__FILES=' + sj(srcFiles) + ';window.__CSS_MODULES=' + sj(cssBundle.exports) + ';window.__ENTRY=' + sj(entry) + ';window.__IMAP=' + sj(imapEntries) + ';window.__CDN_IMAP=' + sj(cdnImap) + ';window.__NON_RUNTIME=' + sj(NON_RUNTIME_FILE_SOURCE) + ';</' + 'script>'
     + '<script>' + PREVIEW_BOOTSTRAP + '</' + 'script>'
     + '</body></html>';
 }

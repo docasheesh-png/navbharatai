@@ -83481,6 +83481,64 @@ Tests:
 - **A live ₹ figure during the build (G10).** This is a billing-display product decision.
 
 
+## 2026-09-28 — "farzi app": the preview dropped the styling, and no gate ever asked whether the page carried any
+
+The admin sent a screenshot from the admin Built-apps preview: a "secret calculator" in a serif "0", browser-default
+buttons wrapping inline — *"code padh ke dekh! kya aisa calculator banaya ja raha hai! … user ko aise farzi app na
+mile! … sundar aur real cheez bane fake/farzi nahi!!"* That build (2720e553) was autopsied yesterday (#3363: its
+stylesheet was emptied by a continuation, and that class is fixed). Reading the renderer that produced the screenshot
+found four more things, each of them a way a WELL-built app is shown as raw HTML.
+
+**Ledger:**
+- ❌ Shipped wrong: 3
+  - both in-browser renderers (`src/server/runtime/ReactPreview.ts` — the user's preview pane, the admin's
+    Built-apps preview, every App Mart web player and its baked page; and `src/lib/previewUtils.ts`, the client
+    bundler) answered EVERY `.css` import with `exports: {}`. For `import styles from "./X.module.css"` that makes
+    `styles.card` undefined and every class on the page blank. `previewFidelity.ts` knew ("class names come out
+    blank here") and said so in a caveat — a known defect wearing a label.
+  - the server renderer detected only Tailwind v3 (`@tailwind`); a v4 app (`@import "tailwindcss"`, `@theme`) got
+    the v3 Play CDN, which compiles nothing from it; the client bundler loaded no Tailwind at all.
+  - the fast lane's REACT_CONVENTION said "CSS Modules (default)" while its DESIGN_CONTRACT said "use classes that
+    REALLY exist in the global stylesheet" — the shape the scaffolds, the stylesheet tier (#3363) and the class check
+    all assume. A cheap model picked one at random.
+- ⏭️ Skipped: 1 — every render check asked whether the app RAN; none asked whether one line of its own CSS reached the
+  page. An app with no stylesheet and an app with a 5,000-character design system paint the same `painted=1`.
+- ✅ Self-healed / 🔀 workaround / 🥵 struggle: 0 in this reading (the build's own ledger is in yesterday's entry).
+
+**Fixed:**
+1. **CSS Modules are real in both renderers** — `src/lib/cssModules.ts` (pure, browser-safe, ONE definition):
+   scopes every class by a path hash, exports written → scoped plus a camelCase alias, keeps `:global()`
+   verbatim, follows `@media`, leaves `@keyframes` steps and declaration values alone, handles native nesting. The
+   server transform runs BEFORE precompilation so the Babel fallback ships the same scoped CSS; the bundle carries
+   `cssModules` and the loader returns the map (`cssModuleExportsJs`, one expression for both loaders). The
+   previewFidelity caveat is retired (a `.module.scss` still falls under the preprocessor caveat).
+2. **Tailwind v4 is compiled** — `src/lib/previewTailwind.ts` decides v3 / v4 / none from the CSS first, then the
+   manifest; v4 loads `@tailwindcss/browser@4` (no shadcn v3 config — v4 declares tokens in CSS), v3 is byte-identical
+   to before. Both loaders route every directive (v3 and v4) into the compiler block from one regex source. The
+   client bundler now loads Tailwind at all.
+3. **The fast lane's styling instruction is one instruction**: one global stylesheet by default, imported once from
+   main/App; CSS Modules only when the existing project already uses them.
+4. **The real browser measures styling** — `src/server/AgentV3/renderStyle.ts`. `browsePageScript` evaluates, on a
+   PAINTED page, the author CSS rule count, whether any rule sets a font, and how many buttons still look
+   browser-default (Chromium's UA values), printed as `NBAI_STYLE:` before the paint marker. A pure judge:
+   0 rules ⇒ UNSTYLED (strong); rules but no font and ≥3 default buttons ⇒ UNSTYLED (weak); <8 elements or no
+   evidence ⇒ unknown, never an accusation. Both render checks hand the shot to it; `UNSTYLED_RENDER` (warning) /
+   `RENDER_STYLE` (info) in the report; the strong case adds one plain sentence to the user's reply with a
+   one-tap "Give your app its proper look" repair; and `auditSummaryClaims` gains `design-claimed` so "a beautiful,
+   polished UI" about a raw-HTML page is corrected in the reply. Evidence only — fails no build, moves no money.
+
+Tests: `tests/theCssModulesCameOutBlank.test.ts` (19) and `tests/theRenderedAppLookedLikeRawHtml.test.ts` (16), with
+source-level reversion guards on both loaders' `.module.css` branch, the shared directive regex, the browse-script
+marker and the route wiring — `tsc` and `vitest` cannot see a loader returning `{}` for a file it should have mapped.
+
+**Open — said plainly:**
+- The style measurement is EVIDENCE for now, not a heal trigger. The design heal (`AGENTV3_DESIGN_GATE`) runs before
+  the render checks; wiring a second, post-render repair on this signal is a model pass NavBharatAI pays for on Weak,
+  and the signal has produced zero readings on real builds. Watch `UNSTYLED_RENDER` on the next reports; when it
+  fires on builds whose static gates were clean, that is the case for the second pass.
+- `composes:` in a CSS Module is left in place (ignored by the browser); `@keyframes` names stay global. Neither has
+  appeared in a generated app.
+- A relative `@import "./x.css"` inside a stylesheet is still unresolved by both renderers (pre-existing).
 ## 2026-09-28 — "No React entry module found": the saved app kept its page and lost the page's script
 
 Admin report (Admin → Built apps, a user's workspace): *"No React entry module found — expected a module

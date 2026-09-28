@@ -94,6 +94,9 @@ const PROCESS_ONLY_CODES = new Set([
   'UNBILLED_BARREN_WORK',
   // Our own journey runner produced nothing — a statement about OUR check, never about their app.
   'JOURNEY_NOT_RUN',
+  // …and the click explorer's two "did not look" outcomes (clickExplorer.ts): it never reached the app,
+  // or found nothing safe to press. Facts about OUR instrument, never about the user's app.
+  'EXPLORE_NOT_RUN', 'EXPLORE_NOTHING_TO_PRESS',
   // …and the reviewer's own version of that: the judge threw, or answered with something unreadable.
   // It used to be recorded as `CHEAP_REVIEW: PASS`, which is the fake-success class exactly. A review
   // that did not happen says something about OUR instrument, never about the user's app.

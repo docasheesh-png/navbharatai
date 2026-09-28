@@ -650,7 +650,16 @@ the code (it is actually read somewhere) on 2026-07-11.
   next key before dropping quality. A single key = today's behaviour. Buy the extra keys, then just set the
   comma list — no redeploy logic needed. See ROADMAP Tier-4 "GLM KEY POOL".
   ✅ **LIVE 2026-07-21: the admin SET the GLM comma-pool in Cloud Run** (multiple Z.ai keys) as part of the
-  GLM-429-storm response — key rotation is now genuinely active in prod.)
+  GLM-429-storm response — key rotation is now genuinely active in prod.
+  🔴 **CORRECTED 2026-09-27 — "genuinely active" was true of the BUILD ENGINE ONLY.** The pool parser
+  lived inside `routes/agentv3.ts`; the FREE CHAT leader (`GlmProvider`) and the free vision rung
+  (`visionChain.tryGlm`) sent the whole comma string as ONE bearer token, so from 2026-07-21 every free
+  chat, Professional and Doctor AI turn was refused by Z.ai and fell through to a PAID rung — the admin
+  Diagnostics page read *"GLM 8 requests · 8 errors"* and *"0% served by the free model"*, and nothing
+  looked broken because the fallback worked. **Every reader of a pooled key now goes through
+  `src/server/lib/keyPool.ts`** (`parseKeyPool` / `firstPoolKey` / `nextPoolKey`, round-robin); a new
+  reader that passes `process.env.GLM_API_KEY` straight to a client re-opens this. Test-locked and
+  reversion-proven in `tests/theDiagnosticsPageToldThreeUntruths.test.ts`.)
 - **Sandbox (E2B):** `E2B_API_KEY`, `E2B_TEMPLATE_ID`, `FULLSTACK_E2B_TEMPLATE_ID`, `E2B_PREVIEW_DOMAIN`
   (⚠️ CORRECTION 2026-08-02: the admin verified in the live Cloud Run console that `E2B_PREVIEW_DOMAIN`
   is **NOT set** — so v5.0 previews use the raw `*.e2b.app` host by code default (`PreviewDomain.ts`
@@ -979,6 +988,14 @@ the code (it is actually read somewhere) on 2026-07-11.
   truth). Set as part of turning the referral ladder on; the preflight compares this against
   `FIRST_RELEASE_WITH_DEVICE_PLUGIN = 117` to confirm the live app can device-attest — 134 ≥ 117 ✓, so the
   release row is green either way. Recorded hand-to-hand the same session.
+  🔴 **CORRECTED 2026-09-27 — "134 ≥ 117 ✓" WAS THE WRONG COMPARISON, AND BUILD 134 CANNOT ATTEST.**
+  117 is when the plugin SHIPPED, not when it WORKED: builds 117–136 send a classic Play Integrity
+  request with no nonce (the SDK refuses it before it reaches Google) and do not list the `phone` sign-in
+  provider, so on build 134 every device check and every in-app mobile OTP fails — the admin's "mobile
+  recognition" problem. Both were fixed in #3338, first built by run **#137** (138 is built from main
+  too), and **neither is on Play**. The preflight now compares against `FIRST_RELEASE_THAT_ATTESTS =
+  137` and shows 134 as failed. ⚠️ **To actually fix it: roll out build 137/138 (or a fresh one) on
+  Play, then set this key to its run number.** No server change can make build 134 attest.
   ✅ **SET by the admin 2026-08-25: `ANDROID_LATEST_VERSION_CODE = 91`** — the first PRODUCTION release.
   Verified against the pipeline rather than taken on trust: `android-aab.yml` sets
   `ANDROID_VERSION_CODE: ${{ github.run_number }}`, the run was **#91**, and Play displayed
@@ -1820,6 +1837,11 @@ the code (it is actually read somewhere) on 2026-07-11.
   Report code: `COST_CEILING_REACHED` (admin-only). Test-locked in `tests/buildCostCeiling.test.ts`.
   🔴 **STILL OPEN:** an abandoned provider call is not cancelled by this stop — the loop ends between
   turns, so a call already in flight runs to completion on the provider's side and is paid for.
+  ✅ **CLOSED 2026-09-27 (autopsy 2720e553):** every abort of the build's signal — this cost stop, the
+  Stop button, the watchdog, a deploy drain — now reaches the call in flight. `RunTurnParams.signal`
+  runs through the provider ladder (which neither benches a vendor nor falls to the next rung for it),
+  closes a GLM/Kimi stream, and cancels the Claude request and its retries; `stopSignal.ts` is the one
+  definition. The fast lane, which never read the signal at all, checks it at every step.
 
 - **🐢 THE SLOW-PROVIDER FIX — streamed build calls (built 2026-09-16; ✅ **SET `on` in Cloud Run by the
   admin the SAME DAY**):** `AGENTV3_STREAM_BUILD_CALLS` = `on`, so streamed reading is LIVE on every
@@ -1957,6 +1979,24 @@ the code (it is actually read somewhere) on 2026-07-11.
   ✅ **AND THIS REPORT SETTLED THE STREAMING ENTRY'S ONE OPEN QUESTION: Z.ai DOES honour
   `stream_options.include_usage`** — real per-call input/output/cache token counts came back on every
   streamed call. The "0 in / 0 out" risk that entry warns to watch for did not materialise.
+- **🎁 THE FREE-CREDIT STEPS, FINAL PLAN (admin 2026-09-27, verbatim: *"sabhi pahle 50₹ do! (mobile +
+  website) · fir refral code ke 100₹ (only mobile') · fir login par 50₹ (dono par) · fir mobile otp
+  verification par 100₹ (dono par) · fir github connect (100₹ mobile only) — ab yeh final hai"*). SUPERSEDES
+  the step amounts in the two entries below.** Signup ₹50 (both) · referral code ₹100 (app) · login with a
+  verified email ₹50 (both) · mobile OTP ₹100 (both) · GitHub ₹100 (app). App ₹400, website ₹200 — exactly
+  the two ceilings that already existed, so neither moved. Referrer still ₹25 × (login, mobile, GitHub),
+  never for the signup. Amounts live in `STEP_RUPEES` (`referralRewards.ts`); **`REFERRAL_STEP_TOKENS` is
+  no longer read.** New key **`REFERRAL_WEB_HOLD_UNTIL_MOBILE`** (NOT set; default OFF): `on` puts the
+  website's signup/login money back behind the OTP, the 2026-09-26 rule, without a deploy.
+  ⚠️ **THE COST THE ADMIN ACCEPTED, stated:** the ₹50 + ₹50 are earnable on the website with no phone and
+  no device check, so scripted accounts can collect ₹100 each (credit only — it cannot be withdrawn).
+  Watch the Referral cost card; the lever above is the answer if it is farmed.
+  📱 **Three steps no longer need the phone to be recognised:** the sign-in settle every client already
+  calls (`/api/payment/reconcile`, including build 134) pays the day-one two (signup, login — never the
+  mobile, which would make a new app user "old" before their typed code is applied), and a failed device
+  check on the phone falls back to the web rules for signup/login/mobile on both the client and the server.
+  Only the referral code and GitHub still need a device that can be checked. The phone also retries a
+  transient Play Integrity failure (-3/-8/-9/-12/-17/-100) twice before reporting it.
 - **The referral welcome gift — four earned steps (built 2026-09-15, NOT live yet):**
   `REFERRAL_REWARDS` (the master switch — ⚠️ **UNSET, and unset means today's behaviour exactly**:
   no code is minted, no money moves, and not one document is written). Tunables, all with working
@@ -2163,6 +2203,16 @@ the code (it is actually read somewhere) on 2026-07-11.
   `navbharatai.com` and `www.navbharatai.com` (no localhost) → Firebase console → App Check → register the
   web app with that key → set `APP_CHECK_SITE_KEY` in Cloud Run. The privacy policy (§3.3, §7) already
   discloses reCAPTCHA; `tests/appCheck.test.ts` holds that and the shared route list.
+- **🔒 TEN FREE MESSAGES A DAY WITHOUT SIGNING IN, ALL SURFACES TOGETHER (admin 2026-09-27, built the same day).**
+  `GUEST_DAILY_MESSAGES` (NOT set; code default **10**; `0` = sign-in from the first message; `off` = no limit;
+  unreadable ⇒ 10, never unlimited) and `GUEST_DAILY_IP_CAP` (NOT set; default **100**, never below the per-device
+  limit). Read by `src/server/lib/guestDailyQuota.ts`, mounted on every AI route a signed-out visitor can reach
+  (free chat, Repo Analyst, App Review, Security Scan, AI Debugger, App Scan, design tools); the census in
+  `tests/tenFreeMessagesThenSignIn.test.ts` fails when a new anonymous AI route lacks it. The visitor is the random
+  device id the app sends (`x-nb-guest`, `src/lib/guestId.ts`), because Indian mobile networks share one IP among
+  many phones; the IP (the LAST `X-Forwarded-For` entry) is only the backstop. The day is India's. Refusal is
+  **403 `guest_limit_reached`** — never 401, which the free-chat client reads as an expired session.
+  ⚠️ **The old browser counter (`FREE_DAILY_MESSAGES`) is gone on purpose; do not reintroduce a client-side count.**
 - **Visitor analytics for published apps (shipped 2026-09-10, ROADMAP §13 item 1.1):**
   `AGENTV3_SITE_ANALYTICS` (kill switch — **default ON**; `off` stops the beacon being stamped at
   publish and the hit route recording; apps already published keep their script until republished,
@@ -2362,7 +2412,7 @@ the code (it is actually read somewhere) on 2026-07-11.
 
   | Item | How to confirm it WITHOUT trusting this entry |
   |---|---|
-  | **`GRIEVANCE_OFFICER_NAME`** (+ optional `_EMAIL` / `_PHONE` / `_ADDRESS`) — read by `src/server/lib/grievanceOfficer.ts`; the public page is `/grievance` | Admin Monitor: the amber "Grievance Officer not named" warning is GONE. It is driven by `officerIsNamed`, so it cannot be green while the key is missing |
+  | **`GRIEVANCE_OFFICER_NAME`** (+ optional `_EMAIL` / `_PHONE` / `_ADDRESS`) — read by `src/server/lib/grievanceOfficer.ts`; the public page is `/grievance` | Admin Monitor: the amber "Grievance Officer not named" warning is GONE. It is driven by `officerIsNamed`, so it cannot be green while the key is missing. 🔴 **CHECKED 2026-09-27 AND IT FAILED:** the admin's own Monitor capture that day still shows *"Grievance Officer not named"*, so the RUNNING revision reads `GRIEVANCE_OFFICER_NAME` as empty or absent — never set, set on a revision that was replaced, or set under a mistyped name (a trailing space counts). This row is therefore **NOT done**, whatever the queue list says |
   | **`NAVBHARAT_WEB_RISK=on`** | An admin build report's `outboundNote` stops saying `unknown` for every origin |
   | **`E2B_USD_PER_HOUR` = `0.1656`** (was the half-true `0.083`) | The Monitor's amber rate-mismatch tile clears — `sandboxRate.ts` raises it by comparing the configured rate against the template's REAL size, so a wrong value cannot look right |
   | ✅ **The six DUPLICATE keys** (`AGENTV3_ESCALATION` ×3, `CHEAP_FLOOR`, `ENABLED`, `PAID_PUBLIC`, `CREDIT_GATE`, `STREAMING_PREVIEW`) — see the 2026-08-20 audit below | **DELETED — the admin said so directly on 2026-09-20 ("maine delete kar diye hai, 10-12 din pahle hi"), i.e. around 2026-09-08/10.** This was the one row with NO self-verifying signal: nothing in the code can detect a duplicate, because the process sees one value and cannot know a second row existed. So the admin's word IS the record here, and it is written down the day it was said — exactly what this registry's hand-to-hand rule is for |
@@ -2996,6 +3046,47 @@ the flag entries above promise.
   Until now the only journey outcomes a report could carry were `JOURNEY_NOT_DERIVED` and the
   mislabelled empty pass. A sudden crop of `JOURNEY_FAILED` is not a regression — it is the check
   working for the first time, and each one is a real app that looks like it saves data and does not.
+
+- **`AGENTV3_CLICK_EXPLORE`** (default ON, set `off` to disable — added 2026-09-28, competitive gap G1,
+  admin: *"best solution jo gaps ko fill kar ke navbharatai ko compatitors se aage la jaye"*) — **the
+  app is PRESSED, not only painted.** Every post-build check watched the app render or drove ONE derived
+  form; nothing pressed the rest of it, so a tab that white-screens, a button whose handler throws and a
+  link to a page that was never written survived every check we own. `clickExplorer.ts` opens the running
+  app in the sandbox's pre-baked browser and presses up to 12 visible controls, EACH ON A FRESH LOAD (so a
+  failure belongs to exactly one control), recording an error overlay, a blank root, an in-app link that
+  lands on a missing page, or an uncaught error. **No model call.** Measured on a local test page: seven
+  presses in ~10 s.
+  🪜 **ONE LEVEL DEEPER (2026-09-28, same day):** a first-screen press that WORKED and CHANGED the screen
+  (a tab, a menu, an in-app link) is looked at again, and the controls it revealed — never ones the first
+  screen already had — are pressed too: up to **8** more (`MAX_SECOND_LEVEL_CLICKS`), at most **2** under
+  any one parent (`MAX_SECOND_LEVEL_PER_PARENT`), each on a fresh load with the parent pressed UNARMED
+  first so nothing the parent does is blamed on the child. The same never-press rules apply. A failure is
+  named with its screen (*"Pressing "Refresh" (on the "Reports" screen) …"*). The 75 s budget is
+  unchanged, so first-screen presses always go first and a slow app loses depth, never coverage.
+  ⚠️ **THE RUNNER IS A TS TEMPLATE, SO EVERY BACKSLASH IS DOUBLED** — a single `\b` reaches the page as a
+  backspace, parses fine, and silently never matches. `node --check` cannot see it; a test now fails on
+  any raw control character in the generated module.
+  🔒 **WHAT IT WILL NOT PRESS IS THE DESIGN:** any name matching `NEVER_PRESS` (delete, clear, pay, buy,
+  checkout, send, share, upload, download, log out, …), a form's submit (the journey owns forms), a link
+  out of the app (another origin, `mailto:`/`tel:`, a new tab, a download), a control with no readable
+  name (an unnamed icon is as likely a trash can) — and, when `writesToUserDatabase` is true, every
+  creating verb too (`WRITE_VERBS`), the same rule the journey obeys. Browser dialogs are DISMISSED. The
+  in-page collector receives the exported regexes as data rather than a copy of them.
+  🔒 **THREE OUTCOMES, never two:** `EXPLORE_PASSED` / `EXPLORE_FAILED` need a loaded app and a completed
+  press; `EXPLORE_NOT_RUN` (never reached the app) and `EXPLORE_NOTHING_TO_PRESS` are facts about OUR
+  instrument, registered in `PROCESS_ONLY_CODES` and `NEVER_SUGGEST`. A press that could not complete
+  (covered, detached, timed out) is `skipped`, never a failure. `EXPLORE_FAILED` offers the user one
+  next step ("Fix the button that breaks your app").
+  ⚠️ **THE BUILD CARD HAS ONE SLOT** (`state.verification`), so the journey's proof is now HELD and emitted
+  once, merged with this one (`mergeUserProofs`) — a second `verified` event would have erased the
+  first. A source guard asserts there is exactly one `emit({ type: 'verified'` in the route.
+  ⚠️ **Evidence, never a gate**: it never fails a build and never spends a repair; runs only with ≥90 s of
+  build budget left. It does NOT attach the console recorder, deliberately — its errors are attributed per
+  press, and feeding them into the runtime auto-fix window would be a spend decision nobody took.
+  Test-locked and reversion-proven in `tests/theAppIsPressedNotOnlyPainted.test.ts`, whose real-browser
+  half runs wherever Chromium exists (`/opt/pw-browsers`) and is skipped in CI, which has none.
+  **What to watch:** `EXPLORE_FAILED` on real builds — each is a button a user would have found broken in
+  their first minute. A crop of `EXPLORE_NOT_RUN` means the runner, not the apps, needs looking at.
 
 - **`AGENTV3_CONTRACT_FILE`** (default ON, set `off` to disable — added 2026-09-17, autopsy 57875eb3) —
   the fast lane's SHARED CONTRACT (the enums / interfaces / types every per-file call is handed) is now
@@ -4301,6 +4392,12 @@ and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; 
   `kimi-k2.7-code` ($0.95/$4.00) instead of `glm-4.7-flashx` ($0.07/$0.40) — ~13× the input price for
   THOSE builds. The bet is that a cheap rung which fails is paid twice, once in the wasted call and
   once in the heal. **Watch: the share of builds routed complex, and whether their heal count drops.**
+- 🧩 **A TESTED TEMPLATE OPENS ON THE FIRST RUNG (admin accepted 2026-09-27, autopsy 15151196).** A
+  golden scaffold is seeded only for a starter chip's prompt VERBATIM, so the template already is the
+  request and the job is verify-and-polish. The memory-match chip still scored 63 and opened on KIMI for
+  21 calls that changed one line. `scaffoldedComplexityDecision` makes it `simple` (source `scaffold`)
+  with no model call; the ladder still climbs if the first rung fails. No flag of its own —
+  `AGENTV3_GOLDEN_SCAFFOLD=off` turns the scaffold, and so this, off.
 - 🗺️ **THE PLANNERS ARE THE ONE EXCEPTION (admin chose "A", 2026-09-26, autopsy 7d79254b).** The
   roadmap, blueprint and project-mode planners are plans, so they climb `planLadder` through
   `makePlanTextRunner` (#3334) instead of the complex build chain — which had cost a large app 76 s of

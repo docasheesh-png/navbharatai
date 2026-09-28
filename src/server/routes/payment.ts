@@ -10,7 +10,9 @@ import { mirroredCreditPatch, rupeesToTokens } from '../lib/walletMirror';
 import { ordersToReconcile, reconcileMessage, type PendingOrderRecord } from '../lib/pendingOrders';
 import { getSecretValue } from '../lib/secrets';
 import { sendSafeError } from '../lib/httpError';
-import { verifyPaymentInternal, computeCreditedWallet } from '../lib/payments';
+import { verifyPaymentInternal, computeCreditedWallet, TOKENS_PER_RUPEE } from '../lib/payments';
+import { DAY_ONE_STEPS } from '../lib/referralRewards';
+import { settleWebReferralSteps } from './referral';
 import { verifyFirebaseToken } from '../lib/authMiddleware';
 import {
   storeBillingEnabled, storePlatformConfigured, storePacks, packForProduct, storeTransactionDocId,
@@ -424,14 +426,28 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         }
       }
 
+      // 🎁 THE SAME SIGN-IN SETTLES THE DAY-ONE FREE CREDIT (admin 2026-09-27): ₹50 for having an
+      // account and ₹50 for signing in with a verified email, on every surface. It rides here because
+      // every client already calls this route on sign-in — including app builds whose device check
+      // cannot run — so these two steps never depend on recognising the phone. Its own failure never
+      // costs the user the payment answer above.
+      const referral = await settleWebReferralSteps(db, userId, { only: DAY_ONE_STEPS })
+        .catch(() => ({ granted: 0, phoneVerified: false }));
+      const referralRupees = referral.granted / TOKENS_PER_RUPEE;
+      const paymentMessage = reconcileMessage(creditedInr, creditedOrders);
+      const freeCreditMessage = referralRupees > 0
+        ? `₹${referralRupees.toLocaleString('en-IN')} of free credit has been added to your wallet.`
+        : null;
+
       // `checked` is honest telemetry for the admin; the user only ever sees a message when money
-      // actually arrived (reconcileMessage returns null otherwise), so simply opening the app never
-      // produces a payment notice.
+      // actually arrived (both messages are null otherwise), so simply opening the app never
+      // produces a notice.
       return res.json({
         checked: orderIds.length,
         creditedOrders,
         creditedInr: Math.round(creditedInr * 100) / 100,
-        message: reconcileMessage(creditedInr, creditedOrders),
+        freeCreditRupees: referralRupees,
+        message: [paymentMessage, freeCreditMessage].filter(Boolean).join(' ') || null,
       });
     } catch (err: any) {
       return sendSafeError(res, 500, 'Unable to check your recent payments right now. Please try again.', err, 'payment reconcile');

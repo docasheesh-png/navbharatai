@@ -301,9 +301,8 @@ export default function App() {
   // the JSX below is unchanged. The hook owns the Cashfree URL-callback effect + all /api/payment/* +
   // /api/wallet/* actions; nothing payment-owned flows into the build/preview/chat pipeline.
   const {
-    FREE_DAILY_MESSAGES,
     wallet, setWallet,
-    dailyUsage, setDailyUsage, incrementDailyUsage, isFreeLimitReached,
+    dailyUsage, setDailyUsage, incrementDailyUsage,
     billingLogs, setBillingLogs,
     billingTransactions, setBillingTransactions,
     loadingWallet, setLoadingWallet,
@@ -2244,7 +2243,7 @@ export default function App() {
   const { handleSendForTab, handleSend, stop: stopChat, unsend: unsendChat } = useChatEngine({
     input, messages, isLoading, sessions, currentSessionId, activeAgent, mode, activeView, activeIntent,
     errorContext, preferredLanguage, user, keys, invalidKeys, selectedModel, apnapanProfile,
-    hasGeneratedCode, generatedCode, pendingGHEdit, githubToken, files, FREE_DAILY_MESSAGES, isFreeLimitReached,
+    hasGeneratedCode, generatedCode, pendingGHEdit, githubToken, files,
     setMessages, setInput, setIsLoading, setActiveIntent, setErrorContext, setIsSearching, setPreferredLanguage,
     setMode, setShowAuth, setUser, setGithubToken, setGithubRepoContext,
     setFiles, setHasGeneratedCode, setIsDeployed, setIsAppBuilt,

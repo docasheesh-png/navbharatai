@@ -236,7 +236,7 @@ describe('the wiring — the server pages, the preview never touches a sandbox, 
     // A failed read is a 502, never an empty page.
     expect(block).toContain("res.status(502).json({ ok: false, error: 'Could not read the built-app list.' })");
     // Orphaned live publishes ride the first page so a live site is never unmoderatable.
-    expect(block).toContain('deploymentStore.listOrphaned(50)');
+    expect(block).toContain('liveOrphans(await deploymentStore.listOrphaned(200))'); // live ones only — theAdminSeesWhoBuiltWhat.test.ts
   });
 
   it('🔒 the preview route reads the DURABLE files only — never an actuator, never a sandbox', () => {
@@ -252,7 +252,7 @@ describe('the wiring — the server pages, the preview never touches a sandbox, 
     const body = fileStore.slice(at, fileStore.indexOf('\nexport async function getWorkspaceAppsMany'));
     expect(body).toContain("orderBy('savedAt', 'desc')");
     expect(body).toContain('startAfter(after)');
-    expect(body).toContain('isGreenSnapshotKey(d.id)');
+    expect(body).toContain('!isAppWorkspaceKey(d.id)'); // every derived key, not ::green alone — theAdminSeesWhoBuiltWhat.test.ts
     expect(body).toContain('if (fileCount <= 0) continue;');
     expect(body).toContain('return { ok: false, apps: [], nextAfterDocId: null };');
   });

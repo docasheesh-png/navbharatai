@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { modelSupportsAdaptiveThinking } from './models';
 import { claudeBlockedInZone, NoClaudeInWeakBuildError } from './noClaudeZone';
 import { turnDeadline, BUDGET_EXHAUSTED_MESSAGE } from './turnDeadline';
+import { BuildStoppedError, throwIfStopped } from './stopSignal';
 
 /**
  * ClaudeClient — the v5.0 engine's wrapper over the Anthropic SDK for native
@@ -183,6 +184,13 @@ export interface RunTurnParams {
    * which is what makes callers able to adopt it one at a time.
    */
   deadlineAt?: number;
+  /**
+   * The BUILD's own stop signal (Stop, Unsend, a lease stop). When it aborts, the provider chain stops
+   * waiting at once, closes a stream it can close, and throws `BuildStoppedError` — which no rung is
+   * benched for and no fallback follows (stopSignal.ts, autopsy 2720e553). Omitted → today's
+   * behaviour exactly: the call runs to its own bound.
+   */
+  signal?: AbortSignal;
 }
 
 /** The slice of ClaudeClient the AgentRunner loop depends on (DI/testing). */
@@ -193,13 +201,14 @@ export interface TurnRunner {
 /** Minimal structural type of the Anthropic client method we use (for DI/tests). */
 export interface MessagesCreateClient {
   messages: {
-    create(params: Record<string, unknown>): Promise<AnthropicMessageLike>;
+    /** `options.signal` cancels the HTTP request itself (the Anthropic SDK honours it). */
+    create(params: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<AnthropicMessageLike>;
     /**
      * Optional streaming entry point. When present, runTurn uses it to emit
      * text/thinking deltas live; the final assembled message is awaited via
      * `finalMessage()`. The real Anthropic SDK provides this; tests can inject it.
      */
-    stream?(params: Record<string, unknown>): AsyncIterable<unknown> & {
+    stream?(params: Record<string, unknown>, options?: { signal?: AbortSignal }): AsyncIterable<unknown> & {
       finalMessage(): Promise<AnthropicMessageLike>;
     };
   };
@@ -436,12 +445,13 @@ export class ClaudeClient implements TurnRunner {
       try {
         return await this.streamTurn(createParams, params);
       } catch (err) {
+        if (params.signal?.aborted) throw new BuildStoppedError();
         if (!isRetryableError(err)) throw err;
         // Fall through to the non-streaming path below on a transient error.
       }
     }
 
-    const resp = await this.createWithRetry(createParams, params.deadlineAt);
+    const resp = await this.createWithRetry(createParams, params.deadlineAt, params.signal);
     return parseMessage(resp);
   }
 
@@ -453,7 +463,10 @@ export class ClaudeClient implements TurnRunner {
     createParams: Record<string, unknown>,
     params: RunTurnParams,
   ): Promise<TurnResult> {
-    const stream = this.getClient().messages.stream!(createParams);
+    throwIfStopped(params.signal);
+    const stream = params.signal
+      ? this.getClient().messages.stream!(createParams, { signal: params.signal })
+      : this.getClient().messages.stream!(createParams);
     for await (const event of stream) {
       const e = event as { type?: string; delta?: { type?: string; text?: string; thinking?: string } };
       if (e.type === 'content_block_delta' && e.delta) {
@@ -475,12 +488,17 @@ export class ClaudeClient implements TurnRunner {
    * This keeps a long multi-step build alive through provider hiccups instead of
    * dying on the first blip.
    */
-  private async createWithRetry(createParams: Record<string, unknown>, deadlineAt?: number): Promise<AnthropicMessageLike> {
+  private async createWithRetry(createParams: Record<string, unknown>, deadlineAt?: number, signal?: AbortSignal): Promise<AnthropicMessageLike> {
     let attempt = 0;
     for (;;) {
+      // A stopped build starts no request, and no RETRY either — a retry is a new call nobody will read.
+      throwIfStopped(signal);
       try {
-        return await this.getClient().messages.create(createParams);
+        return signal
+          ? await this.getClient().messages.create(createParams, { signal })
+          : await this.getClient().messages.create(createParams);
       } catch (err) {
+        if (signal?.aborted) throw new BuildStoppedError();
         attempt++;
         if (attempt > this.maxRetries || !isRetryableError(err)) throw err;
         // 🔴 A RETRY IS A NEW CALL, AND IT MUST FACE THE SAME DEADLINE AS THE FIRST ONE. Without this,

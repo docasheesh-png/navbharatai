@@ -182,6 +182,10 @@ describe('🔒 the wiring — the old fabrications must be gone, not merely unus
     // There are two health endpoints and both fed process.uptime(); fixing one would have left the
     // platform still reading CRITICAL for a day after every deploy on the other.
     expect(admin).not.toMatch(/uptimeSeconds:\s*process\.uptime\(\)/);
-    expect((admin.match(/uptimeSeconds: null/g) || []).length).toBeGreaterThanOrEqual(2);
+    // Since the Monitor capture of 2026-09-27 both endpoints build their inputs with ONE function,
+    // `platformHealthInputs`, which is where "uptime is not measured" now lives.
+    expect((admin.match(/platformHealthInputs\(\{/g) || []).length).toBe(2);
+    const healthScore = readFileSync(resolve(__dirname, 'HealthScore.ts'), 'utf8');
+    expect(healthScore).toMatch(/export function platformHealthInputs[\s\S]*uptimeSeconds: null/);
   });
 });

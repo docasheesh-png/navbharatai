@@ -91,7 +91,14 @@ function isCustomClass(c: string): boolean {
 export function findUndefinedClasses(files: Record<string, string>): string[] {
   if (usesTailwind(files) || usesExternalStylesheet(files)) return [];
   const { defined, cssFiles } = collectDefinedClasses(files);
-  if (cssFiles === 0 || defined.size === 0) return []; // nothing to check against → don't guess
+  // No stylesheet at all ⇒ nothing to check against, so say nothing (a CSS-in-JS app).
+  //
+  // 🔴 A stylesheet that defines NO class is not "nothing to check against" (autopsy 2720e553,
+  // 2026-09-27). It used to be treated the same way, which made deleting every rule the one edit
+  // that always passes this check: a repair round reduced a calculator's 4.6 KB stylesheet to `{ }`,
+  // this check went silent, and the build said "verified" about an app with no styles at all. The
+  // screens still name their classes, so every one of them is undefined, and saying so is exact.
+  if (cssFiles === 0) return [];
   const used = collectUsedClasses(files);
   const missing: string[] = [];
   for (const c of used) {
@@ -112,7 +119,67 @@ export function cssConsistencyError(files: Record<string, string>): string | nul
     `CSS class mismatch: ${missing.length} class name(s) are used in components via className but are NOT defined in any CSS file, so the app renders unstyled / visually broken:`,
     missing.map((c) => `  .${c}`).join('\n'),
     'Fix by making the components and the stylesheet AGREE — either add these classes to the CSS with real styles, or rename the className usages to the classes the CSS actually defines. Keep them consistent across all files.',
+    'Removing style rules never fixes this: a stylesheet with fewer rules leaves MORE of these classes unstyled.',
   ].join('\n');
+}
+
+/** A token that can be a CSS class name. */
+const CLASS_TOKEN = /^-?[A-Za-z_][\w-]*$/;
+
+/**
+ * Every class name the given source files put on an element, INCLUDING the ones chosen by an
+ * expression (`className={isOp ? 'key key-operator' : 'key'}`, a template literal's static parts).
+ * `collectUsedClasses` reads only a plain literal, which is right for a precision-first CHECK and wrong
+ * for a stylesheet that must style what the screens really render. PURE; sorted.
+ */
+export function classNamesUsedBy(files: Record<string, string>): string[] {
+  const out = new Set<string>();
+  const addTokens = (text: string) => {
+    for (const tok of text.split(/\s+/)) if (CLASS_TOKEN.test(tok)) out.add(tok);
+  };
+  // Every string literal in an expression; a template literal's `${ … }` parts are expressions too,
+  // so their own literals (`${active ? 'key-active' : ''}`) are read by recursing into them.
+  const scanExpression = (expr: string, depth: number): void => {
+    if (depth > 3) return;
+    const literals = /(["'`])((?:\\.|(?!\1)[\s\S])*?)\1/g;
+    let lit: RegExpExecArray | null;
+    while ((lit = literals.exec(expr))) {
+      const body = lit[2];
+      if (lit[1] === '`') {
+        for (const part of body.matchAll(/\$\{([^}]*)\}/g)) scanExpression(part[1], depth + 1);
+        addTokens(body.replace(/\$\{[^}]*\}/g, ' '));
+      } else {
+        addTokens(body);
+      }
+    }
+  };
+  for (const [path, content] of Object.entries(files)) {
+    if (!SRC_RE.test(path)) continue;
+    const re = /className\s*=\s*/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(content))) {
+      let i = m.index + m[0].length;
+      let expr: string;
+      if (content[i] === '{') {
+        // The balanced `{ … }` expression after `className=`.
+        let depth = 0;
+        const start = i;
+        for (; i < content.length; i++) {
+          if (content[i] === '{') depth++;
+          else if (content[i] === '}' && --depth === 0) break;
+        }
+        expr = content.slice(start + 1, i);
+      } else {
+        const q = content[i];
+        if (q !== '"' && q !== "'") continue;
+        const end = content.indexOf(q, i + 1);
+        if (end < 0) continue;
+        expr = content.slice(i, end + 1);
+      }
+      scanExpression(expr, 0);
+    }
+  }
+  return [...out].sort();
 }
 
 /**

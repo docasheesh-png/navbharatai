@@ -16,6 +16,8 @@ import { asMessageArray } from '../lib/chatUtils';
 import { previewAttachment } from '../lib/attachmentPreview';
 import { trackEvent } from '../lib/analytics';
 import { auth } from '../lib/firebase';
+import { authHeader } from '../lib/authHeaders';
+import { GUEST_LIMIT_CODE, guestLimitReached, openSignIn } from '../lib/guestId';
 import { rememberGithubOwner } from '../lib/githubTokenStore';
 import { parseVialTeaching } from '../lib/neonatalDosing';
 import { loadVials, saveVial } from '../lib/vialMemory';
@@ -42,8 +44,6 @@ export interface ChatEngineDeps {
   pendingGHEdit: any;
   githubToken: string | null;
   files: FileSystem;
-  FREE_DAILY_MESSAGES: number;
-  isFreeLimitReached: boolean;
   // setters
   setMessages: (v: Message[] | ((p: Message[]) => Message[])) => void;
   setInput: Dispatch<SetStateAction<string>>;
@@ -74,7 +74,7 @@ export function useChatEngine(deps: ChatEngineDeps) {
   const {
     input, messages, isLoading, sessions, currentSessionId, activeAgent, mode, activeView, activeIntent,
     errorContext, preferredLanguage, user, keys, invalidKeys, selectedModel, apnapanProfile,
-    hasGeneratedCode, generatedCode, pendingGHEdit, githubToken, files, FREE_DAILY_MESSAGES, isFreeLimitReached,
+    hasGeneratedCode, generatedCode, pendingGHEdit, githubToken, files,
     setMessages, setInput, setIsLoading, setActiveIntent, setErrorContext, setIsSearching, setPreferredLanguage,
     setMode, setShowAuth, setUser, setGithubToken, setGithubRepoContext,
     setFiles, setHasGeneratedCode, setIsDeployed, setIsAppBuilt,
@@ -115,6 +115,9 @@ export function useChatEngine(deps: ChatEngineDeps) {
       }, {
         signal: controller.signal,
         headers: {
+          // The account token (or, signed out, this device's guest id): the server counts a guest's daily
+          // messages and must recognise a signed-in user as one. This route used to receive neither.
+          ...(await authHeader()),
           'x-gemini-key': keys.gemini,
           'x-groq-key': keys.groq,
           'x-openai-key': keys.openai,
@@ -140,6 +143,11 @@ export function useChatEngine(deps: ChatEngineDeps) {
       }
       
       let errMsg = "AI request failed.";
+      // A signed-out visitor who has used today's free messages: open sign-in and say so plainly.
+      if (error.response?.status === 403 && error.response?.data?.code === GUEST_LIMIT_CODE) {
+        openSignIn();
+        throw new Error(String(error.response.data.error || 'Please sign in to keep chatting.'));
+      }
 
       if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') errMsg = "Network connection failed. Please check your internet or the backend availability.";
       else if (error.response?.status === 401) errMsg = "API key invalid or expired. Go to Settings → Secrets & API Keys to update your key.";
@@ -294,12 +302,9 @@ export function useChatEngine(deps: ChatEngineDeps) {
       }
     }
 
-    // 11.1 — Free tier daily limit enforcement (guests only)
-    if (isFreeLimitReached) {
-      addToast(`Free limit reached (${FREE_DAILY_MESSAGES} messages/day). Please sign in for unlimited access!`, 'warning');
-      setShowAuth(true);
-      return;
-    }
+    // 11.1 — The guest daily limit is the SERVER's (guestDailyQuota.ts): one count across every AI surface,
+    // which a browser counter could neither see nor keep. The old localStorage gate is gone; the local
+    // tally below stays only as usage bookkeeping for this device.
     incrementDailyUsage('message');
     trackEvent('message_sent', { tab: tabId, agent: activeAgent, isGuest: !user });
 
@@ -436,7 +441,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
 
       const performStreamingBackendCall = async (): Promise<{ reply: string; model?: string }> => {
         addLog('Falling back to background AI processing...', 'info');
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        // The account token (or, signed out, this device's guest id) — see the axios path above.
+        const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(await authHeader()) };
         if (keys.gemini && !invalidKeys.has(keys.gemini)) headers['x-gemini-key'] = keys.gemini;
         if (keys.groq) headers['x-groq-key'] = keys.groq;
         if (keys.deepseek) headers['x-deepseek-key'] = keys.deepseek;
@@ -497,6 +503,13 @@ export function useChatEngine(deps: ChatEngineDeps) {
         });
 
         if (!response.ok) {
+          // A signed-out visitor who has used today's free messages (checked BEFORE the 401 branch below,
+          // which signs the user out). The reply goes into the chat as an answer, not as an outage.
+          const guestLimit = await guestLimitReached(response);
+          if (guestLimit) {
+            setMessagesForTab((prev) => [...prev, { id: `guest-limit-${Date.now()}`, text: guestLimit, sender: 'ai', timestamp: new Date(), modelUsed: 'navBharatAI' }]);
+            throw Object.assign(new Error(guestLimit), { guestLimit: true });
+          }
           const errData = await response.json().catch(() => ({}));
           if (response.status === 401) {
             setUser(null);
@@ -712,6 +725,8 @@ export function useChatEngine(deps: ChatEngineDeps) {
         });
         return; // finally still clears the loading state
       }
+      // Today's guest messages are used up: the reply is already in the chat and sign-in is open.
+      if (error?.guestLimit) return;
       console.error('Chat error:', error);
       const errType = classifyError(error);
       setErrorContext({

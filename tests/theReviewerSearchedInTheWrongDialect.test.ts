@@ -127,3 +127,66 @@ describe('🔴 one turn, one read per file', () => {
     expect(duplicateReadsInTurn(uses, [0, 1, 2, 3]).size).toBe(0);
   });
 });
+
+// ── The three follow-ups the admin accepted the same day ("apki sabhi salah accepted") ──────────────
+import { scaffoldedComplexityDecision } from '../src/server/AgentV3/complexityRouting';
+import { missingClassClaim, classIsDefined, refuteReviewByEvidence } from '../src/server/AgentV3/reviewEvidence';
+
+describe('🧩 a tested template opens on the first rung', () => {
+  it('the scaffolded decision is simple, keeps the score for the report, and names why', () => {
+    const d = scaffoldedComplexityDecision(63);
+    expect(d).toMatchObject({ verdict: 'simple', score: 63, source: 'scaffold' });
+    expect(d.reason).toMatch(/tested template/);
+    expect(scaffoldedComplexityDecision(Number.NaN).score).toBe(0);
+  });
+  it('the route asks the same questions the seeding asks, and buys no model call for it', () => {
+    expect(route).toContain("const scaffoldWillSeed = process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !isImportTurn && !!goldenScaffoldForPrompt(prompt);");
+    expect(route).toContain('const complexityDecision = scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(');
+  });
+});
+
+describe('🔎 a reviewer claim a file can answer is checked before a repair is spent', () => {
+  // Verbatim from the report.
+  const FIRST = '[CRITICAL] (confidence: high) `className="badge"`, `className="alert alert-success"`, `className="muted"`, and `className="primary"` are used in `src/App.tsx`, but none of these classes are defined in `src/index.css`. The shipped CSS defines only the `.nb-*` recipe namespace.';
+  const SECOND = '[CRITICAL] (confidence: medium) The card grid buttons rely on inline `style` props for layout and color, so they will render, but the missing classes still leave the rest of the UI visually broken compared to the intended design.';
+  const CSS = { 'src/index.css': 'button[type="submit"], .btn-primary, .primary, button.primary { x: 1 }\nsmall, .muted { y: 2 }\n.badge { z: 3 }\n.alert { a: 4 }\n.alert-success { b: 5 }\n' };
+  const review = (issues: Array<{ severity: 'critical' | 'warning'; message: string }>) =>
+    ({ passed: false, score: 65, summary: issues[0]?.message ?? '', issues } as never);
+
+  it('reads the class names out of the report’s own sentence', () => {
+    expect(missingClassClaim(FIRST)).toEqual(['badge', 'alert', 'alert-success', 'muted', 'primary']);
+    expect(missingClassClaim(SECOND)).toBeNull(); // names nothing — it rides on the first
+    expect(missingClassClaim('[WARNING] The badge colour is too faint on dark mode.')).toBeNull();
+  });
+  it('a selector counts; a longer class that merely starts with the name does not', () => {
+    expect(classIsDefined('primary', CSS)).toBe(true);
+    expect(classIsDefined('alert', { a: '.alert-success { }' })).toBe(false);
+  });
+  it('both findings fall when every named class is defined — no repair, no suggestion, no failed verdict', () => {
+    const r = refuteReviewByEvidence(review([{ severity: 'critical', message: FIRST }, { severity: 'critical', message: SECOND }]), { stylesheets: CSS });
+    expect(r.refuted).toHaveLength(2);
+    expect(r.review.issues).toHaveLength(0);
+    expect(r.review.passed).toBe(true);
+  });
+  it('one class really missing ⇒ the finding stands, whole, and so does the one resting on it', () => {
+    const css = { 'src/index.css': CSS['src/index.css'].replace('.muted', '.quiet') };
+    const r = refuteReviewByEvidence(review([{ severity: 'critical', message: FIRST }, { severity: 'critical', message: SECOND }]), { stylesheets: css });
+    expect(r.refuted).toHaveLength(0);
+  });
+  it('no stylesheets read ⇒ nothing is refuted', () => {
+    expect(refuteReviewByEvidence(review([{ severity: 'critical', message: FIRST }]), {}).refuted).toHaveLength(0);
+  });
+  it('the route reads the stylesheets only when a finding makes the claim, and passes them in', () => {
+    expect(route).toContain('if (review.issues.some((i) => missingClassClaim(i.message))) {');
+    expect(route).toContain('refuteReviewByEvidence(review, { typecheck: gateEvidence.typecheck, stylesheets })');
+  });
+});
+
+describe('⚖️ Vite dev CSS is dropped from the capture only when the page would not fit', () => {
+  const script = browsePageScript('https://5173-x.e2b.app');
+  it('guarded by the same 30,000 budget, and the style tag is kept with a note', () => {
+    expect(script).toContain("if(document.documentElement.outerHTML.length>30000)for(const st of Array.from(document.querySelectorAll('style[data-vite-dev-id]')))");
+    expect(script).toContain('bytes of dev CSS omitted from this capture');
+    expect(script.indexOf('style[data-vite-dev-id]')).toBeLessThan(script.indexOf('(await p.content()).slice(0,30000)'));
+  });
+});

@@ -18,6 +18,7 @@
 // honest message — never a fake result).
 
 import { claudeVisionAnswerModel, glmVisionModels, grokVisionModels, geminiVisionModels, vertexVisionModels } from './visionModels';
+import { nextPoolKey } from './keyPool';
 
 export interface VisionAttachment {
   name: string;
@@ -65,7 +66,8 @@ async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise
  * Z.AI is OpenAI-compatible, so this mirrors tryGrok's shape (data-URL image parts).
  */
 async function tryGlm(atts: VisionAttachment[], o: VisionOptions): Promise<string | null> {
-  const key = process.env.GLM_API_KEY;
+  // A POOL, not one key (lib/keyPool.ts): the whole comma string used to go out as one bearer token.
+  const key = nextPoolKey(process.env.GLM_API_KEY);
   const images = atts.filter((f) => f.type.startsWith('image/'));
   if (!key || images.length === 0) return null;
   if (images.length !== atts.length) return null; // a PDF in the batch → defer to Vertex/Gemini (they read both)

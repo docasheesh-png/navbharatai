@@ -83073,3 +83073,410 @@ A weak-tier build that succeeded (10.7 min, ₹179.99, KIMI throughout, preview 
 preview"* (confidence 35%) seconds after the preview was proven — the shared-evidence-ledger open root cause;
 the ETA estimator was 3.7× under (heuristic, unevidenced, and labelled so); our E2E scaffold keeps the gate
 YELLOW (PR #3331's area).
+**Follow-ups accepted by the admin the same day ("apki sabhi salah accepted") — #3352 merged before this commit reached it, so these ship in the next PR:**
+- **A tested template opens on the first rung.** `scaffoldedComplexityDecision`: a starter chip whose golden scaffold will be seeded is routed `simple`, with no model call. This closes the first open item above.
+- **A reviewer claim a file can answer is checked first.** `reviewEvidence.ts` `missingClassClaim` / `classIsDefined`: a finding whose first sentence says named classes are not defined is refuted only when EVERY named class has a selector in the real stylesheets. A finding resting on "the missing classes" falls with them only when every class claim fell. Stylesheets are read only when a finding makes the claim. This closes the second open item.
+- **Vite dev CSS leaves the capture only when the page would not fit.** `style[data-vite-dev-id]` text is replaced with a note when `outerHTML` is over 30,000 characters; a page that fits is read as before. This closes the third open item.
+
+## 2026-09-27 — Admin Security → Built apps: who built what, and previews that work
+
+Admin, with the panel's own copy pasted: *"isko fix karo. kuch app ke preview chal hi nahi rahe! admin ko
+dikhna chahiye kon kya bana raha hai!!"* Five defects on one screen, each root-caused from code:
+
+1. **`…::greenmeta` listed as an app.** The file store holds three DERIVED keys beside each workspace
+   (`::green`, `::attempt`, `::greenmeta`); both listings excluded `::green` only (`isGreenSnapshotKey`).
+   The same hole reached the USER's Full-App Debugger list (`listUserWorkspaceApps`). Class fix:
+   `isAppWorkspaceKey` (workspaceIdentity.ts) refuses any key containing the `::` separator — a session
+   id can never hold a colon, so a fourth derived key is excluded by construction.
+2. **Previews framing "Site Not Found".** Reclaiming an `sn-` snapshot channel (Reclaim / Reclaim all,
+   2026-09-18) deleted the channel and never told the sandbox record, whose `snapshotUrl` kept pointing at
+   it — for the admin's Preview AND the user's own sleeping-app preview door. `previewSnapshot.ts` had
+   called that reclaim "harmless" (corrected in place). Now the reclaim route clears exactly the records
+   naming that channel URL (transactional, so a newer copy is never touched), and
+   `deadSnapshotCopies.ts` heals the records PAST reclaims left behind — judged only against a COMPLETE
+   channel inventory, only for a `--sn-` host on this site, run at most once per 10 min from the admin
+   list. A bucket copy or a published URL can never be judged dead.
+3. **Preview greyed out on live orphans.** An app whose owner deleted the workspace has no saved files,
+   so the render had nothing to compile — beside a working public link. `previewPlan` gains the live site
+   as its second source: copy → live site → render → none.
+4. **The orphan strip contradicted itself.** `markOrphaned` flags every record of a deleted workspace
+   (offline, banned, never-published ghosts included) and the strip said "Still live" on all of them.
+   The strip now holds only `liveOrphans` (read from up to 200 flagged records, not the first 50), and the
+   row's line is judged from its own state.
+5. **No "who" and no "what".** Every row leaves the route through `finish`: owner name/email in one
+   batched wallet read (`resolveUserIdentities`, the All-builds resolver), app name in one field-masked
+   `getAll` over the conversation docs (`readConversationNamesMany`) — chosen name, else the first
+   prompt's title, else an honest "Name not recorded". A name or email fragment now filters too.
+
+Tests: `tests/theAdminSeesWhoBuiltWhat.test.ts` (source guards on both listings, the reclaim route and
+every list mode; the orphan line). `everyBuiltAppHasAPreview.test.ts` updated to the new truth.
+⚠️ Not verified against production: how many records the heal will clear (it logs the count). The
+in-browser render of a full-stack app still shows the frontend only — unchanged, and labelled so.
+## 2026-09-27 — Autopsy "secret calculator" (build 2720e553): the stylesheet was written beside its screens, then emptied, then "verified"
+
+A free user (weak tier) asked for a calculator that hides files, photos and videos behind the code `0000`. The fast lane
+planned four files and finished at 13.7 min against a 2–4 min estimate. It said "Build verified — the app compiles ✓"
+about an app whose stylesheet had been reduced to `{ }`. The user was billed ₹15.44 at real cost (margin waived — no
+render proof) and stopped the build 143 ms after the preview address was published.
+
+**Ledger:**
+- ✅ Self-healed: 2
+  - the deterministic heal added four foundational files (package.json, vite.config.ts, tsconfig ×2)
+  - it put back `vite-tsconfig-paths`, which that rewrite had dropped
+- 🔀 Workaround: 3
+  - GLM flashx crawled on the plan call (17 s) and was benched
+  - repair round 2 fell KIMI → GLM-5.3 → Nemotron
+- ⏭️ Skipped: 0
+- ❌ Shipped wrong: 2
+  - the app shipped with no styles at all
+  - "verified ✓" was said about it
+- 🥵 Struggle: 4
+  - 494 s (61%) of the lane went to three repair rounds, each rewriting only `src/index.css`, each with a different
+    palette
+  - 240 s wasted on two reasoning rungs that spent a 12,000-token ceiling thinking (`OUTPUT_BUDGET_STARVED`)
+  - the dev server failed twice with "no recognisable error" before it came up (70 s)
+  - the ETA was 4.7× over its band
+
+**Root causes, all fixed here:**
+1. **The stylesheet was in the SHELL's tier.** f152c1ab (2026-09-20) moved stylesheets from tier 0 to "last", but
+   last was tier 2 — the tier of `App.tsx` and `main.tsx`.
+   - In any app whose screens live in `App.tsx`, the stylesheet was generated at the same moment as the only file
+     whose classes it styles. It invented its own; the class check failed; three repairs followed.
+   - Even a later tier would not have been enough: the export surface a stylesheet was handed drops JSX bodies, so
+     it never saw one `className`.
+   - Fix: stylesheets are now their own final stage (`STYLESHEET_TIER = 3`), and the call is handed the exact
+     class names the written screens use (`stylesheetClassContext`, built on `classNamesUsedBy`). That reader also
+     reads classes chosen by a ternary or a template literal, which the precision-first check's reader skips.
+   - The stage is DEFERRABLE: `requiredStageCount` leaves it out of the budget projection, so f152c1ab's
+     stage-count win stands. A lane out of time stops before it with the app written, and the existing root-written
+     break rule already allows that.
+2. **A continuation replaced a 4,669-character stylesheet with `{ }`.** `continuationRestartsFile` judged "too
+   little to preserve" by the FIRST LINE's length. A stylesheet's first line is `:root {` — seven characters, one
+   under the bar. So the continuation counted as a restart, and the parser's LAST-wins rule threw the whole partial
+   file away.
+   - It now compares the file's head with whitespace collapsed. `{ }` is welded onto the partial instead; the
+     brace gate then reports the truncated rule honestly.
+3. **The class check treated an EMPTIED stylesheet as "nothing to check against".** `defined.size === 0` returned
+   no findings, which made deleting every rule the one edit that always passes.
+   - The check stays silent only when there is no stylesheet at all.
+   - Its error now says that removing rules never fixes it.
+   - This reaches the architect lane's CSS heal (#3346) too, because it reads the same `findUndefinedClasses`.
+
+Tests: `tests/theStylesheetWasWrittenBesideItsScreens.test.ts` (13). Each of the three fixes was reverted alone and
+its tests failed. The f152c1ab tests now assert `STYLESHEET_TIER` and count required stages.
+
+**Open — for the admin, not decided here:**
+- **The lane's reasoning-rung stop (`stopLane`, Study-Racer 2026-09-25) cannot fire for GLM or Kimi.**
+  - `fastLaneCallIdentity` returns the FAMILY label (`kimi`, `glm`) as the model, so `modelAlwaysReasons('kimi')` is
+    false. This build ran its whole lane on `kimi-k2.7-code`, a rung that always reasons.
+  - Making the stop real is a behaviour change: every build whose flashx crawls would hand off to the full builder.
+  - This build's own evidence cuts the other way: Kimi generated all four files in 115 s, and the waste was the
+    repair, not the per-file calls. Left as found, with the question put to the admin.
+  - The per-call log's `model` field shows the family, not the id, for the same reason.
+- **The dev server "did not start and its log had no recognisable error" twice**, then came up. A git message ("On
+  branch master nothing to commit") appears in the health-check output. This is the same open class as the earlier
+  dev-server entries; the cause is not in this report.
+- **The foundational-file heal rewrote a working scaffold `package.json`** (it had to restore a dropped plugin). Why
+  those four files counted as "missing" on a warm sandbox is not established.
+- **Stop 143 ms after the preview published.** It was recorded from the abort signal (Stop / Unsend / lease stop).
+  That it was the user is likely but not proven from this report.
+## 2026-09-27 — Autopsy: the admin Diagnostics page, read against the code (three untruths)
+
+The admin pasted the whole Diagnostics page. Read line by line against the routes that produce it,
+three numbers were false and one was a real, months-old money leak:
+
+1. 🔴 **Free chat has not been free since 2026-07-21.** `GLM_API_KEY` became a 51-key comma pool that
+   day; only the build engine parsed it. `GlmProvider` (free chat leader) and `visionChain.tryGlm` sent
+   the comma string as one bearer token → every call refused → every free chat / Professional / Doctor
+   AI turn served by a PAID Vertex rung. Page evidence: *"GLM 8 requests · 8 errors, half_open"*,
+   *"0% of assistant turns were served by the free model"*. Fixed at the class: `lib/keyPool.ts` is the
+   one parser (the route re-exports it), chat rotates round-robin across the pool, `mobileBuildAiRepair`'s
+   private `split(',')[0]` (which missed the whitespace separator) replaced. Sibling hunt: every other
+   reader of the key only tests presence.
+2. 🔴 **"Real cost absorbed $570.09"** was the Sonnet-equivalent BASELINE, the number the usage card
+   stopped calling a loss on 2026-09-23 — the sibling card was never hunted. The same 208 builds really
+   cost $1.30. `summarizeLosses` now leads with measured spend plus coverage; the baseline is a labelled
+   comparison. And the usage card's **"$294.99 margin"** was billed-of-508 minus spend-of-28 — a margin
+   of no real set of builds. `measuredBilledUsd` is now recorded per day, and `realMarginUsd` is taken
+   over builds whose bill AND spend are both known (old partly-measured days contribute nothing rather
+   than a mismatch). One existing test had encoded the defect (4 − 0.5) and was corrected with the reason.
+3. **"Latest day 2026-08-28"** on 2026-09-27: `metricsStore.list` is newest-first and the card took the
+   last element. `latestDay` picks the maximum date.
+
+**Open, not fixed here (proactive, raised with the admin):** the stuck-projects list counts user-stopped
+builds as failures; a stuck project's "root cause" can be the upsell note; ladder depth shows 41 of 44
+builds opening on rung 2 (the complexity router sends most apps to KIMI — worth re-measuring its line
+now that the free-first premise is being checked); the Build event log card reads 0 events.
+## 2026-09-27 — Phone features PROVEN up to the Gradle step (admin: "jo apke karne ka hai karo")
+
+The "phone features built for real" entry above says *"No real phone build with these plugins has been run."*
+This session ran as much of one as this environment allows, with the registry's own plugin set at its own
+pinned versions (all 14, every plugin in `NATIVE_CAPABILITIES`), through the pipeline's own steps:
+
+| Step | Result |
+|---|---|
+| `npm install` — Capacitor 7.6.9 core + CLI/Android 7 + all 14 plugins | ✅ clean, no peer conflict (every plugin's peer is `@capacitor/core >=7`) |
+| `npx cap add android` / `cap sync android` | ✅ "Found 14 Capacitor plugins for android" |
+| the generated `nativePermissionScript('android')`, run twice | ✅ 7 permissions added, second run adds nothing, manifest parses as XML |
+| each plugin's own manifest vs the table's "declares it itself" comments | ✅ true for speech (RECORD_AUDIO + queries), TTS (queries), local notifications (POST_NOTIFICATIONS, WAKE_LOCK, BOOT), haptics (VIBRATE), Bluetooth (all six) |
+| `./gradlew assembleDebug` | ⛔ **not run** — Google's SDK host (dl.google.com) is blocked from this environment, so there is no Android SDK. This is the one step only a real phone build can prove. |
+
+**❌ One real defect, fixed:** the QR scanner. On Android `BarcodeScanner.scan()` runs Google's code scanner, a
+Play-services module downloaded separately; the plugin README says to check
+`isGoogleBarcodeScannerModuleAvailable()` first, and to add `<meta-data android:name="com.google.mlkit.vision.DEPENDENCIES"
+android:value="barcode_ui"/>` inside `<application>`. The builder was told `requestPermissions(); scan()` — a QR
+button that fails on its first press on a phone without the module. Now: the builder's `api` line gives the full
+check → install → wait-for-state-4 → scan sequence, and the registry gained `androidMetaData`, which the same
+generated script writes inside `<application>` (idempotent, only for apps that use the plugin).
+`tests/theQrScannerNeedsItsModule.test.ts` runs the real generated script on a real manifest.
+## 2026-09-27 — Admin Monitor capture: three false numbers on the main panel, and one legal item still open
+
+The admin pasted the Monitor page with no comment. Read against the code, four things on it were not what they looked like.
+
+1. **"Builds 0 · last 6 hours" beside "AI cost ₹10.95 · kimi".**
+   - **Cause:** `recordPlatformBuild` records a build's model calls first and the build last. On a quiet instance the FIRST `recordModelCall` flushed, the build counter landed in the fresh pending map, and nothing flushed it before the next deploy killed the instance.
+   - **Fix (`metricsTimeline.ts`):**
+     - The flush check runs on the next tick, so one build and its cost leave together.
+     - An unref'd idle timer flushes pending deltas.
+     - `server.ts` graceful shutdown flushes after the drain, before exit (bounded 2.5 s inside the 9 s backstop).
+2. **"Platform health — critical · Health 0 · Risk 100"** on servers "keeping up comfortably". Both admin routes built the inputs by hand from the per-PROVIDER counters.
+   - **Errors** were counted per ladder rung: a fallback that worked read as an error. This is the 2026-09-18 AI-load mistake, and this sibling was never hunted.
+   - **Latency** was the model's generation time (3–4 s) scored on a web scale where 2 s is zero.
+   - **Fix:** one builder, `platformHealthInputs`, for both routes. It uses per-request outcomes (`getRouterOutcomeStats`, with the same `AI_MIN_SAMPLE`) and our own server's wait (event-loop p99).
+3. **"AI load 15% unanswered"** was measured on everything EXCEPT streamed chat, the main path. This is the fourth time the streaming path has been forgotten.
+   - **Fix:** `routeStream` now records one outcome per turn. A user abort is not counted. The tile's note names the denominator ("3 of 20 requests").
+4. 🔴 **Grievance Officer still not named.** The Monitor shows the warning, so the running revision has no `GRIEVANCE_OFFICER_NAME`. CLAUDE.md's queue row said this was done; that row is corrected in place.
+
+- Tests: `tests/theMonitorCountsWhatItCosts.test.ts` (9). Reversion-proven: the old flush fails 2 of them and removing the stream outcome fails 1.
+
+**Observed, not changed (the admin's decisions):**
+- `AGENTV3_BUILD_BLOCKED_NO_CREDITS` repeats in the log (7 times in 2 days).
+- +126 registered users today, but Active (24h) = 1.
+- Since the welcome grants were removed, a WEBSITE signup has ₹0 and the referral ladder pays only in the Android app. So a web user can sign up and never build anything.
+- 892 chat rows log provider "unknown" and 1,103 calls "could not be priced" on the Business panel. Not investigated in this change.
+## 2026-09-27 — Games open on the cheap engine, where it can (admin decision)
+
+Asked after #3350 whether games should join reminder/planner apps on the cheap opening rung, the admin said:
+*"han, agar saste module me ho sakte hai to, hona chahiye"*.
+- **Before:** every prompt labelled `game` by the requirement analyser scored **58 / complex_app** (the
+  hospital-ERP score), because `namesBusinessDomain` promoted every labelled domain. "Build a car racing
+  game" opened on the always-reasoning rung and skipped the fast lane; "snake game" scored 15 only because
+  it is named in `SIMPLE_APP_SIGNAL`.
+- **Now:** `game` joins `PERSONAL_TOOL_DOMAINS` (`appComplexitySignals.ts`), so an ordinary game is
+  `simple_app` / 15 and opens on the cheap rung, keeping the fast lane.
+- **The admin's condition ("where it can")** is `HEAVY_GAME_SIGNAL`: 3D / three.js / WebGL, multiplayer,
+  online play or PvP, an MMO, a physics engine or physics-based play, an open world, Unity/Unreal — those
+  keep the complex opening. Login/database/real-time were already caught earlier by `isComplexAppPrompt`.
+  "Physics" alone (a school subject) and "3d ball" (a named simple app) do not count.
+- One predicate (`isPersonalTool`) now answers for both `namesBusinessDomain` and `namesPersonalTool`, so
+  the two can never disagree about the same prompt.
+- `tests/theLanguagesOfTheMarketNameTheirDomain.test.ts` pinned Indic game prompts to complex_app/58; it now
+  expects `simple_app` for the game rows (still recognised as games, never chat), per the admin's decision.
+- Tests: `tests/aGameOpensOnTheCheapEngineWhereItCan.test.ts` (19), reversion-proven in both halves.
+- ⚠️ **What to watch:** heal count and first-render time on Weak/Normal game builds. If ordinary games start
+  needing heals the cheap rung cannot give, the fix is to widen `HEAVY_GAME_SIGNAL`, not to revert.
+
+## 2026-09-27 — The free-credit steps, final plan; and why phones were not being recognised
+
+**Admin, verbatim:** *"sabhi pahle 50₹ do! (mobile + website) · fir refral code ke 100₹ (only mobile') · fir
+login par 50₹ (dono par) · fir mobile otp verification par 100₹ (dono par) · fir github connect (100₹ mobile
+only) — ab yeh final hai. isko fix karo! aur mobile recognition aapko 100% fix karna hai, abhi problem aa
+rahi hai!!"*
+
+**Correction of my own earlier line (same day):** I told the admin a website signup "has ₹0 and the referral
+ladder pays only in the Android app". Not quite: since 2026-09-26 the website paid mobile ₹100 + GitHub ₹100,
+but nothing at all until the mobile was verified by OTP — so a new website user did still start at ₹0.
+
+**The plan, shipped:** signup ₹50 (both) · referral code ₹100 (app) · login with a verified email ₹50 (both) ·
+mobile OTP ₹100 (both) · GitHub ₹100 (app). App ₹400 / website ₹200, which are exactly the two ceilings that
+already existed. `STEP_RUPEES` replaces the single `REFERRAL_STEP_TOKENS`, which is no longer read. The
+2026-09-26 OTP hold is now the lever `REFERRAL_WEB_HOLD_UNTIL_MOBILE` (default off). The referrer is never paid
+for a signup.
+
+**Mobile recognition — root cause:** the build live on Play is **134** (built 2026-09-25). Builds 117–136 send a
+classic Play Integrity request with **no nonce**, which the SDK refuses before it reaches Google, so every
+device check on every phone failed. They also did not list the `phone` sign-in provider, so every in-app
+mobile OTP failed as well. #3338 fixed both on 2026-09-26, and it is in builds **137 and 138. Neither is on
+Play.** The referral preflight compared the live release against 117 (when the plugin *shipped*, not when it
+*worked*), so it showed build 134 green. It now compares against `FIRST_RELEASE_THAT_ATTESTS = 137`.
+
+**What makes three of the five steps independent of the phone being recognised:**
+1. The sign-in settle that every client already calls, build 134 included (`/api/payment/reconcile`), now pays the day-one signup + login. It never pays the mobile there, because that would make a new app user "old" before the referral code they typed is applied.
+2. A failed device check falls back to the web rules for signup, login and mobile. This works on the server for any client that sends a token, and in the client for builds from this change onward.
+3. The phone retries a transient Play Integrity failure (-3/-8/-9/-12/-17/-100) twice before reporting it.
+
+**Tests:** `tests/aPhoneWeCannotRecogniseStillEarns.test.ts`, plus the new-plan tests in `referralRewards`, `referralRoutes` (59), `giftPolicy`, `referralPreflight` and the checklist suites. Reversion-proven: removing any one of the three fixes fails its test.
+
+**Still open — only the admin can do these:**
+- Roll out build 137/138 (or a fresh `.aab`) on Play, then set `ANDROID_LATEST_VERSION_CODE`. Until then, users on 134 earn signup, login and web-rule mobile, but not the referral code, GitHub or an in-app mobile OTP.
+- The website ₹50 + ₹50 can be farmed with scripted accounts. The admin accepted that. The lever is ready if it happens.
+## 2026-09-27 — The three open items of autopsy 2720e553, root-caused and fixed (admin: "dna level par ja kar")
+
+The earlier entry for that build listed three items it could not explain from the report. All three are
+explained now, and each is closed as a class rather than as one occurrence.
+
+**1. A pressed Stop did not stop the build.** The Stop button, Unsend and a lease stop all abort the
+build's signal (`abortBuild(…, 'user-stop')`).
+- **The defect:**
+  - The fast lane (`runSimpleBuild`, the one-shot lane, and the route's verify, repair and preview
+    helpers) never read that signal. A lane that was stopped kept calling models, kept repairing, and
+    started a dev server. Stop was recorded only when the lane ran out of work. That is why that report
+    shows `USER_STOPPED_BUILD` 143 ms after the preview published: the timestamp is when the stop was
+    NOTICED, not when it was pressed.
+  - The agentic loop noticed a stop only BETWEEN turns, after paying for the call in flight.
+    `CLAUDE.md` had recorded this as an open item since 2026-09-13.
+- **The fix:**
+  - `stopSignal.ts` is one definition of a stop: `BuildStoppedError`, `raceStop`, `withStopSignal`.
+  - `RunTurnParams.signal` carries the stop to the provider ladder. On a stop, the ladder asks no
+    further rung, benches nobody, counts no wasted provider time, and still attributes a stopped call's
+    cost to us (never to the user).
+  - The GLM/Kimi runner closes its stream, so the provider stops generating and billing.
+  - The Claude request is cancelled through the SDK, and never retried after a stop.
+  - `AgentRunner` passes its signal into the call it waits on, and ends through the same abort summary.
+  - The route's two text-runner factories are wrapped with `withStopSignal`, so every direct call site
+    (planners, post-build repairs, the fast lane) carries the signal without anyone having to remember.
+  - `runSimpleBuild` checks the signal before every file call and at every tier, repair round and
+    preview start. A repair that finishes after a stop is not written. The lane returns
+    `stopped: true`, saves the files it finished, and starts no one-shot lane.
+  - Every OTHER abort cause (watchdog, cost cap, deploy drain, reaper) now cancels in-flight calls
+    too, because each of them already means "this build is over".
+
+**2. The foundation guard overwrote a working `package.json`.**
+- **The defect:**
+  - The lane listed the sandbox once and kept `.slice(0, 80)` of an unsorted `find` listing, so which
+    80 files survived was chance.
+  - `ensureViteReactFoundation` then called `package.json`, `vite.config.ts` and both tsconfigs
+    "missing" and wrote generic ones over the scaffold's. The build had to restore a plugin that was
+    already installed.
+- **The fix:**
+  - The listing is no longer capped. Prompts that show it cap it themselves at 60.
+  - `foundationFilesStillAbsent` asks the disk immediately before writing, so a file that exists is
+    never overwritten (`FOUNDATION_KEPT_EXISTING`).
+  - The Diagnose/restore call site is left as it was, on purpose: there, the durable store IS the whole
+    project, and the sandbox holds only the template's generic files.
+
+**3. The dev server "did not start and the log had no recognisable error" twice, then came up.**
+- **The defect:**
+  - The recovery loop waited 25 s, then killed and relaunched with a 20 s wait, twice: 70 s in all.
+  - The port was listening 17 s later.
+  - A clean log from a living process is a server still starting (a cold `vite` after a fresh install
+    pre-bundles before it prints). Each restart killed it and reset its clock.
+- **The fix:**
+  - For an unrecognised failure, the loop first waits on the SAME process
+    (`buildStillStartingWaitCommand`, 40 s, bounded).
+  - A process that has exited answers `PROC_GONE` within about a second, so a real crash is restarted
+    exactly as before. A named failure keeps its own recovery.
+
+Tests (all reversion-proven by removing each fix and watching its test fail):
+- `tests/aPressedStopStopsTheBuild.test.ts` (19)
+- `tests/theDiskDecidesWhatIsMissing.test.ts` (5)
+- `tests/aStartingServerIsNotADeadOne.test.ts` (9); its shell command is run for real
+
+**Still open:**
+- Gemini's runner has no cancel handle. A stop there stops the WAITING (the ladder races it), not the
+  call itself.
+- Why the dev server's log was silent for that long is not established. A git message ("On branch
+  master") appears in that output, and its source was not traced here.
+
+## 2026-09-27 — Ten free messages a day without signing in, all surfaces together (admin-mandated)
+
+Admin, verbatim: *"without login only 10 messages per day! iske bad login compulsory!! 11th message login ke bad
+ya next day! sabhi mila kar!!"*
+
+**What was there before, measured rather than assumed:**
+- The only "10 a day" rule was a **browser localStorage counter** (`usePaymentEngine.ts`). It counted free chat
+  alone, and clearing site data, a private window or a second browser reset it.
+- **Free chat never sent the signed-in user's token**, so the server treated every free-chat caller as anonymous.
+  A server-side limit added without fixing that would have limited signed-in users too.
+- Anonymous callers could reach free chat, Repo Analyst (which runs on the system keys up to Claude), App Review,
+  the Security Scan (no rate limiter at all), the AI Debugger, App Scan and the design tools. They were bounded only
+  by per-minute/per-hour IP limiters.
+
+**What it is now:**
+- **`src/server/lib/guestDailyQuota.ts`** is ONE daily budget for a signed-out visitor.
+  - 10 messages (`GUEST_DAILY_MESSAGES`), counted TOGETHER across every surface above.
+  - The day is India's calendar day, so the eleventh goes through after midnight IST.
+  - A verified account is never counted.
+  - The over-limit reply is **403 `guest_limit_reached`**, not 401: the free-chat client reads a 401 as an
+    expired session and signs the user out.
+  - Fail-open on a store error, like every limiter here.
+- **Who "one visitor" is:**
+  - A random **device id** the app mints (`src/lib/guestId.ts`), sent as `x-nb-guest` only while signed out,
+    stored server-side only as a hash.
+  - An IP alone would lock out every stranger on the same Indian mobile address (CGNAT).
+  - The IP is kept as a **backstop** of 100/day (`GUEST_DAILY_IP_CAP`). It is read from the LAST
+    `X-Forwarded-For` entry (the one Cloud Run appends), not `req.ip`, which under `trust proxy` is whatever the
+    caller claimed. A script minting a fresh id per message stops there.
+  - A request with no device id is held to the backstop alone. That is deliberate: app builds from before this
+    change do not send it, and holding them to ten would reintroduce the CGNAT lockout.
+- **The client:**
+  - `authHeader` / `authJsonHeaders` / `authedHeaders` carry the token, or the guest id when signed out.
+  - Free chat, Bot Build Help, Live Collaboration, Repo Analyst, Security Scan, AI Debugger, App Scan, App Review
+    and the palette tool now send it.
+  - On the refusal, every one of them opens the existing sign-in screen (`navbharat:navigate {signIn:'phone'}`) and
+    shows the sentence. Free chat shows it as a reply, not as an outage.
+  - Professionals maps it to its existing login card.
+- The localStorage gate (`isFreeLimitReached`, `FREE_DAILY_MESSAGES`) is removed. The server is the one count.
+- The Privacy Policy §11 discloses the guest identifier. `AppKnowledgeBase` has `guest_free_messages`.
+
+**Untouched on purpose:**
+- Pro builds, image generation, screenshot→code, voice, Professionals and Doctor AI already require an account
+  from the first message.
+- The published-app AI gateway serves other people's visitors on the owner's wallet.
+
+Tests:
+- `tests/tenFreeMessagesThenSignIn.test.ts` (30), reversion-proven on the device limit, the signed-in skip, the
+  route census and the free-chat token. It includes the census that fails when an anonymous AI route lacks the
+  budget, and the CORS preflight check for the native app.
+- `tests/authHeaders.test.ts` was updated to the new contract: signed out still sends no token, only the guest id.
+
+**Still open:**
+- Anonymous identity is weak by nature: clearing site data mints a new device id. The backstop bounds that; only an
+  account removes it.
+- Existing per-IP limiters still read `req.ip` (the spoofable first forwarded entry). That is a separate, older
+  finding that this change does not widen.
+
+## 2026-09-28 — Competitor refresh + the click explorer (gap G1)
+
+**Asked (admin):** *"navbharatai ko sabhi compatitors ke sath compare karo! architecture, systems, design, skill gaps ko list karo. best solution jo gaps ko fill kar ke navbharatai ko compatitors se aage la jaye banao"*.
+
+**Comparison:** `COMPETITIVE_ANALYSIS_2026.md` §5, appended (the August sections are kept as the record). It covers Lovable, Bolt, v0, Replit, Cursor and Google AI Studio, web-verified with sources; gaps by architecture / systems / design / skill; a ranked lever list; and the honest ahead-list. It records one new opening: Lovable trains on Free/Pro content by default from 2026-09-09, while our Privacy Policy already forbids training on users' chats, documents or apps.
+
+**Built:** `src/server/AgentV3/clickExplorer.ts`, wired into `routes/agentv3.ts` beside the journey check. Flag `AGENTV3_CLICK_EXPLORE` (default on).
+- **What it does:** after a successful build it presses up to 12 visible, safe controls in the sandbox's pre-baked browser, each on a fresh load.
+- **What it reports:** a crash overlay, a blank screen, an in-app link to a missing page, or an uncaught error, naming the control.
+- **Cost:** no model call.
+- **What it will not press:** anything named for delete, pay, send, upload, download or log out; a form's submit; a link that leaves the app; an unnamed control. When the app writes to the user's own database, it also skips creating verbs.
+- **Outcomes:** three, never two. `EXPLORE_NOT_RUN` and `EXPLORE_NOTHING_TO_PRESS` are process-only.
+- **Build card:** the card has one slot, so the journey's proof is now held and emitted once, merged with the explorer's (`mergeUserProofs`). A second event would have erased the first.
+- **Verified in real Chromium** against a page carrying every verdict. Tests: `tests/theAppIsPressedNotOnlyPainted.test.ts` (25), reversion-proven on the "could not look ≠ pass" rule and on blank detection. The real-browser half skips in CI, which has no browser.
+
+**Still open (next levers, not started):**
+- Explorer → verified repair pass. This is a spend decision for the admin, because NavBharatAI pays on Weak.
+- Controls inside modals and on other pages are not reached.
+- A one-button security report.
+- A live ₹ figure during the build (G10).
+- Connectors via short-lived credentials (G6).
+- Expo/native UI (G7).
+
+## 2026-09-28 — The click explorer goes one screen deeper
+
+**Asked (admin):** *"continue"* — after #3368 merged. Chosen: the explorer's own open item, "controls on another page are not reached". It is the zero-spend lever; the two others are the admin's decisions (below).
+
+**Built:** second-level exploration in `clickExplorer.ts`.
+- **How it works:** a first-screen press that worked and changed the screen is collected again. The controls it revealed, never ones the first screen had, are queued.
+- **Limits:** up to 8 of them, at most 2 per parent.
+- **Each press:** a fresh load, the parent pressed unarmed, then the child judged by the same four questions.
+- **Reporting:** a failure names its screen (`pressName`: *"Refresh" (on the "Reports" screen)*).
+- **What did not change:** budget, codes, wiring, and the never-press rules.
+
+**Caught before it shipped:** the first draft wrote `404\b` and `'\n'` with single backslashes in the TypeScript template. That became a backspace and a raw newline in the generated script. The backspace breaks the missing-page regex silently, and `node --check` cannot see it. Fixed, and a test now rejects any raw control character in the module.
+
+**Verified in real Chromium:** "Tab two" reveals Refresh (throws → `error`), Sort by name (`ok`), Remove row (never pressed) and Show more (past the per-parent cap). The Help page reveals a throwing button (`error`). No first-screen control is pressed twice.
+- Tests: 28.
+- Reversion-proven: removing discovery fails the real-browser test and a source guard; a single backslash fails the control-character test.
+
+**Still open — admin decisions, not started:**
+- **Explorer → verified repair.** This is spend: NavBharatAI pays on Weak.
+- **A live ₹ figure during the build (G10).** This is a billing-display product decision.
+

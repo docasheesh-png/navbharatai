@@ -145,6 +145,14 @@ export interface BuiltAppRow {
   snapshotUrl: string | null;
   snapshotAt: number;
   orphaned: boolean;
+  /**
+   * WHAT the app is (its chosen name, else the title of its first prompt) and WHO built it (admin
+   * 2026-09-27: "admin ko dikhna chahiye kon kya bana raha hai"). Optional so a row from an older server
+   * still renders; null means the server could not find one, and the row says "name not recorded"
+   * rather than inventing it.
+   */
+  appName?: string | null;
+  owner?: { name: string; email: string; label: string; anonymous: boolean } | null;
 }
 
 /** What the admin reads on a built app's row — every state yields real words, never blank. */
@@ -167,10 +175,15 @@ export function publishStateView(state: PublishState | string | undefined): AppS
  * over the rows already loaded, because answering it server-side would mean scanning everything —
  * the load the admin asked to stop. Matches the id, the owner and the link, case-insensitively.
  */
-export function matchesBuiltApp(row: Pick<BuiltAppRow, 'workspaceId' | 'ownerUid' | 'userId' | 'url'>, query: string): boolean {
+export function matchesBuiltApp(
+  row: Pick<BuiltAppRow, 'workspaceId' | 'ownerUid' | 'userId' | 'url'> & Partial<Pick<BuiltAppRow, 'appName' | 'owner'>>,
+  query: string,
+): boolean {
   const q = (query || '').trim().toLowerCase();
   if (!q) return true;
-  return [row?.workspaceId, row?.ownerUid, row?.userId, row?.url]
+  // The app's name and the owner's name/email are what an admin actually remembers — "the hotel app",
+  // "rahul@…" — so a fragment of either finds the row too.
+  return [row?.workspaceId, row?.ownerUid, row?.userId, row?.url, row?.appName, row?.owner?.name, row?.owner?.email]
     .some((f) => typeof f === 'string' && f.toLowerCase().includes(q));
 }
 
@@ -186,13 +199,27 @@ export function matchesBuiltApp(row: Pick<BuiltAppRow, 'workspaceId' | 'ownerUid
  */
 export type PreviewPlan =
   | { source: 'copy'; url: string; label: string }
+  | { source: 'live'; url: string; label: string }
   | { source: 'render'; label: string }
   | { source: 'none'; label: string };
 
-export function previewPlan(row: Pick<BuiltAppRow, 'snapshotUrl' | 'snapshotAt' | 'fileCount'>): PreviewPlan {
+/**
+ * ⚠️ THE LIVE SITE IS THE SECOND SOURCE, added 2026-09-27 (admin: "kuch app ke preview chal hi nahi
+ * rahe"). A published app whose owner deleted the workspace has NO saved files, so the render had
+ * nothing to compile and Preview was greyed out on exactly the rows a moderator most needs to look at
+ * — while the app itself was one click away at its public link. And for any live app the published
+ * site is the real thing, backend included, where the render is the frontend only. Order: the saved
+ * copy (the latest green build) → the live site → the in-browser render → nothing, said plainly.
+ */
+export function previewPlan(
+  row: Pick<BuiltAppRow, 'snapshotUrl' | 'snapshotAt' | 'fileCount'> & Partial<Pick<BuiltAppRow, 'publish' | 'url'>>,
+): PreviewPlan {
   if (row.snapshotUrl) {
     const when = row.snapshotAt > 0 ? ` (${new Date(row.snapshotAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })})` : '';
     return { source: 'copy', url: row.snapshotUrl, label: `Saved copy of the last successful build${when} — the real built app, served without waking the owner's machine.` };
+  }
+  if (row.publish === 'live' && typeof row.url === 'string' && /^https?:\/\//i.test(row.url)) {
+    return { source: 'live', url: row.url, label: 'The published app, exactly as the public sees it at its link — no copy of this build was saved.' };
   }
   if (row.fileCount > 0) {
     return { source: 'render', label: 'Rendered in your browser from the saved files — the frontend only; a backend or database this app uses does not run here.' };

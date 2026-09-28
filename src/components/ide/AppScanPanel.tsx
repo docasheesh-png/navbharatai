@@ -15,6 +15,7 @@ import { Github } from '../ui/BrandIcons';
 import { authJsonHeaders } from '../../lib/authHeaders';
 import { AddCreditNotice } from '../common/AddCreditNotice';
 import { walletEmptyRefusalMessage } from '../../lib/walletEmptyRefusal';
+import { guestLimitReached } from '../../lib/guestId';
 
 type Severity = 'critical' | 'high' | 'medium' | 'low';
 
@@ -180,6 +181,8 @@ export const AppScanPanel: React.FC<AppScanPanelProps> = ({ files, onAutoFixInV5
   const streamRun = useCallback(async (payload: any, headers: Record<string, string>) => {
     const res = await fetch('/api/app-debug/run', { method: 'POST', headers, body: JSON.stringify(payload) });
     if (!res.ok || !res.body) {
+      const guestLimit = await guestLimitReached(res);
+      if (guestLimit) throw new Error(guestLimit);
       const data = await res.json().catch(() => null);
       // An empty wallet is a PRICE, not a fault, and it must be recognised HERE — a `throw` keeps
       // only the sentence, and the catch below has no status left to judge it by.

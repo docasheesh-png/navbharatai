@@ -6,6 +6,7 @@ import { mergePalette, paletteSummary } from '../../lib/paletteMerge';
 import { authedFetch } from '../../lib/authedFetch';
 import { AddCreditNotice } from '../common/AddCreditNotice';
 import { walletEmptyRefusalMessage } from '../../lib/walletEmptyRefusal';
+import { guestLimitReached } from '../../lib/guestId';
 
 interface ColorToken {
   name: string;
@@ -163,6 +164,8 @@ export function DesignSystem({ onCodeUpdate, sessionId }: DesignSystemProps = {}
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ brand: description }),
       }, 60_000);
+      // A signed-out visitor out of today's free messages: open sign-in (the words are shown below).
+      await guestLimitReached(res);
       const data = await res.json().catch(() => null);
       // An empty wallet is a PRICE, not a fault. `paletteMsg` also carries SUCCESS summaries, so the
       // refusal gets its own state rather than a sentence that a later success would silently erase

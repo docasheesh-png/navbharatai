@@ -129,3 +129,40 @@ export function computeHealthScore(inputs: HealthInputs): HealthScoreReport {
     missing,
   };
 }
+
+/**
+ * The platform's health INPUTS, built in one place for both admin routes that show a health score.
+ *
+ * 🔴 WHY (admin Monitor capture, 2026-09-27): "Platform health — critical · Health 0 · Reliability 0 ·
+ * Risk 100" on a platform whose servers were "keeping up comfortably". Both admin routes built the
+ * inputs by hand, identically, from the per-PROVIDER counters — and both halves were the wrong
+ * measurement:
+ *   • ERRORS counted every ladder rung that failed. The free leader is rate-limited, the next rung
+ *     answers, the user gets a reply — one success and one "error". This is the exact mistake the AI
+ *     load tile was corrected for on 2026-09-18 (see `recordRouterOutcome`); its sibling here was never
+ *     hunted. The honest question is per REQUEST: did the person get an answer?
+ *   • LATENCY was the model's GENERATION time (3–4 s for an ordinary answer, longer for a long one)
+ *     scored on a web-request scale where 2 s is zero. Every healthy AI platform scores 0 on that. How
+ *     long a model takes to write is the vendor's pace and the answer's length — not our platform's
+ *     health. Our own latency is how long a request waits on OUR server: the event-loop delay the
+ *     "Server load" panel already measures.
+ * A rate over too few requests is not a measurement — the same `AI_MIN_SAMPLE` the load board uses.
+ * PURE.
+ */
+export function platformHealthInputs(src: {
+  builds: { total: number; successRate: number };
+  router: { requests: number; failed: number } | null;
+  /** Worst-case event-loop wait on this server, ms (serverLoad's p99), or null when not sampled. */
+  serverWaitMs: number | null;
+  minRequests: number;
+}): Required<HealthInputs> {
+  const req = src.router ? Number(src.router.requests) || 0 : 0;
+  const failed = src.router ? Number(src.router.failed) || 0 : 0;
+  return {
+    successRatePct: src.builds.total > 0 ? src.builds.successRate * 100 : null,
+    errorRatePct: req >= Math.max(1, src.minRequests) ? (failed / req) * 100 : null,
+    avgLatencyMs: isNum(src.serverWaitMs) ? src.serverWaitMs : null,
+    // Process age is deploy recency, not uptime, on a host that deploys on every merge (2026-09-12).
+    uptimeSeconds: null,
+  };
+}

@@ -104,3 +104,82 @@ belong once the APK telemetry round lands.
 *Drift warning: competitor facts above are an August-2026 snapshot; re-verify before quoting in
 marketing. NavBharatAI-side claims were code-verified 2026-08-27 — re-grep before relying on them later,
 exactly as ROADMAP.md's own history demands.*
+
+---
+
+## 5 · September 2026 refresh (2026-09-28) — what moved, what the gaps are now, what was built
+
+The admin asked for the comparison again, across **architecture, systems, design and skill**, and for the
+best gap-filling solution to be BUILT, not only listed. This section appends; §1–§4 are the August record.
+
+### 5.1 What the competitors shipped since August (web-verified 2026-09-28)
+
+| Competitor | What changed | Why it matters to us |
+|---|---|---|
+| **Lovable** | Agent is the default builder. Security scan on every publish plus an on-demand **deep scan** (database access rules, keys in JS bundles, auth config, HTTP headers). **From 2026-09-09, Free/Pro content trains Lovable's models unless the user opts out.** | The scan is now a visible product. The training change is a **privacy opening** for us (see 5.4). |
+| **Bolt** | **Bolt Cloud**: hosting, domains and SEO public; auth, storage, payments, databases and analytics built with Netlify + Supabase. Azure/Microsoft partnership (May 2026). | Owns the whole backend. We deliberately don't (§3 "Deliberately NOT copied"), and that still holds. |
+| **v0** | **v0 API GA**: a headless builder (prompt → app → sandbox preview URL). **Vercel Connect**: short-lived managed credentials for 100+ services instead of pasted keys. | Connect is the best answer yet to "connectors" (our G6). The API is still a developer-platform play (§8E defer stands). |
+| **Replit** | **App Testing**: the agent drives the app in a real browser like a user (buttons, forms, APIs) and fixes what it finds. Agent 3 runs up to ~200 min autonomously. **Expo mobile** with App Store/Play submission (early 2026). | This was our #1 honest deficit in August (G1). See 5.3. |
+| **Cursor** | Bugbot 3× faster and 22% cheaper. **Security Review** and **Rollouts** bots (2026-09-23, Teams/Enterprise). Self-hosted cloud agents. | PR-time review is now table stakes for developer tools (our G4). |
+| **Google AI Studio** | Coding agent built on Antigravity parts. **Auto-provisions Firestore + Firebase Auth** when an app needs data or login. Hands off to Antigravity, which verifies the app in a real browser. Firebase Studio closed to new signups 2026-06-22; sunset 2027-03-22. | Zero-setup backend from a free tier. Our equivalent is one-click Supabase **in the user's own account**. |
+
+### 5.2 Gaps now, by layer (✅ = closed, 🟡 = partial, ❌ = open)
+
+**Architecture**
+- ❌ **No shared evidence ledger.** Gates and the agent keep private notions of what is proven (open root cause, CLAUDE.md autopsy 697b38ee). This is the single biggest *internal* ceiling.
+- ❌ **No single `turnKind`.** "What kind of turn was this?" is still inferred by counting outputs in several places (open root cause, autopsy e628efd4).
+- 🟡 **`routes/agentv3.ts` is ~20k lines.** It works and is heavily test-locked, but every new check is wired into one file. Extraction is incremental, never a rewrite.
+- ❌ **Native mobile is a Capacitor webview.** Replit ships Expo and Google ships Kotlin/Compose. Our phone features are real (`nativeCapabilities.ts`), but it is not a native UI toolkit.
+- ⏸️ **No headless builder API** (v0). Deliberately deferred.
+
+**Systems**
+- ✅ **G1 · Whole-app browser self-test**: closed in part by this refresh (5.3).
+- 🟡 **Visible deep security report.** Publish safety is real (secret refusal with file and line, CVE gate, APK scan + human review), but there is no one-button report of the kind Lovable shows ("your tables are readable by anyone").
+- ❌ **G6 · Connectors.** v0's short-lived-credential model is the one to adapt, not per-service OAuth plumbing.
+- ❌ **G5 · Scheduled runs**, ❌ **G10 · live ₹ during a build**, ❌ **G4 · PR / security review trigger.** All three are unchanged since August.
+- 🟡 **Analytics.** Visitor analytics for published apps exist (§13 item 1.1). Funnels and custom events (Replit) do not.
+
+**Design**
+- ❌ **G8 · Figma import** and ❌ **G9 · variants** are unchanged. The image → contract pipeline covers "here is a screenshot".
+- ❌ **Design-system upload** (Bolt). This is a real ask for agencies, but it is not our first audience.
+
+**Skill** (what the engine knows how to do)
+- 🟡 **Reusable skill packs** (Replit "Growth Skills") vs our domain recipes + requirement-aware building (hospital, restaurant, …). Our recipes are deeper for India. Theirs are user-installable. Making recipes user-visible and selectable is a cheap adaptation.
+- ✅ **Code literacy in the user's language** (G11, shipped August). No competitor has it.
+
+### 5.3 What was BUILT in this refresh — the click explorer (closes G1's biggest half)
+
+Every check we ran after a build watched the app **paint**, or drove **one** derived form. Nothing pressed the rest of the app. `clickExplorer.ts` now opens the finished app in the sandbox's pre-baked browser and presses up to 12 visible controls, **each on a fresh load**. It names the exact control that crashes the app, blanks the screen, opens a page that does not exist, or throws an error, and the user sees that in the build card. Flag `AGENTV3_CLICK_EXPLORE` (default on).
+
+**Where this puts us, stated without inflation:**
+- **Ahead on:**
+  - It runs on **every** build, not when an agent "decides enough has changed".
+  - It costs **no model call**, where Replit's testing is model-driven.
+  - Its **safety rules are written down and tested**: it never presses delete, pay, send, upload or log out, never submits forms, never leaves the app, and never writes to a database the user owns.
+  - The user sees a **per-button** result, in plain language.
+- **Behind on:** Replit's tester also **fixes** what it finds. Ours reports it and offers the fix as the next step, one tap. Wiring the finding into a bounded, verified repair pass is the obvious follow-up, and it is a **spend decision** for the admin (on Weak, NavBharatAI pays).
+- **Not covered yet:** ~~only the home screen's controls are pressed~~ — since the second-level pass (same day) the controls a tab, menu or in-app link reveals are pressed too, up to 8, two per parent. Still not reached: a third level, and multi-step flows, which are the journey check's job.
+
+### 5.4 Where NavBharatAI is ahead now (re-verified against code 2026-09-28)
+
+1. **India-first:** Hindi/Hinglish, UPI/Cashfree, Indian domain recipes, App Mart instant apps, mobile-first. Unchanged, and still absent from all six.
+2. **Privacy:** NavBharatAI does not train models on the user's chats, documents or apps. Our own Privacy Policy already promises this in writing ("we do not use the private content of your chats, your uploaded documents or your built apps to train any AI model", `privacyPolicy.ts`), and providers are contractually barred from training on it. **Lovable now trains by default** on Free/Pro. This is a line we can say truthfully today.
+3. **Billing honesty:** real cost × published markup, a failed build is never charged, markup only when the preview ran. Nobody else puts this in writing.
+4. **Proof shown to the user:** the form → reload → still-there journey, and now every safe button pressed, in the same card. Failures are shown as plainly as passes.
+5. **Publish safety** beyond a headline scan (APK malware scan + human review, secret refusal with file and line).
+
+### 5.5 The next levers, ranked (value to the user ÷ cost to us)
+
+1. **Explorer → verified repair** (small; a spend decision). Close the "Replit fixes it" gap with the `verifyAfterFix` wrapper the heals already use.
+2. **One-button security report** (medium). Most of the probes exist already (secret scan, CVE gate, headers). Add a Supabase access-rule probe **against the user's own project, read-only**, and show the result as a card.
+3. **Live ₹ during a build (G10)** (small–medium). The ledger already accumulates real cost mid-build (`buildCostCeiling.ts` reads it). Surfacing it needs only a branded, provider-free line.
+4. **Connectors via short-lived credentials (G6)** (medium). Start with WhatsApp Business and Google Sheets for our audience.
+5. **Expo / native UI (G7)** (large). The deepest product gap, and an infra item. It needs its own admin decision.
+
+*Sources (2026-09-28):*
+- **Lovable:** [security overview](https://docs.lovable.dev/features/security), [how Lovable protects apps](https://lovable.dev/blog/how-lovable-protects-your-apps-automatically), [training-data opt-out](https://docs.lovable.dev/features/business/data-opt-out)
+- **Bolt:** [Bolt Cloud](https://support.bolt.new/cloud/bolt-cloud), [Sacra on Bolt](https://sacra.com/c/bolt-new/)
+- **v0:** [new v0 API](https://vercel.com/blog/introducing-the-new-v0-api), [InfoQ on the v0 API](https://www.infoq.com/news/2026/08/vercel-v0-api/), [Vercel Connect](https://v0.app/docs/vercel-connect)
+- **Replit:** [App Testing](https://docs.replit.com/features/agent/app-testing), [self-testing at scale](https://blog.replit.com/automated-self-testing), [Expo mobile](https://docs.replit.com/learn/mobile/expo)
+- **Cursor:** [Bugbot update](https://cursor.com/blog/bugbot-updates-june-2026), [Rollouts and Security Review](https://ccleaks.com/news/cursor-rollouts-security-review-sep-2026)
+- **Google:** [AI Studio + Firebase](https://firebase.blog/posts/2026/03/announcing-ai-studio-integration), [full-stack vibe coding in AI Studio](https://blog.google/innovation-and-ai/technology/developers-tools/full-stack-vibe-coding-google-ai-studio/), [Firebase Studio sunset](https://firebase.google.com/docs/studio/migrating-project)

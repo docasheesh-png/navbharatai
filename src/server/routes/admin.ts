@@ -21,7 +21,7 @@ import {
 } from '../lib/mobileBuildOutcomeStore';
 import { summarizeReferrals, selfPayoutTokens } from '../lib/referralAdminSummary';
 import { ledgerPatch } from '../lib/walletStatement';
-import { stepRewardTokens, referrerLifetimeCapTokens, referralRewardsEnabled } from '../lib/referralRewards';
+import { stepRewardTokens, referrerLifetimeCapTokens, referralRewardsEnabled, STEP_RUPEES, type RewardStep } from '../lib/referralRewards';
 import { runReferralPreflight } from '../lib/referralPreflight';
 import { listDailyClaimOutcomes, summariseClaimOutcomes } from '../lib/referralClaimOutcomes';
 import { listDailyOtpOutcomes, summariseOtpOutcomes } from '../lib/otpOutcomes';
@@ -49,7 +49,7 @@ import { listSafetyFlags, SAFETY_FLAG_RETENTION_DAYS } from '../lib/safetyFlagSt
 import { officerIsNamed, OFFICER_MISSING_WARNING } from '../../content/legal/grievance';
 import { serverLoad } from '../lib/serverLoad';
 import { usdInrRate } from '../lib/UsdInrRate';
-import { agentV3CostTelemetry, buildUsageReport } from '../AgentV3/AgentV3CostTelemetry';
+import { agentV3CostTelemetry, buildUsageReport, summarizeLosses } from '../AgentV3/AgentV3CostTelemetry';
 import { assistantSpendStore } from '../lib/AssistantSpendStore';
 import { summarizeBuildFailures } from '../AgentV3/buildFailureAnalytics';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
@@ -89,7 +89,7 @@ let lastUpdateBroadcast: { versionCode: number | null; at: number; devices: numb
 import { saveNotification, normalizeTarget } from '../lib/AdminNotificationStore';
 import { sonnetEquivalentUsd } from '../AgentV3/pricing';
 import { evaluateAlerts } from '../lib/metricsAlerts';
-import { computeHealthScore } from '../lib/HealthScore';
+import { computeHealthScore, platformHealthInputs } from '../lib/HealthScore';
 import { summariseUsage, marginInr } from '../lib/usageLedger';
 import { realRateFor, usageCostUsd } from '../AgentV3/providerRates';
 import { usdToInr } from '../lib/UsdInrRate';
@@ -110,8 +110,13 @@ import { deploymentStore, isLiveDeployment, type DeploymentStatus } from '../Age
 import { listWorkspaceAppsPage, getWorkspaceAppsMany, listUserWorkspaceApps, loadWorkspaceFiles } from '../AgentV3/WorkspaceFileStore';
 import {
   BUILT_APPS_PAGE_SIZE, clampPageSize, parseAppsQuery, joinBuiltAppRows, builtAppRow, encodeCursor, decodeCursor,
-  sliceOwnerPage, type BuiltAppRow,
+  sliceOwnerPage, annotateBuiltAppRows, liveOrphans, type BuiltAppRow, type BuiltAppOwnerIdentity,
 } from '../AgentV3/adminBuiltApps';
+import { readConversationNamesMany } from '../AgentV3/FirestoreConversationStore';
+import {
+  channelInventory, forgetChannelInventory, snapshotCopyIsDead,
+  healDeadSnapshotRecordsThrottled, type ChannelInventory, type HealDeps,
+} from '../AgentV3/deadSnapshotCopies';
 import { VirtualFileSystem } from '../project/ProjectModel';
 import { renderPreview } from '../runtime/renderPreview';
 import { isReactProject } from '../runtime/ReactPreview';
@@ -124,7 +129,7 @@ import { classifyHostedServices, hostingCapacity } from '../AgentV3/hostedServic
 import {
   appsProject, appsRegion, buildListServicesRequest, parseServiceList, SERVICES_PER_PROJECT_CAP,
 } from '../AgentV3/cloudRunHosting';
-import { loadBoard, worstLevel, type LoadReadings } from '../lib/loadBoard';
+import { loadBoard, worstLevel, AI_MIN_SAMPLE, type LoadReadings } from '../lib/loadBoard';
 import { tierLadder, availableRungs, rungHasKey, tierDisplayName, tierEngineAvailable } from '../AgentV3/tierLadder';
 import { readEngineUse, engineUseDayKey } from '../AgentV3/engineUseStore';
 import { reportStatus, openReportCount } from '../AgentV3/reportTriage';
@@ -218,6 +223,28 @@ async function getAdminMfa(): Promise<AdminMfaState> {
     console.error('[ADMIN_MFA] state read failed:', err);
   }
   return { enabled: false, secret: null, envManaged: false };
+}
+
+/**
+ * The hosting site's channel list for the saved-copy check, cached five minutes and bounded at four
+ * seconds: a slow Hosting API must not hold the admin's page, and a read that did not finish is
+ * INCOMPLETE, which judges nothing dead (see deadSnapshotCopies.ts).
+ */
+async function boundedInventory(): Promise<ChannelInventory> {
+  const incomplete: ChannelInventory = { channels: [], complete: false };
+  return Promise.race([
+    channelInventory(() => new FirebaseHostingDeployer().listChannelsWithCompleteness()),
+    new Promise<ChannelInventory>((resolve) => setTimeout(() => resolve(incomplete), 4_000)),
+  ]).catch(() => incomplete);
+}
+
+/** The I/O the saved-copy heal runs on — the real inventory and the real sandbox records. */
+function snapshotHealDeps(): HealDeps {
+  return {
+    inventory: () => channelInventory(() => new FirebaseHostingDeployer().listChannelsWithCompleteness()),
+    listSnapshotRecords: () => sandboxStore.listSnapshotRecords(),
+    clearSnapshot: (ws, url) => sandboxStore.clearSnapshot(ws, url),
+  };
 }
 
 export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequestHandler): void {
@@ -477,45 +504,23 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // with no real data drops out (reported in `missing`); none is fabricated.
   app.get('/api/admin/health-score', verifyAdminToken, (_req: Request, res: Response) => {
     const snap = getMetrics().snapshot();
-    const provider = getProviderStats();
-
-    // Aggregate provider error rate + request-weighted average latency from real counters.
-    let totalReq = 0;
-    let totalErr = 0;
-    let latencyWeighted = 0;
-    for (const s of Object.values(provider)) {
-      totalReq += s.requestCount || 0;
-      totalErr += s.errorCount || 0;
-      latencyWeighted += (s.avgLatencyMs || 0) * (s.requestCount || 0);
-    }
-    const inputs = {
-      // Build success rate is real only once at least one build has run.
-      successRatePct: snap.builds.total > 0 ? snap.builds.successRate * 100 : null,
-      // Provider error rate + latency are real only once at least one AI call has run.
-      errorRatePct: totalReq > 0 ? (totalErr / totalReq) * 100 : null,
-      avgLatencyMs: totalReq > 0 ? latencyWeighted / totalReq : null,
-      // 🔴 UPTIME IS NOT REPORTED, AND THAT IS THE FIX (2026-09-12).
-      //
-      // This passed `process.uptime()`, which `scoreUptime` divides by 24 HOURS. NavBharatAI deploys on
-      // every merge to main, and Cloud Run recycles instances on its own — so the process is routinely
-      // minutes old while nothing whatsoever is wrong. A server deployed 50 minutes ago scored 3.5/100
-      // on this component and, at its 15% weight, lost the platform ~14 health points for the crime of
-      // having shipped. That is how a healthy platform came to read CRITICAL.
-      //
-      // "Seconds since this process started" was never uptime on a serverless host; it is deploy
-      // recency wearing uptime's name. `computeHealthScore` already renormalises over the components
-      // it HAS and lists the rest under `missing`, so omitting it removes a misleading signal and
-      // claims nothing in its place — which is the honest state until a real uptime measurement
-      // (the outside-in probe `siteUptime.ts` already does for user domains) exists for the platform.
-      uptimeSeconds: null,
-    };
+    // ONE builder for both admin health scores — see `platformHealthInputs` for why the per-provider
+    // counters and the model's generation time were the wrong inputs (admin Monitor, 2026-09-27).
+    // Process uptime stays unmeasured: process age is deploy recency on a host that deploys on every
+    // merge (2026-09-12).
+    const inputs = platformHealthInputs({
+      builds: snap.builds,
+      router: getRouterOutcomeStats(),
+      serverWaitMs: serverLoad.snapshot().eventLoopP99Ms,
+      minRequests: AI_MIN_SAMPLE,
+    });
     res.json({
       score: computeHealthScore(inputs),
       inputs,
       sources: {
         successRatePct: 'metrics.builds (live build outcomes)',
-        errorRatePct: 'AIRouter provider circuit stats',
-        avgLatencyMs: 'AIRouter provider circuit stats (request-weighted)',
+        errorRatePct: 'AIRouter request outcomes — requests no engine answered (not per-rung failures)',
+        avgLatencyMs: "this server's worst-case request wait (event-loop p99), not the model's generation time",
         // Not fed at all — see the note on `uptimeSeconds` above. Process age is deploy recency,
         // not uptime, and NavBharatAI deploys on every merge.
         uptimeSeconds: 'not measured (process age is not uptime on a serverless host)',
@@ -679,23 +684,13 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     // The same composite health inputs the dedicated /health-score endpoint reports, from the same
     // real signals. Kept identical on purpose — two health numbers would be worse than none.
     const health = guard(() => {
-      const provider = providerStats.value ?? {};
-      let totalReq = 0;
-      let totalErr = 0;
-      let latencyWeighted = 0;
-      for (const st of Object.values(provider) as any[]) {
-        totalReq += st.requestCount || 0;
-        totalErr += st.errorCount || 0;
-        latencyWeighted += (st.avgLatencyMs || 0) * (st.requestCount || 0);
-      }
-      const inputs = {
-        successRatePct: scoped.snapshot.builds.total > 0 ? scoped.snapshot.builds.successRate * 100 : null,
-        errorRatePct: totalReq > 0 ? (totalErr / totalReq) * 100 : null,
-        avgLatencyMs: totalReq > 0 ? latencyWeighted / totalReq : null,
-        // Same reason as the live endpoint above: process age is deploy recency, and scoring it made a
-        // freshly-deployed platform read CRITICAL. Omitted rather than guessed.
-        uptimeSeconds: null,
-      };
+      // The SAME builder the /health-score endpoint uses — two health numbers would be worse than none.
+      const inputs = platformHealthInputs({
+        builds: scoped.snapshot.builds,
+        router: getRouterOutcomeStats(),
+        serverWaitMs: serverLoad.snapshot().eventLoopP99Ms,
+        minRequests: AI_MIN_SAMPLE,
+      });
       return { score: computeHealthScore(inputs), inputs };
     });
 
@@ -834,10 +829,8 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     try {
       const days = Math.min(Math.max(parseInt(String(req.query.days ?? '30'), 10) || 30, 1), 365);
       const history = await agentV3CostTelemetry.list(days);
-      const perDay = history.map(d => ({ date: d.date, lossBuilds: d.lossBuilds ?? 0, lossRealCostUsd: d.lossRealCostUsd ?? 0 }));
-      const totalLossBuilds = perDay.reduce((s, d) => s + d.lossBuilds, 0);
-      const totalLossRealCostUsd = Math.round(perDay.reduce((s, d) => s + d.lossRealCostUsd, 0) * 1_000_000) / 1_000_000;
-      res.json({ totalLossBuilds, totalLossRealCostUsd, perDay });
+      // Measured spend first, baseline as a labelled comparison — see summarizeLosses.
+      res.json(summarizeLosses(history));
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to read AgentV3 losses.' });
     }
@@ -2511,6 +2504,27 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         const [deployments, sandboxes] = await Promise.all([deploymentStore.getMany(ids), sandboxStore.getMany(ids)]);
         return { deployments, sandboxes };
       };
+      // WHO and WHAT, plus an honest saved copy, for every row that leaves this route (admin
+      // 2026-09-27). Two batched reads (the owners' wallets, the apps' conversation names) and one
+      // cached channel inventory — never a read per row. A copy whose channel was reclaimed is dropped
+      // here so Preview falls through to a source that works, and the durable heal is nudged (at most
+      // once per ten minutes) so the user's own preview stops pointing at it too.
+      const finish = async (rows: BuiltAppRow[]): Promise<BuiltAppRow[]> => {
+        if (rows.length === 0) return rows;
+        const uids = rows.map((r) => r.userId || r.ownerUid);
+        const [identities, names, inv] = await Promise.all([
+          resolveUserIdentities(uids, getDb() as never).catch(() => new Map()),
+          readConversationNamesMany(rows.map((r) => r.workspaceId)),
+          boundedInventory(),
+        ]);
+        const owners = new Map<string, BuiltAppOwnerIdentity>();
+        for (const [uid, id] of identities) owners.set(uid, { email: id.email, name: id.name, anonymous: id.anonymous, label: identityLabel(id) });
+        const out = annotateBuiltAppRows(rows, owners, names).map((r) => (
+          r.snapshotUrl && snapshotCopyIsDead(r.snapshotUrl, inv) ? { ...r, snapshotUrl: null, snapshotAt: 0 } : r
+        ));
+        if (inv.complete) healDeadSnapshotRecordsThrottled(snapshotHealDeps());
+        return out;
+      };
 
       if (query.mode === 'text') {
         res.json({ ok: true, mode: 'text', rows: [], nextCursor: null, pageSize: limit });
@@ -2522,7 +2536,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         const [metas, { deployments, sandboxes }] = await Promise.all([getWorkspaceAppsMany([id]), enrich([id])]);
         const meta = metas.get(id) ?? null;
         const rec = deployments.get(id) ?? null;
-        const rows: BuiltAppRow[] = meta || rec ? [builtAppRow(meta, rec, sandboxes.get(id), id)] : [];
+        const rows: BuiltAppRow[] = meta || rec ? await finish([builtAppRow(meta, rec, sandboxes.get(id), id)]) : [];
         res.json({ ok: true, mode: 'exact', rows, nextCursor: null, pageSize: limit });
         return;
       }
@@ -2531,7 +2545,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         const rec = await deploymentStore.findByUrl(query.url);
         if (!rec) { res.json({ ok: true, mode: 'url', rows: [], nextCursor: null, pageSize: limit }); return; }
         const [metas, { sandboxes }] = await Promise.all([getWorkspaceAppsMany([rec.workspaceId]), enrich([rec.workspaceId])]);
-        res.json({ ok: true, mode: 'url', rows: [builtAppRow(metas.get(rec.workspaceId) ?? null, rec, sandboxes.get(rec.workspaceId))], nextCursor: null, pageSize: limit });
+        res.json({ ok: true, mode: 'url', rows: await finish([builtAppRow(metas.get(rec.workspaceId) ?? null, rec, sandboxes.get(rec.workspaceId))]), nextCursor: null, pageSize: limit });
         return;
       }
 
@@ -2542,7 +2556,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         const { page, nextOffset } = sliceOwnerPage(all, rawCursor, limit);
         const ids = page.map((a) => a.workspaceId);
         const { deployments, sandboxes } = await enrich(ids);
-        res.json({ ok: true, mode: 'owner', rows: joinBuiltAppRows(page, deployments, sandboxes), nextCursor: nextOffset, pageSize: limit });
+        res.json({ ok: true, mode: 'owner', rows: await finish(joinBuiltAppRows(page, deployments, sandboxes)), nextCursor: nextOffset, pageSize: limit });
         return;
       }
 
@@ -2553,7 +2567,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         if (!pageRes.ok) { res.status(502).json({ ok: false, error: 'Could not read the published-app registry.' }); return; }
         const ids = pageRes.records.map((r) => r.workspaceId);
         const [metas, sandboxes] = await Promise.all([getWorkspaceAppsMany(ids), sandboxStore.getMany(ids)]);
-        const rows = pageRes.records.map((r) => builtAppRow(metas.get(r.workspaceId) ?? null, r, sandboxes.get(r.workspaceId), r.workspaceId));
+        const rows = await finish(pageRes.records.map((r) => builtAppRow(metas.get(r.workspaceId) ?? null, r, sandboxes.get(r.workspaceId), r.workspaceId)));
         res.json({ ok: true, mode: 'status', order: pageRes.order, rows, nextCursor: encodeCursor(pageRes.nextAfterDocId), pageSize: limit });
         return;
       }
@@ -2564,11 +2578,16 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       if (!pageRes.ok) { res.status(502).json({ ok: false, error: 'Could not read the built-app list.' }); return; }
       const ids = pageRes.apps.map((a) => a.workspaceId);
       const { deployments, sandboxes } = await enrich(ids);
-      const rows = joinBuiltAppRows(pageRes.apps, deployments, sandboxes);
       // Published apps whose owner deleted the workspace have no durable files left, so this list cannot
       // reach them — and a live site nobody can moderate is the hole markOrphaned exists to close. They
-      // ride the FIRST page only, as their own strip.
-      const orphaned = after ? [] : (await deploymentStore.listOrphaned(50)).map((r) => builtAppRow(null, r, undefined, r.workspaceId));
+      // ride the FIRST page only, as their own strip — and only the ones still LIVE (`liveOrphans`):
+      // the flag is set on every record of a deleted workspace, offline and never-published included,
+      // and a strip headed "Live" must not list apps that are not.
+      const orphanRecs = after ? [] : liveOrphans(await deploymentStore.listOrphaned(200)).slice(0, 50);
+      const [rows, orphaned] = await Promise.all([
+        finish(joinBuiltAppRows(pageRes.apps, deployments, sandboxes)),
+        finish(orphanRecs.map((r) => builtAppRow(null, r, undefined, r.workspaceId))),
+      ]);
       res.json({ ok: true, mode: 'all', rows, orphaned, nextCursor: encodeCursor(pageRes.nextAfterDocId), pageSize: limit });
     } catch (e: any) {
       console.error('[ADMIN] built-apps list error:', e?.message);
@@ -2846,8 +2865,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const all = (snap.docs || []).map((d: any) => ({ userId: String(d.id), ...(d.data() || {}) }));
       const rows = all.slice(0, MAX);
       const summary = summarizeReferrals(rows, all.length > MAX);
-      const perStep = stepRewardTokens();
-      const self = selfPayoutTokens(rows, perStep);
+      const self = selfPayoutTokens(rows, (step) => stepRewardTokens(step as RewardStep));
       // What was TRIED, not only what was paid — last 14 UTC days. Never throws; an empty read is [].
       const claims = summariseClaimOutcomes(await listDailyClaimOutcomes(14));
       return res.json({
@@ -2857,7 +2875,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         ...summary,
         selfTokens: self,
         totalTokens: self + summary.referrerTokens,
-        perStepTokens: perStep,
+        stepRupees: STEP_RUPEES,
         capTokens: referrerLifetimeCapTokens(),
         // Only the busiest handful are worth a human's attention; the rest is noise on a screen.
         topReferrers: summary.topReferrers.slice(0, 20),
@@ -3256,7 +3274,19 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       }
       await new FirebaseHostingDeployer().deleteChannelById(channelId);
       audit('ADMIN_CHANNEL_RECLAIMED', { channelId, state: target.state, workspaceId: target.workspaceId || '', ip: req.ip });
-      res.json({ ok: true, channelId, state: target.state });
+      // The channel is gone, so every record still pointing at it points at nothing. Reclaiming a build
+      // copy was called "harmless — the next green build writes it again", and the records were never
+      // told: an app not rebuilt kept framing "Site Not Found" in its preview. Clear exactly the records
+      // that name this channel's URL (conditional, so a newer copy is never touched), then forget the
+      // cached inventory so the next list judges against the site as it is now.
+      forgetChannelInventory();
+      let copiesCleared = 0;
+      if (target.url) {
+        for (const ws of await sandboxStore.findBySnapshotUrl(target.url)) {
+          if (await sandboxStore.clearSnapshot(ws, target.url)) copiesCleared += 1;
+        }
+      }
+      res.json({ ok: true, channelId, state: target.state, copiesCleared });
     } catch (e: any) {
       console.error('[ADMIN] Channel reclaim error:', e?.message);
       res.status(502).json({ error: 'Reclaim failed — the channel was NOT confirmed removed.', detail: e?.message || String(e) });

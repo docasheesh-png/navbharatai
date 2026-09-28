@@ -809,9 +809,12 @@ describe('generationTier (LENS B — leaves before consumers)', () => {
   // generated LAST. It exports nothing a later file imports, and what it really needs — the class
   // names the components chose — does not exist until those components are written. See the rule's
   // own docblock in SimpleBuilder.ts for the build this cost.
-  it('a stylesheet is generated last, not first', () => {
-    expect(generationTier('src/styles/App.css')).toBe(2);
-    expect(generationTier('src/App.css')).toBe(2);
+  // ⚠️ AND MOVED AGAIN, 2026-09-27 (autopsy 2720e553): tier 2 is the SHELL's tier, so in an app whose
+  // screens are App.tsx the stylesheet ran beside the only file it styles. It is after the shell now.
+  it('a stylesheet is generated last, after the shell', () => {
+    expect(generationTier('src/styles/App.css')).toBe(3);
+    expect(generationTier('src/App.css')).toBe(3);
+    expect(generationTier('src/App.css')).toBeGreaterThan(generationTier('src/App.tsx'));
   });
 });
 

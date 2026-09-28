@@ -96,7 +96,8 @@ describe('3 · planners use the plan ladder; a planner that got no answer blames
   it('🔒 buildTurnRunner has a plan option, and all three planners use it', () => {
     const route = strip(src('src/server/routes/agentv3.ts'));
     expect(route).toContain('if (opts.plan) rungs = planLadder(level);');
-    expect(route).toContain('const makePlanTextRunner = (onUsed?: (used: string) => void): TurnRunner => buildTurnRunner({');
+    // Wrapped with the build's stop signal since autopsy 2720e553 (stopSignal.ts); the ladder is unchanged.
+    expect(route).toContain('const makePlanTextRunner = (onUsed?: (used: string) => void): TurnRunner => withStopSignal(buildTurnRunner({');
     for (const v of ['rmProvider', 'bpProvider', 'ppProvider']) {
       expect(route).toContain(`makePlanTextRunner((used) => { ${v} = used; })`);
       expect(route).not.toContain(`let ${v} = 'CLAUDE';`);

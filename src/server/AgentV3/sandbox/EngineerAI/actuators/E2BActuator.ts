@@ -7,7 +7,7 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure, buildStillStartingWaitCommand, shouldWaitOnStartingServer, STILL_STARTING_EXTRA_SECONDS } from './devServerHost';
 import { buildPortSweepCommand, parsePortSweep, portCandidates, shouldSweep, sweepFoundSummary } from './portSweep';
 import { appPortsFrom } from '../../../appPorts';
 import type { DevFramework } from './devServerHost';
@@ -447,8 +447,16 @@ ${dropBridgeJs('p')}
  * removing its node changes nothing on the page — only what we read back. Matched by the bridge's own
  * marker, never by position.
  */
+//
+// ⚖️ AND VITE'S DEV CSS, ONLY WHEN THE PAGE WOULD NOT FIT (admin-approved 2026-09-27). In dev, Vite
+// inlines every stylesheet as `<style data-vite-dev-id>` — ~10 KB on that app, more on a CSS-heavy
+// one — ahead of the body. Every reader that looks at this DOM strips `<style>` anyway (PreviewVerify,
+// FeaturePresence), so its text buys nothing and costs the body. It is emptied ONLY when the page is
+// over the budget; a page that fits is read byte for byte as before. The tag stays, with a note.
 const dropBridgeJs = (page: string): string =>
-  `  await ${page}.evaluate(m=>{for(const s of Array.from(document.querySelectorAll('script')))if((s.textContent||'').includes(m))s.remove();},${JSON.stringify(PREVIEW_BRIDGE_MARKER)}).catch(()=>{});`;
+  `  await ${page}.evaluate(m=>{for(const s of Array.from(document.querySelectorAll('script')))if((s.textContent||'').includes(m))s.remove();`
+  + `if(document.documentElement.outerHTML.length>30000)for(const st of Array.from(document.querySelectorAll('style[data-vite-dev-id]'))){const n=(st.textContent||'').length;st.textContent='/* '+n+' bytes of dev CSS omitted from this capture */';}`
+  + `},${JSON.stringify(PREVIEW_BRIDGE_MARKER)}).catch(()=>{});`;
 
 /**
  * `AGENTV3_BROWSE_CONSOLE=off` — the no-deploy revert for the lane-C recorder.
@@ -2158,11 +2166,13 @@ export class E2BActuator implements IEngineerActuator {
       // free a busy port, STOP on a code error the agent must fix (a restart can never help it), or
       // plain-retry a transient crash. This replaces the old single blind restart and yields an HONEST
       // root cause when it still can't come up (instead of a generic "check the logs").
+      let lastLaunchPid: number | undefined;
       const launchAndWait = async (seconds: number): Promise<boolean> => {
         const h = await sandbox.commands.run(devCommand, {
           cwd: WORKSPACE_ROOT, background: true,
           onStdout: s => { stdout += s; }, onStderr: s => { stderr += s; },
         });
+        lastLaunchPid = typeof (h as { pid?: unknown }).pid === 'number' ? (h as { pid: number }).pid : undefined;
         const w = await sandbox.commands.run(buildPortWaitCommand(port, seconds), { timeoutMs: (seconds + 5) * 1000 })
           .catch(() => ({ stdout: 'PORT_DOWN' } as { stdout: string }));
         await h.disconnect().catch(() => {});
@@ -2201,6 +2211,20 @@ export class E2BActuator implements IEngineerActuator {
         if (diag.recovery === 'code_fix') {
           stdout += `\n[health-check] ${diag.detail}`;
           break;
+        }
+        // A LIVING server with a clean log is still starting — give it more time on the SAME process
+        // before any restart (autopsy 2720e553: two restarts killed a server that came up 17 s later).
+        // A process that has exited answers PROC_GONE within a second, so a real crash restarts as before.
+        if (shouldWaitOnStartingServer(diag.cause, lastLaunchPid)) {
+          const w = await sandbox.commands
+            .run(buildStillStartingWaitCommand(lastLaunchPid as number, port, STILL_STARTING_EXTRA_SECONDS), { timeoutMs: (STILL_STARTING_EXTRA_SECONDS + 5) * 1000 })
+            .catch(() => ({ stdout: 'PORT_DOWN' } as { stdout: string }));
+          if (w.stdout.includes('PORT_UP')) {
+            await armKeepalive(port);
+            portUp = true;
+            stdout += `\n[health-check] the dev server was still starting (its process was alive and its log showed no error) — it came up after more time on the same process, with no restart.`;
+            break;
+          }
         }
         stdout += `\n[health-check] attempt ${attempt} — ${diag.detail}`;
         if (diag.recovery === 'reinstall') {

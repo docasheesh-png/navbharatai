@@ -30,13 +30,14 @@ import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContrac
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
 import { goldenScaffoldForPrompt, goldenScaffoldFiles } from '../AgentV3/goldenScaffolds/registry';
+import { parseKeyPool } from '../lib/keyPool';
 import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAuthored';
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
-import { decideComplexity } from '../AgentV3/complexityRouting';
+import { decideComplexity, scaffoldedComplexityDecision } from '../AgentV3/complexityRouting';
 import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite, writeQualitySummary } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary, repairLostEscapes, scriptRepairSummary } from '../AgentV3/scriptIntegrity';
 import { answeringModel } from '../AgentV3/answeringModel';
@@ -169,8 +170,12 @@ import {
 } from '../AgentV3/PageRouteCheck';
 import {
   deriveJourneys, journeyScript, parseJourneyResults, summarizeJourneys, noJourneyReason, appHasNoDataEntry,
-  JOURNEY_TIMEOUT_MS,
+  JOURNEY_TIMEOUT_MS, writesToUserDatabase,
 } from '../AgentV3/journeyDerivation';
+import {
+  clickExplorerEnabled, clickExplorerScript, parseExploreOutput, summarizeExplore, exploreUserSummary,
+  mergeUserProofs, EXPLORE_BUDGET_MS, type UserProof,
+} from '../AgentV3/clickExplorer';
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths } from '../AgentV3/greenReviewPolicy';
@@ -360,6 +365,7 @@ import {
 } from '../AgentV3/ProviderUsageLedger';
 import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
+import { withStopSignal } from '../AgentV3/stopSignal';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { redactPII, redactEventForUser } from '../AgentV3/SecretRedactor';
@@ -471,7 +477,7 @@ import { userStorageContext } from '../AgentV3/userStorageContext';
 import { userAuthContext } from '../AgentV3/userAuthContext';
 import { classifyPreviewHealth, previewHealthContextLine } from '../AgentV3/PreviewHealth';
 import { findMissingDependencies, phantomAliasDependencies, removeDependenciesFromPackageJson } from '../AgentV3/DependencyReconciler';
-import { ensureViteReactFoundation, sanitizeTsconfigExtends } from '../AgentV3/FrameworkFoundation';
+import { foundationFilesStillAbsent, ensureViteReactFoundation, sanitizeTsconfigExtends } from '../AgentV3/FrameworkFoundation';
 import { TSC_ENSURE, TSC_BIN } from '../AgentV3/tscCommand';
 import { renderPreview } from '../runtime/renderPreview';
 import { wakePublicState, sanitizeWakeError, type TerminalWakeState } from '../AgentV3/terminalWake';
@@ -497,7 +503,7 @@ import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from 
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
 import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable } from '../AgentV3/ReviewerAgent';
-import { refuteReviewByEvidence } from '../AgentV3/reviewEvidence';
+import { refuteReviewByEvidence, missingClassClaim } from '../AgentV3/reviewEvidence';
 import { SALVAGE_HANDOFF_MARKER, HANDOFF_NOTE_FIX_LINE } from '../AgentV3/handoffRule';
 import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
 import {
@@ -2566,21 +2572,11 @@ export function parseModelLadder(env: string | undefined, fallback: string[]): s
 }
 
 /**
- * Parse a provider API-key env into a POOL of keys for rotation (ROADMAP Tier-4). Accepts a comma- or
- * whitespace-separated list (`key1,key2 key3`) so the cheap floor can fail over from a 429-throttled
- * key to a fresh one on the SAME model — the deep-test App #9/#10 GLM-saturation lever. A single key
- * stays valid (a list of one → today's exact behaviour). Blanks are dropped and duplicates de-duped
- * (a copy-paste repeat never doubles a rung). Pure + exported for testing.
+ * Parse a provider API-key env into a POOL of keys for rotation (ROADMAP Tier-4). The one shared
+ * implementation lives in `lib/keyPool.ts` since 2026-09-27 — the chat and vision callers could not
+ * reach it here, and sent a 51-key pool as one bearer token. Re-exported so existing imports hold.
  */
-export function parseKeyPool(env: string | undefined): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const k of (env || '').split(/[\s,]+/)) {
-    const key = k.trim();
-    if (key && !seen.has(key)) { seen.add(key); out.push(key); }
-  }
-  return out;
-}
+export { parseKeyPool } from '../lib/keyPool';
 
 /**
  * NavBharatAI Pro — optional CHEAP BUILD FLOOR (admin cost-down lever, DEFAULT OFF).
@@ -5768,6 +5764,9 @@ async function noteBuildOutcome(
         // healed files to the durable store so the fix STICKS across future sandboxes, not just this boot.
         if (Object.keys(saved).length > 0) {
           try {
+            // No disk check here, unlike the fast lane (foundationFilesStillAbsent): `saved` is the WHOLE
+            // project, and the sandbox at this point holds only the template's generic files, which a
+            // package.json derived from the app's real imports is better than.
             const foundation = ensureViteReactFoundation(saved, { framework });
             if (foundation.added.length > 0) {
               Object.assign(saved, foundation.files);
@@ -12613,7 +12612,11 @@ async function noteBuildOutcome(
        * ⚠️ `isEditMode` is not known yet here — deliberately. This only decides which rung OPENS a
        * build, and an edit that reaches this point is routed by the same ladder as any other turn.
        */
-      const complexityDecision = await decideComplexity(
+      // A starter chip whose tested template will be seeded is verify-and-polish, not a big build — see
+      // scaffoldedComplexityDecision. The same four conditions the seeding below checks up front
+      // (flag, a fresh build, not an import, a template for this exact prompt).
+      const scaffoldWillSeed = process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !isImportTurn && !!goldenScaffoldForPrompt(prompt);
+      const complexityDecision = scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(
         { prompt, score: analysis?.complexityScore ?? 0 },
         (p) => AIRouterManager.getRouter('free')
           .route(p, 'You are a classifier. Reply with one word only.')
@@ -13090,7 +13093,7 @@ async function noteBuildOutcome(
       // 11-feature ERP scored 63 (complex) and still made 83 calls on the cheapest flash rung; KIMI
       // sat one rung away for 26 minutes. "Starting me bhi" means THIS runner too: the roadmap
       // planner, the project planner and the fast lane's manifest are the first calls a build makes.
-      const makeFastTextRunner = (onUsed?: (used: string) => void): TurnRunner => buildTurnRunner({
+      const makeFastTextRunner = (onUsed?: (used: string) => void): TurnRunner => withStopSignal(buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
         complex: buildIsComplex, // a complex app opens past the flash rung — see the note above
@@ -13107,11 +13110,11 @@ async function noteBuildOutcome(
         onProviderError: recordProviderFallback,
         onProviderBenched: recordProviderBenched,
         onAttemptWasted: recordAttemptWasted,
-      });
+      }), abort.signal);
       // The PLANNERS' runner — roadmap, blueprint, Project Mode. Same memory and callbacks as the fast
       // text runner above; only the ladder differs (see `plan` in buildTurnRunner). Repairs stay on the
       // build ladder: they rewrite code, which is the work that ladder is ordered for.
-      const makePlanTextRunner = (onUsed?: (used: string) => void): TurnRunner => buildTurnRunner({
+      const makePlanTextRunner = (onUsed?: (used: string) => void): TurnRunner => withStopSignal(buildTurnRunner({
         tier: powerLevelReqEffective,
         noClaude: noClaudeBuild,
         plan: true,
@@ -13122,7 +13125,7 @@ async function noteBuildOutcome(
         onProviderError: recordProviderFallback,
         onProviderBenched: recordProviderBenched,
         onAttemptWasted: recordAttemptWasted,
-      });
+      }), abort.signal);
       const client = buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
@@ -16143,8 +16146,11 @@ async function noteBuildOutcome(
       if (fastLaneWouldRun && !fastLaneRung.skip) {
         // Usage ACCUMULATES across every cheap call (manifest + each per-file call), so billing is honest.
         const osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
+        // The WHOLE listing: this list answers "does this file exist?" for the missing-files gate and the
+        // foundation guard, and a capped answer is a wrong one (`find` output is unsorted, so which 80
+        // survived was chance — autopsy 2720e553). Prompts that show it cap it themselves (60).
         const scaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
-          .filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
+          .filter((p) => !/^(node_modules|\.git)\//.test(p));
         // Shared side-effects for both fast lanes (Simple Builder + OneShot).
         // ONE fast-lane model round trip. Returns the provider's stop reason alongside the text so the
         // continuation wrapper below can tell "the model finished" from "the model ran out of budget"
@@ -16190,6 +16196,9 @@ async function noteBuildOutcome(
               // outlive the wait (turnDeadline.ts). Undefined for every caller that does not set one,
               // which is every lane except the fast lane's plan and contract calls today.
               deadlineAt,
+              // Stop cancels this call and every later one (stopSignal.ts). The lane never read the
+              // build's signal before autopsy 2720e553, so a pressed Stop ran on for minutes.
+              signal: abort.signal,
               // The SIBLING of AgentRunner's own reasoning emit — gated by the same one switch, so the
               // two lanes cannot drift into showing the user different things (thinkingStream.ts).
               ...(streamThinkingToChat()
@@ -16330,7 +16339,19 @@ async function noteBuildOutcome(
           // Deterministic + unit-tested (FrameworkFoundation.ts). Kill switch: AGENTV3_FOUNDATION_GUARD=off.
           if (process.env.AGENTV3_FOUNDATION_GUARD !== 'off') {
             try {
-              const foundation = ensureViteReactFoundation(Object.fromEntries(writtenFiles), { framework, existingPaths: scaffold });
+              const planned = ensureViteReactFoundation(Object.fromEntries(writtenFiles), { framework, existingPaths: scaffold });
+              // The list above is a hint; the disk decides. A file already in the sandbox is never
+              // overwritten (autopsy 2720e553 — a working package.json was replaced from a stale list).
+              const foundation = Object.keys(planned.files).length === 0
+                ? { ...planned, keptExisting: [] as string[] }
+                : await foundationFilesStillAbsent(planned, (p) => actuator.readFile(workspaceId, p).then(() => true, () => false));
+              if (foundation.keptExisting.length > 0) {
+                buildDiag.record({
+                  phase: 'build', severity: 'info', code: 'FOUNDATION_KEPT_EXISTING', autoResolved: true,
+                  message: `Kept ${foundation.keptExisting.length} foundational file(s) that already existed on disk instead of replacing them: ${foundation.keptExisting.join(', ')}.`,
+                  detail: 'The pre-listed paths did not include them; the sandbox did.',
+                });
+              }
               if (foundation.added.length > 0) {
                 fastLog(`🩹 Added ${foundation.added.length} missing foundational file(s) so the app can install & boot: ${foundation.added.join(', ')}`);
                 // Route through write_file so each lands in the sandbox AND is recorded in writtenFiles
@@ -16569,7 +16590,8 @@ async function noteBuildOutcome(
           stopLane: () => (fastLaneReasoningRung
             ? `the lane's engine fell to ${fastLaneReasoningRung}, which reasons before every answer; the lane's per-file budget cannot carry that, so the files finished so far go to the full builder now`
             : null),
-          writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3 });
+          writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3,
+          signal: abort.signal });
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         // WHERE THE FAST LANE'S MINUTES WENT (autopsy 21b431e1). Measurement only — nothing reads it.
         // Recorded on BOTH outcomes, because a lane that handed off is exactly the one whose time
@@ -16609,7 +16631,7 @@ async function noteBuildOutcome(
         // builder rebuilt a PARALLEL module tree (src/utils + src/types beside the fast lane's src/lib)
         // → 4 broken imports → a dead app. The note travels in buildPrompt so EVERY fallback runner
         // (start-tier, escalation, default) sees it.
-        if (!sb.ok && sb.salvagedPaths?.length) {
+        if (!sb.ok && !sb.stopped && sb.salvagedPaths?.length) {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_SALVAGE', message: `Fast lane salvaged ${sb.salvagedPaths.length} finished file(s) into the workspace for the full builder to continue from.`, autoResolved: true, detail: sb.salvagedPaths.join(', ') });
           buildPrompt =
             `${SALVAGE_HANDOFF_MARKER} A faster build lane already generated ${sb.salvagedPaths.length} file(s) of THIS app before running out of time; ` +
@@ -16629,7 +16651,7 @@ async function noteBuildOutcome(
         // "continue from" files that are not there is precisely the confident-and-wrong instruction
         // this codebase forbids. So it is a starting point it may change, and it is only offered when
         // nothing was salvaged (salvaged work is the stronger signal and already carries its own).
-        if (!sb.ok && !sb.salvagedPaths?.length && sb.plannedPaths?.length) {
+        if (!sb.ok && !sb.stopped && !sb.salvagedPaths?.length && sb.plannedPaths?.length) {
           buildDiag.record({
             phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_PLAN_HANDOFF',
             message: `Fast lane planned ${sb.plannedPaths.length} file(s) before it stopped — the plan was handed to the full builder instead of being thrown away.`,
@@ -16643,7 +16665,7 @@ async function noteBuildOutcome(
         }
         // HONESTY (rule 5): a lane we DECIDED not to run must say so, and say why. Silence here would
         // read in the report as "the one-shot was never eligible", which is a different fact.
-        if (!sb.ok && classifyForOneShot(analysis?.startTier) && !oneShotStillViable(sb)) {
+        if (!sb.ok && !sb.stopped && classifyForOneShot(analysis?.startTier) && !oneShotStillViable(sb)) {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: oneShotSkipReason(sb) ?? 'Skipped the one-shot fast lane — going straight to the full builder.', autoResolved: true });
         }
         // 🔴 THE SECOND WAY THIS LANE WAS WASTED, and the one the file-count gate above cannot see
@@ -16652,7 +16674,7 @@ async function noteBuildOutcome(
         // viable. It then ran for 150 seconds on the SAME degraded provider chain that had just
         // failed three times, and failed the same way. Re-running a lane against a provider that is
         // timing out is not a retry; it is the identical failure at full price.
-        else if (!sb.ok && classifyForOneShot(analysis?.startTier) && !anotherLaneWorthTrying(sb.reason)) {
+        else if (!sb.ok && !sb.stopped && classifyForOneShot(analysis?.startTier) && !anotherLaneWorthTrying(sb.reason)) {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: 'Skipped the one-shot fast lane: the previous lane failed because the engine did not respond in time, not because of the app — a second lane on the same engine would fail the same way. Going straight to the full builder.', autoResolved: true, detail: sb.reason });
         }
         if (sb.ok) {
@@ -16660,7 +16682,7 @@ async function noteBuildOutcome(
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'VERIFY_DID_NOT_RUN', message: 'The fast-lane type-check could not execute in the sandbox (after one retry) — the app shipped unverified; the agentic readiness gate stays ON.', autoResolved: false });
           }
           fastResult(sb.summary, sb.filesWritten, sb.typecheckRan !== false);
-        } else if (classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb) && anotherLaneWorthTrying(sb.reason)) {
+        } else if (!sb.stopped && !abort.signal.aborted && classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb) && anotherLaneWorthTrying(sb.reason)) {
           // 2) ONE-SHOT (secondary) — a single call still suits a TRIVIAL one-file app the manifest
           //    skips. Gated to the simple tiers only: a sonnet-tier (complex) prompt can never fit in
           //    one 8k-token call — it falls straight through to the agentic loop instead.
@@ -19875,6 +19897,9 @@ async function noteBuildOutcome(
       //
       // EVIDENCE, NEVER A GATE. And a journey that never reached the app's own behaviour is reported
       // UNREACHABLE, never FAILED — a login wall is not a defect.
+      // The user-facing proof of the checks below. One card, several checks — see mergeUserProofs.
+      let journeyProof: UserProof | null = null;
+      let exploreProof: UserProof | null = null;
       if (
         process.env.AGENTV3_JOURNEY_CHECK !== 'off' && result.ok && lastPreviewUrl && actuator.runCommand
         && !isImportTurn && !abort.signal.aborted
@@ -19928,9 +19953,12 @@ async function noteBuildOutcome(
             // rewritten by a model, and so an honest failure is as visible as a pass. The wording is
             // built by journeyUserSummary, which refuses to round "could not reach it" up into a pass
             // and carries no codes, tool names or provider names.
+            //
+            // Held, not emitted, since 2026-09-28: the click explorer below adds its own proof to the SAME
+            // card (the card has one slot, so a second event would erase this one). Emitted once, merged.
             try {
               const proof = journeyUserSummary(journeyResults);
-              if (proof.headline) emit({ type: 'verified', ok: proof.ok, headline: proof.headline, steps: proof.steps, ts: Date.now() });
+              if (proof.headline) journeyProof = proof;
             } catch { /* the proof is evidence for the user, never a gate on the build */ }
           } else {
             // A quiet result that explains itself. "Nothing ran" and "nothing could be derived" look
@@ -19948,6 +19976,47 @@ async function noteBuildOutcome(
           }
         } catch { /* evidence, never a gate — a failure here changes nothing about the build verdict */ }
       }
+
+      // PRESS EVERY SAFE BUTTON (competitive gap G1, 2026-09-28 — clickExplorer.ts).
+      //
+      // The journey above drives ONE form. Nothing pressed the rest of the app, so the commonest
+      // first-minute failure — a tab that white-screens, a button whose handler throws, a link to a page
+      // that was never written — survived every check we own. This opens the running app in the
+      // sandbox's pre-baked browser and presses each visible, SAFE control on a fresh load, so a failure
+      // belongs to exactly one control. No model call. It never presses anything that deletes, pays,
+      // sends, uploads or logs out, never a form's submit (the journey owns forms), never a link out of
+      // the app — and when the app writes to the user's OWN database, never a creating verb either.
+      //
+      // EVIDENCE, NEVER A GATE, and three outcomes, never two: a runner that could not reach the app is
+      // EXPLORE_NOT_RUN, not a pass. Kill switch AGENTV3_CLICK_EXPLORE=off.
+      if (
+        clickExplorerEnabled() && result.ok && lastPreviewUrl && actuator.runCommand
+        && !isImportTurn && !abort.signal.aborted
+        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
+      ) {
+        try {
+          const exploreFiles = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
+          const out = await withTimeout(
+            actuator.runCommand(workspaceId, clickExplorerScript(lastPreviewUrl, { blockWrites: writesToUserDatabase(exploreFiles) })),
+            EXPLORE_BUDGET_MS + 20_000, 'click-explorer',
+          );
+          const explored = summarizeExplore(parseExploreOutput(out.stdout));
+          buildDiag.record({
+            phase: 'preview',
+            severity: explored.outcome === 'failed' ? 'warning' : 'info',
+            code: explored.code,
+            message: explored.message,
+            autoResolved: explored.outcome === 'passed',
+            detail: explored.detail || undefined,
+          });
+          const proof = exploreUserSummary(explored);
+          if (proof.headline) exploreProof = proof;
+        } catch { /* evidence, never a gate — a failure here changes nothing about the build verdict */ }
+      }
+      try {
+        const card = mergeUserProofs(journeyProof, exploreProof);
+        if (card.headline) emit({ type: 'verified', ok: card.ok, headline: card.headline, steps: card.steps, ts: Date.now() });
+      } catch { /* the proof is evidence for the user, never a gate on the build */ }
 
       // NO PREVIEW AT ALL IS THE LOUDEST FINDING THERE IS — and it was the one thing the report never
       // said (build f323a4db/49a7a987, admin 2026-08-06). Every post-build verification is gated on a
@@ -21206,13 +21275,26 @@ async function noteBuildOutcome(
           // inference the evidence refutes — dropped BEFORE it can be narrated, offered, repaired or
           // counted as a critical. Recorded for the admin with what was dropped. See reviewEvidence.ts.
           if (review) {
-            const checked = refuteReviewByEvidence(review, { typecheck: gateEvidence.typecheck });
+            // A CLAIM A FILE CAN ANSWER (autopsy 15151196): "these classes are not defined in
+            // src/index.css" is checked against the real stylesheets before any repair is spent. They
+            // are read only when some finding makes that claim, so an ordinary review costs nothing.
+            let stylesheets: Record<string, string> | undefined;
+            if (review.issues.some((i) => missingClassClaim(i.message))) {
+              try {
+                const paths = (await actuator.listFiles(workspaceId))
+                  .filter((p) => /\.(css|scss|sass|less)$/i.test(p) && !/(^|\/)(node_modules|dist|build|\.git)\//.test(p))
+                  .slice(0, 40);
+                stylesheets = {};
+                for (const p of paths) { try { stylesheets[p] = await actuator.readFile(workspaceId, p); } catch { /* unreadable ⇒ not evidence */ } }
+              } catch { stylesheets = undefined; /* could not look ⇒ the findings stand */ }
+            }
+            const checked = refuteReviewByEvidence(review, { typecheck: gateEvidence.typecheck, stylesheets });
             if (checked.refuted.length > 0) {
               review = checked.review;
               try {
                 buildDiag.record({
                   phase: 'build', severity: 'info', code: 'REVIEW_REFUTED_BY_EVIDENCE', autoResolved: true,
-                  message: `${checked.refuted.length} reviewer finding(s) claimed the project does not compile, after the platform's own typecheck had passed — dropped rather than shown to the user or repaired.`,
+                  message: `${checked.refuted.length} reviewer finding(s) were contradicted by the platform's own evidence (a passing typecheck, or the stylesheets that define the classes named) — dropped rather than shown to the user or repaired.`,
                   detail: checked.refuted.map((i) => i.message.slice(0, 200)).join(' | '),
                 });
               } catch { /* best-effort */ }

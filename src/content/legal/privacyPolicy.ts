@@ -31,7 +31,7 @@
 // ⚠️ NOT LEGAL ADVICE: drafted to be reviewed by a lawyer before being relied on in a dispute.
 
 export const PRIVACY_POLICY_TITLE = 'Privacy Policy';
-export const PRIVACY_POLICY_UPDATED = '26 September 2026';
+export const PRIVACY_POLICY_UPDATED = '27 September 2026';
 
 export const PRIVACY_POLICY = `# Privacy Policy
 
@@ -65,7 +65,7 @@ This mailbox also serves as our **Grievance contact** for the purposes of Indian
 - **Files you upload.** Documents, images, spreadsheets, PDFs and archives you attach — for example a .zip of an app you import into NavBharatAI Pro, a logo you add to a build, or a document you ask an assistant to analyse.
 - **Health-related documents and descriptions (web only).** The Doctor AI / Senior Doctor Assistant surface (available on the website, intended for qualified medical professionals) accepts clinical descriptions and documents such as lab reports. This is **sensitive information** and is treated under the stricter rules in Section 5.
 - **Payment identifiers.** When you buy tokens or a plan, the payment itself is processed by our payment provider (Section 7). We store the order identifiers, the amount, and the outcome — **we never see or store your full card number, UPI PIN or banking password**.
-- **Things you publish.** If you publish an app to the Nav App Store, the app package, its listing (name, description, icon) and your developer name become part of the store listing you asked us to create.
+- **Things you publish.** If you publish an app to the Nav App Store, the app package, its listing (name, description, icon) and your developer name become part of the store listing you asked us to create. An app that runs in the browser (App Mart's "Play instantly") is shown with **the display name on your NavBharatAI account, a short public creator code and the date it was published**. The creator code is derived from your account but cannot be turned back into it, and your email address is never shown.
 - **Support communication.** Emails you send to our support address.
 - **Problem reports you send from inside the app.** When you use "Report a problem", we receive what you typed, the kind of problem you picked, and any screenshot you chose to attach. So that the fault can be found without a round of questions, the app also attaches a short technical snapshot of that moment: the screen you were on, your screen size and pixel density, your device and browser type, which version of NavBharatAI you are running, your language, whether you were online and the connection type your browser reports, a structural note of any element that was reaching past the edge of your screen (its tag and CSS classes — never its text), and the last few error messages your browser had recorded in that tab. **This snapshot is taken only when you press Send on a report, is never collected in the background, and never includes the content of your chats, your files or your apps.**
 
@@ -103,7 +103,7 @@ We do not buy data about you from data brokers.
 
 ### 3.2 Device check for the referral bonus (Android app only)
 
-If you claim one of the free-credit bonuses in our Android app — for verifying your email, your mobile number, connecting GitHub, or applying a friend's referral code — the app checks, at that moment, that it is running on a genuine Android device.
+If you claim one of the free-credit bonuses in our Android app — for signing up, logging in with a verified email, verifying your mobile number, connecting GitHub, or applying a friend's referral code — the app checks, at that moment, that it is running on a genuine Android device. If the check cannot be completed, the signup, login and mobile bonuses are paid under the same rules as on our website, and the referral-code and GitHub bonuses wait until it can.
 
 **What that involves, precisely:**
 
@@ -246,6 +246,8 @@ The Platform is **not intended for children under 18**. We do not knowingly coll
 We use a small set of cookies and local-storage keys that are **necessary** for the Platform to work (your session, your theme, your text-size choice, your consent decision). Optional analytics and the Meta advertising-measurement pixel (Section 3.1) run **only** if you accept the consent banner, which is where you control them. Decline, and no third-party advertising or measurement cookie is set at all — the pixel is not even downloaded.
 
 ---
+
+**Using NavBharatAI without signing in.** A visitor who has not signed in may send a limited number of free AI messages each day. So that we can count them, your browser or the app keeps a **random guest identifier** in local storage and sends it with AI requests **only while you are signed out**. It is not linked to your name, phone number or any account, and it is never sent once you sign in. On our side it is stored only as a **one-way code** beside a daily message count, and that count is deleted after a few days. Clearing your site data removes the identifier.
 
 ### 11.1 Counting visits to NavBharatAI itself — no cookie, no script, no profile
 

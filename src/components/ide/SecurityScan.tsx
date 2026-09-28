@@ -6,6 +6,8 @@ import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
 import { deliverTextFile } from '../../lib/downloadFile';
+import { authJsonHeaders } from '../../lib/authHeaders';
+import { guestLimitReached } from '../../lib/guestId';
 
 interface SecurityFinding {
   id: string;
@@ -57,7 +59,7 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
     setStatus('Starting…');
 
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const headers: Record<string, string> = await authJsonHeaders();
       if (userKeys?.gemini) headers['x-gemini-key'] = userKeys.gemini;
 
       const response = await fetch('/api/security/scan', {
@@ -67,6 +69,8 @@ export const SecurityScan: React.FC<SecurityScanProps> = ({ files, userKeys }) =
       });
 
       if (!response.ok || !response.body) {
+        const guestLimit = await guestLimitReached(response);
+        if (guestLimit) throw new Error(guestLimit);
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || 'Scan failed');
       }

@@ -55,6 +55,14 @@ const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: string; 
     prompt: 'When I add something in the app and reload the page, it disappears. Make the data actually persist so it is still there after a reload.',
   },
   {
+    // A control that broke the app when it was pressed (clickExplorer.ts) — the user sees which one in
+    // their build card, so the offer names the class, not the button.
+    code: 'EXPLORE_FAILED',
+    title: 'Fix the button that breaks your app',
+    detail: 'Pressing one of the buttons or links caused an error or a blank screen.',
+    prompt: 'When I press some of the buttons or links in the app, it shows an error, goes blank, or opens a page that does not exist. Find each one, fix the real cause, and make sure every button and link works.',
+  },
+  {
     code: 'PAGE_RENDER_FAILED',
     title: 'Fix the page that did not load',
     detail: 'At least one page failed to open properly.',
@@ -116,6 +124,8 @@ const NEVER_SUGGEST = new Set([
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', 'LADDER_DEPTH',
   'RELEASE_GATE', 'TIME_TO_FIRST_CALL', 'RUNTIME_UNCHECKED', 'RUNTIME_VERIFIED', 'APP_RENDERED',
   'TEST_SUITE_UNVERIFIED', 'JOURNEY_NOT_DERIVED', 'JOURNEY_NOT_RUN', 'PAGE_RENDER_NOT_RUN',
+  // The click explorer's "did not look" outcomes and its pass — nothing for the user to do.
+  'EXPLORE_NOT_RUN', 'EXPLORE_NOTHING_TO_PRESS', 'EXPLORE_PASSED',
   // Our reviewer produced no verdict — nothing the user can act on, and never a mark against their app.
   'CHEAP_REVIEW_NOT_RUN',
   'BUILD_ORDER_READ_AS_EDIT', 'CLAIM_UNSUPPORTED', 'PREVIEW_UNVERIFIED',

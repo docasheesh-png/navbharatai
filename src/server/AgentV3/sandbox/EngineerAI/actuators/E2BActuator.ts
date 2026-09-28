@@ -63,6 +63,7 @@ const DURABLE_RESTORE_ASSET_MS = 90_000;
 import {
   BROWSE_PAINT_DEADLINE_MS, BROWSE_PAINT_POLL_MS, splitPaintMarker,
 } from '../../../PreviewVerify';
+import { STYLE_EVIDENCE_JS, STYLE_MARKER, splitStyleMarker, type RenderStyleEvidence } from '../../../renderStyle';
 import { assertWriteAllowed, runInPass } from '../../../greenFreeze';
 import { loadWorkspaceFiles } from '../../../WorkspaceFileStore';
 import { writeWorkspaceFiles } from '../../../WorkspaceFiles';
@@ -430,6 +431,9 @@ ${record ? attachConsoleJs('p').trimEnd() : ''}
   await p.goto(${JSON.stringify(url)},{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
 ${paintWaitJs('p')}
 ${record ? '  if(painted) recSessionExisted();' : ''}
+  // DID ANY OF THE APP'S OWN STYLING REACH THE PAGE? (renderStyle.ts, admin 2026-09-28.) Measured only
+  // on a painted page, printed BEFORE the paint marker so splitPaintMarker's html slice never sees it.
+  if(painted){var styleEv=await p.evaluate(${STYLE_EVIDENCE_JS}).catch(function(){return null;});if(styleEv)console.log(${JSON.stringify(STYLE_MARKER)}+JSON.stringify(styleEv));}
   console.log('NBAI_PAINTED:'+painted);
 ${dropBridgeJs('p')}
   console.log((await p.content()).slice(0,30000));
@@ -2422,7 +2426,7 @@ export class E2BActuator implements IEngineerActuator {
     return { exitCode: -1, stdout: '', stderr: 'sandbox unavailable after recreate attempt' };
   }
 
-  async browseUrl(workspaceId: string, url: string): Promise<{ html: string; painted?: boolean; source?: 'browser' | 'curl' }> {
+  async browseUrl(workspaceId: string, url: string): Promise<{ html: string; painted?: boolean; source?: 'browser' | 'curl'; style?: RenderStyleEvidence }> {
     const sandbox = await this.getSandbox(workspaceId);
 
     // Ensure the shared Playwright install (same one the screenshot path uses) has been kicked
@@ -2507,7 +2511,9 @@ export class E2BActuator implements IEngineerActuator {
       }).catch((err: unknown) => commandFailureResult(err));
       if (pw.exitCode === 0 && pw.stdout.trim()) {
         const { painted, html } = splitPaintMarker(pw.stdout);
-        return { html, painted, source: 'browser' };
+        // The style line precedes the paint marker, so it is never inside `html`; it is read from the raw stdout.
+        const { style } = splitStyleMarker(pw.stdout);
+        return { html, painted, source: 'browser', style };
       }
       const browseWhy = commandLogTail(pw, 4);
       if (browseWhy) {

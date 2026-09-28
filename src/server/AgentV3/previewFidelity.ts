@@ -7,7 +7,7 @@
 // when one is used the preview renders something that is NOT what the app really looks like.
 //
 // The toolbar said only "In-browser preview (react)". So a user whose SCSS did not load, or whose
-// CSS-module class names came out undefined, or whose custom Tailwind colours silently fell back to
+// custom Tailwind colours silently fell back to
 // the defaults, had no way to know whether their app was broken or the preview was approximate — and
 // the honest answer, which we knew and did not say, was the second.
 //
@@ -41,13 +41,12 @@ export function previewFidelityCaveats(files: Record<string, string>): PreviewFi
   const code = codeFiles(files || {});
   const bodyOf = (p: string) => (typeof files[p] === 'string' ? files[p] : '');
 
-  // 1. CSS MODULES. The mini-bundler injects a .css file's text and returns an EMPTY exports object,
-  //    so `styles.card` is undefined and every class name on the page comes out blank. The layout
-  //    collapses, which reads exactly like a broken app.
-  if (paths.some((p) => /\.module\.(css|scss|sass|less)$/i.test(p))
-    || code.some((p) => /import\s+\w+\s+from\s+['"][^'"]+\.module\.(css|scss|sass|less)['"]/.test(bodyOf(p)))) {
-    out.push({ id: 'css-modules', text: 'CSS Modules — class names come out blank here, so the layout will look wrong. It is correct on the live server.' });
-  }
+  // 1. CSS MODULES — NO LONGER A CAVEAT (2026-09-28). Both renderers now scope every `.module.css` and
+  //    hand the component its class map (src/lib/cssModules.ts), so `styles.card` is a real class in the
+  //    page. This block used to say "class names come out blank here" — a known defect wearing a label,
+  //    which is how an unstyled app reached the admin's screen as a "preview". The id stays in the union
+  //    so a client that still knows it does not break; nothing emits it any more. A `.module.scss` is
+  //    still not compiled — the preprocessor caveat below covers it.
 
   // 2. SCSS / SASS / LESS. Not in the resolver's extension list and not compiled anywhere in the page,
   //    so the import fails outright and takes the render with it.

@@ -91,7 +91,11 @@ export interface IEngineerActuator {
    * working apps in a loop. `painted: undefined` means the transport could not tell us; it must never
    * be read as `false`.
    */
-  browseUrl(workspaceId: string, url: string): Promise<{ html: string; painted?: boolean; source?: 'browser' | 'curl' }>;
+  browseUrl(workspaceId: string, url: string): Promise<{
+    html: string; painted?: boolean; source?: 'browser' | 'curl';
+    /** What the page's styling looked like when it painted (renderStyle.ts); absent when not measured. */
+    style?: { rules: number; fontRule: boolean; buttons: number; styledButtons: number; elements: number };
+  }>;
   /**
    * Return the public HTTPS URL for a port running inside the sandbox.
    * Used for live-preview when the agent starts a dev server.

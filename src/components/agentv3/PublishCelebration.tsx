@@ -24,6 +24,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ExternalLink, Copy, Check, X, Share2 } from 'lucide-react';
 import { FIREWORK_MS, prettyUrl, whatsappShareUrl, type CelebrationKind } from '../../lib/firstPublish';
+import { useDialogOpen } from '../../hooks/useDialogOpen';
 
 /**
  * Above every other layer this app stacks.
@@ -69,12 +70,9 @@ export function PublishCelebration({ kind, url, appName, firstPublish = false, o
 
   // Escape closes, and focus lands on the close button — this is a dialog, and a dialog you cannot
   // dismiss from the keyboard is a trap.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    closeRef.current?.focus();
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  // Once, on open — the builder re-renders constantly while it streams, and a focus that moved on each
+  // re-render would keep taking the keyboard away from whatever the user tabbed to (see useDialogOpen).
+  useDialogOpen(closeRef, onClose);
 
   if (kind === 'none') return null;
 

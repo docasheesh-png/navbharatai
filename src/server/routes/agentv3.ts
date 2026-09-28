@@ -170,8 +170,12 @@ import {
 } from '../AgentV3/PageRouteCheck';
 import {
   deriveJourneys, journeyScript, parseJourneyResults, summarizeJourneys, noJourneyReason, appHasNoDataEntry,
-  JOURNEY_TIMEOUT_MS,
+  JOURNEY_TIMEOUT_MS, writesToUserDatabase,
 } from '../AgentV3/journeyDerivation';
+import {
+  clickExplorerEnabled, clickExplorerScript, parseExploreOutput, summarizeExplore, exploreUserSummary,
+  mergeUserProofs, EXPLORE_BUDGET_MS, type UserProof,
+} from '../AgentV3/clickExplorer';
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths } from '../AgentV3/greenReviewPolicy';
@@ -19893,6 +19897,9 @@ async function noteBuildOutcome(
       //
       // EVIDENCE, NEVER A GATE. And a journey that never reached the app's own behaviour is reported
       // UNREACHABLE, never FAILED — a login wall is not a defect.
+      // The user-facing proof of the checks below. One card, several checks — see mergeUserProofs.
+      let journeyProof: UserProof | null = null;
+      let exploreProof: UserProof | null = null;
       if (
         process.env.AGENTV3_JOURNEY_CHECK !== 'off' && result.ok && lastPreviewUrl && actuator.runCommand
         && !isImportTurn && !abort.signal.aborted
@@ -19946,9 +19953,12 @@ async function noteBuildOutcome(
             // rewritten by a model, and so an honest failure is as visible as a pass. The wording is
             // built by journeyUserSummary, which refuses to round "could not reach it" up into a pass
             // and carries no codes, tool names or provider names.
+            //
+            // Held, not emitted, since 2026-09-28: the click explorer below adds its own proof to the SAME
+            // card (the card has one slot, so a second event would erase this one). Emitted once, merged.
             try {
               const proof = journeyUserSummary(journeyResults);
-              if (proof.headline) emit({ type: 'verified', ok: proof.ok, headline: proof.headline, steps: proof.steps, ts: Date.now() });
+              if (proof.headline) journeyProof = proof;
             } catch { /* the proof is evidence for the user, never a gate on the build */ }
           } else {
             // A quiet result that explains itself. "Nothing ran" and "nothing could be derived" look
@@ -19966,6 +19976,47 @@ async function noteBuildOutcome(
           }
         } catch { /* evidence, never a gate — a failure here changes nothing about the build verdict */ }
       }
+
+      // PRESS EVERY SAFE BUTTON (competitive gap G1, 2026-09-28 — clickExplorer.ts).
+      //
+      // The journey above drives ONE form. Nothing pressed the rest of the app, so the commonest
+      // first-minute failure — a tab that white-screens, a button whose handler throws, a link to a page
+      // that was never written — survived every check we own. This opens the running app in the
+      // sandbox's pre-baked browser and presses each visible, SAFE control on a fresh load, so a failure
+      // belongs to exactly one control. No model call. It never presses anything that deletes, pays,
+      // sends, uploads or logs out, never a form's submit (the journey owns forms), never a link out of
+      // the app — and when the app writes to the user's OWN database, never a creating verb either.
+      //
+      // EVIDENCE, NEVER A GATE, and three outcomes, never two: a runner that could not reach the app is
+      // EXPLORE_NOT_RUN, not a pass. Kill switch AGENTV3_CLICK_EXPLORE=off.
+      if (
+        clickExplorerEnabled() && result.ok && lastPreviewUrl && actuator.runCommand
+        && !isImportTurn && !abort.signal.aborted
+        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000)
+      ) {
+        try {
+          const exploreFiles = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
+          const out = await withTimeout(
+            actuator.runCommand(workspaceId, clickExplorerScript(lastPreviewUrl, { blockWrites: writesToUserDatabase(exploreFiles) })),
+            EXPLORE_BUDGET_MS + 20_000, 'click-explorer',
+          );
+          const explored = summarizeExplore(parseExploreOutput(out.stdout));
+          buildDiag.record({
+            phase: 'preview',
+            severity: explored.outcome === 'failed' ? 'warning' : 'info',
+            code: explored.code,
+            message: explored.message,
+            autoResolved: explored.outcome === 'passed',
+            detail: explored.detail || undefined,
+          });
+          const proof = exploreUserSummary(explored);
+          if (proof.headline) exploreProof = proof;
+        } catch { /* evidence, never a gate — a failure here changes nothing about the build verdict */ }
+      }
+      try {
+        const card = mergeUserProofs(journeyProof, exploreProof);
+        if (card.headline) emit({ type: 'verified', ok: card.ok, headline: card.headline, steps: card.steps, ts: Date.now() });
+      } catch { /* the proof is evidence for the user, never a gate on the build */ }
 
       // NO PREVIEW AT ALL IS THE LOUDEST FINDING THERE IS — and it was the one thing the report never
       // said (build f323a4db/49a7a987, admin 2026-08-06). Every post-build verification is gated on a

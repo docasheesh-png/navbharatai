@@ -3047,6 +3047,37 @@ the flag entries above promise.
   mislabelled empty pass. A sudden crop of `JOURNEY_FAILED` is not a regression — it is the check
   working for the first time, and each one is a real app that looks like it saves data and does not.
 
+- **`AGENTV3_CLICK_EXPLORE`** (default ON, set `off` to disable — added 2026-09-28, competitive gap G1,
+  admin: *"best solution jo gaps ko fill kar ke navbharatai ko compatitors se aage la jaye"*) — **the
+  app is PRESSED, not only painted.** Every post-build check watched the app render or drove ONE derived
+  form; nothing pressed the rest of it, so a tab that white-screens, a button whose handler throws and a
+  link to a page that was never written survived every check we own. `clickExplorer.ts` opens the running
+  app in the sandbox's pre-baked browser and presses up to 12 visible controls, EACH ON A FRESH LOAD (so a
+  failure belongs to exactly one control), recording an error overlay, a blank root, an in-app link that
+  lands on a missing page, or an uncaught error. **No model call.** Measured on a local test page: seven
+  presses in ~10 s.
+  🔒 **WHAT IT WILL NOT PRESS IS THE DESIGN:** any name matching `NEVER_PRESS` (delete, clear, pay, buy,
+  checkout, send, share, upload, download, log out, …), a form's submit (the journey owns forms), a link
+  out of the app (another origin, `mailto:`/`tel:`, a new tab, a download), a control with no readable
+  name (an unnamed icon is as likely a trash can) — and, when `writesToUserDatabase` is true, every
+  creating verb too (`WRITE_VERBS`), the same rule the journey obeys. Browser dialogs are DISMISSED. The
+  in-page collector receives the exported regexes as data rather than a copy of them.
+  🔒 **THREE OUTCOMES, never two:** `EXPLORE_PASSED` / `EXPLORE_FAILED` need a loaded app and a completed
+  press; `EXPLORE_NOT_RUN` (never reached the app) and `EXPLORE_NOTHING_TO_PRESS` are facts about OUR
+  instrument, registered in `PROCESS_ONLY_CODES` and `NEVER_SUGGEST`. A press that could not complete
+  (covered, detached, timed out) is `skipped`, never a failure. `EXPLORE_FAILED` offers the user one
+  next step ("Fix the button that breaks your app").
+  ⚠️ **THE BUILD CARD HAS ONE SLOT** (`state.verification`), so the journey's proof is now HELD and emitted
+  once, merged with this one (`mergeUserProofs`) — a second `verified` event would have erased the
+  first. A source guard asserts there is exactly one `emit({ type: 'verified'` in the route.
+  ⚠️ **Evidence, never a gate**: it never fails a build and never spends a repair; runs only with ≥90 s of
+  build budget left. It does NOT attach the console recorder, deliberately — its errors are attributed per
+  press, and feeding them into the runtime auto-fix window would be a spend decision nobody took.
+  Test-locked and reversion-proven in `tests/theAppIsPressedNotOnlyPainted.test.ts`, whose real-browser
+  half runs wherever Chromium exists (`/opt/pw-browsers`) and is skipped in CI, which has none.
+  **What to watch:** `EXPLORE_FAILED` on real builds — each is a button a user would have found broken in
+  their first minute. A crop of `EXPLORE_NOT_RUN` means the runner, not the apps, needs looking at.
+
 - **`AGENTV3_CONTRACT_FILE`** (default ON, set `off` to disable — added 2026-09-17, autopsy 57875eb3) —
   the fast lane's SHARED CONTRACT (the enums / interfaces / types every per-file call is handed) is now
   written as a REAL file, `src/types.ts` (or `types.ts` when the app has no `src/`), BEFORE any other file,

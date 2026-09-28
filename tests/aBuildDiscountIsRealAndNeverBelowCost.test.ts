@@ -200,7 +200,9 @@ describe('REVERSION GUARDS — both settle paths apply it, last, with our cost a
     expect(route).toContain('usdInrRate(), livePreviewCharge, buildDiscount);');
     expect(route).toContain('usdInrRate(), watchdogLivePreview, watchdogDiscount)');
     expect(route.match(/buildDiscountLine\(\{/g)?.length).toBe(2);
-    expect(route.match(/buildDiscountStore\.readWithin\(\)/g)?.length).toBe(2);
+    // Three since 2026-09-28: the live ₹ figure reads the same setting once, up front, so what the
+    // user watches during the build is discounted exactly as the bill will be (liveBuildCost.ts).
+    expect(route.match(/buildDiscountStore\.readWithin\(\)/g)?.length).toBe(3);
   });
 
   it('the admin routes exist, behind the admin token', () => {

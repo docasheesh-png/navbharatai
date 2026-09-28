@@ -79,6 +79,10 @@ describe('ordinary English is not a domain', () => {
     ['ordering a list', 'sort the rows ordered by date'],
     ['reading material', 'a list of the books I have read'],
     ['an error message', 'show an error message when it fails'],
+    // autopsy 1a32248f — a way to SIGN IN, not a social network; a footer, not a feed.
+    ['a sign-in method (the report prompt)', 'Build a polished login and signup page: email and password fields with inline validation, a show/hide password toggle, a "remember me" option, social-login buttons, and a smooth switch between Login and Sign up. Front-end UI with light/dark mode.'],
+    ['social sign-in providers', 'login screen with social sign-in (Google, GitHub)'],
+    ['a footer', 'portfolio site with social media icons in the footer'],
   ];
 
   for (const [why, prompt] of INNOCENT) {
@@ -110,6 +114,8 @@ describe('the genuine request still classifies — stripping must never cost a r
     ['build an LMS for a coaching institute with courses and exams', 'education'],
     ['a social app with a feed, posts, likes, comments and friends', 'social'],
     ['a realtime chat app with rooms, message history and user profiles', 'social'],
+    ['build a social network for photographers', 'social'],
+    ['a social app where users post photos and follow friends', 'social'],
     ['a B2B SaaS with team workspaces, roles and subscription billing', 'saas'],
     ['a hospital management system with patient records and appointments', 'healthcare'],
     ['a gym membership and workout tracking app', 'fitness'],

@@ -83590,6 +83590,23 @@ entry (e.g. src/main.jsx) referenced by index.html"*, with *"user app bana hi na
 
 ---
 
+## 2026-09-28 — "Report" on every piece of AI output (Play AI-Generated Content policy)
+
+**Why:** Google's rejection email for version 139 says: "We allow apps that prohibit and prevent the generation of Restricted Content AND contain in-app user reporting/flagging features." The prevention half is the Pollinations word scan (separate PR). This change is the reporting half.
+
+**What was missing:** the "Report a problem" sheet could carry a complaint, but nothing sat on the AI output itself. A reviewer looking at an offensive picture could not flag that picture without leaving it.
+
+**What shipped:**
+- `ReportTargetKind` gains `ai`.
+- `aiReportMessage` builds the report text: the reason, an optional note, and the prompt or reply text, bounded.
+- `ReportAiContent` is a flag button with a one-tap reason picker. It posts to the real `/api/report` route (the admin inbox) and attaches the picture itself for images.
+- The button sits on every AI Image Generator picture and on every AI reply in NavBharatAI chat, Professionals and Doctor AI. It is always visible, never hover-only, because a phone has no hover.
+- A reported picture or reply is hidden on screen at once (session-only; Delete still removes a picture for good).
+- The admin list labels these reports "AI content".
+- New AppKnowledgeBase entry `report_ai_content`.
+- Tests: `tests/aiContentCanBeReportedInTheApp.test.ts`.
+
+**Next:** after both PRs merge, build a fresh `.aab` and resubmit to Play.
 ## 2026-09-28 — Google Play rejection: the free image generator drew a nude picture
 
 **What Google sent:** "Sexual Content and Profanity policy: Violation of Sexual Content and Profanity and AI-Generated Content policy", enforced 28 Sept. The evidence was a screenshot of "Image Generator AI FREE", style "Photograph", showing a realistic nude woman.

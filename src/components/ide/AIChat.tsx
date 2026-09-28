@@ -17,6 +17,7 @@ import { AgentProgress } from './AgentProgress';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { ChatToolbar } from '../chat/ChatToolbar';
 import { MessageEditActions } from '../chat/MessageEditActions';
+import { ReportAiContent } from '../chat/ReportAiContent';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { filterMessages, enterShouldSend, searchActive } from '../../lib/chatToolbar';
 import { deleteMessage, editMessage } from '../../lib/chatMessageActions';
@@ -485,6 +486,9 @@ export const AIChat: React.FC<AIChatProps> = ({
   const [showModeDropdown, setShowModeDropdown] = useState(false);
   const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({});
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+  // AI replies the user flagged with Report — hidden on this screen at once (the person asked not to see
+  // them). Session-only: the conversation itself is unchanged, and the admin has the report.
+  const [reportedMsgIds, setReportedMsgIds] = useState<ReadonlySet<string>>(() => new Set());
   // B9: Edit user message — fill input with message text for re-editing
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [liked, setLiked] = useState<Record<string, boolean>>({});
@@ -1206,7 +1210,9 @@ export const AIChat: React.FC<AIChatProps> = ({
                       ))}
                     </div>
                   )}
-                  {isLongMessage ? (
+                  {reportedMsgIds.has(msg.id) ? (
+                    <p className="text-[11px] text-muted">You reported this reply. It is hidden and has been sent to NavBharatAI for review.</p>
+                  ) : isLongMessage ? (
                     <div className="relative">
                       <div className={cn("transition-all duration-300", !expandedMessages[msg.id] ? "max-h-[120px] overflow-hidden" : "max-h-[5000px]")}>
                         {renderMessageContent(msg)}
@@ -1303,6 +1309,18 @@ export const AIChat: React.FC<AIChatProps> = ({
                   >
                     {copiedMsgId === msg.id ? <Check className="w-2.5 h-2.5 text-success" /> : <Copy className="w-2.5 h-2.5" />}
                   </button>
+                  {/* REPORT an AI reply (Play AI-Generated Content policy, rejection 2026-09-28). Always
+                      visible, unlike Copy: a phone has no hover, and a flag nobody can see is no flag. */}
+                  {msg.sender === 'ai' && !reportedMsgIds.has(msg.id) && (
+                    <ReportAiContent
+                      surface="reply"
+                      content={String(msg.text ?? '')}
+                      onReported={() => setReportedMsgIds((prev) => new Set(prev).add(msg.id))}
+                      view="chat"
+                      className="p-0.5 rounded text-faint hover:text-danger opacity-70"
+                      iconClassName="w-2.5 h-2.5"
+                    />
+                  )}
                 </div>
                 {/* B3 — Regenerate: only on the last AI message */}
                 {isLastAI && onSendSuggestion && (

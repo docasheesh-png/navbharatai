@@ -12,6 +12,7 @@ import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { ChatToolbar } from '../chat/ChatToolbar';
 import { ExamMode } from './ExamMode';
 import { MessageEditActions } from '../chat/MessageEditActions';
+import { ReportAiContent } from '../chat/ReportAiContent';
 import { filterMessages, enterShouldSend, readSendOnEnter, searchActive } from '../../lib/chatToolbar';
 import { deleteMessage, editMessage, editedLabel } from '../../lib/chatMessageActions';
 import {
@@ -120,6 +121,8 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
   /** Opens chat history from the composer's left column. Absent ⇒ no History button (the phone's bottom bar has it). */
   onOpenHistory?: (() => void) | undefined;
 }) {
+  // AI replies the user flagged with Report, by their text — hidden on this screen at once. Session-only.
+  const [reported, setReported] = useState<ReadonlySet<string>>(() => new Set());
   // ONE definition of where a professional's conversation lives (professionalChatStore) — the key used
   // to be spelled out here AND in ProfessionalHistoryView, and App's ✕ close has to agree with both.
   // Three hand-written copies of a key is how a close button ends up clearing the wrong thing. Since
@@ -327,9 +330,22 @@ export function ProfessionalChat({ config, userId, conversationId, onScreen = tr
             <div className={`nb-selectable max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-on-accent' : 'bg-card border border-line text-body'}`}>
               {/* Real, tappable source links (admin 2026-08-25). The bubble stays plain text —
                   LinkedText emits only strings and anchors, so wrapping is unchanged. */}
-              <LinkedText text={String(m.content ?? '')} />
+              {m.role !== 'user' && reported.has(String(m.content ?? ''))
+                ? <span className="text-[12px] text-muted">You reported this reply. It is hidden and has been sent to NavBharatAI for review.</span>
+                : <LinkedText text={String(m.content ?? '')} />}
               {m.edited && <span className="ml-2 text-[10px] opacity-60 align-middle">{editedLabel()}</span>}
             </div>
+            {/* REPORT an AI reply (Play AI-Generated Content policy, rejection 2026-09-28). */}
+            {m.role !== 'user' && String(m.content ?? '').trim() && !reported.has(String(m.content ?? '')) && (
+              <ReportAiContent
+                surface="reply"
+                content={String(m.content ?? '')}
+                onReported={() => setReported((prev) => new Set(prev).add(String(m.content ?? '')))}
+                view={config.id}
+                className="mt-0.5 p-1 rounded text-faint hover:text-danger opacity-70"
+                iconClassName="w-3 h-3"
+              />
+            )}
             {/* DELETE + EDIT on a sent message (admin 2026-08-10). Only the user's own, and only while
                 no answer is in flight — rewinding under a running turn is not a state we could honestly
                 represent on screen. Hidden until hover on a pointer device; always present on touch,

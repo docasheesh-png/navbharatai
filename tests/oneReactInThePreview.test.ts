@@ -36,8 +36,9 @@ function makeContainer() {
   return el;
 }
 
-const loader = new Function(`${REACT_CORE_LOADER_SOURCE}; return { nbaiReactIsSingle, nbaiLoadReactCore };`)() as {
-  nbaiReactIsSingle: (mods: Mods, makeContainer: () => unknown) => boolean;
+const loader = new Function(`${REACT_CORE_LOADER_SOURCE}; return { nbaiReactIsSingle, nbaiLoadReactCore, nbaiRungSummary };`)() as {
+  nbaiReactIsSingle: (mods: Mods, makeContainer: () => unknown, waitMs?: number) => Promise<boolean>;
+  nbaiRungSummary: (errors: string[]) => string;
   nbaiLoadReactCore: (
     specs: readonly string[], rungs: Array<(s: string) => string>, importFn: (u: string) => Promise<unknown>,
     deadlineFn: (s: string) => Promise<never>, interopFn: (ns: unknown) => unknown, makeContainer: () => unknown,
@@ -66,18 +67,18 @@ beforeAll(() => {
 // last test, and vitest isolates this file's globals anyway.
 
 describe('the probe measures, it does not assume', () => {
-  it('one React passes', () => {
-    expect(loader.nbaiReactIsSingle(copyA, makeContainer)).toBe(true);
+  it('one React passes', async () => {
+    expect(await loader.nbaiReactIsSingle(copyA, makeContainer)).toBe(true);
   });
 
-  it("the report's split — the app's react from one copy, react-dom from another — fails", () => {
-    expect(loader.nbaiReactIsSingle({ ...copyA, react: copyB }, makeContainer)).toBe(false);
+  it("the report's split — the app's react from one copy, react-dom from another — fails", async () => {
+    expect(await loader.nbaiReactIsSingle({ ...copyA, react: copyB }, makeContainer)).toBe(false);
   });
 
-  it('never prints: the dev build\'s "Invalid hook call" would reach the console mirror as an app error', () => {
+  it('never prints: the dev build\'s "Invalid hook call" would reach the console mirror as an app error', async () => {
     const spy = vi.spyOn(console, 'error');
     try {
-      loader.nbaiReactIsSingle({ ...copyA, react: copyB }, makeContainer);
+      await loader.nbaiReactIsSingle({ ...copyA, react: copyB }, makeContainer);
       expect(spy).not.toHaveBeenCalled();
     } finally {
       spy.mockRestore();
@@ -86,8 +87,48 @@ describe('the probe measures, it does not assume', () => {
     expect(typeof console.error).toBe('function');
   });
 
-  it('an incomplete group is not one React', () => {
-    expect(loader.nbaiReactIsSingle({ react: copyA.react }, makeContainer)).toBe(false);
+  it('an incomplete group is not one React', async () => {
+    expect(await loader.nbaiReactIsSingle({ react: copyA.react }, makeContainer)).toBe(false);
+  });
+});
+
+describe('🔴 autopsy 1a32248f — ONE React was refused because the probe could not see its own render', () => {
+  // A CDN can give `react-dom/client` its own copy of react-dom. Then the `flushSync` exported by
+  // `react-dom` belongs to the OTHER reconciler: it runs the callback, the probe's render stays
+  // scheduled, and the old probe read "no verdict yet" as "two Reacts" — on every rung. The app's own
+  // hooks were fine (one React), and the user got the platform-fault screen on a working app.
+  let otherDom: unknown;
+  beforeAll(() => {
+    const keep = { ...req.cache };
+    for (const k of Object.keys(req.cache)) if (/[\\/]node_modules[\\/]react-dom[\\/]/.test(k)) delete req.cache[k];
+    otherDom = req('react-dom');
+    Object.assign(req.cache, keep);
+    expect(otherDom).not.toBe(copyA['react-dom']);
+  });
+
+  it('one React whose flushSync comes from another react-dom still passes — the render is awaited, not assumed failed', async () => {
+    expect(await loader.nbaiReactIsSingle({ ...copyA, 'react-dom': otherDom }, makeContainer)).toBe(true);
+  });
+
+  it('…and two Reacts in that same shape are still refused', async () => {
+    expect(await loader.nbaiReactIsSingle({ ...copyA, 'react-dom': otherDom, react: copyB }, makeContainer)).toBe(false);
+  });
+
+  it('a render that never runs inside the wait is "not measured", trusted like a group with no flushSync', async () => {
+    const noRender = { ...copyA, 'react-dom': {}, 'react-dom/client': { createRoot: () => ({ render() {}, unmount() {} }) } };
+    expect(await loader.nbaiReactIsSingle(noRender, makeContainer, 50)).toBe(true);
+  });
+
+  it('the fault line says what each rung did, and names no vendor', () => {
+    const line = loader.nbaiRungSummary(['rung 1: timed out after 180s', 'rung 2: two copies of React', 'rung 3: Failed to fetch https://cdn.jsdelivr.net/npm/react@18.3.1/+esm']);
+    expect(line).toBe('r1 timed out · r2 two copies · r3 did not load');
+    expect(line).not.toMatch(/jsdelivr|esm|http|cdn/i);
+  });
+
+  it('the page appends that line to the platform-fault message, which keeps its marker', () => {
+    const src = readFileSync(join(__dirname, '..', 'src/server/runtime/ReactPreview.ts'), 'utf8');
+    expect(src).toMatch(/var rungWhy = nbaiRungSummary\(core\.errors\);/);
+    expect(src).toMatch(/showError\(\$\{JSON\.stringify\(REACT_SPLIT_FAULT_MESSAGE\)\} \+ \(rungWhy \? ' \(' \+ rungWhy \+ '\)' : ''\), true\);/);
   });
 });
 
@@ -202,7 +243,8 @@ describe('🔒 the wiring — tsc and vitest cannot see a loader that stopped us
   });
 
   it('a split React stops the boot with the platform message instead of mounting the app', () => {
-    expect(html).toContain(`showError(${JSON.stringify(REACT_SPLIT_FAULT_MESSAGE)}, true);`);
+    // The message now carries a vendor-free per-rung line after it (autopsy 1a32248f); the marker leads.
+    expect(html).toContain(`showError(${JSON.stringify(REACT_SPLIT_FAULT_MESSAGE)} + (rungWhy ? ' (' + rungWhy + ')' : ''), true);`);
     expect(html).toMatch(/platform: platform === true/);
   });
 

@@ -83709,3 +83709,20 @@ kept, blank chat saved, opening re-dates, owner check removed). Six older tests 
 - The free chat still opens on a new chat at launch, as ChatGPT, Claude and Grok do; the previous chat is
   first in History. If the admin wants the last chat reopened on launch instead, that is a one-line decision.
 - Phone users get this with the next `.aab`/`.ipa` (bundled mode).
+
+## 2026-09-28 — Exam settings: the language dropdown closed after about a second
+
+Admin: Teacher AI → Exam mode → Settings → the language dropdown *"bas 1 second ke liye khulta hai"*.
+
+- **Root cause:** `ExamSettingsSheet` moved the focus to its heading inside an effect keyed on `[onClose]`,
+  and its parent passes `onClose` as an inline arrow — a new function on every render. Every re-render of
+  the exam screen re-ran the effect and pulled the focus out of the `<select>`; a native select closes its
+  list the moment it loses focus.
+- **Sibling:** `PublishCelebration` had the same effect shape, and the builder re-renders constantly while
+  streaming, so it kept taking the keyboard focus back to its close button.
+- **Fix:** `src/hooks/useDialogOpen.ts` — focus once on open, Escape through a ref to the current `onClose`.
+  Both dialogs use it.
+- **Proven in a real browser** (harness, parent re-rendering every 300 ms): old pattern — focus on the
+  heading 1.5 s after tapping the select; new hook — still on the select, and Escape still closes.
+- Test: `tests/aDialogKeepsTheFocusItIsGiven.test.ts` (also fails if any component moves focus in an
+  effect keyed on `onClose` again).

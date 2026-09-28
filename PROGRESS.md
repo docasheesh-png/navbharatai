@@ -83741,3 +83741,19 @@ was re-checked item by item against current `main` before anything was claimed:
 - ⚠️ **Honest limit:** the CDN behaviour itself could not be observed from a session (esm.sh / jsdelivr are
   refused by the egress proxy). The probe defect is proven in Node; that it is exactly what the admin's
   browser hit is inferred, and the new per-rung line is what will confirm or refute it.
+## 2026-09-28 — Exam settings: the language dropdown closed after about a second
+
+Admin: Teacher AI → Exam mode → Settings → the language dropdown *"bas 1 second ke liye khulta hai"*.
+
+- **Root cause:** `ExamSettingsSheet` moved the focus to its heading inside an effect keyed on `[onClose]`,
+  and its parent passes `onClose` as an inline arrow — a new function on every render. Every re-render of
+  the exam screen re-ran the effect and pulled the focus out of the `<select>`; a native select closes its
+  list the moment it loses focus.
+- **Sibling:** `PublishCelebration` had the same effect shape, and the builder re-renders constantly while
+  streaming, so it kept taking the keyboard focus back to its close button.
+- **Fix:** `src/hooks/useDialogOpen.ts` — focus once on open, Escape through a ref to the current `onClose`.
+  Both dialogs use it.
+- **Proven in a real browser** (harness, parent re-rendering every 300 ms): old pattern — focus on the
+  heading 1.5 s after tapping the select; new hook — still on the select, and Escape still closes.
+- Test: `tests/aDialogKeepsTheFocusItIsGiven.test.ts` (also fails if any component moves focus in an
+  effect keyed on `onClose` again).

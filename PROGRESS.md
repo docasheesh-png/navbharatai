@@ -83481,6 +83481,27 @@ Tests:
 - **A live ₹ figure during the build (G10).** This is a billing-display product decision.
 
 
+## 2026-09-28 — "No React entry module found": the saved app kept its page and lost the page's script
+
+Admin report (Admin → Built apps, a user's workspace): *"No React entry module found — expected a module
+entry (e.g. src/main.jsx) referenced by index.html"*, with *"user app bana hi nahi pa rhe"*.
+
+- **Root cause (code, `WorkspaceFileStore.saveWorkspaceFiles`):** the durable save REPLACES the path index
+  with the files the turn wrote (`Object.fromEntries(writtenFiles)` at five call sites). The 2026-07
+  carry-forward keeps root manifests (`index.html`, `package.json`, configs) alive across that replace —
+  but not the module `index.html` LOADS. The scaffold seeds `src/main.tsx` and the model rarely rewrites
+  it, so a comparable-size save kept the page and dropped its entry. Every render from the saved files
+  (the admin viewer, the in-browser preview) and every cold sandbox restore then had no entry module.
+- **Fixed at the class:** `entryModulesToCarry` carries the local scripts the saved `index.html` loads
+  (read from the incoming set, else one read of its content doc); the conventional `src/main|index.*`
+  names are carried when the page cannot be read. **Existing broken indexes heal on read**
+  (`restoreDroppedEntryModules`): the replace never deleted the entry's content doc, so a load returns it
+  when the listed `index.html` loads it — nothing else unlisted is resurrected. This includes the
+  reported workspace, with no migration.
+- Test: `tests/theEntryModuleIsSavedWithItsPage.test.ts`.
+- ⚠️ **Not proven from the report alone:** whether that user's *live* build also failed, or only renders
+  from the saved files did. A running sandbox still had `src/main.tsx` on disk. The build report for that
+  workspace would settle it.
 ## 2026-09-28 — Broken buttons get a verified repair; the build shows its cost live
 
 **Asked (admin):** approving both open decisions — *"han dono ho jaye to bahut accha rahe! aap isko real engineering kar ke, world class banao"*.

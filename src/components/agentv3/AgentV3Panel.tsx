@@ -62,6 +62,7 @@ import { useScreenWakeLock } from '../../lib/useScreenWakeLock';
 import { clampComposerHeight } from './composerHeight';
 import { FoldableMessage } from './FoldableMessage';
 import { buildProgress, type BuildProgress } from './buildProgress';
+import { liveCostLabel } from './liveCostLabel';
 import { MessageActions } from './MessageActions';
 import { partitionStarters, pickerSections } from './starterTemplates';
 import { loadSavedTemplates, saveTemplate, removeSavedTemplate, type SavedTemplate } from './savedTemplates';
@@ -4742,7 +4743,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               </div>
             )}
             {(running || state.activity.length > 0) && (
-              <WorkingIndicator activity={state.activity} running={running} progress={progress} />
+              <WorkingIndicator activity={state.activity} running={running} progress={progress} costInr={state.costSoFarInr} />
             )}
             {/* THE PROOF THAT WE ACTUALLY CHECKED (gap analysis 2026-09-10). After a build,
                 NavBharatAI drives a real browser through the app's own forms — fills them in,
@@ -5798,7 +5799,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
             <span className="font-medium text-muted capitalize shrink-0">{tab}</span>
             {(running || state.activity.length > 0) && (
               <div className="flex-1 min-w-0 flex justify-end">
-                <WorkingIndicator activity={state.activity} running={running} progress={progress} />
+                <WorkingIndicator activity={state.activity} running={running} progress={progress} costInr={state.costSoFarInr} />
               </div>
             )}
             <button onClick={() => setShowWorkspace(false)} title="Close workspace (back to chat)" aria-label="Close workspace" className="ml-auto shrink-0 flex items-center text-muted hover:text-ink">
@@ -6737,7 +6738,7 @@ function fmtElapsed(ms: number): string {
  * REAL engine events (state.activity); no synthetic activity. Renders while running, and stays as a
  * collapsed "view activity" expander after the build finishes so the work is reviewable.
  */
-function WorkingIndicator({ activity, running, progress }: { activity: ActivityEntry[]; running: boolean; progress?: BuildProgress }) {
+function WorkingIndicator({ activity, running, progress, costInr }: { activity: ActivityEntry[]; running: boolean; progress?: BuildProgress; costInr?: number }) {
   const [nowTick, setNowTick] = useState(() => Date.now());
   const mountTsRef = useRef(Date.now());
 
@@ -6751,6 +6752,8 @@ function WorkingIndicator({ activity, running, progress }: { activity: ActivityE
 
   const startTs = activity.length ? activity[0].ts : mountTsRef.current;
   const endTs = running ? nowTick : (activity.length ? activity[activity.length - 1].ts : startTs);
+  const cost = liveCostLabel(costInr);
+  const [costInfoOpen, setCostInfoOpen] = useState(false);
   const elapsed = fmtElapsed(endTs - startTs);
 
   // Current action: the newest still-in-flight tool, else the newest entry.
@@ -6773,8 +6776,27 @@ function WorkingIndicator({ activity, running, progress }: { activity: ActivityE
         {running && progress && progress.pct > 0 && (
           <span className="shrink-0 tabular-nums font-medium text-accent-text">{progress.pct}%</span>
         )}
+        {/* WHAT IT HAS COST SO FAR (admin 2026-09-28). Sent by the server only to someone who will be
+            charged, priced by the final bill's own function — see liveBuildCost.ts and liveCostLabel.ts. */}
+        {running && cost && (
+          <button
+            type="button"
+            onClick={() => setCostInfoOpen((v) => !v)}
+            aria-expanded={costInfoOpen}
+            aria-label={cost.explanation}
+            title={cost.explanation}
+            className="shrink-0 tabular-nums text-muted underline decoration-dotted underline-offset-2"
+          >
+            {cost.text}
+          </button>
+        )}
         <span className="shrink-0 tabular-nums text-faint">{elapsed}</span>
       </div>
+      {/* A tooltip never appears on a phone, so the explanation opens on a TAP — the place most
+          users will read it. */}
+      {running && cost && costInfoOpen && (
+        <div className="mt-1 text-[11px] leading-snug text-muted">{cost.explanation}</div>
+      )}
     </div>
   );
 }

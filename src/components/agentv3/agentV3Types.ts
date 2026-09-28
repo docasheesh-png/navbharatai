@@ -134,6 +134,11 @@ export type AgentV3WireEvent =
   // dismissible card the user MAY answer via a follow-up; the build never waits for it.
   | { type: 'clarify'; domain: string; questions: string[]; ts: number }
   | { type: 'verified'; ok: boolean; headline: string; steps: string[]; ts: number }
+  /**
+   * What this build has cost SO FAR, in rupees — priced by the same function as the final bill
+   * (liveBuildCost.ts). Sent only to someone who will be charged; one number, no vendor, no split.
+   */
+  | { type: 'cost_so_far'; inr: number; ts: number }
   | { type: 'done'; ok: boolean; summary: string; ts: number; readiness?: BuildHealth }
   /**
    * `code` is set when the server refused for a reason the UI can ACT on rather than merely print.
@@ -238,6 +243,8 @@ export interface AgentV3ClientState {
   pendingClarify?: { domain: string; questions: string[] };
   /** What NavBharatAI actually tested in the finished app, shown to the user as proof rather than a claim. */
   verification?: { ok: boolean; headline: string; steps: string[] };
+  /** The running build's cost so far in rupees (`cost_so_far`). Cleared when a new build begins. */
+  costSoFarInr?: number;
   /** A pending plan/permission gate awaiting the user's Approve/Reject (P4). */
   pendingPermission?: { callId: string; action: string };
   /** The build is waiting on credentials the user must type. Names only — values go straight to the vault. */

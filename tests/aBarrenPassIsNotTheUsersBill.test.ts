@@ -244,7 +244,10 @@ describe('REVERSION GUARDS — the wiring lives in a 20k-line route no unit test
     // both of which DELIVERED something and must stay billable.
     const after = route.slice(at, at + 400);
     expect(after).toContain('REVIEW_INCOMPLETE');
-    expect(route.match(/barrenPhases\.add\(/g) ?? []).toHaveLength(1);
+    // Exactly two phases can go barren: this review, and — since 2026-09-28 — the explorer's repair when
+    // it is NOT kept (explorerRepair.ts). A third site would be a new verdict and must come here first.
+    expect(route.match(/barrenPhases\.add\(/g) ?? []).toHaveLength(2);
+    expect(route).toContain('if (!outcome.kept) barrenPhases.add(PHASE_EXPLORER_REPAIR);');
     // And the two branches it must NOT be in:
     const partial = route.indexOf('REVIEW_PARTIAL');
     const late = route.indexOf('REVIEW_LATE');
@@ -257,7 +260,11 @@ describe('REVERSION GUARDS — the wiring lives in a 20k-line route no unit test
   it('BOTH settle paths pass the same verdict — Fix 67 is what their drifting cost', () => {
     // A `[^)]*` window cannot be used here: the argument list itself contains calls like
     // `buildUsage.total()`, so the first `)` is not the call's own.
-    expect(route.match(/decideBuildBilledUsd\([\s\S]{0,220}?barrenPhases\)/g) ?? []).toHaveLength(2);
+    // Three readers since 2026-09-28: the two settle paths, and the LIVE figure (liveBuildCost.ts), which
+    // prices the running build with the same verdict so the number the user watches cannot disagree
+    // with the bill. It reads; it never bills.
+    expect(route.match(/decideBuildBilledUsd\([\s\S]{0,220}?barrenPhases\)/g) ?? []).toHaveLength(3);
+    expect(route).toContain('decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, vm.usd, barrenPhases)');
   });
 
   it('the verdict set is declared ABOVE the deadline finalizer that closes over it', () => {

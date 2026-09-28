@@ -181,6 +181,7 @@ import {
   explorerRepairOutcomeRecord, explorerRepairProof, explorerRepairUserLine, EXPLORER_REPAIR_PASS,
 } from '../AgentV3/explorerRepair';
 import { explorerRepairBudget } from '../lib/explorerRepairBudget';
+import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS } from '../AgentV3/liveBuildCost';
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths } from '../AgentV3/greenReviewPolicy';
@@ -12882,6 +12883,20 @@ async function noteBuildOutcome(
         shadowFastLaneLedger.add(used, usage, model);
       };
       billingCtx.providerLedger = providerLedger; // Fix 67 — expose to the wall-clock/advisory finalizer
+      // THE LIVE ₹ FIGURE (admin 2026-09-28 — liveBuildCost.ts). Decided once per build: will this bill
+      // reach the wallet at all (the settle's own `billingActive`), and could the first-build-free credit
+      // zero it? Either "no" ⇒ no figure is ever sent. The discount is read ONCE, up front, so the live
+      // number is priced exactly like the final bill; until it has been read nothing is sent.
+      const liveCostCharged = !!userId && (isAgentV3PaidPublicEnabled() || isAgentV3CreditGateEnabled()) && !isAgentV3FreeUser(userId, email);
+      const liveCostOnboarding = freeOnboardingLimit() > 0;
+      let liveCostDiscountPct: number | null = null;
+      let liveCostLast: { inr: number; at: number } | null = null;
+      if (liveCostEnabled() && liveCostCharged && !liveCostOnboarding) {
+        buildDiscountStore.readWithin().then(
+          (setting) => { liveCostDiscountPct = setting.pct > 0 ? setting.pct : 0; },
+          () => { liveCostDiscountPct = 0; }, // unreadable ⇒ 0% — the ordinary price, as at settle
+        );
+      }
       const captureTurnUsage = (used: string, usage: { inputTokens: number; outputTokens: number; measured?: boolean; producedNothing?: boolean }, model?: string, cacheReadInputTokens?: number): void => {
         // 🔴 SAY IT WHEN WE DO NOT KNOW. A provider that returns no token counts contributes zeros to
         // the ledger, and zeros are indistinguishable from a turn that genuinely cost nothing — the
@@ -12970,6 +12985,27 @@ async function noteBuildOutcome(
           } catch {
             // A ceiling we could not evaluate must never end somebody's build. Failing OPEN here is
             // the same call the affordability gate makes on an unreadable balance.
+          }
+        }
+        // THE LIVE ₹ FIGURE. Priced by `decideBuildBilledUsd` — the function the final bill uses — over
+        // this same ledger, with the same sandbox measure and the same discount. Throttled BEFORE it is
+        // computed, so a burst of quick turns costs nothing. Never a gate: any failure sends nothing.
+        if (liveCostDiscountPct !== null) {
+          const now = Date.now();
+          if (!liveCostLast || now - liveCostLast.at >= LIVE_COST_MIN_GAP_MS) {
+            try {
+              const vm = billableSandboxDetail(actuator, workspaceId, buildStartedAt);
+              const d = decideBuildBilledUsd(providerLedger, buildUsage.total(), powerLevelReqEffective, userId ?? undefined, email, vm.usd, barrenPhases);
+              const inr = liveCostInr({
+                charged: liveCostCharged, onboardingFreeBuildPossible: liveCostOnboarding,
+                billedUsd: d.effectiveBilledUsd, floorUsd: d.realCostUsd + d.sandboxUsd,
+                discountPct: liveCostDiscountPct, usdInr: usdInrRate(),
+              });
+              if (inr !== null && shouldEmitLiveCost(liveCostLast, inr, now)) {
+                liveCostLast = { inr, at: now };
+                emit({ type: 'cost_so_far', inr, ts: now });
+              }
+            } catch { /* a live figure we could not price is simply not shown */ }
           }
         }
       };

@@ -17,6 +17,7 @@
 // person is told so in plain words rather than meeting a button that does nothing.
 
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Flag, X } from 'lucide-react';
 import { authedHeaders } from '../../lib/authHeaders';
 import { compressForReport } from '../../lib/reportImage';
@@ -119,16 +120,22 @@ export function ReportAiContent({ surface, content, getImage, onReported, view, 
       >
         <Flag className={iconClassName ?? 'w-3.5 h-3.5'} />
       </button>
-      {open && (
+      {/* PORTALLED, AND ON THE SHEET CONTRACT (`everyPopupClearsTheChrome.test.ts`). The button lives
+          inside a chat bubble that animates with a transform, and a transformed ancestor becomes the
+          containing block for `position: fixed` — so un-portalled, this sheet would open INSIDE the
+          bubble. `nb-sheet-overlay` keeps it clear of the notch and the tab bar; `-over-nav` because
+          z-400 paints above the bar's 150. No `p-*` on the overlay: it would cancel the contract. */}
+      {open && typeof document !== 'undefined' && createPortal(
         <div
-          className="fixed inset-0 z-[400] flex items-end sm:items-center justify-center bg-scrim p-3"
+          className="nb-sheet-overlay nb-sheet-over-nav fixed inset-0 flex items-end sm:items-center justify-center bg-scrim sm:p-4"
+          style={{ zIndex: 400 }}
           role="dialog"
           aria-modal="true"
           aria-label={`Report this ${what}`}
           onClick={close}
         >
           <div
-            className="w-full max-w-sm rounded-2xl border border-line bg-card text-body p-4 space-y-3"
+            className="nb-sheet w-full max-w-sm overflow-y-auto rounded-2xl border border-line bg-card text-body p-4 space-y-3"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-2">
@@ -174,7 +181,8 @@ export function ReportAiContent({ surface, content, getImage, onReported, view, 
               {busy ? 'Sending…' : 'Send report'}
             </button>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );

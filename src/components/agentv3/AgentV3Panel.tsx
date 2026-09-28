@@ -1518,7 +1518,6 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       doc(db, 'chat_sessions', docId),
       sanitizeFirestoreData({
         id: docId,
-        uci: docId,
         userId,
         tab: 'engine_builder',
         original_agent: 'agentv3',

@@ -4,7 +4,7 @@
 // me jo history button hai … isko popup ka ui badalna hai!! claude and gpt jaisa karo!! open chat
 // button kyu banaya hai. hatao isko!!"*
 //
-// Ours had become a stack of cards, each carrying a title, a `CUI:` id, a mode tag, an App/Chat
+// Ours had become a stack of cards, each carrying a title, a chat id, a mode tag, an App/Chat
 // badge, a full timestamp, the agent name and a big **Open Chat** button — seven pieces of chrome to
 // reach one conversation, three or four rows to a phone screen. Claude and ChatGPT show the title and
 // nothing else, and the reason is not minimalism for its own sake: **the group heading carries the
@@ -24,6 +24,8 @@ export interface RecencyRow {
   lastUpdated?: string | number | null;
   /** True for a professional conversation that is still open (there is no "when" yet). */
   profLive?: boolean;
+  /** Pinned by the user (History → Pin). A pinned chat is listed under "Pinned", above every date. */
+  isPinned?: boolean;
 }
 
 export interface HistoryGroup<T> {
@@ -57,6 +59,10 @@ function timeOf(row: RecencyRow): number | null {
  * "today" is a claim about the row that nothing supports.
  */
 export function recencyLabel(row: RecencyRow, now: number): string {
+  // PINNED FIRST, the way Grok and ChatGPT keep a pinned chat above every date (admin 2026-09-28:
+  // "history me jaisa chatgpt, claude, grok karte hai"). A live professional conversation is still
+  // "Ongoing" — it has no pin control, so it can never be both.
+  if (row?.isPinned && !row?.profLive) return 'Pinned';
   if (row?.profLive) return 'Ongoing';
   const t = timeOf(row);
   if (t == null) return 'Older';
@@ -70,7 +76,7 @@ export function recencyLabel(row: RecencyRow, now: number): string {
 
 /** The headings in the order they are shown. A group with no rows is never rendered. */
 export const RECENCY_ORDER: readonly string[] = [
-  'Ongoing', 'Today', 'Yesterday', 'Previous 7 days', 'Previous 30 days', 'Older',
+  'Pinned', 'Ongoing', 'Today', 'Yesterday', 'Previous 7 days', 'Previous 30 days', 'Older',
 ];
 
 /**

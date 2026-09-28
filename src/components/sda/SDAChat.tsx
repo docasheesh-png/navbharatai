@@ -537,7 +537,6 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
       const docId = caseDocRef.current || perCaseSdaDocId(userId, caseIdRef.current);
       setDoc(doc(db, 'chat_sessions', docId), sanitizeFirestoreData({
         id: docId,
-        uci: docId,
         userId,
         tab: 'sda_chat',
         original_agent: 'sda',
@@ -555,11 +554,13 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
         })),
         files: {},
         lastUpdated: new Date().toISOString(),
-        isPinned: false,
         mode: 'sda',
         patientSnapshot: patient,
         redFlags: activeRedFlags,
-      })).catch(err => console.error('SDA Firestore autosave error:', err));
+      // MERGE, and no `isPinned` in the payload (2026-09-28): History can now pin and rename a Doctor AI
+      // case, and a whole-document write that set `isPinned: false` would have unpinned it — and erased
+      // its name — on the case's next message.
+      }), { merge: true }).catch(err => console.error('SDA Firestore autosave error:', err));
     }, 1200);
     return () => clearTimeout(t);
   }, [messages, patient, activeRedFlags, userId]);

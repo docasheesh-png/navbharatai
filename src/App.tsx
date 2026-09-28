@@ -75,7 +75,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { onAuthStateChanged, getRedirectResult, GithubAuthProvider, User as FirebaseUser } from 'firebase/auth';
 // One shared, tested describer for social sign-in outcomes (see socialSignInPolicy).
 import { socialRedirectFailureMessage, authErrorDetail } from './components/socialSignInPolicy';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, updateDoc } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
 
 // Firebase init now lives in ONE place — src/lib/firebase.ts (root-cause fix 2026-07-11: a second
@@ -147,7 +147,8 @@ import { useSettings } from './hooks/useSettings';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
 import OfflineBanner from './components/OfflineBanner';
 import { Message, ChatSession, ApiKeys, ViewType, SettingsScreen, FileSystem, ErrorContext } from './types';
-import { generateUCI } from './lib/chatUtils';
+import { isEmptyConversation, sameTranscript, sameFileMap, cleanTitle } from './lib/chatHistory';
+import { claimDeviceSessions, readDeviceSessionsFor } from './lib/deviceSessions';
 import { sanitizeFirestoreData } from './lib/firestoreUtils';
 import { safeLocalJson } from './lib/safeLocalJson';
 
@@ -730,12 +731,11 @@ export default function App() {
 
     cloudSyncReady.current = false;
 
-    // 1) Instant: show whatever is cached locally
-    let local: ChatSession[] = [];
-    try {
-      const saved = localStorage.getItem('navbharat_sessions');
-      if (saved) local = JSON.parse(saved);
-    } catch {}
+    // 1) Instant: show whatever is cached locally — but only THIS account's. The device keeps one
+    //    account's chats; another account's are removed here, before anything reads them (see
+    //    lib/deviceSessions.ts — they used to be loaded into, and synced up for, whoever signed in next).
+    claimDeviceSessions(user.uid);
+    const local = readDeviceSessionsFor(user.uid) as ChatSession[];
     setSessions(local);
 
     // 2) Cloud: pull cross-device workspace and merge (newer lastUpdated wins)
@@ -795,11 +795,6 @@ export default function App() {
     return () => clearTimeout(handle);
   }, [sessions, user]);
   
-  // Universal Chat Continuation (UCI) State Managers inside App.tsx
-  const [resumeUciInputState, setResumeUciInputState] = useState('');
-  const [isRestoringUci, setIsRestoringUci] = useState(false);
-  const [restoreUciError, setRestoreUciError] = useState('');
-  const [showContinueModal, setShowContinueModal] = useState(false);
   const [firebaseOauthError, setFirebaseOauthError] = useState<{
     errorType: string;
     message: string;
@@ -1033,16 +1028,39 @@ export default function App() {
   // theme persistence → handled inside useSettings() hook
 
 
-  const togglePin = (sessionId: string) => {
-    if (!user) return;
+  /**
+   * PIN and RENAME, the two History actions ChatGPT, Claude and Grok all have (admin 2026-09-28).
+   *
+   * Both write the device's copy AND the cloud document, because History reads the cloud: the pin
+   * used to change only the device's copy, and the cloud learned of it only if that chat happened to
+   * be the open one — so pinning any other chat did nothing a user could see. A cloud write that fails
+   * (offline) is kept by Firestore and sent later; the device's copy already shows it.
+   *
+   * Neither touches `lastUpdated`: pinning or renaming a chat is not writing in it, so it does not move.
+   * A rename is stored as `customTitle`, which the automatic writers never derive, so the next message
+   * can never quietly put the old title back.
+   */
+  const updateSessionMeta = (sessionId: string, patch: { isPinned?: boolean; customTitle?: string }) => {
+    if (!user || !sessionId) return;
     setSessions(prev => {
-      const next = prev.map(s => 
-        s.id === sessionId ? { ...s, isPinned: !s.isPinned } : s
-      );
+      const next = prev.map(s => (s.id === sessionId ? { ...s, ...patch } : s));
       safeLS('navbharat_sessions', JSON.stringify(next));
       return next;
     });
-    addLog('Session pin status updated.', 'info');
+    // `updateDoc` only touches the named fields and fails cleanly on a chat the cloud does not have yet
+    // (it is then saved whole, with these fields, by the next autosave).
+    updateDoc(doc(db, 'chat_sessions', sessionId), sanitizeFirestoreData(patch)).catch(() => {});
+  };
+
+  const togglePin = (sessionId: string, pinned?: boolean) => {
+    const current = sessions.find(s => s.id === sessionId)?.isPinned;
+    updateSessionMeta(sessionId, { isPinned: typeof pinned === 'boolean' ? pinned : !current });
+  };
+
+  const renameSession = (sessionId: string, title: string) => {
+    const clean = cleanTitle(title);
+    if (!clean) return;
+    updateSessionMeta(sessionId, { customTitle: clean });
   };
 
   useEffect(() => {
@@ -1178,7 +1196,6 @@ export default function App() {
         if (showCheckoutModal) { setShowCheckoutModal(false); return; }
         if (showPurchaseFormPanel) { setShowPurchaseFormPanel(false); return; }
         if (showDeployPanel) { setShowDeployPanel(false); return; }
-        if (showContinueModal) { setShowContinueModal(false); return; }
         // No modal was open — if Focus Mode is on, Esc brings the header back (always works, even
         // though the on-screen toggle/floating button might be out of view).
         if (focusMode) { setFocusMode(false); return; }
@@ -1194,7 +1211,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [canUndo, canRedo, undoCode, redoCode, addToast, showAuth, showCheckoutModal, showPurchaseFormPanel, showDeployPanel, showContinueModal, focusMode]);
+  }, [canUndo, canRedo, undoCode, redoCode, addToast, showAuth, showCheckoutModal, showPurchaseFormPanel, showDeployPanel, focusMode]);
 
   const [keys, setKeys] = useState<ApiKeys>(() => {
       const defaults = { gemini: '', groq: '', deepseek: '', openai: '', openrouter: '', claude: '' };
@@ -1634,7 +1651,6 @@ export default function App() {
       if (showDeployPanel) openOverlays.push('deploy');
       if (showModePicker) openOverlays.push('mode-picker');
       if (historyPopupOpen) openOverlays.push('history');
-      if (showContinueModal) openOverlays.push('continue');
       if (reportOpen) openOverlays.push('report');
       if (zipSizeModal) openOverlays.push('zip-size');
       if (showAuth) openOverlays.push('auth');
@@ -1648,7 +1664,6 @@ export default function App() {
             case 'deploy': setShowDeployPanel(false); return;
             case 'mode-picker': setShowModePicker(false); return;
             case 'history': setHistoryPopupOpen(false); return;
-            case 'continue': setShowContinueModal(false); return;
             case 'report': setReportOpen(false); return;
             case 'zip-size': setZipSizeModal(null); return;
             case 'auth': setShowAuth(false); return;
@@ -1665,7 +1680,7 @@ export default function App() {
   }, [
     exitPromptOpen, activeView, toggleTab,
     isMenuOpen, showDeployPanel, showModePicker, historyPopupOpen,
-    showContinueModal, reportOpen, zipSizeModal, showAuth,
+    reportOpen, zipSizeModal, showAuth,
   ]);
 
   /**
@@ -1870,7 +1885,7 @@ export default function App() {
         setProMessages([]);
         setProInput('');
         try { localStorage.removeItem('navbharat_pro_messages'); } catch {}
-        // Fresh session id so the next conversation doesn't inherit this one's memory/UCI
+        // Fresh session id so the next conversation doesn't inherit this one's memory
         const newProSessionId = `pro-${Date.now()}`;
         try { localStorage.setItem('pro_session_id', newProSessionId); } catch { /* ignore */ }
         setCurrentProSessionId(newProSessionId);
@@ -1983,20 +1998,27 @@ export default function App() {
     if (!user) return; // ONLY save sessions if logged-in!
     const activeMsgs = messages;
     
-    // Avoid saving if messages are empty or only contains welcome greetings
-    if (activeMsgs.length === 0) return;
-    if (activeMsgs.length <= 1 && activeMsgs[0]?.id?.includes('welcome')) return;
+    // A chat is saved from its FIRST USER MESSAGE, never before. The opening (welcome line, and the
+    // language picker for a user who has not chosen one) is not a conversation, and saving it is what
+    // filled History with "New Conversation" rows nobody wrote (see lib/chatHistory.ts).
+    if (!activeMsgs.some(m => m.sender === 'user')) return;
 
     setSessions(prev => {
       const existingIdx = prev.findIndex(s => s.id === currentSessionId);
       let existingSession = existingIdx > -1 ? prev[existingIdx] : null;
 
-      // Determine session title from the first non-welcome message
-      const firstRealMsg = activeMsgs.find(m => m.sender === 'user' || !m.id?.includes('welcome'));
-      const rawTitle = firstRealMsg?.text || 'New Conversation';
-      const title = rawTitle.slice(0, 40) + (rawTitle.length > 40 ? '...' : '');
+      // OPENING A CHAT IS NOT WRITING IN IT. When the transcript on screen is the one already saved,
+      // nothing changed — so nothing is stamped. Without this, looking at an old conversation moved it
+      // to the top of History, which ChatGPT, Claude and Grok never do.
+      if (existingSession && sameTranscript(existingSession.messages, activeMsgs)
+        && sameFileMap(existingSession.files, files) && existingSession.currentAgent === activeAgent) {
+        return prev;
+      }
 
-      const sessionUci = existingSession?.uci || generateUCI();
+      // The title is the user's own first words — never the welcome line or the language picker.
+      const firstUserMsg = activeMsgs.find(m => m.sender === 'user');
+      const rawTitle = firstUserMsg?.text || 'New Conversation';
+      const title = rawTitle.slice(0, 40) + (rawTitle.length > 40 ? '...' : '');
 
       const updatedSession: ChatSession = {
         id: currentSessionId,
@@ -2007,8 +2029,7 @@ export default function App() {
         mode,
         agent: activeAgent,
         isPinned: existingSession?.isPinned || false,
-        // UCI details
-        uci: sessionUci,
+        customTitle: existingSession?.customTitle,
         originalAgent: existingSession?.originalAgent || activeAgent,
         currentAgent: activeAgent,
         memorySummary: existingSession?.memorySummary || '',
@@ -2035,7 +2056,7 @@ export default function App() {
         const transitionRef = doc(db, 'chat_agent_history', transitionId);
         setDoc(transitionRef, sanitizeFirestoreData({
           id: transitionId,
-          uci: sessionUci || '',
+          sessionId: currentSessionId,
           userId: user?.uid || 'anonymous',
           previous_agent: existingSession.currentAgent || null,
           current_agent: updatedSession.currentAgent || null,
@@ -2055,18 +2076,21 @@ export default function App() {
     if (!user) return; // ONLY save sessions if logged-in!
     const activeMsgs = proMessages;
 
-    if (activeMsgs.length === 0) return;
-    if (activeMsgs.length <= 1 && activeMsgs[0]?.id?.includes('welcome')) return;
+    // Same rules as the free autosave above: saved from the first user message, and an unchanged
+    // transcript (a chat that was only opened) is not re-stamped.
+    if (!activeMsgs.some(m => m.sender === 'user')) return;
 
     setSessions(prev => {
       const existingIdx = prev.findIndex(s => s.id === currentProSessionId);
       let existingSession = existingIdx > -1 ? prev[existingIdx] : null;
 
-      const firstRealMsg = activeMsgs.find(m => m.sender === 'user' || !m.id?.includes('welcome'));
-      const rawTitle = firstRealMsg?.text || 'New App Build';
-      const title = rawTitle.slice(0, 40) + (rawTitle.length > 40 ? '...' : '');
+      if (existingSession && sameTranscript(existingSession.messages, activeMsgs) && sameFileMap(existingSession.files, files)) {
+        return prev;
+      }
 
-      const sessionUci = existingSession?.uci || generateUCI();
+      const firstUserMsg = activeMsgs.find(m => m.sender === 'user');
+      const rawTitle = firstUserMsg?.text || 'New App Build';
+      const title = rawTitle.slice(0, 40) + (rawTitle.length > 40 ? '...' : '');
 
       const updatedSession: ChatSession = {
         id: currentProSessionId,
@@ -2077,7 +2101,7 @@ export default function App() {
         mode: 'build',
         agent: 'navbharatai-pro',
         isPinned: existingSession?.isPinned || false,
-        uci: sessionUci,
+        customTitle: existingSession?.customTitle,
         originalAgent: existingSession?.originalAgent || 'navbharatai-pro',
         currentAgent: 'navbharatai-pro',
         memorySummary: existingSession?.memorySummary || '',
@@ -2102,6 +2126,60 @@ export default function App() {
     });
   }, [proMessages, currentProSessionId, files, user]);
 
+  /**
+   * The cloud copy of one chat (`chat_sessions/<id>`), written by ONE function for the free and the Pro
+   * chat alike — the two writers used to be forty identical lines each, which is how a field added to
+   * one is forgotten in the other.
+   */
+  const writeSessionDoc = useCallback((session: ChatSession, tab: string, docMode: string) => {
+    if (!user) return;
+    const toWire = (list: Message[] | undefined) => (list || []).map(m => ({
+      id: m.id || '',
+      text: m.text || '',
+      sender: m.sender || 'ai',
+      timestamp: m.timestamp || new Date().toISOString()
+    }));
+    setDoc(doc(db, 'chat_sessions', session.id), sanitizeFirestoreData({
+      id: session.id || 'unknown',
+      userId: user.uid,
+      tab,
+      original_agent: session.originalAgent || null,
+      current_agent: session.currentAgent || null,
+      title: session.title || 'Untitled',
+      // The user's own name for the chat (History → Rename). Written back every time because this is
+      // a whole-document write: leaving it out would erase a rename on the next message.
+      customTitle: session.customTitle || '',
+      memory_summary: session.memorySummary || '',
+      edit_log: session.editLog || [],
+      restoredMessages: toWire(session.restoredMessages),
+      messages: toWire(session.messages),
+      files: Object.entries(session.files || {}).reduce((acc: Record<string, string>, [k, v]) => { acc[k] = v || ''; return acc; }, {}),
+      lastUpdated: session.lastUpdated || new Date().toISOString(),
+      isPinned: !!session.isPinned,
+      mode: docMode
+    })).catch(err => {
+      if ((err as any)?.code !== 'resource-exhausted') {
+        console.error('Firestore chat_sessions sync error:', err);
+      }
+    });
+  }, [user]);
+
+  /**
+   * Cloud writes waiting out their 2-second quiet period, by chat surface. Kept so they can be sent AT
+   * ONCE when the app goes to the background — see the flush effect below.
+   */
+  const pendingSessionWritesRef = useRef<{ nbi?: () => void; pro?: () => void }>({});
+
+  /** Schedule one surface's cloud write after 2 s of quiet (one write per burst, not one per message). */
+  const scheduleSessionWrite = useCallback((key: 'nbi' | 'pro', timerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | undefined>, write: () => void) => {
+    clearTimeout(timerRef.current);
+    pendingSessionWritesRef.current[key] = write;
+    timerRef.current = setTimeout(() => {
+      delete pendingSessionWritesRef.current[key];
+      write();
+    }, 2000);
+  }, []);
+
   // Debounced Firestore sync for NBI Chat sessions.
   // Fires at most once per 2 s of quiet after messages change, so a 20-turn conversation
   // produces 1–2 writes instead of 20 — keeps the free-tier daily write quota healthy.
@@ -2114,42 +2192,10 @@ export default function App() {
     // Never let this generic writer touch a v3_ doc — a stale full-doc write here would re-add a
     // messages copy and reintroduce the transcript-corruption class of bugs.
     if (typeof session.id === 'string' && session.id.startsWith('v3_')) return;
-    clearTimeout(fsNBIDebounceRef.current);
-    fsNBIDebounceRef.current = setTimeout(() => {
-      const sessionRef = doc(db, 'chat_sessions', session.id);
-      setDoc(sessionRef, sanitizeFirestoreData({
-        id: session.id || 'unknown',
-        uci: session.uci || '',
-        userId: user.uid,
-        tab: activeView,
-        original_agent: session.originalAgent || null,
-        current_agent: session.currentAgent || null,
-        title: session.title || 'Untitled',
-        memory_summary: session.memorySummary || '',
-        edit_log: session.editLog || [],
-        restoredMessages: (session.restoredMessages || []).map(m => ({
-          id: m.id || '',
-          text: m.text || '',
-          sender: m.sender || 'ai',
-          timestamp: m.timestamp || new Date().toISOString()
-        })),
-        messages: (session.messages || []).map(m => ({
-          id: m.id || '',
-          text: m.text || '',
-          sender: m.sender || 'ai',
-          timestamp: m.timestamp || new Date().toISOString()
-        })),
-        files: Object.entries(session.files || {}).reduce((acc: Record<string, string>, [k, v]) => { acc[k] = v || ''; return acc; }, {}),
-        lastUpdated: session.lastUpdated || new Date().toISOString(),
-        isPinned: !!session.isPinned,
-        mode: session.mode || 'chat'
-      })).catch(err => {
-        if ((err as any)?.code !== 'resource-exhausted') {
-          console.error('Firestore chat_sessions sync error:', err);
-        }
-      });
-    }, 2000);
-  }, [sessions, currentSessionId, user, activeView]);
+    // A chat nobody has typed in is not written (see lib/chatHistory.ts isEmptyConversation).
+    if (isEmptyConversation(session)) return;
+    scheduleSessionWrite('nbi', fsNBIDebounceRef, () => writeSessionDoc(session, activeView, session.mode || 'chat'));
+  }, [sessions, currentSessionId, user, activeView, scheduleSessionWrite, writeSessionDoc]);
 
   // Debounced Firestore sync for Pro Builder sessions.
   useEffect(() => {
@@ -2159,42 +2205,32 @@ export default function App() {
     // v5.0 (AgentV3) docs are single-writer (server transcript + panel-owned metadata row) —
     // same rule as the NBI writer above: this generic writer must never touch a v3_ doc.
     if (typeof session.id === 'string' && session.id.startsWith('v3_')) return;
-    clearTimeout(fsProDebounceRef.current);
-    fsProDebounceRef.current = setTimeout(() => {
-      const sessionRef = doc(db, 'chat_sessions', session.id);
-      setDoc(sessionRef, sanitizeFirestoreData({
-        id: session.id || 'unknown',
-        uci: session.uci || '',
-        userId: user.uid,
-        tab: 'nbi_pro_chat',
-        original_agent: session.originalAgent || null,
-        current_agent: session.currentAgent || null,
-        title: session.title || 'Untitled',
-        memory_summary: session.memorySummary || '',
-        edit_log: session.editLog || [],
-        restoredMessages: (session.restoredMessages || []).map(m => ({
-          id: m.id || '',
-          text: m.text || '',
-          sender: m.sender || 'ai',
-          timestamp: m.timestamp || new Date().toISOString()
-        })),
-        messages: (session.messages || []).map(m => ({
-          id: m.id || '',
-          text: m.text || '',
-          sender: m.sender || 'ai',
-          timestamp: m.timestamp || new Date().toISOString()
-        })),
-        files: Object.entries(session.files || {}).reduce((acc: Record<string, string>, [k, v]) => { acc[k] = v || ''; return acc; }, {}),
-        lastUpdated: session.lastUpdated || new Date().toISOString(),
-        isPinned: !!session.isPinned,
-        mode: 'build'
-      })).catch(err => {
-        if ((err as any)?.code !== 'resource-exhausted') {
-          console.error('Firestore chat_sessions (pro) sync error:', err);
-        }
-      });
-    }, 2000);
-  }, [sessions, currentProSessionId, user]);
+    if (isEmptyConversation(session)) return;
+    scheduleSessionWrite('pro', fsProDebounceRef, () => writeSessionDoc(session, 'nbi_pro_chat', 'build'));
+  }, [sessions, currentProSessionId, user, scheduleSessionWrite, writeSessionDoc]);
+
+  // 🔴 A CHAT MUST REACH THE CLOUD EVEN WHEN THE APP IS CLOSED MID-WAIT (user report 2026-09-25: "when
+  // we close the app and reopen it, it doesn't show"). The write above waits 2 s of quiet — so a user
+  // who read the answer and closed the app inside those 2 s left a conversation the cloud never
+  // received, and History (which reads the cloud) did not list it. The moment the page is hidden
+  // (app to background, tab switched, screen locked) or unloaded, every waiting write is sent at once.
+  useEffect(() => {
+    const flush = () => {
+      const pending = pendingSessionWritesRef.current;
+      pendingSessionWritesRef.current = {};
+      clearTimeout(fsNBIDebounceRef.current);
+      clearTimeout(fsProDebounceRef.current);
+      pending.nbi?.();
+      pending.pro?.();
+    };
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flush(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', flush);
+    };
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -2654,14 +2690,6 @@ export default function App() {
    */
   const hasHeaderChip = useCallback((id: string) => menuItems.some((m) => m.id === id), [menuItems]);
 
-  // --- UNIVERSAL CHAT CONTINUATION SYSTEM (UCI) HELPERS & IMPLEMENTATION ---
-  
-  // Agent greetings (NBI/Basic/Pro/VIP) → imported from src/lib/agentGreetings.ts
-
-  // generateUCI → imported from src/lib/chatUtils.ts
-  // getRandomElement → imported from src/lib/chatUtils.ts
-  // generateSmartHeuristicSummary → imported from src/lib/chatUtils.ts
-
   // A v5.0 session restored from History → handed to AgentV3Panel via this prop;
   // the nonce makes each "open chat" re-adopt even if the panel is already mounted.
   const [v3Resume, setV3Resume] = useState<{ sessionId: string; messages: Array<{ role: 'user' | 'agent'; text: string; ts: number }>; nonce: number } | null>(null);
@@ -2750,56 +2778,18 @@ export default function App() {
   // the Diff Viewer's "previous version" so it shows exactly what the last build changed.
   const [previousFiles, setPreviousFiles] = useState<Record<string, string>>({});
 
-  const resumeSession = (session: ChatSession) => {
-    // v5.0 (engine_builder) sessions resume INSIDE v5.0 — adopt the saved sessionId
-    // (so the backend continues with the same workspace/memory, best-effort) and
-    // restore the saved thread. Detected by the agentv3 agent tag or the v3_ id.
-    const isV3 = session.agent === 'agentv3'
-      || (session as any).originalAgent === 'agentv3'
-      || (session as any).currentAgent === 'agentv3'
-      || (typeof session.id === 'string' && session.id.startsWith('v3_'));
-    if (isV3) {
-      setCurrentSessionId(session.id);
-      const sid = (session.id || '').replace(/^v3_/, '') || session.id;
-      const msgs = (session.messages || []).map((mm: any) => ({
-        role: (mm.sender === 'user' || mm.role === 'user') ? 'user' as const : 'agent' as const,
-        text: mm.text ?? mm.content ?? '',
-        ts: mm.timestamp ? (Date.parse(mm.timestamp) || Date.now()) : (mm.ts ?? Date.now()),
-      }));
-      setV3Resume({ sessionId: sid, messages: msgs, nonce: Date.now() });
-      v3ResumeInFlightRef.current = true; // resume, not a fresh open — suppress the new-chat bump
-      toggleTab('nbi_pro_chat'); // v5.0 now lives in nbi_pro_chat
-      addLog(`Resumed NavBharatAI Pro session: ${session.title}`, 'info');
-      return;
-    }
-
-    setCurrentSessionId(session.id);
-    const m = session.messages || [];
-    // A session saved before Vishwakarma was deleted (2026-09-12). Its surface is gone, so it opens in
-    // the Pro chat — the same mapping resolveSessionSurface makes — rather than being unopenable.
-    const isLegacyBuilderSession = !!(session.agent && session.agent.startsWith('vishwakarma'));
-    
-    setFiles(session.files || {});
-    if (session.mode) setMode(session.mode);
-    if (session.agent) setActiveAgent(isLegacyBuilderSession ? 'navbharatai-pro' : session.agent);
-    
-    setMessages(m);
-    toggleTab(isLegacyBuilderSession ? 'nbi_pro_chat' : 'nbi_chat');
-    
-    addLog(`Resored session (UCI: ${session.uci || 'N/A'}): ${session.title}`, 'info');
-  };
 
 
-  // P3.1 — session restore/management (UCI restore, delete, new chat) extracted into useSessionManager
+  // P3.1 — opening, deleting and starting chats, extracted into useSessionManager
   // (behavior-preserving). All deps are defined above; the panels/modal consumers below resolve the
   // returned handlers unchanged. v3ResumeInFlightRef stays App-owned (shared with the toggleTab bump).
-  const { handleRestoreUci, handleRestoreByUci, deleteSession, startNewChat } = useSessionManager({
-    sessions, user, currentSessionId, resumeUciInputState, mode,
+  const { openSession, deleteSession, startNewChat } = useSessionManager({
+    sessions, user, currentSessionId,
     v3ResumeInFlightRef,
     setV3Resume, setCurrentSessionId, setFiles, setSessions, setSdaResetKey, setCurrentProSessionId,
     setSdaOpenCaseId,
     setProMessages, setMessages, setGeneratedCode, setHasGeneratedCode, setActiveAgent, setErrorContext,
-    setIsAppBuilt, setRestoreUciError, setIsRestoringUci, setResumeUciInputState, setShowContinueModal,
+    setIsAppBuilt,
     toggleTab, addToast, addLog, initialFreeChatMessages: initialNbiMessages,
   });
 
@@ -3505,8 +3495,6 @@ export default function App() {
         isThemePickerOpen={isThemePickerOpen}
         setIsThemePickerOpen={setIsThemePickerOpen}
         setErrorContext={setErrorContext}
-        sessions={sessions}
-        onResumeSession={resumeSession}
       />
       {/* Workspace */}
       <main id="main-content" className="flex flex-1 relative min-h-0 min-w-0">
@@ -3647,7 +3635,6 @@ export default function App() {
               isAppBuilt={isAppBuilt}
               theme={theme}
               onPreviewClick={() => { toggleTab('preview'); setIsMenuOpen(false); }}
-              onRestoreUci={handleRestoreUci}
               wallet={wallet}
               setPreferredLanguage={setPreferredLanguage}
               setMessages={setMessages}
@@ -4188,8 +4175,12 @@ export default function App() {
             <HistoryPopup
               user={user}
               onClose={() => setHistoryPopupOpen(false)}
-              onRestoreSession={handleRestoreUci}
+              onOpenSession={openSession}
               onDeleteSession={deleteSession}
+              onNewChat={() => { startNewChat(); }}
+              currentSessionId={currentSessionId}
+              onRenameSession={renameSession}
+              onTogglePin={togglePin}
               onOpenProfessional={openProfessionalConversation}
               onDeleteProfessional={deleteProfessionalConversation}
             />
@@ -4197,7 +4188,8 @@ export default function App() {
           {activeView === 'report' && <ReportsListView user={user} />}
           {activeView === 'history' && (historyInitialFilter === 'professional'
             ? <ProfessionalHistoryView onOpen={openProfessionalConversation} onDelete={deleteProfessionalConversation} onBack={() => toggleTab('professionals')} />
-            : <HistoryView user={user} onRestoreSession={handleRestoreUci} onDeleteSession={deleteSession} initialFilter={historyInitialFilter} lockFilter={historyInitialFilter === 'free'}
+            : <HistoryView user={user} onOpenSession={openSession} onDeleteSession={deleteSession} initialFilter={historyInitialFilter} lockFilter={historyInitialFilter === 'free'}
+                onNewChat={() => { startNewChat(); }} currentSessionId={currentSessionId} onRenameSession={renameSession} onTogglePin={togglePin}
                 includeProfessionals={historyInitialFilter === 'free'}
                 onOpenProfessional={openProfessionalConversation} onDeleteProfessional={deleteProfessionalConversation} />)}
 
@@ -4327,14 +4319,6 @@ export default function App() {
         githubRedirectingMessage={githubRedirectingMessage}
         githubDebugData={githubDebugData}
         setGithubRedirectingMessage={setGithubRedirectingMessage}
-        showContinueModal={showContinueModal}
-        setShowContinueModal={setShowContinueModal}
-        setRestoreUciError={setRestoreUciError}
-        setResumeUciInputState={setResumeUciInputState}
-        resumeUciInputState={resumeUciInputState}
-        restoreUciError={restoreUciError}
-        handleRestoreByUci={handleRestoreByUci}
-        isRestoringUci={isRestoringUci}
         firebaseOauthError={firebaseOauthError}
         setFirebaseOauthError={setFirebaseOauthError}
         pendingProvider={pendingProvider}

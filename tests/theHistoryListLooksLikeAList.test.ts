@@ -73,7 +73,8 @@ describe('groupSessionsByRecency', () => {
   it('is total', () => {
     expect(groupSessionsByRecency([], NOW)).toEqual([]);
     expect(groupSessionsByRecency(undefined as never, NOW)).toEqual([]);
-    expect(RECENCY_ORDER[0]).toBe('Ongoing');
+    // "Pinned" leads since 2026-09-28 (History → Pin); "Ongoing" follows it.
+    expect(RECENCY_ORDER.slice(0, 2)).toEqual(['Pinned', 'Ongoing']);
   });
 });
 
@@ -100,9 +101,14 @@ describe('🔒 the chrome really left the row', () => {
     expect(code).not.toContain('new Date(session.lastUpdated).toLocaleString()');
   });
 
-  it('⚠️ but the id is still SEARCHABLE, so nothing became unfindable', () => {
-    expect(code).toContain("(s.uci && s.uci.toLowerCase().includes(q))");
-    expect(view).toContain('Search by title, CUI, or message...');
+  it('🔴 the chat id is gone from the SEARCH too (admin 2026-09-28: "yeh chat id wala system band karo")', () => {
+    // It was kept searchable when the row chip went (2026-09-20). The admin then removed the whole
+    // chat-ID system: a chat is found by its name or its words, as in ChatGPT, Claude and Grok.
+    expect(code).not.toMatch(/s\.uci\b/);
+    expect(view).not.toContain('CUI');
+    expect(view).toContain('placeholder="Search chats"');
+    // The user's own name for a chat IS searchable.
+    expect(code).toContain("s.customTitle.toLowerCase().includes(q)");
   });
 
   it('the group heading is what replaced the per-row date', () => {

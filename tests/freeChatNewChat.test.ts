@@ -48,11 +48,13 @@ describe('the two defects the dead code carried', () => {
     expect(hook).toContain('setMessages(opening);');
   });
 
-  it('🔒 ONE copy of the opening, used for both the screen and the saved session', () => {
+  it('🔒 ONE copy of the opening, and a new chat is NOT saved until somebody types in it', () => {
     // It previously carried THREE hardcoded copies of the welcome line — two for the transcript and a
     // third inside the saved record. That is how a saved session can describe a conversation that
-    // never happened, and how any future edit to one of them silently disagrees with the others.
-    expect(hook).toContain('messages: opening,');
+    // never happened. Since 2026-09-28 (the chat-ID removal) the blank chat is not saved at all: that
+    // saved record is what filled History with "New Conversation" rows nobody wrote.
+    expect(hook).not.toContain('messages: opening,');
+    expect(hook).not.toContain('initSession');
     expect(hook).not.toContain("I\\'m Vishwakarma. How can I help you today?");
     const welcomeCopies = hook.split('You can chat with me in any language!').length - 1;
     expect(welcomeCopies).toBe(0);

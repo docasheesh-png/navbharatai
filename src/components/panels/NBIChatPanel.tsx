@@ -32,7 +32,6 @@ export interface NBIChatPanelProps {
   isAppBuilt: boolean;
   theme: ThemeMode;
   onPreviewClick: () => void;
-  onRestoreUci?: (uci: string) => Promise<boolean>;
   wallet: any;
   setPreferredLanguage: (lang: any) => void;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
@@ -78,7 +77,6 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
   isAppBuilt,
   theme,
   onPreviewClick,
-  onRestoreUci,
   wallet,
   setPreferredLanguage,
   setMessages,
@@ -131,7 +129,6 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
               <span>{teachMode ? '📚' : '🎓'}</span>
               <span className="hidden sm:inline">Teach</span>
             </button>
-            <span className="font-mono text-accent-text hidden sm:inline">{currentSession?.uci || ''}</span>
           </div>
         </div>
         <AIChat
@@ -163,10 +160,6 @@ export const NBIChatPanel: React.FC<NBIChatPanelProps> = ({
           theme={theme}
           onPreviewClick={onPreviewClick}
           userId={user?.uid}
-          activeUci={user ? (currentSession?.uci || '') : ''}
-          onRestoreUci={user ? onRestoreUci : undefined}
-          restoredMessages={currentSession?.restoredMessages || []}
-          memorySummary={currentSession?.memorySummary || ''}
           wallet={wallet}
           onLanguagePick={(lang) => {
             setPreferredLanguage(lang as any);

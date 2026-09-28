@@ -12,7 +12,11 @@
 
 /**
  * Large, regenerable keys that may be thrown away to make room. Order is eviction order — cheapest
- * to lose first. Exported because App.tsx also clears the whole set on sign-out.
+ * to lose first. Exported because App.tsx also clears the whole set when storage is over 3 MB.
+ *
+ * ⚠️ CORRECTED 2026-09-28: this comment said App.tsx cleared the set "on sign-out". It never did — the
+ * saved chats of one account survived sign-out and were loaded for the next. Account separation now lives
+ * in lib/deviceSessions.ts (an owner stamp checked wherever the chats are read).
  */
 export const LS_EVICTABLE = [
   'navbharat_versions',

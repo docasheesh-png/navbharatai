@@ -13,7 +13,7 @@ describe('buildTimedOut (watchdog wall-clock cap)', () => {
     expect(buildTimedOut(1000, 5000, 1000 + 9999)).toBe(true);
   });
 });
-import { ClaudeClient, type MessagesCreateClient } from './ClaudeClient';
+import { ClaudeClient, type MessagesCreateClient, type TurnRunner } from './ClaudeClient';
 import { ToolDispatcher, type ActuatorPort } from './ToolDispatcher';
 import { WorkspaceState } from './WorkspaceState';
 import { AgentEventStream } from './AgentEventStream';
@@ -827,7 +827,7 @@ describe('AgentRunner — E4 hard timeouts (no hung call blocks the build)', () 
   });
 
   /** A TurnRunner that plays a scripted list of per-turn thunks (each gets the live params). */
-  class ProgrammableRunner implements import('./ClaudeClient').TurnRunner {
+  class ProgrammableRunner implements TurnRunner {
     calls: import('./ClaudeClient').RunTurnParams[] = [];
     private i = 0;
     constructor(private turns: Array<(p: import('./ClaudeClient').RunTurnParams) => Promise<import('./ClaudeClient').TurnResult>>) {}

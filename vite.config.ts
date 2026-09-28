@@ -27,6 +27,18 @@ export default defineConfig(({mode}) => {
       },
     },
     build: {
+      // THE BROWSER FLOOR IS OURS TO STATE, NOT A BUNDLER DEFAULT (Vite 6 -> 8, 2026-09-28).
+      // Vite 6 built for exactly this list (its `'modules'` default). Vite 8 changed the default to
+      // 'baseline-widely-available' (~Chrome 107 / Safari 16) and made Lightning CSS the minifier, so
+      // an upgrade that changed no line of ours raised the app's floor by twenty Chrome versions:
+      // every breakpoint became `@media (width>=64rem)` (Chrome 104+), the hex fallbacks that
+      // postcss.config.js adds before each oklch()/color-mix() were folded back into a bare oklab()
+      // (Chrome 111+), and ES2021 `??=` / `||=` reached the JS. None of that is visible on a current
+      // phone — it lands on the older Android WebViews postcss.config.js exists to serve (the
+      // 2026-08-21 tablet). Pinning the list keeps the floor where it was; cssLegacy.test.ts checks
+      // the built OUTPUT, so a future default change fails CI instead of a user.
+      target: ['es2020', 'edge88', 'firefox78', 'chrome87', 'safari14'],
+      cssTarget: ['edge88', 'firefox78', 'chrome87', 'safari14'],
       rollupOptions: {
         output: {
           // REACT VENDOR SPLIT (admin 2026-08-16, "app ki speed badhao"). React + react-dom + scheduler +

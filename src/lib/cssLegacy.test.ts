@@ -77,7 +77,12 @@ const builtCss = existsSync(assets)
 //
 // (This is the same mistake as treating a stale preview URL as a live preview — "the artifact exists"
 // standing in for "the artifact is valid". Naming it here so the pattern is recognised next time.)
-const configMtimeMs = statSync(join(root, 'postcss.config.js')).mtimeMs;
+// vite.config.ts counts too: it states the browser floor the CSS minifier and the JS transform aim
+// at (see "the browser floor" below), so a build older than EITHER file cannot answer for it.
+const configMtimeMs = Math.max(
+  statSync(join(root, 'postcss.config.js')).mtimeMs,
+  statSync(join(root, 'vite.config.ts')).mtimeMs,
+);
 const freshCss = builtCss.filter((f) => statSync(f).mtimeMs >= configMtimeMs);
 const staleBuild = builtCss.length > 0 && freshCss.length === 0;
 
@@ -103,7 +108,112 @@ describe.runIf(freshCss.length > 0)('the built stylesheet itself', () => {
   });
 
   it('declares the palette in a form an old engine can actually use', () => {
-    // The fallback must come as a plain rgb()/hex value OUTSIDE the @supports guard.
-    expect(css).toMatch(/--color-[a-z]+-\d+:\s*rgb\(/);
+    // The fallback must come as a plain rgb()/hex value OUTSIDE the @supports guard. Which of the two
+    // is the minifier's choice (esbuild kept rgb(), Lightning CSS writes hex) — both are understood by
+    // every engine, so the assertion names the property, not one spelling of it.
+    expect(css).toMatch(/--color-[a-z]+-\d+:\s*(?:rgb\(|#[0-9a-f]{3,8}\b)/i);
+  });
+
+  it('never leaves a modern colour without a fallback an old engine can fall back to', () => {
+    // THE VITE 8 INCIDENT (2026-09-28). postcss.config.js emits `border-color:#2496ed33` before each
+    // `border-color:color-mix(...)`; the new minifier, aiming at a newer default floor, folded the pair
+    // into ONE `border-color:oklab(.../.2)`. The declaration an old engine could read was gone, and
+    // nothing above noticed — oklch() was still present, @supports was still present. So this reads
+    // every declaration outside an @supports guard and asks the only question that matters to an old
+    // engine: if it throws this value away, is there an earlier one in the same rule to keep?
+    expect(unguardedModernColours(css).slice(0, 5)).toEqual([]);
+  });
+
+  it('writes breakpoints in the media-query syntax an old engine can parse', () => {
+    // `@media (width>=64rem)` is Media Queries 4 range syntax — Chrome 104, Safari 16.4. An engine
+    // older than that does not match the query, so every responsive layout silently falls back to
+    // the phone layout. `(min-width:64rem)` means the same thing and works everywhere.
+    expect(css).not.toMatch(/@media[^{]*\(\s*(?:width|height)\s*[<>]=?/);
   });
 });
+
+// THE BROWSER FLOOR (2026-09-28). The fallbacks above are only half of it: the bundler also decides,
+// from its target, which syntax it is allowed to leave in the output — and that default moved under us
+// in the Vite 6 -> 8 upgrade (Chrome 87 -> ~107) without one line of ours changing. So the floor is
+// stated in vite.config.ts, and the OUTPUT is checked against it.
+describe('the browser floor is stated, not inherited from a bundler default', () => {
+  const viteConfig = readFileSync(join(root, 'vite.config.ts'), 'utf8');
+
+  it('vite.config.ts pins both the JS target and the CSS target', () => {
+    expect(viteConfig).toMatch(/\btarget:\s*\[[^\]]*'chrome87'/);
+    expect(viteConfig).toMatch(/\bcssTarget:\s*\[[^\]]*'chrome87'/);
+  });
+
+  const builtJs = existsSync(assets)
+    ? readdirSync(assets).filter((f) => f.endsWith('.js')).map((f) => join(assets, f))
+        .filter((f) => statSync(f).mtimeMs >= configMtimeMs)
+    : [];
+
+  it.runIf(builtJs.length > 0)('the built JS carries no syntax newer than that floor', () => {
+    // Logical assignment (`??=`, `||=`, `&&=`) is ES2021 — Chrome 85, but the transform only lowers
+    // it when the target says so. Under Vite 8's default target 150+ of them reached the bundle; one
+    // unparseable token and an old engine runs none of the app's JavaScript at all.
+    const js = builtJs.map((f) => readFileSync(f, 'utf8')).join('\n');
+    for (const op of ['??=', '||=', '&&=']) expect(js.includes(op), `${op} in the built JS`).toBe(false);
+  });
+});
+
+/**
+ * Every declaration OUTSIDE an @supports guard whose value an old engine cannot parse (oklch/oklab/
+ * lab/lch/color-mix) and that has no earlier declaration of the same property in the same rule to fall
+ * back to. A small character scanner rather than a regex, because the answer depends on nesting.
+ */
+function unguardedModernColours(css: string): string[] {
+  const modern = /\b(?:oklch|oklab|lab|lch|color-mix)\(/i;
+  const bad: string[] = [];
+  const frames: { prelude: string; decls: string[] }[] = [{ prelude: '', decls: [] }];
+  let buf = '';
+  let paren = 0;
+  let quote = '';
+  const flushDecl = () => {
+    const d = buf.trim();
+    if (d) frames[frames.length - 1].decls.push(d);
+    buf = '';
+  };
+  const judge = (frame: { prelude: string; decls: string[] }) => {
+    if (frames.some((f) => f.prelude.startsWith('@supports')) || frame.prelude.startsWith('@supports')) return;
+    const seen = new Map<string, boolean>(); // property -> has a plain (fallback) value been declared
+    for (const d of frame.decls) {
+      const i = d.indexOf(':');
+      if (i < 0) continue;
+      const prop = d.slice(0, i).trim().toLowerCase();
+      const value = d.slice(i + 1);
+      if (modern.test(value)) {
+        if (!seen.get(prop)) bad.push(`${frame.prelude.slice(0, 80)} { ${d.slice(0, 80)} }`);
+      } else {
+        seen.set(prop, true);
+      }
+    }
+  };
+  for (let i = 0; i < css.length; i++) {
+    const c = css[i];
+    if (quote) {
+      buf += c;
+      if (c === '\\') buf += css[++i] ?? '';
+      else if (c === quote) quote = '';
+      continue;
+    }
+    if (c === '\\') { buf += c + (css[++i] ?? ''); continue; }
+    if (c === '"' || c === "'") { quote = c; buf += c; continue; }
+    if (c === '(') paren++;
+    if (c === ')') paren = Math.max(0, paren - 1);
+    if (paren > 0) { buf += c; continue; }
+    if (c === '{') { frames.push({ prelude: buf.trim(), decls: [] }); buf = ''; continue; }
+    if (c === ';') { flushDecl(); continue; }
+    if (c === '}') {
+      flushDecl();
+      const frame = frames.pop();
+      if (frame && frames.length > 0) judge(frame);
+      if (frames.length === 0) frames.push({ prelude: '', decls: [] });
+      continue;
+    }
+    if (c === '/' && css[i + 1] === '*') { const end = css.indexOf('*/', i + 2); i = end < 0 ? css.length : end + 1; continue; }
+    buf += c;
+  }
+  return bad;
+}

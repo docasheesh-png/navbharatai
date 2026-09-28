@@ -83587,3 +83587,22 @@ entry (e.g. src/main.jsx) referenced by index.html"*, with *"user app bana hi na
 **Still open:**
 - **The Weak allowance of 100/day is a starting point, not a measurement.** Read the `EXPLORE_REPAIR*` codes on real builds before changing it.
 - **The repair can only fix what the explorer may press.** Delete, pay, send, upload and logout controls are never pressed, so a broken one is neither found nor repaired. That is the design, and it is a real limit.
+
+---
+
+## 2026-09-28 — Google Play rejection: the free image generator drew a nude picture
+
+**What Google sent:** "Sexual Content and Profanity policy: Violation of Sexual Content and Profanity and AI-Generated Content policy", enforced 28 Sept. The evidence was a screenshot of "Image Generator AI FREE", style "Photograph", showing a realistic nude woman.
+
+**Root cause (two gaps that met):**
+- `triagePrompt` / `ADULT_CONTENT` is written for app-building prompts and needs a porn noun AND "site/app/stream". An image prompt never has the second half, so `nude woman`, `naked girl on beach`, `topless woman` and even `porn` returned `allow` (measured on the real function).
+- The Pollinations link never sent `safe=true`, so the provider's own NSFW filter was off. The image model does not refuse; it draws.
+
+**Fix (admin: "pollination ai ki api call se pahle ek scanning ki jaye, sensitive words par ban, sirf pollination ai ke liye"):**
+- New `src/server/lib/pollinationsGuard.ts`: a word ban for sexual content, nudity and profanity. It covers English, Hinglish, Devanagari, and spaced-out or look-alike spellings (`n u d e`, `p0rn`, `$exy`, zero-width characters). Words with common innocent readings are deliberately left out and listed in the file, for example chicken breast, a rooster, a comic strip, lustrous hair and "chod do".
+- The choke point is `pollinationsImageUrl`, which throws for a banned prompt, so no caller can build a link for one. The image route and free chat also scan first and show a branded refusal.
+- Every link now carries `safe=true`.
+- Tests: `tests/theImageGeneratorDrawsNoNudity.test.ts`. The choke point and `safe=true` are reversion-proven.
+
+**Still open, and required before resubmitting to Play:** Google's AI-Generated Content policy also requires an in-app way to report or flag offensive AI output without leaving the app. The Report sheet can report an app, a person or a bug, but there is no report button on a generated image or an AI reply. That is the next change.
+

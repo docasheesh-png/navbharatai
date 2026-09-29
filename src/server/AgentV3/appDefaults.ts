@@ -102,6 +102,11 @@ self.addEventListener('fetch', (e) => {
  * versions do not pile up. Activating it deletes this worker's older caches (`app-shell-*`, which is
  * what rescues a visitor already stuck on v1) and nothing else. Self-contained. Pure string.
  */
+// 🔒 OUR OWN FILE MUST PASS OUR OWN GATE (autopsy e7baf61d, 2026-09-29). Its two deliberate ignores
+// were written `.catch(() => {})`, which the authenticity scan reads as an error swallowed in silence.
+// `evaluate` then told the builder the app still had "incomplete/placeholder" code, and it spent turns
+// rewriting this file. Each ignore now says why in its body, which is what the scan accepts.
+// tests/theJeePlannerAutopsy.test.ts runs every generated default through that scan.
 function swJs(): string {
   return `// Auto-generated service worker (NavBharatAI app defaults, v2).
 // Network first: online, every request goes to the network, so a new version of the app is seen on
@@ -112,7 +117,7 @@ const CACHE = PREFIX + 'v2';
 const MAX_ENTRIES = 80;
 const STATIC = ['script', 'style', 'image', 'font', 'manifest'];
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.add('/')).catch(() => {}).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then((c) => c.add('/')).catch(() => { /* offline at install: the shell is cached on the next load */ }).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
   // Only this worker's own older caches; a cache the app itself created is not ours to delete.
@@ -145,7 +150,7 @@ self.addEventListener('fetch', (e) => {
       .then((res) => {
         if (res && res.status === 200 && res.type === 'basic' && cacheable(req, url)) {
           const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy).then(() => trim(c))).catch(() => {});
+          caches.open(CACHE).then((c) => c.put(req, copy).then(() => trim(c))).catch(() => { /* a full or unavailable cache only costs the offline copy */ });
         }
         return res;
       })

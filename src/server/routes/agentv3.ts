@@ -347,7 +347,7 @@ import { computePlanProgress } from '../AgentV3/PlanProgress';
 import { decideCancelledBuildBill } from '../AgentV3/cancelledBuildBilling';
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
-import { projectPlannerTimeoutMs, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION } from '../AgentV3/projectPlannerBudget';
+import { projectPlannerTimeoutMs, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
 import { projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
@@ -13310,7 +13310,7 @@ async function noteBuildOutcome(
             }
             try {
               const lbl = fastLaneProviderLabel(rmProvider);
-              buildDiag.recordLlmCall({ model: answeringModel({ answered: rmT.model, planned: lbl === 'anthropic' ? fastBuildModel() : null, family: rmProvider }), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: rmT.text.length, responsePreview: rmT.text, responseChars: rmT.text.length, finishReason: rmT.stopReason, toolCalls: rmT.toolUses.length, inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens, latencyMs: Date.now() - rmStartedAt, ok: true });
+              buildDiag.recordLlmCall({ model: answeringModel({ answered: rmT.model, planned: lbl === 'anthropic' ? fastBuildModel() : null, family: rmProvider }), provider: lbl, promptPreview: megaRoadmapSystemPrompt(), promptChars: megaRoadmapSystemPrompt().length + megaRoadmapUserPrompt(prompt, scope.famousApp, scope.signals).length, responsePreview: rmT.text, responseChars: rmT.text.length, finishReason: rmT.stopReason, toolCalls: rmT.toolUses.length, inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens, latencyMs: Date.now() - rmStartedAt, ok: true });
             } catch { /* diagnostics best-effort */ }
             blueprintUsage.inputTokens += rmT.usage.inputTokens;
             blueprintUsage.outputTokens += rmT.usage.outputTokens;
@@ -13324,7 +13324,11 @@ async function noteBuildOutcome(
             // planner calls were the siblings never hunted. Same ledger the fast lane feeds.
             captureTurnUsage(rmProvider, { inputTokens: rmT.usage.inputTokens, outputTokens: rmT.usage.outputTokens }, rmT.model, rmT.usage.cacheReadInputTokens ?? 0);
 
-            const { roadmap, rejected } = roadmapGuardrail(parseMegaRoadmap(rmT.text, scope.famousApp), scope.famousApp);
+            const rmParsed = parseMegaRoadmap(rmT.text, scope.famousApp);
+            const { roadmap, rejected } = roadmapGuardrail(rmParsed, scope.famousApp);
+            // "no parseable roadmap" never said WHY (autopsy 6a4a799f: 120 s of a planner, then that
+            // sentence alone). A cut-off reply and a malformed one need different fixes.
+            if (!rmParsed) rejected.push(roadmapUnparseableDetail({ stopReason: rmT.stopReason, text: rmT.text }));
             if (roadmap) {
               buildDiag.record({
                 phase: 'plan',
@@ -15934,6 +15938,9 @@ async function noteBuildOutcome(
           // never a second, tighter clock: the hard-coded 60 s that stood here killed the School ERP
           // decomposition (autopsy e706e068) on a rung that needed minutes, and recorded nothing.
           const ppTimeoutMs = projectPlannerTimeoutMs();
+          // The last answer's stop reason and length — so an answer that came back UNUSABLE (cut off,
+          // unreadable) is recorded as the planner failure it is (autopsy 6a4a799f, unusablePlanCause).
+          const ppLast = { stopReason: null as string | null, chars: 0, latencyMs: 0 };
           const ppGenerate = async (system: string, user: string): Promise<string> => {
             const startedAt = Date.now();
             let ppProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
@@ -15966,6 +15973,9 @@ async function noteBuildOutcome(
             // Attributed to the vendor that answered, never swept into the Sonnet-priced remainder —
             // see the roadmap planner above (autopsy Study-Racer, 2026-09-25).
             captureTurnUsage(ppProvider, { inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens }, t.model, t.usage.cacheReadInputTokens ?? 0);
+            ppLast.stopReason = t.stopReason ?? null;
+            ppLast.chars = t.text.length;
+            ppLast.latencyMs = Date.now() - startedAt;
             return t.text;
           };
           if (!pPlan && intent === 'new_build' && !isEditMode && detectMegaProject(prompt)) {
@@ -15977,9 +15987,23 @@ async function noteBuildOutcome(
               pPlan = createProjectPlan(prompt, framework, modules, Date.now());
               await saveProjectPlan(workspaceId, pPlan);
               events.emit({ type: 'narration', agent: 'architect', text: `📦 Project plan ready: ${modules.length} modules — ${modules.map((m) => m.name).join(' → ')}. I will build them one per round, in dependency order, and the plan survives reloads.`, ts: Date.now() });
+            } else {
+              // Fewer modules than MIN_PROJECT_MODULES → build normally (never force a small app
+              // through module rounds). But an answer that was CUT OFF or UNREADABLE is a failed
+              // planner, not a small project, and it is said as one — to the admin with the seconds it
+              // cost, and to the user, who was just promised a module plan (autopsy 6a4a799f).
+              const cause = unusablePlanCause({ modules: modules.length, stopReason: ppLast.stopReason, responseChars: ppLast.chars });
+              try {
+                buildDiag.record({
+                  phase: 'plan', severity: cause === 'too-small' ? 'info' : 'warning',
+                  code: cause === 'too-small' ? 'PROJECT_MODE_STOOD_DOWN' : 'PROJECT_MODE_FAILED',
+                  autoResolved: cause === 'too-small',
+                  message: projectPlanUnusableMessage({ cause, modules: modules.length, responseChars: ppLast.chars, latencyMs: ppLast.latencyMs, min: MIN_PROJECT_MODULES }),
+                  detail: `cause=${cause} · stop=${ppLast.stopReason ?? 'unknown'} · announced=true`,
+                });
+              } catch { /* diagnostics best-effort */ }
+              events.emit({ type: 'narration', agent: 'architect', text: cause === 'too-small' ? PROJECT_MODE_ONE_GO_NARRATION : PROJECT_MODE_FALLBACK_NARRATION, ts: Date.now() });
             }
-            // Fewer modules than MIN_PROJECT_MODULES → not really a mega-project; fall through and
-            // build normally (honest fallback — never force a small app through module rounds).
           }
           if (pPlan && !planComplete(pPlan) && (!planPreExisted || isContinuationMessage(prompt))) {
             // GA-7 — Project Coordinator: before scheduling, run the deterministic coordinator to break

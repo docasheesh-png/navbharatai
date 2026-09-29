@@ -97,3 +97,60 @@ export function projectModeFailedMessage(kind: PlannerFailureKind, timeoutMs: nu
  */
 export const PROJECT_MODE_FALLBACK_NARRATION =
   'ℹ️ I could not prepare the module-by-module plan in time, so I am building this in one go instead. Nothing is lost — the build continues normally.';
+
+/**
+ * 🔴 AN ANSWER THAT CANNOT BE USED IS A FAILED PLANNER, NOT A SMALL PROJECT (autopsy 6a4a799f, 2026-09-29).
+ *
+ * The "Blue Berry" music app announced "🏗️ decomposing it into independently-buildable modules…", the
+ * planner ran for 300 s and was cut off mid-array (`finish=max_tokens`, 16,352 characters of modules),
+ * `parsePlannedModules` found nothing it could read, and the route took the branch written for "fewer
+ * modules than the minimum → not really a mega-project" — which records NOTHING and tells the user
+ * nothing. Five of the build's twenty-four minutes went to a plan nobody saw, and the promise stood
+ * unwithdrawn. `PROJECT_MODE_FAILED` existed for exactly this and could not fire, because the call did
+ * not throw.
+ *
+ * So the empty result is split by its cause: a reply the provider CUT (max_tokens / length) or one with
+ * no readable array is a planner failure and is said as one; a readable plan with too few modules is
+ * the honest "this is not really a mega-project" it was always meant to be. PURE.
+ */
+export type UnusablePlanCause = 'cut-off' | 'unreadable' | 'too-small';
+
+export function unusablePlanCause(input: { modules: number; stopReason: string | null | undefined; responseChars: number }): UnusablePlanCause {
+  const stop = String(input.stopReason ?? '').toLowerCase();
+  if (/max_tokens|length|truncat/.test(stop)) return 'cut-off';
+  if (input.modules === 0) return 'unreadable';
+  return 'too-small';
+}
+
+export function projectPlanUnusableMessage(input: { cause: UnusablePlanCause; modules: number; responseChars: number; latencyMs: number; min: number }): string {
+  const secs = Math.round(Math.max(0, input.latencyMs) / 1000);
+  switch (input.cause) {
+    case 'cut-off':
+      return `Project mode could not decompose this build: the planner's answer was cut off (${input.responseChars} characters in ${secs}s, before the module list was complete), so no plan could be read — the build proceeded on the ordinary path. Those ${secs}s were spent on a plan that was not used.`;
+    case 'unreadable':
+      return `Project mode could not decompose this build: the planner answered (${input.responseChars} characters in ${secs}s) but no module list could be read from it — the build proceeded on the ordinary path. Those ${secs}s were spent on a plan that was not used.`;
+    default:
+      return `Project mode stood down: the planner proposed ${input.modules} module(s), fewer than the ${input.min} a module-by-module build needs, so this was built in one go.`;
+  }
+}
+
+/**
+ * Why a roadmap reply could not be parsed — the one fact "no parseable roadmap" never said. A reply cut
+ * off by the provider leaves its JSON unbalanced; one that is complete but malformed does not. PURE.
+ */
+export function roadmapUnparseableDetail(input: { stopReason: string | null | undefined; text: string }): string {
+  const text = String(input.text ?? '');
+  const stop = String(input.stopReason ?? '').toLowerCase();
+  const opens = (text.match(/\{/g) || []).length;
+  const closes = (text.match(/\}/g) || []).length;
+  const unbalanced = opens > closes;
+  if (/max_tokens|length|truncat/.test(stop) || unbalanced) {
+    return `the reply looks cut off (${text.length} characters, ${opens - closes} unclosed brace(s), stop=${input.stopReason ?? 'unknown'})`;
+  }
+  if (opens === 0) return `the reply held no JSON object (${text.length} characters)`;
+  return `the reply's JSON could not be parsed (${text.length} characters, stop=${input.stopReason ?? 'unknown'})`;
+}
+
+/** What the user is told when the plan came back readable but too small to split into rounds. */
+export const PROJECT_MODE_ONE_GO_NARRATION =
+  'ℹ️ This fits in a single build, so I am building it in one go instead of module by module.';

@@ -38,6 +38,7 @@ import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
 import { decideComplexity, scaffoldedComplexityDecision } from '../AgentV3/complexityRouting';
+import { planningRequest, planningContextNote } from '../AgentV3/planningRequest';
 import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite, writeQualitySummary } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary, repairLostEscapes, scriptRepairSummary } from '../AgentV3/scriptIntegrity';
 import { answeringModel } from '../AgentV3/answeringModel';
@@ -574,6 +575,7 @@ import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
 import { readyOverrunNote } from '../AgentV3/doneSignal';
 import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, isProjectStylesheet } from '../AgentV3/CssConsistency';
+import { kitRestorePatch, kitRestoreNote } from '../AgentV3/kitRestore';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
 import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPolicy';
 import { buildServiceGraph } from '../AgentV3/serviceGraph';
@@ -11921,7 +11923,16 @@ async function noteBuildOutcome(
       }
     }
     const largeEditProject = isEditMode && isLargeExistingProject(durableFilePaths.length);
-    const buildComplexity = complexityFromPrompt(prompt);
+    /**
+     * 🔴 THE REQUEST AS THE BUILDER WILL READ IT (autopsy e725e002). The builder is handed the message
+     * PLUS the attached file(s) and, on a fresh workspace, the earlier requests (`projectCtx` below).
+     * Everything that SIZES or PLANS the build before it — this wall-clock budget, the complexity
+     * score and routing, the scope and project-mode checks, the ETA, the fast lane — read the message
+     * alone, so `mkdir src` was sized as "hi" while a 35-file shop was built. They all read this one
+     * text now. `prompt` itself is unchanged everywhere else (intent, the user's own words, titles).
+     */
+    const planning = planningRequest({ prompt, attachmentText: attachmentContext, recentRequests, userAppExists });
+    const buildComplexity = complexityFromPrompt(planning.text);
     const buildDepth: PipelineDepth = resolvePipelineDepth(
       (buildComplexity.moduleCount || 0) + (buildComplexity.featureCount || 0),
       onlyOpus,
@@ -12597,7 +12608,7 @@ async function noteBuildOutcome(
       // No provider name is surfaced to the user (kept to server telemetry only).
       const costLadderOn = process.env.AGENTV3_COST_LADDER !== 'off';
       const analysis = costLadderOn
-        ? analyzeRequest({ prompt, powerMode: onlyOpus, pinnedModel: powerSpecResolved.pinnedModel, buildIntent: intent })
+        ? analyzeRequest({ prompt: planning.text, powerMode: onlyOpus, pinnedModel: powerSpecResolved.pinnedModel, buildIntent: intent })
         : undefined;
       if (analysis) {
         console.log(
@@ -12624,7 +12635,7 @@ async function noteBuildOutcome(
       // (flag, a fresh build, not an import, a template for this exact prompt).
       const scaffoldWillSeed = process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !isImportTurn && !!goldenScaffoldForPrompt(prompt);
       const complexityDecision = scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(
-        { prompt, score: analysis?.complexityScore ?? 0 },
+        { prompt: planning.text, score: analysis?.complexityScore ?? 0 },
         (p) => AIRouterManager.getRouter('free')
           .route(p, 'You are a classifier. Reply with one word only.')
           .then((r) => r.response.content),
@@ -12726,6 +12737,13 @@ async function noteBuildOutcome(
       // and takes `fileCount`/`historyTurns` that are not stored at all. A re-derived score would be a
       // different number printed as the same fact.
       try { buildDiag.setRequestAnalysis(analysis); } catch { /* observation only — never a build's problem */ }
+      // Say when the sizers read more than the message — a report showing `prompt: "mkdir src"` beside
+      // a complexity of 60 must explain where the rest came from (autopsy e725e002).
+      if (planning.sources.length > 0) {
+        try {
+          buildDiag.record({ phase: 'plan', severity: 'info', code: 'PLANNING_CONTEXT', autoResolved: true, message: planningContextNote(planning, prompt.length) });
+        } catch { /* observation only */ }
+      }
       // A clean sheet, so "healed twice" means twice in THIS build — see HealLedger.
       resetHealLedger(workspaceId);
 
@@ -12780,7 +12798,7 @@ async function noteBuildOutcome(
       // anything. Default is always 'direct'; only a strong mega-signal (famous product / heavy infra /
       // huge feature spec) reads as 'analyze'.
       try {
-        const scope = analyzeAppScope(prompt);
+        const scope = analyzeAppScope(planning.text);
         buildDiag.record({
           phase: 'plan',
           severity: 'info',
@@ -13254,7 +13272,7 @@ async function noteBuildOutcome(
       let megaRoadmapActive: MegaRoadmap | null = null;
       if (envFlag('AGENTV3_MEGA_ROADMAP', true) && intent === 'new_build' && !isEditMode) {
         try {
-          const scope = analyzeAppScope(prompt);
+          const scope = analyzeAppScope(planning.text);
           // TWO CLASSIFIERS DISAGREEING IS A FACT, NOT A TIE THE DEARER ONE WINS (autopsy Study-Racer,
           // 2026-09-25 — see scopeDispute). Recorded as a fact about OUR routing; the build runs direct.
           const dispute = scopeDispute(scope, { complex: buildIsComplex });
@@ -13400,7 +13418,7 @@ async function noteBuildOutcome(
           // build records we ALREADY store durably, so this adds no storage and costs no provider spend.
           // Best-effort by construction: a history read that fails yields [], i.e. exactly today's
           // behaviour, and can never delay or fail a build.
-          const etaComplexity = complexityFromPrompt(prompt);
+          const etaComplexity = complexityFromPrompt(planning.text);
           const past = await recentBuildHistoryFor(
             workspaceId, etaComplexity,
             (id, n) => listDiagnosticsHistory(id, n) as Promise<any>,
@@ -15973,7 +15991,7 @@ async function noteBuildOutcome(
             ppLast.latencyMs = Date.now() - startedAt;
             return t.text;
           };
-          if (!pPlan && intent === 'new_build' && !isEditMode && detectMegaProject(prompt)) {
+          if (!pPlan && intent === 'new_build' && !isEditMode && detectMegaProject(planning.text)) {
             ppDecompositionAnnounced = true;
             events.emit({ type: 'narration', agent: 'architect', text: '🏗️ This is a large software project — decomposing it into independently-buildable modules with frozen interface contracts…', ts: Date.now() });
             const ppScaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
@@ -16590,7 +16608,19 @@ async function noteBuildOutcome(
                 if (written[path] !== undefined) continue;
                 try { sheets[path] = await actuator.readFile(workspaceId, path); } catch { /* unreadable ⇒ not counted */ }
               }
-              const cssErr = cssConsistencyError({ ...sheets, ...written });
+              // A kit class with no rule has exactly one right rule — the kit's (autopsy e725e002). Put it
+              // back here, for free, so a repair round is spent only on classes nobody can know.
+              let project = { ...sheets, ...written };
+              try {
+                const patch = kitRestorePatch(project);
+                if (patch) {
+                  await fastWrite([{ path: patch.path, content: patch.content }]);
+                  writtenFiles.set(patch.path, patch.content);
+                  project = { ...project, [patch.path]: patch.content };
+                  buildDiag.record({ phase: 'build', severity: 'info', code: 'DESIGN_KIT_RESTORED', message: kitRestoreNote(patch, 'before-repair'), autoResolved: true });
+                }
+              } catch { /* deterministic and best-effort — the check below still runs */ }
+              const cssErr = cssConsistencyError(project);
               if (cssErr) return { ok: false, errors: cssErr };
             } catch { /* css check is best-effort — never blocks on its own failure */ }
             if (!out.includes('__TSC_CLEAN__')) {
@@ -16652,7 +16682,7 @@ async function noteBuildOutcome(
           const c = await actuator.readFile(workspaceId, p).catch(() => null);
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
-        const sb = await runSimpleBuild({ prompt, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
+        const sb = await runSimpleBuild({ prompt: planning.text, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
           stopLane: () => (fastLaneReasoningRung
             ? `the lane's engine fell to ${fastLaneReasoningRung}, which reasons before every answer; the lane's per-file budget cannot carry that, so the files finished so far go to the full builder now`
             : null),
@@ -18361,7 +18391,27 @@ async function noteBuildOutcome(
            * to compare against". Here it reads the WHOLE project (`integrityFiles`), in the lane that
            * builds most apps, and a real mismatch rides the same repair pass as the design findings.
            */
-          const projectForCss = { ...integrityFiles, ...designFiles };
+          /**
+           * 🔴 THE KIT'S OWN RULES, PUT BACK BY CONSTRUCTION (autopsy e725e002, 2026-09-29). A class a
+           * screen uses that exists in our design kit but not in this app's stylesheet has exactly one
+           * correct rule — the kit's. Adding it is free and deterministic, so it runs BEFORE the check
+           * below decides whether a model repair is needed, and again after any repair (which is told
+           * to reuse the kit, and so can introduce kit classes the app's rewritten stylesheet lacks).
+           */
+          const restoreKitRules = async (files: Record<string, string>, when: 'before-repair' | 'after-repair'): Promise<void> => {
+            try {
+              const patch = kitRestorePatch(files);
+              if (!patch || abort.signal.aborted) return;
+              const wrote = await runInPass('design-consistency-heal', () => writeUnlessFrozen(() => actuator.writeFile(workspaceId, patch.path, patch.content)));
+              if (!wrote) return;
+              writtenFiles.set(patch.path, patch.content);
+              integrityFiles[patch.path] = patch.content;
+              await mergeWorkspaceFiles(workspaceId, { [patch.path]: patch.content }).catch(() => {});
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'DESIGN_KIT_RESTORED', message: kitRestoreNote(patch, when), autoResolved: true });
+            } catch { /* deterministic and best-effort — it can never affect a build */ }
+          };
+          await restoreKitRules({ ...integrityFiles, ...designFiles }, 'before-repair');
+          const projectForCss = { ...integrityFiles, ...Object.fromEntries(writtenFiles) };
           const cssErr = (() => { try { return cssConsistencyError(projectForCss); } catch { return null; } })();
           if (cssErr) {
             buildDiag.record({
@@ -18432,6 +18482,17 @@ async function noteBuildOutcome(
                     });
                   }
                 } catch { /* the guard is best-effort — it must never itself break a build */ }
+                await restoreKitRules({ ...integrityFiles, ...Object.fromEntries(writtenFiles) }, 'after-repair');
+                if (!cssRepair) {
+                  // A design-only repair can itself leave classes unstyled (e725e002: four empty states
+                  // on `.nb-empty*`). Say so when it does — DESIGN_HEALED alone would claim the pages are fine.
+                  try {
+                    const leftAfterDesign = findUndefinedClasses({ ...integrityFiles, ...Object.fromEntries(writtenFiles) });
+                    if (leftAfterDesign.length >= 3) {
+                      buildDiag.record({ phase: 'build', severity: 'warning', code: 'CSS_CLASSES_UNDEFINED', ...obs(`After the design repair: ${undefinedClassesNote(leftAfterDesign)}`) });
+                    }
+                  } catch { /* observation only */ }
+                }
                 if (healed.ok) {
                   // Same honesty rule as the integrity heal: keep the REAL build summary, take only the
                   // edits. A no-op heal must never replace the user's build result with its own chatter.

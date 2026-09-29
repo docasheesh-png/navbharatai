@@ -3383,6 +3383,21 @@ the flag entries above promise.
   cancellation may take our margin and never our cost, and the route passes `realCostUsd` /
   `sandboxUsd` in (commit `6844b99f`). Re-grep before re-raising anything this file calls open.
 
+- **📏 `AGENTV3_PLANNING_CONTEXT` + 🎨 `AGENTV3_KIT_RESTORE` — THE SIZERS READ WHAT THE BUILDER READS, AND THE
+  KIT'S RULES COME BACK WITH ITS CLASSES (autopsy e725e002, 2026-09-29). ⚠️ NEITHER is set; both default ON;
+  `off` reverts each alone.** The message was `mkdir src`; the builder, reading it with the attached file /
+  earlier requests, built a 35-file shop in 17.6 min — while the complexity score (5), the ETA (2–4 min), the
+  request analysis, the complexity router, project-mode detection and the fast lane (267 s planning a generic
+  app) all read the four words. `planningRequest.ts` is ONE request (message + capped attachment + the last 3
+  earlier requests ONLY while no app exists) that every sizer and planner reads; intent and the golden
+  scaffold still read the message. Admin line `PLANNING_CONTEXT`.
+  `kitRestore.ts`: the design repair is told the kit is "already in the project" — it was not, the architect
+  had rewritten `src/index.css` — so four empty states shipped on undefined `.nb-empty*`. A kit class with no
+  rule has exactly one right rule, the kit's, so it is appended deterministically (with its media rules,
+  keyframes and light/dark tokens), never restyling a class or overriding a token the app defines. It runs
+  before the CSS check, after the design/CSS repair, and in the fast lane's verify. Admin line
+  `DESIGN_KIT_RESTORED`. 🔴 **Still open:** the architect REPLACING the global stylesheet is the prevention
+  half. Test-locked in `tests/theSizersReadWhatTheBuilderReads.test.ts`.
 - **⏯️ `AGENTV3_UNFINISHED_RESUME` — A BUILD THAT STOPPED TALKING IS NOT A BUILD THAT FINISHED (autopsy
   121c2431, 2026-09-26). ⚠️ NOT set, and the code default is ON**; `off` restores the old ending exactly.
   Read by `src/server/AgentV3/unfinishedResume.ts`; applied in `AgentRunner`'s readiness gate.

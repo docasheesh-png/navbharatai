@@ -162,7 +162,9 @@ import {
   LEASE_HEARTBEAT_MS, BUILD_RUNNING_ELSEWHERE_MESSAGE, BUILD_RUNNING_ELSEWHERE_CODE, type BuildLeaseStore,
 } from '../AgentV3/workspaceBuildLease';
 import { getConnection } from '../lib/supabaseConnectionStore';
-import { provisionDatabaseForUser } from '../lib/supabaseProvisionFlow';
+import { provisionDatabaseForUser, freshAccessToken } from '../lib/supabaseProvisionFlow';
+import { setupSupabasePayments, supabasePaymentsEnabled, PAYMENT_SECRET_NAMES } from '../lib/supabasePayments';
+import { projectRefFromUrl } from '../lib/supabaseData';
 import { databaseReadiness } from '../AgentV3/databaseNeed';
 import {
   extractPageRoutes, pageCheckScript, parsePageCheck, summarizePageCheck, PAGE_LOAD_TIMEOUT_MS,
@@ -14304,6 +14306,7 @@ async function noteBuildOutcome(
         // sub-agent, not just the architect (autopsy f97eb0ec).
         readLedger: () => dispatcherForSubAgents?.sharedReadLedger(),
         readLoopStops: () => dispatcherForSubAgents?.sharedReadLoopStops(),
+        serverlessPayment: () => dispatcherForSubAgents?.serverlessPaymentHandler(),
         client, actuator, workspaceId, state, events, model, onlyOpus,
         // Tier fidelity + honest billing (admin 2026-07-13): sub-agents spend most of a build's
         // tokens — they must bill at the TIER's rate (Strong → Sonnet × 3, not Opus × 2) and run
@@ -14798,6 +14801,41 @@ async function noteBuildOutcome(
             if (typeof v === 'string' && v.trim()) picked[a.name] = v;
           }
           return Object.keys(picked).length > 0 ? picked : null;
+        });
+      }
+
+      // PAYMENT VERIFICATION IN THE USER'S OWN SUPABASE (supabasePayments.ts). Only for a verified user,
+      // only with the flag on, and only when the app is wired to a Supabase project we hold a grant for.
+      // Everything is re-read at call time — the database may have been created earlier in this build.
+      if (userId && supabasePaymentsEnabled()) {
+        dispatcher.setServerlessPaymentHandler(async ({ table }) => {
+          const conn = await getConnection(userId).catch(() => null);
+          if (!conn) return null;
+          const vault = await loadUserVaultSecrets(userId, workspaceId).catch(() => null);
+          const projectRef = projectRefFromUrl(vault?.VITE_SUPABASE_URL);
+          if (!vault || !projectRef) return null;
+          const keyId = vault[PAYMENT_SECRET_NAMES.keyId];
+          const keySecret = vault[PAYMENT_SECRET_NAMES.keySecret];
+          if (!keyId || !keySecret) return { ok: false, needKeys: true, message: 'Your Razorpay keys are not saved yet.' };
+          const token = await freshAccessToken(userId, conn).catch(() => null);
+          if (!token || !token.ok) {
+            return { ok: false, message: 'Your Supabase connection has expired. Please connect Supabase again from Settings → App Settings → Database.' };
+          }
+          emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '💳 Setting up secure payment checking in your own Supabase project.' });
+          const done = await setupSupabasePayments({ token: token.token, projectRef, tables: [table], keyId, keySecret });
+          if (!done.ok) {
+            buildDiag.record({
+              code: 'SERVERLESS_PAYMENT_NOT_SET_UP', severity: 'warning', phase: 'tool',
+              message: `Payment verification could not be set up in the user's Supabase project (${done.failure}).`,
+              detail: done.detail, autoResolved: false,
+            });
+            return { ok: false, message: done.message };
+          }
+          buildDiag.record({
+            code: 'SERVERLESS_PAYMENT_SET_UP', severity: 'info', phase: 'tool',
+            message: `Razorpay verification deployed to the user's Supabase project for table "${table}".`, autoResolved: true,
+          });
+          return { ok: true };
         });
       }
 

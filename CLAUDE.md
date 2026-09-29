@@ -1824,6 +1824,17 @@ the code (it is actually read somewhere) on 2026-07-11.
   SAME single model call that already writes the paper — test-locked, because "scan the internet for
   PYQ" is the reading of the request that would have added a search per paper.
   Test-locked and **reversion-proven four ways** in `tests/theExamAsksWhatTheExamAsks.test.ts`.
+- **💳 `AGENTV3_SUPABASE_PAYMENTS` — payment verification in the USER'S OWN Supabase (built 2026-09-29).
+  ⚠️ NOT set, and unset means OFF** — only the exact value `on` enables it, because it deploys code into a
+  user's own account. Read by `src/server/lib/supabasePayments.ts`. For a Razorpay app with no server of
+  its own, the build adds guarded payment columns to the app's table, stores the user's Razorpay keys as
+  THAT project's secrets, and deploys the `nbai-payments` Edge Function, so a row is marked paid only after
+  Razorpay's signature is verified. With it off, `generate_payment` on a serverless app gives the honest
+  "payment pending" guidance (PR A). ⚠️ **Turning it on also adds `edge_functions.write` + `secrets.write`
+  to the Supabase consent screen** — so the Supabase OAuth app must have those two permissions enabled
+  first, and a user who connected earlier gets a "reconnect" message on first use. **Never live-tested**
+  (the Management API is unreachable from a session): test on the admin's own account in Razorpay TEST
+  mode before widening.
 - **The MID-BUILD cost stop (shipped 2026-09-13):** `AGENTV3_BUILD_COST_CEILING_USD` — ⚠️ **NOT set,
   and the code default is what governs today.** The ceiling on ONE build's REAL provider cost, in USD.
   **Default $5**, capped at $50, read by `src/server/AgentV3/buildCostCeiling.ts` and evaluated inside

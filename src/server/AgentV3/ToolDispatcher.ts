@@ -199,6 +199,7 @@ import { planProductionMigration, isProductionSafeCommand, migrationOutcome } fr
 import { loadMigrationHistory, recordMigrationRun, summarizeMigrationHistory } from './migrationHistory';
 import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
 import { generatePaymentIntegration, isPaymentProvider, projectHasServer, noServerPaymentGuidance } from '../lib/PaymentGenerator';
+import { PAYMENTS_CLIENT_PATH, PAYMENT_SECRET_NAMES, isSafeTableName, paymentsClientHelper, serverlessPaymentGuidance } from '../lib/supabasePayments';
 import { generateOtpIntegration, isOtpProvider } from '../lib/OtpGenerator';
 import { generateTotpIntegration } from '../lib/TotpGenerator';
 import { generateIndianValidatorsIntegration } from '../lib/IndianValidatorsGenerator';
@@ -898,6 +899,66 @@ export class ToolDispatcher {
   /** Wire the ask above. Supplied only when there is a verified user whose vault we can write to. */
   setSecretRequestHandler(fn: (asks: SecretAsk[]) => Promise<Record<string, string> | null>): void {
     this.onSecretsNeeded = fn;
+  }
+
+  /**
+   * Set up payment verification in the user's OWN Supabase project for an app with no server
+   * (supabasePayments.ts). Injected for the same reason as the two hooks above: the dispatcher must not
+   * know about OAuth grants, the vault or the Management API. Returns:
+   *   { ok: true }                    — columns, guard, keys and the function are all in place;
+   *   { ok: false, needKeys: true }   — the user's Razorpay keys are not in their vault yet;
+   *   { ok: false, message }          — Supabase refused; the message is written for the user;
+   *   null                            — this path is not available for this app (no connected project).
+   */
+  private onServerlessPayment?: (req: { table: string }) => Promise<
+    { ok: true } | { ok: false; needKeys?: boolean; message: string } | null
+  >;
+
+  /** Wire the setup above. Supplied only when the flag is on and there is a verified user. */
+  setServerlessPaymentHandler(fn: NonNullable<ToolDispatcher['onServerlessPayment']>): void {
+    this.onServerlessPayment = fn;
+  }
+
+  /** Handed to sub-agents, which write most of an app's code, so the same setup is reachable there. */
+  serverlessPaymentHandler(): ToolDispatcher['onServerlessPayment'] {
+    return this.onServerlessPayment;
+  }
+
+  /**
+   * The no-server Razorpay path: verification runs in the user's own Supabase project. Asks for the
+   * Razorpay keys through the existing key card when they are missing (once), and falls back to the
+   * honest "payment pending" guidance whenever the setup is unavailable or refused.
+   */
+  private async setUpServerlessPayment(table: string | undefined, agent: AgentRole | undefined): Promise<string> {
+    const pending = noServerPaymentGuidance('razorpay');
+    if (!isSafeTableName(table)) {
+      return 'generate_payment: this app has no server, but Razorpay payments can be verified in the user\'s own '
+        + 'Supabase project. Call generate_payment again with provider = "razorpay" and table = the lower-case name '
+        + 'of the table that stores the orders/bookings (it must already exist and have an "id" primary key).';
+    }
+    const handler = this.onServerlessPayment!;
+    let result = await handler({ table }).catch(() => null);
+    if (result && !result.ok && result.needKeys && this.onSecretsNeeded) {
+      const saved = await this.onSecretsNeeded([
+        { name: PAYMENT_SECRET_NAMES.keyId, why: 'Your Razorpay Key ID — Razorpay Dashboard → Account & Settings → API Keys.' },
+        { name: PAYMENT_SECRET_NAMES.keySecret, why: 'Your Razorpay Key Secret, from the same page. It is stored only in your own Supabase project.' },
+      ]).catch(() => null);
+      result = saved ? await handler({ table }).catch(() => null) : null;
+    }
+    if (!result) return pending;
+    if (!result.ok && result.needKeys) {
+      return `${pending}\n\nOnline payment can be verified in the user's own Supabase project once their Razorpay keys are saved. `
+        + `Ask for ${PAYMENT_SECRET_NAMES.keyId} and ${PAYMENT_SECRET_NAMES.keySecret} with request_secrets (or report that they are needed), then call generate_payment again.`;
+    }
+    if (!result.ok) return `${pending}\n\nOnline payment could not be set up: ${result.message}`;
+    let kind: 'create' | 'modify' = 'create';
+    try { await this.actuator.readFile(this.workspaceId, PAYMENTS_CLIENT_PATH); kind = 'modify'; } catch { kind = 'create'; }
+    const helper = paymentsClientHelper();
+    await this.actuator.writeFile(this.workspaceId, PAYMENTS_CLIENT_PATH, helper);
+    this.state?.recordFileChange({ path: PAYMENTS_CLIENT_PATH, kind }, agent);
+    getWorkspaceMemory(this.workspaceId).indexFile(PAYMENTS_CLIENT_PATH, helper);
+    this.scheduleCheckpoint('payment verification');
+    return serverlessPaymentGuidance(table);
   }
 
   /** Names already in the user's vault, so the build never asks twice for the same key. */
@@ -7349,7 +7410,10 @@ export class ToolDispatcher {
         {
           const pkgText = await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => null);
           const paths = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
-          if (!projectHasServer(pkgText, paths)) return noServerPaymentGuidance(pProvider);
+          if (!projectHasServer(pkgText, paths)) {
+            if (pProvider !== 'razorpay' || !this.onServerlessPayment) return noServerPaymentGuidance(pProvider);
+            return this.setUpServerlessPayment(optStr(input, 'table'), agent);
+          }
         }
         const pcfg = generatePaymentIntegration(pProvider);
         const payWritten: string[] = [];

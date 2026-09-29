@@ -83937,3 +83937,32 @@ notifications.ts; 114 model calls, one file per call).
 - **No Cloud Run change needed.**
 - **Test:** `tests/nemotronWhereItPays.test.ts`, reversion-proven.
 - **Open:** the plan quality of `glm-4.7-flashx` on large apps is not measured. Watch the next two or three large Weak builds for `MEGA_ROADMAP_ACTIVE` / a project plan with modules, rather than `PROJECT_MODE_FAILED`.
+
+
+## 2026-09-29 — PR B: payment verification in the user's OWN Supabase (behind `AGENTV3_SUPABASE_PAYMENTS`, default OFF)
+
+Admin: *"database aur payment verification wala kaam shuru karo"*, choosing the user's own Supabase for both.
+Builds on PR A (#3385), which made `generate_payment` reachable and honest ("payment pending") on an app
+with no server.
+
+- `src/server/lib/supabasePayments.ts` — for a Razorpay app with no server, set up the server check in the
+  user's own project: (1) payment columns + a guard trigger on the app's own table (`anon`/`authenticated`
+  can never write `payment_status`/`payment_id`/`paid_amount`/`amount_due` after insert; a new row is forced
+  to `pending`), (2) the Razorpay keys + a table allowlist as project secrets, (3) the Edge Function
+  `nbai-payments` (order from the ROW's `amount_due`, never the request; HMAC-SHA256 signature check;
+  order notes + amount must match the row) via the Management API deploy endpoint. Stops at the first
+  failure; never reports success for a partial setup. Writes `src/lib/payments.ts` (`payForRecord`).
+- Dispatcher: `setServerlessPaymentHandler` (injected, like the key card); missing keys are asked for ONCE
+  through the existing key card, then retried; anything unavailable/refused falls back to "payment pending".
+  Sub-agents receive the same handler (they write most app code).
+- OAuth: `edge_functions.write` + `secrets.write` are requested ONLY when the flag is on.
+
+**NOT verified live, said plainly:** `api.supabase.com` is unreachable from the session sandbox, so the
+deploy/secrets contract comes from the Management API's published OpenAPI types, and the OAuth scope names
+follow the existing dotted style. **Before turning the flag on:** enable Edge Functions + Secrets (write) on
+the Supabase OAuth app, reconnect Supabase on the admin's own account, build one Razorpay test-mode booking
+app, and pay once with a test card.
+
+**Honest limit (open):** `amount_due` is written by the app at insert, so a hostile client can create a row
+with a small amount; `paid_amount` records what Razorpay really charged. A server-owned price table is a
+later slice.

@@ -14322,6 +14322,8 @@ async function noteBuildOutcome(
         // sub-agent, not just the architect (autopsy f97eb0ec).
         readLedger: () => dispatcherForSubAgents?.sharedReadLedger(),
         readLoopStops: () => dispatcherForSubAgents?.sharedReadLoopStops(),
+        // And its stylesheet rewrites that had design-kit rules kept (autopsy e725e002).
+        kitKept: () => dispatcherForSubAgents?.sharedKitKept(),
         client, actuator, workspaceId, state, events, model, onlyOpus,
         // Tier fidelity + honest billing (admin 2026-07-13): sub-agents spend most of a build's
         // tokens — they must bill at the TIER's rate (Strong → Sonnet × 3, not Opus × 2) and run
@@ -17146,6 +17148,18 @@ async function noteBuildOutcome(
             detail: stops > 0
               ? `${stops} STOP-level notice(s) issued after ${READ_LOOP_LIMIT} no-progress reads of the same path.`
               : 'No read reached the no-progress limit — every re-read followed a real change, or the streak was short.',
+          });
+        }
+      } catch { /* an advisory finding must never affect a build */ }
+      // 🎨 A REWRITE OF THE STYLESHEET THAT WOULD HAVE DROPPED THE DESIGN KIT (autopsy e725e002). The
+      // write door kept those rules (kitRestore.ts `keepKitOnRewrite`); said here so the report shows
+      // the prevention firing — a keep that fires on every build is a prompt that is not being obeyed.
+      try {
+        const kit = dispatcher.kitKeptTally();
+        if (kit.writes > 0) {
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'DESIGN_KIT_KEPT', autoResolved: true,
+            message: `${kit.writes} stylesheet rewrite(s) dropped design-kit rules without restyling them; the rules were kept (${kit.classes.slice(0, 12).map((c) => `.${c}`).join(', ')}${kit.classes.length > 12 ? ` and ${kit.classes.length - 12} more` : ''}).`,
           });
         }
       } catch { /* an advisory finding must never affect a build */ }

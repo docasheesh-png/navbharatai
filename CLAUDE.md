@@ -3396,8 +3396,17 @@ the flag entries above promise.
   rule has exactly one right rule, the kit's, so it is appended deterministically (with its media rules,
   keyframes and light/dark tokens), never restyling a class or overriding a token the app defines. It runs
   before the CSS check, after the design/CSS repair, and in the fast lane's verify. Admin line
-  `DESIGN_KIT_RESTORED`. 🔴 **Still open:** the architect REPLACING the global stylesheet is the prevention
-  half. Test-locked in `tests/theSizersReadWhatTheBuilderReads.test.ts`.
+  `DESIGN_KIT_RESTORED`. Test-locked in `tests/theSizersReadWhatTheBuilderReads.test.ts`.
+  ✅ **THE PREVENTION HALF — `AGENTV3_KIT_KEEP` (NOT set; default ON; `off` writes the model's content as
+  sent), admin 2026-09-29: *"architect ko index.css replace na karne wala fix bhi karo"*.** At the write
+  door (`write_file`, `write_files_batch`; the fast lane writes through `write_file`), a rewrite of a
+  stylesheet that carried the kit (≥ `KIT_SIGNATURE_MIN` kit rules) keeps every kit rule it dropped
+  without restyling — EXACTLY as the old file had it, tuned palette included — appended after the
+  model's own content, which is never altered. A class the rewrite restyles is the model's. The model is
+  told in the tool result; the architect prompt now says never to replace `src/index.css` wholesale.
+  Admin line `DESIGN_KIT_KEPT` (sub-agents count into it). ⚠️ `edit_file` is not guarded — a targeted
+  edit that deletes kit rules is caught after the build by the restore. Test-locked and reversion-proven
+  in `tests/theStylesheetKeepsItsKit.test.ts`.
 - **⏯️ `AGENTV3_UNFINISHED_RESUME` — A BUILD THAT STOPPED TALKING IS NOT A BUILD THAT FINISHED (autopsy
   121c2431, 2026-09-26). ⚠️ NOT set, and the code default is ON**; `off` restores the old ending exactly.
   Read by `src/server/AgentV3/unfinishedResume.ts`; applied in `AgentRunner`'s readiness gate.

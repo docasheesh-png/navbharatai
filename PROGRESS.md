@@ -83881,3 +83881,18 @@ first 3.4 minutes. That is the first real measurement of that rung's speed as a 
 - `.js` siblings of `.tsx` files in `src/` (Vite resolves `.js` first, so a stale sibling can shadow a fixed file). Origin not established from the report; nothing in the report shows which step wrote them.
 - The evaluate tool claiming "no preview" after `APP_RENDERED` is the known EVIDENCE-LEDGER class (697b38ee) — another actor's private notion of what was proven.
 - Placeholder-files-then-rewrite (~13 double writes) and the reviewer timing out on a 35-file app are recorded, not fixed.
+
+## 2026-09-29 — Autopsy e725e002, the prevention half: a rewrite of the stylesheet keeps the kit
+
+Admin: *"architect ko index.css replace na karne wala fix bhi karo"*. This closes the open item recorded in the entry above ("why the architect rewrites `src/index.css` without the kit").
+- **Fixed at the write door, not only in the prompt.** `keepKitOnRewrite` (`kitRestore.ts`, pure) runs in `write_file` and `write_files_batch`; the fast lane writes through `write_file`, so it is covered too.
+- **When it acts:** the file being replaced carried the design kit (at least `KIT_SIGNATURE_MIN` = 5 kit rules), and the new content drops kit rules without redefining their classes.
+- **What it does:** those rules are appended after the model's content, exactly as the old file had them (a tuned palette stays tuned), with the keyframes and light/dark tokens they read. The model's own rules are never altered, and a class it restyles is left to it.
+- **Honesty:** the model is told in the tool result; the report gets `DESIGN_KIT_KEPT` (sub-agents count into the parent's tally); the audit log gets `[KIT-KEEP]`.
+- **Prompt:** the architect is told never to replace `src/index.css` wholesale, but to append with `edit_file` and restyle by overriding.
+- Kill switch `AGENTV3_KIT_KEEP=off`.
+- Test: `tests/theStylesheetKeepsItsKit.test.ts`, 19 cases; reversion-proven.
+
+**Open.**
+- `edit_file` is not guarded. A targeted edit that deletes kit rules is repaired after the build by `kitRestorePatch` for the classes screens use, not prevented.
+- If `DESIGN_KIT_KEPT` fires on most builds, the prompt line is not being obeyed. The next step would be to stop handing the kit to the model as editable file content at all (a separate `kit.css` imported by `index.css`).

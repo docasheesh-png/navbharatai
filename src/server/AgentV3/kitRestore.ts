@@ -212,6 +212,142 @@ export function kitRestorePatch(files: Record<string, string>, env: NodeJS.Proce
   return { path: target, content, restored, tokens: tokenList };
 }
 
+// ─── THE PREVENTION HALF: a rewrite of the stylesheet keeps the kit rules it did not restyle ───────
+//
+// `kitRestorePatch` repairs the app AFTER the kit was lost. This stops it being lost: the architect (or
+// the fast lane) replacing the global stylesheet wholesale is the moment the kit disappears, and the
+// write door is the one place every such write passes through — write_file, write_files_batch, and the
+// fast lane, which writes via write_file. So at that door, when the file being replaced carried the kit
+// and the new content drops kit rules without redefining their classes, those rules are carried over
+// EXACTLY AS THE OLD FILE HAD THEM (a palette the app had already tuned stays tuned) and appended after
+// the new content. The model's own rules come first and are never altered; a class it restyles is its.
+// Kill switch: AGENTV3_KIT_KEEP=off.
+
+/** Kill switch for the write-time half. Default ON. */
+export function kitKeepEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.AGENTV3_KIT_KEEP ?? '').trim().toLowerCase() !== 'off';
+}
+
+/** Below this many kit rules, the old file did not carry the kit — it merely shares a class name. */
+export const KIT_SIGNATURE_MIN = 5;
+
+export const KIT_KEEP_MARKER = '/* NavBharatAI design kit — rules this rewrite dropped, kept as they were */';
+
+const norm = (s: string): string => s.replace(/\s+/g, ' ').trim();
+
+let kitPreludeCache: { top: Set<string>; media: Map<string, Set<string>> } | null = null;
+function kitPreludes(): { top: Set<string>; media: Map<string, Set<string>> } {
+  if (kitPreludeCache) return kitPreludeCache;
+  const kit = parsedKit();
+  kitPreludeCache = {
+    top: new Set(kit.rules.map((r) => norm(r.prelude))),
+    media: new Map(kit.media.map((m) => [norm(m.prelude), new Set(m.rules.map((r) => norm(r.prelude)))])),
+  };
+  return kitPreludeCache;
+}
+
+export interface KitKeep {
+  /** The content to write: the new content unchanged, plus the kit rules it dropped. */
+  content: string;
+  /** Kit classes the rewrite would have left without a rule, now kept. */
+  kept: string[];
+  /** Design tokens carried over because the kept rules read them and the new content never sets them. */
+  tokens: string[];
+}
+
+/**
+ * The content a rewrite of a stylesheet should really write, or null when nothing needs keeping. PURE.
+ * `before` is the file being replaced, `after` the new content the model sent.
+ */
+export function keepKitOnRewrite(path: string, before: string, after: string, env: NodeJS.ProcessEnv = process.env): KitKeep | null {
+  if (!kitKeepEnabled(env)) return null;
+  if (!isProjectStylesheet(path) || /\.sass$/.test(path)) return null;
+  if (typeof before !== 'string' || typeof after !== 'string' || !before.trim() || !after.trim()) return null;
+
+  const { top, media } = kitPreludes();
+  const beforeBlocks = parseCssBlocks(before);
+  const keptTop = beforeBlocks.filter((b) => !b.prelude.startsWith('@') && top.has(norm(b.prelude)));
+  const keptMedia: { prelude: string; rules: CssBlock[] }[] = [];
+  for (const b of beforeBlocks) {
+    const inner = /^@media\b/.test(b.prelude) ? media.get(norm(b.prelude)) : undefined;
+    if (!inner) continue;
+    const rules = parseCssBlocks(b.body).filter((r) => inner.has(norm(r.prelude)));
+    if (rules.length > 0) keptMedia.push({ prelude: b.prelude, rules });
+  }
+  if (keptTop.length + keptMedia.reduce((n, m) => n + m.rules.length, 0) < KIT_SIGNATURE_MIN) return null;
+
+  const { defined: afterDefined } = collectDefinedClasses({ [path]: after });
+  const hadKit = new Set<string>();
+  for (const r of [...keptTop, ...keptMedia.flatMap((m) => m.rules)]) for (const c of classesIn(r.prelude)) hadKit.add(c);
+  const needed = new Set([...hadKit].filter((c) => !afterDefined.has(c)));
+  if (needed.size === 0) return null;
+
+  const pieces: string[] = [];
+  for (const r of keptTop) if (takeRule(r.prelude, needed, afterDefined)) pieces.push(`${r.prelude} {${r.body}}`);
+  for (const m of keptMedia) {
+    const inner = m.rules.filter((r) => takeRule(r.prelude, needed, afterDefined));
+    if (inner.length > 0) pieces.push(`${m.prelude} {\n${inner.map((r) => `  ${r.prelude} {${r.body}}`).join('\n')}\n}`);
+  }
+  if (pieces.length === 0) return null;
+
+  // Keyframes and tokens come from the OLD file first (the app's own tuned values), the kit second.
+  const kit = parsedKit();
+  const beforeKeyframes = new Map<string, string>();
+  const beforeLight = new Map<string, string>();
+  const beforeDark = new Map<string, string>();
+  for (const b of beforeBlocks) {
+    if (/^@keyframes\s+/.test(b.prelude)) beforeKeyframes.set(b.prelude.replace(/^@keyframes\s+/, '').trim(), `${b.prelude} {${b.body}}`);
+    else if (b.prelude === ':root') for (const [k, v] of tokenDecls(b.body)) beforeLight.set(k, v);
+    else if (/^@media\b/.test(b.prelude) && /prefers-color-scheme:\s*dark/.test(b.prelude)) {
+      for (const r of parseCssBlocks(b.body)) if (r.prelude === ':root') for (const [k, v] of tokenDecls(r.body)) beforeDark.set(k, v);
+    }
+  }
+  for (const name of new Set([...kit.keyframes.keys(), ...beforeKeyframes.keys()])) {
+    if (!pieces.some((p) => new RegExp(`\\b${name}\\b`).test(p))) continue;
+    if (new RegExp(`@keyframes\\s+${name}\\b`).test(after)) continue;
+    const block = beforeKeyframes.get(name) ?? kit.keyframes.get(name);
+    if (block) pieces.push(block);
+  }
+  const lightOf = (t: string) => beforeLight.get(t) ?? kit.light.get(t);
+  const darkOf = (t: string) => beforeDark.get(t) ?? kit.dark.get(t);
+  const declaredInAfter = (t: string) => new RegExp(`${t.replace(/-/g, '\\-')}\\s*:`).test(after);
+  const tokens = new Set<string>();
+  let frontier = varsUsedIn(pieces.join('\n'));
+  while (frontier.size > 0) {
+    const next = new Set<string>();
+    for (const t of frontier) {
+      const value = lightOf(t);
+      if (tokens.has(t) || declaredInAfter(t) || value === undefined) continue;
+      tokens.add(t);
+      for (const v of varsUsedIn(value)) next.add(v);
+    }
+    frontier = next;
+  }
+  const tokenList = [...tokens].sort();
+  const tokenCss: string[] = [];
+  if (tokenList.length > 0) {
+    tokenCss.push(`:root {\n${tokenList.map((t) => `  ${t}: ${lightOf(t)};`).join('\n')}\n}`);
+    const dark = tokenList.filter((t) => darkOf(t) !== undefined);
+    if (dark.length > 0) tokenCss.push(`@media (prefers-color-scheme: dark) {\n  :root {\n${dark.map((t) => `    ${t}: ${darkOf(t)};`).join('\n')}\n  }\n}`);
+  }
+
+  const content = `${after.replace(/\s*$/, '')}\n\n${KIT_KEEP_MARKER}\n${[...tokenCss, ...pieces].join('\n')}\n`;
+  const { defined: nowDefined } = collectDefinedClasses({ [path]: content });
+  const kept = [...needed].filter((c) => nowDefined.has(c)).sort();
+  if (kept.length === 0) return null;
+  return { content, kept, tokens: tokenList };
+}
+
+/** What the model is told when its rewrite had kit rules put back. PURE. */
+export function kitKeepToolNote(path: string, keep: KitKeep): string {
+  const shown = keep.kept.slice(0, 10).map((c) => `.${c}`).join(', ');
+  const more = keep.kept.length > 10 ? ` and ${keep.kept.length - 10} more` : '';
+  return `\nℹ️ DESIGN KIT KEPT: this rewrite of ${path} dropped the design kit's rules for ${keep.kept.length} class(es) `
+    + `(${shown}${more}) without restyling them, so they were appended after your content unchanged — screens `
+    + 'that use them stay styled. Your own rules come first and were not altered. To restyle a kit class, write '
+    + 'your own rule for it; to add styles, prefer edit_file and append rather than rewriting this file.';
+}
+
 /** The admin line for `DESIGN_KIT_RESTORED`. PURE. */
 export function kitRestoreNote(patch: KitRestorePatch, when: 'before-repair' | 'after-repair'): string {
   const shown = patch.restored.slice(0, 12).map((c) => `.${c}`).join(', ');

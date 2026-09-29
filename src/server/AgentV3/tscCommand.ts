@@ -20,7 +20,10 @@ export const TSC_ENSURE =
   // `&& touch node_modules`: an "up to date" install leaves the directory's mtime alone, so without the
   // stamp a rewritten package.json kept this re-running `npm install` before every typecheck.
   'if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install >/dev/null 2>&1 && touch node_modules; fi; ' +
-  'if [ ! -x node_modules/.bin/tsc ]; then npm install typescript --no-save >/dev/null 2>&1; fi';
+  // PINNED to the major our scaffolds declare (autopsy 4499741f). An unpinned install fetched a newer
+  // major that REMOVES `baseUrl`, so a project without its own `typescript` failed on its tsconfig alone
+  // (TS5102) — a verdict about the compiler we picked, not about the app.
+  'if [ ! -x node_modules/.bin/tsc ]; then npm install typescript@5 --no-save >/dev/null 2>&1; fi';
 
 /**
  * The DEFINITIVE tsc invocation: the local binary directly. NEVER `npx tsc` — even `npx --no-install tsc`

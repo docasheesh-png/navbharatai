@@ -83758,6 +83758,38 @@ Admin: Teacher AI → Exam mode → Settings → the language dropdown *"bas 1 s
 - Test: `tests/aDialogKeepsTheFocusItIsGiven.test.ts` (also fails if any component moves focus in an
   effect keyed on `onClose` again).
 
+## 2026-09-29 — Autopsy 4499741f (MP3 music player, weak tier, 18.8 min, billed ₹328.77)
+
+A plain-JavaScript music player (index.html + style.css + script.js, YouTube links only through an
+authorised backend). Six wrong verdicts about one build, each root-caused and locked in
+`tests/theMusicPlayerAutopsy.test.ts` (reversion-proven, one revert per fix):
+
+1. **"Proper messages show karo" → domain SOCIAL.** New `NON_DOMAIN_USES` idioms for messages an app
+   SHOWS (English and Hinglish word order). Genuine chat apps still classify as social.
+2. **Four tool mentions of YouTube → "LARGE — clone of YouTube".** `namesAsProduct` now strips markdown and
+   quotes before reading the words around a name (`YouTube ka **video…**` hid its noun behind `**`), and
+   knows paste/copy/import/convert before a name and content/audio/music/MP3 or `-to-MP3` after it. The
+   prompt stays LARGE on its own ~94 features, which is correct; it is no longer a clone.
+3. **The planner answered Roman Hinglish in Devanagari.** `replyScriptLine` counts the script
+   deterministically and names it to the planner ("Latin letters — never Devanagari").
+4. **LADDER_DEPTH "fell to rung 4".** The planner's Nemotron Ultra call was rounded into the weak ladder's
+   Nemotron Super rung by provider alone. A slice that names a model no rung claims is now unmatched;
+   the provider fallback applies only to a slice with no model id.
+5. **"Entry is still the starter" about a file nothing ran.** The model wrote the app into the root
+   index.html; the seeded `src/App.tsx` stayed untouched and UNUSED. `entryIsStillTheStarter` said
+   starter → in-build proof refused a real render, readiness blocked "done", `UNFINISHED_BUILD_RESUMED`
+   handed the builder a false blocker, and it spent ~4 minutes deleting src/, rewriting package.json
+   (dropping typescript) and breaking the dev server (50 s, two restarts). Now a readable index.html
+   that mounts nothing from `src/` means the starter is not the app (`pageMountsSrc`).
+6. **A JavaScript app ended YELLOW on "the project does not typecheck".** A rewritten `vite.config.ts`
+   counted as TypeScript source (`isTypeScriptSourcePath` — the 681bd91b sibling), and with typescript
+   gone from package.json the platform installed an UNPINNED compiler whose newer major removes
+   `baseUrl` (TS5102). Tool config files no longer count as app TypeScript, and the fallback install is
+   pinned to `typescript@5`, the major every scaffold declares.
+
+**Still open, raised with the admin (routing is theirs):** the roadmap planner on Weak is Nemotron Ultra
+(`AGENTV3_NEMOTRON=weak`), and it took **202 s** for one 3.6k-token plan — the user saw nothing for the
+first 3.4 minutes. That is the first real measurement of that rung's speed as a planner.
 ## 2026-09-29 — Autopsy 6a4a799f ("Blue Berry" music app, Weak tier, 24 min, RED, billed ₹0)
 
 **Ledger.**

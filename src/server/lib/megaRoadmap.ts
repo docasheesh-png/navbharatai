@@ -137,11 +137,34 @@ export function hardConstraintLines(prompt: string, max = 24): string[] {
   return out;
 }
 
+/**
+ * Which SCRIPT the user wrote in, stated to the planner as a fact rather than left for it to infer.
+ *
+ * 🔴 AUTOPSY 4499741f (2026-09-29). The request was English with Hindi words typed in Roman letters
+ * ("Website mein user YouTube ka … URL paste karke"). Rule 5 already says "the SAME language the user
+ * wrote in", and the planner answered every user-facing field in DEVANAGARI — it read "Hindi words" as
+ * "Hindi script". Roman Hinglish is its own way of writing: a reader who types it may not read
+ * Devanagari at all. The script is counted here, deterministically, so the instruction names it. PURE.
+ */
+export function replyScriptLine(prompt: string): string {
+  const text = String(prompt || '');
+  const latin = (text.match(/[A-Za-z]/g) || []).length;
+  const indic = (text.match(/[\u0900-\u0DFF]/g) || []).length;
+  if (latin + indic === 0) return '';
+  if (indic / (latin + indic) < 0.1) {
+    return 'REPLY SCRIPT: the user wrote in LATIN letters (English, or Hindi words typed in Roman letters). '
+      + 'Write EVERY user-facing field (userMessage, achievableSummary, note, titles, goals) in Latin letters — '
+      + 'English, or Roman Hinglish if they mixed Hindi words. NEVER use Devanagari or any other script.';
+  }
+  return 'REPLY SCRIPT: the user wrote in an Indian script. Write every user-facing field in that SAME script.';
+}
+
 export function megaRoadmapUserPrompt(prompt: string, famousApp: string | null, signals: string[]): string {
   const clean = boundedRequest(prompt);
   const constraints = hardConstraintLines(prompt);
   const lines = [
     `User's request:\n${clean}`,
+    replyScriptLine(prompt),
     constraints.length
       ? `\nNON-NEGOTIABLE CONSTRAINTS the user stated (bind EVERY step — restate them in each buildPrompt):\n${constraints.map((c) => `- ${c}`).join('\n')}`
       : '',

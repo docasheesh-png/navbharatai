@@ -83757,3 +83757,37 @@ Admin: Teacher AI → Exam mode → Settings → the language dropdown *"bas 1 s
   heading 1.5 s after tapping the select; new hook — still on the select, and Escape still closes.
 - Test: `tests/aDialogKeepsTheFocusItIsGiven.test.ts` (also fails if any component moves focus in an
   effect keyed on `onClose` again).
+
+## 2026-09-29 — Autopsy a7aa447c: event-booking app (Weak tier, KIMI rung 2, 11 min, green)
+
+**Ledger.** ✅ self-healed 3 (write-time typecheck caught `import.meta.env` → model wrote `vite-env.d.ts`;
+`vitest` missing → model installed it; mixed `@/` vs relative imports normalized) · 🔀 workaround 0 ·
+⏭️ skipped 2 (user journey not reached — the booking form sits behind navigation; one explore control
+"Visit Office" timed out) · ❌ shipped imperfect 2 (payments are client-only Razorpay with no server-side
+verification, and bookings live in the customer's localStorage — the business never receives them; both are
+said honestly in the summary) · 🥵 struggle 3 (a typo'd `.node_modules/.bin/tsc | head` reported exit 0 and
+cost two steps; a 16 s install inside the first write's typecheck; a ~40 s design repair on a list that
+can never be empty).
+
+**Fixed at the class (this change):**
+- **Starter templates had no `src/vite-env.d.ts`** (ViteReact, Vue, Vanilla-TS), and Remix's tsconfig named
+  an `env.d.ts` nothing wrote. The first file reading `import.meta.env` always failed its typecheck. All ship
+  it now, and the test asserts every Vite + TS starter passes `missingViteEnvTypes`.
+- **`generate_tests` wrote a Vitest file into a project without Vitest.** It now declares
+  `vitest@^5.0.1` (the repo's own range, test-locked) in devDependencies before writing the test.
+- **The `evaluate` tool could not read the render proof**, so its confidence ALWAYS said "Nothing here was
+  ever proven to RUN — no preview" — to the builder 2 s after the app rendered, and to the reviewer 47 s
+  after `APP_RENDERED` (which then reported 58% confidence on a working app). `BuildDiagnostics.record` now
+  notes a render proof per workspace (cleared when a build's diagnostics are created) and `evaluate` passes
+  `runtimeProven: 'passed'` from it.
+- **LIST_WITHOUT_EMPTY_STATE followed no imports**: `packages` was an exported literal array in
+  `src/data/packages.ts`, so a repair pass added an empty state to a fixed catalogue. The rule now follows a
+  relative import to a module in the project map that exports the name as a literal array.
+- Test: `tests/theEventBookingAutopsy.test.ts` (18 cases).
+
+**Open, not fixed here:**
+- A shell pipeline's exit status is its LAST command's, so `missing-binary | head` reads exit 0. Turning on
+  `pipefail` for the bash tool would change every command's reported status — its own decision.
+- The journey check cannot reach a form behind state-routed navigation (the existing open item for lane B).
+- A generated payments app with no server verification: the builder should be steered to a server-side
+  order + signature check (or an honest "test mode only" banner) — a prompt/contract change, not done here.

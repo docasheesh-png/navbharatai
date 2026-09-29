@@ -31,7 +31,7 @@ import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBui
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
 import { mergeTruncation, pushBounded, boundedWindow, COMPLETE, type ChannelTruncation, type ReportTruncation } from './reportTruncation';
-import { renderProvenByAnyActor } from './renderProof';
+import { renderProvenByAnyActor, noteRenderSeen, forgetRenderSeen, RENDER_PROVEN_CODES } from './renderProof';
 import { isSelfHeal, isWorkaroundIssue, isNarrationIssue } from '../../lib/healIssue';
 
 export type IssuePhase =
@@ -731,6 +731,8 @@ export class BuildDiagnostics {
 
   constructor(meta: BuildDiagnosticsMeta = {}) {
     this.meta = meta;
+    // A new build has proven nothing yet — see `renderSeenThisBuild` in renderProof.ts.
+    if (meta.workspaceId) forgetRenderSeen(meta.workspaceId);
     this.now = meta.now ?? (() => Date.now());
     this.startedAt = this.now();
   }
@@ -750,6 +752,10 @@ export class BuildDiagnostics {
    * repeat into the PREVIOUS entry's `repeatCount` instead of pushing a new one.
    */
   record(issue: Omit<BuildIssue, 'ts'> & { ts?: number }): void {
+    // The render proof, readable by the tools too (renderProof.ts) — same rule as renderProvenByAnyActor.
+    if (this.meta.workspaceId && issue.severity === 'info' && typeof issue.code === 'string' && RENDER_PROVEN_CODES.has(issue.code)) {
+      noteRenderSeen(this.meta.workspaceId);
+    }
     const last = this.issues[this.issues.length - 1];
     if (last && last.phase === issue.phase && last.code === issue.code && last.message === issue.message) {
       last.repeatCount = (last.repeatCount ?? 1) + 1;

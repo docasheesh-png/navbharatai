@@ -343,6 +343,10 @@ const NON_DOMAIN_USES: RegExp[] = [
   /\bmessages?\s+(?:such\s+as|like\s*:)/gi,
   /\b(?:display|show|render)\s+(?:the\s+)?messages?\s+as\b/gi,
   /\bchat[- ]bubbles?\b/gi,
+  // social — "Proper messages show karo" (autopsy 4499741f): a music player's error-handling section was
+  // read as a social network. Messages an app SHOWS its user are copy, in English or Hinglish word order.
+  /\b(?:proper|appropriate|meaningful|clear|user[- ]?friendly|helpful|short|simple)\s+(?:error\s+)?messages?\b/gi,
+  /\bmessages?\s+(?:show|dikha\w*|display|bata\w*)\b/gi,
   /\bthe\s+following\b|\bas\s+follows\b/gi,
   // ecommerce — purpose, arithmetic, sorting, and "store" as the verb.
   /\bin\s+order\s+to\b/gi,

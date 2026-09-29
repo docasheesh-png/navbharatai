@@ -1,0 +1,296 @@
+Build a complete, modern music streaming application called “Blue Berry”, inspired by premium music apps but with completely original branding and UI.
+
+🎵 APP NAME
+
+Blue Berry
+
+🫐 VISUAL THEME
+
+Use a beautiful blueberry-inspired dark theme throughout the entire application.
+
+Background
+
+- Very dark navy/blue background
+- Subtle blueberry-inspired gradient
+- Add a soft, abstract blueberry texture/pattern in the background
+- Use subtle blueberry shapes/blobs and glowing particles
+- Keep the background elegant and non-distracting
+- Do NOT use copyrighted Spotify assets or branding
+
+Color palette
+
+- Deep navy
+- Blueberry blue
+- Electric blue highlights
+- Soft purple-blue accents
+- White/light-gray text
+
+The overall appearance should feel premium, modern, smooth and futuristic.
+
+🏠 HOME
+
+Create:
+
+- Blue Berry logo/name
+- Featured songs
+- Trending music
+- Recommended songs
+- Recently played
+- Popular artists
+- Albums
+- Genre categories
+
+Use beautiful album artwork cards with rounded corners.
+
+🔎 SEARCH
+
+Allow users to search:
+
+- Songs
+- Artists
+- Albums
+- Genres
+
+Each result should show:
+
+- Artwork
+- Song name
+- Artist
+- Duration
+- Play button
+- Favourite button
+- Download button where legally permitted
+
+🎧 MUSIC PLAYER
+
+Create a persistent mini-player at the bottom.
+
+Full-screen player should contain:
+
+- Large album artwork
+- Song title
+- Artist
+- Progress bar
+- Current time / duration
+- Previous
+- Play/Pause
+- Next
+- Shuffle
+- Repeat
+- Favourite
+- Download
+- Queue
+- Volume
+
+Use smooth animations and blueberry-blue visual effects.
+
+❤️ FAVOURITES
+
+Create a Liked Songs section.
+
+Users can:
+
+- Like/unlike songs
+- View all liked songs
+- Play all
+- Shuffle
+- Remove songs
+
+Save favourites permanently using local storage/database.
+
+⬇️ DOWNLOADS
+
+Create a dedicated Downloads section.
+
+Only allow downloading when the selected music provider legally permits downloading.
+
+Features:
+
+- Download progress
+- Pause/resume
+- Cancel
+- Delete
+- File size
+- Offline playback
+
+Downloaded songs must remain playable without internet.
+
+📚 LIBRARY
+
+Create:
+
+- Liked Songs
+- Playlists
+- Downloads
+- Recently Played
+
+🎶 PLAYLISTS
+
+Users can:
+
+- Create playlists
+- Rename playlists
+- Delete playlists
+- Add songs
+- Remove songs
+- Play playlist
+- Shuffle playlist
+
+🕘 RECENTLY PLAYED
+
+Store the user's recently played songs locally.
+
+Show the latest 20–50 tracks.
+
+🌐 MUSIC API
+
+Use a FREE and LEGAL music API/source.
+
+The API must legally allow the functionality being implemented.
+
+Do NOT:
+
+- Bypass DRM
+- Scrape unauthorized music
+- Circumvent copyright restrictions
+- Use unauthorized downloading methods
+- Pretend that preview URLs are full songs
+
+If one API cannot provide full-length legal streaming, use another legal/free source where available.
+
+Create a provider-independent API layer with:
+
+- "searchTracks()"
+- "getTrendingTracks()"
+- "getFeaturedTracks()"
+- "getTrack()"
+- "getArtist()"
+- "getAlbum()"
+- "getStreamUrl()"
+- "getDownloadUrl()" — only when legally permitted
+
+Keep API keys in environment variables and never expose private keys in frontend code.
+
+🎵 AUDIO
+
+Support:
+
+- Full-length legally available tracks
+- Background playback where supported
+- Media notification controls
+- Lock-screen controls where supported
+- Resume playback
+- Queue
+- Automatic next-song playback
+- Buffering/loading states
+- Network error handling
+
+💾 STORAGE
+
+Persist:
+
+- Favourites
+- Playlists
+- Downloads metadata
+- Recently played
+- User settings
+- Playback state
+
+📱 NAVIGATION
+
+Bottom navigation:
+
+Home | Search | Library | Downloads
+
+Use clean icons and smooth transitions.
+
+⚙️ SETTINGS
+
+Include:
+
+- Dark/light mode
+- Audio quality
+- Wi-Fi-only downloads
+- Clear cache
+- Clear recently played
+- Storage usage
+- About Blue Berry
+- Privacy
+- Music source/API information
+
+✨ UI DETAILS
+
+Add:
+
+- Smooth page transitions
+- Glassmorphism where appropriate
+- Rounded cards
+- Blueberry-blue glow effects
+- Subtle animations
+- Skeleton loaders
+- Empty states
+- Error states
+- Offline indicator
+- Toast/snackbar notifications
+- Responsive design
+
+Do not make the interface overly flashy. Keep it clean and premium.
+
+🚀 PERFORMANCE
+
+Optimize for:
+
+- Fast startup
+- Lazy-loaded artwork
+- Image caching
+- API caching
+- Efficient audio streaming
+- Efficient downloads
+- Low memory usage
+- Slow internet connections
+
+🔐 SECURITY
+
+- Never hardcode private API keys
+- Use environment variables
+- Validate API responses
+- Sanitize search input
+- Handle API failures
+- Do not bypass DRM or copyright restrictions
+
+🏗️ CODE QUALITY
+
+Use:
+
+- Clean architecture
+- Reusable components
+- Modular services
+- Proper error handling
+- Maintainable folder structure
+- Production-quality code
+
+Before implementation, inspect the selected music API's current terms and capabilities and verify which tracks/features can legally be streamed or downloaded.
+
+If full-song streaming or downloading is not legally available from the selected free API, clearly handle that limitation rather than implementing unauthorized access.
+
+🫐 BRANDING
+
+The application should consistently use the Blue Berry identity.
+
+Create an original Blue Berry logo/icon using a stylized blueberry-inspired design.
+
+The final application should feel like a premium blueberry-themed music streaming platform with:
+
+✓ Full legal song playback
+✓ Search
+✓ Recommendations
+✓ Favourites
+✓ Playlists
+✓ Recently Played
+✓ Downloads where legally permitted
+✓ Offline playback
+✓ Persistent library
+✓ Modern blueberry background
+✓ Premium music player
+✓ Smooth animations
+✓ Free/legal music API integration

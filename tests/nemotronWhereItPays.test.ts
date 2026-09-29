@@ -151,9 +151,19 @@ describe('the flag is an allowlist, so the rollout can start on the tier WE pay 
 
 describe('the plan rung', () => {
   it('Ultra leads the plan chain on an allowed tier, and the tier ladder still follows', () => {
-    const chain = seq(planLadder('weak', ON('weak')));
+    const chain = seq(planLadder('off', ON('normal')));
     expect(chain[0]).toBe('NEMOTRON:nemotron-ultra');
     expect(chain).toContain('GLM:glm-4.7-flashx');
+  });
+
+  it('🔴 WEAK NEVER TAKES THE PLAN EITHER (autopsy 6a4a799f) — and its JUDGE still does', () => {
+    // Blue Berry: Ultra's roadmap was unreadable after 120 s and its decomposition was cut off at the
+    // 300 s cap. The Weak plan goes back to glm-4.7-flashx, which can be told not to think.
+    for (const flag of ['weak', 'free', 'on', 'true', 'weak,normal']) {
+      expect(nemotronAllowedFor('plan', 'weak', ON(flag)), flag).toBe(false);
+      expect(seq(planLadder('weak', ON(flag)))[0], flag).toBe('GLM:glm-4.7-flashx');
+    }
+    expect(nemotronAllowedFor('judge', 'weak', ON('weak'))).toBe(true);
   });
 
   it('🔒 a Weak plan still never reaches Sonnet or Opus', () => {
@@ -174,8 +184,7 @@ describe('the plan rung', () => {
     }
     // …while the JUDGE on Strong is deliberately still allowed — that is the whole saving.
     expect(nemotronAllowedFor('judge', 'mini', ON('on'))).toBe(true);
-    // And Weak/Normal plans are unaffected by the floor.
-    expect(nemotronAllowedFor('plan', 'weak', ON('on'))).toBe(true);
+    // And the Normal plan is unaffected by the floor (Weak has its own, above).
     expect(nemotronAllowedFor('plan', 'off', ON('on'))).toBe(true);
   });
 });

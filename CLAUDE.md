@@ -4498,6 +4498,11 @@ and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; 
   Kimi reasoning before its first file, and a project decomposition 315 s and a timeout (autopsy
   eed79815). There is no separate kill switch. The build itself still opens on KIMI. ⚠️ On Weak, with
   `AGENTV3_NEMOTRON=weak`, the plan rung is Nemotron Ultra — also a reasoning model, speed unmeasured.
+  🔴 **CORRECTED 2026-09-29 (admin: "B bana do") — IT IS NOT ANY MORE, and it was measured first.** On
+  "Blue Berry" (autopsy 6a4a799f) both Ultra planner answers were unusable: the roadmap was unreadable
+  after 120 s, the decomposition was cut off at the 300 s stream cap — 7 of 24 minutes. Weak is now in
+  `PLAN_FORBIDDEN_TIERS` beside Strong, so its plan rung is `glm-4.7-flashx` (thinking disabled) whatever
+  the flag says. **Only the plan moved: Weak's JUDGE stays on Nemotron** where the flag names it.
 - 🔗 `healLadder` and this router share ONE definition of "the cheap opener"
   (`withoutCheapFlashLead`), applied by `buildTurnRunner` for `heal || complex`. They stay separate
   FLAGS — "this is a repair" and "this is a big app" are different questions with the same answer
@@ -4683,7 +4688,9 @@ rung only when it is the known-weak 4.7-flash.
   also why it is the safest place to try an unproven vendor.
   ✅ **THE LIVE VALUE IS `weak`, VERIFIED FROM THE CONSOLE 2026-09-20** — the admin sent a screenshot
   of the Cloud Run variable list (`AGENTV3_NEMOTRON = weak`, `NEMOTRON_BASE_URL` = the NVIDIA host), so
-  the judge and the plan ARE on for that tier.
+  the judge and the plan ARE on for that tier. ⚠️ **Since 2026-09-29 only the JUDGE is** — Weak joined
+  Strong in `PLAN_FORBIDDEN_TIERS` after both Ultra plans on autopsy 6a4a799f came back unusable; the
+  flag value was not changed and does not need to be.
   🔴 **AND THIS ENTRY SAID OTHERWISE FOR HALF A DAY, WHICH IS THE PART WORTH KEEPING.** It read *"the
   admin reported setting `AGENTV3_NEMOTRON=week`… the judge and the plan stayed OFF"*, ending with the
   exact sentence **"this must be verified in the console, not assumed from this entry"** — and a

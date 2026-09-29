@@ -83896,3 +83896,13 @@ Admin: *"architect ko index.css replace na karne wala fix bhi karo"*. This close
 **Open.**
 - `edit_file` is not guarded. A targeted edit that deletes kit rules is repaired after the build by `kitRestorePatch` for the classes screens use, not prevented.
 - If `DESIGN_KIT_KEPT` fires on most builds, the prompt line is not being obeyed. The next step would be to stop handing the kit to the model as editable file content at all (a separate `kit.css` imported by `index.css`).
+## 2026-09-29 — Weak's plan rung leaves Nemotron; its judge stays (admin: "B bana do")
+
+- **Why:** autopsy 6a4a799f. Both Nemotron Ultra planner answers on a Weak build were unusable. The roadmap was unreadable after 120 s. The module decomposition hit the 300 s stream cap and was cut off. Together they cost 7 of the build's 24 minutes.
+- **Change:** `PLAN_FORBIDDEN_TIERS` (`nemotron.ts`) now holds `weak` beside `mini`.
+  - The Weak plan rung is `glm-4.7-flashx` whatever `AGENTV3_NEMOTRON` says. It is sent `thinking: disabled`, so its whole output allowance goes to the plan.
+  - The Weak judge is untouched and stays on Nemotron where the flag names the tier.
+  - Normal is left to the flag, because there is no evidence about it.
+- **No Cloud Run change needed.**
+- **Test:** `tests/nemotronWhereItPays.test.ts`, reversion-proven.
+- **Open:** the plan quality of `glm-4.7-flashx` on large apps is not measured. Watch the next two or three large Weak builds for `MEGA_ROADMAP_ACTIVE` / a project plan with modules, rather than `PROJECT_MODE_FAILED`.

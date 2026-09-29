@@ -109,7 +109,7 @@ const FAMOUS_APPS: Array<{ name: string; re: RegExp }> = [
  * ordinary build (which the feature count may still escalate), while a false clone costs a planner call
  * and hands the build a roadmap for the wrong app.
  */
-const TOOL_BEFORE = /\b(?:using|use|uses|via|through|thru|over|on|with|by|to|into|from|in|share|send|post|login|log\s+in|sign\s+in|signin|integrat\w*|connect\w*|link\w*|embed\w*|se)\s+(?:the\s+|my\s+|your\s+|our\s+|their\s+|a\s+)?$/i;
+const TOOL_BEFORE = /\b(?:using|use|uses|via|through|thru|over|on|with|by|to|into|from|in|share|send|post|login|log\s+in|sign\s+in|signin|integrat\w*|connect\w*|link\w*|embed\w*|se|paste|copy|import|add|fetch|download\w*|convert\w*|unauthori[sz]ed|authori[sz]ed)\s+(?:the\s+|my\s+|your\s+|our\s+|their\s+|a\s+|any\s+)?$/i;
 // 🔴 CONTENT FROM A PRODUCT IS NOT THE PRODUCT (autopsy Study-Racer, 2026-09-25). "mai isme notes,
 // youtube video ka link dalunga" — I will paste YouTube video links into it — was classed
 // *"LARGE — clone of YouTube"* while the complexity router scored the same prompt 15 ("simple"). The
@@ -117,7 +117,7 @@ const TOOL_BEFORE = /\b(?:using|use|uses|via|through|thru|over|on|with|by|to|int
 // 3 and built a hard-coded math-quiz racer. A product name followed by a CONTENT noun (video, url,
 // playlist, clip, thumbnail…) or by a Hinglish possessive before an integration noun ("youtube ka
 // link", "instagram ki post") is the product being USED, exactly as a channel preposition before it is.
-const TOOL_AFTER = /^[\s/]*(?:(?:ka|ki|ke|wala|wali|wale|se)\s+)?(?:api|apis|sdk|login|log\s*in|sign[\s-]?in|oauth|auth|share|sharing|button|buttons|integration|notifications?|messages?|link|links|otp|business|pay|s3|web\s+services|account|accounts|group|groups|number|alerts?|widget|embed|embeds|channel|bot|webhook|ads|videos?|urls?|playlists?|clips?|thumbnails?|posts?|reels?|stories|feed|page|pages)\b/i;
+const TOOL_AFTER = /^[\s/]*(?:(?:ka|ki|ke|wala|wali|wale|se)\s+)?(?:api|apis|sdk|login|log\s*in|sign[\s-]?in|oauth|auth|share|sharing|button|buttons|integration|notifications?|messages?|link|links|otp|business|pay|s3|web\s+services|account|accounts|group|groups|number|alerts?|widget|embed|embeds|channel|bot|webhook|ads|videos?|urls?|playlists?|clips?|thumbnails?|posts?|reels?|stories|feed|page|pages|content|audio|music|songs?|mp3|data|downloads?)\b|^[\s-]*to[\s-]*(?:mp3|mp4|audio|video|wav|gif|text|pdf)\b/i;
 
 // 🔴 A PRODUCT NAMED IN A PROHIBITION IS NOT A CLONE REQUEST (autopsy 6a4a799f, 2026-09-29). "Do NOT use
 // copyrighted Spotify assets or branding" — written by someone asking for ORIGINAL branding — was classed
@@ -130,8 +130,12 @@ export function namesAsProduct(text: string, re: RegExp): boolean {
   for (const m of text.matchAll(g)) {
     const at = m.index ?? 0;
     if (PROHIBITED_BEFORE.test(text.slice(Math.max(0, at - 48), at))) continue;
-    const before = text.slice(Math.max(0, at - 24), at);
-    const after = text.slice(at + m[0].length, at + m[0].length + 24);
+    // Markdown and quotes are not words (autopsy 4499741f): `YouTube ka **video/playlist URL**` and
+    // `"Paste YouTube / Music URL"` hid their tool nouns behind `**` and `"`, and a music player that only
+    // accepts YouTube links was planned as "LARGE — clone of YouTube".
+    const noise = (t: string): string => t.replace(/[*_`"'“”‘’]+/g, '');
+    const before = noise(text.slice(Math.max(0, at - 30), at));
+    const after = noise(text.slice(at + m[0].length, at + m[0].length + 30));
     // A list of channels ("WhatsApp/Drive/USB") inherits the preposition before its first item.
     const listHead = before.replace(/(?:[\w.-]+\s*\/\s*)+$/, '');
     if (TOOL_BEFORE.test(before) || TOOL_BEFORE.test(listHead) || TOOL_AFTER.test(after)) continue;

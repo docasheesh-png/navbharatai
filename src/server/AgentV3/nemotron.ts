@@ -194,7 +194,18 @@ export type NemotronRole = 'judge' | 'plan' | 'rung';
  * somebody enables a feature broadly and is exactly the value that would otherwise reach through.
  * Changing it is a code change with an admin decision behind it, which is the point.
  */
-const PLAN_FORBIDDEN_TIERS: ReadonlySet<PowerLevel> = new Set<PowerLevel>(['mini']);
+// 🔴 AND WEAK, SINCE 2026-09-29 (admin: "B bana do", autopsy 6a4a799f). The first real Weak builds with
+// `AGENTV3_NEMOTRON=weak` put Ultra on the plan rung, and on the "Blue Berry" music app BOTH planner
+// answers were unusable: the roadmap took 120 s and could not be parsed, the module decomposition ran
+// into the 300 s stream cap and was cut off mid-list. Seven of the build's twenty-four minutes went to
+// plans nobody saw. Ultra ALWAYS reasons before it answers, and a plan is a long structured answer — so
+// the thinking and the answer compete for one output allowance and one clock. The Weak plan rung goes
+// back to the code table's `glm-4.7-flashx`, which is sent `thinking: disabled` and so spends its whole
+// allowance on the plan itself. ⚠️ ONLY THE PLAN MOVES: the JUDGE stays on Nemotron wherever the flag
+// names the tier — a judge reads a finished app and answers in a few lines, the shape Nemotron is cheap
+// at, and it is where `nemotron.ts` measured the saving. Normal is left to the flag: there is no
+// evidence about it either way, and this floor is written from evidence.
+const PLAN_FORBIDDEN_TIERS: ReadonlySet<PowerLevel> = new Set<PowerLevel>(['mini', 'weak']);
 
 export function nemotronAllowedFor(
   role: NemotronRole,

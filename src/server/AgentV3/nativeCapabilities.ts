@@ -300,6 +300,13 @@ export function nativeCapabilityBrief(prompt: string | null | undefined): string
     'and on the web show the fallback plus a small note "Works in the phone app" — the web preview must',
     'never crash or show a dead button. Never pin a different version and never run `npm install <plugin>`',
     'without the version.',
+    // Autopsy e7baf61d (2026-09-29): "these EXACT versions" was read as a rule for EVERY package — the
+    // builder also pinned an old router, charting and icon library from memory (the router pin carried two
+    // advisories) and then told the user it had used "the exact versions you asked for". The user asked
+    // for no versions; this block did.
+    'These pins apply ONLY to the packages listed above, and they are a platform requirement, not the',
+    'user\'s request — never tell the user they asked for versions. Install every other library the',
+    'normal way.',
   ].join('\n');
 }
 

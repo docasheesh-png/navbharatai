@@ -83827,6 +83827,49 @@ first 3.4 minutes. That is the first real measurement of that rung's speed as a 
 - The fast lane has no write-time notes at all, so the store-loop note reaches only architect writes.
 - Why the builder's own `console_errors` read clean right after the `Layout.tsx` fix, while the platform's fresh load still looped in `PlayerBar`, is not established. HMR keeping store state is the leading guess, and it is unverified.
 
+## 2026-09-29 — Autopsy e7baf61d ("Crest" JEE study planner, Weak tier, KIMI rung 2, 20.6 min, green, billed ₹490.33)
+
+A 175-line spec written one item per line, for a single-person app ("No account required",
+"Everything stored locally"). The app rendered at 601 s and ended YELLOW (no journey reached).
+
+**Ledger.** ✅ self-healed 4 (9 undefined CSS classes; 4 pages with no empty state; a placeholder
+`alert('… coming soon')` that the design repair ITSELF introduced, caught by the readiness gate and
+resumed; two tsc errors at write time) · 🔀 workaround 0 · ⏭️ skipped 3 (3 journeys unreachable — the
+forms sit behind "New Goal" / "Add Chapter" toggles; the lean review timed out with nothing; two
+post-green writes to `src/types.ts` by an unnamed writer, refused) · ❌ shipped imperfect 3 (a
+"Reviews & Ratings" page nobody asked for; Mock Test Tracker, Daily Reflection and Weekly Review have no
+screen and the summary still said "the full JEE preparation app you described"; react-router 6.26.1
+pinned from memory with 2 advisories) · 🥵 struggle 4 (ETA 5–11 min vs 20.6; "11 of 12 steps done · ~1
+min to go" at minute 4; the post-answer design pass took 406 s and wandered into our own sw.js and
+notifications.ts; 114 model calls, one file per call).
+
+**Fixed at the class (this change), locked in `tests/theJeePlannerAutopsy.test.ts` (reversion-proven per file):**
+- **"Start\nPause\nResume\nFinish" → JOBS.** The pause/resume idiom from #3381 required a separator; a
+  line break is one too now, with start/stop/finish neighbours. The build had been told to INCLUDE
+  employer & candidate roles and job postings.
+- **"Each book should show" → BOOKING**, then education proposing roles, enrolment and fees. Study
+  books are stripped (constructions, and any bare noun "book" in a study prompt; "book a slot" keeps
+  its meaning), and an app that declares BOTH no accounts AND device-only data gets no second-party
+  features proposed — in the build guidance and the suggestion bulb (`declaresSinglePersonApp`).
+- **"Weekly Review" → "reviews / ratings — build every one of these".** Periodic, self, progress and
+  code reviews are a report, not a star rating (`notRequest`).
+- **Our own sw.js failed our own authenticity scan** (`.catch(() => {})` ×2), and `evaluate` told the
+  builder the app still had placeholder code. Each ignore now says why; every generated default and the
+  E2E starter are run through the scan in CI.
+- **The phone-plugin brief's "EXACT versions" leaked** into every package and into the user summary
+  ("the exact versions you asked for"). It now says the pins are the platform's and only for those plugins.
+
+**Open — for the admin, not changed here:**
+- 🔴 **A spec written one item per line counts as ZERO features.** `countEnumeratedFeatures` reads
+  bullets and comma runs; this 175-line prompt scored 0, so Software Project Mode and the mega-roadmap
+  never saw a 17-module request, and three modules were dropped without a word. Counting plain lines
+  would send prompts like this one into Project Mode — a routing change, raised with the admin.
+- The requested-feature contract names only a fixed generic catalogue (dashboard, calendar, charts), so
+  a spec's own modules (Mock Test Tracker, Daily Reflection) are never restated to the builder nor
+  checked at the end — which is why the summary could claim the whole spec.
+- Journey check cannot reach a form behind a toggle button (the known lane-B open item).
+- An unnamed writer touched `src/types.ts` twice after the app was green (refused by the freeze).
+- The design repair runs as a full builder with the readiness resume: 406 s after a green app.
 ## 2026-09-29 — Weak's plan rung leaves Nemotron; its judge stays (admin: "B bana do")
 
 - **Why:** autopsy 6a4a799f. Both Nemotron Ultra planner answers on a Weak build were unusable. The roadmap was unreadable after 120 s. The module decomposition hit the 300 s stream cap and was cut off. Together they cost 7 of the build's 24 minutes.

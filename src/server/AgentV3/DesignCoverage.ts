@@ -153,7 +153,41 @@ function boundToLiteral(content: string, before: string): boolean {
   return new RegExp(`\\b(?:const|let|var)\\s+${id[1]}\\s*(?::[^=\\n]{1,120})?=\\s*\\[`).test(content);
 }
 
-export function rendersDataList(content: string): boolean {
+/**
+ * THE SAME FACT, ONE FILE AWAY (autopsy a7aa447c, 2026-09-29). An event-booking home page mapped
+ * `packages`, imported from `src/data/packages.ts` where it is `export const packages: EventPackage[] =
+ * [ … ]` — the app's own fixed catalogue. `boundToLiteral` only looks inside the page, so the list was
+ * judged data, flagged LIST_WITHOUT_EMPTY_STATE, and a paid repair pass (~40 s, three model calls) added
+ * an empty state to a list that can never be empty. Same class as the SignBridge Settings page, one import
+ * away. The import is followed ONLY to a module in the project map that EXPORTS the name bound to a
+ * literal array; anything it cannot resolve is judged exactly as before. PURE.
+ */
+function importedLiteral(content: string, before: string, pagePath: string, files: Readonly<Record<string, string>>): boolean {
+  const id = /\b([A-Za-z_$][\w$]*)\s*$/.exec(before)?.[1];
+  if (!id) return false;
+  const imp = new RegExp(`import\\s*\\{([^}]*)\\}\\s*from\\s*['"](\\.{1,2}/[^'"]+)['"]`, 'g');
+  let m: RegExpExecArray | null;
+  while ((m = imp.exec(content)) !== null) {
+    const spec = m[1].split(',').map((x) => x.trim()).find((x) => new RegExp(`^(?:type\\s+)?([\\w$]+)(?:\\s+as\\s+${id})?$`).test(x) && (x === id || x.endsWith(` as ${id}`)));
+    if (!spec) continue;
+    const exported = spec.split(/\s+as\s+/)[0].trim();
+    const dir = pagePath.includes('/') ? pagePath.slice(0, pagePath.lastIndexOf('/')) : '';
+    const parts = `${dir}/${m[2]}`.split('/');
+    const out: string[] = [];
+    for (const part of parts) {
+      if (!part || part === '.') continue;
+      if (part === '..') out.pop(); else out.push(part);
+    }
+    const base = out.join('/');
+    const candidates = [base, ...['.ts', '.tsx', '.js', '.jsx'].flatMap((e) => [base + e, `${base}/index${e}`])];
+    const target = candidates.find((c) => typeof files[c] === 'string');
+    if (!target) return false;
+    return new RegExp(`\\bexport\\s+const\\s+${exported}\\s*(?::[^=\\n]{1,120})?=\\s*\\[`).test(files[target]);
+  }
+  return false;
+}
+
+export function rendersDataList(content: string, pagePath = '', files: Readonly<Record<string, string>> = {}): boolean {
   const re = /\.map\s*\(/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) {
@@ -163,7 +197,8 @@ export function rendersDataList(content: string): boolean {
       /\b[A-Z][A-Z0-9_]{1,}\s*$/.test(before)
       || /\]\s*$/.test(before)
       || /\bObject\.(?:keys|values|entries)\(\s*[A-Z][A-Z0-9_]{1,}\s*\)\s*$/.test(before)
-      || boundToLiteral(content, before);
+      || boundToLiteral(content, before)
+      || importedLiteral(content, before, pagePath, files);
     const rendersOptions = /^\.map\s*\([^]*?<option\b/.test(after) && !/<(?:li|tr|article|section|div)\b/.test(after.slice(0, after.search(/<option\b/)));
     if (!staticReceiver && !rendersOptions) return true;
   }
@@ -176,7 +211,7 @@ export function rendersDataList(content: string): boolean {
  * The thresholds are deliberately forgiving: this must fire on "a wall of bare divs", not on a page
  * that happens to style four of its six elements.
  */
-export function analyzePage(path: string, content: string): PageFinding | null {
+export function analyzePage(path: string, content: string, files: Readonly<Record<string, string>> = {}): PageFinding | null {
   if (!isPageFile(path)) return null;
   // Styled another way entirely — nothing here can judge it, and guessing would be a false positive.
   if (ALTERNATIVE_STYLING_RE.some((re) => re.test(content))) return null;
@@ -203,7 +238,7 @@ export function analyzePage(path: string, content: string): PageFinding | null {
 
   // 4. A list with no empty state. A blank panel reads as BROKEN to a first-time user, who sees the
   //    app on its emptiest day — the day they sign up.
-  const rendersList = rendersDataList(content);
+  const rendersList = rendersDataList(content, path, files);
   const hasEmptyState = /nb-empty|length\s*===\s*0|length\s*<\s*1|!\w+(\.\w+)*\.length|\blength\s*\?/.test(content);
   if (rendersList && !hasEmptyState) defects.push('LIST_WITHOUT_EMPTY_STATE');
 
@@ -292,7 +327,7 @@ export function analyzeDesignCoverage(files: Record<string, string>): DesignCove
     if (ALTERNATIVE_STYLING_RE.some((re) => re.test(content))) continue;
     if (countHtmlElements(content).total < 6) continue;
     pagesExamined++;
-    const finding = analyzePage(path, content);
+    const finding = analyzePage(path, content, files);
     if (finding) findings.push(finding);
   }
 

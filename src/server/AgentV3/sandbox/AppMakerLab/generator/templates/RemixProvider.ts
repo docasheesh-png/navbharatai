@@ -131,6 +131,9 @@ export class RemixProvider implements ITemplateProvider {
       'vite.config.ts': VITE_CONFIG,
       'app/root.tsx': ROOT_TSX,
       'app/routes/_index.tsx': INDEX_TSX,
+      // tsconfig's `include` names this file and nothing wrote it, so Remix's and Vite's types were
+      // never loaded (autopsy a7aa447c, sibling of the missing src/vite-env.d.ts).
+      'env.d.ts': '/// <reference types="@remix-run/node" />\n/// <reference types="vite/client" />\n',
     };
   }
 }

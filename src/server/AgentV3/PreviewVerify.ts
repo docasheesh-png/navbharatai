@@ -99,6 +99,32 @@ export function splitPaintMarker(stdout: string): { painted?: boolean; html: str
 }
 
 /** Strip scripts/styles/tags to the visible text, so we can tell a real UI from an empty shell. */
+/**
+ * 🔴 OUR OWN ERROR SCREEN IS NOT THE APP (autopsy 6a4a799f, 2026-09-29).
+ *
+ * Every Vite React app this platform scaffolds ships `src/ErrorBoundary.tsx` (scaffoldBoilerplate.ts —
+ * restored verbatim if a model breaks it). When the app crashes, React shows THAT component's fallback:
+ * a heading "Something went wrong", the error message, and a "Try again" button. It is real text on a
+ * painted page, so nothing below this line could tell it from an app — and a music app stuck in an
+ * infinite render loop ("Maximum update depth exceeded") was saved as the build's LAST KNOWN GOOD
+ * (`IN_BUILD_GREEN`, "Your app rendered — this working version is now protected"). Every later verdict
+ * then read "rendered, but with console errors" as "could not be checked" rather than "broken", so the
+ * end-of-build guard told the admin the app "could not be opened" about an app that had been opened,
+ * and had crashed, twice.
+ *
+ * The match is the fallback's OWN structure — heading, message paragraph, then the button — not the
+ * words alone, so an app's designed error card ("Something went wrong. Try again" for a failed fetch)
+ * is never mistaken for a crash. Returns the error message the screen shows, or null. PURE.
+ */
+const SCAFFOLD_CRASH_SCREEN = /<h1\b[^>]*>\s*Something went wrong\s*<\/h1>\s*<p\b[^>]*>([\s\S]{0,800}?)<\/p>\s*<button\b[^>]*>\s*Try again\s*<\/button>/i;
+
+export function scaffoldCrashScreen(html: string): string | null {
+  const m = SCAFFOLD_CRASH_SCREEN.exec(String(html || ''));
+  if (!m) return null;
+  const msg = visibleText(m[1]).slice(0, 200);
+  return msg || 'an error with no message';
+}
+
 function visibleText(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -246,6 +272,13 @@ export function analyzePreviewHtml(html: string, capture: PreviewCaptureContext 
     // Return IMMEDIATELY and say what this is. Nothing else in this function can tell us anything
     // about an app we never reached, and the caller must restart a process rather than rewrite code.
     return { rendered: false, serverDown: true, problems: [hostError] };
+  }
+
+  // The app crashed into our scaffold's error boundary — positive evidence, so it is judged even on a
+  // capture that could not otherwise see the app. See `scaffoldCrashScreen`.
+  const crashed = scaffoldCrashScreen(h);
+  if (crashed) {
+    problems.push(`the app crashed and is showing its error screen instead of the app ("${crashed}")`);
   }
 
   if (problems.length === 0 && h.length < 40) {

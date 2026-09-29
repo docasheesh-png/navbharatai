@@ -1,3 +1,4 @@
+import { VITE_ENV_DTS_PATH, VITE_ENV_DTS_CONTENT } from '../../../../viteEnvTypes';
 import { packageJson, viteConfig, tsconfig, tsconfigBuild, tsconfigNode, indexHtml, mainTsx, appTsx, errorBoundaryTsx, indexCss } from './ViteReactProviderContents';
 
 export interface ITemplateProvider {
@@ -31,6 +32,10 @@ export class ViteReactProvider implements ITemplateProvider {
       'src/index.css': indexCss,
       'src/App.tsx': appTsx,
       'src/ErrorBoundary.tsx': errorBoundaryTsx,
+      // Vite's client types — without them the first file that reads `import.meta.env` (a payment key,
+      // an API base URL) fails the typecheck and the model has to discover and write this line itself
+      // (autopsy a7aa447c: the first Razorpay file). See viteEnvTypes.ts.
+      [VITE_ENV_DTS_PATH]: VITE_ENV_DTS_CONTENT,
     };
   }
 }

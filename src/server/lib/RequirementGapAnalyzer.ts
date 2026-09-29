@@ -326,7 +326,11 @@ const NON_DOMAIN_USES: RegExp[] = [
   // "Resume playback" and "Pause/resume" made it a jobs app, and the builder of "Blue Berry" was told to
   // INCLUDE employer & candidate roles and interview scheduling). "upload your resume" keeps its meaning.
   /\bresum(?:e|es|ed|ing)\s+(?:playback|playing|play|music|songs?|tracks?|audio|video|videos|media|podcasts?|episodes?|downloads?|uploads?|streams?|streaming|listening|watching|reading|progress|sessions?|timers?|the\s+(?:song|track|video|download|timer))\b/gi,
-  /\b(?:pause|play)\s*(?:\/|and|&|or|,)\s*resume\b|\bresume\s*(?:\/|and|&|or|,)\s*pause\b/gi,
+  // The separator is OPTIONAL (autopsy e7baf61d, 2026-09-29): a JEE study planner listed its timer's
+  // controls one per line — "Start\nPause\nResume\nFinish" — which no separator in the list above could
+  // match, and the build was handed employer & candidate roles and job postings to INCLUDE. A control
+  // word written on the line next to "resume" is the same player control as one written beside it.
+  /\b(?:pause|play|start|stop)\s*(?:\/|and|&|or|,)?\s*resume\b|\bresume\s*(?:\/|and|&|or|,)?\s*(?:pause|finish|stop|end|restart|reset)\b/gi,
   // ANY domain — a CODE CALL written into the prompt is an identifier, never a noun. A spec that lists an
   // API ("speak(text, language) stop() pause() resume()") read as a jobs app off `resume()` (autopsy
   // SignBridge, 2026-09-26) — and the builder of a sign-language translator was told to INCLUDE employer
@@ -409,6 +413,11 @@ const NON_DOMAIN_USES: RegExp[] = [
   /\b(?:support|help.?desk|bug|issue|jira|trouble|service)\s+tickets?\b/gi,
   /\b(?:read|reading|reads|write|writing|wrote|buy|buying|sell|selling|borrow|lend|shelf|library|audio|e-?)\s+books?\b/gi,
   /\bbooks?\s+(?:i'?ve|i\s+have|i\s+read|on\s+my\s+shelf)\b/gi,
+  // booking — a book a student STUDIES from (autopsy e7baf61d, 2026-09-29): a JEE planner tracking
+  // "Book Progress", "Reference Book" and "Books Completed" across NCERT and HC Verma was read as a
+  // booking app, and would have been told to include payments, deposits and a cancellation policy.
+  /\b(?:reference|text|study|course|note|exercise|work|practice|question|guide|school|college|coaching|revision)\s*-?\s*books?\b/gi,
+  /\bbooks?\s+(?:progress|completed|finished|solved|read|chapters?|summar(?:y|ies)|notes|tracker|tracking|list|wise)\b/gi,
 ];
 
 /**
@@ -426,8 +435,16 @@ export function stripNonDomainUses(text: string): string {
   // "if the project uses Expo, configure EAS" has no construction of its own to match. Conditional on
   // THAT evidence, never a bare-word strip: without it, "expo" keeps its meaning.
   if (REACT_NATIVE_CONTEXT.test(String(text || ''))) out = out.replace(/\bexpo\b/gi, ' ');
+  // Same shape for "book": in a prompt about STUDYING, a book is a textbook ("Each book should show
+  // Questions Solved" — autopsy e7baf61d), and no construction of its own marks it. Only the NOUN is
+  // stripped: "book a session", "book a slot" keep their booking meaning in any context.
+  if (STUDY_CONTEXT.test(String(text || ''))) out = out.replace(STUDY_BOOK_NOUN, ' ');
   return out;
 }
+
+/** Evidence that the prompt is about studying, so a bare "book" is a textbook (autopsy e7baf61d). */
+const STUDY_CONTEXT = /\b(?:syllabus|ncert|jee|neet|upsc|cbse|icse|pyqs?|chapters?\s+(?:tracker|completed|wise|list)|study\s+(?:hours?|sessions?|timer|plan|planner|tracker)|exam\s+prep(?:aration)?|revision\s+(?:schedule|system|reminders?))\b/i;
+const STUDY_BOOK_NOUN = /\bbooks?\b(?!\s+(?:a|an|the|your|my|now|online|appointments?|slots?|sessions?|tickets?|tables?|rooms?|seats?|classes?|tutors?|demos?)\b)/gi;
 
 /** Evidence that "Expo" in this prompt is the React Native toolchain (autopsy 0d297b25). */
 const REACT_NATIVE_CONTEXT = /\breact[\s-]?native\b|\beas\.json\b|\beas\s+(?:build|submit|update|cli)\b|\bconfigure\s+eas\b/i;
@@ -532,6 +549,16 @@ export function analyzeRequirementGaps(prompt: string): RequirementGaps {
     i18n: /language|hindi|hinglish|translat|locale|i18n|multilingual|regional/i.test(text),
   };
 
+  // 🔒 AN APP THE USER DECLARED SINGLE-PERSON HAS NO SECOND PARTY (autopsy e7baf61d, 2026-09-29). A JEE
+  // study planner said "No account required" and "Everything stored locally"; the domain list then
+  // proposed student / teacher / admin roles, enrolment and fees — every one of which needs a second
+  // person and a server the user had just ruled out. The domain is still NAMED (reports read it); only
+  // the features and questions it would have ADDED are withdrawn, because the user already answered them.
+  if (declaresSinglePersonApp(original)) {
+    likelyMissing.length = 0;
+    return { domain: domain ? domain.key : 'general', mentioned, likelyMissing, nonFunctional, india: detectIndiaContext(original), clarifyingQuestions: [] };
+  }
+
   // Ask about the highest-value missing pieces first (cap at 6 so we never over-ask — the admin's rule).
   const clarifyingQuestions: string[] = [];
   for (const label of likelyMissing.slice(0, 4)) clarifyingQuestions.push(`Does it need ${label}?`);
@@ -547,6 +574,21 @@ export function analyzeRequirementGaps(prompt: string): RequirementGaps {
     india: detectIndiaContext(original),
     clarifyingQuestions: clarifyingQuestions.slice(0, 6),
   };
+}
+
+/**
+ * Did the user declare an app for ONE person — no accounts AND data kept on the device? PURE.
+ *
+ * Both halves are required, on purpose. "No login needed for customers" alone is a business choosing a
+ * frictionless storefront, which still takes payments; "stored locally" alone is a caching remark. Together
+ * they rule out every feature that needs a second party (roles, payments, enrolment, employers), because
+ * there is nowhere for a second party's data to go.
+ */
+export function declaresSinglePersonApp(prompt: string): boolean {
+  const t = String(prompt || '');
+  const noAccount = /\bno\s+(?:user\s+)?(?:accounts?|log\s?-?ins?|sign\s?-?ups?|registration|auth(?:entication)?)\b(?:\s+(?:is\s+)?(?:required|needed|necessary))?|\bwithout\s+(?:an?\s+)?(?:accounts?|log\s?-?in|sign(?:ing)?\s?-?(?:up|in)|registration)\b|\b(?:accounts?|log\s?-?in|sign\s?-?up)\s+(?:is\s+)?not\s+(?:required|needed)\b/i;
+  const localOnly = /\b(?:everything|all\s+(?:the\s+)?data|all\s+data|data)\s+(?:is\s+|will\s+be\s+)?(?:stored|saved|kept)\s+(?:locally|on\s+(?:the\s+|my\s+)?(?:device|phone))\b|\boffline\s+(?:database|storage|only)\b|\blocal[- ]only\b|\bstored\s+locally\b/i;
+  return noAccount.test(t) && localOnly.test(t);
 }
 
 /** Whether the analyzed gaps are worth surfacing — a real domain was detected AND there is something
@@ -568,6 +610,9 @@ export function missingDomainFeatures(appText: string, source: string): { domain
   const text = stripNonDomainUses(String(appText || ''));
   const src = String(source || '');
   const domain = selectDomain(text);
+  // The same single-person rule as `analyzeRequirementGaps`: the suggestion bulb must not offer roles or
+  // payments to an app its user declared has no accounts and keeps its data on the device.
+  if (declaresSinglePersonApp(String(appText || ''))) return { domain: domain ? domain.key : 'general', labels: [] };
   const feats = domain ? domain.features : GENERIC_FEATURES;
   const labels = feats.filter((f) => !f.re.test(src) && !f.re.test(text)).map((f) => f.label);
   return { domain: domain ? domain.key : 'general', labels };

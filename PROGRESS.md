@@ -83758,6 +83758,39 @@ Admin: Teacher AI → Exam mode → Settings → the language dropdown *"bas 1 s
 - Test: `tests/aDialogKeepsTheFocusItIsGiven.test.ts` (also fails if any component moves focus in an
   effect keyed on `onClose` again).
 
+## 2026-09-29 — Autopsy a7aa447c: event-booking app (Weak tier, KIMI rung 2, 11 min, green)
+
+**Ledger.** ✅ self-healed 3 (write-time typecheck caught `import.meta.env` → model wrote `vite-env.d.ts`;
+`vitest` missing → model installed it; mixed `@/` vs relative imports normalized) · 🔀 workaround 0 ·
+⏭️ skipped 2 (user journey not reached — the booking form sits behind navigation; one explore control
+"Visit Office" timed out) · ❌ shipped imperfect 2 (payments are client-only Razorpay with no server-side
+verification, and bookings live in the customer's localStorage — the business never receives them; both are
+said honestly in the summary) · 🥵 struggle 3 (a typo'd `.node_modules/.bin/tsc | head` reported exit 0 and
+cost two steps; a 16 s install inside the first write's typecheck; a ~40 s design repair on a list that
+can never be empty).
+
+**Fixed at the class (this change):**
+- **Starter templates had no `src/vite-env.d.ts`** (ViteReact, Vue, Vanilla-TS), and Remix's tsconfig named
+  an `env.d.ts` nothing wrote. The first file reading `import.meta.env` always failed its typecheck. All ship
+  it now, and the test asserts every Vite + TS starter passes `missingViteEnvTypes`.
+- **`generate_tests` wrote a Vitest file into a project without Vitest.** It now declares
+  `vitest@^5.0.1` (the repo's own range, test-locked) in devDependencies before writing the test.
+- **The `evaluate` tool could not read the render proof**, so its confidence ALWAYS said "Nothing here was
+  ever proven to RUN — no preview" — to the builder 2 s after the app rendered, and to the reviewer 47 s
+  after `APP_RENDERED` (which then reported 58% confidence on a working app). `BuildDiagnostics.record` now
+  notes a render proof per workspace (cleared when a build's diagnostics are created) and `evaluate` passes
+  `runtimeProven: 'passed'` from it.
+- **LIST_WITHOUT_EMPTY_STATE followed no imports**: `packages` was an exported literal array in
+  `src/data/packages.ts`, so a repair pass added an empty state to a fixed catalogue. The rule now follows a
+  relative import to a module in the project map that exports the name as a literal array.
+- Test: `tests/theEventBookingAutopsy.test.ts` (18 cases).
+
+**Open, not fixed here:**
+- A shell pipeline's exit status is its LAST command's, so `missing-binary | head` reads exit 0. Turning on
+  `pipefail` for the bash tool would change every command's reported status — its own decision.
+- The journey check cannot reach a form behind state-routed navigation (the existing open item for lane B).
+- A generated payments app with no server verification: the builder should be steered to a server-side
+  order + signature check (or an honest "test mode only" banner) — a prompt/contract change, not done here.
 ## 2026-09-29 — Autopsy 4499741f (MP3 music player, weak tier, 18.8 min, billed ₹328.77)
 
 A plain-JavaScript music player (index.html + style.css + script.js, YouTube links only through an
@@ -83851,6 +83884,49 @@ both (asked directly). While mapping the path, the real root cause surfaced:
 - ⚠️ **OPEN, the admin's decision:** the other 56 (OTP, PDF, file upload, email, SMS, QR, write_files_batch…).
   Offering all of them adds ~50 tool schemas to every call; a single "recipe" tool that dispatches by name
   would keep the tool list short. Not decided here.
+## 2026-09-29 — Autopsy e7baf61d ("Crest" JEE study planner, Weak tier, KIMI rung 2, 20.6 min, green, billed ₹490.33)
+
+A 175-line spec written one item per line, for a single-person app ("No account required",
+"Everything stored locally"). The app rendered at 601 s and ended YELLOW (no journey reached).
+
+**Ledger.** ✅ self-healed 4 (9 undefined CSS classes; 4 pages with no empty state; a placeholder
+`alert('… coming soon')` that the design repair ITSELF introduced, caught by the readiness gate and
+resumed; two tsc errors at write time) · 🔀 workaround 0 · ⏭️ skipped 3 (3 journeys unreachable — the
+forms sit behind "New Goal" / "Add Chapter" toggles; the lean review timed out with nothing; two
+post-green writes to `src/types.ts` by an unnamed writer, refused) · ❌ shipped imperfect 3 (a
+"Reviews & Ratings" page nobody asked for; Mock Test Tracker, Daily Reflection and Weekly Review have no
+screen and the summary still said "the full JEE preparation app you described"; react-router 6.26.1
+pinned from memory with 2 advisories) · 🥵 struggle 4 (ETA 5–11 min vs 20.6; "11 of 12 steps done · ~1
+min to go" at minute 4; the post-answer design pass took 406 s and wandered into our own sw.js and
+notifications.ts; 114 model calls, one file per call).
+
+**Fixed at the class (this change), locked in `tests/theJeePlannerAutopsy.test.ts` (reversion-proven per file):**
+- **"Start\nPause\nResume\nFinish" → JOBS.** The pause/resume idiom from #3381 required a separator; a
+  line break is one too now, with start/stop/finish neighbours. The build had been told to INCLUDE
+  employer & candidate roles and job postings.
+- **"Each book should show" → BOOKING**, then education proposing roles, enrolment and fees. Study
+  books are stripped (constructions, and any bare noun "book" in a study prompt; "book a slot" keeps
+  its meaning), and an app that declares BOTH no accounts AND device-only data gets no second-party
+  features proposed — in the build guidance and the suggestion bulb (`declaresSinglePersonApp`).
+- **"Weekly Review" → "reviews / ratings — build every one of these".** Periodic, self, progress and
+  code reviews are a report, not a star rating (`notRequest`).
+- **Our own sw.js failed our own authenticity scan** (`.catch(() => {})` ×2), and `evaluate` told the
+  builder the app still had placeholder code. Each ignore now says why; every generated default and the
+  E2E starter are run through the scan in CI.
+- **The phone-plugin brief's "EXACT versions" leaked** into every package and into the user summary
+  ("the exact versions you asked for"). It now says the pins are the platform's and only for those plugins.
+
+**Open — for the admin, not changed here:**
+- 🔴 **A spec written one item per line counts as ZERO features.** `countEnumeratedFeatures` reads
+  bullets and comma runs; this 175-line prompt scored 0, so Software Project Mode and the mega-roadmap
+  never saw a 17-module request, and three modules were dropped without a word. Counting plain lines
+  would send prompts like this one into Project Mode — a routing change, raised with the admin.
+- The requested-feature contract names only a fixed generic catalogue (dashboard, calendar, charts), so
+  a spec's own modules (Mock Test Tracker, Daily Reflection) are never restated to the builder nor
+  checked at the end — which is why the summary could claim the whole spec.
+- Journey check cannot reach a form behind a toggle button (the known lane-B open item).
+- An unnamed writer touched `src/types.ts` twice after the app was green (refused by the freeze).
+- The design repair runs as a full builder with the readiness resume: 406 s after a green app.
 ## 2026-09-29 — Weak's plan rung leaves Nemotron; its judge stays (admin: "B bana do")
 
 - **Why:** autopsy 6a4a799f. Both Nemotron Ultra planner answers on a Weak build were unusable. The roadmap was unreadable after 120 s. The module decomposition hit the 300 s stream cap and was cut off. Together they cost 7 of the build's 24 minutes.

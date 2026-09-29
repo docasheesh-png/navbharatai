@@ -104,7 +104,16 @@ const FEATURES: FeatureSpec[] = [
   // reasonable alternate name still counts — the module stays high-precision, not nagging.
   { label: 'file / image upload', request: /\b(upload|file upload|image upload|attach(ment)?)\b/i, artifact: /(upload|dropzone|filepicker|attach)/i, evidence: /type\s*=\s*["'{]\s*file\b|\bnew FormData\(|\bmulter\(|\.files\[0\]/i },
   { label: 'calendar / booking / appointment', request: /\b(calendar|booking|appointment|schedul(e|ing)|reservation)\b/i, artifact: /(calendar|booking|appointment|schedul|reservation|datepicker)/i },
-  { label: 'reviews / ratings', request: /\b(review|reviews|rating|ratings)\b/i, artifact: /(review|rating|star)/i },
+  {
+    label: 'reviews / ratings',
+    request: /\b(review|reviews|rating|ratings)\b/i,
+    // A review of one's OWN work over a period is a report, not a star rating (autopsy e7baf61d,
+    // 2026-09-29): a JEE planner's "Weekly Review — every Sunday, hours studied, weak areas" was handed to
+    // the builder as "reviews / ratings — build every one of these", and it built a star-rating page
+    // nobody asked for. "product reviews", "ratings and reviews", "customer reviews" keep their meaning.
+    notRequest: /\b(?:daily|nightly|weekly|monthly|quarterly|yearly|annual|sunday|weekend|periodic|self|progress|performance|code|pull[- ]request|pr|peer|design|mid[- ]?term|end[- ]of[- ](?:day|week|month|year))\s*-?\s*reviews?\b|\breviews?\s+(?:of\s+(?:the\s+|my\s+|your\s+)?(?:day|week|month|year|progress|mistakes|goals)|(?:every|each)\s+(?:day|night|week|sunday|month))\b/gi,
+    artifact: /(review|rating|star)/i,
+  },
   { label: 'comments', request: /\bcomments?\b/i, artifact: /(comment|discuss|reply|replies)/i },
   { label: 'wishlist / favorites', request: /\b(wishlist|favou?rites?|saved items?|bookmarks?)\b/i, artifact: /(wishlist|favou?rite|saved|bookmark)/i, evidence: /\b(?:toggleFavou?rite|isFavou?rite|addToWishlist|toggleBookmark)\b/i },
   // "Map recognized labels to the sign dictionary" is the VERB (SignBridge, 2026-09-26). Read as a request

@@ -160,6 +160,37 @@ export function planAutoTests(
 }
 
 /**
+ * The Vitest range a generated test is declared against. It is this repository's own range, which runs on
+ * the same Vite major the app template ships (vitest 5 supports vite ^6 || ^7 || ^8); a test asserts the
+ * two stay equal, so the pin cannot drift from a version we actually run.
+ */
+export const VITEST_RANGE = '^5.0.1';
+
+/**
+ * THE MODEL ASKED FOR TESTS, SO THE TESTS MUST BE ABLE TO RUN (autopsy a7aa447c, 2026-09-29).
+ *
+ * `generate_tests` wrote `src/utils/booking.test.ts`, which imports `vitest`, into a project that did not
+ * declare it. The very next write-time typecheck said `TS2307 Cannot find module 'vitest'`, and the model
+ * spent a step and an install discovering what the tool already knew. Unlike the starter skeletons (which
+ * nobody asked for, and are therefore only written where vitest already is — `testSkeletonsCanRun`), this
+ * tool is called BY the builder for tests it wants, so the honest fix is to declare the runner with them.
+ *
+ * Returns the new package.json text with `devDependencies.vitest` set, or null when it is already declared
+ * (in any section) or the file cannot be read — never a guess written over a file we could not parse. PURE.
+ */
+export function withVitestDeclared(packageJson: string | null | undefined): string | null {
+  if (packageJson == null) return null;
+  let pkg: Record<string, unknown>;
+  try { pkg = JSON.parse(packageJson) as Record<string, unknown>; } catch { return null; }
+  if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) return null;
+  const has = (k: string) => { const sec = pkg[k]; return !!sec && typeof sec === 'object' && 'vitest' in (sec as object); };
+  if (has('dependencies') || has('devDependencies') || has('peerDependencies') || has('optionalDependencies')) return null;
+  const dev = (pkg.devDependencies && typeof pkg.devDependencies === 'object' ? pkg.devDependencies : {}) as Record<string, string>;
+  pkg.devDependencies = { ...dev, vitest: VITEST_RANGE };
+  return `${JSON.stringify(pkg, null, 2)}\n`;
+}
+
+/**
  * CAN A TEST SKELETON EVEN RUN HERE? Only when the project declares `vitest` (autopsy eed79815).
  *
  * `testSkeletonsCannotBreakTheBuild` answered a narrower question — the RELEASE build — and the golden

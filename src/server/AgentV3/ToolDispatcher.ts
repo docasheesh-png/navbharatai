@@ -175,6 +175,8 @@ import { generateOpenApi, type RouteSpec } from '../lib/OpenApiGenerator';
 import { generateApiDocs, type RouteDoc } from '../lib/DocGenerator';
 import { generateDevGuide, type DevGuideScript } from '../lib/DeveloperGuideGenerator';
 import { generateUnitTest, type FunctionDef } from '../lib/TestSkeletonGenerator';
+import { withVitestDeclared, VITEST_RANGE } from './TestGenerationAgent';
+import { renderSeenThisBuild } from './renderProof';
 import { generateIntegrationTests } from '../lib/IntegrationTestGenerator';
 import { addDependency, removeDependency as removeOneDependency, listDependencies } from './packageEdit';
 import { planE2eScaffold, e2eScaffoldSummary } from './e2eScaffold';
@@ -4407,6 +4409,9 @@ export class ToolDispatcher {
           envVarsMissing: envIssues.filter((e) => e.severity === 'high').length,
           accessibility: tally(a11yIssues),
           compliance: complianceTally,
+          // A render this build proved in a real browser (autopsy a7aa447c). Absent ⇒ unknown, exactly as
+          // before — never "failed": not having looked is not evidence against the app.
+          ...(renderSeenThisBuild(this.workspaceId) ? { runtimeProven: 'passed' as const } : {}),
         });
         // GA-16 — N+1 query anti-pattern (a DB query per loop iteration). Advisory-only; async (ts-morph).
         const queryPatternLine = queryPatternSummary(await analyzeQueryPatterns(snap.sources).catch(() => []));
@@ -4760,11 +4765,25 @@ export class ToolDispatcher {
         } catch {
           kind = 'create';
         }
+        // Declare the runner BEFORE the test lands, so the write-time typecheck that follows the test
+        // already sees `vitest` (its script reinstalls when package.json is newer than node_modules).
+        let declaredVitest = false;
+        try {
+          const pkgBefore = await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => null);
+          const pkgAfter = withVitestDeclared(pkgBefore);
+          if (pkgAfter) {
+            await this.actuator.writeFile(this.workspaceId, 'package.json', pkgAfter);
+            this.state?.recordFileChange({ path: 'package.json', kind: 'modify' }, agent);
+            this.onFileWrite?.('package.json', pkgAfter);
+            declaredVitest = true;
+          }
+        } catch { /* the test is still written; the typecheck then names the missing module honestly */ }
         await this.actuator.writeFile(this.workspaceId, path, content);
         this.state?.recordFileChange({ path, kind }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, content);
         this.scheduleCheckpoint(`${kind} ${path}`);
-        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — Vitest skeleton for ${functions.length} function(s). Fill in the TODO assertions to verify real behaviour.`;
+        return `${kind === 'create' ? 'Created' : 'Updated'} ${path} — Vitest skeleton for ${functions.length} function(s). Fill in the TODO assertions to verify real behaviour.`
+          + (declaredVitest ? ` Added vitest@${VITEST_RANGE} to devDependencies so the test can run (it installs on the next typecheck or \`npm install\`).` : '');
       }
 
       case 'generate_integration_tests': {

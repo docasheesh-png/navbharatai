@@ -146,6 +146,36 @@ export function renderProvenByAnyActor(
   return false;
 }
 
+/**
+ * 🔴 THE TOOLS COULD NOT READ THE LEDGER (autopsy a7aa447c, 2026-09-29). The render proof lives on the
+ * build's `BuildDiagnostics`, which only the route holds. The `evaluate` tool — the one the builder and the
+ * reviewer both call to ask "how confident are we?" — never received it, so `computeBuildConfidence` saw
+ * `runtimeProven: unknown` on EVERY build and told both of them *"Nothing here was ever proven to RUN — no
+ * preview"*: once 2 s after the app rendered in a real browser, and again 47 s after `APP_RENDERED`. The
+ * reviewer repeated that as a 58% confidence verdict on a working app.
+ *
+ * So the ledger's write door also notes it here, per workspace, and a build's own diagnostics clears it
+ * when the build starts — a render proven by an EARLIER build is not evidence about this one. Only
+ * `BuildDiagnostics` writes it (from `record`, the one door every proof already goes through), so this is
+ * not a second producer of the fact; it is the same write made readable to the tools.
+ */
+const renderSeenByWorkspace = new Map<string, number>();
+
+/** Called by `BuildDiagnostics.record` when a render-proof code is recorded. */
+export function noteRenderSeen(workspaceId: string, at: number = Date.now()): void {
+  if (workspaceId) renderSeenByWorkspace.set(workspaceId, at);
+}
+
+/** Called when a build's diagnostics are created: this build has proven nothing yet. */
+export function forgetRenderSeen(workspaceId: string): void {
+  if (workspaceId) renderSeenByWorkspace.delete(workspaceId);
+}
+
+/** Has a real browser seen this workspace's app render during the current build? */
+export function renderSeenThisBuild(workspaceId: string): boolean {
+  return !!workspaceId && renderSeenByWorkspace.has(workspaceId);
+}
+
 /** Shape matches `BuildDiagnostics.record`'s `BuildIssue`; structural, to avoid a circular import. */
 export interface RenderProofRecord {
   phase: 'preview';

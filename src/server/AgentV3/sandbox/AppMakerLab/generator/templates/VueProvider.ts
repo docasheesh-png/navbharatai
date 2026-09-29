@@ -1,4 +1,5 @@
 import { DESIGN_KIT_CSS } from './designKit';
+import { VITE_ENV_DTS_PATH, VITE_ENV_DTS_CONTENT } from '../../../../viteEnvTypes';
 import { ITemplateProvider } from './ViteReactProvider';
 
 const PKG = JSON.stringify({
@@ -107,6 +108,10 @@ export class VueProvider implements ITemplateProvider {
       'src/index.css': DESIGN_KIT_CSS,
       'src/main.ts': `import './index.css';\n` + MAIN_TS,
       'src/App.vue': APP_VUE,
+      // Vite's client types — without them the first file that reads `import.meta.env` (a payment key,
+      // an API base URL) fails the typecheck and the model has to discover and write this line itself
+      // (autopsy a7aa447c: the first Razorpay file). See viteEnvTypes.ts.
+      [VITE_ENV_DTS_PATH]: VITE_ENV_DTS_CONTENT,
     };
   }
 }

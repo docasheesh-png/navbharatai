@@ -18406,7 +18406,8 @@ async function noteBuildOutcome(
           const restoreKitRules = async (files: Record<string, string>, when: 'before-repair' | 'after-repair'): Promise<void> => {
             try {
               const patch = kitRestorePatch(files);
-              if (!patch || abort.signal.aborted) return;
+              // Never on a read-only import/survey turn: there, the user's files are theirs, untouched.
+              if (!patch || abort.signal.aborted || isImportTurn || !expectsArtifacts) return;
               const wrote = await runInPass('design-consistency-heal', () => writeUnlessFrozen(() => actuator.writeFile(workspaceId, patch.path, patch.content)));
               if (!wrote) return;
               writtenFiles.set(patch.path, patch.content);

@@ -225,6 +225,9 @@ describe('the route — the restore runs in BOTH lanes, before and after the rep
   it('a design-only repair that leaves classes unstyled is reported, not called healed', () => {
     expect(ROUTE).toMatch(/After the design repair: \$\{undefinedClassesNote\(leftAfterDesign\)\}/);
   });
+  it('never writes on a read-only import/survey turn', () => {
+    expect(ROUTE).toMatch(/if \(!patch \|\| abort\.signal\.aborted \|\| isImportTurn \|\| !expectsArtifacts\) return;/);
+  });
   it('the fast lane restores before its own CSS check', () => {
     const i = ROUTE.indexOf('const patch = kitRestorePatch(project);');
     const j = ROUTE.indexOf('const cssErr = cssConsistencyError(project);');

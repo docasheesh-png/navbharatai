@@ -24,16 +24,22 @@ describe('₹475 — "isse 1 paisa jyada nahi", enforced against the TOTAL', () 
     expect(rupees(MAX_ACQUISITION_COST_TOKENS)).toBe(475);
   });
 
-  it('🔴 A TUNABLE CANNOT RAISE ITS OWN CEILING — the whole point of the cap', () => {
-    // 4 steps × ₹100 = ₹400 holds only while REFERRAL_STEP_TOKENS is 100. Set it to 200 in a console
-    // and the same four steps would pay ₹800 with nothing objecting.
-    const env = { REFERRAL_REWARDS: 'on', REFERRAL_STEP_TOKENS: String(200 * TOKENS_PER_RUPEE) };
+  it('🔴 THE CEILING IS ENFORCED AGAINST WHAT WAS RECEIVED, not assumed from the step prices', () => {
+    // "₹50 + ₹100 + ₹50 + ₹100 + ₹100 = ₹400" is arithmetic about a table; an account that was given
+    // money under an EARLIER table (₹100 for the Gmail login, say) must still stop at ₹400.
+    const env = { REFERRAL_REWARDS: 'on' };
     const atCeiling = decideSelfReward({
-      step: 'email', alreadyPaidSteps: [], deviceVerified: true, platform: 'android',
-      alreadyGiftedTokens: 300 * TOKENS_PER_RUPEE, env,
+      step: 'github', alreadyPaidSteps: [], deviceVerified: true, platform: 'android',
+      alreadyGiftedTokens: 350 * TOKENS_PER_RUPEE, env,
     });
-    // ₹300 already given, ₹200 wanted → only ₹100 of room remains.
-    expect(rupees(atCeiling.tokens)).toBe(100);
+    // ₹350 already given, ₹100 wanted → only ₹50 of room remains.
+    expect(rupees(atCeiling.tokens)).toBe(50);
+  });
+
+  it('REFERRAL_STEP_TOKENS is no longer read — a stale value in a console cannot re-price the plan', () => {
+    const env = { REFERRAL_REWARDS: 'on', REFERRAL_STEP_TOKENS: String(200 * TOKENS_PER_RUPEE) };
+    const r = decideSelfReward({ step: 'signup', alreadyPaidSteps: [], deviceVerified: true, platform: 'android', env });
+    expect(rupees(r.tokens)).toBe(50);
   });
 
   it('the REFERRER side is capped by the same rule, and by its own tunable', () => {

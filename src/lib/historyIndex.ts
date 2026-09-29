@@ -31,7 +31,8 @@ export interface HistoryIndexRow {
   id: string;
   title: string;
   lastUpdated: string;
-  uci?: string;
+  /** The user's own name for the chat (History → Rename). */
+  customTitle?: string;
   /** Mirrors the fields the filters read (`isV3Session` / `isProSession` / `isSdaSession`). */
   agent?: string;
   current_agent?: string;
@@ -44,6 +45,9 @@ export interface HistoryIndexRow {
   fileCount?: number;
   /** Message count, for the row's subtitle. The text itself is not kept. */
   messageCount?: number;
+  /** Did the USER ever write in this chat? The one fact History needs to hide a chat that never
+   *  started (lib/chatHistory.ts isEmptyConversation) — kept because the text itself is not. */
+  hasUserMessage?: boolean;
 }
 
 export const HISTORY_INDEX_KEY = 'navbharat_history_index_v1';
@@ -67,7 +71,7 @@ export function toIndexRow(session: Record<string, any>): HistoryIndexRow | null
     id,
     title: str(session?.title) || 'Untitled',
     lastUpdated: str(session?.lastUpdated),
-    uci: str(session?.uci) || undefined,
+    customTitle: str(session?.customTitle) || undefined,
     agent: str(session?.agent) || undefined,
     current_agent: str(session?.current_agent ?? session?.currentAgent) || undefined,
     original_agent: str(session?.original_agent ?? session?.originalAgent) || undefined,
@@ -76,6 +80,8 @@ export function toIndexRow(session: Record<string, any>): HistoryIndexRow | null
     isPinned: !!session?.isPinned,
     fileCount: files && typeof files === 'object' ? Object.keys(files).length : 0,
     messageCount: Array.isArray(messages) ? messages.length : 0,
+    hasUserMessage: [messages, session?.restoredMessages].some((list) =>
+      Array.isArray(list) && list.some((m: any) => m && m.sender === 'user')),
   };
 }
 

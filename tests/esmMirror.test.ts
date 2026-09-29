@@ -37,6 +37,28 @@ describe('rewriteAbsoluteImports', () => {
     expect(await rewriteAbsoluteImports(body)).toBe(body);
   });
 
+  // es-module-lexer 3 (the v2 -> v3 migration). v3 renamed every field (d/n/s/e -> type/specifier/start/
+  // end) and began reporting a template-literal dynamic import as a GLOB instead of "no specifier".
+  // These pin the behaviour the migration had to preserve, byte for byte.
+  it('does NOT rewrite a template-literal dynamic import — v3 reports it as a glob, v2 as nothing', async () => {
+    const body = 'const t=import(`/v135/${name}.mjs`);';
+    expect(await rewriteAbsoluteImports(body)).toBe(body);
+  });
+
+  it('rewrites a dynamic import that carries import attributes, keeping the options argument', async () => {
+    const body = "const j=import('/v135/data.json',{with:{type:'json'}});";
+    expect(await rewriteAbsoluteImports(body)).toBe('const j=import("/api/esm/v135/data.json",{with:{type:\'json\'}});');
+  });
+
+  it('rewrites every kind in one module exactly once, and leaves import.meta alone', async () => {
+    const body = 'import a from"/v135/a.mjs";export*from"/v135/b.mjs";export{y}from"/v135/y.mjs";'
+      + 'const m=import("/v135/c.mjs");const u=import.meta.url;';
+    expect(await rewriteAbsoluteImports(body)).toBe(
+      'import a from"/api/esm/v135/a.mjs";export*from"/api/esm/v135/b.mjs";export{y}from"/api/esm/v135/y.mjs";'
+      + 'const m=import("/api/esm/v135/c.mjs");const u=import.meta.url;',
+    );
+  });
+
   it('serves an unparseable body unmodified rather than corrupting it', async () => {
     const body = 'this is ] not javascript at all';
     expect(await rewriteAbsoluteImports(body)).toBe(body);

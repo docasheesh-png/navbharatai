@@ -67,7 +67,9 @@ describe('the two ways this breaks silently', () => {
     // Without this the chosen conversation loads UNDERNEATH a list still covering it: the user taps,
     // something happens, and they are looking at the same list.
     expect(src).toContain('closeAfter');
-    expect(src).toContain('onRestoreSession={closeAfter(onRestoreSession)}');
+    expect(src).toContain('onOpenSession={closeAfter(onOpenSession)}');
+    // "New chat" closes it too, so the fresh chat is in front rather than under the list.
+    expect(src).toContain('onNewChat={onNewChat ? closeAfter(onNewChat) : undefined}');
     expect(src).toContain('onOpenProfessional={closeAfter(onOpenProfessional)}');
   });
 

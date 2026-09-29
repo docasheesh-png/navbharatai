@@ -3,7 +3,7 @@ import { ImageLightbox } from '../chat/ImageLightbox';
 import { ComposerShell, COMPOSER_TEXTAREA_CLASS, COMPOSER_SEND_CLASS, COMPOSER_STOP_CLASS } from '../chat/ComposerShell';
 import { playTapTone } from '../../lib/tapTone';
 import { dismissKeyboardOnMobile } from '../../lib/dismissKeyboard';
-import { Bot, User, Send, Sparkles, Heart, Zap, ShieldCheck, Languages, ShieldAlert, CheckCircle2, Save, ChevronUp, ChevronDown, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, Clock, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Volume2 } from 'lucide-react';
+import { Bot, User, Send, Sparkles, Heart, Zap, ShieldCheck, Languages, ShieldAlert, CheckCircle2, Save, Lock, Eye, EyeOff, ExternalLink, AlertCircle, Check, Copy, ThumbsUp, ThumbsDown, MessageSquare, Maximize2, Minimize2, Mic, MicOff, X, Volume2 } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import { cn } from '../../lib/utils';
@@ -17,6 +17,7 @@ import { AgentProgress } from './AgentProgress';
 import { AppUpdateChatNotice } from '../AppUpdateChatNotice';
 import { ChatToolbar } from '../chat/ChatToolbar';
 import { MessageEditActions } from '../chat/MessageEditActions';
+import { ReportAiContent } from '../chat/ReportAiContent';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { filterMessages, enterShouldSend, searchActive } from '../../lib/chatToolbar';
 import { deleteMessage, editMessage } from '../../lib/chatMessageActions';
@@ -308,11 +309,6 @@ interface AIChatProps {
   onPreviewClick?: () => void;
   theme?: ThemeMode;
   userId?: string;
-  // UCI System extensions
-  activeUci?: string;
-  onRestoreUci?: (uci: string) => Promise<boolean>;
-  restoredMessages?: Message[];
-  memorySummary?: string;
   wallet?: any;
   onGoToMain?: () => void;
   onAttachmentsChange?: (files: File[]) => void;
@@ -364,10 +360,6 @@ export const AIChat: React.FC<AIChatProps> = ({
   onPreviewClick,
   theme = 'dark',
   userId,
-  activeUci = '',
-  onRestoreUci,
-  restoredMessages = [],
-  memorySummary = '',
   wallet = null,
   onGoToMain,
   onAttachmentsChange,
@@ -485,6 +477,9 @@ export const AIChat: React.FC<AIChatProps> = ({
   const [showModeDropdown, setShowModeDropdown] = useState(false);
   const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({});
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+  // AI replies the user flagged with Report — hidden on this screen at once (the person asked not to see
+  // them). Session-only: the conversation itself is unchanged, and the admin has the report.
+  const [reportedMsgIds, setReportedMsgIds] = useState<ReadonlySet<string>>(() => new Set());
   // B9: Edit user message — fill input with message text for re-editing
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [liked, setLiked] = useState<Record<string, boolean>>({});
@@ -522,59 +517,11 @@ export const AIChat: React.FC<AIChatProps> = ({
   // Guider confirmation card: the user's refinement / answer text.
   const [guiderInput, setGuiderInput] = useState('');
 
-  const [codeStudioUci] = useState<string>(() => {
-    let uci = localStorage.getItem('code_studio_chat_uci');
-    if (!uci) {
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-      let res = 'CS-';
-      for (let i = 0; i < 8; i++) {
-        res += chars[Math.floor(Math.random() * chars.length)];
-      }
-      uci = res;
-      localStorage.setItem('code_studio_chat_uci', uci);
-    }
-    return uci;
-  });
-
-  // UCI Local UI states
+  // The per-message Copy button's "copied" tick.
   const [copied, setCopied] = useState(false);
-  const [shared, setShared] = useState(false);
-  const [resumeUciInput, setResumeUciInput] = useState('');
-  const [isRestoring, setIsRestoring] = useState(false);
-  const [restoreError, setRestoreError] = useState('');
-  const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
-  const [showContinueModal, setShowContinueModal] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   // B30: send on Enter preference
   const [sendOnEnter, setSendOnEnter] = useState<boolean>(() => localStorage.getItem('chat_sendOnEnter') !== 'false');
-
-  // Dynamic continuation suggestions
-  const [continuePromptPhrase, setContinuePromptPhrase] = useState('Want to continue previous work? Enter your Universal Chat ID (UCI).');
-
-  useEffect(() => {
-    const prompts = [
-      "Want to continue previous work? Enter your Universal Chat ID (UCI).",
-      "Have an existing workspace? Paste your UCI below to restore memory.",
-      "Resume an older session using your Chat ID.",
-      "Want to transition agents? Enter your Chat ID."
-    ];
-    setContinuePromptPhrase(prompts[Math.floor(Math.random() * prompts.length)]);
-  }, [messages.length]);
-
-  const copyUci = () => {
-    if (!activeUci) return;
-    navigator.clipboard.writeText(activeUci);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const shareChat = () => {
-    if (!activeUci) return;
-    const shareUrl = `${window.location.origin}${window.location.pathname}?uci=${encodeURIComponent(activeUci)}`;
-    navigator.clipboard.writeText(shareUrl);
-    setShared(true);
-    setTimeout(() => setShared(false), 2000);
-  };
 
   // F3: Offline detection
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
@@ -598,25 +545,6 @@ export const AIChat: React.FC<AIChatProps> = ({
     return () => document.removeEventListener('keydown', handler);
   }, []);
 
-
-  const handleRestoreByUci = async () => {
-    if (!resumeUciInput.trim() || !onRestoreUci) return;
-    setIsRestoring(true);
-    setRestoreError('');
-    try {
-      const success = await onRestoreUci(resumeUciInput.trim());
-      if (success) {
-        setResumeUciInput('');
-        setShowContinueModal(false);
-      } else {
-        setRestoreError('Universal Chat ID not found or unauthorized access.');
-      }
-    } catch (err: any) {
-      setRestoreError(err.message || 'Error restoring chat.');
-    } finally {
-      setIsRestoring(false);
-    }
-  };
 
   const formatMsgTime = (ts: Date | string | undefined): string => {
     if (!ts) return '';
@@ -1027,103 +955,6 @@ export const AIChat: React.FC<AIChatProps> = ({
           return lastUser ? <AppUpdateChatNotice /> : null;
         })()}
         {/* AgentProgress removed here to only be rendered dynamically in messages if needed */}
-        {restoredMessages && restoredMessages.length > 0 && (
-          <div className="mb-6 bg-indigo-500/10 border border-indigo-500/10 rounded-2xl overflow-hidden shadow-2xl transition-all">
-            <button 
-              onClick={() => setIsHistoryExpanded(!isHistoryExpanded)}
-              className="w-full flex items-center justify-between p-4 bg-indigo-500/5 hover:bg-indigo-500/10 transition-all border-b border-indigo-500/5 text-left group"
-            >
-              <div className="flex items-center gap-3">
-                <Clock className="w-4 h-4 text-accent-text" />
-                <div>
-                  <span className="text-[10px] font-black uppercase tracking-widest text-muted">Previous Conversation ({activeUci})</span>
-                  <p className="text-[8px] text-accent-text font-mono mt-0.5 font-bold uppercase tracking-wide">
-                    Click to {isHistoryExpanded ? 'collapse' : 'expand'} • {restoredMessages.length} messages preserved
-                  </p>
-                </div>
-              </div>
-              {isHistoryExpanded ? <ChevronUp className="w-4 h-4 text-accent-text" /> : <ChevronDown className="w-4 h-4 text-accent-text" />}
-            </button>
-            
-            <AnimatePresence>
-              {isHistoryExpanded && (
-                <motion.div 
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="overflow-hidden"
-                >
-                  <div className="p-4 space-y-6 max-h-[350px] overflow-y-auto border-t border-line divide-y divide-line">
-                    {restoredMessages.map((msg, i) => (
-                      <div key={msg.id || i} className={cn("pt-4 flex flex-col space-y-1.5", msg.sender === 'user' ? "items-end" : "items-start")}>
-                        <div className={cn(
-                          "max-w-[90%] p-3 rounded-xl text-[10.5px] font-medium leading-relaxed shadow-sm break-words bg-surface text-muted border border-line"
-                        )}>
-                          {renderMessageContent(msg)}
-                        </div>
-                        <div className="flex items-center gap-1.5 px-1 opacity-70">
-                          <span className="text-[7px] font-black text-muted uppercase tracking-widest">
-                            {msg.sender === 'user' ? 'YOU' : 'PREVIOUS AI'}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        )}
-        
-        {restoredMessages && restoredMessages.length > 0 && (
-          <div className="relative flex items-center justify-center my-8 select-none">
-            <div className="absolute inset-0 flex items-center" aria-hidden="true">
-              <div className="w-full border-t border-dashed border-indigo-500/25"></div>
-            </div>
-            <div className="relative flex justify-center text-[8px] font-black uppercase tracking-[0.2em] px-4 bg-[var(--theme-bg)] text-indigo-450 border border-indigo-500/20 py-1.5 rounded-full shadow-lg backdrop-blur-md">
-              Continuation Workspace
-            </div>
-          </div>
-        )}
-
-        {/* Compact UCI continuation card */}
-        {messages.length <= 1 && (
-            <div className="flex justify-center my-4">
-                <button 
-                  onClick={() => setShowContinueModal(!showContinueModal)}
-                  className="px-4 py-2 bg-indigo-500/10 hover:bg-indigo-500/10 border border-indigo-500/20 text-accent-text rounded-xl text-[9px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-95 flex items-center gap-2"
-                >
-                  <Clock className="w-3 h-3" />
-                  {showContinueModal ? 'Hide Restore Options' : 'Resume Previous Session'}
-                </button>
-            </div>
-        )}
-        
-        {showContinueModal && messages.length <= 1 && (
-          <div className="p-4 bg-indigo-500/10 border border-indigo-500/10 rounded-2xl space-y-3 shadow-xl backdrop-blur-md max-w-xl mx-auto select-none animate-in fade-in zoom-in-95">
-            <p className="text-[9px] text-muted font-medium">{continuePromptPhrase}</p>
-            <div className="flex gap-2">
-              <input 
-                type="text"
-                placeholder="Enter Universal Chat ID ..."
-                value={resumeUciInput}
-                onChange={(e) => setResumeUciInput(e.target.value)}
-                className="flex-1 bg-surface border border-line rounded-xl p-2.5 text-[10px] font-mono text-ink placeholder:text-faint focus:border-indigo-500 outline-none transition-all shadow-inner"
-              />
-              <button 
-                onClick={handleRestoreByUci}
-                disabled={isRestoring || !resumeUciInput.trim()}
-                className="px-3 bg-indigo-600 hover:bg-indigo-505 text-on-accent rounded-xl text-[8px] font-black uppercase tracking-widest transition-all disabled:opacity-35"
-              >
-                Restore
-              </button>
-            </div>
-            {restoreError && (
-              <p className="text-[8px] text-danger font-bold animate-pulse">⚠️ {restoreError}</p>
-            )}
-          </div>
-        )}
-
         {messages.length === 0 && (
           <>
               <div className="flex flex-col items-center justify-center p-6 space-y-2 opacity-50">
@@ -1206,7 +1037,9 @@ export const AIChat: React.FC<AIChatProps> = ({
                       ))}
                     </div>
                   )}
-                  {isLongMessage ? (
+                  {reportedMsgIds.has(msg.id) ? (
+                    <p className="text-[11px] text-muted">You reported this reply. It is hidden and has been sent to NavBharatAI for review.</p>
+                  ) : isLongMessage ? (
                     <div className="relative">
                       <div className={cn("transition-all duration-300", !expandedMessages[msg.id] ? "max-h-[120px] overflow-hidden" : "max-h-[5000px]")}>
                         {renderMessageContent(msg)}
@@ -1303,6 +1136,18 @@ export const AIChat: React.FC<AIChatProps> = ({
                   >
                     {copiedMsgId === msg.id ? <Check className="w-2.5 h-2.5 text-success" /> : <Copy className="w-2.5 h-2.5" />}
                   </button>
+                  {/* REPORT an AI reply (Play AI-Generated Content policy, rejection 2026-09-28). Always
+                      visible, unlike Copy: a phone has no hover, and a flag nobody can see is no flag. */}
+                  {msg.sender === 'ai' && !reportedMsgIds.has(msg.id) && (
+                    <ReportAiContent
+                      surface="reply"
+                      content={String(msg.text ?? '')}
+                      onReported={() => setReportedMsgIds((prev) => new Set(prev).add(msg.id))}
+                      view="chat"
+                      className="p-0.5 rounded text-faint hover:text-danger opacity-70"
+                      iconClassName="w-2.5 h-2.5"
+                    />
+                  )}
                 </div>
                 {/* B3 — Regenerate: only on the last AI message */}
                 {isLastAI && onSendSuggestion && (

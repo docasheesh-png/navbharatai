@@ -21,7 +21,7 @@ import {
 } from '../lib/mobileBuildOutcomeStore';
 import { summarizeReferrals, selfPayoutTokens } from '../lib/referralAdminSummary';
 import { ledgerPatch } from '../lib/walletStatement';
-import { stepRewardTokens, referrerLifetimeCapTokens, referralRewardsEnabled } from '../lib/referralRewards';
+import { stepRewardTokens, referrerLifetimeCapTokens, referralRewardsEnabled, STEP_RUPEES, type RewardStep } from '../lib/referralRewards';
 import { runReferralPreflight } from '../lib/referralPreflight';
 import { listDailyClaimOutcomes, summariseClaimOutcomes } from '../lib/referralClaimOutcomes';
 import { listDailyOtpOutcomes, summariseOtpOutcomes } from '../lib/otpOutcomes';
@@ -2865,8 +2865,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       const all = (snap.docs || []).map((d: any) => ({ userId: String(d.id), ...(d.data() || {}) }));
       const rows = all.slice(0, MAX);
       const summary = summarizeReferrals(rows, all.length > MAX);
-      const perStep = stepRewardTokens();
-      const self = selfPayoutTokens(rows, perStep);
+      const self = selfPayoutTokens(rows, (step) => stepRewardTokens(step as RewardStep));
       // What was TRIED, not only what was paid — last 14 UTC days. Never throws; an empty read is [].
       const claims = summariseClaimOutcomes(await listDailyClaimOutcomes(14));
       return res.json({
@@ -2876,7 +2875,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         ...summary,
         selfTokens: self,
         totalTokens: self + summary.referrerTokens,
-        perStepTokens: perStep,
+        stepRupees: STEP_RUPEES,
         capTokens: referrerLifetimeCapTokens(),
         // Only the busiest handful are worth a human's attention; the rest is noise on a screen.
         topReferrers: summary.topReferrers.slice(0, 20),

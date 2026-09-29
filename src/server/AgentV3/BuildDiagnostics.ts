@@ -94,6 +94,9 @@ const PROCESS_ONLY_CODES = new Set([
   'UNBILLED_BARREN_WORK',
   // Our own journey runner produced nothing — a statement about OUR check, never about their app.
   'JOURNEY_NOT_RUN',
+  // …and the click explorer's two "did not look" outcomes (clickExplorer.ts): it never reached the app,
+  // or found nothing safe to press. Facts about OUR instrument, never about the user's app.
+  'EXPLORE_NOT_RUN', 'EXPLORE_NOTHING_TO_PRESS',
   // …and the reviewer's own version of that: the judge threw, or answered with something unreadable.
   // It used to be recorded as `CHEAP_REVIEW: PASS`, which is the fake-success class exactly. A review
   // that did not happen says something about OUR instrument, never about the user's app.
@@ -105,6 +108,8 @@ const PROCESS_ONLY_CODES = new Set([
   'PAGE_RENDER_NOT_RUN',
   // Project mode could not steer the build — the build itself is unaffected (projectPlannerBudget.ts).
   'PROJECT_MODE_FAILED',
+  // …or stood down because the plan was too small to split — also a fact about OUR planner (6a4a799f).
+  'PROJECT_MODE_STOOD_DOWN',
   // Whether THIS BUILD left a version in the Time Machine (restorePoint.ts). A statement about our own
   // safety net, never a finding about the user's app — a perfect app whose version write failed is
   // still a perfect app, and counting it against them is the provider-error-as-app-blocker class.
@@ -2048,6 +2053,29 @@ export class BuildDiagnostics {
    * re-running `assessBuildReadiness()` and only on `verdict.ready`. This clears blockers because the
    * same gate that raised them has looked again and passed — never because a repair "probably worked".
    */
+  /**
+   * Clear every unresolved finding of `code` because THE CHECK THAT RAISED IT LOOKED AGAIN AND PASSED.
+   *
+   * The explorer's sibling of `recordReadinessRecovery` (2026-09-28). `EXPLORE_FAILED` is recorded as an
+   * unresolved warning before the explorer's verified repair runs; when that repair is kept and the
+   * explorer, pressing every button again, finds NOTHING broken, the old finding describes buttons that
+   * now work — and left open it would count in `shippingIssueCount` and hold the release gate at yellow
+   * over a problem that no longer exists. The same class as build 1ef27cd7.
+   *
+   * 🔒 THE CALLER'S OBLIGATION: reach here only when the SAME check re-ran over the whole app and found
+   * no failure at all — never because a repair "probably worked", and never on a partial fix.
+   */
+  resolveOnRecheck(code: string): number {
+    let cleared = 0;
+    for (const issue of this.issues) {
+      if (issue.code !== code || issue.autoResolved === true) continue;
+      issue.autoResolved = true;
+      cleared++;
+    }
+    if (cleared > 0) this.notify();
+    return cleared;
+  }
+
   recordReadinessRecovery(code: string, message: string): number {
     const cleared = this.resolveReadinessBlockersOnRejudge();
     this.record({ phase: 'build', severity: 'info', code, message, autoResolved: true });

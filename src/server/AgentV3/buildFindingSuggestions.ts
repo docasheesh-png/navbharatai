@@ -55,10 +55,27 @@ const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: string; 
     prompt: 'When I add something in the app and reload the page, it disappears. Make the data actually persist so it is still there after a reload.',
   },
   {
+    // A control that broke the app when it was pressed (clickExplorer.ts) — the user sees which one in
+    // their build card, so the offer names the class, not the button.
+    code: 'EXPLORE_FAILED',
+    title: 'Fix the button that breaks your app',
+    detail: 'Pressing one of the buttons or links caused an error or a blank screen.',
+    prompt: 'When I press some of the buttons or links in the app, it shows an error, goes blank, or opens a page that does not exist. Find each one, fix the real cause, and make sure every button and link works.',
+  },
+  {
     code: 'PAGE_RENDER_FAILED',
     title: 'Fix the page that did not load',
     detail: 'At least one page failed to open properly.',
     prompt: 'One of the pages does not load properly. Find out why and fix it, then check that every page opens.',
+  },
+  {
+    // The app rendered as raw HTML — its own stylesheet never reached the page (renderStyle.ts, admin
+    // 2026-09-28: "sundar aur real cheez bane, fake/farzi nahi"). The commonest cause is a global
+    // stylesheet that is empty or never imported, which is exactly what the prompt asks to be fixed.
+    code: 'UNSTYLED_RENDER',
+    title: 'Give your app its proper look',
+    detail: 'When the app was opened in a browser, its styles had not loaded — it showed as plain HTML.',
+    prompt: 'When the app opens in the browser it shows as plain, unstyled HTML — default fonts and default buttons. Make sure the global stylesheet is imported by the entry file and actually contains the styles for every class the screens use, then give every screen a polished, consistent, professional design: real layout, spacing, styled buttons and inputs, a colour theme and a proper font.',
   },
   {
     code: 'DESIGN_PAGE_INCONSISTENT',
@@ -116,8 +133,12 @@ const NEVER_SUGGEST = new Set([
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', 'LADDER_DEPTH',
   'RELEASE_GATE', 'TIME_TO_FIRST_CALL', 'RUNTIME_UNCHECKED', 'RUNTIME_VERIFIED', 'APP_RENDERED',
   'TEST_SUITE_UNVERIFIED', 'JOURNEY_NOT_DERIVED', 'JOURNEY_NOT_RUN', 'PAGE_RENDER_NOT_RUN',
+  // The click explorer's "did not look" outcomes and its pass — nothing for the user to do.
+  'EXPLORE_NOT_RUN', 'EXPLORE_NOTHING_TO_PRESS', 'EXPLORE_PASSED',
   // Our reviewer produced no verdict — nothing the user can act on, and never a mark against their app.
   'CHEAP_REVIEW_NOT_RUN',
+  // The clean half of the styling measurement (renderStyle.ts) — the app IS styled; nothing to offer.
+  'RENDER_STYLE',
   'BUILD_ORDER_READ_AS_EDIT', 'CLAIM_UNSUPPORTED', 'PREVIEW_UNVERIFIED',
   // A dropped backslash our own pass already put back — nothing left for the user to do.
   'SCRIPT_INTEGRITY_REPAIRED',

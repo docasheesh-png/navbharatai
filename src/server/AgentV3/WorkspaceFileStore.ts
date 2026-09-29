@@ -141,6 +141,44 @@ export function essentialManifestsToCarry(existingPaths: string[], incomingPaths
 }
 
 /**
+ * The LOCAL scripts an index.html loads (`<script src="/src/main.tsx">` → `src/main.tsx`), as
+ * workspace-relative keys. Remote, protocol-relative and data: sources are not ours. PURE.
+ */
+export function localScriptPaths(html: string | null | undefined): string[] {
+  if (!html) return [];
+  const out = new Set<string>();
+  const re = /<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    const src = m[1].trim();
+    if (!src || /^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(src) || /^[a-z][a-z0-9+.-]*:/i.test(src)) continue;
+    const key = toDurableFileKey(src.split(/[?#]/)[0].replace(/^\.?\/+/, ''));
+    if (key) out.add(key);
+  }
+  return Array.from(out);
+}
+
+/** The conventional entry modules, carried when the index.html that names the real one cannot be read. */
+const CONVENTIONAL_ENTRY_RE = /^src\/(?:main|index)\.(?:tsx|jsx|ts|js)$/;
+
+/**
+ * ENTRY-MODULE CARRY-FORWARD (admin report 2026-09-28: "No React entry module found" on a built app).
+ * `essentialManifestsToCarry` keeps index.html alive across a partial replace, but not the module that
+ * index.html LOADS. The scaffold seeds `src/main.tsx`, the model rarely rewrites it, so a replace with
+ * this turn's writes kept index.html and dropped its entry: the saved app pointed at a file it no longer
+ * had, and every cold restore and every render from the saved files was a broken app. An index.html
+ * without its entry is never intended, so its entry is carried exactly like the manifest. PURE.
+ *
+ * `indexHtml` is the index.html the saved set will contain; `null` means it could not be read, and
+ * then the conventional entry names are carried instead (carrying an unused entry breaks nothing).
+ */
+export function entryModulesToCarry(existingPaths: string[], incomingPaths: string[], indexHtml: string | null): string[] {
+  const incoming = new Set(incomingPaths);
+  const wanted = indexHtml == null ? null : new Set(localScriptPaths(indexHtml));
+  return (existingPaths || []).filter((p) => !incoming.has(p) && (wanted ? wanted.has(p) : CONVENTIONAL_ENTRY_RE.test(p)));
+}
+
+/**
  * The paths of a stored index that a load would actually return: normalized, de-duplicated, and without
  * anything `toDurableFileKey` refuses. PURE.
  */
@@ -204,7 +242,21 @@ export async function saveWorkspaceFiles(workspaceId: string, files: Record<stri
     // reports "No package.json found" despite the sandbox having it. The manifest's content doc already
     // exists (it was merged in at build start), so carrying the path forward restores it losslessly.
     const carried = essentialManifestsToCarry(existingPaths, safe.paths);
-    const finalPaths = carried.length > 0 ? Array.from(new Set([...safe.paths, ...carried])) : safe.paths;
+    // ...and the module that index.html loads (see entryModulesToCarry). The page is read from the
+    // incoming set when it is there, else from its existing content doc (one read, by id).
+    let indexHtml: string | null = normalized.files['index.html'] ?? null;
+    if (indexHtml == null && existingPaths.includes('index.html')) {
+      try {
+        const doc = await filesCol.doc(fileDocId('index.html')).get();
+        const c = doc.exists ? doc.data()?.content : undefined;
+        indexHtml = typeof c === 'string' ? c : null;
+      } catch { indexHtml = null; }
+    }
+    const entryCarry = indexHtml != null || existingPaths.includes('index.html')
+      ? entryModulesToCarry(existingPaths, safe.paths, indexHtml)
+      : [];
+    const keep = [...carried, ...entryCarry];
+    const finalPaths = keep.length > 0 ? Array.from(new Set([...safe.paths, ...keep])) : safe.paths;
     await root.set({ paths: finalPaths, count: finalPaths.length, savedAt: Date.now() }, { merge: false });
   } catch (e) {
     // Best-effort — a save failure never blocks a build — but it is the exact "reload pe data gayab"
@@ -335,19 +387,40 @@ export async function loadWorkspaceFiles(workspaceId: string): Promise<Record<st
     const allowed = new Set(paths.map((p) => toDurableFileKey(p)).filter((p): p is string => p !== null));
     const docs = await root.collection('files').get();
     const out: Record<string, string> = {};
+    const unindexed = new Map<string, string>();
     for (const d of docs.docs) {
       const data = d.data();
       if (typeof data.path !== 'string' || typeof data.content !== 'string') continue;
       const key = toDurableFileKey(data.path);
-      if (key === null || !allowed.has(key)) continue;
+      if (key === null) continue;
+      if (!allowed.has(key)) { unindexed.set(key, data.content); continue; }
       // A phantom and its real twin carry the same content in practice; when they do not, the doc that
       // sorts later wins, exactly as before this guard existed for a single key.
       out[key] = data.content;
     }
-    return out;
+    return restoreDroppedEntryModules(out, unindexed);
   } catch {
     return {};
   }
+}
+
+/**
+ * HEAL ON READ for indexes saved before the entry carry-forward existed. A replace dropped the entry
+ * from the path list but never deleted its content doc, so the file is still here — only unlisted.
+ * When the saved index.html loads a local script that is missing from the listed files but present as
+ * an unlisted doc, it is returned. Nothing else unlisted is ever resurrected (a file the user deleted
+ * stays deleted). PURE.
+ */
+export function restoreDroppedEntryModules(
+  listed: Record<string, string>,
+  unlisted: ReadonlyMap<string, string>,
+): Record<string, string> {
+  const html = listed['index.html'];
+  if (typeof html !== 'string' || unlisted.size === 0) return listed;
+  for (const p of localScriptPaths(html)) {
+    if (!(p in listed) && unlisted.has(p)) listed[p] = unlisted.get(p) as string;
+  }
+  return listed;
 }
 
 /**

@@ -7,7 +7,7 @@ import { TemplateRegistry } from '../../AppMakerLab/generator/templates/Template
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure, buildStillStartingWaitCommand, shouldWaitOnStartingServer, STILL_STARTING_EXTRA_SECONDS } from './devServerHost';
 import { buildPortSweepCommand, parsePortSweep, portCandidates, shouldSweep, sweepFoundSummary } from './portSweep';
 import { appPortsFrom } from '../../../appPorts';
 import type { DevFramework } from './devServerHost';
@@ -63,6 +63,7 @@ const DURABLE_RESTORE_ASSET_MS = 90_000;
 import {
   BROWSE_PAINT_DEADLINE_MS, BROWSE_PAINT_POLL_MS, splitPaintMarker,
 } from '../../../PreviewVerify';
+import { STYLE_EVIDENCE_JS, STYLE_MARKER, splitStyleMarker, type RenderStyleEvidence } from '../../../renderStyle';
 import { assertWriteAllowed, runInPass } from '../../../greenFreeze';
 import { loadWorkspaceFiles } from '../../../WorkspaceFileStore';
 import { writeWorkspaceFiles } from '../../../WorkspaceFiles';
@@ -430,6 +431,9 @@ ${record ? attachConsoleJs('p').trimEnd() : ''}
   await p.goto(${JSON.stringify(url)},{waitUntil:'domcontentloaded',timeout:15000}).catch(()=>{});
 ${paintWaitJs('p')}
 ${record ? '  if(painted) recSessionExisted();' : ''}
+  // DID ANY OF THE APP'S OWN STYLING REACH THE PAGE? (renderStyle.ts, admin 2026-09-28.) Measured only
+  // on a painted page, printed BEFORE the paint marker so splitPaintMarker's html slice never sees it.
+  if(painted){var styleEv=await p.evaluate(${STYLE_EVIDENCE_JS}).catch(function(){return null;});if(styleEv)console.log(${JSON.stringify(STYLE_MARKER)}+JSON.stringify(styleEv));}
   console.log('NBAI_PAINTED:'+painted);
 ${dropBridgeJs('p')}
   console.log((await p.content()).slice(0,30000));
@@ -2166,11 +2170,13 @@ export class E2BActuator implements IEngineerActuator {
       // free a busy port, STOP on a code error the agent must fix (a restart can never help it), or
       // plain-retry a transient crash. This replaces the old single blind restart and yields an HONEST
       // root cause when it still can't come up (instead of a generic "check the logs").
+      let lastLaunchPid: number | undefined;
       const launchAndWait = async (seconds: number): Promise<boolean> => {
         const h = await sandbox.commands.run(devCommand, {
           cwd: WORKSPACE_ROOT, background: true,
           onStdout: s => { stdout += s; }, onStderr: s => { stderr += s; },
         });
+        lastLaunchPid = typeof (h as { pid?: unknown }).pid === 'number' ? (h as { pid: number }).pid : undefined;
         const w = await sandbox.commands.run(buildPortWaitCommand(port, seconds), { timeoutMs: (seconds + 5) * 1000 })
           .catch(() => ({ stdout: 'PORT_DOWN' } as { stdout: string }));
         await h.disconnect().catch(() => {});
@@ -2209,6 +2215,20 @@ export class E2BActuator implements IEngineerActuator {
         if (diag.recovery === 'code_fix') {
           stdout += `\n[health-check] ${diag.detail}`;
           break;
+        }
+        // A LIVING server with a clean log is still starting — give it more time on the SAME process
+        // before any restart (autopsy 2720e553: two restarts killed a server that came up 17 s later).
+        // A process that has exited answers PROC_GONE within a second, so a real crash restarts as before.
+        if (shouldWaitOnStartingServer(diag.cause, lastLaunchPid)) {
+          const w = await sandbox.commands
+            .run(buildStillStartingWaitCommand(lastLaunchPid as number, port, STILL_STARTING_EXTRA_SECONDS), { timeoutMs: (STILL_STARTING_EXTRA_SECONDS + 5) * 1000 })
+            .catch(() => ({ stdout: 'PORT_DOWN' } as { stdout: string }));
+          if (w.stdout.includes('PORT_UP')) {
+            await armKeepalive(port);
+            portUp = true;
+            stdout += `\n[health-check] the dev server was still starting (its process was alive and its log showed no error) — it came up after more time on the same process, with no restart.`;
+            break;
+          }
         }
         stdout += `\n[health-check] attempt ${attempt} — ${diag.detail}`;
         if (diag.recovery === 'reinstall') {
@@ -2406,7 +2426,7 @@ export class E2BActuator implements IEngineerActuator {
     return { exitCode: -1, stdout: '', stderr: 'sandbox unavailable after recreate attempt' };
   }
 
-  async browseUrl(workspaceId: string, url: string): Promise<{ html: string; painted?: boolean; source?: 'browser' | 'curl' }> {
+  async browseUrl(workspaceId: string, url: string): Promise<{ html: string; painted?: boolean; source?: 'browser' | 'curl'; style?: RenderStyleEvidence }> {
     const sandbox = await this.getSandbox(workspaceId);
 
     // Ensure the shared Playwright install (same one the screenshot path uses) has been kicked
@@ -2491,7 +2511,9 @@ export class E2BActuator implements IEngineerActuator {
       }).catch((err: unknown) => commandFailureResult(err));
       if (pw.exitCode === 0 && pw.stdout.trim()) {
         const { painted, html } = splitPaintMarker(pw.stdout);
-        return { html, painted, source: 'browser' };
+        // The style line precedes the paint marker, so it is never inside `html`; it is read from the raw stdout.
+        const { style } = splitStyleMarker(pw.stdout);
+        return { html, painted, source: 'browser', style };
       }
       const browseWhy = commandLogTail(pw, 4);
       if (browseWhy) {

@@ -43,14 +43,16 @@ export interface ChecklistRow {
 export function checklistLabel(step: RewardStep, claimed: boolean, rupees: number): string {
   const amount = `₹${rupees}`;
   const done: Record<RewardStep, string> = {
+    signup: 'Account created',
     'referral-code': 'Referral code applied',
-    email: 'Gmail / email verified',
+    email: 'Logged in with a verified email',
     mobile: 'Mobile number verified',
     github: 'GitHub connected',
   };
   const todo: Record<RewardStep, string> = {
+    signup: 'Signup bonus not added yet',
     'referral-code': 'Referral code not applied',
-    email: 'Gmail / email not verified',
+    email: 'Email not verified',
     mobile: 'Mobile number not verified',
     github: 'GitHub not connected',
   };
@@ -81,7 +83,7 @@ export function buildChecklist(steps: unknown): ChecklistRow[] {
     const claimed = r.claimed === true;
     rows.push({ step, claimed, rupees, label: checklistLabel(step, claimed, rupees) });
   }
-  // The admin's own order, not the server's: code, email, mobile, github.
+  // The admin's own order, not the server's: signup, code, login, mobile, github.
   return rows.sort((a, b) => STEP_ORDER.indexOf(a.step) - STEP_ORDER.indexOf(b.step));
 }
 

@@ -20,8 +20,15 @@ export interface HistoryPopupProps {
   user: any;
   /** Closes the popup — backdrop, ✕, Escape, and after any row is opened. */
   onClose: () => void;
-  onRestoreSession?: (uci: string) => void;
+  /** Open a saved chat by its session id. */
+  onOpenSession?: (sessionId: string) => void;
   onDeleteSession?: (id: string) => void;
+  /** Start a fresh chat — the popup closes and the new chat is in front. */
+  onNewChat?: () => void;
+  /** The chat behind the popup, marked in the list. */
+  currentSessionId?: string;
+  onRenameSession?: (sessionId: string, title: string) => void;
+  onTogglePin?: (sessionId: string, pinned: boolean) => void;
   onOpenProfessional?: (viewId: string, ref: ConversationRef) => boolean | void;
   onDeleteProfessional?: (viewId: string, conversationId: string) => void;
 }
@@ -35,8 +42,12 @@ export interface HistoryPopupProps {
 export const HistoryPopup: React.FC<HistoryPopupProps> = ({
   user,
   onClose,
-  onRestoreSession,
+  onOpenSession,
   onDeleteSession,
+  onNewChat,
+  currentSessionId,
+  onRenameSession,
+  onTogglePin,
   onOpenProfessional,
   onDeleteProfessional,
 }) => {
@@ -106,8 +117,12 @@ export const HistoryPopup: React.FC<HistoryPopupProps> = ({
         <div className="flex-1 min-h-0 overflow-y-auto pb-[env(safe-area-inset-bottom,0px)]">
           <HistoryView
             user={user}
-            onRestoreSession={closeAfter(onRestoreSession)}
+            onOpenSession={closeAfter(onOpenSession)}
             onDeleteSession={onDeleteSession}
+            onNewChat={onNewChat ? closeAfter(onNewChat) : undefined}
+            currentSessionId={currentSessionId}
+            onRenameSession={onRenameSession}
+            onTogglePin={onTogglePin}
             initialFilter="free"
             lockFilter
             includeProfessionals

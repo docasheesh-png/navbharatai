@@ -22,7 +22,7 @@ const read = (rel: string) => readFileSync(join(__dirname, '..', rel), 'utf8');
 const FULL_ENV = {
   GOOGLE_PLAY_PACKAGE_NAME: 'com.navbharat.ai',
   GOOGLE_PLAY_SA_JSON: JSON.stringify({ client_email: 'sa@proj.iam.gserviceaccount.com', private_key: 'k' }),
-  ANDROID_LATEST_VERSION_CODE: '120',
+  ANDROID_LATEST_VERSION_CODE: '138',
   REFERRAL_REWARDS: 'on',
 } as NodeJS.ProcessEnv;
 
@@ -82,9 +82,18 @@ describe('classifyRelease — the one server-readable fact about the installed a
     expect(c.remedy).toContain('PLAY_INTEGRITY_CLOUD_PROJECT');
   });
 
-  it('a release at or past 117 is ok, and SAYS the build-time secret cannot be seen from here', () => {
-    expect(classifyRelease('117').state).toBe('ok');
-    const c = classifyRelease('120');
+  it('🔴 117–136 carry the plugin but CANNOT attest (no nonce, no native phone OTP) — failed, not ok', () => {
+    for (const n of ['117', '120', '134', '136']) {
+      const c = classifyRelease(n);
+      expect(c.state, n).toBe('failed');
+      expect(c.detail, n).toMatch(/nonce/);
+      expect(c.remedy, n).toContain('137');
+    }
+  });
+
+  it('a release at or past 137 is ok, and SAYS the build-time secret cannot be seen from here', () => {
+    expect(classifyRelease('137').state).toBe('ok');
+    const c = classifyRelease('138');
     expect(c.state).toBe('ok');
     expect(c.detail).toContain('cannot be seen from here');
   });

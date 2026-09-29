@@ -71,12 +71,13 @@ describe('the wiring: no chip on a mode switch, one switch path, one cap', () =>
     expect(app.indexOf('const menuItems = useMemo')).toBeLessThan(app.indexOf('const hasHeaderChip'));
   });
 
-  it('a recent row switches through toggleTab with its conversation — the window path, not a second one', () => {
-    expect(app).toContain('if (resume) { toggleTab(resume.view as ViewType, true, resume.conversationId); return; }');
+  it('a recent row switches through ONE helper — a professional through toggleTab with its conversation', () => {
+    expect(app).toContain('if (resume) { switchToRecent(resume.view, resume.conversationId); return; }');
+    expect(app).toContain('toggleTab(view as ViewType, true, windowId);');
     expect(app).not.toContain('onSelectChatWindow');
   });
 
-  it('✕ on a recent row closes ONE conversation — a window through closeChatWindow, a single-chat view through closeTab — and the FREE row has no ✕ at all', () => {
+  it('✕ on a recent row closes ONE window — FREE included since 2026-09-28, and never through the FREE tab\'s teardown', () => {
     const at = app.indexOf('onCloseRecent={(recentId) =>');
     const body = app.slice(at, app.indexOf('onPick={(id) =>', at));
     // 🔴 THE BUG (admin 2026-09-22, morning): the FREE row's ✕ called `closeTab('nbi_chat')`, the header
@@ -85,7 +86,9 @@ describe('the wiring: no chip on a mode switch, one switch path, one cap', () =>
     // close for it through the SAME rule the sheet renders by, so the two cannot disagree.
     expect(body).toContain('if (!recentRowClosable(recentId)) return;');
     expect(body).toContain('const target = recentTargetFromId(recentId);');
-    expect(body).toContain('if (target.conversationId) closeChatWindow(undefined, target.conversationId);');
+    expect(body).toContain('} else if (target.conversationId) closeChatWindow(undefined, target.conversationId);');
+    expect(body).toContain('closeFreeWindow(viewWindowId);');
+    expect(body).toContain("closeSlotViewWindow(target.view as 'imagegen' | 'sda_chat', viewWindowId);");
     expect(body).toContain('else closeTab(undefined, target.view as ViewType);');
     expect(body).not.toContain("closeTab(undefined, 'nbi_chat'");
     expect(app).not.toContain('freeChatClosed');
@@ -97,14 +100,14 @@ describe('the wiring: no chip on a mode switch, one switch path, one cap', () =>
     const body = app.slice(at, app.indexOf('onPick={(id) =>', at));
     // The next chat is decided BEFORE anything closes, from the same Recent list the sheet shows.
     expect(body.indexOf('const next = nextRecentAfterClose(recent, recentId);')).toBeLessThan(body.indexOf('closeChatWindow(undefined, target.conversationId)'));
-    expect(body).toContain('recentModeEntries({ hideMedical, activeView, openViews: openTabs, openChats })');
+    expect(body).toContain('recentModeEntries({ hideMedical, activeView, openViews: openTabs, openChats, viewWindows })');
     expect(body).toContain('const last = lastChatClosed(recent, recentId);');
-    expect(body).toContain('if (wasOnScreen && next) toggleTab(next.view as ViewType, true, next.conversationId);');
+    expect(body).toContain('if (wasOnScreen && next) switchToRecent(next.view as string, next.conversationId);');
     // The last chat: sheet dismissed, FREE on screen — a FRESH one only when no FREE tab was open at all
     // (FREE's own conversation is never wiped by closing somebody else).
-    const last = body.slice(body.indexOf('if (last) {'), body.indexOf('if (wasOnScreen'));
+    const last = body.slice(body.indexOf('if (last) {'), body.indexOf('if (wasOnScreen && next) switchToRecent'));
     expect(last).toContain('setShowModePicker(false);');
-    expect(last).toContain('if (!next) startNewChat();');
+    expect(last).toContain("if (!next && target.view !== 'nbi_chat') startNewChat();");
     expect(last).toContain("toggleTab('nbi_chat');");
     // Closing one of several does NOT dismiss the sheet — the only setShowModePicker(false) is in the last-close branch.
     expect(body.split('setShowModePicker(false)').length - 1).toBe(1);
@@ -113,15 +116,18 @@ describe('the wiring: no chip on a mode switch, one switch path, one cap', () =>
   it('the image studio picked from Mode is capped, then parented to the chat tab it was picked from', () => {
     const at = app.indexOf('if (id === IMAGE_MODE_ID) {');
     const body = app.slice(at, at + 800);
-    expect(body).toContain("if (!chatSlotFree(openChats, openTabs)) { addToast(capMessage(), 'warning'); return; }");
+    expect(body).toContain("if (!chatSlotFree(openChats, openTabs, viewWindows)) { addToast(capMessage(), 'warning'); return; }");
     expect(body).toContain('const host = headerTabFor(activeView, tabOpeners, hasHeaderChip);');
+    // Already open: one more window (admin 2026-09-28).
+    expect(body).toContain("newSlotViewWindow('imagegen');");
     expect(body).toContain('setTabOpeners(prev => ({ ...prev, [IMAGE_MODE_ID]: host as ViewType }));');
     // Only when it was NOT already open: an open studio keeps the door it came in by.
     expect(body.indexOf('if (!openTabs.includes(IMAGE_MODE_ID as ViewType)) {')).toBeLessThan(body.indexOf('const host ='));
   });
 
-  it('Doctor AI picked from Mode is capped only when it is CLOSED — a fresh case replaces, it does not add', () => {
-    expect(app).toContain("if (!openTabs.includes('sda_chat') && !chatSlotFree(openChats, openTabs)) { addToast(capMessage(), 'warning'); return; }");
+  it('Doctor AI picked from Mode: already open ⇒ a new window with its own case; closed ⇒ capped, then a fresh case', () => {
+    expect(app).toContain("if (openTabs.includes('sda_chat')) { newSlotViewWindow('sda_chat'); return; }");
+    expect(app).toContain("if (!chatSlotFree(openChats, openTabs, viewWindows)) { addToast(capMessage(), 'warning'); return; }");
   });
 
   it('the sheet receives the open tabs, the open windows and the window on screen', () => {

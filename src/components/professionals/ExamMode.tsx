@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, X, GraduationCap, ArrowRight, SkipForward, RotateCcw, Sparkles, ListChecks, ChevronLeft, Settings, Timer } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
+import { useDialogOpen } from '../../hooks/useDialogOpen';
 import { auth } from '../../lib/firebase';
 import {
   EXAM_COUNT_PRESETS, EXAM_LEVELS, EXAM_MAX_QUESTIONS, EXAM_MIN_QUESTIONS, EXAM_DEFAULT_QUESTIONS,
@@ -682,12 +683,8 @@ function ExamSettingsSheet({ settings, onChange, onClose, questionCount, paperIn
   paperInProgress: boolean;
 }) {
   const headingRef = useRef<HTMLHeadingElement | null>(null);
-  useEffect(() => {
-    headingRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  // Focus on OPEN only — a re-render must never pull it out of the language list (see useDialogOpen).
+  useDialogOpen(headingRef, onClose);
 
   const timerOn = settings.pace !== 'off';
   return (

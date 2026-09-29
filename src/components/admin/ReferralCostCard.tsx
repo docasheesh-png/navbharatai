@@ -130,7 +130,7 @@ export function ReferralCostCard({ adminToken }: { adminToken: string }): React.
         <div>
           <h3 className="text-sm font-black uppercase tracking-tight text-ink">Referral cost</h3>
           <p className="mt-1 text-[10px] font-semibold text-muted">
-            What the four-step welcome gift has paid out, and who is worth a look.
+            What the free-credit steps have paid out, and who is worth a look.
           </p>
         </div>
         <div className="flex items-center gap-2">

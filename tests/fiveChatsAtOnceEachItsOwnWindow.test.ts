@@ -74,9 +74,10 @@ describe('every door into an expert leads to a window', () => {
     const body = app.slice(at, app.indexOf('const closeTab', at));
     // The cap counts Doctor AI and the image studio too since 2026-09-22, so it asks `chatSlotFree`
     // with the open tabs — never `openChats.length` alone.
-    const capAt = body.indexOf("if (!chatSlotFree(openChats, openTabs)) { addToast(capMessage(), 'warning'); return false; }");
+    // Every window counts since 2026-09-28, so the FREE, image and Doctor windows ride along.
+    const capAt = body.indexOf("if (!chatSlotFree(openChats, openTabs, viewWindows)) { addToast(capMessage(), 'warning'); return false; }");
     expect(body).not.toContain('openChats.length >= MAX_OPEN_CHATS');
-    expect(body).toContain('openWindow(openChats, { id: wanted, professionalId: view }, openTabs)');
+    expect(body).toContain('openWindow(openChats, { id: wanted, professionalId: view }, openTabs, viewWindows)');
     const resumeAt = body.indexOf('resumeArchived(store, view, resumeEndedAt)');
     expect(capAt).toBeGreaterThan(0);
     expect(resumeAt).toBeGreaterThan(capAt);

@@ -1,19 +1,22 @@
-// useSessionManager — the session-restore / session-management slice, lifted out of the App.tsx God
-// component (P3.1, behavior-preserving). Owns handleRestoreUci (restore a chat by its UCI/id — local
-// cache then Firestore, with the v5.0-session resume branch), handleRestoreByUci (restore from the
-// typed UCI input), deleteSession (delete a saved session locally + in Firestore), and startNewChat.
-// Code moved BYTE-IDENTICAL — pure relocation, zero logic change. Everything from the rest of the app
-// is injected via deps, and App.tsx destructures the SAME identifiers back, so every call site (the
-// history/pro-chat panels, the Continue modal) is unchanged.
+// useSessionManager — opening, deleting and starting chats (extracted from App.tsx in P3.1).
+//
+// Owns `openSession` (open a saved conversation by its id — the device's copy first, then the cloud —
+// including the NavBharatAI Pro resume branch), `deleteSession` (delete a chat locally and in the
+// cloud) and `startNewChat`. Everything from the rest of the app is injected via deps.
+//
+// 🔴 THE CHAT-ID SYSTEM IS GONE (admin 2026-09-28: "yeh chat id wala system band karo"). A chat used to
+// be restored by typing a "Universal Chat ID" into a box — an identifier no screen ever showed, so the
+// box could only ever fail. Chats are opened from History by tapping them, the way ChatGPT, Claude and
+// Grok work, and opening one shows the conversation exactly as it was (see lib/chatHistory.ts).
 
-import { collection, query, where, getDocs, doc, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, deleteDoc } from 'firebase/firestore';
 import type { User as FirebaseUser } from 'firebase/auth';
 import type { Message, ChatSession, ViewType } from '../types';
 import { authedHeaders } from '../lib/authHeaders';
 import { db } from '../lib/firebase';
 import { safeLS } from '../lib/localStorageSafe';
-import { generateUCI, getRandomElement, generateSmartHeuristicSummary, dedupAndSortMessages, asMessageArray } from '../lib/chatUtils';
-import { pickGreetingForAgent } from '../lib/agentGreetings';
+import { generateSmartHeuristicSummary, asMessageArray } from '../lib/chatUtils';
+import { openedTranscript } from '../lib/chatHistory';
 import { resolveSessionSurface, sessionOwnerOf } from '../lib/sessionRouting';
 import { caseIdFromDocId } from '../lib/sdaCaseStore';
 
@@ -22,8 +25,6 @@ export interface SessionManagerDeps {
   sessions: any[];
   user: FirebaseUser | null;
   currentSessionId: string;
-  resumeUciInputState: any;
-  mode: any;
   // ref (shared with App's toggleTab new-chat-bump effect — must NOT be hook-owned)
   v3ResumeInFlightRef: { current: boolean };
   // setters (typed loosely — App passes the real ones; assignable via contravariance)
@@ -42,10 +43,6 @@ export interface SessionManagerDeps {
   setActiveAgent: (v: any) => void;
   setErrorContext: (v: any) => void;
   setIsAppBuilt: (v: any) => void;
-  setRestoreUciError: (v: any) => void;
-  setIsRestoringUci: (v: any) => void;
-  setResumeUciInputState: (v: any) => void;
-  setShowContinueModal: (v: any) => void;
   // functions
   toggleTab: (view: any, pushToHistory?: boolean) => void;
   addToast: (message: string, type?: any) => void;
@@ -63,39 +60,40 @@ export interface SessionManagerDeps {
 
 export function useSessionManager(deps: SessionManagerDeps) {
   const {
-    sessions, user, currentSessionId, resumeUciInputState, mode,
+    sessions, user, currentSessionId,
     v3ResumeInFlightRef,
     setV3Resume, setCurrentSessionId, setFiles, setSessions, setSdaResetKey, setCurrentProSessionId,
     setSdaOpenCaseId,
     setProMessages, setMessages, setGeneratedCode, setHasGeneratedCode, setActiveAgent, setErrorContext,
-    setIsAppBuilt, setRestoreUciError, setIsRestoringUci, setResumeUciInputState, setShowContinueModal,
+    setIsAppBuilt,
     toggleTab, addToast, addLog, initialFreeChatMessages,
   } = deps;
 
-  const handleRestoreUci = async (uciToFind: string): Promise<boolean> => {
-    let targetSession = sessions.find(s => s.uci === uciToFind || s.id === uciToFind);
-    
-    // Search in Firestore if authenticated & not found in local cache
-    if (!targetSession && user) {
+  /**
+   * Open a saved conversation by its session id — what tapping a History row does.
+   * The device's copy is read first (instant, and it may hold turns the cloud has not received yet);
+   * the cloud is asked only when this device has never seen the chat (it was started elsewhere).
+   */
+  const openSession = async (sessionId: string): Promise<boolean> => {
+    let targetSession = sessions.find(s => s.id === sessionId);
+
+    if (!targetSession && user && sessionId) {
       try {
-        const q = query(
-          collection(db, 'chat_sessions'), 
-          where('uci', '==', uciToFind),
-          where('userId', '==', user.uid)
-        );
-        const querySnap = await getDocs(q);
-        if (!querySnap.empty) {
-          const docData = querySnap.docs[0].data();
+        const snap = await getDoc(doc(db, 'chat_sessions', sessionId));
+        const docData = snap.exists() ? snap.data() : null;
+        // The security rules already refuse another account's document; this states it again at the
+        // one place a wrong owner would matter, so a rule change can never open someone else's chat.
+        if (docData && docData.userId === user.uid) {
           targetSession = {
-            id: docData.id,
+            id: docData.id || sessionId,
             title: docData.title,
+            customTitle: docData.customTitle || undefined,
             messages: docData.messages || [],
             files: docData.files || {},
             lastUpdated: docData.lastUpdated,
             mode: docData.mode,
             agent: docData.current_agent || docData.original_agent,
             isPinned: docData.isPinned || false,
-            uci: docData.uci,
             originalAgent: docData.original_agent,
             currentAgent: docData.current_agent,
             memorySummary: docData.memory_summary || '',
@@ -106,14 +104,14 @@ export function useSessionManager(deps: SessionManagerDeps) {
         }
       } catch (err) {
         console.error('Error fetching session from Firestore:', err);
-        // F4: surface Firestore restore failures to the user
-        addToast('Failed to load session from cloud. Please try again.', 'error');
+        addToast('Could not open this chat right now. Please try again.', 'error');
+        return false;
       }
     }
 
     if (!targetSession) {
       // F4: inform user when session is not found
-      addToast('Session not found. It may have been deleted or is from a different account.', 'error');
+      addToast('This chat could not be found. It may have been deleted.', 'error');
       return false;
     }
 
@@ -148,44 +146,33 @@ export function useSessionManager(deps: SessionManagerDeps) {
     }
     
     const targetAgent = targetSession.agent || 'navbharatai';
-    
-    // Build combined list of old messages to collapse (dedup by id + sort by time)
-    const uniqueHistory = dedupAndSortMessages([...asMessageArray(targetSession.restoredMessages), ...asMessageArray(targetSession.messages)]);
 
+    // THE CONVERSATION AS IT WAS — one thread, in order, nothing collapsed, nothing announced. The old
+    // system split everything before a restore into `restoredMessages` and added a canned "Previous
+    // workspace context has been successfully loaded" line; both are folded away here.
+    const transcript = openedTranscript<Message>(targetSession);
+
+    // A long thread keeps a short summary for the AI's context (the request sends the last 40 turns);
+    // a summary already saved is kept as it is.
     let memSummary = targetSession.memorySummary || '';
-    if (!memSummary && uniqueHistory.length > 0) {
-      memSummary = generateSmartHeuristicSummary(uniqueHistory);
+    if (!memSummary && transcript.length > 40) {
+      memSummary = generateSmartHeuristicSummary(transcript);
     }
-    
-    const greetingText = pickGreetingForAgent(targetAgent, getRandomElement);
-    
-    const continuationGreeting: Message = {
-      id: `continuation-greeting-${Date.now()}`,
-      text: `${greetingText}\n\n*Previous workspace context has been successfully loaded. We are continuing our dynamic session with total context memory.*`,
-      sender: 'ai',
-      timestamp: new Date().toISOString(),
-      modelUsed: 'navBharatAI Cognitive Layer'
-    };
-    
+
     // 🔴 A RESTORE MUST NOT REWRITE WHOSE SESSION THIS IS (admin 2026-09-22, the history leak).
-    // This used to stamp `currentAgent: 'navbharatai'` on EVERY restored non-v3 session — including a
-    // NavBharatAI Pro builder session, which this function's own `isV3Session` above does not match
-    // (it looks for the `agentv3` family, not `navbharatai-pro`). App.tsx then synced that value to
-    // Firestore as `current_agent`, and the next load reads `agent: current_agent || original_agent`,
-    // so the session came back calling itself `navbharatai` — a Pro conversation turned into a Free
-    // one by the act of opening it, permanently, and it then appeared in NavBharatAI Free's history.
     // Opening a conversation is not a change of ownership, so a non-free session keeps what it had.
     const restoredOwner = sessionOwnerOf(targetSession as unknown as Record<string, unknown>);
+    // `lastUpdated` is deliberately NOT touched: opening a chat is reading it, and a chat you only
+    // looked at must not jump to the top of History. The next message you send moves it.
     const updatedSession: ChatSession = {
       ...targetSession,
       currentAgent: restoredOwner === 'free' ? 'navbharatai' : (targetSession.currentAgent || targetAgent),
       agent: targetAgent,
-      messages: [continuationGreeting],
-      restoredMessages: uniqueHistory,
+      messages: transcript,
+      restoredMessages: [],
       memorySummary: memSummary,
-      lastUpdated: new Date().toISOString()
     };
-    
+
     setSessions(prev => {
       const idx = prev.findIndex(s => s.id === updatedSession.id);
       let next = [...prev];
@@ -197,14 +184,10 @@ export function useSessionManager(deps: SessionManagerDeps) {
       safeLS('navbharat_sessions', JSON.stringify(next));
       return next;
     });
-    
+
     // Detect target tab — use saved tab field first, then broad agent/mode detection
     const savedTab = (targetSession as any).meta?.tab as ViewType | undefined;
     const { isProSession, isSdaSession, targetTab } = resolveSessionSurface(targetAgent, savedTab);
-
-    // Show the last 40 messages from previous conversation so user can scroll up and see context,
-    // then append the continuation greeting at the bottom.
-    const visibleHistory = uniqueHistory.slice(-40);
 
     // Route restored content into the state belonging to the session's actual
     // surface — Free/Pro/SDA each own a separate message state, so dumping
@@ -220,10 +203,10 @@ export function useSessionManager(deps: SessionManagerDeps) {
       setSdaResetKey(k => k + 1);
     } else if (isProSession) {
       setCurrentProSessionId(targetSession.id);
-      setProMessages([...visibleHistory, continuationGreeting]);
+      setProMessages(transcript);
     } else {
       setCurrentSessionId(targetSession.id);
-      setMessages([...visibleHistory, continuationGreeting]);
+      setMessages(transcript);
     }
 
     // Restore generated code from session files if available
@@ -245,31 +228,8 @@ export function useSessionManager(deps: SessionManagerDeps) {
     if (isProSession) setActiveAgent('navbharatai-pro');
     else setActiveAgent('navbharatai');
 
-    addLog(`UCI resumed: ${uciToFind}`, 'info');
+    addLog(`Opened chat: ${targetSession.customTitle || targetSession.title || sessionId}`, 'info');
     return true;
-  };
-
-  const handleRestoreByUci = async () => {
-    if (!user) {
-      setRestoreUciError('CUI / Universal Chat ID restoration requires a logged-in session. Please login first.');
-      return;
-    }
-    if (!resumeUciInputState.trim()) return;
-    setIsRestoringUci(true);
-    setRestoreUciError('');
-    try {
-      const success = await handleRestoreUci(resumeUciInputState.trim());
-      if (success) {
-        setResumeUciInputState('');
-        setShowContinueModal(false);
-      } else {
-        setRestoreUciError('Universal Chat ID not found or unauthorized access.');
-      }
-    } catch (err: any) {
-      setRestoreUciError(err.message || 'Error restoring chat.');
-    } finally {
-      setIsRestoringUci(false);
-    }
   };
 
   const deleteSession = async (id: string) => {
@@ -304,15 +264,12 @@ export function useSessionManager(deps: SessionManagerDeps) {
 
   const startNewChat = () => {
     const newId = Date.now().toString();
-    const newUci = user ? generateUCI() : '';
     
     setCurrentSessionId(newId);
     // The SAME opening App uses for a fresh chat — so a user who has not picked a language still gets
     // the picker, and the welcome text cannot drift from the one App shows on first load.
     //
-    // ⚠️ Computed ONCE and used for both the on-screen transcript and the saved session below. This
-    // function previously carried THREE hardcoded copies of that welcome line (two here, one in the
-    // saved record), which is how the saved session could describe a conversation that never happened.
+    // ⚠️ This function once carried THREE hardcoded copies of that welcome line; there is now one.
     const opening = initialFreeChatMessages();
     setMessages(opening);
 
@@ -320,38 +277,17 @@ export function useSessionManager(deps: SessionManagerDeps) {
     setHasGeneratedCode(false);
     setIsAppBuilt(false);
     // A new chat has NO files — `{}`, never placeholder ones (admin 2026-09-23). Three "New Sandbox"
-    // files used to be seeded here AND saved into the session below, so Code Studio showed files that
+    // files used to be seeded here AND saved with the blank session, so Code Studio showed files that
     // do not exist, and restoring this blank chat from History found that index.html and set
     // hasGeneratedCode(true) — a conversation with no app came back looking like one. Same fix as the
     // initial state in App.tsx; see the note there.
     setFiles({});
     
-    // Initial save of the new clean session
-    const initSession: ChatSession = {
-      id: newId,
-      title: 'New Conversation',
-      messages: opening,
-      files: {},
-      lastUpdated: new Date().toISOString(),
-      isPinned: false,
-      mode: mode,
-      agent: 'navbharatai',
-      uci: newUci,
-      originalAgent: 'navbharatai',
-      currentAgent: 'navbharatai',
-      memorySummary: '',
-      restoredMessages: []
-    };
-
-    if (user) {
-      setSessions(prev => {
-        const next = [initSession, ...prev];
-        safeLS('navbharat_sessions', JSON.stringify(next));
-        return next;
-      });
-    }
+    // NOTHING IS SAVED YET. A new chat becomes a History entry when its first message is sent (the
+    // autosave in App.tsx creates it then). Saving the blank chat here is what filled History with
+    // "New Conversation" rows holding only the welcome line — a list of chats nobody ever had.
 
     toggleTab('nbi_chat');
   };
-  return { handleRestoreUci, handleRestoreByUci, deleteSession, startNewChat };
+  return { openSession, deleteSession, startNewChat };
 }

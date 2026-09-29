@@ -33,7 +33,9 @@ export interface ChatSession {
   isPinned?: boolean;
   mode?: AgentMode;
   agent?: string;
-  uci?: string;
+  /** The name the USER gave this chat from History (Rename). Shown before `title`, which the writers
+   *  keep deriving from the first message — so a writer can never undo a rename. */
+  customTitle?: string;
   originalAgent?: string;
   currentAgent?: string;
   memorySummary?: string;

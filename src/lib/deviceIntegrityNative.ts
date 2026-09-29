@@ -55,6 +55,43 @@ async function plugin(): Promise<{ api: DeviceIntegrityPlugin } | null> {
 }
 
 /**
+ * Play Integrity's own error codes for a failure that a second try usually clears: no network (-3),
+ * too many requests (-8), could not bind to the Play service (-9), Google's server unavailable (-12),
+ * a client-side transient error (-17) and an internal error (-100). Everything else — the API not
+ * enabled, Play Services too old, a wrong cloud project — fails the same way every time, and retrying
+ * it would only make the user wait longer for the same answer.
+ */
+const TRANSIENT_INTEGRITY_CODES = new Set([3, 8, 9, 12, 17, 100]);
+
+/** PURE: does this failure message carry one of Google's transient codes? */
+export function isTransientIntegrityFailure(message: string | null | undefined): boolean {
+  const text = String(message ?? '');
+  for (const m of text.matchAll(/-(\d{1,3})\b/g)) {
+    if (TRANSIENT_INTEGRITY_CODES.has(Number(m[1]))) return true;
+  }
+  return /network|timed? ?out|temporar/i.test(text);
+}
+
+/** Waits between tries, in ms. Two retries: a phone on a weak signal gets three chances in ~3 s. */
+export const DEVICE_CHECK_RETRY_DELAYS_MS: readonly number[] = [800, 2000];
+
+/**
+ * Collect this device's evidence, retrying a TRANSIENT failure (admin 2026-09-27: "mobile recognition
+ * 100% fix karna hai"). A permanent failure is returned at once. `sleep` is a test seam.
+ */
+export async function collectDeviceCheck(
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+): Promise<NativeDeviceCheck> {
+  let last = await collectDeviceCheckOnce();
+  for (const delay of DEVICE_CHECK_RETRY_DELAYS_MS) {
+    if (last.outcome !== 'failed' || !isTransientIntegrityFailure(last.message)) return last;
+    await sleep(delay);
+    last = await collectDeviceCheckOnce();
+  }
+  return last;
+}
+
+/**
  * Collect this device's evidence, to be posted to the server alongside a reward claim.
  *
  * 🔒 A PARTIAL RESULT IS A FAILURE. If either half is missing the whole thing is `failed`, because
@@ -65,7 +102,7 @@ async function plugin(): Promise<{ api: DeviceIntegrityPlugin } | null> {
  * Never throws: every path returns a named outcome, so a caller on the sign-in screen cannot be
  * broken by a device that behaves unexpectedly.
  */
-export async function collectDeviceCheck(): Promise<NativeDeviceCheck> {
+async function collectDeviceCheckOnce(): Promise<NativeDeviceCheck> {
   try {
     const held = await plugin();
     if (!held) return { outcome: 'unavailable' };

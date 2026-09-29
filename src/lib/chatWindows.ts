@@ -68,14 +68,59 @@ export const MAX_OPEN_CHATS = 5;
  */
 export const SLOT_VIEWS: readonly string[] = ['sda_chat', 'imagegen'];
 
-/** How many of the five are taken: every open window, plus every slot view that is open. */
-export function chatSlotsUsed(windows: ChatWindow[], openViews: readonly string[]): number {
-  return windows.length + SLOT_VIEWS.filter((v) => openViews.includes(v)).length;
+/**
+ * EVERY CHAT CAN HOLD SEVERAL WINDOWS (admin 2026-09-28: *"navbharatai free aur image generate ai free,
+ * bas 1 hi open ho rhe hai, waki sabhi professional 2-2 open ho ja rahe hai. sabhi ko ek jaisa karo"*,
+ * and asked which way, chose "sab 2-2"). The FREE chat, the image studio and Doctor AI were one chat
+ * each; a professional was already a list of windows. These three now are too.
+ *
+ * They are listed in their OWN list (`viewWindows` in App), not in the professional one, because every
+ * reader of the professional list assumes a `PROFESSIONAL_CHATS` entry. The shape is the same
+ * (`ChatWindow`, with the view id in `professionalId`), so numbering and closing are the same functions.
+ *
+ * A view whose tab is open and whose list is empty has ONE implicit window, `DEFAULT_VIEW_WINDOW` —
+ * exactly the single chat it always had — so nothing changes until a second window is opened.
+ */
+export const VIEW_WINDOW_VIEWS: readonly string[] = ['nbi_chat', 'imagegen', 'sda_chat'];
+
+/** The implicit first window of a single-chat view: the chat it always had. */
+export const DEFAULT_VIEW_WINDOW = 'main';
+
+/** Can this view hold several windows through the view-window list? */
+export function isViewWindowed(view: string): boolean {
+  return VIEW_WINDOW_VIEWS.includes(view);
+}
+
+/** The windows a single-chat view has right now: its own list, else its implicit one while its tab is open. */
+export function viewWindowsFor(viewWindows: readonly ChatWindow[], openViews: readonly string[], view: string): ChatWindow[] {
+  if (!isViewWindowed(view) || !openViews.includes(view)) return [];
+  const own = viewWindows.filter((w) => w.professionalId === view);
+  return own.length > 0 ? own : [{ id: DEFAULT_VIEW_WINDOW, professionalId: view }];
+}
+
+/**
+ * How many of the five are taken: every professional window, every Doctor AI and image window, and
+ * every FREE window after the first (the first FREE chat is the tab's home and was never counted).
+ */
+export function chatSlotsUsed(windows: ChatWindow[], openViews: readonly string[], viewWindows: readonly ChatWindow[] = []): number {
+  const slotViews = SLOT_VIEWS.reduce((n, v) => n + viewWindowsFor(viewWindows, openViews, v).length, 0);
+  const extraFree = Math.max(0, viewWindowsFor(viewWindows, openViews, 'nbi_chat').length - 1);
+  return windows.length + slotViews + extraFree;
 }
 
 /** Is there room for one more chat (a new window, a Doctor AI case, the image studio)? */
-export function chatSlotFree(windows: ChatWindow[], openViews: readonly string[]): boolean {
-  return chatSlotsUsed(windows, openViews) < MAX_OPEN_CHATS;
+export function chatSlotFree(windows: ChatWindow[], openViews: readonly string[], viewWindows: readonly ChatWindow[] = []): boolean {
+  return chatSlotsUsed(windows, openViews, viewWindows) < MAX_OPEN_CHATS;
+}
+
+/**
+ * The list after opening one more window of a single-chat view. The implicit first window is written
+ * out explicitly at the same time, so it keeps its place (and its number) beside the new one. PURE.
+ */
+export function addViewWindow(viewWindows: readonly ChatWindow[], openViews: readonly string[], view: string, id: string): ChatWindow[] {
+  const current = viewWindowsFor(viewWindows, openViews, view);
+  const others = viewWindows.filter((w) => w.professionalId !== view);
+  return [...others, ...current, { id, professionalId: view }];
 }
 
 export interface OpenOutcome {
@@ -93,12 +138,12 @@ export interface OpenOutcome {
  *
  * `openViews` (the open tab ids) is what makes the cap count Doctor AI and the image studio too.
  */
-export function openWindow(windows: ChatWindow[], win: ChatWindow, openViews: readonly string[] = []): OpenOutcome {
+export function openWindow(windows: ChatWindow[], win: ChatWindow, openViews: readonly string[] = [], viewWindows: readonly ChatWindow[] = []): OpenOutcome {
   if (windows.some((w) => w.id === win.id)) return { windows, opened: true };
   // `openViews` is what lets Doctor AI and the image studio count (2026-09-22). A caller that omits it
   // gets the window-only count, which is LOOSER than the truth — so App passes `openTabs` at every
   // call site, and the wiring test reads that it does.
-  if (!chatSlotFree(windows, openViews)) return { windows, opened: false, reason: 'cap' };
+  if (!chatSlotFree(windows, openViews, viewWindows)) return { windows, opened: false, reason: 'cap' };
   return { windows: [...windows, win], opened: true };
 }
 

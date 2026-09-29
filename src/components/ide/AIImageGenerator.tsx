@@ -18,6 +18,7 @@ import { fetchImageFromUser, relayImage, type ClientFetchTicket } from '../../li
 import { imageWaitMessage } from '../../lib/imageDelivery';
 import { walletEmptyRefusalMessage } from '../../lib/walletEmptyRefusal';
 import { AddCreditNotice } from '../common/AddCreditNotice';
+import { ReportAiContent } from '../chat/ReportAiContent';
 import { TextOverlayEditor } from './TextOverlayEditor';
 import { extractImageText, layersFromExtracted } from '../../lib/imageTextFromPrompt';
 import { IMAGE_PROMPT_MAX, imagePromptLimit, imagePromptLimitNote } from '../../lib/imagePromptLimit';
@@ -188,6 +189,10 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
   const [history, setHistory] = useState<GeneratedImage[]>([]);
   const pagedHistory = usePagedList(history);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Pictures the user flagged with Report. Hidden on this screen at once — the person asked not to see
+  // them, and waiting for an admin to agree would be the wrong way round. Session-only on purpose:
+  // the Delete button is how a picture leaves the history for good.
+  const [reportedIds, setReportedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [craftNotes, setCraftNotes] = useState<string[]>([]);
   // The countdown shown while the browser waits out the provider's rate limit. Blank the rest of
   // the time. A visible wait is the difference between "busy" and "broken" — the blank-screen
@@ -772,12 +777,18 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
 
                   {/* The answer. */}
                   <div className="rounded-2xl rounded-bl-md border border-line bg-card overflow-hidden">
+                    {reportedIds.has(item.id) ? (
+                      <p className="px-3 py-6 text-center text-xs text-muted">
+                        You reported this image. It is hidden and has been sent to NavBharatAI for review.
+                      </p>
+                    ) : (
                     <img
                       src={item.url}
                       alt={item.prompt || item.type || 'Generated image'}
                       loading="lazy"
                       className="w-full h-auto block"
                     />
+                    )}
                     <div className="flex items-center gap-1.5 p-2">
                       <button
                         type="button"
@@ -817,6 +828,15 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
+                      {/* REPORT (Play AI-Generated Content policy, rejection 2026-09-28): flag THIS
+                          picture to NavBharatAI without leaving the screen. The picture itself is attached. */}
+                      <ReportAiContent
+                        surface="image"
+                        content={item.prompt || item.type || ''}
+                        getImage={() => ensureLocalImage(item.id)}
+                        onReported={() => setReportedIds((prev) => new Set(prev).add(item.id))}
+                        view="imagegen"
+                      />
                     </div>
                   </div>
                   <p className="text-[10px] text-faint pl-1">{relativeTime(item.timestamp)}</p>

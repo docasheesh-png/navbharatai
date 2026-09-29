@@ -23,6 +23,8 @@ import { VirtualFileSystem } from '../project/ProjectModel';
 import { normalizePath } from '../project/ProjectModel';
 import { ashokChakraSvg } from '../../lib/ashokChakra';
 import { precompileModules } from './PreviewPrecompile';
+import { bundleCssModules, cssModuleExportsJs } from '../../lib/cssModules';
+import { detectTailwindFlavour, tailwindHeadTags, tailwindStyleBody, TAILWIND_DIRECTIVE_RE_SOURCE, SHADCN_TW_CONFIG, SHADCN_CSS_VARS } from '../../lib/previewTailwind';
 import { startDepWarmup, getWarmDepUrls, WARMUP_MAX_MODULES } from './PreviewDepWarmup';
 import { IMPORT_META_IDENT, IMPORT_META_ENV_SOURCE, PROCESS_SHIM_SOURCE, NAVDATA_RUNTIME_SOURCE, STORAGE_SHIM_SOURCE, APP_TOUCH_CSS, APP_FEEL_LISTENER_SOURCE } from './previewImportMeta';
 import { proveBackendRunnable } from './browserBackend/capability';
@@ -89,30 +91,10 @@ const EXTERNAL_REACT_Q = '?external=react,react-dom';
 const SOURCE_EXT = ['.jsx', '.js', '.tsx', '.ts', '.mjs'];
 const CSS_EXT = ['.css'];
 
-// shadcn/ui token registry for the in-browser Tailwind Play CDN (admin 2026-07-17). Exported so it is
-// unit-testable. The Play CDN ignores the project's tailwind.config.js, so these standard tokens must be
-// declared inline or `@apply border-border` / `bg-background` / `text-foreground` throw "class does not
-// exist" and kill the preview. Every colour maps to a CSS variable (shadcn convention); SHADCN_CSS_VARS
-// supplies safe light-theme defaults so it renders even when the imported app omitted its `:root`.
-export const SHADCN_TW_CONFIG =
-  "tailwind.config={darkMode:['class'],theme:{extend:{colors:{" +
-  "border:'hsl(var(--border))',input:'hsl(var(--input))',ring:'hsl(var(--ring))'," +
-  "background:'hsl(var(--background))',foreground:'hsl(var(--foreground))'," +
-  "primary:{DEFAULT:'hsl(var(--primary))',foreground:'hsl(var(--primary-foreground))'}," +
-  "secondary:{DEFAULT:'hsl(var(--secondary))',foreground:'hsl(var(--secondary-foreground))'}," +
-  "destructive:{DEFAULT:'hsl(var(--destructive))',foreground:'hsl(var(--destructive-foreground))'}," +
-  "muted:{DEFAULT:'hsl(var(--muted))',foreground:'hsl(var(--muted-foreground))'}," +
-  "accent:{DEFAULT:'hsl(var(--accent))',foreground:'hsl(var(--accent-foreground))'}," +
-  "popover:{DEFAULT:'hsl(var(--popover))',foreground:'hsl(var(--popover-foreground))'}," +
-  "card:{DEFAULT:'hsl(var(--card))',foreground:'hsl(var(--card-foreground))'}}," +
-  "borderRadius:{lg:'var(--radius)',md:'calc(var(--radius) - 2px)',sm:'calc(var(--radius) - 4px)'}}}};";
-
-export const SHADCN_CSS_VARS =
-  ':root{--background:0 0% 100%;--foreground:222.2 84% 4.9%;--card:0 0% 100%;--card-foreground:222.2 84% 4.9%;' +
-  '--popover:0 0% 100%;--popover-foreground:222.2 84% 4.9%;--primary:222.2 47.4% 11.2%;--primary-foreground:210 40% 98%;' +
-  '--secondary:210 40% 96.1%;--secondary-foreground:222.2 47.4% 11.2%;--muted:210 40% 96.1%;--muted-foreground:215.4 16.3% 46.9%;' +
-  '--accent:210 40% 96.1%;--accent-foreground:222.2 47.4% 11.2%;--destructive:0 84.2% 60.2%;--destructive-foreground:210 40% 98%;' +
-  '--border:214.3 31.8% 91.4%;--input:214.3 31.8% 91.4%;--ring:222.2 84% 4.9%;--radius:0.5rem}';
+// shadcn/ui token registry for the in-browser Tailwind Play CDN (admin 2026-07-17). The constants now
+// live in src/lib/previewTailwind.ts — ONE definition for this renderer and the client bundler — and are
+// re-exported here so the tests and callers that import them from this module keep working.
+export { SHADCN_TW_CONFIG, SHADCN_CSS_VARS };
 
 /** True if this VFS looks like a frontend React app we can bundle in-browser. */
 export function isReactProject(vfs: VirtualFileSystem): boolean {
@@ -277,13 +259,19 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string, works
   const entry = findReactEntry(vfs);
 
   // Gather every source + css module so the in-browser loader can resolve imports.
-  const modules: Record<string, string> = {};
+  const gathered: Record<string, string> = {};
   for (const path of vfs.paths()) {
     if ([...SOURCE_EXT, ...CSS_EXT].some((e) => path.endsWith(e))) {
       const text = vfs.readText(path);
-      if (text != null) modules[path] = text;
+      if (text != null) gathered[path] = text;
     }
   }
+  // CSS MODULES ARE REAL HERE (admin 2026-09-28, the unstyled "secret calculator"). Every `.module.css`
+  // is scoped on the server and its class map shipped beside the sources, so `styles.card` is a real
+  // class name in the page instead of `undefined`. Done BEFORE precompilation so the Babel-in-browser
+  // fallback ships the same scoped stylesheet — one transform, both paths. src/lib/cssModules.ts.
+  const cssBundle = bundleCssModules(gathered);
+  const modules = cssBundle.files;
 
   if (!entry) {
     return `<!doctype html><html><body style="font-family:system-ui;padding:24px;color:#444">`
@@ -340,7 +328,7 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string, works
   }
   const backendEntry = backend.runnable ? backend.entry : null;
 
-  const payload = JSON.stringify({ entry, modules: shipped, backendEntry }).replace(/<\//g, '<\\/');
+  const payload = JSON.stringify({ entry, modules: shipped, backendEntry, cssModules: cssBundle.exports }).replace(/<\//g, '<\\/');
   // Serve dependencies from OUR origin when we know it (the /api/esm mirror): the browser then holds
   // every version-pinned module as an immutable cache entry, so reopening an old app loads its deps
   // from disk with zero network — and a CDN outage stops being a preview outage. Without an origin
@@ -387,20 +375,18 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string, works
   // and put the project CSS in a <style type="text/tailwindcss"> so @tailwind/@apply are processed too.
   // Vite apps import their CSS from JS (`import './index.css'`) rather than via a <link>, so most Tailwind
   // CSS arrives through the runtime loader's injectCss — which appends into the `#__nbai-tw` block below.
-  const usesTailwind = Object.values(modules).some((v) => /@tailwind\b|@apply\b/.test(v))
-    || vfs.paths().some((p) => /(^|\/)tailwind\.config\.[cm]?[jt]s$/.test(p));
-  // shadcn/ui DESIGN-TOKEN CONTRACT for the Tailwind Play CDN (admin 2026-07-17 — "border/colour error
-  // kabhi wapas na aaye"). ROOT CAUSE (mitrify2 import): the Play CDN does NOT read the project's
-  // tailwind.config.js, so a stylesheet using shadcn utilities — `@apply border-border`, `bg-background`,
-  // `text-foreground`, … — failed to compile with "The `border-border` class does not exist" and the
-  // whole preview died. We register the standard shadcn token set in an INLINE config (so every such
-  // utility EXISTS) and supply default CSS variables (so the colours actually render even when the app
-  // forgot its `:root` block; the app's own `:root`, injected after, always wins). Harmless for a
-  // non-shadcn Tailwind app — the extra tokens/vars are simply unused.
-  const tailwindCdn = usesTailwind
-    ? `<script src="https://cdn.tailwindcss.com"></script>\n<script>${SHADCN_TW_CONFIG}</script>`
-    : '';
-  const twCss = usesTailwind ? `${SHADCN_CSS_VARS}\n${css}` : css;
+  // WHICH TAILWIND (src/lib/previewTailwind.ts): v3 directives → the Play CDN + the shadcn token config;
+  // v4 (`@import "tailwindcss"`, `@theme`) → the v4 browser build, because the Play CDN compiles NOTHING
+  // from a v4 stylesheet and the app renders as raw HTML (admin 2026-09-28). One detector, shared with the
+  // client bundler, so the two renderers cannot disagree about what an app needs.
+  const twProbe: Record<string, string> = { ...modules };
+  for (const p of vfs.paths()) {
+    if (p === 'package.json' || /(^|\/)tailwind\.config\.[cm]?[jt]s$/.test(p)) twProbe[p] = vfs.readText(p) ?? '';
+  }
+  const twFlavour = detectTailwindFlavour(twProbe);
+  const usesTailwind = twFlavour != null;
+  const tailwindCdn = tailwindHeadTags(twFlavour);
+  const twCss = tailwindStyleBody(twFlavour, css);
   const styleTag = usesTailwind
     ? `<style id="__nbai-tw" type="text/tailwindcss">\n${twCss}\n</style>`
     : (css ? `<style>\n${css}\n</style>` : '');
@@ -442,6 +428,8 @@ ${babelTag}
   var bundle = JSON.parse(document.getElementById('__bundle__').textContent);
   var SOURCES = bundle.modules;
   var ENTRY = bundle.entry;
+  // path → { writtenClass: scopedClass } for every CSS Module, built by src/lib/cssModules.ts.
+  var CSS_MODULES = bundle.cssModules || {};
   // PHASE 2 — the app's own server, when the prover vouched for it. Null on every other page, which is
   // what keeps this whole path invisible to apps that never had a backend.
   var BACKEND_ENTRY = bundle.backendEntry || null;
@@ -667,7 +655,10 @@ ${previewBridgeSource('in-browser')}
     // CSS carrying @tailwind/@apply MUST land in a <style type="text/tailwindcss"> so the Tailwind Play
     // CDN compiles it — a plain <style> would leave the directives as inert (no-op) CSS and the app would
     // render unstyled. Reuse the head's #__nbai-tw block when present (Vite imports CSS from JS at runtime).
-    if (/@tailwind\\b|@apply\\b/.test(t)) {
+    // Every Tailwind directive, v3 and v4 alike (src/lib/previewTailwind.ts) — a v4 @import "tailwindcss"
+    // in a plain <style> is an unresolvable import and the app renders unstyled. (No backticks in this
+    // comment: it lives inside the loader's template literal.)
+    if (/${TAILWIND_DIRECTIVE_RE_SOURCE}/.test(t)) {
       if (!twStyleEl) {
         twStyleEl = document.getElementById('__nbai-tw');
         if (!twStyleEl) { twStyleEl = document.createElement('style'); twStyleEl.setAttribute('type', 'text/tailwindcss'); document.head.appendChild(twStyleEl); }
@@ -696,6 +687,10 @@ ${previewBridgeSource('in-browser')}
     if (cache.hasOwnProperty(path)) return cache[path].exports;
     var code = SOURCES[path];
     if (code == null) throw new Error('Module not found: ' + path);
+    // A CSS Module hands its importer the class map (default export = the map, every class also named);
+    // a plain stylesheet is injected and exports nothing. Shape from cssModuleExportsJs — shared with the
+    // client bundler, so the two loaders cannot drift.
+    if (/\\.module\\.css$/.test(path)) { injectCss(code); cache[path] = { exports: ${cssModuleExportsJs('CSS_MODULES[path]')} }; return cache[path].exports; }
     if (/\\.css$/.test(path)) { injectCss(code); cache[path] = { exports: {} }; return cache[path].exports; }
     if (/\\.json$/.test(path)) { cache[path] = { exports: JSON.parse(code) }; return cache[path].exports; }
     var isTs = /\\.tsx?$/.test(path), isTsx = /\\.tsx$/.test(path);
@@ -903,7 +898,10 @@ ${previewBridgeSource('in-browser')}
       }
       if (core.mods && !core.single) {
         console.warn('[preview] no rung served one consistent React —', core.errors.join(' | '));
-        showError(${JSON.stringify(REACT_SPLIT_FAULT_MESSAGE)}, true);
+        // What each rung did, in words that name no vendor — so the admin's report says WHICH rung
+        // refused instead of only that one did (autopsy 1a32248f carried no per-rung evidence at all).
+        var rungWhy = nbaiRungSummary(core.errors);
+        showError(${JSON.stringify(REACT_SPLIT_FAULT_MESSAGE)} + (rungWhy ? ' (' + rungWhy + ')' : ''), true);
         return;
       }
       bare = bare.filter(function (s) { return REACT_CORE.indexOf(s) < 0; });

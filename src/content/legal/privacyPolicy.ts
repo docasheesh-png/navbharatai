@@ -31,7 +31,7 @@
 // ⚠️ NOT LEGAL ADVICE: drafted to be reviewed by a lawyer before being relied on in a dispute.
 
 export const PRIVACY_POLICY_TITLE = 'Privacy Policy';
-export const PRIVACY_POLICY_UPDATED = '26 September 2026';
+export const PRIVACY_POLICY_UPDATED = '27 September 2026';
 
 export const PRIVACY_POLICY = `# Privacy Policy
 
@@ -103,7 +103,7 @@ We do not buy data about you from data brokers.
 
 ### 3.2 Device check for the referral bonus (Android app only)
 
-If you claim one of the free-credit bonuses in our Android app — for verifying your email, your mobile number, connecting GitHub, or applying a friend's referral code — the app checks, at that moment, that it is running on a genuine Android device.
+If you claim one of the free-credit bonuses in our Android app — for signing up, logging in with a verified email, verifying your mobile number, connecting GitHub, or applying a friend's referral code — the app checks, at that moment, that it is running on a genuine Android device. If the check cannot be completed, the signup, login and mobile bonuses are paid under the same rules as on our website, and the referral-code and GitHub bonuses wait until it can.
 
 **What that involves, precisely:**
 
@@ -246,6 +246,8 @@ The Platform is **not intended for children under 18**. We do not knowingly coll
 We use a small set of cookies and local-storage keys that are **necessary** for the Platform to work (your session, your theme, your text-size choice, your consent decision). Optional analytics and the Meta advertising-measurement pixel (Section 3.1) run **only** if you accept the consent banner, which is where you control them. Decline, and no third-party advertising or measurement cookie is set at all — the pixel is not even downloaded.
 
 ---
+
+**Using NavBharatAI without signing in.** A visitor who has not signed in may send a limited number of free AI messages each day. So that we can count them, your browser or the app keeps a **random guest identifier** in local storage and sends it with AI requests **only while you are signed out**. It is not linked to your name, phone number or any account, and it is never sent once you sign in. On our side it is stored only as a **one-way code** beside a daily message count, and that count is deleted after a few days. Clearing your site data removes the identifier.
 
 ### 11.1 Counting visits to NavBharatAI itself — no cookie, no script, no profile
 

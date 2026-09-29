@@ -21,6 +21,7 @@ import { isBudgetEndedError, isSlowStreamAbandon } from '../turnDeadline';
 import { isStarvedBudgetError, turnStarvedItsBudget } from '../floorBudget';
 import { abandonedTurnUsage } from '../unbilledTurns';
 import { reasoningAwareAsk } from '../reasoningAsk';
+import { BuildStoppedError, isBuildStoppedError, raceStop, throwIfStopped } from '../stopSignal';
 import {
   EMPTY_SLOW_RUNG_STATE, canBenchAnother, describeSlowRung, isRungTooSlow, recordSlowSample,
   type SlowRungState,
@@ -702,6 +703,9 @@ export function makeMultiProviderTurnRunner(
       let lastError: unknown;
       let alive = 0;
       for (let i = 0; i < chain.length; i++) {
+        // A stopped build asks no further rung. Checked per rung, not once: a stop that lands while one
+        // rung is failing must not walk the rest of the ladder.
+        throwIfStopped(params.signal);
         const { name, runner } = chain[i];
         const reportName = chain[i].reportAs ?? name; // normalized label for telemetry/delivery (key-pool)
         if ((timeoutStreak.get(reportName) ?? 0) >= TIMEOUT_BENCH_AFTER) {
@@ -765,10 +769,12 @@ export function makeMultiProviderTurnRunner(
           // on fifty keys; this stops it starving in the first place, when the ask came from a call site
           // that could not know which rung would answer it (build 681bd91b: a hard-coded `maxTokens:
           // 8000` starved glm-5.3 for 26 minutes on a repair, and `4000` starved the planner before it).
-          const result = await runner.runTurn({
+          // `raceStop` makes EVERY runner stop waiting on a stop, including one with no cancel handle of
+          // its own; a streaming runner additionally closes its stream (it receives the same signal).
+          const result = await raceStop(runner.runTurn({
             ...params, canAbandonSlowStream,
             maxTokens: reasoningAwareAsk(params.maxTokens, chain[i].modelId),
-          });
+          }), params.signal);
           timeoutStreak.delete(reportName); // a success resets the family's consecutive-timeout streak
           rateLimitStreak.delete(name); // …and the consecutive-429 streak (the provider recovered)
           cooldowns.clear(name); // …and the SHARED cooldown — the provider is back for everyone
@@ -824,6 +830,23 @@ export function makeMultiProviderTurnRunner(
           } catch { /* throughput bookkeeping must never disturb the build */ }
           return result;
         } catch (err) {
+          // 🔴 A STOP IS NOT A PROVIDER FAILURE (autopsy 2720e553). Decided FIRST, before any
+          // classification below can bench this vendor, count the wait as its waste, or fall to the
+          // next rung and start a new call for a build nobody is waiting on.
+          if (isBuildStoppedError(err) || params.signal?.aborted) {
+            // What a stopped call already cost is still ours — same attribution as a discarded turn.
+            try {
+              const abandoned = abandonedTurnUsage(err);
+              if (abandoned) {
+                opts.onTurnComplete?.(reportName, {
+                  inputTokens: abandoned.usage.inputTokens,
+                  outputTokens: abandoned.usage.outputTokens,
+                  producedNothing: true,
+                }, abandoned.model ?? chain[i].modelId, abandoned.usage.cacheReadInputTokens ?? 0);
+              }
+            } catch { /* cost attribution must never replace the stop */ }
+            throw new BuildStoppedError();
+          }
           lastError = err;
           fellBackFrom.push(reportName);
           opts.onProviderError?.(reportName, err);

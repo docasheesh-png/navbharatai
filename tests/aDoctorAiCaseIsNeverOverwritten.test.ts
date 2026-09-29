@@ -263,7 +263,9 @@ describe('the wiring — asserted from source, comments stripped', () => {
 
   it('History opens the case that was tapped, and SDAChat accepts it', () => {
     expect(sessions).toContain('setSdaOpenCaseId(caseIdFromDocId(');
-    expect(app).toContain('openCaseId={sdaOpenCaseId}');
+    // The first Doctor AI window opens the tapped case; every further window (2026-09-28) names its own.
+    expect(app).toContain('openCaseId={w.id === DEFAULT_VIEW_WINDOW ? sdaOpenCaseId : w.id}');
+    expect(app).toContain(': sdaOpenCaseId} onOpenModePicker={modePickerOpener}');
     expect(sda).toContain('openCaseId');
   });
 });

@@ -183,6 +183,18 @@ promised to build it.** Every model refused — the model's virtue, never our de
   one model refusal, which already works; insulting a doctor loses a user forever.**
 - The `adult` CONTENT CLASS is unchanged for the publish scanner (tagging still works); only the
   PROMPT verdict changed.
+- 🔴 **PICTURES ARE A DIFFERENT SURFACE, AND THIS RULE DID NOT COVER THEM (Play rejection 2026-09-28).**
+  `ADULT_CONTENT` waits for a porn noun AND "site / app / stream", so an IMAGE prompt has no second
+  half to match: measured, `nude woman`, `naked girl on beach` and the bare word `porn` all returned
+  **allow**. And "missing a request costs one model refusal" is **false for the image model — it does
+  not refuse, it draws.** Google rejected the Android update with a screenshot of "Image Generator AI
+  FREE" → "Photograph" showing a nude woman. Every prompt bound for Pollinations now passes
+  `pollinationsGuard.ts` — a word ban (English, Hinglish, Devanagari, spaced/leet disguises, plus
+  profanity) run INSIDE `pollinationsImageUrl`, so no path can build a link for a banned prompt — and
+  every link carries `safe=true`, the provider's own NSFW filter, which is OFF unless asked for.
+  ⚠️ **Scoped to Pollinations on purpose** (admin: *"sirf pollination ai ke liye"*): chat and build keep
+  their precision-first triage. Do NOT widen the word list into chat — a sexual-health question must
+  still get an answer. Test-locked and reversion-proven in `tests/theImageGeneratorDrawsNoNudity.test.ts`.
 
 ### 🙋 READ THE MOOD FIRST — a question gets an answer, not an app (admin-mandated 2026-09-13)
 
@@ -988,6 +1000,14 @@ the code (it is actually read somewhere) on 2026-07-11.
   truth). Set as part of turning the referral ladder on; the preflight compares this against
   `FIRST_RELEASE_WITH_DEVICE_PLUGIN = 117` to confirm the live app can device-attest — 134 ≥ 117 ✓, so the
   release row is green either way. Recorded hand-to-hand the same session.
+  🔴 **CORRECTED 2026-09-27 — "134 ≥ 117 ✓" WAS THE WRONG COMPARISON, AND BUILD 134 CANNOT ATTEST.**
+  117 is when the plugin SHIPPED, not when it WORKED: builds 117–136 send a classic Play Integrity
+  request with no nonce (the SDK refuses it before it reaches Google) and do not list the `phone` sign-in
+  provider, so on build 134 every device check and every in-app mobile OTP fails — the admin's "mobile
+  recognition" problem. Both were fixed in #3338, first built by run **#137** (138 is built from main
+  too), and **neither is on Play**. The preflight now compares against `FIRST_RELEASE_THAT_ATTESTS =
+  137` and shows 134 as failed. ⚠️ **To actually fix it: roll out build 137/138 (or a fresh one) on
+  Play, then set this key to its run number.** No server change can make build 134 attest.
   ✅ **SET by the admin 2026-08-25: `ANDROID_LATEST_VERSION_CODE = 91`** — the first PRODUCTION release.
   Verified against the pipeline rather than taken on trust: `android-aab.yml` sets
   `ANDROID_VERSION_CODE: ${{ github.run_number }}`, the run was **#91**, and Play displayed
@@ -1829,6 +1849,11 @@ the code (it is actually read somewhere) on 2026-07-11.
   Report code: `COST_CEILING_REACHED` (admin-only). Test-locked in `tests/buildCostCeiling.test.ts`.
   🔴 **STILL OPEN:** an abandoned provider call is not cancelled by this stop — the loop ends between
   turns, so a call already in flight runs to completion on the provider's side and is paid for.
+  ✅ **CLOSED 2026-09-27 (autopsy 2720e553):** every abort of the build's signal — this cost stop, the
+  Stop button, the watchdog, a deploy drain — now reaches the call in flight. `RunTurnParams.signal`
+  runs through the provider ladder (which neither benches a vendor nor falls to the next rung for it),
+  closes a GLM/Kimi stream, and cancels the Claude request and its retries; `stopSignal.ts` is the one
+  definition. The fast lane, which never read the signal at all, checks it at every step.
 
 - **🐢 THE SLOW-PROVIDER FIX — streamed build calls (built 2026-09-16; ✅ **SET `on` in Cloud Run by the
   admin the SAME DAY**):** `AGENTV3_STREAM_BUILD_CALLS` = `on`, so streamed reading is LIVE on every
@@ -1966,6 +1991,24 @@ the code (it is actually read somewhere) on 2026-07-11.
   ✅ **AND THIS REPORT SETTLED THE STREAMING ENTRY'S ONE OPEN QUESTION: Z.ai DOES honour
   `stream_options.include_usage`** — real per-call input/output/cache token counts came back on every
   streamed call. The "0 in / 0 out" risk that entry warns to watch for did not materialise.
+- **🎁 THE FREE-CREDIT STEPS, FINAL PLAN (admin 2026-09-27, verbatim: *"sabhi pahle 50₹ do! (mobile +
+  website) · fir refral code ke 100₹ (only mobile') · fir login par 50₹ (dono par) · fir mobile otp
+  verification par 100₹ (dono par) · fir github connect (100₹ mobile only) — ab yeh final hai"*). SUPERSEDES
+  the step amounts in the two entries below.** Signup ₹50 (both) · referral code ₹100 (app) · login with a
+  verified email ₹50 (both) · mobile OTP ₹100 (both) · GitHub ₹100 (app). App ₹400, website ₹200 — exactly
+  the two ceilings that already existed, so neither moved. Referrer still ₹25 × (login, mobile, GitHub),
+  never for the signup. Amounts live in `STEP_RUPEES` (`referralRewards.ts`); **`REFERRAL_STEP_TOKENS` is
+  no longer read.** New key **`REFERRAL_WEB_HOLD_UNTIL_MOBILE`** (NOT set; default OFF): `on` puts the
+  website's signup/login money back behind the OTP, the 2026-09-26 rule, without a deploy.
+  ⚠️ **THE COST THE ADMIN ACCEPTED, stated:** the ₹50 + ₹50 are earnable on the website with no phone and
+  no device check, so scripted accounts can collect ₹100 each (credit only — it cannot be withdrawn).
+  Watch the Referral cost card; the lever above is the answer if it is farmed.
+  📱 **Three steps no longer need the phone to be recognised:** the sign-in settle every client already
+  calls (`/api/payment/reconcile`, including build 134) pays the day-one two (signup, login — never the
+  mobile, which would make a new app user "old" before their typed code is applied), and a failed device
+  check on the phone falls back to the web rules for signup/login/mobile on both the client and the server.
+  Only the referral code and GitHub still need a device that can be checked. The phone also retries a
+  transient Play Integrity failure (-3/-8/-9/-12/-17/-100) twice before reporting it.
 - **The referral welcome gift — four earned steps (built 2026-09-15, NOT live yet):**
   `REFERRAL_REWARDS` (the master switch — ⚠️ **UNSET, and unset means today's behaviour exactly**:
   no code is minted, no money moves, and not one document is written). Tunables, all with working
@@ -2172,6 +2215,16 @@ the code (it is actually read somewhere) on 2026-07-11.
   `navbharatai.com` and `www.navbharatai.com` (no localhost) → Firebase console → App Check → register the
   web app with that key → set `APP_CHECK_SITE_KEY` in Cloud Run. The privacy policy (§3.3, §7) already
   discloses reCAPTCHA; `tests/appCheck.test.ts` holds that and the shared route list.
+- **🔒 TEN FREE MESSAGES A DAY WITHOUT SIGNING IN, ALL SURFACES TOGETHER (admin 2026-09-27, built the same day).**
+  `GUEST_DAILY_MESSAGES` (NOT set; code default **10**; `0` = sign-in from the first message; `off` = no limit;
+  unreadable ⇒ 10, never unlimited) and `GUEST_DAILY_IP_CAP` (NOT set; default **100**, never below the per-device
+  limit). Read by `src/server/lib/guestDailyQuota.ts`, mounted on every AI route a signed-out visitor can reach
+  (free chat, Repo Analyst, App Review, Security Scan, AI Debugger, App Scan, design tools); the census in
+  `tests/tenFreeMessagesThenSignIn.test.ts` fails when a new anonymous AI route lacks it. The visitor is the random
+  device id the app sends (`x-nb-guest`, `src/lib/guestId.ts`), because Indian mobile networks share one IP among
+  many phones; the IP (the LAST `X-Forwarded-For` entry) is only the backstop. The day is India's. Refusal is
+  **403 `guest_limit_reached`** — never 401, which the free-chat client reads as an expired session.
+  ⚠️ **The old browser counter (`FREE_DAILY_MESSAGES`) is gone on purpose; do not reintroduce a client-side count.**
 - **Visitor analytics for published apps (shipped 2026-09-10, ROADMAP §13 item 1.1):**
   `AGENTV3_SITE_ANALYTICS` (kill switch — **default ON**; `off` stops the beacon being stamped at
   publish and the hit route recording; apps already published keep their script until republished,
@@ -2841,6 +2894,14 @@ the flag entries above promise.
   says so, `null` means *not supplied* and never zero, and `writeTypecheckUntouched` makes the
   silence unrepresentable as a fact about the build. Test-locked and reversion-proven four ways in
   `tests/theCounterWatchedOneLaneOfTwo.test.ts`.
+- **`AGENTV3_STORE_LOOP_NOTE`** (default ON, `off` disables — added 2026-09-29, autopsy 6a4a799f) — a
+  write-time note (`storeEffectLoop.ts`, via `ToolDispatcher.writeSteeringNotes`) when a file binds a
+  zustand hook with NO selector (`const store = useMusicStore()`), lists that bare name in an effect's
+  dependencies and calls one of its actions inside the effect. That loops forever ("Maximum update depth
+  exceeded") and was what left "Blue Berry" on its error screen. No model call; never blocks a write.
+  🔴 **Same autopsy: the scaffold's own ErrorBoundary screen is now judged NOT rendered**
+  (`scaffoldCrashScreen` in `PreviewVerify.ts`). Before, it was saved as the last known good at 809 s.
+  Do not loosen that match to the bare words; an app's designed error card must stay a render.
 - **📱 PHONE FEATURES — `nativeCapabilities.ts` is the ONE table (built 2026-09-27, admin: *"jarwis jaisa
   app … navbharatai banayega"*).** It feeds the builder's brief, the user's summary (web / phone app / impossible,
   with More → Download APK + connect GitHub) and the phone build (plugin versions aligned to the app's
@@ -2855,6 +2916,24 @@ the flag entries above promise.
   the changed files against the rules derived from the project as it was BEFORE the build. Costs no file
   reads (it uses the already-warm graph) and no model call. Purely advisory — it can never fail a build.
   Report codes: `ARCHITECTURE_INVARIANTS_HELD` (clean) / `ARCHITECTURE_INVARIANT_VIOLATED`.
+- **🎨 THE IN-BROWSER PREVIEW RENDERS CSS MODULES AND TAILWIND v4, AND THE REAL BROWSER MEASURES STYLING (admin
+  2026-09-28: *"user ko aise farzi app na mile! … sundar aur real cheez bane fake/farzi nahi!!"*; no flag).** Both
+  in-browser renderers (`src/server/runtime/ReactPreview.ts` — the preview pane, the admin Built-apps preview, every
+  App Mart web player; and `src/lib/previewUtils.ts`) answered every `.css` import with `exports: {}`, so a CSS-Module
+  app rendered with every class blank, and only Tailwind v3 was detected, so a v4 app got a compiler that emits
+  nothing. `previewFidelity.ts` KNEW and said so in a caveat. **A well-built app was shown as raw HTML, and the label
+  made that feel handled.** Now: `src/lib/cssModules.ts` (ONE pure transform, both renderers, path-hash scope +
+  class map shipped in the bundle) and `src/lib/previewTailwind.ts` (ONE detector: v3 → Play CDN + shadcn config,
+  v4 → `@tailwindcss/browser@4`). ⚠️ A NEW reader of `.css` in either loader must go through `cssModuleExportsJs`
+  and `TAILWIND_DIRECTIVE_RE_SOURCE`; a second copy is the drifted-copy class. And `renderStyle.ts`: the browse
+  script measures a painted page (author rules, font rule, default-looking buttons) and the route records
+  `UNSTYLED_RENDER` / `RENDER_STYLE`, tells the user in plain words with a one-tap repair, and the claim audit
+  contradicts "beautiful, polished UI" about a raw-HTML page. **Evidence, not a gate — it fails no build and moves no
+  money**; a post-render styling heal is deliberately NOT wired until `UNSTYLED_RENDER` has appeared on real builds.
+  The fast lane's convention now names ONE global stylesheet as the default (CSS Modules only where the project
+  already uses them) — it used to say "CSS Modules (default)" a paragraph after the design contract said the
+  opposite. Test-locked and reversion-proven in `tests/theCssModulesCameOutBlank.test.ts` and
+  `tests/theRenderedAppLookedLikeRawHtml.test.ts`.
 - **`AGENTV3_PREVIEW_DOOR`** (default ON, set `off` to disable — added 2026-08-22) — the live-preview
   iframe points at OUR OWN workspace-stable route (`/api/agentv3/preview-door`, HMAC-tokened) instead of
   a stored sandbox URL; the route resolves "which machine, which port" at REQUEST time (proven recipe
@@ -3005,6 +3084,79 @@ the flag entries above promise.
   Until now the only journey outcomes a report could carry were `JOURNEY_NOT_DERIVED` and the
   mislabelled empty pass. A sudden crop of `JOURNEY_FAILED` is not a regression — it is the check
   working for the first time, and each one is a real app that looks like it saves data and does not.
+
+- **`AGENTV3_CLICK_EXPLORE`** (default ON, set `off` to disable — added 2026-09-28, competitive gap G1,
+  admin: *"best solution jo gaps ko fill kar ke navbharatai ko compatitors se aage la jaye"*) — **the
+  app is PRESSED, not only painted.** Every post-build check watched the app render or drove ONE derived
+  form; nothing pressed the rest of it, so a tab that white-screens, a button whose handler throws and a
+  link to a page that was never written survived every check we own. `clickExplorer.ts` opens the running
+  app in the sandbox's pre-baked browser and presses up to 12 visible controls, EACH ON A FRESH LOAD (so a
+  failure belongs to exactly one control), recording an error overlay, a blank root, an in-app link that
+  lands on a missing page, or an uncaught error. **No model call.** Measured on a local test page: seven
+  presses in ~10 s.
+  🪜 **ONE LEVEL DEEPER (2026-09-28, same day):** a first-screen press that WORKED and CHANGED the screen
+  (a tab, a menu, an in-app link) is looked at again, and the controls it revealed — never ones the first
+  screen already had — are pressed too: up to **8** more (`MAX_SECOND_LEVEL_CLICKS`), at most **2** under
+  any one parent (`MAX_SECOND_LEVEL_PER_PARENT`), each on a fresh load with the parent pressed UNARMED
+  first so nothing the parent does is blamed on the child. The same never-press rules apply. A failure is
+  named with its screen (*"Pressing "Refresh" (on the "Reports" screen) …"*). The 75 s budget is
+  unchanged, so first-screen presses always go first and a slow app loses depth, never coverage.
+  ⚠️ **THE RUNNER IS A TS TEMPLATE, SO EVERY BACKSLASH IS DOUBLED** — a single `\b` reaches the page as a
+  backspace, parses fine, and silently never matches. `node --check` cannot see it; a test now fails on
+  any raw control character in the generated module.
+  🔒 **WHAT IT WILL NOT PRESS IS THE DESIGN:** any name matching `NEVER_PRESS` (delete, clear, pay, buy,
+  checkout, send, share, upload, download, log out, …), a form's submit (the journey owns forms), a link
+  out of the app (another origin, `mailto:`/`tel:`, a new tab, a download), a control with no readable
+  name (an unnamed icon is as likely a trash can) — and, when `writesToUserDatabase` is true, every
+  creating verb too (`WRITE_VERBS`), the same rule the journey obeys. Browser dialogs are DISMISSED. The
+  in-page collector receives the exported regexes as data rather than a copy of them.
+  🔒 **THREE OUTCOMES, never two:** `EXPLORE_PASSED` / `EXPLORE_FAILED` need a loaded app and a completed
+  press; `EXPLORE_NOT_RUN` (never reached the app) and `EXPLORE_NOTHING_TO_PRESS` are facts about OUR
+  instrument, registered in `PROCESS_ONLY_CODES` and `NEVER_SUGGEST`. A press that could not complete
+  (covered, detached, timed out) is `skipped`, never a failure. `EXPLORE_FAILED` offers the user one
+  next step ("Fix the button that breaks your app").
+  ⚠️ **THE BUILD CARD HAS ONE SLOT** (`state.verification`), so the journey's proof is now HELD and emitted
+  once, merged with this one (`mergeUserProofs`) — a second `verified` event would have erased the
+  first. A source guard asserts there is exactly one `emit({ type: 'verified'` in the route.
+  ⚠️ **Evidence, never a gate**: it never fails a build and never spends a repair; runs only with ≥90 s of
+  build budget left. It does NOT attach the console recorder, deliberately — its errors are attributed per
+  press, and feeding them into the runtime auto-fix window would be a spend decision nobody took.
+  Test-locked and reversion-proven in `tests/theAppIsPressedNotOnlyPainted.test.ts`, whose real-browser
+  half runs wherever Chromium exists (`/opt/pw-browsers`) and is skipped in CI, which has none.
+  **What to watch:** `EXPLORE_FAILED` on real builds — each is a button a user would have found broken in
+  their first minute. A crop of `EXPLORE_NOT_RUN` means the runner, not the apps, needs looking at.
+  🔧 **AND NOW IT FIXES WHAT IT FINDS — `AGENTV3_EXPLORER_REPAIR` (2026-09-28, admin: *"han dono ho jaye …
+  real engineering kar ke, world class banao"*). ⚠️ NOT set; code default ON; `off` restores report-only.**
+  `explorerRepair.ts`. One bounded repair pass (allowlisted pass `explorer-repair`, refused every `.env`),
+  then EVERY button is pressed again. **Kept only if the app renders, a broken control now WORKS (pressed,
+  not merely present — deleting the button is not a fix) and no control that worked broke.** Anything
+  else — timeout, a failed pass, a re-check that threw, a regression — is undone to the green snapshot, and
+  the pass's billing phase (`PHASE_EXPLORER_REPAIR`) goes barren, so **an undone repair is never billed.**
+  A kept repair whose re-press found nothing broken clears the earlier `EXPLORE_FAILED`
+  (`BuildDiagnostics.resolveOnRecheck`) so the release gate is not held yellow by buttons that now work.
+  Report codes `EXPLORE_REPAIRED` / `_NO_CHANGE` / `_UNDONE` / `_SKIPPED`.
+  💸 **Normal/Strong always. Weak under `AGENTV3_EXPLORER_REPAIR_WEAK_DAILY`** (NOT set; default **100
+  repairs a day, platform-wide**; `0` = never on Weak; `off` = no cap; unreadable ⇒ 100, never unlimited).
+  Counted per ATTEMPT in `explorer_repair_weak_daily`, and it **fails closed** — an unreadable counter
+  refuses the repair and the broken button is reported exactly as before. Free-listed accounts are neither
+  counted nor refused. ⚠️ **100 is a starting point, not a measurement**: nobody has measured one Weak
+  repair's cost yet. `[AGENTV3] free-tier explorer repair allowance reached` in the log (once per day) is
+  what says whether it is right.
+  🔴 **SIBLING FIXED IN THE SAME CHANGE:** `verifyAfterFix` KEEPS a change whose re-check throws (right for
+  a crash fix), and the reviewer's green repair — which promises "an unproven result is UNDONE" — relied on
+  it, so a browser timeout during its check kept the edit. Both repairs now wrap their re-check in
+  `strictReverify`; the crash-fix callers are untouched.
+- **💰 `AGENTV3_LIVE_COST` — the build shows what it has cost SO FAR (2026-09-28, admin approved "build ke
+  dauraan live ₹ kharcha"). ⚠️ NOT set; code default ON; `off` sends no figure.** `liveBuildCost.ts` +
+  `liveCostLabel.ts`. The live strip reads **"₹12.40 so far"**, tappable for a one-line explanation.
+  🔒 **ONE PRICE, TWO READINGS:** it is `decideBuildBilledUsd` — the final bill's own function — over the
+  same live ledger, with the same sandbox measure and the same build discount (read once, up front). A
+  source guard fails CI if the live path's arguments or its "who is charged" predicate drift from the
+  settle's. 🔒 **Shown only to someone who will be charged** (the settle's `billingActive`), and never
+  while `AGENTV3_FREE_ONBOARDING_BUILDS` could zero the bill. Throttled to one update per 2.5 s and
+  computed only after the throttle allows it; the event (`cost_so_far`) carries one rupee number, no
+  vendor, no split. The label says what can still move it: more work adds to it, the checks at the end
+  can only lower it, a build that fails is free.
 
 - **`AGENTV3_CONTRACT_FILE`** (default ON, set `off` to disable — added 2026-09-17, autopsy 57875eb3) —
   the fast lane's SHARED CONTRACT (the enums / interfaces / types every per-file call is handed) is now

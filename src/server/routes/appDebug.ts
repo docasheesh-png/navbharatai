@@ -15,6 +15,7 @@ import {
   buildDebugSystemPrompt, buildDebugUserPrompt, parseDebugResponse,
 } from '../lib/debugAnalysis';
 import { ownedByVerifiedUid } from '../lib/workspaceIdentity';
+import { guestDailyQuota } from '../lib/guestDailyQuota';
 
 /**
  * Full-App Debugger — the REAL whole-codebase scan route (admin request 2026-07-24).
@@ -89,7 +90,7 @@ export function registerAppDebugRoutes(app: Express): void {
   });
 
   // ── Run a whole-app scan (NDJSON stream) ────────────────────────────────────────────────────────
-  app.post('/api/app-debug/run', workspaceRateLimiter(), inAiSpendZone(async (req: Request, res: Response) => {
+  app.post('/api/app-debug/run', workspaceRateLimiter(), guestDailyQuota('app-debug'), inAiSpendZone(async (req: Request, res: Response) => {
     // Daily allowance / Professional Pass (flag-off = no-op). Checked BEFORE anything is loaded or
     // streamed, so a blocked caller gets a clean JSON paywall rather than a half-open stream.
     const identity = await verifyFirebaseIdentity(req);
@@ -233,7 +234,7 @@ export function registerAppDebugRoutes(app: Express): void {
   }));
 
   // ── Deep-dive: investigate ONE finding → root cause + full fix (interactive) ────────────────────
-  app.post('/api/app-debug/investigate', workspaceRateLimiter(), inAiSpendZone(async (req: Request, res: Response) => {
+  app.post('/api/app-debug/investigate', workspaceRateLimiter(), guestDailyQuota('app-debug'), inAiSpendZone(async (req: Request, res: Response) => {
     const investigateIdentity = await verifyFirebaseIdentity(req);
     const investigateGate = await gateToolAction(investigateIdentity?.uid || null, investigateIdentity?.email || null, 'ai_tool');
     if (!investigateGate.allow) {

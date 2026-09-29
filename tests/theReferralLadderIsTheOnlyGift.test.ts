@@ -183,11 +183,11 @@ describe('the referral ladder is still there — the sweep did not go too far', 
     expect(read('src/components/AdminDashboard.tsx')).toContain('<ReferralCostCard');
   });
 
-  it('still pays ₹100 a step, capped at ₹400', async () => {
+  it('still pays its steps (₹100 for the mobile here), capped at ₹400', async () => {
     const { decideSelfReward } = await import('../src/server/lib/referralRewards');
     const { MAX_SELF_GIFT_TOKENS } = await import('../src/server/lib/giftPolicy');
     const r = decideSelfReward({
-      step: 'email', alreadyPaidSteps: [], deviceVerified: true, platform: 'android',
+      step: 'mobile', alreadyPaidSteps: [], deviceVerified: true, platform: 'android',
       alreadyGiftedTokens: 0, env: { REFERRAL_REWARDS: 'on' },
     });
     expect(r.tokens).toBe(100 * 100);

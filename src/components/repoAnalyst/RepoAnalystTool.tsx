@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { GitBranch, Search, Send, Sparkles, Copy, Download } from 'lucide-react';
 import { TirangaLoader } from '../ui/TirangaLoader';
+import { authJsonHeaders } from '../../lib/authHeaders';
+import { guestLimitReached } from '../../lib/guestId';
 
 /**
  * Dedicated "GitHub Repo Analyst & Improver" tool UI.
@@ -57,9 +59,11 @@ export function RepoAnalystTool({ userId }: { userId?: string }) {
   const post = async (message: string, history: Turn[]): Promise<string> => {
     const res = await fetch(ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await authJsonHeaders(),
       body: JSON.stringify({ message, history, userId }),
     });
+    const guestLimit = await guestLimitReached(res);
+    if (guestLimit) throw new Error(guestLimit);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data?.error || 'Request failed.');
     return data.reply || '(no reply)';
@@ -107,9 +111,11 @@ export function RepoAnalystTool({ userId }: { userId?: string }) {
     try {
       const res = await fetch(GEN_ENDPOINT, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authJsonHeaders(),
         body: JSON.stringify({ message: followUp.trim(), history: turns.slice(-10), userId }),
       });
+      const guestLimit = await guestLimitReached(res);
+      if (guestLimit) throw new Error(guestLimit);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || 'Request failed.');
       setGenSummary(data.summary || '');

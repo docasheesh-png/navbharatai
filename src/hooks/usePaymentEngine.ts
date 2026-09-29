@@ -11,6 +11,7 @@ import axios from 'axios';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { triggerCashfreeCheckout, warmCheckout } from '../services/paymentService';
 import { authedHeaders } from '../lib/authHeaders';
+import { REFERRAL_GRANTED_EVENT } from '../lib/referralClaim';
 import { trackEvent } from '../lib/analytics';
 import { decideReportOnce } from '../lib/conversionOnce';
 import { isNativeApp, nativePlatformName } from '../lib/mobileNative';
@@ -18,8 +19,6 @@ import { purchaseRail, type StoreConfig, type PurchaseOutcome } from '../lib/sto
 import { launchPlayPurchase, consumePlayPurchase, pendingPlayPurchases, playBillingAvailable, outcomeForNativeStatus } from '../lib/playBillingNative';
 import { fetchPlatformFeePct, DEFAULT_PLATFORM_FEE_PCT } from '../lib/platformFee';
 import { unlockHeaders } from '../lib/appLock';
-/** Free-tier daily message ceiling for anonymous (not-signed-in) users. */
-export const FREE_DAILY_MESSAGES = 10;
 
 export interface UsePaymentEngineDeps {
   /** The signed-in Firebase user (or null when anonymous). Payment actions no-op when null. */
@@ -57,7 +56,8 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
       return { ...prev, count: prev.count + (type === 'message' ? 1 : 0), builds: prev.builds + (type === 'build' ? 1 : 0) };
     });
   }, []);
-  const isFreeLimitReached = !user && dailyUsage.date === new Date().toDateString() && dailyUsage.count >= FREE_DAILY_MESSAGES;
+  // The guest daily limit lives on the SERVER now (guestDailyQuota.ts) — one count across every AI
+  // surface. `dailyUsage` stays as this device's own tally; it decides nothing.
 
   // 🔴 THE INVENTED REFERRAL CODE IS GONE (admin 2026-09-15). This minted `NB-XXXXXX` from
   // Math.random() into localStorage and the Billing panel printed it as "My Referral Code" — while
@@ -619,9 +619,18 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
         const res = await axios.post('/api/payment/reconcile', {});
         const data = res.data || {};
         if (cancelled || !data.message) return;
-        addLog(`Recovered ${data.creditedOrders} unsettled payment(s) totalling ₹${data.creditedInr}.`, 'success');
+        if (Number(data.creditedOrders) > 0) {
+          addLog(`Recovered ${data.creditedOrders} unsettled payment(s) totalling ₹${data.creditedInr}.`, 'success');
+        }
+        // The same sign-in settles the day-one free credit (signup + login, 2026-09-27). Every screen
+        // showing the rewards checklist refreshes on this event, so the ticks match the new balance.
+        if (Number(data.freeCreditRupees) > 0 && typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent(REFERRAL_GRANTED_EVENT, { detail: { rupees: Number(data.freeCreditRupees) } }));
+        }
         fetchWallet();
-        alert(`🎉 ${data.message}`);
+        // Free credit alone is announced by App's toast on the event above; a recovered payment still
+        // gets the alert it always had.
+        if (Number(data.creditedOrders) > 0) alert(`🎉 ${data.message}`);
       } catch {
         // Never surface this — it is a background safety net, and a user who has no pending payment
         // must not be shown a payment error for simply opening the app.
@@ -658,11 +667,9 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
   }, [user]);
 
   return {
-    // constants
-    FREE_DAILY_MESSAGES,
     // wallet + usage
     wallet, setWallet,
-    dailyUsage, setDailyUsage, incrementDailyUsage, isFreeLimitReached,
+    dailyUsage, setDailyUsage, incrementDailyUsage,
     // billing data
     billingLogs, setBillingLogs,
     billingTransactions, setBillingTransactions,

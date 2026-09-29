@@ -95,6 +95,13 @@ export const ALLOWED_PASSES: ReadonlySet<string> = new Set([
   // with a history of harm — the 2026-08-12 reviewer erased a user's real .env secrets — so it is ALSO
   // refused every secret file, below, whatever else it is allowed.
   'reviewer-functional-repair',
+  // A BUTTON THE CLICK EXPLORER PROVED BROKEN (admin 2026-09-28: "han dono ho jaye … world class
+  // banao"). The strongest evidence this platform collects — a real browser pressed a real control and
+  // the app crashed, blanked, threw or led nowhere — and until now it could only be reported. One
+  // repair, then EVERY button is pressed again; kept only if the app renders, a broken control now
+  // works and nothing that worked broke (explorerRepair.ts). A model-driven edit to a working app, so it
+  // carries the reviewer repair's restraints: an unproven result is undone, and no secret file, below.
+  'explorer-repair',
 ]);
 
 /**
@@ -144,6 +151,7 @@ const CREATE_ONLY_PASSES: ReadonlySet<string> = new Set([
  */
 const SECRET_FILE_DENIED_PASSES: ReadonlySet<string> = new Set([
   'reviewer-functional-repair',
+  'explorer-repair',
   ...CREATE_ONLY_PASSES,
 ]);
 

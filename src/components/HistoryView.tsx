@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { MessageSquare, Clock, MoreVertical, Trash2, Search, X, Layers, Code2, Zap, Cpu, Stethoscope } from 'lucide-react';
+import { MessageSquare, Clock, MoreVertical, Trash2, Search, X, Layers, Code2, Zap, Cpu, Stethoscope, SquarePen, Pin, PinOff, Pencil, Check } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Skeleton, SkeletonList } from './ui/Skeleton';
 import { readProfessionalHistory } from './professionals/ProfessionalHistoryView';
@@ -11,6 +11,8 @@ import { professionalRows, sortMergedRows, type ProfessionalPseudoSession } from
 import { shapeSessions, messagesOf } from '../lib/sessionShape';
 import { readHistoryIndex, buildHistoryIndex, writeHistoryIndex } from '../lib/historyIndex';
 import { groupSessionsByRecency } from './history/historyGroups';
+import { readDeviceSessionsFor } from '../lib/deviceSessions';
+import { mergeDeviceSessions, isEmptyConversation, displayTitle, cleanTitle, MAX_TITLE_LENGTH } from '../lib/chatHistory';
 import { sessionIsPro, sessionIsDoctor, sessionOwnerOf } from '../lib/sessionRouting';
 
 type FilterMode = 'all' | 'chat' | 'apps' | 'free' | 'pro' | 'sda';
@@ -21,6 +23,15 @@ let cachedRowsMemo: ReturnType<typeof readHistoryIndex> | null = null;
 function cachedRowsOnce() {
   if (cachedRowsMemo === null) cachedRowsMemo = readHistoryIndex();
   return cachedRowsMemo;
+}
+
+/**
+ * THIS DEVICE's saved chats (`navbharat_sessions`, written by App.tsx on every message) — and only when
+ * they belong to the account whose History this is (lib/deviceSessions.ts). Another account's chats on a
+ * shared phone read as none. Unreadable ⇒ none, never a thrown error on the list's first frame.
+ */
+function readDeviceSessions(uid: string | undefined) {
+  return shapeSessions(readDeviceSessionsFor(uid));
 }
 
 // ⚠️ THIS IS NOT THE SURFACE RULE — that is `sessionIsPro` in sessionRouting.ts, and it is the only
@@ -44,8 +55,12 @@ const isAppSession = (session: any) =>
 
 export const HistoryView = ({
   user,
-  onRestoreSession,
+  onOpenSession,
   onDeleteSession,
+  onNewChat,
+  currentSessionId,
+  onRenameSession,
+  onTogglePin,
   initialFilter,
   lockFilter,
   includeProfessionals,
@@ -54,8 +69,17 @@ export const HistoryView = ({
   embedded,
 }: {
   user: any;
-  onRestoreSession?: (uci: string) => void;
+  /** Open a saved chat by its session id — the whole row is this button. */
+  onOpenSession?: (sessionId: string) => void;
   onDeleteSession?: (id: string) => void;
+  /** Start a fresh chat — the "New chat" line at the top of the list, as in ChatGPT, Claude and Grok. */
+  onNewChat?: () => void;
+  /** The chat on screen right now, so its row can be marked the way every chat sidebar marks it. */
+  currentSessionId?: string;
+  /** Rename a chat (stored as `customTitle`; see lib/chatHistory.ts). */
+  onRenameSession?: (sessionId: string, title: string) => void;
+  /** Pin or unpin a chat. Pinned chats are listed under "Pinned", above every date. */
+  onTogglePin?: (sessionId: string, pinned: boolean) => void;
   /** Pre-select a filter when History is opened from a scoped entry point (e.g. the
    *  NavBharatAI Free footer opens it filtered to 'free'). The user can still switch. */
   initialFilter?: FilterMode;
@@ -106,6 +130,9 @@ export const HistoryView = ({
   const [hydrated, setHydrated] = useState(false);
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // Inline rename: the row becomes a text box in place, the way ChatGPT and Claude rename a chat.
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>(initialFilter ?? 'all');
   const [searchQuery, setSearchQuery] = useState('');
   // Professional conversations for the unified FREE history — localStorage, refreshed on demand
@@ -130,12 +157,14 @@ export const HistoryView = ({
       // shapeSessions at the DOOR: every reader below — the search filter, the title fallback, and any
       // added later — can then treat `messages` as an array without knowing that a stored session might
       // not have one. See sessionShape.ts for the crash this closes.
-      const data = shapeSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })))
-        .sort((a: any, b: any) => {
-          const ta = a.lastUpdated ? new Date(a.lastUpdated).getTime() : 0;
-          const tb = b.lastUpdated ? new Date(b.lastUpdated).getTime() : 0;
-          return tb - ta;
-        });
+      //
+      // 🔴 AND THIS DEVICE'S OWN SAVED CHATS ARE LISTED TOO (user report 2026-09-25: "when we close the
+      // app and reopen it, it doesn't show"). The cloud copy is written 2 s after the last message, so
+      // a chat closed inside those 2 s existed on the phone and nowhere else — and this list read the
+      // phone's copy only when the cloud ERRORED, never when it was merely behind. Now both are one
+      // list, the newer copy of each chat winning (lib/chatHistory.ts mergeDeviceSessions).
+      const cloud = shapeSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      const data = mergeDeviceSessions(cloud, readDeviceSessions(user?.uid));
       setSessions(data);
       setLoading(false);
       setHydrated(true);
@@ -153,10 +182,8 @@ export const HistoryView = ({
         // is unreachable the richer local copy is the best we have — the index is only a head start
         // for the online case. A cached index already on screen is left alone rather than replaced by
         // a shorter list.
-        const local = shapeSessions(JSON.parse(localStorage.getItem('navbharat_sessions') || '[]'));
-        if (local.length > 0) {
-          setSessions(local.sort((a: any, b: any) => new Date(b.lastUpdated as string).getTime() - new Date(a.lastUpdated as string).getTime()));
-        }
+        const local = mergeDeviceSessions([], readDeviceSessions(user?.uid));
+        if (local.length > 0) setSessions(local);
       } catch { /* empty */ }
       setLoading(false);
       // The offline list IS the full local copy, so message-text search works against it — the
@@ -178,7 +205,9 @@ export const HistoryView = ({
   const isFreeSession = (s: any) => sessionOwnerOf(s) === 'free';
 
   const filteredSessions = useMemo(() => {
-    let result = sessions;
+    // A chat nobody typed in is not a chat (the old "New chat" saved one on every press, and the index
+    // still carries them) — hidden here, from every source, by the one shared rule.
+    let result = sessions.filter((s) => !isEmptyConversation(s));
 
     if (includeProfessionals && effectiveFilter === 'free') {
       // The unified FREE scope (admin 2026-08-25): Free + Doctor sessions from Firestore, plus every
@@ -196,9 +225,8 @@ export const HistoryView = ({
       const q = searchQuery.trim().toLowerCase();
       result = result.filter(s =>
         (s.title && s.title.toLowerCase().includes(q)) ||
+        (typeof s.customTitle === 'string' && s.customTitle.toLowerCase().includes(q)) ||
         (s.profName && s.profName.toLowerCase().includes(q)) ||
-        (s.uci && s.uci.toLowerCase().includes(q)) ||
-        (s.id && s.id.toLowerCase().includes(q)) ||
         // No Array.isArray here any more: shapeSessions guarantees it upstream. Leaving the old guard
         // would keep implying the field is untrustworthy at THIS reader and safe at the others, which
         // is the exact asymmetry that hid the crash.
@@ -220,10 +248,16 @@ export const HistoryView = ({
     const sessionIsApp = isAppSession(session);
     // A professional pseudo-row (unified FREE history) — lives in localStorage, not Firestore.
     const prof = (session as Partial<ProfessionalPseudoSession>).profViewId ? (session as ProfessionalPseudoSession) : null;
+    // The user's own name for the chat first (Rename), then the saved title.
     // B25: fallback to first-message excerpt when title is blank.
-    const title = session.title && session.title !== 'New Conversation'
-      ? session.title
+    const named = displayTitle(session);
+    const title = named && named !== 'New Conversation'
+      ? named
       : messagesOf(session).find((m) => m.sender === 'user')?.text?.slice(0, 50) || 'New Conversation';
+    const isCurrent = !prof && !!currentSessionId && session.id === currentSessionId;
+    // Pin and Rename are for the chats this list owns. A professional conversation keeps its own store
+    // and its own controls (Professional History), so its row offers Delete only, as before.
+    const canEdit = !prof;
     // THE MODE, AS A DOT. It used to be a bordered chip with a word in it, on a row that already had
     // three other chips. The colour carries it for a sighted user and `aria-label` carries it for
     // everyone else, so the information survives at a tenth of the width.
@@ -232,7 +266,7 @@ export const HistoryView = ({
       : isProSession(session) ? { label: 'Pro', dot: 'bg-violet-500' }
       : { label: 'Free', dot: 'bg-amber-500' };
     const openRow = () => {
-      if (!prof) { onRestoreSession && onRestoreSession(session.uci || session.id); return; }
+      if (!prof) { onOpenSession?.(session.id); return; }
       // An archived conversation is genuinely RESUMED by the caller (same rule as Professional History)
       // so opening it continues that exact conversation rather than starting a fresh one — under the id
       // it had, so the server continues the same memory — and only once a window is certain. An open
@@ -255,6 +289,51 @@ export const HistoryView = ({
       }
       setProfItems(readProfessionalHistory());
     };
+    // Rename and Pin change this list AT ONCE (the caller also saves them on the device and in the
+    // cloud) — a list that waited for the cloud to echo a rename would look like it ignored the user.
+    const saveRename = () => {
+      const clean = cleanTitle(renameDraft);
+      setRenamingId(null);
+      if (!clean || clean === title) return;
+      setSessions((prev) => prev.map((x) => (x.id === session.id ? { ...x, customTitle: clean } : x)));
+      onRenameSession?.(session.id, clean);
+    };
+    const togglePinRow = () => {
+      const next = !session.isPinned;
+      setSessions((prev) => prev.map((x) => (x.id === session.id ? { ...x, isPinned: next } : x)));
+      onTogglePin?.(session.id, next);
+    };
+
+    // RENAMING: the row becomes its own text box, in place. Enter saves, Escape cancels, and leaving
+    // the box saves — the three ways every chat sidebar lets you finish a rename.
+    if (renamingId === session.id) {
+      return (
+        <div key={session.id} role="listitem" className="flex items-center gap-1.5 mx-1 my-0.5 px-2 py-1.5 rounded-xl bg-raised">
+          <input
+            autoFocus
+            value={renameDraft}
+            maxLength={MAX_TITLE_LENGTH}
+            aria-label="Chat name"
+            onChange={(e) => setRenameDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); saveRename(); }
+              if (e.key === 'Escape') { e.preventDefault(); setRenamingId(null); }
+            }}
+            onBlur={saveRename}
+            className="min-w-0 flex-1 bg-surface border border-line rounded-lg px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-indigo-500/60"
+          />
+          <button
+            type="button"
+            // onMouseDown so the click lands before the box's blur saves and closes it.
+            onMouseDown={(e) => { e.preventDefault(); saveRename(); }}
+            aria-label="Save name"
+            className="shrink-0 p-1.5 rounded-lg text-success hover:bg-surface touch-manipulation"
+          >
+            <Check className="w-4 h-4" />
+          </button>
+        </div>
+      );
+    }
 
     // THE CONFIRMATION IS INLINE AND COMPACT, and it still names what is about to go. A destructive
     // action on a one-line row must not become a one-tap action.
@@ -291,12 +370,17 @@ export const HistoryView = ({
           type="button"
           onClick={openRow}
           // The accessible name carries everything the chips used to say out loud.
-          aria-label={`${title} — ${mode.label}${sessionIsApp ? ' — app' : ''}`}
+          aria-label={`${title} — ${mode.label}${sessionIsApp ? ' — app' : ''}${session.isPinned ? ' — pinned' : ''}`}
+          aria-current={isCurrent ? 'true' : undefined}
           title={title}
-          className="min-w-0 flex-1 flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left transition-colors hover:bg-raised active:bg-raised-hover touch-manipulation"
+          className={cn(
+            'min-w-0 flex-1 flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left transition-colors hover:bg-raised active:bg-raised-hover touch-manipulation',
+            // The open chat is marked, as in every chat sidebar — you can see where you are.
+            isCurrent && 'bg-raised',
+          )}
         >
           <span aria-hidden="true" className={cn('w-1.5 h-1.5 rounded-full shrink-0', mode.dot)} />
-          <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-body">{title}</span>
+          <span className={cn('min-w-0 flex-1 truncate text-[13px] font-medium', isCurrent ? 'text-ink' : 'text-body')}>{title}</span>
           {prof?.profLive && (
             <span className="shrink-0 text-[9px] font-black uppercase tracking-widest text-success">Live</span>
           )}
@@ -322,6 +406,24 @@ export const HistoryView = ({
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setOpenDropdownId(null)} />
                 <div className="absolute right-0 mt-1 w-44 bg-raised border border-line rounded-xl shadow-2xl z-50 py-1 overflow-hidden">
+                  {canEdit && onTogglePin && (
+                    <button
+                      onClick={() => { setOpenDropdownId(null); togglePinRow(); }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-[11px] font-bold text-ink hover:bg-surface transition-colors text-left"
+                    >
+                      {session.isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
+                      {session.isPinned ? 'Unpin' : 'Pin'}
+                    </button>
+                  )}
+                  {canEdit && onRenameSession && (
+                    <button
+                      onClick={() => { setOpenDropdownId(null); setRenameDraft(title); setRenamingId(session.id); }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-[11px] font-bold text-ink hover:bg-surface transition-colors text-left"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      Rename
+                    </button>
+                  )}
                   <button
                     onClick={() => { setOpenDropdownId(null); setConfirmDeleteId(session.id); }}
                     className="w-full flex items-center gap-2.5 px-3 py-2 text-[11px] font-bold text-danger hover:bg-red-500/10 transition-colors text-left"
@@ -404,12 +506,26 @@ export const HistoryView = ({
         </div>
         )}
 
+        {/* NEW CHAT, AT THE TOP OF THE LIST — where ChatGPT, Claude and Grok all put it (admin
+            2026-09-28). Shown only when the caller can start one, so it is never a dead button. */}
+        {onNewChat && (
+          <button
+            type="button"
+            onClick={onNewChat}
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left text-[13px] font-semibold text-ink hover:bg-raised active:bg-raised-hover transition-colors touch-manipulation"
+          >
+            <SquarePen className="w-4 h-4 shrink-0 text-accent-text" />
+            New chat
+          </button>
+        )}
+
         {/* Search box */}
         <div className="flex-1 relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-faint" />
           <input
             type="text"
-            placeholder="Search by title, CUI, or message..."
+            placeholder="Search chats"
+            aria-label="Search chats"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             className="w-full bg-card border border-line rounded-xl pl-8 pr-8 py-2 text-[12px] text-ink placeholder-faint outline-none focus:border-indigo-500/50 transition-colors"
@@ -457,8 +573,9 @@ export const HistoryView = ({
             • **The "Open Chat" button.** The row IS the button now, which is how every list on a phone
               works and the only honest way to delete that control — a row you can see but not tap
               would be worse than the button it replaced.
-            • **The `CUI:` id.** A support identifier on every row of a user's own history. It is still
-              SEARCHABLE (the box above matches it, unchanged), so nothing became unfindable.
+            • **The chat id.** Gone entirely since 2026-09-28 — from the row, from the search, and from
+              the free chat's "enter your chat ID" box (admin: "yeh chat id wala system band karo"). A
+              chat is found by its name or its words, the way every other chat app finds one.
             • **The full timestamp and the agent line.** The group heading says when; a row repeating it
               cost a whole line each. This is the single change that turns cards back into a list.
             • **The App/Chat and mode chips.** The mode survives as a coloured dot and, for a screen
@@ -477,20 +594,22 @@ export const HistoryView = ({
             </div>
             <div className="text-center space-y-2">
               <p className="text-sm font-black text-ink uppercase tracking-widest">
-                {searchQuery ? `No results for "${searchQuery}"` : 'No sessions yet'}
+                {searchQuery ? `No results for "${searchQuery}"` : 'No chats yet'}
               </p>
               <p className="text-[11px] text-faint max-w-xs mx-auto leading-relaxed">
                 {searchQuery
                   ? 'Try a different search term or clear the filter.'
-                  : 'Start a conversation in the Pro Chat or ask the AI to build an app — your sessions will appear here.'}
+                  : 'Start a conversation — every chat you have is saved here, and opening one picks it up where you left it.'}
               </p>
             </div>
-            {!searchQuery && (
+            {!searchQuery && onNewChat && (
               <button
-                onClick={() => onRestoreSession?.('new')}
+                // This used to call the RESTORE handler with the id 'new', which found no chat and
+                // answered "Session not found" — a Start button that could only fail.
+                onClick={onNewChat}
                 className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-on-accent rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg"
               >
-                Start a New Chat
+                Start a new chat
               </button>
             )}
           </div>

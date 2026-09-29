@@ -92,10 +92,11 @@ describe('modePickerEntries — what the Mode button offers', () => {
     expect(withImage.map((e) => e.view)).toEqual(['nbi_chat', IMAGE_MODE_ID]);
   });
 
-  it('🔴 every recent row has a ✕ EXCEPT NavBharatAI FREE (admin 2026-09-22: "chat ke age se X hi hata den")', () => {
-    // FREE is the home the other chats live in; closing it from its own list either closed the tab and
-    // every AI inside it (the bug) or needed a tab-less "closed" flag (the first fix). Neither: no ✕.
-    expect(recentRowClosable(recentModeId('nbi_chat'))).toBe(false);
+  it('🔴 EVERY recent row has a ✕, FREE included (admin 2026-09-28: "sabhi ke end me x button bana do")', () => {
+    // Reverses 2026-09-22: a FREE row's ✕ now closes that one FREE window (or restarts the only one),
+    // never the FREE tab and the chats inside it — so the reason FREE had none is gone.
+    expect(recentRowClosable(recentModeId('nbi_chat'))).toBe(true);
+    expect(recentRowClosable(recentModeId('nbi_chat', 'free-2'))).toBe(true);
     expect(recentRowClosable(recentModeId('sda_chat'))).toBe(true);
     expect(recentRowClosable(recentModeId(IMAGE_MODE_ID))).toBe(true);
     expect(recentRowClosable(recentModeId('teacher_ai', 't1'))).toBe(true);
@@ -218,14 +219,16 @@ describe('the App wiring this feature depends on (source-pinned)', () => {
 
   it('the FREE row genuinely starts a NEW chat before opening the Free surface', () => {
     // Was pinned as `NEW_FREE_MODE_ID` — the row that did this is now the only FREE row there is.
-    expect(app).toContain("if (id === FREE_MODE_ID) { startNewChat(); toggleTab('nbi_chat'); return; }");
+    expect(app).toContain('if (id === FREE_MODE_ID) { newFreeWindow(); return; }');
+    // A FREE chat with nothing said yet is reused; otherwise a new window opens beside it.
+    expect(app).toContain("if (!openTabs.includes('nbi_chat') || !hasConversation) { startNewChat(); setInput(''); return; }");
   });
 
   it('a recent row SWITCHES to its exact conversation and starts nothing', () => {
     // The conversation id rides into `toggleTab`, which focuses that window — the same path the header
     // chip used until 2026-09-22, so there is one switch, not two.
     expect(app).toContain('const resume = recentTargetFromId(id);');
-    expect(app).toContain('if (resume) { toggleTab(resume.view as ViewType, true, resume.conversationId); return; }');
+    expect(app).toContain('if (resume) { switchToRecent(resume.view, resume.conversationId); return; }');
   });
 
   it('a professional\'s "New chat" opens a NEW WINDOW with a fresh conversation — the open one is neither archived nor dropped', () => {
@@ -240,7 +243,7 @@ describe('the App wiring this feature depends on (source-pinned)', () => {
 
   it('the image row opens Other Tools\' OWN view — not a fork', () => {
     expect(app).toContain('if (id === IMAGE_MODE_ID) {');
-    expect(app).toContain('toggleTab(IMAGE_MODE_ID as ViewType);');
+    expect(app).toContain('if (toggleTab(IMAGE_MODE_ID as ViewType) && isModeSurface(host)) {');
     const panels = readFileSync(join(__dirname, '..', 'panels', 'ViewPanels.tsx'), 'utf8');
     expect(panels).toContain("activeView === 'imagegen'");
     expect(panels).toContain('<AIImageGenerator');
@@ -336,13 +339,13 @@ describe('ModePickerSheet — the rows say which is which', () => {
   });
 
   it('it builds the list from the OPEN TABS and OPEN WINDOWS, or the Recent group could never know what is open', () => {
-    expect(sheet).toContain('modePickerEntries({ hideMedical, activeView, openViews, openChats })');
-    expect(sheet).toContain('[hideMedical, activeView, openViews, openChats]');
-    expect(sheet).toContain('activeModeId(activeView, activeChatId)');
+    expect(sheet).toContain('modePickerEntries({ hideMedical, activeView, openViews, openChats, viewWindows })');
+    expect(sheet).toContain('[hideMedical, activeView, openViews, openChats, viewWindows]');
+    expect(sheet).toContain('activeModeId(activeView, activeChatId, activeViewWindowId)');
   });
 
   it('the FREE styling follows the NAME, so the same chat is painted the same way in both rows', () => {
-    expect(sheet).toContain("e.name === 'NavBharatAI FREE'");
+    expect(sheet).toContain("e.name.startsWith('NavBharatAI FREE')");
     // The old branch keyed on kind, which would have left the recent row's "NavBharatAI FREE" plain
     // while the row beneath it kept the gradient — one chat, two looks, in one list.
     expect(sheet).not.toContain("e.kind === 'free' || e.kind === 'free_new'");

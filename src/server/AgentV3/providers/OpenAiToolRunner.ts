@@ -16,6 +16,7 @@ import { turnDeadline, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE, SLOW_ST
 import { glmThinkingParam, isThinkingParamRejection, modelAlwaysReasons, type GlmThinkingLevel } from './glmThinking';
 import { reconcileFloorBudget, turnStarvedItsBudget, starvedBudgetError } from '../floorBudget';
 import { markAbandonedTurn } from '../unbilledTurns';
+import { BuildStoppedError, onStop, raceStop, throwIfStopped } from '../stopSignal';
 import {
   toolDefsToOpenAI,
   transcriptToOpenAI,
@@ -120,6 +121,11 @@ async function readStream(
      * could make a build worse. Absent ⇒ never abandon, i.e. today's behaviour exactly.
      */
     canAbandon?: () => boolean;
+    /**
+     * The build's stop signal. A stop CLOSES the stream — the provider stops generating and stops
+     * billing — and throws `BuildStoppedError`, never a timeout the chain would bench a vendor for.
+     */
+    signal?: AbortSignal;
     startedAt?: number;
     now?: () => number;
   },
@@ -128,9 +134,14 @@ async function readStream(
   const startedAt = typeof opts.startedAt === 'number' ? opts.startedAt : now();
   const iterator = stream[Symbol.asyncIterator]();
   const abort = () => { try { stream.controller?.abort(); } catch { /* best-effort */ } };
+  const stoppedMark = Symbol('stopped');
+  let resolveStopped: ((v: typeof stoppedMark) => void) | undefined;
+  const stoppedTick = new Promise<typeof stoppedMark>((resolve) => { resolveStopped = resolve; });
+  const offStop = onStop(opts.signal, () => resolveStopped?.(stoppedMark));
 
   try {
     for (;;) {
+      if (opts.signal?.aborted) { abort(); throw new BuildStoppedError(); }
       const msToCeiling = opts.endAt - now();
       if (msToCeiling <= 0) { abort(); return 'deadline'; }
       const waitMs = Math.min(opts.idleMs, msToCeiling);
@@ -142,11 +153,17 @@ async function readStream(
       });
 
       const advance = iterator.next();
-      let step: IteratorResult<OpenAiStreamChunkLike> | typeof stalled;
+      let step: IteratorResult<OpenAiStreamChunkLike> | typeof stalled | typeof stoppedMark;
       try {
-        step = await Promise.race([advance, tick]);
+        step = await Promise.race([advance, tick, stoppedTick]);
       } finally {
         if (timer) clearTimeout(timer);
+      }
+
+      if (step === stoppedMark) {
+        advance.catch(() => { /* abandoned by a stop — see the stall branch below */ });
+        abort();
+        throw new BuildStoppedError();
       }
 
       if (step === stalled) {
@@ -191,6 +208,8 @@ async function readStream(
   } catch (err) {
     abort();
     throw err;
+  } finally {
+    offStop();
   }
 }
 
@@ -331,6 +350,8 @@ export class OpenAiToolRunner implements TurnRunner {
     // can no longer be read by anybody. Starting it would buy nothing and bill for it — which is exactly
     // the 148 seconds of post-mortem provider traffic in the report that produced this contract.
     if (bound.expired) throw new Error(BUDGET_EXHAUSTED_MESSAGE);
+    // …and refuse before spending when the build has been STOPPED: nobody will read this answer.
+    throwIfStopped(params.signal);
     const timeoutMs = bound.timeoutMs;
     // 🔴 NEVER AUTHORISE MORE OUTPUT THAN THE CLOCK CAN CARRY (autopsy 4efab9d7 — see floorBudget.ts).
     //
@@ -426,12 +447,17 @@ export class OpenAiToolRunner implements TurnRunner {
     // `idleMs` was the provider saying nothing, and our budget was not involved.
     const initialBoundMs = streaming ? idleMs : timeoutMs;
     const providerWentSilent = streaming && idleMs < timeoutMs;
-    const raw = await withTimeout(
-      call(),
-      initialBoundMs,
-      providerWentSilent
-        ? `OpenAI-compatible call (GLM/Kimi) timed out after ${idleMs}ms`
-        : clockMessage(initialBoundMs),
+    const raw = await raceStop(
+      withTimeout(
+        call(),
+        initialBoundMs,
+        providerWentSilent
+          ? `OpenAI-compatible call (GLM/Kimi) timed out after ${idleMs}ms`
+          : clockMessage(initialBoundMs),
+      ),
+      params.signal,
+      // A stream that opens AFTER the stop is closed on arrival, so it never generates for nobody.
+      (late) => { if (isChatStream(late)) { try { late.controller?.abort(); } catch { /* best-effort */ } } },
     );
 
     let completion: OpenAiCompletionLike;
@@ -448,6 +474,7 @@ export class OpenAiToolRunner implements TurnRunner {
         onReasoning: params.onThinking,
         // Only the ladder knows whether there is somewhere else to go; absent ⇒ never abandon.
         canAbandon: params.canAbandonSlowStream,
+        signal: params.signal,
       });
 
       // 🔑 THE POINT OF THE WHOLE CHANGE. A stall used to destroy the call; now it keeps the answer

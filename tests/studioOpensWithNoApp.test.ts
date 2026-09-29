@@ -49,12 +49,14 @@ describe('with no app there are no files — not placeholder ones', () => {
     expect(app).toContain('const [files, setFiles] = useState<FileSystem>({});');
   });
 
-  it('a new chat resets to an empty file set, and saves the session with none', () => {
+  it('a new chat resets to an empty file set, and saves nothing until somebody types', () => {
     const start = sessions.indexOf('const startNewChat');
     expect(start).toBeGreaterThan(-1);
     const body = sessions.slice(start, sessions.indexOf('toggleTab(', start));
     expect(body).toContain('setFiles({});');
-    expect(body).toContain('files: {},');
+    // Since 2026-09-28 the blank chat is not saved at all (the autosave creates it on the first
+    // message), so there is no saved record left to carry placeholder files.
+    expect(body).not.toContain('setSessions(');
   });
 
   it('neither placeholder page comes back, in either place', () => {

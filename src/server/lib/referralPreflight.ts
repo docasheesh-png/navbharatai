@@ -48,6 +48,17 @@ export const PLAY_INTEGRITY_API = 'https://playintegrity.googleapis.com/v1';
  */
 export const FIRST_RELEASE_WITH_DEVICE_PLUGIN = 117;
 
+/**
+ * The first Play release whose device check can actually SUCCEED. 🔴 CORRECTED 2026-09-27: carrying
+ * the plugin was never the same as being able to attest. Builds 117–136 send a classic Play Integrity
+ * request with no nonce, which the SDK refuses before it reaches Google, so every check on every phone
+ * failed; and they did not list the `phone` sign-in provider, so a native mobile OTP failed too. Both
+ * were fixed in #3338 (commit f21bcb76), first built by run **#137**. This preflight used to compare
+ * against 117 and showed release 134 green while no installed app could claim a rupee — the admin's
+ * "mobile recognition" problem, reported as fine by the one screen meant to catch it.
+ */
+export const FIRST_RELEASE_THAT_ATTESTS = 137;
+
 /** The token the probe sends. Google cannot decode it, which is the point: only the REFUSAL is read. */
 export const PROBE_TOKEN = 'navbharatai-setup-check';
 
@@ -68,7 +79,7 @@ export function classifyRelease(raw: unknown): PreflightCheck {
     return {
       id, label, state: 'unknown',
       detail: 'ANDROID_LATEST_VERSION_CODE is not set, so the live release cannot be judged from here.',
-      remedy: `After the next Play upload is live, set ANDROID_LATEST_VERSION_CODE in Cloud Run to that run number (${FIRST_RELEASE_WITH_DEVICE_PLUGIN} or later carries the device check).`,
+      remedy: `After the next Play upload is live, set ANDROID_LATEST_VERSION_CODE in Cloud Run to that run number (${FIRST_RELEASE_THAT_ATTESTS} or later can pass the device check).`,
     };
   }
   const n = Number(s);
@@ -86,9 +97,16 @@ export function classifyRelease(raw: unknown): PreflightCheck {
       remedy: 'Build a fresh .aab from main (with the PLAY_INTEGRITY_CLOUD_PROJECT repo secret set), roll it out on Play, then set ANDROID_LATEST_VERSION_CODE to its run number.',
     };
   }
+  if (n < FIRST_RELEASE_THAT_ATTESTS) {
+    return {
+      id, label, state: 'failed',
+      detail: `The live release is ${n}. It carries the device check but cannot pass it: builds before ${FIRST_RELEASE_THAT_ATTESTS} send the request without the nonce Google requires, and cannot send a mobile OTP inside the app. Phones on it still earn the signup, login and mobile rewards under the website rules; the referral-code and GitHub rewards wait for ${FIRST_RELEASE_THAT_ATTESTS} or later.`,
+      remedy: `Roll out build ${FIRST_RELEASE_THAT_ATTESTS} or later on Play (138 is built from main), then set ANDROID_LATEST_VERSION_CODE to its run number.`,
+    };
+  }
   return {
     id, label, state: 'ok',
-    detail: `Release ${n} carries the device check — provided the PLAY_INTEGRITY_CLOUD_PROJECT repo secret was set when it was built, which cannot be seen from here.`,
+    detail: `Release ${n} can pass the device check — provided the PLAY_INTEGRITY_CLOUD_PROJECT repo secret was set when it was built, which cannot be seen from here.`,
     remedy: '',
   };
 }

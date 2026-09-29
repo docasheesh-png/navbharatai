@@ -322,6 +322,11 @@ const NON_DOMAIN_USES: RegExp[] = [
   /\bjobs?\s+(?:queue|runner|scheduler|id)\b/gi,
   // jobs — "resume the build", "resume from where you left off": continue, not a CV.
   /\bresumes?\s+(?:the|this|that|my|our|it|from|where|building|work|again)\b/gi,
+  // jobs — resuming MEDIA or a transfer is a player control, not a CV (autopsy 6a4a799f: a music app's
+  // "Resume playback" and "Pause/resume" made it a jobs app, and the builder of "Blue Berry" was told to
+  // INCLUDE employer & candidate roles and interview scheduling). "upload your resume" keeps its meaning.
+  /\bresum(?:e|es|ed|ing)\s+(?:playback|playing|play|music|songs?|tracks?|audio|video|videos|media|podcasts?|episodes?|downloads?|uploads?|streams?|streaming|listening|watching|reading|progress|sessions?|timers?|the\s+(?:song|track|video|download|timer))\b/gi,
+  /\b(?:pause|play)\s*(?:\/|and|&|or|,)\s*resume\b|\bresume\s*(?:\/|and|&|or|,)\s*pause\b/gi,
   // ANY domain — a CODE CALL written into the prompt is an identifier, never a noun. A spec that lists an
   // API ("speak(text, language) stop() pause() resume()") read as a jobs app off `resume()` (autopsy
   // SignBridge, 2026-09-26) — and the builder of a sign-language translator was told to INCLUDE employer
@@ -375,6 +380,11 @@ const NON_DOMAIN_USES: RegExp[] = [
   /\bpropert(?:y|ies)\s+(?:name|value|key|of|is|are|on)\b/gi,
   /\bflat\s+(?:design|list|structure|file|rate|array|layout|colou?rs?|hierarchy|style|ui)\b/gi,
   /\b(?:file|code|command|feature|price|product|task|item)\s+listings?\b/gi,
+  // social — "social login" / "social sign-in buttons" is a WAY TO SIGN IN (Google, GitHub), and
+  // "social icons / links" is a footer. Neither is a social network (autopsy 1a32248f: a login page with
+  // "social-login buttons" was read as SOCIAL and told to include a realtime feed, moderation and media
+  // upload). "a social network", "social feed", "social app" keep their domain.
+  /\bsocial[\s-]*(?:log[\s-]?ins?|sign[\s-]?(?:ins?|ons?|ups?)|auth(?:entication)?|oauth|providers?|buttons?|icons?|links?|handles?|share\s+buttons?|media\s+(?:icons?|links?|handles?|buttons?))\b/gi,
   // social — following instructions, an HTTP POST, a user's own profile, and "message" as output.
   /\bfollow(?:s|ing|ed)?\s+(?:the|these|this|those|my|our|your|a|an|it|them|up|along|instructions?|steps?|guidelines?|conventions?|patterns?|rules?)\b/gi,
   /\b(?:http|api|rest|ajax|fetch|axios|curl|a|the)\s+post\s+(?:request|endpoint|route|method|call|body|handler|api)\b/gi,

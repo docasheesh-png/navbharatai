@@ -4,7 +4,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Message } from '../src/types/index';
 import {
-  generateUCI,
   getRandomElement,
   generateSmartHeuristicSummary,
   extractCode,
@@ -14,46 +13,7 @@ import {
   asMessageArray,
 } from '../src/lib/chatUtils';
 
-// ─── generateUCI ─────────────────────────────────────────────────────────────
-
-describe('generateUCI', () => {
-  it('returns a string between 10 and 16 characters', () => {
-    for (let i = 0; i < 20; i++) {
-      const uci = generateUCI();
-      expect(uci.length).toBeGreaterThanOrEqual(10);
-      expect(uci.length).toBeLessThanOrEqual(16);
-    }
-  });
-
-  it('always contains at least one uppercase letter', () => {
-    for (let i = 0; i < 20; i++) {
-      expect(/[A-Z]/.test(generateUCI())).toBe(true);
-    }
-  });
-
-  it('always contains at least one lowercase letter', () => {
-    for (let i = 0; i < 20; i++) {
-      expect(/[a-z]/.test(generateUCI())).toBe(true);
-    }
-  });
-
-  it('always contains at least one digit', () => {
-    for (let i = 0; i < 20; i++) {
-      expect(/[0-9]/.test(generateUCI())).toBe(true);
-    }
-  });
-
-  it('always contains at least one symbol from !@#$%^&*', () => {
-    for (let i = 0; i < 20; i++) {
-      expect(/[!@#$%^&*]/.test(generateUCI())).toBe(true);
-    }
-  });
-
-  it('generates distinct values on consecutive calls', () => {
-    const set = new Set(Array.from({ length: 50 }, () => generateUCI()));
-    expect(set.size).toBeGreaterThan(45);
-  });
-});
+// generateUCI was deleted with the chat-ID system (2026-09-28) — see tests/theChatIdSystemIsGone.test.ts.
 
 // ─── getRandomElement ────────────────────────────────────────────────────────
 

@@ -1,39 +1,5 @@
 import type { Message } from '../types/index';
 
-/**
- * Generates a random UCI (Unique Conversation Identifier) string:
- * 10–16 characters drawn from uppercase, lowercase, digits and symbols,
- * guaranteed to contain at least one from every class.
- */
-export function generateUCI(): string {
-  const uppers = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  const lowers = 'abcdefghijklmnopqrstuvwxyz';
-  const digits = '0123456789';
-  const symbols = '!@#$%^&*';
-  const allChars = uppers + lowers + digits + symbols;
-
-  const len = Math.floor(Math.random() * (16 - 10 + 1)) + 10;
-
-  let result = '';
-  result += uppers[Math.floor(Math.random() * uppers.length)];
-  result += lowers[Math.floor(Math.random() * lowers.length)];
-  result += digits[Math.floor(Math.random() * digits.length)];
-  result += symbols[Math.floor(Math.random() * symbols.length)];
-
-  for (let i = 4; i < len; i++) {
-    result += allChars[Math.floor(Math.random() * allChars.length)];
-  }
-
-  const arr = result.split('');
-  for (let j = arr.length - 1; j > 0; j--) {
-    const k = Math.floor(Math.random() * (j + 1));
-    const temp = arr[j];
-    arr[j] = arr[k];
-    arr[k] = temp;
-  }
-  return arr.join('');
-}
-
 /** Returns a random element from an array. */
 export function getRandomElement<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
@@ -61,8 +27,10 @@ export function generateSmartHeuristicSummary(history: Message[]): string {
     }
   });
 
-  if (completed.length === 0) completed.push('Workspace initiation under UCI protocol');
-  if (pending.length === 0) pending.push('Dynamic continuous prompt analysis');
+  // Plain facts when a list is empty — this text is handed to the AI as the chat's memory, so a filler
+  // phrase ("Workspace initiation under UCI protocol") was a made-up milestone the model could repeat.
+  if (completed.length === 0) completed.push('No build or fix requested yet');
+  if (pending.length === 0) pending.push('Nothing open');
 
   return `### 🧠 COMPRESSED INTELLECTUAL WORKSPACE MEMORY
 - **Completed Milestones**:

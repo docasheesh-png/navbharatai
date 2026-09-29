@@ -52,11 +52,12 @@ import {
 } from './lib/professionalChatStore';
 import {
   openWindow, closeWindow, windowsOf, nextActiveAfterClose, capMessage, isWindowedProfessional, chatSlotFree,
+  viewWindowsFor, addViewWindow, DEFAULT_VIEW_WINDOW,
   type ChatWindow, type ConversationRef,
 } from './lib/chatWindows';
 import { MOBILE_NAV_TOTAL_HEIGHT, publishMobileNavHeight } from './lib/mobileNav';
 import { footerTapPlan, type ModeFooterKey } from './lib/footerSheets';
-import { startFreshCase } from './lib/sdaCaseStore';
+import { startFreshCase, CASE_ID_KEY, CASE_DOC_KEY } from './lib/sdaCaseStore';
 import { newSdaCaseId } from './lib/sdaCaseId';
 import { ModePickerSheet } from './components/chat/ModePickerSheet';
 import { ActionDot } from './components/ActionDot';
@@ -75,7 +76,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { onAuthStateChanged, getRedirectResult, GithubAuthProvider, User as FirebaseUser } from 'firebase/auth';
 // One shared, tested describer for social sign-in outcomes (see socialSignInPolicy).
 import { socialRedirectFailureMessage, authErrorDetail } from './components/socialSignInPolicy';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, updateDoc } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
 
 // Firebase init now lives in ONE place — src/lib/firebase.ts (root-cause fix 2026-07-11: a second
@@ -147,7 +148,8 @@ import { useSettings } from './hooks/useSettings';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
 import OfflineBanner from './components/OfflineBanner';
 import { Message, ChatSession, ApiKeys, ViewType, SettingsScreen, FileSystem, ErrorContext } from './types';
-import { generateUCI } from './lib/chatUtils';
+import { isEmptyConversation, sameTranscript, sameFileMap, cleanTitle } from './lib/chatHistory';
+import { claimDeviceSessions, readDeviceSessionsFor } from './lib/deviceSessions';
 import { sanitizeFirestoreData } from './lib/firestoreUtils';
 import { safeLocalJson } from './lib/safeLocalJson';
 
@@ -301,9 +303,8 @@ export default function App() {
   // the JSX below is unchanged. The hook owns the Cashfree URL-callback effect + all /api/payment/* +
   // /api/wallet/* actions; nothing payment-owned flows into the build/preview/chat pipeline.
   const {
-    FREE_DAILY_MESSAGES,
     wallet, setWallet,
-    dailyUsage, setDailyUsage, incrementDailyUsage, isFreeLimitReached,
+    dailyUsage, setDailyUsage, incrementDailyUsage,
     billingLogs, setBillingLogs,
     billingTransactions, setBillingTransactions,
     loadingWallet, setLoadingWallet,
@@ -731,12 +732,11 @@ export default function App() {
 
     cloudSyncReady.current = false;
 
-    // 1) Instant: show whatever is cached locally
-    let local: ChatSession[] = [];
-    try {
-      const saved = localStorage.getItem('navbharat_sessions');
-      if (saved) local = JSON.parse(saved);
-    } catch {}
+    // 1) Instant: show whatever is cached locally — but only THIS account's. The device keeps one
+    //    account's chats; another account's are removed here, before anything reads them (see
+    //    lib/deviceSessions.ts — they used to be loaded into, and synced up for, whoever signed in next).
+    claimDeviceSessions(user.uid);
+    const local = readDeviceSessionsFor(user.uid) as ChatSession[];
     setSessions(local);
 
     // 2) Cloud: pull cross-device workspace and merge (newer lastUpdated wins)
@@ -796,11 +796,6 @@ export default function App() {
     return () => clearTimeout(handle);
   }, [sessions, user]);
   
-  // Universal Chat Continuation (UCI) State Managers inside App.tsx
-  const [resumeUciInputState, setResumeUciInputState] = useState('');
-  const [isRestoringUci, setIsRestoringUci] = useState(false);
-  const [restoreUciError, setRestoreUciError] = useState('');
-  const [showContinueModal, setShowContinueModal] = useState(false);
   const [firebaseOauthError, setFirebaseOauthError] = useState<{
     errorType: string;
     message: string;
@@ -827,6 +822,32 @@ export default function App() {
   // its windows is on screen.
   const [openChats, setOpenChats] = useState<ChatWindow[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  // WINDOWS OF THE FREE CHAT, THE IMAGE STUDIO AND DOCTOR AI (admin 2026-09-28: *"sabhi ko ek jaisa
+  // karo"* — every AI opens several windows, like a professional). A separate list from `openChats`
+  // because every reader of that one assumes a professional; the rules live in lib/chatWindows.ts.
+  // A view with no entry here has its one implicit window, so nothing changes until a second is opened.
+  const [viewWindows, setViewWindows] = useState<ChatWindow[]>([]);
+  const [activeViewWindows, setActiveViewWindows] = useState<Record<string, string>>({});
+  const activeViewWindowOf = useCallback(
+    (view: string): string => {
+      const own = viewWindowsFor(viewWindows, openTabs, view);
+      const wanted = activeViewWindows[view] ?? DEFAULT_VIEW_WINDOW;
+      return own.some((w) => w.id === wanted) ? wanted : (own[0]?.id ?? DEFAULT_VIEW_WINDOW);
+    },
+    [viewWindows, activeViewWindows, openTabs],
+  );
+  /**
+   * A FREE window that is not on screen: its conversation, kept here until it is switched back to. The
+   * FREE chat's state lives in App (one `messages`), so a second window is a SWAP of that state, not a
+   * second mounted chat — the saved sessions (History) are unchanged by it.
+   */
+  const freeWindowSnapshotsRef = useRef(new Map<string, { messages: Message[]; input: string; sessionId: string }>());
+  /**
+   * Doctor AI's own case before its second window opened. Each extra window names its case explicitly;
+   * the first one reads "the current case" from the device, which every other window overwrites on
+   * mount — so the device's pointer is put back when the first window is the only one again.
+   */
+  const sdaDefaultCaseRef = useRef<{ caseId: string | null; caseDoc: string | null } | null>(null);
   /**
    * THE window on screen: the active view's window named by `activeChatId`, else that view's last
    * window. The fallback is not decoration — `closeTab` lands on "the last remaining tab", which can be
@@ -1034,16 +1055,39 @@ export default function App() {
   // theme persistence → handled inside useSettings() hook
 
 
-  const togglePin = (sessionId: string) => {
-    if (!user) return;
+  /**
+   * PIN and RENAME, the two History actions ChatGPT, Claude and Grok all have (admin 2026-09-28).
+   *
+   * Both write the device's copy AND the cloud document, because History reads the cloud: the pin
+   * used to change only the device's copy, and the cloud learned of it only if that chat happened to
+   * be the open one — so pinning any other chat did nothing a user could see. A cloud write that fails
+   * (offline) is kept by Firestore and sent later; the device's copy already shows it.
+   *
+   * Neither touches `lastUpdated`: pinning or renaming a chat is not writing in it, so it does not move.
+   * A rename is stored as `customTitle`, which the automatic writers never derive, so the next message
+   * can never quietly put the old title back.
+   */
+  const updateSessionMeta = (sessionId: string, patch: { isPinned?: boolean; customTitle?: string }) => {
+    if (!user || !sessionId) return;
     setSessions(prev => {
-      const next = prev.map(s => 
-        s.id === sessionId ? { ...s, isPinned: !s.isPinned } : s
-      );
+      const next = prev.map(s => (s.id === sessionId ? { ...s, ...patch } : s));
       safeLS('navbharat_sessions', JSON.stringify(next));
       return next;
     });
-    addLog('Session pin status updated.', 'info');
+    // `updateDoc` only touches the named fields and fails cleanly on a chat the cloud does not have yet
+    // (it is then saved whole, with these fields, by the next autosave).
+    updateDoc(doc(db, 'chat_sessions', sessionId), sanitizeFirestoreData(patch)).catch(() => {});
+  };
+
+  const togglePin = (sessionId: string, pinned?: boolean) => {
+    const current = sessions.find(s => s.id === sessionId)?.isPinned;
+    updateSessionMeta(sessionId, { isPinned: typeof pinned === 'boolean' ? pinned : !current });
+  };
+
+  const renameSession = (sessionId: string, title: string) => {
+    const clean = cleanTitle(title);
+    if (!clean) return;
+    updateSessionMeta(sessionId, { customTitle: clean });
   };
 
   useEffect(() => {
@@ -1179,7 +1223,6 @@ export default function App() {
         if (showCheckoutModal) { setShowCheckoutModal(false); return; }
         if (showPurchaseFormPanel) { setShowPurchaseFormPanel(false); return; }
         if (showDeployPanel) { setShowDeployPanel(false); return; }
-        if (showContinueModal) { setShowContinueModal(false); return; }
         // No modal was open — if Focus Mode is on, Esc brings the header back (always works, even
         // though the on-screen toggle/floating button might be out of view).
         if (focusMode) { setFocusMode(false); return; }
@@ -1195,7 +1238,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [canUndo, canRedo, undoCode, redoCode, addToast, showAuth, showCheckoutModal, showPurchaseFormPanel, showDeployPanel, showContinueModal, focusMode]);
+  }, [canUndo, canRedo, undoCode, redoCode, addToast, showAuth, showCheckoutModal, showPurchaseFormPanel, showDeployPanel, focusMode]);
 
   const [keys, setKeys] = useState<ApiKeys>(() => {
       const defaults = { gemini: '', groq: '', deepseek: '', openai: '', openrouter: '', claude: '' };
@@ -1528,14 +1571,14 @@ export default function App() {
         // Cap BEFORE the archive is touched (review finding 2026-09-21): a resume that is then refused
         // would leave the row "ongoing" with no window, and could shed an on-screen window's own
         // conversation from the store's open list.
-        if (!chatSlotFree(openChats, openTabs)) { addToast(capMessage(), 'warning'); return false; }
+        if (!chatSlotFree(openChats, openTabs, viewWindows)) { addToast(capMessage(), 'warning'); return false; }
         wanted = store ? resumeArchived(store, view, resumeEndedAt) : null;
         if (!wanted) return false; // the record is gone — the view re-reads rather than opening a blank chat
       }
       if (!wanted && existing.length === 0) wanted = (store && latestOpenConversationId(store, view)) || newConversationId();
       if (wanted) {
         if (!existing.some((w) => w.id === wanted)) {
-          const opened = openWindow(openChats, { id: wanted, professionalId: view }, openTabs);
+          const opened = openWindow(openChats, { id: wanted, professionalId: view }, openTabs, viewWindows);
           if (!opened.opened) { addToast(capMessage(), 'warning'); return false; }
           setOpenChats(opened.windows);
         }
@@ -1572,7 +1615,7 @@ export default function App() {
     
     setActiveView(view);
     return true;
-  }, [user, openTabs, activeView, addLog, setShowAuth, openChats, activeChatId, addToast]);
+  }, [user, openTabs, activeView, addLog, setShowAuth, openChats, activeChatId, addToast, viewWindows]);
 
   // Cross-component navigation (billing PR 5): deeply-nested surfaces (e.g. the v5.0 panel inside
   // ProV3Surface, which gets no nav callback) can request a view switch by dispatching
@@ -1635,7 +1678,6 @@ export default function App() {
       if (showDeployPanel) openOverlays.push('deploy');
       if (showModePicker) openOverlays.push('mode-picker');
       if (historyPopupOpen) openOverlays.push('history');
-      if (showContinueModal) openOverlays.push('continue');
       if (reportOpen) openOverlays.push('report');
       if (zipSizeModal) openOverlays.push('zip-size');
       if (showAuth) openOverlays.push('auth');
@@ -1649,7 +1691,6 @@ export default function App() {
             case 'deploy': setShowDeployPanel(false); return;
             case 'mode-picker': setShowModePicker(false); return;
             case 'history': setHistoryPopupOpen(false); return;
-            case 'continue': setShowContinueModal(false); return;
             case 'report': setReportOpen(false); return;
             case 'zip-size': setZipSizeModal(null); return;
             case 'auth': setShowAuth(false); return;
@@ -1666,7 +1707,7 @@ export default function App() {
   }, [
     exitPromptOpen, activeView, toggleTab,
     isMenuOpen, showDeployPanel, showModePicker, historyPopupOpen,
-    showContinueModal, reportOpen, zipSizeModal, showAuth,
+    reportOpen, zipSizeModal, showAuth,
   ]);
 
   /**
@@ -1838,6 +1879,15 @@ export default function App() {
     // Every WINDOW of a closing professional goes with it (their transcripts are archived below).
     setOpenChats(prev => prev.filter(w => !closingSet.has(w.professionalId)));
     if (openChats.some(w => w.id === activeChatId && closingSet.has(w.professionalId))) setActiveChatId(null);
+    // ...and every window of a closing FREE chat, image studio or Doctor AI.
+    setViewWindows(prev => prev.filter(w => !closingSet.has(w.professionalId)));
+    setActiveViewWindows(prev => {
+      const next = { ...prev };
+      for (const v of closing) delete next[v];
+      return next;
+    });
+    if (closingSet.has('nbi_chat')) freeWindowSnapshotsRef.current.clear();
+    if (closingSet.has('sda_chat')) sdaDefaultCaseRef.current = null;
 
     setTabHistories(prevHistories => {
       const nextHistories = { ...prevHistories };
@@ -1871,7 +1921,7 @@ export default function App() {
         setProMessages([]);
         setProInput('');
         try { localStorage.removeItem('navbharat_pro_messages'); } catch {}
-        // Fresh session id so the next conversation doesn't inherit this one's memory/UCI
+        // Fresh session id so the next conversation doesn't inherit this one's memory
         const newProSessionId = `pro-${Date.now()}`;
         try { localStorage.setItem('pro_session_id', newProSessionId); } catch { /* ignore */ }
         setCurrentProSessionId(newProSessionId);
@@ -1984,20 +2034,27 @@ export default function App() {
     if (!user) return; // ONLY save sessions if logged-in!
     const activeMsgs = messages;
     
-    // Avoid saving if messages are empty or only contains welcome greetings
-    if (activeMsgs.length === 0) return;
-    if (activeMsgs.length <= 1 && activeMsgs[0]?.id?.includes('welcome')) return;
+    // A chat is saved from its FIRST USER MESSAGE, never before. The opening (welcome line, and the
+    // language picker for a user who has not chosen one) is not a conversation, and saving it is what
+    // filled History with "New Conversation" rows nobody wrote (see lib/chatHistory.ts).
+    if (!activeMsgs.some(m => m.sender === 'user')) return;
 
     setSessions(prev => {
       const existingIdx = prev.findIndex(s => s.id === currentSessionId);
       let existingSession = existingIdx > -1 ? prev[existingIdx] : null;
 
-      // Determine session title from the first non-welcome message
-      const firstRealMsg = activeMsgs.find(m => m.sender === 'user' || !m.id?.includes('welcome'));
-      const rawTitle = firstRealMsg?.text || 'New Conversation';
-      const title = rawTitle.slice(0, 40) + (rawTitle.length > 40 ? '...' : '');
+      // OPENING A CHAT IS NOT WRITING IN IT. When the transcript on screen is the one already saved,
+      // nothing changed — so nothing is stamped. Without this, looking at an old conversation moved it
+      // to the top of History, which ChatGPT, Claude and Grok never do.
+      if (existingSession && sameTranscript(existingSession.messages, activeMsgs)
+        && sameFileMap(existingSession.files, files) && existingSession.currentAgent === activeAgent) {
+        return prev;
+      }
 
-      const sessionUci = existingSession?.uci || generateUCI();
+      // The title is the user's own first words — never the welcome line or the language picker.
+      const firstUserMsg = activeMsgs.find(m => m.sender === 'user');
+      const rawTitle = firstUserMsg?.text || 'New Conversation';
+      const title = rawTitle.slice(0, 40) + (rawTitle.length > 40 ? '...' : '');
 
       const updatedSession: ChatSession = {
         id: currentSessionId,
@@ -2008,8 +2065,7 @@ export default function App() {
         mode,
         agent: activeAgent,
         isPinned: existingSession?.isPinned || false,
-        // UCI details
-        uci: sessionUci,
+        customTitle: existingSession?.customTitle,
         originalAgent: existingSession?.originalAgent || activeAgent,
         currentAgent: activeAgent,
         memorySummary: existingSession?.memorySummary || '',
@@ -2036,7 +2092,7 @@ export default function App() {
         const transitionRef = doc(db, 'chat_agent_history', transitionId);
         setDoc(transitionRef, sanitizeFirestoreData({
           id: transitionId,
-          uci: sessionUci || '',
+          sessionId: currentSessionId,
           userId: user?.uid || 'anonymous',
           previous_agent: existingSession.currentAgent || null,
           current_agent: updatedSession.currentAgent || null,
@@ -2056,18 +2112,21 @@ export default function App() {
     if (!user) return; // ONLY save sessions if logged-in!
     const activeMsgs = proMessages;
 
-    if (activeMsgs.length === 0) return;
-    if (activeMsgs.length <= 1 && activeMsgs[0]?.id?.includes('welcome')) return;
+    // Same rules as the free autosave above: saved from the first user message, and an unchanged
+    // transcript (a chat that was only opened) is not re-stamped.
+    if (!activeMsgs.some(m => m.sender === 'user')) return;
 
     setSessions(prev => {
       const existingIdx = prev.findIndex(s => s.id === currentProSessionId);
       let existingSession = existingIdx > -1 ? prev[existingIdx] : null;
 
-      const firstRealMsg = activeMsgs.find(m => m.sender === 'user' || !m.id?.includes('welcome'));
-      const rawTitle = firstRealMsg?.text || 'New App Build';
-      const title = rawTitle.slice(0, 40) + (rawTitle.length > 40 ? '...' : '');
+      if (existingSession && sameTranscript(existingSession.messages, activeMsgs) && sameFileMap(existingSession.files, files)) {
+        return prev;
+      }
 
-      const sessionUci = existingSession?.uci || generateUCI();
+      const firstUserMsg = activeMsgs.find(m => m.sender === 'user');
+      const rawTitle = firstUserMsg?.text || 'New App Build';
+      const title = rawTitle.slice(0, 40) + (rawTitle.length > 40 ? '...' : '');
 
       const updatedSession: ChatSession = {
         id: currentProSessionId,
@@ -2078,7 +2137,7 @@ export default function App() {
         mode: 'build',
         agent: 'navbharatai-pro',
         isPinned: existingSession?.isPinned || false,
-        uci: sessionUci,
+        customTitle: existingSession?.customTitle,
         originalAgent: existingSession?.originalAgent || 'navbharatai-pro',
         currentAgent: 'navbharatai-pro',
         memorySummary: existingSession?.memorySummary || '',
@@ -2103,6 +2162,60 @@ export default function App() {
     });
   }, [proMessages, currentProSessionId, files, user]);
 
+  /**
+   * The cloud copy of one chat (`chat_sessions/<id>`), written by ONE function for the free and the Pro
+   * chat alike — the two writers used to be forty identical lines each, which is how a field added to
+   * one is forgotten in the other.
+   */
+  const writeSessionDoc = useCallback((session: ChatSession, tab: string, docMode: string) => {
+    if (!user) return;
+    const toWire = (list: Message[] | undefined) => (list || []).map(m => ({
+      id: m.id || '',
+      text: m.text || '',
+      sender: m.sender || 'ai',
+      timestamp: m.timestamp || new Date().toISOString()
+    }));
+    setDoc(doc(db, 'chat_sessions', session.id), sanitizeFirestoreData({
+      id: session.id || 'unknown',
+      userId: user.uid,
+      tab,
+      original_agent: session.originalAgent || null,
+      current_agent: session.currentAgent || null,
+      title: session.title || 'Untitled',
+      // The user's own name for the chat (History → Rename). Written back every time because this is
+      // a whole-document write: leaving it out would erase a rename on the next message.
+      customTitle: session.customTitle || '',
+      memory_summary: session.memorySummary || '',
+      edit_log: session.editLog || [],
+      restoredMessages: toWire(session.restoredMessages),
+      messages: toWire(session.messages),
+      files: Object.entries(session.files || {}).reduce((acc: Record<string, string>, [k, v]) => { acc[k] = v || ''; return acc; }, {}),
+      lastUpdated: session.lastUpdated || new Date().toISOString(),
+      isPinned: !!session.isPinned,
+      mode: docMode
+    })).catch(err => {
+      if ((err as any)?.code !== 'resource-exhausted') {
+        console.error('Firestore chat_sessions sync error:', err);
+      }
+    });
+  }, [user]);
+
+  /**
+   * Cloud writes waiting out their 2-second quiet period, by chat surface. Kept so they can be sent AT
+   * ONCE when the app goes to the background — see the flush effect below.
+   */
+  const pendingSessionWritesRef = useRef<{ nbi?: () => void; pro?: () => void }>({});
+
+  /** Schedule one surface's cloud write after 2 s of quiet (one write per burst, not one per message). */
+  const scheduleSessionWrite = useCallback((key: 'nbi' | 'pro', timerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | undefined>, write: () => void) => {
+    clearTimeout(timerRef.current);
+    pendingSessionWritesRef.current[key] = write;
+    timerRef.current = setTimeout(() => {
+      delete pendingSessionWritesRef.current[key];
+      write();
+    }, 2000);
+  }, []);
+
   // Debounced Firestore sync for NBI Chat sessions.
   // Fires at most once per 2 s of quiet after messages change, so a 20-turn conversation
   // produces 1–2 writes instead of 20 — keeps the free-tier daily write quota healthy.
@@ -2115,42 +2228,10 @@ export default function App() {
     // Never let this generic writer touch a v3_ doc — a stale full-doc write here would re-add a
     // messages copy and reintroduce the transcript-corruption class of bugs.
     if (typeof session.id === 'string' && session.id.startsWith('v3_')) return;
-    clearTimeout(fsNBIDebounceRef.current);
-    fsNBIDebounceRef.current = setTimeout(() => {
-      const sessionRef = doc(db, 'chat_sessions', session.id);
-      setDoc(sessionRef, sanitizeFirestoreData({
-        id: session.id || 'unknown',
-        uci: session.uci || '',
-        userId: user.uid,
-        tab: activeView,
-        original_agent: session.originalAgent || null,
-        current_agent: session.currentAgent || null,
-        title: session.title || 'Untitled',
-        memory_summary: session.memorySummary || '',
-        edit_log: session.editLog || [],
-        restoredMessages: (session.restoredMessages || []).map(m => ({
-          id: m.id || '',
-          text: m.text || '',
-          sender: m.sender || 'ai',
-          timestamp: m.timestamp || new Date().toISOString()
-        })),
-        messages: (session.messages || []).map(m => ({
-          id: m.id || '',
-          text: m.text || '',
-          sender: m.sender || 'ai',
-          timestamp: m.timestamp || new Date().toISOString()
-        })),
-        files: Object.entries(session.files || {}).reduce((acc: Record<string, string>, [k, v]) => { acc[k] = v || ''; return acc; }, {}),
-        lastUpdated: session.lastUpdated || new Date().toISOString(),
-        isPinned: !!session.isPinned,
-        mode: session.mode || 'chat'
-      })).catch(err => {
-        if ((err as any)?.code !== 'resource-exhausted') {
-          console.error('Firestore chat_sessions sync error:', err);
-        }
-      });
-    }, 2000);
-  }, [sessions, currentSessionId, user, activeView]);
+    // A chat nobody has typed in is not written (see lib/chatHistory.ts isEmptyConversation).
+    if (isEmptyConversation(session)) return;
+    scheduleSessionWrite('nbi', fsNBIDebounceRef, () => writeSessionDoc(session, activeView, session.mode || 'chat'));
+  }, [sessions, currentSessionId, user, activeView, scheduleSessionWrite, writeSessionDoc]);
 
   // Debounced Firestore sync for Pro Builder sessions.
   useEffect(() => {
@@ -2160,42 +2241,32 @@ export default function App() {
     // v5.0 (AgentV3) docs are single-writer (server transcript + panel-owned metadata row) —
     // same rule as the NBI writer above: this generic writer must never touch a v3_ doc.
     if (typeof session.id === 'string' && session.id.startsWith('v3_')) return;
-    clearTimeout(fsProDebounceRef.current);
-    fsProDebounceRef.current = setTimeout(() => {
-      const sessionRef = doc(db, 'chat_sessions', session.id);
-      setDoc(sessionRef, sanitizeFirestoreData({
-        id: session.id || 'unknown',
-        uci: session.uci || '',
-        userId: user.uid,
-        tab: 'nbi_pro_chat',
-        original_agent: session.originalAgent || null,
-        current_agent: session.currentAgent || null,
-        title: session.title || 'Untitled',
-        memory_summary: session.memorySummary || '',
-        edit_log: session.editLog || [],
-        restoredMessages: (session.restoredMessages || []).map(m => ({
-          id: m.id || '',
-          text: m.text || '',
-          sender: m.sender || 'ai',
-          timestamp: m.timestamp || new Date().toISOString()
-        })),
-        messages: (session.messages || []).map(m => ({
-          id: m.id || '',
-          text: m.text || '',
-          sender: m.sender || 'ai',
-          timestamp: m.timestamp || new Date().toISOString()
-        })),
-        files: Object.entries(session.files || {}).reduce((acc: Record<string, string>, [k, v]) => { acc[k] = v || ''; return acc; }, {}),
-        lastUpdated: session.lastUpdated || new Date().toISOString(),
-        isPinned: !!session.isPinned,
-        mode: 'build'
-      })).catch(err => {
-        if ((err as any)?.code !== 'resource-exhausted') {
-          console.error('Firestore chat_sessions (pro) sync error:', err);
-        }
-      });
-    }, 2000);
-  }, [sessions, currentProSessionId, user]);
+    if (isEmptyConversation(session)) return;
+    scheduleSessionWrite('pro', fsProDebounceRef, () => writeSessionDoc(session, 'nbi_pro_chat', 'build'));
+  }, [sessions, currentProSessionId, user, scheduleSessionWrite, writeSessionDoc]);
+
+  // 🔴 A CHAT MUST REACH THE CLOUD EVEN WHEN THE APP IS CLOSED MID-WAIT (user report 2026-09-25: "when
+  // we close the app and reopen it, it doesn't show"). The write above waits 2 s of quiet — so a user
+  // who read the answer and closed the app inside those 2 s left a conversation the cloud never
+  // received, and History (which reads the cloud) did not list it. The moment the page is hidden
+  // (app to background, tab switched, screen locked) or unloaded, every waiting write is sent at once.
+  useEffect(() => {
+    const flush = () => {
+      const pending = pendingSessionWritesRef.current;
+      pendingSessionWritesRef.current = {};
+      clearTimeout(fsNBIDebounceRef.current);
+      clearTimeout(fsProDebounceRef.current);
+      pending.nbi?.();
+      pending.pro?.();
+    };
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flush(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', flush);
+    };
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -2244,7 +2315,7 @@ export default function App() {
   const { handleSendForTab, handleSend, stop: stopChat, unsend: unsendChat } = useChatEngine({
     input, messages, isLoading, sessions, currentSessionId, activeAgent, mode, activeView, activeIntent,
     errorContext, preferredLanguage, user, keys, invalidKeys, selectedModel, apnapanProfile,
-    hasGeneratedCode, generatedCode, pendingGHEdit, githubToken, files, FREE_DAILY_MESSAGES, isFreeLimitReached,
+    hasGeneratedCode, generatedCode, pendingGHEdit, githubToken, files,
     setMessages, setInput, setIsLoading, setActiveIntent, setErrorContext, setIsSearching, setPreferredLanguage,
     setMode, setShowAuth, setUser, setGithubToken, setGithubRepoContext,
     setFiles, setHasGeneratedCode, setIsDeployed, setIsAppBuilt,
@@ -2655,14 +2726,6 @@ export default function App() {
    */
   const hasHeaderChip = useCallback((id: string) => menuItems.some((m) => m.id === id), [menuItems]);
 
-  // --- UNIVERSAL CHAT CONTINUATION SYSTEM (UCI) HELPERS & IMPLEMENTATION ---
-  
-  // Agent greetings (NBI/Basic/Pro/VIP) → imported from src/lib/agentGreetings.ts
-
-  // generateUCI → imported from src/lib/chatUtils.ts
-  // getRandomElement → imported from src/lib/chatUtils.ts
-  // generateSmartHeuristicSummary → imported from src/lib/chatUtils.ts
-
   // A v5.0 session restored from History → handed to AgentV3Panel via this prop;
   // the nonce makes each "open chat" re-adopt even if the panel is already mounted.
   const [v3Resume, setV3Resume] = useState<{ sessionId: string; messages: Array<{ role: 'user' | 'agent'; text: string; ts: number }>; nonce: number } | null>(null);
@@ -2751,58 +2814,144 @@ export default function App() {
   // the Diff Viewer's "previous version" so it shows exactly what the last build changed.
   const [previousFiles, setPreviousFiles] = useState<Record<string, string>>({});
 
-  const resumeSession = (session: ChatSession) => {
-    // v5.0 (engine_builder) sessions resume INSIDE v5.0 — adopt the saved sessionId
-    // (so the backend continues with the same workspace/memory, best-effort) and
-    // restore the saved thread. Detected by the agentv3 agent tag or the v3_ id.
-    const isV3 = session.agent === 'agentv3'
-      || (session as any).originalAgent === 'agentv3'
-      || (session as any).currentAgent === 'agentv3'
-      || (typeof session.id === 'string' && session.id.startsWith('v3_'));
-    if (isV3) {
-      setCurrentSessionId(session.id);
-      const sid = (session.id || '').replace(/^v3_/, '') || session.id;
-      const msgs = (session.messages || []).map((mm: any) => ({
-        role: (mm.sender === 'user' || mm.role === 'user') ? 'user' as const : 'agent' as const,
-        text: mm.text ?? mm.content ?? '',
-        ts: mm.timestamp ? (Date.parse(mm.timestamp) || Date.now()) : (mm.ts ?? Date.now()),
-      }));
-      setV3Resume({ sessionId: sid, messages: msgs, nonce: Date.now() });
-      v3ResumeInFlightRef.current = true; // resume, not a fresh open — suppress the new-chat bump
-      toggleTab('nbi_pro_chat'); // v5.0 now lives in nbi_pro_chat
-      addLog(`Resumed NavBharatAI Pro session: ${session.title}`, 'info');
-      return;
-    }
-
-    setCurrentSessionId(session.id);
-    const m = session.messages || [];
-    // A session saved before Vishwakarma was deleted (2026-09-12). Its surface is gone, so it opens in
-    // the Pro chat — the same mapping resolveSessionSurface makes — rather than being unopenable.
-    const isLegacyBuilderSession = !!(session.agent && session.agent.startsWith('vishwakarma'));
-    
-    setFiles(session.files || {});
-    if (session.mode) setMode(session.mode);
-    if (session.agent) setActiveAgent(isLegacyBuilderSession ? 'navbharatai-pro' : session.agent);
-    
-    setMessages(m);
-    toggleTab(isLegacyBuilderSession ? 'nbi_pro_chat' : 'nbi_chat');
-    
-    addLog(`Resored session (UCI: ${session.uci || 'N/A'}): ${session.title}`, 'info');
-  };
 
 
-  // P3.1 — session restore/management (UCI restore, delete, new chat) extracted into useSessionManager
+  // P3.1 — opening, deleting and starting chats, extracted into useSessionManager
   // (behavior-preserving). All deps are defined above; the panels/modal consumers below resolve the
   // returned handlers unchanged. v3ResumeInFlightRef stays App-owned (shared with the toggleTab bump).
-  const { handleRestoreUci, handleRestoreByUci, deleteSession, startNewChat } = useSessionManager({
-    sessions, user, currentSessionId, resumeUciInputState, mode,
+  const { openSession, deleteSession, startNewChat } = useSessionManager({
+    sessions, user, currentSessionId,
     v3ResumeInFlightRef,
     setV3Resume, setCurrentSessionId, setFiles, setSessions, setSdaResetKey, setCurrentProSessionId,
     setSdaOpenCaseId,
     setProMessages, setMessages, setGeneratedCode, setHasGeneratedCode, setActiveAgent, setErrorContext,
-    setIsAppBuilt, setRestoreUciError, setIsRestoringUci, setResumeUciInputState, setShowContinueModal,
+    setIsAppBuilt,
     toggleTab, addToast, addLog, initialFreeChatMessages: initialNbiMessages,
   });
+
+  // ── EVERY AI HOLDS SEVERAL WINDOWS (admin 2026-09-28: "sabhi ko ek jaisa karo") ────────────────────
+  // The FREE chat, the image studio and Doctor AI open a new WINDOW from "New chat", exactly like a
+  // professional, and each window is one row of the Mode list with its own ✕. lib/chatWindows.ts holds
+  // the list rules; these handlers are the only place the three surfaces' state is moved.
+  const freeWindowOnScreen = activeViewWindowOf('nbi_chat');
+  /** Swap the FREE chat on screen for the one kept under `targetId`. False when nothing is kept there. */
+  const loadFreeSnapshot = (targetId: string): boolean => {
+    const snap = freeWindowSnapshotsRef.current.get(targetId);
+    if (!snap) return false;
+    freeWindowSnapshotsRef.current.delete(targetId);
+    setMessages(snap.messages);
+    setInput(snap.input);
+    setCurrentSessionId(snap.sessionId);
+    return true;
+  };
+  /** Keep the FREE chat on screen under its window id, so it can be switched back to. */
+  const keepFreeOnScreen = () => {
+    freeWindowSnapshotsRef.current.set(freeWindowOnScreen, { messages, input, sessionId: currentSessionId });
+  };
+  /**
+   * Put a FREE window on screen. Refused (with the reason) while a reply is still arriving: the reply
+   * writes into the FREE chat's one state, so switching mid-reply would pour it into the other window.
+   */
+  const showFreeWindow = (targetId: string): void => {
+    if (targetId === freeWindowOnScreen) { toggleTab('nbi_chat'); return; }
+    if (isLoading) { addToast('Wait for the reply to finish, then switch chats.', 'warning'); return; }
+    keepFreeOnScreen();
+    if (!loadFreeSnapshot(targetId)) { freeWindowSnapshotsRef.current.delete(freeWindowOnScreen); return; }
+    setActiveViewWindows(prev => ({ ...prev, nbi_chat: targetId }));
+    toggleTab('nbi_chat');
+  };
+  /**
+   * "New chat → NavBharatAI FREE". A FREE chat with nothing said yet IS a new chat, so it is reused
+   * rather than joined by an empty twin; otherwise the chat on screen stays open as its own window and
+   * a new one opens beside it (it used to be replaced — kept in History only when signed in).
+   */
+  const newFreeWindow = (): void => {
+    const hasConversation = messages.some((m) => m.sender === 'user');
+    if (!openTabs.includes('nbi_chat') || !hasConversation) { startNewChat(); setInput(''); return; }
+    if (isLoading) { addToast('Wait for the reply to finish, then start a new chat.', 'warning'); return; }
+    if (!chatSlotFree(openChats, openTabs, viewWindows)) { addToast(capMessage(), 'warning'); return; }
+    const id = `free-${Date.now().toString(36)}`;
+    keepFreeOnScreen();
+    setViewWindows(prev => addViewWindow(prev, openTabs, 'nbi_chat', id));
+    setActiveViewWindows(prev => ({ ...prev, nbi_chat: id }));
+    startNewChat();
+    setInput('');
+  };
+  /**
+   * ✕ on a FREE row. The only FREE window restarts fresh (its conversation stays in History) — the tab
+   * is the home of every other chat, so it is never closed from here. One of several simply goes, and
+   * when it was on screen its neighbour takes its place.
+   */
+  const closeFreeWindow = (windowId: string): void => {
+    const wins = viewWindowsFor(viewWindows, openTabs, 'nbi_chat');
+    const onScreen = windowId === freeWindowOnScreen;
+    if (onScreen && isLoading) stopChat();
+    if (wins.length <= 1) {
+      const stay = activeView;
+      startNewChat();
+      setInput('');
+      if (stay !== 'nbi_chat') toggleTab(stay);
+      return;
+    }
+    const idx = wins.findIndex((w) => w.id === windowId);
+    const remaining = wins.filter((w) => w.id !== windowId);
+    setViewWindows(prev => [...prev.filter((w) => w.professionalId !== 'nbi_chat'), ...remaining]);
+    freeWindowSnapshotsRef.current.delete(windowId);
+    if (onScreen) {
+      const next = wins[idx + 1] ?? wins[idx - 1];
+      if (!loadFreeSnapshot(next.id)) { startNewChat(); setInput(''); }
+      setActiveViewWindows(prev => ({ ...prev, nbi_chat: next.id }));
+    }
+  };
+  /** "New chat" for the image studio or Doctor AI while it is already open: one more window. */
+  const newSlotViewWindow = (view: 'imagegen' | 'sda_chat'): void => {
+    if (!chatSlotFree(openChats, openTabs, viewWindows)) { addToast(capMessage(), 'warning'); return; }
+    let id = `img-${Date.now().toString(36)}`;
+    if (view === 'sda_chat') {
+      // Remember the first window's case before any other window moves the device's pointer.
+      if (viewWindowsFor(viewWindows, openTabs, 'sda_chat').length <= 1) {
+        try {
+          sdaDefaultCaseRef.current = { caseId: localStorage.getItem(CASE_ID_KEY), caseDoc: localStorage.getItem(CASE_DOC_KEY) };
+        } catch { sdaDefaultCaseRef.current = null; }
+      }
+      id = newSdaCaseId();
+    }
+    setViewWindows(prev => addViewWindow(prev, openTabs, view, id));
+    setActiveViewWindows(prev => ({ ...prev, [view]: id }));
+    toggleTab(view);
+  };
+  /** ✕ on an image-studio or Doctor AI row. The last window closes the view, exactly as before. */
+  const closeSlotViewWindow = (view: 'imagegen' | 'sda_chat', windowId: string): void => {
+    const wins = viewWindowsFor(viewWindows, openTabs, view);
+    if (wins.length <= 1) { closeTab(undefined, view); return; }
+    const idx = wins.findIndex((w) => w.id === windowId);
+    const remaining = wins.filter((w) => w.id !== windowId);
+    setViewWindows(prev => [...prev.filter((w) => w.professionalId !== view), ...remaining]);
+    if (activeViewWindowOf(view) === windowId) {
+      const next = wins[idx + 1] ?? wins[idx - 1];
+      setActiveViewWindows(prev => ({ ...prev, [view]: next.id }));
+    }
+    // Doctor AI back to its first window alone: put the device's "current case" back to that window's,
+    // so it reopens on its own patient rather than on the last window that mounted.
+    if (view === 'sda_chat' && remaining.length === 1 && remaining[0].id === DEFAULT_VIEW_WINDOW && sdaDefaultCaseRef.current) {
+      const { caseId, caseDoc } = sdaDefaultCaseRef.current;
+      try {
+        if (caseId) localStorage.setItem(CASE_ID_KEY, caseId); else localStorage.removeItem(CASE_ID_KEY);
+        if (caseDoc) localStorage.setItem(CASE_DOC_KEY, caseDoc); else localStorage.removeItem(CASE_DOC_KEY);
+      } catch { /* private mode — the window on screen is still right */ }
+      sdaDefaultCaseRef.current = null;
+    }
+  };
+  /** A recent row → its chat: a FREE window by swap, an image/Doctor window by focus, a professional through toggleTab. */
+  const switchToRecent = (view: string, windowId?: string): void => {
+    if (view === 'nbi_chat') { showFreeWindow(windowId ?? DEFAULT_VIEW_WINDOW); return; }
+    if (view === IMAGE_MODE_ID || view === 'sda_chat') {
+      setActiveViewWindows(prev => ({ ...prev, [view]: windowId ?? DEFAULT_VIEW_WINDOW }));
+      toggleTab(view as ViewType);
+      return;
+    }
+    toggleTab(view as ViewType, true, windowId);
+  };
 
   useEffect(() => {
     // Check and restore saved layout/project state if returning from OAuth
@@ -3506,8 +3655,6 @@ export default function App() {
         isThemePickerOpen={isThemePickerOpen}
         setIsThemePickerOpen={setIsThemePickerOpen}
         setErrorContext={setErrorContext}
-        sessions={sessions}
-        onResumeSession={resumeSession}
       />
       {/* Workspace */}
       <main id="main-content" className="flex flex-1 relative min-h-0 min-w-0">
@@ -3648,7 +3795,6 @@ export default function App() {
               isAppBuilt={isAppBuilt}
               theme={theme}
               onPreviewClick={() => { toggleTab('preview'); setIsMenuOpen(false); }}
-              onRestoreUci={handleRestoreUci}
               wallet={wallet}
               setPreferredLanguage={setPreferredLanguage}
               setMessages={setMessages}
@@ -3779,11 +3925,32 @@ export default function App() {
           )}
 
           {/* ── Senior Doctor Assistant (hidden in the Play native shell — playCompliance) ── */}
-          {activeView === 'sda_chat' && !medicalViewBlocked('sda_chat', isNativeApp()) && (
-            <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
-              <SDAChat key={sdaResetKey} userId={user?.uid} openCaseId={sdaOpenCaseId} onOpenModePicker={modePickerOpener} onOpenHistory={historyOpener} />
-            </div>
-          )}
+          {/* ONE Doctor AI window is exactly today's screen (mounted while on screen). Several
+              (admin 2026-09-28) stay mounted while the tab is open, hidden when not on screen, so no
+              window re-reads the device's "current case" pointer another window has just moved. The
+              first window is the case it always was; every other one names its own case. */}
+          {!medicalViewBlocked('sda_chat', isNativeApp()) && (() => {
+            const sdaWins = viewWindowsFor(viewWindows, openTabs, 'sda_chat');
+            if (sdaWins.length <= 1) {
+              return activeView === 'sda_chat' ? (
+                <div className="flex-1 overflow-hidden h-full min-h-0 max-h-full">
+                  <SDAChat key={sdaResetKey} userId={user?.uid} openCaseId={sdaWins[0] && sdaWins[0].id !== DEFAULT_VIEW_WINDOW ? sdaWins[0].id : sdaOpenCaseId} onOpenModePicker={modePickerOpener} onOpenHistory={historyOpener} />
+                </div>
+              ) : null;
+            }
+            const onScreenWin = activeViewWindowOf('sda_chat');
+            return sdaWins.map((w) => (
+              <div key={w.id} className={activeView === 'sda_chat' && w.id === onScreenWin ? 'flex-1 overflow-hidden h-full min-h-0 max-h-full' : 'hidden'}>
+                <SDAChat
+                  key={w.id === DEFAULT_VIEW_WINDOW ? `main-${sdaResetKey}` : w.id}
+                  userId={user?.uid}
+                  openCaseId={w.id === DEFAULT_VIEW_WINDOW ? sdaOpenCaseId : w.id}
+                  onOpenModePicker={modePickerOpener}
+                  onOpenHistory={historyOpener}
+                />
+              </div>
+            ));
+          })()}
 
           {/* ── Professionals hub ── */}
           {activeView === 'professionals' && (
@@ -4090,8 +4257,10 @@ export default function App() {
             <ModePickerSheet
               activeView={activeView}
               activeChatId={activeChat?.id ?? null}
+              activeViewWindowId={activeViewWindowOf(activeView)}
               openViews={openTabs}
               openChats={openChats}
+              viewWindows={viewWindows}
               hideMedical={medicalFeaturesHidden(isNativeApp())}
               onClose={() => setShowModePicker(false)}
               // ✕ ON A RECENT ROW (admin 2026-09-21, one row; 2026-09-22, every open chat). It closes
@@ -4110,21 +4279,30 @@ export default function App() {
                 const target = recentTargetFromId(recentId);
                 if (!target) return;
                 const hideMedical = medicalFeaturesHidden(isNativeApp());
-                const recent = recentModeEntries({ hideMedical, activeView, openViews: openTabs, openChats });
+                const recent = recentModeEntries({ hideMedical, activeView, openViews: openTabs, openChats, viewWindows });
                 const next = nextRecentAfterClose(recent, recentId);
                 const last = lastChatClosed(recent, recentId);
-                const wasOnScreen = activeModeId(activeView, activeChat?.id ?? null) === recentId;
-                if (target.conversationId) closeChatWindow(undefined, target.conversationId);
+                const wasOnScreen = activeModeId(activeView, activeChat?.id ?? null, activeViewWindowOf(activeView)) === recentId;
+                // The FREE chat, the image studio and Doctor AI close ONE window (admin 2026-09-28);
+                // a professional window through `closeChatWindow`, as before.
+                const viewWindowId = target.conversationId ?? DEFAULT_VIEW_WINDOW;
+                if (target.view === 'nbi_chat') {
+                  closeFreeWindow(viewWindowId);
+                  if (!last) return; // FREE stays on screen (its neighbour, or a fresh chat) — nothing to move to
+                } else if (target.view === IMAGE_MODE_ID || target.view === 'sda_chat') {
+                  closeSlotViewWindow(target.view as 'imagegen' | 'sda_chat', viewWindowId);
+                  if (wasOnScreen && next && next.view === target.view) return; // its sibling is now on screen
+                } else if (target.conversationId) closeChatWindow(undefined, target.conversationId);
                 else closeTab(undefined, target.view as ViewType);
                 if (last) {
                   // Nothing but FREE is open now: the list goes, FREE shows. With no FREE tab open at all
                   // (an expert opened from the hub with FREE closed), this is the app's starting page.
                   setShowModePicker(false);
-                  if (!next) startNewChat();
+                  if (!next && target.view !== 'nbi_chat') startNewChat();
                   toggleTab('nbi_chat');
                   return;
                 }
-                if (wasOnScreen && next) toggleTab(next.view as ViewType, true, next.conversationId);
+                if (wasOnScreen && next) switchToRecent(next.view as string, next.conversationId);
               }}
               onPick={(id) => {
                 setShowModePicker(false);
@@ -4133,23 +4311,24 @@ export default function App() {
                 // ke sabhi chat waise hi switch hone chahiye jaise multi window se hote hai").
                 // `toggleTab` with the conversation id focuses that window; no second switch path.
                 const resume = recentTargetFromId(id);
-                if (resume) { toggleTab(resume.view as ViewType, true, resume.conversationId); return; }
+                if (resume) { switchToRecent(resume.view, resume.conversationId); return; }
                 // Everything else opens a NEW chat, which is the whole point of the change.
-                if (id === FREE_MODE_ID) { startNewChat(); toggleTab('nbi_chat'); return; }
+                if (id === FREE_MODE_ID) { newFreeWindow(); return; }
                 // The image studio is Other Tools' own view — nothing forked.
                 // Opened from HERE it lives inside the chat tab the user is in (no header chip of its
                 // own, that tab stays lit) and takes one of the five slots; already open, it is simply
                 // shown, through whichever door it came in by (from Other Tools it keeps its own tab).
                 if (id === IMAGE_MODE_ID) {
                   if (!openTabs.includes(IMAGE_MODE_ID as ViewType)) {
-                    if (!chatSlotFree(openChats, openTabs)) { addToast(capMessage(), 'warning'); return; }
+                    if (!chatSlotFree(openChats, openTabs, viewWindows)) { addToast(capMessage(), 'warning'); return; }
                     const host = headerTabFor(activeView, tabOpeners, hasHeaderChip);
                     if (toggleTab(IMAGE_MODE_ID as ViewType) && isModeSurface(host)) {
                       setTabOpeners(prev => ({ ...prev, [IMAGE_MODE_ID]: host as ViewType }));
                     }
                     return;
                   }
-                  toggleTab(IMAGE_MODE_ID as ViewType);
+                  // Already open: one more window, like a professional's "New chat" (admin 2026-09-28).
+                  newSlotViewWindow('imagegen');
                   return;
                 }
                 if (medicalViewBlocked(id, isNativeApp())) return; // defense in depth behind the filter
@@ -4160,9 +4339,10 @@ export default function App() {
                 // its own row in History → SDA. Same call the ✕ makes, so there is one way to begin a
                 // case rather than a second copy of the rule.
                 if (id === 'sda_chat') {
-                  // Doctor AI holds one case, so a fresh case REPLACES the open one and takes no new
-                  // slot; only opening it when it is closed is a sixth chat the cap may refuse.
-                  if (!openTabs.includes('sda_chat') && !chatSlotFree(openChats, openTabs)) { addToast(capMessage(), 'warning'); return; }
+                  // Already open: a NEW WINDOW with its own case, beside the one on screen (admin
+                  // 2026-09-28: every AI opens several windows). Closed: open it on a fresh case.
+                  if (openTabs.includes('sda_chat')) { newSlotViewWindow('sda_chat'); return; }
+                  if (!chatSlotFree(openChats, openTabs, viewWindows)) { addToast(capMessage(), 'warning'); return; }
                   setSdaOpenCaseId(undefined);
                   startFreshCase(typeof window !== 'undefined' ? window.localStorage : null, newSdaCaseId(), user?.uid);
                   setSdaResetKey(k => k + 1);
@@ -4189,8 +4369,12 @@ export default function App() {
             <HistoryPopup
               user={user}
               onClose={() => setHistoryPopupOpen(false)}
-              onRestoreSession={handleRestoreUci}
+              onOpenSession={openSession}
               onDeleteSession={deleteSession}
+              onNewChat={() => { startNewChat(); }}
+              currentSessionId={currentSessionId}
+              onRenameSession={renameSession}
+              onTogglePin={togglePin}
               onOpenProfessional={openProfessionalConversation}
               onDeleteProfessional={deleteProfessionalConversation}
             />
@@ -4198,7 +4382,8 @@ export default function App() {
           {activeView === 'report' && <ReportsListView user={user} />}
           {activeView === 'history' && (historyInitialFilter === 'professional'
             ? <ProfessionalHistoryView onOpen={openProfessionalConversation} onDelete={deleteProfessionalConversation} onBack={() => toggleTab('professionals')} />
-            : <HistoryView user={user} onRestoreSession={handleRestoreUci} onDeleteSession={deleteSession} initialFilter={historyInitialFilter} lockFilter={historyInitialFilter === 'free'}
+            : <HistoryView user={user} onOpenSession={openSession} onDeleteSession={deleteSession} initialFilter={historyInitialFilter} lockFilter={historyInitialFilter === 'free'}
+                onNewChat={() => { startNewChat(); }} currentSessionId={currentSessionId} onRenameSession={renameSession} onTogglePin={togglePin}
                 includeProfessionals={historyInitialFilter === 'free'}
                 onOpenProfessional={openProfessionalConversation} onDeleteProfessional={deleteProfessionalConversation} />)}
 
@@ -4211,6 +4396,8 @@ export default function App() {
           )}
 
           <ViewPanels
+            imageWindowIds={viewWindowsFor(viewWindows, openTabs, IMAGE_MODE_ID).map((w) => w.id)}
+            imageWindowOnScreen={activeViewWindowOf(IMAGE_MODE_ID)}
             onOpenModePicker={modePickerOpener}
             onOpenHistory={historyOpener}
             effectiveDeviceMode={effectiveDeviceMode}
@@ -4328,14 +4515,6 @@ export default function App() {
         githubRedirectingMessage={githubRedirectingMessage}
         githubDebugData={githubDebugData}
         setGithubRedirectingMessage={setGithubRedirectingMessage}
-        showContinueModal={showContinueModal}
-        setShowContinueModal={setShowContinueModal}
-        setRestoreUciError={setRestoreUciError}
-        setResumeUciInputState={setResumeUciInputState}
-        resumeUciInputState={resumeUciInputState}
-        restoreUciError={restoreUciError}
-        handleRestoreByUci={handleRestoreByUci}
-        isRestoringUci={isRestoringUci}
         firebaseOauthError={firebaseOauthError}
         setFirebaseOauthError={setFirebaseOauthError}
         pendingProvider={pendingProvider}

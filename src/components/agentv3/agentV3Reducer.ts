@@ -74,7 +74,8 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
         ...(event.workspaceId ? { workspaceId: event.workspaceId } : {}),
         // The saved copy belongs to the build that produced it. A new build means the copy is of
         // the PREVIOUS app, and framing it during this one would show edits that are not there yet.
-        ...(isNewBuild ? { todos: [], agents: {}, snapshotUrl: undefined, snapshotNote: undefined } : {}),
+        // …and so does the running cost: a new build's figure starts from nothing, never from the last one's.
+        ...(isNewBuild ? { todos: [], agents: {}, snapshotUrl: undefined, snapshotNote: undefined, costSoFarInr: undefined } : {}),
       };
     }
 
@@ -281,6 +282,11 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       // the wording is decided on the server by journeyUserSummary precisely so it cannot be softened
       // here, and a failure must be exactly as visible as a pass.
       return { ...state, verification: { ok: event.ok, headline: event.headline, steps: event.steps } };
+
+    case 'cost_so_far':
+      // Recorded verbatim: the server priced it with the final bill's own function, so nothing here
+      // may round it, smooth it or guess at it. A non-finite or negative value is refused, not shown.
+      return Number.isFinite(event.inr) && event.inr >= 0 ? { ...state, costSoFarInr: event.inr } : state;
 
     case 'secret_request':
       // Same shape as a permission request — one pending interactive gate — but with fields to fill.

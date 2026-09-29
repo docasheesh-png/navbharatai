@@ -15,6 +15,7 @@ import { gateToolAction, burnToolAction, chargeToolAction } from '../tools/toolG
 import { aiSuggestions, aiPalette, type RouteFn } from '../AgentV3/DesignAdvisor';
 import { lintDesign } from '../AppMakerLab/intelligence/DesignLinter';
 import { lintA11y } from '../AppMakerLab/intelligence/A11yLinter';
+import { guestDailyQuota } from '../lib/guestDailyQuota';
 
 const MAX_CODE = 12_000;
 const MAX_BRAND = 600;
@@ -24,7 +25,7 @@ export function registerDesignRoutes(app: Express): void {
   const routeFn: RouteFn = async (prompt, system) => ({ response: { content: await callProfessionalAI(system ?? '', prompt ?? '', 'free') } });
 
   // Context-aware AI improvement suggestions for the current app.
-  app.post('/api/design/suggest', inAiSpendZone(async (req: Request, res: Response) => {
+  app.post('/api/design/suggest', guestDailyQuota('design'), inAiSpendZone(async (req: Request, res: Response) => {
     // Daily allowance / Professional Pass (flag-off = no-op).
     const identity = await verifyFirebaseIdentity(req);
     const gate = await gateToolAction(identity?.uid || null, identity?.email || null, 'ai_tool');
@@ -46,7 +47,7 @@ export function registerDesignRoutes(app: Express): void {
   }));
 
   // AI colour palette + type scale from a brand/description.
-  app.post('/api/design/palette', inAiSpendZone(async (req: Request, res: Response) => {
+  app.post('/api/design/palette', guestDailyQuota('design'), inAiSpendZone(async (req: Request, res: Response) => {
     const brand = typeof req.body?.brand === 'string' ? req.body.brand.trim().slice(0, MAX_BRAND) : '';
     if (!brand) {
       res.status(400).json({ error: 'provide { brand: "<description of the brand/vibe>" }' });

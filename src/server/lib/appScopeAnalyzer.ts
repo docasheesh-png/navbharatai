@@ -119,10 +119,17 @@ const TOOL_BEFORE = /\b(?:using|use|uses|via|through|thru|over|on|with|by|to|int
 // link", "instagram ki post") is the product being USED, exactly as a channel preposition before it is.
 const TOOL_AFTER = /^[\s/]*(?:(?:ka|ki|ke|wala|wali|wale|se)\s+)?(?:api|apis|sdk|login|log\s*in|sign[\s-]?in|oauth|auth|share|sharing|button|buttons|integration|notifications?|messages?|link|links|otp|business|pay|s3|web\s+services|account|accounts|group|groups|number|alerts?|widget|embed|embeds|channel|bot|webhook|ads|videos?|urls?|playlists?|clips?|thumbnails?|posts?|reels?|stories|feed|page|pages)\b/i;
 
+// 🔴 A PRODUCT NAMED IN A PROHIBITION IS NOT A CLONE REQUEST (autopsy 6a4a799f, 2026-09-29). "Do NOT use
+// copyrighted Spotify assets or branding" — written by someone asking for ORIGINAL branding — was classed
+// "LARGE — clone of Spotify". Only the clause the name sits in is read (a comma, full stop, colon or line
+// break ends it), so "I don't want a basic app, make a Spotify clone" still escalates.
+const PROHIBITED_BEFORE = /\b(?:do\s+not|don'?t|dont|never|avoid|must\s+not)\b(?![^.,;:!?\n]*\b(?:like|jaisa|jaise|similar\s+to|inspired\s+by)\b)[^.,;:!?\n]{0,40}$/i;
+
 export function namesAsProduct(text: string, re: RegExp): boolean {
   const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
   for (const m of text.matchAll(g)) {
     const at = m.index ?? 0;
+    if (PROHIBITED_BEFORE.test(text.slice(Math.max(0, at - 48), at))) continue;
     const before = text.slice(Math.max(0, at - 24), at);
     const after = text.slice(at + m[0].length, at + m[0].length + 24);
     // A list of channels ("WhatsApp/Drive/USB") inherits the preposition before its first item.

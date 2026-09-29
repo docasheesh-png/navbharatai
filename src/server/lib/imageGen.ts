@@ -11,6 +11,7 @@
 // "NavBharatAI". Model ids live here (env-tunable) and appear only in server logs.
 
 import { CUSTOM_SIZE_ID, PRESET_PIXELS, resolveCustomSize } from '../../lib/imageSize';
+import { assertPollinationsPromptSafe, scanPollinationsPrompt } from './pollinationsGuard';
 
 export interface ImageGenRequest {
   /** Required for a fresh generation; optional when `initImage` is present (a picture is a request). */
@@ -177,11 +178,18 @@ export function pollinationsImageUrl(
   env: NodeJS.ProcessEnv = process.env,
   custom?: { width?: unknown; height?: unknown },
 ): string {
+  // 🔒 THE CHOKE POINT (Play rejection 2026-09-28): no link is ever built for a banned prompt, from any
+  // caller. Callers scan first and refuse politely; this throw is the net under a caller that forgot.
+  const finalPrompt = String(prompt || '').slice(0, MAX_PROMPT_CHARS);
+  assertPollinationsPromptSafe(finalPrompt);
   const px = imagePixelsFor(size, custom?.width, custom?.height);
   const model = (env.IMAGE_GEN_POLLINATIONS_MODEL || '').trim() || 'flux';
-  const p = encodeURIComponent(String(prompt || '').slice(0, MAX_PROMPT_CHARS));
+  const p = encodeURIComponent(finalPrompt);
   const seed = pollinationsSeed(env);
-  return `https://image.pollinations.ai/prompt/${p}?width=${px.w}&height=${px.h}&nologo=true&private=true&seed=${seed}&model=${encodeURIComponent(model)}`;
+  // `safe=true` switches on the provider's OWN NSFW filter, which is OFF on this door unless asked for.
+  // It is the second net: the word scan catches what the user ASKED for, this catches what the model
+  // drew anyway (Google's evidence was a nude "Photograph" — exactly what an unfiltered model produces).
+  return `https://image.pollinations.ai/prompt/${p}?width=${px.w}&height=${px.h}&nologo=true&private=true&safe=true&seed=${seed}&model=${encodeURIComponent(model)}`;
 }
 
 /**
@@ -384,9 +392,12 @@ export async function fetchPollinationsImage(
   prompt: string,
   size?: string,
   opts: { fetchImpl?: typeof fetch; timeoutMs?: number; env?: NodeJS.ProcessEnv; custom?: { width?: unknown; height?: unknown } } = {},
-): Promise<{ image?: GeneratedImage; error?: string; disabled?: boolean }> {
+): Promise<{ image?: GeneratedImage; error?: string; disabled?: boolean; blocked?: boolean }> {
   const env = opts.env ?? process.env;
   if (!pollinationsEnabled(env)) return { disabled: true };
+  // Scanned BEFORE the call, so a banned prompt is a refusal the caller can word — never a thrown
+  // error that reads as "the provider failed" and sends a caller down its fallback rungs.
+  if (!scanPollinationsPrompt(prompt).ok) return { blocked: true };
   const fetchImpl = opts.fetchImpl ?? fetch;
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 45_000);

@@ -152,7 +152,7 @@ describe('WIRING — a contract nothing calls is a comment', () => {
     // A retry is a new call carrying the full 120 s bound. Bounding only the first one leaves the
     // expensive half of this family unbounded.
     const src = read('src/server/AgentV3/ClaudeClient.ts');
-    expect(src).toContain('createWithRetry(createParams, params.deadlineAt)');
+    expect(src).toContain('createWithRetry(createParams, params.deadlineAt, params.signal)');
     expect(src).toContain('if (turnDeadline(llmRequestTimeoutMs(), deadlineAt).expired) throw err;');
   });
 

@@ -38,6 +38,7 @@ import { ComposerShell, COMPOSER_PANEL_CLASS, COMPOSER_ICON_CLASS, COMPOSER_SEND
 import { AttachMenu } from '../AttachMenu';
 import { autoGrow, resetGrow } from '../../lib/autoGrowTextarea';
 import { MessageEditActions } from '../chat/MessageEditActions';
+import { ReportAiContent } from '../chat/ReportAiContent';
 import { filterMessages, enterShouldSend, readSendOnEnter, searchActive } from '../../lib/chatToolbar';
 import { deleteMessage, editMessage } from '../../lib/chatMessageActions';
 
@@ -536,7 +537,6 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
       const docId = caseDocRef.current || perCaseSdaDocId(userId, caseIdRef.current);
       setDoc(doc(db, 'chat_sessions', docId), sanitizeFirestoreData({
         id: docId,
-        uci: docId,
         userId,
         tab: 'sda_chat',
         original_agent: 'sda',
@@ -554,11 +554,13 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
         })),
         files: {},
         lastUpdated: new Date().toISOString(),
-        isPinned: false,
         mode: 'sda',
         patientSnapshot: patient,
         redFlags: activeRedFlags,
-      })).catch(err => console.error('SDA Firestore autosave error:', err));
+      // MERGE, and no `isPinned` in the payload (2026-09-28): History can now pin and rename a Doctor AI
+      // case, and a whole-document write that set `isPinned: false` would have unpinned it — and erased
+      // its name — on the case's next message.
+      }), { merge: true }).catch(err => console.error('SDA Firestore autosave error:', err));
     }, 1200);
     return () => clearTimeout(t);
   }, [messages, patient, activeRedFlags, userId]);
@@ -1168,9 +1170,21 @@ export const SDAChat: React.FC<SDAChatProps> = ({ userId, openCaseId, onOpenMode
                     <Wallet className="w-3.5 h-3.5" /> Add credit
                   </button>
                 )}
-                <p className="text-[8px] text-faint mt-2 text-right">
-                  {msg.timestamp instanceof Date ? msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                </p>
+                <div className="mt-2 flex items-center justify-end gap-2">
+                  {/* REPORT an AI reply (Play AI-Generated Content policy, rejection 2026-09-28). */}
+                  {msg.sender === 'sda' && (
+                    <ReportAiContent
+                      surface="reply"
+                      content={String(msg.text ?? '')}
+                      view="sda_chat"
+                      className="p-0.5 rounded text-faint hover:text-danger opacity-70"
+                      iconClassName="w-2.5 h-2.5"
+                    />
+                  )}
+                  <p className="text-[8px] text-faint text-right">
+                    {msg.timestamp instanceof Date ? msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                  </p>
+                </div>
               </div>
               {msg.sender === 'doctor' && (
                 <div className="flex flex-col items-center shrink-0 ml-2.5 mt-0.5 group/msg">

@@ -83791,3 +83791,39 @@ can never be empty).
 - The journey check cannot reach a form behind state-routed navigation (the existing open item for lane B).
 - A generated payments app with no server verification: the builder should be steered to a server-side
   order + signature check (or an honest "test mode only" banner) — a prompt/contract change, not done here.
+## 2026-09-29 — Autopsy 6a4a799f ("Blue Berry" music app, Weak tier, 24 min, RED, billed ₹0)
+
+**Ledger.**
+- ✅ Self-healed: 1. Three missing imports were added.
+- 🔀 Workarounds: 0.
+- ⏭️ Skipped: 2.
+  - The project-plan decomposition was cut off at 300 s; it was dropped with no report line, and the user's "decomposing…" promise was never withdrawn.
+  - The explorer repair stood down; that is correct, because the app was not green.
+- ❌ Shipped broken: 1. A render loop ("Maximum update depth exceeded" at `PlayerBar`) left the app on its error screen.
+- 🥵 Struggle points: 4.
+  - 8.6 min before the first file was written: the roadmap planner took 120 s and returned an unreadable answer; the project planner took 300 s and was cut off.
+  - The same loop was met three times: the builder fixed `syncPlayer`, the heal fixed `Layout.tsx`, and `PlayerBar` still looped.
+  - The design and CSS heal took 287 s.
+  - The build ran 2.1× over its ETA band.
+
+**Root causes fixed here.**
+- **Our own error screen was scored as a rendered app** (`analyzePreviewHtml`).
+  - The scaffold's `ErrorBoundary` fallback (heading, message, "Try again") is real text on a painted page.
+  - So `IN_BUILD_GREEN` saved it at 809 s as the last known good.
+  - The verify loop then read "rendered + console errors", which never set `previewProvenBroken`. As a result, `GREEN_GUARD_NONE` and `POST_GREEN_WRITES` said the app "could not be checked".
+  - Fix: `scaffoldCrashScreen` matches the fallback's own structure; every render-proof producer reads the one judge.
+- **A cut-off plan was silent.**
+  - A reply that did not throw fell into the branch meant for a genuinely small plan ("fewer than 3 modules").
+  - Fix: `unusablePlanCause` splits the causes into cut-off, unreadable and too-small. The first two record `PROJECT_MODE_FAILED` with the seconds lost and withdraw the promise to the user; too-small records `PROJECT_MODE_STOOD_DOWN`.
+  - The roadmap's "no parseable roadmap" now says why (`roadmapUnparseableDetail`).
+  - The roadmap call's logged `promptChars` had held the reply's length; it now holds the prompt's.
+- **"Resume playback" and "Pause/resume" made it a jobs app.** The builder was told to include employer roles and interview scheduling. New idioms in `NON_DOMAIN_USES`.
+- **"Do NOT use copyrighted Spotify assets" was classed as a Spotify clone.** `namesAsProduct` now skips a product named in a prohibition clause; a likeness request still escalates.
+- **Prevent, not heal: whole-store effect loop.** `storeEffectLoop.ts` adds a write-time note when a `use…Store()` with no selector is an effect dependency and the effect calls one of its actions. Kill switch: `AGENTV3_STORE_LOOP_NOTE=off`.
+- Test: `tests/theErrorScreenIsNotTheApp.test.ts`. Reversion was proven three ways.
+
+**Open.**
+- 🔴 **Admin decision — Nemotron as the Weak tier's plan rung.** First measurement: 2 of 2 planner answers unusable (roadmap 120 s unreadable, decomposition 300 s cut off), 7 of the build's 24 minutes. `AGENTV3_NEMOTRON=weak` enables the judge AND the plan together, so moving the plan off Nemotron is a routing change the admin must approve.
+- Nemotron reported 0 input / 0 output tokens on both calls, so our own cost report under-states those calls.
+- The fast lane has no write-time notes at all, so the store-loop note reaches only architect writes.
+- Why the builder's own `console_errors` read clean right after the `Layout.tsx` fix, while the platform's fresh load still looped in `PlayerBar`, is not established. HMR keeping store state is the leading guess, and it is unverified.

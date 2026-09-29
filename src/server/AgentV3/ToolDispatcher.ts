@@ -75,6 +75,7 @@ import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServ
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote } from './writeTimeQualityCheck';
+import { storeEffectLoopNote } from './storeEffectLoop';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
 import {
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckNote, WriteTypecheckQueue,
@@ -2760,7 +2761,10 @@ export class ToolDispatcher {
         }
       } catch { /* a note is best-effort */ }
     }
-    return hooks + imports + typecheck + quality;
+    // A whole-store dependency that loops the app forever (autopsy 6a4a799f) — said while the file is open.
+    let storeLoop = '';
+    try { storeLoop = storeEffectLoopNote(files); } catch { /* a note is best-effort */ }
+    return hooks + storeLoop + imports + typecheck + quality;
   }
 
   private async hookWriteNote(files: Record<string, string>): Promise<string> {

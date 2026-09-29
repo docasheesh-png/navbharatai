@@ -10,7 +10,7 @@ describe('robust tsc command (build report 2026-07-21 — npx tsc → tsc@2.0.4 
 
   it('ensures the compiler exists first (installs typescript only if the local binary is absent)', () => {
     expect(TSC_ENSURE).toContain('node_modules/.bin/tsc'); // guards on the binary
-    expect(TSC_ENSURE).toContain('npm install typescript --no-save'); // installs the REAL compiler, no-save
+    expect(TSC_ENSURE).toContain('npm install typescript@5 --no-save'); // installs the REAL compiler, no-save
     expect(robustTscCommand()).toMatch(/^if \[ ! -d node_modules \]/); // ensure runs before the check
   });
 

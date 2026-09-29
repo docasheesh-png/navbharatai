@@ -80,6 +80,12 @@ export function rungIndexFor(slice: DeliveredSlice, rungs: readonly LadderRung[]
     if (family >= 0) return family;
   }
 
+  // A slice that NAMES a model no rung claims is not this ladder's work (autopsy 4499741f): the planner's
+  // Nemotron Ultra call was mapped to the weak ladder's Nemotron Super rung by provider alone, and the
+  // report said the build "fell to rung 4" when every build call ran on the rung it opened on. The
+  // provider fallback is for a slice with NO model id — never a way to round a different model into a rung.
+  if (model) return null;
+
   // Provider-only, and ONLY when it is unambiguous on this ladder.
   const byProvider = rungs
     .map((r, i) => ({ i, provider: normalise(r.provider) }))

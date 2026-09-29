@@ -1567,6 +1567,11 @@ export function postBuildCodeGateShouldRun(opts: {
 
 /** Does this path name a TypeScript source the typecheck could be about? Pure. */
 export function isTypeScriptSourcePath(path: string): boolean {
+  // A tool's config file (vite.config.ts, playwright.config.ts) is read by that tool, not type-checked
+  // as app source (autopsy 4499741f): a plain-JavaScript app whose builder rewrote `vite.config.ts` was
+  // type-checked, failed on a tsconfig it never needed, and ended YELLOW with "the project does not
+  // typecheck" as its root cause — about an app with no TypeScript in it.
+  if (/(?:^|\/)[\w.-]+\.config\.(?:ts|mts|cts)$/i.test(path)) return false;
   return /\.(?:ts|tsx|mts|cts)$/i.test(path) && !/\.d\.ts$/i.test(path);
 }
 

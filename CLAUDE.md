@@ -2894,6 +2894,14 @@ the flag entries above promise.
   says so, `null` means *not supplied* and never zero, and `writeTypecheckUntouched` makes the
   silence unrepresentable as a fact about the build. Test-locked and reversion-proven four ways in
   `tests/theCounterWatchedOneLaneOfTwo.test.ts`.
+- **`AGENTV3_STORE_LOOP_NOTE`** (default ON, `off` disables — added 2026-09-29, autopsy 6a4a799f) — a
+  write-time note (`storeEffectLoop.ts`, via `ToolDispatcher.writeSteeringNotes`) when a file binds a
+  zustand hook with NO selector (`const store = useMusicStore()`), lists that bare name in an effect's
+  dependencies and calls one of its actions inside the effect. That loops forever ("Maximum update depth
+  exceeded") and was what left "Blue Berry" on its error screen. No model call; never blocks a write.
+  🔴 **Same autopsy: the scaffold's own ErrorBoundary screen is now judged NOT rendered**
+  (`scaffoldCrashScreen` in `PreviewVerify.ts`). Before, it was saved as the last known good at 809 s.
+  Do not loosen that match to the bare words; an app's designed error card must stay a render.
 - **📱 PHONE FEATURES — `nativeCapabilities.ts` is the ONE table (built 2026-09-27, admin: *"jarwis jaisa
   app … navbharatai banayega"*).** It feeds the builder's brief, the user's summary (web / phone app / impossible,
   with More → Download APK + connect GitHub) and the phone build (plugin versions aligned to the app's

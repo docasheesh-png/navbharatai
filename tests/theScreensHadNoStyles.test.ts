@@ -122,13 +122,13 @@ describe('5 · a glob with braces finds files', () => {
 describe('6 · the wiring (source guards — tsc cannot see which lane runs a check)', () => {
   const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
   it('the architect lane checks the WHOLE project and repairs a real mismatch', () => {
-    expect(route).toMatch(/const projectForCss = \{ \.\.\.integrityFiles, \.\.\.designFiles \};/);
+    expect(route).toMatch(/const projectForCss = \{ \.\.\.integrityFiles, \.\.\.Object\.fromEntries\(writtenFiles\) \};/);
     expect(route).toMatch(/code: 'CSS_CLASSES_UNDEFINED'/);
     expect(route).toMatch(/if \(designRepair \|\| cssRepair\)/);
     expect(route).toMatch(/CSS_CLASSES_HEALED/);
   });
   it('the fast lane reads the project\'s stylesheets, not only this turn\'s writes', () => {
-    expect(route).toMatch(/filter\(isProjectStylesheet\)[\s\S]{0,300}cssConsistencyError\(\{ \.\.\.sheets, \.\.\.written \}\)/);
+    expect(route).toMatch(/filter\(isProjectStylesheet\)[\s\S]{0,700}let project = \{ \.\.\.sheets, \.\.\.written \};[\s\S]{0,900}cssConsistencyError\(project\)/);
   });
 });
 

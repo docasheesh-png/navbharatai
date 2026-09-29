@@ -3,7 +3,7 @@ import { withoutPreviewBridge } from './previewBridge';
 import type { AgentEventStream } from './AgentEventStream';
 import type { WorkspaceState } from './WorkspaceState';
 import type { TurnRunner } from './ClaudeClient';
-import type { ActuatorPort, SubAgentSpawn, ReadLedger } from './ToolDispatcher';
+import type { ActuatorPort, SubAgentSpawn, ReadLedger, KitKeptTally } from './ToolDispatcher';
 import type { Checkpointer } from './GitManager';
 import { ToolDispatcher } from './ToolDispatcher';
 import { AgentRunner } from './AgentRunner';
@@ -135,6 +135,8 @@ export interface SubAgentDeps {
    * an app's code, so without this `generate_payment` there would always take the "payment pending" path.
    */
   serverlessPayment?: () => ReturnType<ToolDispatcher['serverlessPaymentHandler']>;
+  /** The parent's design-kit keep tally, so a sub-agent's stylesheet rewrite reaches the report (autopsy e725e002). */
+  kitKept?: () => KitKeptTally | undefined;
 
   /**
    * The raw result of every sandbox `bash` command. Position 13, and never passed — so **not one
@@ -229,6 +231,8 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       if (sharedReads) childDispatcher.shareReadLedger(sharedReads);
       const sharedStops = deps.readLoopStops?.();
       if (sharedStops) childDispatcher.shareReadLoopStops(sharedStops);
+      const sharedKit = deps.kitKept?.();
+      if (sharedKit) childDispatcher.shareKitKept(sharedKit);
     } catch { /* never block a spawn */ }
     try {
       const pay = deps.serverlessPayment?.();

@@ -76,6 +76,7 @@ import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote } from './writeTimeQualityCheck';
 import { storeEffectLoopNote } from './storeEffectLoop';
+import { keepKitOnRewrite, kitKeepToolNote } from './kitRestore';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
 import {
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckNote, WriteTypecheckQueue,
@@ -534,6 +535,8 @@ export type ReadLedgerEntry = {
   unchangedRereads?: number;
 };
 export type ReadLedger = Map<string, ReadLedgerEntry>;
+/** Stylesheet rewrites whose dropped design-kit rules were kept, and the classes kept (kitRestore.ts). */
+export type KitKeptTally = { writes: number; classes: string[] };
 
 /** The file a ledger key belongs to — a ranged read is keyed `path#Lfrom-to` (see read_file). PURE. */
 export function readLedgerPath(key: string): string {
@@ -2389,6 +2392,49 @@ export class ToolDispatcher {
   }
 
   /**
+   * Stylesheet rewrites whose dropped design-kit rules were kept (kitRestore.ts, autopsy e725e002).
+   * A BOX, like `_readLoopStops`, so a sub-agent's rewrite — the frontend agent usually writes the
+   * stylesheet — is counted in the parent's report rather than lost with the child.
+   */
+  private _kitKept: KitKeptTally = { writes: 0, classes: [] };
+
+  /** The build's design-kit keep tally, for the report. */
+  kitKeptTally(): KitKeptTally {
+    return this._kitKept;
+  }
+
+  /** The LIVE tally, for a child dispatcher to count into. */
+  sharedKitKept(): KitKeptTally {
+    return this._kitKept;
+  }
+
+  /** Count this child's kept rules in the parent's tally. Called once at spawn. */
+  shareKitKept(box: KitKeptTally): void {
+    if (box && typeof box.writes === 'number' && Array.isArray(box.classes)) this._kitKept = box;
+  }
+
+  /**
+   * THE PREVENTION HALF OF THE KIT RESTORE (autopsy e725e002). A wholesale rewrite of a stylesheet that
+   * carried the design kit keeps the kit rules it dropped without restyling — at the write door, so the
+   * kit is never lost rather than repaired after the build. Pure decision in `keepKitOnRewrite`; this
+   * only records it. Never throws: a guard failure writes the model's content exactly as sent.
+   */
+  private keepDesignKit(path: string, content: string, existingContent: string): { content: string; note: string } {
+    try {
+      const keep = keepKitOnRewrite(path, existingContent, content);
+      if (!keep) return { content, note: '' };
+      this._kitKept.writes++;
+      for (const c of keep.kept) if (!this._kitKept.classes.includes(c)) this._kitKept.classes.push(c);
+      try {
+        getWorkspaceMemory(this.workspaceId).recordAudit(`[KIT-KEEP] ${path}: kept ${keep.kept.length} design-kit class rule(s) the rewrite dropped`);
+      } catch { /* audit best-effort */ }
+      return { content: keep.content, note: kitKeepToolNote(path, keep) };
+    } catch {
+      return { content, note: '' };
+    }
+  }
+
+  /**
    * The LIVE ledger, for a child dispatcher to accumulate into.
    *
    * 🔴 WHY THIS EXISTS — autopsy f97eb0ec, 2026-09-20, and it is the FIFTH time this exact class has
@@ -3038,6 +3084,9 @@ export class ToolDispatcher {
         // version. This is the sibling choke point to the install-command pin (#1526).
         content = this.pinPackageJsonContent(path, content, existingContent);
         content = this.dedupeImportsForSource(path, content, agent);
+        // A rewrite of the global stylesheet keeps the design-kit rules it dropped (autopsy e725e002).
+        const kitKeep = kind === 'modify' ? this.keepDesignKit(path, content, existingContent) : { content, note: '' };
+        content = kitKeep.content;
         // Self-destruct guard (StudySync autopsy 2026-07-16): refuse to BLANK a populated source file.
         // Overwriting src/App.tsx with "" deletes its code and breaks every importer — the same
         // catastrophe as `rm`, but via the tool path (bypasses the shell guard). Checked BEFORE writing
@@ -3127,7 +3176,7 @@ export class ToolDispatcher {
           return (
             `Updated ${path} (${content.length} bytes).\n` +
             `${risk.message} The file content BEFORE this overwrite was:\n\`\`\`\n${preview}\n\`\`\`` +
-            reviewNote + cascadeNote + testHint + steeringNotes
+            reviewNote + cascadeNote + testHint + steeringNotes + kitKeep.note
           );
         }
         return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + steeringNotes;
@@ -3224,7 +3273,10 @@ export class ToolDispatcher {
           // `priorContent` (read above for the create-vs-modify verdict) also lets the ADD-ONLY dropped-
           // dep guard (EduTube autopsy 2026-09-14) see what this batch is about to drop — this batch
           // path is the one a full-file-dump rescue call actually writes through.
-          const writtenContent = this.dedupeImportsForSource(file.path, this.pinPackageJsonContent(file.path, file.content, priorContent), agent);
+          const pinnedContent = this.dedupeImportsForSource(file.path, this.pinPackageJsonContent(file.path, file.content, priorContent), agent);
+          // Parity with write_file: a batched rewrite of the stylesheet keeps the kit rules it dropped.
+          const batchKit = kind === 'modify' ? this.keepDesignKit(file.path, pinnedContent, priorContent) : { content: pinnedContent, note: '' };
+          const writtenContent = batchKit.content;
           await this.actuator.writeFile(this.workspaceId, file.path, writtenContent);
           // Consistency with write_file: run the per-write hook (security scan / durable tracking) —
           // batch-written files were previously skipping it entirely. Best-effort + '?.'-guarded.
@@ -3239,7 +3291,7 @@ export class ToolDispatcher {
           });
           batchMem.indexFile(file.path, file.content);
           getEmbeddingStore(this.workspaceId).addFile(file.path, file.content).catch(() => {});
-          return { path: file.path, kind, shrink };
+          return { path: file.path, kind, shrink, kitNote: batchKit.note };
         });
         const blocked: string[] = perFile.filter((r) => (r as { blocked?: boolean }).blocked).map((r) => r.path); // empty-overwrite refusals — NOT written
         const written: string[] = perFile.filter((r) => !(r as { blocked?: boolean }).blocked).map((r) => r.path);
@@ -3274,7 +3326,8 @@ export class ToolDispatcher {
         for (const f of parsedFiles) if (writtenSet.has(f.path)) writtenRecord[f.path] = f.content;
         // ONE compile for the whole batch (the queue coalesces anyway); each note names its own file.
         const batchSteeringNotes = await this.writeSteeringNotes(writtenRecord);
-        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchSteeringNotes}`;
+        const kitKeepNotes = perFile.map((r) => (r as { kitNote?: string }).kitNote ?? '').join('');
+        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchSteeringNotes}${kitKeepNotes}`;
       }
 
       case 'edit_file': {

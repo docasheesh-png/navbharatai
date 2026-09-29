@@ -2475,7 +2475,11 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      build wrote, and only an HTML form field the linter calls unlabelled that carries a LITERAL
     //      placeholder, to which it adds that same text as `aria-label` — nothing is removed and nothing
     //      is invented (labelFieldsFromPlaceholder). Considered ✓.
-    expect(count).toBe(24);
+    //   2× the DESIGN-KIT RESTORE (autopsy e725e002, 2026-09-29) — the architect lane's `restoreKitRules`
+    //      returns before writing when `isImportTurn || !expectsArtifacts`; the fast lane's copy lives in
+    //      fastVerify, whose lane never runs on an import turn. Append-only, and only the kit's own rules
+    //      for classes the screens use. Considered ✓.
+    expect(count).toBe(26);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

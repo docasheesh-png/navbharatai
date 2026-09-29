@@ -67,6 +67,9 @@ const PROCESS_ONLY_CODES = new Set([
   'NATIVE_CAPABILITY_BRIEF',
   // Our own deterministic label repair — housekeeping, never a finding against the app.
   'LABELS_REPAIRED',
+  // Our own deterministic design-kit restore (kitRestore.ts, autopsy e725e002) and the note that the
+  // sizers read the whole request (planningRequest.ts) — engine housekeeping, never app findings.
+  'DESIGN_KIT_RESTORED', 'PLANNING_CONTEXT', 'DESIGN_KIT_KEPT',
   // A measurement of our own write-time notes — never a finding against the app.
   'WRITE_TIME_QUALITY',
   // Same rule, same reason (autopsy 21b431e1): a dropped backslash that OUR deterministic pass put

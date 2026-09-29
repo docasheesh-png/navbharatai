@@ -188,10 +188,35 @@ export function withStarterVerdict<V extends { rendered: boolean; inconclusive?:
  * veto a real app's proof (the asymmetry `isUntouchedStarterEntry` is built on).
  */
 export async function entryIsStillTheStarter(read: (path: string) => Promise<string>): Promise<boolean> {
+  // 🔴 THE PAGE DECIDES WHICH FILE IS THE ENTRY (autopsy 4499741f, 2026-09-29). A plain-JavaScript music
+  // player was written into the ROOT index.html (with style.css and script.js), exactly as the user asked.
+  // The seeded src/App.tsx was left untouched — and unused, because the page no longer loads src/ at all.
+  // This check still called it "the starter": the in-build proof refused a real render, the readiness gate
+  // blocked "done", and the resumed builder spent four minutes deleting src/, rewriting package.json and
+  // breaking the dev server to satisfy a verdict about a file nothing ran. An index.html we CAN read that
+  // no longer mounts anything from src/ means the starter is not the app, whatever App.tsx still says.
+  let indexHtml: string | null = null;
+  try { indexHtml = await read('index.html'); } catch { indexHtml = null; }
+  if (indexHtml != null && !pageMountsSrc(indexHtml)) return false;
   for (const path of STARTER_ENTRY_PATHS) {
     let content: string;
     try { content = await read(path); } catch { continue; }
     return isUntouchedStarterEntry(content);
+  }
+  return false;
+}
+
+/**
+ * Does this index.html still load a module from `src/` — the chain through which the seeded App.tsx is
+ * mounted? PURE. A page whose only module script is `/script.js` (or none at all) does not mount the
+ * starter, so the starter's content says nothing about what the user sees. Comments are ignored, so a
+ * commented-out `<script src="/src/main.tsx">` does not count as mounting it.
+ */
+export function pageMountsSrc(indexHtml: string): boolean {
+  const html = String(indexHtml ?? '').replace(/<!--[\s\S]*?-->/g, '');
+  const re = /<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
+  for (const m of html.matchAll(re)) {
+    if (/^(?:\.?\/)?src\//i.test(m[1].trim())) return true;
   }
   return false;
 }

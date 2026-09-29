@@ -29,7 +29,13 @@ export interface RoleConfig {
 // Tool-set groups, by what a role is allowed to do. Every group includes the
 // read-only `recall` (query project memory) and `evaluate` (static architecture
 // analysis) — both are useful to all roles and never mutate the workspace.
-const BUILD_TOOLS: ToolName[] = ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'recall', 'evaluate', 'generate_readme', 'generate_env_example', 'generate_gitignore', 'generate_app_defaults', 'generate_openapi', 'generate_api_docs', 'generate_tests', 'run_tests', 'code_graph', 'architecture_map', 'find_dead_code', 'api_graph', 'typecheck', 'lint', 'check_package', 'check_toolchain', 'generate_observability', 'generate_bundle_optimization', 'generate_seed_data', 'generate_auth', 'generate_migration', 'generate_deploy_artifacts', 'replace_symbol', 'check_conventions', 'generate_release_notes', 'codemod_rename', 'codemod_add_prop', 'codemod_move_file', 'update_todo', 'update_preview'];
+// THE PAYMENT, WEBHOOK AND DATABASE RECIPES (2026-09-29). The architect prompt has told the model to
+// "call generate_payment", "generate_db_config" and to ask for keys with "request_secrets" for months —
+// and none of them was in any role's list, so `catalogForTools` filtered them out and the model could
+// never call them. A generated booking app therefore marked payments "paid" from the browser and kept its
+// bookings in localStorage. `tests/promisedToolsAreOffered.test.ts` holds the prompt and the lists together.
+const PAYMENT_DATA_TOOLS: ToolName[] = ['generate_payment', 'generate_webhook', 'generate_idempotency', 'generate_db_config'];
+const BUILD_TOOLS: ToolName[] = [...PAYMENT_DATA_TOOLS, 'read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'recall', 'evaluate', 'generate_readme', 'generate_env_example', 'generate_gitignore', 'generate_app_defaults', 'generate_openapi', 'generate_api_docs', 'generate_tests', 'run_tests', 'code_graph', 'architecture_map', 'find_dead_code', 'api_graph', 'typecheck', 'lint', 'check_package', 'check_toolchain', 'generate_observability', 'generate_bundle_optimization', 'generate_seed_data', 'generate_auth', 'generate_migration', 'generate_deploy_artifacts', 'replace_symbol', 'check_conventions', 'generate_release_notes', 'codemod_rename', 'codemod_add_prop', 'codemod_move_file', 'update_todo', 'update_preview'];
 const EDIT_TOOLS: ToolName[] = ['read_file', 'write_file', 'edit_file', 'grep', 'glob', 'recall', 'evaluate'];
 const RUN_TOOLS: ToolName[] = ['read_file', 'bash', 'grep', 'glob', 'recall', 'evaluate'];
 const READONLY_TOOLS: ToolName[] = ['read_file', 'grep', 'glob', 'recall', 'evaluate'];
@@ -52,7 +58,9 @@ const REGISTRY: Record<AgentRole, RoleConfig> = {
     // the user actually talks to — steer messages are injected into ITS turn — and a sub-agent
     // ending the whole build over a message it half-saw is not a risk worth taking for a
     // capability it has no way to need.
-    tools: [...BUILD_TOOLS, 'stop_build', 'task', 'second_opinion', 'consensus', 'web_search', 'screenshot', 'browser_action', 'console_errors', 'deploy'],
+    // `request_secrets` is the architect's too, for the same reason as `stop_build`: it opens a popup in
+    // front of the user, and only the agent the user is talking to should do that.
+    tools: [...BUILD_TOOLS, 'stop_build', 'request_secrets', 'task', 'second_opinion', 'consensus', 'web_search', 'screenshot', 'browser_action', 'console_errors', 'deploy'],
     capabilities: ['orchestrate', 'plan', 'delegate', 'integrate', 'architecture', 'coordinate'],
   },
 

@@ -50,6 +50,13 @@ export type ToolName =
   | 'codemod_rename'
   | 'codemod_add_prop'
   | 'codemod_move_file'
+  // Payments, webhooks, idempotency, the user's own database and the in-build key popup — see
+  // PAYMENT_DATA_TOOLS in AgentRegistry.ts for why these were unreachable until 2026-09-29.
+  | 'generate_payment'
+  | 'generate_webhook'
+  | 'generate_idempotency'
+  | 'generate_db_config'
+  | 'request_secrets'
   | 'task'
   | 'second_opinion'
   | 'consensus'

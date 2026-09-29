@@ -83826,3 +83826,28 @@ first 3.4 minutes. That is the first real measurement of that rung's speed as a 
 - Nemotron reported 0 input / 0 output tokens on both calls, so our own cost report under-states those calls.
 - The fast lane has no write-time notes at all, so the store-loop note reaches only architect writes.
 - Why the builder's own `console_errors` read clean right after the `Layout.tsx` fix, while the platform's fresh load still looped in `PlayerBar`, is not established. HMR keeping store state is the leading guess, and it is unverified.
+
+## 2026-09-29 — The prompt named 61 tools the builder was never given (payments PR A of 3)
+
+Admin: *"database aur payment verification wala kaam shuru karo"*, choosing **the user's own Supabase** for
+both (asked directly). While mapping the path, the real root cause surfaced:
+
+- The architect prompt tells the model to *"call generate_payment"*, *"generate_db_config"*, and to ask for
+  keys with *"request_secrets"*. **None of them was in any role's tool list**, and `catalogForTools` drops
+  what a role does not list — so the model was told to call tools it could not call. The key popup the admin
+  asked for on 2026-08-08 (`request_secrets` → `SecretRequestCard`, wired end to end) had **never once** been
+  reachable. Measured: 96 tool names in the prompt exist in the catalog; **61 were not offered**.
+- **This PR:** offers `generate_payment`, `generate_webhook`, `generate_idempotency`, `generate_db_config` to
+  every build role and `request_secrets` to the architect alone (it opens a popup in front of the user).
+  `generate_payment` now checks for a server first (`projectHasServer`); an app without one gets nothing
+  written and an honest instruction — payments recorded as "payment pending", offline payment kept, online
+  shown as coming soon — instead of an Express route nothing mounts. One prompt line states the rule: a
+  payment is PAID only when a server verified the signature.
+- 🔒 `tests/promisedToolsAreOffered.test.ts` is a RATCHET: the remaining **56** named-but-not-offered tools are
+  listed, the list may only shrink, and a NEW prompt promise without its tool fails CI.
+- **Next (PR B):** a Razorpay order + verify function deployed into the user's own Supabase (Edge Functions),
+  with the key secret pushed as a Supabase secret. Needs the admin to enable Edge Functions permission on the
+  Supabase OAuth app. **PR C:** offer the user's own database at build START when the app saves data.
+- ⚠️ **OPEN, the admin's decision:** the other 56 (OTP, PDF, file upload, email, SMS, QR, write_files_batch…).
+  Offering all of them adds ~50 tool schemas to every call; a single "recipe" tool that dispatches by name
+  would keep the tool list short. Not decided here.

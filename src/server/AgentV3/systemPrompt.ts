@@ -1182,6 +1182,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '- REACH FOR THE REAL GENERATOR — never hand-roll or stub a capability that has one (they emit real,',
     '  tested code with the keys pasted into .env, never stored). When the app needs it, call:',
     '    • payments → generate_payment (Razorpay/Stripe) · transactional email → generate_email · file',
+    '      (A payment is PAID only when a SERVER verified the gateway signature — never from the browser',
+    '       checkout\'s success callback. An app with no server records orders as "payment pending".)',
     '      uploads → generate_storage · realtime → generate_realtime · full-text search → generate_search',
     '    • phone OTP → generate_otp · SMS → generate_sms · newsletter signup → generate_newsletter · team',
     '      alerts → generate_notify (Slack/Discord) · your own DB → generate_db_config',

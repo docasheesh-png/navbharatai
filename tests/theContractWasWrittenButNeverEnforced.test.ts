@@ -150,6 +150,7 @@ describe('🔒 it is actually wired — on BOTH write return paths', () => {
     const quality = helper.indexOf('qualityNote(p, files[p])');
     expect(typecheck).toBeGreaterThan(-1);
     expect(quality).toBeGreaterThan(typecheck);
-    expect(helper).toContain('return hooks + imports + typecheck + quality;');
+    // 6a4a799f added the store render-loop note beside the hooks note — named, not wildcarded.
+    expect(helper).toContain('return hooks + storeLoop + imports + typecheck + quality;');
   });
 });

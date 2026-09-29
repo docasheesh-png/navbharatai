@@ -83860,6 +83860,75 @@ first 3.4 minutes. That is the first real measurement of that rung's speed as a 
 - The fast lane has no write-time notes at all, so the store-loop note reaches only architect writes.
 - Why the builder's own `console_errors` read clean right after the `Layout.tsx` fix, while the platform's fresh load still looped in `PlayerBar`, is not established. HMR keeping store state is the leading guess, and it is unverified.
 
+## 2026-09-29 — Autopsy e725e002 ("mkdir src", Weak tier, KIMI, 17.6 min, e-commerce app, billed ₹193.77)
+
+**What happened.** The user's message was `mkdir src`. The builder read it together with what gave it meaning — the attached file and/or the earlier requests in this workspace — and built a 35-file e-commerce site: catalogue, search, cart, checkout with a demo payment, accounts, saved addresses and orders. Every judge that runs BEFORE the builder read `mkdir src` alone.
+
+**Tally.**
+- ✅ Self-healed: 5.
+  - GLM flashx crawled and was benched after 26 s.
+  - OrderContext TS errors took 5 edits to fix.
+  - Placeholder files were rewritten.
+  - `.nb-hero` and `.error-boundary` CSS were added.
+  - Empty states were added (`DESIGN_HEALED`).
+- 🔀 Workarounds: 3.
+  - The fast lane timed out and handed off. It had built the wrong, generic app over 267 s.
+  - The contract step was cut at its own 43 s cap.
+  - The platform started the preview itself.
+- ⏭️ Skipped: 3.
+  - 2 moderate npm advisories.
+  - The reviewer timed out with no suggestions.
+  - 2 journeys were unreachable behind login.
+- ❌ Still broken: 4.
+  - The `.nb-empty*` classes had no CSS; the design repair itself introduced them.
+  - 17 hard-coded colours.
+  - Stray `.js` siblings in `src/`.
+  - The evaluate tool said "no preview" after `APP_RENDERED`.
+- 🥵 Struggle: 5.
+  - 4.5 min in a fast lane planning the wrong app.
+  - The ETA said 2–4 min against 17.6 actual (6.1×).
+  - The build opened on the cheapest rung (score 5, the score of "hi").
+  - ~13 files were written twice.
+  - 894 s to first render.
+
+**Missing subsystem, and the class.** A judge that READS LESS THAN THE WORKER IT JUDGES. The complexity score, the ETA, the request analysis, complexity routing, the app-scope analyser, project-mode detection and the fast lane's file plan each read the bare message. Only the builder read the whole request.
+
+**Fixed.**
+- `src/server/AgentV3/planningRequest.ts` (pure): ONE planning request made of:
+  - the message first;
+  - the attached-file text, capped at 12 KB;
+  - the last 3 earlier requests, ONLY while no user app exists (on an existing app they describe finished work, and would size "make the button blue" as the whole app again).
+- Every sizer, planner and the fast lane read `planning.text`. Intent and the golden-scaffold match still read the message.
+- Admin line `PLANNING_CONTEXT`. Kill switch `AGENTV3_PLANNING_CONTEXT=off`.
+- `src/server/AgentV3/kitRestore.ts` (pure): when a screen uses a design-kit class that the app's stylesheet lacks, the kit's OWN rule is appended to the imported stylesheet — with the `@media` rules, keyframes and tokens it reads (light and dark) — and no model call.
+  - It never restyles a class the app defines and never overrides a token the app sets.
+  - It is idempotent.
+  - It runs in the architect lane BEFORE the CSS check decides on a model repair and again AFTER the design/CSS repair, and in the fast lane's verify (the sibling).
+  - Admin line `DESIGN_KIT_RESTORED`. Kill switch `AGENTV3_KIT_RESTORE=off`.
+- Honesty: a design-only repair that leaves ≥3 classes unstyled now records `CSS_CLASSES_UNDEFINED` ("After the design repair: …") instead of standing behind `DESIGN_HEALED` alone.
+- Both new codes are in `PROCESS_ONLY_CODES` and `NEVER_SUGGEST`.
+- Test: `tests/theSizersReadWhatTheBuilderReads.test.ts`, 33 cases including source guards on every sizer and on both lanes.
+
+**Open.**
+- 🔴 **Why the architect rewrites `src/index.css` without the kit.** The restore makes this harmless for kit classes, but the prevention half is a prompt/contract change: "append to the global stylesheet, never replace it". Not done here — it touches the architect prompt, which other sessions edit.
+- `.js` siblings of `.tsx` files in `src/` (Vite resolves `.js` first, so a stale sibling can shadow a fixed file). Origin not established from the report; nothing in the report shows which step wrote them.
+- The evaluate tool claiming "no preview" after `APP_RENDERED` is the known EVIDENCE-LEDGER class (697b38ee) — another actor's private notion of what was proven.
+- Placeholder-files-then-rewrite (~13 double writes) and the reviewer timing out on a 35-file app are recorded, not fixed.
+
+## 2026-09-29 — Autopsy e725e002, the prevention half: a rewrite of the stylesheet keeps the kit
+
+Admin: *"architect ko index.css replace na karne wala fix bhi karo"*. This closes the open item recorded in the entry above ("why the architect rewrites `src/index.css` without the kit").
+- **Fixed at the write door, not only in the prompt.** `keepKitOnRewrite` (`kitRestore.ts`, pure) runs in `write_file` and `write_files_batch`; the fast lane writes through `write_file`, so it is covered too.
+- **When it acts:** the file being replaced carried the design kit (at least `KIT_SIGNATURE_MIN` = 5 kit rules), and the new content drops kit rules without redefining their classes.
+- **What it does:** those rules are appended after the model's content, exactly as the old file had them (a tuned palette stays tuned), with the keyframes and light/dark tokens they read. The model's own rules are never altered, and a class it restyles is left to it.
+- **Honesty:** the model is told in the tool result; the report gets `DESIGN_KIT_KEPT` (sub-agents count into the parent's tally); the audit log gets `[KIT-KEEP]`.
+- **Prompt:** the architect is told never to replace `src/index.css` wholesale, but to append with `edit_file` and restyle by overriding.
+- Kill switch `AGENTV3_KIT_KEEP=off`.
+- Test: `tests/theStylesheetKeepsItsKit.test.ts`, 19 cases; reversion-proven.
+
+**Open.**
+- `edit_file` is not guarded. A targeted edit that deletes kit rules is repaired after the build by `kitRestorePatch` for the classes screens use, not prevented.
+- If `DESIGN_KIT_KEPT` fires on most builds, the prompt line is not being obeyed. The next step would be to stop handing the kit to the model as editable file content at all (a separate `kit.css` imported by `index.css`).
 ## 2026-09-29 — Autopsy e7baf61d ("Crest" JEE study planner, Weak tier, KIMI rung 2, 20.6 min, green, billed ₹490.33)
 
 A 175-line spec written one item per line, for a single-person app ("No account required",

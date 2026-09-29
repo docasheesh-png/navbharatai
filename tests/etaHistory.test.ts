@@ -147,7 +147,8 @@ describe('WIRING — the live build path finally gets history', () => {
   it('the SAME complexity object feeds both the history and the estimate', () => {
     // Two different complexities would make the estimator compare incomparable things and return a
     // confident number that means nothing.
-    expect(route).toContain('const etaComplexity = complexityFromPrompt(prompt);');
+    // Sized from the whole request the builder reads (autopsy e725e002), not the bare message.
+    expect(route).toContain('const etaComplexity = complexityFromPrompt(planning.text);');
     expect(route).toMatch(/recentBuildHistoryFor\(\s*\n?\s*workspaceId, etaComplexity,/);
   });
 

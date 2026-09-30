@@ -1587,8 +1587,11 @@ the code (it is actually read somewhere) on 2026-07-11.
   metering puts every hosted app's Cloud Run bill on NavBharatAI with nothing recording it. This is the
   metering. Opening hosting still needs the rates above to be set and a few real days of the admin
   report read first — the switch is not a consequence of this code existing.
-- **AI inside a PUBLISHED app — the gateway (built 2026-09-12, ROADMAP §13 item 3.1, NOT live yet):**
-  `APP_AI_GATEWAY` (the master switch — ⚠️ **UNSET, and unset means today's behaviour exactly**: no token
+- **AI inside a PUBLISHED app — the gateway (built 2026-09-12, ROADMAP §13 item 3.1):**
+  ✅ **LIVE — the admin SET `APP_AI_GATEWAY = on` in Cloud Run on 2026-09-30** (recorded hand-to-hand the
+  same session, right after #3405 taught the builder to use it). Verify on a real build: a published AI
+  app with no server should call `generate_ai` (navbharat) and answer with no key pasted anywhere.
+  `APP_AI_GATEWAY` (the master switch — unset or anything but `on` means the old behaviour exactly: no token
   is minted, no page is stamped, and the endpoint refuses everything). Tunables, all with working code
   defaults: `APP_AI_DAILY_CAP_INR` (**₹20** — what ONE APP's assistant may spend in a day) and
   `APP_AI_VISITOR_CAP_INR` (**₹2** — what one VISITOR may spend of it). Read by

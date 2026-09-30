@@ -85563,3 +85563,28 @@ Admin: *"mobile friendly game/app bane — mobile first!!!!!!"*, choosing touch 
 - The phone check reports and offers a fix; it does not repair on its own. A verified repair (like the
   explorer's) waits until `MOBILE_LAYOUT_ISSUES` has appeared on real builds.
 - Games built before today get the controls only when rebuilt.
+
+## 2026-09-30 — A free build holds the sandbox for less (E2B cost lever, admin: "han, free build time-limit wala PR banao")
+
+**The problem.** A free (Weak) build got the paid window: 30 minutes, or 60 on a deep prompt. When the
+window ran out, the watchdog pause was always `resumable`. The client auto-continues it for up to 8
+windows while files grow, plus 2 windows with no progress. So one free request could hold an E2B machine
+for four to eight hours with nobody pressing anything, all of it paid by NavBharatAI.
+
+**The fix** (`src/server/AgentV3/freeBuildTimeCap.ts`):
+- **Window:** a free build's window is min(paid cap, `AGENTV3_FREE_BUILD_SECONDS`), default 25 min. It is
+  applied to `effectiveBuildSeconds`, so every budget derived from it moves together.
+- **Unattended chain:** the watchdog pause is resumable only while this request's free windows total less
+  than `AGENTV3_FREE_BUILD_AUTO_SECONDS` (default 50 min). After that the work is saved, the user is told
+  so, and each "continue" buys one window.
+- **Server-side:** the phone apps are bundled, so a client change would not reach them.
+- **Report codes:** `FREE_BUILD_TIME_CAP` and `FREE_BUILD_CHAIN_PAUSED`, both process-only.
+- **Honesty sibling:** the runner's timeout outcome now names the key that actually set the cap.
+- **Tests:** `tests/aFreeBuildHoldsTheMachineForLess.test.ts`, reversion-proven.
+
+**Still open:**
+- The chain is counted per instance. An auto-continue served by another Cloud Run instance starts a
+  fresh chain there, which is the old behaviour. The complete fix is a durable per-workspace counter,
+  for example on the workspace build lease.
+- 25 min / 50 min are assumptions. Read `FREE_BUILD_CHAIN_PAUSED` on real builds before tuning them.
+- Project-mode module turns (`planRemaining`) keep their own chain guard and are not bounded by this.

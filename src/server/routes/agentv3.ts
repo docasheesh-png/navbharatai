@@ -411,6 +411,7 @@ import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMiscon
 import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
+import { freeBuildWindow, noteFreeBuildStart, decideFreePause, freePauseMessage } from '../AgentV3/freeBuildTimeCap';
 import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionReserve';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
@@ -11970,7 +11971,14 @@ async function noteBuildOutcome(
       onlyOpus,
       largeEditProject,
     );
-    const effectiveBuildSeconds = scaleBuildSeconds(maxBuildSeconds(), buildDepth);
+    /**
+     * A FREE build holds the sandbox for less than a paid one (freeBuildTimeCap.ts, admin 2026-09-30).
+     * Applied HERE because every budget below derives from `effectiveBuildSeconds`, so the watchdog, the
+     * runner's own stop, the reserve and the reviewer's headroom all read the same shorter number.
+     */
+    const freeWindow = freeBuildWindow(scaleBuildSeconds(maxBuildSeconds(), buildDepth), freeTierBuildActive);
+    if (freeTierBuildActive) noteFreeBuildStart(workspaceId, prompt);
+    const effectiveBuildSeconds = freeWindow.seconds;
     const deadlineMs = effectiveBuildSeconds * 1000;
     // P-ARCH+.3 — tokens spent by the optional up-front blueprint step (below). Declared here so the
     // final billing hook can fold them into the user's charge with the same markup as every other
@@ -12231,7 +12239,17 @@ async function noteBuildOutcome(
       // Computed unconditionally (cheap, pure — just formats `writtenFiles.size`) so both the diagnostics
       // report and the emitted result below use the exact same honest text; not needed for reasoning
       // about the plain success (`ok`) case.
-      const pauseMsgForReport = deadlinePauseMessage(writtenFiles.size);
+      // A FREE build's unattended chain is bounded HERE (freeBuildTimeCap.ts): once this request's free
+      // windows have used their allowance, the pause is not resumable — the work is saved and one
+      // "continue" from the user buys the next window. A paid build, and a finished app, are untouched.
+      const freePause = !ok && freeTierBuildActive ? decideFreePause(workspaceId, deadlineMs) : null;
+      const pauseResumable = freePause ? freePause.resumable : true;
+      if (freePause && !freePause.resumable) {
+        try {
+          buildDiagRef?.record({ phase: 'build', severity: 'info', code: 'FREE_BUILD_CHAIN_PAUSED', message: `Free build paused for the user: ${Math.round(freePause.spentSeconds / 60)} min of unattended windows used (allowance ${Math.round((freePause.allowanceSeconds ?? 0) / 60)} min). Not auto-continued.`, autoResolved: true });
+        } catch { /* observation only */ }
+      }
+      const pauseMsgForReport = pauseResumable ? deadlinePauseMessage(writtenFiles.size) : freePauseMessage(writtenFiles.size);
       let dl: BuildDiagnosticsReport | undefined;
       try {
         if (!ok) buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_TIMEOUT', message: `Build exceeded the ${Math.round(deadlineMs / 1000)}s wall-clock cap and was stopped.`, autoResolved: false });
@@ -12299,11 +12317,14 @@ async function noteBuildOutcome(
         // (never rendered as a bubble on the resumable path). RC-4's honest-wording lives in the client
         // stopMessage now, so nothing here can claim "almost done".
         const pauseMsg = pauseMsgForReport;
+        // A pause that waits for the user (free chain spent) is NOT resumable, so the client renders its
+        // `summary` as the build's closing line — which is why freePauseMessage's summary is the full
+        // sentence. No separate narration: it would say the same thing twice.
         // P-Layer3 — mark this result RESUMABLE so the client can auto-continue (bounded) without the
         // user having to type "continue". A normal failure has no `resumable` flag, so it won't auto-retry.
         // `filesWritten` is the PROGRESS signal (FleetOps): the client keeps auto-continuing a wall-clock
         // pause while this strictly increases across windows, so a big full-stack app finishes unattended.
-        emit({ type: 'result', ok: false, resumable: true, summary: pauseMsg.summary, steps: 0, billedUsd: 0, billedInr: 0, filesWritten: writtenFiles.size, ...(dl ? { diagnostics: dl } : {}) });
+        emit({ type: 'result', ok: false, resumable: pauseResumable, summary: pauseMsg.summary, steps: 0, billedUsd: 0, billedInr: 0, filesWritten: writtenFiles.size, ...(dl ? { diagnostics: dl } : {}) });
       }
       // A deadline-finalized build's `finally` may never run (the body is stuck on an un-abortable
       // await) — persist the evidence layer HERE too, after the terminal emit so the recorder has
@@ -12779,6 +12800,13 @@ async function noteBuildOutcome(
         },
       });
       buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
+      // Say when the free limit shortened this build's window (freeBuildTimeCap.ts) — a build that stops
+      // at 25 minutes must not read, in the report, as one that hit the 30-minute paid cap.
+      if (freeWindow.capped) {
+        try {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'FREE_BUILD_TIME_CAP', message: `Free build window: ${Math.round(freeWindow.seconds / 60)} min (a paid build would get ${Math.round(freeWindow.paidSeconds / 60)} min).`, autoResolved: true });
+        } catch { /* observation only */ }
+      }
       // OBSERVABILITY ONLY (2026-09-16) — record what the request analyser concluded above, so a
       // model's measured performance can be correlated with the DIFFICULTY of the work it was handed
       // (modelPerformance.ts). The value was computed long before this line; this only stores it, and
@@ -17435,8 +17463,8 @@ async function noteBuildOutcome(
           buildDiag.record({
             phase: 'build', severity: result.ok ? 'warning' : 'error', code: 'OUTCOME_BUILD_TIMEOUT',
             message: result.ok
-              ? `Build outcome: hit the ${Math.round(effectiveBuildSeconds / 60)}-minute wall-clock cap (AGENTV3_MAX_BUILD_SECONDS) with real work saved — resumable, not a crash.`
-              : `Build outcome: hit the ${Math.round(effectiveBuildSeconds / 60)}-minute wall-clock cap (AGENTV3_MAX_BUILD_SECONDS) before producing anything.`,
+              ? `Build outcome: hit the ${Math.round(effectiveBuildSeconds / 60)}-minute wall-clock cap (${freeWindow.capped ? 'AGENTV3_FREE_BUILD_SECONDS' : 'AGENTV3_MAX_BUILD_SECONDS'}) with real work saved — resumable, not a crash.`
+              : `Build outcome: hit the ${Math.round(effectiveBuildSeconds / 60)}-minute wall-clock cap (${freeWindow.capped ? 'AGENTV3_FREE_BUILD_SECONDS' : 'AGENTV3_MAX_BUILD_SECONDS'}) before producing anything.`,
             autoResolved: false,
           });
         } catch { /* diagnostics best-effort */ }

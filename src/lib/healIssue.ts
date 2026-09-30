@@ -67,6 +67,43 @@ export const WORKAROUND_CODES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Codes recorded `autoResolved: true` because they do NOT BLOCK — never because anything was repaired
+ * (admin scorecard 2026-09-30).
+ *
+ * The scorecard's "Most-repaired" list read `READINESS_WARNING ×305 (130 builds)` at the top, then
+ * `PREVIEW_SNAPSHOT_STALE ×105`. Neither is a repair. A readiness warning is a finding the gate
+ * decided was not a blocker — an import cycle, an unused component, a requested feature that was never
+ * built — and it is still in the app when the build ends; the flag is set so it never counts as an
+ * UNRESOLVED blocker (see NEVER_ROOT_CAUSE in BuildDiagnostics). A stale snapshot is a copy that stayed
+ * stale. So the one number the 50/50 law is read from counted shipped imperfections as heals, and the
+ * work list it produced pointed the next autopsy at "the heal that fires most" when nothing had been
+ * healed. That is the 2026-09-25 bug (info rows counted as repairs) in its last remaining shape.
+ *
+ * They are not dropped: they are counted as LEFT OPEN (`isLeftOpen`) — the fifth rule's ❌ bucket, which
+ * is where a finding that survived into the delivered app belongs.
+ *
+ * ⚠️ A NEW code recorded `severity: 'warning'`, `autoResolved: true` that fixed nothing belongs here.
+ * Ask of every such record: "what was repaired between the moment this was noticed and now?" — if the
+ * answer is "nothing, it was never going to block", it is left open, not a heal.
+ */
+export const NOT_A_REPAIR_CODES: ReadonlySet<string> = new Set([
+  'READINESS_WARNING',
+  'PREVIEW_SNAPSHOT_STALE',
+  'USAGE_NOT_REPORTED',
+  'CHEAP_REVIEW_NOT_RUN',
+  // A repair that was UNDONE: the defect it targeted is still there.
+  'RUNTIME_FIX_REGRESSED',
+  'DESIGN_HEAL_REVERTED',
+]);
+
+/**
+ * The version of the heal rule a report's `counts.autoResolved` was computed with. Reports written
+ * before 2026-09-30 carry no `counts.healRule`, and their `autoResolved` still includes the rows
+ * NOT_A_REPAIR_CODES now excludes — `healCountOf` corrects for that.
+ */
+export const HEAL_RULE = 2;
+
+/**
  * The engine REPEATING a sentence, never a measurement (autopsy 586295b7, 2026-09-20). Excluded from
  * every tally: not an error the build had, not a warning it raised, not something it healed.
  */
@@ -98,6 +135,7 @@ export function isWorkaroundIssue(i: HealIssueLike | null | undefined): boolean 
  *   healed nor ours to owe (same day).
  * - not narration — a repeated sentence is not a measurement (586295b7).
  * - not a workaround — a fallback that fired fixed nothing (2026-09-13).
+ * - not left open — a finding recorded as non-blocking was never repaired (2026-09-30).
  */
 export function isSelfHeal(i: HealIssueLike | null | undefined): boolean {
   if (!i || i.autoResolved !== true) return false;
@@ -105,13 +143,24 @@ export function isSelfHeal(i: HealIssueLike | null | undefined): boolean {
   if (i.severity === 'info') return false;
   if (isNarrationIssue(i)) return false;
   if (WORKAROUND_CODES.has(codeOf(i))) return false;
+  if (NOT_A_REPAIR_CODES.has(codeOf(i))) return false;
   return true;
+}
+
+/**
+ * A non-blocking finding that was still there when the build ended — neither a heal nor a blocker.
+ * Counted so it is never lost when it stops being called a repair. PURE.
+ */
+export function isLeftOpen(i: HealIssueLike | null | undefined): boolean {
+  if (!i || i.autoResolved !== true) return false;
+  if (i.observation === true || i.severity === 'info') return false;
+  return NOT_A_REPAIR_CODES.has(codeOf(i));
 }
 
 /** A stored or live report, read structurally — this module never imports the recorder. */
 export interface HealReportLike {
   issues?: HealIssueLike[] | null;
-  counts?: { total?: unknown; workarounds?: unknown } | null;
+  counts?: { total?: unknown; workarounds?: unknown; autoResolved?: unknown; healRule?: unknown; leftOpen?: unknown } | null;
   truncation?: { channels?: { issues?: { kept?: unknown; total?: unknown } | null } | null } | null;
 }
 
@@ -148,4 +197,24 @@ export function workaroundCountOf(report: HealReportLike | null | undefined): nu
   if (typeof recorded === 'number' && Number.isFinite(recorded) && recorded >= 0) return Math.floor(recorded);
   if (!isTimelineComplete(report)) return null;
   return (report!.issues ?? []).filter(isWorkaroundIssue).length;
+}
+
+const finiteCount = (v: unknown): number | null =>
+  (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : null);
+
+/**
+ * How many defects this build REALLY repaired. The recorder's own number when it was computed with the
+ * current rule; for an older report, that number minus the left-open rows it wrongly included. Null when
+ * the report recorded no count ("nobody measured", excluded by every aggregate — never zero).
+ *
+ * ⚠️ On a legacy report whose timeline was trimmed, left-open rows that were cut cannot be subtracted, so
+ * the result can still be slightly HIGH — it is never pushed below the truth.
+ */
+export function healCountOf(report: HealReportLike | null | undefined): number | null {
+  const recorded = finiteCount(report?.counts?.autoResolved);
+  if (recorded === null) return null;
+  const rule = finiteCount(report?.counts?.healRule);
+  if (rule !== null && rule >= HEAL_RULE) return recorded;
+  const visibleOpen = (Array.isArray(report?.issues) ? report!.issues! : []).filter(isLeftOpen).length;
+  return Math.max(0, recorded - visibleOpen);
 }

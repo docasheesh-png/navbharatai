@@ -84122,6 +84122,66 @@ The admin asked whether everything was fixed. It was not, so the open items were
 **Proactive, not done here:** the other golden templates with logic (tip split, stopwatch, pomodoro) have
 no behavioural test of this kind. The same harness would lock them, so any false reviewer claim against
 them is answered by evidence rather than a repair call.
+## 2026-09-30 — Builder scorecard autopsy (admin Diagnostics capture, 254 builds): two defects, both ours
+
+The admin sent the Builder scorecard with no text. Headline numbers: build success 62.2% of 254,
+"needed a heal" 83.9% (3.15 per build), median build 11.6 min, median cost ₹69.53. The same capture
+carried an iOS console error. Two root causes, both fixed in this change.
+
+**1. App Check never started on ANY phone** (`"FirebaseAppCheck.then()" is not implemented on ios @
+unhandled promise`). `loadNativeAppCheck` (App Check slice 2, my own code, 2026-09-26) was `async` and
+did `return FirebaseAppCheck` — a Capacitor plugin PROXY. Resolving the promise reads `.then` off the
+value; the proxy dispatched a native method named `then`, which rejected unhandled and never called
+back, so `installAppCheck`'s `await` never settled. Nothing broke (fetch stayed unwrapped, monitor mode),
+but no phone ever sent a token.
+- 🔴 **The identical defect was root-caused on 2026-09-15** (PlayBilling, DeviceIntegrity). That fix
+  guarded the two files by NAME, so a third file walked straight past it — the headline class again.
+- Fixed: the loader returns a plain wrapper object.
+- 🔴 **DUPLICATED WORK, recorded honestly: #3388 (another session) fixed the SAME line the same morning
+  and shipped its own repo-wide scanner (`tests/pluginProxyIsNeverResolved.test.ts`), merging before
+  this PR.** On merging `main` in, this PR took `main`'s `appCheckClient.ts` and DROPPED its own
+  duplicate scanner. It kept only what #3388 lacks: `tests/theAppCheckLoaderSettles.test.ts`, which
+  drives the loader with a proxy that BEHAVES like Capacitor's (its `then` never calls back) and proves
+  `installAppCheck` actually settles — a text scan cannot show that. The admin's report went to two
+  sessions; one owner per report is still the only thing that prevents this.
+- ⚠️ Reaches phones only with a fresh `.aab`/`.ipa` (bundled mode). The first such build is the first
+  time native App Check actually runs; console enforcement stays OFF, so it refuses nothing.
+
+**2. The scorecard counted findings nobody fixed as "repairs".** "Most-repaired" was led by
+`READINESS_WARNING ×305` and `PREVIEW_SNAPSHOT_STALE ×105`, plus `USAGE_NOT_REPORTED ×10` — 420 of the
+629 named repairs. All are recorded `autoResolved: true` because they do not BLOCK, never because
+anything was repaired: a readiness warning (import cycle, unused component, requested feature not
+built) is still in the app when the build ends. The 2026-09-25 fix (info rows counted as repairs) left
+this last shape.
+- `NOT_A_REPAIR_CODES` + `isLeftOpen` in `src/lib/healIssue.ts` (also RUNTIME_FIX_REGRESSED,
+  DESIGN_HEAL_REVERTED, CHEAP_REVIEW_NOT_RUN — an undone repair and a review that never ran). The
+  recorder writes `counts.leftOpen` and `counts.healRule: 2`; `healCountOf` corrects OLDER stored
+  reports on read, so the card is right about the builds already recorded. The scorecard shows them on
+  their own line — "Left open, not repaired" — the ❌ bucket, never dropped.
+- First-pass quality does NOT improve by renaming: `classifyFirstPass` counts left-open findings as
+  not-clean, for old and new reports alike.
+- Test-locked in `tests/aWarningLeftOpenIsNotARepair.test.ts` (12 cases), reversion-proven twice.
+- ⚠️ **Expect the card's heal rate to DROP** on the next load. That is the measurement getting honest,
+  not the engine getting better.
+
+**3. ✅ A build the USER stopped was counted as a failed build and as a "stuck project"** (same PR,
+after the admin said "continuously fix karo"). Two of the four stuck projects said, in their own root
+cause, "no failure of the app or the engine is implied". The signal already existed — the failure panel
+excludes a Stop via `isUserStoppedBuild`, and the all-builds index carries `userStopped` — but the
+scorecard reads builds from per-workspace HISTORY, whose projection never carried it: one reader fixed,
+its sibling not. Now the history entry carries `userStopped` (the same `stoppedByUser` read), the metric
+input carries it, `judgeable` excludes it, and success/survival count it on its own
+(`stoppedByUser`), stated in the headline and the card's note. Test-locked and reversion-proven in
+`tests/aWarningLeftOpenIsNotARepair.test.ts` §6.
+
+**Open, not done here:**
+- `PREVIEW_SNAPSHOT_STALE` on 105 of 254 builds is itself a real defect. **Not root-caused, and not
+  guessed at:** the count is a LIFETIME tally that includes builds from before the 2026-09-25
+  (`identitySource`) and 2026-09-26 (#3313) fixes, and the scorecard carries no per-build detail. Since
+  2026-09-20 the stale line itself names the cause (`staleDetail`: a file-set mismatch vs a content
+  change, with the paths). The next report carrying it settles it.
+- The fourth stuck row's root cause ("Did not ask this user to add credits…") predates the 2026-09-17
+  `UPSELL_SUPPRESSED` fix; nothing new to do.
 ## 2026-09-30 — The referral-code box closes after 3 app opens or 7 days
 
 Admin: *"Refral code dalne ka option 3 bar app open hone ke bad band ho jana chahiye … 4rth time … input box

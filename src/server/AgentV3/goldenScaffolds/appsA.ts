@@ -204,9 +204,11 @@ function App() {
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  const key = (label: string, onClick: () => void, cls?: string, span?: number) => (
+  // \`name\` is what a screen reader says: "DEL" and "x" are glyphs, not names.
+  const key = (label: string, onClick: () => void, cls?: string, span?: number, name?: string) => (
     <button
       className={cls || ''}
+      aria-label={name}
       onClick={onClick}
       style={{ gridColumn: span === 2 ? 'span 2' : undefined, padding: '18px 0', fontSize: 20, fontWeight: 600 }}
     >
@@ -226,25 +228,25 @@ function App() {
           <div style={{ fontSize: 40, fontWeight: 800, overflowWrap: 'anywhere' }}>{display}</div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-          {key('C', clearAll)}
-          {key('DEL', backspace)}
-          {key('%', percent)}
-          {key('/', () => chooseOp('/'), 'primary')}
+          {key('C', clearAll, '', 1, 'Clear')}
+          {key('DEL', backspace, '', 1, 'Backspace')}
+          {key('%', percent, '', 1, 'Percent')}
+          {key('/', () => chooseOp('/'), 'primary', 1, 'Divide')}
           {key('7', () => inputDigit('7'))}
           {key('8', () => inputDigit('8'))}
           {key('9', () => inputDigit('9'))}
-          {key('x', () => chooseOp('x'), 'primary')}
+          {key('x', () => chooseOp('x'), 'primary', 1, 'Multiply')}
           {key('4', () => inputDigit('4'))}
           {key('5', () => inputDigit('5'))}
           {key('6', () => inputDigit('6'))}
-          {key('-', () => chooseOp('-'), 'primary')}
+          {key('-', () => chooseOp('-'), 'primary', 1, 'Minus')}
           {key('1', () => inputDigit('1'))}
           {key('2', () => inputDigit('2'))}
           {key('3', () => inputDigit('3'))}
-          {key('+', () => chooseOp('+'), 'primary')}
+          {key('+', () => chooseOp('+'), 'primary', 1, 'Plus')}
           {key('0', () => inputDigit('0'), '', 2)}
-          {key('.', () => inputDigit('.'))}
-          {key('=', equals, 'primary')}
+          {key('.', () => inputDigit('.'), '', 1, 'Decimal point')}
+          {key('=', equals, 'primary', 1, 'Equals')}
         </div>
       </div>
       {history.length > 0 && (

@@ -188,7 +188,7 @@ import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS 
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
 import { judgeRenderStyle, renderStyleNote, unstyledRenderUserNote, type RenderStyleVerdict, type RenderStyleEvidence } from '../AgentV3/renderStyle';
-import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths } from '../AgentV3/greenReviewPolicy';
+import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths, greenRepairPrompt, readRepairVerdicts, type RepairVerdicts } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver, GreenFreezeError } from '../AgentV3/greenFreeze';
 import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild, IN_BUILD_PROOF_BUDGET_MS, type AttemptOutcome } from '../AgentV3/inBuildGreen';
@@ -16173,8 +16173,11 @@ async function noteBuildOutcome(
               .filter((p) => p.startsWith('src/'));
             if (existingSrc.length === 0) {
               const goldenFiles = goldenScaffoldFiles(golden);
+              // TOGETHER, not one after another (autopsy 972acde5): twelve sequential sandbox round trips
+              // were ~5 s of the wait before the first model call. A failed write still rejects the whole
+              // seed, exactly as the loop did, and the files are recorded only once every write landed.
+              await Promise.all(Object.entries(goldenFiles).map(([gp, gc]) => actuator.writeFile(workspaceId, gp, gc)));
               for (const [gp, gc] of Object.entries(goldenFiles)) {
-                await actuator.writeFile(workspaceId, gp, gc);
                 writtenFiles.set(gp, gc);
                 try { getWorkspaceMemory(workspaceId).indexFile(gp, gc); } catch { /* index best-effort */ }
               }
@@ -21674,6 +21677,8 @@ async function noteBuildOutcome(
             // can see). The pass may never write a .env file (greenFreeze.ts). Everything it did not fix
             // is still OFFERED below, exactly as before.
             let greenRepaired: string[] = [];
+            // Findings the repair traced and reported NOT A BUG: never claimed as fixed, never offered.
+            let greenRefuted: string[] = [];
             if (greenRepairable.length > 0) {
               const headroomMs = effectiveBuildSeconds === 0 ? Number.POSITIVE_INFINITY : effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt);
               const plan = greenRepairPlan(headroomMs);
@@ -21688,6 +21693,10 @@ async function noteBuildOutcome(
                 let repairTimedOut = false;
                 // What the pass really changed, measured against the snapshot — never its own report.
                 let repairChanged: number | undefined;
+                // What the pass said about each finding (`greenRepairPrompt`). Unread ⇒ the old reading.
+                let repairVerdicts: RepairVerdicts | undefined;
+                // Every finding it was handed, it traced and found not real (autopsy 972acde5).
+                const repairRefutedAll = () => !!repairVerdicts?.read && repairVerdicts.confirmed.length === 0;
                 try {
                   // The snapshot is taken HERE, not inside verifyAfterFix: when its own snapshot fails it
                   // runs the change without a net and keeps it — right for a crash fix, never for an edit
@@ -21704,10 +21713,10 @@ async function noteBuildOutcome(
                   const vr = await verifyAfterFix<Record<string, string>>({
                     snapshot: async () => greenSnap,
                     apply: async () => {
-                      const run = runInPass('reviewer-functional-repair', () => repairRunner.run(judgeRepairPrompt(prompt, greenRepairable)));
+                      const run = runInPass('reviewer-functional-repair', () => repairRunner.run(greenRepairPrompt(prompt, greenRepairable)));
                       let timer: ReturnType<typeof setTimeout> | undefined;
                       const outcome = await Promise.race([
-                        run.then((r) => ({ ok: !!r?.ok }), () => ({ ok: false })),
+                        run.then((r) => ({ ok: !!r?.ok, summary: String(r?.summary ?? '') }), () => ({ ok: false, summary: '' })),
                         new Promise<'timeout'>((res) => { timer = setTimeout(() => res('timeout'), plan.repairMs); }),
                       ]);
                       if (timer) clearTimeout(timer);
@@ -21720,6 +21729,7 @@ async function noteBuildOutcome(
                         return;
                       }
                       repairOk = outcome.ok;
+                      if (repairOk) repairVerdicts = readRepairVerdicts(outcome.summary, greenRepairable.length);
                       if (repairOk) {
                         try { repairChanged = changedWorkspacePaths(greenSnap, (await collectWorkspaceFiles(actuator, workspaceId)).files).length; }
                         catch { repairChanged = undefined; /* could not count ⇒ the old reading, re-verified below */ }
@@ -21730,21 +21740,23 @@ async function noteBuildOutcome(
                     reverify: strictReverify(async () => {
                       if (!repairOk) return false; // unfinished or failed ⇒ undo
                       if (repairChanged === 0) return true; // nothing changed ⇒ it is the version that rendered
+                      if (repairRefutedAll()) return false; // it proved no finding real ⇒ its edits are undone
                       const shot = await withTimeout(actuator.browseUrl!(workspaceId, lastPreviewUrl), 35_000, 'green-repair-verify');
                       const v = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
                       return v.rendered && !v.inconclusive && !v.serverDown; // unproven ⇒ undo
                     }),
                     revert: revertToGreenSnapshot,
                   });
+                  if (repairVerdicts?.read) greenRefuted = repairVerdicts.refuted.map((i) => greenRepairable[i]);
                   if (vr.kept && repairOk && repairChanged !== 0) {
-                    greenRepaired = greenRepairable.slice();
+                    greenRepaired = repairVerdicts?.read ? repairVerdicts.confirmed.map((i) => greenRepairable[i]) : greenRepairable.slice();
                     result = { ...result, summary: `${result.summary || ''}${greenRepairUserLine(greenRepaired.length, repairChanged)}` };
                     if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
                   }
                   try {
                     buildDiag.record({
                       phase: 'build',
-                      ...greenRepairOutcome({ kept: vr.kept && repairOk, reverted: vr.reverted, timedOut: repairTimedOut, finished: repairOk, count: greenRepairable.length, budgetMs: plan.repairMs, changed: repairChanged }),
+                      ...greenRepairOutcome({ kept: vr.kept && repairOk, reverted: vr.reverted, timedOut: repairTimedOut, finished: repairOk, count: vr.kept && repairOk && repairVerdicts?.read ? greenRepaired.length : greenRepairable.length, budgetMs: plan.repairMs, changed: repairChanged, refuted: repairRefutedAll() && repairChanged !== 0 }),
                     });
                   } catch { /* best-effort */ }
                 } catch (e) {
@@ -21772,7 +21784,7 @@ async function noteBuildOutcome(
               }
             }
             // The app is verified working. Surface what was NOT repaired as an offer, never a silent edit.
-            const offered = [...new Set([...autoFixItems, ...greenRepairable])].filter((t) => !greenRepaired.includes(t));
+            const offered = [...new Set([...autoFixItems, ...greenRepairable])].filter((t) => !greenRepaired.includes(t) && !greenRefuted.includes(t));
             const suggestions = toReviewSuggestions(
               offered.map((t) => ({ text: t, functional: criticals.includes(t) || greenRepairable.includes(t) })),
             );

@@ -84035,3 +84035,39 @@ app, and pay once with a test card.
 **Honest limit (open):** `amount_due` is written by the app at insert, so a hostile client can create a row
 with a small amount; `paid_amount` records what Razorpay really charged. A server-owned price table is a
 later slice.
+
+## 2026-09-30 — Autopsy 972acde5 ("Calculator", Weak tier): a working app, reported three untrue things about itself
+
+The build succeeded in 5.6 min from our tested calculator template, rendered, typechecked and built for
+production. Its report still said three things that were not true.
+
+**Ledger:** ✅ 0 self-heals · 🔀 1 workaround (GLM `glm-4.7-flashx` crawled 34.5 s, benched, fell to KIMI) ·
+⏭️ 0 skips · ❌ 3 false verdicts (below) · 🥵 3 struggles:
+- 17 s before the first model call;
+- KIMI's first call took 40 s to say "let me run a type check";
+- a 2-minute repair of a bug that did not exist.
+
+**Fixed, each reversion-proven in `tests/theCalculatorAutopsy.test.ts`:**
+1. **"Delete / remove has no visible control" was the build's root cause, and it was false.** The
+   calculator has a `DEL` key. The probe did not know `del`/`backspace`/`⌫`. The same line hid a larger
+   class: every icon in every probe (`✕ × 🗑 ✏ ✓ 🌙`) sat inside `\b…\b`, which cannot match next to a
+   symbol. So an icon-only delete, edit or done button had never been recognised. `controlPattern()`
+   matches words with boundaries and icons on their own.
+2. **The template's glyph keys had no accessible names** (`C`, `DEL`, `x`, `/`). They now have them:
+   Clear, Backspace, Multiply, Divide, Plus, Minus, Equals, Percent, Decimal point.
+3. **The explorer said pressing "7" changed nothing.** Its change signature compared the page's text and
+   HTML **lengths**, and `0` → `7` has the same length. It now hashes the content.
+4. **The review repair edited a working app for a bug that was not there, and the user was told it was a
+   real fix.** Full account in CLAUDE.md under `AGENTV3_GREEN_FUNCTIONAL_REPAIR`. This is the second
+   instance of the class after build 15151196, which had only handled the "changed nothing" ending.
+5. **Template seeding wrote 12 files one after another** (~5 s of the pre-call wait). The writes are now
+   concurrent, and any failure still drops the seed.
+
+**Still open (rule 6):**
+- ~7 s between "personal context loaded" and the project-mode decision is unaccounted for. No timing line
+  covers that window; the next step is an instrument, not a guess.
+- A CONFIRMED repair after the preview copy was taken still leaves the copy stale
+  (`PREVIEW_SNAPSHOT_STALE`); a refuted-and-undone repair no longer does. Re-taking the copy after a kept
+  repair costs a production build plus a deploy, and is its own change.
+- `requestAnalysis.startTier` still reads `gemini`, a label from before the tier ladders. It is
+  admin-only and cosmetic, but it is untrue.

@@ -147,6 +147,22 @@ const BUILDER_INSTRUCTION_OBJECT =
   // The instruction with no object at all: "add it", "add this", and the Hinglish "add karo".
   '|(?:it|this|that|them|these|those)\\b|(?:karo|kar\\s*do|kar\\s*dijiye|kijiye|kare)\\b';
 
+/**
+ * A control pattern: WORDS matched as whole words, ICONS matched as themselves.
+ *
+ * 🔴 WHY IT IS TWO HALVES (autopsy 972acde5, 2026-09-30). Every probe used to write its icons inside
+ * the word boundaries — `/\b(delete|remove|✕|🗑)\b/` — and `\b` needs a WORD character on one side,
+ * which a symbol never is. So `✕`, `×`, `🗑`, `✏`, `✓`, `🌙` could only ever match wedged between two
+ * letters, i.e. never: an icon-only delete, edit or done button — the commonest shape a generated app
+ * uses — has been invisible to this check since each probe was written, and the report said the
+ * feature had "no visible control". Icons are matched on their own now; words keep their boundaries.
+ */
+function controlPattern(words: readonly string[], icons: readonly string[] = []): RegExp {
+  const w = `\\b(?:${words.join('|')})\\b`;
+  const i = icons.map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  return new RegExp(i ? `${w}|(?:${i})` : w);
+}
+
 const FEATURES: FeatureDef[] = [
   {
     feature: 'add', label: 'Add / create',
@@ -156,19 +172,23 @@ const FEATURES: FeatureDef[] = [
       '|\\bnew\\s+(?:task|item|note|todo|entry|record)\\b',
     ),
     // Needs an input to type into AND a control to submit it (button text or a form).
-    present: (h, t) => (inputCount(h) >= 1 && (hasControlMatching(h, t, /\b(add|create|save|submit|new|\+)\b/) !== false || /<form\b/.test(h)))
+    present: (h, t) => (inputCount(h) >= 1 && (hasControlMatching(h, t, controlPattern(['add', 'create', 'save', 'submit', 'new'], ['+'])) !== false || /<form\b/.test(h)))
       ? 'control' // an <input> was captured — that is a real affordance, whatever matched the verb
       : false,
   },
   {
     feature: 'delete', label: 'Delete / remove',
     requested: /\b(delete|remove|trash|clear (?:task|item|completed|all))\b/,
-    present: (h, t) => hasControlMatching(h, t, /\b(delete|remove|trash|clear|✕|×|✖|🗑)\b/),
+    present: (h, t) => hasControlMatching(h, t, controlPattern(
+      // `del` and `backspace` are the delete KEY of a keypad (a calculator's DEL, a PIN pad's ⌫) — the
+      // same request in a different app, and the one this probe missed in autopsy 972acde5.
+      ['delete', 'del', 'remove', 'trash', 'clear', 'backspace'], ['✕', '×', '✖', '🗑', '⌫'],
+    )),
   },
   {
     feature: 'edit', label: 'Edit / update',
     requested: /\b(edit|update|rename|modify)\b/,
-    present: (h, t) => hasControlMatching(h, t, /\b(edit|update|rename|save|✎|✏)\b/),
+    present: (h, t) => hasControlMatching(h, t, controlPattern(['edit', 'update', 'rename', 'save'], ['✎', '✏'])),
   },
   {
     feature: 'complete', label: 'Mark complete / toggle',
@@ -183,7 +203,7 @@ const FEATURES: FeatureDef[] = [
     requested: /\bmark\b[^.]{0,20}\b(?:complete|completed|done)\b|\b(?:complete|completed|done)\s+(?:task|item|todo|to-?do|entry|entries|chore)s?\b|\b(?:task|item|todo|to-?do|entry|entries|chore)s?\s+(?:as\s+)?(?:complete|completed|done)\b|\bcheckbox(?:es)?\b|\bchecklist\b|\btick\b[^.]{0,15}\boff\b|\btoggle\b[^.]{0,15}\b(?:complete|completed|done|task|item|todo)s?\b/,
     present: (h, t) => (/type=["']checkbox["']/.test(h) || /role=["']checkbox["']/.test(h))
       ? 'control'
-      : hasControlMatching(h, t, /\b(complete|done|✓|✔)\b/),
+      : hasControlMatching(h, t, controlPattern(['complete', 'done'], ['✓', '✔'])),
   },
   {
     feature: 'filter', label: 'Filter',
@@ -233,7 +253,7 @@ const FEATURES: FeatureDef[] = [
   {
     feature: 'theme', label: 'Dark mode / theme toggle',
     requested: /\b(dark mode|light mode|theme (?:toggle|switch)|toggle theme)\b/,
-    present: (h, t) => hasControlMatching(h, t, /\b(dark|light|theme|🌙|☀|mode)\b/),
+    present: (h, t) => hasControlMatching(h, t, controlPattern(['dark', 'light', 'theme', 'mode'], ['🌙', '☀'])),
   },
 ];
 

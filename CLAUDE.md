@@ -3016,6 +3016,15 @@ the flag entries above promise.
   `revertToGreenSnapshot`, which calls `reconcileCapturedWrites` (`GreenGuard.ts`). It also refuses an
   EMPTY snapshot, because `restorePlan({}, cur)` would delete the whole workspace. Test-locked and
   reversion-proven in `tests/aRealBugInAWorkingAppGetsOneVerifiedRepair.test.ts`.
+  🔴 **THE FINDING IS PROVEN BEFORE THE APP IS EDITED (autopsy 972acde5, 2026-09-30).** The pass was
+  handed `judgeRepairPrompt`, which calls every finding a "real problem that must be fixed". That is true
+  of a failed build's judge verdict and false of a reviewer's reading of working code. On a correct
+  calculator, the repair traced the reviewer's CRITICAL and wrote *"this happened to work"*, then edited
+  the app anyway. The user was told a real problem had been fixed. It now gets `greenRepairPrompt`: prove
+  each finding with one concrete input, change nothing for the rest, and end with `CONFIRMED n` /
+  `NOT A BUG n` lines, read by `readRepairVerdicts`. When every finding is refuted, whatever it changed
+  is undone (`REVIEW_FUNCTIONAL_REFUTED`). A refuted finding is never claimed as fixed and never offered
+  to the user. Unreadable verdicts ⇒ the previous behaviour. Test-locked in `tests/theCalculatorAutopsy.test.ts`.
 - **ONE BUILD PER APP ACROSS SERVERS, AND SCOPED REPAIRS — built ONCE, by #3331 (autopsy eed79815 =
   "4D Future City Drive", 2026-09-26).** The lease is `AgentV3/workspaceBuildLease.ts` (kill switch
   `AGENTV3_WORKSPACE_LEASE=off`; see SCALE PLAN §2), the repair scope is `limitRepairToScope` +

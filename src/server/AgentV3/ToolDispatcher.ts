@@ -76,7 +76,8 @@ import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote } from './writeTimeQualityCheck';
 import { storeEffectLoopNote } from './storeEffectLoop';
-import { keepKitOnRewrite, kitKeepToolNote } from './kitRestore';
+import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, usesNonKitNbClass } from './kitRestore';
+import { isProjectStylesheet } from './CssConsistency';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
 import {
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckNote, WriteTypecheckQueue,
@@ -2871,7 +2872,34 @@ export class ToolDispatcher {
     // A whole-store dependency that loops the app forever (autopsy 6a4a799f) — said while the file is open.
     let storeLoop = '';
     try { storeLoop = storeEffectLoopNote(files); } catch { /* a note is best-effort */ }
-    return hooks + storeLoop + imports + typecheck + quality;
+    // An `nb-` class the kit does not have and nothing defines (autopsy 466c260a) — said while the file
+    // is open, instead of by the end-of-build check inside a four-minute heal.
+    const invented = await this.inventedKitClassNotes(files);
+    return hooks + storeLoop + imports + typecheck + quality + invented;
+  }
+
+  private async inventedKitClassNotes(files: Record<string, string>): Promise<string> {
+    try {
+      const suspects = Object.keys(files).filter((p) => usesNonKitNbClass(files[p], p));
+      if (suspects.length === 0) return '';
+      // The project's stylesheets: the ones in this write, plus the usual entry sheets on disk. A sheet
+      // that cannot be read is simply absent — the worst case is a note about a class defined somewhere
+      // we did not look, which the builder can dismiss in one line.
+      const sheets: Record<string, string> = {};
+      for (const [p, c] of Object.entries(files)) if (isProjectStylesheet(p)) sheets[p] = c;
+      for (const p of ['src/index.css', 'src/App.css', 'src/styles.css', 'src/global.css', 'src/styles/globals.css', 'src/styles/index.css']) {
+        if (sheets[p] !== undefined) continue;
+        try {
+          const raw = await this.actuator.readFile(this.workspaceId, p);
+          if (typeof raw === 'string') sheets[p] = raw;
+        } catch { /* absent */ }
+      }
+      let out = '';
+      for (const p of suspects) out += inventedKitClassNote(p, inventedKitClasses(files[p], p, sheets));
+      return out;
+    } catch {
+      return '';
+    }
   }
 
   private async hookWriteNote(files: Record<string, string>): Promise<string> {

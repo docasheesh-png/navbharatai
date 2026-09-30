@@ -205,6 +205,48 @@ export function rendersDataList(content: string, pagePath = '', files: Readonly<
   return false;
 }
 
+/** `src/pages/Notes.tsx` → `Notes`. The component name a page is rendered under, by convention. */
+function componentNameOf(path: string): string {
+  const base = path.slice(path.lastIndexOf('/') + 1).replace(/\.[^.]+$/, '');
+  return /^[A-Z][\w$]*$/.test(base) ? base : '';
+}
+
+/** A heading whose content is an EXPRESSION — a title that changes with the screen, e.g. `{title}`. */
+const DYNAMIC_HEADING_RE = /<h[1-3]\b[^>]*>\s*\{/;
+const CHILDREN_SLOT_RE = /\{\s*(?:props\.)?children\s*\}/;
+/** What makes a file a LAYOUT rather than a card or a modal that also has `{title}` and `{children}`. */
+const LAYOUT_RE = /<header\b|<nav\b|<aside\b|\btopbar\b|\bsidebar\b|\bnb-shell\b|\bapp-shell\b/i;
+
+/**
+ * 🔴 THE TITLE IS ON THE SCREEN, ONE FILE UP (autopsy 466c260a, 2026-09-29). A dashboard app rendered
+ * every screen inside `DashboardShell`, whose topbar is `<h1 className="nb-page-title">{…}</h1>` — the
+ * current screen's name. Five pages carried no heading OF THEIR OWN because the shell already shows
+ * it, and all five were flagged NO_HEADING. The repair pass spent 255 s and roughly 40 model calls
+ * (the largest single slice of that build's cost) adding a second H1 to each page — a title stacked
+ * under the same title.
+ *
+ * A page is judged to HAVE a title when a layout that renders it carries a DYNAMIC heading: either the
+ * layout — a file with a header, nav, sidebar or topbar, never a card or a modal — renders the page itself
+ * (`<Notes />`), or it wraps `{children}` and some file renders both the layout and the page. Only a heading with an EXPRESSION counts — a fixed brand name (`<h1>NavAI</h1>`)
+ * is not a page title, so a page under a brand-only header is still flagged. Anything this cannot
+ * trace is judged exactly as before. PURE.
+ */
+export function shellOwnsPageHeading(pagePath: string, files: Readonly<Record<string, string>> = {}): boolean {
+  const name = componentNameOf(pagePath);
+  if (!name) return false;
+  const renders = new RegExp(`<${name}\\b|import\\s+[^;]*\\b${name}\\b[^;]*\\bfrom\\b`);
+  const code = Object.entries(files).filter(([p, c]) => typeof c === 'string' && p !== pagePath && /\.(?:tsx|jsx)$/.test(p));
+  const shells = code.filter(([p, c]) => !isPageFile(p) && DYNAMIC_HEADING_RE.test(c) && LAYOUT_RE.test(c));
+  if (shells.length === 0) return false;
+  if (shells.some(([, c]) => new RegExp(`<${name}\\b`).test(c))) return true;
+  const wrappers = shells
+    .filter(([, c]) => CHILDREN_SLOT_RE.test(c))
+    .map(([p]) => componentNameOf(p))
+    .filter(Boolean);
+  if (wrappers.length === 0) return false;
+  return code.some(([, c]) => renders.test(c) && wrappers.some((w) => new RegExp(`<${w}\\b`).test(c)));
+}
+
 /**
  * Judge ONE page. Returns null when the file is out of scope or too small to judge honestly.
  *
@@ -230,7 +272,7 @@ export function analyzePage(path: string, content: string, files: Readonly<Recor
 
   // 2. No title of any kind. An inner page that opens with no heading reads as unfinished even when
   //    the rest is styled — it is the single clearest "this is a draft" signal.
-  if (!/<h[1-3]\b/.test(content) && !/\bnb-hero\b|\bnb-auth\b/.test(content)) defects.push('NO_HEADING');
+  if (!/<h[1-3]\b/.test(content) && !/\bnb-hero\b|\bnb-auth\b/.test(content) && !shellOwnsPageHeading(path, files)) defects.push('NO_HEADING');
 
   // 3. A raw table. The kit ships .nb-table-wrap/.nb-table specifically because an unwrapped table
   //    scrolls the whole PAGE sideways on a phone instead of scrolling inside its own box.

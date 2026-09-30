@@ -181,6 +181,13 @@ export interface SubAgentDeps {
    * here would freeze an answer taken before the question was settled.
    */
   expectsArtifacts?: () => boolean;
+  /**
+   * The build's language line (`appLanguageInstruction`). Autopsy 466c260a: the frontend specialist
+   * wrote every label in Devanagari for a request typed in English, because the only language it ever
+   * heard of was the one the ARCHITECT chose — the child never sees the user's words. A thunk, so a
+   * spawn reads the line the route has settled on; absent ⇒ nothing is added, exactly as before.
+   */
+  languageRule?: () => string;
 }
 
 /**
@@ -322,6 +329,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
           + 'the workspace root, so a clone puts a second copy of the app inside the app.'
         : '',
       verification,
+      (() => { try { return deps.languageRule?.() ?? ''; } catch { return ''; } })(),
     ].filter(Boolean);
     // THE HANDOFF CARRIES THE FILES, NOT ONLY A SENTENCE (admin 2026-09-24) — see taskHandoff.ts. The
     // child is told it holds them, so a later re-read of an unchanged one gets the honest notice.

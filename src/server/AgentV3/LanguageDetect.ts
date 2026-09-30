@@ -14,7 +14,7 @@
 // PURE & deterministic: no I/O. The route wiring that calls this is wrapped so
 // it can NEVER affect (let alone break) a build.
 
-import { devanagariLanguage, detectRomanizedIndic, type LanguageEvidence } from './IndicLanguage';
+import { devanagariLanguage, detectRomanizedIndic, languageInstruction, type LanguageEvidence } from './IndicLanguage';
 
 /** A detected language: a short tag plus an English display name. */
 export interface LanguageHint {
@@ -149,4 +149,60 @@ export function detectLanguageHint(text: string): LanguageHint | null {
   // in Hindi. Marathi has markers Hindi does not use, so the two separate without guessing.
   if (script.code === 'hi') return devanagariLanguage(text);
   return { code: script.code, name: script.name, evidence: 'script' };
+}
+
+// ── The build's language line — ONE source for the architect and every sub-agent ───────────────────
+
+/**
+ * Does the request itself ask for a language, a translation or a script? ("hindi me banao", "in
+ * Tamil", "bilingual", "translate the labels"). When it does, the user has decided and the generic
+ * "follow the request" line is the right one — this module must never override an explicit ask.
+ * Deliberately broad: a false match only costs today's behaviour.
+ */
+const NAMES_A_LANGUAGE_RE =
+  /\b(?:hindi|marathi|tamil|telugu|bengali|bangla|gujarati|kannada|malayalam|punjabi|odia|oriya|urdu|assamese|sanskrit|nepali|konkani|devanagari|hinglish|english|spanish|french|german|arabic|japanese|chinese|multi-?lingual|bi-?lingual|translat\w*|i18n|locali[sz]\w*|languages?|bhasha)\b/i;
+
+export function requestNamesAppLanguage(text: string): boolean {
+  return NAMES_A_LANGUAGE_RE.test(String(text ?? ''));
+}
+
+/**
+ * 🔴 A REQUEST WRITTEN IN LATIN LETTERS IS NOT AN INVITATION TO SWITCH SCRIPT (autopsy 466c260a,
+ * 2026-09-29). "Notes, Visualizeusing, pdf code file handling picture editor, pro chat codestudeo and
+ * more" — every word English, no Indian script, no romanized marker — was built with every label in
+ * Devanagari (`src/locales/hi.ts`), the reply opened "Namaste!", and the summary told the user
+ * "Saara user-facing text Hindi mein hai, jaise aapne request ki thi". They had requested nothing of
+ * the kind.
+ *
+ * The detector was right (it returned null); the INSTRUCTION was the gap. "Use the same language the
+ * user used" leaves the choice to a model whose system prompt carries Indian branding and Hindi
+ * phrases — the exact bias `systemPrompt.ts` already names for the chat reply. The line now states the
+ * one fact the detector established: the request is in Latin letters, so the app stays in Latin
+ * letters. It does not force ENGLISH (Latin cannot tell English from Spanish), and Roman Hinglish
+ * stays allowed for a request that mixes Hindi words — only the unrequested switch of script and
+ * language is forbidden.
+ */
+export const LATIN_REQUEST_LANGUAGE_LINE =
+  'Language: the user wrote this request in LATIN letters (English, or Hindi words typed in Roman letters) '
+  + 'and did not ask for any other language. Write ALL user-facing text in the app (labels, buttons, headings, '
+  + 'placeholders, messages) in the SAME language they wrote in, in Latin letters — English for an English '
+  + 'request, Roman-letter Hinglish only if their own words mix Hindi in. NEVER switch to Devanagari or any '
+  + 'other script, never translate the app into a language they did not write in, and never tell them they '
+  + 'asked for one. Reply to them the same way. Keep code identifiers and comments in English.';
+
+const GENERIC_LANGUAGE_LINE =
+  'Language: generate all user-facing text in the app in the SAME language the user used in this request '
+  + '(default to English if it is English). Keep code identifiers and comments in English.';
+
+/**
+ * The language line for a build — the architect's prompt and every sub-agent's context read THIS, so
+ * the child that actually writes the labels is never told less than the parent (in 466c260a the
+ * frontend specialist wrote `locales/hi.ts` because the only language it ever heard of was the one
+ * the architect chose). PURE.
+ */
+export function appLanguageInstruction(prompt: string): string {
+  const hint = detectLanguageHint(prompt);
+  if (hint) return languageInstruction({ code: hint.code, name: hint.name, evidence: hint.evidence ?? 'script' });
+  if (requestNamesAppLanguage(prompt)) return GENERIC_LANGUAGE_LINE;
+  return /[A-Za-z]/.test(String(prompt ?? '')) ? LATIN_REQUEST_LANGUAGE_LINE : GENERIC_LANGUAGE_LINE;
 }

@@ -59,7 +59,7 @@ export function freeChatModeGuide(): string {
     '• Under this chat there is a **Mode** button (in the bottom bar on a phone; beside the message box on a computer). Tapping it opens a list with two groups: "Recent chat" (every chat open right now — tap one to go straight back to it, ✕ closes it) and "New chat" (tap any row to start a fresh conversation with that AI). Up to 5 chats can be open at once.',
     '• "New chat" contains, in this order:',
     '  1. **NavBharatAI FREE** — a brand-new free chat like this one (the old one stays in History).',
-    `  2. **${IMAGE_STUDIO_MODE_NAME}** — THE place where pictures are made (${imagePriceSentence()}): photos, logos, banners, app icons, posters, avatars, backgrounds, thumbnails. Choose Image type, Style and Size, describe the picture, press send. It can also change a photo the user attaches, and add text that is always spelled correctly (a shop name, a phone number, Hindi) with its "Add text" button.`,
+    `  2. **${IMAGE_STUDIO_MODE_NAME}** — THE place where pictures are made (${imagePriceSentence()}): photos, logos, banners, app icons, posters, avatars, backgrounds, thumbnails. Choose Image type, Style and Size, describe the picture, press send. A Free / Paid switch sits at the top. In Paid mode it can also change a photo the user attaches. It can add text that is always spelled correctly (a shop name, a phone number, Hindi) with its "Add text" button.`,
     `  3. **Expert AIs**, each a separate chat that specialises in one field: ${names}.`,
     `• ${medical.join(', ')} are on the NavBharatAI website (navbharatai.com); the phone app does not show them.`,
     '• NavBharatAI Pro (the app builder) is NOT in Mode — it has its own tile on the Home screen.',

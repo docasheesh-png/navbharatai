@@ -85581,3 +85581,18 @@ that Pollinations was working and had not been down.
 - **Same screen, same route.** The request's `tier` field decides the mode. No tier (every installed phone app) means Free.
 - **Honest note:** the "anonymous door closed (401)" diagnosis in #3409 came from the provider's docs and was never observed from a session. The admin says the provider works. The door code only acts on a real 401/402/403, so it stays. The earlier outage's cause is **unproven**.
 - **Tests:** `tests/imageFreeAndPaid.test.ts` (18) is new. `theImageGeneratorHasOneTier` became `theImageGeneratorHasFreeAndPaid`. Updated: `fiveFreeImagesThenOneRupee`, `theFreeDoorClosedAndNobodyNoticed`, `everyFaceIsIndianAndNoImageIsADeadEnd`, `yourPictureComesBackAsYourPicture`, `theUsersOwnConnectionFetchesTheirPicture`, `thePlatformHasADayToo` and `theBoxEmptiesWhenYouPressSend`. Reversion-proven: removing the Free-mode stop, or the `anonymous` flag, fails 5 tests.
+
+## 2026-09-30 — Autopsy 12511a9c ("Calculator", Weak, 9.2 min vs ~4 min estimate, billed ₹121.19)
+
+**Tally:** 2 self-heals (GLM crawl benched, then KIMI took over; the preview re-publish), 1 workaround (the contract
+step stopped at its own 55.9 s cap, so the files were written without a shared contract), 0 skipped, 0 shipped broken.
+There were 3 struggles: two needless repairs (~90 s + ~3 min) and App.tsx alone taking 104 s.
+
+| Problem | Root cause | Class | Siblings | Test |
+|---|---|---|---|---|
+| The build prompt was our own weak-tier notice, byte for byte. It became the app's og:description and made REQUIREMENT_GAPS read a "social" domain. | No send path does this (checked every client and server path). The exact bytes come from a copy: every reply bubble has a Copy button, and phone keyboards offer the clipboard as a paste suggestion. | Platform text returned as a request. | fdd59ef8 (sign-in notice via Fix with AI) closed one door; this is the shared door, the route. | `ourOwnNoticeIsNotARequest` |
+| A rendered app (20/20 buttons styled) was judged "not rendered" over one console line, then repaired. | The defaults pass wrote index.html (`register('/sw.js')`) before public/sw.js, and the SPA fallback served HTML for `/sw.js`. | A console line from our own file writes was read as an app defect. | The render rescue and the last-chance proof also record their clean checks. | `theConsoleLineWasOurOwnWrite` |
+| The runtime auto-fix repaired the same line ~116 s after a clean re-check. | Fixed 180 s look-back window. | The stale-console window: 7d79254b fixed the render checks and not this reader. | This was the last reader using a fixed window. | same file |
+
+**Still open:** the fast lane's contract step for a 4-file app was cut at its own cap. For a simple app the
+contract may not be worth a model call. This is not decided here.

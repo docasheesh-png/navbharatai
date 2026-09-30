@@ -3362,6 +3362,22 @@ the flag entries above promise.
     exactly the sideways scroll being looked for — the first version of this check did that. Evidence,
     never a gate; `MOBILE_LAYOUT_ISSUES` becomes the one-tap offer "Make it fit a phone".
     `MOBILE_LAYOUT_OK` / `_NOT_RUN` are process-only.
+- **🔁 A RENDERED APP'S CONSOLE LINE IS CHECKED AGAIN BEFORE A REPAIR, AND OUR OWN NOTICE IS NOT A REQUEST
+  (autopsy 12511a9c, 2026-09-30).** Two keys, NEITHER set, both default ON; `off` reverts each alone.
+  - **`AGENTV3_CONSOLE_RECHECK`** (`renderCheckConsole.ts`): an app that RENDERED in a real browser, where
+    the only evidence against it is its console, gets one free second look before a repair is paid for
+    (`PREVIEW_CONSOLE_RECHECK`). A calculator (158 CSS rules, 20/20 buttons styled) was repaired twice
+    (~90 s, then ~3 min with a 118 s model call) for "The script has an unsupported MIME type
+    ('text/html')". That is Chrome's message for a service worker whose script came back as HTML. The
+    defaults pass had written `register('/sw.js')` into index.html BEFORE writing public/sw.js. The pass now
+    writes index.html LAST. And the runtime auto-fix reads the console only from the last CLEAN real-browser
+    check (`runtimeAutofixSince`): its fixed 180 s window was the sibling the 7d79254b fix never reached.
+  - **`AGENTV3_NOTICE_ECHO`** (`platformNoticeEcho.ts`): a prompt that IS one of our own notices (the
+    weak-tier welcome or build-failed notice, any language, or a 60+ character piece of one) is answered
+    with a fixed line naming the user's earlier request. No model call, no build, and it is never recorded as a
+    request. The report's prompt was the notice byte for byte, most likely copied from the notice bubble.
+    The build ran on our words and shipped them as the app's og:description. Second instance of the class
+    after fdd59ef8 (our sign-in notice).
 - **`AGENTV3_CLICK_EXPLORE`** (default ON, set `off` to disable — added 2026-09-28, competitive gap G1,
   admin: *"best solution jo gaps ko fill kar ke navbharatai ko compatitors se aage la jaye"*) — **the
   app is PRESSED, not only painted.** Every post-build check watched the app render or drove ONE derived

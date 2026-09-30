@@ -69,8 +69,9 @@ describe('🔒 SOURCE — one reader, after the user\'s own allowance, and the c
   });
 
   it('the count is recorded inside deliver(), only for a PAID rung, never for the free provider', () => {
-    const deliver = free.slice(free.indexOf('const deliver = ('), free.indexOf('let sawRefusal'));
-    expect(deliver).toMatch(/if \(paidRung && gate && gate\.allow && !gate\.isFreeListed\) void imageFreePaidBudget\.record\(\);/);
+    const deliver = free.slice(free.indexOf('const deliver = async ('), free.indexOf('let sawRefusal'));
+    expect(free.indexOf('const deliver = async (')).toBeGreaterThan(-1);
+    expect(deliver).toMatch(/if \(paidRung && !freeListed\) void imageFreePaidBudget\.record\(\);/);
     expect(free.split('imageFreePaidBudget.record(').length).toBe(2);
   });
 });

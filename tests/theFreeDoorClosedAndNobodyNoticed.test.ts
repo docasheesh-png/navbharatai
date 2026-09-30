@@ -141,6 +141,10 @@ describe('the real route', () => {
       'IMAGE_GEN_POLLINATIONS', 'IMAGE_GEN_CLIENT_FETCH', 'POLLINATIONS_API_KEY']) delete process.env[k];
     process.env.SECRET_ENCRYPTION_KEY = 'route-secret';
     process.env.IMAGE_GEN_ANON_PROBE = 'off';
+    // The test account is free-listed, as the mocked tool gate always said: its images are neither
+    // counted against the platform's paid-image day nor charged.
+    process.env.AGENTV3_FREE_LIST = 'u1@example.com';
+    for (const k of ['CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_AI_TOKEN']) delete process.env[k];
     resetAnonymousDoor();
     fetchSpy = vi.fn(async (url: string) => {
       if (String(url).startsWith('https://api.x.ai/')) {

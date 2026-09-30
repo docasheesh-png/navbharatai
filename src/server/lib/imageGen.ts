@@ -12,6 +12,7 @@
 
 import { CUSTOM_SIZE_ID, PRESET_PIXELS, resolveCustomSize } from '../../lib/imageSize';
 import { assertPollinationsPromptSafe, scanPollinationsPrompt } from './pollinationsGuard';
+import { cloudflareImageConfig } from './cloudflareImage';
 
 export interface ImageGenRequest {
   /** Required for a fresh generation; optional when `initImage` is present (a picture is a request). */
@@ -396,7 +397,7 @@ export function isValidImageGenRequest(body: unknown): body is ImageGenRequest {
 /** True when ANY image provider is available — the free Pollinations provider (no key), OR a Gemini key,
  *  OR an xAI/Grok key. With Pollinations on (the default), image generation is always configured. */
 export function imageGenConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
-  return pollinationsEnabled(env) || Boolean(
+  return pollinationsEnabled(env) || cloudflareImageConfig(env) !== null || Boolean(
     env.GEMINI_API_KEY || env.GOOGLE_API_KEY || env.GOOGLE_GENERATIVE_AI_API_KEY
     || env.GROK_API_KEY || env.XAI_API_KEY,
   );

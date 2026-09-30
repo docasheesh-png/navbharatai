@@ -85524,3 +85524,34 @@ closed before the next report. Status, item by item:
   it rare, not impossible. Turning `strictNullChecks` on needs a measured trial first, because it would
   raise new errors in generated apps.
 - GLM/Kimi latency is provider-side.
+
+## 2026-09-30 — Autopsy 4541f1cf + 6e646503 (admin's "old build report": a Gita reader, then a Gujarati question)
+
+Two builds in one workspace, 14:06 and 14:28 UTC. Both ran before most of today's merges, so every item
+was re-checked against current `main` before anything was built.
+
+**Ledger (problem → root cause → class → siblings → lock):**
+
+| # | Problem | Root cause / class | Status |
+|---|---|---|---|
+| 1 | Romanized Gujarati *"Ibahart app ni jaherat karvi chhe kai rite bolvu a janavo"* (a question) read as a build, turned into an EDIT of the Gita reader, then 2 min of preview/explorer/prod build | Question rules were English/Hindi only (`REGIONAL_QUESTION_ANYWHERE` added). Sibling: when the reader's 6 s race timed out, the ROUTE kept the bare keyword verdict and skipped the question fallback. It now uses `readerlessIntent`, the same fallback the classifier uses | Fixed, `theGujaratiQuestionWasBuilt.test.ts` §1 |
+| 2 | Report said "intention reader did not run". It had been asked | The boolean could not say "asked, then failed / unclear / unusable". Now `readerOutcome` + `describeReaderOutcome` | Fixed, §1 |
+| 3 | The answer came back in English | Two faults. (a) `detectRomanizedIndic` found 1 Gujarati marker, so no language was named. (b) The Latin line told the model the request was "English, or Hindi words typed in Roman letters". Markers were added for Gujarati and Marathi. The romanized instruction now says to reply in that language. The Latin line names Indian languages typed in Roman letters and forbids answering them in English | Fixed, §2 |
+| 4 | Our own templates carried false a11y findings: `html-lang` on `src/theme.tsx` in all 40 scaffolds (a comment mentioning `<html>`). Since #3410 (mine, today), also `img-alt` on `src/index.css` (a kit CSS comment mentioning `<img>`), which cost every new app 8 accessibility points | Markup scanners read comments. `stripCommentsForMarkup` is applied in `scanMarkup` (covers the a11y linter, journey derivation, auth flow), `lintA11y`, `scanAccessibility` and `lintBuiltApp` (design lint too). Length-preserving; `//` after a quote, `(` or `:` is not a comment | Fixed. Census: every golden template lints with 0 offenders and a11y 100 (§3) |
+| 5 | `UNBILLED_BARREN_WORK` blamed "turns that spent their whole output budget" for ₹5.62 that was a timed-out suggest-only review | The detail was a fixed sentence. `absorbedWorkDetail` now reads the ledger and the barren-phase verdicts the bill used. Both settle paths | Fixed, §4 |
+| 6 | Builder told "wishlist / favorites" when the user said "bookmarks". Its reply said "bookmarks / favorites / wishlist" and "add the missing … wishlist features" | Contract restated our category, not the user's word. `usersWordFor`: the contract line names their word | Fixed, §5 |
+| 7 | FEATURE_COVERAGE "Search absent" (Hindi `खोजें` field) — became the build's root cause | Hindi control words | Already fixed by #3398 (merged after this build) |
+| 8 | Write-time typecheck `exit ?` after 25 s counted "1 clean" | A compiler that never ran was counted clean | Already fixed by #3412 |
+| 9 | GLM flashx crawl benched it for the whole build | Crawl is weather | Already fixed by #3402 (window + one re-probe) |
+| 10 | Lean reviewer re-read App.tsx 7 times, timed out, returned nothing | — | #3399 hands the lean reviewer the code. Its spend is now correctly named as absorbed (item 5) |
+| 11 | `edit_file` old_string not found (model error, self-healed by re-reading) | — | #3411 (edits → one write) covers the adjacent class. Not rebuilt |
+
+**Still open, honestly:**
+- **Why the reader did not answer on 6e646503 is not knowable from this report.** From now on the line
+  says which of failed / unclear / unusable it was.
+- **The missing `turnKind` subsystem again.** A turn whose model ANSWERED in text (not asked, not
+  declined) still gets the full post-build pipeline. On 6e646503 that was platform preview, explorer and
+  prod build, about 2 min. Its stored summary is `verifiedNoChangeSummary` ("Nothing needed changing"),
+  which replaces the answer in the record. Item 1 routes this report's message to chat, so it no longer
+  reaches that path. The general case is the OPEN root cause already recorded (2026-09-25, e628efd4).
+- The Gita template carries 27 of 700 shlokas, and says so honestly. See the proactive note in the reply.

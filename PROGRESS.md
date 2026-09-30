@@ -84495,3 +84495,37 @@ The user asked for ONE html file and got a 25-file Vite + TypeScript project; mo
 - `SANDBOX_SESSION` says "created-fresh" while `SETUP_TIMING` says "warm".
 - The ETA was 2.4× under the real time.
 - The step limit of 80 was reached.
+
+## 2026-09-30 — Autopsy d8ed307a (Bengali "personal AI Assistant", Weak, 19 min, ₹340.91): milestone 1 of 6 shipped and rendered
+
+The app built, rendered and passed the production build (release gate YELLOW). It was step 1 of a
+six-step roadmap: chat and settings.
+
+**Fixed (root cause):**
+- **The summary claimed what no scan proves.** It said "Everything else is built and working", beside a
+  single confirmed-missing feature. But memory, voice and file correction were not built either (they
+  were deferred roadmap steps). `missingFeatureNotice` now names only what the scan proved.
+- **The ~2.5-minute struggle:** the frontend agent wrote `if (!result.ok) setError(result.message)`. Our
+  scaffold compiles with `"strict": false`, where TypeScript does not narrow a boolean-discriminated
+  union by that guard (verified with tsc). The result was TS2339 on correct-looking code, and fifteen
+  `node -e` experiments.
+  - Remedy: `tscErrorCauses` now explains it in the write-time note (`union-not-narrowed-nonstrict`,
+    claimed only when the file has a negated flag guard).
+  - Prevention: the architect prompt states the rule up front.
+  - The unstyled screens (18 undefined CSS classes, healed later) most likely came from the same lost
+    minutes. The agent's time went on the experiments, not the stylesheet. Not proven, so recorded as
+    likely.
+- **An AI assistant was classified SOCIAL** off "Chat History" / "Chat". The requirement report then
+  proposed auth, a realtime feed and moderation for a single-user tool. `stripNonDomainUses` now drops
+  bare chat/message/conversation when the prompt names an AI assistant and nothing says people talk to
+  each other.
+
+**Recorded, not changed:**
+- GLM crawled for 38 s on the first call.
+- The roadmap planner then spent 144 s on a reasoning rung before any file was written.
+- `Chat` was imported as both a type and a component in App.tsx (self-healed in 2 writes).
+- The ETA was 1.8× over.
+- The reviewer timed out at its lean 45 s budget.
+
+**Proactive:** the generated AI app asks the USER for an OpenAI key. The AI gateway (`APP_AI_GATEWAY`,
+built, unset) is what removes that wall.

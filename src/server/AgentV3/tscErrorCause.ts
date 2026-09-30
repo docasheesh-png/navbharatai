@@ -67,6 +67,12 @@ export const MAX_CAUSES = 3;
 const REACT_CLASS_MEMBER_RE =
   /^Property '(props|state|setState|context|refs|forceUpdate)' does not exist on type '([^']+)'/;
 
+/** `Property 'message' does not exist on type 'Ok | Err'` — a member missing from a UNION type. */
+const UNION_MEMBER_RE = /^Property '([\w$]+)' does not exist on type '([^']*\|[^']*)'/;
+
+/** A negated boolean-flag guard, `if (!result.ok)` — the narrowing `strict: false` does not perform. */
+const NEGATED_FLAG_GUARD_RE = /\bif\s*\(\s*!\s*([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\s*\)/;
+
 /** `Property 'env' does not exist on type 'ImportMeta'` — Vite's client types, not React's. */
 const IMPORT_META_ENV_RE = /^Property 'env' does not exist on type 'ImportMeta'/;
 
@@ -309,6 +315,30 @@ export function tscErrorCauses(
         + 'start(): void; stop(): void; onresult: ((e: any) => void) | null; onerror: ((e: any) => void) | '
         + 'null; onend: (() => void) | null }` in the same file.');
       continue;
+    }
+
+    // 🔴 A GUARD THAT NARROWS UNDER `strict` AND NOT WITHOUT IT (autopsy d8ed307a, 2026-09-30). Our
+    // scaffold compiles with `"strict": false`, and without strictNullChecks TypeScript does NOT narrow
+    // a `{ ok: true } | { ok: false; message }` union by `if (!result.ok)` — so `result.message` is an
+    // error on code that is correct everywhere else. The Bengali AI-assistant build's frontend agent
+    // spent ~2.5 minutes and fifteen `node -e` experiments proving the code was right before the
+    // architect happened on `result.ok === false`. The remedy is not in the message and the code looks
+    // fine, which is exactly this module's class. Claimed only when the file really has such a guard
+    // (or, with no source in hand, stated as the likely cause).
+    const union = UNION_MEMBER_RE.exec(message);
+    if (union && !REACT_CLASS_MEMBER_RE.test(message)) {
+      const src = sourceFor(e.file);
+      const guard = src ? NEGATED_FLAG_GUARD_RE.exec(src) : null;
+      if (guard || !src) {
+        const [, prop] = union;
+        const flag = guard ? `${guard[1]}.${guard[2]}` : 'result.ok';
+        add('union-not-narrowed-nonstrict',
+          `This project compiles with \`"strict": false\`, and in that mode TypeScript does NOT narrow a union `
+          + `by a boolean check like \`if (!${flag})\` — so \`${prop}\` looks missing even though the code is right. `
+          + `Compare the flag to its literal instead: \`if (${flag} === false)\` (or test the member: \`'${prop}' in `
+          + `${flag.split('.')[0]}\`). Do NOT change tsconfig and do not experiment further — that one edit clears it.`);
+        continue;
+      }
     }
 
     // Vite's client types — checked BEFORE the React member rule, because `ImportMeta` matches neither

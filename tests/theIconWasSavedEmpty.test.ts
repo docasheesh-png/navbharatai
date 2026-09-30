@@ -87,7 +87,7 @@ describe('a write tool does not write a binary file', () => {
 describe('a binary file the build made is saved with the app', () => {
   it('only new binaries outside node_modules/dist are picked', () => {
     const r = unsavedBuildAssets(
-      ['public/nemi-icon-192.png', 'public/nemi-icon-512.png', 'public/logo.png', 'node_modules/x/a.png', 'dist/icon.png', 'src/App.tsx', 'public/icon.svg'],
+      ['public/nemi-icon-192.png', 'public/nemi-icon-512.png', 'public/logo.png', 'node_modules/x/a.png', 'dist/icon.png', 'src/App.tsx', 'public/icon.svg', '.nbai-landing.tar.gz', 'test-results/smoke/failure.png'],
       ['public/logo.png'],
     );
     expect(r.save).toEqual(['public/nemi-icon-192.png', 'public/nemi-icon-512.png']);

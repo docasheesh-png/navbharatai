@@ -24,6 +24,13 @@ import { contentTypeFor } from './bucketPublish';
 export const MAX_BUILD_ASSETS = 40;
 export const MAX_BUILD_ASSET_BYTES = 5 * 1024 * 1024;
 
+/**
+ * Paths inside the project that are NOT the app's: our own landing archive (`.nbai-landing.tar.gz`)
+ * and the output of a test run (Playwright's failure screenshots), which the vaccine may have produced
+ * in this very sandbox.
+ */
+const NOT_THE_APPS = /(^|\/)\.nbai[^/]*|(^|\/)(test-results|playwright-report|blob-report)(\/|$)/i;
+
 /** Binary assets in the project the store does not hold yet, in listing order, capped. PURE. */
 export function unsavedBuildAssets(
   projectPaths: readonly string[],
@@ -31,7 +38,7 @@ export function unsavedBuildAssets(
   max = MAX_BUILD_ASSETS,
 ): { save: string[]; overCap: string[] } {
   const held = new Set(heldPaths);
-  const candidates = [...new Set(projectPaths)].filter((p) => isBinaryAsset(p) && !isExcludedPath(p) && !held.has(p));
+  const candidates = [...new Set(projectPaths)].filter((p) => isBinaryAsset(p) && !isExcludedPath(p) && !NOT_THE_APPS.test(p) && !held.has(p));
   return { save: candidates.slice(0, max), overCap: candidates.slice(max) };
 }
 

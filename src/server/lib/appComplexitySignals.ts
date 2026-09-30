@@ -208,5 +208,17 @@ export function isComplexAppPrompt(prompt: string): boolean {
   if (PAGE_DELIVERABLE_SIGNAL.test(p)) {
     return COMPLEX_APP_SIGNAL.test(p.replace(CATEGORY_THEME_WORDS, ' '));
   }
+  // 🔴 "FULL-STACK" IS A COMPLIMENT, NOT A SCOPE (autopsy 53a621e3, 2026-09-30). "Create a modern,
+  // full-stack Android calculator application" opened on the reasoning rung and skipped the fast lane
+  // — ~4× the lead rung's cost — because `full-stack` alone made a calculator "complex". The same
+  // shape as the landing-page rule above: when the request names one of the small self-contained apps,
+  // the packaging adjectives are removed and the verdict rests on what is left. A calculator with a
+  // database, a login or payments is still complex; a calculator described as "full-stack" is not.
+  if (SIMPLE_APP_SIGNAL.test(p)) {
+    return COMPLEX_APP_SIGNAL.test(p.replace(SCOPE_ADJECTIVES, ' '));
+  }
   return true;
 }
+
+/** Words that describe how complete an app should FEEL, never what it must contain. */
+const SCOPE_ADJECTIVES = /\b(?:full[- ]?stack|full app|complete app)\b/gi;

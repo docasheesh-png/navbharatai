@@ -184,6 +184,8 @@ export interface AdminBuildReportMeta {
    */
   healCount?: number;
   unresolvedCount?: number;
+  /** Non-blocking findings left open (`counts.leftOpen`). Absent on older reports. */
+  leftOpenCount?: number;
   /**
    * TRIAGE (admin request 2026-08-12) — has this report been downloaded, and has the work been done?
    *
@@ -416,6 +418,7 @@ export function buildAdminReportRecord(
       // which is what keeps the self-heal tally from inflating itself — see BuildDiagnostics.
       healCount: typeof trimmed.counts?.autoResolved === 'number' ? trimmed.counts.autoResolved : undefined,
       unresolvedCount: typeof trimmed.counts?.unresolved === 'number' ? trimmed.counts.unresolved : undefined,
+      leftOpenCount: typeof trimmed.counts?.leftOpen === 'number' ? trimmed.counts.leftOpen : undefined,
       // 1 part = just the focused build; more when the whole session came with it. A session that did
       // not fit stores 0 builds — the focused report is still there, so the record still has 1 part.
       sessionParts: fittedSession && fittedSession.kept.length > 0 ? fittedSession.kept.length : 1,

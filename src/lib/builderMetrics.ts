@@ -51,7 +51,7 @@ export interface BuildMetricInput {
    * WHICH repairs this build ran, with its own completeness. `undefined` ⇒ never measured, and the
    * breakdown EXCLUDES it rather than scoring it as a build that healed nothing.
    */
-  healCodes?: { codes: Record<string, number>; total: number | null; unattributed: number | null } | null;
+  healCodes?: { codes: Record<string, number>; total: number | null; unattributed: number | null; open?: Record<string, number> } | null;
   /**
    * THE THREE FACTS THAT LET A STUCK PROJECT BE NAMED (admin 2026-09-25: "7 projects currently
    * sitting on a failed build" — and the card could not say which seven). All optional and all
@@ -67,11 +67,23 @@ export interface BuildMetricInput {
    * are looking at; `null`/undefined means the report cannot say.
    */
   restoredToGreen?: boolean | null;
+  /**
+   * Did the USER stop this build (the store's `stoppedByUser` read of the timeline)? Such a build is
+   * neither a success nor a failure — the failure panel's rule (`isUserStoppedBuild`), which this
+   * scorecard did not share until 2026-09-30, so a person's own Stop was counted as a failed build and
+   * listed as a "stuck project" whose own root cause said no failure was implied.
+   */
+  userStopped?: boolean | null;
 }
 
-/** Builds that can actually be judged: finished, with a real verdict. */
+/** A build its own user stopped. Excluded from every verdict and counted on its own. */
+export function wasStoppedByUser(b: BuildMetricInput | null | undefined): boolean {
+  return !!b && b.userStopped === true;
+}
+
+/** Builds that can actually be judged: finished, with a real verdict, and not stopped by their user. */
 export function judgeable(builds: readonly BuildMetricInput[]): BuildMetricInput[] {
-  return (builds ?? []).filter((b) => !!b && b.inFlight !== true && typeof b.ok === 'boolean');
+  return (builds ?? []).filter((b) => !!b && b.inFlight !== true && typeof b.ok === 'boolean' && !wasStoppedByUser(b));
 }
 
 export interface EditSurvival {
@@ -101,6 +113,8 @@ export interface EditSurvival {
   broken: StuckProject[];
   /** Builds excluded because they were in flight or had no verdict. */
   skipped: number;
+  /** Builds their own user stopped — neither survived nor broke, so excluded. */
+  stoppedByUser: number;
 }
 
 /** One project whose latest build failed, with everything the stored report can say about it. */
@@ -203,7 +217,8 @@ export function editSurvival(builds: readonly BuildMetricInput[]): EditSurvival 
     restoredToGreen,
     restoredUnknown,
     broken: broken.slice(0, STUCK_PROJECTS_SHOWN),
-    skipped: all.length - usable.length,
+    skipped: all.length - usable.length - all.filter(wasStoppedByUser).length,
+    stoppedByUser: all.filter(wasStoppedByUser).length,
   };
 }
 
@@ -262,6 +277,8 @@ export interface BuildSuccess {
   rate: number | null;
   /** In-flight or verdict-less records, excluded rather than counted as failures. */
   skipped: number;
+  /** Builds their own user stopped — a person's choice, not a failure and not a success. */
+  stoppedByUser: number;
 }
 
 /** Build success rate — the directive's headline §51 metric. */
@@ -269,12 +286,14 @@ export function buildSuccess(builds: readonly BuildMetricInput[]): BuildSuccess 
   const all = builds ?? [];
   const usable = judgeable(all);
   const succeeded = usable.filter((b) => b.ok === true).length;
+  const stoppedByUser = all.filter(wasStoppedByUser).length;
   return {
     total: usable.length,
     succeeded,
     failed: usable.length - succeeded,
     rate: usable.length > 0 ? succeeded / usable.length : null,
-    skipped: all.length - usable.length,
+    skipped: all.length - usable.length - stoppedByUser,
+    stoppedByUser,
   };
 }
 
@@ -389,6 +408,12 @@ export interface HealBreakdown {
   unattributed: number;
   /** Builds whose total was unrecorded, so nobody can say whether their list was complete. */
   completenessUnknown: number;
+  /**
+   * Non-blocking findings still OPEN when their build ended — the ❌ bucket (2026-09-30). These used to
+   * sit at the top of `top` as "repairs" (READINESS_WARNING ×305); they repaired nothing, so they are
+   * listed here instead, never dropped. `heals` on each row is the number of findings.
+   */
+  openTop: HealCodeRow[];
 }
 
 /** How many codes the headline names. The rest are still counted in `attributed`. */
@@ -420,9 +445,16 @@ export function healBreakdown(builds: readonly BuildMetricInput[]): HealBreakdow
   let attributed = 0;
   let unattributed = 0;
   let completenessUnknown = 0;
+  const openN = new Map<string, number>();
+  const openIn = new Map<string, number>();
 
   for (const b of rows) {
     const tally = b.healCodes as NonNullable<BuildMetricInput['healCodes']>;
+    for (const [code, n] of Object.entries(tally.open ?? {})) {
+      if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) continue;
+      openN.set(code, (openN.get(code) ?? 0) + n);
+      openIn.set(code, (openIn.get(code) ?? 0) + 1);
+    }
     for (const [code, n] of Object.entries(tally.codes ?? {})) {
       if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) continue;
       heals.set(code, (heals.get(code) ?? 0) + n);
@@ -439,7 +471,12 @@ export function healBreakdown(builds: readonly BuildMetricInput[]): HealBreakdow
     .sort((a, b) => (b.heals - a.heals) || a.code.localeCompare(b.code))
     .slice(0, HEAL_CODES_SHOWN);
 
-  return { builds: rows.length, top, attributed, unattributed, completenessUnknown };
+  const openTop = [...openN.entries()]
+    .map(([code, n]) => ({ code, heals: n, builds: openIn.get(code) ?? 0 }))
+    .sort((a, b) => (b.heals - a.heals) || a.code.localeCompare(b.code))
+    .slice(0, HEAL_CODES_SHOWN);
+
+  return { builds: rows.length, top, attributed, unattributed, completenessUnknown, openTop };
 }
 
 export interface BuilderScorecard {
@@ -489,6 +526,10 @@ export function scorecardHeadline(card: BuilderScorecard): string {
   } else {
     const note = card.success.total < MIN_SAMPLES_FOR_RATE ? ' (too few builds to read a trend into)' : '';
     lines.push(`Build success: ${pct(card.success.rate)} of ${card.success.total}${note}.`);
+  }
+  // Said, never silently dropped: a Stop is excluded from both tallies, and the reader must see how many.
+  if (card.success.stoppedByUser > 0) {
+    lines.push(`Stopped by their own user: ${card.success.stoppedByUser} build(s) — counted as neither a success nor a failure, and never as a stuck project.`);
   }
 
   if (card.survival.rate === null) {
@@ -569,6 +610,15 @@ export function scorecardHeadline(card: BuilderScorecard): string {
       `Most-repaired: ${named} — across ${card.healCodes.builds} build(s) carrying a breakdown, `
       + `${card.healCodes.attributed} repair(s) named.${missing}${unknown}`,
     );
+  }
+
+  // ❌ LEFT OPEN — findings that survived into the delivered app. Its own line, never merged into the
+  // repair list above: a readiness warning that nobody fixed is debt, not a heal.
+  if (card.healCodes.openTop.length > 0) {
+    const named = card.healCodes.openTop
+      .map((r) => `${r.code} ×${r.heals} (${r.builds} build${r.builds === 1 ? '' : 's'})`)
+      .join(', ');
+    lines.push(`Left open, not repaired: ${named} — non-blocking findings still in the app when the build ended.`);
   }
 
   return lines.join('\n');

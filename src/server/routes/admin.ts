@@ -920,6 +920,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         ok: b.ok,
         healCount: b.counts?.autoResolved,
         unresolvedCount: b.counts?.unresolved,
+        leftOpenCount: b.counts?.leftOpen,
       })));
       const reported = firstPassStatsFromMeta(reports);
       res.json({

@@ -192,3 +192,9 @@ export const SNAPSHOT_NOTE =
  */
 export const SNAPSHOT_WAKING_NOTE =
   'Showing your saved copy while the live preview starts up. Nothing has changed since it was saved, so this is your current app — the live version takes over by itself the moment it is ready.';
+
+/**
+ * How long a refresh of the preview copy may take after a kept repair: a production rebuild plus the
+ * copy itself (autopsy 972acde5). Past it the earlier copy stays a fallback, and the report says so.
+ */
+export const PREVIEW_COPY_REFRESH_MS = 60_000;

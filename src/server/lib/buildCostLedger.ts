@@ -29,6 +29,7 @@ import type { BuildDiagnosticsReport, LlmCallRecord } from '../AgentV3/BuildDiag
 import { realRateFor, usageCostUsd } from '../AgentV3/providerRates';
 import { toPowerLevel, type PowerLevel } from '../AgentV3/powerLevel';
 import { tierDisplayName } from '../AgentV3/tierLadder';
+import { healCountOf } from '../../lib/healIssue';
 import { STORED_LLM_CALLS_MAX } from '../AgentV3/DiagnosticsStore';
 import { channelWasTruncated, type ReportTruncation } from '../AgentV3/reportTruncation';
 
@@ -182,7 +183,8 @@ export function buildCostRow(entry: StoredReport, usdInr: number): BuildCostRow 
     files: new Set(paths).size,
     ok: typeof r.ok === 'boolean' ? r.ok : null,
     minutes: started > 0 && ended > started ? Math.round(((ended - started) / 60_000) * 10) / 10 : null,
-    heals: Math.max(0, Number(r.counts?.autoResolved) || 0),
+    // Repairs, not findings left open — one definition (healCountOf), so this column agrees with the scorecard.
+    heals: healCountOf(r) ?? 0,
     billedInr: billedInr === null ? null : money(billedInr),
     zeroBillReason: typeof billing?.zeroBillReason === 'string' && billing.zeroBillReason.trim() ? billing.zeroBillReason.trim() : null,
     realInr,

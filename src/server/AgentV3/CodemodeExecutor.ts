@@ -62,6 +62,11 @@ export function insertPropBeforeInterfaceClose(content: string, componentName: s
   return content.slice(0, closeIdx) + insertion + content.slice(closeIdx);
 }
 
+/** A path as ts-morph's in-memory file system spells it: forward slashes, one leading `/`. PURE. */
+function rootedPath(p: string): string {
+  return '/' + String(p ?? '').replace(/\\/g, '/').replace(/^(\.\/|\/)+/, '');
+}
+
 async function loadTsMorph(): Promise<boolean> {
   if (TsMorphProject) return true;
   try {
@@ -131,9 +136,14 @@ export async function renameSymbol(
       project.createSourceFile(path, content, { overwrite: true });
     }
 
+    // ts-morph's in-memory file system ROOTS every path (`src/a.ts` comes back as `/src/a.ts`). Map it
+    // back to the path the caller gave, or the change is reported under a key nobody else uses — the
+    // graph grew a phantom twin of every renamed file, and `before` read as '' (autopsy ce115e1f).
+    const byRooted = new Map<string, string>(files.map((f) => [rootedPath(f.path), f.path]));
     const changes: CodemodeChange[] = [];
     for (const sf of project.getSourceFiles()) {
-      const path: string = sf.getFilePath?.() ?? '';
+      const rooted: string = sf.getFilePath?.() ?? '';
+      const path = byRooted.get(rootedPath(rooted)) ?? rooted.replace(/^\/+/, '');
       const identifiers = sf.getDescendantsOfKind?.(IDENTIFIER_KIND) ?? [];
       let touched = false;
       // Traverse in reverse so replacements don't invalidate earlier positions.

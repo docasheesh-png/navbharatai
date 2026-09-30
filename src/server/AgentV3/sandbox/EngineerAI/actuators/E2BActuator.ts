@@ -1780,6 +1780,12 @@ export class E2BActuator implements IEngineerActuator {
     return this.fileOp(workspaceId, 'files.read', (sb) => sb.files.read(`${WORKSPACE_ROOT}/${safeRelPath(filePath)}`));
   }
 
+  /** A file's RAW bytes as base64 — for a binary asset, which `readFile` would mangle as UTF-8. */
+  async readBinaryFile(workspaceId: string, filePath: string): Promise<string> {
+    const bytes = await this.fileOp(workspaceId, 'files.read', (sb) => sb.files.read(`${WORKSPACE_ROOT}/${safeRelPath(filePath)}`, { format: 'bytes' }));
+    return Buffer.from(bytes as Uint8Array).toString('base64');
+  }
+
   async listFiles(workspaceId: string): Promise<string[]> {
     // FAST PATH — prune the ignored dirs INSIDE the sandbox (see buildListFilesCommand for the 226s
     // report this closes). Bounded and best-effort: any failure, timeout, or empty result falls

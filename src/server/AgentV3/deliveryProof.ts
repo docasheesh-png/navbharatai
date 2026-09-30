@@ -38,6 +38,8 @@ export interface PlatformPreviewInput {
   remainingMs: number | null;
   /** `AGENTV3_PLATFORM_PREVIEW` kill switch — anything but 'off' is on. */
   env?: NodeJS.ProcessEnv;
+  /** The name of the Project Mode module that will assemble the app, when this turn is not it. */
+  awaitingShell?: string | null;
 }
 
 /** Below this much remaining budget, starting a server risks the wall-clock cap more than it proves. */
@@ -61,6 +63,9 @@ export function shouldAttemptPlatformPreview(i: PlatformPreviewInput): { attempt
   if (i.aborted) return { attempt: false, reason: 'the build was aborted' };
   if (i.isImportTurn) return { attempt: false, reason: 'import turns boot their own preview' };
   if (!i.expectsArtifacts) return { attempt: false, reason: 'this turn was not expected to produce an app' };
+  // A Project Mode module that a later module assembles has no app to start yet — starting one shows our
+  // starter page and reads as a failure (autopsy 6a5fb04b).
+  if (i.awaitingShell) return { attempt: false, reason: `this turn builds one project module; the app is assembled by the "${i.awaitingShell}" module, so there is nothing to start yet` };
   if (!(i.appFiles > 0)) return { attempt: false, reason: 'the workspace has no files — there is no app to start' };
   if (!i.hasPackageJson) return { attempt: false, reason: 'no package.json — nothing to run a dev server from' };
   if (i.remainingMs !== null && i.remainingMs < PLATFORM_PREVIEW_MIN_REMAINING_MS) {

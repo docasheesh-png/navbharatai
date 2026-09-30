@@ -1,5 +1,6 @@
 import { entryShadowNote } from './entryShadow';
 import { repeatedReadNotice, READ_LOOP_LIMIT, repeatedCommandNotice, commandKey } from './repeatedReads';
+import { repeatedEditNotice } from './repeatedEdits';
 import { healWouldOscillate } from './HealLedger';
 import type { AgentEventStream } from './AgentEventStream';
 import { parseNpmAuditSummary, looksLikeDependencyInstall } from './npmAuditSummary';
@@ -2394,6 +2395,8 @@ export class ToolDispatcher {
    * told STOP three times and the report said "No read reached the no-progress limit").
    */
   private _readLoopStops: { n: number } = { n: 0 };
+  /** Edits per file in this dispatcher's run — see repeatedEdits.ts (autopsy ce115e1f). A full write resets it. */
+  private readonly _editsPerFile = new Map<string, number>();
   /** This agent's own shell commands, for the bash half of the loop breaker (never shared: a sub-agent starts fresh). */
   private _ownCommands = new Map<string, { output: string; writeSeq: number; stalls: number }>();
 
@@ -3314,6 +3317,7 @@ export class ToolDispatcher {
 
       case 'write_file': {
         let path = reqStr(input, 'path');
+        this._editsPerFile.delete(path); // a whole-file write is exactly what the edit-loop note asks for
         // NEXT.JS MIDDLEWARE LOCATION FIX (CargoPilot autopsy 2026-07-19): Next.js runs middleware ONLY
         // from the project root (`middleware.ts`) or `src/middleware.ts` — a `app/middleware.*` is
         // SILENTLY ignored, so the route guards / auth it holds never run and every guarded route is
@@ -3673,7 +3677,10 @@ export class ToolDispatcher {
         const editSteeringNotes = await this.writeSteeringNotes({ [path]: updated });
         // An edit that changes nothing the app runs is the same trap as a write (autopsy e725e002).
         const editTwinNote = await this.removeShadowTwins(path, agent);
-        return `Edited ${path}.${note}` + editReviewNote + editCascadeNote + editTestHint + editSteeringNotes + editKitNote + editTwinNote;
+        const editCount = (this._editsPerFile.get(path) ?? 0) + 1;
+        this._editsPerFile.set(path, editCount);
+        const editLoopNote = repeatedEditNotice(path, editCount);
+        return `Edited ${path}.${note}` + editReviewNote + editCascadeNote + editTestHint + editSteeringNotes + editKitNote + editTwinNote + editLoopNote;
       }
 
       case 'bash': {

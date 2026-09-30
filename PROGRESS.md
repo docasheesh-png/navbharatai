@@ -84036,6 +84036,30 @@ app, and pay once with a test card.
 with a small amount; `paid_amount` records what Razorpay really charged. A server-owned price table is a
 later slice.
 
+## 2026-09-30 — The referral-code box closes after 3 app opens or 7 days
+
+Admin: *"Refral code dalne ka option 3 bar app open hone ke bad band ho jana chahiye … 4rth time … input box
+gayab ho jaye! Aur notification me bhi refral 100₹ wale ke age missed (❌)"* — then approved the three details:
+30-minute folding, a 7-day backstop, and "b" (accounts already older than 7 days close at once).
+
+- **Why:** the only limit was `canStillRedeem` (no code after a mobile/GitHub reward). An account that never
+  verified either could apply a friend's code months later.
+- **Server:** `src/server/lib/referralCodeWindow.ts` (pure). Opens are counted on the account's referral
+  record by the app's status read (`GET /api/referral/:uid`, android only), in a transaction, folding anything
+  within 30 min of the last counted open; nothing is written once the window is shut. Age from Firebase
+  `metadata.creationTime` (new `createdAt` on `AccountContact`), falling back to the referral record's own
+  creation time (never earlier, so a fallback can only keep a window open longer). `decideAttribution` gains
+  `codeWindowOpen` → reason `code-window-closed`; status adds `codeOpensLeft` and `missed` on the row.
+- **Every installed build is covered from the deploy**, because they all already read the status at start-up.
+  A missed row is only sent with `missed=1` (new builds); older builds keep hiding the row, so they never show
+  ₹100 as still waiting.
+- **Client:** ❌ Missed row (no button) in the Notifications checklist and the Wallet; a missed row is left out
+  of "₹… waiting"; the Wallet box says how many opens are left; the app re-reads the status on resume so a
+  phone that never cold-starts is still counted.
+- **Tests:** `tests/referralCodeWindow.test.ts` (pure + client), a new block in `tests/referralRoutes.test.ts`
+  driving the real handlers; the redeem refusal is reversion-proven.
+- ⚠️ Needs a fresh `.aab` for the ❌ row and the opens-left line; the refusal and the hidden box are live on
+  the server deploy for every build.
 
 ## 2026-09-30 — Admin Build Reports page: App Check hang + Mobile OTP health (admin: "pura page ki error ke sath me mobile otp heath par special focus")
 
@@ -84086,3 +84110,17 @@ Root cause it closes: autopsy a7aa447c (bookings kept in the visitor's browser; 
 "no database needed").
 **Deliberately NOT done:** the post-build "Connect a database" tray row still reads the app's files only, like
 the publish screen it must agree with. Users without a Supabase grant keep today's honest builder guidance.
+## 2026-09-30 — every tool the builder's prompt names is now reachable (admin chose "one recipe tool")
+
+The #3385 ratchet listed 56 tools named in the architect prompt and offered to no role. Paid in full:
+- **54 code recipes** (`generate_email`, `generate_pdf`, `generate_qr`, `generate_game_runtime`, …) are reached
+  through ONE catalog entry, `run_recipe({ name, input })`, instead of 54 more schemas on every model call. Each
+  runs through its OWN unchanged handler (`this.run` with the inner name), so behaviour is byte-identical to a
+  direct call — a test compares the two. `name: "list"` returns every recipe's inputs; an unknown name or a
+  missing required input gets the inputs back and writes nothing. It cannot reach a non-recipe tool.
+  All 54 are code generators on the user's own keys — none spends NavBharatAI money (checked).
+- **`write_files_batch`** (a full write door with every write-time guard, and a prompt telling builders to use
+  it) was offered to NO role — now in BUILD_TOOLS. **`find_ui_element`** (visual; returns a screenshot, so not a
+  recipe) is now the architect's, beside `screenshot`.
+- The ratchet list is deleted, not emptied: a new prompt promise without a reachable tool fails CI with no escape.
+- The live strip names the recipe ("using generate_pdf"), not "using run_recipe".

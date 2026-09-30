@@ -34,14 +34,21 @@ import { STEP_ORDER } from './referralStepNames';
 export interface ChecklistRow {
   step: RewardStep;
   claimed: boolean;
+  /**
+   * The chance to earn this row has passed and will not come back — today only the referral code,
+   * once the first three app opens or seven days are over (admin 2026-09-30). Never true for a claimed
+   * row, and never counted as money still waiting.
+   */
+  missed: boolean;
   rupees: number;
   /** The whole line, ready to render. Built here so the words are testable. */
   label: string;
 }
 
 /** One step's status line. The claimed and pending wordings differ, as the admin's example does. */
-export function checklistLabel(step: RewardStep, claimed: boolean, rupees: number): string {
+export function checklistLabel(step: RewardStep, claimed: boolean, rupees: number, missed = false): string {
   const amount = `₹${rupees}`;
+  if (missed && !claimed) return `Referral code window closed — ${amount} missed`;
   const done: Record<RewardStep, string> = {
     signup: 'Account created',
     'referral-code': 'Referral code applied',
@@ -72,7 +79,7 @@ export function buildChecklist(steps: unknown): ChecklistRow[] {
   if (!Array.isArray(steps)) return [];
   const rows: ChecklistRow[] = [];
   for (const raw of steps) {
-    const r = (raw || {}) as { step?: unknown; claimed?: unknown; rupees?: unknown };
+    const r = (raw || {}) as { step?: unknown; claimed?: unknown; rupees?: unknown; missed?: unknown };
     const step = String(r.step ?? '') as RewardStep;
     if (!STEP_ORDER.includes(step)) continue;
     if (rows.some((x) => x.step === step)) continue;
@@ -81,7 +88,10 @@ export function buildChecklist(steps: unknown): ChecklistRow[] {
     // Only an explicit `true` counts as claimed. Anything else is pending, which errs toward telling
     // the user there is money left rather than hiding money they can still take.
     const claimed = r.claimed === true;
-    rows.push({ step, claimed, rupees, label: checklistLabel(step, claimed, rupees) });
+    // Only an explicit `true` is missed, and only on a row not already claimed — a misread here must
+    // err toward showing money as still available, never toward hiding it.
+    const missed = !claimed && r.missed === true;
+    rows.push({ step, claimed, missed, rupees, label: checklistLabel(step, claimed, rupees, missed) });
   }
   // The admin's own order, not the server's: signup, code, login, mobile, github.
   return rows.sort((a, b) => STEP_ORDER.indexOf(a.step) - STEP_ORDER.indexOf(b.step));
@@ -89,7 +99,8 @@ export function buildChecklist(steps: unknown): ChecklistRow[] {
 
 /** What is still unclaimed, in ₹. The number that decides whether the notice waits. */
 export function pendingRupees(rows: ChecklistRow[]): number {
-  return rows.filter((r) => !r.claimed).reduce((sum, r) => sum + r.rupees, 0);
+  // A missed row is not waiting: counting it would keep telling the user about ₹100 they cannot earn.
+  return rows.filter((r) => !r.claimed && !r.missed).reduce((sum, r) => sum + r.rupees, 0);
 }
 
 /**

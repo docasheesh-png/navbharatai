@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CheckCircle2, ChevronRight, Circle, Gift, Loader2 } from 'lucide-react';
+import { CheckCircle2, ChevronRight, Circle, Gift, Loader2, CircleX } from 'lucide-react';
 import { rewardsChecklistModel, type RewardChecklistInput, type RewardChecklistRow } from '../lib/rewardsChecklist';
 import { postReferral, REFERRAL_GRANTED_EVENT } from '../lib/referralClaim';
 import { openProfileVerifications } from '../lib/profileFocus';
@@ -73,15 +73,22 @@ export function RewardsChecklistCard({ userId, progress, onRefresh, onNavigate }
             <span className="flex min-w-0 items-center gap-2">
               {row.state === 'done'
                 ? <CheckCircle2 className="w-4 h-4 shrink-0 text-success" aria-label="Done" />
-                : <Circle className="w-4 h-4 shrink-0 text-faint" aria-label="Pending" />}
+                : row.state === 'missed'
+                  ? <CircleX className="w-4 h-4 shrink-0 text-danger" aria-label="Missed" />
+                  : <Circle className="w-4 h-4 shrink-0 text-faint" aria-label="Pending" />}
               <span className="min-w-0">
-                <span className={`block truncate text-[12px] font-bold ${row.state === 'done' ? 'text-muted' : 'text-ink'}`}>
-                  {row.name} <span className={row.state === 'done' ? 'text-success' : 'text-accent-text'}>· ₹{row.rupees}</span>
+                <span className={`block truncate text-[12px] font-bold ${row.state === 'done' || row.state === 'missed' ? 'text-muted' : 'text-ink'}`}>
+                  {row.name} <span className={row.state === 'done' ? 'text-success' : row.state === 'missed' ? 'text-danger line-through' : 'text-accent-text'}>· ₹{row.rupees}</span>
                 </span>
                 <span className="block truncate text-[10px] text-muted">{row.hint}</span>
               </span>
             </span>
-            {row.state !== 'done' && (
+            {row.state === 'missed' && (
+              // The chance has passed (admin 2026-09-30: "missed (❌) likh kar aa jaye"). No button: there is
+              // nothing left to complete, and a button that cannot work is what the second rule forbids.
+              <span className="shrink-0 text-[10px] font-black uppercase tracking-wider text-danger">❌ Missed</span>
+            )}
+            {(row.state === 'claim' || row.state === 'complete') && (
               <button
                 onClick={() => void act(row)}
                 disabled={busy !== null}

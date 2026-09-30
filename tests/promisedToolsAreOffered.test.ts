@@ -19,14 +19,25 @@ import { projectHasServer, noServerPaymentGuidance } from '../src/server/lib/Pay
 // list is gone rather than empty, so a new unoffered promise fails the first test below with no escape.
 
 const catalog = readFileSync('src/server/AgentV3/ToolCatalog.ts', 'utf8');
-const catalogNames = new Set([...catalog.matchAll(/name:\s*'([a-z_]+)'/g)].map((m) => m[1]));
-const prompt = readFileSync('src/server/AgentV3/systemPrompt.ts', 'utf8');
-const promised = new Set([...prompt.matchAll(/\b([a-z]+(?:_[a-z]+)+)\b/g)].map((m) => m[1]).filter((n) => catalogNames.has(n)));
+// 🔴 A TOOL NAME MAY CARRY A DIGIT (autopsy f496c75b, 2026-09-30). Both patterns used to be letters and
+// underscores only, so `generate_game_3d` matched as `generate_game` — not a catalog name — and the
+// census never saw the prompt's step 2 for every 3D game. It was on no list, and a real build re-ran
+// generate_game_runtime six times looking for the renderer it never got.
+const catalogNames = new Set([...catalog.matchAll(/name:\s*'([a-z0-9_]+)'/g)].map((m) => m[1]));
+// Every file that writes text the ARCHITECT reads as instructions — not only the system prompt. The
+// object contract (heroObjectSpec.ts) is injected into the build prompt and names `object_spec`.
+const PROMPT_SOURCES = ['src/server/AgentV3/systemPrompt.ts', 'src/server/lib/heroObjectSpec.ts'];
+const prompt = PROMPT_SOURCES.map((f) => readFileSync(f, 'utf8')).join('\n');
+const promised = new Set([...prompt.matchAll(/\b([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\b/g)].map((m) => m[1]).filter((n) => catalogNames.has(n)));
 const architectTools = roleConfig('architect').tools as string[];
 /** What the architect can actually reach: its own tools, plus every recipe when it holds run_recipe. */
 const architect = new Set<string>([...architectTools, ...(architectTools.includes('run_recipe') ? RECIPE_TOOLS : [])]);
 
 describe('every tool the architect prompt names is one it can call', () => {
+  it('the census reads a name with a digit in it', () => {
+    expect(promised.has('generate_game_3d')).toBe(true);
+    expect(promised.has('object_spec')).toBe(true);
+  });
   it('no NEW promise without the tool', () => {
     const missing = [...promised].filter((n) => !architect.has(n));
     expect(missing).toEqual([]);

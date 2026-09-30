@@ -417,6 +417,13 @@ const NON_DOMAIN_USES: RegExp[] = [
   // "social-login buttons" was read as SOCIAL and told to include a realtime feed, moderation and media
   // upload). "a social network", "social feed", "social app" keep their domain.
   /\bsocial[\s-]*(?:log[\s-]?ins?|sign[\s-]?(?:ins?|ons?|ups?)|auth(?:entication)?|oauth|providers?|buttons?|icons?|links?|handles?|share\s+buttons?|media\s+(?:icons?|links?|handles?|buttons?))\b/gi,
+  // social — PUBLISHING TO social media is marketing, not a social network (autopsy a5b661c8,
+  // 2026-09-30: "an approval app for plan, design and posting a collection … I am making advt on social
+  // media" was read as SOCIAL and handed a realtime feed, notifications and moderation to consider — for
+  // a campaign workflow whose users post to Instagram, not to each other). "a social media app", "a
+  // social network", "social feed" keep their domain.
+  /\b(?:on|to|via|through|across|for)\s+(?:the\s+|my\s+|our\s+)?social[\s-]*media(?:\s+(?:platforms?|channels?|accounts?|pages?|handles?|sites?))?\b/gi,
+  /\bsocial[\s-]*media\s+(?:marketing|ads?|advertis(?:ing|ements?)|advts?|campaigns?|posts?|posting|scheduler|scheduling|manager|management|calendar|content|promotions?|presence|strategy|analytics|agency|handles?|accounts?)\b/gi,
   // social — following instructions, an HTTP POST, a user's own profile, and "message" as output.
   /\bfollow(?:s|ing|ed)?\s+(?:the|these|this|those|my|our|your|a|an|it|them|up|along|instructions?|steps?|guidelines?|conventions?|patterns?|rules?)\b/gi,
   /\b(?:http|api|rest|ajax|fetch|axios|curl|a|the)\s+post\s+(?:request|endpoint|route|method|call|body|handler|api)\b/gi,

@@ -205,6 +205,25 @@ export function extractFacts(file: string, content: string): FileFacts {
       const root = depRoot(m[1]);
       if (root) depSet.add(root);
     }
+    // 🔴 A LAZY-LOADED SCREEN IS IMPORTED, AND SO IS A RE-EXPORTED ONE (autopsy a5b661c8, 2026-09-30).
+    // `lazy(() => import('./steps/PlanStep'))` and `export { Card } from './Card'` both make a file
+    // reachable, and neither matched `import … from`. A six-step app that code-split every step was told
+    // "6 component(s) created but never used" — its reviewer called that a false positive in its own
+    // words — and a finding like that is what invites a repair pass to wire a screen that is wired.
+    const dynamicImportRe = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+    for (let m = dynamicImportRe.exec(code); m; m = dynamicImportRe.exec(code)) {
+      // A URL (`import('https://cdn…')`) is neither a project file nor a package to install.
+      if (/^[a-z][a-z0-9+.-]*:/i.test(m[1])) continue;
+      imports.push(m[1]);
+      const root = depRoot(m[1]);
+      if (root) depSet.add(root);
+    }
+    const reExportRe = /\bexport\s+(?:type\s+)?(?:\*(?:\s+as\s+[\w$]+)?|\{[^}]*\})\s*from\s+['"]([^'"]+)['"]/g;
+    for (let m = reExportRe.exec(code); m; m = reExportRe.exec(code)) {
+      imports.push(m[1]);
+      const root = depRoot(m[1]);
+      if (root) depSet.add(root);
+    }
 
     // Routes: server route registrations, <Route path=...>, and `path: '...'`.
     const routePatterns = [

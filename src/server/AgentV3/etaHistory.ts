@@ -114,6 +114,57 @@ export function etaBasisNote(history: readonly HistoricalBuild[]): string {
   return `Learned from your last ${history.length} builds.`;
 }
 
+/** The per-day, per-task-type slice of the platform's own cost telemetry the fleet prior reads. */
+export interface FleetTelemetryDayLike {
+  date?: string;
+  byTaskType?: Record<string, { builds?: number; durationMs?: number } | undefined>;
+}
+
+/** Fewer builds of a kind on one day than this, and that day's mean is noise, not a measurement. */
+export const FLEET_MIN_BUILDS_PER_DAY = 2;
+
+/**
+ * The PLATFORM's recent builds of this kind, as estimator history — for an app with no builds of its own.
+ * PURE.
+ *
+ * 🔴 AUTOPSY a5b661c8 (2026-09-30): a complex six-step app was told "~5–11 min" and took 24.3. It was the
+ * workspace's first build, so `historyFromRecords` had nothing and the estimate fell back to the prompt
+ * heuristic — which this module's own header says runs backwards on short, ambitious prompts. The
+ * platform DID know how long complex apps take: every build is folded into the daily cost telemetry,
+ * per task type, with its duration. That record was read by the admin report and never by the ETA.
+ *
+ * One entry per day (that day's mean for this task type), newest first, and only days with enough builds
+ * of the kind to be a measurement. Stamped with the CURRENT complexity for the reason `historyFromRecords`
+ * gives. ⚠️ The mean includes failed builds, because the telemetry does not split durations by outcome;
+ * the label says "average", and the workspace's own history still wins the moment it exists.
+ */
+export function fleetHistoryFromTelemetry(
+  days: readonly FleetTelemetryDayLike[],
+  taskType: string | null | undefined,
+  currentComplexity: Complexity,
+  maxDays = 7,
+): { history: HistoricalBuild[]; builds: number; days: number } {
+  const history: HistoricalBuild[] = [];
+  let builds = 0;
+  if (!taskType) return { history, builds, days: 0 };
+  for (const d of (days ?? []).slice(0, maxDays)) {
+    const slice = d?.byTaskType?.[taskType];
+    const n = Number(slice?.builds);
+    const ms = Number(slice?.durationMs);
+    if (!Number.isFinite(n) || !Number.isFinite(ms) || n < FLEET_MIN_BUILDS_PER_DAY || ms <= 0) continue;
+    const mean = ms / n;
+    if (!(mean >= MIN_SANE_BUILD_MS && mean <= MAX_SANE_BUILD_MS)) continue;
+    history.push({ complexity: currentComplexity, durationMs: Math.round(mean) });
+    builds += n;
+  }
+  return { history, builds, days: history.length };
+}
+
+/** The admin line for an estimate taught by the platform's recent builds of this kind. PURE. */
+export function fleetEtaBasisNote(taskType: string, builds: number, days: number): string {
+  return `No past builds of this app — using NavBharatAI's recent average for "${taskType}" builds (${builds} build${builds === 1 ? '' : 's'} over ${days} day${days === 1 ? '' : 's'}).`;
+}
+
 /**
  * Read this workspace's own recent builds and turn them into estimator history.
  *

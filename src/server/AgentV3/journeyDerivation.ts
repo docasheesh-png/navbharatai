@@ -797,6 +797,24 @@ export function noJourneyReason(files: Record<string, string>): string {
     if (hasRenderSurface(files ?? {}) && appHasNoDataEntry(files ?? {})) return NO_DATA_ENTRY_REASON;
     return 'this app has no form for a journey to fill in — nothing here takes user input';
   }
+  // 🔴 AN ADDRESSABLE FIELD WITH NOTHING TO SUBMIT IS NOT AN UNADDRESSABLE FIELD (autopsy 2d076ce8,
+  // 2026-09-30). A Bhagavad Gita reader's only input is a live search box — `id="q"`, a real
+  // `<label htmlFor="q">` — that filters as you type and has no submit step. `deriveJourneys` skipped it
+  // for having no submit button, and this function then fell through to the sentence below and told
+  // the user to give the field "a `name` and a label": a remedy for a defect the field does not have,
+  // on NavBharatAI's own tested template. So: when some form's fields CAN all be addressed and it is
+  // only the submit step that is absent, say that — it is a different fact with no fix to ask for.
+  const addressableButNoSubmit = pages.some((p) => formSourcesFor(p, files).some((s) => {
+    const fields = formFields(s.source);
+    if (fields.length === 0) return false;
+    const allAddressable = fields.slice(0, 6).every(({ tag, labelText }) => targetForInput(tag) !== null || !!labelText);
+    return allAddressable && submitTargetIn(s.source) === null;
+  }));
+  if (addressableButNoSubmit) {
+    return 'the fields in this app act as you type (a search or filter) and have no submit or save step, '
+      + 'so there is nothing a journey could submit and then look for after a reload — no journey was derived, '
+      + 'and nothing needs changing for this check.';
+  }
   // ⚠️ THE REMEDY, NOT ONLY THE SYMPTOM (autopsy a48d0f9e, 2026-09-19). This sentence used to stop at
   // "no journey was derived", which reads like an environmental limit of the CHECK. It is not: it is a
   // fixable defect in the generated app, and in that report the SAME build's accessibility pass had

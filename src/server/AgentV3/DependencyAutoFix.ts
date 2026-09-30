@@ -156,6 +156,7 @@ export const WELL_KNOWN_DEPS: Record<string, string> = {
 export function knownDepVersion(name: string, ctx?: PinContext): string {
   const n = String(name ?? '');
   if (VITEST_FAMILY.has(n)) return vitestRangeForVite(ctx?.viteRange);
+  if (Object.prototype.hasOwnProperty.call(R3F_FAMILY, n)) return r3fRangeForReact(n, ctx?.reactRange);
   if (Object.prototype.hasOwnProperty.call(WELL_KNOWN_DEPS, n)) return WELL_KNOWN_DEPS[n];
   if (Object.prototype.hasOwnProperty.call(WELL_KNOWN_DEV_DEPS, n)) return WELL_KNOWN_DEV_DEPS[n];
   return '';
@@ -165,6 +166,43 @@ export function knownDepVersion(name: string, ctx?: PinContext): string {
 export interface PinContext {
   /** The project's declared Vite range (`dependencies` or `devDependencies`), when it has one. */
   viteRange?: string | null;
+  /** The project's declared React range, when it has one — the React Three Fiber family follows it. */
+  reactRange?: string | null;
+}
+
+/**
+ * React Three Fiber and drei follow REACT's major (autopsy a5b661c8, 2026-09-30). A React 18 project ran
+ * `npm install @react-three/drei`; npm took drei 10.7.9, whose peer is `@react-three/fiber@^9` (the React
+ * 19 line), and the install failed ERESOLVE against the project's fiber 8.18. The model recovered by
+ * pinning `drei@9.122.0` — a detour this table makes unnecessary, the same way it already pins vitest to
+ * the project's Vite. Pairs as npm reported them in that build: fiber 8 ↔ drei 9 on React 18; fiber 9 ↔
+ * drei 10 on React 19.
+ */
+const R3F_FAMILY: Record<string, { react18: string; react19: string }> = {
+  '@react-three/fiber': { react18: '^8', react19: '^9' },
+  '@react-three/drei': { react18: '^9', react19: '^10' },
+};
+
+/**
+ * The R3F-family range for this project's React, or '' when React's range is unknown — an unknown
+ * project keeps today's unpinned install rather than a guess. PURE.
+ */
+export function r3fRangeForReact(name: string, reactRange: string | null | undefined): string {
+  const fam = R3F_FAMILY[name];
+  if (!fam) return '';
+  const major = firstMajor(String(reactRange ?? ''));
+  if (major === null) return '';
+  return major <= 18 ? fam.react18 : fam.react19;
+}
+
+/** The project's declared React range, or undefined when package.json is absent, unreadable or has none. */
+export function reactRangeOf(packageJson: string | null | undefined): string | undefined {
+  if (typeof packageJson !== 'string') return undefined;
+  try {
+    const pkg = JSON.parse(packageJson) as { dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown> };
+    const v = pkg?.dependencies?.react ?? pkg?.devDependencies?.react;
+    return typeof v === 'string' ? v : undefined;
+  } catch { return undefined; }
 }
 
 /** Packages that must share vitest's major, or npm installs two test runners that disagree. */
@@ -530,7 +568,7 @@ export function applyWellKnownMissingDeps(files: Record<string, string>): Depend
   let missing: DependencyIssue[];
   try { missing = analyzeDependencies(external, pkgRaw).filter((d) => d.kind === 'missing'); }
   catch { return unchanged; }
-  const plan = planDependencyAutoFix(missing, { viteRange: viteRangeOf(pkgRaw) });
+  const plan = planDependencyAutoFix(missing, { viteRange: viteRangeOf(pkgRaw), reactRange: reactRangeOf(pkgRaw) });
   if (plan.autofixable.length === 0) return unchanged;
 
   let pkg: Record<string, unknown>;

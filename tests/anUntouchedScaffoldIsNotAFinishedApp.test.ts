@@ -114,6 +114,7 @@ describe('the wiring — asserted from source, comments stripped', () => {
 
   it('every candidate entry path is a real scaffold entry name', () => {
     expect(STARTER_ENTRY_PATHS.length).toBeGreaterThan(0);
-    for (const p of STARTER_ENTRY_PATHS) expect(p).toMatch(/App\.(tsx|jsx)$/);
+    // A Vite entry (App.tsx) or the Next.js App Router page this repo also seeds (autopsy b47c56d8).
+    for (const p of STARTER_ENTRY_PATHS) expect(p).toMatch(/App\.(tsx|jsx)$|^app\/page\.tsx$/);
   });
 });

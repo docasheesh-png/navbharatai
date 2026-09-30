@@ -105,7 +105,10 @@ describe('ViteReactProvider — ships a wired global stylesheet by default', () 
     // The accent is a real saturated hue (indigo), never grey/black.
     expect(css).toMatch(/--accent:\s*#4f46e5/i);
     // A primary/submit button is FILLED with the accent (white text) — not a grey outlined button.
-    expect(css).toMatch(/button\[type="submit"\][\s\S]*background:\s*var\(--accent\)/);
+    // Since 2026-09-30 the fill is a gradient of the FILL tokens (--accent-strong → --accent-deep): one
+    // token cannot be both a readable link colour on a dark page and a fill dark enough for white text.
+    expect(css).toMatch(/button\[type="submit"\][\s\S]*?background:\s*linear-gradient\(135deg, var\(--accent-strong\), var\(--accent-deep\)\)/);
+    expect(css).toMatch(/button\[type="submit"\][\s\S]*?color:\s*var\(--accent-fg\)/);
     expect(css).toContain('--accent-fg');
     // Links carry the accent colour.
     expect(css).toMatch(/a\s*\{[^}]*color:\s*var\(--accent\)/);

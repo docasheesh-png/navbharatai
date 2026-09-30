@@ -170,6 +170,7 @@ const NEVER_SUGGEST = new Set([
   'REPAIR_OUT_OF_SCOPE',
   'SUMMARY_ADDITIONS_SHOWN', 'SUMMARY_REPLY_NOT_FOUND', // how our closing line reached the screen
   'REVIEW_OFFER_FILE_GONE', // a finding about a file that no longer exists — nothing left to offer
+  'SINGLE_FILE_KIT_INLINED', // our own finishing step on a one-file app — never a finding against it
 ]);
 
 /**

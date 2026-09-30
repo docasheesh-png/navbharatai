@@ -203,6 +203,7 @@ import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext, plannerDomainBrief } from '../AgentV3/RoleChats';
 import { summarizeFileTree, NAVBHARATAI_UI_MAP } from '../AgentV3/systemPrompt';
 import { SINGLE_HTML_FILE_RULE } from '../AgentV3/systemPrompt';
+import { inlineLinkedStylesheet } from '../AgentV3/singleFileKit';
 import { wantsSingleHtmlFile } from '../../lib/frameworkDetect';
 import { weakBuildDisciplineBlock } from '../AgentV3/weakBuildDiscipline';
 import { pickPaletteForPrompt, palettePromptBlock } from '../AgentV3/designPresets';
@@ -19401,6 +19402,40 @@ async function noteBuildOutcome(
           }
         }
       } catch { /* the import sweep is best-effort — never affects the build result */ }
+      // 🎨 A ONE-FILE APP KEEPS ITS DESIGN (admin 2026-09-30: "na koi design, na sundarta"). The one-file
+      // rule has the model keep style.css — the design kit — linked; here the platform folds it into
+      // index.html and removes the file, so the delivered app is one file AND styled. A model will not
+      // copy ~450 lines of CSS it did not write, which is how every one-file app used to lose the kit.
+      // It moves only the stylesheet the page already links; anything else and nothing changes.
+      try {
+        if (singleHtmlFileRule && result.ok && expectsArtifacts) {
+          const sandboxIndex = await actuator.readFile(workspaceId, 'index.html').catch(() => null);
+          const kitCss = await actuator.readFile(workspaceId, 'style.css').catch(() => null);
+          const cleanIndex = sandboxIndex == null ? null : withoutPreviewBridge('index.html', sandboxIndex);
+          const inlined = cleanIndex != null && kitCss != null ? inlineLinkedStylesheet(cleanIndex, 'style.css', kitCss) : null;
+          if (inlined) {
+            await actuator.writeFile(
+              workspaceId, 'index.html',
+              hasPreviewBridge(sandboxIndex ?? '') ? injectPreviewBridge(inlined, 'live') : inlined,
+            );
+            writtenFiles.set('index.html', inlined);
+            inBuildWriteTick++; // the model's own page, not a platform file: the reviewer still reads it
+            try { getWorkspaceMemory(workspaceId).indexFile('index.html', inlined); } catch { /* index best-effort */ }
+            await actuator.runCommand(workspaceId, "rm -f 'style.css'").catch(() => null);
+            const stillThere = await actuator.readFile(workspaceId, 'style.css').then(() => true).catch(() => false);
+            if (!stillThere) {
+              writtenFiles.delete('style.css');
+              try { getWorkspaceMemory(workspaceId).removeFile('style.css'); } catch { /* graph best-effort */ }
+              await removeWorkspaceFiles(workspaceId, ['style.css']).catch(() => 0);
+            }
+            await saveWorkspaceFiles(workspaceId, { 'index.html': inlined }).catch(() => {});
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: 'SINGLE_FILE_KIT_INLINED', autoResolved: true,
+              message: `The design kit (style.css, ${kitCss!.length} chars) was folded into index.html${stillThere ? ' (style.css could not be removed from the sandbox, so it stays beside it)' : ' and style.css removed'}, so the one-file app keeps its design.`,
+            });
+          }
+        }
+      } catch { /* folding the kit is best-effort — never affects the build result */ }
       // E2E NET, WRITTEN NOT RUN (ROADMAP #1 Phase 4.3). `generate_e2e` was a tool the agent MAY call,
       // which in practice meant most apps shipped without one. This makes it a system reflex.
       //

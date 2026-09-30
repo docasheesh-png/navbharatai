@@ -55,6 +55,7 @@ const PROCESS_ONLY_CODES = new Set([
   'REVIEW_REFUTED_BY_EVIDENCE',
   // …and a finding not offered because its file no longer exists (autopsy f496c75b): about the reviewer.
   'REVIEW_OFFER_FILE_GONE',
+  'SINGLE_FILE_KIT_INLINED',
   // A file OUR OWN post-build pass repaired is a fact about this engine, not a defect in the user's
   // app (autopsy 53d43c18). It is recorded as a warning so it is legible in the report and so a rising
   // rate is visible, but it must never count against the app or colour the release gate.

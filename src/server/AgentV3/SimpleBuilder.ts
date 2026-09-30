@@ -36,6 +36,8 @@ import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 import { wireOrphanPages } from './orphanPageWiring';
 import { injectGlobalStylesheetImport } from './ProjectIntegrityChecks';
+import { frameworkShipsDesignKit } from './designKitReach';
+import { kitClasses } from './kitRestore';
 import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, canAffordSharedContract, preambleBailReason } from './FastLaneBudget';
 
 export interface SimpleFileSpec {
@@ -187,16 +189,31 @@ export function requiredStageCount(paths: readonly string[]): number {
  * bodies, so it carries no className at all — the stylesheet was styling classes it had to guess.
  * Empty when there is nothing to style. PURE.
  */
-export function stylesheetClassContext(produced: readonly OneShotFile[]): string {
-  const classes = classNamesUsedBy(Object.fromEntries(produced.map((f) => [f.path, f.content])));
-  if (classes.length === 0) return '';
-  return [
-    '',
-    'CLASS NAMES THE SCREENS ALREADY USE — these files are written and will not change. Style EVERY one',
-    'of these exact class names with a real rule (same spelling, same case); do not rename them and do',
-    'not invent different ones. Add element and state rules as the design needs:',
-    classes.map((c) => `.${c}`).join(', '),
-  ].join('\n');
+export function stylesheetClassContext(produced: readonly OneShotFile[], framework?: string | null): string {
+  const used = classNamesUsedBy(Object.fromEntries(produced.map((f) => [f.path, f.content])));
+  if (used.length === 0) return '';
+  // 🎨 A kit class the screens use is ALREADY styled — by the kit, in this project. Listing it with
+  // "style EVERY one" had this call write a second, weaker rule for `.card` and `.btn-primary` that sat
+  // after the kit and overrode it: the designed look undone by the file meant to add to it.
+  const kit = frameworkShipsDesignKit(framework) ? kitClasses() : new Set<string>();
+  const classes = used.filter((c) => !kit.has(c));
+  const fromKit = used.filter((c) => kit.has(c));
+  const lines = [''];
+  if (classes.length > 0) {
+    lines.push(
+      'CLASS NAMES THE SCREENS ALREADY USE — these files are written and will not change. Style EVERY one',
+      'of these exact class names with a real rule (same spelling, same case); do not rename them and do',
+      'not invent different ones. Add element and state rules as the design needs:',
+      classes.map((c) => `.${c}`).join(', '),
+    );
+  }
+  if (fromKit.length > 0) {
+    lines.push(
+      "ALREADY STYLED by the project's design kit — do NOT write rules for these, and do not remove the kit:",
+      fromKit.map((c) => `.${c}`).join(', '),
+    );
+  }
+  return lines.join('\n');
 }
 
 export function generationTier(path: string): number {
@@ -322,7 +339,7 @@ export function fileSystemPrompt(framework: string): string {
     '- Never generate simulated/mock data about OTHER people (nearby shops, other users, followers, drivers) and present it as real — showing other people\'s data needs a shared online database. Example entries shown for layout must be labelled on screen as examples.',
     '- Match the imports/exports the rest of the app expects (you are given the full file list).',
     ...exportImportConvention(framework),
-    ...DESIGN_CONTRACT,
+    ...designContractFor(framework),
   ].join('\n');
 }
 
@@ -341,6 +358,34 @@ export const DESIGN_CONTRACT: string[] = [
   '- In components, use className with classes that REALLY exist in the global stylesheet (and add any class you use to it when you write that stylesheet).',
   '- Empty states, hover feedback and a clear visual hierarchy (one accent color, muted secondary text) — small details make it feel like a real product.',
 ];
+
+/**
+ * 🎨 THE KIT, BY NAME (admin 2026-09-30: "app/game ek dam simple se html bante hai — na koi design, na
+ * sundarta, na animations"). Rendered in a real browser, a screen built from the kit's classes looked
+ * designed and the SAME screen built from class names the model invented (`.app`, `.todo-list`) looked
+ * like raw HTML — because nothing styled those names. DESIGN_CONTRACT asked for good design and never
+ * said the design already exists, so every file invented its own. Only given where the scaffold really
+ * ships the kit (`frameworkShipsDesignKit`) — a kit class with no CSS behind it is worse than none.
+ */
+export const DESIGN_KIT_VOCABULARY: string[] = [
+  '',
+  "THE PROJECT'S GLOBAL STYLESHEET ALREADY IS A DESIGN KIT — build the screens from its classes instead of",
+  'inventing class names nobody styles (an invented, unstyled class is exactly what makes an app look like',
+  'plain HTML). Bare <button>, <input>, <table> and lists are already styled; reach for these first:',
+  '- Page: `.container` (centred, padded) with `.stack` / `.row` for spacing; an <h1> and a `.muted` subtitle.',
+  '- Surfaces: `.card` (items of a list as `.card` rows); `.nb-table-wrap` > `table.nb-table`; `.nb-stats` > `.nb-stat` (+ `-label` / `-value`); `.nb-hero`, `.nb-auth-card`, `.nb-modal`.',
+  '- Controls: `button.btn-primary` for the main action; a plain <button> is already a tinted secondary; `.btn-ghost`; a filter or view switch is `.nb-tabs` > `button.nb-tab` with aria-selected="true" on the chosen one; each field in `.field` with a <label>.',
+  '- States: `.nb-empty` (+ `-icon` / `-title` / `-text`) for anything that can be empty; `.nb-skeleton` while loading; `.nb-toast` for "Saved"/"Copied".',
+  '- Motion: `.nb-rise` on a panel that appears; `.nb-stagger` on a list so its items arrive one by one.',
+  '- Chat: `.nb-chat` holding `.nb-msg nb-msg-user` / `.nb-msg nb-msg-bot`, with `.nb-composer` at the bottom.',
+  '- GAMES: the stage is `.nb-game`; start/pause/game-over screens are `.nb-game-screen` with `h1.nb-game-title` and REAL `<button class="nb-game-btn">` (`nb-game-btn nb-game-btn-secondary` for a second choice) — never a clickable <div>; the score and health sit in `.nb-game-hud` as `.nb-game-stat` and `.nb-game-bar` > `.nb-game-bar-fill` (style="--value: 0.6"); on phones add `.nb-game-pad` > `.nb-game-keys` > `button.nb-game-key`.',
+  "- Your own stylesheet ADDS to the kit (your own classes, your own --accent); do not restyle or remove the kit's classes.",
+];
+
+/** The design block a per-file call is given: the bar, plus the kit by name where the scaffold has it. PURE. */
+export function designContractFor(framework: string | null | undefined): string[] {
+  return frameworkShipsDesignKit(framework) ? [...DESIGN_CONTRACT, ...DESIGN_KIT_VOCABULARY] : DESIGN_CONTRACT;
+}
 
 /**
  * A FIXED export/import convention, injected into every per-file generation + repair prompt. Because
@@ -1345,8 +1390,8 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           // the old full-body dump verbatim.
           const depBlock = !produced.length
             ? ''
-            : isStylesheetPath(spec.path) && !/\.module\./i.test(spec.path) && stylesheetClassContext(produced)
-              ? stylesheetClassContext(produced)
+            : isStylesheetPath(spec.path) && !/\.module\./i.test(spec.path) && stylesheetClassContext(produced, deps.framework)
+              ? stylesheetClassContext(produced, deps.framework)
               : (signatureContextEnabled() ? signatureDependencyContext(produced) : dependencyContext(produced));
           // 🔴 THE SAME INVERSION THE PLAN CALL ALREADY CLOSED (line ~697), MISSED HERE — this is the
           // highest-volume call site in the whole lane and the one a real report caught running away

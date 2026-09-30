@@ -185,6 +185,23 @@ export function namesPersonalTool(prompt: string): boolean {
   return isPersonalTool(analyzeRequirementGaps(p).domain, p);
 }
 
+/**
+ * A heavy GAME — the game domain with real engineering named (3D, multiplayer, a physics engine, an
+ * open world). The same two facts `isPersonalTool` already combines, asked directly.
+ *
+ * 🔴 AUTOPSY f496c75b (2026-09-30). *"Single file html code se mobile friendly 3d fight game banao
+ * realastic"* scored **30, coding** — the "small snippet" class — because `html` is on the coding list
+ * and that check runs before the domain question. A realistic 3D fight game opened on the cheapest flash
+ * rung, which then spent 196 s timing out, and the 5–11 min estimate became 17.7 min. A technology word
+ * inside an app request does not make the request a snippet. Asked BEFORE `coding` in RequestAnalyser;
+ * a page or document deliverable is still a page. PURE.
+ */
+export function namesHeavyGame(prompt: string): boolean {
+  const p = String(prompt || '');
+  if (PAGE_DELIVERABLE_SIGNAL.test(p) || DOCUMENT_DELIVERABLE_SIGNAL.test(p)) return false;
+  return HEAVY_GAME_SIGNAL.test(p) && analyzeRequirementGaps(p).domain === 'game';
+}
+
 export function isComplexAppPrompt(prompt: string): boolean {
   const p = String(prompt || '');
   if (!COMPLEX_APP_SIGNAL.test(p)) return false;

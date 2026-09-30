@@ -22,7 +22,7 @@ import { scaffoldRestores, protectBoilerplateInRepair, SCAFFOLD_BOILERPLATE } fr
 import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
 import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
-import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
+import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports, fixTypeOnlyValueImports } from './ImportExportReconcile';
 import { parseTscErrors, endgameDeterministicPass, endgameRepairEnabled } from './EndgameRepair';
 import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import type { FastLanePhases } from './fastLanePhases';
@@ -37,6 +37,8 @@ import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 import { wireOrphanPages } from './orphanPageWiring';
 import { injectGlobalStylesheetImport } from './ProjectIntegrityChecks';
+import { frameworkShipsDesignKit } from './designKitReach';
+import { kitClasses } from './kitRestore';
 import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, canAffordSharedContract, preambleBailReason } from './FastLaneBudget';
 
 export interface SimpleFileSpec {
@@ -199,16 +201,31 @@ export function requiredStageCount(paths: readonly string[]): number {
  * bodies, so it carries no className at all — the stylesheet was styling classes it had to guess.
  * Empty when there is nothing to style. PURE.
  */
-export function stylesheetClassContext(produced: readonly OneShotFile[]): string {
-  const classes = classNamesUsedBy(Object.fromEntries(produced.map((f) => [f.path, f.content])));
-  if (classes.length === 0) return '';
-  return [
-    '',
-    'CLASS NAMES THE SCREENS ALREADY USE — these files are written and will not change. Style EVERY one',
-    'of these exact class names with a real rule (same spelling, same case); do not rename them and do',
-    'not invent different ones. Add element and state rules as the design needs:',
-    classes.map((c) => `.${c}`).join(', '),
-  ].join('\n');
+export function stylesheetClassContext(produced: readonly OneShotFile[], framework?: string | null): string {
+  const used = classNamesUsedBy(Object.fromEntries(produced.map((f) => [f.path, f.content])));
+  if (used.length === 0) return '';
+  // 🎨 A kit class the screens use is ALREADY styled — by the kit, in this project. Listing it with
+  // "style EVERY one" had this call write a second, weaker rule for `.card` and `.btn-primary` that sat
+  // after the kit and overrode it: the designed look undone by the file meant to add to it.
+  const kit = frameworkShipsDesignKit(framework) ? kitClasses() : new Set<string>();
+  const classes = used.filter((c) => !kit.has(c));
+  const fromKit = used.filter((c) => kit.has(c));
+  const lines = [''];
+  if (classes.length > 0) {
+    lines.push(
+      'CLASS NAMES THE SCREENS ALREADY USE — these files are written and will not change. Style EVERY one',
+      'of these exact class names with a real rule (same spelling, same case); do not rename them and do',
+      'not invent different ones. Add element and state rules as the design needs:',
+      classes.map((c) => `.${c}`).join(', '),
+    );
+  }
+  if (fromKit.length > 0) {
+    lines.push(
+      "ALREADY STYLED by the project's design kit — do NOT write rules for these, and do not remove the kit:",
+      fromKit.map((c) => `.${c}`).join(', '),
+    );
+  }
+  return lines.join('\n');
 }
 
 export function generationTier(path: string): number {
@@ -354,7 +371,7 @@ export function fileSystemPrompt(framework: string): string {
     '- Match the imports/exports the rest of the app expects (you are given the full file list).',
     NO_EVAL_RULE,
     ...exportImportConvention(framework),
-    ...DESIGN_CONTRACT,
+    ...designContractFor(framework),
   ].join('\n');
 }
 
@@ -373,6 +390,34 @@ export const DESIGN_CONTRACT: string[] = [
   '- In components, use className with classes that REALLY exist in the global stylesheet (and add any class you use to it when you write that stylesheet).',
   '- Empty states, hover feedback and a clear visual hierarchy (one accent color, muted secondary text) — small details make it feel like a real product.',
 ];
+
+/**
+ * 🎨 THE KIT, BY NAME (admin 2026-09-30: "app/game ek dam simple se html bante hai — na koi design, na
+ * sundarta, na animations"). Rendered in a real browser, a screen built from the kit's classes looked
+ * designed and the SAME screen built from class names the model invented (`.app`, `.todo-list`) looked
+ * like raw HTML — because nothing styled those names. DESIGN_CONTRACT asked for good design and never
+ * said the design already exists, so every file invented its own. Only given where the scaffold really
+ * ships the kit (`frameworkShipsDesignKit`) — a kit class with no CSS behind it is worse than none.
+ */
+export const DESIGN_KIT_VOCABULARY: string[] = [
+  '',
+  "THE PROJECT'S GLOBAL STYLESHEET ALREADY IS A DESIGN KIT — build the screens from its classes instead of",
+  'inventing class names nobody styles (an invented, unstyled class is exactly what makes an app look like',
+  'plain HTML). Bare <button>, <input>, <table> and lists are already styled; reach for these first:',
+  '- Page: `.container` (centred, padded) with `.stack` / `.row` for spacing; an <h1> and a `.muted` subtitle.',
+  '- Surfaces: `.card` (items of a list as `.card` rows); `.nb-table-wrap` > `table.nb-table`; `.nb-stats` > `.nb-stat` (+ `-label` / `-value`); `.nb-hero`, `.nb-auth-card`, `.nb-modal`.',
+  '- Controls: `button.btn-primary` for the main action; a plain <button> is already a tinted secondary; `.btn-ghost`; a filter or view switch is `.nb-tabs` > `button.nb-tab` with aria-selected="true" on the chosen one; each field in `.field` with a <label>.',
+  '- States: `.nb-empty` (+ `-icon` / `-title` / `-text`) for anything that can be empty; `.nb-skeleton` while loading; `.nb-toast` for "Saved"/"Copied".',
+  '- Motion: `.nb-rise` on a panel that appears; `.nb-stagger` on a list so its items arrive one by one.',
+  '- Chat: `.nb-chat` holding `.nb-msg nb-msg-user` / `.nb-msg nb-msg-bot`, with `.nb-composer` at the bottom.',
+  '- GAMES: the stage is `.nb-game`; start/pause/game-over screens are `.nb-game-screen` with `h1.nb-game-title` and REAL `<button class="nb-game-btn">` (`nb-game-btn nb-game-btn-secondary` for a second choice) — never a clickable <div>; the score and health sit in `.nb-game-hud` as `.nb-game-stat` and `.nb-game-bar` > `.nb-game-bar-fill` (style="--value: 0.6"); on phones add `.nb-game-pad` > `.nb-game-keys` > `button.nb-game-key`.',
+  "- Your own stylesheet ADDS to the kit (your own classes, your own --accent); do not restyle or remove the kit's classes.",
+];
+
+/** The design block a per-file call is given: the bar, plus the kit by name where the scaffold has it. PURE. */
+export function designContractFor(framework: string | null | undefined): string[] {
+  return frameworkShipsDesignKit(framework) ? [...DESIGN_CONTRACT, ...DESIGN_KIT_VOCABULARY] : DESIGN_CONTRACT;
+}
 
 /**
  * A FIXED export/import convention, injected into every per-file generation + repair prompt. Because
@@ -525,6 +570,13 @@ export function contractUserPrompt(prompt: string, manifest: SimpleFileSpec[]): 
  * so — with the exact import specifier from `at.from` when that is known — so the isolated per-file
  * call has somewhere to import the shared symbols from instead of a paragraph to guess a path for.
  */
+/**
+ * An enum is a VALUE (autopsy f496c75b, 2026-09-30). The contract declares enums, and the per-file
+ * convention asks for `import type` on types, so `useInput.ts` imported the `InputAction` enum type-only
+ * and read its members: TS1361 on every line, re-quoted by the write-time typecheck for seven minutes.
+ */
+export const ENUM_IMPORT_RULE = 'An ENUM (or a const, function or class) is a VALUE: import it with a plain `import { Name }`, never `import type` — a type-only import of an enum fails to compile the moment a member is read.';
+
 export function contractBlock(contract: string | undefined, at?: { path: string; from?: string }): string {
   const trimmed = (contract || '').trim();
   if (!trimmed) return '';
@@ -541,6 +593,7 @@ export function contractBlock(contract: string | undefined, at?: { path: string;
       'not in the contract file. These symbols are FROZEN and SHARED across files: use these EXACT names,',
       'enum members, types, util signatures, and component prop interfaces. Do NOT rename, re-case,',
       'or invent variants; do NOT import a symbol that is not declared here:',
+      ENUM_IMPORT_RULE,
       '```ts',
       trimmed.slice(0, 12_000),
       '```',
@@ -551,6 +604,7 @@ export function contractBlock(contract: string | undefined, at?: { path: string;
     'SHARED CONTRACT — these symbols are FROZEN and SHARED across files. Use these EXACT names,',
     'enum members, types, util signatures, and component prop interfaces. Do NOT rename, re-case,',
     'or invent variants; do NOT import a symbol that is not declared here:',
+    ENUM_IMPORT_RULE,
     '```ts',
     trimmed.slice(0, 12_000),
     '```',
@@ -1369,8 +1423,8 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           // the old full-body dump verbatim.
           const depBlock = !produced.length
             ? ''
-            : isStylesheetPath(spec.path) && !/\.module\./i.test(spec.path) && stylesheetClassContext(produced)
-              ? stylesheetClassContext(produced)
+            : isStylesheetPath(spec.path) && !/\.module\./i.test(spec.path) && stylesheetClassContext(produced, deps.framework)
+              ? stylesheetClassContext(produced, deps.framework)
               : (signatureContextEnabled() ? signatureDependencyContext(produced) : dependencyContext(produced));
           // 🔴 THE SAME INVERSION THE PLAN CALL ALREADY CLOSED (line ~697), MISSED HERE — this is the
           // highest-volume call site in the whole lane and the one a real report caught running away
@@ -1484,9 +1538,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           // (3) re-point a NAMED import at the correct module when the symbol lives in exactly one OTHER
           // module (Kanban build 2026-07-13 — the wrong source file). Unique-owner only; never a guess.
           const wrong = await fixWrongSourceImports(addd.files);
-          const changes = recd.fixes.length + addd.added.length + wrong.fixes.length;
+          // (4) an enum/const imported with `import type` and then read as a value (autopsy f496c75b).
+          const typeOnly = await fixTypeOnlyValueImports(wrong.files);
+          const changes = recd.fixes.length + addd.added.length + wrong.fixes.length + typeOnly.fixes.length;
           if (changes > 0) {
-            for (const f of written) { const nc = wrong.files[f.path]; if (typeof nc === 'string') f.content = nc; }
+            for (const f of written) { const nc = typeOnly.files[f.path]; if (typeof nc === 'string') f.content = nc; }
             deps.log?.(`🔧 Auto-fixed ${changes} import issue(s) (wrong-kind, forgotten, or wrong-source) before preview.`);
           }
         } catch { /* best-effort — a failure just leaves the files as generated */ }

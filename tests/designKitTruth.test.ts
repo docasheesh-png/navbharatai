@@ -82,8 +82,10 @@ describe('✅ the spacing complaint was real, and is fixed in the CSS', () => {
     // Snapping one to 8 and the other to 10 would have broken that in every generated app — the
     // reason this was measured rather than bulk-replaced.
     const css = kit['src/index.css'] ?? '';
-    const btn = /button, \.btn \{[^}]*padding:\s*(\d+)px/.exec(css)?.[1];
-    const input = /input, textarea, select \{[^}]*padding:\s*(\d+)px/.exec(css)?.[1];
+    // Selectors are :where() since 2026-09-30 (a zero-specificity element layer an app's own class
+    // always beats); the invariant this pins — matched vertical padding — is unchanged.
+    const btn = /:where\(button\), \.btn \{[^}]*padding:\s*(\d+)px/.exec(css)?.[1];
+    const input = /:where\(input:not\([^)]*\), textarea, select\) \{[^}]*padding:\s*(\d+)px/.exec(css)?.[1];
     expect(btn).toBeDefined();
     expect(input).toBeDefined();
     expect(btn).toBe(input);

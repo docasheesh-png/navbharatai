@@ -445,8 +445,20 @@ export function stripNonDomainUses(text: string): string {
   // Questions Solved" — autopsy e7baf61d), and no construction of its own marks it. Only the NOUN is
   // stripped: "book a session", "book a slot" keep their booking meaning in any context.
   if (STUDY_CONTEXT.test(String(text || ''))) out = out.replace(STUDY_BOOK_NOUN, ' ');
+  // Same shape for "chat": in a prompt for an AI ASSISTANT, the chat is the user talking to the AI
+  // (autopsy d8ed307a — a Bengali "personal AI Assistant" whose English words were "Chat History", "Chat"
+  // and "Clear History" was read as SOCIAL and handed auth, a realtime feed and moderation). Only when
+  // nothing says people chat with EACH OTHER — "group chat", "chat with friends", "users can message"
+  // keep their meaning in any context.
+  const raw = String(text || '');
+  if (AI_ASSISTANT_CONTEXT.test(raw) && !PEOPLE_CHAT.test(raw)) out = out.replace(/\b(?:chats?|conversations?|messages?)\b/gi, ' ');
   return out;
 }
+
+/** Evidence the product IS an AI assistant, so its "chat" is with the AI (autopsy d8ed307a). */
+const AI_ASSISTANT_CONTEXT = /\b(?:(?:personal\s+)?ai[\s-]+(?:assistant|companion|chatbot|tutor|helper)|chat\s*bot|virtual\s+assistant|personal\s+assistant)\b/i;
+/** Evidence people talk to each other, which makes an assistant app social after all. */
+const PEOPLE_CHAT = /\bgroup\s+chats?\b|\bchat\s+(?:with|between)\s+(?:friends|users|people|members|each\s+other|other\s+users)\b|\b(?:users|members|people)\s+(?:can\s+)?(?:chat|message|talk)\b|\b(?:friends?|followers?|dm|direct\s+messages?)\b/i;
 
 /** Evidence that the prompt is about studying, so a bare "book" is a textbook (autopsy e7baf61d). */
 const STUDY_CONTEXT = /\b(?:syllabus|ncert|jee|neet|upsc|cbse|icse|pyqs?|chapters?\s+(?:tracker|completed|wise|list)|study\s+(?:hours?|sessions?|timer|plan|planner|tracker)|exam\s+prep(?:aration)?|revision\s+(?:schedule|system|reminders?))\b/i;

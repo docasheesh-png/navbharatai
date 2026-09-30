@@ -887,6 +887,7 @@ export class AgentRunner {
               nudgesUsed: noBuildNudges,
               maxNudges: MAX_BUILD_NUDGES,
               editingExistingApp: this.opts.editingExistingApp === true,
+              request: userPrompt,
             });
           if (nudge.standDown) {
             try { this.opts.onNote?.({ code: 'BUILD_NUDGE_STOOD_DOWN', message: standDownNote(nudge.standDown), detail: nudge.standDown }); } catch { /* a note must never fail a build */ }
@@ -1219,7 +1220,9 @@ export class AgentRunner {
         try {
           if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, wroteThisRun: dispatcher.wroteAnything() })) {
             const readiness = await dispatcher.assessBuildReadiness();
-            if (appIsDone(readiness)) {
+            // Never "complete and healthy" over a compile that just failed (autopsy 33812996).
+            const typeErrors = typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null;
+            if (appIsDone(readiness) && !(typeErrors !== null && typeErrors > 0)) {
               if (!readyMark) readyMark = { step: steps, elapsedMs: Date.now() - buildStartMs, score: readiness.score };
               doneText = doneSteer(readiness);
               if (doneText) {

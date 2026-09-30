@@ -148,13 +148,13 @@ describe('🔒 REVERSION GUARDS — tsc and vitest cannot see an argument that s
   // rewrites `result.summary` between the readers. What these guards exist to prove — each reader is
   // really given the fact — is asserted below against the new spelling.
   it('the retry decision is really given the fact', () => {
-    expect(route).toContain('const firstAttempt = readTurnAnswer(result.summary);');
+    expect(route).toContain('const firstAttempt = readTurnAnswer(result.summary, prompt);');
     expect(route).toContain('const firstAttemptAskedTheUser = firstAttempt.asked;');
     expect(route).toContain('modelAskedTheUser: firstAttemptAskedTheUser');
   });
 
   it('the settle flip is really given the fact — both halves of it', () => {
-    expect(route).toMatch(/emptyBuildFailureSummary\([\s\S]{0,900}?modelAnswer\.asked,\s*modelAnswer\.declined,\s*\)/);
+    expect(route).toMatch(/emptyBuildFailureSummary\([\s\S]{0,1100}?modelAnswer\.asked \|\| modelAnswer\.pointed,\s*modelAnswer\.declined,\s*\)/);
   });
 
   it('🔑 the predicate is IMPORTED, never re-implemented beside its sibling', () => {
@@ -162,7 +162,7 @@ describe('🔒 REVERSION GUARDS — tsc and vitest cannot see an argument that s
     // The route reaches it only through `readTurnAnswer`, which imports it from `nudgeToBuild`.
     expect(route).toContain("import { readTurnAnswer, answeredWithoutBuilding } from '../AgentV3/turnAnswer'");
     const reader = fs.readFileSync(path.join(process.cwd(), 'src/server/AgentV3/turnAnswer.ts'), 'utf8');
-    expect(reader).toContain("import { turnAskedTheUser } from './nudgeToBuild'");
+    expect(reader).toContain("import { turnAskedTheUser, turnPointedToPlatformFeature } from './nudgeToBuild'");
     expect(route).not.toMatch(/const\s+\w*[Aa]skedTheUser\s*=\s*\/.*\?/);
   });
 

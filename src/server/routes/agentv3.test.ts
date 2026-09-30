@@ -2484,7 +2484,10 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      an import/survey turn (expectsArtifacts is false there). It moves the stylesheet the page
     //      already links into that page and nothing else (inlineLinkedStylesheet returns null otherwise),
     //      with the preview bridge stripped first so it is never persisted. Considered ✓.
-    expect(count).toBe(27);
+    //   1× the STYLESHEET DEDUPE (autopsy 33812996, 2026-09-30) — inside the
+    //      `AGENTV3_CSS_IMPORT_GUARD !== 'off' && !isImportTurn` block, through writeUnlessFrozen; it only
+    //      removes a duplicate side-effect css import the entry already covers. Considered ✓.
+    expect(count).toBe(28);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

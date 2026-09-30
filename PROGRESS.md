@@ -85167,3 +85167,26 @@ the architect. The Frontend specialist that actually writes the AI client never 
 - **The no-journey sentence** (#3398, the Gita search box). There is one predicate. The sentence depends on whether the form has any button: a field with no button "acts as you type"; a form with a button has "none of its buttons reads as submitting them".
 - **The Project Mode starter verdict** (#3399, autopsy 6a5fb04b). #3399's `setStarterExpected` flag and `shellModuleFor` are kept. This branch's `setStarterEntryExpected` and its route call are removed, and `starterEntryExpectedFor` / `moduleOwnsAppEntry` now delegate to #3399's helpers.
 - **Why this is recorded:** this is exactly the duplicate-work class `CLAUDE.md` warns about. Neither PR existed when the other started.
+## 2026-09-30 — Autopsy 53a621e3 ("full-stack Android calculator", Weak, 4.7 min, ₹85.38): green, and routed as a big app
+
+The app rendered and passed the production build. The explorer pressed 12 controls, and nothing wrote to
+the app after it went green. The build was clean. It was expensive for what it was.
+
+**Fixed:**
+- **"full-stack" made a calculator COMPLEX (score 63).** Because of that, the build skipped the cheap lead
+  rung and the fast lane. Real cost was $0.23, billed ₹85.
+  - `isComplexAppPrompt` now removes packaging adjectives (full-stack / full app / complete app) when the
+    request names one of the small self-contained apps. It uses the same shape as the existing
+    landing-page rule.
+  - A small app with a real need (database, login, payment) stays complex.
+  - The report prompt now scores 20 (`simple_app`).
+- **The first App.tsx evaluated input with `new Function()`.** The write-time security scan caught it,
+  and the rewrite cost ~70 s (a new parser file and two type errors). `NO_EVAL_RULE` now reaches the
+  architect prompt AND the fast lane's per-file prompt (`noEvalRule.ts`, one constant).
+- Locked in `tests/fullStackIsACompliment.test.ts` (reversion-proven).
+
+**Recorded, not changed:**
+- The builder added unrequested "bonus" scientific functions and used mathjs, which made the bundle
+  788 KB.
+- Dead helpers were left in App.tsx (the reviewer noted them).
+- `PREVIEW_SNAPSHOT_STALE` again. That root cause is owned by #3398's instrument.

@@ -85585,3 +85585,11 @@ deployed with today's fixes (#3397–#3411). The complex route was correct for a
 
 **Recorded, not changed:** the lean post-build reviewer timed out at 45 s in 3 of today's 4 reports. It
 spends tokens and returns nothing. Raising or dropping it is an admin decision.
+
+**Follow-up (admin chose "fix the timeout", after being told that skipping the review on green apps would
+also switch off the one verified functional repair, `selectGreenRepairable`):**
+5. **The lean reviewer was handed all 11 changed files in full and read them all again anyway** (`glob`,
+   then one `read_file` each), then timed out. "Do NOT read these again" was advice, not a mechanism.
+   When every changed source file fits inline (`leanReviewAnswersInOneCall`), the review now spawns with
+   NO tools (`toolsOverride: []` on `makeSubAgentSpawn`): it can only answer, in one call. When a changed
+   file did not fit, it keeps its read tools. The skip-the-review option was withdrawn, not shipped.

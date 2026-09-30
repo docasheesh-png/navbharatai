@@ -524,7 +524,7 @@ import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrches
 import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
-import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline } from '../AgentV3/ReviewerAgent';
+import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall } from '../AgentV3/ReviewerAgent';
 import { refuteReviewByEvidence, missingClassClaim } from '../AgentV3/reviewEvidence';
 import { SALVAGE_HANDOFF_MARKER, HANDOFF_NOTE_FIX_LINE } from '../AgentV3/handoffRule';
 import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
@@ -21921,14 +21921,20 @@ async function noteBuildOutcome(
           const stopReviewWithBuild = (): void => reviewAbort.abort();
           if (abort.signal.aborted) reviewAbort.abort();
           else abort.signal.addEventListener('abort', stopReviewWithBuild, { once: true });
+          // What THIS turn changed, and — for a suggest-only review — that code in full. Computed before
+          // the spawn because whether the review may read at all depends on it (autopsy bee95692).
+          const reviewChanged = [...writtenFiles.keys()].filter((p) => !finishingPaths.has(p));
+          const reviewInline = reviewPlan.mode === 'suggest' ? leanReviewInline(reviewChanged, (p) => writtenFiles.get(p)) : undefined;
+          const reviewOneCall = leanReviewAnswersInOneCall(reviewInline);
           const reviewSpawn = makeSubAgentSpawn({
             ...subAgentDeps,
             signal: reviewAbort.signal,
             ...(reviewPlan.maxSteps !== undefined ? { maxSteps: reviewPlan.maxSteps } : {}),
+            ...(reviewOneCall ? { toolsOverride: [] } : {}),
           });
           const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs, projectFileCount, { previewGreen: reviewPlan.mode === 'suggest' });
           if (reviewPlan.mode === 'suggest') {
-            try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_LEAN', message: `The app is proven green, so the post-build review is suggest-only and ran lean: at most ${reviewPlan.maxSteps} steps, ${Math.round(reviewBudget / 1000)}s budget. Its findings are an offer, never a repair.`, autoResolved: true }); } catch { /* best-effort */ }
+            try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_LEAN', message: `The app is proven green, so the post-build review is suggest-only and ran lean: ${reviewOneCall ? `one call, no tools, handed all ${reviewInline?.files.length ?? 0} changed file(s) in full` : `at most ${reviewPlan.maxSteps} steps`}, ${Math.round(reviewBudget / 1000)}s budget.`, autoResolved: true }); } catch { /* best-effort */ }
           }
           let review;
           /** A verdict rebuilt from an unfinished review's own narration — see partialReview.ts. */
@@ -21965,13 +21971,12 @@ async function noteBuildOutcome(
           // descendant, so the sub-agent's calls carry it without a line of their own; and because it
           // survives `raceTimeout` giving up, a reviewer we WALKED AWAY FROM keeps tagging its turns.
           // Nothing here decides whether to charge — see the REVIEW_INCOMPLETE branch below.
-          const reviewChanged = [...writtenFiles.keys()].filter((p) => !finishingPaths.has(p));
           const reviewPromise = runInBillingPhase(PHASE_POST_BUILD_REVIEW, async () => reviewBuild({
               // A roadmap milestone is reviewed against its own brief (autopsy 728a402d), never against
               // the later milestones this build was told not to build.
               userRequest: milestoneRequest ?? prompt,
               // A suggest-only review is handed the changed code in full, so it answers in one call.
-              ...(reviewPlan.mode === 'suggest' ? { inlineFiles: leanReviewInline(reviewChanged, (p) => writtenFiles.get(p)) } : {}),
+              ...(reviewInline ? { inlineFiles: reviewInline } : {}),
               fileTree: rFiles,
               fileSample: rSample,
               spawn: reviewSpawn,

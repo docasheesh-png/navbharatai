@@ -84500,3 +84500,48 @@ the architect. The Frontend specialist that actually writes the AI client never 
 - Locked in `tests/anAiAppNeedsNoKey.test.ts`.
 
 **Admin action:** set `APP_AI_GATEWAY=on` in Cloud Run.
+## 2026-09-30 — Autopsy ee0e6de5 ("world's countries and capitals", Weak tier, KIMI rung 2, 6.5 min, green, billed ₹86.23)
+
+The prompt was English written in Devanagari (*"Build an app वेयर वर्ल्ड'एस टोटल कंट्रीज नेम विथ थेइर कैपिटल्स"*). The app is
+one screen: a search box, an A–Z/Z–A sort, a static table of 195 countries. It rendered at 293 s and passed
+typecheck, production build and runtime check. Real cost $0.206 (KIMI) + $0.018 (E2B) ≈ ₹21.5; billed ₹86.23 (×4 tier).
+
+**Ledger.** ✅ self-heals 0 · 🔀 workarounds 0 · ⏭️ skipped 4 · ❌ wrong verdicts 3 · 🥵 struggles 4.
+- ⏭️ Journey not derived; the reason blamed missing field names. Click explorer pressed nothing (the only control
+  it may press is the "made by" link; it never types or picks). Page routes not checked (none exist). The e2e
+  suite was written, not run (by design).
+- ❌ RELEASE_GATE YELLOW "whether it actually SAVES anything is untested" about an app with nothing to save ·
+  "its individual page routes were never render-checked" about an app with no routes · the live tick said
+  "rough estimate ~2–4 min" at minute 6.
+- 🥵 COMPLEXITY_ROUTING = COMPLEX: the scorer cannot read Devanagari, so the model decided, and read "every
+  country in the world" as a big app. It opened on the reasoning rung and skipped the fast lane: 6.5 min vs 2–4.
+  The Frontend sub-agent read `src/index.css` 6× in slices to learn the kit classes (the architect had been
+  told them, it had not). One write call took 130 s (7,252 output tokens: the 195-row data file on a
+  reasoning model). The first write-time typecheck took 15 s (cold compile).
+
+**Fixed (PR #3389, same branch):**
+1. `complexityPrompt` — a long list of fixed facts is simple however many rows; if unsure, simple (the
+   module's own default, never told to the model). ⚠️ Model behaviour itself is not testable here; the next
+   Devanagari lookup-app report is the evidence.
+2. `appOnlyShowsWhatItHolds` (`journeyDerivation.ts`) — inputs that a change handler listens to, and NO way to
+   save anywhere (button, form, submit, click/key handler, editable surface, browser storage, write call) ⇒
+   `none-derivable` in the gate, and `LOOKUP_ONLY_REASON` as the explanation. Conservative: any save sign
+   keeps today's behaviour; it can only change the wording of a YELLOW, never earn GREEN. The scaffold's
+   ErrorBoundary button, `public/`, tests and config files are not read as the app's UI.
+3. Page check derives routes from the whole project (was `writtenFiles` only — an edit turn that did not touch
+   the router found no routes; the journey check already used the overlay). New `RuntimeEvidence.noPageRoutes`
+   explains an unchecked pages line truthfully, including that router-less screens are not reached.
+4. `unevidencedEtaTickLine` takes the band's top end; past it, the tick says the guess was too low.
+5. `DESIGN_KIT_BRIEF` (`systemPrompt.ts`) is one copy read by the architect (byte-identical output) and by any
+   writing sub-agent whose `src/index.css` carries the kit (`stylesheetCarriesKit`, same threshold as kit-keep).
+Test-locked in `tests/aLookupAppHasNothingToSave.test.ts` (reversion-proven on the reason).
+
+**Not fixed, recorded:**
+- 🔴 OPEN — the explorer never types into an input or picks a select option, so a search box or sort that is
+  broken still passes every check. A "narrowing" probe (type a letter, confirm rows change; pick Z–A, confirm
+  order flips) is the proactive lever for this class; not built without the admin's word.
+- The readiness scan's "No tests at all" warning is recorded at run end, 4 s before the platform scaffolds the
+  e2e suite. It is already resolved and does not count against the gate; left as is.
+- `requestAnalysis.startTier` still says "gemini" (a pre-ladder name) in the admin report. Cosmetic, admin-only.
+- The prompt is English words in Devanagari; the model built a Hindi UI. The language rule mirrors the SCRIPT
+  here; whether a transliterated-English user wants Hindi or English UI is a product question for the admin.

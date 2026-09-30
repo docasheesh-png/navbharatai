@@ -363,6 +363,34 @@ function frameworkProvidedDeps(files: Record<string, string>, declared: string[]
   return new Set();
 }
 
+/**
+ * The commands a project's own `scripts` run (`next dev` → `next`, `npx vite build` → `vite`,
+ * `NODE_ENV=production node server.js` → `node`). A dependency whose name is one of them is USED — by the
+ * CLI — however few files import it.
+ *
+ * 🔴 AUTOPSY b47c56d8 (2026-09-30): a Next.js app was told *"\"next\" is declared in package.json
+ * dependencies but no project file imports it"* while its dev script was literally `next dev`. The finding
+ * hedged ("if it is used only via a CLI, ignore this") about the one fact it had in hand. Matched by exact
+ * name only, so this can only REMOVE findings, never invent one.
+ */
+function scriptCommands(pkg: unknown): Set<string> {
+  const out = new Set<string>();
+  const scripts = pkg && typeof pkg === 'object' ? (pkg as { scripts?: unknown }).scripts : null;
+  if (!scripts || typeof scripts !== 'object') return out;
+  const WRAPPERS = new Set(['npx', 'pnpx', 'bunx', 'exec', 'dlx', 'cross-env', 'dotenv', 'env']);
+  for (const value of Object.values(scripts as Record<string, unknown>)) {
+    if (typeof value !== 'string') continue;
+    for (const segment of value.split(/&&|\|\||;|\|/)) {
+      const tokens = segment.trim().split(/\s+/).filter(Boolean);
+      let i = 0;
+      // Skip env assignments, wrappers (and a wrapper's own `--` or flags), and `yarn`/`pnpm` runners.
+      while (i < tokens.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i]) || WRAPPERS.has(tokens[i]) || tokens[i] === 'yarn' || tokens[i] === 'pnpm' || tokens[i] === '--' || tokens[i].startsWith('-'))) i++;
+      if (i < tokens.length) out.add(tokens[i]);
+    }
+  }
+  return out;
+}
+
 /** Reduce an import specifier to its package name: '@scope/x/sub' → '@scope/x', 'x/sub' → 'x'. */
 function packageNameOf(spec: string): string {
   if (spec.startsWith('@')) return spec.split('/').slice(0, 2).join('/');
@@ -380,11 +408,13 @@ export function findUnusedDependencies(files: Record<string, string>): UnusedDep
   const pkgRaw = files['package.json'];
   if (typeof pkgRaw !== 'string') return [];
   let declared: string[];
+  let commands: Set<string>;
   try {
     const pkg = JSON.parse(pkgRaw);
     const deps = pkg && typeof pkg === 'object' ? pkg.dependencies : null;
     if (!deps || typeof deps !== 'object') return [];
     declared = Object.keys(deps);
+    commands = scriptCommands(pkg);
   } catch {
     return []; // malformed package.json — say nothing rather than mislead
   }
@@ -415,6 +445,7 @@ export function findUnusedDependencies(files: Record<string, string>): UnusedDep
     if (IMPLICIT_USE_DEPS.has(name)) continue;
     if (provided.has(name)) continue; // auto-provided by the meta-framework (Nuxt/SvelteKit) — not unused
     if (name.startsWith('@types/')) continue; // type-only, never statically imported
+    if (commands.has(name)) continue; // run by the project's own scripts (`next dev`, `nodemon …`)
     if (!importedPkgs.has(name)) unused.push({ name });
   }
   return unused;

@@ -81,6 +81,47 @@ export interface SnapshotTaken {
    * genuine content change (the app's).
    */
   filePaths?: string[];
+  /**
+   * One short hash PER FILE at copy time (over `identitySource`, so the bridge never counts).
+   *
+   * 🔴 WHY (autopsy 2d076ce8, 2026-09-30): the paths above told a set mismatch from a content change,
+   * and then stopped. That build's line read *"Both sides hold the same 21 file(s), so a file's CONTENT
+   * changed"* — and nothing on the timeline wrote after the copy (the only later actor was a
+   * suggest-only reviewer that read five files). With the whole-tree hash alone the report could not
+   * say WHICH file differed, nor whether the SANDBOX had moved or the SAVED set simply held something
+   * the sandbox never ran. Those are different bugs: the first is a late write, the second means the
+   * durable app is not the app that was verified. Per-file hashes answer both on the next report.
+   * NOT PERSISTED — the whole-tree `filesHash` is still what decides.
+   */
+  fileHashes?: Record<string, string>;
+}
+
+/**
+ * A short content hash for every file, over the SAME source an identity is taken over. PURE.
+ * 16 hex chars is diagnostic, not cryptographic: it names which file differs, the tree hash decides.
+ */
+export function fileContentHashes(files: Record<string, string> | null | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [path, content] of Object.entries(identitySource(files))) {
+    out[path] = crypto.createHash('sha256').update(String(content ?? '')).digest('hex').slice(0, 16);
+  }
+  return out;
+}
+
+/**
+ * Files the build SAVED with content the sandbox does not hold. PURE.
+ *
+ * The durable save starts from a sandbox scan and then lets the build's captured writes win. A path
+ * where the two disagree is a write that was RECORDED one way and is running another way — so the
+ * project a restore brings back is not the project the browser checks proved. Only paths present on
+ * both sides are compared: a path the scan could not read is "not measured", never a divergence.
+ */
+export function savedDivergesFromSandbox(
+  sandbox: Record<string, string> | null | undefined,
+  saved: Record<string, string> | null | undefined,
+): string[] {
+  if (!sandbox || !saved) return [];
+  return Object.keys(saved).filter((p) => p in sandbox && sandbox[p] !== saved[p]).sort();
 }
 
 export type SnapshotConfirmation =
@@ -101,14 +142,18 @@ export type SnapshotConfirmation =
  * was taken over 2 path(s) that were not saved" are different bugs with different owners, and the
  * old sentence asserted the first while the second was never ruled out.
  */
-function staleDetail(takenPaths: string[] | undefined, persistedPaths: string[] | undefined): string {
+function staleDetail(
+  takenPaths: string[] | undefined,
+  persistedPaths: string[] | undefined,
+  hashes: { taken?: Record<string, string>; persisted?: Record<string, string>; sandbox?: Record<string, string> } = {},
+): string {
   if (!takenPaths || !persistedPaths) return '';
   const taken = new Set(takenPaths);
   const saved = new Set(persistedPaths);
   const onlyInCopy = takenPaths.filter((p) => !saved.has(p));
   const onlyInSave = persistedPaths.filter((p) => !taken.has(p));
   if (onlyInCopy.length === 0 && onlyInSave.length === 0) {
-    return ` Both sides hold the same ${taken.size} file(s), so a file's CONTENT changed between them.`;
+    return ` Both sides hold the same ${taken.size} file(s), so a file's CONTENT changed between them.${contentDetail(hashes)}`;
   }
   const bits: string[] = [];
   // Named, bounded — a report line is read by a person, and forty paths is not a sentence.
@@ -117,7 +162,37 @@ function staleDetail(takenPaths: string[] | undefined, persistedPaths: string[] 
   return ` The two sides cover DIFFERENT files — ${bits.join('; ')} — so this is a file-set mismatch, not necessarily a late write.`;
 }
 
-export function snapshotConfirmation(i: { taken: SnapshotTaken | null | undefined; persistedHash: string; persistedPaths?: string[] }): SnapshotConfirmation {
+/**
+ * WHICH files changed, and WHERE the change happened. Empty when the per-file hashes are not all known.
+ *
+ * `sandbox` is the final scan BEFORE the build's captured writes were laid over it. So for a path
+ * whose saved content differs from the copy: sandbox ≠ copy ⇒ the SANDBOX moved after the copy (a
+ * late write); sandbox = copy ⇒ the sandbox never moved, and the SAVED content is what differs (a
+ * captured write that is not what the sandbox ran).
+ */
+function contentDetail(h: { taken?: Record<string, string>; persisted?: Record<string, string>; sandbox?: Record<string, string> }): string {
+  if (!h.taken || !h.persisted) return '';
+  const changed = Object.keys(h.persisted).filter((p) => p in h.taken! && h.taken![p] !== h.persisted![p]).sort();
+  if (changed.length === 0) return '';
+  const named = `${changed.slice(0, 6).join(', ')}${changed.length > 6 ? ` and ${changed.length - 6} more` : ''}`;
+  if (!h.sandbox) return ` Changed: ${named}.`;
+  const moved = changed.filter((p) => h.sandbox![p] !== h.taken![p]);
+  const divergent = changed.filter((p) => h.sandbox![p] === h.taken![p]);
+  const bits: string[] = [];
+  if (moved.length) bits.push(`${moved.length} changed in the sandbox AFTER the copy was taken (${moved.slice(0, 6).join(', ')})`);
+  if (divergent.length) bits.push(`${divergent.length} were SAVED with content the sandbox never ran (${divergent.slice(0, 6).join(', ')}) — the saved project is not the one the copy was built from`);
+  return ` Changed: ${named} — ${bits.join('; ')}.`;
+}
+
+export function snapshotConfirmation(i: {
+  taken: SnapshotTaken | null | undefined;
+  persistedHash: string;
+  persistedPaths?: string[];
+  /** Per-file hashes of what was persisted (`fileContentHashes`). */
+  persistedFileHashes?: Record<string, string>;
+  /** Per-file hashes of the final sandbox scan, BEFORE captured writes were laid over it. */
+  sandboxFileHashes?: Record<string, string>;
+}): SnapshotConfirmation {
   if (!i?.taken || typeof i.taken.url !== 'string' || !/^https?:\/\//i.test(i.taken.url)) {
     return { action: 'none', reason: 'No copy was taken this build.' };
   }
@@ -125,7 +200,7 @@ export function snapshotConfirmation(i: { taken: SnapshotTaken | null | undefine
     return { action: 'stale', reason: 'A copy was taken, but its source could not be read at the time, so it cannot be proven to match the app that was saved. It stays a fallback for an expired machine only.' };
   }
   if (i.taken.filesHash !== i.persistedHash) {
-    return { action: 'stale', reason: `The copy does not match what was saved, so it is not this app. It stays a fallback for an expired machine only; the next build takes a fresh one.${staleDetail(i.taken.filePaths, i.persistedPaths)}` };
+    return { action: 'stale', reason: `The copy does not match what was saved, so it is not this app. It stays a fallback for an expired machine only; the next build takes a fresh one.${staleDetail(i.taken.filePaths, i.persistedPaths, { taken: i.taken.fileHashes, persisted: i.persistedFileHashes, sandbox: i.sandboxFileHashes })}` };
   }
   return { action: 'restamp', reason: 'The saved copy was built from exactly the files that were persisted — it is this app, and the preview can show it in place of a running machine.' };
 }

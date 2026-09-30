@@ -22602,6 +22602,33 @@ async function noteBuildOutcome(
             } catch { /* the guard must never cost a user their save — fall through to the plain save */ }
           }
           const finalSave = saved ? Promise.resolve() : saveWorkspaceFiles(workspaceId, toSave).catch(() => {});
+          // THE COPY FOLLOWS EVERY PASS THAT CHANGED THE APP, NOT ONE (autopsy 876afca9, 2026-09-30).
+          // The copy is taken right after the production build, and four passes may still write after it —
+          // the vaccine repair, the runtime auto-fix, the reviewer's repair and the GreenGuard restore. Only
+          // the reviewer's repair re-took it (autopsy 972acde5), so in the calculator build the auto-fix
+          // deleted a file and the user's free preview stayed on the version before it. Asked HERE, once,
+          // of what is about to be persisted, so a pass added later cannot forget it. Bounded and single:
+          // a copy that cannot be re-taken stays what it was, and the line below still says it is stale.
+          if (snapshotTaken && refreshPreviewCopy && !abort.signal.aborted) {
+            const before = snapshotConfirmation({
+              taken: snapshotTaken,
+              persistedHash: workspaceContentHash(identitySource(persisted)),
+              persistedPaths: Object.keys(persisted ?? {}),
+            });
+            if (before.action !== 'restamp') {
+              armAdvisoryCap(PREVIEW_COPY_REFRESH_MS + 20_000);
+              const refreshed = await withTimeout(refreshPreviewCopy(), PREVIEW_COPY_REFRESH_MS, 'snapshot-refresh-final').catch(() => false);
+              try {
+                buildDiag.record({
+                  phase: 'readiness', severity: 'info', autoResolved: true,
+                  code: refreshed ? 'PREVIEW_SNAPSHOT_REFRESHED' : 'PREVIEW_SNAPSHOT_NOT_REFRESHED',
+                  message: refreshed
+                    ? 'A pass changed the app after its preview copy was taken, so the app was rebuilt and a fresh copy taken before the final save.'
+                    : 'A pass changed the app after its preview copy was taken, and a fresh copy could not be made in time — the earlier copy stays a fallback only.',
+                });
+              } catch { /* best-effort */ }
+            }
+          }
           // THE COPY IS THE APP — AND ONLY NOW CAN THAT BE SAID (snapshotIdentity.ts). The save above
           // moves the workspace's durable stamp PAST the copy, so every clock-based "nothing written
           // since" rule would call the copy stale from here on — which is exactly what silently killed

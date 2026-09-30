@@ -66,19 +66,19 @@ describe('ViteReactProvider scaffold — resolves baseUrl-"src" imports (Kanban 
   });
 
   it('Vite mirrors the tsconfig paths so resolution holds at build/runtime, not only in tsc', () => {
-    expect(files['vite.config.ts']).toContain("import tsconfigPaths from 'vite-tsconfig-paths'");
-    expect(files['vite.config.ts']).toMatch(/plugins:\s*\[react\(\),\s*tsconfigPaths\(\)\]/);
-    expect(JSON.parse(files['package.json']).devDependencies['vite-tsconfig-paths']).toBeTruthy();
+    // Natively since 2026-09-30 (autopsy 728a402d): Vite 8's own option, no deprecated plugin.
+    expect(files['vite.config.ts']).toContain('resolve: { tsconfigPaths: true }');
+    expect(files['vite.config.ts']).not.toContain('vite-tsconfig-paths');
+    expect(JSON.parse(files['package.json']).devDependencies['vite-tsconfig-paths']).toBeUndefined();
   });
 
   // ShopKhata autopsy 2026-07-17: without type:module Vite require()s the bundled config, and the
   // ESM-only vite-tsconfig-paths crashes the dev server on BOOT — the app never gets a preview.
   // The plugin version is exact-pinned so a fresh npm install can't drift onto a build the baked
   // sandbox never tested (the ^5.1.4 range is how the crash arrived).
-  it('package.json carries the LOAD-BEARING type:module + an exact-pinned tsconfig-paths plugin', () => {
+  it('package.json carries the LOAD-BEARING type:module (kept for the configs apps already have)', () => {
     const pkg = JSON.parse(files['package.json']);
     expect(pkg.type).toBe('module');
-    expect(pkg.devDependencies['vite-tsconfig-paths']).toBe('5.1.4');
   });
 });
 

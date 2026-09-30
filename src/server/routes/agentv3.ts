@@ -358,7 +358,7 @@ import { decideCancelledBuildBill } from '../AgentV3/cancelledBuildBilling';
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
-import { projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { shellModuleFor, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
@@ -383,6 +383,7 @@ import {
 import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { withStopSignal } from '../AgentV3/stopSignal';
+import { withAnswerNotDeliberation } from '../AgentV3/answerNotDeliberate';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { redactPII, redactEventForUser } from '../AgentV3/SecretRedactor';
@@ -519,7 +520,7 @@ import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrches
 import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
-import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable } from '../AgentV3/ReviewerAgent';
+import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline } from '../AgentV3/ReviewerAgent';
 import { refuteReviewByEvidence, missingClassClaim } from '../AgentV3/reviewEvidence';
 import { SALVAGE_HANDOFF_MARKER, HANDOFF_NOTE_FIX_LINE } from '../AgentV3/handoffRule';
 import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
@@ -556,7 +557,8 @@ import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } 
 import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
-import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
+import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
+import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
 import { attachUserActionRecorder } from '../AgentV3/userActionRecorder';
@@ -11849,7 +11851,11 @@ async function noteBuildOutcome(
     // The latest live preview URL the build published — used by the post-build PREVIEW SELF-CHECK to
     // actually open the running app in a browser and verify it rendered.
     let lastPreviewUrl = '';
-    events.subscribe((e) => { if ((e as { type?: string }).type === 'preview') { const u = (e as { url?: unknown }).url; if (typeof u === 'string' && u) lastPreviewUrl = u; } }, false);
+    // Set when this turn builds a Project Mode module that a LATER module assembles (ProjectPlan.ts
+    // `shellModuleFor`). There is no app to prove yet, so a preview published anyway is not adopted as
+    // this build's preview — every proof below is gated on `lastPreviewUrl` (autopsy 6a5fb04b).
+    let moduleAwaitsShell: string | null = null;
+    events.subscribe((e) => { if ((e as { type?: string }).type === 'preview' && !moduleAwaitsShell) { const u = (e as { url?: unknown }).url; if (typeof u === 'string' && u) lastPreviewUrl = u; } }, false);
     // Every chat line the user has already SEEN — so the end of a successful build can show only what
     // the platform added to the reply (summaryAdditions.ts). Short status blips are not kept.
     const narratedTexts: string[] = [];
@@ -13181,7 +13187,9 @@ async function noteBuildOutcome(
       // 11-feature ERP scored 63 (complex) and still made 83 calls on the cheapest flash rung; KIMI
       // sat one rung away for 26 minutes. "Starting me bhi" means THIS runner too: the roadmap
       // planner, the project planner and the fast lane's manifest are the first calls a build makes.
-      const makeFastTextRunner = (onUsed?: (used: string) => void): TurnRunner => withStopSignal(buildTurnRunner({
+      // Both text-runner factories default every call to `thinking: false` — see answerNotDeliberate.ts
+      // (autopsy 6a5fb04b: the roadmap planner reasoned its whole 4,000-token allowance away).
+      const makeFastTextRunner = (onUsed?: (used: string) => void): TurnRunner => withAnswerNotDeliberation(withStopSignal(buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
         complex: buildIsComplex, // a complex app opens past the flash rung — see the note above
@@ -13198,11 +13206,11 @@ async function noteBuildOutcome(
         onProviderError: recordProviderFallback,
         onProviderBenched: recordProviderBenched,
         onAttemptWasted: recordAttemptWasted,
-      }), abort.signal);
+      }), abort.signal));
       // The PLANNERS' runner — roadmap, blueprint, Project Mode. Same memory and callbacks as the fast
       // text runner above; only the ladder differs (see `plan` in buildTurnRunner). Repairs stay on the
       // build ladder: they rewrite code, which is the work that ladder is ordered for.
-      const makePlanTextRunner = (onUsed?: (used: string) => void): TurnRunner => withStopSignal(buildTurnRunner({
+      const makePlanTextRunner = (onUsed?: (used: string) => void): TurnRunner => withAnswerNotDeliberation(withStopSignal(buildTurnRunner({
         tier: powerLevelReqEffective,
         noClaude: noClaudeBuild,
         plan: true,
@@ -13213,7 +13221,7 @@ async function noteBuildOutcome(
         onProviderError: recordProviderFallback,
         onProviderBenched: recordProviderBenched,
         onAttemptWasted: recordAttemptWasted,
-      }), abort.signal);
+      }), abort.signal));
       const client = buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
@@ -13298,6 +13306,8 @@ async function noteBuildOutcome(
       // Fully wrapped: a small app, an edit, or ANY failure ⇒ the build runs exactly as today. Billed like
       // every other planner call (blueprintUsage + buildUsage) when it fires, and only on large-app builds.
       let megaRoadmapActive: MegaRoadmap | null = null;
+      /** The milestone's brief when a roadmap step is being built — what the feature checks grade. */
+      let milestoneRequest: string | null = null;
       if (envFlag('AGENTV3_MEGA_ROADMAP', true) && intent === 'new_build' && !isEditMode) {
         try {
           const scope = analyzeAppScope(planning.text);
@@ -14460,7 +14470,7 @@ async function noteBuildOutcome(
             autoResolved: true,
           });
         } catch { /* best-effort */ }
-      });
+      }, workspaceId); // THIS build's workspace only — see greenFreeze.ts (autopsy dfd81a3a)
       /**
        * IN-BUILD GREEN (inBuildGreen.ts): counts every captured write so a proof attempt can tell
        * whether the tree it collected is the tree the browser rendered. Compared before the browser
@@ -14651,7 +14661,7 @@ async function noteBuildOutcome(
       const postGreenWrites: PostGreenWrite[] = [];
       disposeWriteObserver = setWriteObserver(({ path, pass }) => {
         if (inBuildGreenAt > 0 && postGreenWrites.length < 2000) postGreenWrites.push({ path, pass, at: Date.now() });
-      });
+      }, workspaceId);
 
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework,
         // AI Diagnosis Bundle #3 — capture every sandbox command's raw logs into the build report.
@@ -15921,9 +15931,18 @@ async function noteBuildOutcome(
       // The original `prompt` is untouched (language detection, telemetry and scope all read it), so only
       // WHAT gets built changes, never the user's identity/intent signals. `megaRoadmapActive` is only ever
       // set when both mega-roadmap flags are on and a guardrailed roadmap exists (see the block above).
+      // Setup (and its asset restore) is done: what is newer than this marker, the build itself made.
+      // `buildAssets.ts` reads it at the save so a regenerated icon replaces the stored one.
+      if (expectsArtifacts && !isImportTurn) {
+        try { await withTimeout(actuator.runCommand(workspaceId, MARK_ASSET_BASELINE_COMMAND), 5_000, 'asset-baseline'); } catch { /* no marker ⇒ only new assets are saved */ }
+      }
       if (megaRoadmapActive && megaRoadmapActive.steps.length > 0) {
         const step1 = megaRoadmapActive.steps[0];
         const total = megaRoadmapActive.steps.length;
+        // The build is JUDGED on what it is ASKED to build (autopsy 728a402d): the milestone's brief,
+        // not the whole message whose later parts this build is told not to build.
+        milestoneRequest = step1.buildPrompt;
+        dispatcher.setCoverageRequest(step1.buildPrompt);
         buildPrompt = `${step1.buildPrompt}\n\n(This is milestone 1 of ${total} for a larger app the user is building step by step: "${step1.title}". Build THIS milestone as a complete, standalone, fully-working and polished app on its own — do NOT stub the later milestones, and do NOT try to build them now. Later milestones will be added in their own separate builds.)`;
         // 🔴 THE USER'S OWN RULES SURVIVE THE SWAP (build 681bd91b). This line REPLACES the user's words
         // with the planner's, so "no React, one single file, no fake responses, no placeholder buttons"
@@ -16061,6 +16080,9 @@ async function noteBuildOutcome(
       // markup as every other v5.0 call).
       let projectPlanRef: ProjectPlan | null = null;
       let projectModuleRef: ProjectModule | null = null;
+      // A plan left paused while this turn builds normally — retired at the end if it never built
+      // anything and this turn delivered a working app instead (retireUnbuiltPlan, autopsy dfd81a3a).
+      let pausedPlanRef: ProjectPlan | null = null;
       // Mutually exclusive with the mega-app roadmap (Phase 3): both are "big app" strategies and must
       // never both steer one build. When the roadmap owns this build (step-1 target already set), SPM
       // project mode stays out.
@@ -16205,6 +16227,20 @@ async function noteBuildOutcome(
               projectPlanRef = pPlan;
               projectModuleRef = pPlan.modules.find((m) => m.id === nextMod.id) ?? nextMod;
               buildPrompt = `${moduleBuildContext(pPlan, projectModuleRef)}\n\n---\n\nUser's message this turn:\n${buildPrompt}`;
+              // WHO ASSEMBLES THE APP? A module that does not own the entry leaves the starter page in
+              // place by design, so this turn is judged on its own files, not as a whole app (autopsy
+              // 6a5fb04b: a config module wrote its files, typechecked, and was failed for "Hello World").
+              const shell = shellModuleFor(pPlan, projectModuleRef);
+              if (shell) {
+                moduleAwaitsShell = shell.name;
+                dispatcher.setStarterExpected(true);
+                try {
+                  buildDiag.record({
+                    phase: 'plan', severity: 'info', code: 'PROJECT_MODULE_AWAITS_SHELL', autoResolved: true,
+                    message: `Module "${projectModuleRef.name}" does not own the app's entry; "${shell.name}" assembles the app in a later turn. This turn is judged on its own files and the typecheck — no starter verdict, no preview.`,
+                  });
+                } catch { /* diagnostics best-effort */ }
+              }
               // GA-7 — surface the coordinator digest (milestone progress + current role) alongside the
               // plain progress line, closing the previously built-but-unwired coordinatorDigest export.
               const digest = coordinatorDigest(pPlan);
@@ -16214,6 +16250,7 @@ async function noteBuildOutcome(
               if (reason) events.emit({ type: 'narration', agent: 'architect', text: `⚠️ Project plan is blocked: ${reason}`, ts: Date.now() });
             }
           } else if (pPlan && !planComplete(pPlan) && planPreExisted) {
+            pausedPlanRef = pPlan;
             events.emit({ type: 'narration', agent: 'architect', text: `ℹ️ Handling this message normally (project plan stays paused at ${planProgressLine(pPlan)}). Say "continue" to resume the next module.`, ts: Date.now() });
           }
         } catch (err) {
@@ -18698,6 +18735,10 @@ async function noteBuildOutcome(
                       : `Design repair improved ${design.findings.length - after.findings.length} of ${design.findings.length} page(s); ${after.findings.length} still fall short.`,
                     autoResolved: after.ok,
                   });
+                  // The same check, over the same files, looked again and found nothing: the page
+                  // findings it raised describe pages that are now fine (autopsy 728a402d — they stayed
+                  // "unresolved" beside DESIGN_HEALED and were named in the build's root-cause line).
+                  if (designRepair && after.ok) { try { buildDiag.resolveOnRecheck('DESIGN_PAGE_INCONSISTENT'); } catch { /* best-effort */ } }
                   if (a11yAsk) {
                     // The earlier ACCESSIBILITY line describes the app BEFORE this repair; say what is
                     // true now, either way, rather than leave a fixed finding standing or a failed one hidden.
@@ -19309,6 +19350,7 @@ async function noteBuildOutcome(
           appFiles: presentFiles.length,
           hasPackageJson: presentFiles.some((f) => /(^|\/)package\.json$/.test(String(f))),
           remainingMs: remainingForProof,
+          awaitingShell: moduleAwaitsShell,
         });
         if (proofDecision.attempt) {
           const budget = platformPreviewBudgetMs(remainingForProof, previewWakeBudgetMs());
@@ -19964,7 +20006,7 @@ async function noteBuildOutcome(
             // FEATURE_COVERAGE finding in the report (present vs missing); it NEVER blocks a build (a
             // heuristic must never false-fail a working app). Auto-fixing the gaps is the next slice.
             try {
-              let coverage = checkFeaturePresence(prompt, html, declinedPresenceFeatures(featureConfirmation));
+              let coverage = checkFeaturePresence(milestoneRequest ?? prompt, html, declinedPresenceFeatures(featureConfirmation));
               // APP HEALTH CULTURE slice 2 (Phase 1b, opt-in AGENTV3_FEATURE_HEAL=on): the app renders
               // but a REQUESTED control is missing → run ONE bounded heal pass that adds the missing UI,
               // then re-open the running app and re-probe (only a control now in the live DOM counts).
@@ -20011,7 +20053,7 @@ async function noteBuildOutcome(
                     if (vr.kept && healResult?.ok) {
                       result = healResult as typeof result;
                       if (afterHtml) {
-                        const afterCoverage = checkFeaturePresence(prompt, afterHtml, declinedPresenceFeatures(featureConfirmation));
+                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? prompt, afterHtml, declinedPresenceFeatures(featureConfirmation));
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
                       }
                     }
@@ -20021,7 +20063,7 @@ async function noteBuildOutcome(
                       result = healed;
                       try {
                         const after = (await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl')).html;
-                        const afterCoverage = checkFeaturePresence(prompt, after, declinedPresenceFeatures(featureConfirmation));
+                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? prompt, after, declinedPresenceFeatures(featureConfirmation));
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
                       } catch { /* re-open best-effort — keep the pre-heal coverage */ }
                     }
@@ -20519,7 +20561,7 @@ async function noteBuildOutcome(
       // `PREVIEW_ERROR` already exists, but it fires only when a preview ATTEMPT reports an error. A
       // preview that was never produced at all raised nothing. This is that gap, and it is deliberately
       // a WARNING on the build itself rather than a note buried in another check's explanation.
-      if (result.ok && !lastPreviewUrl && !isImportTurn && !abort.signal.aborted) {
+      if (result.ok && !lastPreviewUrl && !isImportTurn && !abort.signal.aborted && !moduleAwaitsShell) {
         try {
           buildDiag.record({
             phase: 'preview', severity: 'warning', code: 'PREVIEW_NEVER_CAME_UP',
@@ -21641,7 +21683,16 @@ async function noteBuildOutcome(
         reviewFastlaneForced: envFlag('AGENTV3_REVIEW_FASTLANE'),
         startTierSonnet: analysis?.startTier === 'sonnet',
       });
-      if (result.ok && reviewHeadroomOk && reviewerAllowed) {
+      // A Project Mode module that a later module assembles is not reviewed as an app: the reviewer would
+      // read a half-built project and report the starter page as the product. The shell turn reviews the
+      // assembled app (autopsy 6a5fb04b).
+      if (result.ok && reviewHeadroomOk && reviewerAllowed && moduleAwaitsShell) {
+        try {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_DEFERRED_TO_SHELL', autoResolved: true,
+            message: `Post-build review deferred: this turn built one project module, and the app is reviewed once "${moduleAwaitsShell}" assembles it.` });
+        } catch { /* diagnostics best-effort */ }
+      }
+      if (result.ok && reviewHeadroomOk && reviewerAllowed && !moduleAwaitsShell) {
         try {
           let rFiles = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
           // The REAL project size, captured before the fallback below can shrink rFiles to just this
@@ -21729,8 +21780,13 @@ async function noteBuildOutcome(
           // descendant, so the sub-agent's calls carry it without a line of their own; and because it
           // survives `raceTimeout` giving up, a reviewer we WALKED AWAY FROM keeps tagging its turns.
           // Nothing here decides whether to charge — see the REVIEW_INCOMPLETE branch below.
+          const reviewChanged = [...writtenFiles.keys()].filter((p) => !finishingPaths.has(p));
           const reviewPromise = runInBillingPhase(PHASE_POST_BUILD_REVIEW, async () => reviewBuild({
-              userRequest: prompt,
+              // A roadmap milestone is reviewed against its own brief (autopsy 728a402d), never against
+              // the later milestones this build was told not to build.
+              userRequest: milestoneRequest ?? prompt,
+              // A suggest-only review is handed the changed code in full, so it answers in one call.
+              ...(reviewPlan.mode === 'suggest' ? { inlineFiles: leanReviewInline(reviewChanged, (p) => writtenFiles.get(p)) } : {}),
               fileTree: rFiles,
               fileSample: rSample,
               spawn: reviewSpawn,
@@ -21741,7 +21797,7 @@ async function noteBuildOutcome(
               // …and not the files the platform's own finishing passes wrote (skeletons, PWA files,
               // the architecture note): reviewing NavBharatAI's scaffolding spends the user's money and
               // can send a repair pass after our own files.
-              changedFiles: [...writtenFiles.keys()].filter((p) => !finishingPaths.has(p)),
+              changedFiles: reviewChanged,
           }));
           try {
             review = await raceTimeout(reviewPromise, reviewBudget, 'post-build-review');
@@ -22312,6 +22368,18 @@ async function noteBuildOutcome(
           }
         } catch { /* module settle is best-effort — the plan self-heals on the next turn */ }
       }
+      // A PAUSED PLAN THAT NEVER BUILT ANYTHING IS RETIRED ONCE THE APP EXISTS ANOTHER WAY (autopsy
+      // dfd81a3a). The voice-assistant plan stopped at "0/12 — 1 failed"; the user's next message built the
+      // whole app directly, and the plan stayed saved, so a later "continue" would have re-run the config
+      // module on top of a finished app. Only a plan with NO done module is retired, and only after a real
+      // browser proved this turn's app — a plan that has built something is never touched.
+      if (pausedPlanRef && !projectModuleRef && result.ok && runProof().proven && retireUnbuiltPlan(pausedPlanRef)) {
+        try {
+          await deleteProjectPlan(workspaceId);
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'PROJECT_PLAN_RETIRED', autoResolved: true,
+            message: `The paused project plan (${planProgressLine(pausedPlanRef)}) had built nothing, and this turn delivered a working app directly — the plan was retired so a later "continue" cannot rebuild over it.` });
+        } catch { /* best-effort — a plan left in place is today's behaviour */ }
+      }
 
       // P-AI.5 — Personalization: learn this user's revealed stack from the SUCCESSFUL build.
       // Inferred from the files that actually shipped (framework + deps + code) and the prompt —
@@ -22588,6 +22656,19 @@ async function noteBuildOutcome(
             } catch { /* the guard must never cost a user their save — fall through to the plain save */ }
           }
           const finalSave = saved ? Promise.resolve() : saveWorkspaceFiles(workspaceId, toSave).catch(() => {});
+          // THE BINARY HALF OF THE SAME SAVE (autopsy 728a402d). The text store skips binaries, so an icon
+          // or image a build made with a command lived only as long as this sandbox. Only when the turn's
+          // own files are what was kept — a restored turn's pictures belong to the attempt, not the app.
+          if (persisted === toSave && expectsArtifacts && !isImportTurn) {
+            try {
+              const assetsOutcome = await withTimeout(
+                persistBuildAssets(actuator as BuildAssetSource, workspaceId, { heldPaths: listWorkspaceAssetPaths, save: saveWorkspaceAssets }),
+                20_000, 'build-assets',
+              );
+              const assetsNote = buildAssetsNote(assetsOutcome);
+              if (assetsNote) buildDiag.record({ phase: 'build', severity: 'info', code: 'BUILD_ASSETS_SAVED', message: assetsNote, autoResolved: true });
+            } catch { /* best-effort — the text files are saved either way */ }
+          }
           // THE COPY IS THE APP — AND ONLY NOW CAN THAT BE SAID (snapshotIdentity.ts). The save above
           // moves the workspace's durable stamp PAST the copy, so every clock-based "nothing written
           // since" rule would call the copy stale from here on — which is exactly what silently killed

@@ -283,6 +283,68 @@ export interface ReviewBuildOpts {
    * it with a hard step cap and a small time budget. `full` (the default) is today's review, unchanged.
    */
   mode?: 'full' | 'suggest';
+  /**
+   * The changed source files IN FULL, for a suggest-only review (see `leanReviewInline`). Present ⇒ the
+   * instruction carries them and tells the reviewer to answer from them rather than read them again.
+   */
+  inlineFiles?: LeanReviewInline;
+}
+
+/**
+ * 🔴 A LEAN REVIEW MUST BE HANDED THE CODE IT IS ASKED TO JUDGE (autopsy 728a402d, 2026-09-30).
+ *
+ * The suggest-only review has a 12-step cap and a 45 s budget, and it had never once returned a
+ * verdict on a real app: it spent its steps reading files one tool call at a time and timed out. The
+ * "sample" it was handed was the FIRST FIVE paths of the listing, 500 characters each — on that
+ * build `.gitignore`, `package.json`, `vite.config.ts`, `tsconfig.json`, `tsconfig.build.json`. Not
+ * one line of the app. So the files that changed are now put in the instruction in full, bounded, and
+ * the reviewer answers in one call instead of eleven. Fewer tokens, too: one call carrying the code
+ * instead of eleven each re-sending a growing transcript.
+ */
+export interface LeanReviewInline {
+  files: { path: string; content: string }[];
+  /** Changed source files that did not fit the bound — named, so the reviewer can read one it needs. */
+  omitted: string[];
+}
+
+const LEAN_SOURCE = /\.(tsx?|jsx?|mjs|cjs|vue|svelte|css|scss|html)$/i;
+const LEAN_SKIP = /(^|\/)(node_modules|dist|build|e2e|tests?|__tests__)\/|\.(test|spec)\.[jt]sx?$|\.d\.ts$|(^|\/)(vite|vitest|playwright|tailwind|postcss|eslint)\.config\.[cm]?[jt]s$/i;
+/** Total characters of code a lean review is handed, and the most any one file may take of it. */
+export const LEAN_REVIEW_INLINE_CHARS = 60_000;
+export const LEAN_REVIEW_FILE_CHARS = 16_000;
+
+/** The app's own entry and screens first, then the rest — what a reviewer reads first by hand. */
+function leanPriority(path: string): number {
+  if (/(^|\/)src\/App\.[jt]sx?$/.test(path)) return 0;
+  if (/(^|\/)(pages|screens|routes|views)\//.test(path)) return 1;
+  if (/(^|\/)(components|hooks|lib|store|context|services|utils|data)\//.test(path)) return 2;
+  if (/\.css$|\.html$/i.test(path)) return 4;
+  return 3;
+}
+
+/**
+ * Pick the changed source files a lean review is handed in full, bounded. PURE — the caller supplies
+ * contents (the freshest copy it holds).
+ */
+export function leanReviewInline(
+  changed: readonly string[],
+  contentOf: (path: string) => string | undefined,
+  maxChars = LEAN_REVIEW_INLINE_CHARS,
+): LeanReviewInline {
+  const paths = [...new Set(changed)]
+    .filter((p) => LEAN_SOURCE.test(p) && !LEAN_SKIP.test(p))
+    .sort((a, b) => leanPriority(a) - leanPriority(b) || a.localeCompare(b));
+  const files: { path: string; content: string }[] = [];
+  const omitted: string[] = [];
+  let used = 0;
+  for (const path of paths) {
+    const content = contentOf(path);
+    if (typeof content !== 'string' || !content.trim()) continue;
+    if (content.length > LEAN_REVIEW_FILE_CHARS || used + content.length > maxChars) { omitted.push(path); continue; }
+    files.push({ path, content });
+    used += content.length;
+  }
+  return { files, omitted };
 }
 
 /**
@@ -343,6 +405,16 @@ export function reviewerInstruction(opts: Omit<ReviewBuildOpts, 'spawn'>): strin
     '',
     'End with: "Score: N/100" (where N = your quality assessment).',
     'If everything looks good, just write: [PASS] App looks complete. Score: 90',
+    ...(opts.mode === 'suggest' && opts.inlineFiles && opts.inlineFiles.files.length > 0 ? [
+      '',
+      `THE FILES THAT CHANGED, IN FULL (${opts.inlineFiles.files.length}). They are complete and current — review them`,
+      'from here and answer directly. Do NOT read any of these again with a tool.',
+      ...opts.inlineFiles.files.map(({ path, content }) => `\n=== ${path} ===\n${content}`),
+      ...(opts.inlineFiles.omitted.length > 0 ? [
+        '',
+        `Changed but not included (too large for this review): ${opts.inlineFiles.omitted.join(', ')} — read one only if a finding depends on it.`,
+      ] : []),
+    ] : []),
     ...(opts.mode === 'suggest' ? [
       '',
       'THIS APP IS PROVEN TO RENDER IN A REAL BROWSER, AND THIS REVIEW IS SUGGEST-ONLY: nothing you',

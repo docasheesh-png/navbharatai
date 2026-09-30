@@ -1824,7 +1824,7 @@ export function createMotorcycle(options: MotorcycleOptions = {}): Motorcycle {
   const engineMat = new THREE.MeshStandardMaterial({ color: 0x3b4046, roughness: 0.45, metalness: 0.9 });
   const matte = new THREE.MeshStandardMaterial({ color: 0x1b1e22, roughness: 0.72, metalness: 0.25 });
   const tyreMat = shared('fabric', d, 0x121418, 2);
-  const seatMat = shared('cloth', d, 0x15171a, 2);
+  const seatMat = shared('fabric', d, 0x15171a, 2);
   const seg = d === 'real' ? 22 : 10;
 
   /** One wheel, as a GROUP so it can be rolled and steered independently of the frame. */

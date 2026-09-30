@@ -325,6 +325,7 @@ declare module 'lucide-react' {
   export const LayoutGrid: Icon;
   export const List: Icon;
   export const MoreHorizontal: Icon;
+  export const Reply: Icon;
   export const Move: Icon;
   export const Navigation: Icon;
   export const Paperclip: Icon;

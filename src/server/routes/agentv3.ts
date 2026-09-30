@@ -360,6 +360,7 @@ import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { createLaneWriteFence } from '../AgentV3/laneWriteFence';
 import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
+import { entryShadowRepairHint } from '../AgentV3/entryShadow';
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceEvidence, featurePresenceRepairPrompt, featureHealEnabled, isSignInWall } from '../AgentV3/FeaturePresence';
 import { adoptHealResult } from '../AgentV3/healResult';
 import { signInExploreEnabled, signInScript, signInCandidates, parseSignInOutput, signInReportLine, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
@@ -20120,6 +20121,9 @@ async function noteBuildOutcome(
           // server, so it can never nudge a correct app. The loop's next iteration re-browses and re-checks
           // `rendered`, so this needs no separate revert net — an unfixed preview is reported honestly below.
           let repairPrompt = buildPreviewRepairPrompt(verdict.problems, consoleErrs);
+          // A cause the platform can already see goes to the repair pass, so it is not called "transient"
+          // (autopsy 876afca9). Best-effort: an unreadable file list simply adds nothing.
+          repairPrompt = entryShadowRepairHint(await actuator.listFiles(workspaceId).catch(() => [] as string[])) + repairPrompt;
           try {
             if (/cannot get|not serving the app|404/i.test(problems.join(' '))) {
               const curFiles = (await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string> }))).files;
@@ -21277,7 +21281,8 @@ async function noteBuildOutcome(
             persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
           });
           try {
-            const applyFix = () => runInPass('runtime-error-autofix', () => fixRunner.run(buildRepairPrompt(captured)));
+            const shadowHint = entryShadowRepairHint(await actuator.listFiles(workspaceId).catch(() => [] as string[]));
+            const applyFix = () => runInPass('runtime-error-autofix', () => fixRunner.run(shadowHint + buildRepairPrompt(captured)));
             // VERIFY AFTER FIX (admin 2026-08-12) — this repair is ALLOWED to write to a green app, so it
             // must PROVE the app still works afterwards. Snapshot the working files, apply, re-render; if
             // the fix broke the app, roll back to the snapshot automatically. Only engaged once the app is

@@ -84078,14 +84078,22 @@ this last shape.
 - ⚠️ **Expect the card's heal rate to DROP** on the next load. That is the measurement getting honest,
   not the engine getting better.
 
+**3. ✅ A build the USER stopped was counted as a failed build and as a "stuck project"** (same PR,
+after the admin said "continuously fix karo"). Two of the four stuck projects said, in their own root
+cause, "no failure of the app or the engine is implied". The signal already existed — the failure panel
+excludes a Stop via `isUserStoppedBuild`, and the all-builds index carries `userStopped` — but the
+scorecard reads builds from per-workspace HISTORY, whose projection never carried it: one reader fixed,
+its sibling not. Now the history entry carries `userStopped` (the same `stoppedByUser` read), the metric
+input carries it, `judgeable` excludes it, and success/survival count it on its own
+(`stoppedByUser`), stated in the headline and the card's note. Test-locked and reversion-proven in
+`tests/aWarningLeftOpenIsNotARepair.test.ts` §6.
+
 **Open, not done here:**
-- **A build the USER stopped counts as a failed build and as a "stuck project".** Two of the four stuck
-  projects on this card say, in their own root cause, "no failure of the app or the engine is implied".
-  The stored listing carries no structured "stopped by the user" field, so the scorecard cannot exclude
-  them without one. Next change: project that fact onto the listing entry and exclude it from success
-  and survival, counted separately.
-- `PREVIEW_SNAPSHOT_STALE` on 105 of 254 builds is itself a real defect (the saved copy of a green build
-  goes stale when a pass writes after it is taken). Now visible as left open, and not root-caused here.
+- `PREVIEW_SNAPSHOT_STALE` on 105 of 254 builds is itself a real defect. **Not root-caused, and not
+  guessed at:** the count is a LIFETIME tally that includes builds from before the 2026-09-25
+  (`identitySource`) and 2026-09-26 (#3313) fixes, and the scorecard carries no per-build detail. Since
+  2026-09-20 the stale line itself names the cause (`staleDetail`: a file-set mismatch vs a content
+  change, with the paths). The next report carrying it settles it.
 - The fourth stuck row's root cause ("Did not ask this user to add credits…") predates the 2026-09-17
   `UPSELL_SUPPRESSED` fix; nothing new to do.
 

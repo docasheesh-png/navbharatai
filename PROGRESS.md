@@ -85563,3 +85563,30 @@ Admin: *"mobile friendly game/app bane — mobile first!!!!!!"*, choosing touch 
 - The phone check reports and offers a fix; it does not repair on its own. A verified repair (like the
   explorer's) waits until `MOBILE_LAYOUT_ISSUES` has appeared on real builds.
 - Games built before today get the controls only when rebuilt.
+## 2026-09-30 — Autopsy a9f8d186: "circle to search", Weak, 17.5 min — rendered, then called "sandbox unavailable" and made free
+
+The prompt asked for a circle-to-search app with a QR scanner, screen translation, music recognition, an
+AI overview, three search engines, and a Play Store link to copy the layout from. The app rendered in a
+real browser at minute 12, typechecked, built for production, and every button was pressed. The build
+still ended "The build could not run — the sandbox was unavailable", `ok:false`, release gate RED, ₹0.
+
+**Ledger:**
+
+| Problem | Root cause | Class | Siblings found and fixed | Test |
+|---|---|---|---|---|
+| Working app reported "sandbox unavailable", free | Setup's first op hit a stale cached handle; `fileOp` recovers from that, `ensureWorkspace` did not. The route set `sandboxUnavailable` at second 0 and never re-read it | A fact measured once at setup read as the verdict of the whole build | `ensureWorkspace` drops the corpse and retries once; the flag is re-judged against what ran (a real exit code, or a render) before any verdict reads it (`sandboxAvailability.ts`); all three readers covered | `aStaleHandleIsNotAnOutage.test.ts` |
+| RELEASE_GATE RED, "1 build-breaking blocker" | A sandbox-phase setup error counted as an app finding | Infra fact as an app blocker (4efab9d7's class) | `isAppFinding` excludes the `sandbox` phase by phase; `OUTCOME_SANDBOX_UNAVAILABLE` is process-only | same |
+| Treated as a shop: "cart, payments, accounts & addresses" added | `store` read out of `play.google.com/store/...` | A link read as words | `withoutUrls` in `stripNonDomainUses` (both requirement entry points, `namesBusinessDomain`, `domainOfPrompt`) and in `classify` | `theCircleToSearchAutopsy.test.ts` |
+| Six-feature app scored `translate`, 15, no second opinion | "screen translation" matched the translate verb list | A feature noun inside an app order read as the task | `summary` too; both yield when a build verb orders an app | same |
+| Missing microphone "repaired" into a fake "Demo Track" | The repair told to make the control "do what its label says" in a browser with no microphone | A repair that can only succeed by faking | Absent-device errors get an honest-state instruction; every finding forbids invented results; `NO_FAKED_RESULT_RULE` in the architect prompt, the fast lane and writing sub-agents (the first build had a fake recogniser and a `Math.random()` QR scan) | same |
+| Architect worked from "0 files" after the handoff | Only the timeout handoff carried `salvagedPaths`; the verify-failed one handed over nothing | Two handoff shapes, one carried the work | The verify-failed handoff carries its files and the compiler's errors | same |
+| Fast lane repair rounds 2–3 spent on TS2613 + five TS2686 | The free mechanical pass ran once, before the first model repair | A model repair reintroduces what grep fixes | The pass reruns after every kept repair; new free fix for a missing React import (both lanes, via `endgameDeterministicPass`) | same |
+| AIOverview duplicated (every import twice, two default exports) | `replace_symbol` put a whole file into one symbol's slot | An edit tool that can corrupt a file silently | The edit is refused when it would duplicate a name or a default export | same |
+| `npm install … @capacitor/haptics` ERESOLVE | A bare plugin resolved to 8.x against core 7 | Plugin versions not following the project major (the R3F/vitest class) | Pinned from the same command's core, else the project's range, else 7; also for the missing-import autofix | same |
+
+**Recorded, not changed:**
+- The iframe sandbox finding on WebView.tsx was reported but not fixed. On a green app the reviewer only
+  suggests (Green Stop, admin policy), and the fast lane's writes get no write-time security note.
+- GLM flashx timed out twice (75 s). Provider-side; the bench worked.
+- The AI overview shipped scripted and was disclosed. The architect had the gateway rule but inherited
+  the fast lane's file. The new no-faked-result rule reaches the fast lane.

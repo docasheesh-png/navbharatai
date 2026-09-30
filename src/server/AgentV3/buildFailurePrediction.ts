@@ -80,3 +80,26 @@ export function overruledByRealBuildMessage(count: number): string {
     + `SUCCEEDED, so the prediction is superseded by the result — the finding is kept on the timeline as `
     + `resolved rather than counted against this app.`;
 }
+
+/**
+ * Did an agent's OWN shell command prove the production build succeeds? (autopsy ce115e1f)
+ *
+ * The end-of-build overrule above arrives too late for the loop: a build whose agent had run
+ * `npm run build` to exit 0 was still told, mid-build, "2 unresolved import(s) — the build will fail",
+ * spent a resume turn chasing it, and handed the user "this app isn't fully working yet".
+ *
+ * Deliberately narrow, because a false "yes" here would silence a real blocker:
+ *   • only a production build command (`npm run build`, `vite build`, `next build`, …);
+ *   • never a PIPED command — `npm run build | tail` exits with tail's 0 whatever the build did;
+ *   • exit code 0 AND the bundler's own success line in the output;
+ *   • and no error line in it. PURE.
+ */
+export function shellBuildProvesSuccess(command: string | null | undefined, exitCode: number, output: string | null | undefined): boolean {
+  const c = String(command ?? '');
+  if (exitCode !== 0) return false;
+  if (!/\b(npm|pnpm|yarn)\s+(run\s+)?build\b|\b(vite|next)\s+build\b/.test(c)) return false;
+  if (/(^|[^|])\|(?!\|)/.test(c)) return false;
+  const out = String(output ?? '');
+  if (/\berror during build\b|\bBuild failed\b|\bERROR\b/.test(out)) return false;
+  return /\bbuilt in \d|Compiled successfully|✓ Generating static pages/i.test(out);
+}

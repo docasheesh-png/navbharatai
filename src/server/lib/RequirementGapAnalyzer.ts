@@ -12,6 +12,7 @@
 // Real, complete, unit-tested. (The interactive "pause and ask the user" loop is a deliberate follow-up.)
 
 import { indicDomainMatches, usesIndicScript } from './indicDomainTerms';
+import { withoutMachineText } from './machineText';
 
 export interface RequirementGaps {
   domain: string;
@@ -465,7 +466,9 @@ const NON_DOMAIN_USES: RegExp[] = [
  * repo's most expensive shape — a fix applied to one of two lanes (see `a38c6fef`). Pure.
  */
 export function stripNonDomainUses(text: string): string {
-  let out = String(text || '');
+  // A URL is an address, never a domain signal: `play.google.com/store/apps/…` made a Circle to Search
+  // app an ECOMMERCE build (autopsy 33812996). Blanked first, by the shared helper.
+  let out = withoutMachineText(String(text || ''));
   for (const re of NON_DOMAIN_USES) out = out.replace(re, ' ');
   // A prompt that names the React Native toolchain anywhere is using "Expo" as its name every time —
   // "if the project uses Expo, configure EAS" has no construction of its own to match. Conditional on

@@ -14,7 +14,7 @@
 // fully unit-testable without a sandbox.
 
 import { dropShadowingEntries } from './entryShadow';
-import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE } from './noEvalRule';
+import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE } from './noEvalRule';
 import { posix } from 'node:path';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { deadlineFromBudget } from './turnDeadline';
@@ -37,7 +37,7 @@ import { BUILD_STOPPED_MESSAGE, isBuildStoppedError, throwIfStopped } from './st
 import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 import { wireOrphanPages } from './orphanPageWiring';
-import { injectGlobalStylesheetImport } from './ProjectIntegrityChecks';
+import { injectGlobalStylesheetImport, dedupeStylesheetImports } from './ProjectIntegrityChecks';
 import { frameworkShipsDesignKit } from './designKitReach';
 import { kitClasses } from './kitRestore';
 import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, canAffordSharedContract, preambleBailReason } from './FastLaneBudget';
@@ -371,9 +371,11 @@ export function fileSystemPrompt(framework: string): string {
     '- Never generate simulated/mock data about OTHER people (nearby shops, other users, followers, drivers) and present it as real — showing other people\'s data needs a shared online database. Example entries shown for layout must be labelled on screen as examples.',
     '- Match the imports/exports the rest of the app expects (you are given the full file list).',
     NO_EVAL_RULE,
+    NO_FAKE_RESULTS_RULE,
     BUILD_WHAT_WAS_ASKED_RULE,
     NO_FAKED_RESULT_RULE,
     STABLE_SNAPSHOT_RULE,
+    ...webPlatformRule(framework),
     ...exportImportConvention(framework),
     ...designContractFor(framework),
   ].join('\n');
@@ -506,6 +508,19 @@ const GENERIC_CONVENTION: string[] = [
  * was fed verbatim to Vue/Nuxt and Svelte builds (ShopSphere autopsy 2026-07-19: a Nuxt app got told to
  * `export default` its components and `import React`), so producers and consumers drifted. Pure.
  */
+/**
+ * A web app's files may not be written for a PHONE framework (autopsy 33812996). One isolated per-file
+ * call in a vite-react Circle to Search app wrote `src/utils/safeImage.ts` against `react-native`
+ * (`ImageSourcePropType`, `Image as RNImage`) — a package the app does not have and a browser cannot
+ * run. The call sees only its own file, so the platform is said to it. React Native / Expo projects get
+ * nothing. PURE.
+ */
+export function webPlatformRule(framework: string): string[] {
+  const fw = (framework || '').toLowerCase();
+  if (!fw || /react-?native|expo/.test(fw)) return [];
+  return ['- This is a WEB app that runs in a browser: never import react-native or react-native-* packages — use HTML elements (<img>, <div>, <button>) instead.'];
+}
+
 export function exportImportConvention(framework: string): string[] {
   const fw = (framework || '').toLowerCase();
   if (/vue|nuxt/.test(fw)) return VUE_CONVENTION;
@@ -1830,6 +1845,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
             for (const f of written) { const nc = wired.files[f.path]; if (typeof nc === 'string') f.content = nc; }
             deps.log?.(`🎨 Wired ${wired.injected.length} orphaned global stylesheet(s) into the entry so the app is actually styled.`);
           }
+          // …and a sheet the entry AND another module both import keeps only the entry's line (autopsy 33812996).
+          const deduped = dedupeStylesheetImports(Object.fromEntries(written.map((f) => [f.path, f.content])));
+          if (deduped.removed.length > 0) {
+            for (const f of written) { const nc = deduped.files[f.path]; if (typeof nc === 'string') f.content = nc; }
+          }
         } catch { /* best-effort — a failure just leaves the files as generated */ }
       }
       // DETERMINISTIC ORPHAN-PAGE WIRING before write/preview (deep-test SaaS dashboard 6f87751d): the
@@ -2034,6 +2054,12 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     await mechanicalPass();
     let promptingErrors = verdict.errors;
     while (!verdict.ok && attempt < maxRepairs && deps.repair && !deps.signal?.aborted) {
+      // The same question the generation calls ask (`SimpleBuildDeps.stopLane`), asked before every
+      // repair too. 🔴 Autopsy 33812996: the lane's opener crawled DURING a repair, the chain fell to
+      // reasoning rungs, and repair ran 560 s (77% of the lane) without fixing anything. Generation
+      // consulted this; the repair loop — the lane's longest phase — never did.
+      // No narration here: the hand-off line after the loop already says it, in the user's words.
+      if (deps.stopLane?.()) break;
       attempt++;
       // GA-8: each attempt climbs the ordered strategy ladder so a retry is a genuinely DIFFERENT push
       // (contract-full → focus-offenders → contract-authority), not the identical prompt re-fired.

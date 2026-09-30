@@ -15,6 +15,7 @@
 
 import { crawlBenchWindowMs, mayAbandonCrawl, crawlBenchUntil } from '../crawlBench';
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
+import { modelAlwaysReasons } from './glmThinking';
 import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { isModelUnavailableError } from '../providerErrorClass';
@@ -594,6 +595,21 @@ export function createBuildBenchRegistry(): BuildBenchRegistry {
   };
 }
 
+/**
+ * The fast lane's walk reached a rung that always reasons (see `RunTurnParams.stopAtReasoningRung`).
+ * Not a provider failure: the lane reads it as "hand what you have to the full builder".
+ */
+export class ReasoningRungStopError extends Error {
+  constructor(readonly model: string, readonly fellBackFrom: string[]) {
+    super(`The next engine (${model}) reasons before every answer; the fast lane stops here and hands off (after ${fellBackFrom.join(' → ') || 'the opener'}).`);
+    this.name = 'ReasoningRungStopError';
+  }
+}
+
+export function isReasoningRungStop(err: unknown): err is ReasoningRungStopError {
+  return err instanceof ReasoningRungStopError || (err instanceof Error && err.name === 'ReasoningRungStopError');
+}
+
 export function makeMultiProviderTurnRunner(
   chain: NamedRunner[],
   opts: MultiProviderOptions = {},
@@ -719,6 +735,13 @@ export function makeMultiProviderTurnRunner(
         throwIfStopped(params.signal);
         const { name, runner } = chain[i];
         const reportName = chain[i].reportAs ?? name; // normalized label for telemetry/delivery (key-pool)
+        // The fast lane stops HERE rather than walk onto a rung that reasons before every answer — see
+        // `RunTurnParams.stopAtReasoningRung`. Not the opener (a lane whose opener reasons is never
+        // started), and not a failure of this rung: nothing is benched, struck or recorded against it.
+        const rungModel = chain[i].modelId;
+        if (params.stopAtReasoningRung && i > 0 && rungModel && modelAlwaysReasons(rungModel)) {
+          throw new ReasoningRungStopError(rungModel, fellBackFrom);
+        }
         // 🔴 A BENCH THAT HAS BEEN ANNOUNCED STAYS (autopsy f496c75b, 2026-09-30). The skip used to read
         // only the streak, and a success deletes the streak — so a GLM call already IN FLIGHT when the
         // bench fired (69 s, started before it) came back ten seconds later and quietly un-benched the

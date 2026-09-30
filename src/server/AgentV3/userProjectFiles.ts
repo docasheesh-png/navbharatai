@@ -65,7 +65,49 @@ export function couldBeAppCode(path: string): boolean {
   if (/^(node_modules|dist|build|\.git|coverage)\//.test(p) || /\/node_modules\//.test(p)) return false;
   const base = p.split('/').pop() ?? p;
   if (HOUSEKEEPING.test(base)) return false;
+  if (isStrayRootName(p)) return false;
   return !isBinaryAsset(p);
+}
+
+/**
+ * Extensionless ROOT files that ARE part of a project: build and manifest files every ecosystem names
+ * without an extension. Anything else at the root with no extension and no leading dot is not code.
+ */
+const EXTENSIONLESS_PROJECT_FILES = /^(dockerfile|containerfile|makefile|gnumakefile|procfile|gemfile|rakefile|podfile|brewfile|pipfile|vagrantfile|jenkinsfile|caddyfile|justfile|cname|readme|changelog|authors|contributing|codeowners)$/i;
+
+/**
+ * 🔴 THE CLASS CAME BACK, ONE FILE NAME LATER (autopsy 6db0ff31, 2026-09-30). After "Universal Remote"
+ * a zero-byte `Minecraft.apk` was excluded — by adding `.apk` to the binary list. The next report
+ * carried a zero-byte file named `java`, created in Code Studio, and it was counted as "1 source file":
+ * *"✏️ Editing your existing app (1 source file)"*, the intent reader was told the user already had a
+ * project, "A app for my online business of digital marketing agency" ran as an EDIT of our scaffold,
+ * and Software Project Mode declined to plan it. The earlier fix taught the list one extension; the
+ * fact it needed is the SHAPE. A root-level name with no extension, no leading dot and no place in any
+ * ecosystem's build files is a stray — a typed name, a redirect target (`cmd > java`), a note — never
+ * application code. Nested extensionless files (`bin/www`) are real code and are untouched. PURE.
+ */
+export function isStrayRootName(path: string): boolean {
+  const p = normalize(path);
+  if (!p || p.includes('/')) return false;
+  if (p.startsWith('.') || p.includes('.')) return false;
+  return !EXTENSIONLESS_PROJECT_FILES.test(p);
+}
+
+/**
+ * How many files here could be application code — scaffold paths INCLUDED, because after a build
+ * `src/App.tsx` holds the user's real app. This is the count a guard that PROTECTS an existing app
+ * must weigh (the rebuild guard, the rebuild confirmation, the edit banner): it drops only what can
+ * never be code — housekeeping, binaries, dependencies, build output and stray root names. PURE.
+ */
+export function appSourceFileCount(paths: readonly string[] | null | undefined): number {
+  if (!Array.isArray(paths)) return 0;
+  const seen = new Set<string>();
+  for (const raw of paths) {
+    if (typeof raw !== 'string') continue;
+    const p = normalize(raw);
+    if (p && couldBeAppCode(p)) seen.add(p);
+  }
+  return seen.size;
 }
 
 /**

@@ -85645,6 +85645,28 @@ out looking for files by guessed paths, and a click explorer that found "nothing
   as games are recorded, not by a constant.
 - GLM crawled at the start (provider-side). The throughput bench benched it as designed.
 
+## 2026-09-30 — The Gita reader template carries the whole Gita (admin: "haan, poori Gita ke 700 shloka daal do")
+
+- **Sanskrit:** all 701 verses (700 + Arjuna's question 13.0) from the gita/gita dataset (`data/verse.json`,
+  Unlicense). Cleaned deterministically in these ways:
+  - speaker lines are split out and the verse-number marks removed;
+  - the source's encoding slips are repaired: i-matra before a conjunct (26 cases), ṝ typed as ृ + nukta, श्रृ → शृ;
+  - a per-line syllable count found three defects, fixed by hand: 5.8 शृण्वन्, 17.23's missing ॐ and
+    17.25's cut last word.
+
+  11.1 is the one irregular line, and it is irregular in the received text itself.
+- **Hindi:** a bhavarth for every verse, written for NavBharatAI. The dataset's two Hindi translations
+  (Swami Ramsukhdas, Swami Tejomayananda) are copyrighted, whatever the dataset's own licence says, so neither
+  was used.
+- **Numbering** follows Gita Press. **Shape:** `gitaText.ts` holds the data. The scaffold ships it as
+  `src/gita/01.json … 18.json` (largest under 64 KB) through a new optional `GoldenScaffold.files`. This way
+  a builder that opens one file reads one chapter, and App.tsx stays small.
+- **Verified:** `tsc` + `vite build` pass (JS 552 KB, 128 KB gzip). In a real browser: the honesty line says
+  700; chapter 18 has 78 verses; 13.0 renders as the opening question; "कर्म" finds 189 verses (40 shown);
+  "2.47" finds the verse; zero console errors. Locked by `tests/theWholeGitaIsHere.test.ts` (12 cases,
+  reversion-proven).
+- **Honest limits:** the Hindi bhavarth is our own plain-language reading. It has not been reviewed by a
+  scholar. The Quran reader is unchanged and remains a counted selection.
 ## 2026-09-30 — Image generator: Free and Paid are two modes again (admin: "free + paid dono")
 
 **Admin, verbatim:** *"pahle ek system tha, free + paid (dono the) wahi bana do! free wala sabhi ke liye free,

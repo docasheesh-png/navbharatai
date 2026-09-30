@@ -84035,3 +84035,47 @@ app, and pay once with a test card.
 **Honest limit (open):** `amount_due` is written by the app at insert, so a hostile client can create a row
 with a small amount; `paid_amount` records what Razorpay really charged. A server-owned price table is a
 later slice.
+
+## 2026-09-30 — Autopsy 466c260a ("NavAI Workspace", Weak tier, KIMI rung 2, 16.6 min, green, billed ₹395.75)
+
+Prompt, verbatim: *"Notes , Visualizeusing, pdf code file handling picture editor , pro chat codestudeo and
+more"*. Built, rendered at 429 s, typechecked, production build clean, 16 controls pressed without a break.
+
+**Ledger.** ✅ 3 self-heals (a missing `MessageSquare` import; 3 undefined `nb-` classes; 5 "no heading"
+pages) · 🔀 0 · ⏭️ 2 (3 XSS sinks reported and left; no journey derivable) · ❌ 2 (UI shipped in Hindi for an
+English request, with the summary claiming the user asked for it; a "Pro Chat" answering with text written
+into the app, sold as an "instant assistant response") · 🥵 3 (the 255 s post-answer design heal, ~40 calls at
+~48 K input each, the largest slice of the build's cost; the frontend agent's 5 minutes after first render;
+an ETA of 5–11 min against 16.6).
+
+**Fixed (PR after this entry):**
+- **Language** — the detector was right (null), the instruction was the gap: "same language as the request"
+  left a bias-prone model to pick Hindi. `appLanguageInstruction` now tells a Latin-letter request with no
+  language named to stay in Latin letters and never switch script or claim the user asked for one; an
+  explicit ask ("hindi me", "in Tamil", "bilingual") is never overridden. The SAME line reaches every
+  sub-agent (`languageRule`) — the frontend specialist wrote `locales/hi.ts` because the architect's choice was
+  the only language it had ever heard of.
+- **Domain** — "pro chat" made the workspace SOCIAL and its build was told to include auth, a realtime feed,
+  moderation and media upload. AI-assistant chat idioms are stripped; chatting with people keeps its meaning.
+- **NO_HEADING** — the pages rendered inside `DashboardShell`, whose topbar carries `{title}`. A page under a
+  LAYOUT (header/nav/sidebar/topbar) with a dynamic heading now counts as titled. A brand-only header, a
+  card or a modal does not.
+- **Scripted assistant** — `findScriptedAssistant`: assistant-side messages in a project that makes no
+  network or AI call anywhere are disclosed in the summary (`SCRIPTED_ASSISTANT_SHIPPED`), confirmed on the
+  whole durable project so an edit turn is never judged on its own few files.
+- **Invented kit classes** — an `nb-` class the kit does not define and no stylesheet defines is named at
+  WRITE time (`inventedKitClassNote`), instead of at the end-of-build check inside a heal.
+Test-locked and reversion-proven six ways in `tests/theWorkspaceNobodyAskedToBeHindi.test.ts`.
+
+**Corrected record (CLAUDE.md):** the Nemotron JUDGE has never run on a Weak build. `judgeBuild` lives only
+inside the escalation block (`!freeTierBuildActive && tierEscalationPath.length > 1`) and Weak never
+escalates. Not wired: a Weak judge would add cost with no repair to act on it — raised to the admin.
+
+**Open, not decided here:**
+- **Billing:** ₹395.75 billed, 15,000 tokens (₹150) actually debited — the overdraft floor clamped a new
+  user's first build and NavBharatAI absorbed ₹245.75 on ~₹100 of real cost. One weak build consumed the
+  user's whole welcome credit. Policy, not a bug; raised to the admin.
+- **Heal cost:** the design heal continues the ARCHITECT's conversation, so every heal call re-sends ~48 K
+  tokens of build history. A fresh, file-scoped heal context would cost a fraction; not built here.
+- **XSS sinks** (`dangerouslySetInnerHTML` in the chat, `innerHTML` in the code runner) are suggest-only on a
+  green app and shipped.

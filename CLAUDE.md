@@ -4702,6 +4702,15 @@ rung only when it is the known-weak 4.7-flash.
   the judge and the plan ARE on for that tier. ⚠️ **Since 2026-09-29 only the JUDGE is** — Weak joined
   Strong in `PLAN_FORBIDDEN_TIERS` after both Ultra plans on autopsy 6a4a799f came back unusable; the
   flag value was not changed and does not need to be.
+  🔴 **CORRECTED 2026-09-30 (autopsy 466c260a) — THE JUDGE DOES NOT RUN ON A WEAK BUILD EITHER, AND NEVER
+  HAS.** `judgeBuild` is called in exactly one place in `routes/agentv3.ts`: inside the escalation block,
+  which is gated `!freeTierBuildActive && tierEscalationPath.length > 1` — and `escalationPathForTier('weak')`
+  returns ONE element by design ("Weak never escalates"). So on the build engine `AGENTV3_NEMOTRON=weak`
+  reaches no role at all today; only the keyed Super ladder rung is live. The report shows it: no
+  `CHEAP_REVIEW` line of any kind on that weak build. ⚠️ **Wiring it is an admin decision, not a fix:** the
+  judge acts only by driving an escalation repair, which Weak never takes, so a Weak judge would add cost
+  and a verdict with nothing to act on it. The "judge = 78% of a cheap-lead build's cost" figure below was
+  therefore measured on a build that escalates (Normal/Strong), not on Weak.
   🔴 **AND THIS ENTRY SAID OTHERWISE FOR HALF A DAY, WHICH IS THE PART WORTH KEEPING.** It read *"the
   admin reported setting `AGENTV3_NEMOTRON=week`… the judge and the plan stayed OFF"*, ending with the
   exact sentence **"this must be verified in the console, not assumed from this entry"** — and a
@@ -4811,7 +4820,7 @@ me" · "mera kharcha kam se kam ho").** Test-locked in `tests/agentRolesPerTier.
 | Builder + sub-agents + fast lane | tier ladder | tier ladder | tier ladder | above |
 | Heals | ladder minus leading flash | same | same | `healLadder` |
 | Lint / typecheck / build / preview / journey / fuzz / CVE | code | code | code | ₹0 |
-| **Judge / Reviewer** | **glm-5.3** | **glm-5.3** | **Grok** | a DIFFERENT model from the builder at the lowest input price that reasons well (glm-5.3 $1.40 in vs Grok $3); Strong builds on glm-5.3 so its judge is Grok, outside every ladder; `AGENTV3_REVIEWER=sonnet` forces Sonnet; no keys ⇒ Sonnet; **Opus is never the judge**. ⚠️ The user-facing review narration used to print the judge's vendor name ("🔎 Grok is reviewing…") — a White-Label breach, fixed |
+| **Judge / Reviewer** | **none — Weak never escalates, and the judge runs only inside escalation (verified 2026-09-30)** | **glm-5.3** | **Grok** | a DIFFERENT model from the builder at the lowest input price that reasons well (glm-5.3 $1.40 in vs Grok $3); Strong builds on glm-5.3 so its judge is Grok, outside every ladder; `AGENTV3_REVIEWER=sonnet` forces Sonnet; no keys ⇒ Sonnet; **Opus is never the judge**. ⚠️ The user-facing review narration used to print the judge's vendor name ("🔎 Grok is reviewing…") — a White-Label breach, fixed |
 | Vision (describe) | Gemini → Grok | Gemini → Grok | Claude(Haiku describe tier) → Gemini → Grok | `useClaude` follows `powerMode` |
 | Escalation | never | own ladder from Sonnet | own ladder from Opus | `escalationPathForTier` |
 

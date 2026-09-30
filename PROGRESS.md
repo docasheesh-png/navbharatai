@@ -84550,6 +84550,51 @@ them, because its `normalizePath` strips the slash and so saw them as present.
     "repo" in "report", "push" in "push notification"). It now matches whole words only.
   - **Tests:** 2 more in `tests/freeChatKnowsItsModeButton.test.ts`, reversion-proven.
   - **Reach:** the website gets this on deploy; phones need a fresh bundle.
+## 2026-09-30 — autopsy f496c75b: "single file html … 3d fight game" (Weak, 17.7 min, ₹448.18)
+
+The user asked for ONE html file and got a 25-file Vite + TypeScript project; most of the struggle was ours.
+**Ledger:**
+
+| Bucket | Count | Items |
+|---|---|---|
+| ✅ self-healed | 3 | a false missing-import heal (then undone); an `import type` enum (TS1361) repaired by hand; the sweep refused post-latch |
+| 🔀 worked around | 2 | a recipe re-run 6× plus `web_search` for the unreachable 3D renderer; the salvaged fast-lane files |
+| ⏭️ skipped | 2 | the single-file ask; the explorer pressed 0 controls |
+| ❌ shipped imperfect | 2 | a Vite project instead of one file; an offer about a deleted file |
+| 🥵 struggle | 3 | 196 s on the cheapest rung for a heavy game; 76 s on GLM after it was "benched"; step limit 80 reached |
+
+**Fixed (all locked in `tests/theSingleFileGameAutopsy.test.ts`, reversion-proven):**
+- **Single file:** `frameworkDetect` sends a single-file / plain html,css,js ask to the `static` template
+  (precision: an explicit "react" keeps React; "fix the index.html file" is not it).
+  `SINGLE_HTML_FILE_RULE` reaches both the architect prompt and the fast lane, and the static hint says the
+  TS recipes cannot run there.
+- **Reachable tools:** `generate_game_3d` is in `RECIPE_TOOLS`, and `object_spec` is the architect's. The
+  census regex could not read a digit in a tool name, which is why the census missed it.
+- **Heal:** `addMissingProjectImports` no longer treats a property or method NAME as a use.
+  - On the recipes' own output it added `state` and `load` imports, which then had to be undone.
+  - A shorthand `{ state }` still counts as a use.
+- **Enum as type:** `fixTypeOnlyValueImports` (fast lane plus `ToolDispatcher`), plus `ENUM_IMPORT_RULE`
+  in every contract block.
+- **Bench:** the skip reads `benchedFamilies`, so a late success on an in-flight call cannot un-bench a
+  family the report already called benched.
+- **Complexity:** `namesHeavyGame` makes a 3D / multiplayer / physics game `complex_app` (30 → 58), so it
+  opens on KIMI. A simple snake game is unchanged.
+- **Sweep:** the U-3 unused-import sweep moved into the finishing passes before the latch.
+- **Offers:** `parseReviewOutput` attributes findings to their file heading. An offer whose file is gone is
+  dropped (`REVIEW_OFFER_FILE_GONE`, admin-only).
+
+**Open root causes (not fixed here):**
+- The explorer found 0 controls: the game uses clickable divs ("Tap to Start" is not a button), and A11y
+  scored 100 without flagging it.
+- A reviewer compile claim in a NON-first sentence ("This file will not compile") is not refuted by the
+  green typecheck.
+- Salvaged fast-lane files are left as dead code (a circular `types.ts` ↔ `MathUtils.ts` came from the
+  contract).
+- Three more post-latch writers are unnamed: vite config, HTML entry guard, entry dedupe. All three act
+  only on a broken app.
+- `SANDBOX_SESSION` says "created-fresh" while `SETUP_TIMING` says "warm".
+- The ETA was 2.4× under the real time.
+- The step limit of 80 was reached.
 
 ## 2026-09-30 — Autopsy 6a55d939 + 26b03113 ("Build a app like god of war", Weak, two builds)
 
@@ -84688,6 +84733,65 @@ six-step roadmap: chat and settings.
 
 **Proactive:** the generated AI app asks the USER for an OpenAI key. The AI gateway (`APP_AI_GATEWAY`,
 built, unset) is what removes that wall.
+## 2026-09-30 — apps and games look designed without being asked (admin: "ek dam simple se html bante hai")
+
+**Evidence, not theory.** The design kit and a hand-written "typical model" screen were rendered in Chromium. A screen
+using the KIT's class names looked designed. The same screen using the MODEL's own class names (`.app`, `.todo-list`,
+a bare `<button>`) rendered as raw HTML: white buttons with a grey hairline and a bulleted list. A game menu written as
+divs was plain text. Most generated markup is the second kind, so that is what users saw.
+
+**Root causes:**
+- The kit's element layer was a thin floor (white-on-white buttons).
+- The fast lane, where most small apps are built, was never told the kit exists:
+  - its `DESIGN_CONTRACT` asked for "good design" in five generic lines;
+  - so every per-file call invented class names;
+  - its stylesheet call was told to re-style every used class, the kit's included.
+- The static template put page-wide rules after the kit (`* { margin:0; padding:0 }`, a centred `body`, one flat
+  button fill), overriding it on every plain-HTML app.
+- The one-file rule (#3403) told the model to copy ~450 lines of kit CSS into `index.html`. A cheap model would not
+  do that, so one-file apps would have lost the kit.
+- There were no recipes for games, AI chat, tabs or toasts.
+
+**Fixed:**
+- **Element layer:** `designKit.ts` now has a designed element layer, all inside `:where()` (zero specificity):
+  - tinted secondary buttons and filled gradient primaries;
+  - destructive buttons shown in red;
+  - focus rings, accent-coloured form controls, classed lists without bullets, and styled bare tables;
+  - an app's own class always wins. The old `button[type="submit"]` (0,1,1) used to beat it.
+- **Fill vs ink tokens:** the new `--accent-strong` / `--accent-deep` / `--accent-ink` / `--danger-ink` tokens exist
+  because white on the dark theme's `--accent` is 3.4:1.
+- **Contrast:** every new colour pair is WCAG-AA tested in both themes. The unselected tab was 3.9:1 and is fixed.
+- **Golden templates:** their theme switch carries the new tokens.
+- **New recipes:**
+  - games: `.nb-game` stage, `-screen`, `-title`, a pulsing real `button.nb-game-btn`, `-hud`/`-stat`, `-bar` (a
+    `scaleX` fill), and `-pad`/`-key` touch keys;
+  - chat: bubbles, a composer and a typing indicator;
+  - `.nb-tabs`, `.nb-toast`, `.nb-gradient-text`, `.nb-stagger`.
+  - The architect prompt names them all, and says a game's start button is a real `<button>`.
+- **Fast lane:** gets `DESIGN_KIT_VOCABULARY` only where the scaffold really ships the kit.
+  - `designKitReach.ts` derives that from `TemplateRegistry`, not a hand-written list.
+  - `stylesheetClassContext` now lists kit classes as "already styled — do not restyle".
+- **Static starter styles** are scoped to `.starter`.
+- **One-file apps:** the model keeps `style.css` linked, and a finishing pass (`singleFileKit.ts`,
+  `SINGLE_FILE_KIT_INLINED`) folds it into `index.html` and removes the file. The preview bridge is stripped first.
+- **Knowledge base:** `AppKnowledgeBase.ts` gains a "Designed by default" bullet.
+- **Tests:** `tests/theAppLooksDesignedWithoutBeingAsked.test.ts` covers contrast, specificity, wiring and a
+  real-browser cascade check. It is reversion-proven four ways.
+
+**The external (ChatGPT) suggestion, adapted rather than copied:**
+- **Rejected:** "25 repos as knowledge bases". A model cannot learn from a repo list; it already knows shadcn,
+  Radix and Tailwind. Vendoring HeroUI/Flowbite/Tremor into every scaffold would add install time, preview-fidelity
+  risk and licence bookkeeping for a look the kit can give in CSS.
+- **Adopted:** the useful part, pattern CATEGORIES the kit was missing — AI chat UI, tabs, toast, game UI — written
+  once in our own kit.
+
+**Still open:**
+- If the model rewrites `index.css` wholesale, the kit-keep guard restores class rules only, so the element layer
+  (bare `button`, lists, tables) is lost. Measure how often before building more.
+- A page the model leaves without any container is still flush to the edge. A page-level default would break
+  full-bleed games and dashboards, so this stays the prompt's job.
+- Apps built before this keep their old `index.css`. Only kit classes they use are restored.
+- Tailwind apps do not use the kit and are unchanged.
 
 ## 2026-09-30 — Autopsy 728a402d ("Nemi Mart", Weak tier, mega-roadmap milestone 1 of 6)
 
@@ -84911,3 +85015,190 @@ the marker and the fit. The count and source guards in three existing suites wer
 
 **Still open:** the `CollectionTheme` import origin in a5b661c8 itself cannot be recovered; that report
 is already stored. The next report of that shape will show it.
+## 2026-09-30 — Autopsy ee0e6de5 ("world's countries and capitals", Weak tier, KIMI rung 2, 6.5 min, green, billed ₹86.23)
+
+The prompt was English written in Devanagari (*"Build an app वेयर वर्ल्ड'एस टोटल कंट्रीज नेम विथ थेइर कैपिटल्स"*). The app is
+one screen: a search box, an A–Z/Z–A sort, a static table of 195 countries. It rendered at 293 s and passed
+typecheck, production build and runtime check. Real cost $0.206 (KIMI) + $0.018 (E2B) ≈ ₹21.5; billed ₹86.23 (×4 tier).
+
+**Ledger.** ✅ self-heals 0 · 🔀 workarounds 0 · ⏭️ skipped 4 · ❌ wrong verdicts 3 · 🥵 struggles 4.
+- ⏭️ Journey not derived; the reason blamed missing field names. Click explorer pressed nothing (the only control
+  it may press is the "made by" link; it never types or picks). Page routes not checked (none exist). The e2e
+  suite was written, not run (by design).
+- ❌ RELEASE_GATE YELLOW "whether it actually SAVES anything is untested" about an app with nothing to save ·
+  "its individual page routes were never render-checked" about an app with no routes · the live tick said
+  "rough estimate ~2–4 min" at minute 6.
+- 🥵 COMPLEXITY_ROUTING = COMPLEX: the scorer cannot read Devanagari, so the model decided, and read "every
+  country in the world" as a big app. It opened on the reasoning rung and skipped the fast lane: 6.5 min vs 2–4.
+  The Frontend sub-agent read `src/index.css` 6× in slices to learn the kit classes (the architect had been
+  told them, it had not). One write call took 130 s (7,252 output tokens: the 195-row data file on a
+  reasoning model). The first write-time typecheck took 15 s (cold compile).
+
+**Fixed (a new PR on the same branch, after #3389 merged):**
+1. `complexityPrompt` — a long list of fixed facts is simple however many rows; if unsure, simple (the
+   module's own default, never told to the model). ⚠️ Model behaviour itself is not testable here; the next
+   Devanagari lookup-app report is the evidence.
+2. `appOnlyShowsWhatItHolds` (`journeyDerivation.ts`) — inputs that a change handler listens to, and NO way to
+   save anywhere (button, form, submit, click/key handler, editable surface, browser storage, write call) ⇒
+   `none-derivable` in the gate, and `LOOKUP_ONLY_REASON` as the explanation. Conservative: any save sign
+   keeps today's behaviour; it can only change the wording of a YELLOW, never earn GREEN. The scaffold's
+   ErrorBoundary button, `public/`, tests and config files are not read as the app's UI.
+3. Page check derives routes from the whole project (was `writtenFiles` only — an edit turn that did not touch
+   the router found no routes; the journey check already used the overlay). New `RuntimeEvidence.noPageRoutes`
+   explains an unchecked pages line truthfully, including that router-less screens are not reached.
+4. `unevidencedEtaTickLine` takes the band's top end; past it, the tick says the guess was too low.
+5. `DESIGN_KIT_BRIEF` (`systemPrompt.ts`) is one copy read by the architect (byte-identical output) and by any
+   writing sub-agent whose `src/index.css` carries the kit (`stylesheetCarriesKit`, same threshold as kit-keep).
+Test-locked in `tests/aLookupAppHasNothingToSave.test.ts` (reversion-proven on the reason).
+
+**Not fixed, recorded:**
+- 🔴 OPEN — the explorer never types into an input or picks a select option, so a search box or sort that is
+  broken still passes every check. A "narrowing" probe (type a letter, confirm rows change; pick Z–A, confirm
+  order flips) is the proactive lever for this class; not built without the admin's word.
+- The readiness scan's "No tests at all" warning is recorded at run end, 4 s before the platform scaffolds the
+  e2e suite. It is already resolved and does not count against the gate; left as is.
+- `requestAnalysis.startTier` still says "gemini" (a pre-ladder name) in the admin report. Cosmetic, admin-only.
+- The prompt is English words in Devanagari; the model built a Hindi UI. The language rule mirrors the SCRIPT
+  here; whether a transliterated-English user wants Hindi or English UI is a product question for the admin.
+
+## 2026-09-30 — The explorer tries search boxes and sort menus (admin: "haan, search/sort wala check bana do")
+
+Closes the open item recorded in autopsy ee0e6de5: the explorer pressed buttons only, so a lookup app's
+search box and A–Z/Z–A menu were never tried and a search that filters nothing passed every check.
+- `clickExplorer.ts`: after the first-screen presses, up to 3 qualifying controls are tried on a fresh
+  load (`narrowOne`): type a word from the list's own items (`pickSearchWord`, Unicode incl. vowel signs),
+  or pick another option (up to two), then compare the screen's text with form controls removed. New
+  verdict `unresponsive`; records carry `kind: 'type' | 'pick'`. The in-page code is ONE self-contained
+  function (`narrowingPage`, modes list/text/narrow), because `page.evaluate` sends a function's source
+  only — the first draft called helpers that did not exist in the page and silently found nothing
+  (caught by the real-browser test).
+- `FAILING_VERDICTS` is exported and `explorerRepair.ts` reads it instead of its own copy (the drift
+  class: a failure kind reported and never repaired). The repair finding for an unresponsive control says
+  to wire it to the list, never to remove it.
+- User card: "Typed into the search box — the list changed to match." / "Typing into "X" changed nothing on
+  the screen — it does not search the list." Admin line: "Pressed N control(s) and tried M search or sort
+  control(s)".
+- Precision rules and the real-browser cases (working, dead, button-gated, Hindi, a settings menu that is
+  never tried) are in `tests/theSearchBoxIsTypedInto.test.ts`.
+- ⚠️ What it costs: an `unresponsive` finding is an `EXPLORE_FAILED`, so on Normal/Strong it runs the
+  existing explorer repair (and on Weak within its daily allowance). A wrong "did nothing" would spend one
+  repair that is then undone, which is why every doubtful case is `skipped`, not failed.
+- AppKnowledgeBase: the explorer entry says it tries the search box and sort menu.
+
+## 2026-09-30 — Autopsy ee0e6de5, second pass: every ledger item accounted for (admin: "sabhi problem ke root cause dna level par fixed huye? agar nahi to karo")
+
+Re-read the "Not fixed, recorded" list against the code rather than against my own ledger:
+- 🥵 **The first write-time typecheck took 15 s cold** — FIXED. `ToolDispatcher.warmTypecheckCache()` runs the
+  same incremental compile on the same shared `.tsbuildinfo` once, in the background, when a code-writing
+  turn starts (route, beside `dispatcherForSubAgents`), so it overlaps the model's first call. It goes
+  through the write-time queue (a write arriving mid-warm-up waits, then runs its own compile — it never
+  shares the warm-up's `null`), starts only on an idle queue, is shared with sub-agents through the stats
+  object, and is never a run, a clean verdict, a timeout strike, typecheck evidence or a memory update.
+  🔒 Its command is NOT `robustTscCommand`: that prefix runs `npm install` when node_modules is missing or
+  stale, and a background install racing the build's own is a new problem. The warm-up does nothing unless
+  the compiler exists and the install is current (`writeTypecheckWarmupCommand`). The admin line says when
+  the cache was warmed. Test-locked and reversion-proven in `tests/aLookupAppHasNothingToSave.test.ts` §6.
+- `requestAnalysis.startTier: "gemini"` — **my ledger was wrong; this was fixed on 2026-09-17** (autopsy
+  2b0a3ed5): the report carries `startBand: "cheapest band"` beside the key, and the key stays because the
+  lanes and months of telemetry are keyed by it. Nothing to do.
+- "No tests at all" before the e2e scaffold — verified, not assumed: it is recorded `autoResolved: true`,
+  and `shippingIssueCount` skips auto-resolved findings, so it never reached the gate or the user. It is a
+  true statement about the moment it was made. Nothing to do.
+- The 130 s data-file write — its cause is the misroute (a reasoning rung writing 195 rows); fix 1 of the
+  first pass is its root fix, and the admin is testing it with real prompts.
+- ⚠️ STILL THE ADMIN'S: Hindi or English UI for English written in Devanagari. A product decision, asked.
+
+## 2026-09-30 — Autopsy e6d46cde ("एक ऐप बनाओटेलीनॉर", Weak, KIMI rung 2, 7.1 min, green, billed ₹115.33)
+
+Real cost $0.314 + $0.020 E2B ≈ ₹29; billed ₹115.33 after the 10% discount (×4 tier, as the policy says).
+A 4-screen telecom app (Home, Plans, History, Profile) that rendered, typechecked and built for production.
+
+**Ledger.** ✅ self-heals 2 · 🔀 workarounds 0 · ⏭️ skipped 1 · ❌ wrong decisions 2 · 🥵 struggles 4.
+- ✅ CSS_CLASSES_UNDEFINED (9 classes used, defined nowhere) and DESIGN_PAGE_INCONSISTENT (Plans.tsx list, no
+  empty state) — both healed by one 100-second post-answer repair pass in a fresh context that re-read four
+  screens. Both were knowable the moment the files were written.
+- ❌ The model's first reply was a question ("क्या आप इसी तरह का ऐप चाहते हैं? … तो बता दीजिए। 🙏").
+  `turnAskedTheUser` read only a `?` at the very end of the last line, so it saw a stall; the build was
+  nudged into the app the user was being asked about, and the fired nudge left NO line in the report.
+- ❌ The user's reply arrived mid-build ("Archer Ai", twice). It was delivered as "fold this into the current
+  work"; the model never acted on it or mentioned it again.
+- ⏭️ REVIEW_LATE — the lean reviewer overran its 45 s budget (one 23 s model call); findings were kept.
+- 🥵 COMPLEXITY_ROUTING = COMPLEX (score 15, model) for an ordinary 4-screen app → reasoning rung, fast lane
+  skipped, 7.1 min against a 2–4 min estimate. Same class as ee0e6de5; the classifier-prompt fix
+  ("if unsure, simple") is in #3401, which this build predates. The first write-time typecheck took 18 s
+  (cold compile + an install, then 6 honest "cannot find module" errors — the model had imported
+  react-router-dom/lucide-react before installing them and fixed it in one step); the warm-up in #3401
+  takes the cold half off the critical path.
+
+**Fixed (same PR, #3401):**
+1. `turnAskedTheUser` — trailing emoji are stripped like other decoration, and a last line with a question mark
+   followed only by an invitation to reply ("बता दीजिए", "let me know", "batao"), or a last line that IS that
+   invitation right after a question, is an ask. "Ready? Let's build it." and "I'll build it now — let me know
+   if you want changes!" are still stalls. Nothing about the nudge's asymmetry changed.
+2. `BUILD_NUDGED` — a nudge that fires is recorded with the model's last words, before it is counted.
+3. `liveUserMessageTurn` — a live message is to be acted on now; if it answers a question the model asked,
+   build to that answer; if unclear, say how it was read; the final reply must account for it.
+4. `undefinedClassWriteNote` (CssConsistency) — at a STYLESHEET write, every screen's classes that still have
+   no rule are named. `nb-` classes are left to the kit. ⚠️ While this was in flight, #3398 (autopsy
+   a5b661c8) landed the SCREEN-write half (`undefinedClassNotes`) and a class-name brief for UI sub-agents
+   (`stylesheetBriefFor`). Rebased onto it: the screen-write note is theirs and is not repeated here; this adds
+   only the stylesheet-write moment, which is where e6d46cde's nine were knowable. The sub-agent brief and
+   ee0e6de5's `DESIGN_KIT_BRIEF` both stay — the first lists the names this project defines, the second the
+   kit's screen recipes (which class for which job); they overlap in cause, not in content.
+5. `pageDesignWriteNote` (DesignCoverage) — `analyzePage` at write time, with the project read so a fixed
+   catalogue is not flagged; BARE_MARKUP / RAW_TABLE / LIST_WITHOUT_EMPTY_STATE only (never NO_HEADING —
+   a layout may own the title). Both notes share one bounded read (`styleWriteNotes`, ≤80 files) and the
+   `AGENTV3_WRITE_QUALITY` kill switch. The end-of-build checks and their repair pass are unchanged; the
+   aim is that they find nothing.
+Test-locked and reversion-proven in `tests/theQuestionEndedWithPlease.test.ts`.
+
+## 2026-09-30 — Autopsy 53a621e3 ("full-stack Android calculator", Weak, 4.7 min, ₹85.38): green, and routed as a big app
+
+The app rendered and passed the production build. The explorer pressed 12 controls, and nothing wrote to
+the app after it went green. The build was clean. It was expensive for what it was.
+
+**Fixed:**
+- **"full-stack" made a calculator COMPLEX (score 63).** Because of that, the build skipped the cheap lead
+  rung and the fast lane. Real cost was $0.23, billed ₹85.
+  - `isComplexAppPrompt` now removes packaging adjectives (full-stack / full app / complete app) when the
+    request names one of the small self-contained apps. It uses the same shape as the existing
+    landing-page rule.
+  - A small app with a real need (database, login, payment) stays complex.
+  - The report prompt now scores 20 (`simple_app`).
+- **The first App.tsx evaluated input with `new Function()`.** The write-time security scan caught it,
+  and the rewrite cost ~70 s (a new parser file and two type errors). `NO_EVAL_RULE` now reaches the
+  architect prompt AND the fast lane's per-file prompt (`noEvalRule.ts`, one constant).
+- Locked in `tests/fullStackIsACompliment.test.ts` (reversion-proven).
+
+**Recorded, not changed:**
+- The builder added unrequested "bonus" scientific functions and used mathjs, which made the bundle
+  788 KB.
+- Dead helpers were left in App.tsx (the reviewer noted them).
+- `PREVIEW_SNAPSHOT_STALE` again. That root cause is owned by #3398's instrument.
+
+## 2026-09-30 — Closing the day's open items before the next report
+
+The admin asked for every open item from today's three reports (ce115e1f, d8ed307a, 53a621e3) to be
+closed before the next report. Status, item by item:
+
+**Fixed here:**
+- **One file edited piece by piece (~20 serial `edit_file` on src/index.css, ~11 min, ce115e1f).** The
+  read-loop breaker watches reads, not writes. `repeatedEditNotice` (`repeatedEdits.ts`) now tells the
+  agent, at the 6th edit to one file (and every 5th after), to finish with ONE `write_file`. A whole-file
+  write resets the count.
+- **Unrequested features (a basic calculator got a scientific panel, mathjs and a 788 KB bundle,
+  53a621e3).** `BUILD_WHAT_WAS_ASKED_RULE` reaches the architect and fast-lane prompts. The requirement
+  notes stay the one sanctioned source of additions.
+
+**Already closed by #3398 (merged 14:11, re-verified, not rebuilt):**
+- Undefined CSS classes are named at write time (d8ed307a had 18).
+- The ETA learns from the platform's recent builds.
+- An instrument now records per-file hashes for `PREVIEW_SNAPSHOT_STALE`.
+
+**Still open, honestly:**
+- `HEAL_NOT_DURABLE` on src/types.ts (ce115e1f) cannot be proven from a truncated report. The truncation
+  fix is #3398's named follow-up, so it is not taken here.
+- The scaffold's `"strict": false` is the true root of the narrowing trap. #3400's note and prompt make
+  it rare, not impossible. Turning `strictNullChecks` on needs a measured trial first, because it would
+  raise new errors in generated apps.
+- GLM/Kimi latency is provider-side.

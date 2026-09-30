@@ -29,7 +29,7 @@
 // PURE. Every side effect (snapshot, repair, re-render, re-explore, revert) is injected, so the whole
 // keep-or-undo decision is unit-tested without a sandbox, a browser or a model.
 
-import { pressName, type ExploreRun, type PressResult, type PressVerdict, type UserProof } from './clickExplorer';
+import { pressName, FAILING_VERDICTS, type ExploreRun, type PressResult, type PressVerdict, type UserProof } from './clickExplorer';
 import { strictReverify, verifyAfterFix } from './verifyAfterFix';
 
 /** The green-freeze pass name (greenFreeze.ts ALLOWED_PASSES) and the billing phase share this word. */
@@ -40,7 +40,8 @@ export function explorerRepairEnabled(env: NodeJS.ProcessEnv = process.env): boo
   return String(env.AGENTV3_EXPLORER_REPAIR ?? '').trim().toLowerCase() !== 'off';
 }
 
-const FAILING: ReadonlySet<PressVerdict> = new Set<PressVerdict>(['crashed', 'blank', 'broken-link', 'error']);
+// The explorer's own set, never a copy: a failure kind it reports is one this repairs (see FAILING_VERDICTS).
+const FAILING: ReadonlySet<PressVerdict> = FAILING_VERDICTS;
 
 /** At most this many broken controls are handed to one pass — one focused repair, not a rebuild. */
 export const MAX_REPAIR_TARGETS = 5;
@@ -69,17 +70,24 @@ export function explorerRepairFindings(targets: PressResult[]): string[] {
   return targets.map((p) => {
     const where = p.via ? ` (it appears after opening "${p.via}")` : '';
     const said = p.errors.length ? ` The browser reported: "${p.errors[0].replace(/\s+/g, ' ').slice(0, 180)}".` : '';
+    const doing = p.kind === 'type' ? 'typing into' : p.kind === 'pick' ? 'changing' : 'pressing';
     const what = p.verdict === 'crashed'
       ? 'crashes the app into an error screen'
       : p.verdict === 'blank'
         ? 'leaves the whole screen blank'
         : p.verdict === 'broken-link'
           ? 'opens a page that does not exist'
-          : 'throws an error in the app';
+          : p.verdict === 'unresponsive'
+            ? `changes nothing on the screen (${p.note})`
+            : 'throws an error in the app';
     const fix = p.verdict === 'broken-link'
       ? 'Create the page it points to with real content, or point it at a page that exists.'
-      : 'Find the cause in the code that runs when it is pressed and fix it so the control does what its label says.';
-    return `In a real browser, pressing "${p.label}"${where} ${what}.${said} ${fix} Do not remove, hide or disable the control — that is not a fix.`;
+      : p.verdict === 'unresponsive'
+        ? (p.kind === 'pick'
+          ? 'Wire the menu to the list it sits above so choosing an option really sorts or filters that list.'
+          : 'Wire the box to the list it sits above so typing really filters that list as the user types.')
+        : 'Find the cause in the code that runs when it is used and fix it so the control does what its label says.';
+    return `In a real browser, ${doing} "${p.label}"${where} ${what}.${said} ${fix} Do not remove, hide or disable the control — that is not a fix.`;
   });
 }
 

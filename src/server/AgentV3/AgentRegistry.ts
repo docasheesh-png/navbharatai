@@ -62,7 +62,9 @@ const REGISTRY: Record<AgentRole, RoleConfig> = {
     // capability it has no way to need.
     // `request_secrets` is the architect's too, for the same reason as `stop_build`: it opens a popup in
     // front of the user, and only the agent the user is talking to should do that.
-    tools: [...BUILD_TOOLS, 'stop_build', 'request_secrets', 'task', 'second_opinion', 'consensus', 'web_search', 'screenshot', 'find_ui_element', 'browser_action', 'console_errors', 'deploy'],
+    // `object_spec` is a read-only lookup the build prompt tells the architect to call FIRST for any
+    // object a 3D game needs (heroObjectSpec.ts) — offered to no role until autopsy f496c75b.
+    tools: [...BUILD_TOOLS, 'stop_build', 'request_secrets', 'task', 'second_opinion', 'consensus', 'web_search', 'object_spec', 'screenshot', 'find_ui_element', 'browser_action', 'console_errors', 'deploy'],
     capabilities: ['orchestrate', 'plan', 'delegate', 'integrate', 'architecture', 'coordinate'],
   },
 

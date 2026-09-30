@@ -2479,7 +2479,12 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      returns before writing when `isImportTurn || !expectsArtifacts`; the fast lane's copy lives in
     //      fastVerify, whose lane never runs on an import turn. Append-only, and only the kit's own rules
     //      for classes the screens use. Considered ✓.
-    expect(count).toBe(26);
+    //   1× the ONE-FILE KIT FOLD (admin 2026-09-30, "na koi design") — gated on `singleHtmlFileRule &&
+    //      result.ok && expectsArtifacts`: only a static build whose PROMPT asked for one html file, never
+    //      an import/survey turn (expectsArtifacts is false there). It moves the stylesheet the page
+    //      already links into that page and nothing else (inlineLinkedStylesheet returns null otherwise),
+    //      with the preview bridge stripped first so it is never persisted. Considered ✓.
+    expect(count).toBe(27);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

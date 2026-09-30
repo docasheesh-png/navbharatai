@@ -13,6 +13,24 @@
 // standard.
 //
 // Consumed by ViteReactProviderContents (as `indexCss`) and by every other frontend provider.
+//
+// 🎨 2026-09-30 (admin: "app/game ek dam simple se html bante hai — na koi design, na sundarta, na
+// animations"). Rendered in a real browser, the kit told the truth only when the MODEL USED ITS CLASS
+// NAMES. Markup that used the model's own names — `<div class="app">`, `<ul class="todo-list">`,
+// `<button>Add</button>` — got the bare element layer: a white button with a grey hairline, a bulleted
+// list, and nothing else. That is the "plain HTML" the admin sees, because that is what most generated
+// markup looks like. Three changes, all here:
+//   1. A ZERO-SPECIFICITY ELEMENT LAYER. Every rule for a bare element sits inside :where(), so it
+//      styles markup nobody styled and can never beat a rule the app writes — a model's own
+//      `.delete-btn { background: … }` always wins, where the old `button[type="submit"]` (0,1,1)
+//      silently beat it. Buttons, fields, lists with a class, bare tables and form controls now look
+//      designed with no class at all.
+//   2. FILL AND INK ARE SEPARATE TOKENS. `--accent` stays the colour for links and accent text (light
+//      enough to read on a dark page); `--accent-strong`/`--accent-deep` fill buttons (dark enough for
+//      white text), `--accent-ink` is accent text on a tinted surface. One token cannot do both in
+//      dark mode: white on the dark theme's #7c74ff is 3.4:1. Every pair is contrast-tested.
+//   3. RECIPES FOR WHAT PEOPLE ACTUALLY BUILD and the kit did not cover: GAMES (a stage, a title, a
+//      glowing start button, a HUD, touch keys), CHAT (bubbles and a composer), TABS and a TOAST.
 
 export const DESIGN_KIT_CSS = `:root {
   color-scheme: light dark;
@@ -23,13 +41,22 @@ export const DESIGN_KIT_CSS = `:root {
   --accent-hover: #4338ca;
   --accent-fg: #ffffff;
   --accent-soft: #eef0ff;
+  --accent-ink: #4338ca;
+  --accent-strong: #4f46e5;
+  --accent-deep: #4338ca;
+  --accent-2: #be185d;
   --success: #16a34a;
   --danger: #dc2626;
+  --danger-ink: #b91c1c;
   --warning: #d97706;
   --card: #ffffff;
   --border: #e5e7eb;
   --radius: 12px;
   --shadow: 0 1px 2px rgba(16, 17, 28, 0.06), 0 8px 24px rgba(16, 17, 28, 0.06);
+  --shadow-lg: 0 24px 48px -20px rgba(16, 17, 28, 0.28);
+  --ring: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+  --game-bg: #0b0a1a;
+  --game-fg: #f5f5ff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -40,9 +67,14 @@ export const DESIGN_KIT_CSS = `:root {
     --accent: #7c74ff;
     --accent-hover: #948dff;
     --accent-soft: #1c1b2e;
+    --accent-ink: #c4c0ff;
+    --accent-strong: #5b52e0;
+    --accent-deep: #4a3fd6;
+    --danger-ink: #fca5a5;
     --card: #17171f;
     --border: #2a2a35;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 24px 48px -20px rgba(0, 0, 0, 0.7);
   }
 }
 
@@ -51,7 +83,13 @@ export const DESIGN_KIT_CSS = `:root {
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--bg);
+  /* Two faint glows of the app's own accent over the page colour: a page that is one flat grey reads
+     as unstyled before a single component has loaded. Scrolls with the page (a fixed background
+     judders on phones). An app's own body background replaces it outright. */
+  background:
+    radial-gradient(960px 480px at 0% -8%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%),
+    radial-gradient(720px 400px at 108% 0%, color-mix(in srgb, var(--accent-2) 7%, transparent), transparent 70%),
+    var(--bg);
   color: var(--fg);
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif;
   line-height: 1.5;
@@ -63,51 +101,96 @@ a:hover { text-decoration: underline; }
 
 ::selection { background: var(--accent); color: var(--accent-fg); }
 
-/* Buttons: the default is a subtle secondary; submit / .primary / .btn-primary get the SATURATED
-   brand colour so every form and CTA has visible colour out of the box — never a grey-on-grey button. */
-button, .btn {
+/* Buttons. A bare <button> is a soft TINTED button in the app's accent — never the browser's grey box,
+   never white-on-white. Submit / .primary / .btn-primary are FILLED with a brand gradient and a glow, so
+   every form and CTA has real colour out of the box. The element rules are :where() — zero specificity —
+   so any rule the app writes for its own button class wins outright. */
+:where(button), .btn {
   font: inherit;
+  font-weight: 600;
   cursor: pointer;
-  border: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  border: 1px solid transparent;
   border-radius: var(--radius);
   padding: 8px 16px;
-  background: var(--card);
-  color: var(--fg);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
   transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
 }
-button:hover, .btn:hover { border-color: var(--accent); }
+:where(button:hover), .btn:hover { background: color-mix(in srgb, var(--accent) 18%, var(--card)); }
 
-button[type="submit"], .btn-primary, .primary, button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
+/* A button whose own class says it destroys something reads as dangerous before anyone presses it. */
+:where(button[class*="delete" i], button[class*="danger" i], button[class*="remove" i]) {
+  background: color-mix(in srgb, var(--danger) 12%, var(--card));
+  color: var(--danger-ink);
+}
+
+:where(button[type="submit"]), .btn-primary, .primary, :where(button.primary) {
+  background: linear-gradient(135deg, var(--accent-strong), var(--accent-deep));
+  border-color: transparent;
   color: var(--accent-fg);
   font-weight: 600;
+  box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--accent-strong) 70%, transparent);
 }
-button[type="submit"]:hover, .btn-primary:hover, .primary:hover, button.primary:hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+:where(button[type="submit"]:hover), .btn-primary:hover, .primary:hover, :where(button.primary:hover) {
+  background: linear-gradient(135deg, var(--accent-deep), var(--accent-deep));
   color: var(--accent-fg);
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px -8px color-mix(in srgb, var(--accent-strong) 75%, transparent);
 }
 
-input, textarea, select {
+:where(button:disabled), .btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Fields. Checkboxes, radios, sliders and colour/file pickers are left to the browser (drawn in the
+   accent below) — padding and a border would deform them. */
+:where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]), textarea, select) {
   font: inherit;
   color: var(--fg);
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 8px 12px;
+  min-height: 40px;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible {
+:where(input:focus-visible, textarea:focus-visible, select:focus-visible) {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+:where(button:focus-visible, a:focus-visible), .btn:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
+:where(input[type="checkbox"], input[type="radio"], input[type="range"], progress, meter) { accent-color: var(--accent-strong); }
+:where(input[type="checkbox"], input[type="radio"]) { width: 16px; height: 16px; }
+
+/* A list the app gave a class to is a UI list (tasks, items, results), not prose: no bullets, no
+   indent. A bare <ul> inside text keeps its bullets. */
+:where(ul[class], ol[class]) { list-style: none; padding-left: 0; }
+
+/* A bare <table> gets the data-table look (the full recipe is .nb-table below). */
+:where(table) { width: 100%; border-collapse: collapse; font-size: 0.925rem; }
+:where(th, td) { padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--border); }
+:where(th) { color: var(--muted); font-weight: 600; font-size: 0.8rem; letter-spacing: 0.02em; text-transform: uppercase; }
+:where(hr) { border: 0; border-top: 1px solid var(--border); margin: 24px 0; }
+:where(code, kbd) { font-size: 0.9em; padding: 0 4px; border-radius: 4px; background: var(--accent-soft); }
 
 /* A styled card surface so panels never look like raw HTML even before the generator styles them. */
 .card {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 16px;
+  padding: 20px;
   box-shadow: var(--shadow);
 }
 
@@ -269,6 +352,67 @@ small, .muted { color: var(--muted); }
 .nb-stat-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); font-weight: 600; }
 .nb-stat-value { font-size: 1.75rem; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 
+/* Tabs / segmented control — "All · Active · Done", a view switcher, a filter row. The selected tab is
+   marked with aria-selected="true" (or .active), which is also what a screen reader announces. */
+.nb-tabs { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; border-radius: var(--radius); background: color-mix(in srgb, var(--fg) 6%, transparent); }
+/* An unselected tab is NOT --muted: on the strip's own tint that is 3.9:1, below AA. */
+.nb-tab { min-height: 36px; padding: 4px 16px; border: 0; border-radius: 8px; background: transparent; color: color-mix(in srgb, var(--fg) 78%, var(--bg)); font-weight: 600; }
+.nb-tab:hover { background: transparent; color: var(--fg); }
+.nb-tab.active, .nb-tab[aria-selected="true"] { background: var(--card); color: var(--fg); box-shadow: 0 1px 4px rgba(16, 17, 28, 0.14); }
+
+/* Toast — a short confirmation ("Saved", "Copied") that appears and goes, never a blocking alert(). */
+.nb-toast { position: fixed; left: 50%; bottom: max(20px, env(safe-area-inset-bottom)); z-index: 60; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 32px); padding: 12px 16px; border-radius: var(--radius); background: var(--fg); color: var(--bg); box-shadow: var(--shadow-lg); font-weight: 600; animation: nb-toast-in var(--dur) var(--ease) both; }
+
+/* Gradient text — for a hero or app title. Decoration only: keep it for large display text. */
+.nb-gradient-text { background: linear-gradient(135deg, var(--accent-strong), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* Chat — an assistant, a support chat, messages. Bubbles, not a list of paragraphs: the user's own
+   messages on the right in the accent, the other side on the left on a card. The composer stays at the
+   bottom above the phone's home bar. */
+.nb-chat { display: flex; flex-direction: column; gap: 12px; padding: 16px; overflow-y: auto; }
+.nb-msg { max-width: min(80%, 560px); padding: 8px 16px; border-radius: 20px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; animation: nb-rise var(--dur) var(--ease) both; }
+.nb-msg-user { align-self: flex-end; background: linear-gradient(135deg, var(--accent-strong), var(--accent-deep)); color: var(--accent-fg); border-bottom-right-radius: 8px; }
+.nb-msg-bot { align-self: flex-start; background: var(--card); color: var(--fg); border: 1px solid var(--border); border-bottom-left-radius: 8px; }
+.nb-composer { position: sticky; bottom: 0; display: flex; align-items: flex-end; gap: 8px; padding: 12px; padding-bottom: max(12px, env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border-top: 1px solid var(--border); }
+.nb-composer > input, .nb-composer > textarea { flex: 1; }
+.nb-typing { display: inline-flex; gap: 4px; }
+.nb-typing > span { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); animation: nb-blink 1.2s ease-in-out infinite; }
+.nb-typing > span:nth-child(2) { animation-delay: 0.15s; }
+.nb-typing > span:nth-child(3) { animation-delay: 0.3s; }
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════════
+   GAMES
+   ══════════════════════════════════════════════════════════════════════════════════════════════
+   A game's canvas is drawn by the game; everything AROUND it — the title screen, the start button, the
+   score, the pause and game-over screens, the on-screen keys on a phone — is ordinary UI, and it is what
+   a player sees first. Written as plain divs it reads as a web page with a picture in it. Every control
+   here is a real <button>: a clickable div cannot be reached by keyboard or screen reader, and
+   NavBharatAI's own check cannot press it to prove the game starts. */
+.nb-game { position: relative; min-height: 100dvh; overflow: hidden; background: radial-gradient(circle at 50% 28%, color-mix(in srgb, var(--accent-strong) 38%, var(--game-bg)), var(--game-bg) 72%); color: var(--game-fg); touch-action: manipulation; }
+.nb-game canvas { display: block; width: 100%; height: 100%; }
+.nb-game-screen { position: absolute; inset: 0; z-index: 10; display: grid; place-items: center; align-content: center; gap: 16px; padding: 24px; text-align: center; background: rgba(8, 7, 20, 0.6); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); animation: nb-fade-in var(--dur) var(--ease) both; }
+.nb-game-title { margin: 0; font-size: clamp(2.25rem, 9vw, 4.5rem); font-weight: 900; line-height: 1; letter-spacing: -0.03em; background: linear-gradient(135deg, var(--game-fg), color-mix(in srgb, var(--accent) 80%, var(--game-fg)) 55%, color-mix(in srgb, var(--accent-2) 70%, var(--game-fg))); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 8px 24px color-mix(in srgb, var(--accent) 55%, transparent)); }
+.nb-game-sub { color: color-mix(in srgb, var(--game-fg) 72%, transparent); font-size: 1rem; }
+.nb-game-btn { min-width: 200px; min-height: 52px; padding: 12px 32px; border: 0; border-radius: 999px; background: linear-gradient(135deg, var(--accent-strong), var(--accent-2)); color: var(--accent-fg); font-size: 1.1rem; font-weight: 800; letter-spacing: 0.02em; box-shadow: 0 12px 32px -8px color-mix(in srgb, var(--accent-strong) 80%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.25); animation: nb-pulse 1.8s var(--ease) infinite; }
+.nb-game-btn:hover { background: linear-gradient(135deg, var(--accent-deep), var(--accent-2)); color: var(--accent-fg); animation-play-state: paused; transform: translateY(-2px) scale(1.02); }
+.nb-game-btn-secondary { background: rgba(255, 255, 255, 0.1); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22); animation: none; }
+.nb-game-btn-secondary:hover { background: rgba(255, 255, 255, 0.18); }
+.nb-game-hud { position: absolute; top: max(12px, env(safe-area-inset-top)); left: 12px; right: 12px; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 8px; pointer-events: none; }
+.nb-game-hud button { pointer-events: auto; }
+.nb-game-stat { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 999px; background: rgba(0, 0, 0, 0.45); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14); color: var(--game-fg); font-weight: 800; font-variant-numeric: tabular-nums; }
+/* A health/energy bar. Set its fill with a 0–1 number: style="--value: 0.6". The fill scales (transform),
+   it does not resize, so it stays smooth. */
+.nb-game-bar { width: 140px; height: 12px; border-radius: 999px; overflow: hidden; background: rgba(255, 255, 255, 0.18); }
+.nb-game-bar-fill { height: 100%; transform-origin: left center; transform: scaleX(var(--value, 1)); background: linear-gradient(90deg, var(--success), color-mix(in srgb, var(--success) 50%, var(--game-fg))); transition: transform var(--dur) var(--ease); }
+/* On-screen keys for a phone. Round, thumb-sized, and they do not scroll or zoom the page when held. */
+.nb-game-pad { position: absolute; left: 16px; right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); z-index: 5; display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; pointer-events: none; }
+.nb-game-pad > * { pointer-events: auto; }
+.nb-game-keys { display: flex; gap: 12px; }
+.nb-game-key { width: 64px; height: 64px; min-height: 64px; padding: 0; border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.14); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24); color: var(--game-fg); font-size: 1.4rem; font-weight: 800; touch-action: none; user-select: none; -webkit-user-select: none; }
+.nb-game-key:hover { background: rgba(255, 255, 255, 0.2); }
+.nb-game-key:active { transform: scale(0.94); background: rgba(255, 255, 255, 0.3); }
+@media (hover: hover) and (pointer: fine) { .nb-game-pad { display: none; } }
+
 /* ══════════════════════════════════════════════════════════════════════════════════════════════
    MOTION (ROADMAP #1 Phase 3.3)
    ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -295,11 +439,11 @@ small, .muted { color: var(--muted); }
 
 /* Interactive elements acknowledge a press. The lift is 1px: enough to feel, too small to nudge
    the layout or distract. */
-button, .btn, .nb-nav-item, .nb-plan, .card {
+:where(button), .btn, .nb-nav-item, .nb-plan, .card {
   transition: transform var(--dur-fast) var(--ease), background-color var(--dur) var(--ease),
               border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease), color var(--dur) var(--ease);
 }
-button:active, .btn:active { transform: translateY(1px); }
+:where(button:active), .btn:active { transform: translateY(1px); }
 /* Cards lift only when they are actually clickable — a static panel that moves under the cursor is
    noise pretending to be feedback. */
 a > .card:hover, .card[role="button"]:hover, .card.nb-clickable:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
@@ -312,6 +456,22 @@ a > .card:hover, .card[role="button"]:hover, .card.nb-clickable:hover { transfor
 @keyframes nb-pop     { from { opacity: 0; transform: scale(0.97); }     to { opacity: 1; transform: none; } }
 .nb-fade { animation: nb-fade-in var(--dur) var(--ease) both; }
 .nb-rise { animation: nb-rise var(--dur) var(--ease) both; }
+
+/* A list whose items arrive one after another reads as alive rather than pasted in. Put .nb-stagger on
+   the LIST, never on the page; the delay stops growing after the eighth item so a long list is not a
+   slow one. */
+.nb-stagger > * { animation: nb-rise var(--dur) var(--ease) both; }
+.nb-stagger > :nth-child(2) { animation-delay: 40ms; }
+.nb-stagger > :nth-child(3) { animation-delay: 80ms; }
+.nb-stagger > :nth-child(4) { animation-delay: 120ms; }
+.nb-stagger > :nth-child(5) { animation-delay: 160ms; }
+.nb-stagger > :nth-child(6) { animation-delay: 200ms; }
+.nb-stagger > :nth-child(7) { animation-delay: 240ms; }
+.nb-stagger > :nth-child(n + 8) { animation-delay: 280ms; }
+
+@keyframes nb-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+@keyframes nb-blink { 0%, 80%, 100% { opacity: 0.3; } 40% { opacity: 1; } }
+@keyframes nb-toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
 /* A dialog arrives; it does not blink into existence. */
 .nb-modal-backdrop { animation: nb-fade-in var(--dur-fast) var(--ease) both; }
@@ -337,7 +497,7 @@ a > .card:hover, .card[role="button"]:hover, .card.nb-clickable:hover { transfor
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
-  button:active, .btn:active,
+  :where(button:active), .btn:active, .nb-game-btn:hover,
   a > .card:hover, .card[role="button"]:hover, .card.nb-clickable:hover { transform: none; }
 }
 `;

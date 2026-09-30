@@ -145,7 +145,18 @@ export function parseComplexityAnswer(raw: string | null | undefined): Complexit
   return null;
 }
 
-/** The classifier prompt. Short on purpose — this is a label, not an essay, and it is billed per token. */
+/**
+ * The classifier prompt. Short on purpose — this is a label, not an essay, and it is billed per token.
+ *
+ * 🔴 A BIG DATA LIST IS NOT A BIG APP (autopsy ee0e6de5, 2026-09-30). "Build an app with the world's
+ * total countries and their capitals", written in Devanagari, is one screen with a search box and a
+ * static table. The scorer could not read the script, so this prompt decided alone — and it answered
+ * `complex`, most likely reading "every country in the world" as a database. The build opened on the
+ * reasoning rung, skipped the fast lane, and took 6.5 minutes against a 2–4 minute estimate. The two
+ * added lines are the same rule this module states for a long PROMPT (`fallbackVerdict`): size of the
+ * input is not size of the app. And "if unsure, simple" is the module's own default on every doubt,
+ * which the question never told the model.
+ */
 export function complexityPrompt(userPrompt: string): string {
   return [
     'Decide how big the app this person is asking for really is.',
@@ -155,6 +166,8 @@ export function complexityPrompt(userPrompt: string): string {
     '            calculator, todo list, clock, landing page, portfolio, quiz.',
     '"complex" — many screens, user accounts, a database, payments, dashboards,',
     '            real-time updates, or several features that depend on each other.',
+    'A long list of FIXED facts (all countries and capitals, a periodic table, a price',
+    'list) is simple however many rows it has. If unsure, answer "simple".',
     '',
     `Request: "${String(userPrompt ?? '').slice(0, 600)}"`,
     '',

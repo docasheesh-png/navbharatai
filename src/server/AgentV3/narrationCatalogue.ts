@@ -59,6 +59,8 @@ export interface NarrationParams {
   'fix.missingImports': { count: number };
   /** Imports that pointed at the wrong module. */
   'fix.repointedImports': { count: number };
+  /** A value (an enum, const, function or class) that was imported with `import type`. */
+  'fix.typeOnlyValueImports': { count: number };
   /** A duplicate import that would have broken the preview, in one file. */
   'fix.duplicateImport': { file: string };
   /** Duplicate imports removed while a file was being written. */
@@ -111,6 +113,8 @@ const EN: Catalogue = {
     `🔧 Auto-fixed ${count} import(s) (named↔default mismatch) so the build isn't blocked by a wrong import kind.`,
   'fix.missingImports': ({ count }) =>
     `🔧 Added ${count} missing import(s) (a shared symbol was used but not imported) so the app doesn't crash at runtime.`,
+  'fix.typeOnlyValueImports': ({ count }) =>
+    `🔧 Fixed ${count} import(s) that brought in a value as a type only, so the build isn't blocked.`,
   'fix.repointedImports': ({ count }) =>
     `🔧 Re-pointed ${count} import(s) at the correct module (the symbol lived in a sibling file) so the build isn't blocked.`,
   'fix.duplicateImport': ({ file }) =>

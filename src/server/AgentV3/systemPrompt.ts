@@ -165,7 +165,10 @@ const FRAMEWORK_HINTS: Record<string, string> = {
   'flask': 'SCAFFOLDING — a Flask project is scaffolded (app.py, requirements.txt, dev.sh). Run: `bash dev.sh` → PORT 5000. Call update_preview(5000). Add routes as `@app.route()` decorators. ⚠️ THIS TEMPLATE IS API-ONLY: it has no index.html and no frontend build step, so a React/Vue component written here is NEVER compiled and NEVER served — the preview will show your JSON response instead of a page, and publishing will produce no site. If this app needs a user interface, say so plainly in your reply and ask the user to start it as a web app instead; do NOT write interface components into this project and report it as done.',
   'spring-boot': 'SCAFFOLDING — a Spring Boot (Java 17) + Maven project is scaffolded (pom.xml, src/main/java/com/example/demo/Application.java, HelloController.java, src/main/resources/application.properties which already binds server.address=0.0.0.0 and server.port=${PORT:8080}). Build/run with Maven — NOT npm. Run: `mvn spring-boot:run` → PORT 8080. Call update_preview(8080). Add @RestController classes under src/main/java/com/example/demo/. JDK 17, Maven, MongoDB and Redis are pre-installed in this sandbox (start mongod/redis-server in the background if the app needs them). ⚠️ THIS TEMPLATE IS API-ONLY: it has no index.html and no frontend build step, so a React/Vue component written here is NEVER compiled and NEVER served — the preview will show your JSON response instead of a page, and publishing will produce no site. If this app needs a user interface, say so plainly in your reply and ask the user to start it as a web app instead; do NOT write interface components into this project and report it as done.',
   'go': 'SCAFFOLDING — a Go 1.23 project is scaffolded (go.mod module `myapp`, main.go with a net/http server bound to 0.0.0.0:$PORT default 8080). Build/run with the Go toolchain — NOT npm. Run: `go run main.go` → PORT 8080. Call update_preview(8080). Add handlers with `http.HandleFunc`; run `go mod tidy` after adding imports. Go, MongoDB and Redis are pre-installed in this sandbox (start mongod/redis-server in the background if the app needs them). ⚠️ THIS TEMPLATE IS API-ONLY: it has no index.html and no frontend build step, so a React/Vue component written here is NEVER compiled and NEVER served — the preview will show your JSON response instead of a page, and publishing will produce no site. If this app needs a user interface, say so plainly in your reply and ask the user to start it as a web app instead; do NOT write interface components into this project and report it as done.',
-  'static': 'SCAFFOLDING — a plain HTML/CSS/JS site is scaffolded (index.html, style.css, script.js, package.json). No build step. Run: `npm run dev` → PORT 3000. Call update_preview(3000). Write plain HTML/CSS/JS only.',
+  // The generate_* recipes (games included) emit TypeScript modules for a Vite project; a plain HTML site
+  // has no compiler to run them, so here the rule "games are built with the game tools" cannot apply
+  // (autopsy f496c75b).
+  'static': 'SCAFFOLDING — a plain HTML/CSS/JS site is scaffolded (index.html, style.css, script.js, package.json). No build step. Run: `npm run dev` → PORT 3000. Call update_preview(3000). Write plain HTML/CSS/JS only. The generate_* recipes (the game tools included) emit TypeScript for a Vite project and CANNOT run here — write the code yourself in plain JavaScript; a library such as three.js loads from a CDN with <script type="module"> and an import map.',
 };
 
 /**
@@ -514,10 +517,38 @@ export const DESIGN_KIT_BRIEF: readonly string[] = [
   '      the layout does not jump when the data lands.',
   '    • DIALOG — `.nb-modal-backdrop` > `.nb-modal` (+ `.nb-modal-title`, `.nb-modal-actions`).',
   '    • TOOLBAR — `.nb-toolbar` with `.nb-spacer` to push actions right.',
+  '    • TABS / FILTERS — `.nb-tabs` > `button.nb-tab`, aria-selected="true" on the chosen one (All · Active',
+  '      · Done, a view switch). Never a row of plain buttons for a single choice.',
+  '    • TOAST — `.nb-toast` for a short "Saved" / "Copied"; never a blocking alert().',
+  '    • CHAT — `.nb-chat` with `.nb-msg nb-msg-user` (right, accent) and `.nb-msg nb-msg-bot` (left, card),',
+  '      `.nb-composer` pinned at the bottom, `.nb-typing` (three <span>) while the reply comes.',
+  '    • GAME UI — see the GAMES rule below: `.nb-game`, `.nb-game-screen`, `.nb-game-title`,',
+  '      `.nb-game-btn`, `.nb-game-hud`, `.nb-game-stat`, `.nb-game-bar`, `.nb-game-pad`, `.nb-game-key`.',
+  '    • `.nb-gradient-text` for a big title; `.nb-stagger` on a list so its items arrive one after another.',
+  '  Bare elements are already styled too: a plain <button> is a tinted secondary (a destructive one —',
+  '  a class containing delete/remove/danger — turns red), a submit button is filled, fields have a focus',
+  '  ring, a classed <ul> has no bullets, a bare <table> looks like a data table. Those are the FLOOR;',
+  '  the recipes are what make a screen look designed.',
   '  They are `nb-` prefixed so they never collide with Tailwind utilities if the app uses Tailwind too.',
   '  If a screen needs something the kit does not have, extend the kit in index.css using the palette',
   '  vars — never drop back to unstyled markup.',
 ];
+
+/**
+ * THE USER ASKED FOR ONE FILE (autopsy f496c75b, 2026-09-30). Added to the build prompt — and to the fast
+ * lane's — only when the request says so AND the framework is `static` (`wantsSingleHtmlFile`,
+ * src/lib/frameworkDetect.ts). The scaffold ships index.html, style.css and script.js; without this line a
+ * single-file request comes back as three files, which is not what was asked.
+ */
+export const SINGLE_HTML_FILE_RULE = [
+  'ONE FILE — the user asked for the whole app in a SINGLE HTML file. Put all markup, your own CSS (in a',
+  '<style> tag) and all JavaScript (in a <script> tag) inside index.html, and delete the scaffold\'s',
+  'script.js. KEEP style.css and its <link> exactly as they are: it is NavBharatAI\'s design kit (styled',
+  'buttons, cards, tabs, the game UI recipes), and NavBharatAI folds it into index.html itself when the',
+  'build finishes — the delivered app is still one file. Put your own <style> AFTER that <link> so your',
+  'rules win. Do not create other source files. A library may load from a CDN (<script src> or an import',
+  'map, e.g. three.js). Keep package.json as it is: it only serves the file for the preview.',
+].join('\n');
 
 export function architectSystemPrompt(framework?: string, opts?: { parallelBuild?: boolean }): string {
   const scaffoldHint = frameworkScaffoldHint(framework);
@@ -780,6 +811,15 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  a start button or countdown gates the race, the vehicle MUST be moving the moment that gate',
     '  opens. A car that sits at 0 with the game "running" is a broken game, not a hard one — and the',
     '  user who reports it will describe it as "the speed is not increasing", not as "the car is stuck".',
+    '  🎨 EVERYTHING AROUND THE CANVAS IS UI, AND IT IS WHAT THE PLAYER SEES FIRST. Where the kit is in',
+    '  the project, build it from the GAME UI recipes: the stage is `.nb-game`; the start, pause and',
+    '  game-over screens are `.nb-game-screen` with an `h1.nb-game-title`, a one-line `.nb-game-sub` and',
+    '  REAL `<button class="nb-game-btn">` elements (`nb-game-btn nb-game-btn-secondary` for Settings /',
+    '  Quit); the score, lives and timer are `.nb-game-stat` pills inside ONE `.nb-game-hud`; health is',
+    '  `.nb-game-bar` > `.nb-game-bar-fill` with style="--value: <0..1>"; on touch screens the controls',
+    '  are `.nb-game-pad` > `.nb-game-keys` > `button.nb-game-key`. A start button that is a clickable',
+    '  <div> or <span> ("Tap to Start" as text) cannot be reached by keyboard or screen reader, and',
+    '  NavBharatAI\'s own check cannot press it to prove the game starts — it is always a <button>.',
     '  🔒 THE HUD IS A LAYOUT, NOT A PILE. This is the single most visible way a playable game still',
     '  looks broken, and it happens on the screen most players are actually holding — a phone. Every',
     '  overlay you put on top of the canvas (score, lives/hearts, level, timer, the "WASD to move"',

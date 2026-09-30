@@ -82,7 +82,7 @@ import { currentPass, runInPass } from './greenFreeze';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
 import {
-  writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckNote, WriteTypecheckQueue,
+  writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckNote, writeTypecheckCleanNote, WriteTypecheckQueue,
   shouldProbeTsconfig, probeExhausted, isMissingFileError, type TsProjectVerdict,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
@@ -2675,6 +2675,7 @@ export class ToolDispatcher {
         return '';
       }
       if (unprobed) s.compiledUnprobed += 1;
+      let silentRun = false; // tsc printed nothing at all — the only output that means "clean"
       const errors = await this._writeTypecheckQueue.run(async () => {
         const command = writeTypecheckCommand();
         const startedAt = Date.now();
@@ -2700,6 +2701,7 @@ export class ToolDispatcher {
         try { this.onCommand?.({ command, exitCode: null, stdout: r.stdout || '', stderr: r.stderr || '', durationMs }); }
         catch { /* diagnostics are best-effort */ }
         const combined = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
+        silentRun = combined === '';
         this.noteCompileOutput(combined);
         // A tsc that printed no `error TSxxxx` line is clean; a help page or an install log parses to zero
         // errors too, which is why a clean run here is evidence only through the bridge above, never on its own.
@@ -2719,6 +2721,8 @@ export class ToolDispatcher {
       // its remedy in the IMPORTED file, which only that file's text can confirm (autopsy 2a7fa4b0 —
       // BottomNav rewritten three times for an export App.tsx lacked). At most two targets' candidates
       // are read, only when such an error exists, and a read that fails is simply not evidence.
+      // A clean run is SAID, so the model does not re-run the compiler to find out (autopsy dfd81a3a).
+      if (errors.length === 0) return silentRun ? writeTypecheckCleanNote(tsPaths) : '';
       sources = { ...(await this.exportTargetSources(splitByWrittenFiles(errors, tsPaths).own, sources)), ...sources };
       return writeTypecheckNote(errors, tsPaths, sources);
     } catch {

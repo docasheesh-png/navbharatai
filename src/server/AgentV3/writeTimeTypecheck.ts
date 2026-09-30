@@ -83,6 +83,23 @@ export function splitByWrittenFiles(errors: TscError[], written: string[]): { ow
 const fmt = (e: TscError) => `${e.file}(${e.line},${e.col}): ${e.code} ${e.message}`;
 
 /**
+ * The note for a write after which the whole project compiled with NO output at all.
+ *
+ * 🔴 AUTOPSY dfd81a3a (2026-09-30). A clean run used to append nothing, so the model could not tell "we
+ * checked and it is clean" from "we did not check" — and after every batch it ran `tsc --noEmit` itself:
+ * eight extra turns of ~40–55K input each, two of which tripped the no-progress nudge, to learn what this
+ * check had already established a few seconds earlier.
+ *
+ * ⚠️ Only for a run whose output was EMPTY. A clean `tsc --noEmit` prints nothing; a missing compiler or
+ * an install log also parses to zero errors, and must never be reported to the model as "clean".
+ */
+export function writeTypecheckCleanNote(written: string[]): string {
+  const files = written.map(normalizePath).join(', ');
+  return `\n\n✓ TYPECHECK after this write (${files}): the whole project compiles with no errors. `
+    + 'You do not need to run tsc yourself — every TypeScript write is checked like this.';
+}
+
+/**
  * The note appended to the write's tool result — '' when the tree is clean.
  *
  * The written file's errors are quoted in full (they are the ones the model can fix while it still

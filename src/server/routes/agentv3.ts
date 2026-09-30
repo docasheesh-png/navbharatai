@@ -378,6 +378,7 @@ import {
 import OpenAI from 'openai';
 import type { TurnRunner } from '../AgentV3/ClaudeClient';
 import { withStopSignal } from '../AgentV3/stopSignal';
+import { withAnswerNotDeliberation } from '../AgentV3/answerNotDeliberate';
 import { AIRouterManager } from '../AI/AIRouterManager';
 import { buildDocumentContext } from '../lib/attachmentText';
 import { redactPII, redactEventForUser } from '../AgentV3/SecretRedactor';
@@ -13176,7 +13177,9 @@ async function noteBuildOutcome(
       // 11-feature ERP scored 63 (complex) and still made 83 calls on the cheapest flash rung; KIMI
       // sat one rung away for 26 minutes. "Starting me bhi" means THIS runner too: the roadmap
       // planner, the project planner and the fast lane's manifest are the first calls a build makes.
-      const makeFastTextRunner = (onUsed?: (used: string) => void): TurnRunner => withStopSignal(buildTurnRunner({
+      // Both text-runner factories default every call to `thinking: false` — see answerNotDeliberate.ts
+      // (autopsy 6a5fb04b: the roadmap planner reasoned its whole 4,000-token allowance away).
+      const makeFastTextRunner = (onUsed?: (used: string) => void): TurnRunner => withAnswerNotDeliberation(withStopSignal(buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
         complex: buildIsComplex, // a complex app opens past the flash rung — see the note above
@@ -13193,11 +13196,11 @@ async function noteBuildOutcome(
         onProviderError: recordProviderFallback,
         onProviderBenched: recordProviderBenched,
         onAttemptWasted: recordAttemptWasted,
-      }), abort.signal);
+      }), abort.signal));
       // The PLANNERS' runner — roadmap, blueprint, Project Mode. Same memory and callbacks as the fast
       // text runner above; only the ladder differs (see `plan` in buildTurnRunner). Repairs stay on the
       // build ladder: they rewrite code, which is the work that ladder is ordered for.
-      const makePlanTextRunner = (onUsed?: (used: string) => void): TurnRunner => withStopSignal(buildTurnRunner({
+      const makePlanTextRunner = (onUsed?: (used: string) => void): TurnRunner => withAnswerNotDeliberation(withStopSignal(buildTurnRunner({
         tier: powerLevelReqEffective,
         noClaude: noClaudeBuild,
         plan: true,
@@ -13208,7 +13211,7 @@ async function noteBuildOutcome(
         onProviderError: recordProviderFallback,
         onProviderBenched: recordProviderBenched,
         onAttemptWasted: recordAttemptWasted,
-      }), abort.signal);
+      }), abort.signal));
       const client = buildTurnRunner({
         tier: powerLevelReqEffective, // the chain IS this tier's ladder — see tierLadder.ts
         noClaude: noClaudeBuild, // weak module → Claude can never be in the chain (absolute rule)
@@ -14440,7 +14443,7 @@ async function noteBuildOutcome(
             autoResolved: true,
           });
         } catch { /* best-effort */ }
-      });
+      }, workspaceId); // THIS build's workspace only — see greenFreeze.ts (autopsy dfd81a3a)
       /**
        * IN-BUILD GREEN (inBuildGreen.ts): counts every captured write so a proof attempt can tell
        * whether the tree it collected is the tree the browser rendered. Compared before the browser
@@ -14631,7 +14634,7 @@ async function noteBuildOutcome(
       const postGreenWrites: PostGreenWrite[] = [];
       disposeWriteObserver = setWriteObserver(({ path, pass }) => {
         if (inBuildGreenAt > 0 && postGreenWrites.length < 2000) postGreenWrites.push({ path, pass, at: Date.now() });
-      });
+      }, workspaceId);
 
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework,
         // AI Diagnosis Bundle #3 — capture every sandbox command's raw logs into the build report.

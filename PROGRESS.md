@@ -85821,6 +85821,30 @@ that Pollinations was working and had not been down.
 - **Honest note:** the "anonymous door closed (401)" diagnosis in #3409 came from the provider's docs and was never observed from a session. The admin says the provider works. The door code only acts on a real 401/402/403, so it stays. The earlier outage's cause is **unproven**.
 - **Tests:** `tests/imageFreeAndPaid.test.ts` (18) is new. `theImageGeneratorHasOneTier` became `theImageGeneratorHasFreeAndPaid`. Updated: `fiveFreeImagesThenOneRupee`, `theFreeDoorClosedAndNobodyNoticed`, `everyFaceIsIndianAndNoImageIsADeadEnd`, `yourPictureComesBackAsYourPicture`, `theUsersOwnConnectionFetchesTheirPicture`, `thePlatformHasADayToo` and `theBoxEmptiesWhenYouPressSend`. Reversion-proven: removing the Free-mode stop, or the `anonymous` flag, fails 5 tests.
 
+## 2026-09-30 — Autopsy 6ae30b33: "Make question" built an app
+
+A Weak build (₹88.15, 6.9 min, ok). Earlier in the conversation the user had asked for an essay and for two
+hard GK questions in Hindi, and both were answered in chat. Then the user typed "Make question", and it built
+a 35-file "GK & Study Helper" app that nobody asked for.
+
+| # | Problem | Root cause | Class | Siblings / fix | Locked by |
+|---|---|---|---|---|---|
+| 1 | "Make question" built an app | `firstNewBuildOrder` hard-locked a build verb to `new_build` HIGH, whatever its object was | A build verb whose object is WRITTEN CONTENT is chat | `ordersWrittenContent` (content nouns, English + Hinglish/Hindi) → `chat` LOW `content-request`. A build noun, a screen part or a pointed reference keeps it a build. The reader prompt was told the same | `theQuestionWasContent` S1 (16 cases) |
+| 2 | Earlier chat turns became the app's spec | `planningRequest` read every earlier request, and nothing recorded which lane answered a turn | A turn answered in chat is not a build request | Episodes carry `lane`, set by all three recording lanes and replayed on restore. The planner drops chat turns; an untagged turn is judged by the classifier (`wasBuildRequest`). A source guard fails on an unlabelled `recordRequest` | S2 |
+| 3 | `edit_file` on `index.css` → "fetch failed", never written | `fileOp` dropped the dead handle but threw on the call that found it | A fast dead-connection error loses the operation in flight | One retry on a fresh handle for a dead-sandbox error. A timeout is never retried. All callers are idempotent | S3b source guard |
+| 4 | "STOP, the app is complete" rode the failed step | The done check ran on its cadence, whatever the step's result | A completion steer attached to a failed step | `shouldCheckDone` skips a step with `is_error` and runs on the next clean step (`missedAt`) | S3b |
+| 5 | Fast-lane files disagreed on constant names | The contract pinned types but not shared values; tier-0 files run in parallel | Shared values with no single owner | Contract declares constants; `valueOwnerFor` names one owner file (see the CLAUDE.md note) | S3c |
+| 6 | `<title>App</title>`; meta description = "Make question" | A `<title>` element counted as a name even when it was a placeholder; the description came from the prompt | Placeholder names outrank the app's own heading | Order is now chosen → real title → the app's brand/h1 → prompt. A placeholder `<title>` is replaced. A body under 3 words falls back to the name. Both callers pass `appSource` | S3d |
+| 7 | a11y finding on a CSS file | — | — | Already fixed by #3416 | (#3416) |
+
+**Recorded, not changed:**
+- GLM crawled (25.8 s), then a 60 s timeout. This is provider weather; the crawl bench did its job.
+- The Explorer's "History" click timed out at 4000 ms. The cause is unknown.
+- Installing `react-router-dom` left 2 moderate vulnerabilities.
+- `requestAnalysis.startTier: "gemini"` is a stale label (admin-only).
+- Episodes stored before this change carry no lane. They rely on the classifier.
+
+All 32 cases in `tests/theQuestionWasContent.test.ts` are reversion-proven. Reverting S1 fails 9 cases, S2 fails 2, S3b fails 1, and each half of S3d fails 1.
 ## 2026-09-30 — Autopsy 1389f0d5: the saved project, the style note, "complete" before the edit, the silent rung, the unread picture
 
 **The build:** a Weak edit, *"Generate a pdf on genesis 4 with added images with this photo type uploaded"*, on a

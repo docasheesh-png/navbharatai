@@ -72,7 +72,7 @@ describe('the answer, instead of a build', () => {
     expect(route.slice(decide, decide + 300)).toContain("intent = 'chat';");
     expect(decide).toBeLessThan(route.indexOf("const isPlainChatTurn = intent === 'chat'"));
     expect(route).toContain('reply = platformNoticeEchoReply(recentRequests.find((r) => !isPlatformNoticeEcho(r)) ?? null);');
-    expect(route).toContain('if (!echoesPlatformNotice) chatMem.recordRequest(prompt);');
+    expect(route).toContain("if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, 'chat');");
     expect(route).toMatch(/!chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere/);
   });
 });

@@ -1771,6 +1771,17 @@ export class E2BActuator implements IEngineerActuator {
       // shapes too, so the next getSandbox recreates (and replays the cached source files).
       if (e instanceof Error && (isDeadSandboxError(e.message) || / timed out after /.test(e.message)) && this.sandboxes.get(workspaceId) === sandbox) {
         this._dropSandbox(workspaceId);
+        // 🔴 THE CALL THAT FOUND THE CORPSE WAS LOST (autopsy 6ae30b33, 2026-09-30). Dropping the handle
+        // fixes the NEXT call, but this one threw. An architect's `edit_file` on `src/index.css` came
+        // back "Error: fetch failed"; the model moved on, the styles were never written, 23 classes
+        // shipped undefined and a 64-second repair pass wrote them afterwards. A fast dead-connection
+        // error is retried ONCE on a fresh handle (reconnect by id, or recreate). Every caller of this
+        // method is idempotent (a full-content write, a read, a listing), so a second try cannot
+        // double anything. A TIMEOUT is not retried: against a hung machine that only doubles the wait.
+        if (isDeadSandboxError(e.message) && !/ timed out after /.test(e.message)) {
+          const fresh = await this.getSandbox(workspaceId);
+          return await withTimeout(op(fresh), timeoutMs, label);
+        }
       }
       throw e;
     }

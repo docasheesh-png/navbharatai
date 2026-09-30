@@ -7,6 +7,8 @@
 // tool applies the result. Scoped to a standard index.html (Vite/CRA/static); if there is none (e.g.
 // Next.js metadata API) the tool says so honestly rather than writing something wrong.
 
+import { PLACEHOLDER_TITLE } from './appDisplayName';
+
 export interface AppDefaultsResult {
   /** Patched index.html, or null when there was no html to patch. */
   indexHtml: string | null;
@@ -263,6 +265,15 @@ export function planAppDefaults(
     { test: /rel=["']manifest["']/i, tag: `<link rel="manifest" href="${MANIFEST_HREF}" />`, label: 'manifest link' },
     { test: /rel=["']icon["']/i, tag: `<link rel="icon" href="${ICON_HREF}" type="image/svg+xml" />`, label: 'icon link' },
   ];
+
+  // A PLACEHOLDER <title> ("App", "Vite + React") names no app, so it is replaced with the real name
+  // rather than kept because a <title> element exists (autopsy 6ae30b33: `<title>App</title>` shipped
+  // beside a screen reading "GK & Study Helper"). A real title is never touched.
+  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (titleMatch && appName !== 'App' && PLACEHOLDER_TITLE.test(titleMatch[1].replace(/\s+/g, ' ').trim())) {
+    html = html.replace(titleMatch[0], `<title>${safeName}</title>`);
+    added.push('title (replaced a placeholder)');
+  }
 
   const toInsert: string[] = [];
   for (const e of ensures) {

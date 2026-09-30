@@ -62,7 +62,7 @@ import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
 import { assessFullRewrite } from './rewriteRisk';
 import { analyzeToolchain } from './toolchainPins';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from './appDefaults';
-import { resolveAppDisplayName } from './appDisplayName';
+import { APP_ENTRY_CANDIDATES, resolveAppDisplayName } from './appDisplayName';
 import { computeMove, type MoveFile } from './codemodMoveFile';
 import { buildArchitectureMap, renderArchitectureMap } from './architectureMap';
 import { findUnwiredFiles, unwiredFilesSummary } from './deadCode';
@@ -5380,7 +5380,12 @@ export class ToolDispatcher {
         }
         // The name the model passed wins; without one, the app's own <title> — never a bare "App" when
         // the app already says what it is called (autopsy d829b523).
-        const display = resolveAppDisplayName({ chosenName: optStr(input, 'app_name'), indexHtml });
+        // …and before the prompt, the name the app's own screen shows (autopsy 6ae30b33).
+        let appSource: string | null = null;
+        for (const p of APP_ENTRY_CANDIDATES) {
+          try { appSource = await this.actuator.readFile(this.workspaceId, p); break; } catch { /* try next */ }
+        }
+        const display = resolveAppDisplayName({ chosenName: optStr(input, 'app_name'), indexHtml, appSource });
         const appName = display.name;
         const plan = planAppDefaults(indexHtml, appName, { shortName: display.shortName });
         const written: string[] = [];

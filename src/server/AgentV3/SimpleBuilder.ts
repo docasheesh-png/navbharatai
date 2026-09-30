@@ -555,6 +555,10 @@ export function contractSystemPrompt(framework: string): string {
     '  • Every ENUM with its EXACT member names (decide casing ONCE — e.g. `enum MediaType { YouTube, Vimeo }`).',
     '  • Every shared TYPE / INTERFACE used by more than one file (e.g. `interface PlayerState { … }`).',
     '  • The EXACT signature of every shared util/helper (e.g. `export function extractEmbedUrl(url: string): string`).',
+    // Autopsy 6ae30b33: `data.ts` exported `MOCK_GK_QUESTIONS` while both hooks, written at the same
+    // time, imported `gkQuestions` — a value nobody had named, so each file guessed.
+    '  • The EXACT name and type of every shared CONSTANT another file imports (seed data, option lists,',
+    '    config maps), declared as `export declare const gkQuestions: GKQuestion[];`.',
     '  • For EACH component, its props interface with EXACT prop names + types',
     '    (e.g. `interface PlayerProps { url: string; mediaType: MediaType }`).',
     '',
@@ -815,6 +819,54 @@ export function utilOwnerPurpose(names: readonly string[], existing?: string): s
 /** The note appended to the contract text so every per-file and repair call knows where the helpers live. PURE. */
 export function utilOwnerNote(names: readonly string[], ownerPath: string): string {
   return `\n// The utility functions above (${names.join(', ')}) are implemented and exported by ${ownerPath} — import them from that file, never from the types file.`;
+}
+
+/**
+ * The shared CONSTANTS the contract declares (`export declare const gkQuestions: GKQuestion[];`).
+ *
+ * 🔴 AUTOPSY 6ae30b33 (2026-09-30). The contract carried types and props, never a value. `src/utils/data.ts`
+ * and both hooks that read it sit in the SAME generation tier, so they were written at the same time:
+ * the data file exported `MOCK_GK_QUESTIONS`, the hooks imported `gkQuestions` and `swimmingBenefits`,
+ * `tsc` failed and the lane handed its unfinished work on. A value two files share is a name two files
+ * must agree on, exactly like a type. PURE.
+ */
+export function contractValueExports(contract: string | undefined): string[] {
+  let text = String(contract ?? '').replace(/\r\n?/g, '\n');
+  text = text.replace(/^[ \t]*```[a-zA-Z]*[ \t]*$/gm, '');
+  const names: string[] = [];
+  for (const st of topLevelStatements(text)) {
+    const m = /^(?:export\s+)?(?:declare\s+)?const\s+(?!enum\b)([A-Za-z_$][\w$]*)\s*:/.exec(st);
+    if (m && !names.includes(m[1])) names.push(m[1]);
+  }
+  return names;
+}
+
+/**
+ * Which file exports the contract's shared constants: a planned file whose purpose names one of them, a
+ * planned data/constants/mock file, or a new `data.ts` beside the contract file. Never the contract file,
+ * which holds types only. PURE (the caller applies `added` to its manifest).
+ */
+export function valueOwnerFor(manifest: ReadonlyArray<SimpleFileSpec>, names: readonly string[], contractPath: string): UtilOwner | null {
+  if (names.length === 0) return null;
+  const candidates = manifest.filter((f) => f.path !== contractPath && /\.[jt]sx?$/.test(f.path));
+  const named = candidates.find((f) => names.some((n) => new RegExp(`\\b${n.replace(/\$/g, '\\$')}\\b`).test(f.purpose || '')));
+  if (named) return { path: named.path, added: false };
+  const dataFile = candidates.find((f) => /(^|\/)(data|constants?|mocks?|mockData|fixtures?|seed(?:Data)?)\.[jt]sx?$/i.test(f.path));
+  if (dataFile) return { path: dataFile.path, added: false };
+  const dir = posix.dirname(contractPath);
+  const ext = /\.js$/.test(contractPath) ? 'js' : 'ts';
+  return { path: dir === '.' ? `data.${ext}` : `${dir}/data.${ext}`, added: true };
+}
+
+/** The purpose line the constants' owner is given, naming each constant it must export. PURE. */
+export function valueOwnerPurpose(names: readonly string[], existing?: string): string {
+  const need = `Exports these shared constants under exactly these names, typed as the shared contract declares them: ${names.join(', ')}.`;
+  return existing ? `${existing} ${need}` : need;
+}
+
+/** The note appended to the contract so every call knows where the constants live. PURE. */
+export function valueOwnerNote(names: readonly string[], ownerPath: string): string {
+  return `\n// The constants above (${names.join(', ')}) are exported by ${ownerPath} under exactly these names — import them from that file, never from the types file.`;
 }
 
 export interface ContractModule {
@@ -1619,6 +1671,16 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           else manifest.push({ path: owner.path, purpose: utilOwnerPurpose(names) });
           contract = `${contract}${utilOwnerNote(names, owner.path)}`;
           if (owner.added) deps.log?.(`🧰 ${names.length} shared helper(s) had no file to live in — added ${owner.path} for them.`);
+        }
+        // …and so do the shared CONSTANTS (autopsy 6ae30b33): one owner, named before file one.
+        const values = contractValueExports(contract);
+        const valueOwner = valueOwnerFor(manifest, values, contractPath || contractFilePath(manifest));
+        if (valueOwner) {
+          const existing = manifest.find((f) => f.path === valueOwner.path);
+          if (existing) existing.purpose = valueOwnerPurpose(values, existing.purpose);
+          else manifest.push({ path: valueOwner.path, purpose: valueOwnerPurpose(values) });
+          contract = `${contract}${valueOwnerNote(values, valueOwner.path)}`;
+          if (valueOwner.added) deps.log?.(`🧰 ${values.length} shared constant(s) had no file to live in — added ${valueOwner.path} for them.`);
         }
       }
       deps.log?.(`Building ${manifest.length} file(s) — one focused pass each…`);

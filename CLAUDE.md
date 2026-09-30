@@ -3544,6 +3544,11 @@ the flag entries above promise.
   itself under that name. The net: `fixTypeImportValueClash` in the shared deterministic pass turns a TS2865
   import type-only (tsc's own fix; a model repair had made it a self-import). Test-locked and
   reversion-proven in `tests/theSalesSampleHadTwoHelperHomes.test.ts`.
+  📦 **AND ITS SHARED CONSTANTS GET ONE OWNER (autopsy 6ae30b33, 2026-09-30; rides `AGENTV3_UTIL_OWNER`, no key
+  of its own).** The contract now declares every shared constant (`export declare const gkQuestions:
+  GKQuestion[];`), and `valueOwnerFor` pins them to one file (a planned data/constants file, else a new
+  `data.ts` beside the contract). The types module never carries them. In the report, tier-0 files written in
+  parallel each invented their own names for the same seed data.
 
 - **`AGENTV3_SNAPSHOT_BUCKET`** (default ON wherever bucket-only publishing is on; `off` reverts
   snapshots alone — added 2026-09-18, admin Monitor capture) — a build SNAPSHOT is now served from the

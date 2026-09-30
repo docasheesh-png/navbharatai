@@ -348,7 +348,7 @@ import { injectDotenvLoad, dotenvWiringMessage } from '../AgentV3/envLoading';
 import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneGate';
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
 import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
-import { hasTscErrors, tscNeverRan } from '../AgentV3/TscGate';
+import { hasTscErrors, tscNeverRan, buildScriptTypecheckVerdict } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, judgeActuallyRan, describeJudgeVerdict, judgeEngineLabel, type JudgeRunTurn, type JudgeVerdict } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
@@ -20786,6 +20786,13 @@ async function noteBuildOutcome(
             } catch { ran = false; /* no sandbox, or it outran the bound — UNVERIFIED, never "failed" */ }
             const verdict = judgeProdBuild({ ran, exitCode, output });
             prodBuildOutcome = verdict.code === 'PROD_BUILD_OK' ? 'ok' : verdict.code === 'PROD_BUILD_FAILED' ? 'failed' : 'not-run';
+            // The build script that just ran usually compiles FIRST (`tsc -p tsconfig.build.json && vite
+            // build`) — so it is typecheck evidence too, read from its own echoed script line (autopsy
+            // 0c2a987a: "the typecheck did not run" beside PROD_BUILD_OK). Fills a gap only.
+            if (gateEvidence.typecheck === 'not-run') {
+              const fromBuild = buildScriptTypecheckVerdict({ command: prodBuildCommand(), stdout: output, exitCode });
+              if (fromBuild) gateEvidence.typecheck = fromBuild;
+            }
             buildDiag.record({
               phase: 'readiness',
               severity: verdict.code === 'PROD_BUILD_FAILED' ? 'warning' : 'info',

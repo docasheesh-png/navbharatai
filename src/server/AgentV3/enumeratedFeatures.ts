@@ -33,6 +33,8 @@
  * PURE. No I/O, no clock, no env.
  */
 
+import { withoutMachineText } from '../lib/machineText';
+
 /** A run must carry at least this many pieces before it reads as an enumeration rather than a pause. */
 export const MIN_RUN_ITEMS = 3;
 /** A named part is short. Longer than this and it is prose, which enumerates nothing. */
@@ -206,7 +208,8 @@ export function countEnumeratedFeatures(prompt: string): number {
 
 /** The items themselves, in first-seen order — what `countEnumeratedFeatures` counts. PURE. */
 export function enumeratedFeatureItems(prompt: string): string[] {
-  const text = String(prompt ?? '');
+  // A pasted link is not a list item (autopsy 33812996) — dropped before anything is counted.
+  const text = withoutMachineText(String(prompt ?? ''), { drop: true });
   if (!text.trim()) return [];
 
   const seen = new Set<string>();

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, type TestPlan, type TestFramework, suitePresentButRunnerMissing, withTestFilter, withSandboxBrowsers } from './testRunner';
+import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, type TestPlan, type TestFramework, suitePresentButRunnerMissing, withTestFilter, withSandboxBrowsers, testSuiteCouldNotRun, wantedBrowserDetail } from './testRunner';
 
 // B4: detection + parsing of the project's OWN test suite. Both functions are pure, so we exercise
 // every framework branch with real-shaped tool output — no sandbox needed.
@@ -325,5 +325,17 @@ describe('withTestFilter', () => {
     const cmd = withSandboxBrowsers(r.command, 'playwright');
     expect(cmd).toContain('PLAYWRIGHT_BROWSERS_PATH=');
     expect(cmd).toContain("-g 'login'");
+  });
+});
+
+describe('the browser build Playwright wanted is kept (autopsy 1389f0d5)', () => {
+  const out = "Error: browserType.launch: Executable doesn't exist at /home/user/.cache/ms-playwright/chromium_headless_shell-1187/chrome-linux/headless_shell\nplease run the following command to download new browsers";
+  it('names it, trimmed to the part after the browsers folder', () => {
+    expect(wantedBrowserDetail(out)).toBe(' (Playwright looked for chromium_headless_shell-1187/chrome-linux/headless_shell)');
+    expect(testSuiteCouldNotRun(1, out)).toBe('the Playwright browser binaries are not installed in the sandbox (Playwright looked for chromium_headless_shell-1187/chrome-linux/headless_shell)');
+  });
+  it('says nothing it was not told', () => {
+    expect(wantedBrowserDetail('npx playwright install')).toBe('');
+    expect(testSuiteCouldNotRun(1, 'please run npx playwright install')).toBe('the Playwright browser binaries are not installed in the sandbox');
   });
 });

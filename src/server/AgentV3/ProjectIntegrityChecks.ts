@@ -216,9 +216,9 @@ export function findOrphanStylesheets(files: Record<string, string>): OrphanStyl
  * DETERMINISTIC FIX for an orphan GLOBAL stylesheet: inject its side-effect import at the top of the
  * app's entry module (src/main.tsx / main.jsx / main.ts / index.tsx …) so the app is actually styled.
  * Returns the updated files plus what was injected (empty = nothing to do / no entry to inject into).
- * Only fires for an orphan named like a global sheet living beside the entry (index/main/app/global/
- * style[s].css) — an unreferenced feature-level sheet stays a report finding for the LLM repair pass,
- * because guessing its importer would be wrong more often than right. Pure.
+ * Only fires for an APP-WIDE orphan (see `isAppWideStylesheet`) — an unreferenced sheet beside one
+ * component stays a report finding for the LLM repair pass, because its importer is that component.
+ * Pure.
  */
 export function injectGlobalStylesheetImport(
   files: Record<string, string>,
@@ -229,12 +229,10 @@ export function injectGlobalStylesheetImport(
     .find((p) => typeof files[p] === 'string');
   if (!entry) return { files, injected: [] };
   const entryDir = entry.slice(0, entry.lastIndexOf('/') + 1); // '' when the entry sits at the root
-  const globalName = /^(index|main|app|global|globals|style|styles)\.css$/i;
   const out = { ...files };
   const injected: Array<{ stylesheet: string; entry: string }> = [];
   for (const { stylesheet } of orphans) {
-    const base = stylesheet.split('/').pop() ?? stylesheet;
-    if (!globalName.test(base)) continue; // feature-level sheet — leave to the repair pass
+    if (!isAppWideStylesheet(stylesheet)) continue; // feature-level sheet — leave to the repair pass
     // Import specifier relative to the entry: same dir → './x.css'; otherwise from the project root.
     const spec = stylesheet.startsWith(entryDir) && entryDir
       ? `./${stylesheet.slice(entryDir.length)}`
@@ -243,6 +241,59 @@ export function injectGlobalStylesheetImport(
     injected.push({ stylesheet, entry });
   }
   return { files: out, injected };
+}
+
+/**
+ * Is this stylesheet written for the WHOLE APP, so that the entry is its right importer? PURE.
+ *
+ * A global name (index / main / app / global / style[s]) always was. 🔴 Autopsy 33812996 added the
+ * rest: the fast lane planned `src/styles/global.css`, `src/styles/components.css` and
+ * `src/styles/themes.css`; only global.css was imported, and the two orphans went to an LLM heal pass
+ * — a model call for a one-line import whose answer has exactly one right form. A sheet in a `styles/`
+ * (or `css/`) folder, or named for an app-wide concern (themes, variables, tokens, base, reset,
+ * utilities, layout, typography, components, animations, colours), is app-wide by its own placement or
+ * name. Vite applies every non-module stylesheet globally whoever imports it, so the entry is correct
+ * for these. A sheet sitting beside one component (`src/components/Sidebar.css`) is still left to the
+ * repair pass — its importer is that component.
+ */
+export function isAppWideStylesheet(stylesheet: string): boolean {
+  const base = stylesheet.split('/').pop() ?? stylesheet;
+  if (/\.module\.css$/i.test(base)) return false;
+  if (/^(index|main|app|global|globals|style|styles)\.css$/i.test(base)) return true;
+  if (/^(themes?|variables|vars|tokens|base|reset|normalize|utilities|utils|layout|typography|components|animations?|colou?rs?)\.css$/i.test(base)) return true;
+  return /(^|\/)(styles?|css)\//i.test(stylesheet);
+}
+
+/**
+ * DETERMINISTIC FIX for a stylesheet imported by the entry AND by another module (autopsy 33812996:
+ * `./styles/global.css` in both `src/main.tsx` and `src/App.tsx`, repaired by an LLM heal pass). A
+ * non-module sheet is global whoever imports it, so once the entry imports it every other side-effect
+ * import of it is a no-op — removing those lines changes nothing the user sees and clears the finding.
+ * Only exact side-effect import lines are removed, and only when the entry is one of the importers; a
+ * duplicate the entry is not part of stays a finding (which of two components owns it is a judgement).
+ * PURE.
+ */
+export function dedupeStylesheetImports(
+  files: Record<string, string>,
+): { files: Record<string, string>; removed: Array<{ stylesheet: string; from: string }> } {
+  const dups = findDuplicateStylesheets(files);
+  if (dups.length === 0) return { files, removed: [] };
+  const entry = ['src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/index.tsx', 'src/index.jsx', 'main.tsx']
+    .find((p) => typeof files[p] === 'string');
+  if (!entry) return { files, removed: [] };
+  const out = { ...files };
+  const removed: Array<{ stylesheet: string; from: string }> = [];
+  for (const d of dups) {
+    if (!d.importers.includes(entry)) continue;
+    const key = stylesheetKey(d.stylesheet);
+    for (const file of d.importers) {
+      if (file === entry) continue;
+      const before = out[file];
+      const after = before.replace(/^[ \t]*import\s+['"]([^'"]+\.css)['"];?[ \t]*\r?\n?/gm, (line, spec: string) => (stylesheetKey(spec) === key ? '' : line));
+      if (after !== before) { out[file] = after; removed.push({ stylesheet: d.stylesheet, from: file }); }
+    }
+  }
+  return removed.length ? { files: out, removed } : { files, removed: [] };
 }
 
 /** True when a source file mounts a React root — createRoot(x).render(…) or ReactDOM.render(…). Pure. */

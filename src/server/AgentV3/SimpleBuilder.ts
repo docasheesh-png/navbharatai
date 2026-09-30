@@ -14,7 +14,7 @@
 // fully unit-testable without a sandbox.
 
 import { dropShadowingEntries } from './entryShadow';
-import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE } from './noEvalRule';
+import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE } from './noEvalRule';
 import { posix } from 'node:path';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { deadlineFromBudget } from './turnDeadline';
@@ -37,7 +37,7 @@ import { BUILD_STOPPED_MESSAGE, isBuildStoppedError, throwIfStopped } from './st
 import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 import { wireOrphanPages } from './orphanPageWiring';
-import { injectGlobalStylesheetImport } from './ProjectIntegrityChecks';
+import { injectGlobalStylesheetImport, dedupeStylesheetImports } from './ProjectIntegrityChecks';
 import { frameworkShipsDesignKit } from './designKitReach';
 import { kitClasses } from './kitRestore';
 import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, canAffordSharedContract, preambleBailReason } from './FastLaneBudget';
@@ -371,9 +371,11 @@ export function fileSystemPrompt(framework: string): string {
     '- Never generate simulated/mock data about OTHER people (nearby shops, other users, followers, drivers) and present it as real — showing other people\'s data needs a shared online database. Example entries shown for layout must be labelled on screen as examples.',
     '- Match the imports/exports the rest of the app expects (you are given the full file list).',
     NO_EVAL_RULE,
+    NO_FAKE_RESULTS_RULE,
     BUILD_WHAT_WAS_ASKED_RULE,
     NO_FAKED_RESULT_RULE,
     STABLE_SNAPSHOT_RULE,
+    ...webPlatformRule(framework),
     ...exportImportConvention(framework),
     ...designContractFor(framework),
   ].join('\n');
@@ -506,6 +508,19 @@ const GENERIC_CONVENTION: string[] = [
  * was fed verbatim to Vue/Nuxt and Svelte builds (ShopSphere autopsy 2026-07-19: a Nuxt app got told to
  * `export default` its components and `import React`), so producers and consumers drifted. Pure.
  */
+/**
+ * A web app's files may not be written for a PHONE framework (autopsy 33812996). One isolated per-file
+ * call in a vite-react Circle to Search app wrote `src/utils/safeImage.ts` against `react-native`
+ * (`ImageSourcePropType`, `Image as RNImage`) — a package the app does not have and a browser cannot
+ * run. The call sees only its own file, so the platform is said to it. React Native / Expo projects get
+ * nothing. PURE.
+ */
+export function webPlatformRule(framework: string): string[] {
+  const fw = (framework || '').toLowerCase();
+  if (!fw || /react-?native|expo/.test(fw)) return [];
+  return ['- This is a WEB app that runs in a browser: never import react-native or react-native-* packages — use HTML elements (<img>, <div>, <button>) instead.'];
+}
+
 export function exportImportConvention(framework: string): string[] {
   const fw = (framework || '').toLowerCase();
   if (/vue|nuxt/.test(fw)) return VUE_CONVENTION;
@@ -724,8 +739,9 @@ export interface UtilOwner {
  * new `utils.ts` beside the contract file. PURE (the caller applies `added` to its manifest).
  *
  * Owner, in order: a planned file whose purpose names one of the helpers; a planned `utils`/`helpers`
- * file in the contract's folder; otherwise a new `<contract folder>/utils.ts`. Never the contract file
- * itself — that file holds types only, and a bodiless signature there is a compile error.
+ * file in the contract's folder; a planned plain module whose name and purpose DESCRIBE the helpers
+ * (`helperModuleByWords`); otherwise a new `<contract folder>/utils.ts`. Never the contract file itself —
+ * that file holds types only, and a bodiless signature there is a compile error.
  */
 export function utilOwnerFor(manifest: ReadonlyArray<SimpleFileSpec>, names: readonly string[], contractPath: string): UtilOwner | null {
   if (names.length === 0) return null;
@@ -736,8 +752,62 @@ export function utilOwnerFor(manifest: ReadonlyArray<SimpleFileSpec>, names: rea
   const inDir = (p: string) => posix.dirname(p) === dir;
   const helper = candidates.find((f) => inDir(f.path) && /(^|\/)(utils?|helpers?)\.[jt]s$/i.test(f.path));
   if (helper) return { path: helper.path, added: false };
+  const described = helperModuleByWords(candidates, names);
+  if (described) return { path: described.path, added: false };
   const ext = /\.js$/.test(contractPath) ? 'js' : 'ts';
   return { path: dir === '.' ? `utils.${ext}` : `${dir}/utils.${ext}`, added: true };
+}
+
+/** Words too common in a file's purpose line to say which helpers it holds. */
+const OWNER_STOPWORDS = new Set(['with', 'from', 'into', 'that', 'this', 'file', 'files', 'logic', 'helper', 'helpers', 'util', 'utils', 'utility', 'utilities', 'function', 'functions', 'shared', 'component', 'components', 'module', 'value', 'values']);
+
+/** The four-letter stems of a name or a purpose line's words (`generateSampleSalesData` → gene, samp, sale, data). PURE. */
+function ownerStems(text: string): Set<string> {
+  const words = String(text ?? '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 4 && !OWNER_STOPWORDS.has(w));
+  return new Set(words.map((w) => w.slice(0, 4)));
+}
+
+/**
+ * A planned plain module (never a component) whose path and purpose describe the helpers. PURE.
+ *
+ * 🔴 WHY (build 9762f589, 2026-09-30 — "sales ki city wise, only 10 employees"). The plan had
+ * `src/utils/sales.ts :: Sample sales data generation with 10 employees and city distribution logic`, and the
+ * contract's helpers were `generateSampleSalesData` and `aggregateCitySales`. The purpose DESCRIBED them without
+ * NAMING them, and the file sat in `src/utils/`, not beside the contract — so neither rule above matched and
+ * the lane ADDED a second home, `src/utils.ts`. Both files then wrote the same two helpers with different
+ * signatures; `App.tsx` called `generateSampleSalesData()` with the arguments of one and the return shape of
+ * the other, and three repair passes were spent on the disagreement.
+ *
+ * Precision-first, because a wrong owner is an import pointed at the wrong file: only `.ts`/`.js` modules
+ * (a `.tsx` component is not where helpers live, and a component's purpose shares words with its data —
+ * `SalesTable` says "sales"), never a config file, an entry or a declaration file, and a pick only when one
+ * file clearly leads with at least two shared stems. A file under `utils/`, `helpers/` or `lib/` counts one
+ * more. A tie or a weaker match adds `utils.ts` exactly as before.
+ */
+export function helperModuleByWords(candidates: ReadonlyArray<SimpleFileSpec>, names: readonly string[]): SimpleFileSpec | null {
+  const want = new Set<string>();
+  for (const n of names) for (const s of ownerStems(n)) want.add(s);
+  if (want.size === 0) return null;
+  const scored = candidates
+    .filter((f) => /\.[jt]s$/.test(f.path) && !/\.d\.ts$/.test(f.path) && !/(^|\/)[^/]*\.config\.[jt]s$/.test(f.path)
+      && !/(^|\/)(main|server|app)\.[jt]s$/i.test(f.path)
+      && !(/(^|\/)index\.[jt]s$/i.test(f.path) && !/(^|\/)(utils?|helpers?|lib)\/index\.[jt]s$/i.test(f.path)))
+    .map((f) => {
+      const have = ownerStems(`${posix.basename(f.path).replace(/\.[jt]s$/, '')} ${f.purpose || ''}`);
+      const shared = [...want].filter((s) => have.has(s)).length;
+      const inHelperDir = /(^|\/)(utils?|helpers?|lib)\//i.test(f.path) ? 1 : 0;
+      return { f, shared, score: shared + inHelperDir };
+    })
+    .filter((x) => x.shared >= 2)
+    .sort((a, b) => b.score - a.score);
+  if (scored.length === 0) return null;
+  if (scored.length > 1 && scored[1].score === scored[0].score) return null;
+  return scored[0].f;
 }
 
 /** The purpose line the lane gives the helpers' owner, naming each helper it must implement. PURE. */
@@ -907,6 +977,58 @@ export function contractModule(contract: string | undefined): ContractModule | n
   ];
   const source = `${[...header, ...(imports.length ? ['', ...imports] : []), '', joined].join('\n')}\n`;
   return { source, symbols };
+}
+
+/** Kill switch — `AGENTV3_CONTRACT_NAME_SPLIT=off` leaves a type named after a component as the model wrote it. Default ON. */
+export function contractNameSplitEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.AGENTV3_CONTRACT_NAME_SPLIT ?? '').trim().toLowerCase() !== 'off';
+}
+
+/**
+ * Rename every contract type, interface or enum that has the name of a planned component. PURE.
+ *
+ * 🔴 WHY BY CONSTRUCTION (build 9762f589, 2026-09-30). The contract prompt has said "NO NAME MAY BE BOTH A
+ * TYPE AND A COMPONENT" since autopsy 121c2431, and this contract still declared `interface CitySummary` beside
+ * a planned `src/components/CitySummary.tsx`. That file imported the type and declared a component of the same
+ * name (TS2865), the first repair turned it into a self-import, and the error survived all three passes. A
+ * rule the model can ignore twice is not a rule; the contract is ours to adjust before file one is written.
+ *
+ * A clashing name `X` becomes `XData` (then `XInfo`, `XRecord`) — the first not already declared — at every
+ * whole-word use in the contract, so `XProps` and other compounds are untouched. Only PascalCase `.tsx`/`.jsx`
+ * files count as components; nothing else is renamed.
+ */
+export function separateTypeFromComponentNames(
+  contract: string,
+  manifest: ReadonlyArray<{ path: string }>,
+): { contract: string; renamed: Array<{ from: string; to: string }> } {
+  const components = new Set(
+    manifest
+      .filter((f) => /\.[jt]sx$/.test(f.path))
+      .map((f) => posix.basename(f.path).replace(/\.[jt]sx$/, ''))
+      .filter((n) => /^[A-Z][A-Za-z0-9]*$/.test(n)),
+  );
+  if (components.size === 0) return { contract, renamed: [] };
+  const declared = new Set<string>();
+  const values = new Set<string>();
+  for (const st of topLevelStatements(String(contract ?? '').replace(/\r\n?/g, '\n'))) {
+    const head = CONTRACT_HEAD.exec(st);
+    if (head) { declared.add(head[2]); continue; }
+    const value = /^(?:export\s+)?(?:declare\s+)?(?:default\s+)?(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/.exec(st);
+    if (value) values.add(value[1]);
+  }
+  let out = contract;
+  const renamed: Array<{ from: string; to: string }> = [];
+  for (const name of [...declared]) {
+    // The contract also declares the component itself under this name: a whole-word rename would
+    // rename the component too. Leave it; the mechanical TS2865 fix is the net for this shape.
+    if (!components.has(name) || values.has(name)) continue;
+    const to = ['Data', 'Info', 'Record'].map((s) => `${name}${s}`).find((n) => !declared.has(n) && !components.has(n));
+    if (!to) continue;
+    out = out.replace(new RegExp(`(?<![\\w$])${name}(?![\\w$])`, 'g'), to);
+    declared.add(to);
+    renamed.push({ from: name, to });
+  }
+  return { contract: out, renamed };
 }
 
 /**
@@ -1500,6 +1622,14 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         clock.contractCapMs = contractCap;
         // Name what happened, so the report never has to guess which clock ended the call.
         clock.contractOutcome = contract ? 'written' : (contractCallMs >= contractCap - 1_000 ? 'cut' : 'failed');
+        // A type named after a planned component — see `separateTypeFromComponentNames`. Before file one.
+        if (contract && contractNameSplitEnabled()) {
+          const split = separateTypeFromComponentNames(contract, manifest);
+          if (split.renamed.length > 0) {
+            contract = split.contract;
+            deps.log?.(`🏷️ Renamed ${split.renamed.map((r) => `${r.from} → ${r.to}`).join(', ')} in the shared contract so no data type shares a component's name.`);
+          }
+        }
       } else if (shareContract) {
         clock.contractOutcome = 'skipped';
         // 🔴 ONE SKIP, ONE SENTENCE (autopsy f97eb0ec, 2026-09-20). This used to be TWO logs: an
@@ -1777,6 +1907,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
             for (const f of written) { const nc = wired.files[f.path]; if (typeof nc === 'string') f.content = nc; }
             deps.log?.(`🎨 Wired ${wired.injected.length} orphaned global stylesheet(s) into the entry so the app is actually styled.`);
           }
+          // …and a sheet the entry AND another module both import keeps only the entry's line (autopsy 33812996).
+          const deduped = dedupeStylesheetImports(Object.fromEntries(written.map((f) => [f.path, f.content])));
+          if (deduped.removed.length > 0) {
+            for (const f of written) { const nc = deduped.files[f.path]; if (typeof nc === 'string') f.content = nc; }
+          }
         } catch { /* best-effort — a failure just leaves the files as generated */ }
       }
       // DETERMINISTIC ORPHAN-PAGE WIRING before write/preview (deep-test SaaS dashboard 6f87751d): the
@@ -1981,6 +2116,12 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     await mechanicalPass();
     let promptingErrors = verdict.errors;
     while (!verdict.ok && attempt < maxRepairs && deps.repair && !deps.signal?.aborted) {
+      // The same question the generation calls ask (`SimpleBuildDeps.stopLane`), asked before every
+      // repair too. 🔴 Autopsy 33812996: the lane's opener crawled DURING a repair, the chain fell to
+      // reasoning rungs, and repair ran 560 s (77% of the lane) without fixing anything. Generation
+      // consulted this; the repair loop — the lane's longest phase — never did.
+      // No narration here: the hand-off line after the loop already says it, in the user's words.
+      if (deps.stopLane?.()) break;
       attempt++;
       // GA-8: each attempt climbs the ordered strategy ladder so a retry is a genuinely DIFFERENT push
       // (contract-full → focus-offenders → contract-authority), not the identical prompt re-fired.

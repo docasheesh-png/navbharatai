@@ -84075,7 +84075,12 @@ escalates. Not wired: a Weak judge would add cost with no repair to act on it �
 - **Billing:** ₹395.75 billed, 15,000 tokens (₹150) actually debited — the overdraft floor clamped a new
   user's first build and NavBharatAI absorbed ₹245.75 on ~₹100 of real cost. One weak build consumed the
   user's whole welcome credit. Policy, not a bug; raised to the admin.
-- **Heal cost:** the design heal continues the ARCHITECT's conversation, so every heal call re-sends ~48 K
-  tokens of build history. A fresh, file-scoped heal context would cost a fraction; not built here.
-- **XSS sinks** (`dangerouslySetInnerHTML` in the chat, `innerHTML` in the code runner) are suggest-only on a
-  green app and shipped.
+- **Heal cost — measured, and the first theory was wrong.** The heal was ~$0.46 of the build's $0.99 real
+  cost (~2.4 M cache-read tokens at $0.19/M). It is NOT inherited history: `AgentRunner.run` starts every
+  run from `[{ role: 'user', content: prompt }]`, and `persistence` only appends. The ~48 K per call is the
+  heal's OWN transcript — ~50 calls, re-reading a 25 KB `index.css` repeatedly between edits. The cause of
+  the calls was the NO_HEADING false positive (5 pages), which this PR removes; a "fresh context" change
+  would have fixed nothing.
+- ~~**XSS sinks**~~ — **fixed upstream in the same PR:** `securityWriteNote` runs the same `scanSecurity` on
+  every write and hands medium/high findings back with the file (kill switch `AGENTV3_WRITE_SECURITY=off`).
+  At readiness they were only ever reported, because the reviewer is suggest-only on a green app.

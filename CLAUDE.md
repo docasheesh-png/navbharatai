@@ -2905,6 +2905,13 @@ the flag entries above promise.
   says so, `null` means *not supplied* and never zero, and `writeTypecheckUntouched` makes the
   silence unrepresentable as a fact about the build. Test-locked and reversion-proven four ways in
   `tests/theCounterWatchedOneLaneOfTwo.test.ts`.
+- **`AGENTV3_WRITE_SECURITY`** (NOT set; default ON, `off` disables — added 2026-09-30, autopsy 466c260a) —
+  `scanSecurity`'s medium/high findings (an XSS sink such as `dangerouslySetInnerHTML` / raw `innerHTML`, a
+  hardcoded secret) are handed back with every write (`securityWriteNote`, via `writeSteeringNotes`). Before
+  this they surfaced only at readiness, after the app was green, where the reviewer is suggest-only — so
+  three sinks shipped with a warning nobody acted on. Advisory, never blocks a write, no model call.
+  Same PR, no flag: an `nb-` class the design kit does not define and no stylesheet defines is named at
+  write time too (`inventedKitClassNote`).
 - **`AGENTV3_STORE_LOOP_NOTE`** (default ON, `off` disables — added 2026-09-29, autopsy 6a4a799f) — a
   write-time note (`storeEffectLoop.ts`, via `ToolDispatcher.writeSteeringNotes`) when a file binds a
   zustand hook with NO selector (`const store = useMusicStore()`), lists that bare name in an effect's

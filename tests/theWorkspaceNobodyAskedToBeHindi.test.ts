@@ -23,6 +23,7 @@ import { analyzeRequirementGaps } from '../src/server/lib/RequirementGapAnalyzer
 import { analyzeDesignCoverage, shellOwnsPageHeading } from '../src/server/AgentV3/DesignCoverage';
 import { findScriptedAssistant, scriptedAssistantNotice } from '../src/server/AgentV3/scriptedAssistant';
 import { inventedKitClasses, inventedKitClassNote, usesNonKitNbClass } from '../src/server/AgentV3/kitRestore';
+import { securityWriteNote } from '../src/server/AgentV3/SecurityAnalysis';
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -175,6 +176,29 @@ describe('5 · a kit-looking class the kit does not have is named at write time'
   it('the dispatcher hands the note back with the write', () => {
     const d = read('src/server/AgentV3/ToolDispatcher.ts');
     expect(d).toContain('const invented = await this.inventedKitClassNotes(files);');
-    expect(d).toContain('return hooks + storeLoop + imports + typecheck + quality + invented;');
+    expect(d).toContain('return hooks + storeLoop + imports + typecheck + quality + invented + security;');
+  });
+});
+
+describe('6 · an XSS sink is named while the file is open, not after the app is green', () => {
+  const CHAT = `export default function ProChat() {
+  return <div className="bubble" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.text) }} />;
+}`;
+  it('🔴 the report sinks are named at write time', () => {
+    expect(securityWriteNote('src/pages/ProChat.tsx', CHAT)).toMatch(/Security check on src\/pages\/ProChat\.tsx[\s\S]*line 2: dangerouslySetInnerHTML/);
+    expect(securityWriteNote('src/pages/CodeStudio.tsx', 'out.innerHTML = result;')).toMatch(/innerHTML/);
+  });
+  it('clean code, a cleared sink, tests and fixtures stay silent', () => {
+    expect(securityWriteNote('src/pages/Notes.tsx', '<p>{note.text}</p>')).toBe('');
+    expect(securityWriteNote('src/pages/X.tsx', "el.innerHTML = '';")).toBe('');
+    expect(securityWriteNote('src/pages/ProChat.test.tsx', CHAT)).toBe('');
+    expect(securityWriteNote('src/index.css', 'a{}')).toBe('');
+  });
+  it('the kill switch turns it off', () => {
+    expect(securityWriteNote('src/pages/ProChat.tsx', CHAT, { AGENTV3_WRITE_SECURITY: 'off' })).toBe('');
+  });
+  it('the dispatcher hands it back with every write', () => {
+    const d = read('src/server/AgentV3/ToolDispatcher.ts');
+    expect(d).toContain('security += securityWriteNote(p, files[p]);');
   });
 });

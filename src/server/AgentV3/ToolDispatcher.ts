@@ -65,7 +65,7 @@ import { generateSchemaTypes } from './schemaTypeGen';
 import { analyzeCiWorkflow, ciWorkflowSummary, repairCiWorkflow, ciPlatform } from './ciWorkflowAnalysis';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc, orphanComponentFile } from './ArchitectureAnalysis';
-import { securitySummary } from './SecurityAnalysis';
+import { securitySummary, securityWriteNote } from './SecurityAnalysis';
 import { applyPreviewDomain } from './PreviewDomain';
 import { injectAppSignature, hasAppSignature } from './appSignature';
 import { mergeDotEnv, gitignoreWithEnv, dotEnvValue } from '../secrets/appSecretsEnv';
@@ -2875,7 +2875,13 @@ export class ToolDispatcher {
     // An `nb-` class the kit does not have and nothing defines (autopsy 466c260a) — said while the file
     // is open, instead of by the end-of-build check inside a four-minute heal.
     const invented = await this.inventedKitClassNotes(files);
-    return hooks + storeLoop + imports + typecheck + quality + invented;
+    // An XSS sink or a hardcoded secret (autopsy 466c260a) — the readiness scan saw three sinks only after
+    // the app was green, where nothing repairs; the same scan runs here, with the file still open.
+    let security = '';
+    for (const p of paths) {
+      try { security += securityWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
+    }
+    return hooks + storeLoop + imports + typecheck + quality + invented + security;
   }
 
   private async inventedKitClassNotes(files: Record<string, string>): Promise<string> {

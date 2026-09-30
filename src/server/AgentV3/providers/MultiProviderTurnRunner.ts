@@ -719,7 +719,14 @@ export function makeMultiProviderTurnRunner(
         throwIfStopped(params.signal);
         const { name, runner } = chain[i];
         const reportName = chain[i].reportAs ?? name; // normalized label for telemetry/delivery (key-pool)
-        if ((timeoutStreak.get(reportName) ?? 0) >= TIMEOUT_BENCH_AFTER) {
+        // 🔴 A BENCH THAT HAS BEEN ANNOUNCED STAYS (autopsy f496c75b, 2026-09-30). The skip used to read
+        // only the streak, and a success deletes the streak — so a GLM call already IN FLIGHT when the
+        // bench fired (69 s, started before it) came back ten seconds later and quietly un-benched the
+        // family. The architect then spent 76 s more on GLM under a report line that said "benched for
+        // the rest of this build". A late answer from a call the bench already judged slow is evidence
+        // of the slowness, not of a recovery; `benchedFamilies` is what the report promised, so it is
+        // what the skip reads.
+        if (benchedFamilies.has(reportName) || (timeoutStreak.get(reportName) ?? 0) >= TIMEOUT_BENCH_AFTER) {
           fellBackFrom.push(name); // the FAMILY is benched — skip every remaining key without spending another timeout window
           continue;
         }

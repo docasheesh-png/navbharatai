@@ -21,63 +21,38 @@ const INDEX_HTML = `<!doctype html>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <main>
-      <h1>Hello World!</h1>
+    <main class="starter">
+      <h1 class="nb-gradient-text">Hello World!</h1>
       <p id="message">Edit <code>index.html</code>, <code>style.css</code>, and <code>script.js</code> to get started.</p>
-      <button id="btn">Click me</button>
+      <button id="btn" class="btn-primary">Click me</button>
     </main>
     <script src="script.js"></script>
   </body>
 </html>
 `;
 
-const STYLE_CSS = `*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-body {
-  font-family: system-ui, -apple-system, sans-serif;
-  background: #0f172a;
-  color: #e2e8f0;
+// 🎨 SCOPED TO THE STARTER PAGE (2026-09-30). These rules used to be page-wide — `* { margin: 0; padding:
+// 0 }`, a centred dark `body`, a solid indigo `button` — and they sit AFTER the design kit, so on every
+// plain-HTML app they overrode the kit's element layer: every button the same flat fill, every list
+// indent gone, every page centred. They style the Hello World markup above and nothing else, so the
+// app the model writes in its place gets the kit.
+const STYLE_CSS = `.starter {
   min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-main {
+  display: grid;
+  place-content: center;
+  gap: 16px;
+  padding: 32px;
   text-align: center;
-  padding: 2rem;
 }
 
-h1 {
-  font-size: 2.5rem;
-  margin-bottom: 1rem;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+.starter h1 {
+  font-size: clamp(2.25rem, 6vw, 3.5rem);
+  margin: 0;
 }
 
-p {
-  color: #94a3b8;
-  margin-bottom: 1.5rem;
-}
-
-button {
-  background: #6366f1;
-  color: white;
-  border: none;
-  padding: 0.6rem 1.4rem;
-  border-radius: 0.5rem;
-  font-size: 1rem;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-button:hover {
-  background: #4f46e5;
+.starter p {
+  color: var(--muted);
+  margin: 0;
 }
 `;
 

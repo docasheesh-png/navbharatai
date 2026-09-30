@@ -26,6 +26,7 @@ import { clickExplorerScript, clickExplorerModule } from '../src/server/AgentV3/
 import { newPageOptionsExpr, signInScript, BROWSER_PAGE_OPTIONS } from '../src/server/AgentV3/signInExplore';
 import { pageCheckScript } from '../src/server/AgentV3/PageRouteCheck';
 import { journeyScript } from '../src/server/AgentV3/journeyDerivation';
+import { mobileLayoutScript } from '../src/server/AgentV3/mobileLayoutCheck';
 import { nearestKitClass, inventedKitClassNote } from '../src/server/AgentV3/kitRestore';
 
 const src = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
@@ -140,18 +141,19 @@ describe('4 · every browser lane opens pages with reduced motion — one defini
     const signInRoute = journeyScript('http://x/', [j('/login')], 'M', { storageState: '/tmp/s.json' });
     expect(signInRoute).toContain('pageOpts: {"reducedMotion":"reduce"}');
     expect(signInScript('http://x/', [])).toContain('browser.newContext({"reducedMotion":"reduce"})');
+    expect(mobileLayoutScript('http://x/', { storageState: '/tmp/s.json' })).toContain('"pageOpts":{"reducedMotion":"reduce","storageState":"/tmp/s.json"}');
   });
   it('no browser lane opens a page without the shared options (census over the generators)', () => {
-    const allowed = ['(cfg.pageOpts)', '(j.pageOpts)', '(${newPageOptionsExpr(opts.storageState)})', '(${JSON.stringify(BROWSER_PAGE_OPTIONS)})'];
+    const allowed = ['({ ...cfg.pageOpts,', '(cfg.pageOpts)', '(j.pageOpts)', '(${newPageOptionsExpr(opts.storageState)})', '(${JSON.stringify(BROWSER_PAGE_OPTIONS)})'];
     let seen = 0;
-    for (const f of ['src/server/AgentV3/clickExplorer.ts', 'src/server/AgentV3/PageRouteCheck.ts', 'src/server/AgentV3/journeyDerivation.ts', 'src/server/AgentV3/signInExplore.ts']) {
+    for (const f of ['src/server/AgentV3/clickExplorer.ts', 'src/server/AgentV3/PageRouteCheck.ts', 'src/server/AgentV3/journeyDerivation.ts', 'src/server/AgentV3/signInExplore.ts', 'src/server/AgentV3/mobileLayoutCheck.ts']) {
       for (const line of src(f).split('\n')) {
         if (!/\b(?:browser\.newPage|browser\.newContext)\(/.test(line)) continue;
         seen += 1;
         expect(allowed.some((a) => line.includes(a)), `${f}: ${line.trim()}`).toBe(true);
       }
     }
-    expect(seen).toBe(4);
+    expect(seen).toBe(5);
   });
   it('an element that never stops moving is pressed on itself — for that failure alone', () => {
     const mod = clickExplorerModule({ base: 'http://x/' });

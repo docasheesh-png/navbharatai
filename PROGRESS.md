@@ -84419,3 +84419,48 @@ The #3385 ratchet listed 56 tools named in the architect prompt and offered to n
     "repo" in "report", "push" in "push notification"). It now matches whole words only.
   - **Tests:** 2 more in `tests/freeChatKnowsItsModeButton.test.ts`, reversion-proven.
   - **Reach:** the website gets this on deploy; phones need a fresh bundle.
+## 2026-09-30 — autopsy f496c75b: "single file html … 3d fight game" (Weak, 17.7 min, ₹448.18)
+
+The user asked for ONE html file and got a 25-file Vite + TypeScript project; most of the struggle was ours.
+**Ledger:**
+
+| Bucket | Count | Items |
+|---|---|---|
+| ✅ self-healed | 3 | a false missing-import heal (then undone); an `import type` enum (TS1361) repaired by hand; the sweep refused post-latch |
+| 🔀 worked around | 2 | a recipe re-run 6× plus `web_search` for the unreachable 3D renderer; the salvaged fast-lane files |
+| ⏭️ skipped | 2 | the single-file ask; the explorer pressed 0 controls |
+| ❌ shipped imperfect | 2 | a Vite project instead of one file; an offer about a deleted file |
+| 🥵 struggle | 3 | 196 s on the cheapest rung for a heavy game; 76 s on GLM after it was "benched"; step limit 80 reached |
+
+**Fixed (all locked in `tests/theSingleFileGameAutopsy.test.ts`, reversion-proven):**
+- **Single file:** `frameworkDetect` sends a single-file / plain html,css,js ask to the `static` template
+  (precision: an explicit "react" keeps React; "fix the index.html file" is not it).
+  `SINGLE_HTML_FILE_RULE` reaches both the architect prompt and the fast lane, and the static hint says the
+  TS recipes cannot run there.
+- **Reachable tools:** `generate_game_3d` is in `RECIPE_TOOLS`, and `object_spec` is the architect's. The
+  census regex could not read a digit in a tool name, which is why the census missed it.
+- **Heal:** `addMissingProjectImports` no longer treats a property or method NAME as a use.
+  - On the recipes' own output it added `state` and `load` imports, which then had to be undone.
+  - A shorthand `{ state }` still counts as a use.
+- **Enum as type:** `fixTypeOnlyValueImports` (fast lane plus `ToolDispatcher`), plus `ENUM_IMPORT_RULE`
+  in every contract block.
+- **Bench:** the skip reads `benchedFamilies`, so a late success on an in-flight call cannot un-bench a
+  family the report already called benched.
+- **Complexity:** `namesHeavyGame` makes a 3D / multiplayer / physics game `complex_app` (30 → 58), so it
+  opens on KIMI. A simple snake game is unchanged.
+- **Sweep:** the U-3 unused-import sweep moved into the finishing passes before the latch.
+- **Offers:** `parseReviewOutput` attributes findings to their file heading. An offer whose file is gone is
+  dropped (`REVIEW_OFFER_FILE_GONE`, admin-only).
+
+**Open root causes (not fixed here):**
+- The explorer found 0 controls: the game uses clickable divs ("Tap to Start" is not a button), and A11y
+  scored 100 without flagging it.
+- A reviewer compile claim in a NON-first sentence ("This file will not compile") is not refuted by the
+  green typecheck.
+- Salvaged fast-lane files are left as dead code (a circular `types.ts` ↔ `MathUtils.ts` came from the
+  contract).
+- Three more post-latch writers are unnamed: vite config, HTML entry guard, entry dedupe. All three act
+  only on a broken app.
+- `SANDBOX_SESSION` says "created-fresh" while `SETUP_TIMING` says "warm".
+- The ETA was 2.4× under the real time.
+- The step limit of 80 was reached.

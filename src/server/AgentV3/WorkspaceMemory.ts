@@ -21,6 +21,7 @@ import { scanSecurity, type SecurityFinding } from './SecurityAnalysis';
 import { stripCodeComments } from './stripCodeComments';
 import { withoutPreviewBridge } from './previewBridge';
 import { bm25, type Bm25Doc } from './Bm25';
+import { toWorkspaceRelPath, SANDBOX_WORKSPACE_ROOT } from '../lib/workspacePath';
 
 // Words too generic to carry recall signal — dropped from the query token set so a
 // multi-word query like "build the timer app" ranks on "timer"/"app", not on "the".
@@ -243,6 +244,15 @@ export function extractFacts(file: string, content: string): FileFacts {
  */
 export const RESTORED_STUB = '/* restored */';
 
+/**
+ * The graph's key for a path: workspace-relative, forward-slashed, no leading `/` or `./`. A path that
+ * cannot be made relative (empty, all `..`) is kept as written — the graph is best-effort, and an
+ * unknown shape must never throw out of an indexer. PURE.
+ */
+export function graphKey(file: string): string {
+  try { return toWorkspaceRelPath(file, SANDBOX_WORKSPACE_ROOT); } catch { return file; }
+}
+
 export class WorkspaceMemory {
   private readonly fileFacts = new Map<string, FileFacts>();
   /**
@@ -282,7 +292,13 @@ export class WorkspaceMemory {
   markHydrationConfirmed(): void { this._hydrationConfirmed = true; }
 
   /** Index (or re-index) a file's content into the project graph. */
-  indexFile(file: string, content: string): void {
+  indexFile(rawFile: string, content: string): void {
+    // ONE KEY SHAPE FOR THE GRAPH, ENFORCED AT THE DOOR (autopsy ce115e1f). `codemod_rename` handed
+    // this ts-morph's in-memory paths (`/src/hooks/useBusData.ts`), the seeder hands it `src/…`, and
+    // an exact-match graph kept BOTH: the slash copy resolved `../types` to `/src/types.ts`, which is
+    // no key, so a build whose `npm run build` exited 0 reported a READINESS_BLOCKER, a phantom orphan
+    // and a phantom import cycle. Normalising here makes it true for every writer, present and future.
+    const file = graphKey(rawFile);
     // OUR PREVIEW BRIDGE IS NOT THE APP'S CODE, AND THIS IS WHERE THE ANALYSIS CORPUS BEGINS
     // (autopsy fd021c64). `extractFacts` runs `scanSecurity` over whatever it is handed, and the
     // pre-seed indexer reads the sandbox with the raw actuator — not the `read_file` tool, so not
@@ -318,7 +334,8 @@ export class WorkspaceMemory {
   }
 
   /** Drop a deleted file from the graph. */
-  removeFile(file: string): void {
+  removeFile(rawFile: string): void {
+    const file = graphKey(rawFile);
     this.fileFacts.delete(file);
     this.restoredStubs.delete(file);
     this.lastWriteAt = Date.now();
@@ -335,6 +352,11 @@ export class WorkspaceMemory {
   private lastWriteAt = 0;
 
   markDepsInstalled(): void { this.depsInstalledAt = Date.now(); }
+  private prodBuildCleanAt = 0;
+  /** The agent's own production build ran and succeeded (`shellBuildProvesSuccess`). */
+  markProdBuildClean(ts: number = Date.now()): void { this.prodBuildCleanAt = ts; }
+  /** True while no file has been written since the last successful production build. Strict >, like tsc. */
+  prodBuildCleanSinceLastWrite(): boolean { return this.prodBuildCleanAt > 0 && this.prodBuildCleanAt > this.lastWriteAt; }
   /**
    * A whole-project compile came back clean. Besides the verification ledger, it RESOLVES every
    * compile-class error recorded before it — without this, `projectMap()` kept handing those errors to

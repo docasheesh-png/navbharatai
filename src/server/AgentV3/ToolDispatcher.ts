@@ -36,6 +36,7 @@ import { defaultToolCatalog, isRecipeName, recipeListing } from './ToolCatalog';
 import type { Checkpointer } from './GitManager';
 import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
+import { shellBuildProvesSuccess } from './buildFailurePrediction';
 import { robustTscCommand } from './tscCommand';
 import { parseTscErrors } from './EndgameRepair';
 import { tscOutputProvesClean, looksLikeTypecheckCommand } from './TscGate';
@@ -4041,6 +4042,7 @@ export class ToolDispatcher {
           // specialists don't redundantly re-run them (they receive verificationStatus()).
           const mem = getWorkspaceMemory(this.workspaceId);
           if (/\bnpm\s+(ci|install|i)\b/.test(command) || /\b(pnpm|yarn)\s+(install|add)\b/.test(command)) mem.markDepsInstalled();
+          if (shellBuildProvesSuccess(command, exitCode, `${stdout}\n${stderr}`)) mem.markProdBuildClean();
         }
         // Read from the OUTPUT, never the exit code: `tsc --noEmit 2>&1 | head -40` exits with head's 0
         // whether or not tsc failed, and that used to be recorded as "TypeScript already checked CLEAN".
@@ -4605,6 +4607,19 @@ export class ToolDispatcher {
             });
           }
         } catch { /* attribution is best-effort — a failure keeps the whole-workspace score */ }
+        // 🔴 A FORECAST IS NOT A VERDICT WHEN THE VERDICT IS ALREADY IN (autopsy ce115e1f). The agent ran
+        // `npm run build` and it succeeded, with no write since — so "the build will fail" is contradicted
+        // by the build itself. The forecast is kept as a zero-cost observation, never priced as a blocker.
+        try {
+          if (getWorkspaceMemory(this.workspaceId).prodBuildCleanSinceLastWrite()
+              && (scoredArch.unresolvedImports.length > 0 || scoredArch.nodeBuiltinsInFrontend.length > 0)) {
+            extra.push({
+              severity: 'observation',
+              label: `the production build was run after the last change and succeeded, so ${scoredArch.unresolvedImports.length + scoredArch.nodeBuiltinsInFrontend.length} predicted build-breaking import(s) did not break it: ${[...scoredArch.unresolvedImports, ...scoredArch.nodeBuiltinsInFrontend].slice(0, 3).join(', ')}`,
+            });
+            scoredArch = { ...scoredArch, unresolvedImports: [], nodeBuiltinsInFrontend: [] };
+          }
+        } catch { /* memory best-effort — the forecast stands */ }
         const readiness = assessReadiness(scoredArch, findings, extra);
         // Stash for the mandatory end-of-build gate (R2 §1.1) — same scan, no divergence.
         this.lastReadiness = readiness;

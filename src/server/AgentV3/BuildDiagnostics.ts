@@ -26,7 +26,7 @@ import { isModelUnavailableError } from './providerErrorClass';
 import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError } from './turnDeadline';
-import { typecheckEvidenceFromCommands } from './TscGate';
+import { typecheckEvidenceFromCommands, commandOutcomeText } from './TscGate';
 import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
@@ -1013,7 +1013,7 @@ export class BuildDiagnostics {
       phase: 'build',
       severity: failed ? 'error' : 'info',
       code: failed ? 'SANDBOX_CMD_FAILED' : 'SANDBOX_CMD',
-      message: `$ ${cmdHead} → exit ${rec.exitCode ?? '?'}${durTxt}`,
+      message: `$ ${cmdHead} → ${commandOutcomeText(rec)}${durTxt}`,
       autoResolved: !failed,
       detail: failed ? capTail(rec.stderr || rec.stdout, 400) : undefined,
     });

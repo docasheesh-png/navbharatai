@@ -35,7 +35,9 @@ export interface RoleConfig {
 // never call them. A generated booking app therefore marked payments "paid" from the browser and kept its
 // bookings in localStorage. `tests/promisedToolsAreOffered.test.ts` holds the prompt and the lists together.
 const PAYMENT_DATA_TOOLS: ToolName[] = ['generate_payment', 'generate_webhook', 'generate_idempotency', 'generate_db_config'];
-const BUILD_TOOLS: ToolName[] = [...PAYMENT_DATA_TOOLS, 'read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'recall', 'evaluate', 'generate_readme', 'generate_env_example', 'generate_gitignore', 'generate_app_defaults', 'generate_openapi', 'generate_api_docs', 'generate_tests', 'run_tests', 'code_graph', 'architecture_map', 'find_dead_code', 'api_graph', 'typecheck', 'lint', 'check_package', 'check_toolchain', 'generate_observability', 'generate_bundle_optimization', 'generate_seed_data', 'generate_auth', 'generate_migration', 'generate_deploy_artifacts', 'replace_symbol', 'check_conventions', 'generate_release_notes', 'codemod_rename', 'codemod_add_prop', 'codemod_move_file', 'update_todo', 'update_preview'];
+// `run_recipe` reaches the RECIPE_TOOLS (ToolCatalog.ts); `write_files_batch` had a full handler and a
+// prompt telling builders to use it, and was offered to NO role until 2026-09-30.
+const BUILD_TOOLS: ToolName[] = [...PAYMENT_DATA_TOOLS, 'run_recipe', 'write_files_batch', 'read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'recall', 'evaluate', 'generate_readme', 'generate_env_example', 'generate_gitignore', 'generate_app_defaults', 'generate_openapi', 'generate_api_docs', 'generate_tests', 'run_tests', 'code_graph', 'architecture_map', 'find_dead_code', 'api_graph', 'typecheck', 'lint', 'check_package', 'check_toolchain', 'generate_observability', 'generate_bundle_optimization', 'generate_seed_data', 'generate_auth', 'generate_migration', 'generate_deploy_artifacts', 'replace_symbol', 'check_conventions', 'generate_release_notes', 'codemod_rename', 'codemod_add_prop', 'codemod_move_file', 'update_todo', 'update_preview'];
 const EDIT_TOOLS: ToolName[] = ['read_file', 'write_file', 'edit_file', 'grep', 'glob', 'recall', 'evaluate'];
 const RUN_TOOLS: ToolName[] = ['read_file', 'bash', 'grep', 'glob', 'recall', 'evaluate'];
 const READONLY_TOOLS: ToolName[] = ['read_file', 'grep', 'glob', 'recall', 'evaluate'];
@@ -60,7 +62,7 @@ const REGISTRY: Record<AgentRole, RoleConfig> = {
     // capability it has no way to need.
     // `request_secrets` is the architect's too, for the same reason as `stop_build`: it opens a popup in
     // front of the user, and only the agent the user is talking to should do that.
-    tools: [...BUILD_TOOLS, 'stop_build', 'request_secrets', 'task', 'second_opinion', 'consensus', 'web_search', 'screenshot', 'browser_action', 'console_errors', 'deploy'],
+    tools: [...BUILD_TOOLS, 'stop_build', 'request_secrets', 'task', 'second_opinion', 'consensus', 'web_search', 'screenshot', 'find_ui_element', 'browser_action', 'console_errors', 'deploy'],
     capabilities: ['orchestrate', 'plan', 'delegate', 'integrate', 'architecture', 'coordinate'],
   },
 

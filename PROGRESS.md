@@ -84195,3 +84195,17 @@ successful reply reached no screen.
 - The fast lane and sub-agents do not carry `AI_IN_APP_RULE` yet; only the architect does.
 - An app written against a provider's own client still gets that provider's line only. That is honest,
   but it is not the two-option choice.
+## 2026-09-30 — every tool the builder's prompt names is now reachable (admin chose "one recipe tool")
+
+The #3385 ratchet listed 56 tools named in the architect prompt and offered to no role. Paid in full:
+- **54 code recipes** (`generate_email`, `generate_pdf`, `generate_qr`, `generate_game_runtime`, …) are reached
+  through ONE catalog entry, `run_recipe({ name, input })`, instead of 54 more schemas on every model call. Each
+  runs through its OWN unchanged handler (`this.run` with the inner name), so behaviour is byte-identical to a
+  direct call — a test compares the two. `name: "list"` returns every recipe's inputs; an unknown name or a
+  missing required input gets the inputs back and writes nothing. It cannot reach a non-recipe tool.
+  All 54 are code generators on the user's own keys — none spends NavBharatAI money (checked).
+- **`write_files_batch`** (a full write door with every write-time guard, and a prompt telling builders to use
+  it) was offered to NO role — now in BUILD_TOOLS. **`find_ui_element`** (visual; returns a screenshot, so not a
+  recipe) is now the architect's, beside `screenshot`.
+- The ratchet list is deleted, not emptied: a new prompt promise without a reachable tool fails CI with no escape.
+- The live strip names the recipe ("using generate_pdf"), not "using run_recipe".

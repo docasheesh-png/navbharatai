@@ -100,6 +100,15 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Play Console warning (admin 2026-09-29): "This App Bundle contains native code, and you've
+            // not uploaded debug symbols." The .so files come from dependencies (Firebase, Play services,
+            // Capacitor plugins); this puts their symbol tables into the .aab, so native crash reports in
+            // Play Console name functions instead of raw addresses. SYMBOL_TABLE, not FULL: that is all a
+            // readable stack needs, at a fraction of the size. Nothing changes in the installed app.
+            // If the runner's NDK tools were ever missing, AGP only warns — the bundle still builds.
+            ndk {
+                debugSymbolLevel 'SYMBOL_TABLE'
+            }
             // Sign ONLY when a keystore is supplied (the CI release build); otherwise unsigned.
             if (System.getenv("ANDROID_KEYSTORE_FILE")) {
                 signingConfig signingConfigs.release

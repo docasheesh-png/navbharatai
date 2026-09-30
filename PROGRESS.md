@@ -84394,3 +84394,30 @@ left at "1 failed" also resumes on a later "continue" over an app built since.
 **Open, not ours to fix here:** GLM 60 s timeouts (provider); Kimi 167 s first call; the ETA used a complexity
 score the router itself disowned as unreadable (shown as a labelled guess); the scripted "AI" reply is #3389's
 (`SCRIPTED_ASSISTANT_SHIPPED`), not duplicated.
+
+### 2026-09-30 addendum — the Project Mode module-turn root cause is FIXED (admin: "cause dhundo! fix karo!!")
+
+The entry above recorded it as an open admin decision; the admin asked for it to be root-caused and fixed.
+
+**Cause:** modules are built in dependency order, so the shell (the only module that writes `src/App.tsx`) is
+last. Every module turn was judged as a whole app, and three verdicts written for whole apps each read the
+seeded starter page as a failure: the readiness starter blocker (which then fed two `UNFINISHED_BUILD_RESUMED`
+nudges pushing the model out of scope), the platform's own preview, and the starter-render verdict. So a plan
+whose first module did not own the entry could never pass module 1.
+
+**Fix:**
+- `shellModuleFor` / `moduleOwnsEntry` (`ProjectPlan.ts`, pure). Until the shell module is built, a module turn:
+  - is judged on its own files and the typecheck;
+  - stands the starter blocker down (`ToolDispatcher.setStarterExpected`);
+  - starts no platform preview (`shouldAttemptPlatformPreview` `awaitingShell`);
+  - does not adopt a published preview, so every `lastPreviewUrl`-gated proof stands down;
+  - defers the reviewer to the shell turn;
+  - is told in its context not to touch the entry.
+- The shell turn, and every turn of a plan with no entry owner, is judged exactly as before.
+- The planner is told that exactly one module, the shell, owns `src/App.tsx`.
+- `retireUnbuiltPlan`: a paused plan with no done module is deleted after a direct build proves a working app.
+- Tests: `tests/aModuleIsNotTheWholeApp.test.ts` (15), reversion-proven.
+
+**Still unmeasured:**
+- No plan has yet run end to end in production.
+- A module turn earns no markup (no preview proof), so modules before the shell are billed at real cost.

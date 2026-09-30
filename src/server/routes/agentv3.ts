@@ -354,7 +354,7 @@ import { decideCancelledBuildBill } from '../AgentV3/cancelledBuildBilling';
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
-import { projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { shellModuleFor, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
@@ -11846,7 +11846,11 @@ async function noteBuildOutcome(
     // The latest live preview URL the build published — used by the post-build PREVIEW SELF-CHECK to
     // actually open the running app in a browser and verify it rendered.
     let lastPreviewUrl = '';
-    events.subscribe((e) => { if ((e as { type?: string }).type === 'preview') { const u = (e as { url?: unknown }).url; if (typeof u === 'string' && u) lastPreviewUrl = u; } }, false);
+    // Set when this turn builds a Project Mode module that a LATER module assembles (ProjectPlan.ts
+    // `shellModuleFor`). There is no app to prove yet, so a preview published anyway is not adopted as
+    // this build's preview — every proof below is gated on `lastPreviewUrl` (autopsy 6a5fb04b).
+    let moduleAwaitsShell: string | null = null;
+    events.subscribe((e) => { if ((e as { type?: string }).type === 'preview' && !moduleAwaitsShell) { const u = (e as { url?: unknown }).url; if (typeof u === 'string' && u) lastPreviewUrl = u; } }, false);
     // Every chat line the user has already SEEN — so the end of a successful build can show only what
     // the platform added to the reply (summaryAdditions.ts). Short status blips are not kept.
     const narratedTexts: string[] = [];
@@ -16042,6 +16046,9 @@ async function noteBuildOutcome(
       // markup as every other v5.0 call).
       let projectPlanRef: ProjectPlan | null = null;
       let projectModuleRef: ProjectModule | null = null;
+      // A plan left paused while this turn builds normally — retired at the end if it never built
+      // anything and this turn delivered a working app instead (retireUnbuiltPlan, autopsy dfd81a3a).
+      let pausedPlanRef: ProjectPlan | null = null;
       // Mutually exclusive with the mega-app roadmap (Phase 3): both are "big app" strategies and must
       // never both steer one build. When the roadmap owns this build (step-1 target already set), SPM
       // project mode stays out.
@@ -16186,6 +16193,20 @@ async function noteBuildOutcome(
               projectPlanRef = pPlan;
               projectModuleRef = pPlan.modules.find((m) => m.id === nextMod.id) ?? nextMod;
               buildPrompt = `${moduleBuildContext(pPlan, projectModuleRef)}\n\n---\n\nUser's message this turn:\n${buildPrompt}`;
+              // WHO ASSEMBLES THE APP? A module that does not own the entry leaves the starter page in
+              // place by design, so this turn is judged on its own files, not as a whole app (autopsy
+              // 6a5fb04b: a config module wrote its files, typechecked, and was failed for "Hello World").
+              const shell = shellModuleFor(pPlan, projectModuleRef);
+              if (shell) {
+                moduleAwaitsShell = shell.name;
+                dispatcher.setStarterExpected(true);
+                try {
+                  buildDiag.record({
+                    phase: 'plan', severity: 'info', code: 'PROJECT_MODULE_AWAITS_SHELL', autoResolved: true,
+                    message: `Module "${projectModuleRef.name}" does not own the app's entry; "${shell.name}" assembles the app in a later turn. This turn is judged on its own files and the typecheck — no starter verdict, no preview.`,
+                  });
+                } catch { /* diagnostics best-effort */ }
+              }
               // GA-7 — surface the coordinator digest (milestone progress + current role) alongside the
               // plain progress line, closing the previously built-but-unwired coordinatorDigest export.
               const digest = coordinatorDigest(pPlan);
@@ -16195,6 +16216,7 @@ async function noteBuildOutcome(
               if (reason) events.emit({ type: 'narration', agent: 'architect', text: `⚠️ Project plan is blocked: ${reason}`, ts: Date.now() });
             }
           } else if (pPlan && !planComplete(pPlan) && planPreExisted) {
+            pausedPlanRef = pPlan;
             events.emit({ type: 'narration', agent: 'architect', text: `ℹ️ Handling this message normally (project plan stays paused at ${planProgressLine(pPlan)}). Say "continue" to resume the next module.`, ts: Date.now() });
           }
         } catch (err) {
@@ -19283,6 +19305,7 @@ async function noteBuildOutcome(
           appFiles: presentFiles.length,
           hasPackageJson: presentFiles.some((f) => /(^|\/)package\.json$/.test(String(f))),
           remainingMs: remainingForProof,
+          awaitingShell: moduleAwaitsShell,
         });
         if (proofDecision.attempt) {
           const budget = platformPreviewBudgetMs(remainingForProof, previewWakeBudgetMs());
@@ -20423,7 +20446,7 @@ async function noteBuildOutcome(
       // `PREVIEW_ERROR` already exists, but it fires only when a preview ATTEMPT reports an error. A
       // preview that was never produced at all raised nothing. This is that gap, and it is deliberately
       // a WARNING on the build itself rather than a note buried in another check's explanation.
-      if (result.ok && !lastPreviewUrl && !isImportTurn && !abort.signal.aborted) {
+      if (result.ok && !lastPreviewUrl && !isImportTurn && !abort.signal.aborted && !moduleAwaitsShell) {
         try {
           buildDiag.record({
             phase: 'preview', severity: 'warning', code: 'PREVIEW_NEVER_CAME_UP',
@@ -21545,7 +21568,16 @@ async function noteBuildOutcome(
         reviewFastlaneForced: envFlag('AGENTV3_REVIEW_FASTLANE'),
         startTierSonnet: analysis?.startTier === 'sonnet',
       });
-      if (result.ok && reviewHeadroomOk && reviewerAllowed) {
+      // A Project Mode module that a later module assembles is not reviewed as an app: the reviewer would
+      // read a half-built project and report the starter page as the product. The shell turn reviews the
+      // assembled app (autopsy 6a5fb04b).
+      if (result.ok && reviewHeadroomOk && reviewerAllowed && moduleAwaitsShell) {
+        try {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_DEFERRED_TO_SHELL', autoResolved: true,
+            message: `Post-build review deferred: this turn built one project module, and the app is reviewed once "${moduleAwaitsShell}" assembles it.` });
+        } catch { /* diagnostics best-effort */ }
+      }
+      if (result.ok && reviewHeadroomOk && reviewerAllowed && !moduleAwaitsShell) {
         try {
           let rFiles = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
           // The REAL project size, captured before the fallback below can shrink rFiles to just this
@@ -22196,6 +22228,18 @@ async function noteBuildOutcome(
             events.emit({ type: 'narration', agent: 'architect', text: `❌ Module "${projectModuleRef.name}" failed — ${reason ?? 'say "continue" after reviewing to retry the remaining modules.'}`, ts: Date.now() });
           }
         } catch { /* module settle is best-effort — the plan self-heals on the next turn */ }
+      }
+      // A PAUSED PLAN THAT NEVER BUILT ANYTHING IS RETIRED ONCE THE APP EXISTS ANOTHER WAY (autopsy
+      // dfd81a3a). The voice-assistant plan stopped at "0/12 — 1 failed"; the user's next message built the
+      // whole app directly, and the plan stayed saved, so a later "continue" would have re-run the config
+      // module on top of a finished app. Only a plan with NO done module is retired, and only after a real
+      // browser proved this turn's app — a plan that has built something is never touched.
+      if (pausedPlanRef && !projectModuleRef && result.ok && runProof().proven && retireUnbuiltPlan(pausedPlanRef)) {
+        try {
+          await deleteProjectPlan(workspaceId);
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'PROJECT_PLAN_RETIRED', autoResolved: true,
+            message: `The paused project plan (${planProgressLine(pausedPlanRef)}) had built nothing, and this turn delivered a working app directly — the plan was retired so a later "continue" cannot rebuild over it.` });
+        } catch { /* best-effort — a plan left in place is today's behaviour */ }
       }
 
       // P-AI.5 — Personalization: learn this user's revealed stack from the SUCCESSFUL build.

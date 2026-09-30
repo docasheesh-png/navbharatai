@@ -1446,7 +1446,17 @@ export class ToolDispatcher {
    * not look" is not "the app is a scaffold", and inventing a blocker from an unreadable file would
    * fail real builds on our own trouble — the same rule the timeout above already follows.
    */
+  /**
+   * This turn builds ONE Software Project Mode module, and a LATER module assembles the app, so the
+   * starter entry is expected (ProjectPlan.ts `shellModuleFor`, autopsy 6a5fb04b). Set by the route.
+   */
+  private _starterExpected = false;
+  setStarterExpected(on: boolean): void { this._starterExpected = on; }
+
   private async _blockIfStillTheStarterApp(report: ReadinessReport): Promise<ReadinessReport> {
+    // A module that does not own the entry leaves the starter in place by design — judging the whole
+    // app here is what failed every Project Mode module before the shell (autopsy 6a5fb04b).
+    if (this._starterExpected) return report;
     // The SAME question every render proof asks (`entryIsStillTheStarter`) — one answer, so the gate
     // and the proofs can never disagree about the same file again (autopsy 0d297b25).
     try {

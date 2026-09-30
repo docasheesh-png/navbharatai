@@ -85581,3 +85581,47 @@ that Pollinations was working and had not been down.
 - **Same screen, same route.** The request's `tier` field decides the mode. No tier (every installed phone app) means Free.
 - **Honest note:** the "anonymous door closed (401)" diagnosis in #3409 came from the provider's docs and was never observed from a session. The admin says the provider works. The door code only acts on a real 401/402/403, so it stays. The earlier outage's cause is **unproven**.
 - **Tests:** `tests/imageFreeAndPaid.test.ts` (18) is new. `theImageGeneratorHasOneTier` became `theImageGeneratorHasFreeAndPaid`. Updated: `fiveFreeImagesThenOneRupee`, `theFreeDoorClosedAndNobodyNoticed`, `everyFaceIsIndianAndNoImageIsADeadEnd`, `yourPictureComesBackAsYourPicture`, `theUsersOwnConnectionFetchesTheirPicture`, `thePlatformHasADayToo` and `theBoxEmptiesWhenYouPressSend`. Reversion-proven: removing the Free-mode stop, or the `anonymous` flag, fails 5 tests.
+
+## 2026-09-30 — App Mart becomes social: 👍 · 👎 · 💬 under every app, comments, creator profiles
+
+**Admin, verbatim:** *"app mart me ek social media banana hai! … app ke niche 3 option dikhe- like (👍) dislike
+(👎) comment … only login user like dislike comment kar sakta hai … creter ke pas notifications jaye … create
+dekh sake kisne like kiya hai, (dislike kisne kiya hai yeh na dikhe bas number dikhe) … comment wale user ke naam
+par koi other user click kare to, us user ki profile bhi dekhi ka sake … note: user ki email nahi dikhani hai!!"*
+and *"isko real word social media jaisa banao!"*
+
+**What shipped (branch `claude/app-mart-social`):**
+- **Reactions.** One doc per (app, user), toggled in a transaction (like ↔ dislike ↔ none). Counts come from
+  Firestore `count()` aggregations, cached 30 s. No stored tally, so there is no hot document and a deleted
+  account's reactions drop out of the number by themselves. Every user sees the numbers. Only a signed-in user
+  can press (the server refuses with 401 and the client opens sign-in).
+- **Comments and replies.** Up to 1000 characters, one reply level (a reply to a reply attaches to the top
+  comment, as on YouTube). Delete by the author, the app's creator or an admin. A removed comment that has
+  replies becomes a placeholder, and its text is erased, never sent. The creator's comments carry a badge.
+- **Who liked it.** A likers list for the app's creator (and admins) only, 403 for anyone else.
+  **There is no dislikers list anywhere**, server or client; a source guard fails CI if one appears.
+- **Profiles.** Tapping a commenter's name, or "by <creator>" in an app's sheet, opens the public profile: name,
+  photo (https only), creator code, the apps they published to App Mart with counts, total likes. Never an
+  email, never a uid; a source guard checks every `res.json` body. "My profile" is in the App Mart header.
+  An iPhone never lists an `.apk` on a profile.
+- **Notifications to the creator.** Grouped like real social apps: one entry per (kind, app, India day), e.g.
+  "Asha and 3 others liked your app". Replies notify the parent comment's author. Push for comments and
+  replies only, at most one per 10 minutes per app. Tapping one opens App Mart on that app. Kept in their own
+  collection, merged into the bell, read/dismiss state stored on the entry itself.
+- **Safety (needed for user content on Play and the App Store).** Report a comment (reason + text snapshot) into
+  an admin queue in the App Mart Review tab (Keep / Remove); block a person (their comments hidden, their
+  activity never notifies you). Rate limits on reacting, commenting and reporting.
+- **Data.** Reactions, comments, blocks, notifications and the creator-code link are erased with the account.
+  Notifications expire after 90 days; comment reports after 180. Privacy policy (§2.1, §6) and the account
+  deletion page say so; `AppKnowledgeBase` has `app_mart_social`.
+- **Tests:** `tests/appMartSocial.test.ts` (32, server rules + source guards), `tests/appMartSocialClient.test.ts`
+  (12, formatting + wiring).
+
+**Still open (said plainly):**
+- A push notification tap on the phone opens the app, not the specific App Mart page (no native deep-link
+  routing exists for it yet). The in-app bell does open the app's page.
+- No word filter on comments. The admin scoped the word ban to Pollinations only; widening it is their call.
+- Replies under a comment whose author deleted their account are no longer reachable, but still count in the
+  comment number until the next recount of that comment.
+- "Follow a creator" is a natural phase 2; not built.
+- Phone users get the new screens only with a fresh `.aab`/`.ipa` (bundled mode).

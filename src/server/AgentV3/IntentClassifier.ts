@@ -664,6 +664,25 @@ const HI_FIRST_PERSON_VERB =
 const HI_WH_ANYWHERE =
   /\b(?:kya|kaise|kase|kaisay|kaisi|kaisa|kahan|kaha|kahaan|kidhar|kab|kaun|kon|konsa|konsi|kitna|kitne|kitni|kyun|kyu|kyon)\b/;
 
+/**
+ * THE OTHER INDIAN LANGUAGES PEOPLE TYPE IN ROMAN LETTERS (autopsy 6e646503, 2026-09-30).
+ *
+ * 🔴 *"Ibahart app ni jaherat karvi chhe kai rite bolvu a janavo"* — Gujarati: *"I want to advertise the
+ * Ibahart app; tell me how to word it."* Every rule above is English or Hindi, so this read as a
+ * statement naming an app. The intention reader did not answer, the keyword verdict (build) stood, the
+ * workspace turned it into an EDIT of the user's Gita reader, and two minutes of preview, button
+ * presses and a production build ran before an English answer about a diary app nobody mentioned.
+ *
+ * Each phrase is either a question word (`kai rite` / `kevi rite` = how, `shu` = what, `kyare` = when,
+ * Marathi `kasa`/`kashi` = how, `kay`/`kaay` = what, `kuthe` = where, `kadhi` = when) or a request to be
+ * TOLD something (`janavo`, `batavo`, `samjavo`, Marathi `sanga`) — a request to be told is a request
+ * for an answer, never an order to build. Unanchored for the reason `HI_WH_ANYWHERE` is: these
+ * languages are verb-final, so the question sits at the end. A false positive costs only the hard lock
+ * (see `doubt`), exactly like every other line here.
+ */
+const REGIONAL_QUESTION_ANYWHERE =
+  /\b(?:kai rite|kevi rite|kem karvu|kem karu|shu chhe|shu che|shu karvu|shu karu|kyare|janavo|janavjo|batavo|samjavo|kasa|kashi|kase karaych\w*|kay aahe|kaay|kuthe|kadhi|sanga|sangaa|sangal ka)\b/;
+
 const MIDSENTENCE_KYA_QUESTION =
   /(?:^|[\s,.!])kya\s+(?:aap|tum|main|mai|hum|hume)\b|(?:^|[\s,।!])क्या\s+(?:मैं|मई|आप|तुम|हम|हमें)(?:\s|$|[।,.!?])/;
 
@@ -695,6 +714,7 @@ function clauseReadsAsQuestion(raw: string): boolean {
   // itself is unchanged, so "do it again" is still an order, not a question.
   if (AUX_ASKS_US.test(text)) return true;
   if (MIDSENTENCE_KYA_QUESTION.test(text)) return true;
+  if (REGIONAL_QUESTION_ANYWHERE.test(text)) return true;
   // The verb-final Hindi question: a question word anywhere, and a FIRST-PERSON verb to go with it.
   // Both are required — the wh-word alone appears in plenty of statements ("kya baat hai"), and the
   // verb alone appears in plenty of plans ("main banau"). Together they are only ever a question.
@@ -1012,6 +1032,28 @@ export interface SmartIntent {
    * `unclear` above already follows.
    */
   readerAnswered: boolean;
+  /**
+   * What happened to the reader, stated as ONE fact the report can print (autopsy 6e646503). That
+   * report said "intention reader did not run" — it had been ASKED, and either failed, timed out or
+   * said "unclear", and the three need different fixes. `readerAnswered` stays the boolean the net
+   * reads; this is only its explanation. Optional so a caller building its own SmartIntent compiles.
+   */
+  readerOutcome?: ReaderOutcome;
+}
+
+/** Why the reader's verdict was or was not used — see `SmartIntent.readerOutcome`. */
+export type ReaderOutcome = 'answered' | 'unclear' | 'unusable-answer' | 'failed' | 'not-asked';
+
+/** The admin report's words for a reader outcome. PURE. */
+export function describeReaderOutcome(o: ReaderOutcome | undefined): string {
+  switch (o) {
+    case 'answered': return 'intention reader answered';
+    case 'unclear': return 'intention reader was asked and said "unclear"';
+    case 'unusable-answer': return 'intention reader was asked and gave an unusable answer';
+    case 'failed': return 'intention reader was asked and failed or timed out';
+    case 'not-asked': return 'intention reader not asked (the wording was certain)';
+    default: return 'intention reader outcome unknown';
+  }
 }
 
 /**
@@ -1025,9 +1067,9 @@ export async function classifyIntentSmartDetailed(
   llmCall: (prompt: string) => Promise<string>,
   context?: IntentContext,
 ): Promise<SmartIntent> {
-  const { intent, confidence, signal } = classifyIntentWithConfidence(message);
+  const { intent, confidence } = classifyIntentWithConfidence(message);
   // The reader is not consulted at all here, so the route's deterministic net still governs.
-  if (confidence === 'high') return { intent, unclear: false, readerAnswered: false };
+  if (confidence === 'high') return { intent, unclear: false, readerAnswered: false, readerOutcome: 'not-asked' };
 
   const ctxLines: string[] = [];
   if (context?.projectExists !== undefined) {
@@ -1071,19 +1113,21 @@ export async function classifyIntentSmartDetailed(
     'Reply with ONLY one word: chat, help, build, edit, or unclear.',
   ].join('\n');
 
+  let outcome: ReaderOutcome = 'failed';
   try {
     const raw = (await llmCall(prompt)).trim().toLowerCase().split(/\s/)[0] ?? '';
+    outcome = 'unusable-answer';
     // "help" is a question about NavBharatAI itself — it takes the chat lane, which now carries
     // NAVBHARATAI_UI_MAP and can say "press the Preview tab" instead of `npm run dev`. Two sessions
     // added a fourth answer on the same day (#3045's `unclear`, #3046's `help`); they are different
     // answers to different situations, so the reader now has five, not a merged four.
-    if (raw === 'chat' || raw === 'help') return { intent: 'chat', unclear: false, readerAnswered: true };
-    if (raw === 'build') return { intent: 'new_build', unclear: false, readerAnswered: true };
-    if (raw === 'edit') return { intent: 'edit_existing', unclear: false, readerAnswered: true };
+    if (raw === 'chat' || raw === 'help') return { intent: 'chat', unclear: false, readerAnswered: true, readerOutcome: 'answered' };
+    if (raw === 'build') return { intent: 'new_build', unclear: false, readerAnswered: true, readerOutcome: 'answered' };
+    if (raw === 'edit') return { intent: 'edit_existing', unclear: false, readerAnswered: true, readerOutcome: 'answered' };
     // ⚠️ The INTENT stays at the keyword result here, on purpose — see `SmartIntent.unclear`. A
     // caller that does not read the flag must be byte-identical to before this answer existed.
     // `intent` is the KEYWORD verdict here, not the reader's — so the net must still govern it.
-    if (raw === 'unclear') return { intent, unclear: true, readerAnswered: false };
+    if (raw === 'unclear') return { intent, unclear: true, readerAnswered: false, readerOutcome: 'unclear' };
   } catch {
     /* LLM call failed — fall through to the honest fallback below */
   }
@@ -1096,8 +1140,20 @@ export async function classifyIntentSmartDetailed(
   // verdict exactly as before, which is what keeps "add a payment button" an edit when GLM is slow.
   // The reader could not answer (failed, timed out, or an unusable word). Whatever this returns is
   // a FALLBACK, so the route's deterministic net keeps governing it, exactly as it did before.
+  return { intent: readerlessIntent(message), unclear: false, readerAnswered: false, readerOutcome: outcome };
+}
+
+/**
+ * The verdict when the intention reader could not answer — ONE function, because it has two callers
+ * (autopsy 6e646503). `classifyIntentSmartDetailed` uses it when the reader throws or answers
+ * nonsense; the ROUTE uses it when the reader is simply too slow and its 6-second race gives up. Before
+ * this, that second path fell back to the bare keyword verdict, so on a slow free router a question
+ * was built after all — the exact case the comments below exist to prevent. PURE.
+ */
+export function readerlessIntent(message: string): BuildIntent {
+  const { intent, signal } = classifyIntentWithConfidence(message);
   const lowerMsg = message.toLowerCase();
-  if (readsAsQuestion(lowerMsg)) return { intent: 'chat', unclear: false, readerAnswered: false };
+  if (readsAsQuestion(lowerMsg)) return 'chat';
   // 🔴 LENGTH ALONE IS NOT AN ORDER EITHER (admin report f2ff962f, 2026-09-12). The prompt was a set of
   // chat instructions in Hindi — *"be an expert assistant, call me Boss, answer in Hindi, never guess"*
   // — with no build verb and nothing to build in it. Its ONLY evidence for `new_build` was
@@ -1108,9 +1164,9 @@ export async function classifyIntentSmartDetailed(
   // BUILDABLE — no build noun, no Devanagari build verb — falls to chat. A long message that does name
   // something ("an expense tracker where…") keeps the build verdict exactly as before.
   if (signal === 'long-message' && !namesSomethingToBuild(message)) {
-    return { intent: 'chat', unclear: false, readerAnswered: false };
+    return 'chat';
   }
-  return { intent, unclear: false, readerAnswered: false };
+  return intent;
 }
 
 /** The `बना-` family ("बनाओ", "बनाना", "बना दो", "बनवाना") — the Devanagari order no Roman list can see. */

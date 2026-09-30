@@ -84903,3 +84903,30 @@ the app after it went green. The build was clean. It was expensive for what it w
   788 KB.
 - Dead helpers were left in App.tsx (the reviewer noted them).
 - `PREVIEW_SNAPSHOT_STALE` again. That root cause is owned by #3398's instrument.
+
+## 2026-09-30 — Closing the day's open items before the next report
+
+The admin asked for every open item from today's three reports (ce115e1f, d8ed307a, 53a621e3) to be
+closed before the next report. Status, item by item:
+
+**Fixed here:**
+- **One file edited piece by piece (~20 serial `edit_file` on src/index.css, ~11 min, ce115e1f).** The
+  read-loop breaker watches reads, not writes. `repeatedEditNotice` (`repeatedEdits.ts`) now tells the
+  agent, at the 6th edit to one file (and every 5th after), to finish with ONE `write_file`. A whole-file
+  write resets the count.
+- **Unrequested features (a basic calculator got a scientific panel, mathjs and a 788 KB bundle,
+  53a621e3).** `BUILD_WHAT_WAS_ASKED_RULE` reaches the architect and fast-lane prompts. The requirement
+  notes stay the one sanctioned source of additions.
+
+**Already closed by #3398 (merged 14:11, re-verified, not rebuilt):**
+- Undefined CSS classes are named at write time (d8ed307a had 18).
+- The ETA learns from the platform's recent builds.
+- An instrument now records per-file hashes for `PREVIEW_SNAPSHOT_STALE`.
+
+**Still open, honestly:**
+- `HEAL_NOT_DURABLE` on src/types.ts (ce115e1f) cannot be proven from a truncated report. The truncation
+  fix is #3398's named follow-up, so it is not taken here.
+- The scaffold's `"strict": false` is the true root of the narrowing trap. #3400's note and prompt make
+  it rare, not impossible. Turning `strictNullChecks` on needs a measured trial first, because it would
+  raise new errors in generated apps.
+- GLM/Kimi latency is provider-side.

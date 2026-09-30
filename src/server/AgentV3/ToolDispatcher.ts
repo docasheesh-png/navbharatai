@@ -84,7 +84,7 @@ import { currentPass, runInPass } from './greenFreeze';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
 import {
-  writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckNote, WriteTypecheckQueue,
+  writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckWarmupCommand, writeTypecheckNote, WriteTypecheckQueue,
   shouldProbeTsconfig, probeExhausted, isMissingFileError, type TsProjectVerdict,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
@@ -2601,6 +2601,32 @@ export class ToolDispatcher {
    */
   shareWriteTypecheckStats(stats: WriteTypecheckStats): void {
     this._writeTypecheckStats = stats;
+  }
+
+  /**
+   * Warm the shared compile cache ONCE per build, in the background, so the first write's check is
+   * incremental instead of cold (autopsy ee0e6de5: 15 s cold, ~1 s after). Called by the route when a
+   * build that will write code starts, while the model is still on its first call.
+   *
+   * 🔒 Runs through the SAME queue as the real checks, so a write arriving mid-warm-up waits for it and
+   * then runs its own compile — it never shares the warm-up's `null`. Starts only on an idle queue for
+   * the same reason. Never counts as a run, a clean verdict, a timeout strike or typecheck evidence,
+   * never throws, and never runs `npm install` (see `writeTypecheckWarmupCommand`).
+   */
+  warmTypecheckCache(): void {
+    const s = this._writeTypecheckStats;
+    try {
+      if (!writeTypecheckEnabled() || s.warmupStarted || s.runs > 0 || !this._writeTypecheckQueue.idle()) return;
+      s.warmupStarted = true;
+      const startedAt = Date.now();
+      void this._writeTypecheckQueue.run(async () => {
+        try {
+          await withTimeout(this.actuator.runCommand(this.workspaceId, writeTypecheckWarmupCommand()), WRITE_TYPECHECK_TIMEOUT_MS, 'write-typecheck-warmup');
+          s.warmupMs = Date.now() - startedAt;
+        } catch { /* a warm-up that did not finish is only a cold first check, as before */ }
+        return null;
+      }).catch(() => undefined);
+    } catch { /* never let a warm-up touch the build */ }
   }
 
   /**

@@ -84569,3 +84569,26 @@ search box and A–Z/Z–A menu were never tried and a search that filters nothi
   existing explorer repair (and on Weak within its daily allowance). A wrong "did nothing" would spend one
   repair that is then undone, which is why every doubtful case is `skipped`, not failed.
 - AppKnowledgeBase: the explorer entry says it tries the search box and sort menu.
+
+## 2026-09-30 — Autopsy ee0e6de5, second pass: every ledger item accounted for (admin: "sabhi problem ke root cause dna level par fixed huye? agar nahi to karo")
+
+Re-read the "Not fixed, recorded" list against the code rather than against my own ledger:
+- 🥵 **The first write-time typecheck took 15 s cold** — FIXED. `ToolDispatcher.warmTypecheckCache()` runs the
+  same incremental compile on the same shared `.tsbuildinfo` once, in the background, when a code-writing
+  turn starts (route, beside `dispatcherForSubAgents`), so it overlaps the model's first call. It goes
+  through the write-time queue (a write arriving mid-warm-up waits, then runs its own compile — it never
+  shares the warm-up's `null`), starts only on an idle queue, is shared with sub-agents through the stats
+  object, and is never a run, a clean verdict, a timeout strike, typecheck evidence or a memory update.
+  🔒 Its command is NOT `robustTscCommand`: that prefix runs `npm install` when node_modules is missing or
+  stale, and a background install racing the build's own is a new problem. The warm-up does nothing unless
+  the compiler exists and the install is current (`writeTypecheckWarmupCommand`). The admin line says when
+  the cache was warmed. Test-locked and reversion-proven in `tests/aLookupAppHasNothingToSave.test.ts` §6.
+- `requestAnalysis.startTier: "gemini"` — **my ledger was wrong; this was fixed on 2026-09-17** (autopsy
+  2b0a3ed5): the report carries `startBand: "cheapest band"` beside the key, and the key stays because the
+  lanes and months of telemetry are keyed by it. Nothing to do.
+- "No tests at all" before the e2e scaffold — verified, not assumed: it is recorded `autoResolved: true`,
+  and `shippingIssueCount` skips auto-resolved findings, so it never reached the gate or the user. It is a
+  true statement about the moment it was made. Nothing to do.
+- The 130 s data-file write — its cause is the misroute (a reasoning rung writing 195 rows); fix 1 of the
+  first pass is its root fix, and the admin is testing it with real prompts.
+- ⚠️ STILL THE ADMIN'S: Hindi or English UI for English written in Devanagari. A product decision, asked.

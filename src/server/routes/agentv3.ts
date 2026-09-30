@@ -14649,6 +14649,10 @@ async function noteBuildOutcome(
       // The spawn factory above holds a thunk to this; assigned here, before any sub-agent can run,
       // so a child's write-time compiles accumulate into the object the report actually reads.
       dispatcherForSubAgents = dispatcher;
+      // THE FIRST WRITE'S TYPECHECK USED TO PAY A COLD COMPILE (autopsy ee0e6de5: 15 s, the later ones
+      // ~1 s). Warmed once here, in the background, while the model is still on its first call. Only on
+      // a turn that will write code; it never installs anything and never counts as evidence.
+      if ((intent === 'new_build' || intent === 'edit_existing') && !isImportTurn) dispatcher.warmTypecheckCache();
       // WHOSE CODE IS THE READINESS GATE JUDGING? (autopsy e4ebcb5f — see `buildAuthorship.ts`.)
       // `writtenFiles` is the ONE set every writer feeds — the architect's tools, the fast lanes
       // (which write through `dispatcher.dispatch('write_file')`) and every sub-agent — so it is the

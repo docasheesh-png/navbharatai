@@ -23,6 +23,13 @@ import { unevidencedEtaTickLine } from '../src/server/AgentV3/etaEvidence';
 import { stylesheetCarriesKit } from '../src/server/AgentV3/kitRestore';
 import { DESIGN_KIT_BRIEF, architectSystemPrompt } from '../src/server/AgentV3/systemPrompt';
 import { DESIGN_KIT_CSS } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/designKit';
+import {
+  writeTypecheckWarmupCommand, writeTypecheckCommand, WriteTypecheckQueue, WRITE_TYPECHECK_TSBUILDINFO,
+  writeTypecheckSummary, emptyWriteTypecheckStats, writeTypecheckUntouched,
+} from '../src/server/AgentV3/writeTimeTypecheck';
+import { ToolDispatcher, type ActuatorPort } from '../src/server/AgentV3/ToolDispatcher';
+import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
+import { AgentEventStream } from '../src/server/AgentV3/AgentEventStream';
 
 // The app as that build wrote it, reduced to the parts the predicates read.
 const countriesApp: Record<string, string> = {
@@ -174,5 +181,86 @@ describe('5 · a writing sub-agent is told the kit, as the architect is', () => 
     expect(src).toMatch(/if \(roleExpectsArtifacts\(cfg\.tools\)\)/);
     expect(src).toMatch(/stylesheetCarriesKit\(withoutPreviewBridge\('src\/index\.css', raw\)\)/);
     expect(src).toMatch(/DESIGN_KIT_BRIEF\.join\('\\n'\)/);
+  });
+});
+
+describe('6 · the first write-time typecheck reads a warm cache, not a cold compile', () => {
+  it('the warm-up never installs, discards its output, and fills the one shared cache', () => {
+    const cmd = writeTypecheckWarmupCommand();
+    expect(cmd).not.toMatch(/npm install/);
+    expect(cmd).toContain(WRITE_TYPECHECK_TSBUILDINFO);
+    expect(cmd).toContain('>/dev/null 2>&1');
+    expect(cmd).toMatch(/\[ -x node_modules\/\.bin\/tsc \]/);
+    expect(cmd).toMatch(/\[ ! package\.json -nt node_modules \]/);
+    // The real check still ensures its compiler — only the background warm-up must not.
+    expect(writeTypecheckCommand()).toMatch(/npm install/);
+  });
+
+  it('the queue reports idle only with nothing running and nothing waiting', async () => {
+    const q = new WriteTypecheckQueue<number>();
+    expect(q.idle()).toBe(true);
+    let release!: () => void;
+    const first = q.run(() => new Promise<number>((r) => { release = () => r(1); }));
+    expect(q.idle()).toBe(false);
+    const second = q.run(async () => 2);
+    release();
+    expect(await first).toBe(1);
+    expect(await second).toBe(2);
+    expect(q.idle()).toBe(true);
+  });
+
+  const TSC_ERR = `src/a.ts(1,7): error TS2322: Type 'string' is not assignable to type 'number'.`;
+  class Act implements ActuatorPort {
+    files = new Map<string, string>([['tsconfig.json', '{}']]);
+    commands: string[] = [];
+    releaseWarmup: (() => void) | null = null;
+    async readFile(_w: string, p: string) { const f = this.files.get(p); if (f === undefined) throw new Error(`ENOENT: ${p}`); return f; }
+    async writeFile(_w: string, p: string, c: string) { this.files.set(p, c); }
+    async listFiles() { return [...this.files.keys()]; }
+    async runCommand(_w: string, cmd: string) {
+      this.commands.push(cmd);
+      if (cmd === writeTypecheckWarmupCommand()) {
+        await new Promise<void>((r) => { this.releaseWarmup = r; });
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      return /\btsc\b/.test(cmd) ? { exitCode: 2, stdout: TSC_ERR, stderr: '' } : { exitCode: 0, stdout: '', stderr: '' };
+    }
+    async getPortUrl(_w: string, port: number) { return `https://s-${port}.example.dev`; }
+  }
+
+  it('runs once per build, is never evidence, and a write arriving mid-warm-up still gets its own verdict', async () => {
+    const act = new Act();
+    const stream = new AgentEventStream();
+    const recorded: string[] = [];
+    const d = new ToolDispatcher(act, 'ws-warm', new WorkspaceState(stream), stream,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      (c) => { recorded.push(c.command); });
+    d.warmTypecheckCache();
+    d.warmTypecheckCache(); // a second call is a no-op
+    expect(act.commands.filter((c) => c === writeTypecheckWarmupCommand())).toHaveLength(1);
+
+    const write = d.dispatch({ id: 'w1', name: 'write_file', input: { path: 'src/a.ts', content: 'export const a: number = "x";' } }, 'architect');
+    await new Promise((r) => setTimeout(r, 20));
+    act.releaseWarmup?.();
+    const text = String((await write).content);
+    expect(text).toContain('TS2322');                       // the write's own compile ran after the warm-up
+    const s = d.writeTypecheckStats();
+    expect(s.warmupStarted).toBe(true);
+    expect(s.warmupMs).not.toBeNull();
+    expect(s.runs).toBe(1);                                 // the warm-up is not a run
+    expect(recorded.some((c) => c === writeTypecheckWarmupCommand())).toBe(false); // nor typecheck evidence
+  });
+
+  it('a warm-up alone never makes the stats "touched", and the summary says the cache was warmed', () => {
+    const warmed = { ...emptyWriteTypecheckStats(), warmupStarted: true, warmupMs: 14_600 };
+    expect(writeTypecheckUntouched(warmed)).toBe(true);
+    const ran = writeTypecheckSummary({ ...warmed, runs: 3, cleanRuns: 2, elapsedMs: 3000 }, true, 5);
+    expect(ran).toContain('the cache was warmed at build start in 15s, before the first write');
+    expect(writeTypecheckSummary({ ...emptyWriteTypecheckStats(), runs: 3, cleanRuns: 2, elapsedMs: 3000 }, true, 5)).not.toContain('warmed');
+  });
+
+  it('🔒 the route warms it only on a turn that writes code', () => {
+    const src = readFileSync('src/server/routes/agentv3.ts', 'utf8');
+    expect(src).toMatch(/if \(\(intent === 'new_build' \|\| intent === 'edit_existing'\) && !isImportTurn\) dispatcher\.warmTypecheckCache\(\);/);
   });
 });

@@ -84035,3 +84035,32 @@ app, and pay once with a test card.
 **Honest limit (open):** `amount_due` is written by the app at insert, so a hostile client can create a row
 with a small amount; `paid_amount` records what Razorpay really charged. A server-owned price table is a
 later slice.
+
+
+## 2026-09-30 — Admin Build Reports page: App Check hang + Mobile OTP health (admin: "pura page ki error ke sath me mobile otp heath par special focus")
+
+Read the whole page copy the admin sent (iOS app 103). Ledger:
+- ❌ **`"FirebaseAppCheck.then()" is not implemented on ios`** — root cause: `loadNativeAppCheck` returned the
+  Capacitor proxy from an async function; promise resolution read `.then` off it (a native call), and the
+  promise NEVER resolved, so App Check never started on any phone. Fixed with a wrapper. **Third time this
+  class shipped** (PlayBilling + DeviceIntegrity, 2026-09-15) — `tests/pluginProxyIsNeverResolved.test.ts`
+  now scans every client file for `return <plugin>` / `resolve(<plugin>)`, reversion-proven on the exact
+  shipped code. Reaches phones only with a fresh `.aab`/`.ipa`.
+- ❌ **OTP "6 sent, 6 verified, 1 failed — code-expired"** — the failure was a code used TWICE: Android's SMS
+  Retriever signed the person in automatically, and a Verify tap spent the same code again. Fixed: one owner
+  per code (`otpClaim`), a tap stands down while the automatic path owns it.
+- ❌ **Instant verification dead-end (found reading the plugin, invisible on the card)** — Android can confirm
+  the number with NO SMS; the listener `return`ed silently, so the person waited for a code that never comes
+  and no counter moved. Now a named category `instant-verified` (also the link flow's native
+  "No user is signed in."), recorded for the admin, with an honest user message (use Email/Google).
+- ⚠️ Headline said "6 sent, 1 failed" — read as someone locked out. It now always prints verified beside failed.
+- ✅ Not bugs, checked against code: Website "₹100 paid" is the admin's 2026-09-27 web rule (CLAUDE.md
+  corrected); "72 / 72" on Failure category is a coincidence (every total reconciles); "vitest: FAIL (29/29
+  passed)" is a 17/9 report, fixed in `testRunner.ts`; "person-day s" is the copy tool splitting text nodes.
+
+**OPEN ROOT CAUSE (rule 6): instant verification cannot sign anyone in yet.** With `skipNativeAuth: true` the
+web SDK is the only session, and a code-less native credential cannot be moved into it. The real fix is a
+server step — phone signs in natively for this one case, sends its native ID token, the server verifies it and
+issues a custom token (`admin.auth().createCustomToken`) for `signInWithCustomToken`. That needs the Cloud Run
+service account to hold **Service Account Token Creator** (signBlob) — unverified, admin console. Now that the
+category is recorded, the card will say how often it actually happens before anything is built.

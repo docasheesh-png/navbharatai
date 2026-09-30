@@ -34,7 +34,8 @@ export const OTP_FIX_HINT: Readonly<Record<string, string>> = {
   network: 'The phone could not reach the provider. Usually the user\'s connection.',
   'invalid-number': 'The number was not valid. A user mistake, not a setting.',
   'code-wrong': 'The user typed the wrong code.',
-  'code-expired': 'The code expired before it was entered.',
+  'code-expired': 'The code was used after it expired — or used a SECOND time: Android read the SMS and signed the person in automatically, and the same code was then typed. Since 2026-09-30 that second use is no longer counted as a failure; a code-expired recorded after that date is a genuinely late code.',
+  'instant-verified': 'Android confirmed the number without sending any SMS (instant verification), and sign-in keeps only the web session, which cannot use a code-less credential. The person was told to use Email or Google. The real fix is a server step: verify the phone\'s own ID token and issue a sign-in token — not built yet.',
   internal: 'The provider returned an internal error. Read the detail below; it usually names the real cause.',
   other: 'Not recognised. Read the detail below.',
 };

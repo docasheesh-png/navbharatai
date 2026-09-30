@@ -180,6 +180,26 @@ export function detectMegaProject(prompt: string): boolean {
   return megaProjectSignals(prompt).fires;
 }
 
+/**
+ * ONE PLANNER PER BUILD (autopsy a2b9c802, 2026-09-30). The mega-app roadmap and Software Project Mode
+ * are both "big app" strategies over the same prompt, and the route ran them in SEQUENCE: the roadmap
+ * first (240 s, cut off at its token limit), then — because it produced nothing — the project planner
+ * (315 s, timed out). Nine minutes of planning before the first line of code, and the futility breaker
+ * then stopped the build 38 seconds into its real work.
+ *
+ * When project mode is on for this account and reads the prompt as a mega-project, it owns the build
+ * and the roadmap does not run. Project mode is the stronger strategy there (it builds the whole thing
+ * module by module; a roadmap narrows it to step 1). A plan-first turn is left alone — it has its own
+ * planner and project mode already stands down for it. PURE.
+ */
+export function roadmapStandsDownForProjectMode(input: {
+  projectModeOn: boolean;
+  planFirst: boolean;
+  megaProject: boolean;
+}): boolean {
+  return !!input.projectModeOn && !input.planFirst && !!input.megaProject;
+}
+
 /** Why Software Project Mode did not steer this build — `null` means it did. */
 export type ProjectModeSkipReason =
   | 'not-configured'

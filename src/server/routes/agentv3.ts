@@ -354,7 +354,7 @@ import { decideCancelledBuildBill } from '../AgentV3/cancelledBuildBilling';
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
-import { projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, starterEntryExpectedFor, reconcilePlanWithWrites, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { projectModeEnabled, projectModeDiagnosis, detectMegaProject, roadmapStandsDownForProjectMode, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, starterEntryExpectedFor, reconcilePlanWithWrites, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
@@ -426,7 +426,7 @@ import { provenFromTimeline } from '../AgentV3/provenFromTimeline';
 import { appRenderedRecord } from '../AgentV3/renderProof';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
 import { buildCostCeilingUsd, ledgerCostUsd, checkCostCeiling, costCeilingDetail } from '../AgentV3/buildCostCeiling';
-import { futilityMinutes, initialFutilityState, tickFutility, futilityDetail } from '../AgentV3/futilityBreaker';
+import { futilityMinutes, initialFutilityState, armedFutilityState, tickFutility, futilityDetail } from '../AgentV3/futilityBreaker';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
 function sessionCostCapUsd(): number {
@@ -12498,6 +12498,17 @@ async function noteBuildOutcome(
     let commandsRun = 0;
     let futilityState = initialFutilityState();
     let futilityFired = false;
+    /**
+     * The breaker judges the BUILD, so it starts when the build does (autopsy a2b9c802 — JARVIS).
+     * Before this, the quiet window opened at request time and swallowed the platform's own bounded
+     * planners: a 240 s roadmap and a 315 s project planner left the architect 38 seconds before the
+     * breaker called the build futile. Armed by `armFutilityBreaker` just before the build loop (fast
+     * lane or architect); each planner before it carries its own bound, and the wall clock still
+     * governs the whole request.
+     */
+    let futilityArmed = false;
+    /** A COMPLETED command, from ANY lane — the one door both the architect and its sub-agents use. */
+    const noteCommandCompleted = (): void => { commandsRun += 1; };
 
     // MINUTE-BY-MINUTE TIMELINE — record a "still working" heartbeat every 60 s so the build report
     // shows what the build was doing each minute (and names any in-flight/stuck tool) instead of a
@@ -12516,7 +12527,7 @@ async function noteBuildOutcome(
       // It fires ONCE, like the cost ceiling: a second abort is harmless (AbortController is
       // idempotent) but would record a second identical finding, and a report that says the same
       // thing twice reads like two events.
-      if (!futilityFired) {
+      if (!futilityFired && futilityArmed) {
         try {
           const limit = futilityMinutes();
           const verdict = tickFutility(
@@ -13310,7 +13321,25 @@ async function noteBuildOutcome(
               detail: `scope signals: ${scope.signals.join('; ')} · complexity: simple`,
             });
           }
-          if (scope.decision === 'analyze' && !dispute) {
+          // ONE PLANNER PER BUILD (autopsy a2b9c802 — JARVIS). When Software Project Mode is going to
+          // decompose this prompt, the roadmap is a second planner over the same words: in that report
+          // it spent 240 s, came back cut off, and only THEN did the 315 s project planner start — nine
+          // minutes before the first line of code. Project mode is the stronger strategy for a prompt it
+          // reads as a mega-project (it builds the WHOLE thing across turns; a roadmap narrows it to step
+          // 1), so it owns the build and the roadmap stands down, said aloud in the report.
+          const projectModeOwns = roadmapStandsDownForProjectMode({
+            projectModeOn: projectModeEnabled(process.env, { userId, email }),
+            planFirst,
+            megaProject: detectMegaProject(planning.text),
+          });
+          if (projectModeOwns && scope.decision === 'analyze' && !dispute) {
+            buildDiag.record({
+              phase: 'plan', severity: 'info', code: 'MEGA_ROADMAP_STOOD_DOWN', autoResolved: true,
+              message: 'Mega-app roadmap stood down: Software Project Mode will decompose this build, so one planner runs instead of two.',
+              detail: `scope signals: ${scope.signals.join('; ')}`,
+            });
+          }
+          if (scope.decision === 'analyze' && !dispute && !projectModeOwns) {
             const rmStartedAt = Date.now();
             let rmProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
             const rmCall = makePlanTextRunner((used) => { rmProvider = used; }).runTurn({
@@ -14368,7 +14397,7 @@ async function noteBuildOutcome(
         onCommand: (c) => {
           // A COMPLETED command is one of the futility breaker's three progress signals — counted here,
           // at the one hook that fires on completion, so an attempt can never be mistaken for progress.
-          commandsRun += 1;
+          noteCommandCompleted();
           try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ }
         },
         onLlmCall: (c: Parameters<NonNullable<typeof buildDiag.recordLlmCall>>[0]) => {
@@ -14642,7 +14671,10 @@ async function noteBuildOutcome(
 
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework,
         // AI Diagnosis Bundle #3 — capture every sandbox command's raw logs into the build report.
-        (c) => { try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
+        // ⚠️ AND COUNT IT (autopsy a2b9c802): this hook only recorded, so the futility breaker never saw
+        // one command the ARCHITECT ran — only sub-agents' — and read a build that had just run `ls`
+        // and was mid-`npm install` as "0 commands".
+        (c) => { noteCommandCompleted(); try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
       // The spawn factory above holds a thunk to this; assigned here, before any sub-agent can run,
       // so a child's write-time compiles accumulate into the object the report actually reads.
       dispatcherForSubAgents = dispatcher;
@@ -16232,6 +16264,11 @@ async function noteBuildOutcome(
           }
         }
       }
+
+      // THE BUILD STARTS HERE, so the futility breaker's quiet window does too (futilityBreaker.ts,
+      // `armedFutilityState`): everything above is the platform's own bounded preparation.
+      futilityState = armedFutilityState({ filesWritten: writtenFiles.size, commandsRun, stepsDone: etaStepsDone });
+      futilityArmed = true;
 
       // Cost-ladder escalation (P3) — DORMANT unless AGENTV3_ESCALATION=on. When off,
       // this is exactly `await runner.run(buildPrompt)` (the start-tier build, once). When

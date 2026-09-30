@@ -84527,3 +84527,39 @@ them, because its `normalizePath` strips the slash and so saw them as present.
 - Still recorded, not changed: the ₹490 of markup absorbed by the overdraft floor is policy, not a defect.
 - ⚠️ Pushing needs the admin: the designated branch still carried #3396's (merged) history, and replacing it
   (force-push) and merging it in were both refused by the session's safety classifier.
+- ✅ **Resolved the same day:** the admin said "force push kar do", so the branch was replaced and PR #3402 was opened.
+  The merged-state suite caught the vaccine repair's render check browsing the branded host. It now goes
+  through `internalPreviewUrl`.
+
+## 2026-09-30 — Autopsy a2b9c802 ("JARVIS Mobile Edition", Telugu, Weak): the first build was stopped 38 s into its real work
+
+**Two builds.**
+- **Build 1 (7ba4e63d):** 10 min, 0 files, ended by the futility breaker. Billed at real cost only, and shown free to the user.
+- **Build 2 (47b4a5e8, "continue"):** 8 min. It delivered a working voice app with first render at 393 s, then preview, prod build, runtime and explorer checks all passed. Release gate YELLOW (no journey).
+
+**Tally**
+- **Self-heals: 2.** The loop guard broke a typecheck loop. The slow-rung abandon moved past crawling GLM.
+- **Workarounds: 3.** The roadmap and the project planner both failed and the build went direct. The fast lane was skipped for a reasoning rung.
+- **Skipped: 1.** No journey was derived: the fields had no name or label.
+- **Still imperfect: 2.** `react-router-dom` installed and never used. 6 off-grid spacing values.
+- **Struggles: 4.**
+  - 240 s roadmap cut off at max_tokens on KIMI.
+  - 315 s project planner timed out, with KIMI starving 12,000 tokens on reasoning.
+  - 256 s of provider time wasted (69% of build 1).
+  - The breaker fired on a working build.
+
+**Root causes fixed (PR #3402, second part)**
+1. **The architect's commands never counted.** The ToolDispatcher's `onCommand` recorded each command but never incremented `commandsRun`; only sub-agents did. So `ls` plus four reads plus a todo update plus an in-flight `npm install` read as "0 commands". One door now, `noteCommandCompleted`, used by both lanes.
+2. **The quiet window opened at request time.** The platform's own bounded planners filled nine of its ten minutes. It now opens where the build loop starts (`armedFutilityState`, `futilityArmed`), baselined on what preparation already produced.
+3. **Two planners over one prompt, in sequence.**
+   - When Project Mode is on and reads the prompt as a mega-project, it owns the build, and the roadmap stands down (`roadmapStandsDownForProjectMode`, `MEGA_ROADMAP_STOOD_DOWN`).
+   - For THIS prompt the 8e124182 counter fix already makes it not a mega-project (15 → 6: "Development Order — Step N →" is an instruction). So only the roadmap would run.
+4. **The crawl floor measured UTF-16 characters.** Indic tokens are ~1–2 characters against English ~4, so a Telugu answer looked 2–4× slower at the same token rate. It now measures UTF-8 bytes (`producedBytes`, `utf8Bytes`). This is identical for ASCII, and an Indic stream can only look faster. Whether this caused the 33 s GLM abandon here is NOT provable from the report.
+
+**Tests:** `tests/theJarvisBuildWasStoppedWhileItWorked.test.ts` (14), each of the four fixes reversion-proven. `aBuildGoingNowhereMustStop.test.ts` was updated for the armed check.
+
+**Open root causes (not guessed at)**
+- **A Weak plan has no direct-answering rung after flashx except Haiku.** Once GLM was benched for crawling, both planners fell to KIMI k2.7-code, which always reasons: 12,000 tokens were spent thinking (planner) or cut off mid-JSON (roadmap).
+  - Moving Haiku ahead of KIMI for plans would change the admin's "Haiku last" rule on Weak. That is the admin's call.
+  - A plan written in Telugu is also token-heavy. Asking planners for English structure plus a user-language message only is a candidate.
+- **Write-time typecheck commands record `exit ?`.** `runCommand` returns no exit code on that path, so the report cannot say pass or fail per run.

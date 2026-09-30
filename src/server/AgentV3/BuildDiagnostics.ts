@@ -119,6 +119,8 @@ const PROCESS_ONLY_CODES = new Set([
   'PROJECT_MODE_FAILED',
   // …or stood down because the plan was too small to split — also a fact about OUR planner (6a4a799f).
   'PROJECT_MODE_STOOD_DOWN',
+  // …and the roadmap standing down so ONE planner runs, not two (autopsy a2b9c802) — our routing.
+  'MEGA_ROADMAP_STOOD_DOWN',
   // Whether THIS BUILD left a version in the Time Machine (restorePoint.ts). A statement about our own
   // safety net, never a finding about the user's app — a perfect app whose version write failed is
   // still a perfect app, and counting it against them is the provider-error-as-app-blocker class.

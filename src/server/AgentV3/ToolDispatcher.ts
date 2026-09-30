@@ -32,6 +32,7 @@ export const ALWAYS_WRITE_SECRETS = '__navbharatai_always_write_secrets__';
 import type { WorkspaceState } from './WorkspaceState';
 import type { ToolUse } from './ClaudeClient';
 import type { AgentRole, ToolName, TodoItem, TodoStatus } from './types';
+import { defaultToolCatalog, isRecipeName, recipeListing } from './ToolCatalog';
 import type { Checkpointer } from './GitManager';
 import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
@@ -2943,6 +2944,21 @@ export class ToolDispatcher {
     await this.ensureScaffoldOnce();
     const input = call.input;
     switch (call.name) {
+      case 'run_recipe': {
+        // ONE entry point for the RECIPE_TOOLS (ToolCatalog.ts). The recipe runs through its OWN case
+        // below, unchanged — this only chooses which one. Unknown or "list" ⇒ the inputs, never a guess.
+        const recipe = optStr(input, 'name');
+        const inner = (input as Record<string, unknown> | undefined)?.input;
+        const hasInput = !!inner && typeof inner === 'object' && !Array.isArray(inner) && Object.keys(inner).length > 0;
+        if (!isRecipeName(recipe)) {
+          const lead = recipe && recipe !== 'list' ? `There is no recipe called "${recipe}". ` : '';
+          return `${lead}Available recipes and their inputs:\n\n${recipeListing()}`;
+        }
+        const def = defaultToolCatalog().find((t) => t.name === recipe);
+        const required = ((def?.input_schema as { required?: string[] } | undefined)?.required ?? []);
+        if (!hasInput && required.length > 0) return `run_recipe: "${recipe}" needs input. Its inputs:\n\n${recipeListing(recipe)}`;
+        return this.run({ ...call, name: recipe, input: hasInput ? inner as Record<string, unknown> : {} }, agent);
+      }
       case 'read_file': {
         const reqPath = reqStr(input, 'path');
         let full: string;

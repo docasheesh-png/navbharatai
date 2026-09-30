@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { checkFeaturePresence } from '../src/server/AgentV3/FeaturePresence';
 import { injectPreviewBridge } from '../src/server/AgentV3/previewBridge';
+import { noJourneyReason } from '../src/server/AgentV3/journeyDerivation';
 import {
   workspaceContentHash,
   identitySource,
@@ -195,5 +196,32 @@ describe('The route carries the evidence (source guard — tsc and vitest cannot
     expect(route).toContain("code: 'SAVED_SOURCE_DIVERGES'");
     expect(diag).toContain("'SAVED_SOURCE_DIVERGES'");
     expect(sugg).toContain("'SAVED_SOURCE_DIVERGES'");
+  });
+});
+
+describe('A live search box is not told to fix a label it already has', () => {
+  const GITA_APP = {
+    'src/main.tsx': "import { createRoot } from 'react-dom/client';\nimport App from './App';\ncreateRoot(document.getElementById('root')!).render(<App />);",
+    'src/App.tsx': `export default function App() {
+  const [search, setSearch] = useState('');
+  return (
+    <div className="field">
+      <label htmlFor="q">खोजें (हिन्दी अर्थ या अध्याय)</label>
+      <input id="q" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="जैसे: कर्म, भक्ति, 2.47" />
+    </div>
+  );
+}`,
+  };
+
+  it('says the field acts as you type — never "give each field a name and a label"', () => {
+    const reason = noJourneyReason(GITA_APP);
+    expect(reason).toContain('act as you type');
+    expect(reason).not.toContain('`name`');
+    expect(reason).not.toContain('no field this check could address');
+  });
+
+  it('a form whose fields genuinely cannot be addressed still gets the remedy', () => {
+    const bare = { ...GITA_APP, 'src/App.tsx': GITA_APP['src/App.tsx'].replace('<label htmlFor="q">खोजें (हिन्दी अर्थ या अध्याय)</label>', '').replace(' id="q"', '').replace(' placeholder="जैसे: कर्म, भक्ति, 2.47"', '') };
+    expect(noJourneyReason(bare)).not.toContain('act as you type');
   });
 });

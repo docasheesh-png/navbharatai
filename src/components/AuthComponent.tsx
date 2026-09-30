@@ -20,6 +20,7 @@ import {
 import { Capacitor } from '@capacitor/core';
 import { raceNativeAuth, settleWithinOrProceed, preLoginWebSignOutAllowed } from '../lib/nativeAuthGuard';
 import { normalizePhone } from '../lib/phoneNumber';
+import { handOverNativePhoneSession, fetchPhoneExchange } from '../lib/phoneHandover';
 import { motion } from 'motion/react';
 import { X, AlertCircle } from 'lucide-react';
 import { Github } from './ui/BrandIcons';
@@ -266,6 +267,16 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
   const recaptchaVerifier = useRef<RecaptchaVerifier | null>(null);
   // Native (Android/iOS) phone-auth verification id — set by the plugin's `phoneCodeSent` listener.
   const nativeVerificationId = useRef<string | null>(null);
+  // ONE CODE, ONE OWNER (admin page, 2026-09-30: "android: 6 sent, 6 verified, 1 failed —
+  // code-expired"). On Android the SMS Retriever reads the code and signs in automatically; if the
+  // person also taps Verify, the same code is used twice and the second use fails with code-expired —
+  // a failure recorded against somebody who was already signed in. Whichever path starts first owns
+  // the code; the other stands down. Reset on every new send.
+  const otpClaim = useRef<'idle' | 'working' | 'done'>('idle');
+  // WHICH SESSION THIS PHONE SIGN-IN USES. 'web' is the normal path: the code signs the web SDK in
+  // directly. 'native' is set only after Android confirmed the number WITHOUT an SMS: the phone then
+  // signs in natively and hands that session over through the server (phoneHandover.ts). Reset per send.
+  const phoneSession = useRef<'web' | 'native'>('web');
 
   useEffect(() => {
     return () => {
@@ -360,19 +371,46 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
         const { PhoneAuthProvider } = (await import('firebase/auth')) as any;
         await FirebaseAuthentication.removeAllListeners();
         nativeVerificationId.current = null;
+        otpClaim.current = 'idle';
+        phoneSession.current = 'web';
         // Auto-read (SMS Retriever) — sign in the JS SDK the moment the code is captured automatically.
         await FirebaseAuthentication.addListener('phoneVerificationCompleted', async (event: any) => {
+          const vid = event?.verificationId ?? nativeVerificationId.current;
+          const code = event?.verificationCode;
+          if (phoneSession.current === 'native') {
+            // The retry below signed the phone in natively (with or without an SMS) — hand that over.
+            if (otpClaim.current !== 'idle') return;
+            otpClaim.current = 'working';
+            const done = await finishNativePhoneSession();
+            otpClaim.current = done ? 'done' : 'idle';
+            return;
+          }
+          if (!code) {
+            // INSTANT VERIFICATION: the phone confirmed the number itself and NO SMS is coming. This used
+            // to `return` silently, leaving the person waiting for a code that never arrives. The code-less
+            // credential cannot reach the web session, so ask ONCE more with the native session on, and
+            // hand that session over when it completes.
+            phoneSession.current = 'native';
+            setSuccessMessage('Confirming your number…');
+            try {
+              await FirebaseAuthentication.signInWithPhoneNumber({ phoneNumber: phone, skipNativeAuth: false });
+            } catch (e) {
+              setError(describeOtpFailure(e, 'send'));
+            }
+            return;
+          }
+          if (!vid || otpClaim.current !== 'idle') return;
+          otpClaim.current = 'working';
           try {
-            const vid = event?.verificationId ?? nativeVerificationId.current;
-            const code = event?.verificationCode;
-            if (!vid || !code) return;
             await signInWithCredential(auth, PhoneAuthProvider.credential(vid, code));
+            otpClaim.current = 'done';
             setIsOtpVerified(true);
             setError('');
             reportOtpSuccess('verified');
             addTerminalLine(`[AUTH] Authentication successful via Phone (auto-verified)`, 'success');
             onClose();
           } catch (e: any) {
+            otpClaim.current = 'idle';
             logAuthErrorDetail('otp', e);
             setError('Automatic sign-in did not finish. Please enter the code manually.');
           }
@@ -399,6 +437,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
       if (!recaptchaVerifier.current) throw new Error('Recaptcha failed to initialize');
 
       const result = await signInWithPhoneNumber(auth, phone, recaptchaVerifier.current);
+      otpClaim.current = 'idle';
       setConfirmationResult(result);
       setIsOtpSent(true);
       setOtpCooldown(30); // 30-second security cooldown starts
@@ -423,25 +462,69 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
     }
   };
 
+  /**
+   * Hand the phone's NATIVE session over to the web session (instant verification only). Returns
+   * whether the person is now signed in; on failure the reason is recorded and they are told plainly.
+   */
+  const finishNativePhoneSession = async (): Promise<boolean> => {
+    const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
+    const result = await handOverNativePhoneSession({
+      getNativeIdToken: async () => (await FirebaseAuthentication.getIdToken()).token,
+      exchange: (idToken) => fetchPhoneExchange(idToken),
+      // Exported by `firebase/auth` at runtime; the v12 umbrella types do not surface it (same as
+      // PhoneAuthProvider above), so it is resolved dynamically.
+      signInWithCustomToken: async (token) => {
+        const { signInWithCustomToken } = (await import('firebase/auth')) as any;
+        await signInWithCustomToken(auth, token);
+      },
+      signOutNative: () => FirebaseAuthentication.signOut(),
+    });
+    if (result.ok) {
+      setIsOtpVerified(true);
+      setError('');
+      reportOtpSuccess('verified');
+      addTerminalLine(`[AUTH] Authentication successful via Phone (confirmed by the phone)`, 'success');
+      onClose();
+      return true;
+    }
+    const why = 'code' in result ? result.code : 'unknown';
+    setError(describeOtpFailure({ code: 'instant-verified', message: `Native session handover failed: ${why}` }, 'verify'));
+    return false;
+  };
+
   const handleVerifyOtp = async () => {
+    // The automatic path already owns this code (see otpClaim): signed in, or signing in right now.
+    // Using the code a second time can only fail, so a tap here stands down instead of competing.
+    if (otpClaim.current === 'done') { onClose(); return; }
+    if (otpClaim.current === 'working') return;
     setLoading(true);
+    otpClaim.current = 'working';
     try {
       if (Capacitor.isNativePlatform()) {
         // NATIVE: build a real Firebase phone credential from the plugin's verificationId + the entered
         // code and sign the JS SDK in (skipNativeAuth keeps the web SDK the single session source).
         if (!nativeVerificationId.current) throw new Error('Please request an OTP first.');
+        if (phoneSession.current === 'native') {
+          // The retry sent a real SMS instead: confirm it natively and hand the session over.
+          const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
+          await FirebaseAuthentication.confirmVerificationCode({ verificationId: nativeVerificationId.current, verificationCode: otp });
+          otpClaim.current = (await finishNativePhoneSession()) ? 'done' : 'idle';
+          return;
+        }
         const { PhoneAuthProvider } = (await import('firebase/auth')) as any;
         await signInWithCredential(auth, PhoneAuthProvider.credential(nativeVerificationId.current, otp));
       } else {
-        if (!confirmationResult) return;
+        if (!confirmationResult) { otpClaim.current = 'idle'; return; }
         await confirmationResult.confirm(otp);
       }
+      otpClaim.current = 'done';
       setIsOtpVerified(true);
       setError('');
       reportOtpSuccess('verified');
       addTerminalLine(`[AUTH] Authentication successful via Phone`, 'success');
       onClose(); // Auto close on successful login
     } catch (err: any) {
+      otpClaim.current = 'idle';
       setError(describeOtpFailure(err, 'verify'));
     } finally {
       setLoading(false);

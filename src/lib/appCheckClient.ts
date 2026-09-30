@@ -114,6 +114,19 @@ export interface NativeAppCheck {
   getToken(opts?: { forceRefresh?: boolean }): Promise<{ token: string }>;
 }
 
+/**
+ * 🔴 NEVER `return FirebaseAppCheck` FROM AN ASYNC FUNCTION (admin page copy, 2026-09-30, iOS app 103:
+ * `"FirebaseAppCheck.then()" is not implemented on ios @ unhandled promise`). A Capacitor plugin is a
+ * PROXY that turns every property read into a native call, and resolving a promise with a value reads
+ * `.then` off it to see whether it is a thenable. So the proxy made a native call named `then`, iOS has
+ * no such method, and — the part that mattered — the promise this function returned NEVER RESOLVED:
+ * App Check never started on a phone. This is the THIRD time this class shipped (PlayBilling and
+ * DeviceIntegrity, 2026-09-15, see playBillingNative.ts); `tests/pluginProxyIsNeverResolved.test.ts`
+ * now fails CI on the pattern anywhere in the client.
+ *
+ * The fix is the wrapper: the plugin is used through plain functions that close over it, so no promise
+ * ever resolves to the proxy itself.
+ */
 async function loadNativeAppCheck(): Promise<NativeAppCheck | null> {
   const [{ Capacitor }, { FirebaseAppCheck }] = await Promise.all([
     import('@capacitor/core'),
@@ -122,7 +135,10 @@ async function loadNativeAppCheck(): Promise<NativeAppCheck | null> {
   // A phone app built before the plugin shipped has no native half. Asking it would throw
   // "not implemented"; asking first keeps that an ordinary "missing".
   if (!Capacitor.isPluginAvailable('FirebaseAppCheck')) return null;
-  return FirebaseAppCheck as unknown as NativeAppCheck;
+  return {
+    initialize: (opts) => FirebaseAppCheck.initialize(opts),
+    getToken: (opts) => FirebaseAppCheck.getToken(opts),
+  };
 }
 
 let installed = false;

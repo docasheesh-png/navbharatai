@@ -2047,6 +2047,12 @@ the code (it is actually read somewhere) on 2026-07-11.
   GitHub account cost nothing and take three minutes, so ₹200 reachable from a laptop would be an
   unlimited, scriptable printer that never meets the device check. **Half a gate is no gate.** A code
   can still be SHARED from the website — only claiming is Android-only.
+  🔴 **SUPERSEDED BY THE ADMIN ON 2026-09-27 — the paragraph above is history, not the rule.** The
+  website now earns signup ₹50, login ₹50 and mobile ₹100 (**₹200 max**); GitHub and the rest still
+  need the Android device check. Verified in `routes/referral.ts` (`stepAllowedOnWeb`, "The website earns
+  signup ₹50, login ₹50 and mobile ₹100 — at most ₹200 (admin 2026-09-27)"). Recorded 2026-09-30 when the
+  admin Referral card showed *"Website · ₹100 paid"*: that payment is the CURRENT rule working, not a
+  leak — a session reading only the ₹0 paragraph would have "fixed" it.
   🔒 **THE REFERRER IS PAID FOR VERIFICATIONS, NEVER FOR A REDEMPTION, and nothing releases until the
   friend's MOBILE is verified.** Paying on redemption is what would make a CHAIN — one "mother"
   account farming a throwaway per cycle, earnings concentrating in one usable wallet. A device id
@@ -2228,6 +2234,14 @@ the code (it is actually read somewhere) on 2026-07-11.
   fingerprints `ANDROID_CERT_SHA256` holds). `capacitor.config.ts` carries the SwiftPM `symlink` option the
   plugin's README requires (a package-identity collision with Firebase's own `FirebaseAppCheck`). Read `GET /api/admin/app-check` first — it counts
   valid/missing/invalid/unverifiable **per web and per native**, per instance since boot.
+  🔴 **UNTIL 2026-09-30 THE PHONE HALF NEVER STARTED, whatever the console said.** `loadNativeAppCheck`
+  returned the plugin proxy from an async function, so resolving it read `.then` off the proxy — a native
+  call no platform has (*"FirebaseAppCheck.then() is not implemented on ios"*) — and the promise NEVER
+  resolved. So every native request so far arrived with NO token, and the counters' "native: missing"
+  was our bug, not old installs. It is fixed in the bundle, which means it reaches phones only with a
+  **fresh `.aab`/`.ipa`**; read the native counts only from builds made after the fix.
+  `tests/pluginProxyIsNeverResolved.test.ts` now fails CI on the pattern anywhere in the client (third
+  time this class shipped).
   ⛔ **AND DO NOT turn on App Check ENFORCEMENT in the Firebase console for Firestore/Auth** — the phone
   apps talk to Firestore directly and would lose it. Registering the web app with the site key is safe;
   the console's *Enforce* buttons are not, until slice 2 ships and the numbers say so.

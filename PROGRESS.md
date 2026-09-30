@@ -84588,3 +84588,19 @@ divs was plain text. Most generated markup is the second kind, so that is what u
   full-bleed games and dashboards, so this stays the prompt's job.
 - Apps built before this keep their old `index.css`. Only kit classes they use are restored.
 - Tailwind apps do not use the kit and are unchanged.
+
+## 2026-09-30 — AI inside the user's app needs no key when the gateway is on (admin chose "B")
+
+The AI gateway (`APP_AI_GATEWAY`) was built, but no builder was ever told it existed. Turning it on
+alone would have changed no generated app. The d8ed307a app shipped asking for an OpenAI key.
+Autopsy #3387 (the same day) had added `AI_IN_APP_RULE` (server + `AI_API_KEY`), which reached only
+the architect. The Frontend specialist that actually writes the AI client never saw it.
+
+**What changed:**
+- `aiInAppRule()`: with the gateway on, an app with no server takes the keyless `generate_ai`
+  (navbharat) route and tells the user the AI answers after PUBLISH. An app with a server keeps
+  `AI_IN_APP_RULE`. With the gateway off, the prompt is byte-identical to before.
+- The same rule now also reaches sub-agents (`SubAgentDeps.aiRule`).
+- Locked in `tests/anAiAppNeedsNoKey.test.ts`.
+
+**Admin action:** set `APP_AI_GATEWAY=on` in Cloud Run.

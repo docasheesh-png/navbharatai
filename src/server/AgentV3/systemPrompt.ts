@@ -13,6 +13,7 @@ import { isBinaryAsset } from './fileClassification';
 import { EMOJI_RULE } from '../lib/responseEmoji';
 import { DEVICE_POWERS_RULE } from './devicePowers';
 import { LISTENING_PORTS_COMMAND } from './PortDiscovery';
+import { appAiGatewayEnabled } from '../lib/appAiGateway';
 
 /**
  * The #1 conversation rule — mirror the user's language, never default to Hindi. The platform's
@@ -74,6 +75,30 @@ export const AI_IN_APP_RULE =
   'API key as-is, and with any compatible provider by changing only AI_BASE_URL and AI_MODEL. With no ' +
   'AI_API_KEY set, show a clear "add your AI key to turn this on" state — never canned or fake answers. ' +
   'If the app has no server yet, add a small one for this route.';
+
+/**
+ * THE KEYLESS ROUTE COMES FIRST WHEN THE GATEWAY IS ON (admin 2026-09-30, "B"). AI_IN_APP_RULE ends in
+ * a key: the user must fetch one and paste it before their chatbot says a word, and that is where most
+ * people stop (autopsy d8ed307a: a Bengali AI assistant shipped asking for an OpenAI key). With
+ * `APP_AI_GATEWAY=on` a published app can answer through NavBharatAI itself, billed to its owner's wallet,
+ * with nothing pasted anywhere — so an app WITHOUT a server of its own takes that route (`generate_ai`,
+ * provider left empty). An app that has or needs a server keeps AI_IN_APP_RULE exactly: the gateway is a
+ * browser path, and a server should not route through a page. The honest cost of the keyless route is
+ * said to the user: the assistant answers once the app is PUBLISHED, not in the preview.
+ */
+export const GATEWAY_AI_RULE =
+  'AI INSIDE THE APP — NO KEY NEEDED: if the app itself needs an AI model AND it has no server of its ' +
+  'own (a plain React/Vite or HTML app), do NOT write your own API calls and do NOT ask for an API key. ' +
+  'Call run_recipe with name "generate_ai" and input { "provider": "navbharat" }: it writes src/lib/ai.ts, which answers ' +
+  'through NavBharatAI with no key. Use generateText()/chat() from it, and show isAiReady() === false as ' +
+  'a clear "the assistant starts working once you publish this app" state, never canned answers. In your ' +
+  'final message tell the user plainly: the AI answers after they PUBLISH, not in the preview. ' +
+  'Only if the app already has, or genuinely needs, a server: follow the server rule below instead.';
+
+/** The AI-in-app rule for THIS deployment. Gateway off ⇒ AI_IN_APP_RULE byte-for-byte. */
+export function aiInAppRule(env: NodeJS.ProcessEnv = process.env): string {
+  return appAiGatewayEnabled(env) ? `${GATEWAY_AI_RULE}\n${AI_IN_APP_RULE}` : AI_IN_APP_RULE;
+}
 
 /**
  * NEVER INVENT OTHER PEOPLE (autopsy f15a9bcc, 2026-09-23). Asked for "nearby shops that are open, over
@@ -490,7 +515,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     NO_INVENTED_PEOPLE_RULE,
     DEVICE_POWERS_RULE,
     '',
-    AI_IN_APP_RULE,
+    aiInAppRule(),
     '',
     'Conversation:',
     '- Reply to anything the user says. If they greet you (e.g. "hello") or ask a',

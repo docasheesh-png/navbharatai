@@ -3247,6 +3247,15 @@ the flag entries above promise.
   (`modelAlwaysReasons`). Its single plan call is capped at 90 s, a cap sized for a rung that answers
   directly, so on `kimi-k2.7-code` it spent the whole cap thinking and handed over nothing.
   `fastLaneRungDecision` in `fastLaneRung.ts`; report code `FAST_LANE_SKIPPED_REASONING_RUNG`.
+- **`AGENTV3_FASTLANE_GAMES`** (NOT set; unset ⇒ a GAME skips the fast lane; `on` lets games back in —
+  added 2026-09-30, autopsy 0bb437b4). The lane has no tools, so it cannot run the game recipes the full
+  builder's prompt requires for any game. For "Make a racing game" it planned five generic files, spent
+  96 s and wrote nothing. The domain is `analyzeRequirementGaps(prompt).domain === 'game'`;
+  `fastLaneSkipsGame` in `fastLaneRung.ts`; report code `FAST_LANE_SKIPPED_GAME` (process-only).
+  Same autopsy, no flags: every in-sandbox browser lane opens pages with `reducedMotion: 'reduce'`
+  (`BROWSER_PAGE_OPTIONS`, one definition), because the kit's game button pulses for ever and Playwright
+  never presses a moving element. The explorer dispatches the click on the same element only for a
+  "not stable" failure.
 - **`AGENTV3_GREEN_REVIEW_LEAN`** (default ON, set `off` to disable — added 2026-09-18, autopsy b6f88a72) —
   **a suggestion costs a suggestion's price.** `reviewerShouldWrite` (Green Stop) already makes the
   post-build reviewer suggest-only on a proven-green app — no repair, nothing it says can fail the

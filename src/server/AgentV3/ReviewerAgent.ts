@@ -347,6 +347,15 @@ export function leanReviewInline(
   return { files, omitted };
 }
 
+/** Changed files first, then the rest, capped at `REVIEW_TREE_CAP` with the remainder counted. Pure. */
+export const REVIEW_TREE_CAP = 60;
+export function reviewFileList(fileTree: readonly string[], changed: readonly string[]): string {
+  const ordered = [...new Set([...changed, ...fileTree])];
+  const shown = ordered.slice(0, REVIEW_TREE_CAP);
+  const rest = ordered.length - shown.length;
+  return shown.join('\n') + (rest > 0 ? `\n…and ${rest} more (use glob to list them)` : '');
+}
+
 /**
  * The reviewer's instruction, as a pure function of its inputs — exported so the suggest-mode block
  * can be asserted rather than trusted. PURE.
@@ -368,7 +377,12 @@ export function reviewerInstruction(opts: Omit<ReviewBuildOpts, 'spawn'>): strin
     `USER REQUEST: "${userRequest}"`,
     '',
     `FILES BUILT (${fileTree.length} total):`,
-    fileTree.slice(0, 20).join('\n'),
+    // 🔴 THE FILES THIS TURN WROTE COME FIRST, AND THE LIST IS LONG ENOUGH TO HOLD THEM (autopsy 0bb437b4).
+    // A game carries ~30 platform library files; the first 20 of the tree were all library, the app's own
+    // src/game/racing/* were cut, and the reviewer guessed `src/components/RaceGame.tsx` and three other
+    // paths that did not exist, spent its budget finding them, and timed out with no suggestions. Paths
+    // are cheap; a guessed path costs a step.
+    reviewFileList(fileTree, scope.files),
     '',
     ...(scope.focused ? [
       `CHANGED THIS TURN (${scope.files.length} file(s)) — REVIEW THESE:`,

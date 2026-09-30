@@ -958,7 +958,7 @@ export function journeyScript(previewUrl: string, journeys: readonly Journey[], 
     route: ${JSON.stringify(j.route)},
     // A sign-in form is driven signed OUT (a session would only redirect away from it); every other
     // journey runs behind the door when the app has one (signInExplore.ts).
-    pageOpts: ${isSignInRoute(j.route) ? '{}' : newPageOptionsExpr(opts.storageState)},
+    pageOpts: ${newPageOptionsExpr(isSignInRoute(j.route) ? null : opts.storageState)},
     fields: (page) => [
 ${fills}
     ],

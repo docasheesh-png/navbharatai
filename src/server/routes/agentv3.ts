@@ -335,7 +335,7 @@ import { auditConnectedProject } from '../AgentV3/ConnectAudit';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, oneShotStillViable, oneShotSkipReason, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
-import { fastLaneRungDecision, fastLaneReasoningGateEnabled } from '../AgentV3/fastLaneRung';
+import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame } from '../AgentV3/fastLaneRung';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
@@ -16479,10 +16479,18 @@ async function noteBuildOutcome(
           } catch { return { rung: null, skip: false, reason: '' }; }
         })()
         : { rung: null, skip: false, reason: '' };
+      // A game is built with the game recipes, which only the full builder can call (fastLaneSkipsGame).
+      let fastLaneGameSkip = false;
+      if (fastLaneWouldRun && !fastLaneRung.skip) {
+        try { fastLaneGameSkip = fastLaneSkipsGame(analyzeRequirementGaps(prompt).domain); } catch { fastLaneGameSkip = false; }
+        if (fastLaneGameSkip) {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_SKIPPED_GAME', autoResolved: true, message: 'Skipped the fast lane: a game is built with the game tools (loop, input, 3D, audio), and only the full builder can run them. Building directly with the full builder.' });
+        }
+      }
       if (fastLaneRung.skip) {
         buildDiag.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_SKIPPED_REASONING_RUNG', message: 'Skipped the fast lane: the engine this build opens on always reasons first, so the lane could not finish its plan step in time. Building directly with the full builder.', autoResolved: true, detail: fastLaneRung.reason });
       }
-      if (fastLaneWouldRun && !fastLaneRung.skip) {
+      if (fastLaneWouldRun && !fastLaneRung.skip && !fastLaneGameSkip) {
         // Usage ACCUMULATES across every cheap call (manifest + each per-file call), so billing is honest.
         const osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
         // 🔴 THE SCAFFOLD MUST EXIST BEFORE THE PLAN READS IT (autopsy b47c56d8, 2026-09-30). The

@@ -85590,3 +85590,27 @@ still ended "The build could not run — the sandbox was unavailable", `ok:false
 - GLM flashx timed out twice (75 s). Provider-side; the bench worked.
 - The AI overview shipped scripted and was disclosed. The architect had the gateway rule but inherited
   the fast lane's file. The new no-faked-result rule reaches the fast lane.
+
+## 2026-09-30 — Autopsy 0bb437b4: "Make a racing game", Weak, 15.1 min — worked, but slowly and with guesses
+
+The game rendered and was billed ₹247.16. The struggle came from the engine, not the game: 96 s in a fast
+lane that cannot build games, a sub-agent guessing at library APIs for five minutes (it edited the
+platform's own `src/audio/melody.ts` four times to add methods it had invented), a reviewer that timed
+out looking for files by guessed paths, and a click explorer that found "nothing safe to press".
+
+**Ledger:**
+
+| Problem | Root cause | Class | Siblings found and fixed | Test |
+|---|---|---|---|---|
+| Fast lane: five generic files planned, 96 s, nothing written | The lane cannot call recipes; the full builder's prompt requires them for every game | A lane routed work it has no tool for | `fastLaneSkipsGame` on the platform's own domain classifier; `FAST_LANE_SKIPPED_GAME` process-only; `AGENTV3_FASTLANE_GAMES=on` reverts | `theRacingGameAutopsy.test.ts` |
+| 11 invented members (`playCue`, `attach`, `{ volume }`), six rounds, library edited | The compiler says what is wrong, never what is right; nothing named the type's real members | A guess answered only with "wrong" | `typeMembers.ts`: TS2339/2551/2353 errors → the declaring file's public members, found through the file's relative imports (≤6 reads), handed back with every typechecked write; a recipe library is named as not to edit | same |
+| Reviewer guessed `src/components/RaceGame.tsx` and three more, timed out | The instruction showed the first 20 tree entries — all library files | A capped list cut the part that mattered | `reviewFileList`: changed files first, 60 shown, the rest counted | same |
+| Explorer: "nothing safe to press" on a game with a Start button | `.nb-game-btn` pulses for ever; Playwright waits for a stable element | An instrument that cannot touch a moving control | Reduced motion on every lane from ONE definition (`BROWSER_PAGE_OPTIONS`: explorer, page check, journey both signed in and on sign-in routes, sign-in explorer); a same-element dispatch only for "not stable"; a census test fails on a new lane without it | same |
+| `.nb-hud` shipped unstyled, healed after the build (55 s) | The write-time note listed app classes; for a game it never named `.nb-game-hud` | Advice that does not name the right answer | `nearestKitClass` names the kit class carrying every word of the invented one (a tie names nothing); the note lists game classes too | same |
+
+**Recorded, not changed:**
+- `UNFINISHED_BUILD_RESUMED` after what may have been a question: the reply is truncated in the report, so
+  it cannot be checked. `decideUnfinishedResume` already stands down on `turnAskedTheUser`.
+- ETA 2–4 min vs 15.1 min actual. The fleet ETA had no past game builds to read; the estimate will improve
+  as games are recorded, not by a constant.
+- GLM crawled at the start (provider-side). The throughput bench benched it as designed.

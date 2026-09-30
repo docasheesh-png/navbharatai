@@ -84096,6 +84096,30 @@ input carries it, `judgeable` excludes it, and success/survival count it on its 
   change, with the paths). The next report carrying it settles it.
 - The fourth stuck row's root cause ("Did not ask this user to add credits…") predates the 2026-09-17
   `UPSELL_SUPPRESSED` fix; nothing new to do.
+## 2026-09-30 — The referral-code box closes after 3 app opens or 7 days
+
+Admin: *"Refral code dalne ka option 3 bar app open hone ke bad band ho jana chahiye … 4rth time … input box
+gayab ho jaye! Aur notification me bhi refral 100₹ wale ke age missed (❌)"* — then approved the three details:
+30-minute folding, a 7-day backstop, and "b" (accounts already older than 7 days close at once).
+
+- **Why:** the only limit was `canStillRedeem` (no code after a mobile/GitHub reward). An account that never
+  verified either could apply a friend's code months later.
+- **Server:** `src/server/lib/referralCodeWindow.ts` (pure). Opens are counted on the account's referral
+  record by the app's status read (`GET /api/referral/:uid`, android only), in a transaction, folding anything
+  within 30 min of the last counted open; nothing is written once the window is shut. Age from Firebase
+  `metadata.creationTime` (new `createdAt` on `AccountContact`), falling back to the referral record's own
+  creation time (never earlier, so a fallback can only keep a window open longer). `decideAttribution` gains
+  `codeWindowOpen` → reason `code-window-closed`; status adds `codeOpensLeft` and `missed` on the row.
+- **Every installed build is covered from the deploy**, because they all already read the status at start-up.
+  A missed row is only sent with `missed=1` (new builds); older builds keep hiding the row, so they never show
+  ₹100 as still waiting.
+- **Client:** ❌ Missed row (no button) in the Notifications checklist and the Wallet; a missed row is left out
+  of "₹… waiting"; the Wallet box says how many opens are left; the app re-reads the status on resume so a
+  phone that never cold-starts is still counted.
+- **Tests:** `tests/referralCodeWindow.test.ts` (pure + client), a new block in `tests/referralRoutes.test.ts`
+  driving the real handlers; the redeem refusal is reversion-proven.
+- ⚠️ Needs a fresh `.aab` for the ❌ row and the opens-left line; the refusal and the hidden box are live on
+  the server deploy for every build.
 
 ## 2026-09-30 — Admin Build Reports page: App Check hang + Mobile OTP health (admin: "pura page ki error ke sath me mobile otp heath par special focus")
 

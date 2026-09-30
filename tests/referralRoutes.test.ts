@@ -698,3 +698,103 @@ describe('the Earning list — who used my code, and how far each has got', () =
     expect(tokensOf('A')).toBe(0);
   });
 });
+
+describe('⏳ the referral-code window — three app opens or seven days (admin 2026-09-30)', () => {
+  const T0 = Date.parse('2026-10-01T10:00:00Z');
+  const MIN = 60_000;
+  const statusAt = async (uid: string, ms: number, query: Record<string, string> = {}) => {
+    vi.setSystemTime(ms);
+    const res = mockRes();
+    await (await GET_STATUS())(mockReq({ params: { userId: uid }, query }), res);
+    return res.body as any;
+  };
+  const opensOf = (uid: string) => Number(DOCS[key('user_referrals', uid)]?.appOpens || 0);
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    // A brand-new account, created the moment before its first open.
+    account = { ...account, createdAt: new Date(T0 - MIN).toISOString() } as typeof account;
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('the box is offered on the first three opens and gone on the fourth', async () => {
+    const seen: boolean[] = [];
+    for (let i = 0; i < 4; i++) seen.push((await statusAt('N', T0 + i * 31 * MIN)).canRedeem);
+    expect(seen).toEqual([true, true, true, false]);
+    expect(opensOf('N')).toBe(4);
+  });
+
+  it('says how many opens are left while the box is offered', async () => {
+    expect((await statusAt('N', T0)).codeOpensLeft).toBe(2);
+    expect((await statusAt('N', T0 + 31 * MIN)).codeOpensLeft).toBe(1);
+    expect((await statusAt('N', T0 + 62 * MIN)).codeOpensLeft).toBe(0);
+    expect((await statusAt('N', T0 + 93 * MIN)).codeOpensLeft).toBeNull();
+  });
+
+  it('opens inside 30 minutes are ONE open — coming back from WhatsApp spends nothing', async () => {
+    for (const m of [0, 5, 10, 20, 29]) await statusAt('N', T0 + m * MIN);
+    expect(opensOf('N')).toBe(1);
+    await statusAt('N', T0 + 30 * MIN);
+    expect(opensOf('N')).toBe(2);
+  });
+
+  it('the website never spends a chance — a code cannot be applied there anyway', async () => {
+    for (let i = 0; i < 5; i++) await statusAt('W', T0 + i * 31 * MIN, { platform: 'web' });
+    expect(opensOf('W')).toBe(0);
+    expect((await statusAt('W', T0 + 200 * MIN)).canRedeem).toBe(true);
+  });
+
+  it('❌ a new app asks for missed rows and gets the referral row marked missed', async () => {
+    for (let i = 0; i < 4; i++) await statusAt('N', T0 + i * 31 * MIN);
+    const s = await statusAt('N', T0 + 200 * MIN, { missed: '1' });
+    const row = s.steps.find((x: any) => x.step === 'referral-code');
+    expect(row).toMatchObject({ claimed: false, missed: true, rupees: 100 });
+    expect(s.canRedeem).toBe(false);
+  });
+
+  it('an app build from before this change never sees the row, so it can never show ₹100 as still waiting', async () => {
+    for (let i = 0; i < 4; i++) await statusAt('N', T0 + i * 31 * MIN);
+    const s = await statusAt('N', T0 + 200 * MIN);
+    expect(s.steps.map((x: any) => x.step)).not.toContain('referral-code');
+  });
+
+  it('🔒 the fourth open refuses a redemption on the server, whatever the phone shows', async () => {
+    const code = (await statusAt('A', T0)).code;
+    for (let i = 0; i < 4; i++) await statusAt('B', T0 + i * 31 * MIN);
+    const res = await redeem('B', code, 'bbbbbbbbbbbbbbbb');
+    expect(res.statusCode).toBe(409);
+    expect(res.body.message).toMatch(/first 3 app opens or first 7 days/);
+    expect(DOCS[key('user_referrals', 'B')].referrerUserId).toBeUndefined();
+  });
+
+  it('a code applied inside the window keeps its ₹100 row after the window closes — never "missed"', async () => {
+    const code = (await statusAt('A', T0)).code;
+    await statusAt('B', T0);
+    expect((await redeem('B', code, 'bbbbbbbbbbbbbbbb')).statusCode).toBe(200);
+    for (let i = 1; i < 6; i++) await statusAt('B', T0 + i * 31 * MIN);
+    const s = await statusAt('B', T0 + 300 * MIN, { missed: '1' });
+    expect(s.steps.find((x: any) => x.step === 'referral-code')).toMatchObject({ missed: false });
+  });
+
+  it('⏳ the seven-day backstop closes the box even with opens left — an app that never reports cannot keep it open', async () => {
+    await statusAt('N', T0);
+    const s = await statusAt('N', T0 + 7 * 24 * 60 * MIN, { missed: '1' });
+    expect(s.canRedeem).toBe(false);
+    expect(s.steps.find((x: any) => x.step === 'referral-code')).toMatchObject({ missed: true });
+  });
+
+  it('(b) an account already older than seven days is closed on its very first open', async () => {
+    account = { ...account, createdAt: new Date(T0 - 8 * 24 * 60 * MIN).toISOString() } as typeof account;
+    const code = (await statusAt('A', T0)).code;
+    expect((await statusAt('OLD', T0)).canRedeem).toBe(false);
+    expect((await redeem('OLD', code, 'dddddddddddddddd')).statusCode).toBe(409);
+  });
+
+  it('a closed window writes nothing more — the count stops at four', async () => {
+    for (let i = 0; i < 4; i++) await statusAt('N', T0 + i * 31 * MIN);
+    const before = { ...DOCS[key('user_referrals', 'N')] };
+    for (let i = 5; i < 9; i++) await statusAt('N', T0 + i * 31 * MIN);
+    expect(DOCS[key('user_referrals', 'N')].appOpens).toBe(before.appOpens);
+    expect(DOCS[key('user_referrals', 'N')].lastAppOpenAt).toBe(before.lastAppOpenAt);
+  });
+});

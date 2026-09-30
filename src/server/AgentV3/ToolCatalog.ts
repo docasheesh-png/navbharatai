@@ -2272,7 +2272,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'StrictMode double-mount is handled, dispose() releases the WebGL context (browsers cap live '
         + 'contexts, so a leaked one takes the tab down after a few visits), context loss pauses instead '
         + 'of going black, the HUD updates on EVENTS not per frame, audio is unlocked on first gesture, '
-        + 'and a device without WebGL gets an honest message. '
+        + 'and a device without WebGL gets an honest message. On a PHONE or TABLET it draws the controls '
+        + 'itself (joystick, camera drag, Attack/Jump/Use/Run, Pause) — choose buttons with touchControls. '
         + 'Pass your world in through setup() and your gameplay through update() — do NOT edit the loop.',
       input_schema: {
         type: 'object',
@@ -2280,7 +2281,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: game, gamecanvas, hud. Default = all.',
+            description: 'Optional subset: game, gamecanvas, hud, touchcontrols. Default = all.',
           },
         },
       },

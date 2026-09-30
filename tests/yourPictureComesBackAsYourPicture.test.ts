@@ -148,7 +148,16 @@ describe('🔒 the free route treats an edit as an edit', () => {
     // Pollinations cannot receive a picture that lives only in this request; the xAI endpoint is
     // text-to-image only. Either one answering would return a brand-new picture — a
     // successful-looking response that is exactly the failure being fixed.
-    expect(body).toContain('pollinationsEnabled() && !editing');
+    // Since 2026-09-30 (Free / Paid): Free mode refuses an edit before its free provider, and the
+    // Paid ladder's text-to-image rungs (Cloudflare, the keyed free provider, the old Pro host) sit
+    // inside one `if (!editing)`.
+    expect(body).toContain("if (tier === 'free') {\n        res.status(409).json({ error: editNeedsPaidMessage(userWords)");
+    const guard = body.lastIndexOf('if (!editing) {', body.indexOf('cloudflareServesSize(px)'));
+    expect(guard).toBeGreaterThan(0);
+    for (const rung of ['fetchCloudflareImage(', 'pollinationsApiKey() !==', 'fetchImageProHostImage(']) {
+      expect(body.indexOf(rung, guard)).toBeGreaterThan(guard);
+      expect(body.indexOf(rung, guard)).toBeLessThan(body.indexOf('geminiImageConfigured() && !editing'));
+    }
     expect(body).toContain('geminiImageConfigured() && !editing');
     expect(body).toContain('editing ? null : grokImageKey()');
   });

@@ -37,14 +37,47 @@
 // PURE — string comparison only. No I/O, no clock, no model.
 
 import { appTsx } from './sandbox/AppMakerLab/generator/templates/ViteReactProviderContents';
+import { NEXTJS_STARTER_PAGE } from './sandbox/AppMakerLab/generator/templates/NextjsProvider';
+
+/**
+ * One starter this repo SEEDS: where its entry lives, its exact content, and the heading its page shows.
+ *
+ * 🔴 THE NEXT.JS STARTER WAS MISSING (autopsy b47c56d8, 2026-09-30). This list used to name only the
+ * Vite entry, on the reasoning that "a longer list would start guessing at frameworks whose scaffolds
+ * this repo does not seed" — but this repo DOES seed a Next.js scaffold (`NextjsProvider`), whose page
+ * is `app/page.tsx` saying "Hello from Next.js!". On a Next.js build the fast lane wrote a header, a
+ * footer and a theme toggle into `src/`, never touched `app/page.tsx`, and nothing here could say the
+ * page on screen was still ours. Every entry is read from the template itself, never retyped.
+ */
+interface Starter {
+  readonly paths: readonly string[];
+  readonly content: string;
+  readonly heading: RegExp;
+  readonly label: string;
+}
+
+const STARTERS: readonly Starter[] = [
+  { paths: ['src/App.tsx', 'src/App.jsx', 'App.tsx'], content: appTsx, heading: /<h1\b[^>]*>\s*Hello World\s*<\/h1>/i, label: 'Hello World' },
+  { paths: ['app/page.tsx'], content: NEXTJS_STARTER_PAGE, heading: /<h1\b[^>]*>\s*Hello from Next\.js!\s*<\/h1>/i, label: 'Hello from Next.js!' },
+];
 
 /**
  * The entry files a scaffold seeds, in the order we would look for them.
  *
- * Deliberately short. This asks one narrow question — "is the app's own front door still ours?" — and
- * a longer list would start guessing at frameworks whose scaffolds this repo does not seed.
+ * Deliberately short. This asks one narrow question — "is the app's own front door still ours?" — so
+ * it names only the scaffolds this repo seeds (see `STARTERS`), never a guess at anybody else's.
  */
-export const STARTER_ENTRY_PATHS: readonly string[] = ['src/App.tsx', 'src/App.jsx', 'App.tsx'];
+export const STARTER_ENTRY_PATHS: readonly string[] = STARTERS.flatMap((s) => s.paths);
+
+/** The starter whose entry lives at `path`, or null. */
+function starterAt(path: string | null | undefined): Starter | null {
+  return path ? STARTERS.find((s) => s.paths.includes(path)) ?? null : null;
+}
+
+/** The heading text the starter at `path` shows ("Hello World" when the path is not a known entry). */
+export function starterLabelFor(path: string | null | undefined): string {
+  return starterAt(path)?.label ?? STARTERS[0].label;
+}
 
 /**
  * Whitespace-insensitive comparison, because that is the only difference a formatter may legitimately
@@ -53,7 +86,7 @@ export const STARTER_ENTRY_PATHS: readonly string[] = ['src/App.tsx', 'src/App.j
  */
 const squash = (s: string): string => String(s ?? '').replace(/\s+/g, ' ').trim();
 
-/** The exact content this repo seeds as the starter entry point. */
+/** The exact content this repo seeds as the (Vite) starter entry point. */
 export const STARTER_ENTRY_CONTENT = appTsx;
 
 /**
@@ -66,7 +99,8 @@ export const STARTER_ENTRY_CONTENT = appTsx;
  */
 export function isUntouchedStarterEntry(content: string | null | undefined): boolean {
   if (content == null) return false;
-  return squash(content) === squash(STARTER_ENTRY_CONTENT);
+  const c = squash(content);
+  return STARTERS.some((s) => c === squash(s.content));
 }
 
 /**
@@ -104,9 +138,6 @@ export function starterAppBlocker(entryContent: string | null | undefined): stri
 // The helpers below are that question, asked of the same exact-match fact the readiness gate uses.
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** The visible text of the starter page — the second factor of `starterIsWhatRendered`. */
-const STARTER_HEADING_RE = /<h1\b[^>]*>\s*Hello World\s*<\/h1>/i;
-
 /**
  * The starter entry among `files`, or null. A file absent from the map is simply not examined — the
  * caller decides what "absent" means; this function never invents a finding out of a missing file.
@@ -130,19 +161,24 @@ export function starterEntryIn(files: Readonly<Record<string, string>> | Readonl
  */
 export function starterIsWhatRendered(entryPath: string | null | undefined, renderedHtml: string | null | undefined): boolean {
   if (!entryPath) return false;
-  return pageShowsStarter(renderedHtml);
+  // The heading must be the one THIS entry's starter shows — a Vite entry and a Next.js page each prove
+  // only their own template.
+  const starter = starterAt(entryPath);
+  if (!starter) return pageShowsStarter(renderedHtml);
+  return starter.heading.test(String(renderedHtml ?? ''));
 }
 
 /** The page half of the check alone — cheap, so a caller can skip the file read when it is false. */
 export function pageShowsStarter(renderedHtml: string | null | undefined): boolean {
-  return STARTER_HEADING_RE.test(String(renderedHtml ?? ''));
+  const html = String(renderedHtml ?? '');
+  return STARTERS.some((s) => s.heading.test(html));
 }
 
 /** The problem line a repair pass is handed. Names the exact file and the exact fix — never a guess. */
 export function starterPreviewProblem(entryPath: string): string {
-  return `The page that renders is still NavBharatAI's starter template ("Hello World" from ${entryPath}) — `
+  return `The page that renders is still NavBharatAI's starter template ("${starterLabelFor(entryPath)}" from ${entryPath}) — `
     + `the app's own components were built but ${entryPath} was never rewritten to mount them. `
-    + `Rewrite ${entryPath} so it renders the app the user asked for, using the components already in src/.`;
+    + `Rewrite ${entryPath} so it renders the app the user asked for, using the components already written in the project.`;
 }
 
 /**

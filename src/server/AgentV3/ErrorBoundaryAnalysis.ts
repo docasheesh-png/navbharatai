@@ -36,6 +36,19 @@ export function hasErrorBoundarySignal(content: string): boolean {
   return SIGNAL_RE.test(content || '');
 }
 
+/**
+ * A Next.js App Router `error.tsx` / `global-error.tsx` IS an error boundary — Next wraps its route
+ * segment in one and renders this file on a render error. It must be a Client Component, so the
+ * `'use client'` directive is part of the test. PURE.
+ *
+ * 🔴 AUTOPSY b47c56d8 (2026-09-30): a Next.js app with the scaffold's own `app/error.tsx` was told
+ * "React app has no error boundary" — a finding that invites a repair pass to add a second one.
+ */
+export function isNextErrorBoundaryFile(path: string, content: string): boolean {
+  return /(^|\/)app\/(?:.*\/)?(?:global-)?error\.[jt]sx$/.test(String(path || ''))
+    && /^\s*['"]use client['"]/m.test(String(content || ''));
+}
+
 /** The two React lifecycle hooks that DEFINE an error boundary. Without one of these, it is not one. */
 const BOUNDARY_LIFECYCLE_RE = /\bcomponentDidCatch\b|\bgetDerivedStateFromError\b|react-error-boundary/;
 /** The file declares something that calls itself an error boundary (not merely renders someone else's). */

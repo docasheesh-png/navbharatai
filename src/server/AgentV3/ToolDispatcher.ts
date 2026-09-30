@@ -79,7 +79,7 @@ import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote } from './writeTimeQualityCheck';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, usesNonKitNbClass } from './kitRestore';
-import { isProjectStylesheet } from './CssConsistency';
+import { isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief } from './CssConsistency';
 import { currentPass, runInPass } from './greenFreeze';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
@@ -144,7 +144,7 @@ import { analyzeEffectCleanup, effectCleanupSummary } from './effectCleanupAnaly
 import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
-import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, manifestRewrittenBy, viteRangeOf, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, npmInstallMaskedFailure } from './DependencyAutoFix';
+import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, manifestRewrittenBy, viteRangeOf, reactRangeOf, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, npmInstallMaskedFailure } from './DependencyAutoFix';
 import { quoteShellRouteGroupPaths } from './shellCommandSafety';
 import { resolveStringArg, missingArgMessage } from './toolArgRepair';
 import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
@@ -367,7 +367,7 @@ import { PUBLISH_NOT_REQUESTED } from './publishConsent';
 import { summarizeBundle, bundleSummaryLine } from './BundleSize';
 import { livenessLine } from './PostDeployLiveness';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
-import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary, looksLikeBrokenErrorBoundary } from './ErrorBoundaryAnalysis';
+import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary, looksLikeBrokenErrorBoundary, isNextErrorBoundaryFile } from './ErrorBoundaryAnalysis';
 import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue } from './SecurityConfigAnalysis';
 import { analyzeSecretLeak, secretLeakSummary, gitignoreWithEnvCoverage } from './SecretLeakAnalysis';
 import { scanHardcodedUrls, hardcodedUrlSummary, type HardcodedUrlIssue } from './HardcodedUrlAnalysis';
@@ -1839,6 +1839,14 @@ export class ToolDispatcher {
   // scaffold GUARD tripped, which a plain `npm install` never does. Now the FIRST tool call of a
   // run ensures the scaffold once (one readFile probe when already scaffolded — ~free).
   private scaffoldEnsured = false;
+  /**
+   * The same once-per-run scaffold guarantee, for a caller that must READ the workspace before any tool
+   * runs — the fast lane plans against the listing, so the scaffold has to be there first (autopsy
+   * b47c56d8). Idempotent with the first-tool-call path: whichever runs first does the work.
+   */
+  ensureFrameworkScaffold(): Promise<void> {
+    return this.ensureScaffoldOnce();
+  }
   private async ensureScaffoldOnce(): Promise<void> {
     if (this.scaffoldEnsured) return;
     this.scaffoldEnsured = true; // set first — a probe failure must not re-run this every call
@@ -2211,7 +2219,7 @@ export class ToolDispatcher {
     const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
     for (const { path, content } of sources) {
       if (!FRONTEND.test(path) || SKIP.test(path)) continue;
-      if (hasErrorBoundarySignal(content)) return true;
+      if (hasErrorBoundarySignal(content) || isNextErrorBoundaryFile(path, content)) return true;
     }
     return false;
   }
@@ -3037,13 +3045,61 @@ export class ToolDispatcher {
     // An `nb-` class the kit does not have and nothing defines (autopsy 466c260a) — said while the file
     // is open, instead of by the end-of-build check inside a four-minute heal.
     const invented = await this.inventedKitClassNotes(files);
+    // Any other custom class nothing defines (autopsy a5b661c8) — the end-of-build check's own question.
+    const undefinedCss = await this.undefinedClassNotes(files);
     // An XSS sink or a hardcoded secret (autopsy 466c260a) — the readiness scan saw three sinks only after
     // the app was green, where nothing repairs; the same scan runs here, with the file still open.
     let security = '';
     for (const p of paths) {
       try { security += securityWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
     }
-    return hooks + storeLoop + imports + typecheck + quality + invented + security;
+    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + security;
+  }
+
+  /**
+   * The project's defined classes, for a UI worker's brief (autopsy a5b661c8 — a frontend sub-agent read
+   * the 18.7 KB kit six times in slices to learn them). Only roles that write screens get it. '' on any
+   * failure: a missing brief is today's behaviour, never an error.
+   */
+  private async stylesheetBriefFor(role: string): Promise<string> {
+    if (role !== 'frontend' && role !== 'designer') return '';
+    try {
+      const probes = ['src/index.css', 'src/App.css', 'src/styles.css', 'src/global.css', 'src/app.css', 'app/globals.css', 'style.css', 'src/styles/globals.css', 'src/styles/index.css'];
+      const read = await Promise.all(probes.map((p) => this.actuator.readFile(this.workspaceId, p).then((c) => [p, c] as const, () => null)));
+      const sheets: Record<string, string> = {};
+      for (const r of read) if (r && typeof r[1] === 'string' && r[1].trim()) sheets[r[0]] = r[1];
+      const brief = stylesheetClassBrief(sheets);
+      return brief ? `\n\n${brief}` : '';
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Custom classes a written screen uses that no stylesheet defines. `nb-` classes are left to
+   * `inventedKitClassNotes`, which names the kit's own alternatives. The project context is read in
+   * parallel — every stylesheet the write carries, the usual entry sheets, and the two files that say
+   * whether Tailwind or an external sheet is in play — so a write pays one round trip, not eight.
+   */
+  private async undefinedClassNotes(files: Record<string, string>): Promise<string> {
+    try {
+      const screens = Object.keys(files).filter((p) => /\.(?:t|j)sx?$/.test(p) && /className\s*=/.test(files[p] ?? ''));
+      if (screens.length === 0) return '';
+      const project: Record<string, string> = {};
+      for (const [p, c] of Object.entries(files)) if (isProjectStylesheet(p)) project[p] = c;
+      const probes = ['src/index.css', 'src/App.css', 'src/styles.css', 'src/global.css', 'src/styles/globals.css', 'src/styles/index.css', 'package.json', 'index.html']
+        .filter((p) => project[p] === undefined);
+      const read = await Promise.all(probes.map((p) => this.actuator.readFile(this.workspaceId, p).then((c) => [p, c] as const, () => null)));
+      for (const r of read) if (r && typeof r[1] === 'string') project[r[0]] = r[1];
+      let out = '';
+      for (const p of screens) {
+        const missing = undefinedClassesInFile(p, files[p], project).filter((c) => !c.startsWith('nb-'));
+        out += undefinedClassesWriteNote(p, missing);
+      }
+      return out;
+    } catch {
+      return '';
+    }
   }
 
   private async inventedKitClassNotes(files: Record<string, string>): Promise<string> {
@@ -3755,9 +3811,11 @@ export class ToolDispatcher {
         // parens are a bash subshell → exit 2 syntax error, so the dirs are never made (PulseBoard autopsy).
         // The vitest family's major follows the PROJECT's Vite, so read it — only when the command names
         // vitest, so no other command pays for the read (autopsy 7d79254b, DependencyAutoFix.ts).
-        const pinCtx = /(?:^|[\s/])(?:@vitest\/|vitest\b)/.test(command)
-          ? { viteRange: viteRangeOf(await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => undefined)) }
+        // The React Three Fiber family follows the project's React the same way (autopsy a5b661c8).
+        const pinPkg = /(?:^|[\s/])(?:@vitest\/|vitest\b|@react-three\/)/.test(command)
+          ? await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => undefined)
           : undefined;
+        const pinCtx = pinPkg !== undefined ? { viteRange: viteRangeOf(pinPkg), reactRange: reactRangeOf(pinPkg) } : undefined;
         const effectiveCommand = quoteShellRouteGroupPaths(pinKnownDepsInInstallCommand(command, pinCtx));
         // Inject the user's own vault secrets (Settings → Secrets & API Keys) into the app's .env the first
         // time it installs/builds/runs — so the app runs with real keys the user never pasted in chat.
@@ -9317,7 +9375,7 @@ export class ToolDispatcher {
           throw new Error(`task: unknown role "${role}".`);
         }
         this.events?.emit({ type: 'agent_spawned', agent: role, task: instruction, ts: Date.now() });
-        const result = await this.spawnSubAgent(role, instruction);
+        const result = await this.spawnSubAgent(role, instruction + await this.stylesheetBriefFor(role));
         return taskResultWithWrites(role, result);
       }
 

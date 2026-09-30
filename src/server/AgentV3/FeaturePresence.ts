@@ -158,9 +158,63 @@ const BUILDER_INSTRUCTION_OBJECT =
  * feature had "no visible control". Icons are matched on their own now; words keep their boundaries.
  */
 function controlPattern(words: readonly string[], icons: readonly string[] = []): RegExp {
-  const w = `\\b(?:${words.join('|')})\\b`;
-  const i = icons.map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  return new RegExp(i ? `${w}|(?:${i})` : w);
+  // 🔴 A DEVANAGARI WORD IS AN ICON TO `\b` (autopsy 2d076ce8, 2026-09-30). Without the `u` flag `\b`
+  // is an ASCII boundary, and every Devanagari letter is a non-word character to it — so `\bखोजें\b`
+  // could only match wedged between two Latin letters, i.e. never. The fix above for icons was the same
+  // fact; a word outside ASCII now takes the literal half by construction, wherever it is listed.
+  const isAscii = (x: string): boolean => [...x].every((c) => c.charCodeAt(0) < 128);
+  const ascii = words.filter(isAscii);
+  const literal = [...words.filter((x) => !isAscii(x)), ...icons];
+  const w = ascii.length ? `\\b(?:${ascii.join('|')})\\b` : '';
+  const i = literal.map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  return new RegExp([w, i ? `(?:${i})` : ''].filter(Boolean).join('|') || '(?!)');
+}
+
+/**
+ * THE CONTROL WORDS, IN THE LANGUAGES OUR OWN APPS ARE WRITTEN IN (autopsy 2d076ce8, 2026-09-30).
+ *
+ * 🔴 WHY. Every probe spoke English only. NavBharatAI's own tested Bhagavad Gita template labels its
+ * search box `<label htmlFor="q">खोजें (हिन्दी अर्थ या अध्याय)</label>` with a Devanagari placeholder —
+ * exactly what a Hindi app should do — and the Search probe, which wanted the letters s-e-a-r-c-h,
+ * reported *"Search has NO visible control"*. That false finding started a PAID repair pass on the
+ * second rung, the repair moved a working search box (still labelled in Hindi, so still "absent"), and
+ * the finding became the build's reported root cause. An India-first builder cannot judge a control by
+ * whether it is labelled in English.
+ *
+ * Stems, not inflections: `खोज` covers खोजें / खोजे / खोजिए, `हटा` covers हटाएँ / हटाओ. Matched
+ * literally (see `controlPattern`), on attributes first and then on visible text, exactly like the
+ * English words beside them. ⚠️ Only the PRESENCE side gained these — what counts as REQUESTED is
+ * unchanged, so no new probe can fire from this; an existing one can only stop being wrong.
+ */
+const HI = {
+  search: ['खोज', 'ढूंढ', 'ढूँढ', 'तलाश', 'सर्च'],
+  // जोड़ twice on purpose: once with the nukta as a combining mark (ड + ़), once precomposed (ड़) —
+  // both are how real text arrives, and they are different code points.
+  add: ['जोड़', 'जोड़', 'नया', 'नई', 'सहेज'],
+  del: ['हटा', 'मिटा', 'डिलीट'],
+  edit: ['संपादित', 'संपादन', 'बदलें', 'एडिट', 'सहेज'],
+  done: ['पूरा', 'पूर्ण'],
+  filter: ['सभी', 'सक्रिय', 'बाकी'],
+  auth: ['लॉगिन', 'लॉग इन', 'साइन इन', 'साइन अप', 'लॉगआउट', 'पंजीकरण'],
+  theme: ['डार्क', 'लाइट', 'थीम'],
+} as const;
+
+/**
+ * A search FIELD: an input the page itself calls a search box. PURE.
+ *
+ * Three ways a real page says so, each resting on an element: `type="search"`; a `placeholder`,
+ * `aria-label` or `title` naming it; or a `<label>` naming it while the page has a field to type in.
+ * The third is how an accessible form labels an input — and it is the shape the probe used to miss,
+ * because it read only attributes.
+ */
+function hasSearchField(htmlLower: string): PresenceEvidence | false {
+  if (/type=["']search["']/.test(htmlLower)) return 'control';
+  const words = controlPattern(['search', 'find', 'lookup'], HI.search);
+  const attrs = htmlLower.match(/(?:placeholder|aria-label|title)=["']([^"']*)["']/g) || [];
+  if (attrs.some((a) => words.test(a))) return 'control';
+  if (inputCount(htmlLower) === 0) return false;
+  const labels = htmlLower.match(/<label\b[^>]*>[\s\S]*?<\/label>/g) || [];
+  return labels.some((l) => words.test(l.replace(/<[^>]+>/g, ' '))) ? 'control' : false;
 }
 
 const FEATURES: FeatureDef[] = [
@@ -172,7 +226,7 @@ const FEATURES: FeatureDef[] = [
       '|\\bnew\\s+(?:task|item|note|todo|entry|record)\\b',
     ),
     // Needs an input to type into AND a control to submit it (button text or a form).
-    present: (h, t) => (inputCount(h) >= 1 && (hasControlMatching(h, t, controlPattern(['add', 'create', 'save', 'submit', 'new'], ['+'])) !== false || /<form\b/.test(h)))
+    present: (h, t) => (inputCount(h) >= 1 && (hasControlMatching(h, t, controlPattern(['add', 'create', 'save', 'submit', 'new', ...HI.add], ['+'])) !== false || /<form\b/.test(h)))
       ? 'control' // an <input> was captured — that is a real affordance, whatever matched the verb
       : false,
   },
@@ -182,13 +236,13 @@ const FEATURES: FeatureDef[] = [
     present: (h, t) => hasControlMatching(h, t, controlPattern(
       // `del` and `backspace` are the delete KEY of a keypad (a calculator's DEL, a PIN pad's ⌫) — the
       // same request in a different app, and the one this probe missed in autopsy 972acde5.
-      ['delete', 'del', 'remove', 'trash', 'clear', 'backspace'], ['✕', '×', '✖', '🗑', '⌫'],
+      ['delete', 'del', 'remove', 'trash', 'clear', 'backspace', ...HI.del], ['✕', '×', '✖', '🗑', '⌫'],
     )),
   },
   {
     feature: 'edit', label: 'Edit / update',
     requested: /\b(edit|update|rename|modify)\b/,
-    present: (h, t) => hasControlMatching(h, t, controlPattern(['edit', 'update', 'rename', 'save'], ['✎', '✏'])),
+    present: (h, t) => hasControlMatching(h, t, controlPattern(['edit', 'update', 'rename', 'save', ...HI.edit], ['✎', '✏'])),
   },
   {
     feature: 'complete', label: 'Mark complete / toggle',
@@ -203,22 +257,20 @@ const FEATURES: FeatureDef[] = [
     requested: /\bmark\b[^.]{0,20}\b(?:complete|completed|done)\b|\b(?:complete|completed|done)\s+(?:task|item|todo|to-?do|entry|entries|chore)s?\b|\b(?:task|item|todo|to-?do|entry|entries|chore)s?\s+(?:as\s+)?(?:complete|completed|done)\b|\bcheckbox(?:es)?\b|\bchecklist\b|\btick\b[^.]{0,15}\boff\b|\btoggle\b[^.]{0,15}\b(?:complete|completed|done|task|item|todo)s?\b/,
     present: (h, t) => (/type=["']checkbox["']/.test(h) || /role=["']checkbox["']/.test(h))
       ? 'control'
-      : hasControlMatching(h, t, controlPattern(['complete', 'done'], ['✓', '✔'])),
+      : hasControlMatching(h, t, controlPattern(['complete', 'done', ...HI.done], ['✓', '✔'])),
   },
   {
     feature: 'filter', label: 'Filter',
     requested: /\b(filter|all\b.*\bactive|active\b.*\bcompleted|tabs?)\b/,
     // A filter UI is usually 2+ sibling toggle controls (All / Active / Completed).
-    present: (h, t) => (hasControlMatching(h, t, /\b(all|active|completed|pending|show all)\b/) !== false && buttonCount(h) >= 2)
+    present: (h, t) => (hasControlMatching(h, t, controlPattern(['all', 'active', 'completed', 'pending', 'show all', ...HI.filter])) !== false && buttonCount(h) >= 2)
       ? 'control' // two or more buttons were captured
       : false,
   },
   {
     feature: 'search', label: 'Search',
     requested: /\b(search|find|lookup)\b/,
-    present: (h) => (/type=["']search["']/.test(h) || /(?:placeholder|aria-label)=["'][^"']*search/.test(h))
-      ? 'control'
-      : false,
+    present: (h) => hasSearchField(h),
   },
   {
     feature: 'list', label: 'List / items',
@@ -248,12 +300,12 @@ const FEATURES: FeatureDef[] = [
     requested: /\b(login|log in|log-in|sign in|sign-in|signin|sign up|sign-up|signup|auth|authentication|authenticate|register|registration|user account)\b/,
     present: (h, t) => /type=["']password["']/.test(h)
       ? 'control'
-      : hasControlMatching(h, t, /\b(login|log in|sign in|sign up|register|logout)\b/),
+      : hasControlMatching(h, t, controlPattern(['login', 'log in', 'sign in', 'sign up', 'register', 'logout', ...HI.auth])),
   },
   {
     feature: 'theme', label: 'Dark mode / theme toggle',
     requested: /\b(dark mode|light mode|theme (?:toggle|switch)|toggle theme)\b/,
-    present: (h, t) => hasControlMatching(h, t, controlPattern(['dark', 'light', 'theme', 'mode'], ['🌙', '☀'])),
+    present: (h, t) => hasControlMatching(h, t, controlPattern(['dark', 'light', 'theme', 'mode', ...HI.theme], ['🌙', '☀'])),
   },
 ];
 

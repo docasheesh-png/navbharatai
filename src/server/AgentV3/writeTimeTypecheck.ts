@@ -37,7 +37,7 @@
  * `writeTypecheckUntouched` and `writeTypecheckSummary`'s third argument.
  */
 import { robustTscCommand } from './tscCommand';
-import type { TscError } from './EndgameRepair';
+import { suggestedPropertyRenames, type TscError } from './EndgameRepair';
 import { tscErrorCauses, tscCauseNote, remedyFileFor } from './tscErrorCause';
 
 /** The ONE cache every in-build typecheck shares (endgame, `typecheck` tool, this). Ephemeral, never durable. */
@@ -128,6 +128,17 @@ export function writeTypecheckNote(
       `⛔ TYPECHECK after this write: ${fixHere.length} error(s) in ${files} — fix them NOW, in this turn, before writing the next file `
       + `(the production build fails until they are gone):\n${quoted.join('\n')}${more}`,
     );
+    // ONE RENAME, EVERY PLACE (autopsy a5b661c8): tsc named `scheduledAt` for `scheduledDate` at two
+    // lines, and the file was edited five times, one occurrence per turn. Said as one instruction.
+    const renames = new Map<string, number[]>();
+    for (const r of suggestedPropertyRenames(fixHere)) {
+      const key = `${normalizePath(r.file)}\u0000${r.from}\u0000${r.to}`;
+      renames.set(key, [...(renames.get(key) ?? []), r.line]);
+    }
+    for (const [key, lines] of renames) {
+      const [file, from, to] = key.split('\u0000');
+      parts.push(`✏️ The type spells it \`${to}\`: in ${file}, rename EVERY \`${from}\` to \`${to}\` (line${lines.length > 1 ? 's' : ''} ${[...new Set(lines)].join(', ')}) in ONE edit.`);
+    }
   }
   if (waiting.length > 0) {
     const targets = [...new Set(waiting.map((e) => remedyFileFor(e, sources) as string))];

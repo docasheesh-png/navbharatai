@@ -191,6 +191,12 @@ export interface SubAgentDeps {
    * spawn reads the line the route has settled on; absent ⇒ nothing is added, exactly as before.
    */
   languageRule?: () => string;
+  /**
+   * How AI inside the USER'S app is built (`aiInAppRule`). Autopsy d8ed307a: the Frontend specialist
+   * wrote the AI client — its own OpenAI call with the user's key — and the rule saying how to do it
+   * lived only in the ARCHITECT's prompt, which the child never sees. Absent ⇒ nothing is added.
+   */
+  aiRule?: () => string;
 }
 
 /**
@@ -335,6 +341,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
         : '',
       verification,
       (() => { try { return deps.languageRule?.() ?? ''; } catch { return ''; } })(),
+      (() => { try { return deps.aiRule?.() ?? ''; } catch { return ''; } })(),
     ].filter(Boolean);
     // THE HANDOFF CARRIES THE FILES, NOT ONLY A SENTENCE (admin 2026-09-24) — see taskHandoff.ts. The
     // child is told it holds them, so a later re-read of an unchanged one gets the honest notice.

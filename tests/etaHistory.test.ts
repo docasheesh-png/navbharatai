@@ -139,7 +139,9 @@ describe('WIRING — the live build path finally gets history', () => {
 
   it('the build ETA is no longer computed with no history at all', () => {
     // The whole defect in one line: this used to be estimateBuildTime(complexityFromPrompt(prompt)).
-    expect(route).toContain('const est = estimateBuildTime(etaComplexity, past);');
+    // The app's own history first; the platform's recent builds of its kind only when it has none
+    // (autopsy a5b661c8, fleetHistoryFromTelemetry).
+    expect(route).toContain('const est = estimateBuildTime(etaComplexity, past.length > 0 ? past : fleet.history);');
     expect(route).toContain('recentBuildHistoryFor(');
     expect(route).toContain('listDiagnosticsHistory(id, n)');
   });

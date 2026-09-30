@@ -17,7 +17,7 @@ import { posix } from 'node:path';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { deadlineFromBudget } from './turnDeadline';
 import { judgeRepair } from './repairAcceptance';
-import { scaffoldRestores, protectBoilerplateInRepair, isScaffoldBoilerplate, SCAFFOLD_BOILERPLATE } from './scaffoldBoilerplate';
+import { scaffoldRestores, protectBoilerplateInRepair, SCAFFOLD_BOILERPLATE } from './scaffoldBoilerplate';
 import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
 import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
@@ -72,6 +72,17 @@ export function fastLaneBudgetMs(complex: boolean, env: NodeJS.ProcessEnv = proc
 const APP_ENTRY_RE = /^(src\/)?App\.[jt]sx?$/;
 /** The mount point itself (`src/main.tsx`, `index.jsx` …), which may render the app without an App file. */
 const MOUNT_ENTRY_RE = /^(src\/)?(main|index)\.[jt]sx?$/;
+/**
+ * A Next.js App Router page — the ONLY root a Next.js app has. There is no `main.tsx` to mount anything:
+ * a plan that writes `src/main.tsx` for a Next.js app has written a file nothing runs (autopsy b47c56d8).
+ */
+const NEXT_PAGE_ENTRY_RE = /^(src\/)?app\/page\.[jt]sx?$/;
+
+/** Does `path` render the app, given which starter the workspace holds? */
+function isRootFor(path: string, starterEntryPath: string | undefined): boolean {
+  if (starterEntryPath && NEXT_PAGE_ENTRY_RE.test(starterEntryPath)) return path === starterEntryPath;
+  return APP_ENTRY_RE.test(path) || MOUNT_ENTRY_RE.test(path) || NEXT_PAGE_ENTRY_RE.test(path);
+}
 
 /**
  * 🔴 AN APP WHOSE ROOT WAS NEVER WRITTEN IS THE STARTER, HOWEVER MANY OTHER FILES EXIST
@@ -85,7 +96,7 @@ const MOUNT_ENTRY_RE = /^(src\/)?(main|index)\.[jt]sx?$/;
  */
 export function ensureEntryPlanned(manifest: SimpleFileSpec[], starterEntryPath: string | undefined): { manifest: SimpleFileSpec[]; injected: string | null } {
   if (!starterEntryPath) return { manifest, injected: null };
-  const hasRoot = manifest.some((m) => APP_ENTRY_RE.test(m.path) || MOUNT_ENTRY_RE.test(m.path));
+  const hasRoot = manifest.some((m) => isRootFor(m.path, starterEntryPath));
   if (hasRoot) return { manifest, injected: null };
   return {
     manifest: [...manifest, { path: starterEntryPath, purpose: 'Root component that renders the whole app (replaces the starter page) by composing the components above' }],
@@ -100,7 +111,7 @@ export function ensureEntryPlanned(manifest: SimpleFileSpec[], starterEntryPath:
  */
 export function unwrittenEntries(manifest: SimpleFileSpec[], writtenPaths: Iterable<string>): string[] {
   const written = new Set(writtenPaths);
-  return manifest.map((m) => m.path).filter((p) => APP_ENTRY_RE.test(p) && !written.has(p));
+  return manifest.map((m) => m.path).filter((p) => (APP_ENTRY_RE.test(p) || NEXT_PAGE_ENTRY_RE.test(p)) && !written.has(p));
 }
 
 /**
@@ -273,7 +284,26 @@ export function dependencyContext(producers: OneShotFile[], perFileCap = 4000): 
 }
 
 /** System prompt for the manifest (planning) call. */
-export function manifestSystemPrompt(framework: string): string {
+/**
+ * The boilerplate files this workspace ACTUALLY holds. `SCAFFOLD_BOILERPLATE` is the Vite scaffold's; a
+ * Next.js workspace has no `src/ErrorBoundary.tsx`, so telling its planner the file is "provided" — and
+ * dropping it from the plan — promised a file that did not exist (autopsy b47c56d8). An empty listing
+ * (we could not look) keeps the old behaviour.
+ */
+export function providedBoilerplate(scaffoldPaths: readonly string[] = []): string[] {
+  const all = Object.keys(SCAFFOLD_BOILERPLATE);
+  return scaffoldPaths.length ? all.filter((p) => scaffoldPaths.includes(p)) : all;
+}
+
+/** Where the app's entry lives, in words the planner can act on. */
+function entryFilesHint(framework: string): string {
+  return /next/i.test(framework)
+    ? 'the App Router entry app/page.tsx (and app/layout.tsx when the shell changes) — a Next.js app has NO src/main.tsx and NO index.html; a component nothing imports from app/ is never shown'
+    : 'e.g. src/App.tsx, index.html';
+}
+
+export function manifestSystemPrompt(framework: string, scaffoldPaths?: readonly string[]): string {
+  const provided = providedBoilerplate(scaffoldPaths);
   return [
     `You are an elite ${framework} engineer. Plan the COMPLETE file list for the app the user wants.`,
     '',
@@ -282,7 +312,7 @@ export function manifestSystemPrompt(framework: string): string {
     '',
     'RULES:',
     '- List EVERY source file the app needs (entry, components, styles, hooks, utils, config it must edit).',
-    '- Edit/replace the scaffolded entry files (e.g. src/App.tsx, index.html) — do not nest a subfolder.',
+    `- Edit/replace the scaffolded entry files (${entryFilesHint(framework)}) — do not nest a subfolder.`,
     '- Keep it minimal but COMPLETE — no file the app references should be missing.',
     // SIZE DISCIPLINE (admin 2026-08-02): "minimal" alone is an adjective a weak model reads as optional —
     // a real build planned 50 files for an app needing ~12. The per-app NUMBER lives in the user prompt
@@ -292,7 +322,7 @@ export function manifestSystemPrompt(framework: string): string {
     '- Do NOT list node_modules, lockfiles, or build output.',
     // The persuasion half of the boilerplate fix; SimpleBuilder drops these from the parsed plan
     // regardless, so a model that ignores this line still cannot overwrite them.
-    `- These files are PROVIDED and already correct — do NOT list them, do not rewrite them: ${Object.keys(SCAFFOLD_BOILERPLATE).join(', ')}.`,
+    ...(provided.length ? [`- These files are PROVIDED and already correct — do NOT list them, do not rewrite them: ${provided.join(', ')}.`] : []),
   ].join('\n');
 }
 
@@ -1185,7 +1215,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       try {
         manifestText = await withTimeout(
           deps.generate(
-            manifestSystemPrompt(deps.framework),
+            manifestSystemPrompt(deps.framework, deps.scaffoldPaths),
             manifestUserPrompt(deps.prompt, deps.scaffoldPaths),
             { deadlineAt: deadlineFromBudget(planCap, laneStartedAt) },
           ),
@@ -1206,8 +1236,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // clause. The prompt now says these are provided, and this filter means that instruction cannot be
       // ignored: a boilerplate path is dropped from the plan whatever the model answered.
       const planned = parseFileManifest(manifestText);
-      const droppedBoilerplate = planned.filter((m) => isScaffoldBoilerplate(m.path)).map((m) => m.path);
-      const kept = droppedBoilerplate.length ? planned.filter((m) => !isScaffoldBoilerplate(m.path)) : planned;
+      const provided = new Set(providedBoilerplate(deps.scaffoldPaths));
+      const droppedBoilerplate = planned.filter((m) => provided.has(m.path)).map((m) => m.path);
+      const kept = droppedBoilerplate.length ? planned.filter((m) => !provided.has(m.path)) : planned;
       // The plan must connect what it builds to the screen — see ensureEntryPlanned.
       const { manifest, injected: injectedEntry } = ensureEntryPlanned(kept, deps.starterEntryPath);
       if (droppedBoilerplate.length) {

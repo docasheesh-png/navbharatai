@@ -108,6 +108,56 @@ export function findUndefinedClasses(files: Record<string, string>): string[] {
 }
 
 /**
+ * The custom classes ONE file uses that no project stylesheet defines — the same question
+ * `findUndefinedClasses` asks of the whole project, asked of a file while it is still open. PURE.
+ *
+ * 🔴 AUTOPSY a5b661c8 (2026-09-30): `.btn-danger`, `.field-label` and `.nb-studio-step-label` were written
+ * during the build and only found by the end-of-build check, whose repair ran inside a 63-second heal.
+ * The write-time note (`inventedKitClassNote`) covered `nb-` classes the kit lacks, and nothing else.
+ * Same guards as the project check, so it can never speak where that one would stay silent: Tailwind,
+ * an external stylesheet, or no stylesheet at all ⇒ [].
+ */
+export function undefinedClassesInFile(path: string, content: string, project: Record<string, string>): string[] {
+  if (!SRC_RE.test(path)) return [];
+  if (usesTailwind(project) || usesExternalStylesheet(project)) return [];
+  const { defined, cssFiles } = collectDefinedClasses(project);
+  if (cssFiles === 0) return [];
+  return [...collectUsedClasses({ [path]: content })].filter((c) => isCustomClass(c) && !defined.has(c)).sort();
+}
+
+/** The note handed back with a write that uses classes nothing defines. '' when there are none. PURE. */
+export function undefinedClassesWriteNote(path: string, missing: readonly string[]): string {
+  if (missing.length === 0) return '';
+  const shown = missing.slice(0, 8).map((c) => `.${c}`).join(', ');
+  const more = missing.length > 8 ? ` and ${missing.length - 8} more` : '';
+  return `\n⚠️ ${path} uses ${shown}${more} — no stylesheet in this project defines ${missing.length === 1 ? 'it' : 'them'}, so those elements render UNSTYLED. `
+    + 'Add the rules to src/index.css now (or use a class the stylesheet already has) — not at the end of the build.';
+}
+
+/** How many class names a sub-agent brief may carry — the kit is 59; an app sheet rarely doubles it. */
+const BRIEF_MAX_CLASSES = 160;
+
+/**
+ * The classes the project's stylesheets already define, as one line for a UI sub-agent's brief. PURE.
+ *
+ * 🔴 AUTOPSY a5b661c8 (2026-09-30): a frontend sub-agent read `src/index.css` — the 18.7 KB design kit —
+ * six times in eighteen seconds, in slices, to find out which classes existed, then grepped for them.
+ * Sixteen reads of that one file across the build. What it was looking for is a list of names, and the
+ * platform can hand it over for the cost of the reads it already makes. Read from the sheets on disk,
+ * so it is true of THIS project; '' when there is no sheet, so it is never a guess.
+ */
+export function stylesheetClassBrief(sheets: Record<string, string>): string {
+  const paths = Object.keys(sheets).filter((p) => CSS_RE.test(p));
+  if (paths.length === 0) return '';
+  const { defined } = collectDefinedClasses(sheets);
+  const names = [...defined].filter((c) => !/^\d/.test(c)).sort();
+  if (names.length === 0) return '';
+  const shown = names.slice(0, BRIEF_MAX_CLASSES).map((c) => `.${c}`).join(' ');
+  const more = names.length > BRIEF_MAX_CLASSES ? ` (+${names.length - BRIEF_MAX_CLASSES} more)` : '';
+  return `[STYLESHEET CLASSES — already defined in ${paths.join(', ')}; use these directly. Do not read the stylesheet to find them, and never use a class that is not here without adding its rule.]\n${shown}${more}`;
+}
+
+/**
  * If components use a meaningful number of custom classes the CSS never defines, return a human +
  * model-readable error describing the mismatch (for the auto-repair pass). Returns null when the
  * styles are consistent — so a good app is never flagged.

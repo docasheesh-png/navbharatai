@@ -84058,6 +84058,70 @@ Admin: *"Sabhi problem fix? Yes than merge, No - continue"*. The answer was no. 
 - **A write to `package.json` during the reviewer's `evaluate` was refused by Green Freeze.** The writer is unnamed (the same shape as e7baf61d's `src/types.ts`). No harm was done. The writer is still to be identified.
 - **17 hard-coded colours, 2 moderate npm advisories, 2 journeys behind login.** These are advisory findings or the known lane-B limit.
 
+## 2026-09-30 — Autopsy 972acde5 ("Calculator", Weak tier): a working app, reported three untrue things about itself
+
+The build succeeded in 5.6 min from our tested calculator template, rendered, typechecked and built for
+production. Its report still said three things that were not true.
+
+**Ledger:** ✅ 0 self-heals · 🔀 1 workaround (GLM `glm-4.7-flashx` crawled 34.5 s, benched, fell to KIMI) ·
+⏭️ 0 skips · ❌ 3 false verdicts (below) · 🥵 3 struggles:
+- 17 s before the first model call;
+- KIMI's first call took 40 s to say "let me run a type check";
+- a 2-minute repair of a bug that did not exist.
+
+**Fixed, each reversion-proven in `tests/theCalculatorAutopsy.test.ts`:**
+1. **"Delete / remove has no visible control" was the build's root cause, and it was false.** The
+   calculator has a `DEL` key. The probe did not know `del`/`backspace`/`⌫`. The same line hid a larger
+   class: every icon in every probe (`✕ × 🗑 ✏ ✓ 🌙`) sat inside `\b…\b`, which cannot match next to a
+   symbol. So an icon-only delete, edit or done button had never been recognised. `controlPattern()`
+   matches words with boundaries and icons on their own.
+2. **The template's glyph keys had no accessible names** (`C`, `DEL`, `x`, `/`). They now have them:
+   Clear, Backspace, Multiply, Divide, Plus, Minus, Equals, Percent, Decimal point.
+3. **The explorer said pressing "7" changed nothing.** Its change signature compared the page's text and
+   HTML **lengths**, and `0` → `7` has the same length. It now hashes the content.
+4. **The review repair edited a working app for a bug that was not there, and the user was told it was a
+   real fix.** Full account in CLAUDE.md under `AGENTV3_GREEN_FUNCTIONAL_REPAIR`. This is the second
+   instance of the class after build 15151196, which had only handled the "changed nothing" ending.
+5. **Template seeding wrote 12 files one after another** (~5 s of the pre-call wait). The writes are now
+   concurrent, and any failure still drops the seed.
+
+**Still open (rule 6):**
+- ~7 s between "personal context loaded" and the project-mode decision is unaccounted for. No timing line
+  covers that window; the next step is an instrument, not a guess.
+- A CONFIRMED repair after the preview copy was taken still leaves the copy stale
+  (`PREVIEW_SNAPSHOT_STALE`); a refuted-and-undone repair no longer does. Re-taking the copy after a kept
+  repair costs a production build plus a deploy, and is its own change.
+- `requestAnalysis.startTier` still reads `gemini`, a label from before the tier ladders. It is
+  admin-only and cosmetic, but it is untrue.
+
+### 2026-09-30 (same day) — the three "still open" items from the entry above, and one more bug
+
+The admin asked whether everything was fixed. It was not, so the open items were worked in the same PR.
+
+- **`startTier: gemini` — the entry above was WRONG to list this as open.** A session on 2026-09-17
+  (autopsy 2b0a3ed5) deliberately kept the key, because it is a complexity band that months of cost
+  telemetry is keyed on. It added `startBand` ("cheapest band"), and this report prints both. Nothing to
+  fix. The lesson is safeguard #6 again: re-grep before calling something open.
+- **The ~7 s before the first model call.** `warmIndexFiles` read the project from the sandbox one file
+  at a time, up to 200 files per call. It now reads 8 at a time and still indexes in the original order.
+  The project-context step also records its own `SETUP_TIMING` line (memory restore · listing ·
+  indexing), so the next report shows where this window goes instead of leaving it to be inferred.
+  ⚠️ Whether this was the whole 7 s is unproven until a report carries that line.
+- **The stale preview copy after a kept repair.** The copy-taking code is now one closure
+  (`takePreviewCopy`). After a kept review repair that changed files, `refreshPreviewCopy` rebuilds the
+  app and takes a fresh copy: bounded to 60 s on a re-armed, still-finite advisory cap. The outcome is
+  recorded as `PREVIEW_SNAPSHOT_REFRESHED`, or `_NOT_REFRESHED` with the old copy kept as a fallback.
+- **The calculator template had a real bug, and the reviewer did not find it.** Running the template's
+  own code by pressing its own buttons showed two things:
+  - The reviewer's CRITICAL (`2+3+4=`) was false: it gives 9.
+  - `5 + 50 % + 2 =` gave **2.5**, because an operator after `%` dropped the pending `5 +`.
+
+  The template now tracks whether the display holds an unused operand. The template's arithmetic is
+  locked by 13 key-sequence tests that compile and run the real TSX (`tests/theCalculatorAutopsy.test.ts`).
+
+**Proactive, not done here:** the other golden templates with logic (tip split, stopwatch, pomodoro) have
+no behavioural test of this kind. The same harness would lock them, so any false reviewer claim against
+them is answered by evidence rather than a repair call.
 ## 2026-09-30 — Builder scorecard autopsy (admin Diagnostics capture, 254 builds): two defects, both ours
 
 The admin sent the Builder scorecard with no text. Headline numbers: build success 62.2% of 254,
@@ -84182,6 +84246,38 @@ Creator** on itself (IAM signBlob). Without it the exchange answers `custom-toke
 the old honest Email/Google message, and the OTP card shows that code in the detail — never a fake success.
 - ✅ **Same day, closed: the unnamed `package.json` writer.** It was the `evaluate` tool's dependency reconcile (`landHealWrite`), called by the lean reviewer on a green app. Green Freeze refused it correctly, but the heal ran in no pass, so the report could only say "a later write". `landHealWrite` now runs in the pass `evaluate-heal`. That pass is on no allowlist, so a green app is still untouched; the refusal now names its writer. This is test-locked and reversion-proven in `tests/aStaleCopyCannotRunInsteadOfTheBuild.test.ts`. The e7baf61d `src/types.ts` writer is probably the same heal (the import reconcile uses the same door); the next report will say for certain.
 
+## 2026-09-30 — What the app still needs from you is the last thing the build says (admin request)
+
+Admin: *"jab user koi aisi app banata hai jisme user se suggestion, question ke answer, API keys ya secret
+keys chahiye — to app banne ke last me clearly user ko dikhe, user ki language me."* The example was
+"ChatGPT jaisa AI": after 100% ready, say it needs an AI key, which may be a NavBharatAI API key (Other →
+NavBharatAI API) or a ChatGPT/Claude/Grok/Gemini key, and offer help.
+
+**What already existed:** a localized key checklist (`AppRequirements`, 2026-08-03), a closing key-entry
+card, and the user-action tray.
+
+**What the investigation found, and it is the headline:** on a SUCCESSFUL build, `result.summary` is never
+rendered. The panel shows it only on failure. So the checklist and every other line appended to a
+successful reply reached no screen.
+
+**Built:**
+- `summaryAdditions.ts`: the part of the summary the user has not seen is sent as the build's final chat
+  line. It is sent from the server, so the bundled phone apps get it without a new store build.
+- `AI_IN_APP_RULE`: an AI feature is built on the app's server, as one standard request configured by
+  `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL`. That makes "use a NavBharatAI key" true. The NavBharatAI API
+  refuses other sites' browser pages, so a browser-side call could never have used it.
+- The checklist's two-option AI line, in 11 languages, shown only when the app reads `AI_API_KEY`.
+- Detection now covers Anthropic, Gemini and xAI keys, and the `@anthropic-ai/sdk` and `@google/genai`
+  packages.
+- A "NavBharatAI API" option in the key recipe.
+- The architect's ASK LAST rule.
+
+**Open:**
+- The model's own questions still stream before the platform's closing line. They are at the end of the
+  model's reply, not after the checklist.
+- The fast lane and sub-agents do not carry `AI_IN_APP_RULE` yet; only the architect does.
+- An app written against a provider's own client still gets that provider's line only. That is honest,
+  but it is not the two-option choice.
 ## 2026-09-30 — PR C: the database is offered BEFORE the builder decides where data lives
 `src/server/AgentV3/sharedDataNeed.ts` reads the REQUEST (not the files) for data other people must later see —
 bookings, orders, admissions, records, accounts, an admin dashboard — precision-first, honouring an explicit

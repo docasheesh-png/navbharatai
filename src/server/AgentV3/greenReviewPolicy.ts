@@ -321,6 +321,11 @@ export interface GreenRepairFacts {
    * problems were fixed". `undefined` keeps the old reading for a caller that cannot count.
    */
   changed?: number;
+  /**
+   * The pass traced every finding it was handed and reported each one NOT A BUG, so whatever it
+   * changed was undone (autopsy 972acde5). Only meaningful with `reverted`.
+   */
+  refuted?: boolean;
 }
 
 /**
@@ -352,6 +357,12 @@ export function greenRepairOutcome(f: GreenRepairFacts): { severity: 'info' | 'w
       message: `${n} functional reviewer finding(s) on the working app were repaired, and the app was re-opened in a real browser and still renders.`,
     };
   }
+  if (f.reverted && f.refuted) {
+    return {
+      severity: 'info', code: 'REVIEW_FUNCTIONAL_REFUTED', autoResolved: true,
+      message: `The repair pass traced ${n} functional reviewer finding(s) on the working app and found none of them real, so the edits it made anyway were undone — the app is exactly the version that rendered, and nothing was claimed as fixed.`,
+    };
+  }
   if (f.reverted) {
     const why = f.timedOut
       ? `the repair did not finish inside its ${Math.round(f.budgetMs / 1000)} s budget`
@@ -377,4 +388,69 @@ export function greenRepairUserLine(count: number, changed?: number): string {
   const n = Math.max(0, count | 0);
   if (n === 0 || changed === 0) return '';
   return `\n\n🔧 After the app was working, a final review found ${n} real problem${n === 1 ? '' : 's'}. ${n === 1 ? 'It was' : 'They were'} fixed, and the app was checked again: it still works.`;
+}
+
+/**
+ * The prompt for repairing REVIEWER findings on an app that already works. PURE.
+ *
+ * 🔴 WHY IT IS NOT `judgeRepairPrompt` (autopsy 972acde5, 2026-09-30). That prompt tells the model the
+ * findings are "real problems that must be fixed", which is true of the judge's verdict on a FAILED
+ * build and false here: a reviewer's reading of working code is a claim, and it is wrong often enough
+ * to matter. On a calculator whose logic was correct the reviewer called chained operators a CRITICAL
+ * bug; the repair traced it, wrote *"this happened to work"*, and then edited the working app anyway,
+ * because it had been told the problem was real — and the user was told a real problem had been fixed.
+ * Build 15151196 was the same claim with a different ending (it changed nothing); only that ending had
+ * been handled.
+ *
+ * So the pass must PROVE a finding before it touches the app: one concrete input, the wrong result it
+ * gives, and the right one. And it must say which findings it could not prove, in a form the platform
+ * reads (`readRepairVerdicts`) instead of trusting prose.
+ */
+export function greenRepairPrompt(userRequest: string, findings: readonly string[]): string {
+  const list = findings.map((f, i) => `${i + 1}. ${f}`).join('\n');
+  return [
+    'The app for this request is ALREADY built in the current workspace and it WORKS: it was opened in a',
+    'real browser and rendered. A code reviewer then reported these possible problems:',
+    '',
+    list,
+    '',
+    'A reviewer is sometimes wrong. For EACH finding, first read the code and trace it with one concrete',
+    'input. It is real only if you can name an input that gives a wrong result. Fix ONLY the real ones,',
+    'by editing the existing files (never rebuild, keep everything that works). Change NOTHING for a',
+    'finding you could not prove — a working app must not be edited for a problem it does not have.',
+    '',
+    'End your reply with exactly one line per finding, in this form:',
+    '  CONFIRMED <number>: <the input> gave <the wrong result> instead of <the right one>',
+    '  NOT A BUG <number>: <why the code is already correct>',
+    '',
+    `Original request, for reference: ${userRequest.slice(0, 800)}`,
+  ].join('\n');
+}
+
+export interface RepairVerdicts {
+  /** At least one verdict line was found. When false, nothing below may be relied on. */
+  read: boolean;
+  /** 0-based indexes of the findings the pass proved real. */
+  confirmed: number[];
+  /** 0-based indexes of the findings the pass reported as not a bug. */
+  refuted: number[];
+}
+
+/**
+ * The per-finding verdicts a green repair reported (see `greenRepairPrompt`). PURE; never throws.
+ * A finding named both ways counts as CONFIRMED — the safe side, because it keeps a real fix. Numbers
+ * outside 1..count are ignored, never guessed at.
+ */
+export function readRepairVerdicts(text: string, count: number): RepairVerdicts {
+  const confirmed = new Set<number>();
+  const refuted = new Set<number>();
+  const n = Math.max(0, count | 0);
+  const re = /^[\s>*•-]*\**\s*(CONFIRMED|NOT\s+A\s+BUG)\s*\**\s*#?\s*(\d+)\b/gim;
+  for (const m of String(text ?? '').matchAll(re)) {
+    const idx = Number(m[2]) - 1;
+    if (!(idx >= 0 && idx < n)) continue;
+    if (/^CONFIRMED$/i.test(m[1])) confirmed.add(idx); else refuted.add(idx);
+  }
+  for (const i of confirmed) refuted.delete(i);
+  return { read: confirmed.size + refuted.size > 0, confirmed: [...confirmed].sort((a, b) => a - b), refuted: [...refuted].sort((a, b) => a - b) };
 }

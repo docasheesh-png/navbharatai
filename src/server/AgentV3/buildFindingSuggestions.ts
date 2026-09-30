@@ -78,6 +78,14 @@ const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: string; 
     prompt: 'When the app opens in the browser it shows as plain, unstyled HTML — default fonts and default buttons. Make sure the global stylesheet is imported by the entry file and actually contains the styles for every class the screens use, then give every screen a polished, consistent, professional design: real layout, spacing, styled buttons and inputs, a colour theme and a proper font.',
   },
   {
+    // Measured at phone size (mobileLayoutCheck.ts, admin 2026-09-30: "mobile first"). Most users hold a
+    // phone, so this is offered before the desktop-only design polish below.
+    code: 'MOBILE_LAYOUT_ISSUES',
+    title: 'Make it fit a phone',
+    detail: 'On a phone-sized screen the page scrolls sideways or some buttons are too small to tap.',
+    prompt: 'On a phone the app does not fit: the page scrolls sideways and/or some buttons and links are too small to tap with a thumb. Make every screen mobile-first — one column on a phone, nothing wider than the screen (no fixed widths, tables that scroll inside their own box, images max-width 100%), and every tappable control at least 44 by 44 pixels with space between them — while keeping the tablet and desktop layouts working.',
+  },
+  {
     code: 'DESIGN_PAGE_INCONSISTENT',
     title: 'Make the inside pages look as good as the first',
     detail: 'Some pages are plainer than the main screen.',
@@ -128,7 +136,7 @@ const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: string; 
 
 /** Codes that must never become a suggestion — see the header for why each is excluded. */
 const NEVER_SUGGEST = new Set([
-  'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED',
+  'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',
   'CHECKPOINT_SIGNAL', // our checkpoint heuristic, never a finding (autopsy SignBridge, 2026-09-26)
   'REVIEW_SUGGESTIONS_NOT_READY', // a suggest-only review that ran out of time — nothing for the user to do
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', 'LADDER_DEPTH', 'SAVED_SOURCE_DIVERGES',

@@ -563,6 +563,7 @@ import { workspaceHoldsUserApp, userOwnedFileCount } from '../AgentV3/userProjec
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
+import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
 import { attachUserActionRecorder } from '../AgentV3/userActionRecorder';
@@ -20515,6 +20516,25 @@ async function noteBuildOutcome(
 
       // PRESS EVERY SAFE BUTTON (competitive gap G1, 2026-09-28 — clickExplorer.ts).
       //
+      // 📱 THE APP ON A PHONE (admin 2026-09-30: "mobile first"). Every check above opened the app at a
+      // desktop size; this opens it once at 390×844 with touch and measures sideways scroll and tap-target
+      // size (mobileLayoutCheck.ts). Evidence, never a gate, no model call; a finding becomes a one-tap
+      // offer to the user. Kill switch AGENTV3_MOBILE_LAYOUT=off.
+      if (
+        mobileLayoutCheckEnabled() && result.ok && lastPreviewUrl && actuator.runCommand
+        && !isImportTurn && !abort.signal.aborted && !moduleAwaitsShell
+        && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)
+      ) {
+        try {
+          const out = await withTimeout(actuator.runCommand(workspaceId, mobileLayoutScript(lastPreviewUrl)), MOBILE_CHECK_BUDGET_MS, 'mobile-layout');
+          const verdict = mobileLayoutVerdict(parseMobileLayout(out.stdout));
+          buildDiag.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });
+        } catch (err) {
+          try {
+            buildDiag.record({ phase: 'preview', severity: 'info', code: 'MOBILE_LAYOUT_NOT_RUN', autoResolved: true, message: `The phone-size check did not complete: ${String((err as { message?: string })?.message ?? err).slice(0, 160)}.` });
+          } catch { /* best-effort */ }
+        }
+      }
       // The journey above drives ONE form. Nothing pressed the rest of the app, so the commonest
       // first-minute failure — a tab that white-screens, a button whose handler throws, a link to a page
       // that was never written — survived every check we own. This opens the running app in the

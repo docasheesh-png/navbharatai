@@ -84983,3 +84983,40 @@ the architect. The Frontend specialist that actually writes the AI client never 
 - Locked in `tests/anAiAppNeedsNoKey.test.ts`.
 
 **Admin action:** set `APP_AI_GATEWAY=on` in Cloud Run.
+
+## 2026-09-30 — "Nemi Mart": a shop app looked like a plain web page (admin screenshot)
+
+The admin sent a screenshot of a grocery app: the header stacked, the products ran in one column, the
+MRP was not struck through, and "Start Shopping" was a square, underlined box. There was no build
+report, so the diagnosis is from the screenshot and the code. That app was built BEFORE PR #3403
+(the design-kit overhaul) and #3403 is still unmerged, but three of the causes would have survived
+#3403 as well. All three are fixed on the same branch.
+
+- **The class check never saw a plain HTML app.** `CssConsistency` read only `className=`, so a
+  static app's `class="…"` (in the page and in `innerHTML` strings) was invisible. It also counted
+  only kebab-case names, so single-word classes (`header`, `price`, `mrp`) passed silently. Because
+  of both, the CSS repair (`CSS_CLASSES_UNDEFINED`) never ran. Changes:
+  - It now reads `class=`.
+  - It counts single lowercase words, except state words (`active`, `open`, …).
+  - It treats a page's own `<style>` blocks as a stylesheet.
+  - It stays silent for the Tailwind CDN and for Tailwind v4's `@import "tailwindcss"`.
+  - The write-time note also covers `.html` and `.js` screens, and names `style.css` when that is the
+    project's sheet.
+  - The pinned test "ignores single-word tokens" was rewritten deliberately.
+- **Kit: a button class gave the fill but not the shape.** `.btn-primary`, `-secondary`, `-ghost` and
+  `-danger` now share the button geometry on any element, and a link is never underlined on hover.
+  Added `.btn-sm`, `.btn-lg` and `.btn-block`.
+- **Kit: no shop layout.** Added these recipes, named in both builders' prompts:
+  - `.nb-header` / `-brand` / `-search`;
+  - `.nb-chips`;
+  - `.nb-grid` (two per row at 360 px);
+  - `.nb-product`;
+  - `.nb-price-row` / `.nb-price` / `.nb-mrp` (struck through) / `.nb-discount` (new
+    `--success-ink` token, AA in both themes);
+  - `.nb-qty`, `.nb-cart-bar`, `.nb-footer`.
+- Locked and reversion-proven in `tests/theShopLookedLikeAWebPage.test.ts` (17 cases, including a
+  real-browser check at 360 px).
+
+**Open:** the "Made with NavBharatAI" badge is fixed at the bottom-right and can cover a footer or a
+bottom bar. A spacer would add scroll to full-screen games, so this is not guessed at here.
+`.nb-footer` carries bottom padding for it.

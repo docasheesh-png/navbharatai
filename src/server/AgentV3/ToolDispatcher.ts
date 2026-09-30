@@ -3083,18 +3083,24 @@ export class ToolDispatcher {
    */
   private async undefinedClassNotes(files: Record<string, string>): Promise<string> {
     try {
-      const screens = Object.keys(files).filter((p) => /\.(?:t|j)sx?$/.test(p) && /className\s*=/.test(files[p] ?? ''));
+      // A plain-HTML app names its classes with `class=`, in the page or in the strings its script
+      // writes (autopsy "Nemi Mart", 2026-09-30) — those are screens too.
+      const screens = Object.keys(files).filter((p) => (/\.(?:t|j)sx?$/.test(p) && /className\s*=/.test(files[p] ?? ''))
+        || (/\.(?:html?|js)$/.test(p) && /\bclass\s*=\s*\\?["']/.test(files[p] ?? '')));
       if (screens.length === 0) return '';
       const project: Record<string, string> = {};
       for (const [p, c] of Object.entries(files)) if (isProjectStylesheet(p)) project[p] = c;
-      const probes = ['src/index.css', 'src/App.css', 'src/styles.css', 'src/global.css', 'src/styles/globals.css', 'src/styles/index.css', 'package.json', 'index.html']
+      const probes = ['src/index.css', 'src/App.css', 'src/styles.css', 'src/global.css', 'src/styles/globals.css', 'src/styles/index.css', 'style.css', 'styles.css', 'css/style.css', 'package.json', 'index.html']
         .filter((p) => project[p] === undefined);
       const read = await Promise.all(probes.map((p) => this.actuator.readFile(this.workspaceId, p).then((c) => [p, c] as const, () => null)));
       for (const r of read) if (r && typeof r[1] === 'string') project[r[0]] = r[1];
       let out = '';
       for (const p of screens) {
         const missing = undefinedClassesInFile(p, files[p], project).filter((c) => !c.startsWith('nb-'));
-        out += undefinedClassesWriteNote(p, missing);
+        // Name the sheet this project really has: a static app's is style.css, not src/index.css.
+        const sheet = project['src/index.css'] !== undefined ? 'src/index.css'
+          : (['style.css', 'styles.css', 'css/style.css'].find((s) => project[s] !== undefined) ?? 'src/index.css');
+        out += undefinedClassesWriteNote(p, missing, sheet);
       }
       return out;
     } catch {

@@ -979,7 +979,7 @@ export const AuthComponent = ({ auth, setUser, onClose }: { auth: Auth, setUser:
                 className="mt-1.5 w-full rounded-xl border border-line bg-surface px-4 py-3 font-mono text-xs font-bold uppercase tracking-widest text-ink transition-colors focus:border-amber-500 focus:outline-none"
               />
               <p className="mt-2 text-[10px] font-semibold text-warn">
-                Applied automatically after you sign in. You can also add it later in Wallet &rarr; Promo.
+                Applied automatically after you sign in. You can also add it later in Wallet &rarr; Promo, during your first 3 app opens or 7 days.
               </p>
             </div>
           )}

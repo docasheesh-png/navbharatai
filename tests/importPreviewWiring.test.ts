@@ -37,7 +37,7 @@ describe('🔒 the import preview reaches the build’s own state', () => {
   it('lastPreviewUrl still subscribes to the events stream it now feeds', () => {
     // The other end of the wire — if this subscription moves off `events`, the fix above is void.
     expect(route).toMatch(/let lastPreviewUrl = ''/);
-    expect(route).toMatch(/events\.subscribe\(\(e\) => \{ if \(\(e as \{ type\?: string \}\)\.type === 'preview'\)/);
+    expect(route).toMatch(/events\.subscribe\(\(e\) => \{ if \(\(e as \{ type\?: string \}\)\.type === 'preview'(?: && !moduleAwaitsShell)?\)/);
   });
 });
 

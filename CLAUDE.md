@@ -4730,6 +4730,28 @@ the two GATES were never hunted.
 request's module plan appears and advances. A build that takes an extra planner call and then
 decomposes is the feature working; a *small* app doing that is the precision lock having been broken.
 
+🔴 **FIRST REAL EVIDENCE, 2026-09-30 (autopsy 6a5fb04b): IT DECOMPOSED A SMALL APP, AND ITS FIRST MODULE
+COULD NOT PASS.** A one-screen voice assistant counted fourteen parts (two were style adjectives, three were
+one feature per language) and became twelve modules. Module 1 (config) wrote its three files and typechecked,
+then failed: the readiness gate's "entry is still the starter" blocker (2026-09-20) knows nothing about a
+module that does not own `src/App.tsx`, two `UNFINISHED_BUILD_RESUMED` nudges pushed the model outside its
+module's scope, and the user read *"Nothing has been built yet"*. The planner orders modules by dependency, so
+the app shell is normally LAST — **so, by construction, a plan whose first module does not own the entry fails
+at module 1**. The precision half is fixed (`enumeratedFeatures.ts`: style adjectives dropped, per-language
+variants collapsed — that prompt now counts 10).
+✅ **The module-turn half is FIXED the same day (admin: *"cause dhundo! fix karo!!"*).** A module turn now
+knows which module assembles the app (`shellModuleFor` in `ProjectPlan.ts`). Until that module is built, the
+turn is judged on its own files and the typecheck: the starter blocker stands down
+(`dispatcher.setStarterExpected`), the platform starts no preview and a published one is not adopted
+(`moduleAwaitsShell` — every later proof is gated on `lastPreviewUrl`), the reviewer waits for the assembled
+app, and the model is told not to touch the entry. The shell turn is judged as a whole app, exactly as before,
+and so is every turn of a plan in which no module owns the entry. The planner is now told that exactly one
+module, the shell, owns `src/App.tsx`. A paused plan that built nothing is retired once a direct build proves
+a working app (`retireUnbuiltPlan`), so a later "continue" cannot rebuild over it. Report codes
+`PROJECT_MODULE_AWAITS_SHELL` / `REVIEW_DEFERRED_TO_SHELL` / `PROJECT_PLAN_RETIRED`. Tests:
+`tests/aModuleIsNotTheWholeApp.test.ts`. ⚠️ Still unmeasured: no plan has yet run end to end in production,
+and a module turn earns no markup (no preview proof), so each module is billed at real cost.
+
 ⚠️ **UNSET ⇒ OFF, and every build is byte-identical to today.** The flag takes `on` (everyone),
 `off`/unset (the kill switch), or **anything else as an ALLOWLIST of uids/emails** — built
 deliberately so the admin can enable it for their OWN account and run one real mega-prompt before

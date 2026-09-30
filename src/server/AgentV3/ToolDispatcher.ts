@@ -77,6 +77,7 @@ import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote } from './writeTimeQualityCheck';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { keepKitOnRewrite, kitKeepToolNote } from './kitRestore';
+import { currentPass, runInPass } from './greenFreeze';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
 import {
@@ -803,7 +804,11 @@ export class ToolDispatcher {
    */
   private async landHealWrite(file: string, content: string, before: string | undefined): Promise<boolean> {
     try {
-      await this.actuator.writeFile(this.workspaceId, file, content);
+      // NAMED, so a refusal says who asked (autopsy e725e002: the reviewer's evaluate tried to add a
+      // dependency to a green app's package.json, and the report could only say "a later write").
+      // `evaluate-heal` is on no allowlist, so a green app is still left untouched — only the record changes.
+      const write = () => this.actuator.writeFile(this.workspaceId, file, content);
+      await (currentPass() ? write() : runInPass('evaluate-heal', write));
     } catch {
       return false; // refused (freeze) or failed — nothing is recorded, indexed or announced
     }

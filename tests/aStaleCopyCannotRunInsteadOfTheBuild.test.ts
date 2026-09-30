@@ -12,6 +12,7 @@ import { ToolDispatcher, type ActuatorPort } from '../src/server/AgentV3/ToolDis
 import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
 import { AgentEventStream } from '../src/server/AgentV3/AgentEventStream';
 import type { ToolUse } from '../src/server/AgentV3/ClaudeClient';
+import { latchGreen, clearGreenLatch, setGreenFreezeObserver, assertWriteAllowed } from '../src/server/AgentV3/greenFreeze';
 import { DESIGN_KIT_CSS } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/designKit';
 
 const ROOT = path.join(__dirname, '..');
@@ -159,6 +160,32 @@ describe('edit_file — the door the write-door kit guard left open', () => {
     expect(act.files.get('src/index.css')!).toMatch(/\.nb-empty \{/);
     expect(res.content).toMatch(/DESIGN KIT KEPT/);
     expect(d.kitKeptTally().writes).toBe(1);
+  });
+});
+
+describe('a heal the evaluate tool tries on a green app is refused AND named (the unnamed package.json writer)', () => {
+  it('the refusal carries the writer, so the report can say who asked', async () => {
+    const ws = 'ws-evaluate-heal';
+    class FreezingActuator extends FakeActuator {
+      async writeFile(w: string, p: string, c: string): Promise<void> { assertWriteAllowed(w, p); this.files.set(p, c); }
+    }
+    const act = new FreezingActuator();
+    act.files.set('package.json', '{"dependencies":{}}');
+    const seen: Array<string | null> = [];
+    const dispose = setGreenFreezeObserver(({ pass }) => { seen.push(pass); });
+    latchGreen(ws, ['package.json']);
+    try {
+      const stream = new AgentEventStream();
+      const d = new ToolDispatcher(act, ws, new WorkspaceState(stream), stream);
+      const landed = await (d as unknown as { landHealWrite(f: string, c: string, b?: string): Promise<boolean> })
+        .landHealWrite('package.json', '{"dependencies":{"x":"1"}}', '{"dependencies":{}}');
+      expect(landed).toBe(false);
+      expect(act.files.get('package.json')).toBe('{"dependencies":{}}');
+      expect(seen).toEqual(['evaluate-heal']);
+    } finally {
+      dispose();
+      clearGreenLatch(ws);
+    }
   });
 });
 

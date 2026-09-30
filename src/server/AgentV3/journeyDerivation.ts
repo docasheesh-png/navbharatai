@@ -858,6 +858,13 @@ export function noJourneyReason(files: Record<string, string>): string {
     if (appOnlyShowsWhatItHolds(files ?? {})) return LOOKUP_ONLY_REASON;
     return 'this app has no form for a journey to fill in — nothing here takes user input';
   }
+  // 🔗 THE MOST SPECIFIC TRUE REASON FIRST (autopsies ee0e6de5 and 2d076ce8 met at merge, 2026-09-30).
+  // A pure lookup app — a search box or a filter, and NOTHING anywhere that saves — is answered here,
+  // before the per-form sentence below, which is right only when some save exists elsewhere (an
+  // autosave, a key handler); the gate reads the same predicate as `none-derivable`, so the sentence
+  // and the verdict agree. Also checked before the remedy at the end, which is only true of an app
+  // that has a save to prove.
+  if (appOnlyShowsWhatItHolds(files ?? {})) return LOOKUP_ONLY_REASON;
   // 🔴 AN ADDRESSABLE FIELD WITH NOTHING TO SUBMIT IS NOT AN UNADDRESSABLE FIELD (autopsy 2d076ce8,
   // 2026-09-30). A Bhagavad Gita reader's only input is a live search box — `id="q"`, a real
   // `<label htmlFor="q">` — that filters as you type and has no submit step. `deriveJourneys` skipped it
@@ -883,8 +890,6 @@ export function noJourneyReason(files: Record<string, string>): string {
   // One cause, reported as two unrelated lines, and the release gate then said "whether it actually
   // SAVES anything is untested" as though nothing could be done about it. Naming the fix costs nothing
   // and is what turns this line into something a build can act on.
-  // Checked before the remedy below, because that remedy is only true of an app that has a save to prove.
-  if (appOnlyShowsWhatItHolds(files ?? {})) return LOOKUP_ONLY_REASON;
   return 'the forms in this app have no field this check could address honestly (no name, id, placeholder, '
     + 'label or test id), so no journey was derived rather than one that would fail for the wrong reason. '
     + 'Give each field a `name` and a label and this check can prove the app really saves what is typed — '

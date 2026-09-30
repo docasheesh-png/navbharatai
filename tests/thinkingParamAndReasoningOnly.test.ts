@@ -232,8 +232,9 @@ describe('🔴 4 · we asked for money for our own misconfiguration', () => {
     // misconfigured) {` and broke the day a fourth reason was added (ee20478d's `starved`) — a guard
     // that fails on a CORRECT widening teaches the next reader to edit the test rather than read it.
     // What must hold is that this cause reaches the suppression, and that the suppression still ANDs
-    // every cause together in one place.
-    const suppress = /if \(([^)]*\bmisconfigured\b[^)]*)\) \{\s*\n\s*buildDiag\.record\(\{\s*\n\s*phase: 'build', severity: 'warning', code: 'UPSELL_SUPPRESSED'/.exec(src);
+    // every cause together in one place. (2026-09-30, autopsy 6db0ff31: a STOPPED build's suppression is
+    // info, not a warning — the severity became a conditional that still reads 'warning' for this cause.)
+    const suppress = /if \(([^)]*\bmisconfigured\b[^)]*)\) \{\s*\n\s*buildDiag\.record\(\{\s*\n\s*phase: 'build', severity: (?:stopped \? 'info' : )?'warning', code: 'UPSELL_SUPPRESSED'/.exec(src);
     expect(suppress, 'the misconfigured cause no longer reaches UPSELL_SUPPRESSED').not.toBeNull();
     expect(suppress![1]).toContain('refused');
     expect(suppress![1]).toContain('degraded');

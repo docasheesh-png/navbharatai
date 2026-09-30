@@ -1,7 +1,7 @@
 import { toSafeClientMessage } from '../lib/httpError';
 import type { Express, Request, Response } from 'express';
 import { copyName, copyStatus } from '../AgentV3/duplicateApp';
-import { decideMarkupOnProof, markupNeedsPreview } from '../AgentV3/previewEarnsMarkup';
+import { decideMarkupOnProof, markupNeedsPreview, markupWaiverSettledLine } from '../AgentV3/previewEarnsMarkup';
 import { isPlatformFixRequest, inBrowserPreviewFixGuidance } from '../../lib/platformFixRequest';
 import { buildRateLimiter, rateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import express from 'express';
@@ -234,7 +234,6 @@ import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffe
 import { appLanguageInstruction } from '../AgentV3/LanguageDetect';
 import { findScriptedAssistant, scriptedAssistantNotice } from '../AgentV3/scriptedAssistant';
 import { decidePublishConsent } from '../AgentV3/publishConsent';
-import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { userCostStore } from '../lib/UserCostStore';
@@ -562,7 +561,7 @@ import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../A
 import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } from '../AgentV3/buildQualityLint';
 import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict } from '../AgentV3/buildAbortCause';
-import { workspaceHoldsUserApp, userOwnedFileCount } from '../AgentV3/userProjectFiles';
+import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
@@ -10479,7 +10478,13 @@ async function noteBuildOutcome(
         classifyIntentSmartDetailed(
           prompt,
           (p) => freeRouter.route(p, 'You are a classifier. Reply with one word only.').then((r) => r.response.content),
-          { projectExists, recentRequests },
+          // The reader is told whether the USER has an app here, not whether any file exists (autopsy
+          // 6db0ff31): our own scaffold plus a 0-byte `java` file the user created was read as "the user
+          // ALREADY has a working project", and "A app for my online business…" became an EDIT of it.
+          // `userAppExists` is fail-safe (an unreadable listing answers yes), and an earlier request in this
+          // workspace also counts: a small app living entirely in `src/App.tsx` (a scaffold path) has no
+          // file of its own, and an ambiguous "make it blue" must still be read as an edit of it.
+          { projectExists: userAppExists || recentRequests.length > 0, recentRequests },
         ),
         6_000,
         'classifyIntentSmart',
@@ -11926,7 +11931,7 @@ async function noteBuildOutcome(
     if (rebuildGuardFlipsToEdit({
       intent,
       isEditMode,
-      durableSourceCount: countEditableSourceFiles(durableFilePaths),
+      durableSourceCount: appSourceFileCount(durableFilePaths),
       freshStart: wantsFreshStart(prompt),
       explicitCompleteBuild,
     })) {
@@ -11941,9 +11946,9 @@ async function noteBuildOutcome(
       intent,
       isEditMode,
       hasImportIntent,
-      durableSourceCount: countEditableSourceFiles(durableFilePaths),
+      durableSourceCount: appSourceFileCount(durableFilePaths),
     })) {
-      const srcCount = countEditableSourceFiles(durableFilePaths);
+      const srcCount = appSourceFileCount(durableFilePaths);
       const confirmId = randomUUID();
       emit({
         type: 'narration', agent: 'architect', ts: Date.now(),
@@ -13523,7 +13528,7 @@ async function noteBuildOutcome(
         decisionTrace.record(
           'intent',
           String(intent),
-          projectExists ? 'workspace already has files' : 'no existing files in workspace',
+          userAppExists ? 'workspace already holds the user\'s app' : (projectExists ? 'workspace holds only starter or non-app files' : 'no existing files in workspace'),
           new Date().toISOString(),
         );
       } catch { /* decision trace is best-effort — never affects the build */ }
@@ -14497,6 +14502,9 @@ async function noteBuildOutcome(
         languageRule: () => appLanguageInstruction(prompt),
         // The SAME AI-in-app rule the architect reads (autopsy d8ed307a) — the child writes the AI client.
         aiRule: () => aiInAppRule(),
+        // And the user's own words (autopsy 6db0ff31) — the two lines above derive from them, and a
+        // child handed only a thin instruction asked the ARCHITECT "what would you like me to build?".
+        userRequest: () => prompt,
       };
       const spawnSubAgent = makeSubAgentSpawn(subAgentDeps);
       // Layer 84 (Multi-Model Ensemble): the Architect can call second_opinion to
@@ -15343,7 +15351,7 @@ async function noteBuildOutcome(
           // Count EDITABLE SOURCE files (autopsy #2): listFiles includes ~150 binary assets the agent
           // can't touch, so the old raw `fileTree.length` (e.g. 317) contradicted the import banner's
           // "165 files" for the SAME project. One shared count (fileClassification.ts) keeps them honest.
-          const sourceCount = countEditableSourceFiles(fileTree);
+          const sourceCount = appSourceFileCount(fileTree);
           events.emit({
             type: 'narration',
             agent: 'architect',
@@ -21341,7 +21349,11 @@ async function noteBuildOutcome(
           // A RED gate on a build that SUCCEEDED is a warning about shipping, not an error in the run —
           // recording it as an error made it outrank every real finding and become the report's root
           // cause. Only a gate that agrees with a failed build is an error.
-          severity: gate.state === 'red' && !result.ok ? 'error' : gate.state === 'green' ? 'info' : 'warning',
+          // 🔴 …AND A BUILD THE USER STOPPED DID NOT FAIL (autopsy 6db0ff31). Its gate stays RED — nothing
+          // was proven — but as an ERROR it made `counts.errors = 1` on a report whose own outcome line says
+          // "STOPPED BY THE USER — no failure of the app or the engine is implied". The gate reads the same
+          // `stoppedByUser` fact for its headline; the severity now reads it too.
+          severity: gate.state === 'red' && !result.ok && gateEvidence.stoppedByUser !== true ? 'error' : gate.state === 'green' ? 'info' : 'warning',
           code: 'RELEASE_GATE',
           message: releaseGateSummary(gate),
           autoResolved: gate.state === 'green',
@@ -23323,10 +23335,9 @@ async function noteBuildOutcome(
       let waivedMarkupNotice: string | null = null;
       if (!markupDecision.markupApplied) {
         effectiveBilledUsd = markupDecision.billedUsd;
-        buildDiag.record({
-          phase: 'build', severity: 'info', code: 'MARKUP_WAIVED_NO_PREVIEW',
-          message: markupDecision.reason, autoResolved: true,
-        });
+        // The ADMIN line is held to the same rule as the user's sentence (autopsy 6db0ff31): it used to
+        // be recorded HERE and said "billed at real cost only ($0.1047…)" on a stopped build whose final
+        // bill was ₹0 — two money lines in one report, contradicting each other. Recorded at the settle.
         if (markupDecision.userMessage) waivedMarkupNotice = markupDecision.userMessage;
       }
       // WHY a build ended up free — recorded into the build report's billing section (admin
@@ -23464,8 +23475,11 @@ async function noteBuildOutcome(
             });
           }
           if (refused || degraded || misconfigured || starved || stopped || interrupted) {
+            // A STOPPED build's suppression is the right call and nothing is left to act on — as an
+            // unresolved warning it was one of the two "problems" on a report of a build the user simply
+            // stopped (autopsy 6db0ff31). The other reasons stay warnings: each names a real fault of ours.
             buildDiag.record({
-              phase: 'build', severity: 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: false,
+              phase: 'build', severity: stopped ? 'info' : 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: stopped,
               message: stopped
                 ? 'Did not ask this user to add credits: the build was STOPPED, so no engine was ever asked to build anything. There is no capability limit to sell against — a fuller wallet would have changed nothing.'
                 : interrupted
@@ -23607,6 +23621,12 @@ async function noteBuildOutcome(
       // a later rule that zeroed the bill has already said why in its own words.
       if (waivedMarkupNotice && effectiveBilledUsd > 0 && effectiveBilledUsd === markupDecision.billedUsd) {
         events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${waivedMarkupNotice}`, ts: Date.now() });
+      }
+      if (!markupDecision.markupApplied) {
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'MARKUP_WAIVED_NO_PREVIEW', autoResolved: true,
+          message: markupWaiverSettledLine(markupDecision.reason, effectiveBilledUsd, zeroBillReason),
+        });
       }
 
       // Bill the user the marked-up cost (D5/D6), recorded in the same place the

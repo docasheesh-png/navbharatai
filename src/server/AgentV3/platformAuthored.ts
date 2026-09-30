@@ -50,6 +50,8 @@
 import { GOLDEN_SCAFFOLDS, goldenScaffoldFiles } from './goldenScaffolds/registry';
 import { SCAFFOLD_BOILERPLATE } from './scaffoldBoilerplate';
 import { normalizeAuthoredPath } from './buildAuthorship';
+import { couldBeAppCode } from './userProjectFiles';
+import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';
 
 /**
  * path → every byte-exact content NavBharatAI itself seeds at that path.
@@ -78,6 +80,18 @@ function buildSeededIndex(): Map<string, Set<string>> {
   } catch { /* a broken registry must never break a gate — it just means fewer known-ours files */ }
   try {
     for (const [p, c] of Object.entries(SCAFFOLD_BOILERPLATE)) add(p, c);
+  } catch { /* same */ }
+  // 🔴 THE STARTER EVERY SANDBOX IS SEEDED WITH (autopsy 6db0ff31, 2026-09-30). `E2BActuator` scaffolds
+  // a fresh sandbox from `TemplateRegistry.getProvider(framework).getFiles([])` — a plain `<title>App`
+  // index.html and a placeholder `src/App.tsx` that no golden scaffold shares. They were missing from
+  // this index, so an untouched fresh sandbox read as "the user has an app" to every reader here, and
+  // the report graded NavBharatAI's own starter as the user's code. Same source the sandbox uses, so the
+  // two cannot drift.
+  try {
+    const registry = new TemplateRegistry();
+    for (const fw of registry.listFrameworks()) {
+      for (const [p, c] of Object.entries(registry.getProvider(fw).getFiles([]))) add(p, c);
+    }
   } catch { /* same */ }
   return index;
 }
@@ -132,6 +146,13 @@ export function userAuthoredPaths(files: Record<string, string> | null | undefin
 export function projectHasUserCode(files: Record<string, string> | null | undefined): boolean {
   if (!files || typeof files !== 'object') return false;
   for (const [p, c] of Object.entries(files)) {
+    // 🔴 AN EMPTY FILE OR A STRAY NAME IS NOT AN APP (autopsy 6db0ff31, 2026-09-30). The workspace held
+    // our starter plus a zero-byte `java` the user had created in Code Studio; that file is not ours
+    // byte for byte, so this said "the user has an app" and the report graded our starter under
+    // *"observation about your existing code"*. Nothing written in it can be graded, and nothing that
+    // can never be code (`couldBeAppCode`) is a user's app.
+    if (typeof c === 'string' && c.trim() === '') continue;
+    if (typeof p === 'string' && !couldBeAppCode(p)) continue;
     if (!isPlatformSeededFile(p, c)) return true;
   }
   return false;

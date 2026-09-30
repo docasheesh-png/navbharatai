@@ -404,6 +404,7 @@ import { webFetchUrl, formatWebFetchResult } from './webFetch';
 import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ignoreRules';
 import { withoutPreviewBridge, bridgeShellNote } from './previewBridge';
 import { LIST_PRUNE_DIRS, isListPrunedPath } from '../lib/generatedDirs';
+import { turnAskedTheUser } from './nudgeToBuild';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -431,6 +432,16 @@ export function taskResultWithWrites(
   if (!Array.isArray(result.written)) return head;
   const w = result.written;
   if (w.length === 0) {
+    // 🔴 A SPECIALIST THAT ASKED A QUESTION ASKED IT OF NOBODY (autopsy 6db0ff31, 2026-09-30). The
+    // Frontend specialist ended *"What would you like me to build?"* — a question only the user can
+    // answer, and the user never sees a specialist's final message. Read as a result, it left the
+    // architect holding a delegation that did nothing and no instruction about what to do next; the
+    // user watched 35 s of silence and pressed Stop. Say what it was, and what to do instead.
+    if (turnAskedTheUser(result.summary)) {
+      return `${head}\n\n[Platform check — this agent wrote NO files and stopped to ask a question. It cannot reach the user; `
+        + 'your reply to it is never delivered. Answer the question yourself from the user\'s request and either do the work '
+        + 'directly or delegate again with an instruction that says exactly what to build.]';
+    }
     return `${head}\n\n[Platform check — this agent wrote NO files. Anything the text above says it created, changed or wired up does not exist on disk; check before relying on it.]`;
   }
   const named = w.slice(0, TASK_RESULT_MAX_PATHS).join(', ');

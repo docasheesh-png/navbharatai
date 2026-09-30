@@ -35,7 +35,8 @@ describe('what the user is told', () => {
   it('names the feature, and says the rest works', () => {
     const text = missingFeatureNotice([confirmed('search')]);
     expect(text).toContain('search');
-    expect(text).toContain('Everything else is built and working');
+    // It names what the scan proved and claims nothing about the rest (autopsy d8ed307a).
+    expect(text).not.toMatch(/everything else/i);
   });
 
   it('gives them the one sentence that fixes it', () => {

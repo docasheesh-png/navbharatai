@@ -41,6 +41,13 @@ const list = (items: readonly string[]): string =>
   items.length === 1 ? items[0] : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 
 /**
+ * 🔴 IT NO LONGER SAYS "Everything else is built and working" (autopsy d8ed307a, 2026-09-30). That
+ * sentence was a claim the scan cannot make: it confirms that SPECIFIC features are absent, never that
+ * every other one is present. A Bengali AI-assistant build shipped milestone 1 of a six-step roadmap —
+ * chat and settings — and the user was told file upload was the ONE thing missing and everything else
+ * worked, while memory, voice and file correction had not been built either. The notice now names what
+ * it has proven and nothing more.
+ *
  * The line appended to a SUCCESSFUL build's summary. '' when nothing was confirmed missing, so a
  * complete build reads exactly as it does today.
  *
@@ -54,6 +61,6 @@ export function missingFeatureNotice(warnings: readonly string[] | undefined): s
   const one = missing.length === 1;
   return (
     `\n\n⚠️ One thing you asked for isn't in the app yet: **${list(missing)}**. `
-    + `Everything else is built and working — just reply "add ${one ? 'it' : 'them'}" and I'll put ${one ? 'it' : 'them'} in.`
+    + `Reply "add ${one ? 'it' : 'them'}" and I'll put ${one ? 'it' : 'them'} in.`
   );
 }

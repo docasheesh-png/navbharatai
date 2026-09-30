@@ -877,6 +877,8 @@ order of how much they cost the product:
 
 1. **Cap free-build wall-clock** below the paid cap. Cheapest to build, and it bites exactly the
    runaway free builds rather than the good ones.
+   ✅ **BUILT 2026-09-30** (`freeBuildTimeCap.ts`): a 25-min free window, and the unattended chain of
+   auto-continued windows stops after 50 min (each further window needs the user's "continue").
 2. **A smaller sandbox template for free builds** (fewer vCPU). Needs an E2B template rebuild — admin
    infra, not a session's work.
 3. ⛔ **Do NOT shorten the idle window further** without re-reading `CLAUDE.md`'s warning: idle is

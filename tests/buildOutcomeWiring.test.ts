@@ -218,7 +218,8 @@ describe('🔒 a PERSISTED diagnostics report can never carry a stale success na
     const i = route.indexOf('const finalizeOnDeadline = async () => {');
     expect(i).toBeGreaterThan(-1);
     const body = functionBody(route, 'const finalizeOnDeadline = async () => {');
-    const pauseComputed = body.indexOf('const pauseMsgForReport = deadlinePauseMessage(writtenFiles.size);');
+    // A free build whose unattended chain is spent gets freePauseMessage instead (freeBuildTimeCap.ts) — still one value.
+    const pauseComputed = body.indexOf('const pauseMsgForReport = pauseResumable ? deadlinePauseMessage(writtenFiles.size) : freePauseMessage(writtenFiles.size);');
     const finishCall = body.indexOf('buildDiagRef?.finish(ok, ok ? buildResultRef?.summary : pauseMsgForReport.summary);');
     expect(pauseComputed).toBeGreaterThan(-1);
     expect(finishCall).toBeGreaterThan(-1);

@@ -85594,6 +85594,30 @@ Admin: *"mobile friendly game/app bane — mobile first!!!!!!"*, choosing touch 
   explorer's) waits until `MOBILE_LAYOUT_ISSUES` has appeared on real builds.
 - Games built before today get the controls only when rebuilt.
 
+## 2026-09-30 — A free build holds the sandbox for less (E2B cost lever, admin: "han, free build time-limit wala PR banao")
+
+**The problem.** A free (Weak) build got the paid window: 30 minutes, or 60 on a deep prompt. When the
+window ran out, the watchdog pause was always `resumable`. The client auto-continues it for up to 8
+windows while files grow, plus 2 windows with no progress. So one free request could hold an E2B machine
+for four to eight hours with nobody pressing anything, all of it paid by NavBharatAI.
+
+**The fix** (`src/server/AgentV3/freeBuildTimeCap.ts`):
+- **Window:** a free build's window is min(paid cap, `AGENTV3_FREE_BUILD_SECONDS`), default 25 min. It is
+  applied to `effectiveBuildSeconds`, so every budget derived from it moves together.
+- **Unattended chain:** the watchdog pause is resumable only while this request's free windows total less
+  than `AGENTV3_FREE_BUILD_AUTO_SECONDS` (default 50 min). After that the work is saved, the user is told
+  so, and each "continue" buys one window.
+- **Server-side:** the phone apps are bundled, so a client change would not reach them.
+- **Report codes:** `FREE_BUILD_TIME_CAP` and `FREE_BUILD_CHAIN_PAUSED`, both process-only.
+- **Honesty sibling:** the runner's timeout outcome now names the key that actually set the cap.
+- **Tests:** `tests/aFreeBuildHoldsTheMachineForLess.test.ts`, reversion-proven.
+
+**Still open:**
+- The chain is counted per instance. An auto-continue served by another Cloud Run instance starts a
+  fresh chain there, which is the old behaviour. The complete fix is a durable per-workspace counter,
+  for example on the workspace build lease.
+- 25 min / 50 min are assumptions. Read `FREE_BUILD_CHAIN_PAUSED` on real builds before tuning them.
+- Project-mode module turns (`planRemaining`) keep their own chain guard and are not bounded by this.
 ## 2026-09-30 — Autopsy bee95692 ("Social media app", Weak, 14.5 min, ₹165.64): green, ~5 min lost to one typo
 
 The app rendered and passed the production build. The explorer pressed 14 controls. The build was
@@ -85739,6 +85763,20 @@ a 35-file "GK & Study Helper" app that nobody asked for.
 - Episodes stored before this change carry no lane. They rely on the classifier.
 
 All 32 cases in `tests/theQuestionWasContent.test.ts` are reversion-proven. Reverting S1 fails 9 cases, S2 fails 2, S3b fails 1, and each half of S3d fails 1.
+## 2026-09-30 — Autopsy 12511a9c ("Calculator", Weak, 9.2 min vs ~4 min estimate, billed ₹121.19)
+
+**Tally:** 2 self-heals (GLM crawl benched, then KIMI took over; the preview re-publish), 1 workaround (the contract
+step stopped at its own 55.9 s cap, so the files were written without a shared contract), 0 skipped, 0 shipped broken.
+There were 3 struggles: two needless repairs (~90 s + ~3 min) and App.tsx alone taking 104 s.
+
+| Problem | Root cause | Class | Siblings | Test |
+|---|---|---|---|---|
+| The build prompt was our own weak-tier notice, byte for byte. It became the app's og:description and made REQUIREMENT_GAPS read a "social" domain. | No send path does this (checked every client and server path). The exact bytes come from a copy: every reply bubble has a Copy button, and phone keyboards offer the clipboard as a paste suggestion. | Platform text returned as a request. | fdd59ef8 (sign-in notice via Fix with AI) closed one door; this is the shared door, the route. | `ourOwnNoticeIsNotARequest` |
+| A rendered app (20/20 buttons styled) was judged "not rendered" over one console line, then repaired. | The defaults pass wrote index.html (`register('/sw.js')`) before public/sw.js, and the SPA fallback served HTML for `/sw.js`. | A console line from our own file writes was read as an app defect. | The render rescue and the last-chance proof also record their clean checks. | `theConsoleLineWasOurOwnWrite` |
+| The runtime auto-fix repaired the same line ~116 s after a clean re-check. | Fixed 180 s look-back window. | The stale-console window: 7d79254b fixed the render checks and not this reader. | This was the last reader using a fixed window. | same file |
+
+**Still open:** the fast lane's contract step for a 4-file app was cut at its own cap. For a simple app the
+contract may not be worth a model call. This is not decided here.
 ## 2026-09-30 — CI went red repo-wide on a new `@grpc/grpc-js` advisory; pinned to 1.14.5 by override (the merging session)
 
 - **What happened:** between 18:16 and 18:18 UTC, GitHub published GHSA-m9gg-hp2v-232j (high: `getAuthContext` can
@@ -85761,3 +85799,41 @@ All 32 cases in `tests/theQuestionWasContent.test.ts` are reversion-proven. Reve
 - **Open, honestly:** `@firebase/firestore` upstream still declares `~1.9.0`; when Firebase moves its own range the
   override becomes redundant and should be removed (re-check on the next `firebase` bump). The three pre-existing
   allowlisted highs (`axios`, `brace-expansion`, `undici`) are unchanged.
+
+## 2026-09-30 — Autopsy 9762f589: "sirf sample file bana o sales ki city wise jisme only 10 employees ho" (Weak)
+
+The report was taken while the build was still running (minute 7). The conversation had asked "Excel file
+bana sakte ho?", so what the user wanted was a sample Excel file. The engine planned and built a 13-file
+React dashboard instead.
+
+**Tally:**
+- ✅ Self-healed (3):
+  - 4 unused imports removed by the deterministic pass.
+  - 2 import issues fixed before the preview.
+  - A truncated repair was continued.
+- 🔀 Worked around (1): GLM `glm-4.7-flashx` crawled and was benched after 44 s, so the ladder moved on.
+- ⏭️ Skipped (0).
+- ❌ Open at report time (2):
+  - 5 tsc errors: a nonexistent `./components` barrel, and two self-imports made by repair passes.
+  - The deliverable was an app, but the user asked for a file.
+- 🥵 Struggle (4):
+  - Three repair passes. Pass 2 made things worse: it invented `./components` and `./App.css`.
+  - Pass 3 rewrote several files in one answer, took 112 s and hit the 8,000-token ceiling.
+  - Its continuation crawled.
+  - The ETA said "~59s to go" at minute 6, and the build was still running at minute 7.
+
+| Problem | Root cause | Class | Siblings | Locked by |
+|---|---|---|---|---|
+| Two homes for the same helpers (`src/utils/sales.ts` planned, `src/utils.ts` added) with different signatures | `utilOwnerFor` (876afca9) only matched a purpose that NAMES a helper, or a `utils.ts` in the contract's folder | A symbol's home found by exact name only | The sales file was in `utils/`, outside the contract folder | `helperModuleByWords` (≥ 2 shared stems, plain modules only) |
+| `interface CitySummary` beside `CitySummary.tsx` → TS2865, then a self-import from the repair | The prompt rule (121c2431) is persuasion; the model broke it a second time | A rule the model can ignore | Every type/component name pair | `separateTypeFromComponentNames` (by construction, before file one) + `fixTypeImportValueClash` (deterministic net, both lanes) |
+
+Tests: `tests/theSalesSampleHadTwoHelperHomes.test.ts`, reversion-proven for all three fixes.
+
+**Still open:**
+- **A request for a FILE (Excel / CSV / sample data) has no deliverable.** AgentV3 can only build apps, and
+  nothing hands the user a downloadable file. The server already writes real `.xlsx` files with `exceljs`
+  (`routes/export.ts`), so building this is a product decision. Put to the admin; not built here.
+- The fast lane's plan regenerated `package.json` (vite ^6), `tsconfig.json` (added `noUnusedLocals`) and
+  `vite.config.ts` over the scaffold's own. That caused the TS6133s (fixed for free) and a 16 s `npm install`
+  at the first `tsc`. These files are editable on purpose, because apps add dependencies. Whether the plan may
+  REWRITE them wholesale is not decided here.

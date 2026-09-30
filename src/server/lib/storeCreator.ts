@@ -21,6 +21,7 @@
 import { createHash } from 'node:crypto';
 import * as admin from 'firebase-admin';
 import { userProfileStore } from './UserProfileStore';
+import { rememberCreatorId } from './appMartCreatorIndex';
 
 export interface CreatorInfo {
   /** Display name from the creator's profile or sign-in provider; never an email. */
@@ -60,6 +61,11 @@ export interface CreatorLookupDeps {
   profileName: (uid: string) => Promise<string | null | undefined>;
   authName: (uid: string) => Promise<string | null | undefined>;
   now?: () => number;
+  /**
+   * Record which account a public code belongs to, so a tap on the creator's name can open their App
+   * Mart profile (appMartCreatorIndex.ts). Optional so a test's own deps write nothing.
+   */
+  remember?: (creatorId: string, uid: string) => void;
 }
 
 const CACHE_MS = 10 * 60_000;
@@ -84,6 +90,7 @@ export async function resolveCreators(uids: readonly string[], deps: CreatorLook
     const profile = await deps.profileName(uid).catch(() => null);
     const auth = profile && String(profile).trim() ? null : await deps.authName(uid).catch(() => null);
     const info: CreatorInfo = { name: creatorDisplayName(profile, auth), id: publicCreatorId(uid) };
+    deps.remember?.(info.id, uid);
     cache.set(uid, { info, at: now() });
     out.set(uid, info);
   }));
@@ -92,6 +99,7 @@ export async function resolveCreators(uids: readonly string[], deps: CreatorLook
 
 /** Production lookups: the profile document, then Firebase Auth. Both fail soft to null. */
 export const realCreatorLookupDeps: CreatorLookupDeps = {
+  remember: rememberCreatorId,
   profileName: async (uid) => (await userProfileStore.get(uid))?.displayName ?? null,
   authName: async (uid) => {
     if (process.env.VITEST || process.env.NODE_ENV === 'test') return null;

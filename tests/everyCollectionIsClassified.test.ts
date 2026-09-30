@@ -73,6 +73,12 @@ const CLASSIFICATION: Record<string, { kind: 'user' | 'workspace' | 'platform' |
   auth_otp_outcomes:       { kind: 'retained', why: 'one doc per UTC day: how many mobile OTPs were sent, verified or failed and the latest scrubbed reason per failure kind — no number, uid or address in it, purged at 90 days' },
   referral_claim_people:   { kind: 'retained', why: 'one marker per (person, day) so the claim tally counts people, not app opens; the id is a digest of (day, uid) and the body a timestamp; purged at 7 days' },
   site_analytics:      { kind: 'retained', why: 'visitor day-counts; the policy promises 30 days' },
+  app_mart_reactions:  { kind: 'user', why: "a person's 👍/👎 on App Mart apps — one doc per (app, person), `uid` field" },
+  app_mart_comments:   { kind: 'user', why: "a person's App Mart comments and replies — `uid` field; counts are counted from these, so an erase keeps them true" },
+  app_mart_blocks:     { kind: 'user', why: "the people whose comments a reader chose not to see — doc id IS the uid" },
+  app_mart_notifications: { kind: 'user', why: "a creator's grouped App Mart notifications, filed under `recipientUid`; also purged at 90 days" },
+  app_mart_creator_ids: { kind: 'user', why: 'which account a public creator code belongs to, so a profile can open — holds `uid`, never returned to a client' },
+  app_mart_comment_reports: { kind: 'retained', why: 'what readers reported about App Mart comments — a safety record kept 180 days, like safety_flags' },
   safety_flags:        { kind: 'retained', why: 'flagged messages; the policy promises 180 days' },
   takedown_records:    { kind: 'retained', why: 'removal records; IT Rules 2021 require 180 days' },
 };

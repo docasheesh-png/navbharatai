@@ -84545,3 +84545,27 @@ Test-locked in `tests/aLookupAppHasNothingToSave.test.ts` (reversion-proven on t
 - `requestAnalysis.startTier` still says "gemini" (a pre-ladder name) in the admin report. Cosmetic, admin-only.
 - The prompt is English words in Devanagari; the model built a Hindi UI. The language rule mirrors the SCRIPT
   here; whether a transliterated-English user wants Hindi or English UI is a product question for the admin.
+
+## 2026-09-30 — The explorer tries search boxes and sort menus (admin: "haan, search/sort wala check bana do")
+
+Closes the open item recorded in autopsy ee0e6de5: the explorer pressed buttons only, so a lookup app's
+search box and A–Z/Z–A menu were never tried and a search that filters nothing passed every check.
+- `clickExplorer.ts`: after the first-screen presses, up to 3 qualifying controls are tried on a fresh
+  load (`narrowOne`): type a word from the list's own items (`pickSearchWord`, Unicode incl. vowel signs),
+  or pick another option (up to two), then compare the screen's text with form controls removed. New
+  verdict `unresponsive`; records carry `kind: 'type' | 'pick'`. The in-page code is ONE self-contained
+  function (`narrowingPage`, modes list/text/narrow), because `page.evaluate` sends a function's source
+  only — the first draft called helpers that did not exist in the page and silently found nothing
+  (caught by the real-browser test).
+- `FAILING_VERDICTS` is exported and `explorerRepair.ts` reads it instead of its own copy (the drift
+  class: a failure kind reported and never repaired). The repair finding for an unresponsive control says
+  to wire it to the list, never to remove it.
+- User card: "Typed into the search box — the list changed to match." / "Typing into "X" changed nothing on
+  the screen — it does not search the list." Admin line: "Pressed N control(s) and tried M search or sort
+  control(s)".
+- Precision rules and the real-browser cases (working, dead, button-gated, Hindi, a settings menu that is
+  never tried) are in `tests/theSearchBoxIsTypedInto.test.ts`.
+- ⚠️ What it costs: an `unresponsive` finding is an `EXPLORE_FAILED`, so on Normal/Strong it runs the
+  existing explorer repair (and on Weak within its daily allowance). A wrong "did nothing" would spend one
+  repair that is then undone, which is why every doubtful case is `skipped`, not failed.
+- AppKnowledgeBase: the explorer entry says it tries the search box and sort menu.

@@ -3272,6 +3272,17 @@ the flag entries above promise.
   half runs wherever Chromium exists (`/opt/pw-browsers`) and is skipped in CI, which has none.
   **What to watch:** `EXPLORE_FAILED` on real builds — each is a button a user would have found broken in
   their first minute. A crop of `EXPLORE_NOT_RUN` means the runner, not the apps, needs looking at.
+  🔎 **IT TRIES A SEARCH BOX AND A SORT MENU TOO (2026-09-30, admin: *"haan, search/sort wala check bana do"*,
+  after autopsy ee0e6de5, whose lookup app was "nothing safe to press"). No flag of its own.** After the
+  first-screen presses, up to `MAX_NARROWING_PROBES` (3) controls are tried on a fresh load: a word from the
+  list's own items is typed (`pickSearchWord`), or another option is picked, and the screen's words (form
+  controls removed) are compared. A control that changed nothing is `unresponsive` — in `FAILING_VERDICTS`,
+  which `explorerRepair.ts` now reads instead of its own copy, so it is reported AND repaired like a crash.
+  🔒 Precision first: only a control that names itself a search (`SEARCH_CONTROL`, Hindi included) or a
+  sort/filter menu (`SORT_CONTROL`, deliberately not "type"/"status"); never inside a form, a dialog or a
+  row of the list; no menus at all when the app writes to the user's own database; a list of ≥3 items
+  (search) or 2 distinct (sort); a search with a button beside it is `skipped`, never called broken.
+  Real-browser test: `tests/theSearchBoxIsTypedInto.test.ts`.
   🔧 **AND NOW IT FIXES WHAT IT FINDS — `AGENTV3_EXPLORER_REPAIR` (2026-09-28, admin: *"han dono ho jaye …
   real engineering kar ke, world class banao"*). ⚠️ NOT set; code default ON; `off` restores report-only.**
   `explorerRepair.ts`. One bounded repair pass (allowlisted pass `explorer-repair`, refused every `.env`),

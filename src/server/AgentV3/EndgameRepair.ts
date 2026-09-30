@@ -96,6 +96,45 @@ export function fixTypeOnlyValueImports(
 }
 
 /**
+ * TS2865 — `Import 'X' conflicts with local value, so must be declared with a type-only import when
+ * 'isolatedModules' is enabled.` The file imports the TYPE `X` and declares a value (usually the component)
+ * named `X`. tsc names the fix, and it has one form: mark that specifier `type`. A type-only import and a
+ * value of the same name coexist (verified against tsc, 2026-09-30). Pure.
+ *
+ * 🔴 BUILD 9762f589 (2026-09-30): `src/components/CitySummary.tsx` imported `interface CitySummary` and declared
+ * `const CitySummary`. No deterministic pass knew the code, so a model repair was sent — it turned the import
+ * into a self-import (`from './CitySummary'`), and the error survived all three passes.
+ *
+ * Acts only when the name is a plain specifier of exactly ONE named import in that file.
+ */
+export function fixTypeImportValueClash(
+  files: Record<string, string>,
+  errors: TscError[],
+): { files: Record<string, string>; fixed: string[] } {
+  const fixed: string[] = [];
+  const out = { ...files };
+  for (const e of errors) {
+    if (e.code !== 'TS2865') continue;
+    const name = /^Import '([A-Za-z_$][\w$]*)' conflicts with local value/.exec(e.message)?.[1];
+    const src = out[e.file];
+    if (!name || typeof src !== 'string') continue;
+    const esc = name.replace(/\$/g, '\\$');
+    const plain = new RegExp(`^${esc}$`);
+    const stmts = [...src.matchAll(/import\s+(type\s+)?\{([^}]*)\}\s*from\s*(['"][^'"]+['"])\s*;?/g)]
+      .filter((m) => !m[1] && m[2].split(',').some((sp) => plain.test(sp.trim())));
+    if (stmts.length !== 1) continue;
+    const m = stmts[0];
+    const specs = m[2].split(',').map((sp) => sp.trim()).filter(Boolean);
+    const replacement = specs.length === 1
+      ? `import type { ${name} } from ${m[3]};`
+      : `import { ${specs.map((sp) => (plain.test(sp) ? `type ${sp}` : sp)).join(', ')} } from ${m[3]};`;
+    out[e.file] = src.slice(0, m.index!) + replacement + src.slice(m.index! + m[0].length);
+    fixed.push(`${e.file}: imported '${name}' as a type (a value of the same name is declared in the file)`);
+  }
+  return { files: out, fixed };
+}
+
+/**
  * The property renames tsc itself proposes — TS2551 (`Property 'x' does not exist on type 'T'. Did you
  * mean 'y'?`) and TS2561 (`… but 'x' does not exist in type 'T'. Did you mean to write 'y'?`). PURE.
  *
@@ -246,6 +285,9 @@ export async function endgameDeterministicPass(
   const typeOnly = fixTypeOnlyValueImports(cur, errors);
   cur = typeOnly.files;
   fixes.push(...typeOnly.fixed);
+  const clash = fixTypeImportValueClash(cur, errors);
+  cur = clash.files;
+  fixes.push(...clash.fixed);
   const renamed = fixSuggestedPropertyNames(cur, errors);
   cur = renamed.files;
   fixes.push(...renamed.fixed);

@@ -1915,6 +1915,12 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     }
     let promptingErrors = verdict.errors;
     while (!verdict.ok && attempt < maxRepairs && deps.repair && !deps.signal?.aborted) {
+      // The same question the generation calls ask (`SimpleBuildDeps.stopLane`), asked before every
+      // repair too. 🔴 Autopsy 33812996: the lane's opener crawled DURING a repair, the chain fell to
+      // reasoning rungs, and repair ran 560 s (77% of the lane) without fixing anything. Generation
+      // consulted this; the repair loop — the lane's longest phase — never did.
+      const repairStop = deps.stopLane?.();
+      if (repairStop) { deps.log?.(`Handing the app to the full builder — ${repairStop}.`); break; }
       attempt++;
       // GA-8: each attempt climbs the ordered strategy ladder so a retry is a genuinely DIFFERENT push
       // (contract-full → focus-offenders → contract-authority), not the identical prompt re-fired.

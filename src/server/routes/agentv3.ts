@@ -257,7 +257,7 @@ import { makeResilientTurnRunner } from './agentv3Resilient';
 import { GoogleGenAI } from '@google/genai';
 import { scanGeneratedCode, formatCodeScanReport } from '../AgentV3/CodeSafetyScanner';
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
-import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, sharedRateLimitCooldowns, createBuildBenchRegistry, type NamedRunner, type BuildBenchRegistry } from '../AgentV3/providers/MultiProviderTurnRunner';
+import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, sharedRateLimitCooldowns, createBuildBenchRegistry, isReasoningRungStop, type NamedRunner, type BuildBenchRegistry } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { modelAlwaysReasons } from '../AgentV3/providers/glmThinking';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { buildStreamingEnabled, streamHardCapMs } from '../AgentV3/providers/openAiStream';
@@ -16541,6 +16541,9 @@ async function noteBuildOutcome(
               // outlive the wait (turnDeadline.ts). Undefined for every caller that does not set one,
               // which is every lane except the fast lane's plan and contract calls today.
               deadlineAt,
+              // The walk stops BEFORE a rung that reasons before every answer, rather than spending the
+              // lane's clock inside one (autopsy 33812996: 497 s of one repair call on two such rungs).
+              stopAtReasoningRung: fastLaneReasoningGateEnabled(),
               // Stop cancels this call and every later one (stopSignal.ts). The lane never read the
               // build's signal before autopsy 2720e553, so a pressed Stop ran on for minutes.
               signal: abort.signal,
@@ -16554,6 +16557,17 @@ async function noteBuildOutcome(
                 : {}),
             });
           } catch (err) {
+            // The walk reached a rung the lane may not use — the lane hands off at its next boundary.
+            if (isReasoningRungStop(err) && !fastLaneReasoningRung) {
+              fastLaneReasoningRung = err.model;
+              try {
+                buildDiag.record({
+                  phase: 'build', severity: 'info', code: 'FAST_LANE_FELL_TO_REASONING_RUNG', autoResolved: true,
+                  message: `The fast lane's engine was unavailable and the next one (${err.model}) reasons before every answer; the lane stopped before calling it and hands its files to the full builder.`,
+                  detail: err.message,
+                });
+              } catch { /* diagnostics best-effort */ }
+            }
             const failedAs = fastLaneCallIdentity(providerReported, usedProvider, fbModel);
             try { buildDiag.recordLlmCall({ model: failedAs.model, provider: failedAs.provider, promptPreview, promptChars: promptPreview.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) }); } catch { /* diagnostics best-effort */ }
             throw err;

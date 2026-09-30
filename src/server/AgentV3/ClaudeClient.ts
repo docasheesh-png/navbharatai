@@ -177,6 +177,15 @@ export interface RunTurnParams {
    */
   hasNextRung?: boolean;
   /**
+   * Set by the fast lane: the ladder walk STOPS at the first later rung whose model always reasons
+   * before it answers, and throws `ReasoningRungStopError` instead of calling it (autopsy 33812996).
+   * The lane's calls are bounded for a rung that answers directly — a reasoning rung spent 197 s
+   * producing nothing and the next one ran into the lane's clock, 497 s inside ONE repair call. The
+   * full builder, which the lane hands off to, runs those rungs in the tool loop they fit. Absent ⇒
+   * the walk is unchanged.
+   */
+  stopAtReasoningRung?: boolean;
+  /**
    * ABSOLUTE epoch-ms instant after which the CALLER no longer wants this answer.
    *
    * THE BUG IT CLOSES (admin report 2026-09-13): the fast lane capped its plan call at 90 s while the

@@ -20765,7 +20765,7 @@ async function noteBuildOutcome(
                     const again = await withTimeout(actuator.runCommand!(workspaceId, withSandboxBrowsers(plan.command, plan.framework)), 180_000, 'vaccine-reverify');
                     if (!parseTestOutcome(plan, again.exitCode, again.stdout, again.stderr).ok) return false;
                     if (!lastPreviewUrl || !actuator.browseUrl) return true; // tests pass; no preview to re-open
-                    const shot = await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'vaccine-render-check');
+                    const shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'vaccine-render-check');
                     const v = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
                     return v.rendered && !v.inconclusive && !v.serverDown;
                   }),

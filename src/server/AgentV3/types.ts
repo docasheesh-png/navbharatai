@@ -57,6 +57,11 @@ export type ToolName =
   | 'generate_idempotency'
   | 'generate_db_config'
   | 'request_secrets'
+  // One tool that runs any of the RECIPE_TOOLS by name (ToolCatalog.ts), plus two tools the prompt
+  // named that nothing offered (2026-09-30).
+  | 'run_recipe'
+  | 'write_files_batch'
+  | 'find_ui_element'
   | 'task'
   | 'second_opinion'
   | 'consensus'

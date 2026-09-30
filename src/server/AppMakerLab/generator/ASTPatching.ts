@@ -89,5 +89,53 @@ export function replaceSymbol(source: string, symbolName: string, newCode: strin
   const start = target.getStart(sf); // excludes leading trivia/comments — they stay put
   const end = target.getEnd();
   const content = src.slice(0, start) + code.trim() + src.slice(end);
+  const clash = clashesIn(content);
+  if (clash) {
+    return {
+      ok: false,
+      error: `replaceSymbol: the new code for "${name}" would leave ${clash} in the file. Pass ONLY the declaration of `
+        + `"${name}" (no import lines, no other declarations, no second default export) — or use write_file to replace the whole file.`,
+    };
+  }
   return { ok: true, content };
+}
+
+/**
+ * 🔴 A WHOLE FILE PASSED AS ONE SYMBOL (autopsy a9f8d186, 2026-09-30). The builder called replace_symbol on
+ * `AIOverview` with the ENTIRE new file — imports, the component and `export default` — and the tool
+ * dropped all of it into the component's slot. The file came back with every import twice and two default
+ * exports, and the builder spent a turn noticing "the file got duplicated content" and rewriting it.
+ * The edit is refused when the result would declare a top-level name or an import binding twice, or carry
+ * two default exports — the three shapes that duplication produces. Pure.
+ */
+function clashesIn(content: string): string | null {
+  let sf: ts.SourceFile;
+  try { sf = parse(content); } catch { return null; }
+  const seen = new Set<string>();
+  let defaults = 0;
+  for (const stmt of sf.statements) {
+    const names: string[] = [];
+    if (ts.isImportDeclaration(stmt) && stmt.importClause) {
+      const c = stmt.importClause;
+      if (c.name) names.push(c.name.text);
+      const b = c.namedBindings;
+      if (b && ts.isNamespaceImport(b)) names.push(b.name.text);
+      if (b && ts.isNamedImports(b)) for (const e of b.elements) names.push(e.name.text);
+    } else if (
+      // An overload signature (a function with no body) legitimately repeats its name.
+      ((ts.isFunctionDeclaration(stmt) && stmt.body) || ts.isClassDeclaration(stmt)) && stmt.name
+    ) {
+      names.push(stmt.name.text);
+    } else if (ts.isVariableStatement(stmt)) {
+      for (const d of stmt.declarationList.declarations) if (ts.isIdentifier(d.name)) names.push(d.name.text);
+    }
+    const mods = ts.canHaveModifiers(stmt) ? ts.getModifiers(stmt) ?? [] : [];
+    if (ts.isExportAssignment(stmt) && !stmt.isExportEquals) defaults++;
+    else if (mods.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword)) defaults++;
+    for (const n of names) {
+      if (seen.has(n)) return `"${n}" declared twice`;
+      seen.add(n);
+    }
+  }
+  return defaults > 1 ? 'two default exports' : null;
 }

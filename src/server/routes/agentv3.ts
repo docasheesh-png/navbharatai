@@ -335,7 +335,7 @@ import { auditConnectedProject } from '../AgentV3/ConnectAudit';
 import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, oneShotStillViable, oneShotSkipReason, parseFileBlocks } from '../AgentV3/OneShotBuilder';
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
-import { fastLaneRungDecision, fastLaneReasoningGateEnabled } from '../AgentV3/fastLaneRung';
+import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame } from '../AgentV3/fastLaneRung';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
@@ -407,6 +407,7 @@ import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective, classifyFailure } from '../lib/BuildRetrospectiveEngine';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
 import { abortOutcomeFor, ABORT_OUTCOME_CODES } from '../AgentV3/abortOutcome';
+import { sandboxWasUnavailable } from '../AgentV3/sandboxAvailability';
 import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured, buildStarvedItsOutputBudget, stoppedByUser, buildWasStopped } from '../AgentV3/BuildDiagnostics';
 import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
@@ -16489,10 +16490,18 @@ async function noteBuildOutcome(
           } catch { return { rung: null, skip: false, reason: '' }; }
         })()
         : { rung: null, skip: false, reason: '' };
+      // A game is built with the game recipes, which only the full builder can call (fastLaneSkipsGame).
+      let fastLaneGameSkip = false;
+      if (fastLaneWouldRun && !fastLaneRung.skip) {
+        try { fastLaneGameSkip = fastLaneSkipsGame(analyzeRequirementGaps(prompt).domain); } catch { fastLaneGameSkip = false; }
+        if (fastLaneGameSkip) {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_SKIPPED_GAME', autoResolved: true, message: 'Skipped the fast lane: a game is built with the game tools (loop, input, 3D, audio), and only the full builder can run them. Building directly with the full builder.' });
+        }
+      }
       if (fastLaneRung.skip) {
         buildDiag.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_SKIPPED_REASONING_RUNG', message: 'Skipped the fast lane: the engine this build opens on always reasons first, so the lane could not finish its plan step in time. Building directly with the full builder.', autoResolved: true, detail: fastLaneRung.reason });
       }
-      if (fastLaneWouldRun && !fastLaneRung.skip) {
+      if (fastLaneWouldRun && !fastLaneRung.skip && !fastLaneGameSkip) {
         // Usage ACCUMULATES across every cheap call (manifest + each per-file call), so billing is honest.
         const osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
         // 🔴 THE SCAFFOLD MUST EXIST BEFORE THE PLAN READS IT (autopsy b47c56d8, 2026-09-30). The
@@ -17001,9 +17010,19 @@ async function noteBuildOutcome(
         // (start-tier, escalation, default) sees it.
         if (!sb.ok && !sb.stopped && sb.salvagedPaths?.length) {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_SALVAGE', message: `Fast lane salvaged ${sb.salvagedPaths.length} finished file(s) into the workspace for the full builder to continue from.`, autoResolved: true, detail: sb.salvagedPaths.join(', ') });
+          // Why the lane stopped decides the first sentence: out of time, or finished but not compiling —
+          // and in the second case the compiler's own words come with it, so the builder starts from the
+          // errors instead of re-running the typecheck to find them (autopsy a9f8d186).
+          const salvageWhy = sb.reason === 'verify_failed'
+            ? 'and they do not compile yet'
+            : 'before running out of time';
+          const salvageErrors = sb.reason === 'verify_failed' && sb.verifyErrors
+            ? `The compiler's errors on them right now:\n${sb.verifyErrors.split('\n').slice(0, 20).join('\n')}\n`
+            : '';
           buildPrompt =
-            `${SALVAGE_HANDOFF_MARKER} A faster build lane already generated ${sb.salvagedPaths.length} file(s) of THIS app before running out of time; ` +
-            `they are in the workspace now and they are YOUR OWN prior work:\n${sb.salvagedPaths.slice(0, 40).map((p) => `- ${p}`).join('\n')}\n` +
+            `${SALVAGE_HANDOFF_MARKER} A faster build lane already generated ${sb.salvagedPaths.length} file(s) of THIS app ${salvageWhy}; ` +
+            `they are in the workspace now and they are YOUR OWN prior work (any project context below that lists fewer files was taken before they were written):\n${sb.salvagedPaths.slice(0, 40).map((p) => `- ${p}`).join('\n')}\n` +
+            salvageErrors +
             `READ these files first and COMPLETE the app around them — keep their module structure, types and export names; add only what is missing; ` +
             `fix any error in place. ${HANDOFF_NOTE_FIX_LINE} Do NOT re-plan a parallel structure (no duplicate types/ or utils/ trees), do NOT delete or rewrite them wholesale.\n\n---\n\n${buildPrompt}`;
         }
@@ -22436,6 +22455,29 @@ async function noteBuildOutcome(
             autoResolved: true,
           });
         } catch { /* partition analysis is best-effort — never blocks a build */ }
+      }
+
+      // 🔴 A SETUP FAILURE IS A FACT ABOUT ONE MOMENT, NOT ABOUT THE BUILD (autopsy a9f8d186, 2026-09-30).
+      // Setup hit a stale handle once; the same build then ran npm in the sandbox and watched the app
+      // render — and this flag, set at second 0 and never re-read, told the user the build could not
+      // run and made a working app free. Re-judged here against what actually ran (sandboxAvailability.ts),
+      // before any reader below sees it.
+      if (sandboxUnavailable) {
+        let servedEvidence: { commands?: ReadonlyArray<{ exitCode?: number | null }>; appRendered: boolean } = { appRendered: false };
+        try { servedEvidence = { commands: buildDiag.report()?.commands ?? [], appRendered: renderProvenNow() || buildObs.previewRendered }; }
+        catch { /* a report that cannot be read keeps the setup verdict, exactly as before */ }
+        if (!sandboxWasUnavailable(true, servedEvidence)) {
+          sandboxUnavailable = false;
+          try {
+            buildDiag.resolveOnRecheck('SANDBOX_UNAVAILABLE');
+            buildDiag.record({
+              phase: 'sandbox', severity: 'info', code: 'SANDBOX_RECOVERED', autoResolved: true,
+              message: 'Setup could not reach the sandbox at first, but it served this build afterwards '
+                + (servedEvidence.appRendered ? '(the app rendered from it)' : '(commands ran in it)')
+                + ' — the build is judged on what it produced, not on the setup attempt.',
+            });
+          } catch { /* diagnostics are best-effort */ }
+        }
       }
 
       // EMPTY-BUILD HONESTY (deep-test App #7 — Trello task-board, 2026-07-13). A build that EXPECTED

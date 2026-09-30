@@ -408,7 +408,31 @@ export function usesNonKitNbClass(content: string, path: string): boolean {
 /** The note handed back with the write. '' when there is nothing to say. PURE. */
 export function inventedKitClassNote(path: string, invented: readonly string[]): string {
   if (invented.length === 0) return '';
-  const shown = invented.slice(0, 8).map((c) => `.${c}`).join(', ');
+  const shown = invented.slice(0, 8).map((c) => {
+    const real = nearestKitClass(c);
+    return real ? `.${c} (the kit has .${real})` : `.${c}`;
+  }).join(', ');
   return `\n⚠️ ${path} uses ${shown} — these look like design-kit classes but the kit does not define them, and no stylesheet does either, so those elements render UNSTYLED. `
-    + 'Add their rules to src/index.css now, or switch to the kit\'s own classes (.nb-shell, .nb-sidebar, .nb-nav-item, .nb-topbar, .nb-hero, .nb-empty, .card, .btn-primary).';
+    + 'Switch to the kit class named beside each one, or add their rules to src/index.css now. The kit\'s own classes include .nb-shell, .nb-sidebar, .nb-nav-item, .nb-topbar, .nb-hero, .nb-empty, .card, .btn-primary, and for a game .nb-game, .nb-game-hud, .nb-game-stat, .nb-game-btn, .nb-game-screen.';
+}
+
+/**
+ * The kit class an invented `nb-` name almost certainly meant (autopsy 0bb437b4, 2026-09-30): the
+ * racing game's screen used `.nb-hud` beside a kit that defines `.nb-game-hud`. The write-time note
+ * fired, listed the kit's APP classes, and the model — building a game — kept its own name; a heal
+ * after the build then spent 55 s restyling it. Naming the real class makes the right edit a rename.
+ * A kit class qualifies when it carries every word of the invented name; the shortest wins, and a tie
+ * names nothing (a guess between two is not a fact). PURE.
+ */
+export function nearestKitClass(invented: string): string | null {
+  const words = String(invented ?? '').toLowerCase().split('-').filter((w) => w && w !== 'nb');
+  if (words.length === 0) return null;
+  const hits = [...kitClasses()].filter((k) => {
+    const kw = new Set(k.split('-'));
+    return words.every((w) => kw.has(w));
+  });
+  if (hits.length === 0) return null;
+  const min = Math.min(...hits.map((h) => h.length));
+  const best = hits.filter((h) => h.length === min);
+  return best.length === 1 ? best[0] : null;
 }

@@ -62,6 +62,27 @@ export function repairTargets(run: ExploreRun | null | undefined): PressResult[]
 }
 
 /**
+ * 🔴 A REPAIR THAT INVENTS THE RESULT IS NOT A REPAIR (autopsy a9f8d186, 2026-09-30).
+ *
+ * "Start Recognition" threw `NotFoundError: Requested device not found` — the checking browser has no
+ * microphone. The instruction was "fix it so the control does what its label says", which with no
+ * microphone can only be met by pretending: the repair made a missing microphone show a DEMO TRACK as
+ * the identified song after four seconds, the re-press saw no error, and the fake was kept and shipped.
+ *
+ * A control whose failure is a missing DEVICE (camera, microphone, location) or a refused permission is
+ * fixed by handling that case honestly, never by fabricating what the device would have produced.
+ */
+const ABSENT_DEVICE_ERROR = /NotFoundError|NotAllowedError|NotReadableError|OverconstrainedError|requested device not found|permission (?:denied|dismissed)|getUserMedia|mediaDevices|geolocation|could not start (?:audio|video) source/i;
+
+export function needsAbsentDevice(errors: readonly string[]): boolean {
+  return errors.some((e) => ABSENT_DEVICE_ERROR.test(String(e ?? '')));
+}
+
+const DEVICE_FIX = 'The checking browser has no camera or microphone, so this is the case a real user hits when their device has none or they refuse permission. Catch that error where the device is requested and show a clear message on screen (for example "No microphone found" or "Microphone permission was refused — allow it in your browser settings"), leaving the control usable so the user can try again.';
+
+const NO_INVENTED_RESULT = 'Never make the control appear to work by showing sample, demo or random data in place of the real result.';
+
+/**
  * One concrete instruction per broken control, in the words a developer can act on. Each names the
  * control, where it lives, what the browser saw, and — the part a model most needs told — that
  * removing or disabling the control is not a fix. PURE.
@@ -86,8 +107,10 @@ export function explorerRepairFindings(targets: PressResult[]): string[] {
         ? (p.kind === 'pick'
           ? 'Wire the menu to the list it sits above so choosing an option really sorts or filters that list.'
           : 'Wire the box to the list it sits above so typing really filters that list as the user types.')
-        : 'Find the cause in the code that runs when it is used and fix it so the control does what its label says.';
-    return `In a real browser, ${doing} "${p.label}"${where} ${what}.${said} ${fix} Do not remove, hide or disable the control — that is not a fix.`;
+        : needsAbsentDevice(p.errors)
+          ? DEVICE_FIX
+          : 'Find the cause in the code that runs when it is used and fix it so the control does what its label says.';
+    return `In a real browser, ${doing} "${p.label}"${where} ${what}.${said} ${fix} Do not remove, hide or disable the control — that is not a fix. ${NO_INVENTED_RESULT}`;
   });
 }
 

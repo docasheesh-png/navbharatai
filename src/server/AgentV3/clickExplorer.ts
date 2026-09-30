@@ -50,6 +50,7 @@
 // no model call in this module.
 
 import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
+import { BROWSER_PAGE_OPTIONS } from './signInExplore';
 
 /** Where the pre-baked Playwright and its browsers live inside the sandbox image. */
 export const EXPLORE_TOOLS_DIR = '/home/user/.e-tools';
@@ -591,7 +592,8 @@ function pickSearchWord(items) {
 }
 
 async function freshPage(browser) {
-  const page = await browser.newPage(cfg.storageState ? { storageState: cfg.storageState } : {});
+  // Reduced motion (the one definition every lane uses — signInExplore.ts), plus the saved session.
+  const page = await browser.newPage(Object.assign(${JSON.stringify(BROWSER_PAGE_OPTIONS)}, cfg.storageState ? { storageState: cfg.storageState } : {}));
   page.on('dialog', (d) => d.dismiss().catch(() => {}));
   page.on('popup', (p) => p.close().catch(() => {}));
   return page;
@@ -605,6 +607,20 @@ async function load(page) {
 
 // Wide enough to find controls a first-level press revealed, which may sit beyond the first-screen cap.
 const wide = Object.assign({}, cfg, { maxClicks: 40 });
+
+// Press a control. An element that never stops moving (an app's own infinite animation that does not
+// honour reduced motion) fails Playwright's stability wait however long it waits; for THAT failure
+// alone the click is dispatched on the element itself — the same element, no coordinates, so nothing
+// covering it can receive the press instead. Every other failure still means "could not be pressed".
+async function press(page, i) {
+  const loc = page.locator('[data-nbai-x="' + i + '"]').first();
+  try {
+    await loc.click({ timeout: 4000 });
+  } catch (e) {
+    if (!/not stable/i.test(String(e && e.message || e))) throw e;
+    await loc.dispatchEvent('click');
+  }
+}
 
 async function settle(page) {
   await page.waitForLoadState('networkidle', { timeout: 2500 }).catch(() => {});
@@ -630,7 +646,7 @@ async function pressOne(browser, target, discoverAgainst) {
       const first = await page.evaluate(collect, wide);
       const parent = first.chosen.find((c) => c.key === target.parentKey);
       if (!parent) { res.note = 'the screen it lives on could not be reopened'; await page.close().catch(() => {}); return { res, revealed }; }
-      await page.locator('[data-nbai-x="' + parent.i + '"]').first().click({ timeout: 4000 });
+      await press(page, parent.i);
       await settle(page);
     }
     const again = await page.evaluate(collect, target.parentKey ? wide : cfg);
@@ -639,7 +655,7 @@ async function pressOne(browser, target, discoverAgainst) {
     const before = await page.evaluate(measure);
     const beforeUrl = page.url();
     armed = true;
-    await page.locator('[data-nbai-x="' + hit.i + '"]').first().click({ timeout: 4000 });
+    await press(page, hit.i);
     await settle(page);
     const overlay = await page.locator('vite-error-overlay, #nextjs-portal, .react-error-overlay').count().catch(() => 0);
     const after = await page.evaluate(measure).catch(() => null);

@@ -85593,6 +85593,57 @@ Admin: *"mobile friendly game/app bane — mobile first!!!!!!"*, choosing touch 
 - The phone check reports and offers a fix; it does not repair on its own. A verified repair (like the
   explorer's) waits until `MOBILE_LAYOUT_ISSUES` has appeared on real builds.
 - Games built before today get the controls only when rebuilt.
+## 2026-09-30 — Autopsy a9f8d186: "circle to search", Weak, 17.5 min — rendered, then called "sandbox unavailable" and made free
+
+The prompt asked for a circle-to-search app with a QR scanner, screen translation, music recognition, an
+AI overview, three search engines, and a Play Store link to copy the layout from. The app rendered in a
+real browser at minute 12, typechecked, built for production, and every button was pressed. The build
+still ended "The build could not run — the sandbox was unavailable", `ok:false`, release gate RED, ₹0.
+
+**Ledger:**
+
+| Problem | Root cause | Class | Siblings found and fixed | Test |
+|---|---|---|---|---|
+| Working app reported "sandbox unavailable", free | Setup's first op hit a stale cached handle; `fileOp` recovers from that, `ensureWorkspace` did not. The route set `sandboxUnavailable` at second 0 and never re-read it | A fact measured once at setup read as the verdict of the whole build | `ensureWorkspace` drops the corpse and retries once; the flag is re-judged against what ran (a real exit code, or a render) before any verdict reads it (`sandboxAvailability.ts`); all three readers covered | `aStaleHandleIsNotAnOutage.test.ts` |
+| RELEASE_GATE RED, "1 build-breaking blocker" | A sandbox-phase setup error counted as an app finding | Infra fact as an app blocker (4efab9d7's class) | `isAppFinding` excludes the `sandbox` phase by phase; `OUTCOME_SANDBOX_UNAVAILABLE` is process-only | same |
+| Treated as a shop: "cart, payments, accounts & addresses" added | `store` read out of `play.google.com/store/...` | A link read as words | `withoutUrls` in `stripNonDomainUses` (both requirement entry points, `namesBusinessDomain`, `domainOfPrompt`) and in `classify` | `theCircleToSearchAutopsy.test.ts` |
+| Six-feature app scored `translate`, 15, no second opinion | "screen translation" matched the translate verb list | A feature noun inside an app order read as the task | `summary` too; both yield when a build verb orders an app | same |
+| Missing microphone "repaired" into a fake "Demo Track" | The repair told to make the control "do what its label says" in a browser with no microphone | A repair that can only succeed by faking | Absent-device errors get an honest-state instruction; every finding forbids invented results; `NO_FAKED_RESULT_RULE` in the architect prompt, the fast lane and writing sub-agents (the first build had a fake recogniser and a `Math.random()` QR scan) | same |
+| Architect worked from "0 files" after the handoff | Only the timeout handoff carried `salvagedPaths`; the verify-failed one handed over nothing | Two handoff shapes, one carried the work | The verify-failed handoff carries its files and the compiler's errors | same |
+| Fast lane repair rounds 2–3 spent on TS2613 + five TS2686 | The free mechanical pass ran once, before the first model repair | A model repair reintroduces what grep fixes | The pass reruns after every kept repair; new free fix for a missing React import (both lanes, via `endgameDeterministicPass`) | same |
+| AIOverview duplicated (every import twice, two default exports) | `replace_symbol` put a whole file into one symbol's slot | An edit tool that can corrupt a file silently | The edit is refused when it would duplicate a name or a default export | same |
+| `npm install … @capacitor/haptics` ERESOLVE | A bare plugin resolved to 8.x against core 7 | Plugin versions not following the project major (the R3F/vitest class) | Pinned from the same command's core, else the project's range, else 7; also for the missing-import autofix | same |
+
+**Recorded, not changed:**
+- The iframe sandbox finding on WebView.tsx was reported but not fixed. On a green app the reviewer only
+  suggests (Green Stop, admin policy), and the fast lane's writes get no write-time security note.
+- GLM flashx timed out twice (75 s). Provider-side; the bench worked.
+- The AI overview shipped scripted and was disclosed. The architect had the gateway rule but inherited
+  the fast lane's file. The new no-faked-result rule reaches the fast lane.
+
+## 2026-09-30 — Autopsy 0bb437b4: "Make a racing game", Weak, 15.1 min — worked, but slowly and with guesses
+
+The game rendered and was billed ₹247.16. The struggle came from the engine, not the game: 96 s in a fast
+lane that cannot build games, a sub-agent guessing at library APIs for five minutes (it edited the
+platform's own `src/audio/melody.ts` four times to add methods it had invented), a reviewer that timed
+out looking for files by guessed paths, and a click explorer that found "nothing safe to press".
+
+**Ledger:**
+
+| Problem | Root cause | Class | Siblings found and fixed | Test |
+|---|---|---|---|---|
+| Fast lane: five generic files planned, 96 s, nothing written | The lane cannot call recipes; the full builder's prompt requires them for every game | A lane routed work it has no tool for | `fastLaneSkipsGame` on the platform's own domain classifier; `FAST_LANE_SKIPPED_GAME` process-only; `AGENTV3_FASTLANE_GAMES=on` reverts | `theRacingGameAutopsy.test.ts` |
+| 11 invented members (`playCue`, `attach`, `{ volume }`), six rounds, library edited | The compiler says what is wrong, never what is right; nothing named the type's real members | A guess answered only with "wrong" | `typeMembers.ts`: TS2339/2551/2353 errors → the declaring file's public members, found through the file's relative imports (≤6 reads), handed back with every typechecked write; a recipe library is named as not to edit | same |
+| Reviewer guessed `src/components/RaceGame.tsx` and three more, timed out | The instruction showed the first 20 tree entries — all library files | A capped list cut the part that mattered | `reviewFileList`: changed files first, 60 shown, the rest counted | same |
+| Explorer: "nothing safe to press" on a game with a Start button | `.nb-game-btn` pulses for ever; Playwright waits for a stable element | An instrument that cannot touch a moving control | Reduced motion on every lane from ONE definition (`BROWSER_PAGE_OPTIONS`: explorer, page check, journey both signed in and on sign-in routes, sign-in explorer); a same-element dispatch only for "not stable"; a census test fails on a new lane without it | same |
+| `.nb-hud` shipped unstyled, healed after the build (55 s) | The write-time note listed app classes; for a game it never named `.nb-game-hud` | Advice that does not name the right answer | `nearestKitClass` names the kit class carrying every word of the invented one (a tie names nothing); the note lists game classes too | same |
+
+**Recorded, not changed:**
+- `UNFINISHED_BUILD_RESUMED` after what may have been a question: the reply is truncated in the report, so
+  it cannot be checked. `decideUnfinishedResume` already stands down on `turnAskedTheUser`.
+- ETA 2–4 min vs 15.1 min actual. The fleet ETA had no past game builds to read; the estimate will improve
+  as games are recorded, not by a constant.
+- GLM crawled at the start (provider-side). The throughput bench benched it as designed.
 
 ## 2026-09-30 — The Gita reader template carries the whole Gita (admin: "haan, poori Gita ke 700 shloka daal do")
 

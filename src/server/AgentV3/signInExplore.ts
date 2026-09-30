@@ -195,7 +195,7 @@ async function attempt(page, cand) {
 
 const browser = await chromium.launch({ args: ['--no-sandbox'] });
 try {
-  const ctx = await browser.newContext();
+  const ctx = await browser.newContext(${JSON.stringify(BROWSER_PAGE_OPTIONS)});
   const page = await ctx.newPage();
   page.on('dialog', (d) => d.dismiss().catch(() => {}));
   let signed = false;
@@ -243,8 +243,18 @@ try {
  * scripts interpolate this so the session is used the same way everywhere. PURE.
  */
 export function newPageOptionsExpr(storageState: string | null | undefined): string {
-  return storageState ? JSON.stringify({ storageState }) : '{}';
+  return JSON.stringify(storageState ? { ...BROWSER_PAGE_OPTIONS, storageState } : BROWSER_PAGE_OPTIONS);
 }
+
+/**
+ * Every page our in-sandbox browsers open asks for REDUCED MOTION (autopsy 0bb437b4, 2026-09-30).
+ * The design kit's game button pulses for ever (`.nb-game-btn` → `nb-pulse … infinite`), and
+ * Playwright presses only an element that has stopped moving — so "Start Race" timed out after four
+ * seconds on every attempt and the explorer reported the app as having "nothing safe to press". The
+ * kit already honours `prefers-reduced-motion` (animations end after one 0.01ms run), so asking for it
+ * settles the page without changing what the app shows or does. One definition, every lane.
+ */
+export const BROWSER_PAGE_OPTIONS: Readonly<{ reducedMotion: 'reduce' }> = Object.freeze({ reducedMotion: 'reduce' });
 
 /** A route that IS the sign-in page — a signed-in session would only be redirected away from it. */
 export function isSignInRoute(route: string): boolean {

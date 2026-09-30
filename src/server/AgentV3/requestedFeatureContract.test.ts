@@ -95,7 +95,7 @@ describe('the contract actually reaches the builder', () => {
   const route = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
 
   it('is prepended to the build prompt', () => {
-    const block = sectionUntil(route, 'renderRequestedFeatureContract(confirmedContractLabels(featureLists, featureConfirmation))', '\n\n  ');
+    const block = sectionUntil(route, 'renderRequestedFeatureContract(confirmedContractLabels(featureLists, featureConfirmation), prompt)', '\n\n  ');
     expect(block).toContain('buildPrompt = `${contract}');
   });
 

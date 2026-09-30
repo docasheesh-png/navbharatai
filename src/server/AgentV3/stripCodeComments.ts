@@ -60,3 +60,31 @@ export function stripCodeComments(source: string): string {
     .replace(/\/\*[\s\S]*?\*\//g, blank)
     .replace(/(^|[^:])\/\/[^\n]*/g, (match, prefix: string) => prefix + blank(match.slice(prefix.length)));
 }
+
+/**
+ * Blank every comment a MARKUP scanner could mistake for markup, keeping length and lines (autopsy
+ * 4541f1cf, 2026-09-30).
+ *
+ * 🔴 THE DEFECT. The accessibility and design linters read the words INSIDE comments as tags. Two
+ * comments in our own templates were enough to put a false finding on every one of the 40 golden
+ * scaffolds: `// data-theme on <html> pins the app…` in `src/theme.tsx` was read as an `<html>` with no
+ * `lang`, and `/* The picture: a real <img>… *​/` in the design kit's CSS was read as an image with no
+ * `alt` — which cost every app built after it 8 points of its accessibility score. A comment is never
+ * shipped to a screen reader; no rule about the screen may read one.
+ *
+ * Differs from `stripCodeComments` in two places, both because markup is the input here:
+ *   • `<!-- … -->` is blanked too (an HTML comment hides tags as surely as a JS one).
+ *   • A `//` counts as a line comment only after a line start, whitespace or `;{}` — never after a
+ *     quote, a `(` or a `:`. So `src="//cdn…"`, `url(//…)` and `https://…` stay intact: stripping the
+ *     rest of THAT line would delete real tags, and an unseen `<img>` is a missed finding.
+ *
+ * Pure. Idempotent. Never applied to security scanning (a key in a comment is still a leaked key).
+ */
+export function stripCommentsForMarkup(source: string): string {
+  const src = typeof source === 'string' ? source : '';
+  if (!src) return '';
+  return src
+    .replace(/<!--[\s\S]*?-->/g, blank)
+    .replace(/\/\*[\s\S]*?\*\//g, blank)
+    .replace(/(^|[\s;{}])\/\/[^\n]*/gm, (match, prefix: string) => prefix + blank(match.slice(prefix.length)));
+}

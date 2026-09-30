@@ -35,7 +35,7 @@
 // PURE: no clock, no environment, no I/O. Every rule here is unit-testable and cannot lie.
 
 import { realProviderCostUsd, type ProviderCostEntry } from './providerRates';
-import { NO_BARREN_PHASES, type BarrenPhases } from './billingPhase';
+import { NO_BARREN_PHASES, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, type BarrenPhases } from './billingPhase';
 
 /** The token counts of one turn, in the shape the ledger and the rate card both already use. */
 export interface UnbilledTokens {
@@ -189,3 +189,36 @@ export function abandonedTurnUsage(err: unknown): AbandonedTurn | null {
   if (!usage || typeof usage !== 'object') return null;
   return { usage, ...(typeof model === 'string' && model ? { model } : {}) };
 }
+
+/**
+ * WHY the absorbed money produced nothing, in the words the admin report prints (autopsy 4541f1cf).
+ *
+ * 🔴 The report's detail used to say, unconditionally, that "model turns spent their whole output
+ * budget without producing any text or tool call". In 4541f1cf not one turn had: the ₹5.62 was a
+ * post-build review that ran out of time and returned no suggestions — a BARREN PHASE, the other of
+ * the two rules `billableEntries` applies. A sentence that names the wrong cause sends the next
+ * autopsy to fix a rule that did not fire. This names the rules that actually contributed, read from
+ * the same entries and the same verdicts the bill was priced from. PURE.
+ */
+export function absorbedWorkDetail(
+  entries: readonly UnbilledAwareEntry[],
+  barrenPhases: BarrenPhases = NO_BARREN_PHASES,
+): string {
+  const phases = new Set<string>();
+  let starved = false;
+  for (const e of Array.isArray(entries) ? entries : []) {
+    const spent = clean(e.usage?.inputTokens) + clean(e.usage?.outputTokens);
+    if (e.phase && barrenPhases.has(e.phase)) { if (spent > 0) phases.add(e.phase); continue; }
+    if (e.unbilled && clean(e.unbilled.inputTokens) + clean(e.unbilled.outputTokens) > 0) starved = true;
+  }
+  const causes: string[] = [];
+  for (const p of [...phases].sort()) causes.push(PHASE_WORDS[p] ?? `the "${p}" pass delivered nothing the build kept`);
+  if (starved) causes.push('one or more model turns produced no text and no tool call (a starved or abandoned turn)');
+  return causes.length ? causes.join('; ') : 'no cause could be attributed from the ledger';
+}
+
+/** The report's words for each barren phase that `billingPhase.ts` names. */
+const PHASE_WORDS: Record<string, string> = {
+  [PHASE_POST_BUILD_REVIEW]: 'the post-build review delivered no findings (it ran out of time, or its result could not be read)',
+  [PHASE_EXPLORER_REPAIR]: 'a button repair was undone, so the app kept nothing it wrote',
+};

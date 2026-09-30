@@ -1,6 +1,6 @@
 import { draftAfterFailedSend } from '../../lib/draftAfterSend';
 import { useState, useEffect, useRef } from 'react';
-import { imageAllowanceLine } from '../../lib/imageAllowanceLine';
+import { imageTierLine, paidCanAnswer, type ImageTier } from '../../lib/imageAllowanceLine';
 import { ComposerShell, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_TEXTAREA_CLASS } from '../chat/ComposerShell';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
@@ -200,6 +200,13 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
   // Free pictures left today, as the server counted them on the last delivered picture (2026-09-30:
   // 5 free a day, then ₹1 each). Null until the server has said — the header then shows the rule.
   const [freeLeft, setFreeLeft] = useState<number | null>(null);
+  // FREE or PAID (admin 2026-09-30: "free + paid dono"). Every visit opens on Free and the choice is
+  // not remembered: a remembered Paid is a charge the user did not decide on this visit (the rule
+  // the old Pro toggle settled on 2026-09-22).
+  const [tier, setTier] = useState<ImageTier>('free');
+  // The server's code for a failure Paid mode can answer (`free_busy`, `needs_paid`), so the error
+  // card can offer the switch. Empty for every other failure.
+  const [errorCode, setErrorCode] = useState('');
   // The countdown shown while the browser waits out the provider's rate limit. Blank the rest of
   // the time. A visible wait is the difference between "busy" and "broken" — the blank-screen
   // failure this repo already root-caused once on the chat path.
@@ -260,7 +267,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
   // limit is counted on what is SENT — the type and tint wrapped around the words included.
   const promptLimit = imagePromptLimit(prompt.trim(), buildEffectivePrompt());
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (tierNow: ImageTier = tier) => {
     const effectivePrompt = buildEffectivePrompt();
     // A picture on its own IS a request ("re-render this"), so words are required only without one.
     if ((!effectivePrompt.trim() && !reference) || isLoading || promptLimit.over) return;
@@ -270,6 +277,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
     setImageError(false);
     setBalanceBlock('');
     setErrorMsg('');
+    setErrorCode('');
     setCraftNotes([]);
     // The user's message lands in the thread BEFORE the request goes out, so the press is visibly
     // answered even while nothing has come back yet.
@@ -303,6 +311,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
         // this into an edit on the server, which skips the art-direction layer and the free
         // provider (neither of which can serve a picture that exists only inside this request).
         ...(reference ? { initImage: reference.dataUrl } : {}),
+        tier: tierNow,
       };
       const res = await fetch('/api/image/generate', { method: 'POST', headers, body: JSON.stringify(requestBody) });
       const data = await res.json().catch(() => null);
@@ -316,6 +325,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
         return;
       }
       if (!res.ok || !data) {
+        setErrorCode(paidCanAnswer(data));
         throw new Error((data && typeof data.error === 'string' && data.error)
           || 'Image generation failed — please try again.');
       }
@@ -361,6 +371,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
             return;
           }
           if (!fbRes.ok || !fb || typeof fb.image !== 'string') {
+            setErrorCode(paidCanAnswer(fb));
             throw new Error((fb && typeof fb.error === 'string' && fb.error)
               || got.error
               || 'Image generation failed — please try again.');
@@ -717,10 +728,28 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
         </div>
         <div className="min-w-0">
           <h2 className="font-semibold text-ink text-base truncate">Image Generator AI</h2>
-          <p className="text-xs text-faint truncate">{imageAllowanceLine(freeLeft)}</p>
+          <p className="text-xs text-faint truncate">{imageTierLine(tier, freeLeft)}</p>
         </div>
         <div className="ml-auto flex items-center gap-2 shrink-0">
           <span className="hidden sm:inline text-[10px] bg-violet-500/20 text-accent-text px-2 py-1 rounded-full border border-violet-500/30">NavBharatAI</span>
+          {/* FREE / PAID (admin 2026-09-30). Both are always one press away, and every visit opens on
+              Free: the only default that cannot spend somebody's balance by being forgotten. */}
+          <div role="tablist" aria-label="Image mode" className="flex items-center bg-well border border-line rounded-full p-0.5">
+            {(['free', 'paid'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={tier === t}
+                onClick={() => { setTier(t); setErrorCode(''); }}
+                className={`text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full transition-colors ${
+                  tier === t ? 'bg-accent text-on-accent' : 'text-muted hover:text-body'
+                }`}
+              >
+                {t === 'free' ? 'Free' : 'Paid'}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -922,13 +951,26 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
                   <p className="text-xs text-danger leading-relaxed">
                     {errorMsg || 'Image could not be generated. Retry or change the prompt.'}
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => void handleGenerate()}
-                    className="text-[11px] font-semibold text-accent-text hover:underline"
-                  >
-                    Try again
-                  </button>
+                  <div className="flex items-center gap-4">
+                    {/* The free engine was too busy, or this needs Paid mode: one press switches and
+                        sends the same request again, so the user never retypes it. */}
+                    {errorCode && tier === 'free' && (
+                      <button
+                        type="button"
+                        onClick={() => { setTier('paid'); void handleGenerate('paid'); }}
+                        className="text-[11px] font-semibold text-accent-text hover:underline"
+                      >
+                        Switch to Paid
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void handleGenerate()}
+                      className="text-[11px] font-semibold text-accent-text hover:underline"
+                    >
+                      Try again
+                    </button>
+                  </div>
                 </div>
               )}
 

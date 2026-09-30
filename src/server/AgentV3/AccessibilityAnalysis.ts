@@ -12,6 +12,7 @@
 // false positives.
 
 import { tagsOnLine, hasAttrOrBareBoolean } from './jsxTags';
+import { stripCommentsForMarkup } from './stripCodeComments';
 
 export type AccessibilitySeverity = 'high' | 'medium' | 'low';
 
@@ -124,7 +125,9 @@ const IMPLICIT_ROLE: Record<string, string> = {
 export function scanAccessibility(file: string, content: string): AccessibilityIssue[] {
   if (!FRONTEND_EXT.test(file) || SKIP_PATH.test(file)) return [];
   const issues: AccessibilityIssue[] = [];
-  const lines = content.split('\n');
+  // A tag in a comment is on no screen (autopsy 4541f1cf). Length- and line-preserving, so every
+  // reported line number is still the line in the user's file.
+  const lines = stripCommentsForMarkup(content).split('\n');
 
   // HOW MANY `<label>` ARE OPEN FROM EARLIER LINES (build c847b523, 2026-09-20). The wrapping-label
   // check below used to look only at the text BEFORE the control ON ITS OWN LINE, so the commonest

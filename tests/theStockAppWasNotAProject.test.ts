@@ -229,3 +229,19 @@ describe('7 · a stack we do not build is said out loud', () => {
     expect(ROUTE).toMatch(/unsupportedStackUserNote\(unsupportedStackAsked, framework\)/);
   });
 });
+
+describe('8 · the test-suite repair on a working app is verified or undone', () => {
+  it('runs in its own pass, on a snapshot, kept only if the suite passes AND the app renders', () => {
+    const at = ROUTE.indexOf("runInPass('vaccine-repair'");
+    expect(at).toBeGreaterThan(0);
+    const around = ROUTE.slice(at - 1500, at + 1800);
+    expect(around).toMatch(/if \(isGreenLatched\(workspaceId\)\) \{/);
+    expect(around).toMatch(/snapshot: async \(\) => snap,/);
+    expect(around).toMatch(/reverify: strictReverify\(/);
+    expect(around).toMatch(/parseTestOutcome\(plan, again\.exitCode, again\.stdout, again\.stderr\)\.ok/);
+    expect(around).toMatch(/analyzePreviewHtml\(shot\.html/);
+    expect(around).toMatch(/revert: revertToGreenSnapshot,/);
+    // …and an undone repair still reports the failing suite.
+    expect(around).toMatch(/gateEvidence\.tests = 'failed';/);
+  });
+});

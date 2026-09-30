@@ -20747,6 +20747,39 @@ async function noteBuildOutcome(
                 model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
+              // ON A WORKING APP THE REPAIR IS VERIFIED OR UNDONE (autopsy 8e124182). After the green latch
+              // this pass named nothing, so the freeze refused every edit — correctly, since nothing checked
+              // it — and a model told "fix the failing tests" then reached for the shell to get round it.
+              // Now it is a named, allowlisted pass ('vaccine-repair', never a .env and never a test file —
+              // greenFreeze.ts), run on a snapshot of the working app and KEPT ONLY IF the suite then passes
+              // with the same command AND the app still renders. Anything unproven goes back as it was.
+              if (isGreenLatched(workspaceId)) {
+                const snap = (await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string> }))).files;
+                if (Object.keys(snap).length === 0) break; // no net ⇒ no repair on a working app
+                let healedRun: Awaited<ReturnType<typeof vaxRunner.run>> | null = null;
+                const vr = await verifyAfterFix<Record<string, string>>({
+                  snapshot: async () => snap,
+                  apply: async () => { healedRun = await runInPass('vaccine-repair', () => vaxRunner.run(testOutcomeRepairPrompt(outcome))); },
+                  reverify: strictReverify(async () => {
+                    if (!healedRun?.ok) return false;
+                    const again = await withTimeout(actuator.runCommand!(workspaceId, withSandboxBrowsers(plan.command, plan.framework)), 180_000, 'vaccine-reverify');
+                    if (!parseTestOutcome(plan, again.exitCode, again.stdout, again.stderr).ok) return false;
+                    if (!lastPreviewUrl || !actuator.browseUrl) return true; // tests pass; no preview to re-open
+                    const shot = await withTimeout(actuator.browseUrl(workspaceId, lastPreviewUrl), 35_000, 'vaccine-render-check');
+                    const v = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
+                    return v.rendered && !v.inconclusive && !v.serverDown;
+                  }),
+                  revert: revertToGreenSnapshot,
+                });
+                try { buildDiag.record({ phase: 'readiness', ...verifyAfterFixNote('test-suite repair', vr) }); } catch { /* best-effort */ }
+                const kept = healedRun as Awaited<ReturnType<typeof vaxRunner.run>> | null;
+                if (vr.kept && kept?.ok) { result = adoptHealResult(result, kept); continue; }
+                // Undone (or never finished): the suite still fails as it did — say so, as the budget-out
+                // branch above does, instead of leaving the report silent about a real failing test.
+                gateEvidence.tests = 'failed';
+                buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'TEST_SUITE', message: outcome.summary + (outcome.failingTests.length ? ` — failing: ${outcome.failingTests.slice(0, 8).join(', ')}` : ''), autoResolved: false });
+                break;
+              }
               const healed = await vaxRunner.run(testOutcomeRepairPrompt(outcome));
               if (healed.ok) result = adoptHealResult(result, healed); else break;
             } catch (e) {

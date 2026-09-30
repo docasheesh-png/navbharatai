@@ -148,7 +148,8 @@ describe('the route wires it the only safe way', () => {
   it('ONE revert for every verifyAfterFix site, and it reconciles the captured writes', () => {
     expect(route.match(/'vaf-remove'/g)?.length).toBe(1);
     // Four since 2026-09-28: the explorer repair (explorerRepair.ts) is the fourth verifyAfterFix site, same helper.
-    expect(route.match(/revert: revertToGreenSnapshot,/g)?.length).toBe(4);
+    // Five since 2026-09-30: the test-suite repair on a green app (autopsy 8e124182), same helper.
+    expect(route.match(/revert: revertToGreenSnapshot,/g)?.length).toBe(5);
     const def = route.slice(route.indexOf('const revertToGreenSnapshot'), route.indexOf('const revertToGreenSnapshot') + 1200);
     expect(def).toContain('reconcileCapturedWrites(writtenFiles, plan)');
     // An empty snapshot is a failed read; restoring from it would delete the whole workspace.

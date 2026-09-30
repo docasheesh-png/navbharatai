@@ -102,6 +102,12 @@ export const ALLOWED_PASSES: ReadonlySet<string> = new Set([
   // works and nothing that worked broke (explorerRepair.ts). A model-driven edit to a working app, so it
   // carries the reviewer repair's restraints: an unproven result is undone, and no secret file, below.
   'explorer-repair',
+  // A TEST SUITE THE APP SHIPS THAT FAILS ON A WORKING APP (autopsy 8e124182, admin 2026-09-30: "baaki bhi
+  // fix karo"). It named no pass, so the freeze refused all of it and the model went round the freeze with
+  // the shell. Now it is verified: kept only if the suite then passes with the same command AND the app
+  // still renders, else undone (routes/agentv3.ts). It may never touch a secret file, and never a TEST file
+  // — "fix the source, do not weaken the test" is enforced here rather than merely asked for.
+  'vaccine-repair',
 ]);
 
 /**
@@ -150,6 +156,7 @@ const CREATE_ONLY_PASSES: ReadonlySet<string> = new Set([
  * has any business writing a `.env`, and a future entry to that set must not have to remember this.
  */
 const SECRET_FILE_DENIED_PASSES: ReadonlySet<string> = new Set([
+  'vaccine-repair',
   'reviewer-functional-repair',
   'explorer-repair',
   ...CREATE_ONLY_PASSES,
@@ -275,6 +282,7 @@ export function writeRefused(workspaceId: string, path: string, env: NodeJS.Proc
   if (isInfraPath(path)) return false;                // node_modules / build output — never app source
   const pass = currentPass();
   if (pass && SECRET_FILE_DENIED_PASSES.has(pass) && isSecretFilePath(path)) return true; // never the user's keys
+  if (pass === 'vaccine-repair' && /\.(?:test|spec)\.[cm]?[jt]sx?$/i.test(norm(path))) return true; // fix the source, never the test
   if (pass && ALLOWED_PASSES.has(pass)) return false; // the user's own request, or the restore itself
   // A create-only pass may add a file that was NOT there when the browser rendered, and nothing else.
   // Refused iff the path was present at green — which is the one question the latch can answer exactly.

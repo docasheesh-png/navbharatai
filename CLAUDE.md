@@ -2020,6 +2020,15 @@ the code (it is actually read somewhere) on 2026-07-11.
   check on the phone falls back to the web rules for signup/login/mobile on both the client and the server.
   Only the referral code and GitHub still need a device that can be checked. The phone also retries a
   transient Play Integrity failure (-3/-8/-9/-12/-17/-100) twice before reporting it.
+  ⏳ **THE CODE BOX CLOSES AFTER 3 APP OPENS OR 7 DAYS (admin 2026-09-30: *"4rth time … input box gayab
+  ho jaye … missed (❌)"*; 30-minute rule and 7-day backstop approved, choice "b" for existing accounts).**
+  No env key — `CODE_WINDOW_OPENS` / `OPEN_GAP_MS` / `CODE_WINDOW_DAYS` in `src/server/lib/referralCodeWindow.ts`.
+  🔒 Counted on the SERVER, on the account, by the app's own status read (`GET /api/referral/:uid`, app only —
+  the website never spends a chance), so every installed build is covered without a new `.aab`; opens inside
+  30 min of the last counted one are one open. The 7-day backstop (Firebase `creationTime`) bounds an app that
+  never reports. `/redeem` refuses with `code-window-closed`. A missed row is sent only to a client that asks
+  (`missed=1`) — an older build would draw it as ₹100 still waiting — and is ❌ with no button, never counted
+  as pending. A code applied in time keeps its ₹100.
 - **The referral welcome gift — four earned steps (built 2026-09-15, NOT live yet):**
   `REFERRAL_REWARDS` (the master switch — ⚠️ **UNSET, and unset means today's behaviour exactly**:
   no code is minted, no money moves, and not one document is written). Tunables, all with working

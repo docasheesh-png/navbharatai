@@ -48,6 +48,11 @@ export interface ReferralProgress {
   referred: boolean;
   /** True while this account may still apply a code (the app only; never on the website). */
   canRedeem: boolean;
+  /**
+   * How many more app opens may still apply a code, while one can (admin 2026-09-30: the box is gone
+   * from the fourth open, or after seven days). null when the box is not offered.
+   */
+  codeOpensLeft: number | null;
   /** The website's own ceiling (₹200), or null in the app. */
   webCapRupees: number | null;
   /** What the account has actually verified, so a row can say what is missing. Server's answer. */
@@ -59,7 +64,7 @@ export interface ReferralProgress {
 
 const EMPTY: ReferralProgress = {
   enabled: false, surface: 'web', code: null, shareMessage: '', rows: [],
-  earnedRupees: 0, capRupees: 0, capReached: false, referred: false, canRedeem: false, webCapRupees: null,
+  earnedRupees: 0, capRupees: 0, capReached: false, referred: false, canRedeem: false, codeOpensLeft: null, webCapRupees: null,
   emailVerified: false, phoneVerified: false, githubLinked: false, loading: false,
 };
 
@@ -112,7 +117,9 @@ export function useReferralProgress(userId: string | null | undefined): Referral
       try {
         // A RELATIVE path on purpose: `installNativeApiRewrite` (lib/apiBase.ts) already rewrites every
         // /api call in the native shell to the production origin.
-        const res = await fetch(`/api/referral/${encodeURIComponent(userId)}?platform=${surface}`, {
+        // `missed=1` says this build can draw a ❌ row; an older build never sends it, and the server then
+        // leaves a missed row out rather than let that build show it as ₹100 still waiting.
+        const res = await fetch(`/api/referral/${encodeURIComponent(userId)}?platform=${surface}&missed=1`, {
           headers: await authedHeaders(),
         });
         const data = await res.json().catch(() => null);
@@ -129,6 +136,7 @@ export function useReferralProgress(userId: string | null | undefined): Referral
           capReached: data.capReached === true,
           referred: data.referred === true,
           canRedeem: data.canRedeem === true,
+          codeOpensLeft: Number.isInteger(data.codeOpensLeft) && data.codeOpensLeft >= 0 ? data.codeOpensLeft : null,
           webCapRupees: Number.isFinite(Number(data.webCapRupees)) && data.webCapRupees !== null
             ? Number(data.webCapRupees) : null,
           emailVerified: data.emailVerified === true,
@@ -155,4 +163,33 @@ export function useReferralProgress(userId: string | null | undefined): Referral
   }, [userId, tick]);
 
   return { ...state, refresh };
+}
+
+/**
+ * Ask again when the app comes back to the foreground (admin 2026-09-30).
+ *
+ * The server counts app opens for the referral-code window from this very status read, folding anything
+ * inside 30 minutes into one open. A phone that keeps NavBharatAI in the background never cold-starts it,
+ * so without this a person who opens the app every day could be counted once a week. One caller only (the
+ * App shell) — every screen asking on resume would be three requests for the same open.
+ */
+export function useRefreshReferralOnResume(refresh: () => void, enabled: boolean): void {
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let alive = true;
+    let remove: (() => void) | null = null;
+    void (async () => {
+      try {
+        const { Capacitor } = await import('@capacitor/core');
+        if (!Capacitor.isNativePlatform()) return;
+        const { App } = await import('@capacitor/app');
+        const handle = await App.addListener('appStateChange', ({ isActive }: { isActive: boolean }) => {
+          if (isActive) refresh();
+        });
+        if (!alive) { void handle.remove(); return; }
+        remove = () => { void handle.remove(); };
+      } catch { /* not native, or the plugin is absent — a cold start still counts */ }
+    })();
+    return () => { alive = false; remove?.(); };
+  }, [refresh, enabled]);
 }

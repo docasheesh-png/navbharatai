@@ -530,6 +530,7 @@ export function BillingPanel(props: BillingPanelProps) {
                   referred={referral.referred}
                   surface={referral.surface}
                   canRedeem={referral.canRedeem}
+                  codeOpensLeft={referral.codeOpensLeft}
                   webCapRupees={referral.webCapRupees}
                   emailVerified={referral.emailVerified}
                   phoneVerified={referral.phoneVerified}

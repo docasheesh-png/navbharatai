@@ -85775,3 +85775,41 @@ contract may not be worth a model call. This is not decided here.
 - **Open, honestly:** `@firebase/firestore` upstream still declares `~1.9.0`; when Firebase moves its own range the
   override becomes redundant and should be removed (re-check on the next `firebase` bump). The three pre-existing
   allowlisted highs (`axios`, `brace-expansion`, `undici`) are unchanged.
+
+## 2026-09-30 — Autopsy 9762f589: "sirf sample file bana o sales ki city wise jisme only 10 employees ho" (Weak)
+
+The report was taken while the build was still running (minute 7). The conversation had asked "Excel file
+bana sakte ho?", so what the user wanted was a sample Excel file. The engine planned and built a 13-file
+React dashboard instead.
+
+**Tally:**
+- ✅ Self-healed (3):
+  - 4 unused imports removed by the deterministic pass.
+  - 2 import issues fixed before the preview.
+  - A truncated repair was continued.
+- 🔀 Worked around (1): GLM `glm-4.7-flashx` crawled and was benched after 44 s, so the ladder moved on.
+- ⏭️ Skipped (0).
+- ❌ Open at report time (2):
+  - 5 tsc errors: a nonexistent `./components` barrel, and two self-imports made by repair passes.
+  - The deliverable was an app, but the user asked for a file.
+- 🥵 Struggle (4):
+  - Three repair passes. Pass 2 made things worse: it invented `./components` and `./App.css`.
+  - Pass 3 rewrote several files in one answer, took 112 s and hit the 8,000-token ceiling.
+  - Its continuation crawled.
+  - The ETA said "~59s to go" at minute 6, and the build was still running at minute 7.
+
+| Problem | Root cause | Class | Siblings | Locked by |
+|---|---|---|---|---|
+| Two homes for the same helpers (`src/utils/sales.ts` planned, `src/utils.ts` added) with different signatures | `utilOwnerFor` (876afca9) only matched a purpose that NAMES a helper, or a `utils.ts` in the contract's folder | A symbol's home found by exact name only | The sales file was in `utils/`, outside the contract folder | `helperModuleByWords` (≥ 2 shared stems, plain modules only) |
+| `interface CitySummary` beside `CitySummary.tsx` → TS2865, then a self-import from the repair | The prompt rule (121c2431) is persuasion; the model broke it a second time | A rule the model can ignore | Every type/component name pair | `separateTypeFromComponentNames` (by construction, before file one) + `fixTypeImportValueClash` (deterministic net, both lanes) |
+
+Tests: `tests/theSalesSampleHadTwoHelperHomes.test.ts`, reversion-proven for all three fixes.
+
+**Still open:**
+- **A request for a FILE (Excel / CSV / sample data) has no deliverable.** AgentV3 can only build apps, and
+  nothing hands the user a downloadable file. The server already writes real `.xlsx` files with `exceljs`
+  (`routes/export.ts`), so building this is a product decision. Put to the admin; not built here.
+- The fast lane's plan regenerated `package.json` (vite ^6), `tsconfig.json` (added `noUnusedLocals`) and
+  `vite.config.ts` over the scaffold's own. That caused the TS6133s (fixed for free) and a 16 s `npm install`
+  at the first `tsc`. These files are editable on purpose, because apps add dependencies. Whether the plan may
+  REWRITE them wholesale is not decided here.

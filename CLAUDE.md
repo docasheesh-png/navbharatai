@@ -3438,9 +3438,21 @@ the flag entries above promise.
   without restyling — EXACTLY as the old file had it, tuned palette included — appended after the
   model's own content, which is never altered. A class the rewrite restyles is the model's. The model is
   told in the tool result; the architect prompt now says never to replace `src/index.css` wholesale.
-  Admin line `DESIGN_KIT_KEPT` (sub-agents count into it). ⚠️ `edit_file` is not guarded — a targeted
-  edit that deletes kit rules is caught after the build by the restore. Test-locked and reversion-proven
-  in `tests/theStylesheetKeepsItsKit.test.ts`.
+  Admin line `DESIGN_KIT_KEPT` (sub-agents count into it). ~~`edit_file` is not guarded~~ — **it is
+  since 2026-09-30**: an edit that cuts kit rules out keeps them the same way. Test-locked and
+  reversion-proven in `tests/theStylesheetKeepsItsKit.test.ts` and
+  `tests/aStaleCopyCannotRunInsteadOfTheBuild.test.ts`.
+  🪞 **`AGENTV3_SHADOW_TWIN` — A STALE COPY OF A MODULE CANNOT RUN INSTEAD OF THE BUILD'S OWN (same
+  autopsy, 2026-09-30). ⚠️ NOT set; default ON; `off` removes nothing.** `shadowTwin.ts`. The sandbox
+  came up warm on a resumed id with the durable store EMPTY, and an earlier never-saved attempt had left
+  `.js` copies of every module (`AuthContext.js` beside the new `AuthContext.tsx`). Imports are
+  extensionless and Vite tries `.mjs, .js, .mts, .ts, .jsx, .tsx` in that order, so the OLD copy ran and
+  the build's file was dead. Now, at the write door (`write_file`, `write_files_batch`, `edit_file`;
+  sub-agents share it), a same-named file in the same directory that resolves EARLIER and that this build
+  did NOT write is removed (`rm -f`, confirmed by a read), the model is told, the durable store forgets it
+  after the run, and the report says `SHADOW_TWIN_REMOVED`. 🔒 Unknown authorship ⇒ nothing is removed;
+  a twin the build wrote itself is never touched; a `.d.ts` is never a twin; a later-resolving twin stays
+  (it cannot shadow). One sandbox listing per dispatcher, reused.
 - **⏯️ `AGENTV3_UNFINISHED_RESUME` — A BUILD THAT STOPPED TALKING IS NOT A BUILD THAT FINISHED (autopsy
   121c2431, 2026-09-26). ⚠️ NOT set, and the code default is ON**; `off` restores the old ending exactly.
   Read by `src/server/AgentV3/unfinishedResume.ts`; applied in `AgentRunner`'s readiness gate.

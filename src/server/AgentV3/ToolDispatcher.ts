@@ -2717,10 +2717,18 @@ export class ToolDispatcher {
   private noteCompileOutput(output: string): void {
     try { if (tscOutputProvesClean(output)) getWorkspaceMemory(this.workspaceId).markTscClean(); }
     catch { /* audit best-effort */ }
-    // The latest compile's own verdict, whoever ran it — see `lastKnownTypeErrors`.
+    this.noteTypeErrorCount(output);
+  }
+
+  /**
+   * The latest compile's own verdict, whoever ran it — see `lastKnownTypeErrors`. `failuresOnly` is for a
+   * compile whose exit code already said it failed: its output may not parse (a bare `TS2304` on stderr),
+   * so it may RAISE the count but never set it to clean.
+   */
+  private noteTypeErrorCount(output: string, failuresOnly = false): void {
     try {
       const v = tscVerdict(output);
-      if (v === 'passed') this._lastTypeErrors = 0;
+      if (v === 'passed' && !failuresOnly) this._lastTypeErrors = 0;
       else if (v === 'failed') this._lastTypeErrors = Math.max(1, countTscErrors(output));
     } catch { /* a reading, never a failure */ }
   }
@@ -4362,9 +4370,10 @@ export class ToolDispatcher {
         }
         // Read from the OUTPUT, never the exit code: `tsc --noEmit 2>&1 | head -40` exits with head's 0
         // whether or not tsc failed, and that used to be recorded as "TypeScript already checked CLEAN".
-        // Every typecheck is noted, whatever its exit code — `noteCompileOutput` marks CLEAN only on proof,
-        // and a failed compile is exactly what `lastKnownTypeErrors` must hear about.
-        if (looksLikeTypecheckCommand(command)) this.noteCompileOutput(`${stdout}\n${stderr}`);
+        if (looksLikeTypecheckCommand(command) && exitCode === 0) this.noteCompileOutput(`${stdout}\n${stderr}`);
+        // A compile whose exit code already said it failed still tells the done check it has errors
+        // (autopsy 33812996) — it can never mark anything clean.
+        if (looksLikeTypecheckCommand(command) && exitCode !== 0) this.noteTypeErrorCount(`${stdout}\n${stderr}`, true);
         return out;
       }
 

@@ -188,6 +188,67 @@ export function appHasNoDataEntry(files: Record<string, string>): boolean {
 }
 
 /**
+ * The sentence for an app whose only inputs narrow what it already shows.
+ *
+ * A constant for the same reason as `NO_DATA_ENTRY_REASON`: it is reached from the derivation's
+ * explanation and it names the case the release gate reports as `none-derivable`.
+ */
+export const LOOKUP_ONLY_REASON =
+  'this app only looks things up — its inputs (a search box, a sort or a filter) change what is shown, '
+  + 'and it has no button, form or storage that saves anything, so there is no save-and-reload journey to prove';
+
+const APP_SOURCE_FILE = /\.(?:tsx|jsx|ts|js|mjs|vue|svelte|html)$/i;
+/** Test suites, build config, static assets and our own service worker are not the app's UI. */
+const NOT_APP_UI = /(?:^|\/)(?:e2e|tests?|__tests__|public|node_modules|dist|build)\/|\.(?:test|spec)\.[a-z]+$|(?:^|\/)[\w.-]+\.config\.[a-z]+$|\.d\.ts$/i;
+/** The scaffold's error screen carries a "try again" button that saves nothing. */
+const ERROR_BOUNDARY_FILE = /(?:^|\/)ErrorBoundary\.(?:tsx|jsx|ts|js)$/;
+const SAVE_ACTION: readonly RegExp[] = [
+  /<(?:form|textarea|button)\b/i,
+  /<(?:Form|Textarea|TextField|Button|IconButton)\b/,
+  /role\s*=\s*["']button/i,
+  /type\s*=\s*["']submit/i,
+  /\bon(?:Submit|Click|DoubleClick|KeyDown|KeyUp|KeyPress|Blur|Drop|PointerDown|MouseDown|TouchStart)\s*=/,
+  /\bcontentEditable\b/i,
+  /\b(?:localStorage|sessionStorage|indexedDB|IDBDatabase|FormData|sendBeacon)\b/,
+  /method\s*:\s*["'](?:POST|PUT|PATCH|DELETE)/i,
+  /\.(?:insert|upsert|update|delete|post|put|patch)\s*\(/,
+  /\b(?:addDoc|setDoc|updateDoc|deleteDoc)\b/,
+];
+
+/**
+ * True when every input the app has only narrows what it shows — a search box over a fixed list, a
+ * sort, a filter — and nothing anywhere can take a record from the user and keep it.
+ *
+ * 🔴 WHY (autopsy ee0e6de5, 2026-09-30). "The world's countries and their capitals" is a table with a
+ * search box and an A–Z/Z–A sort, and its own summary said *"a static information app, no database,
+ * no API"*. `appHasNoDataEntry` sees the `<input>` and the `onChange`, so it answers false, and the
+ * release gate reported YELLOW with *"whether it actually SAVES anything is untested"* about an app
+ * that has nothing to save. The same report told the user the fields needed a `name` and a label for
+ * the check to work, when there was no save for any check to prove.
+ *
+ * 🔒 CONSERVATIVE, THE SAME WAY `appHasNoDataEntry` IS. It needs at least one input or select that a
+ * change handler listens to, and it
+ * answers false on ANY sign of a way to save: a button, a form, a submit, a click or key handler, an
+ * editable surface, browser storage, or a write call to a server or database. A to-do list that adds
+ * on Enter, or an app that loses its data on reload, therefore still reads as a data app, and its
+ * missing journey is still a gap. The worst a wrong `true` can do is change the WORDING of a YELLOW:
+ * `none-derivable` can never earn GREEN. Pure.
+ */
+export function appOnlyShowsWhatItHolds(files: Record<string, string>): boolean {
+  let sawControl = false;
+  let sawNarrowing = false;
+  for (const [path, src] of Object.entries(files ?? {})) {
+    if (!src || !APP_SOURCE_FILE.test(path) || NOT_APP_UI.test(path) || ERROR_BOUNDARY_FILE.test(path)) continue;
+    if (SAVE_ACTION.some((re) => re.test(src))) return false;
+    if (/<(?:input|select)\b/i.test(src) || /<(?:Input|Select)\b/.test(src)) sawControl = true;
+    if (/\bon(?:Change|Input)\s*=/.test(src)) sawNarrowing = true;
+  }
+  // A control nothing listens to is not a filter; it is an unwired field, and the remedy sentence for
+  // an unaddressable form is the right one for it.
+  return sawControl && sawNarrowing;
+}
+
+/**
  * How to address this input, or null when it carries nothing we can honestly select it by.
  *
  * The order is deliberate: a `data-testid` is a promise the author made to tests, a `name` is what the
@@ -794,8 +855,16 @@ export function noJourneyReason(files: Record<string, string>): string {
     // than `formSourcesFor` looks (the real defect this sentence is for) still gets the form wording.
     // Only an app with a render surface and no data entry anywhere reads as a game.
     if (hasRenderSurface(files ?? {}) && appHasNoDataEntry(files ?? {})) return NO_DATA_ENTRY_REASON;
+    if (appOnlyShowsWhatItHolds(files ?? {})) return LOOKUP_ONLY_REASON;
     return 'this app has no form for a journey to fill in — nothing here takes user input';
   }
+  // 🔗 THE MOST SPECIFIC TRUE REASON FIRST (autopsies ee0e6de5 and 2d076ce8 met at merge, 2026-09-30).
+  // A pure lookup app — a search box or a filter, and NOTHING anywhere that saves — is answered here,
+  // before the per-form sentence below, which is right only when some save exists elsewhere (an
+  // autosave, a key handler); the gate reads the same predicate as `none-derivable`, so the sentence
+  // and the verdict agree. Also checked before the remedy at the end, which is only true of an app
+  // that has a save to prove.
+  if (appOnlyShowsWhatItHolds(files ?? {})) return LOOKUP_ONLY_REASON;
   // 🔴 AN ADDRESSABLE FIELD WITH NOTHING TO SUBMIT IS NOT AN UNADDRESSABLE FIELD (autopsy 2d076ce8,
   // 2026-09-30). A Bhagavad Gita reader's only input is a live search box — `id="q"`, a real
   // `<label htmlFor="q">` — that filters as you type and has no submit step. `deriveJourneys` skipped it

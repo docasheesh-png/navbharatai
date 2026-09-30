@@ -140,13 +140,22 @@ export const LONG_RUN_BUDGET_SHARE = 0.6;
  * with no limit is never told about a limit that does not exist. Past the cap it also falls back:
  * a negative remainder is not a number worth inventing a phrase for.
  */
-export function unevidencedEtaTickLine(elapsedMs: number, budgetMs?: number, roughBand?: string | null): string {
+export function unevidencedEtaTickLine(
+  elapsedMs: number, budgetMs?: number, roughBand?: string | null, roughHighMs?: number | null,
+): string {
   const elapsed = Math.max(0, Number(elapsedMs) || 0);
   const inTxt = formatEta(elapsed).replace('~', '');
+  // 🔴 A GUESS THE BUILD HAS ALREADY OUTRUN IS NOT REPEATED (autopsy ee0e6de5, 2026-09-30). The tick
+  // read *"6 min in · rough estimate ~2–4 min"* — the band restated two minutes after it was passed,
+  // as if it were still a forecast. Past the band's top, the line says the guess was too low instead.
+  const high = Number(roughHighMs);
+  const outrun = !!roughBand && Number.isFinite(high) && high > 0 && elapsed > high;
   // The rough band rides the tick too (admin 2026-09-26), still labelled; without one, the phase.
-  const sizing = roughBand
-    ? `rough estimate ${roughBand} (${ROUGH_ESTIMATE_LABEL}) — I'll show a measured time as soon as I have one`
-    : 'still working out how big this one is — I\'ll show a time as soon as I can measure it';
+  const sizing = outrun
+    ? `past my rough estimate of ${roughBand}, which was a guess and was too low for this one`
+    : roughBand
+      ? `rough estimate ${roughBand} (${ROUGH_ESTIMATE_LABEL}) — I'll show a measured time as soon as I have one`
+      : 'still working out how big this one is — I\'ll show a time as soon as I can measure it';
   const plain = `⏱️ Still building… ${inTxt} in · ${sizing}, and tell you the moment it's done.`;
   const budget = Number(budgetMs);
   if (!Number.isFinite(budget) || budget <= 0 || elapsed >= budget) return plain;

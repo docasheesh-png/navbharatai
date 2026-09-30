@@ -95,6 +95,18 @@ export interface RuntimeEvidence {
   testSuiteIsOurStarter?: boolean;
 
   /**
+   * Did the page-render check find NO separate routes to load?
+   *
+   * The `previewUrlPublished` sibling, for the pages line (autopsy ee0e6de5). A one-screen countries
+   * table was told *"its individual page routes were never render-checked here"* — true of a check
+   * that was skipped, and misleading about an app with no routes: its one screen is the one the
+   * preview check had just rendered. Like its siblings it ONLY changes the explanation of an unproven
+   * check. It does not claim there are no other screens, because a state-switched app has screens this
+   * check cannot find, and the sentence says so.
+   */
+  noPageRoutes?: boolean;
+
+  /**
    * Was this build STOPPED BY THE USER rather than failed?
    *
    * 🔴 ROOT CAUSE (autopsy 2b0a3ed5, 2026-09-17). A user pressed Stop 66 seconds into a calculator
@@ -169,7 +181,7 @@ export interface GateVerdict {
 // ⚠️ Every field added to RuntimeEvidence that is NOT a runtime CHECK must be excluded here, or it
 // silently becomes a row the gate tries to label and grade. tsc catches the omission, which is
 // how `stoppedByUser` was caught the moment it was added.
-export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser'>;
+export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'noPageRoutes'>;
 
 /** What a PASS means. Phrased as a completed fact, because that is what `proven` is a list of. */
 const RUNTIME_LABEL: Record<CheckKey, string> = {
@@ -250,6 +262,10 @@ export function whyMissing(key: CheckKey, ev: RuntimeEvidence): string {
   }
   // The app WAS running — this gate's own `proven` list says so — so "needs a running app" is false.
   // What is true is narrower and more useful: nobody drove its individual routes.
+  if (key === 'pages' && e.preview === 'passed' && e.noPageRoutes) {
+    return 'no separate page routes were found to check — its home screen rendered above (screens switched '
+      + 'without a router are not reached by this check)';
+  }
   if (key === 'pages' && (e.preview === 'passed' || e.previewUrlPublished)) {
     return 'the app came up, but its individual page routes were never render-checked here';
   }

@@ -1526,6 +1526,14 @@ the code (it is actually read somewhere) on 2026-07-11.
   (`newModeEntries`) in both directions — it found the GitHub repo analyst missing on its first run.
   ⚠️ The free chat's own PHOTO EDIT (an attached picture + "background badlo", 2026-09-21) is
   deliberately untouched — the admin's word was about MAKING a picture; ask before removing an edit.
+  🔴 **AND ON THE PHONE THE MESSAGE NEVER EVEN REACHED THE SERVER** (admin's screenshot, same day:
+  "photo banao" → *"Building applications is only available for NavBharatAI-Pro"*). `useChatEngine.ts`
+  ran `/bana do|build|create|generate|coding|program|banao|project/i` over every free message and
+  answered a match itself — so "photo banao", "chai kaise banao" and "project report likho" were all
+  refused with a canned line. The free agent now always falls through to the server, whose own prompt
+  sends an app request to Pro and a picture request to Mode. Sibling fixed in the same file:
+  `githubTriggers` matched "git" inside "digital" and "repo" inside "report". ⚠️ Bundled mode: the
+  website has it on deploy; phone users need a fresh `.aab`/`.ipa`.
 
 - **Charging for NavBharat Cloud hosting (built 2026-09-12, ROADMAP §11 slice 2.1 — NOT live yet):**
   `NAVBHARAT_BILL_HOSTING` (⚠️ **UNSET.** Unset means the daily job still MEASURES every hosted app and

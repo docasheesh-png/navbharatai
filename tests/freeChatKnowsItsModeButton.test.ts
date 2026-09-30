@@ -80,3 +80,23 @@ describe('the free chat route', () => {
     expect(g.indexOf(`Mode → ${IMAGE_MODE_NAME}`)).toBeLessThan(g.indexOf('Home → Other AI → AI Image Gen'));
   });
 });
+
+describe('the phone never answers the free chat with a canned "Pro only" line', () => {
+  const engine = read('src/hooks/useChatEngine.ts');
+
+  it('the "Building applications is only available for NavBharatAI-Pro" refusal is gone', () => {
+    expect(engine).not.toContain('text: "⚠️ Building applications is only available');
+    expect(engine).toContain("if (currentAgent !== 'navbharatai' && !user) {");
+  });
+
+  it('a GitHub question is a whole word, never "digital" or "report"', () => {
+    const src = engine.match(/const githubTriggers = (\/.*\/i);/)?.[1] ?? '';
+    // eslint-disable-next-line no-new-func
+    const re = new Function(`return ${src};`)() as RegExp;
+    expect(re.test('connect my github repo')).toBe(true);
+    expect(re.test('git push kaise kare')).toBe(true);
+    expect(re.test('digital marketing kaise kare')).toBe(false);
+    expect(re.test('project report likho')).toBe(false);
+    expect(re.test('push notification kya hai')).toBe(false);
+  });
+});

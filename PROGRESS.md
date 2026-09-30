@@ -84162,3 +84162,13 @@ The #3385 ratchet listed 56 tools named in the architect prompt and offered to n
   recipe) is now the architect's, beside `screenshot`.
 - The ratchet list is deleted, not emptied: a new prompt promise without a reachable tool fails CI with no escape.
 - The live strip names the recipe ("using generate_pdf"), not "using run_recipe".
+- **Follow-up, same day (admin screenshot: "photo banao" → "Building applications is only available for
+  NavBharatAI-Pro").**
+  - **Cause:** the free chat's message never reached the server. `useChatEngine.ts` answered any free
+    message matching `/…|create|generate|program|banao|project/i` with that canned line, so the
+    server-side fix above could not run.
+  - **Fix:** the free agent now always goes to the server.
+  - **Sibling fixed in the same file:** `githubTriggers` used substring matching ("git" in "digital",
+    "repo" in "report", "push" in "push notification"). It now matches whole words only.
+  - **Tests:** 2 more in `tests/freeChatKnowsItsModeButton.test.ts`, reversion-proven.
+  - **Reach:** the website gets this on deploy; phones need a fresh bundle.

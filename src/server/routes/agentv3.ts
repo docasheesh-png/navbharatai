@@ -189,7 +189,7 @@ import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS 
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
 import { judgeRenderStyle, renderStyleNote, unstyledRenderUserNote, type RenderStyleVerdict, type RenderStyleEvidence } from '../AgentV3/renderStyle';
-import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths } from '../AgentV3/greenReviewPolicy';
+import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths, greenRepairPrompt, readRepairVerdicts, type RepairVerdicts } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver, GreenFreezeError } from '../AgentV3/greenFreeze';
 import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild, IN_BUILD_PROOF_BUDGET_MS, type AttemptOutcome } from '../AgentV3/inBuildGreen';
@@ -227,7 +227,8 @@ import { decideGreenGuard, restorePlan, reconcileCapturedWrites, greenGuardMessa
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
-import { languageInstruction } from '../AgentV3/IndicLanguage';
+import { appLanguageInstruction } from '../AgentV3/LanguageDetect';
+import { findScriptedAssistant, scriptedAssistantNotice } from '../AgentV3/scriptedAssistant';
 import { decidePublishConsent } from '../AgentV3/publishConsent';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
@@ -243,6 +244,7 @@ import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMe
 import { clampPowerForUser } from '../AgentV3/powerGating';
 import { weakTierWelcomeNotice, weakTierBuildFailedNotice } from '../AgentV3/weakTierNotice';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
+import { summaryAdditions } from '../AgentV3/summaryAdditions';
 import { credentialGuardEnabled, credentialGuardInstruction, findBootKillingEnvGuards, bootKillingGuardSummary, bootKillerRepairInstruction } from '../AgentV3/missingCredentialGuard';
 import { inrToWalletTokens } from '../lib/payments';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
@@ -439,7 +441,7 @@ import { previewDoorEnabled, verifyDoorToken, doorSecret, makeDoorPath, doorPage
 import { previewKeepAliveEnabled, isTopLevelNavigation } from '../AgentV3/previewKeepAlive';
 import { judgeRuntimeRepair } from '../AgentV3/repairAcceptance';
 import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild, prodBuildUserNote, PROD_BUILD_TIMEOUT_MS } from '../AgentV3/prodBuildGate';
-import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE, SNAPSHOT_WAKING_NOTE } from '../AgentV3/previewSnapshot';
+import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE, SNAPSHOT_WAKING_NOTE, PREVIEW_COPY_REFRESH_MS } from '../AgentV3/previewSnapshot';
 import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
 import { canServeFromSnapshot, SNAPSHOT_IDLE_NOTE } from '../AgentV3/snapshotServeDecision';
 import { workspaceContentHash, snapshotConfirmation, snapshotMatchesFiles, identitySource, type SnapshotTaken } from '../AgentV3/snapshotIdentity';
@@ -11844,6 +11846,13 @@ async function noteBuildOutcome(
     // actually open the running app in a browser and verify it rendered.
     let lastPreviewUrl = '';
     events.subscribe((e) => { if ((e as { type?: string }).type === 'preview') { const u = (e as { url?: unknown }).url; if (typeof u === 'string' && u) lastPreviewUrl = u; } }, false);
+    // Every chat line the user has already SEEN — so the end of a successful build can show only what
+    // the platform added to the reply (summaryAdditions.ts). Short status blips are not kept.
+    const narratedTexts: string[] = [];
+    events.subscribe((e) => {
+      const ev = e as { type?: string; text?: unknown };
+      if (ev.type === 'narration' && typeof ev.text === 'string' && ev.text.trim().length >= 40 && narratedTexts.length < 400) narratedTexts.push(ev.text);
+    }, false);
 
     // HARD WALL-CLOCK DEADLINE — guarantees the build can NEVER spin at "working…" forever.
     // If the build body hangs on an UN-abortable await (a stalled model HTTP call, a sandbox
@@ -12383,6 +12392,13 @@ async function noteBuildOutcome(
      * different blocks of this handler.
      */
     let snapshotTaken: SnapshotTaken | null = null;
+    /**
+     * Take the preview copy again from the workspace as it is NOW — rebuild, then copy. Set by the
+     * production-build step when this app can have a copy at all; null otherwise. Used after a kept
+     * repair that changed files the first copy was built from (autopsy 972acde5), so the copy never
+     * silently describes the app from before that repair.
+     */
+    let refreshPreviewCopy: (() => Promise<boolean>) | null = null;
     /**
      * THE PROJECT AS IT STOOD WHEN THIS TURN BEGAN — every file, not just the ones this turn writes.
      *
@@ -14363,6 +14379,9 @@ async function noteBuildOutcome(
           : 0),
         // A thunk: `expectsArtifacts` is decided further down, and `intent` can still change before it.
         expectsArtifacts: () => expectsArtifacts,
+        // The SAME language line the architect's prompt opens with (autopsy 466c260a) — the child
+        // writes the labels and never sees the user's words.
+        languageRule: () => appLanguageInstruction(prompt),
       };
       const spawnSubAgent = makeSubAgentSpawn(subAgentDeps);
       // Layer 84 (Multi-Model Ensemble): the Architect can call second_opinion to
@@ -15658,9 +15677,22 @@ async function noteBuildOutcome(
         // snapshot first — episodes (the user's prior requests) + the project graph survive a Cloud
         // Run restart / a different instance. Previously this restore ran ONLY in edit mode, so a
         // "continue" that landed on a fresh instance lost the memory. Now it runs for every build.
+        // Timed step by step (autopsy 972acde5): ~7 s before the first model call sat in this stretch
+        // with no line of its own, so nothing could say which step it was.
+        const ctxT0 = Date.now();
         await restoreWorkspaceMemory(workspaceId, ctxMem).catch(() => {});
+        const ctxT1 = Date.now();
         const tree = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
-        await warmIndexFiles(ctxMem, tree, (p) => actuator.readFile(workspaceId, p).catch(() => ''), { maxFiles: 200 });
+        const ctxT2 = Date.now();
+        const ctxIndexed = await warmIndexFiles(ctxMem, tree, (p) => actuator.readFile(workspaceId, p).catch(() => ''), { maxFiles: 200 });
+        const ctxT3 = Date.now();
+        try {
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
+            message: `Project context prepared in ${Math.round((ctxT3 - ctxT0) / 100) / 10}s`,
+            detail: `memory restore ${ctxT1 - ctxT0}ms · file listing ${ctxT2 - ctxT1}ms (${tree.length} path(s)) · indexed ${ctxIndexed.length} file(s) in ${ctxT3 - ctxT2}ms`,
+          });
+        } catch { /* diagnostics are best-effort */ }
         const ctxEpisodes = ctxMem.snapshot().episodes;
         const recentRequests = ctxEpisodes.filter((e) => e.kind === 'request').map((e) => e.text);
         // MEMORY FIX 4 (plan carry-over): surface the plan (todo statuses) the LAST build was
@@ -15892,15 +15924,10 @@ async function noteBuildOutcome(
       // language explicitly; otherwise we instruct Claude to mirror whatever
       // language the request used. Best-effort — NEVER blocks a build.
       try {
-        const hint = detectLanguageHint(prompt);
-        // Phase 6.1: the instruction now states its own CONFIDENCE. A distinctive script is proof and
-        // is asserted plainly; a romanized guess ("enakku … venum") says it is a guess and tells the
-        // model to follow the user's actual words if it is wrong — overstating a guess is how a
-        // mis-detection becomes an entire app the user cannot read.
-        const langInstruction = hint
-          ? languageInstruction({ code: hint.code, name: hint.name, evidence: hint.evidence ?? 'script' })
-          : `Language: generate all user-facing text in the app in the SAME language the user used in this request (default to English if it is English). Keep code identifiers and comments in English.`;
-        buildPrompt = `${langInstruction}\n\n${buildPrompt}`;
+        // Phase 6.1: the instruction states its own CONFIDENCE (a script is proof, a romanized guess
+        // says it is a guess). Autopsy 466c260a: a request in Latin letters now says so explicitly and
+        // forbids an unrequested switch of script. ONE function — the sub-agents read the same line.
+        buildPrompt = `${appLanguageInstruction(prompt)}\n\n${buildPrompt}`;
       } catch { /* best-effort — never blocks a build */ }
 
       // Attachments: prepend the extracted file content/description so the build
@@ -16220,8 +16247,11 @@ async function noteBuildOutcome(
               .filter((p) => p.startsWith('src/'));
             if (existingSrc.length === 0) {
               const goldenFiles = goldenScaffoldFiles(golden);
+              // TOGETHER, not one after another (autopsy 972acde5): twelve sequential sandbox round trips
+              // were ~5 s of the wait before the first model call. A failed write still rejects the whole
+              // seed, exactly as the loop did, and the files are recorded only once every write landed.
+              await Promise.all(Object.entries(goldenFiles).map(([gp, gc]) => actuator.writeFile(workspaceId, gp, gc)));
               for (const [gp, gc] of Object.entries(goldenFiles)) {
-                await actuator.writeFile(workspaceId, gp, gc);
                 writtenFiles.set(gp, gc);
                 try { getWorkspaceMemory(workspaceId).indexFile(gp, gc); } catch { /* index best-effort */ }
               }
@@ -20492,48 +20522,65 @@ async function noteBuildOutcome(
             // version somebody deliberately shipped. Skipped entirely for a full-stack app, whose
             // server lives inside the sandbox — a static copy of that would render the shell and fail
             // every request behind it, which is worse than an honest expiry.
-            if (verdict.ok && previewSnapshotEnabled() && snapshotSuitable(pkgRaw) && actuator.downloadDistFiles) {
-              try {
-                const dist = await withTimeout(actuator.downloadDistFiles(workspaceId), 60_000, 'snapshot-dist');
-                if (dist && dist.size > 0) {
-                  const url = await withTimeout(
-                    new FirebaseHostingDeployer().deployStatic(workspaceId, dist, snapshotChannelId(workspaceId)),
-                    90_000, 'snapshot-deploy',
-                  );
-                  if (url) {
-                    const at = Date.now();
-                    // WHAT THE COPY WAS BUILT FROM. Read now, from the same tree `npm run build` just
-                    // consumed — nothing writes between the two. The final durable save compares this
-                    // with what it persists; a copy whose source could not be read is never promoted.
-                    const source = await withTimeout(collectWorkspaceFiles(actuator, workspaceId), 15_000, 'snapshot-identity')
-                      .then((c) => c.files as Record<string, string>).catch(() => null);
-                    // The SANDBOX copy of index.html carries our preview bridge the moment a dev server
-                    // has run; the durable copy never does. Hash the APP, not our console mirror —
-                    // see identitySource (autopsy Study-Racer, 2026-09-25: PREVIEW_SNAPSHOT_STALE on a
-                    // build where nothing had written after the copy).
-                    const filesHash = source ? workspaceContentHash(identitySource(source)) : null;
-                    await sandboxStore.saveSnapshot(workspaceId, url, at, filesHash).catch(() => {});
-                    // The paths travel with the copy for THIS build only, so a mismatch can say which
-                    // side holds what — see staleDetail. The hash is still what decides.
-                    snapshotTaken = { url, filesHash, filePaths: source ? Object.keys(source) : undefined };
-                    // THE COPY IS CURRENT, AND THE SURFACE SHOULD KNOW NOW (sandboxLifetime.ts).
-                    // Raising the flag lets the idle sweep use the shorter snapshot window; the event
-                    // lets the frame move to the real build output the moment the build settles,
-                    // instead of on the next 150-second poll. The actuator clears the flag by itself
-                    // on the next write, so a later heal pass that changes a file cannot leave a
-                    // stale copy counted as current.
-                    try { actuator.noteSnapshotCurrent?.(workspaceId, true); } catch { /* advisory */ }
-                    // The `snapshot` event is emitted at the FINAL durable save, once the copy is
-                    // proven to match what was persisted — the surface only applies it after the
-                    // build ends anyway, so nothing is lost and nothing stale is ever announced.
-                    buildDiag.record({
-                      phase: 'readiness', severity: 'info', code: 'PREVIEW_SNAPSHOT_SAVED',
-                      message: 'Kept a permanent copy of this build, so the preview still works after its live server expires.',
-                      autoResolved: true,
-                    });
+            if (verdict.ok && previewSnapshotEnabled() && snapshotSuitable(pkgRaw)) {
+              // ONE definition of "take the copy", run here and again after a kept repair (refreshPreviewCopy).
+              const takePreviewCopy = async (): Promise<boolean> => {
+                if (!actuator.downloadDistFiles) return false;
+                try {
+                  const dist = await withTimeout(actuator.downloadDistFiles(workspaceId), 60_000, 'snapshot-dist');
+                  if (dist && dist.size > 0) {
+                    const url = await withTimeout(
+                      new FirebaseHostingDeployer().deployStatic(workspaceId, dist, snapshotChannelId(workspaceId)),
+                      90_000, 'snapshot-deploy',
+                    );
+                    if (url) {
+                      const at = Date.now();
+                      // WHAT THE COPY WAS BUILT FROM. Read now, from the same tree `npm run build` just
+                      // consumed — nothing writes between the two. The final durable save compares this
+                      // with what it persists; a copy whose source could not be read is never promoted.
+                      const source = await withTimeout(collectWorkspaceFiles(actuator, workspaceId), 15_000, 'snapshot-identity')
+                        .then((c) => c.files as Record<string, string>).catch(() => null);
+                      // The SANDBOX copy of index.html carries our preview bridge the moment a dev server
+                      // has run; the durable copy never does. Hash the APP, not our console mirror —
+                      // see identitySource (autopsy Study-Racer, 2026-09-25: PREVIEW_SNAPSHOT_STALE on a
+                      // build where nothing had written after the copy).
+                      const filesHash = source ? workspaceContentHash(identitySource(source)) : null;
+                      await sandboxStore.saveSnapshot(workspaceId, url, at, filesHash).catch(() => {});
+                      // The paths travel with the copy for THIS build only, so a mismatch can say which
+                      // side holds what — see staleDetail. The hash is still what decides.
+                      snapshotTaken = { url, filesHash, filePaths: source ? Object.keys(source) : undefined };
+                      // THE COPY IS CURRENT, AND THE SURFACE SHOULD KNOW NOW (sandboxLifetime.ts).
+                      // Raising the flag lets the idle sweep use the shorter snapshot window; the event
+                      // lets the frame move to the real build output the moment the build settles,
+                      // instead of on the next 150-second poll. The actuator clears the flag by itself
+                      // on the next write, so a later heal pass that changes a file cannot leave a
+                      // stale copy counted as current.
+                      try { actuator.noteSnapshotCurrent?.(workspaceId, true); } catch { /* advisory */ }
+                      // The `snapshot` event is emitted at the FINAL durable save, once the copy is
+                      // proven to match what was persisted — the surface only applies it after the
+                      // build ends anyway, so nothing is lost and nothing stale is ever announced.
+                      buildDiag.record({
+                        phase: 'readiness', severity: 'info', code: 'PREVIEW_SNAPSHOT_SAVED',
+                        message: 'Kept a permanent copy of this build, so the preview still works after its live server expires.',
+                        autoResolved: true,
+                      });
+                      return true;
+                    }
                   }
-                }
-              } catch { /* a fallback copy must never be able to affect the build it is copying */ }
+                } catch { /* a fallback copy must never be able to affect the build it is copying */ }
+                return false;
+              };
+              await takePreviewCopy();
+              refreshPreviewCopy = async () => {
+                // The copy is the output of `npm run build`, so a changed source needs a new build first;
+                // a build that does not pass leaves the earlier copy exactly as it was.
+                try {
+                  const r = await withTimeout(actuator.runCommand(workspaceId, prodBuildCommand()), PROD_BUILD_TIMEOUT_MS, 'snapshot-rebuild');
+                  const rebuilt = judgeProdBuild({ ran: true, exitCode: typeof r.exitCode === 'number' ? r.exitCode : null, output: `${r.stdout || ''}\n${r.stderr || ''}` });
+                  if (!rebuilt.ok) return false;
+                } catch { return false; }
+                return takePreviewCopy();
+              };
             }
           }
         } catch { /* the detector must never affect a build it is only observing */ }
@@ -21280,6 +21327,29 @@ async function noteBuildOutcome(
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }
 
+      // 🤖 A CHAT SOLD AS AN ASSISTANT MUST BE ONE — OR SAY IT IS NOT (autopsy 466c260a). The sibling of
+      // the block above for a made-up MIND: assistant-side messages in an app that makes no network or
+      // AI call anywhere can only be fixed text. Checked first on this turn's writes (free), then
+      // confirmed against the WHOLE project, because the call that makes it real may live in a file an
+      // edit turn did not touch.
+      try {
+        if (result.ok && expectsArtifacts && !isImportTurn && writtenFiles.size > 0) {
+          const written = Object.fromEntries(writtenFiles);
+          if (findScriptedAssistant(written, prompt)) {
+            const whole = { ...(await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>))), ...written };
+            const scripted = findScriptedAssistant(whole, prompt);
+            if (scripted) {
+              result = { ...result, summary: `${result.summary}${scriptedAssistantNotice(scripted)}` };
+              buildDiag.record({
+                phase: 'readiness', severity: 'warning', code: 'SCRIPTED_ASSISTANT_SHIPPED', autoResolved: false,
+                message: 'The app has a chat whose replies are fixed text written into the app — it makes no AI or network call anywhere. Disclosed to the user in the summary.',
+                detail: scripted.files.slice(0, 5).join(' · '),
+              });
+            }
+          }
+        }
+      } catch { /* the disclosure is best-effort — it must never break the build */ }
+
       // 📱 WHAT WORKS WHERE, SAID PLAINLY (autopsy 6bae5835; admin 2026-09-27: "user ko saaf bataya jaye ki
       // webapp me kaam nahi karega, github connect kar ke apk banana hoga"). A clean build offered a
       // lock-screen-LIKE welcome screen and never said what an app built here can do on a phone. Now the
@@ -21734,6 +21804,8 @@ async function noteBuildOutcome(
             // can see). The pass may never write a .env file (greenFreeze.ts). Everything it did not fix
             // is still OFFERED below, exactly as before.
             let greenRepaired: string[] = [];
+            // Findings the repair traced and reported NOT A BUG: never claimed as fixed, never offered.
+            let greenRefuted: string[] = [];
             if (greenRepairable.length > 0) {
               const headroomMs = effectiveBuildSeconds === 0 ? Number.POSITIVE_INFINITY : effectiveBuildSeconds * 1000 - (Date.now() - buildStartedAt);
               const plan = greenRepairPlan(headroomMs);
@@ -21748,6 +21820,10 @@ async function noteBuildOutcome(
                 let repairTimedOut = false;
                 // What the pass really changed, measured against the snapshot — never its own report.
                 let repairChanged: number | undefined;
+                // What the pass said about each finding (`greenRepairPrompt`). Unread ⇒ the old reading.
+                let repairVerdicts: RepairVerdicts | undefined;
+                // Every finding it was handed, it traced and found not real (autopsy 972acde5).
+                const repairRefutedAll = () => !!repairVerdicts?.read && repairVerdicts.confirmed.length === 0;
                 try {
                   // The snapshot is taken HERE, not inside verifyAfterFix: when its own snapshot fails it
                   // runs the change without a net and keeps it — right for a crash fix, never for an edit
@@ -21764,10 +21840,10 @@ async function noteBuildOutcome(
                   const vr = await verifyAfterFix<Record<string, string>>({
                     snapshot: async () => greenSnap,
                     apply: async () => {
-                      const run = runInPass('reviewer-functional-repair', () => repairRunner.run(judgeRepairPrompt(prompt, greenRepairable)));
+                      const run = runInPass('reviewer-functional-repair', () => repairRunner.run(greenRepairPrompt(prompt, greenRepairable)));
                       let timer: ReturnType<typeof setTimeout> | undefined;
                       const outcome = await Promise.race([
-                        run.then((r) => ({ ok: !!r?.ok }), () => ({ ok: false })),
+                        run.then((r) => ({ ok: !!r?.ok, summary: String(r?.summary ?? '') }), () => ({ ok: false, summary: '' })),
                         new Promise<'timeout'>((res) => { timer = setTimeout(() => res('timeout'), plan.repairMs); }),
                       ]);
                       if (timer) clearTimeout(timer);
@@ -21780,6 +21856,7 @@ async function noteBuildOutcome(
                         return;
                       }
                       repairOk = outcome.ok;
+                      if (repairOk) repairVerdicts = readRepairVerdicts(outcome.summary, greenRepairable.length);
                       if (repairOk) {
                         try { repairChanged = changedWorkspacePaths(greenSnap, (await collectWorkspaceFiles(actuator, workspaceId)).files).length; }
                         catch { repairChanged = undefined; /* could not count ⇒ the old reading, re-verified below */ }
@@ -21790,21 +21867,41 @@ async function noteBuildOutcome(
                     reverify: strictReverify(async () => {
                       if (!repairOk) return false; // unfinished or failed ⇒ undo
                       if (repairChanged === 0) return true; // nothing changed ⇒ it is the version that rendered
+                      if (repairRefutedAll()) return false; // it proved no finding real ⇒ its edits are undone
                       const shot = await withTimeout(actuator.browseUrl!(workspaceId, lastPreviewUrl), 35_000, 'green-repair-verify');
                       const v = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
                       return v.rendered && !v.inconclusive && !v.serverDown; // unproven ⇒ undo
                     }),
                     revert: revertToGreenSnapshot,
                   });
+                  if (repairVerdicts?.read) greenRefuted = repairVerdicts.refuted.map((i) => greenRepairable[i]);
                   if (vr.kept && repairOk && repairChanged !== 0) {
-                    greenRepaired = greenRepairable.slice();
+                    greenRepaired = repairVerdicts?.read ? repairVerdicts.confirmed.map((i) => greenRepairable[i]) : greenRepairable.slice();
                     result = { ...result, summary: `${result.summary || ''}${greenRepairUserLine(greenRepaired.length, repairChanged)}` };
                     if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
+                  }
+                  // THE COPY FOLLOWS THE REPAIR (autopsy 972acde5): the preview copy was built before this
+                  // pass changed the app, so without a fresh one it is stale for the rest of its life and the
+                  // user's free preview falls back to a live machine. Bounded; a copy that cannot be refreshed
+                  // stays what it was, and the final save still says so (PREVIEW_SNAPSHOT_STALE).
+                  if (vr.kept && repairOk && repairChanged !== 0 && snapshotTaken && refreshPreviewCopy) {
+                    // Room for the rebuild and the copy, once, on the same finite cap (never open-ended).
+                    armAdvisoryCap(PREVIEW_COPY_REFRESH_MS + 20_000);
+                    const refreshed = await withTimeout(refreshPreviewCopy(), PREVIEW_COPY_REFRESH_MS, 'snapshot-refresh').catch(() => false);
+                    try {
+                      buildDiag.record({
+                        phase: 'readiness', severity: 'info', autoResolved: true,
+                        code: refreshed ? 'PREVIEW_SNAPSHOT_REFRESHED' : 'PREVIEW_SNAPSHOT_NOT_REFRESHED',
+                        message: refreshed
+                          ? 'The repair changed the app after its preview copy was taken, so the app was rebuilt and a fresh copy taken.'
+                          : 'The repair changed the app after its preview copy was taken, and a fresh copy could not be made in time — the earlier copy stays a fallback only.',
+                      });
+                    } catch { /* best-effort */ }
                   }
                   try {
                     buildDiag.record({
                       phase: 'build',
-                      ...greenRepairOutcome({ kept: vr.kept && repairOk, reverted: vr.reverted, timedOut: repairTimedOut, finished: repairOk, count: greenRepairable.length, budgetMs: plan.repairMs, changed: repairChanged }),
+                      ...greenRepairOutcome({ kept: vr.kept && repairOk, reverted: vr.reverted, timedOut: repairTimedOut, finished: repairOk, count: vr.kept && repairOk && repairVerdicts?.read ? greenRepaired.length : greenRepairable.length, budgetMs: plan.repairMs, changed: repairChanged, refuted: repairRefutedAll() && repairChanged !== 0 }),
                     });
                   } catch { /* best-effort */ }
                 } catch (e) {
@@ -21832,7 +21929,7 @@ async function noteBuildOutcome(
               }
             }
             // The app is verified working. Surface what was NOT repaired as an offer, never a silent edit.
-            const offered = [...new Set([...autoFixItems, ...greenRepairable])].filter((t) => !greenRepaired.includes(t));
+            const offered = [...new Set([...autoFixItems, ...greenRepairable])].filter((t) => !greenRepaired.includes(t) && !greenRefuted.includes(t));
             const suggestions = toReviewSuggestions(
               offered.map((t) => ({ text: t, functional: criticals.includes(t) || greenRepairable.includes(t) })),
             );
@@ -23502,6 +23599,23 @@ async function noteBuildOutcome(
         } catch {
           // A notice is never worth failing a successful build over — stay silent and ship the app.
         }
+      }
+      // WHAT THE USER STILL HAS TO DO IS THE LAST THING THEY SEE (admin 2026-09-30). On success the panel
+      // shows the model's streamed reply and never `summary`, so everything appended to it above — the
+      // key checklist, corrections, offers — reached no screen. Sent here as the build's final chat line;
+      // a server line reaches the bundled phone apps too. Kill switch AGENTV3_SUMMARY_ADDITIONS=off.
+      if (result.ok && typeof result.summary === 'string' && (process.env.AGENTV3_SUMMARY_ADDITIONS ?? '').trim().toLowerCase() !== 'off') {
+        try {
+          const added = summaryAdditions(result.summary, narratedTexts);
+          if (added.text) events.emit({ type: 'narration', agent: 'architect', text: added.text, ts: Date.now() });
+          buildDiag.record({
+            phase: 'build', severity: 'info', autoResolved: true,
+            code: added.matched ? 'SUMMARY_ADDITIONS_SHOWN' : 'SUMMARY_REPLY_NOT_FOUND',
+            message: added.matched
+              ? (added.text ? `The platform's additions to the reply were shown as the last chat line (${added.text.length} characters).` : 'The reply had no platform additions to show.')
+              : 'The model\u2019s reply could not be found in the final summary, so its additions were not shown (nothing is sent rather than risk repeating the reply).',
+          });
+        } catch { /* the closing line is never worth failing a finished build */ }
       }
       // THE ONE FACT THE CLIENT WAS MISSING (admin 2026-09-14). The platform knows whether it opened
       // this app in a real browser and saw it render — it is the same observation `GREEN_GUARD_SAVE`

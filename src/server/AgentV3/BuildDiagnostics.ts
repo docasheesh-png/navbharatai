@@ -32,7 +32,7 @@ import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
 import { mergeTruncation, pushBounded, boundedWindow, COMPLETE, type ChannelTruncation, type ReportTruncation } from './reportTruncation';
 import { renderProvenByAnyActor, noteRenderSeen, forgetRenderSeen, RENDER_PROVEN_CODES } from './renderProof';
-import { isSelfHeal, isWorkaroundIssue, isNarrationIssue } from '../../lib/healIssue';
+import { isSelfHeal, isWorkaroundIssue, isNarrationIssue, isLeftOpen, HEAL_RULE } from '../../lib/healIssue';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -45,6 +45,8 @@ export type IssueSeverity = 'info' | 'warning' | 'error';
 const PROCESS_ONLY_CODES = new Set([
   // A repair's out-of-scope answer that OUR guard refused to write (autopsy eed79815): engine housekeeping.
   'REPAIR_OUT_OF_SCOPE',
+  // Whether the platform's additions to the reply reached the screen (summaryAdditions.ts): a fact about our delivery.
+  'SUMMARY_ADDITIONS_SHOWN', 'SUMMARY_REPLY_NOT_FOUND',
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', // measurements of the ENGINE (postGreenWrites.ts), never app findings
   // …and its sibling: how far down OUR ladder a build fell (ladderDepth.ts) is a fact about our
   // routing, never about the user's app.
@@ -464,6 +466,13 @@ export interface BuildDiagnosticsReport {
      * debt the tally exists to surface.
      */
     workarounds?: number;
+    /**
+     * Non-blocking findings still there when the build ended (a readiness warning, a stale snapshot).
+     * Once counted as heals; they repaired nothing — see NOT_A_REPAIR_CODES in `src/lib/healIssue.ts`.
+     */
+    leftOpen?: number;
+    /** Which heal rule `autoResolved` was computed with (`HEAL_RULE`). Absent on older reports. */
+    healRule?: number;
     unresolved: number;
     /** Advisory notes about the user's PRE-EXISTING code — not our defects and not our fixes. */
     observations?: number;
@@ -2204,6 +2213,7 @@ export class BuildDiagnostics {
     // predicate excludes it again so a reader that skips `counted` still gets this exact answer.
     const autoResolved = counted.filter(isSelfHeal).length;
     const workarounds = this.issues.filter(isWorkaroundIssue).length;
+    const leftOpen = counted.filter(isLeftOpen).length;
     return {
       schema: 'navbharatai.v3.build-diagnostics/1',
       buildId: this.meta.buildId,
@@ -2240,6 +2250,8 @@ export class BuildDiagnostics {
         // build had at least one and "Workarounds: 100.0% of 165 builds" was true by construction. A
         // zero is a measurement; an absent field is "nobody measured".
         workarounds,
+        leftOpen,
+        healRule: HEAL_RULE,
         unresolved: counted.filter((i) => !i.autoResolved && i.observation !== true).length,
         ...(observations > 0 ? { observations } : {}),
       },

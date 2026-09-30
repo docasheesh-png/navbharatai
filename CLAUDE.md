@@ -2965,6 +2965,43 @@ the flag entries above promise.
   says so, `null` means *not supplied* and never zero, and `writeTypecheckUntouched` makes the
   silence unrepresentable as a fact about the build. Test-locked and reversion-proven four ways in
   `tests/theCounterWatchedOneLaneOfTwo.test.ts`.
+- **`AGENTV3_WRITE_SECURITY`** (NOT set; default ON, `off` disables — added 2026-09-30, autopsy 466c260a) —
+  `scanSecurity`'s medium/high findings (an XSS sink such as `dangerouslySetInnerHTML` / raw `innerHTML`, a
+  hardcoded secret) are handed back with every write (`securityWriteNote`, via `writeSteeringNotes`). Before
+  this they surfaced only at readiness, after the app was green, where the reviewer is suggest-only — so
+  three sinks shipped with a warning nobody acted on. Advisory, never blocks a write, no model call.
+  Same PR, no flag: an `nb-` class the design kit does not define and no stylesheet defines is named at
+  write time too (`inventedKitClassNote`).
+- **📣 `AGENTV3_SUMMARY_ADDITIONS` — THE END OF A SUCCESSFUL BUILD IS WHAT THE USER STILL HAS TO DO (admin
+  2026-09-30: *"app banne ke last me clearly user ko dikhe"*). ⚠️ NOT set, and the code default is ON**; `off`
+  restores the old behaviour. `summaryAdditions.ts`.
+  🔴 **WHY: on a SUCCESSFUL build the chat panel never rendered `result.summary`**. It is rendered only on
+  failure. So every line the platform appended to a successful reply never reached a screen:
+  - the "what this app needs from you" key checklist (AppRequirements, since 2026-08-03);
+  - claim corrections;
+  - the green-repair line;
+  - the review offers;
+  - the live-preview line.
+
+  Only the separate cards (the key-entry card, the suggestion card) were visible. The route now records
+  every chat line the user has seen and sends the summary minus the model's reply as the build's final
+  chat line.
+  🔒 **It is sent from the SERVER on purpose:** the phone apps are bundled, so a panel change would reach
+  them only with a new store build. If the reply cannot be found in the summary, nothing is sent
+  (`SUMMARY_REPLY_NOT_FOUND`), because a repeated reply is worse than a missing note.
+  🤖 **AI inside the app, same change:**
+  - **Builder:** `AI_IN_APP_RULE` makes the builder call AI from the app's server through one standard
+    request configured by `AI_API_KEY` / `AI_BASE_URL` (default `https://navbharatai.com/api/v1`) /
+    `AI_MODEL` (default `navbharatai`). The NavBharatAI API does not accept calls from other sites'
+    browser pages, so a browser-side call could never work with it.
+  - **Checklist:** for an app that reads `AI_API_KEY`, it offers both a NavBharatAI API key (Home → Other
+    AI → Developer Tools → NavBharatAI API) and the user's own OpenAI / Anthropic / Google / xAI key, in
+    11 languages. For an app written against one provider's client, the NavBharatAI option is never
+    offered, because it would not work there.
+  - **Asking last:** the architect prompt's ASK LAST rule puts the model's own questions at the end of
+    its reply.
+
+  Test-locked in `tests/theAskComesLast.test.ts`.
 - **`AGENTV3_STORE_LOOP_NOTE`** (default ON, `off` disables — added 2026-09-29, autopsy 6a4a799f) — a
   write-time note (`storeEffectLoop.ts`, via `ToolDispatcher.writeSteeringNotes`) when a file binds a
   zustand hook with NO selector (`const store = useMusicStore()`), lists that bare name in an effect's
@@ -3076,6 +3113,15 @@ the flag entries above promise.
   `revertToGreenSnapshot`, which calls `reconcileCapturedWrites` (`GreenGuard.ts`). It also refuses an
   EMPTY snapshot, because `restorePlan({}, cur)` would delete the whole workspace. Test-locked and
   reversion-proven in `tests/aRealBugInAWorkingAppGetsOneVerifiedRepair.test.ts`.
+  🔴 **THE FINDING IS PROVEN BEFORE THE APP IS EDITED (autopsy 972acde5, 2026-09-30).** The pass was
+  handed `judgeRepairPrompt`, which calls every finding a "real problem that must be fixed". That is true
+  of a failed build's judge verdict and false of a reviewer's reading of working code. On a correct
+  calculator, the repair traced the reviewer's CRITICAL and wrote *"this happened to work"*, then edited
+  the app anyway. The user was told a real problem had been fixed. It now gets `greenRepairPrompt`: prove
+  each finding with one concrete input, change nothing for the rest, and end with `CONFIRMED n` /
+  `NOT A BUG n` lines, read by `readRepairVerdicts`. When every finding is refuted, whatever it changed
+  is undone (`REVIEW_FUNCTIONAL_REFUTED`). A refuted finding is never claimed as fixed and never offered
+  to the user. Unreadable verdicts ⇒ the previous behaviour. Test-locked in `tests/theCalculatorAutopsy.test.ts`.
 - **ONE BUILD PER APP ACROSS SERVERS, AND SCOPED REPAIRS — built ONCE, by #3331 (autopsy eed79815 =
   "4D Future City Drive", 2026-09-26).** The lease is `AgentV3/workspaceBuildLease.ts` (kill switch
   `AGENTV3_WORKSPACE_LEASE=off`; see SCALE PLAN §2), the repair scope is `limitRepairToScope` +
@@ -4774,6 +4820,15 @@ rung only when it is the known-weak 4.7-flash.
   the judge and the plan ARE on for that tier. ⚠️ **Since 2026-09-29 only the JUDGE is** — Weak joined
   Strong in `PLAN_FORBIDDEN_TIERS` after both Ultra plans on autopsy 6a4a799f came back unusable; the
   flag value was not changed and does not need to be.
+  🔴 **CORRECTED 2026-09-30 (autopsy 466c260a) — THE JUDGE DOES NOT RUN ON A WEAK BUILD EITHER, AND NEVER
+  HAS.** `judgeBuild` is called in exactly one place in `routes/agentv3.ts`: inside the escalation block,
+  which is gated `!freeTierBuildActive && tierEscalationPath.length > 1` — and `escalationPathForTier('weak')`
+  returns ONE element by design ("Weak never escalates"). So on the build engine `AGENTV3_NEMOTRON=weak`
+  reaches no role at all today; only the keyed Super ladder rung is live. The report shows it: no
+  `CHEAP_REVIEW` line of any kind on that weak build. ⚠️ **Wiring it is an admin decision, not a fix:** the
+  judge acts only by driving an escalation repair, which Weak never takes, so a Weak judge would add cost
+  and a verdict with nothing to act on it. The "judge = 78% of a cheap-lead build's cost" figure below was
+  therefore measured on a build that escalates (Normal/Strong), not on Weak.
   🔴 **AND THIS ENTRY SAID OTHERWISE FOR HALF A DAY, WHICH IS THE PART WORTH KEEPING.** It read *"the
   admin reported setting `AGENTV3_NEMOTRON=week`… the judge and the plan stayed OFF"*, ending with the
   exact sentence **"this must be verified in the console, not assumed from this entry"** — and a
@@ -4883,7 +4938,7 @@ me" · "mera kharcha kam se kam ho").** Test-locked in `tests/agentRolesPerTier.
 | Builder + sub-agents + fast lane | tier ladder | tier ladder | tier ladder | above |
 | Heals | ladder minus leading flash | same | same | `healLadder` |
 | Lint / typecheck / build / preview / journey / fuzz / CVE | code | code | code | ₹0 |
-| **Judge / Reviewer** | **glm-5.3** | **glm-5.3** | **Grok** | a DIFFERENT model from the builder at the lowest input price that reasons well (glm-5.3 $1.40 in vs Grok $3); Strong builds on glm-5.3 so its judge is Grok, outside every ladder; `AGENTV3_REVIEWER=sonnet` forces Sonnet; no keys ⇒ Sonnet; **Opus is never the judge**. ⚠️ The user-facing review narration used to print the judge's vendor name ("🔎 Grok is reviewing…") — a White-Label breach, fixed |
+| **Judge / Reviewer** | **none — Weak never escalates, and the judge runs only inside escalation (verified 2026-09-30)** | **glm-5.3** | **Grok** | a DIFFERENT model from the builder at the lowest input price that reasons well (glm-5.3 $1.40 in vs Grok $3); Strong builds on glm-5.3 so its judge is Grok, outside every ladder; `AGENTV3_REVIEWER=sonnet` forces Sonnet; no keys ⇒ Sonnet; **Opus is never the judge**. ⚠️ The user-facing review narration used to print the judge's vendor name ("🔎 Grok is reviewing…") — a White-Label breach, fixed |
 | Vision (describe) | Gemini → Grok | Gemini → Grok | Claude(Haiku describe tier) → Gemini → Grok | `useClaude` follows `powerMode` |
 | Escalation | never | own ladder from Sonnet | own ladder from Opus | `escalationPathForTier` |
 

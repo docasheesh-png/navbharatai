@@ -14,7 +14,7 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 import {
-  depictsPeople, namesOtherOrigin, wantsIndianPeopleDefault, withIndianPeopleDefault, INDIAN_PEOPLE_DIRECTION,
+  depictsPeople, namesOtherOrigin, wantsIndianPeopleDefault, INDIAN_PEOPLE_DIRECTION,
 } from '../src/server/lib/imagePeople';
 import { craftImagePrompt, withInlineNegative } from '../src/server/lib/imagePromptCraft';
 import { scanPollinationsPrompt } from '../src/server/lib/pollinationsGuard';
@@ -55,7 +55,7 @@ describe('a person in the brief is Indian by default', () => {
     'a bowl of biryani', '',
   ])('"%s" has no person, so nothing is added', (p) => {
     expect(depictsPeople(p)).toBe(false);
-    expect(withIndianPeopleDefault(p)).toBe(p.trim());
+    expect(wantsIndianPeopleDefault(p)).toBe(false);
   });
 
   it.each([
@@ -96,12 +96,6 @@ describe('a person in the brief is Indian by default', () => {
   it('leaves a UI screenshot and a background alone — there "student" names a domain, not a person', () => {
     expect(craftImagePrompt({ prompt: 'student management dashboard', type: 'UI screenshot' }).indianPeople).toBe(false);
     expect(craftImagePrompt({ prompt: 'soft pattern for a teacher app', type: 'Background' }).indianPeople).toBe(false);
-  });
-
-  it('applies to free chat too — one rule, both doors', () => {
-    const chat = read('src/server/routes/chat.ts');
-    expect(chat).toContain('fetchPollinationsImage(withIndianPeopleDefault(imgIntent.prompt)');
-    expect(withIndianPeopleDefault('ek ladka')).toBe(`ek ladka. ${INDIAN_PEOPLE_DIRECTION}`);
   });
 
   it('never changes an EDIT of the user\'s own photo — the edit path does not go through the craft layer', () => {

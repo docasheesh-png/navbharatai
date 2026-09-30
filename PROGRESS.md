@@ -84122,3 +84122,29 @@ own default face. New `src/server/lib/imagePeople.ts` (pure):
 - **Open root cause:** why the provider refused `"indian face"` is not proven. Its host cannot be reached from a session. The suspect is `safe=true` (added 2026-09-28) refusing a close-up face. The route now logs the browser's reason (`[IMAGE_GEN] the browser could not get the free picture (…)`). Read that before changing the provider call.
 
 **Tests:** `tests/everyFaceIsIndianAndNoImageIsADeadEnd.test.ts`, 57 cases, including the real route. Reversion-proven: removing the placement, or the server fallback, fails 5 cases.
+
+## 2026-09-30 — NavBharatAI FREE stops making pictures, and learns its own Mode button
+
+**Admin, verbatim:** *"navbharat photo nahi banata hai = sahi hai, banana bhi nahi hai! … navbharatai free
+ko pata hi nahi photo kaha banegi! navbharatai free me 'mode' me image generator hai … navbharatai free ko
+mode aur uske andar jo hai, sabke bare me batao!!"*
+
+- **Cause.** The free system prompt never mentioned Mode. App knowledge reached the model only when a
+  message matched an `AppContextInjector` keyword, so a picture request met a model that had never heard of
+  the studio.
+- **The inline picture is removed** from `routes/chat.ts`. It was made from this server's address and ran
+  against the admin's rule. A free picture request now adds `FREE_IMAGE_REQUEST_DIRECTIVE`: the model
+  replies in the user's language, points to **Mode → Image Generator AI FREE**, and can write a
+  paste-ready description.
+- **`src/server/lib/freeChatModeGuide.ts`** (new) is appended to the free system prompt on every turn. It
+  covers:
+  - both groups of the Mode sheet;
+  - what the studio does;
+  - every expert by name, taken from the professional registry plus Doctor AI and the repo analyst;
+  - the four experts the phone app hides;
+  - that Pro is not in Mode.
+- **`imageGenGuidance()`** now leads with the Mode route. It is used by Professionals, Pro and the
+  photo-edit replies.
+- **Deliberately unchanged:** free chat's photo EDIT of an attached picture (admin 2026-09-21).
+- **Tests.** `tests/freeChatKnowsItsModeButton.test.ts` (9) holds the guide equal to `newModeEntries` in
+  both directions. On its first run it found "GitHub Repo Analyst & Improver" missing. Reversion-proven.

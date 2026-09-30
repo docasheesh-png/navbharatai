@@ -1502,7 +1502,7 @@ the code (it is actually read somewhere) on 2026-07-11.
   face' diya to image bani hi nahi"*). No env key.** (1) `imagePeople.ts` puts
   `INDIAN_PEOPLE_DIRECTION` straight after the subject whenever a person is in the brief and no other
   origin, mix or character is named ("a Japanese chef", "diverse team", "spiderman" stand down) —
-  in the craft layer and in free chat's inline image, never on an edit, a UI screenshot or a
+  in the craft layer (every rung of the generator), never on an edit, a UI screenshot or a
   background. Precision-first: player / worker / cook / seller / driver are NOT people words, and a
   cat's face or a face-wash bottle is not a face. (2) 🔴 **Since this key made the browser fetch the
   free picture, a picture the engine did not deliver was a dead end** — the server had already
@@ -1515,6 +1515,17 @@ the code (it is actually read somewhere) on 2026-07-11.
   reached from a session); the suspect is the provider's own `safe=true` filter (added 2026-09-28)
   refusing a close-up face. The `[IMAGE_GEN] the browser could not get the free picture (<reason>)`
   log line now names it — read it before changing anything else.
+  💬 **NAVBHARATAI FREE DOES NOT MAKE PICTURES, AND IT KNOWS WHERE THEY ARE MADE (admin 2026-09-30:
+  *"photo nahi banata hai = sahi hai, banana bhi nahi hai … navbharatai free ko mode aur uske andar jo
+  hai, sabke bare me batao"*).** The inline Pollinations picture in `routes/chat.ts` is removed — a
+  free picture request now reaches the model with `FREE_IMAGE_REQUEST_DIRECTIVE`, which answers in the
+  user's language and points to **Mode → Image Generator AI FREE**. And `freeChatModeGuide()` is a
+  STANDING part of the free system prompt (every turn, not a keyword match): the Mode sheet's two
+  groups, the studio, every expert by name, the four the phone app hides, and that Pro is not in Mode.
+  🔒 `tests/freeChatKnowsItsModeButton.test.ts` holds the guide equal to the sheet
+  (`newModeEntries`) in both directions — it found the GitHub repo analyst missing on its first run.
+  ⚠️ The free chat's own PHOTO EDIT (an attached picture + "background badlo", 2026-09-21) is
+  deliberately untouched — the admin's word was about MAKING a picture; ask before removing an edit.
 
 - **Charging for NavBharat Cloud hosting (built 2026-09-12, ROADMAP §11 slice 2.1 — NOT live yet):**
   `NAVBHARAT_BILL_HOSTING` (⚠️ **UNSET.** Unset means the daily job still MEASURES every hosted app and

@@ -15,8 +15,8 @@ import { answerShapeFor } from '../AI/answerShape';
 import { liveSearchContext } from '../lib/liveSearchContext';
 import { detectImageIntent, imageGenGuidance, imageGenToolPointer } from '../lib/imageIntent';
 import { isFirstChatTurn, sessionGreetingRule } from '../lib/sessionGreeting';
-import { fetchPollinationsImage, imageMarkdown, IMAGE_REFUSAL_MESSAGE } from '../lib/imageGen';
-import { withIndianPeopleDefault } from '../lib/imagePeople';
+import { imageMarkdown, IMAGE_REFUSAL_MESSAGE } from '../lib/imageGen';
+import { freeChatModeGuide, FREE_IMAGE_REQUEST_DIRECTIVE, IMAGE_STUDIO_MODE_NAME } from '../lib/freeChatModeGuide';
 import { looksLikeImageEdit } from '../../lib/imageEdit';
 import { requireAccountForCostlyAi } from '../lib/costlyAiAccess';
 import { gateToolAction, burnToolAction } from '../tools/toolGate';
@@ -320,6 +320,9 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       // First turn = no prior conversation history. Only then may the AI greet, so "namaste" appears
       // once per session, not on every message (admin 2026-08-12).
       systemPrompt = buildFreeSystemPrompt(userProfile || undefined, isFirstChatTurn(history));
+      // The Mode map is a STANDING instruction, not a keyword lottery (admin 2026-09-30: "navbharatai
+      // free ko mode aur uske andar jo hai, sabke bare me batao").
+      systemPrompt = `${systemPrompt}\n\n${freeChatModeGuide()}`;
     } else if (hasCanvas) {
       systemPrompt = SYSTEM_PROMPT_EDIT;
     } else if (isBuildIntent) {
@@ -526,49 +529,36 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
       return;
     }
 
-    // IMAGE-GENERATION INTENT (admin 2026-08-01 + 2026-08-02). If a plain-text message asks to CREATE an
-    // image (no attachment — an attached image is a vision request, handled above):
-    //   • NavBharatAI FREE generates one inline for free (Pollinations) AND points to the fuller tool.
-    //   • NavBharatAI PRO (and any other tier) does NOT generate inline, so it GUIDES the user to the
-    //     dedicated AI Image Gen tool (Home → Other AI → AI Image Gen) — every AI must point image
-    //     requests there, never leave them unanswered.
+    // IMAGE-GENERATION INTENT. If a plain-text message asks to CREATE an image (no attachment — an
+    // attached image is a vision request, handled above):
+    //   • NavBharatAI FREE does NOT make the picture (admin 2026-09-30: "navbharatai photo nahi banata
+    //     hai = sahi hai, banana bhi nahi hai"). It used to generate one inline from THIS server's
+    //     address; the picture studio is one tap away in Mode and does it properly. So the model is
+    //     told plainly where pictures are made and answers in the user's own language — never a bare
+    //     "I cannot make images", which is what the admin saw (`freeChatModeGuide.ts`).
+    //   • NavBharatAI PRO (and any other tier) GUIDES the user to the dedicated tool with a fixed line.
     if (attachments.length === 0) {
       const imgIntent = detectImageIntent(message);
-      if (imgIntent.wants) {
+      if (imgIntent.wants && isFree) {
+        console.log(`[CHAT/IMAGE] tier=${tier} free image intent — pointing to Mode → ${IMAGE_STUDIO_MODE_NAME}`);
+        systemPrompt = `${systemPrompt}\n\n${FREE_IMAGE_REQUEST_DIRECTIVE}`;
+      } else if (imgIntent.wants) {
         const streamOut = req.body.stream === true;
-        const send = (reply: string) => {
-          if (streamOut) {
-            if (!res.headersSent) {
-              res.setHeader('Content-Type', 'text/event-stream');
-              res.setHeader('Cache-Control', 'no-cache');
-              res.setHeader('Connection', 'keep-alive');
-              res.setHeader('X-Accel-Buffering', 'no');
-              res.flushHeaders();
-            }
-            if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: reply })}\n\n`);
-            if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
-          } else {
-            res.json({ reply });
+        // Pro (and any non-free tier): point to the dedicated image tool instead of leaving the ask unanswered.
+        console.log(`[CHAT/IMAGE] tier=${tier} image intent — guiding to AI Image Gen`);
+        const reply = imageGenGuidance();
+        if (streamOut) {
+          if (!res.headersSent) {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Accel-Buffering', 'no');
+            res.flushHeaders();
           }
-        };
-        if (isFree) {
-          console.log(`[CHAT/IMAGE] tier=${tier} free image intent — prompt="${imgIntent.prompt.slice(0, 80)}"`);
-          // The same Indian-people default the image tool applies (admin 2026-09-30) — one rule, both doors.
-          const pr = await fetchPollinationsImage(withIndianPeopleDefault(imgIntent.prompt), 'square');
-          if (pr.blocked) {
-            // The Pollinations word scan refused the picture (Play rejection 2026-09-28). Said plainly —
-            // never "try again later", which would invite the same request.
-            send(POLLINATIONS_BLOCK_MESSAGE);
-          } else if (pr.image) {
-            send(`Ye rahi aapki image 🎨\n\n${imageMarkdown(pr.image, imgIntent.prompt.slice(0, 60))}\n\nKuch aur banwana ho to bas bata dein — bilkul free!\n\n${imageGenToolPointer()}`);
-          } else {
-            // Honest failure — never a fake/placeholder image; guide to the full tool + let the user retry.
-            send(`Abhi image nahi ban paayi 😔 — thodi der me dubara try karein.\n\n${imageGenGuidance()}`);
-          }
+          if (!res.writableEnded) res.write(`data: ${JSON.stringify({ c: reply })}\n\n`);
+          if (!res.writableEnded) { res.write('data: [DONE]\n\n'); res.end(); }
         } else {
-          // Pro (and any non-free tier): point to the dedicated image tool instead of leaving the ask unanswered.
-          console.log(`[CHAT/IMAGE] tier=${tier} image intent — guiding to AI Image Gen`);
-          send(imageGenGuidance());
+          res.json({ reply });
         }
         return;
       }

@@ -20,8 +20,8 @@
 // ("model", "log", "beta", "developer", bare "portrait") are left out on purpose, and "face" does not
 // count when it belongs to an animal, a clock or a product.
 //
-// PURE — no env, no I/O. The craft layer and the free-chat image path both call it, so the two can
-// never disagree about who is Indian.
+// PURE — no env, no I/O. The craft layer is its only caller, and every image the generator makes —
+// every rung — passes through the craft layer.
 
 /** Words that put a PERSON in the picture. English, Hinglish (romanised) and Devanagari. */
 const PEOPLE_WORDS: readonly string[] = [
@@ -140,13 +140,4 @@ export const INDIAN_PEOPLE_DIRECTION =
 /** Should the Indian default speak for this brief? PURE. */
 export function wantsIndianPeopleDefault(prompt: string | null | undefined): boolean {
   return depictsPeople(prompt) && !namesOtherOrigin(prompt);
-}
-
-/**
- * The brief with the Indian default applied, for a caller that sends one string (free chat). The
- * craft layer places the same sentence itself, right after the subject.
- */
-export function withIndianPeopleDefault(prompt: string): string {
-  const base = String(prompt ?? '').trim();
-  return wantsIndianPeopleDefault(base) ? `${base}. ${INDIAN_PEOPLE_DIRECTION}` : base;
 }

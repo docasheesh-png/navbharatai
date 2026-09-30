@@ -84640,12 +84640,31 @@ carried five defects of ours.
 
 Tests: `tests/theIconWasSavedEmpty.test.ts` (16), reversion-proven.
 
-**Still open:**
-- A build that regenerates an asset the store already holds keeps the older bytes. The listing carries
-  no size or mtime.
-- GLM flashx crawled on the planner (a provider issue).
-- The ETA was 1.5× over.
-- `JOURNEY_NOT_DERIVED`: a storefront with no form yields no journey, so the release gate stays yellow.
-  A click journey (add to cart → reload → still in the cart) would prove it.
-- The starter scaffold's `vite-tsconfig-paths` is deprecated by Vite 8 (`resolve.tsconfigPaths`), and
-  the 2 moderate advisories come from the starter.
+**Follow-up the same day (admin: "sabhi problem ke root cause ko dna level par fix karo, ek ek kar ke"):**
+- ✅ **A regenerated asset replaces the stored copy.** A marker is touched in the sandbox after setup
+  (`MARK_ASSET_BASELINE_COMMAND`), and `find -newer` names the binaries this build changed. Both ends use
+  the sandbox's own clock. No marker ⇒ only new paths are saved, as before.
+- ✅ **The scaffold dropped `vite-tsconfig-paths`**; Vite 8's `resolve.tsconfigPaths: true` is used
+  instead. Proven on the emitted scaffold:
+  - `npm run build` (with its tsc step) resolves a baseUrl-"src" bare import and an `@/` import, with
+    no deprecation notice;
+  - the dev server serves 200 and rewrites the import.
+  - The template now matches the image's warm primer, so a build installs nothing the image lacks.
+- 🔎 **The "2 moderate" were NOT the scaffold.** A fresh `npm audit` today reports 0 for the scaffold
+  and 0 with the model's four packages added. The advisories came from the sandbox image's warm tree,
+  resolved when the image was built (last Dockerfile change 2026-09-20). **The fix is an E2B template
+  rebuild** (`e2b-template.yml`, manual). It changes every build's machine and has a cost, so it is
+  the admin's call, not run from a session.
+- ⏳ **ETA, first step only:** `TelemetryBreakdown.okDurationMs` now records successful-build
+  wall-clock per task type. A new app has no history of its own, so its first ETA can only be a
+  labelled guess until a platform-wide prior exists.
+  - Wiring that prior into the estimate touches the ETA tick region that PR #3401 is changing, so it
+    waits for #3401 to merge rather than race it.
+- **Left to the admin / other PRs, deliberately:**
+  - GLM flashx crawling on the planner is the Weak plan-rung order, which PR #3402 already raised as
+    the admin's decision.
+  - A click journey for form-less apps (add to cart → reload → still there) touches the journey code
+    that #3401 and #3398 are both changing.
+  - PR #3402 also carries a Project Mode starter-blocker fix overlapping #3399's (`setStarterExpected`
+    vs `starterEntryExpectedFor`), and #3403 carries the same member-name import-heal fix as #3399.
+    The admin should merge one of each pair first; the second is then reconciled.

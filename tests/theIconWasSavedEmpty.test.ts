@@ -19,6 +19,7 @@ import { isDeadSandboxSignal, isDeadSandboxError } from '../src/server/AgentV3/s
 import { binaryTextWriteRefusal } from '../src/server/AgentV3/binaryTextWrite';
 import { unsavedBuildAssets, persistBuildAssets, buildAssetsNote, parseChangedListing, CHANGED_SINCE_BASELINE_COMMAND } from '../src/server/AgentV3/buildAssets';
 import { leanReviewInline, reviewerInstruction } from '../src/server/AgentV3/ReviewerAgent';
+import { foldCostTelemetry, type CostTelemetryEntry } from '../src/server/AgentV3/AgentV3CostTelemetry';
 import { ToolDispatcher, type ActuatorPort } from '../src/server/AgentV3/ToolDispatcher';
 import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
 import { AgentEventStream } from '../src/server/AgentV3/AgentEventStream';
@@ -215,5 +216,17 @@ describe('finishing work runs where it can land', () => {
 
   it('a design finding the same check no longer sees is resolved', () => {
     expect(route).toContain("if (designRepair && after.ok) { try { buildDiag.resolveOnRecheck('DESIGN_PAGE_INCONSISTENT'); } catch { /* best-effort */ } }");
+  });
+});
+
+describe('the platform keeps how long a SUCCESSFUL build takes, per task type', () => {
+  const e = (ok: boolean, durationMs: number): CostTelemetryEntry => ({ taskType: 'complex_app', startTier: 'sonnet', billedUsd: 1, inputTokens: 1, outputTokens: 1, ok, powerMode: false, durationMs });
+
+  it('a watchdog kill does not stretch it, and the all-builds total is unchanged', () => {
+    let doc = foldCostTelemetry(null, '2026-09-30', e(true, 690_000), 1);
+    doc = foldCostTelemetry(doc, '2026-09-30', e(false, 1_800_000), 2);
+    expect(doc.byTaskType.complex_app.okDurationMs).toBe(690_000);
+    expect(doc.byTaskType.complex_app.durationMs).toBe(2_490_000);
+    expect(doc.byTaskType.complex_app.okBuilds).toBe(1);
   });
 });

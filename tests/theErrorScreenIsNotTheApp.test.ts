@@ -158,6 +158,6 @@ export function Layout() {
     const d = read('src/server/AgentV3/ToolDispatcher.ts');
     expect(d).toContain('storeLoop = storeEffectLoopNote(files)');
     // 466c260a appended the invented-kit-class note after `quality` — the store note is still returned.
-    expect(d).toContain('return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + security;');
+    expect(d).toContain('return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security;');
   });
 });

@@ -132,9 +132,9 @@ describe('4 · every browser lane opens pages with reduced motion — one defini
     expect(JSON.parse(newPageOptionsExpr('/tmp/s.json'))).toEqual({ reducedMotion: 'reduce', storageState: '/tmp/s.json' });
   });
   it('the explorer, the page check, the journey (signed in AND on a sign-in route) and the sign-in explorer all carry it', () => {
-    const cfg = JSON.parse(clickExplorerScript('http://x/', { blockWrites: false }).match(/const cfg = (\{.*\});/)![1]);
-    expect(cfg.pageOpts).toEqual({ reducedMotion: 'reduce' });
-    expect(clickExplorerModule({ base: 'http://x/' })).toContain('browser.newPage(cfg.pageOpts)');
+    const mod = clickExplorerModule({ base: 'http://x/' });
+    expect(mod).toContain('browser.newPage(Object.assign({"reducedMotion":"reduce"}, cfg.storageState ? { storageState: cfg.storageState } : {}))');
+    expect(clickExplorerScript('http://x/', { blockWrites: false, storageState: '/tmp/s.json' })).toContain('"storageState":"/tmp/s.json"');
     expect(pageCheckScript('http://x/', ['/a'])).toContain('"reducedMotion":"reduce"');
     const j = (route: string) => ({ id: 'j', kind: 'create', route, title: 't', fields: [], submit: null, writes: false }) as any;
     expect(journeyScript('http://x/', [j('/notes')], 'M', { storageState: '/tmp/s.json' })).toContain('"reducedMotion":"reduce","storageState":"/tmp/s.json"');
@@ -144,7 +144,7 @@ describe('4 · every browser lane opens pages with reduced motion — one defini
     expect(mobileLayoutScript('http://x/', { storageState: '/tmp/s.json' })).toContain('"pageOpts":{"reducedMotion":"reduce","storageState":"/tmp/s.json"}');
   });
   it('no browser lane opens a page without the shared options (census over the generators)', () => {
-    const allowed = ['({ ...cfg.pageOpts,', '(cfg.pageOpts)', '(j.pageOpts)', '(${newPageOptionsExpr(opts.storageState)})', '(${JSON.stringify(BROWSER_PAGE_OPTIONS)})'];
+    const allowed = ['(Object.assign(${JSON.stringify(BROWSER_PAGE_OPTIONS)}, cfg.storageState', '({ ...cfg.pageOpts,', '(cfg.pageOpts)', '(j.pageOpts)', '(${newPageOptionsExpr(opts.storageState)})', '(${JSON.stringify(BROWSER_PAGE_OPTIONS)})'];
     let seen = 0;
     for (const f of ['src/server/AgentV3/clickExplorer.ts', 'src/server/AgentV3/PageRouteCheck.ts', 'src/server/AgentV3/journeyDerivation.ts', 'src/server/AgentV3/signInExplore.ts', 'src/server/AgentV3/mobileLayoutCheck.ts']) {
       for (const line of src(f).split('\n')) {
@@ -165,7 +165,7 @@ describe('4 · every browser lane opens pages with reduced motion — one defini
   it('the generated explorer is still valid JavaScript with no raw control character', () => {
     const dir = mkdtempSync(join(tmpdir(), 'nbai-race-'));
     const file = join(dir, 'run.mjs');
-    const mod = clickExplorerModule({ base: 'http://x/', pageOpts: { reducedMotion: 'reduce' } });
+    const mod = clickExplorerModule({ base: 'http://x/', storageState: '/tmp/s.json' });
     writeFileSync(file, mod);
     expect(() => execFileSync(process.execPath, ['--check', file])).not.toThrow();
     expect(mod).not.toMatch(/[\u0000-\u0008\u000b-\u001f]/);

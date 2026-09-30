@@ -50,7 +50,7 @@
 // no model call in this module.
 
 import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
-import { newPageOptionsExpr } from './signInExplore';
+import { BROWSER_PAGE_OPTIONS } from './signInExplore';
 
 /** Where the pre-baked Playwright and its browsers live inside the sandbox image. */
 export const EXPLORE_TOOLS_DIR = '/home/user/.e-tools';
@@ -430,8 +430,6 @@ export function clickExplorerScript(previewUrl: string, opts: { blockWrites: boo
     blockWrites: opts.blockWrites === true,
     // Behind the sign-in page when the app has one — see signInExplore.ts. Null opens it signed out.
     storageState: opts.storageState ?? null,
-    // Reduced motion, and the saved session when there is one — the one definition every lane uses.
-    pageOpts: JSON.parse(newPageOptionsExpr(opts.storageState ?? null)),
     neverSrc: NEVER_PRESS.source, neverFlags: NEVER_PRESS.flags,
     writeSrc: WRITE_VERBS.source, writeFlags: WRITE_VERBS.flags,
     noiseSrc: CONSOLE_NOISE.source, noiseFlags: CONSOLE_NOISE.flags,
@@ -594,7 +592,8 @@ function pickSearchWord(items) {
 }
 
 async function freshPage(browser) {
-  const page = await browser.newPage(cfg.pageOpts);
+  // Reduced motion (the one definition every lane uses — signInExplore.ts), plus the saved session.
+  const page = await browser.newPage(Object.assign(${JSON.stringify(BROWSER_PAGE_OPTIONS)}, cfg.storageState ? { storageState: cfg.storageState } : {}));
   page.on('dialog', (d) => d.dismiss().catch(() => {}));
   page.on('popup', (p) => p.close().catch(() => {}));
   return page;

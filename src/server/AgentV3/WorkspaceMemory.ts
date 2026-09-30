@@ -616,6 +616,19 @@ export class WorkspaceMemory {
     return { direct, transitive };
   }
 
+  /**
+   * A component named with the file it lives in — `PdfGenesis (src/PdfGenesis.tsx)`. 🔴 AUTOPSY 1389f0d5
+   * (2026-09-30): the reviewer was handed "Components: App, PdfGenesis", guessed
+   * `src/components/PdfGenesis.tsx`, and spent a failed read finding out. The path was known; the map
+   * printed only the name. A name exported from more than one file is left bare (which one is meant is
+   * a question, not a fact).
+   */
+  private withFile(component: string): string {
+    const homes: string[] = [];
+    for (const [file, facts] of this.fileFacts) if (facts.components.includes(component)) homes.push(file);
+    return homes.length === 1 ? `${component} (${homes[0]})` : component;
+  }
+
   /** A compact, human-readable map of the project for injecting into agent context. */
   projectMap(): string {
     const g = this.graph();
@@ -624,7 +637,7 @@ export class WorkspaceMemory {
     const recentErrors = this.openErrors().slice(-3).map((e) => `  - ${e.text.slice(0, 100)}`);
     const lines = [
       `Project memory: ${g.files.length} files, ${g.symbols.length} symbols.`,
-      g.components.length ? `Components: ${g.components.slice(0, 20).join(', ')}` : '',
+      g.components.length ? `Components: ${g.components.slice(0, 20).map((c) => this.withFile(c)).join(', ')}` : '',
       g.routes.length ? `Routes: ${g.routes.slice(0, 20).join(', ')}` : '',
       g.dependencies.length ? `Dependencies: ${g.dependencies.slice(0, 20).join(', ')}` : '',
       recentErrors.length ? `Recent errors:\n${recentErrors.join('\n')}` : '',

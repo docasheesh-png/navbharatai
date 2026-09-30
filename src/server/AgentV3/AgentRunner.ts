@@ -1218,7 +1218,7 @@ export class AgentRunner {
         // once. Best-effort by construction: a scan that throws leaves the build exactly as it was.
         let doneText: string | null = null;
         try {
-          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled })) {
+          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, wroteThisRun: dispatcher.wroteAnything() })) {
             const readiness = await dispatcher.assessBuildReadiness();
             // Never "complete and healthy" over a compile that just failed (autopsy 33812996).
             const typeErrors = typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null;

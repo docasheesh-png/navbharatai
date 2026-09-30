@@ -85821,6 +85821,65 @@ that Pollinations was working and had not been down.
 - **Honest note:** the "anonymous door closed (401)" diagnosis in #3409 came from the provider's docs and was never observed from a session. The admin says the provider works. The door code only acts on a real 401/402/403, so it stays. The earlier outage's cause is **unproven**.
 - **Tests:** `tests/imageFreeAndPaid.test.ts` (18) is new. `theImageGeneratorHasOneTier` became `theImageGeneratorHasFreeAndPaid`. Updated: `fiveFreeImagesThenOneRupee`, `theFreeDoorClosedAndNobodyNoticed`, `everyFaceIsIndianAndNoImageIsADeadEnd`, `yourPictureComesBackAsYourPicture`, `theUsersOwnConnectionFetchesTheirPicture`, `thePlatformHasADayToo` and `theBoxEmptiesWhenYouPressSend`. Reversion-proven: removing the Free-mode stop, or the `anonymous` flag, fails 5 tests.
 
+## 2026-09-30 — Autopsy 1389f0d5: the saved project, the style note, "complete" before the edit, the silent rung, the unread picture
+
+**The build:** a Weak edit, *"Generate a pdf on genesis 4 with added images with this photo type uploaded"*, on a
+workspace holding a calculator. It added a Genesis-4 PDF page to the calculator in 8 minutes and rendered.
+Billed ₹174.99, real cost $0.51.
+
+**Tally.** 1 self-heal (the orphan stylesheet, wired in by a post-build LLM pass). 1 workaround (GLM timed out
+and crawled; the ladder fell to KIMI). 0 skips. 1 still broken: the saved `src/App.tsx` was not the one that ran.
+Struggle points:
+- 2 rejected JSX edits;
+- 5 edits copying rules into `src/index.css` that already existed;
+- 80 s waiting on a silent rung;
+- a false "✅ The app looks complete" at step 10.
+
+**Ledger (problem → root cause → class → siblings → lock):**
+
+1. **Saved App.tsx ≠ the App.tsx that ran** (`SAVED_SOURCE_DIVERGES`, `PREVIEW_SNAPSHOT_STALE`).
+   - Root cause: `replace_symbol` wrote to the sandbox and never reached `onFileWrite`. The durable save lets recorded writes win, so the save kept the pre-`replace_symbol` copy.
+   - Class: a tool write that skips the save's record.
+   - Siblings: about 170 other dispatcher writes (generators, recipes, release notes, the `.gitignore` heal).
+   - Fix: the dispatcher's actuator is a recording wrapper (`recordedWrites.ts`). An unrecorded write is recorded when the tool call ends, and both durable saves flush first. The platform's starter stays unrecorded, as before.
+   - Lock: `tests/everyToolWriteReachesTheSave.test.ts`, reversion-proven.
+2. **"`.calc-display` … no stylesheet defines them" on every App.tsx write.**
+   - Root cause: the note looked for stylesheets under a fixed list of names, and never saw the `src/calculator.css` that App.tsx imports.
+   - Sibling: `inventedKitClassNotes` had the same blind spot.
+   - Fix: both now read the sheets the screens and the entry import. Before reporting anything, the class note reads every project sheet. A class defined only in a sheet written this build that nothing imports gets "import it" (with the exact line) instead of "add rules".
+   - Lock: `tests/theStyleNoteReadsWhatTheScreenImports.test.ts`.
+   - This is also the upstream half of the orphan-stylesheet self-heal: the model is told at write time. The deterministic end-of-build import is PR #3420's region (`isAppWideStylesheet`), so it is not touched here.
+3. **"✅ The app looks complete — wrapping up." at step 10, before any write.**
+   - Root cause: the done signal scored the untouched calculator (100/100) on an edit turn. `toolUses > 0` counted reads, not changes.
+   - Fix: `shouldCheckDone` takes `wroteThisRun` from `dispatcher.wroteAnything()`, which includes sub-agent writes.
+   - Lock: `tests/anEditIsNotDoneBeforeItStarts.test.ts`.
+4. **80 s of provider time wasted (60 s silent timeout + 20 s crawl).**
+   - Root cause: the throughput floor was judged only when a chunk arrived, so silence waited 60 s while a trickle was dropped at about 20 s.
+   - Fix: while the ladder allows an abandon, the chunk wait wakes every 2.5 s to judge the rate. A request that has not opened by the grace period is abandoned with the crawl message, so the crawl allowance governs it. The last rung is unchanged.
+   - Sibling: a stream that opens after we gave up is now closed on arrival. The pre-existing 60 s give-up path had the same leak.
+   - Lock: `tests/silenceIsTheSlowestRate.test.ts`.
+5. **The user's photo.**
+   - Root cause: the vision race (8 s) turned a lost race into `''`. The builder was never told a picture was attached, and the report had no line about it.
+   - Fix: an unread picture reaches the builder as "attached, could not be read — say so". `ATTACHMENTS_READ` records count, outcome and seconds.
+   - Lock: `tests/aPictureThatWasNotReadIsNotSilent.test.ts`.
+6. **Two WRITE REJECTED JSX edits.**
+   - Root cause: the rejection hint led with "duplicate declaration" for a JSX-structure error.
+   - Fix: the hint now follows the error's class and points at `replace_symbol`, which is what finally worked (`isJsxStructureError`).
+7. **Reviewer read `src/components/PdfGenesis.tsx`, which does not exist.**
+   - Root cause: the project map named components without paths.
+   - Fix: it now prints `PdfGenesis (src/PdfGenesis.tsx)`.
+8. **`TEST_SUITE_UNVERIFIED` (browsers not installed).**
+   - The report cannot say which browser build Playwright wanted, so the fix is observational: the reason now carries it (`wantedBrowserDetail`).
+   - **OPEN root cause:** a project whose `@playwright/test` wants a different chromium build than the sandbox ships. It needs one report with the new detail before the right fix (install the matching build, or pin the version) can be chosen.
+
+**Not bugs:** `startTier: "gemini"` is the historical band name, and the report already prints "cheapest band".
+`DESIGN_CONSISTENCY 60` is the calculator's own stylesheet from an earlier build, which the write-time notes
+flagged. The Latin-language line and "intention reader did not run" are fixed by PR #3416's Part A, which was
+not yet deployed when this build ran.
+
+**OPEN, for the admin:** an unrelated request on an existing app ("a Genesis PDF" on a calculator) is built INTO
+that app (`BUILD_ORDER_READ_AS_EDIT`). Asking once ("add to this app, or start a new one?") is a product
+decision, not a bug fix.
 ## 2026-09-30 — Autopsy 12511a9c ("Calculator", Weak, 9.2 min vs ~4 min estimate, billed ₹121.19)
 
 **Tally:** 2 self-heals (GLM crawl benched, then KIMI took over; the preview re-publish), 1 workaround (the contract

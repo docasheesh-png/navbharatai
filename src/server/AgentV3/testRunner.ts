@@ -444,10 +444,25 @@ export function testSuiteCouldNotRun(exitCode: number, output: string): string |
     { re: /(?:command not found|is not recognized as an internal or external command)/i, reason: 'the test command does not exist in the sandbox' },
     { re: /No tests found|no test files found/i, reason: 'the suite matched no test files' },
   ];
-  for (const { re, reason } of signatures) if (re.test(out)) return reason;
+  for (const { re, reason } of signatures) if (re.test(out)) return reason + (re === signatures[0].re ? wantedBrowserDetail(out) : '');
   // 127 is the shell's own "command not found" — unambiguous, and never produced by a failing test.
   if (exitCode === 127) return 'the test command does not exist in the sandbox';
   return null;
+}
+
+/**
+ * WHICH browser build Playwright looked for, when it says none is installed. PURE; '' when the output
+ * does not say. 🔴 AUTOPSY 1389f0d5 (2026-09-30): "COULD NOT RUN — the Playwright browser binaries are not
+ * installed" on a sandbox whose image ships a chromium. The likeliest cause is a project whose
+ * `@playwright/test` wants a different browser build than the pre-baked one, and the report could not say,
+ * because the one line that names the build Playwright wanted was dropped. It is kept now, trimmed to the
+ * part after the browsers folder.
+ */
+export function wantedBrowserDetail(output: string): string {
+  const m = /Executable doesn't exist at (\S+)/i.exec(String(output || ''));
+  if (!m) return '';
+  const wanted = m[1].replace(/^.*?(?:ms-playwright|\.browsers)\//, '');
+  return ` (Playwright looked for ${wanted})`;
 }
 
 /**

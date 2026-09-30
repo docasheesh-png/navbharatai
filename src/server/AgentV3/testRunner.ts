@@ -392,10 +392,21 @@ export function testOutcomeRepairPrompt(outcome: TestOutcome): string {
     `The app builds, but its OWN test suite is failing (${outcome.summary}).`,
     ...(names.length ? ['Failing tests:', ...names.map((n) => `  - ${n}`)] : []),
     '',
+    // The exact command the platform ran — its excludes included. Autopsy 8e124182: the repair ran a bare
+    // `npx vitest run`, which also collected our unrun Playwright starter in e2e/, and then told the user
+    // to install Playwright to fix a file NavBharatAI had written. Run what we ran, and nothing else.
+    `Re-run the suite with exactly this command, and judge only its result: ${outcome.command}`,
+    '',
     'Read the failing test(s) and the code under test, then fix the SOURCE so the tests pass — do not',
     'delete, skip, or weaken a test to make it green (that would hide the bug, not fix it). Make the',
     'smallest correct edits and keep the existing passing tests intact.',
   ].join('\n');
+}
+
+/** Remove terminal colour/style escapes (`\x1b[32m` …) so a summary line can be parsed. PURE. */
+export function stripAnsi(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return String(text ?? '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '');
 }
 
 function toInt(v: string | undefined): number | null {
@@ -465,7 +476,11 @@ export function parseTestOutcome(
   stdout: string,
   stderr: string,
 ): TestOutcome {
-  const out = `${stdout}\n${stderr}`;
+  // 🔴 COLOURED OUTPUT WAS UNREADABLE (autopsy 8e124182, 2026-09-30). Vitest colours its summary even
+  // when it is not writing to a terminal, and `Tests \x1b[22m \x1b[1m\x1b[32m34 passed` never matched
+  // `Tests\s+(\d+)\s+passed`: the report could say only `vitest: FAIL (exit=1)` — no counts and no
+  // failing file — and the repair pass was sent to fix "the failing tests" without being told which.
+  const out = stripAnsi(`${stdout}\n${stderr}`);
   let passed: number | null = null;
   let failed: number | null = null;
   let total: number | null = null;
@@ -482,7 +497,16 @@ export function parseTestOutcome(
         total = toInt(m[3]) ?? (passed != null ? passed + (failed ?? 0) : null);
       }
       for (const fm of out.matchAll(/(?:^|\n)\s*(?:×|✗|FAIL)\s+(.+?)(?:\s+\d+ms)?\s*$/gm)) {
-        if (fm[1]) failingTests.push(fm[1].trim());
+        // A suite that failed to LOAD prints `FAIL  src/a.test.ts [ src/a.test.ts ]` — keep the path.
+        const name = fm[1] ? fm[1].replace(/\s*\[[^\]]*\]\s*$/, '').trim() : '';
+        if (name && !failingTests.includes(name)) failingTests.push(name);
+      }
+      // A test FILE that could not even load contributes no test to the `Tests` line, so a run can read
+      // "34 passed" and still exit 1. Count those files as failures, or the verdict has no evidence.
+      const filesFailed = toInt(out.match(/Test Files\s+(\d+)\s+failed/i)?.[1]) ?? 0;
+      if (filesFailed > 0 && (failed ?? 0) === 0) {
+        failed = filesFailed;
+        total = (passed ?? 0) + filesFailed;
       }
       break;
     }

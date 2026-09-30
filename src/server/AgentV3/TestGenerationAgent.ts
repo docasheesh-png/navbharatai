@@ -106,6 +106,93 @@ function usageScore(targetPath: string, names: string[], files: Array<{ path: st
   return score;
 }
 
+/**
+ * The first line of every starter test this file writes — how a later pass tells OUR skeleton from a
+ * test the user or the model wrote on purpose (the same idea as `E2E_SMOKE_MARKER`). Change the
+ * template, keep this line.
+ */
+export const STARTER_TEST_MARKER = '// Starter test added by NavBharatAI — replace the it.todo lines with real cases.';
+
+/** Is `content` a starter test this file wrote? PURE. */
+export function isPlatformStarterTest(content: string | null | undefined): boolean {
+  return String(content ?? '').startsWith(STARTER_TEST_MARKER);
+}
+
+/**
+ * 🔴 OUR STARTER TEST CRASHED THE USER'S SUITE, AND THE REPAIR THEN CHANGED THEIR APP (autopsy
+ * 8e124182, 2026-09-30).
+ *
+ * `src/lib/auth.ts` called `bootstrapData()` at import, which reads `localStorage` — correct in the
+ * browser the app runs in. Our skeleton imported it under vitest's default NODE environment, which has
+ * no `localStorage`, so the file failed before a single test ran. The vaccine read "the app's own tests
+ * are failing", spent a model repair on the user's source to satisfy a file WE wrote, and that repair's
+ * reply became the build's summary. Phase 4.4's promise above — "they also never fail on correct code"
+ * — was false for every app that persists to the browser, which is most of what this engine builds.
+ *
+ * So when the project uses browser storage, the skeleton installs a small in-memory stand-in BEFORE the
+ * module loads (`vi.hoisted` runs ahead of imports) — only where one is missing, so a project that
+ * already runs its tests under jsdom keeps its own. It adds no dependency. PURE.
+ */
+export function withBrowserStorageShim(test: string): string {
+  const lines = String(test ?? '').split('\n');
+  const vitestImport = lines.findIndex((l) => /^import \{[^}]*\} from 'vitest';$/.test(l));
+  if (vitestImport < 0) return test;
+  if (!/\bvi\b/.test(lines[vitestImport])) lines[vitestImport] = lines[vitestImport].replace(/\s*\}/, ', vi }');
+  let lastImport = vitestImport;
+  lines.forEach((l, i) => { if (/^import\s/.test(l)) lastImport = i; });
+  lines.splice(lastImport + 1, 0,
+    '',
+    '// Your app keeps data in the browser (localStorage). Tests run in Node, which has none, so a small',
+    '// in-memory stand-in is installed before your module loads — only if one is not already there.',
+    'vi.hoisted(() => {',
+    '  const memory = () => {',
+    '    const m = new Map<string, string>();',
+    '    return {',
+    '      getItem: (k: string) => (m.has(k) ? (m.get(k) as string) : null),',
+    '      setItem: (k: string, v: string) => { m.set(k, String(v)); },',
+    '      removeItem: (k: string) => { m.delete(k); },',
+    '      clear: () => { m.clear(); },',
+    '      key: (i: number) => [...m.keys()][i] ?? null,',
+    '      get length() { return m.size; },',
+    '    };',
+    '  };',
+    '  const g = globalThis as Record<string, unknown>;',
+    "  if (typeof g.localStorage === 'undefined') g.localStorage = memory();",
+    "  if (typeof g.sessionStorage === 'undefined') g.sessionStorage = memory();",
+    '});',
+  );
+  return lines.join('\n');
+}
+
+const BROWSER_STORAGE = /\b(?:local|session)Storage\b/;
+
+/**
+ * Are ALL the failing tests ones NavBharatAI wrote itself (a starter skeleton, or anything this build's
+ * own finishing pass wrote)? When they are, the failure is OUR defect — the vaccine must not send a model
+ * to change the user's app to satisfy it (autopsy 8e124182: `auth.test.ts`, our skeleton, crashed on
+ * import, and the repair rewrote the user's `seed.ts`). A failing entry that is not a test FILE path —
+ * a bare test name — cannot be attributed, so it answers "not only ours": the direction that never hides
+ * a real failure of the user's own suite. PURE.
+ */
+export function failuresAreOurStarterTests(
+  failing: readonly string[],
+  contents: Readonly<Record<string, string>>,
+  ourPaths: ReadonlySet<string>,
+): boolean {
+  const files = failing.map((f) => norm(String(f ?? '').split(' > ')[0].trim()));
+  if (files.length === 0) return false;
+  return files.every((f) => /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(f)
+    && (ourPaths.has(f) || isPlatformStarterTest(contents[f])));
+}
+
+/** The report line when the only failing tests are our own starter tests. PURE. */
+export function ourStarterTestFailedNote(files: readonly string[]): string {
+  const list = files.slice(0, 3).join(', ');
+  return `The only failing test${files.length === 1 ? ' is' : 's are'} ${list} — a starter test NavBharatAI added, `
+    + 'which could not load your code in the test environment. That is our test\'s defect, not your app\'s, '
+    + 'so your app was not changed to satisfy it.';
+}
+
 export interface TestPlanItem {
   sourcePath: string;
   testPath: string;
@@ -146,15 +233,18 @@ export function planAutoTests(
     .sort((a, b) => b.usage - a.usage || b.functions.length - a.functions.length || a.path.localeCompare(b.path))
     .slice(0, limit);
 
+  // Any file, not only the target: storage is usually touched by a module the target IMPORTS.
+  const usesBrowserStorage = norms.some((f) => BROWSER_STORAGE.test(f.content));
   return ranked.map((c) => {
     const testPath = testPathFor(c.path);
     const modulePath = moduleSpecifierFor(c.path);
+    const body = generateUnitTest({ modulePath, functions: c.functions });
     return {
       sourcePath: c.path,
       testPath,
       modulePath,
       functions: c.functions,
-      content: generateUnitTest({ modulePath, functions: c.functions }),
+      content: `${STARTER_TEST_MARKER}\n${usesBrowserStorage ? withBrowserStorageShim(body) : body}`,
     };
   });
 }

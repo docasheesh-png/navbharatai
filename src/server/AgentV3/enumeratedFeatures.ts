@@ -122,6 +122,44 @@ function isRecordAttribute(item: string): boolean {
 }
 
 /**
+ * 🔴 A PROMPT ABOUT HOW TO ANSWER IS NOT A LIST OF WHAT TO BUILD (autopsy 8e124182, 2026-09-30).
+ *
+ * A stock-inventory request pasted from a prompt generator — six numbered features, then `# Steps`
+ * (seven numbered writing instructions) and `# Output Format` — counted SIXTEEN parts, over the 14 that
+ * turns Software Project Mode on without a big-software noun. Measured, the sixteen were:
+ * *"designing"*, *"developing"* and *"user-friendly"* from the role line (*"You are tasked with
+ * designing, developing, and building a stock inventory application that is attractive,
+ * user-friendly, …"*), *"design considerations"*, *"security measures"* and *"how you ensure
+ * responsiveness"* from an instruction about the ANSWER, and *"explain audit logging strategy"* from
+ * `# Steps`. The app itself had six screens; it was decomposed into fourteen modules.
+ *
+ * Two rules, both of which can only LOWER a count (the safe direction for a gate that spends a planner
+ * call — see this module's header):
+ *   1. A line under a prompt-writing section heading (`# Steps`, `# Output Format`, `Notes:` …) is an
+ *      instruction to the writer, never a part of the app. The next ordinary heading ends the section.
+ *   2. When the author already ENUMERATED with list markers (at least STRUCTURED_MIN of them), the list
+ *      is the enumeration: prose lines between the bullets are framing and add no inline runs.
+ */
+const INSTRUCTION_SECTION =
+  /^\s*(?:#{1,6}\s*)?(?:\*\*)?\s*(?:steps|output(?:\s+format)?|response\s+format|answer\s+format|format|notes?|examples?|tone|style(?:\s+guide)?|instructions?|guidelines?)\s*(?:\*\*)?\s*:?\s*(?:\*\*)?\s*$/i;
+/** Any heading — markdown `#`, or a short line that ends in a colon — closes an instruction section. */
+const ANY_HEADING = /^\s*#{1,6}\s+\S|^\s*(?:\*\*)?[A-Za-z][^.!?\n]{0,70}:\s*(?:\*\*)?\s*$/;
+/** How many list-marker lines make a prompt a STRUCTURED spec whose prose is framing, not features. */
+export const STRUCTURED_MIN = 5;
+
+/** The lines that describe the APP — instruction sections removed. PURE. */
+function appLines(text: string): string[] {
+  const out: string[] = [];
+  let inInstructions = false;
+  for (const line of text.split(/\r?\n/)) {
+    if (INSTRUCTION_SECTION.test(line)) { inInstructions = true; continue; }
+    if (inInstructions && ANY_HEADING.test(line) && !LINE_MARKER.test(line)) inInstructions = false;
+    if (!inInstructions) out.push(line);
+  }
+  return out;
+}
+
+/**
  * 🔴 A LOOK IS NOT A PART, AND A VARIANT IS NOT A SECOND FEATURE (autopsy 6a5fb04b, 2026-09-30).
  *
  * A one-screen voice assistant — a microphone button, a reply, three languages, a history list — was
@@ -180,7 +218,9 @@ export function enumeratedFeatureItems(prompt: string): string[] {
     seen.add(item.toLowerCase());
   };
 
-  for (const line of text.split(/\r?\n/)) {
+  const lines = appLines(text);
+  const structured = lines.filter((l) => LINE_MARKER.test(l)).length >= STRUCTURED_MIN;
+  for (const line of lines) {
     if (!line.trim()) continue;
 
     // A bullet / numbered line is ONE item — the signal that already worked, kept exactly.
@@ -188,6 +228,8 @@ export function enumeratedFeatureItems(prompt: string): string[] {
       add(line);
       continue;
     }
+    // A structured spec's prose is framing (rule 2 above) — its bullets already are the list.
+    if (structured) continue;
 
     // Code/data and quoted strings enumerate nothing (autopsy SignBridge, 2026-09-26: a pasted JSON
     // example and a quoted tagline were counted as features of a one-app spec, and the prompt was

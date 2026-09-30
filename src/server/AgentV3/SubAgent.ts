@@ -1,4 +1,5 @@
 import { collectHandoff, handoffBlock } from './taskHandoff';
+import { parallelHelperScopeNote } from './parallelHelperScope';
 import { withoutPreviewBridge } from './previewBridge';
 import type { AgentEventStream } from './AgentEventStream';
 import type { WorkspaceState } from './WorkspaceState';
@@ -343,6 +344,8 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
         : '',
       verification,
       (() => { try { return deps.languageRule?.() ?? ''; } catch { return ''; } })(),
+      // Two engineers in parallel are told their lane and to reuse before creating (autopsy 8e124182).
+      parallelHelperScopeNote(role, deps.framework),
       (() => { try { return deps.aiRule?.() ?? ''; } catch { return ''; } })(),
     ].filter(Boolean);
     // 🎨 THE KIT, AS THE ARCHITECT WAS TOLD IT (autopsy ee0e6de5, 2026-09-30). A specialist that writes

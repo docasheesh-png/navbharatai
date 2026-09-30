@@ -200,7 +200,7 @@ async function readStream(
       }
       // …and the THIRD state: answering, but so slowly that waiting costs more than moving on. Judged
       // only when the caller says another rung is available — see `canAbandon`.
-      if (opts.canAbandon?.() && streamIsCrawling({ producedChars: acc.producedChars(), elapsedMs: now() - startedAt })) {
+      if (opts.canAbandon?.() && streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt })) {
         abort();
         return 'slow';
       }

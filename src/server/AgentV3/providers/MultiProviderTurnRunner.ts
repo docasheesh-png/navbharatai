@@ -13,6 +13,7 @@
 // validation + the Claude backstop cover hard failures. PURE control flow; the runners are
 // injected, so this is fully unit-testable without any provider key.
 
+import { crawlBenchWindowMs, mayAbandonCrawl, crawlBenchUntil } from '../crawlBench';
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
@@ -571,6 +572,12 @@ export interface BuildBenchRegistry {
   slowKeptAnyway: Set<string>;
   /** One slow-stream abandon per BUILD — see `canAbandonSlowStream` for why it is capped. */
   abandonedSlowRung: boolean;
+  /** family::model → crawl abandons this build (crawlBench.ts). */
+  crawlAbandons: Map<string, number>;
+  /** family::model → when its CRAWL bench ends (ms). Absent ⇒ benched for the rest of the build. */
+  slowBenchUntil: Map<string, number>;
+  /** Rungs whose crawl bench expired and which are being tried once more. */
+  crawlReprobed: Set<string>;
 }
 
 export function createBuildBenchRegistry(): BuildBenchRegistry {
@@ -581,6 +588,9 @@ export function createBuildBenchRegistry(): BuildBenchRegistry {
     slowBenched: new Set(),
     slowKeptAnyway: new Set(),
     abandonedSlowRung: false,
+    crawlAbandons: new Map(),
+    slowBenchUntil: new Map(),
+    crawlReprobed: new Set(),
   };
 }
 
@@ -697,6 +707,7 @@ export function makeMultiProviderTurnRunner(
   /** Rungs judged slow but KEPT (the last engine). Remembered only so the report says it once. */
   const slowKeptAnyway = bench.slowKeptAnyway;
   const distinctSlowRungs = new Set(chain.map(slowKeyFor)).size;
+  const crawlWindowMs = crawlBenchWindowMs();
   return {
     async runTurn(params: RunTurnParams): Promise<TurnResult> {
       const fellBackFrom: string[] = [];
@@ -731,10 +742,18 @@ export function makeMultiProviderTurnRunner(
           fellBackFrom.push(name); // POOL cooldown — the provider SERVICE is saturated; every key skips
           continue;
         }
-        if (slowBenched.has(slowKeyFor(chain[i]))) {
+        const benchKey = slowKeyFor(chain[i]);
+        if (slowBenched.has(benchKey) && (bench.slowBenchUntil.get(benchKey) ?? Number.POSITIVE_INFINITY) <= now()) {
+          // A CRAWL bench has run its window (autopsy 876afca9): one crawl is weather, not a verdict,
+          // so the rung is tried once more. A throughput bench has no end and never reaches here.
+          slowBenched.delete(benchKey);
+          bench.slowBenchUntil.delete(benchKey);
+          bench.crawlReprobed.add(benchKey);
+        }
+        if (slowBenched.has(benchKey)) {
           // Retired for THROUGHPUT earlier in this build — it answers, just far too slowly to finish
-          // the user's app inside the budget. `canBenchAnother` guarantees a rung survives this, so
-          // skipping here can never empty the ladder.
+          // the user's app inside the budget — or benched for crawling and still inside its window.
+          // `canBenchAnother` guarantees a rung survives this, so skipping here can never empty the ladder.
           fellBackFrom.push(name);
           continue;
         }
@@ -770,7 +789,13 @@ export function makeMultiProviderTurnRunner(
            *    whole ladder and failing. That caps the total cost of this guard at ONE abandoned
            *    call, however bad the weather is at every vendor.
            */
-          const canAbandonSlowStream = () => !bench.abandonedSlowRung && i + 1 < chain.length;
+          const canAbandonSlowStream = () => mayAbandonCrawl({
+            hasNextRung: i + 1 < chain.length,
+            abandonsSoFar: [...bench.crawlAbandons.values()].reduce((a, b) => a + b, 0),
+            abandonsOfThisRung: bench.crawlAbandons.get(benchKey) ?? 0,
+            isReprobe: bench.crawlReprobed.has(benchKey),
+            windowMs: crawlWindowMs,
+          });
           // A rung measured to reason before every answer is never asked for less than it needs to
           // BEGIN one — see reasoningAsk.ts. The retirement above stops a starved model being re-proved
           // on fifty keys; this stops it starving in the first place, when the ask came from a call site
@@ -923,13 +948,24 @@ export function makeMultiProviderTurnRunner(
             bench.abandonedSlowRung = true;
             try {
               const slowKey = slowKeyFor(chain[i]);
+              const abandons = (bench.crawlAbandons.get(slowKey) ?? 0) + 1;
+              bench.crawlAbandons.set(slowKey, abandons);
+              bench.crawlReprobed.delete(slowKey);
               if (!slowBenched.has(slowKey) && canBenchAnother(slowBenched.size, distinctSlowRungs)) {
                 slowBenched.add(slowKey);
+                const until = crawlBenchUntil(abandons, now(), crawlWindowMs);
+                if (Number.isFinite(until)) bench.slowBenchUntil.set(slowKey, until);
+                else bench.slowBenchUntil.delete(slowKey);
                 const elapsedMs = Math.max(0, now() - attemptStartedAt);
                 opts.onProviderBenched?.(
                   reportName,
                   `${chain[i].modelId ? `${chain[i].modelId} ` : ''}was answering far below a usable rate after `
-                  + `${Math.round(elapsedMs / 1000)}s — abandoned mid-answer and skipped for the rest of this build, `
+                  + `${Math.round(elapsedMs / 1000)}s — abandoned mid-answer and `
+                  + (Number.isFinite(until)
+                    ? `skipped for ${Math.round((until - now()) / 1000)}s, then tried once more, `
+                    : abandons >= 2
+                      ? 'skipped for the rest of this build (it crawled again when tried once more), '
+                      : 'skipped for the rest of this build, ')
                   + 'so the ladder can reach the next engine instead of waiting it out',
                 );
               }

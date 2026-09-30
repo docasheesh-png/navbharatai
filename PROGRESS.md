@@ -84035,3 +84035,53 @@ app, and pay once with a test card.
 **Honest limit (open):** `amount_due` is written by the app at insert, so a hostile client can create a row
 with a small amount; `paid_amount` records what Razorpay really charged. A server-owned price table is a
 later slice.
+
+## 2026-09-30 — Builder scorecard autopsy (admin Diagnostics capture, 254 builds): two defects, both ours
+
+The admin sent the Builder scorecard with no text. Headline numbers: build success 62.2% of 254,
+"needed a heal" 83.9% (3.15 per build), median build 11.6 min, median cost ₹69.53. The same capture
+carried an iOS console error. Two root causes, both fixed in this change.
+
+**1. App Check never started on ANY phone** (`"FirebaseAppCheck.then()" is not implemented on ios @
+unhandled promise`). `loadNativeAppCheck` (App Check slice 2, my own code, 2026-09-26) was `async` and
+did `return FirebaseAppCheck` — a Capacitor plugin PROXY. Resolving the promise reads `.then` off the
+value; the proxy dispatched a native method named `then`, which rejected unhandled and never called
+back, so `installAppCheck`'s `await` never settled. Nothing broke (fetch stayed unwrapped, monitor mode),
+but no phone ever sent a token.
+- 🔴 **The identical defect was root-caused on 2026-09-15** (PlayBilling, DeviceIntegrity). That fix
+  guarded the two files by NAME, so a third file walked straight past it — the headline class again.
+- Fixed: the loader returns a plain wrapper object. **DNA half:**
+  `tests/aPluginProxyIsNeverAPromisesValue.test.ts` scans EVERY client file for a plugin proxy handed to
+  a promise (`registerPlugin`, `await import('@capacitor…')`, `Promise.all` destructuring,
+  `return (await import(...)).X`), with canaries, plus a behavioural test using a Capacitor-like proxy.
+  Reversion-proven: restoring `return FirebaseAppCheck` fails both.
+- ⚠️ Reaches phones only with a fresh `.aab`/`.ipa` (bundled mode). The first such build is the first
+  time native App Check actually runs; console enforcement stays OFF, so it refuses nothing.
+
+**2. The scorecard counted findings nobody fixed as "repairs".** "Most-repaired" was led by
+`READINESS_WARNING ×305` and `PREVIEW_SNAPSHOT_STALE ×105`, plus `USAGE_NOT_REPORTED ×10` — 420 of the
+629 named repairs. All are recorded `autoResolved: true` because they do not BLOCK, never because
+anything was repaired: a readiness warning (import cycle, unused component, requested feature not
+built) is still in the app when the build ends. The 2026-09-25 fix (info rows counted as repairs) left
+this last shape.
+- `NOT_A_REPAIR_CODES` + `isLeftOpen` in `src/lib/healIssue.ts` (also RUNTIME_FIX_REGRESSED,
+  DESIGN_HEAL_REVERTED, CHEAP_REVIEW_NOT_RUN — an undone repair and a review that never ran). The
+  recorder writes `counts.leftOpen` and `counts.healRule: 2`; `healCountOf` corrects OLDER stored
+  reports on read, so the card is right about the builds already recorded. The scorecard shows them on
+  their own line — "Left open, not repaired" — the ❌ bucket, never dropped.
+- First-pass quality does NOT improve by renaming: `classifyFirstPass` counts left-open findings as
+  not-clean, for old and new reports alike.
+- Test-locked in `tests/aWarningLeftOpenIsNotARepair.test.ts` (12 cases), reversion-proven twice.
+- ⚠️ **Expect the card's heal rate to DROP** on the next load. That is the measurement getting honest,
+  not the engine getting better.
+
+**Open, not done here:**
+- **A build the USER stopped counts as a failed build and as a "stuck project".** Two of the four stuck
+  projects on this card say, in their own root cause, "no failure of the app or the engine is implied".
+  The stored listing carries no structured "stopped by the user" field, so the scorecard cannot exclude
+  them without one. Next change: project that fact onto the listing entry and exclude it from success
+  and survival, counted separately.
+- `PREVIEW_SNAPSHOT_STALE` on 105 of 254 builds is itself a real defect (the saved copy of a green build
+  goes stale when a pass writes after it is taken). Now visible as left open, and not root-caused here.
+- The fourth stuck row's root cause ("Did not ask this user to add credits…") predates the 2026-09-17
+  `UPSELL_SUPPRESSED` fix; nothing new to do.

@@ -87,7 +87,7 @@ import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
 import {
-  writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckNote, WriteTypecheckQueue,
+  writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckNote, writeTypecheckCleanNote, WriteTypecheckQueue,
   shouldProbeTsconfig, probeExhausted, isMissingFileError, type TsProjectVerdict,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
@@ -176,6 +176,7 @@ import { analyzeUndefinedHooks } from './UndefinedHookAnalysis';
 import { analyzeDependencyConstraints } from '../AI/reasoning/ConstraintSolver';
 import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis';
 import { analyzeRequirementCoverage, requirementCoverageSummary, currentRequestForCoverage } from './RequirementCoverage';
+import { binaryTextWriteRefusal } from './binaryTextWrite';
 import { generateReadme } from './ReadmeGenerator';
 import { generateEnvExample } from './EnvExampleGenerator';
 import { generateGitignore } from './GitignoreGenerator';
@@ -296,6 +297,7 @@ import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
+import { missingLayerFiles, missingLayersNote } from '../lib/gameRecipeLayers';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
@@ -711,13 +713,16 @@ export class ToolDispatcher {
   }
 
   /**
-   * A Software Project Mode module turn whose module does not own the app's entry file — the entry is
-   * EXPECTED to still be the starter, so it must not be reported as "nothing has been built yet"
-   * (autopsy 8e124182; see `starterEntryExpectedFor` in ProjectPlan.ts). Set by the route for that turn.
+   * What THIS build was asked to build, when that is not the user's message (autopsy 728a402d). A
+   * mega-app roadmap builds milestone 1 of 6 from the planner's brief ("buyer storefront — browse and
+   * cart") and tells the builder, in as many words, not to build the later milestones; the audit then
+   * graded the storefront on the whole message and reported login, sign-up, dashboard and admin panel
+   * "not found" — five warnings, twice, about work nobody asked this build to do. Null ⇒ the user's
+   * own request, exactly as before.
    */
-  private starterEntryExpected = false;
-  setStarterEntryExpected(expected: boolean): void {
-    this.starterEntryExpected = expected === true;
+  private coverageRequest: string | null = null;
+  setCoverageRequest(text: string | null): void {
+    this.coverageRequest = typeof text === 'string' && text.trim() ? text : null;
   }
 
   setIgnoreRules(rules: IgnoreRule[]): void {
@@ -793,6 +798,19 @@ export class ToolDispatcher {
    * same lesson the deploy tool learned when its failure messages were being RETURNED and the build
    * timeline recorded two successful no-op deploys.
    */
+  /**
+   * A write tool writes TEXT; a `.png`/`.woff2`/`.pdf` written as text is a broken file (autopsy
+   * 728a402d: a zero-byte icon was saved as the app's PWA icon). Thrown, like `assertWritable`, so the
+   * model gets an error it must handle rather than a sentence it may read as success. Not applied to a
+   * rename — moving a real binary file is legitimate.
+   */
+  private assertTextWritable(path: string): void {
+    const refusal = binaryTextWriteRefusal(path);
+    if (!refusal) return;
+    try { getWorkspaceMemory(this.workspaceId).recordAudit(`[BINARY-AS-TEXT] refused text write to ${path}`); } catch { /* audit best-effort */ }
+    throw new Error(refusal);
+  }
+
   private assertWritable(path: string): void {
     if (this.ignoreRules.length === 0) return;
     const rule = matchingIgnoreRule(path, this.ignoreRules);
@@ -1460,9 +1478,17 @@ export class ToolDispatcher {
    * not look" is not "the app is a scaffold", and inventing a blocker from an unreadable file would
    * fail real builds on our own trouble — the same rule the timeout above already follows.
    */
+  /**
+   * This turn builds ONE Software Project Mode module, and a LATER module assembles the app, so the
+   * starter entry is expected (ProjectPlan.ts `shellModuleFor`, autopsy 6a5fb04b). Set by the route.
+   */
+  private _starterExpected = false;
+  setStarterExpected(on: boolean): void { this._starterExpected = on; }
+
   private async _blockIfStillTheStarterApp(report: ReadinessReport): Promise<ReadinessReport> {
-    // A module turn that is not meant to touch the entry — see `setStarterEntryExpected`.
-    if (this.starterEntryExpected) return report;
+    // A module that does not own the entry leaves the starter in place by design — judging the whole
+    // app here is what failed every Project Mode module before the shell (autopsy 6a5fb04b).
+    if (this._starterExpected) return report;
     // The SAME question every render proof asks (`entryIsStillTheStarter`) — one answer, so the gate
     // and the proofs can never disagree about the same file again (autopsy 0d297b25).
     try {
@@ -2660,6 +2686,47 @@ export class ToolDispatcher {
     catch { /* audit best-effort */ }
   }
 
+  /**
+   * Write one game recipe's files. A file already holding EXACTLY the recipe's content is not rewritten
+   * and is reported as unchanged (autopsy 6a55d939: the builder ran the whole recipe sequence twice and
+   * the controller three more times; every re-run said "Updated" about files it had not changed, and each
+   * rewrite undid the previous heal, so the repeat looked like progress).
+   */
+  private async writeRecipeFiles(files: Record<string, string>, agent: AgentRole): Promise<string[]> {
+    const lines: string[] = [];
+    for (const [path, content] of Object.entries(files)) {
+      let existing: string | null = null;
+      try { existing = await this.actuator.readFile(this.workspaceId, path); } catch { existing = null; }
+      if (existing === content) { lines.push(`Unchanged ${path} (already exactly what this recipe writes)`); continue; }
+      await this.actuator.writeFile(this.workspaceId, path, content);
+      this.state?.recordFileChange({ path, kind: existing === null ? 'create' : 'modify' }, agent);
+      getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+      lines.push(`${existing === null ? 'Created' : 'Updated'} ${path}`);
+    }
+    return lines;
+  }
+
+  /**
+   * Write the recipe-owned files a game recipe's output imports and the project does not have — the
+   * 3D layer that `generate_game_shell` and `generate_game_systems` import, when `generate_game_3d` was
+   * never run (autopsy 6a55d939, gameRecipeLayers.ts). Only ABSENT files are written; returns the note
+   * for the tool result. Best-effort: a failure leaves the recipe's own result exactly as it was.
+   */
+  private async addMissingRecipeLayers(written: Record<string, string>, agent: AgentRole): Promise<string> {
+    try {
+      const listed = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
+      const present = new Set(listed.map((f) => String(f).replace(/^\.?\//, '')));
+      const missing = missingLayerFiles(written, present);
+      if (missing.size === 0) return '';
+      for (const [path, f] of missing) {
+        await this.actuator.writeFile(this.workspaceId, path, f.content);
+        this.state?.recordFileChange({ path, kind: 'create' }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(path, f.content);
+      }
+      return missingLayersNote(missing);
+    } catch { return ''; }
+  }
+
   private async writeTypecheckNote(sources: Record<string, string>): Promise<string> {
     const s = this._writeTypecheckStats;
     try {
@@ -2700,6 +2767,7 @@ export class ToolDispatcher {
         return '';
       }
       if (unprobed) s.compiledUnprobed += 1;
+      let silentRun = false; // tsc printed nothing at all — the only output that means "clean"
       const errors = await this._writeTypecheckQueue.run(async () => {
         const command = writeTypecheckCommand();
         const startedAt = Date.now();
@@ -2725,6 +2793,7 @@ export class ToolDispatcher {
         try { this.onCommand?.({ command, exitCode: null, stdout: r.stdout || '', stderr: r.stderr || '', durationMs }); }
         catch { /* diagnostics are best-effort */ }
         const combined = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
+        silentRun = combined === '';
         this.noteCompileOutput(combined);
         // A tsc that printed no `error TSxxxx` line is clean; a help page or an install log parses to zero
         // errors too, which is why a clean run here is evidence only through the bridge above, never on its own.
@@ -2744,6 +2813,8 @@ export class ToolDispatcher {
       // its remedy in the IMPORTED file, which only that file's text can confirm (autopsy 2a7fa4b0 —
       // BottomNav rewritten three times for an export App.tsx lacked). At most two targets' candidates
       // are read, only when such an error exists, and a read that fails is simply not evidence.
+      // A clean run is SAID, so the model does not re-run the compiler to find out (autopsy dfd81a3a).
+      if (errors.length === 0) return silentRun ? writeTypecheckCleanNote(tsPaths) : '';
       sources = { ...(await this.exportTargetSources(splitByWrittenFiles(errors, tsPaths).own, sources)), ...sources };
       return writeTypecheckNote(errors, tsPaths, sources);
     } catch {
@@ -3261,6 +3332,7 @@ export class ToolDispatcher {
         // preview shows "Blocked request … is not allowed" instead of the app. No-op for non-configs
         // or a config that already sets allowedHosts. (Mirrors ScaffoldGuard: prompts are advisory.)
         this.assertWritable(path); // C2 — checked AFTER any relocation, so the REAL destination is judged
+        this.assertTextWritable(path);
         let content = guardConfigContent(path, this.applyPostgresProviderLock(path, reqStr(input, 'content')));
         // THE OTHER END OF THE SAME GUARD (see read_file above). The model is not supposed to be able
         // to see the preview bridge at all — but "cannot see it" and "cannot store it" are different
@@ -3398,6 +3470,7 @@ export class ToolDispatcher {
           const obj = f as Record<string, unknown>;
           const p = reqStr(obj, 'path');
           this.assertWritable(p); // C2 — one protected entry fails the whole batch, never half-applies
+          this.assertTextWritable(p);
           // Same Vite-preview-host backstop as write_file, applied per batched file.
           return { path: p, content: guardConfigContent(p, this.applyPostgresProviderLock(p, reqStr(obj, 'content'))) };
         });
@@ -3542,6 +3615,7 @@ export class ToolDispatcher {
       case 'edit_file': {
         const path = reqStr(input, 'path');
         this.assertWritable(path); // C2 — an edit is a write; the same protection applies
+        this.assertTextWritable(path);
         const oldStr = reqStr(input, 'old_string');
         const newStr = reqStr(input, 'new_string');
         const existing = await this.actuator.readFile(this.workspaceId, path);
@@ -4260,7 +4334,7 @@ export class ToolDispatcher {
           .snapshot()
           .episodes.filter((e) => e.kind === 'request')
           .map((e) => e.text);
-        const requestText = currentRequestForCoverage(requestEpisodes);
+        const requestText = this.coverageRequest ?? currentRequestForCoverage(requestEpisodes);
         // The file BODIES are passed alongside the graph so a feature built INLINE (a search box
         // inside a list page owns no file of its own) is seen as built instead of reported missing —
         // and so a feature found in neither names nor bodies is a CONFIRMED absence rather than a
@@ -7138,17 +7212,10 @@ export class ToolDispatcher {
           ? gsyRec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         const gsy = generateGameSystems(gsyInclude);
-        const gsyWritten: string[] = [];
-        for (const [path, content] of Object.entries(gsy.files)) {
-          let kind: 'create' | 'modify' = 'create';
-          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
-          await this.actuator.writeFile(this.workspaceId, path, content);
-          this.state?.recordFileChange({ path, kind }, agent);
-          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-          gsyWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
-        }
+        const gsyWritten = await this.writeRecipeFiles(gsy.files, agent);
+        const gsyLayers = await this.addMissingRecipeLayers(gsy.files, agent);
         this.scheduleCheckpoint('gameplay systems');
-        return `Wired the gameplay systems:\n${gsyWritten.join('\n')}\n\n${gsy.instructions}`;
+        return `Wired the gameplay systems:\n${gsyWritten.join('\n')}\n\n${gsy.instructions}${gsyLayers}`;
       }
 
       case 'generate_game_shell': {
@@ -7160,17 +7227,10 @@ export class ToolDispatcher {
           ? gshRec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         const gsh = generateGameShell(gshInclude);
-        const gshWritten: string[] = [];
-        for (const [path, content] of Object.entries(gsh.files)) {
-          let kind: 'create' | 'modify' = 'create';
-          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
-          await this.actuator.writeFile(this.workspaceId, path, content);
-          this.state?.recordFileChange({ path, kind }, agent);
-          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-          gshWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
-        }
+        const gshWritten = await this.writeRecipeFiles(gsh.files, agent);
+        const gshLayers = await this.addMissingRecipeLayers(gsh.files, agent);
         this.scheduleCheckpoint('game shell');
-        return `Composed the game shell:\n${gshWritten.join('\n')}\n\n${gsh.instructions}`;
+        return `Composed the game shell:\n${gshWritten.join('\n')}\n\n${gsh.instructions}${gshLayers}`;
       }
 
       case 'generate_melody': {
@@ -7184,17 +7244,10 @@ export class ToolDispatcher {
           ? melRec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         const mel = generateMelody(melInclude);
-        const melWritten: string[] = [];
-        for (const [path, content] of Object.entries(mel.files)) {
-          let kind: 'create' | 'modify' = 'create';
-          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
-          await this.actuator.writeFile(this.workspaceId, path, content);
-          this.state?.recordFileChange({ path, kind }, agent);
-          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-          melWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
-        }
+        const melWritten = await this.writeRecipeFiles(mel.files, agent);
+        const melLayers = await this.addMissingRecipeLayers(mel.files, agent);
         this.scheduleCheckpoint('melody engine');
-        return `Added the melody engine:\n${melWritten.join('\n')}\n\n${mel.instructions}`;
+        return `Added the melody engine:\n${melWritten.join('\n')}\n\n${mel.instructions}${melLayers}`;
       }
 
       case 'generate_game_vfx': {
@@ -7206,17 +7259,10 @@ export class ToolDispatcher {
           ? gfxRec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         const gfx = generateGameVfxAudio(gfxInclude);
-        const gfxWritten: string[] = [];
-        for (const [path, content] of Object.entries(gfx.files)) {
-          let kind: 'create' | 'modify' = 'create';
-          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
-          await this.actuator.writeFile(this.workspaceId, path, content);
-          this.state?.recordFileChange({ path, kind }, agent);
-          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-          gfxWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
-        }
+        const gfxWritten = await this.writeRecipeFiles(gfx.files, agent);
+        const gfxLayers = await this.addMissingRecipeLayers(gfx.files, agent);
         this.scheduleCheckpoint('game VFX and audio');
-        return `Wired VFX and audio:\n${gfxWritten.join('\n')}\n\n${gfx.instructions}`;
+        return `Wired VFX and audio:\n${gfxWritten.join('\n')}\n\n${gfx.instructions}${gfxLayers}`;
       }
 
       case 'generate_game_controller': {
@@ -7228,17 +7274,10 @@ export class ToolDispatcher {
           ? gcRec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         const gc = generateGameController(gcInclude);
-        const gcWritten: string[] = [];
-        for (const [path, content] of Object.entries(gc.files)) {
-          let kind: 'create' | 'modify' = 'create';
-          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
-          await this.actuator.writeFile(this.workspaceId, path, content);
-          this.state?.recordFileChange({ path, kind }, agent);
-          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-          gcWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
-        }
+        const gcWritten = await this.writeRecipeFiles(gc.files, agent);
+        const gcLayers = await this.addMissingRecipeLayers(gc.files, agent);
         this.scheduleCheckpoint('character controller');
-        return `Wired the character controller:\n${gcWritten.join('\n')}\n\n${gc.instructions}`;
+        return `Wired the character controller:\n${gcWritten.join('\n')}\n\n${gc.instructions}${gcLayers}`;
       }
 
       case 'object_spec': {
@@ -7294,20 +7333,13 @@ export class ToolDispatcher {
           ? g3Rec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         const g3 = generateGame3D(g3Include);
-        const g3Written: string[] = [];
-        for (const [path, content] of Object.entries(g3.files)) {
-          let kind: 'create' | 'modify' = 'create';
-          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
-          await this.actuator.writeFile(this.workspaceId, path, content);
-          this.state?.recordFileChange({ path, kind }, agent);
-          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-          g3Written.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
-        }
+        const g3Written = await this.writeRecipeFiles(g3.files, agent);
+        const g3Layers = await this.addMissingRecipeLayers(g3.files, agent);
         this.scheduleCheckpoint('3D layer');
         // Naming the install is not optional: a 3D layer whose `three` dependency is never added
         // produces an app that cannot build, which is the honest-failure rule applied to a generator.
         const g3Deps = g3.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
-        return `Wired the 3D layer:\n${g3Written.join('\n')}\nAdd the dependency: ${g3Deps} (and @types/three)\n\n${g3.instructions}`;
+        return `Wired the 3D layer:\n${g3Written.join('\n')}\nAdd the dependency: ${g3Deps} (and @types/three)\n\n${g3.instructions}${g3Layers}`;
       }
 
       case 'generate_game_runtime': {
@@ -7322,17 +7354,10 @@ export class ToolDispatcher {
           ? grRec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         const gr = generateGameRuntime(grInclude);
-        const grWritten: string[] = [];
-        for (const [path, content] of Object.entries(gr.files)) {
-          let kind: 'create' | 'modify' = 'create';
-          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
-          await this.actuator.writeFile(this.workspaceId, path, content);
-          this.state?.recordFileChange({ path, kind }, agent);
-          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-          grWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
-        }
+        const grWritten = await this.writeRecipeFiles(gr.files, agent);
+        const grLayers = await this.addMissingRecipeLayers(gr.files, agent);
         this.scheduleCheckpoint('game runtime');
-        return `Wired the game runtime:\n${grWritten.join('\n')}\n\n${gr.instructions}`;
+        return `Wired the game runtime:\n${grWritten.join('\n')}\n\n${gr.instructions}${grLayers}`;
       }
 
       case 'generate_animation': {

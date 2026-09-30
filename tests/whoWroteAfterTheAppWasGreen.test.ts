@@ -178,7 +178,7 @@ describe('the wiring', () => {
   it('the observer fires only on the ALLOWED branch of assertWriteAllowed', () => {
     const at = freeze.indexOf('export function assertWriteAllowed');
     const body = freeze.slice(at, freeze.indexOf('\n}', at));
-    expect(body).toMatch(/if \(!writeRefused\(workspaceId, path, env\)\) \{[\s\S]*onWrite\?\.\(/);
+    expect(body).toMatch(/if \(!writeRefused\(workspaceId, path, env\)\) \{[\s\S]*notify\(writeObservers,/);
   });
   it('both codes are measurements of the engine — never app findings, never suggestions', () => {
     const processOnly = diag.slice(diag.indexOf('const PROCESS_ONLY_CODES = new Set(['), diag.indexOf(']);', diag.indexOf('const PROCESS_ONLY_CODES')));

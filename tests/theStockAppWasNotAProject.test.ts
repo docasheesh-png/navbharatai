@@ -75,10 +75,19 @@ describe('2 · a module that does not own the entry leaves it as the starter on 
     expect(starterEntryExpectedFor(plan([types, mod('ui', ['src/pages/A.tsx'])]), types)).toBe(false);
   });
 
-  it('the route tells the dispatcher, and the dispatcher stands the starter blocker down', () => {
-    expect(ROUTE).toMatch(/dispatcher\.setStarterEntryExpected\(starterEntryExpectedFor\(pPlan, projectModuleRef\)\)/);
+  it('ONE flag after the merge with #3399 (autopsy 6a5fb04b fixed this in parallel): the route sets it from shellModuleFor, and the dispatcher stands the starter blocker down', () => {
+    expect(ROUTE).toMatch(/const shell = shellModuleFor\(pPlan, projectModuleRef\);\s*if \(shell\) \{\s*moduleAwaitsShell = shell\.name;\s*dispatcher\.setStarterExpected\(true\);/);
+    expect(ROUTE).not.toContain('setStarterEntryExpected');
+    expect(DISPATCHER).not.toContain('setStarterEntryExpected');
     const body = DISPATCHER.slice(DISPATCHER.indexOf('private async _blockIfStillTheStarterApp'));
-    expect(body.slice(0, 300)).toMatch(/if \(this\.starterEntryExpected\) return report;/);
+    expect(body.slice(0, 400)).toMatch(/if \(this\._starterExpected\) return report;/);
+  });
+
+  it('the two helpers are one answer, not two', () => {
+    const types = mod('foundation-types', ['src/types/index.ts'], 'in_progress');
+    const root = mod('app-root', ['src/main.tsx']); // owns an entry only the wider list names
+    expect(moduleOwnsAppEntry(root)).toBe(true);
+    expect(starterEntryExpectedFor(plan([types, root]), types)).toBe(true);
   });
 });
 

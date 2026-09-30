@@ -180,13 +180,45 @@ const latches = new Map<string, GreenLatch>();
 /** The pass currently executing, propagated to every awaited descendant. */
 const passZone = new AsyncLocalStorage<{ name: string }>();
 
-/** Optional observer: called (best-effort) when a write is refused, so the route can record a diagnostic. */
-let onDeferred: ((info: { workspaceId: string; path: string; pass: string | null }) => void) | null = null;
+type WriteInfo = { workspaceId: string; path: string; pass: string | null };
+type Observer = { fn: (info: WriteInfo) => void; workspaceId?: string };
 
-/** Register the deferred-write observer. Returns a disposer that clears it. */
-export function setGreenFreezeObserver(fn: (info: { workspaceId: string; path: string; pass: string | null }) => void): () => void {
-  onDeferred = fn;
-  return () => { if (onDeferred === fn) onDeferred = null; };
+/**
+ * 🔴 ONE OBSERVER PER BUILD, NOT ONE PER SERVER (autopsy 6a5fb04b / dfd81a3a, 2026-09-30).
+ *
+ * Both observers used to be a single module-level slot: `onDeferred = fn`. Every build registers one, so
+ * with two builds on the same Cloud Run instance the SECOND registration replaced the first. A voice-
+ * assistant build's report then carried four GREEN_FREEZE_DEFERRED lines about `src/lib/stock.ts`,
+ * `src/pages/AddStock.tsx` and `src/components/TransactionForm.tsx` — another user's inventory app — each
+ * saying "the app was already verified working" 330 s before this app had rendered at all. The other
+ * build's own report lost them, and when either finished, its disposer left the survivor with none.
+ * POST_GREEN_WRITES, fed by the write observer, counted the other build's writes the same way.
+ *
+ * So observers are a SET, and a build registers with its own workspace: an observer scoped to a
+ * workspace hears only that workspace. An unscoped observer (tests, a future server-wide ledger) hears
+ * every write, as before.
+ */
+const deferredObservers = new Set<Observer>();
+
+function notify(set: Set<Observer>, info: WriteInfo): void {
+  for (const o of set) {
+    if (o.workspaceId !== undefined && o.workspaceId !== info.workspaceId) continue;
+    try { o.fn(info); } catch { /* an observer is best-effort — it must never break a write */ }
+  }
+}
+
+function register(set: Set<Observer>, fn: (info: WriteInfo) => void, workspaceId?: string): () => void {
+  const entry: Observer = { fn, workspaceId };
+  set.add(entry);
+  return () => { set.delete(entry); };
+}
+
+/**
+ * Register a deferred-write observer. Returns a disposer that removes exactly this registration.
+ * Pass `workspaceId` from a build: without it the observer hears every workspace on this server.
+ */
+export function setGreenFreezeObserver(fn: (info: WriteInfo) => void, workspaceId?: string): () => void {
+  return register(deferredObservers, fn, workspaceId);
 }
 
 /**
@@ -195,10 +227,9 @@ export function setGreenFreezeObserver(fn: (info: { workspaceId: string; path: s
  * rendered. Same chokepoint as the refusal observer, so tool writes, heals, restores and sub-agents
  * are all seen once, and nothing has to be threaded through the twenty places that persist a file.
  */
-let onWrite: ((info: { workspaceId: string; path: string; pass: string | null }) => void) | null = null;
-export function setWriteObserver(fn: (info: { workspaceId: string; path: string; pass: string | null }) => void): () => void {
-  onWrite = fn;
-  return () => { if (onWrite === fn) onWrite = null; };
+const writeObservers = new Set<Observer>();
+export function setWriteObserver(fn: (info: WriteInfo) => void, workspaceId?: string): () => void {
+  return register(writeObservers, fn, workspaceId);
 }
 
 /**
@@ -297,10 +328,10 @@ export function writeRefused(workspaceId: string, path: string, env: NodeJS.Proc
  */
 export function assertWriteAllowed(workspaceId: string, path: string, env: NodeJS.ProcessEnv = process.env): void {
   if (!writeRefused(workspaceId, path, env)) {
-    if (!isInfraPath(path)) { try { onWrite?.({ workspaceId, path: norm(path), pass: currentPass() }); } catch { /* observer is best-effort */ } }
+    if (!isInfraPath(path)) notify(writeObservers, { workspaceId, path: norm(path), pass: currentPass() });
     return;
   }
   const pass = currentPass();
-  try { onDeferred?.({ workspaceId, path: norm(path), pass }); } catch { /* observer is best-effort */ }
+  notify(deferredObservers, { workspaceId, path: norm(path), pass });
   throw new GreenFreezeError(norm(path), pass);
 }

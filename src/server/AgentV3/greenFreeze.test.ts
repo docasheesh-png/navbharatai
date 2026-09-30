@@ -168,7 +168,8 @@ describe('the async zone propagates through awaits', () => {
 
 describe('the enforcement an actuator calls', () => {
   beforeEach(() => latchGreen(WS, ['src/App.tsx']));
-  afterEach(() => setGreenFreezeObserver(() => {})); // reset
+  let dispose: (() => void) | null = null;
+  afterEach(() => { dispose?.(); dispose = null; });
 
   it('throws GreenFreezeError on a refused write, and nothing on an infra path', () => {
     expect(() => assertWriteAllowed(WS, 'src/App.tsx')).toThrow(GreenFreezeError);
@@ -178,7 +179,7 @@ describe('the enforcement an actuator calls', () => {
 
   it('notifies the observer before throwing, with the path and pass', () => {
     let seen: { path: string; pass: string | null } | null = null;
-    setGreenFreezeObserver((info) => { seen = { path: info.path, pass: info.pass }; });
+    dispose = setGreenFreezeObserver((info) => { seen = { path: info.path, pass: info.pass }; });
     expect(() => assertWriteAllowed(WS, 'src/App.tsx')).toThrow();
     expect(seen).toEqual({ path: 'src/App.tsx', pass: null });
   });

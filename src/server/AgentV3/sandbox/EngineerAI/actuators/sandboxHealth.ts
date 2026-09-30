@@ -16,7 +16,11 @@ const DEAD_PATTERNS: RegExp[] = [
   /sandbox\s*(is\s*)?(not\s*found|not\s*running|does\s*not\s*exist|unavailable|paused)/i,
   /sandbox.*(timed?\s*out|timeout|expired|killed|terminated|reaped|reclaimed|gone)/i,
   /\b(50[234])\b/, // bad-gateway / unavailable / gateway-timeout from the E2B edge
-  /ECONNREFUSED|ECONNRESET|ENOTFOUND|ETIMEDOUT|EPIPE|socket hang ?up|network\s*error|fetch failed/i,
+  // Node's error CODES are upper-case whole words. Matched case-insensitively and without a boundary,
+  // `ENOTFOUND` hit the middle of Python's `ModuleNotFoundError` (autopsy 728a402d, 2026-09-30): a
+  // missing `PIL` was read as a dead machine, the sandbox was dropped and the command run twice.
+  /\b(?:ECONNREFUSED|ECONNRESET|ENOTFOUND|ETIMEDOUT|EPIPE)\b/,
+  /socket hang ?up|network\s*error|fetch failed/i,
   /(connection|stream)\s*(closed|lost|refused|reset|aborted)/i,
   /disconnected|unreachable|not\s*connected/i,
 ];
@@ -166,6 +170,11 @@ export interface CommandFailureSignal {
  * Pure + unit-testable.
  */
 export function isDeadSandboxSignal(sig: CommandFailureSignal): boolean {
+  // A real exit status came back, so a process RAN in the sandbox and exited — the machine is alive,
+  // whatever that program printed. Reading its stderr for network words let any program's own error
+  // (an app's "ECONNREFUSED :5432", a test's "503", Python's "ModuleNotFoundError") drop a live
+  // sandbox and re-run a possibly non-idempotent command (autopsy 728a402d, 2026-09-30).
+  if (sig.exitCode >= 0) return false;
   if (isDeadSandboxError(sig.errorMessage) || isDeadSandboxError(sig.stderr)) return true;
   const noOutput = !(sig.stdout || '').trim() && !(sig.stderr || '').trim();
   const instant = (sig.durationMs ?? 0) <= 250;

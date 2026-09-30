@@ -4,6 +4,9 @@
  * referralRoutes.test.ts; this file pins the rule itself.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { buildChecklist, pendingRupees, shouldShowChecklist } from '../src/lib/referralChecklist';
+import { rewardsChecklistModel } from '../src/lib/rewardsChecklist';
 import {
   CODE_WINDOW_OPENS, OPEN_GAP_MS, CODE_WINDOW_DAYS,
   accountCreatedAt, codeWindow, countAppOpen, readAppOpenState, codeWindowClosedMessage,
@@ -91,5 +94,84 @@ describe('the refusal', () => {
     const m = codeWindowClosedMessage();
     expect(m).toMatch(/first 3 app opens or first 7 days/);
     expect(m).toMatch(/still earns every other bonus/);
+  });
+});
+
+// ── The client half: a missed row is ❌, never money still waiting ─────────────────────────────────
+
+const serverRows = [
+  { step: 'signup', claimed: true, rupees: 50 },
+  { step: 'referral-code', claimed: false, rupees: 100, missed: true },
+  { step: 'email', claimed: true, rupees: 50 },
+  { step: 'mobile', claimed: false, rupees: 100 },
+  { step: 'github', claimed: false, rupees: 100 },
+];
+
+describe('the checklist rows', () => {
+  it('reads the server’s missed flag and says so in words', () => {
+    const row = buildChecklist(serverRows).find((r) => r.step === 'referral-code')!;
+    expect(row.missed).toBe(true);
+    expect(row.label).toBe('Referral code window closed — ₹100 missed');
+  });
+
+  it('a missed row is never counted as waiting — ₹300 becomes ₹200', () => {
+    expect(pendingRupees(buildChecklist(serverRows))).toBe(200);
+  });
+
+  it('only an explicit true is missed, and never on a claimed row', () => {
+    const rows = buildChecklist([
+      { step: 'referral-code', claimed: true, rupees: 100, missed: true },
+      { step: 'github', claimed: false, rupees: 100, missed: 'yes' },
+    ]);
+    expect(rows.every((r) => r.missed === false)).toBe(true);
+  });
+
+  it('a checklist whose only open row is missed stops waiting for the user', () => {
+    const rows = buildChecklist([
+      { step: 'signup', claimed: true, rupees: 50 },
+      { step: 'referral-code', claimed: false, rupees: 100, missed: true },
+    ]);
+    expect(shouldShowChecklist(rows, 'android')).toBe(false);
+  });
+});
+
+describe('the notification card', () => {
+  const base = {
+    enabled: true, surface: 'android' as const, emailVerified: true, phoneVerified: false,
+    githubLinked: false, referred: false, webCapRupees: null,
+  };
+  it('❌ the missed row has its own state, no button, and is left out of the headline', () => {
+    const m = rewardsChecklistModel({ ...base, rows: buildChecklist(serverRows) })!;
+    const row = m.rows.find((r) => r.step === 'referral-code')!;
+    expect(row.state).toBe('missed');
+    expect(row.hint).toMatch(/Missed/);
+    expect(m.pendingRupees).toBe(200);
+    expect(m.headline).toBe('₹200 free credit waiting for you');
+  });
+
+  it('with everything else claimed, it does not claim "all rewards claimed"', () => {
+    const rows = buildChecklist([
+      { step: 'signup', claimed: true, rupees: 50 },
+      { step: 'referral-code', claimed: false, rupees: 100, missed: true },
+      { step: 'email', claimed: true, rupees: 50 },
+    ]);
+    const m = rewardsChecklistModel({ ...base, rows })!;
+    expect(m.allDone).toBe(true);
+    expect(m.headline).toBe('₹100 earned — nothing left to claim');
+  });
+});
+
+describe('the wiring', () => {
+  const src = (p: string) => readFileSync(p, 'utf8');
+  it('the app asks for missed rows — an older build that does not ask never sees one', () => {
+    expect(src('src/hooks/useReferralProgress.ts')).toMatch(/\?platform=\$\{surface\}&missed=1/);
+  });
+  it('coming back to the app asks again, so a phone that never cold-starts is still counted', () => {
+    const app = src('src/App.tsx');
+    expect(app).toMatch(/useRefreshReferralOnResume\(referralProgress\.refresh, Boolean\(user\?\.uid\)\)/);
+  });
+  it('both surfaces draw the missed state without a button', () => {
+    expect(src('src/components/RewardsChecklistCard.tsx')).toMatch(/row\.state === 'missed'/);
+    expect(src('src/components/panels/ReferralPanel.tsx')).toMatch(/row\.missed && !row\.claimed/);
   });
 });

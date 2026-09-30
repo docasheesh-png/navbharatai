@@ -85525,6 +85525,36 @@ closed before the next report. Status, item by item:
   raise new errors in generated apps.
 - GLM/Kimi latency is provider-side.
 
+## 2026-09-30 — Autopsy 4541f1cf + 6e646503 (admin's "old build report": a Gita reader, then a Gujarati question)
+
+Two builds in one workspace, 14:06 and 14:28 UTC. Both ran before most of today's merges, so every item
+was re-checked against current `main` before anything was built.
+
+**Ledger (problem → root cause → class → siblings → lock):**
+
+| # | Problem | Root cause / class | Status |
+|---|---|---|---|
+| 1 | Romanized Gujarati *"Ibahart app ni jaherat karvi chhe kai rite bolvu a janavo"* (a question) read as a build, turned into an EDIT of the Gita reader, then 2 min of preview/explorer/prod build | Question rules were English/Hindi only (`REGIONAL_QUESTION_ANYWHERE` added). Sibling: when the reader's 6 s race timed out, the ROUTE kept the bare keyword verdict and skipped the question fallback. It now uses `readerlessIntent`, the same fallback the classifier uses | Fixed, `theGujaratiQuestionWasBuilt.test.ts` §1 |
+| 2 | Report said "intention reader did not run". It had been asked | The boolean could not say "asked, then failed / unclear / unusable". Now `readerOutcome` + `describeReaderOutcome` | Fixed, §1 |
+| 3 | The answer came back in English | Two faults. (a) `detectRomanizedIndic` found 1 Gujarati marker, so no language was named. (b) The Latin line told the model the request was "English, or Hindi words typed in Roman letters". Markers were added for Gujarati and Marathi. The romanized instruction now says to reply in that language. The Latin line names Indian languages typed in Roman letters and forbids answering them in English | Fixed, §2 |
+| 4 | Our own templates carried false a11y findings: `html-lang` on `src/theme.tsx` in all 40 scaffolds (a comment mentioning `<html>`). Since #3410 (mine, today), also `img-alt` on `src/index.css` (a kit CSS comment mentioning `<img>`), which cost every new app 8 accessibility points | Markup scanners read comments. `stripCommentsForMarkup` is applied in `scanMarkup` (covers the a11y linter, journey derivation, auth flow), `lintA11y`, `scanAccessibility` and `lintBuiltApp` (design lint too). Length-preserving; `//` after a quote, `(` or `:` is not a comment | Fixed. Census: every golden template lints with 0 offenders and a11y 100 (§3) |
+| 5 | `UNBILLED_BARREN_WORK` blamed "turns that spent their whole output budget" for ₹5.62 that was a timed-out suggest-only review | The detail was a fixed sentence. `absorbedWorkDetail` now reads the ledger and the barren-phase verdicts the bill used. Both settle paths | Fixed, §4 |
+| 6 | Builder told "wishlist / favorites" when the user said "bookmarks". Its reply said "bookmarks / favorites / wishlist" and "add the missing … wishlist features" | Contract restated our category, not the user's word. `usersWordFor`: the contract line names their word | Fixed, §5 |
+| 7 | FEATURE_COVERAGE "Search absent" (Hindi `खोजें` field) — became the build's root cause | Hindi control words | Already fixed by #3398 (merged after this build) |
+| 8 | Write-time typecheck `exit ?` after 25 s counted "1 clean" | A compiler that never ran was counted clean | Already fixed by #3412 |
+| 9 | GLM flashx crawl benched it for the whole build | Crawl is weather | Already fixed by #3402 (window + one re-probe) |
+| 10 | Lean reviewer re-read App.tsx 7 times, timed out, returned nothing | — | #3399 hands the lean reviewer the code. Its spend is now correctly named as absorbed (item 5) |
+| 11 | `edit_file` old_string not found (model error, self-healed by re-reading) | — | #3411 (edits → one write) covers the adjacent class. Not rebuilt |
+
+**Still open, honestly:**
+- **Why the reader did not answer on 6e646503 is not knowable from this report.** From now on the line
+  says which of failed / unclear / unusable it was.
+- **The missing `turnKind` subsystem again.** A turn whose model ANSWERED in text (not asked, not
+  declined) still gets the full post-build pipeline. On 6e646503 that was platform preview, explorer and
+  prod build, about 2 min. Its stored summary is `verifiedNoChangeSummary` ("Nothing needed changing"),
+  which replaces the answer in the record. Item 1 routes this report's message to chat, so it no longer
+  reaches that path. The general case is the OPEN root cause already recorded (2026-09-25, e628efd4).
+- The Gita template carries 27 of 700 shlokas, and says so honestly. See the proactive note in the reply.
 ## 2026-09-30 — Mobile first: games are playable on a phone, apps are measured on one
 
 Admin: *"mobile friendly game/app bane — mobile first!!!!!!"*, choosing touch controls first.
@@ -85593,3 +85623,72 @@ also switch off the one verified functional repair, `selectGreenRepairable`):**
    When every changed source file fits inline (`leanReviewAnswersInOneCall`), the review now spawns with
    NO tools (`toolsOverride: []` on `makeSubAgentSpawn`): it can only answer, in one call. When a changed
    file did not fit, it keeps its read tools. The skip-the-review option was withdrawn, not shipped.
+## 2026-09-30 — Autopsy a9f8d186: "circle to search", Weak, 17.5 min — rendered, then called "sandbox unavailable" and made free
+
+The prompt asked for a circle-to-search app with a QR scanner, screen translation, music recognition, an
+AI overview, three search engines, and a Play Store link to copy the layout from. The app rendered in a
+real browser at minute 12, typechecked, built for production, and every button was pressed. The build
+still ended "The build could not run — the sandbox was unavailable", `ok:false`, release gate RED, ₹0.
+
+**Ledger:**
+
+| Problem | Root cause | Class | Siblings found and fixed | Test |
+|---|---|---|---|---|
+| Working app reported "sandbox unavailable", free | Setup's first op hit a stale cached handle; `fileOp` recovers from that, `ensureWorkspace` did not. The route set `sandboxUnavailable` at second 0 and never re-read it | A fact measured once at setup read as the verdict of the whole build | `ensureWorkspace` drops the corpse and retries once; the flag is re-judged against what ran (a real exit code, or a render) before any verdict reads it (`sandboxAvailability.ts`); all three readers covered | `aStaleHandleIsNotAnOutage.test.ts` |
+| RELEASE_GATE RED, "1 build-breaking blocker" | A sandbox-phase setup error counted as an app finding | Infra fact as an app blocker (4efab9d7's class) | `isAppFinding` excludes the `sandbox` phase by phase; `OUTCOME_SANDBOX_UNAVAILABLE` is process-only | same |
+| Treated as a shop: "cart, payments, accounts & addresses" added | `store` read out of `play.google.com/store/...` | A link read as words | `withoutUrls` in `stripNonDomainUses` (both requirement entry points, `namesBusinessDomain`, `domainOfPrompt`) and in `classify` | `theCircleToSearchAutopsy.test.ts` |
+| Six-feature app scored `translate`, 15, no second opinion | "screen translation" matched the translate verb list | A feature noun inside an app order read as the task | `summary` too; both yield when a build verb orders an app | same |
+| Missing microphone "repaired" into a fake "Demo Track" | The repair told to make the control "do what its label says" in a browser with no microphone | A repair that can only succeed by faking | Absent-device errors get an honest-state instruction; every finding forbids invented results; `NO_FAKED_RESULT_RULE` in the architect prompt, the fast lane and writing sub-agents (the first build had a fake recogniser and a `Math.random()` QR scan) | same |
+| Architect worked from "0 files" after the handoff | Only the timeout handoff carried `salvagedPaths`; the verify-failed one handed over nothing | Two handoff shapes, one carried the work | The verify-failed handoff carries its files and the compiler's errors | same |
+| Fast lane repair rounds 2–3 spent on TS2613 + five TS2686 | The free mechanical pass ran once, before the first model repair | A model repair reintroduces what grep fixes | The pass reruns after every kept repair; new free fix for a missing React import (both lanes, via `endgameDeterministicPass`) | same |
+| AIOverview duplicated (every import twice, two default exports) | `replace_symbol` put a whole file into one symbol's slot | An edit tool that can corrupt a file silently | The edit is refused when it would duplicate a name or a default export | same |
+| `npm install … @capacitor/haptics` ERESOLVE | A bare plugin resolved to 8.x against core 7 | Plugin versions not following the project major (the R3F/vitest class) | Pinned from the same command's core, else the project's range, else 7; also for the missing-import autofix | same |
+
+**Recorded, not changed:**
+- The iframe sandbox finding on WebView.tsx was reported but not fixed. On a green app the reviewer only
+  suggests (Green Stop, admin policy), and the fast lane's writes get no write-time security note.
+- GLM flashx timed out twice (75 s). Provider-side; the bench worked.
+- The AI overview shipped scripted and was disclosed. The architect had the gateway rule but inherited
+  the fast lane's file. The new no-faked-result rule reaches the fast lane.
+
+## 2026-09-30 — Autopsy 0bb437b4: "Make a racing game", Weak, 15.1 min — worked, but slowly and with guesses
+
+The game rendered and was billed ₹247.16. The struggle came from the engine, not the game: 96 s in a fast
+lane that cannot build games, a sub-agent guessing at library APIs for five minutes (it edited the
+platform's own `src/audio/melody.ts` four times to add methods it had invented), a reviewer that timed
+out looking for files by guessed paths, and a click explorer that found "nothing safe to press".
+
+**Ledger:**
+
+| Problem | Root cause | Class | Siblings found and fixed | Test |
+|---|---|---|---|---|
+| Fast lane: five generic files planned, 96 s, nothing written | The lane cannot call recipes; the full builder's prompt requires them for every game | A lane routed work it has no tool for | `fastLaneSkipsGame` on the platform's own domain classifier; `FAST_LANE_SKIPPED_GAME` process-only; `AGENTV3_FASTLANE_GAMES=on` reverts | `theRacingGameAutopsy.test.ts` |
+| 11 invented members (`playCue`, `attach`, `{ volume }`), six rounds, library edited | The compiler says what is wrong, never what is right; nothing named the type's real members | A guess answered only with "wrong" | `typeMembers.ts`: TS2339/2551/2353 errors → the declaring file's public members, found through the file's relative imports (≤6 reads), handed back with every typechecked write; a recipe library is named as not to edit | same |
+| Reviewer guessed `src/components/RaceGame.tsx` and three more, timed out | The instruction showed the first 20 tree entries — all library files | A capped list cut the part that mattered | `reviewFileList`: changed files first, 60 shown, the rest counted | same |
+| Explorer: "nothing safe to press" on a game with a Start button | `.nb-game-btn` pulses for ever; Playwright waits for a stable element | An instrument that cannot touch a moving control | Reduced motion on every lane from ONE definition (`BROWSER_PAGE_OPTIONS`: explorer, page check, journey both signed in and on sign-in routes, sign-in explorer); a same-element dispatch only for "not stable"; a census test fails on a new lane without it | same |
+| `.nb-hud` shipped unstyled, healed after the build (55 s) | The write-time note listed app classes; for a game it never named `.nb-game-hud` | Advice that does not name the right answer | `nearestKitClass` names the kit class carrying every word of the invented one (a tie names nothing); the note lists game classes too | same |
+
+**Recorded, not changed:**
+- `UNFINISHED_BUILD_RESUMED` after what may have been a question: the reply is truncated in the report, so
+  it cannot be checked. `decideUnfinishedResume` already stands down on `turnAskedTheUser`.
+- ETA 2–4 min vs 15.1 min actual. The fleet ETA had no past game builds to read; the estimate will improve
+  as games are recorded, not by a constant.
+- GLM crawled at the start (provider-side). The throughput bench benched it as designed.
+
+## 2026-09-30 — Image generator: Free and Paid are two modes again (admin: "free + paid dono")
+
+**Admin, verbatim:** *"pahle ek system tha, free + paid (dono the) wahi bana do! free wala sabhi ke liye free,
+agar pollination se image na bane, to likh kar aye, free server are too busy try on paid service (user ki bhasa
+me). aur paid wala system abhi apne jo banaya hai, aur old paid wala mila ke banao!!"* The admin also reported
+that Pollinations was working and had not been down.
+
+- **Free mode (default, every visit, not remembered):** only the free provider. The user's browser fetches the picture, or our server tries once without our key. No count, no charge, no paid engine.
+  - When the free provider cannot make the picture, the answer is 503 `free_busy`: "free servers are too busy, try Paid mode", in the prompt's language.
+  - An edit of the user's photo in Free mode gets 409 `needs_paid`.
+  - Both show a **Switch to Paid** button that re-sends the same request.
+- **Paid mode:** Cloudflare → the free provider with our key → the old Pro host → Gemini → Grok. 5 free a day, then ₹1.
+  - The old Pro host (`imageProHost.ts`) is back for text-to-image only.
+  - An edit goes to `runImageEdit`, never to that host. The host's edit returning the photo unchanged is why the Pro tier was removed on 2026-09-23.
+- **Same screen, same route.** The request's `tier` field decides the mode. No tier (every installed phone app) means Free.
+- **Honest note:** the "anonymous door closed (401)" diagnosis in #3409 came from the provider's docs and was never observed from a session. The admin says the provider works. The door code only acts on a real 401/402/403, so it stays. The earlier outage's cause is **unproven**.
+- **Tests:** `tests/imageFreeAndPaid.test.ts` (18) is new. `theImageGeneratorHasOneTier` became `theImageGeneratorHasFreeAndPaid`. Updated: `fiveFreeImagesThenOneRupee`, `theFreeDoorClosedAndNobodyNoticed`, `everyFaceIsIndianAndNoImageIsADeadEnd`, `yourPictureComesBackAsYourPicture`, `theUsersOwnConnectionFetchesTheirPicture`, `thePlatformHasADayToo` and `theBoxEmptiesWhenYouPressSend`. Reversion-proven: removing the Free-mode stop, or the `anonymous` flag, fails 5 tests.

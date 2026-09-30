@@ -181,14 +181,20 @@ export function requestNamesAppLanguage(text: string): boolean {
  * letters. It does not force ENGLISH (Latin cannot tell English from Spanish), and Roman Hinglish
  * stays allowed for a request that mixes Hindi words — only the unrequested switch of script and
  * language is forbidden.
+ *
+ * 🔴 CORRECTED (autopsy 6e646503, 2026-09-30): it used to say the request was "English, or Hindi words
+ * typed in Roman letters" — so a romanized GUJARATI question the detector could not name was, in the
+ * model's instructions, English or Hinglish, and it was answered in English. The line now names the
+ * Indian languages people type in Roman letters and forbids answering them in English.
  */
 export const LATIN_REQUEST_LANGUAGE_LINE =
-  'Language: the user wrote this request in LATIN letters (English, or Hindi words typed in Roman letters) '
-  + 'and did not ask for any other language. Write ALL user-facing text in the app (labels, buttons, headings, '
-  + 'placeholders, messages) in the SAME language they wrote in, in Latin letters — English for an English '
-  + 'request, Roman-letter Hinglish only if their own words mix Hindi in. NEVER switch to Devanagari or any '
-  + 'other script, never translate the app into a language they did not write in, and never tell them they '
-  + 'asked for one. Reply to them the same way. Keep code identifiers and comments in English.';
+  'Language: the user wrote this request in LATIN letters — English, or an Indian language (Hindi, Gujarati, '
+  + 'Marathi, Tamil, …) typed in Roman letters — and did not ask for any other language. Write ALL user-facing '
+  + 'text in the app (labels, buttons, headings, placeholders, messages) in the SAME language they wrote in, in '
+  + 'Latin letters — English for an English request, that language in Roman letters for anything else. NEVER '
+  + 'switch to Devanagari or any other script, never translate the app into a language they did not write in, '
+  + 'and never tell them they asked for one. Reply to them in the language they wrote in — a message that is '
+  + 'not English is never answered in English. Keep code identifiers and comments in English.';
 
 const GENERIC_LANGUAGE_LINE =
   'Language: generate all user-facing text in the app in the SAME language the user used in this request '

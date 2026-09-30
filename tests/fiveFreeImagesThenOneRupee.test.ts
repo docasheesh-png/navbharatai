@@ -19,7 +19,7 @@ import {
   cloudflareImageConfig, cloudflareServesSize, mimeFromBase64, fetchCloudflareImage, cloudflareRunUrl,
   CLOUDFLARE_IMAGE_MODEL_DEFAULT,
 } from '../src/server/lib/cloudflareImage';
-import { imageAllowanceLine } from '../src/lib/imageAllowanceLine';
+import { imageAllowanceLine, imageTierLine } from '../src/lib/imageAllowanceLine';
 import { IMAGE_MODE_NAME } from '../src/components/chat/modePicker';
 import { WALLET_EMPTY_CODE } from '../src/server/lib/walletEmptyNotice';
 
@@ -122,8 +122,9 @@ describe('5 free images a day, then ₹1 each', () => {
   });
 
   it('every AI that points at the generator states the same rule', () => {
-    expect(imagePriceSentence({} as NodeJS.ProcessEnv)).toBe('5 free images a day, then ₹1 each from the wallet');
-    expect(imagePriceSentence({ AI_IMAGE_PRICING: 'off' } as NodeJS.ProcessEnv)).toBe('free');
+    // Two modes since 2026-09-30 (later the same day): Free for everyone, and Paid with this allowance.
+    expect(imagePriceSentence({} as NodeJS.ProcessEnv)).toBe('free for everyone in Free mode; Paid mode gives 5 free images a day, then ₹1 each from the wallet');
+    expect(imagePriceSentence({ AI_IMAGE_PRICING: 'off' } as NodeJS.ProcessEnv)).toBe('free in both Free and Paid mode');
     expect(read('src/server/lib/freeChatModeGuide.ts')).toMatch(/imagePriceSentence\(\)/);
     expect(read('src/server/lib/imageIntent.ts')).toMatch(/imagePriceSentence\(\)/);
   });
@@ -232,7 +233,8 @@ describe('the real route', () => {
     await routes.get('POST /api/image/generate')!(mockReq({ body }), res);
     return res;
   }
-  const body = { prompt: 'make a camera', style: 'photo', size: 'square', type: 'Photograph' };
+  // The allowance and the price are Paid mode's (2026-09-30); Free mode is `imageFreeAndPaid.test.ts`.
+  const body = { prompt: 'make a camera', style: 'photo', size: 'square', type: 'Photograph', tier: 'paid' };
   const hosts = () => fetchSpy.mock.calls.map((c) => new URL(String(c[0])).host);
 
   it('Cloudflare draws first, the picture comes back as bytes, and a free one is counted and not charged', async () => {
@@ -281,7 +283,9 @@ describe('the real route', () => {
   it('a non-square size is not sent to Cloudflare, which could not honour it', async () => {
     const res = await generate({ ...body, size: 'wide' });
     expect(hosts()).not.toContain('api.cloudflare.com');
-    expect(res.body.mode).toBe('client-fetch');
+    // No other paid engine is configured here, so the answer is the honest failure — never a free link.
+    expect(res.body.mode).toBeUndefined();
+    expect(res.statusCode).toBe(502);
   });
 
   it('a free-listed account is neither counted nor charged', async () => {
@@ -325,11 +329,13 @@ describe('the name has no FREE, and the screen states the price', () => {
     }
   });
 
-  it('the header line states the rule, then what is left today', () => {
+  it('the header line states the mode, the rule, then what is left today', () => {
     expect(imageAllowanceLine(null)).toBe('5 free images a day, then ₹1 each');
     expect(imageAllowanceLine(3)).toBe('3 free images left today, then ₹1 each');
     expect(imageAllowanceLine(1)).toBe('1 free image left today, then ₹1 each');
     expect(imageAllowanceLine(0)).toBe('Free images used for today · ₹1 per image');
-    expect(read('src/components/ide/AIImageGenerator.tsx')).toMatch(/imageAllowanceLine\(freeLeft\)/);
+    expect(imageTierLine('free', 3)).toBe('Free for everyone, no daily limit');
+    expect(imageTierLine('paid', 3)).toBe('Paid · 3 free images left today, then ₹1 each');
+    expect(read('src/components/ide/AIImageGenerator.tsx')).toMatch(/imageTierLine\(tier, freeLeft\)/);
   });
 });

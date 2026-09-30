@@ -58,13 +58,14 @@ describe('which credentials — only the ones the app ships', () => {
 describe('the other checks open the app with the saved session', () => {
   it('page check, journey (except the sign-in form itself) and explorer load the session file', () => {
     expect(pageCheckScript('http://x', ['/stock'], { storageState: SIGNED_IN_STATE_PATH })).toContain(`browser.newPage(${newPageOptionsExpr(SIGNED_IN_STATE_PATH)})`);
-    expect(pageCheckScript('http://x', ['/stock'])).toContain('browser.newPage({})');
+    // Signed out still carries the shared reduced-motion options (autopsy 0bb437b4).
+    expect(pageCheckScript('http://x', ['/stock'])).toContain(`browser.newPage(${newPageOptionsExpr(null)})`);
     const j = journeyScript('http://x', [
       { id: 'a', kind: 'fill', route: '/add-stock', fields: [], submit: null } as never,
       { id: 'b', kind: 'fill', route: '/login', fields: [], submit: null } as never,
     ], 'M ', { storageState: SIGNED_IN_STATE_PATH });
     expect(j).toContain(`pageOpts: ${newPageOptionsExpr(SIGNED_IN_STATE_PATH)}`);
-    expect(j).toContain('pageOpts: {}');
+    expect(j).toContain(`pageOpts: ${newPageOptionsExpr(null)}`);
     expect(isSignInRoute('/login')).toBe(true);
     expect(isSignInRoute('/stock')).toBe(false);
     expect(clickExplorerScript('http://x/', { blockWrites: false, storageState: SIGNED_IN_STATE_PATH })).toContain(`"storageState":"${SIGNED_IN_STATE_PATH}"`);

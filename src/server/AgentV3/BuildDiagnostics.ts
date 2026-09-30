@@ -94,6 +94,8 @@ const PROCESS_ONLY_CODES = new Set([
   // …and the decision NOT to start that lane on a rung that always reasons (fastLaneRung.ts,
   // autopsy ac41a924): a fact about OUR routing, never about the user's app.
   'FAST_LANE_SKIPPED_REASONING_RUNG',
+  // …and not starting it for a GAME, which only the full builder's game recipes can build (autopsy 0bb437b4).
+  'FAST_LANE_SKIPPED_GAME',
   // …and the lane HANDING OFF because its chain fell to such a rung mid-lane (autopsy Study-Racer).
   'FAST_LANE_FELL_TO_REASONING_RUNG',
   // An observation about OUR checkpoint heuristic (autopsy SignBridge, 2026-09-26) — never the app.
@@ -150,6 +152,8 @@ const PROCESS_ONLY_CODES = new Set([
   // too or the split silently turns "we do not know why the run ended" into a blocker counted
   // against the user's app — `tests/everyAbortCauseRecordsAnOutcome.test.ts` caught exactly that.
   'OUTCOME_STOPPED', 'OUTCOME_BUILD_TIMEOUT', 'OUTCOME_ABORTED_UNKNOWN',
+  // …and the sandbox that could not be set up (a9f8d186): infrastructure, the same class as a provider outage.
+  'OUTCOME_SANDBOX_UNAVAILABLE',
 ]);
 
 /**
@@ -283,6 +287,10 @@ export function narrationEchoesPromptSymptom(text: string, prompt: string | unde
 export function isAppFinding(issue: Pick<BuildIssue, 'phase' | 'code'>): boolean {
   if (!issue) return false;
   if (issue.phase === 'provider') return false;
+  // A sandbox that could not be set up is our infrastructure, never the app's code — the same rule as a
+  // provider call, applied BY PHASE for the same reason (autopsy a9f8d186, 2026-09-30: a setup error on a
+  // stale handle was counted as "1 build-breaking blocker" of an app that rendered in a real browser).
+  if (issue.phase === 'sandbox') return false;
   return !PROCESS_ONLY_CODES.has(issue.code);
 }
 

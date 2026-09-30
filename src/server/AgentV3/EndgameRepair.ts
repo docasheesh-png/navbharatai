@@ -195,6 +195,35 @@ export function removeUnusedImports(
   return { files: out, removed };
 }
 
+/**
+ * TS2686 `'React' refers to a UMD global, but the current file is a module` — the file uses `React.x` and
+ * never imports React (autopsy a9f8d186: five of these on one App.tsx rewritten by a model repair). The fix
+ * is one line and has exactly one right form: add the default React import, beside a named `react` import
+ * when there is one. A file whose own code already binds `React` otherwise is left alone. Pure.
+ */
+export function fixReactUmdGlobal(
+  files: Record<string, string>,
+  errors: TscError[],
+): { files: Record<string, string>; fixed: string[] } {
+  const out = { ...files };
+  const fixed: string[] = [];
+  const targets = new Set(errors.filter((e) => e.code === 'TS2686' && /'React'/.test(e.message)).map((e) => e.file));
+  for (const file of targets) {
+    const src = out[file];
+    if (typeof src !== 'string') continue;
+    if (/\bimport\s+(?:\*\s+as\s+)?React\b/.test(src)) continue; // React is already imported
+    const named = /^(\s*)import\s+(\{[^}]*\})\s+from\s+(['"])react\3\s*;?/m;
+    const next = named.test(src)
+      ? src.replace(named, (_m, lead: string, braces: string, q: string) => `${lead}import React, ${braces} from ${q}react${q};`)
+      : `import React from 'react';\n${src}`;
+    if (next !== src) {
+      out[file] = next;
+      fixed.push(`${file}: added the missing React import`);
+    }
+  }
+  return { files: out, fixed };
+}
+
 export interface EndgameDeterministicResult {
   files: Record<string, string>;
   /** Human-readable fix descriptions, in application order. */
@@ -220,6 +249,9 @@ export async function endgameDeterministicPass(
   const renamed = fixSuggestedPropertyNames(cur, errors);
   cur = renamed.files;
   fixes.push(...renamed.fixed);
+  const react = fixReactUmdGlobal(cur, errors);
+  cur = react.files;
+  fixes.push(...react.fixed);
   const unused = removeUnusedImports(cur, errors);
   cur = unused.files;
   fixes.push(...unused.removed);

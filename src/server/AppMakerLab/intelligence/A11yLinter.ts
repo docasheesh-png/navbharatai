@@ -11,6 +11,7 @@
 // a real issue is flagged but false positives are rare — a linter that cries wolf gets ignored.
 
 import { scanMarkup, hasAttr, type ScannedTag } from '../../AgentV3/jsxTags';
+import { stripCommentsForMarkup } from '../../AgentV3/stripCodeComments';
 
 export type A11yViolationType = 'img-alt' | 'input-label' | 'control-name' | 'html-lang' | 'positive-tabindex';
 
@@ -186,7 +187,9 @@ function scoreToGrade(score: number): 'A' | 'B' | 'C' | 'D' {
  * Scoring weights the highest-impact issues (missing alt, unlabelled controls) most.
  */
 export function lintA11y(code: string): A11yLintResult {
-  const src = typeof code === 'string' ? code : '';
+  // Comments never reach a screen reader, so no rule here may read one (autopsy 4541f1cf: a comment
+  // mentioning `<html>` was reported as a document with no `lang`, in every golden scaffold).
+  const src = stripCommentsForMarkup(typeof code === 'string' ? code : '');
   const [images, imagesNoAlt] = imagesMissingAlt(src);
   const [inputs, inputsNoLabel] = inputsMissingLabel(src);
   const [controls, controlsNoName] = controlsMissingName(src);

@@ -13,6 +13,7 @@
 // It NEVER touches package.json or the install path (the builder applies fixes under its own
 // judgment, a second false-positive filter). Pure, no I/O, never throws. Advisory report content only.
 
+import { NATIVE_CAPABILITIES, REGISTRY_CAPACITOR_MAJOR } from './nativeCapabilities';
 import { analyzeDependencies, type DependencyIssue } from './DependencyAnalysis';
 import { isPlatformE2eScaffold } from './e2eScaffold';
 
@@ -157,6 +158,7 @@ export function knownDepVersion(name: string, ctx?: PinContext): string {
   const n = String(name ?? '');
   if (VITEST_FAMILY.has(n)) return vitestRangeForVite(ctx?.viteRange);
   if (Object.prototype.hasOwnProperty.call(R3F_FAMILY, n)) return r3fRangeForReact(n, ctx?.reactRange);
+  if (isCapacitorPlugin(n)) return capacitorPluginRange(n, ctx?.capacitorRange);
   if (Object.prototype.hasOwnProperty.call(WELL_KNOWN_DEPS, n)) return WELL_KNOWN_DEPS[n];
   if (Object.prototype.hasOwnProperty.call(WELL_KNOWN_DEV_DEPS, n)) return WELL_KNOWN_DEV_DEPS[n];
   return '';
@@ -168,6 +170,43 @@ export interface PinContext {
   viteRange?: string | null;
   /** The project's declared React range, when it has one — the React Three Fiber family follows it. */
   reactRange?: string | null;
+  /** The project's `@capacitor/core` range (or the version the same command installs) — plugins follow it. */
+  capacitorRange?: string | null;
+}
+
+/**
+ * A Capacitor PLUGIN follows the project's Capacitor major (autopsy a9f8d186, 2026-09-30). The builder ran
+ * `npm install @capacitor/core@7.6.9 @capacitor-mlkit/barcode-scanning@7.5.0 @capacitor/haptics`; npm took
+ * haptics 8.0.2, whose peer is `@capacitor/core >=8`, and the whole install failed ERESOLVE. The phone
+ * build defaults to Capacitor 7 and every row of the native-capability table is verified against it, so a
+ * bare plugin is held to that major: a table row gets its verified version, an official `@capacitor/*`
+ * plugin gets `^<major>`. Core and the platform packages are never touched here.
+ */
+function isCapacitorPlugin(name: string): boolean {
+  // A bare package name only: `@capacitor/core@7.6.9` already carries its version and is left alone.
+  if (!/^@[\w.-]+\/[\w.-]+$/.test(name)) return false;
+  if (/^@capacitor\/(?:core|android|ios|cli)$/.test(name)) return false;
+  return name.startsWith('@capacitor/') || NATIVE_CAPABILITIES.some((c) => c.pkg === name);
+}
+
+export function capacitorPluginRange(name: string, capacitorRange: string | null | undefined): string {
+  const m = /(\d+)/.exec(String(capacitorRange ?? ''));
+  const major = m ? Number(m[1]) : REGISTRY_CAPACITOR_MAJOR;
+  // The same rule as `alignNativePlugins`: a table row on the table's major gets its verified version;
+  // an official `@capacitor/*` plugin shares Capacitor's own major; anything else we do not know.
+  const row = NATIVE_CAPABILITIES.find((c) => c.pkg === name);
+  if (row && major === REGISTRY_CAPACITOR_MAJOR) return row.version;
+  return name.startsWith('@capacitor/') ? `^${major}.0.0` : '';
+}
+
+/** The project's `@capacitor/core` range, when package.json declares one. Pure. */
+export function capacitorRangeOf(packageJson: string | null | undefined): string | undefined {
+  if (typeof packageJson !== 'string') return undefined;
+  try {
+    const pkg = JSON.parse(packageJson) as { dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown> };
+    const v = pkg?.dependencies?.['@capacitor/core'] ?? pkg?.devDependencies?.['@capacitor/core'];
+    return typeof v === 'string' ? v : undefined;
+  } catch { return undefined; }
 }
 
 /**
@@ -276,6 +315,9 @@ export function manifestRewrittenBy(command: string): string | null {
 export function pinKnownDepsInInstallCommand(command: string, ctx?: PinContext): string {
   if (typeof command !== 'string' || !command) return command;
   if (!INSTALL_SUBCOMMAND_RE.test(command)) return command; // fast path: no install at all
+  // The core this same command installs is the major its plugins must match (a9f8d186).
+  const coreInCommand = /(?:^|\s)@capacitor\/core@(\S+)/.exec(command)?.[1];
+  if (coreInCommand) ctx = { ...(ctx ?? {}), capacitorRange: coreInCommand };
   // Split on shell separators (keeping them) so each sub-command is judged independently.
   return command
     .split(/(\s*(?:&&|\|\||;)\s*)/)
@@ -568,7 +610,7 @@ export function applyWellKnownMissingDeps(files: Record<string, string>): Depend
   let missing: DependencyIssue[];
   try { missing = analyzeDependencies(external, pkgRaw).filter((d) => d.kind === 'missing'); }
   catch { return unchanged; }
-  const plan = planDependencyAutoFix(missing, { viteRange: viteRangeOf(pkgRaw), reactRange: reactRangeOf(pkgRaw) });
+  const plan = planDependencyAutoFix(missing, { viteRange: viteRangeOf(pkgRaw), reactRange: reactRangeOf(pkgRaw), capacitorRange: capacitorRangeOf(pkgRaw) });
   if (plan.autofixable.length === 0) return unchanged;
 
   let pkg: Record<string, unknown>;

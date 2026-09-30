@@ -21,6 +21,7 @@
 // AGENTV3_MOBILE_LAYOUT=off.
 
 import { browserScriptRunLine, parseScriptDiagnostic, playwrightImport } from './sandboxBrowserScript';
+import { newPageOptionsExpr } from './signInExplore';
 
 export const MOBILE_RESULT_MARKER = 'NBAI_MOBILE:';
 export const MOBILE_VIEWPORT = { width: 390, height: 844 } as const;
@@ -44,7 +45,10 @@ export function mobileLayoutCheckEnabled(env: NodeJS.ProcessEnv = process.env): 
  * app behind a login is measured on its own screens and not on the sign-in page.
  */
 export function mobileLayoutScript(previewUrl: string, opts: { storageState?: string | null } = {}): string {
-  const cfg = { base: String(previewUrl ?? '').trim(), marker: MOBILE_RESULT_MARKER, w: MOBILE_VIEWPORT.width, h: MOBILE_VIEWPORT.height, minTap: MIN_TAP_PX, loadMs: LOAD_MS, storageState: opts.storageState ?? null };
+  const cfg = { base: String(previewUrl ?? '').trim(), marker: MOBILE_RESULT_MARKER, w: MOBILE_VIEWPORT.width, h: MOBILE_VIEWPORT.height, minTap: MIN_TAP_PX, loadMs: LOAD_MS, storageState: opts.storageState ?? null,
+    // Reduced motion and the saved session — the one definition every browser lane uses (signInExplore.ts):
+    // a pulsing button measured mid-pulse is a different size on every run.
+    pageOpts: JSON.parse(newPageOptionsExpr(opts.storageState ?? null)) };
   return `cat > /tmp/nbai-mobile.mjs <<'NBAI_EOF'
 ${mobileLayoutModule(cfg)}
 NBAI_EOF
@@ -58,7 +62,7 @@ const cfg = ${JSON.stringify(cfg)};
 const say = (o) => console.log(cfg.marker + JSON.stringify(o));
 const browser = await chromium.launch();
 try {
-  const ctx = await browser.newContext({ viewport: { width: cfg.w, height: cfg.h }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, ...(cfg.storageState ? { storageState: cfg.storageState } : {}) });
+  const ctx = await browser.newContext({ ...cfg.pageOpts, viewport: { width: cfg.w, height: cfg.h }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const page = await ctx.newPage();
   await page.goto(cfg.base, { waitUntil: 'load', timeout: cfg.loadMs });
   await page.waitForTimeout(1500);

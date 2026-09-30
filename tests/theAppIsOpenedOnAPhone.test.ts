@@ -66,7 +66,9 @@ describe('wiring', () => {
     expect(mobileLayoutScript('http://localhost:5173')).toContain('"storageState":null');
     const s = mobileLayoutScript('http://localhost:5173', { storageState: '/tmp/nbai-signed-in.json' });
     expect(s).toContain('"storageState":"/tmp/nbai-signed-in.json"');
-    expect(s).toContain('...(cfg.storageState ? { storageState: cfg.storageState } : {})');
+    // The session rides in the shared page options (signInExplore.ts newPageOptionsExpr), with reduced motion.
+    expect(s).toContain('"pageOpts":{"reducedMotion":"reduce","storageState":"/tmp/nbai-signed-in.json"}');
+    expect(s).toContain('browser.newContext({ ...cfg.pageOpts,');
   });
 
   it('a finding is offered to the user as a one-tap fix; OK and NOT RUN never are', () => {

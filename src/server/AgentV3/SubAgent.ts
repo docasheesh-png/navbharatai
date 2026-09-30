@@ -14,6 +14,7 @@ import { catalogForTools } from './ToolCatalog';
 import { agentLifecycle } from './AgentLifecycle';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { DESIGN_KIT_BRIEF } from './systemPrompt';
+import { NO_EVAL_RULE, NO_FAKED_RESULT_RULE } from './noEvalRule';
 import { stylesheetCarriesKit } from './kitRestore';
 import type { AgentRole, ToolName } from './types';
 
@@ -358,6 +359,9 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     // files was never told the design kit's classes, so the Frontend sub-agent read `src/index.css` six
     // times in slices to find them before writing a line. Given only when the stylesheet really carries
     // the kit, so a project without it is never told about classes that do not exist.
+    // The two coding rules both prompts carry (noEvalRule.ts) — a writing specialist writes the same
+    // feature code the architect would, so it gets them too (autopsy a9f8d186: a faked recogniser).
+    if (roleExpectsArtifacts(cfg.tools)) contextBlocks.push(`${NO_EVAL_RULE}\n${NO_FAKED_RESULT_RULE}`);
     if (roleExpectsArtifacts(cfg.tools)) {
       try {
         const raw = await deps.actuator.readFile(deps.workspaceId, 'src/index.css');

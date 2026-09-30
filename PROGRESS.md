@@ -84596,3 +84596,14 @@ six-step roadmap: chat and settings.
 
 **Proactive:** the generated AI app asks the USER for an OpenAI key. The AI gateway (`APP_AI_GATEWAY`,
 built, unset) is what removes that wall.
+
+## 2026-09-30 (same day) — Weak plan ladder: Haiku second (admin: "haan, plan ladder badal do … planing ke liye haiku accha hai, to lagao")
+
+- The Weak PLAN ladder is now `flashx → Haiku → KIMI → glm-5.3 → Nemotron super` (`weakPlanHaikuEnabled`,
+  `tierLadder.ts`). The reason is JARVIS (a2b9c802). Once flashx was benched, both planners fell to KIMI,
+  which always reasons first, and got nothing back.
+- **Unchanged:** the Weak BUILD ladder, which keeps Haiku last. Normal and Strong carry no Haiku.
+- **Revert:** `AGENTV3_WEAK_PLAN_HAIKU=off`.
+- **Tests:** `tests/aPlanIsAnsweredNotThoughtAbout.test.ts` (7), reversion-proven. `tierLadder.test.ts` is updated.
+- ⚠️ **Open:** Haiku's plan quality here is unmeasured. Read the planner outcome lines on the next Weak builds
+  where flashx was benched.

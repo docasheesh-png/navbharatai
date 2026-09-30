@@ -4647,6 +4647,16 @@ and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; 
   after 120 s, the decomposition was cut off at the 300 s stream cap — 7 of 24 minutes. Weak is now in
   `PLAN_FORBIDDEN_TIERS` beside Strong, so its plan rung is `glm-4.7-flashx` (thinking disabled) whatever
   the flag says. **Only the plan moved: Weak's JUDGE stays on Nemotron** where the flag names it.
+  🧭 **AND ON WEAK, HAIKU IS THE PLAN'S SECOND RUNG (admin 2026-09-30: *"planing ke liye haiku accha hai,
+  to lagao"*, autopsy a2b9c802).** The Weak plan ladder is `flashx → Haiku → KIMI → glm-5.3 → Nemotron
+  super`. With flashx benched for crawling, both JARVIS planners fell to `kimi-k2.7-code`, which always
+  reasons: one plan was cut off after 240 s, the other spent 12,000 tokens thinking and returned nothing.
+  Haiku answers directly at about KIMI's per-token price ($1/$5 against $0.95/$4). ⚠️ **PLAN ladder only**
+  (`weakPlanHaikuEnabled` in `tierLadder.ts`): the Weak BUILD ladder still has Haiku LAST, Normal and
+  Strong have no Haiku, and `enforceNoClaude` still strips every other Claude rung. **`AGENTV3_WEAK_PLAN_HAIKU`**
+  — NOT set; default ON; `off` restores the old order with no deploy. ⚠️ Haiku's plan quality on this
+  platform was unmeasured when this shipped. Watch planner outcomes (`MEGA_ROADMAP*`, `PROJECT_MODE*`)
+  on Weak builds where flashx was benched. Test-locked in `tests/aPlanIsAnsweredNotThoughtAbout.test.ts`.
 - 🔗 `healLadder` and this router share ONE definition of "the cheap opener"
   (`withoutCheapFlashLead`), applied by `buildTurnRunner` for `heal || complex`. They stay separate
   FLAGS — "this is a repair" and "this is a big app" are different questions with the same answer
@@ -4964,7 +4974,7 @@ me" · "mera kharcha kam se kam ho").** Test-locked in `tests/agentRolesPerTier.
 | Credits / abuse / free-clamp | code | code | code | ₹0 — never a model |
 | Safety triage | code | code | code | `triagePrompt` is deterministic, precision-first |
 | Intent doubt-reader | free chat router | free chat router | free chat router | glm-4.7-flash led, $0; one-word answer |
-| **Plan** | glm-5.3-flash → own ladder | glm-5.3-flash → own ladder | glm-5.3 → own ladder | `PLAN_RUNG` / `planLadder`; input-heavy call on the cheapest rung that reasons well; **Grok no longer plans** |
+| **Plan** | glm-4.7-flashx → **Haiku** → rest of own ladder (2026-09-30) | glm-4.7-flashx → own ladder | glm-5.3 → own ladder | `PLAN_RUNG` / `planLadder`; input-heavy call on the cheapest rung that reasons well; **Grok no longer plans** |
 | Builder + sub-agents + fast lane | tier ladder | tier ladder | tier ladder | above |
 | Heals | ladder minus leading flash | same | same | `healLadder` |
 | Lint / typecheck / build / preview / journey / fuzz / CVE | code | code | code | ₹0 |

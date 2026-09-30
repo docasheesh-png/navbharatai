@@ -180,7 +180,10 @@ describe('the plan phase runs on the tier\'s best cheap reasoner, then its own l
     // ⚠️ Read with NO env: the Nemotron plan rung is FLAGGED, so with AGENTV3_NEMOTRON unset the plan
     // chain is exactly what it was before 2026-09-19 — which is what these two lines now prove.
     // (The flagged-on shape is asserted in nemotronWhereItPays.test.ts.)
-    expect(seq(planLadder('weak', {}))).toEqual(['GLM:glm-4.7-flashx', 'KIMI:kimi-k2.7-code', 'GLM:glm-5.3', 'NEMOTRON:nemotron-super', 'CLAUDE_HAIKU:haiku']);
+    // Weak: Haiku moves up to second on the PLAN ladder only (admin 2026-09-30, autopsy a2b9c802 —
+    // weakPlanHaikuEnabled). The Weak BUILD ladder keeps Haiku last (asserted in tierChainFidelity).
+    expect(seq(planLadder('weak', {}))).toEqual(['GLM:glm-4.7-flashx', 'CLAUDE_HAIKU:haiku', 'KIMI:kimi-k2.7-code', 'GLM:glm-5.3', 'NEMOTRON:nemotron-super']);
+    expect(seq(planLadder('weak', { AGENTV3_WEAK_PLAN_HAIKU: 'off' }))).toEqual(['GLM:glm-4.7-flashx', 'KIMI:kimi-k2.7-code', 'GLM:glm-5.3', 'NEMOTRON:nemotron-super', 'CLAUDE_HAIKU:haiku']);
     expect(seq(planLadder('off', {}))).toEqual(['GLM:glm-4.7-flashx', 'KIMI:kimi-k2.7-code-highspeed', 'GLM:glm-5.3', 'NEMOTRON:nemotron-super', 'CLAUDE:sonnet']);
     expect(seq(planLadder('mini', {}))).toEqual(['GLM:glm-5.3', 'KIMI:kimi-k3', 'CLAUDE:sonnet', 'CLAUDE_OPUS:opus']);
     expect(seq(planLadder('max', {}))).toEqual(seq(planLadder('mini', {})));

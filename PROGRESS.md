@@ -84074,3 +84074,15 @@ signed out. The normal code path is untouched (the native session is set in the 
 **Still needed from the admin, unverified:** the Cloud Run service account must hold **Service Account Token
 Creator** on itself (IAM signBlob). Without it the exchange answers `custom-token-unavailable`, the person gets
 the old honest Email/Google message, and the OTP card shows that code in the detail — never a fake success.
+
+## 2026-09-30 — PR C: the database is offered BEFORE the builder decides where data lives
+`src/server/AgentV3/sharedDataNeed.ts` reads the REQUEST (not the files) for data other people must later see —
+bookings, orders, admissions, records, accounts, an admin dashboard — precision-first, honouring an explicit
+"no backend / static site". On a FRESH build, with nothing connected and the user's Supabase already granted, the
+route asks once (2-minute wait) right after the vault loads; Approve provisions via `provisionDatabaseForUser`
+and re-reads the vault, so `userDatabaseContext` wires the new database into the prompt from the first file. The
+mid-build fallback no longer asks a second time. Report code `DATABASE_OFFER_AT_START`.
+Root cause it closes: autopsy a7aa447c (bookings kept in the visitor's browser; every file-based check said
+"no database needed").
+**Deliberately NOT done:** the post-build "Connect a database" tray row still reads the app's files only, like
+the publish screen it must agree with. Users without a Supabase grant keep today's honest builder guidance.

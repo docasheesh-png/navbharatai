@@ -77,6 +77,7 @@ import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote } from './writeTimeQualityCheck';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { keepKitOnRewrite, kitKeepToolNote } from './kitRestore';
+import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
 import {
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckNote, WriteTypecheckQueue,
@@ -2435,6 +2436,77 @@ export class ToolDispatcher {
   }
 
   /**
+   * Stale copies of a module removed because they would have run INSTEAD of the file the build wrote
+   * (shadowTwin.ts, autopsy e725e002). A BOX like `_kitKept`: the composition root arms it with the set
+   * of files this build wrote, and sub-agents share it.
+   */
+  private _shadowTwins: ShadowTwinTally = { removed: [] };
+  /** The sandbox listing, read once per dispatcher and kept current by our own writes and removals. */
+  private _twinTree: Set<string> | null | undefined;
+
+  shadowTwinTally(): ShadowTwinTally {
+    return this._shadowTwins;
+  }
+
+  /** The LIVE tally, for a child dispatcher to share. */
+  sharedShadowTwins(): ShadowTwinTally {
+    return this._shadowTwins;
+  }
+
+  /** Called once at spawn: this child's removals reach the parent's report and store. */
+  shareShadowTwins(box: ShadowTwinTally): void {
+    if (box && Array.isArray(box.removed)) this._shadowTwins = box;
+  }
+
+  /** Arm the guard. Without `authored` nothing is ever removed (unknown means keep). */
+  armShadowTwins(authored: () => Iterable<string>): void {
+    if (typeof authored === 'function') this._shadowTwins.authored = authored;
+  }
+
+  /**
+   * After a module is written: remove any same-named file that the dev server would load INSTEAD of
+   * it and that this build did not write (autopsy e725e002 — a resumed sandbox's unsaved `.js` copies
+   * shadowed every `.tsx` the build wrote). Returns the note for the tool result. Never throws.
+   */
+  private async removeShadowTwins(path: string, agent: AgentRole): Promise<string> {
+    try {
+      const authoredGetter = this._shadowTwins.authored;
+      if (!authoredGetter || !shadowTwinEnabled()) return '';
+      if (!/\.m?[jt]sx?$/i.test(path)) return ''; // only a module can be shadowed; skip the listing otherwise
+      if (this._twinTree === undefined) {
+        const listed = await this.actuator.listFiles(this.workspaceId).catch(() => null);
+        this._twinTree = listed ? new Set(listed) : null;
+      }
+      const tree = this._twinTree;
+      if (!tree) return '';
+      tree.add(path);
+      const twins = shadowingTwins(path, tree, new Set(authoredGetter())).filter(removablePath);
+      if (twins.length === 0) return '';
+      await this.actuator
+        .runCommand(this.workspaceId, `rm -f ${twins.map((t) => `'${t}'`).join(' ')}`)
+        .catch(() => null);
+      const gone: string[] = [];
+      for (const twin of twins) {
+        let stillThere = false;
+        try { await this.actuator.readFile(this.workspaceId, twin); stillThere = true; } catch { stillThere = false; }
+        if (stillThere) continue;
+        tree.delete(twin);
+        try { getWorkspaceMemory(this.workspaceId).removeFile(twin); } catch { /* graph best-effort */ }
+        this.state?.recordFileChange({ path: twin, kind: 'delete' }, agent);
+        gone.push(twin);
+      }
+      if (gone.length === 0) return '';
+      this._shadowTwins.removed.push(...gone);
+      try {
+        getWorkspaceMemory(this.workspaceId).recordAudit(`[SHADOW-TWIN] removed ${gone.join(', ')} — would have loaded instead of ${path}`);
+      } catch { /* audit best-effort */ }
+      return shadowTwinToolNote(path, gone);
+    } catch {
+      return '';
+    }
+  }
+
+  /**
    * The LIVE ledger, for a child dispatcher to accumulate into.
    *
    * 🔴 WHY THIS EXISTS — autopsy f97eb0ec, 2026-09-20, and it is the FIFTH time this exact class has
@@ -3126,6 +3198,8 @@ export class ToolDispatcher {
         await this.actuator.writeFile(this.workspaceId, path, content);
         this.onFileWrite?.(path, content);
         this.state?.recordFileChange({ path, kind }, agent);
+        // A stale copy of this module under an earlier-resolving extension would run INSTEAD of it.
+        const twinNote = await this.removeShadowTwins(path, agent);
         // E7 — stream the written content to the UI Diff tab as a live diff event (create → additions
         // only; wholesale rewrite → removed+added), bounded so a large file can't produce a huge event.
         // Previously only edit_file emitted a diff, so the Diff tab stayed empty through a fresh build.
@@ -3176,10 +3250,10 @@ export class ToolDispatcher {
           return (
             `Updated ${path} (${content.length} bytes).\n` +
             `${risk.message} The file content BEFORE this overwrite was:\n\`\`\`\n${preview}\n\`\`\`` +
-            reviewNote + cascadeNote + testHint + steeringNotes + kitKeep.note
+            reviewNote + cascadeNote + testHint + steeringNotes + kitKeep.note + twinNote
           );
         }
-        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + steeringNotes;
+        return `Created ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + steeringNotes + twinNote;
       }
 
       case 'write_files_batch': {
@@ -3327,7 +3401,10 @@ export class ToolDispatcher {
         // ONE compile for the whole batch (the queue coalesces anyway); each note names its own file.
         const batchSteeringNotes = await this.writeSteeringNotes(writtenRecord);
         const kitKeepNotes = perFile.map((r) => (r as { kitNote?: string }).kitNote ?? '').join('');
-        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchSteeringNotes}${kitKeepNotes}`;
+        // Sequential on purpose: the first call lists the sandbox once and the rest reuse it.
+        let twinNotes = '';
+        for (const p of written) twinNotes += await this.removeShadowTwins(p, agent);
+        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchSteeringNotes}${kitKeepNotes}${twinNotes}`;
       }
 
       case 'edit_file': {
@@ -3341,7 +3418,12 @@ export class ToolDispatcher {
         // unique). applyEdit throws the same honest "not found" / "not unique" errors.
         const { updated: edited, matchedOld, note } = applyEdit(existing, oldStr, newStr, path);
         // If an edit to a Vite/tsconfig left it missing a critical backstop, restore it.
-        const updated = this.dedupeImportsForSource(path, guardConfigContent(path, this.applyPostgresProviderLock(path, edited)), agent);
+        const deduped = this.dedupeImportsForSource(path, guardConfigContent(path, this.applyPostgresProviderLock(path, edited)), agent);
+        // Parity with write_file: an edit that cuts design-kit rules out of the stylesheet keeps them
+        // (autopsy e725e002 — this door was the one left open by the write-door guard).
+        const editKit = this.keepDesignKit(path, deduped, existing);
+        const updated = editKit.content;
+        const editKitNote = editKit.note;
         // Self-destruct guard: an edit that reduces a populated source file to empty/whitespace blanks it
         // — same catastrophe as deletion. Refuse before writing so the file survives (StudySync autopsy).
         if (isDestructiveEmptyOverwrite(path, existing, updated)) {
@@ -3383,7 +3465,9 @@ export class ToolDispatcher {
         const editTestHint = testFileHint(path);
         // M1-S1.1 (prevent-not-heal): write-time Rules-of-Hooks guard on the edited content.
         const editSteeringNotes = await this.writeSteeringNotes({ [path]: updated });
-        return `Edited ${path}.${note}` + editReviewNote + editCascadeNote + editTestHint + editSteeringNotes;
+        // An edit that changes nothing the app runs is the same trap as a write (autopsy e725e002).
+        const editTwinNote = await this.removeShadowTwins(path, agent);
+        return `Edited ${path}.${note}` + editReviewNote + editCascadeNote + editTestHint + editSteeringNotes + editKitNote + editTwinNote;
       }
 
       case 'bash': {

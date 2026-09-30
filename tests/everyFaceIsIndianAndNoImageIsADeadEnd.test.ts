@@ -203,13 +203,16 @@ describe('the real route: a verified failure runs the server ladder instead of h
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('when the server\'s own try fails too and no paid engine is set up, the answer is honest, never a link again', async () => {
+  it('when the server\'s own try fails too, Free mode says the free servers are busy and points at Paid, never a link again', async () => {
     fetchSpy.mockImplementation(async () => new Response('no', { status: 500 }));
     const first = await generate(body);
     const second = await generate({ ...body, freeFailed: { url: first.body.url, ticket: first.body.ticket, exp: first.body.exp } });
-    expect(second.statusCode).toBe(502);
+    // 2026-09-30 (admin: "free server are too busy try on paid service"): Free mode has no paid
+    // engine behind it, so the answer names Paid mode instead of trying one.
+    expect(second.statusCode).toBe(503);
+    expect(second.body.code).toBe('free_busy');
     expect(second.body.url).toBeUndefined();
-    expect(String(second.body.error)).toMatch(/^NavBharatAI could not generate the image/);
+    expect(String(second.body.error)).toMatch(/free image servers are too busy/i);
   });
 
   it('refuses a claim for a link it did not sign, or for a different brief', async () => {

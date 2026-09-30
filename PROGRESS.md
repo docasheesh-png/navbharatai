@@ -85563,3 +85563,21 @@ Admin: *"mobile friendly game/app bane — mobile first!!!!!!"*, choosing touch 
 - The phone check reports and offers a fix; it does not repair on its own. A verified repair (like the
   explorer's) waits until `MOBILE_LAYOUT_ISSUES` has appeared on real builds.
 - Games built before today get the controls only when rebuilt.
+
+## 2026-09-30 — Image generator: Free and Paid are two modes again (admin: "free + paid dono")
+
+**Admin, verbatim:** *"pahle ek system tha, free + paid (dono the) wahi bana do! free wala sabhi ke liye free,
+agar pollination se image na bane, to likh kar aye, free server are too busy try on paid service (user ki bhasa
+me). aur paid wala system abhi apne jo banaya hai, aur old paid wala mila ke banao!!"* The admin also reported
+that Pollinations was working and had not been down.
+
+- **Free mode (default, every visit, not remembered):** only the free provider. The user's browser fetches the picture, or our server tries once without our key. No count, no charge, no paid engine.
+  - When the free provider cannot make the picture, the answer is 503 `free_busy`: "free servers are too busy, try Paid mode", in the prompt's language.
+  - An edit of the user's photo in Free mode gets 409 `needs_paid`.
+  - Both show a **Switch to Paid** button that re-sends the same request.
+- **Paid mode:** Cloudflare → the free provider with our key → the old Pro host → Gemini → Grok. 5 free a day, then ₹1.
+  - The old Pro host (`imageProHost.ts`) is back for text-to-image only.
+  - An edit goes to `runImageEdit`, never to that host. The host's edit returning the photo unchanged is why the Pro tier was removed on 2026-09-23.
+- **Same screen, same route.** The request's `tier` field decides the mode. No tier (every installed phone app) means Free.
+- **Honest note:** the "anonymous door closed (401)" diagnosis in #3409 came from the provider's docs and was never observed from a session. The admin says the provider works. The door code only acts on a real 401/402/403, so it stays. The earlier outage's cause is **unproven**.
+- **Tests:** `tests/imageFreeAndPaid.test.ts` (18) is new. `theImageGeneratorHasOneTier` became `theImageGeneratorHasFreeAndPaid`. Updated: `fiveFreeImagesThenOneRupee`, `theFreeDoorClosedAndNobodyNoticed`, `everyFaceIsIndianAndNoImageIsADeadEnd`, `yourPictureComesBackAsYourPicture`, `theUsersOwnConnectionFetchesTheirPicture`, `thePlatformHasADayToo` and `theBoxEmptiesWhenYouPressSend`. Reversion-proven: removing the Free-mode stop, or the `anonymous` flag, fails 5 tests.

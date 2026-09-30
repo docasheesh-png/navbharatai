@@ -1517,6 +1517,30 @@ the code (it is actually read somewhere) on 2026-07-11.
   PRO switch; the name dropped FREE ("Image Generator AI") the same day. And it amends THE ONE-WALLET LAW's
   line "Image generation stays on its quota cap": the price is the admin's own fixed number, not an
   estimated cost. Test-locked and reversion-proven in `tests/fiveFreeImagesThenOneRupee.test.ts`.
+  🔁 **SUPERSEDED THE SAME EVENING — FREE AND PAID ARE TWO MODES AGAIN (admin 2026-09-30, verbatim: *"pahle
+  ek system tha, free + paid (dono the) wahi bana do! free wala sabhi ke liye free, agar pollination se
+  image na bane, to likh kar aye, free server are too busy try on paid service (user ki bhasa me). aur
+  paid wala system abhi apne jo banaya hai, aur old paid wala mila ke banao!!"*).** The admin also said
+  Pollinations had not been down (*"pollination ai chal raha hai … woh band nahi hua tha"*); the 401 in
+  `freeProviderDoor.ts` came from the provider's published docs and was never observed from a session,
+  so the earlier outage's cause is unproven. No env key; the request's `tier` field decides
+  (`src/server/lib/imageTier.ts`), and a request with no tier — every installed phone app — is FREE.
+  - **FREE mode:** the free provider only, fetched by the user's browser (`IMAGE_GEN_CLIENT_FETCH`), or
+    once from our server with `anonymous: true`. **Our `POLLINATIONS_API_KEY` is never used here.** No
+    count, no charge, no paid rung. When it cannot make the picture, the answer is **503 `free_busy`**:
+    "the free servers are too busy, try Paid mode", in the prompt's language (`detectLanguageHint`
+    scripts plus Roman Hindi; English otherwise). An edit of the user's photo in Free mode is **409
+    `needs_paid`**. The screen shows a **Switch to Paid** button for both, which re-sends the same request.
+  - **PAID mode:** Cloudflare (1024×1024 only) → the free provider **with** our key → the old Pro tier's
+    host (`imageProHost.ts`: `IMAGE_PRO_KEY` / `IMAGE_PRO_ENDPOINT` / `IMAGE_PRO_AUTH_SCHEME`, which the
+    admin set on 2026-09-21; words only, async answers polled; `IMAGE_PRO_ENABLED=off` removes it) →
+    Gemini → Grok. 5 free a day then ₹1 (`imageAllowance.ts`), counted and charged in Paid mode only.
+    An edit goes to `runImageEdit`, **never to the old host**: that host's edit returning the photo
+    unchanged is why the Pro tier was removed on 2026-09-23. With pricing on, the platform cap
+    (`AI_IMAGE_FREE_PAID_DAILY_CAP`) does not apply to Paid mode; it stays the pricing-off rule.
+  - The screen opens on **Free** every visit and never stores the choice (the 2026-09-22 rule: a
+    remembered Paid is a charge the user did not decide on). Test-locked and reversion-proven in
+    `tests/imageFreeAndPaid.test.ts` and `tests/theImageGeneratorHasFreeAndPaid.test.ts`.
 - **🔑 `POLLINATIONS_API_KEY` — THE FREE IMAGE PROVIDER CLOSED ITS ANONYMOUS DOOR (2026-09-30, admin:
   *"image banne band ho gaye hai!!"*). ⚠️ NOT set as of this date.** The provider now answers **401**
   to any request without an account key, and everything below (`IMAGE_GEN_CLIENT_FETCH`) was built on
@@ -1544,6 +1568,8 @@ the code (it is actually read somewhere) on 2026-07-11.
   picture then comes from the capped paid rungs). ⚠️ **The provider's live behaviour could not be
   verified from a session** (its hosts are refused by the session's egress policy); the 401 comes from
   its own published docs. Test-locked and reversion-proven in `tests/theFreeDoorClosedAndNobodyNoticed.test.ts`.
+  🔁 **Since the Free / Paid split (same evening): the key is PAID MODE's.** Free mode never sends it,
+  and a closed anonymous door in Free mode is the `free_busy` answer, not a fall-through to paid engines.
 - **🌐 `IMAGE_GEN_CLIENT_FETCH` — a FREE image is fetched by the USER'S BROWSER, not by this server
   (admin-mandated 2026-09-21: *"free wale me user ki ip, paid me hamari"*). ⚠️ NOT set, and the code
   default is ON**; `off` is the instant, no-deploy revert to the previous behaviour exactly. Read by

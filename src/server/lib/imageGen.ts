@@ -427,7 +427,15 @@ export function grokImageModel(env: NodeJS.ProcessEnv = process.env): string {
 export async function fetchPollinationsImage(
   prompt: string,
   size?: string,
-  opts: { fetchImpl?: typeof fetch; timeoutMs?: number; env?: NodeJS.ProcessEnv; custom?: { width?: unknown; height?: unknown } } = {},
+  opts: {
+    fetchImpl?: typeof fetch; timeoutMs?: number; env?: NodeJS.ProcessEnv; custom?: { width?: unknown; height?: unknown };
+    /**
+     * Never use our account key, even when one is set. Free mode passes this: a picture every user can
+     * ask for without limit must not spend the account's budget (admin 2026-09-21, "free wale me user ki
+     * ip, paid me hamari").
+     */
+    anonymous?: boolean;
+  } = {},
 ): Promise<{ image?: GeneratedImage; error?: string; disabled?: boolean; blocked?: boolean }> {
   const env = opts.env ?? process.env;
   if (!pollinationsEnabled(env)) return { disabled: true };
@@ -437,7 +445,7 @@ export async function fetchPollinationsImage(
   const fetchImpl = opts.fetchImpl ?? fetch;
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 45_000);
-  const key = pollinationsApiKey(env);
+  const key = opts.anonymous ? '' : pollinationsApiKey(env);
   try {
     // With a key: the keyed endpoint, the key in a header. Without: the anonymous link, as before.
     const r = key

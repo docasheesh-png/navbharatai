@@ -196,8 +196,15 @@ describe('🔒 what the server does, and what it deliberately still does', () =>
 
   it('🔴 an EDIT of the user’s own photo is never handed to the browser', () => {
     // An edit carries the user's photograph. It goes to a keyed provider from our server, and its
-    // bytes must not end up in a URL anybody could hold.
-    expect(route).toContain('pollinationsEnabled() && !editing');
+    // bytes must not end up in a URL anybody could hold. Since 2026-09-30 (Free / Paid) an edit in
+    // Free mode is refused inside the edit validation, BEFORE the only place a link is minted, and
+    // Paid mode mints no links at all.
+    const refusal = route.indexOf("res.status(409).json({ error: editNeedsPaidMessage(userWords), code: NEEDS_PAID_CODE })");
+    const validation = route.indexOf('    if (editing) {');
+    expect(validation).toBeGreaterThan(0);
+    expect(refusal).toBeGreaterThan(validation);
+    expect(refusal).toBeLessThan(route.indexOf("mode: 'client-fetch'"));
+    expect(route.split("mode: 'client-fetch'").length).toBe(2);
   });
 
   it('the relay is locked by BOTH the host allowlist and the signature', () => {

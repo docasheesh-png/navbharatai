@@ -10963,7 +10963,7 @@ async function noteBuildOutcome(
     const emit = (e: unknown): void => { const ev = redactEventForUser(honestResultEvent(e)); sessionTimeline.record(ev); broadcastBuild(rb, ev); };
     // Exposed to the finally so the LAST background checkpoint is flushed on every exit path
     // (success, error, abort). Held outside the try because `dispatcher` is block-scoped to it.
-    let dispatcherForFlush: { flushCheckpoints: () => Promise<void>; markBuildActive: (active: boolean) => void } | undefined;
+    let dispatcherForFlush: { flushCheckpoints: () => Promise<void>; markBuildActive: (active: boolean) => void; flushUnrecordedWrites: () => void } | undefined;
     let disposeGreenFreezeObserver: (() => void) | null = null;
     let disposeWriteObserver: (() => void) | null = null;
 
@@ -12073,6 +12073,8 @@ async function noteBuildOutcome(
       // the in-browser preview later found nothing and returned the misleading "No files to preview
       // yet" 404 even though the workspace genuinely had files). Awaited + best-effort: mirrors the
       // "DURABLE FILE SAVE" block at normal completion (captured writes ∪ a live sandbox scan).
+      // A write a tool made without recording it reaches this save too (autopsy 1389f0d5, recordedWrites.ts).
+      try { dispatcherForFlush?.flushUnrecordedWrites(); } catch { /* the durable record is best-effort */ }
       try {
         if (writtenFiles.size > 0) {
           const toSave: Record<string, string> = {};
@@ -22711,6 +22713,8 @@ async function noteBuildOutcome(
       // we captured at write-time (reliable), then supplement with a sandbox scan (catches sub-
       // agent writes when listFiles works). Skip if BOTH are empty so a read hiccup never
       // overwrites a previously-good saved set with nothing. Best-effort — never blocks the build.
+      // A write a tool made without recording it reaches the save too (autopsy 1389f0d5, recordedWrites.ts).
+      try { dispatcher.flushUnrecordedWrites(); } catch { /* the durable record is best-effort */ }
       try {
         const toSave: Record<string, string> = {};
         // Kept apart from `toSave` so the snapshot check can tell a sandbox that MOVED after the copy

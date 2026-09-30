@@ -1,4 +1,5 @@
 import { entryShadowNote } from './entryShadow';
+import { recordingActuator } from './recordedWrites';
 import { repeatedReadNotice, READ_LOOP_LIMIT, repeatedCommandNotice, commandKey } from './repeatedReads';
 import { repeatedEditNotice } from './repeatedEdits';
 import { missingMembers, declaredMembers, relativeImports, resolveCandidates, memberListNote, RECIPE_LIBRARY_PATH, type MissingMember } from './typeMembers';
@@ -569,8 +570,19 @@ export class ToolDispatcher {
   /** Grant permission to publish for this dispatcher's lifetime (one turn). */
   setPublishConsent(granted: boolean): void { this._publishConsent = granted === true; }
 
+  /**
+   * The sandbox, as every tool in this class sees it: each write through it is noted, and one the
+   * call site did not record itself is recorded when the tool call ends (`flushUnrecordedWrites`).
+   * See recordedWrites.ts — `replace_symbol` and ~170 other writes used to skip the saved project.
+   */
+  private readonly actuator: ActuatorPort;
+  /** The sandbox unwrapped — only for the platform's own starter files (see `ensureViteScaffold`). */
+  private readonly _rawActuator: ActuatorPort;
+  /** Writes made through `actuator` that no call site has recorded yet (path → content). */
+  private readonly _unrecorded = new Map<string, string>();
+
   constructor(
-    private readonly actuator: ActuatorPort,
+    actuatorRaw: ActuatorPort,
     private readonly workspaceId: string,
     private readonly state?: WorkspaceState,
     private readonly events?: AgentEventStream,
@@ -596,7 +608,23 @@ export class ToolDispatcher {
      * full — the single highest-value "why won't the app run" signal. Best-effort; never blocks.
      */
     private readonly onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number }) => void,
-  ) {}
+  ) {
+    this._rawActuator = actuatorRaw;
+    this.actuator = recordingActuator(actuatorRaw, workspaceId, (path, content) => { this._unrecorded.set(path, content); });
+  }
+
+  /**
+   * Record every write a call site did not record itself. Runs when a tool call starts and when it
+   * ends, and the route calls it before the durable save — so a write made outside a tool call is
+   * recorded too.
+   */
+  flushUnrecordedWrites(): void {
+    const pending = [...this._unrecorded];
+    this._unrecorded.clear();
+    for (const [path, content] of pending) {
+      try { this.onFileWrite(path, content); } catch { /* the durable record is best-effort */ }
+    }
+  }
 
   /**
    * THE DURABLE STORE IS WHAT A PUBLISH SERVES, SO NOTHING OF OURS MAY REACH IT (autopsy fd021c64).
@@ -639,6 +667,7 @@ export class ToolDispatcher {
   private readonly onFileWrite = (path: string, content: string): void => {
     this._writeSeq++; // see the docblock — one door, so "did anything change?" is true by construction
     this.onFileWriteRaw?.(path, withoutPreviewBridge(path, content));
+    this._unrecorded.delete(path); // recorded here — see `flushUnrecordedWrites`
     this._writtenPaths.add(path); // what THIS agent really wrote — see `writtenPaths`
   };
 
@@ -1776,7 +1805,9 @@ export class ToolDispatcher {
       for (const [path, content] of Object.entries(files)) {
         const exists = await this.actuator.readFile(this.workspaceId, path).then(() => true).catch(() => false);
         if (exists) continue; // never clobber real (e.g. salvaged) work with the starter
-        await this.actuator.writeFile(this.workspaceId, path, content).catch(() => {});
+        // The platform's starter, not the model's work: written UNRECORDED on purpose, exactly as before
+        // recordedWrites.ts, so the authorship gates never judge our template as the build's code.
+        await this._rawActuator.writeFile(this.workspaceId, path, content).catch(() => {});
       }
     } catch {
       /* self-heal is best-effort; the redirect message still guides the agent */
@@ -2928,7 +2959,13 @@ export class ToolDispatcher {
       const visual = call.name === 'screenshot' || call.name === 'browser_action' || call.name === 'find_ui_element'
         ? await this.runVisual(call)
         : null;
-      const content = visual ? visual.content : await this.run(call, agent);
+      this.flushUnrecordedWrites(); // anything written outside a tool call, before this one runs
+      let content: string;
+      try {
+        content = visual ? visual.content : await this.run(call, agent);
+      } finally {
+        this.flushUnrecordedWrites(); // every write this call made reaches the saved project
+      }
       this.events?.emit({
         type: 'tool_result',
         agent,

@@ -293,6 +293,7 @@ import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
+import { missingLayerFiles, missingLayersNote } from '../lib/gameRecipeLayers';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
@@ -2645,6 +2646,47 @@ export class ToolDispatcher {
   private noteCompileOutput(output: string): void {
     try { if (tscOutputProvesClean(output)) getWorkspaceMemory(this.workspaceId).markTscClean(); }
     catch { /* audit best-effort */ }
+  }
+
+  /**
+   * Write one game recipe's files. A file already holding EXACTLY the recipe's content is not rewritten
+   * and is reported as unchanged (autopsy 6a55d939: the builder ran the whole recipe sequence twice and
+   * the controller three more times; every re-run said "Updated" about files it had not changed, and each
+   * rewrite undid the previous heal, so the repeat looked like progress).
+   */
+  private async writeRecipeFiles(files: Record<string, string>, agent: AgentRole): Promise<string[]> {
+    const lines: string[] = [];
+    for (const [path, content] of Object.entries(files)) {
+      let existing: string | null = null;
+      try { existing = await this.actuator.readFile(this.workspaceId, path); } catch { existing = null; }
+      if (existing === content) { lines.push(`Unchanged ${path} (already exactly what this recipe writes)`); continue; }
+      await this.actuator.writeFile(this.workspaceId, path, content);
+      this.state?.recordFileChange({ path, kind: existing === null ? 'create' : 'modify' }, agent);
+      getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+      lines.push(`${existing === null ? 'Created' : 'Updated'} ${path}`);
+    }
+    return lines;
+  }
+
+  /**
+   * Write the recipe-owned files a game recipe's output imports and the project does not have — the
+   * 3D layer that `generate_game_shell` and `generate_game_systems` import, when `generate_game_3d` was
+   * never run (autopsy 6a55d939, gameRecipeLayers.ts). Only ABSENT files are written; returns the note
+   * for the tool result. Best-effort: a failure leaves the recipe's own result exactly as it was.
+   */
+  private async addMissingRecipeLayers(written: Record<string, string>, agent: AgentRole): Promise<string> {
+    try {
+      const listed = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
+      const present = new Set(listed.map((f) => String(f).replace(/^\.?\//, '')));
+      const missing = missingLayerFiles(written, present);
+      if (missing.size === 0) return '';
+      for (const [path, f] of missing) {
+        await this.actuator.writeFile(this.workspaceId, path, f.content);
+        this.state?.recordFileChange({ path, kind: 'create' }, agent);
+        getWorkspaceMemory(this.workspaceId).indexFile(path, f.content);
+      }
+      return missingLayersNote(missing);
+    } catch { return ''; }
   }
 
   private async writeTypecheckNote(sources: Record<string, string>): Promise<string> {
@@ -7060,17 +7102,10 @@ export class ToolDispatcher {
           ? gsyRec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         const gsy = generateGameSystems(gsyInclude);
-        const gsyWritten: string[] = [];
-        for (const [path, content] of Object.entries(gsy.files)) {
-          let kind: 'create' | 'modify' = 'create';
-          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
-          await this.actuator.writeFile(this.workspaceId, path, content);
-          this.state?.recordFileChange({ path, kind }, agent);
-          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-          gsyWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
-        }
+        const gsyWritten = await this.writeRecipeFiles(gsy.files, agent);
+        const gsyLayers = await this.addMissingRecipeLayers(gsy.files, agent);
         this.scheduleCheckpoint('gameplay systems');
-        return `Wired the gameplay systems:\n${gsyWritten.join('\n')}\n\n${gsy.instructions}`;
+        return `Wired the gameplay systems:\n${gsyWritten.join('\n')}\n\n${gsy.instructions}${gsyLayers}`;
       }
 
       case 'generate_game_shell': {
@@ -7082,17 +7117,10 @@ export class ToolDispatcher {
           ? gshRec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         const gsh = generateGameShell(gshInclude);
-        const gshWritten: string[] = [];
-        for (const [path, content] of Object.entries(gsh.files)) {
-          let kind: 'create' | 'modify' = 'create';
-          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
-          await this.actuator.writeFile(this.workspaceId, path, content);
-          this.state?.recordFileChange({ path, kind }, agent);
-          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-          gshWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
-        }
+        const gshWritten = await this.writeRecipeFiles(gsh.files, agent);
+        const gshLayers = await this.addMissingRecipeLayers(gsh.files, agent);
         this.scheduleCheckpoint('game shell');
-        return `Composed the game shell:\n${gshWritten.join('\n')}\n\n${gsh.instructions}`;
+        return `Composed the game shell:\n${gshWritten.join('\n')}\n\n${gsh.instructions}${gshLayers}`;
       }
 
       case 'generate_melody': {
@@ -7106,17 +7134,10 @@ export class ToolDispatcher {
           ? melRec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         const mel = generateMelody(melInclude);
-        const melWritten: string[] = [];
-        for (const [path, content] of Object.entries(mel.files)) {
-          let kind: 'create' | 'modify' = 'create';
-          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
-          await this.actuator.writeFile(this.workspaceId, path, content);
-          this.state?.recordFileChange({ path, kind }, agent);
-          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-          melWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
-        }
+        const melWritten = await this.writeRecipeFiles(mel.files, agent);
+        const melLayers = await this.addMissingRecipeLayers(mel.files, agent);
         this.scheduleCheckpoint('melody engine');
-        return `Added the melody engine:\n${melWritten.join('\n')}\n\n${mel.instructions}`;
+        return `Added the melody engine:\n${melWritten.join('\n')}\n\n${mel.instructions}${melLayers}`;
       }
 
       case 'generate_game_vfx': {
@@ -7128,17 +7149,10 @@ export class ToolDispatcher {
           ? gfxRec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         const gfx = generateGameVfxAudio(gfxInclude);
-        const gfxWritten: string[] = [];
-        for (const [path, content] of Object.entries(gfx.files)) {
-          let kind: 'create' | 'modify' = 'create';
-          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
-          await this.actuator.writeFile(this.workspaceId, path, content);
-          this.state?.recordFileChange({ path, kind }, agent);
-          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-          gfxWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
-        }
+        const gfxWritten = await this.writeRecipeFiles(gfx.files, agent);
+        const gfxLayers = await this.addMissingRecipeLayers(gfx.files, agent);
         this.scheduleCheckpoint('game VFX and audio');
-        return `Wired VFX and audio:\n${gfxWritten.join('\n')}\n\n${gfx.instructions}`;
+        return `Wired VFX and audio:\n${gfxWritten.join('\n')}\n\n${gfx.instructions}${gfxLayers}`;
       }
 
       case 'generate_game_controller': {
@@ -7150,17 +7164,10 @@ export class ToolDispatcher {
           ? gcRec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         const gc = generateGameController(gcInclude);
-        const gcWritten: string[] = [];
-        for (const [path, content] of Object.entries(gc.files)) {
-          let kind: 'create' | 'modify' = 'create';
-          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
-          await this.actuator.writeFile(this.workspaceId, path, content);
-          this.state?.recordFileChange({ path, kind }, agent);
-          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-          gcWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
-        }
+        const gcWritten = await this.writeRecipeFiles(gc.files, agent);
+        const gcLayers = await this.addMissingRecipeLayers(gc.files, agent);
         this.scheduleCheckpoint('character controller');
-        return `Wired the character controller:\n${gcWritten.join('\n')}\n\n${gc.instructions}`;
+        return `Wired the character controller:\n${gcWritten.join('\n')}\n\n${gc.instructions}${gcLayers}`;
       }
 
       case 'object_spec': {
@@ -7216,20 +7223,13 @@ export class ToolDispatcher {
           ? g3Rec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         const g3 = generateGame3D(g3Include);
-        const g3Written: string[] = [];
-        for (const [path, content] of Object.entries(g3.files)) {
-          let kind: 'create' | 'modify' = 'create';
-          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
-          await this.actuator.writeFile(this.workspaceId, path, content);
-          this.state?.recordFileChange({ path, kind }, agent);
-          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-          g3Written.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
-        }
+        const g3Written = await this.writeRecipeFiles(g3.files, agent);
+        const g3Layers = await this.addMissingRecipeLayers(g3.files, agent);
         this.scheduleCheckpoint('3D layer');
         // Naming the install is not optional: a 3D layer whose `three` dependency is never added
         // produces an app that cannot build, which is the honest-failure rule applied to a generator.
         const g3Deps = g3.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
-        return `Wired the 3D layer:\n${g3Written.join('\n')}\nAdd the dependency: ${g3Deps} (and @types/three)\n\n${g3.instructions}`;
+        return `Wired the 3D layer:\n${g3Written.join('\n')}\nAdd the dependency: ${g3Deps} (and @types/three)\n\n${g3.instructions}${g3Layers}`;
       }
 
       case 'generate_game_runtime': {
@@ -7244,17 +7244,10 @@ export class ToolDispatcher {
           ? grRec.include.filter((v): v is string => typeof v === 'string')
           : undefined;
         const gr = generateGameRuntime(grInclude);
-        const grWritten: string[] = [];
-        for (const [path, content] of Object.entries(gr.files)) {
-          let kind: 'create' | 'modify' = 'create';
-          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
-          await this.actuator.writeFile(this.workspaceId, path, content);
-          this.state?.recordFileChange({ path, kind }, agent);
-          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
-          grWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
-        }
+        const grWritten = await this.writeRecipeFiles(gr.files, agent);
+        const grLayers = await this.addMissingRecipeLayers(gr.files, agent);
         this.scheduleCheckpoint('game runtime');
-        return `Wired the game runtime:\n${grWritten.join('\n')}\n\n${gr.instructions}`;
+        return `Wired the game runtime:\n${grWritten.join('\n')}\n\n${gr.instructions}${grLayers}`;
       }
 
       case 'generate_animation': {

@@ -84510,3 +84510,40 @@ them, because its `normalizePath` strips the slash and so saw them as present.
     "repo" in "report", "push" in "push notification"). It now matches whole words only.
   - **Tests:** 2 more in `tests/freeChatKnowsItsModeButton.test.ts`, reversion-proven.
   - **Reach:** the website gets this on deploy; phones need a fresh bundle.
+
+## 2026-09-30 — Autopsy 6a55d939 + 26b03113 ("Build a app like god of war", Weak, two builds)
+
+**Build 1 (6.5 min, stopped by the user, ₹51.87 real cost).** The builder ran the game recipes and skipped
+`generate_game_3d`. It then ran the whole recipe sequence a second time, and the controller three more times
+(three "no progress" nudges). It found `src/game/three/*` missing and wrote those files by hand. A
+missing-import heal fired on `motor.ts`, `ai.ts` and `audio.ts` and was undone by each re-run
+(`HEAL_NOT_DURABLE`). Mid-build the user wrote "For a mobile phone Android".
+
+**Build 2 (11.1 min, green, ₹402.68 on a free welcome balance).** The whole build reconciled `Game.ts` with the
+hand-written three/ files: 30 errors quoted back and 92 model calls. The result has keyboard and mouse controls
+only.
+
+**Measured, not guessed:** every recipe's output was written into a real project with `three` and checked
+with `tsc`. With all seven recipes there was 1 error: `Game3DGenerator` asked for a `'cloth'` surface that
+`SurfaceKind` does not have. Without the 3D layer there were 5, all "Cannot find module", in the shell's
+`Game.ts` and the systems recipe's `spawner.ts`. The missing-import healer, run over the same output, added
+`state`/`load` imports to three files `tsc` passes.
+
+**Fixed:**
+- `gameRecipeLayers.ts` (pure) plus `ToolDispatcher.addMissingRecipeLayers`. After every game recipe, any
+  recipe-owned file its output imports that the project lacks is written from its own recipe. Only absent files
+  are written, and the tool result says so. Proven: the report's recipe set plus the fill gives `tsc` 0 errors.
+- `writeRecipeFiles`: a file already identical to the recipe's content is reported "Unchanged", not rewritten.
+- `Game3DGenerator`: `'cloth'` → `'fabric'`. All seven recipes together: `tsc` 0 errors.
+- `ImportExportReconcile.addMissingProjectImports`: the name of an interface member, class field, method,
+  accessor, enum member or JSX attribute is not a use. It adds nothing to the recipe set now.
+- Tests: `tests/aRecipeBringsTheLayersItImports.test.ts` (10), reversion-proven per fix. This includes a
+  closure test that fails if any recipe imports a file no recipe writes.
+
+**Open (proposed, not built):**
+- No recipe draws on-screen touch controls. `Input` accepts a joystick and virtual buttons, but a game from our
+  recipes cannot be played on a phone unless the model builds that UI, and here it did not, despite the user
+  asking.
+- The ETA showed 2–4 min for a famous-game clone.
+- The lean reviewer timed out on 46 files.
+- `App.tsx` importing `index.css` was healed after the fact (31 s).

@@ -140,6 +140,7 @@ const NEVER_SUGGEST = new Set([
   'CHECKPOINT_SIGNAL', // our checkpoint heuristic, never a finding (autopsy SignBridge, 2026-09-26)
   'REVIEW_SUGGESTIONS_NOT_READY', // a suggest-only review that ran out of time — nothing for the user to do
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', 'LADDER_DEPTH', 'SAVED_SOURCE_DIVERGES',
+  'FREE_BUILD_TIME_CAP', 'FREE_BUILD_CHAIN_PAUSED', // our free-tier time policy (freeBuildTimeCap.ts)
   'UNSUPPORTED_STACK', // the user is told in the ready message already (unsupportedStack.ts)
   'AUTH_EXPLORE_SIGNED_IN', 'AUTH_EXPLORE_NOT_RUN', // our sign-in instrument, never the app's defect
   'DESIGN_KIT_RESTORED', 'PLANNING_CONTEXT', 'DESIGN_KIT_KEPT', 'SHADOW_TWIN_REMOVED', // our own housekeeping (autopsy e725e002)
@@ -169,6 +170,7 @@ const NEVER_SUGGEST = new Set([
   'WRITE_TIME_QUALITY',
   // Our own lane's phase timings — a measurement, never a next move for the user.
   'FAST_LANE_PHASES',
+  'FAST_LANE_SKIPPED_GAME',
   // What our own failed provider calls cost — our routing's problem, never the user's next move.
   'PROVIDER_TIME_WASTED',
   'PREVIEW_SERVER_RESTARTED',

@@ -1628,7 +1628,29 @@ export class E2BActuator implements IEngineerActuator {
     return run;
   }
 
+  /**
+   * 🔴 A STALE HANDLE MADE A WORKING BUILD "SANDBOX UNAVAILABLE" (autopsy a9f8d186, 2026-09-30).
+   *
+   * This instance still held the workspace's machine from an earlier build, and E2B had since let it
+   * go ("The sandbox was not found … sandbox timeout"). The first operation of setup hit that corpse
+   * and threw. Every other operation already recovers from exactly this: `fileOp` drops a dead handle
+   * and the NEXT call reconnects by id or creates. Setup was the one caller with no next call — the
+   * route recorded SANDBOX_UNAVAILABLE, told the user the engine could not create files, and a build
+   * whose app then rendered in a real browser 12 minutes later was reported as never having run and
+   * made free. So setup gets the same recovery, once: drop the corpse, try again.
+   */
   private async _ensureWorkspaceOnce(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void> {
+    try {
+      return await this._ensureWorkspaceAttempt(workspaceId, projectType, resumeSandboxId);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!isDeadSandboxError(msg) && !/ timed out after /.test(msg)) throw e;
+      this._dropSandbox(workspaceId);
+      return await this._ensureWorkspaceAttempt(workspaceId, projectType, resumeSandboxId);
+    }
+  }
+
+  private async _ensureWorkspaceAttempt(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void> {
     // AB-1: pass the framework so the FIRST sandbox create for this workspace can route a polyglot
     // backend (spring-boot/go) onto the fullstack E2B image. Follow-up getSandbox() calls reuse the
     // cached sandbox, so the framework only needs to be known here at creation time.

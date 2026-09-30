@@ -75,10 +75,15 @@ export function devanagariLanguage(text: string): IndicHint {
 const ROMANIZED: Array<{ code: string; name: string; markers: string[] }> = [
   { code: 'ta', name: 'Tamil',     markers: ['enakku', 'venum', 'illai', 'panra', 'panna', 'romba', 'irukku', 'unga', 'vanakkam', 'eppadi', 'nalla', 'kadai', 'seyya'] },
   { code: 'te', name: 'Telugu',    markers: ['naaku', 'kavali', 'unnaru', 'cheyyi', 'cheyandi', 'meeru', 'ledu', 'entha', 'chala', 'baaga', 'kaavali', 'emiti'] },
-  { code: 'mr', name: 'Marathi',   markers: ['aahe', 'ahet', 'mala', 'tumhi', 'aamhi', 'pahije', 'karayche', 'karaycha', 'kasa', 'kaay', 'hava', 'havi', 'zhale'] },
+  // `kashi`, `karaychi`, `sanga`, `amhala`, `tumhala`, `kuthe` — autopsy 4541f1cf: a romanized question
+  // ("… kashi karaychi te sanga") scored ZERO markers and was answered in English.
+  { code: 'mr', name: 'Marathi',   markers: ['aahe', 'ahet', 'mala', 'tumhi', 'aamhi', 'pahije', 'karayche', 'karaycha', 'kasa', 'kaay', 'hava', 'havi', 'zhale', 'kashi', 'karaychi', 'sanga', 'amhala', 'tumhala', 'kuthe'] },
   { code: 'kn', name: 'Kannada',   markers: ['beku', 'nanage', 'neevu', 'hege', 'chennagi', 'maadi', 'yaake', 'illave', 'ashtu', 'estu'] },
   { code: 'ml', name: 'Malayalam', markers: ['venam', 'njan', 'ningal', 'cheyyu', 'undo', 'enthu', 'ariyilla', 'nalla', 'ethra', 'venda'] },
-  { code: 'gu', name: 'Gujarati',  markers: ['chhe', 'nathi', 'joie', 'tame', 'ame', 'karvu', 'kevi', 'saru', 'shu', 'banavvu'] },
+  // `karvi`, `karvanu`, `janavo`, `bolvu`, `joiye`, `banavvi`, `tamne` — autopsy 4541f1cf: "Ibahart app ni
+  // jaherat karvi chhe kai rite bolvu a janavo" carried ONE marker (`chhe`), so no language was named,
+  // the Latin line called it English, and the reply came back in English.
+  { code: 'gu', name: 'Gujarati',  markers: ['chhe', 'nathi', 'joie', 'tame', 'ame', 'karvu', 'kevi', 'saru', 'shu', 'banavvu', 'karvi', 'karvanu', 'janavo', 'bolvu', 'joiye', 'banavvi', 'tamne'] },
   { code: 'bn', name: 'Bengali',   markers: ['korte', 'kore', 'amar', 'tomar', 'kemon', 'hobe', 'chai', 'banate', 'darkar', 'ekta'] },
   { code: 'pa', name: 'Punjabi',   markers: ['chahida', 'tusi', 'mainu', 'asi', 'kive', 'hunda', 'banauna', 'changa'] },
 ];
@@ -137,7 +142,7 @@ export function detectRomanizedIndic(text: string): IndicHint | null {
  */
 export function languageInstruction(hint: IndicHint): string {
   if (hint.evidence === 'romanized') {
-    return `Language: the user appears to be writing ${hint.name} in Roman script. Generate ALL user-facing text in the app (labels, buttons, headings, placeholders, messages) in ${hint.name}, using ${hint.name}'s own script. If the request is actually in another language, follow the user's words rather than this hint. Keep code identifiers and comments in English.`;
+    return `Language: the user appears to be writing ${hint.name} in Roman script. Generate ALL user-facing text in the app (labels, buttons, headings, placeholders, messages) in ${hint.name}, using ${hint.name}'s own script. Reply to the user in ${hint.name} too, in Roman letters the way they wrote — never in English. If the request is actually in another language, follow the user's words rather than this hint. Keep code identifiers and comments in English.`;
   }
-  return `Language: the user is writing in ${hint.name}. Generate ALL user-facing text in the app (labels, buttons, headings, placeholders, messages) in ${hint.name}. Keep code identifiers and comments in English.`;
+  return `Language: the user is writing in ${hint.name}. Generate ALL user-facing text in the app (labels, buttons, headings, placeholders, messages) in ${hint.name}, and reply to the user in ${hint.name}. Keep code identifiers and comments in English.`;
 }

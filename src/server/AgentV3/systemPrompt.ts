@@ -478,6 +478,47 @@ export const NAVBHARATAI_UI_MAP = [
   '- ANDROID FILE (.apk) → the "More" tab at the bottom → "Download APK" (details below).  [apk_builder]',
 ].join('\n');
 
+/**
+ * The design kit and its screen recipes, as the builder is told them. ONE copy, read by the architect
+ * prompt and by a writing sub-agent when the stylesheet really carries the kit (`SubAgent.ts`).
+ *
+ * 🔴 WHY IT IS SHARED (autopsy ee0e6de5, 2026-09-30). The architect was told every kit class; the
+ * Frontend sub-agent it handed the whole UI to was told none, so before writing a line it read
+ * `src/index.css` six times in slices (lines 200–327, 150–220, 220–327, 1–160, 100–150) to find them.
+ */
+export const DESIGN_KIT_BRIEF: readonly string[] = [
+  '- 🎨 READY-MADE DESIGN KIT: the Vite+React scaffold\'s `src/index.css` already ships a themed',
+  '  palette (CSS vars: --accent, --accent-hover, --accent-fg, --success/--danger/--warning, --card,',
+  '  --border, --radius, --shadow) AND a small component kit you should REUSE for a consistent premium',
+  '  look: `.card`, `.btn-primary`/`.btn-ghost` (default `<button>` is a secondary), `.badge`',
+  '  (+`.badge-success/-danger/-warning`), `.alert` (+ same variants), `.container` (centred page),',
+  '  `.stack`/`.row` (flex), `.field` (label+input). Headings (h1–h4) already have a type scale.',
+  '  Reach for these classes and the palette vars first; extend them — do not hand-roll unstyled divs.',
+  '- 🧩 SCREEN RECIPES ALREADY IN THE STYLESHEET (Phase 3.2) — USE THESE INSTEAD OF INVENTING YOUR OWN.',
+  '  The screens every app needs are already designed, responsive and dark-mode aware. Writing a fresh',
+  '  version of one is slower AND worse than reaching for these:',
+  '    • DATA TABLE — wrap in `.nb-table-wrap` + `<table class="nb-table">` (sticky header, zebra rows,',
+  '      hover; scrolls sideways INSIDE its box so a phone page never scrolls horizontally). Numeric',
+  '      cells: `.nb-num`.',
+  '    • EMPTY STATE — `.nb-empty` (+ `.nb-empty-icon` / `.nb-empty-title` / `.nb-empty-text`). EVERY',
+  '      list, table and dashboard needs one: a blank panel reads as BROKEN to a first-time user, so say',
+  '      what will appear here and put the action that fills it right there.',
+  '    • DASHBOARD SHELL — `.nb-shell` > `.nb-sidebar` (+ `.nb-nav-item`, `.active`) and `.nb-topbar` +',
+  '      `.nb-main`. Collapses to one column on a phone by itself.',
+  '    • STAT TILES — `.nb-stats` > `.nb-stat` (+ `.nb-stat-label` / `.nb-stat-value`).',
+  '    • HERO — `.nb-hero` (+ `.nb-hero-sub`, `.nb-hero-actions`); the gradient uses the app\'s OWN accent.',
+  '    • PRICING — `.nb-pricing` > `.nb-plan` (+ `.nb-plan-featured` on the recommended one,',
+  '      `.nb-plan-price`, `.nb-plan-cta`).',
+  '    • AUTH SCREEN — `.nb-auth` > `.nb-auth-card` (+ `.nb-auth-sub`).',
+  '    • LOADING — `.nb-skeleton` blocks shaped like the content that is coming, NOT a bare spinner, so',
+  '      the layout does not jump when the data lands.',
+  '    • DIALOG — `.nb-modal-backdrop` > `.nb-modal` (+ `.nb-modal-title`, `.nb-modal-actions`).',
+  '    • TOOLBAR — `.nb-toolbar` with `.nb-spacer` to push actions right.',
+  '  They are `nb-` prefixed so they never collide with Tailwind utilities if the app uses Tailwind too.',
+  '  If a screen needs something the kit does not have, extend the kit in index.css using the palette',
+  '  vars — never drop back to unstyled markup.',
+];
+
 export function architectSystemPrompt(framework?: string, opts?: { parallelBuild?: boolean }): string {
   const scaffoldHint = frameworkScaffoldHint(framework);
   return [
@@ -593,36 +634,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  the app to prove it really SAVES what the user types — so an app whose fields cannot be addressed',
     '  ships with "whether it actually saves anything is untested", however good it looks. Placeholder',
     '  text is NOT a label. Do this as you write the field, never as a later pass.',
-    '- 🎨 READY-MADE DESIGN KIT: the Vite+React scaffold\'s `src/index.css` already ships a themed',
-    '  palette (CSS vars: --accent, --accent-hover, --accent-fg, --success/--danger/--warning, --card,',
-    '  --border, --radius, --shadow) AND a small component kit you should REUSE for a consistent premium',
-    '  look: `.card`, `.btn-primary`/`.btn-ghost` (default `<button>` is a secondary), `.badge`',
-    '  (+`.badge-success/-danger/-warning`), `.alert` (+ same variants), `.container` (centred page),',
-    '  `.stack`/`.row` (flex), `.field` (label+input). Headings (h1–h4) already have a type scale.',
-    '  Reach for these classes and the palette vars first; extend them — do not hand-roll unstyled divs.',
-    '- 🧩 SCREEN RECIPES ALREADY IN THE STYLESHEET (Phase 3.2) — USE THESE INSTEAD OF INVENTING YOUR OWN.',
-    '  The screens every app needs are already designed, responsive and dark-mode aware. Writing a fresh',
-    '  version of one is slower AND worse than reaching for these:',
-    '    • DATA TABLE — wrap in `.nb-table-wrap` + `<table class="nb-table">` (sticky header, zebra rows,',
-    '      hover; scrolls sideways INSIDE its box so a phone page never scrolls horizontally). Numeric',
-    '      cells: `.nb-num`.',
-    '    • EMPTY STATE — `.nb-empty` (+ `.nb-empty-icon` / `.nb-empty-title` / `.nb-empty-text`). EVERY',
-    '      list, table and dashboard needs one: a blank panel reads as BROKEN to a first-time user, so say',
-    '      what will appear here and put the action that fills it right there.',
-    '    • DASHBOARD SHELL — `.nb-shell` > `.nb-sidebar` (+ `.nb-nav-item`, `.active`) and `.nb-topbar` +',
-    '      `.nb-main`. Collapses to one column on a phone by itself.',
-    '    • STAT TILES — `.nb-stats` > `.nb-stat` (+ `.nb-stat-label` / `.nb-stat-value`).',
-    '    • HERO — `.nb-hero` (+ `.nb-hero-sub`, `.nb-hero-actions`); the gradient uses the app\'s OWN accent.',
-    '    • PRICING — `.nb-pricing` > `.nb-plan` (+ `.nb-plan-featured` on the recommended one,',
-    '      `.nb-plan-price`, `.nb-plan-cta`).',
-    '    • AUTH SCREEN — `.nb-auth` > `.nb-auth-card` (+ `.nb-auth-sub`).',
-    '    • LOADING — `.nb-skeleton` blocks shaped like the content that is coming, NOT a bare spinner, so',
-    '      the layout does not jump when the data lands.',
-    '    • DIALOG — `.nb-modal-backdrop` > `.nb-modal` (+ `.nb-modal-title`, `.nb-modal-actions`).',
-    '    • TOOLBAR — `.nb-toolbar` with `.nb-spacer` to push actions right.',
-    '  They are `nb-` prefixed so they never collide with Tailwind utilities if the app uses Tailwind too.',
-    '  If a screen needs something the kit does not have, extend the kit in index.css using the palette',
-    '  vars — never drop back to unstyled markup.',
+    ...DESIGN_KIT_BRIEF,
     '  🔴 NEVER REPLACE `src/index.css` WHOLESALE — it IS the kit. Add your app\'s styles by APPENDING',
     '  (edit_file, new rules at the end); to restyle a kit class, write your own rule for it below the',
     '  kit. A rewrite that drops kit rules has them put back automatically, so replacing the file gains',

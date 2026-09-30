@@ -173,7 +173,7 @@ import {
   a11yIssueCount, slowRouteCount,
 } from '../AgentV3/PageRouteCheck';
 import {
-  deriveJourneys, journeyScript, parseJourneyResults, summarizeJourneys, noJourneyReason, appHasNoDataEntry,
+  deriveJourneys, journeyScript, parseJourneyResults, summarizeJourneys, noJourneyReason, appHasNoDataEntry, appOnlyShowsWhatItHolds,
   JOURNEY_TIMEOUT_MS, writesToUserDatabase,
 } from '../AgentV3/journeyDerivation';
 import {
@@ -12437,6 +12437,8 @@ async function noteBuildOutcome(
     let etaEvidenced = false;
     // The labelled rough band an unevidenced build shows (admin 2026-09-26) — read by the tick.
     let etaRoughBand: string | null = null;
+    // Its top end, so the tick stops restating a band the build has already outrun.
+    let etaRoughHighMs: number | null = null;
     // MEASURED ETA state (2026-08-23). Everything above predicts from the PROMPT, which is how "Make an
     // VPN App" — a prompt with no page-words and no feature-words — scored the floor of the formula and
     // promised ~3 min for a build that ran 18m 42s. These two fields let the heartbeat stop predicting
@@ -12603,7 +12605,7 @@ async function noteBuildOutcome(
           // d11ad529). Elapsed time is still reported — it has already happened, so it promises
           // nothing — and the moment a real measurement lands the branch above takes over.
           if (!etaEvidenced) {
-            events.emit({ type: 'narration', agent: 'architect', text: unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000, etaRoughBand), ts: now, id: 'eta-live' });
+            events.emit({ type: 'narration', agent: 'architect', text: unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000, etaRoughBand, etaRoughHighMs), ts: now, id: 'eta-live' });
             return;
           }
           const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs, etaRevisions);
@@ -13480,6 +13482,7 @@ async function noteBuildOutcome(
           // show — see the tick below, which withholds the countdown until something real anchors it.
           etaEvidenced = estimateIsEvidenced(est);
           etaRoughBand = etaEvidenced ? null : roughEstimateBand(est);
+          etaRoughHighMs = etaRoughBand ? Number(est.highMs) || null : null;
           const etaShown = etaEvidenced ? firstEtaLine(est, past.length) : unevidencedFirstEtaLine(est);
           // KEEP THE PROMISE SO THE ENDING CAN BE MEASURED AGAINST IT (open root cause #6). The
           // `ETA_BASIS` line below records the same numbers as PROSE, for a human; this records them
@@ -20139,7 +20142,11 @@ async function noteBuildOutcome(
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 45_000)
       ) {
         try {
-          const pageRoutes = extractPageRoutes(Object.fromEntries(writtenFiles));
+          // THE WHOLE PROJECT, overlaid with this turn's writes — the journey check's own rule (below). Read
+          // from the writes alone, an edit turn that did not touch the router found no routes to check.
+          const pageRoutes = extractPageRoutes({ ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) });
+          // Explains a `pages: 'not-run'` truthfully (see RuntimeEvidence.noPageRoutes); never a verdict.
+          if (pageRoutes.length === 0) gateEvidence.noPageRoutes = true;
           if (pageRoutes.length > 0) {
             const out = await withTimeout(
               actuator.runCommand(workspaceId, pageCheckScript(lastPreviewUrl, pageRoutes)),
@@ -20271,7 +20278,9 @@ async function noteBuildOutcome(
             // genuinely no "save" journey to prove — mark it 'none-derivable' so the release gate reports
             // that honestly instead of "whether it actually SAVES anything is untested" (BENCHMARK #1/#2, a
             // game wrongly implied deficient). Conservative: any input/form/handler leaves it 'not-run'.
-            if (appHasNoDataEntry(journeyFiles)) gateEvidence.journeys = 'none-derivable';
+            // A lookup app (a search box and a sort over a fixed list, nothing that saves) is the same fact
+            // for the gate: there is no save to prove (autopsy ee0e6de5).
+            if (appHasNoDataEntry(journeyFiles) || appOnlyShowsWhatItHolds(journeyFiles)) gateEvidence.journeys = 'none-derivable';
           }
         } catch { /* evidence, never a gate — a failure here changes nothing about the build verdict */ }
       }

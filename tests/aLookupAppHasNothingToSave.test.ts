@@ -1,0 +1,178 @@
+/**
+ * Autopsy ee0e6de5 (2026-09-30) — "Build an app with the world's total countries and their capitals",
+ * written in Devanagari. One screen: a search box, an A–Z / Z–A sort, a static table of 195 rows.
+ *
+ * What went wrong, and what each block below locks:
+ *  1. The complexity classifier called it COMPLEX (a big DATA list read as a big APP), so the build
+ *     opened on the reasoning rung, skipped the fast lane, and took 6.5 min against a 2–4 min estimate.
+ *  2. The release gate said "whether it actually SAVES anything is untested" about an app that has
+ *     nothing to save, and told the user its fields needed a `name` for a check that had nothing to prove.
+ *  3. "Its individual page routes were never render-checked" — about an app with no routes.
+ *  4. The live tick repeated "rough estimate ~2–4 min" at minute 6.
+ *  5. The Frontend sub-agent read `src/index.css` six times in slices to learn the kit's class names,
+ *     which the architect had been told and it had not.
+ */
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { complexityPrompt } from '../src/server/AgentV3/complexityRouting';
+import {
+  appOnlyShowsWhatItHolds, appHasNoDataEntry, noJourneyReason, LOOKUP_ONLY_REASON,
+} from '../src/server/AgentV3/journeyDerivation';
+import { releaseGate, whyMissing, type RuntimeEvidence } from '../src/server/AgentV3/releaseGate';
+import { unevidencedEtaTickLine } from '../src/server/AgentV3/etaEvidence';
+import { stylesheetCarriesKit } from '../src/server/AgentV3/kitRestore';
+import { DESIGN_KIT_BRIEF, architectSystemPrompt } from '../src/server/AgentV3/systemPrompt';
+import { DESIGN_KIT_CSS } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/designKit';
+
+// The app as that build wrote it, reduced to the parts the predicates read.
+const countriesApp: Record<string, string> = {
+  'src/App.tsx': `import { useMemo, useState } from "react";
+import { countries } from "./data/countries";
+import { SearchBar } from "./components/SearchBar";
+import { SortSelect } from "./components/SortSelect";
+export default function App() {
+  const [query, setQuery] = useState("");
+  const [order, setOrder] = useState<"asc" | "desc">("asc");
+  const shown = useMemo(() => countries.filter((c) => c.name.includes(query)), [query]);
+  return (<main className="container"><SearchBar value={query} onChange={setQuery} />
+    <SortSelect value={order} onChange={setOrder} /><CountryTable rows={shown} /></main>);
+}`,
+  'src/components/SearchBar.tsx': `export function SearchBar({ value, onChange }: Props) {
+  return (<label className="field">खोजें
+    <input type="search" value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
+  </label>);
+}`,
+  'src/components/SortSelect.tsx': `export function SortSelect({ value, onChange }: Props) {
+  return (<label className="field">क्रम<select value={value} onChange={(e) => onChange(e.target.value as SortOrder)}>
+    <option value="asc">A-Z</option><option value="desc">Z-A</option></select></label>);
+}`,
+  'src/data/countries.ts': 'export const countries = [{ name: "India", capital: "New Delhi" }];',
+  // Files the platform adds, which must not be read as the app's own save paths.
+  'src/ErrorBoundary.tsx': 'class ErrorBoundary { static getDerivedStateFromError() {} render() { return <button onClick={() => this.setState({ error: null })}>Try again</button>; } }',
+  'public/sw.js': "caches.open(CACHE).then((c) => c.put(req, copy));",
+  'e2e/smoke.spec.ts': "await page.locator('button').first().click(); localStorage.clear();",
+  'playwright.config.ts': 'export default { use: { baseURL } };',
+  'index.html': '<div id="root"></div><script type="module" src="/src/main.tsx"></script>',
+};
+
+describe('1 · a long list of fixed facts is a simple app', () => {
+  it('the classifier is told that data volume is not app size, and that doubt means simple', () => {
+    const p = complexityPrompt('Build an app वेयर वर्ल्ड\'एस टोटल कंट्रीज नेम विथ थेइर कैपिटल्स');
+    expect(p).toMatch(/FIXED facts/);
+    expect(p).toMatch(/all countries and capitals/);
+    expect(p).toMatch(/If unsure, answer "simple"/);
+    // Still a label, not an essay — it is billed per token.
+    expect(complexityPrompt('build me a shop').length).toBeLessThan(900);
+  });
+});
+
+describe('2 · a lookup app has no save to prove', () => {
+  it('the countries app is lookup-only, although it has an input and a change handler', () => {
+    expect(appHasNoDataEntry(countriesApp)).toBe(false);   // the old question, still answered the old way
+    expect(appOnlyShowsWhatItHolds(countriesApp)).toBe(true);
+  });
+
+  it('any sign of a way to save keeps it a data app (conservative)', () => {
+    const withIt = (path: string, src: string) => ({ ...countriesApp, [path]: src });
+    expect(appOnlyShowsWhatItHolds(withIt('src/components/Add.tsx', '<button>Add</button>'))).toBe(false);
+    expect(appOnlyShowsWhatItHolds(withIt('src/components/Add.tsx', '<Button>Add</Button>'))).toBe(false);
+    expect(appOnlyShowsWhatItHolds(withIt('src/components/Add.tsx', '<form><input name="t"/></form>'))).toBe(false);
+    expect(appOnlyShowsWhatItHolds(withIt('src/components/Add.tsx', '<input onKeyDown={add}/>'))).toBe(false);
+    expect(appOnlyShowsWhatItHolds(withIt('src/components/Add.tsx', '<div onClick={add}/>'))).toBe(false);
+    expect(appOnlyShowsWhatItHolds(withIt('src/store.ts', 'localStorage.setItem("k", v)'))).toBe(false);
+    expect(appOnlyShowsWhatItHolds(withIt('src/api.ts', 'fetch(url, { method: "POST" })'))).toBe(false);
+    expect(appOnlyShowsWhatItHolds(withIt('src/api.ts', 'await supabase.from("t").insert(row)'))).toBe(false);
+    expect(appOnlyShowsWhatItHolds(withIt('src/api.ts', 'await addDoc(col, row)'))).toBe(false);
+    expect(appOnlyShowsWhatItHolds(withIt('src/Note.tsx', '<textarea/>'))).toBe(false);
+  });
+
+  it('needs a control at all — an app with no input is the other predicate\'s case, not this one', () => {
+    expect(appOnlyShowsWhatItHolds({ 'src/App.tsx': '<main><h1>Hi</h1></main>' })).toBe(false);
+    expect(appOnlyShowsWhatItHolds({})).toBe(false);
+    // An input nothing listens to is an unwired field, not a filter.
+    expect(appOnlyShowsWhatItHolds({ 'src/pages/A.tsx': '<input className="x" />' })).toBe(false);
+  });
+
+  it('the explanation names the real reason instead of asking for field names', () => {
+    expect(noJourneyReason(countriesApp)).toBe(LOOKUP_ONLY_REASON);
+    expect(noJourneyReason(countriesApp)).not.toMatch(/Give each field a `name`/);
+  });
+
+  it('the gate reads it as none-derivable: neutral wording, still never green', () => {
+    const ev: RuntimeEvidence = {
+      buildOk: true, preview: 'passed', pages: 'not-run', journeys: 'none-derivable',
+      typecheck: 'passed', tests: 'not-run', testSuiteIsOurStarter: true, noPageRoutes: true,
+    };
+    const v = releaseGate(ev, { blockers: 0, highSeverity: 0, warnings: 0 });
+    expect(v.state).toBe('yellow');
+    expect(v.headline).not.toMatch(/SAVES/);
+  });
+
+  it('🔒 the route marks a lookup app none-derivable, and derives page routes from the whole project', () => {
+    const src = readFileSync('src/server/routes/agentv3.ts', 'utf8');
+    expect(src).toMatch(/appHasNoDataEntry\(journeyFiles\) \|\| appOnlyShowsWhatItHolds\(journeyFiles\)\) gateEvidence\.journeys = 'none-derivable'/);
+    expect(src).toMatch(/const pageRoutes = extractPageRoutes\(\{ \.\.\.\(projectFilesAtTurnStart \?\? \{\}\), \.\.\.Object\.fromEntries\(writtenFiles\) \}\)/);
+    expect(src).not.toMatch(/extractPageRoutes\(Object\.fromEntries\(writtenFiles\)\)/);
+    expect(src).toMatch(/if \(pageRoutes\.length === 0\) gateEvidence\.noPageRoutes = true;/);
+  });
+});
+
+describe('3 · an app with no routes is not told its routes went unchecked', () => {
+  const base: RuntimeEvidence = {
+    buildOk: true, preview: 'passed', pages: 'not-run', journeys: 'not-run', typecheck: 'passed', tests: 'not-run',
+  };
+  it('says no routes were found, and that it cannot see router-less screens', () => {
+    const why = whyMissing('pages', { ...base, noPageRoutes: true });
+    expect(why).toMatch(/no separate page routes were found/);
+    expect(why).toMatch(/without a router are not reached/);
+  });
+  it('without the fact, the old sentence is unchanged', () => {
+    expect(whyMissing('pages', base)).toBe('the app came up, but its individual page routes were never render-checked here');
+  });
+  it('the fact never changes a verdict', () => {
+    const f = { blockers: 0, highSeverity: 0, warnings: 0 };
+    expect(releaseGate({ ...base, noPageRoutes: true }, f).state).toBe(releaseGate(base, f).state);
+  });
+});
+
+describe('4 · the live tick stops restating an estimate the build has outrun', () => {
+  const band = '~2–4 min';
+  const high = 256_040;              // the report's own highMs
+  const budget = 1_740_000;          // 29 min
+  it('inside the band, the labelled guess is shown as before', () => {
+    const line = unevidencedEtaTickLine(4 * 60_000, budget, band, high);
+    expect(line).toContain(`rough estimate ${band} (`);
+  });
+  it('past the band, it says the guess was too low instead of repeating it', () => {
+    const line = unevidencedEtaTickLine(6 * 60_000, budget, band, high);
+    expect(line).toMatch(/past my rough estimate of ~2–4 min, which was a guess and was too low/);
+    expect(line).not.toContain(`rough estimate ${band} (`);
+  });
+  it('a caller that passes no top end keeps the old line exactly', () => {
+    expect(unevidencedEtaTickLine(6 * 60_000, budget, band)).toBe(unevidencedEtaTickLine(6 * 60_000, budget, band, null));
+    expect(unevidencedEtaTickLine(6 * 60_000, budget, band)).toContain(`rough estimate ${band} (`);
+  });
+  it('🔒 the route passes the band\'s top end to the tick', () => {
+    const src = readFileSync('src/server/routes/agentv3.ts', 'utf8');
+    expect(src).toMatch(/unevidencedEtaTickLine\(elapsedMs, effectiveBuildSeconds \* 1000, etaRoughBand, etaRoughHighMs\)/);
+  });
+});
+
+describe('5 · a writing sub-agent is told the kit, as the architect is', () => {
+  it('the kit stylesheet is recognised; an ordinary stylesheet is not', () => {
+    expect(stylesheetCarriesKit(DESIGN_KIT_CSS)).toBe(true);
+    expect(stylesheetCarriesKit('body { margin: 0 } .title { color: red }')).toBe(false);
+    expect(stylesheetCarriesKit('')).toBe(false);
+  });
+  it('the architect prompt still carries the same brief, word for word', () => {
+    const prompt = architectSystemPrompt('vite-react');
+    expect(prompt).toContain(DESIGN_KIT_BRIEF.join('\n'));
+    expect(DESIGN_KIT_BRIEF.join('\n')).toMatch(/\.nb-table/);
+  });
+  it('🔒 SubAgent hands the brief over only when the stylesheet carries the kit', () => {
+    const src = readFileSync('src/server/AgentV3/SubAgent.ts', 'utf8');
+    expect(src).toMatch(/if \(roleExpectsArtifacts\(cfg\.tools\)\)/);
+    expect(src).toMatch(/stylesheetCarriesKit\(withoutPreviewBridge\('src\/index\.css', raw\)\)/);
+    expect(src).toMatch(/DESIGN_KIT_BRIEF\.join\('\\n'\)/);
+  });
+});

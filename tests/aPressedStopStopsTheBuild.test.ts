@@ -256,8 +256,8 @@ describe('4 — the fast lane checks the signal at every step', () => {
 describe('5 — the route wires the signal where no call site can forget it', () => {
   const route = read('src/server/routes/agentv3.ts');
   it('both text-runner factories carry the build signal', () => {
-    expect(route).toMatch(/const makeFastTextRunner = \(onUsed\?: \(used: string\) => void\): TurnRunner => withStopSignal\(buildTurnRunner\(/);
-    expect(route).toMatch(/const makePlanTextRunner = \(onUsed\?: \(used: string\) => void\): TurnRunner => withStopSignal\(buildTurnRunner\(/);
+    expect(route).toMatch(/const makeFastTextRunner = \(onUsed\?: \(used: string\) => void\): TurnRunner => (?:withAnswerNotDeliberation\()?withStopSignal\(buildTurnRunner\(/);
+    expect(route).toMatch(/const makePlanTextRunner = \(onUsed\?: \(used: string\) => void\): TurnRunner => (?:withAnswerNotDeliberation\()?withStopSignal\(buildTurnRunner\(/);
   });
 
   it('the fast lane is handed the signal, and a stopped lane starts no one-shot lane', () => {

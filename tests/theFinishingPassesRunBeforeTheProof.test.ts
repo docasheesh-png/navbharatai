@@ -317,7 +317,8 @@ describe('the rest of the review, locked at the source', () => {
   });
 
   it('the reviewer is not sent to review our own finishing files', () => {
-    expect(src).toContain('changedFiles: [...writtenFiles.keys()].filter((p) => !finishingPaths.has(p))');
+    expect(src).toContain('const reviewChanged = [...writtenFiles.keys()].filter((p) => !finishingPaths.has(p));');
+    expect(src).toContain('changedFiles: reviewChanged,');
   });
 });
 

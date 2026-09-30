@@ -113,6 +113,14 @@ export interface TelemetryBreakdown {
   inputTokens: number;
   outputTokens: number;
   durationMs: number;
+  /**
+   * Wall-clock of the SUCCESSFUL builds only (autopsy 728a402d, 2026-09-30). `durationMs` sums every
+   * build, and a watchdog kill at 30 min and a failure at 40 s pull an average in opposite directions —
+   * `etaHistory.isTeachableBuild` refuses both for the same reason. This is what a platform-wide ETA
+   * prior per task type needs (a new app has no history of its own, so its first ETA is a guess).
+   * Absent on documents written before it existed; read as "not measured", never as zero.
+   */
+  okDurationMs?: number;
 }
 
 /** Billing Phase 3 — rolled-up per-provider usage for the admin usage-report. */
@@ -226,6 +234,7 @@ function addToBreakdown(slot: TelemetryBreakdown, entry: CostTelemetryEntry): Te
     inputTokens: slot.inputTokens + entry.inputTokens,
     outputTokens: slot.outputTokens + entry.outputTokens,
     durationMs: slot.durationMs + entry.durationMs,
+    okDurationMs: (slot.okDurationMs ?? 0) + (entry.ok ? entry.durationMs : 0),
   };
 }
 

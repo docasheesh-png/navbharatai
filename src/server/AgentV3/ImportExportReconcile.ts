@@ -332,6 +332,12 @@ export async function addMissingProjectImports(files: Record<string, string>): P
 
   const added: AddedImport[] = [];
   const touched = new Set<string>();
+  // The declarations whose NAME position is a member of something, never a free variable.
+  const MEMBER_NAME_KINDS = new Set<number>([
+    SyntaxKind.PropertySignature, SyntaxKind.MethodSignature, SyntaxKind.PropertyDeclaration,
+    SyntaxKind.MethodDeclaration, SyntaxKind.GetAccessor, SyntaxKind.SetAccessor, SyntaxKind.EnumMember,
+    SyntaxKind.JsxAttribute,
+  ].filter((k) => typeof k === 'number'));
 
   for (const [path, sf] of sources) {
     // Names DECLARED or IMPORTED anywhere in this file — never add an import for any of them (safety:
@@ -406,6 +412,12 @@ export async function addMissingProjectImports(files: Record<string, string>): P
           if (pk === SyntaxKind.PropertyAccessExpression && parent.getNameNode?.() === id) continue;
           if (pk === SyntaxKind.QualifiedName) continue;
           if (pk === SyntaxKind.PropertyAssignment && parent.getNameNode?.() === id) continue;
+          // A MEMBER'S OWN NAME IS NOT A USE (autopsy 6a55d939, 2026-09-30). `state: MotorState;` in an
+          // interface, a class field, `async load(name, url)` as a method — each was read as a bare use
+          // of `state` / `load`, so this "healer" added `import { state } from "../core/state"` to
+          // motor.ts and ai.ts and `import { load }` to audio.ts: files our own recipes write and `tsc`
+          // passes. It fired on every run of those recipes, and each re-run undid it (HEAL_NOT_DURABLE).
+          if (MEMBER_NAME_KINDS.has(pk) && parent.getNameNode?.() === id) continue;
           if (pk === SyntaxKind.TypeReference) continue;
           // AN IDENTIFIER INSIDE AN IMPORT/EXPORT STATEMENT IS NOT A USE OF IT.
           //

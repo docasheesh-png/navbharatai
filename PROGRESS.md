@@ -84035,3 +84035,25 @@ app, and pay once with a test card.
 **Honest limit (open):** `amount_due` is written by the app at insert, so a hostile client can create a row
 with a small amount; `paid_amount` records what Razorpay really charged. A server-owned price table is a
 later slice.
+## 2026-09-30 — Autopsy e725e002, the rest: the stale `.js` copies, and `edit_file`
+
+Admin: *"Sabhi problem fix? Yes than merge, No - continue"*. The answer was no. This entry covers what was left and why.
+
+- ❌ → ✅ **Stray `.js` siblings: root cause found.**
+  - What happened: `SETUP_TIMING` shows `durable read 0 file(s)` and `sandbox=warm · had-resume-id=yes`. An earlier attempt was never saved, and it left JavaScript copies of every module in the resumed sandbox.
+  - No command in the report emitted them. Every `tsc` run carried `--noEmit`, and `npm run build` reads a `noEmit: true` tsconfig.
+  - Why it mattered: every import is extensionless, and Vite resolves `.js` before `.tsx`. So the preview could have been running the OLD code while tsc checked the new code.
+  - Fix: `shadowTwin.ts` + the write door (`write_file`, `write_files_batch`, `edit_file`; sub-agents share it).
+    - It removes a same-named twin that resolves earlier and that this build did not write.
+    - The model is told.
+    - The durable store forgets the twin.
+    - Report line `SHADOW_TWIN_REMOVED`; kill switch `AGENTV3_SHADOW_TWIN=off`.
+- ✅ **`edit_file` now keeps the design kit too.** This was the door the 2026-09-29 prevention left open.
+- ✅ **"Evaluate said no preview after APP_RENDERED" was already fixed by #3380** (`renderSeenThisBuild`, autopsy a7aa447c). This report predates that deploy. Nothing further was needed.
+- Tests: `tests/aStaleCopyCannotRunInsteadOfTheBuild.test.ts`, reversion-proven (both the twin removal and the edit_file keep).
+
+**Honestly NOT fixed, with the reason for each:**
+- **~13 double writes.** The model said it itself: *"I created placeholder files by mistake"*. The stubs were tiny and cost ~27 s. This is model behaviour, not a platform defect. Watch for it recurring before building a guard.
+- **The reviewer timed out** (45 s lean budget, "63 files"). It is suggest-only on a green app, so only the suggestions were lost. The stale `.js` copies inflated its file count, and the twin removal shrinks that.
+- **A write to `package.json` during the reviewer's `evaluate` was refused by Green Freeze.** The writer is unnamed (the same shape as e7baf61d's `src/types.ts`). No harm was done. The writer is still to be identified.
+- **17 hard-coded colours, 2 moderate npm advisories, 2 journeys behind login.** These are advisory findings or the known lane-B limit.

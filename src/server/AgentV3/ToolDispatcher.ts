@@ -41,7 +41,7 @@ import { getWorkspaceMemory } from './WorkspaceMemory';
 import { shellBuildProvesSuccess } from './buildFailurePrediction';
 import { robustTscCommand } from './tscCommand';
 import { parseTscErrors } from './EndgameRepair';
-import { tscOutputProvesClean, looksLikeTypecheckCommand } from './TscGate';
+import { tscOutputProvesClean, looksLikeTypecheckCommand, tscVerdict } from './TscGate';
 import { pathMissHint } from './suggestFilePath';
 import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
 import { detectTestPlan, parseTestOutcome, withSandboxBrowsers, withTestFilter } from './testRunner';
@@ -2798,6 +2798,7 @@ export class ToolDispatcher {
       }
       if (unprobed) s.compiledUnprobed += 1;
       let silentRun = false; // tsc printed nothing at all — the only output that means "clean"
+      let neverRan = false; // the compiler did not look at the project — neither clean nor failed
       const errors = await this._writeTypecheckQueue.run(async () => {
         const command = writeTypecheckCommand();
         const startedAt = Date.now();
@@ -2824,12 +2825,19 @@ export class ToolDispatcher {
         catch { /* diagnostics are best-effort */ }
         const combined = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
         silentRun = combined === '';
+        // 🔴 AUTOPSY 12c642ed: a missing compiler also parses to zero errors, and was counted as clean.
+        const verdict = tscVerdict(combined);
+        neverRan = verdict === 'not-run' || verdict === 'unknown';
         this.noteCompileOutput(combined);
         // A tsc that printed no `error TSxxxx` line is clean; a help page or an install log parses to zero
         // errors too, which is why a clean run here is evidence only through the bridge above, never on its own.
         return parseTscErrors(combined);
       });
       if (errors === null) return '';
+      if (neverRan) {
+        s.notRunRuns += 1;
+        return '';
+      }
       if (errors.length === 0) s.cleanRuns += 1;
       const own = splitByWrittenFiles(errors, tsPaths).own.length;
       s.ownErrorsSurfaced += own;
@@ -3167,13 +3175,32 @@ export class ToolDispatcher {
    * parallel — every stylesheet the write carries, the usual entry sheets, and the two files that say
    * whether Tailwind or an external sheet is in play — so a write pays one round trip, not eight.
    */
+  /**
+   * The screens (with `className`) written this build, by path — so a later STYLESHEET write can be
+   * checked against them. 🔴 AUTOPSY 12c642ed (2026-09-30): the frontend sub-agent wrote App.tsx, was
+   * told its classes had no rules, then rewrote src/index.css three times — and nothing re-asked the
+   * question after a stylesheet write, so 41 classes were still undefined at the end and cost a 184 s
+   * heal. Bounded: the most recent 40 screens.
+   */
+  private readonly _screensWithClasses = new Map<string, string>();
+
   private async undefinedClassNotes(files: Record<string, string>): Promise<string> {
     try {
       // A plain-HTML app names its classes with `class=`, in the page or in the strings its script
       // writes (autopsy "Nemi Mart", 2026-09-30) — those are screens too.
-      const screens = Object.keys(files).filter((p) => (/\.(?:t|j)sx?$/.test(p) && /className\s*=/.test(files[p] ?? ''))
+      const written = Object.keys(files).filter((p) => (/\.(?:t|j)sx?$/.test(p) && /className\s*=/.test(files[p] ?? ''))
         || (/\.(?:html?|js)$/.test(p) && /\bclass\s*=\s*\\?["']/.test(files[p] ?? '')));
+      for (const p of written) {
+        this._screensWithClasses.delete(p);
+        this._screensWithClasses.set(p, files[p]);
+        if (this._screensWithClasses.size > 40) this._screensWithClasses.delete(this._screensWithClasses.keys().next().value as string);
+      }
+      // A stylesheet write re-asks the question for the screens already written; the note then says
+      // what is STILL missing after this sheet, not merely what was missing before it.
+      const sheetWritten = Object.keys(files).some((p) => isProjectStylesheet(p));
+      const screens = sheetWritten ? [...this._screensWithClasses.keys()] : written;
       if (screens.length === 0) return '';
+      const content = (p: string) => files[p] ?? this._screensWithClasses.get(p) ?? '';
       const project: Record<string, string> = {};
       for (const [p, c] of Object.entries(files)) if (isProjectStylesheet(p)) project[p] = c;
       const probes = ['src/index.css', 'src/App.css', 'src/styles.css', 'src/global.css', 'src/styles/globals.css', 'src/styles/index.css', 'style.css', 'styles.css', 'css/style.css', 'package.json', 'index.html']
@@ -3182,7 +3209,7 @@ export class ToolDispatcher {
       for (const r of read) if (r && typeof r[1] === 'string') project[r[0]] = r[1];
       let out = '';
       for (const p of screens) {
-        const missing = undefinedClassesInFile(p, files[p], project).filter((c) => !c.startsWith('nb-'));
+        const missing = undefinedClassesInFile(p, content(p), project).filter((c) => !c.startsWith('nb-'));
         // Name the sheet this project really has: a static app's is style.css, not src/index.css.
         const sheet = project['src/index.css'] !== undefined ? 'src/index.css'
           : (['style.css', 'styles.css', 'css/style.css'].find((s) => project[s] !== undefined) ?? 'src/index.css');

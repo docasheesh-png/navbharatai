@@ -804,7 +804,7 @@ export function makeMultiProviderTurnRunner(
           // `raceStop` makes EVERY runner stop waiting on a stop, including one with no cancel handle of
           // its own; a streaming runner additionally closes its stream (it receives the same signal).
           const result = await raceStop(runner.runTurn({
-            ...params, canAbandonSlowStream,
+            ...params, canAbandonSlowStream, hasNextRung: i + 1 < chain.length,
             maxTokens: reasoningAwareAsk(params.maxTokens, chain[i].modelId),
           }), params.signal);
           timeoutStreak.delete(reportName); // a success resets the family's consecutive-timeout streak

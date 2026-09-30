@@ -156,3 +156,26 @@ export function deadlineFromBudget(remainingMs: number | null | undefined, now: 
   const ms = finitePositive(remainingMs);
   return ms === null ? undefined : now + ms;
 }
+
+/** The shortest first-answer wait a deadline-bound call is ever given before the next rung is tried. */
+export const FIRST_ANSWER_FLOOR_MS = 15_000;
+
+/**
+ * How long a call waits for the provider to START answering (the response object) before it is
+ * treated as silent. PURE.
+ *
+ * 🔴 AUTOPSY 12c642ed (2026-09-30). The fast lane's plan step had 90 s. The first rung waited the full
+ * 60 s silence window for a first byte that never came, and the next rung got the 30 s that were left —
+ * too little for any engine to plan an app, so the lane produced nothing and the build fell to the full
+ * builder 90 s late. A silence window sized for a 30-minute build is not a silence window for a
+ * 90-second step.
+ *
+ * When OUR deadline bounds the call AND there is a next rung to go to, the wait is at most a third of
+ * the time the step has (never under 15 s), so a silent first rung leaves the next one the larger share.
+ * With no next rung, or when the provider's own ceiling is the bound, nothing changes: a slow answer
+ * from the last engine beats no answer.
+ */
+export function firstAnswerBoundMs(idleMs: number, timeoutMs: number, source: TurnDeadlineDecision['source'], hasNextRung: boolean): number {
+  if (source !== 'deadline' || !hasNextRung) return idleMs;
+  return Math.min(idleMs, Math.max(FIRST_ANSWER_FLOOR_MS, Math.round(timeoutMs / 3)));
+}

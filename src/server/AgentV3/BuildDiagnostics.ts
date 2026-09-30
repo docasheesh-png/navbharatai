@@ -957,6 +957,22 @@ export class BuildDiagnostics {
             message: note,
             autoResolved: false,
           });
+        } else if (audit && audit.total === 0 && this.lastAuditNote !== null) {
+          // 🔴 AUTOPSY 12c642ed (2026-09-30). `npm install` reported "2 vulnerabilities (1 moderate, 1 high)",
+          // `npm audit fix` then printed "found 0 vulnerabilities" — and the warning stayed, telling the
+          // user to run the very command that had just fixed it. A zero result was ignored because it has
+          // no severity. The LATEST install describes the tree the app ships with, zero included.
+          this.lastAuditNote = null;
+          for (let i = this.issues.length - 1; i >= 0; i--) {
+            if (this.issues[i].code === 'DEPENDENCY_VULNERABILITIES') this.issues.splice(i, 1);
+          }
+          this.record({
+            phase: 'build',
+            severity: 'info',
+            code: 'DEPENDENCY_VULNERABILITIES_FIXED',
+            message: 'The known vulnerabilities reported earlier in this build are gone — the latest install reports 0.',
+            autoResolved: true,
+          });
         }
       } catch { /* a diagnostic must never break the command it is describing */ }
     }

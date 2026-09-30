@@ -71,7 +71,8 @@ export function megaRoadmapSystemPrompt(): string {
     '   chat\'s reply, a payment, a real search result must be REAL from step 1 (using the user\'s own',
     '   key or config), never a canned or simulated stand-in.',
     '7. NEVER plan a placeholder: a button that "logs to the console", a "visual only" control, a fake',
-    '   "connected" status, a simulated response. A control that is not built in this step is simply',
+    '   "connected" status, a simulated response, a simulated progress bar or "rendering…" animation for',
+    '   work nothing is doing. A control that is not built in this step is simply',
     '   absent (or visibly disabled with an honest label) until its own step builds it.',
     '8. The user\'s explicit constraints (a required stack, a forbidden stack, "one single file", "no',
     '   fake responses") bind EVERY step, not just step 1. Repeat each one inside every buildPrompt.',
@@ -257,6 +258,29 @@ const VAGUE = /^(?:etc\.?|and more|more features|\.\.\.|todo|tbd|polish|cleanup|
  * someone types runs entirely in their browser. Real-time is infrastructure only when it is real-time
  * BETWEEN people or devices (chat, sync, collaboration, live location), so only those spellings count.
  */
+/**
+ * A build instruction that asks for work to be FAKED — "simulate the process: show 'Generating Script',
+ * then a 'Rendering' progress bar". 🔴 Autopsy f385a5f9 (2026-09-30): the planner wrote exactly that for
+ * a video generator whose real service was not connected, and rule 7 above had already forbidden it in
+ * words. A rule the model may ignore is a request; this is the check.
+ */
+const SIMULATION_RE = /\b(?:simulat\w*|fake|pretend\w*)\b[^.;]{0,80}?\b(?:process|progress|render\w*|generat\w*|upload\w*|processing|response|result|status|loading|job)\b|\b(?:progress bar|rendering|processing)\b[^.;]{0,40}?\b(?:simulat\w*|fake)\b/gi;
+/** "no fake responses", "never simulate…", "without faking" — the user's own constraint, restated. */
+const NEGATED_BEFORE = /\b(?:no|not|never|don'?t|do not|without|avoid|must not|instead of)\s+(?:\w+\s+){0,2}$/i;
+
+/** Does this build instruction ask for work to be faked? A negated mention is the opposite. Pure. */
+export function asksForSimulation(buildPrompt: string): boolean {
+  const text = String(buildPrompt ?? '');
+  for (const m of text.matchAll(SIMULATION_RE)) {
+    const before = text.slice(Math.max(0, (m.index ?? 0) - 30), m.index ?? 0);
+    if (!NEGATED_BEFORE.test(before)) return true;
+  }
+  return false;
+}
+
+/** What replaces a simulated step's promise: the honest not-available state, said in the instruction itself. */
+export const NO_SIMULATION_CLAUSE = 'Do NOT simulate or animate work that nothing is doing: no fake progress bar, no staged "generating…/rendering…" messages. Where the real service is not connected, show one honest, clearly labelled "not available yet" state that says what it needs.';
+
 const INFRA_RE = /\b(multiplayer|real-?time\s+(?:chat|messag\w*|sync\w*|collaborat\w*|co-?editing|location|tracking|multiplayer|notifications?|updates?\s+(?:between|across|for all|to (?:all|other))|feed)|websocket|game server|matchmaking|video call|voice call|webrtc|live stream|push notification server|train (?:a|an|our|my) (?:ai|ml|model)|foundation model|blockchain|peer-?to-?peer|p2p)\b/i;
 
 const normTitle = (t: string): string => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -295,8 +319,10 @@ export function roadmapGuardrail(
     const key = normTitle(s.title);
     if (!key || seen.has(key)) { rejected.push(`duplicate step "${s.title}"`); continue; }
     seen.add(key);
-    const infraCeiling = !!s.needsInfra || INFRA_RE.test(`${s.title} ${s.goal} ${s.buildPrompt} ${s.needsInfra || ''}`);
-    kept.push({ n: kept.length + 1, title: s.title, goal: s.goal, buildPrompt: bp, infraCeiling });
+    const simulated = asksForSimulation(bp);
+    if (simulated) rejected.push(`step "${s.title}" asked for work to be simulated — rewritten to an honest not-available state`);
+    const infraCeiling = simulated || !!s.needsInfra || INFRA_RE.test(`${s.title} ${s.goal} ${s.buildPrompt} ${s.needsInfra || ''}`);
+    kept.push({ n: kept.length + 1, title: s.title, goal: s.goal, buildPrompt: simulated ? `${bp} ${NO_SIMULATION_CLAUSE}` : bp, infraCeiling });
   }
 
   if (kept.length < MIN_ROADMAP_STEPS) {

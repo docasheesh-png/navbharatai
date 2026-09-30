@@ -15,7 +15,7 @@ import { redactProviderError, redactProvidersText } from '../lib/providerRedacti
 import { recordPlatformBuild } from '../lib/platformBuildMetrics';
 import { isAdminEmail } from '../lib/adminEmails';
 import { honestResultEvent } from '../lib/responseEmoji';
-import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance } from '../lib/RequirementGapAnalyzer';
+import { analyzeRequirementGaps, renderRequirementGaps, shouldSurfaceRequirementGaps, buildRequirementGuidance, userAskedForSmallScope } from '../lib/RequirementGapAnalyzer';
 import { resolveDomainKnowledge, type DomainKnowledge } from '../lib/domainKnowledge';
 import { nextBuildSuggestions } from '../AgentV3/nextBuildSuggestions';
 import { memoryLinkedSuggestions, mergeSuggestions } from '../AgentV3/memoryLinkedSuggestions';
@@ -15687,9 +15687,20 @@ async function noteBuildOutcome(
           // the "include these by default" half must not re-add the declined ones behind their back.
           const answered = domainGuidanceStandsDown(featureConfirmation);
           const gaps = analyzeRequirementGaps(prompt);
+          // "a simple habit tracker" — the user stated the size; no domain features are added on top
+          // (autopsy 12c642ed). Recorded so the report says why the guidance stood down.
+          const smallScope = userAskedForSmallScope(prompt);
           const reqGuidance = buildRequirementGuidance(answered ? { ...gaps, likelyMissing: [] } : gaps, {
             userAskedForAnApp: askedForAnApp,
+            userAskedForSmallScope: smallScope,
           });
+          if (smallScope && askedForAnApp && gaps.likelyMissing.length > 0) {
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: 'REQUIREMENT_GAPS_STOOD_DOWN',
+              message: `The request stated its own size ("simple", "basic", …), so the ${gaps.likelyMissing.length} feature(s) a ${gaps.domain} app usually has were NOT added to the build.`,
+              autoResolved: true,
+            });
+          }
           if (reqGuidance) buildPrompt = `${reqGuidance}\n\n---\n\n${buildPrompt}`;
           // 🇮🇳 THE LONG TAIL (2026-09-18). `buildRequirementGuidance` is silent outside its sixteen
           // enumerated domains, so a mandir donation app or a machhli-palan tracker used to get NOTHING
@@ -15697,7 +15708,7 @@ async function noteBuildOutcome(
           // nobody enumerated — and ONLY there: a listed domain returns `listed` and is skipped here,
           // so every existing build prompt is byte-identical. It never asks a question (the 2026-07-20
           // friction-free decision is untouched); it only names what such an app usually needs.
-          if (!reqGuidance && askedForAnApp && !answered) {
+          if (!reqGuidance && askedForAnApp && !answered && !smallScope) {
             const learned = await learnDomain(prompt);
             if (learned && learned.source === 'generated') {
               buildPrompt = [

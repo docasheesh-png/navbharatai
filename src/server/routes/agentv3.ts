@@ -14328,6 +14328,8 @@ async function noteBuildOutcome(
         serverlessPayment: () => dispatcherForSubAgents?.serverlessPaymentHandler(),
         // And its stylesheet rewrites that had design-kit rules kept (autopsy e725e002).
         kitKept: () => dispatcherForSubAgents?.sharedKitKept(),
+        // And its stale-module-copy guard, armed on the parent (autopsy e725e002).
+        shadowTwins: () => dispatcherForSubAgents?.sharedShadowTwins(),
         client, actuator, workspaceId, state, events, model, onlyOpus,
         // Tier fidelity + honest billing (admin 2026-07-13): sub-agents spend most of a build's
         // tokens — they must bill at the TIER's rate (Strong → Sonnet × 3, not Opus × 2) and run
@@ -14644,6 +14646,10 @@ async function noteBuildOutcome(
       // the app does not have. Removing it here is therefore correct on all three counts at once: a
       // file the build deleted is not one it authored into the finished app. The dispatcher has
       // already confirmed against the sandbox that each of these is genuinely gone before it says so.
+      // A stale copy of a module under an earlier-resolving extension runs INSTEAD of the file the build
+      // writes (autopsy e725e002). Armed with the files this build wrote, so a twin it wrote itself is
+      // never touched; unarmed, nothing is removed.
+      dispatcher.armShadowTwins(() => modelAuthoredPaths(writtenFiles));
       dispatcher.setFileDeletionSink((paths) => {
         for (const p of paths) {
           writtenFiles.delete(p);
@@ -17197,6 +17203,19 @@ async function noteBuildOutcome(
           buildDiag.record({
             phase: 'build', severity: 'info', code: 'DESIGN_KIT_KEPT', autoResolved: true,
             message: `${kit.writes} stylesheet rewrite(s) dropped design-kit rules without restyling them; the rules were kept (${kit.classes.slice(0, 12).map((c) => `.${c}`).join(', ')}${kit.classes.length > 12 ? ` and ${kit.classes.length - 12} more` : ''}).`,
+          });
+        }
+      } catch { /* an advisory finding must never affect a build */ }
+      // 🪞 STALE COPIES OF MODULES THAT WOULD HAVE RUN INSTEAD OF THE BUILD'S OWN (autopsy e725e002). The
+      // write door removed them from the sandbox (shadowTwin.ts); the durable store forgets them too, so
+      // a merge-save cannot keep a path the sandbox no longer has and restore it into the next session.
+      try {
+        const twins = [...new Set(dispatcher.shadowTwinTally().removed)];
+        if (twins.length > 0) {
+          await removeWorkspaceFiles(workspaceId, twins).catch(() => 0);
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'SHADOW_TWIN_REMOVED', autoResolved: true,
+            message: `Removed ${twins.length} stale copy(ies) of modules this build wrote — each would have been loaded INSTEAD of the new file (the dev server resolves .js before .ts/.tsx): ${twins.slice(0, 12).join(', ')}${twins.length > 12 ? ` and ${twins.length - 12} more` : ''}.`,
           });
         }
       } catch { /* an advisory finding must never affect a build */ }

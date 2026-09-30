@@ -50,7 +50,7 @@ describe('🔴 the live tick must not count down from a number we declined to sh
     // SAME sentence at minute 2 and minute 28 — the twelve identical ticks that made a real user
     // press the button three times. Asserting the argument is what stops that silently regressing.
     // And since 2026-09-26 the tick also carries the labelled rough band (null when there is none).
-    expect(block).toContain('unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000, etaRoughBand)');
+    expect(block).toContain('unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000, etaRoughBand, etaRoughHighMs)');
     expect(block).toContain('return;');
   });
 

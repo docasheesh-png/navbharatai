@@ -84058,6 +84058,63 @@ Admin: *"Sabhi problem fix? Yes than merge, No - continue"*. The answer was no. 
 - **A write to `package.json` during the reviewer's `evaluate` was refused by Green Freeze.** The writer is unnamed (the same shape as e7baf61d's `src/types.ts`). No harm was done. The writer is still to be identified.
 - **17 hard-coded colours, 2 moderate npm advisories, 2 journeys behind login.** These are advisory findings or the known lane-B limit.
 
+## 2026-09-30 — Autopsy 466c260a ("NavAI Workspace", Weak tier, KIMI rung 2, 16.6 min, green, billed ₹395.75)
+
+Prompt, verbatim: *"Notes , Visualizeusing, pdf code file handling picture editor , pro chat codestudeo and
+more"*. Built, rendered at 429 s, typechecked, production build clean, 16 controls pressed without a break.
+
+**Ledger.** ✅ 3 self-heals (a missing `MessageSquare` import; 3 undefined `nb-` classes; 5 "no heading"
+pages) · 🔀 0 · ⏭️ 2 (3 XSS sinks reported and left; no journey derivable) · ❌ 2 (UI shipped in Hindi for an
+English request, with the summary claiming the user asked for it; a "Pro Chat" answering with text written
+into the app, sold as an "instant assistant response") · 🥵 3 (the 255 s post-answer design heal, ~40 calls at
+~48 K input each, the largest slice of the build's cost; the frontend agent's 5 minutes after first render;
+an ETA of 5–11 min against 16.6).
+
+**Fixed (PR after this entry):**
+- **Language** — the detector was right (null), the instruction was the gap: "same language as the request"
+  left a bias-prone model to pick Hindi. `appLanguageInstruction` now tells a Latin-letter request with no
+  language named to stay in Latin letters and never switch script or claim the user asked for one; an
+  explicit ask ("hindi me", "in Tamil", "bilingual") is never overridden. The SAME line reaches every
+  sub-agent (`languageRule`) — the frontend specialist wrote `locales/hi.ts` because the architect's choice was
+  the only language it had ever heard of.
+- **Domain** — "pro chat" made the workspace SOCIAL and its build was told to include auth, a realtime feed,
+  moderation and media upload. AI-assistant chat idioms are stripped; chatting with people keeps its meaning.
+- **NO_HEADING** — the pages rendered inside `DashboardShell`, whose topbar carries `{title}`. A page under a
+  LAYOUT (header/nav/sidebar/topbar) with a dynamic heading now counts as titled. A brand-only header, a
+  card or a modal does not.
+- **Scripted assistant** — `findScriptedAssistant`: assistant-side messages in a project that makes no
+  network or AI call anywhere are disclosed in the summary (`SCRIPTED_ASSISTANT_SHIPPED`), confirmed on the
+  whole durable project so an edit turn is never judged on its own few files.
+- **Invented kit classes** — an `nb-` class the kit does not define and no stylesheet defines is named at
+  WRITE time (`inventedKitClassNote`), instead of at the end-of-build check inside a heal.
+Test-locked and reversion-proven six ways in `tests/theWorkspaceNobodyAskedToBeHindi.test.ts`.
+
+**Corrected record (CLAUDE.md):** the Nemotron JUDGE has never run on a Weak build. `judgeBuild` lives only
+inside the escalation block (`!freeTierBuildActive && tierEscalationPath.length > 1`) and Weak never
+escalates. Not wired: a Weak judge would add cost with no repair to act on it — raised to the admin.
+
+**Open, not decided here:**
+- **Billing:** ₹395.75 billed, 15,000 tokens (₹150) actually debited — the overdraft floor clamped a new
+  user's first build and NavBharatAI absorbed ₹245.75 on ~₹100 of real cost. One weak build consumed the
+  user's whole welcome credit. Policy, not a bug; raised to the admin.
+  - 🔴 **Correction, same day, when the admin asked what NavBharatAI actually paid.** "Absorbed ₹245.75" is
+    unbilled MARKUP, not money spent. The real cash out, from the report's own `billing` block, was
+    **$1.04 ≈ ₹99.89**: KIMI `kimi-k2.7-code` $0.994 (234,937 uncached in × $0.95/M = $0.223; 3,244,800
+    cache-read × $0.19/M = $0.617; 38,599 out × $4.00/M = $0.154) plus E2B $0.046. These are converted at
+    the ~₹96/$ rate the bill itself used. `tieredMarkup($1.0398)` = $4.119 = ₹395.75. The debit took ₹150
+    of gifted credit, and no real rupee came in, so the build's cash cost to NavBharatAI is the ~₹100 above.
+    Telling the admin "₹245.75 ka kharcha" overstated the loss 2.5×.
+  - **Admin decision (2026-09-30): the judge stays OFF on Weak** ("ok"). No code change: Weak never escalates,
+    so the judge has no repair to drive there.
+- **Heal cost — measured, and the first theory was wrong.** The heal was ~$0.46 of the build's $0.99 real
+  cost (~2.4 M cache-read tokens at $0.19/M). It is NOT inherited history: `AgentRunner.run` starts every
+  run from `[{ role: 'user', content: prompt }]`, and `persistence` only appends. The ~48 K per call is the
+  heal's OWN transcript — ~50 calls, re-reading a 25 KB `index.css` repeatedly between edits. The cause of
+  the calls was the NO_HEADING false positive (5 pages), which this PR removes; a "fresh context" change
+  would have fixed nothing.
+- ~~**XSS sinks**~~ — **fixed upstream in the same PR:** `securityWriteNote` runs the same `scanSecurity` on
+  every write and hands medium/high findings back with the file (kill switch `AGENTV3_WRITE_SECURITY=off`).
+  At readiness they were only ever reported, because the reviewer is suggest-only on a green app.
 ## 2026-09-30 — Autopsy 972acde5 ("Calculator", Weak tier): a working app, reported three untrue things about itself
 
 The build succeeded in 5.6 min from our tested calculator template, rendered, typechecked and built for

@@ -151,6 +151,7 @@ describe('🔒 it is actually wired — on BOTH write return paths', () => {
     expect(typecheck).toBeGreaterThan(-1);
     expect(quality).toBeGreaterThan(typecheck);
     // 6a4a799f added the store render-loop note beside the hooks note — named, not wildcarded.
-    expect(helper).toContain('return hooks + storeLoop + imports + typecheck + quality;');
+    // …and 466c260a the invented-kit-class note after it, still inside the same helper.
+    expect(helper).toContain('return hooks + storeLoop + imports + typecheck + quality + invented + security;');
   });
 });

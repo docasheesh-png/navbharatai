@@ -22,7 +22,7 @@
 // Kill switch: AGENTV3_KIT_RESTORE=off. PURE — the caller writes the file.
 
 import { DESIGN_KIT_CSS } from './sandbox/AppMakerLab/generator/templates/designKit';
-import { collectDefinedClasses, findUndefinedClasses, isProjectStylesheet } from './CssConsistency';
+import { collectDefinedClasses, collectUsedClasses, findUndefinedClasses, isProjectStylesheet } from './CssConsistency';
 
 /** Kill switch. Default ON. */
 export function kitRestoreEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -357,4 +357,42 @@ export function kitRestoreNote(patch: KitRestorePatch, when: 'before-repair' | '
     ? 'The repair used design-kit classes this app\'s stylesheet no longer contained'
     : 'The screens use design-kit classes this app\'s stylesheet does not contain';
   return `${why}; their kit rules were added to ${patch.path} (${shown}${more}${tok}) — the kit's own rules, no model call, no class the app styles itself was touched.`;
+}
+
+// ── A class that LOOKS like the kit's and is not (write time) ──────────────────────────────────────
+
+/**
+ * 🔴 AUTOPSY 466c260a (2026-09-29). The builder wrote `DashboardShell` with `.nb-nav`, `.nb-nav-list`
+ * and `.nb-page-title` — names in the kit's own `nb-` style, none of which the kit defines (it has
+ * `.nb-sidebar`, `.nb-nav-item`, `.nb-topbar`), and no stylesheet the builder wrote defined them
+ * either. The shell's navigation rendered unstyled, and nothing said so until the end-of-build check
+ * (`CSS_CLASSES_UNDEFINED`), whose repair then ran inside a 255-second heal pass. Restoring kit rules
+ * cannot help — there is no kit rule to restore for a name the kit never had.
+ *
+ * So the builder is told AT WRITE TIME, with the file still open: these `nb-` names are not kit
+ * classes and nothing defines them; define them now, or use the kit's. Only `nb-` names are judged —
+ * that prefix is the kit's, so a name carrying it is a claim about the kit that can be checked
+ * exactly. An app's own naming (`.card-title`) is its own business and is left to the end-of-build
+ * check. PURE — the caller supplies the project's stylesheets it could read.
+ */
+export function inventedKitClasses(content: string, path: string, stylesheets: Record<string, string>): string[] {
+  if (!/\.(?:t|j)sx?$/.test(path)) return [];
+  const kit = kitClasses();
+  const used = [...collectUsedClasses({ [path]: content })].filter((c) => c.startsWith('nb-') && !kit.has(c));
+  if (used.length === 0) return [];
+  const { defined } = collectDefinedClasses(stylesheets);
+  return used.filter((c) => !defined.has(c)).sort();
+}
+
+/** Fast pre-check (no I/O): does this file use an `nb-` class the kit does not have? PURE. */
+export function usesNonKitNbClass(content: string, path: string): boolean {
+  return inventedKitClasses(content, path, {}).length > 0;
+}
+
+/** The note handed back with the write. '' when there is nothing to say. PURE. */
+export function inventedKitClassNote(path: string, invented: readonly string[]): string {
+  if (invented.length === 0) return '';
+  const shown = invented.slice(0, 8).map((c) => `.${c}`).join(', ');
+  return `\n⚠️ ${path} uses ${shown} — these look like design-kit classes but the kit does not define them, and no stylesheet does either, so those elements render UNSTYLED. `
+    + 'Add their rules to src/index.css now, or switch to the kit\'s own classes (.nb-shell, .nb-sidebar, .nb-nav-item, .nb-topbar, .nb-hero, .nb-empty, .card, .btn-primary).';
 }

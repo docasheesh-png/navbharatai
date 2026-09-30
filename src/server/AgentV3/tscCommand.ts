@@ -16,14 +16,33 @@
 //   2. RUN the LOCAL BINARY directly (`node_modules/.bin/tsc`) — never `npx tsc`, which can hit the squatter.
 
 /** Shell prefix that guarantees a runnable local `tsc` binary exists (installs typescript if genuinely absent). */
+export const TSC_ENSURE_LOG = '/tmp/nbai-tsc-ensure.log';
+
+/**
+ * The line printed when, after every install attempt, there is still no compiler. `looksLikeMissingTscBinary`
+ * reads it, so a run that never compiled can never be scored as a clean one.
+ */
+export const TSC_UNAVAILABLE_MARKER = 'NBAI_TSC_UNAVAILABLE';
+
+// 🔴 AUTOPSY 12c642ed (2026-09-30). Both installs below used to write to /dev/null. In that build the
+// write-time typecheck ran four times, the compiler was never installed, every run printed
+// `node_modules/.bin/tsc: No such file or directory` — and npm's own reason was thrown away, so the
+// report could say nothing about WHY. The log is kept now, a peer-resolution failure gets the same
+// `--legacy-peer-deps` retry the dev-server install already has (and only that failure — see
+// npmInstallFallback.ts), and a compiler that is still missing is said in words with npm's last lines.
+const INSTALL = (args: string) =>
+  `(npm install${args ? ` ${args}` : ''} >>${TSC_ENSURE_LOG} 2>&1 || (grep -qiE 'ERESOLVE|peer dep' ${TSC_ENSURE_LOG} && npm install${args ? ` ${args}` : ''} --legacy-peer-deps >>${TSC_ENSURE_LOG} 2>&1))`;
+
 export const TSC_ENSURE =
+  `: >${TSC_ENSURE_LOG}; ` +
   // `&& touch node_modules`: an "up to date" install leaves the directory's mtime alone, so without the
   // stamp a rewritten package.json kept this re-running `npm install` before every typecheck.
-  'if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then npm install >/dev/null 2>&1 && touch node_modules; fi; ' +
+  `if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then ${INSTALL('')} && touch node_modules; fi; ` +
   // PINNED to the major our scaffolds declare (autopsy 4499741f). An unpinned install fetched a newer
   // major that REMOVES `baseUrl`, so a project without its own `typescript` failed on its tsconfig alone
   // (TS5102) — a verdict about the compiler we picked, not about the app.
-  'if [ ! -x node_modules/.bin/tsc ]; then npm install typescript@5 --no-save >/dev/null 2>&1; fi';
+  `if [ ! -x node_modules/.bin/tsc ]; then ${INSTALL('typescript@5 --no-save')}; fi; ` +
+  `if [ ! -x node_modules/.bin/tsc ]; then echo "${TSC_UNAVAILABLE_MARKER}: the TypeScript compiler could not be installed, so nothing was checked. npm said:"; tail -n 6 ${TSC_ENSURE_LOG}; fi`;
 
 /**
  * The DEFINITIVE tsc invocation: the local binary directly. NEVER `npx tsc` — even `npx --no-install tsc`

@@ -51,8 +51,10 @@ describe('the report line says what the compiler said', () => {
     expect(commandOutcomeText({ command: TSC, exitCode: null, stdout: ERRORS.split('\n')[0] })).toMatch(/^1 type error \(/);
   });
 
-  it('a command WITH an exit code is unchanged, and any other command with none still says it does not know', () => {
-    expect(commandOutcomeText({ command: TSC, exitCode: 0, stdout: ERRORS })).toBe('exit 0');
+  it('a command WITH an exit code keeps it, and any other command with none still says it does not know', () => {
+    // A piped typecheck's 0 is the pipe's, so errors in its output are named beside it (autopsy 12c642ed).
+    expect(commandOutcomeText({ command: TSC, exitCode: 0, stdout: ERRORS })).toBe('exit 0 from the pipe, but 2 type errors in the output');
+    expect(commandOutcomeText({ command: TSC, exitCode: 0, stdout: '' })).toBe('exit 0');
     expect(commandOutcomeText({ command: 'npm run build', exitCode: 1 })).toBe('exit 1');
     expect(commandOutcomeText({ command: 'ls -la', exitCode: null })).toBe('exit ?');
   });

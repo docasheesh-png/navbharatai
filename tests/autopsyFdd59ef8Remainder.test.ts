@@ -59,8 +59,8 @@ describe('2 · provider silence is never reported as OUR budget', () => {
   });
 
   it('the runner picks the wording from that comparison', () => {
-    expect(runner).toContain('const providerWentSilent = streaming && idleMs < timeoutMs;');
-    expect(runner).toContain('? `OpenAI-compatible call (GLM/Kimi) timed out after ${idleMs}ms`');
+    expect(runner).toContain('const providerWentSilent = streaming && firstAnswerMs < timeoutMs;');
+    expect(runner).toContain('? `OpenAI-compatible call (GLM/Kimi) timed out after ${firstAnswerMs}ms`');
     expect(runner).toContain(': clockMessage(initialBoundMs),');
   });
 

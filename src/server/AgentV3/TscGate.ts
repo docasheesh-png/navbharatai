@@ -59,7 +59,9 @@ export function looksLikeMissingTscBinary(output: string | null | undefined): bo
   if (!output) return false;
   return /(?:^|\n)\s*(?:[\w./-]*sh|bash|zsh):\s*(?:line\s+\d+:\s*|\d+:\s*)?\S*tsc\S*:\s*(?:command\s+)?(?:not found|No such file or directory|Permission denied)/i.test(output)
     || /\btsc:\s*(?:command\s+)?not found\b/i.test(output)
-    || /could not determine executable to run/i.test(output);
+    || /could not determine executable to run/i.test(output)
+    // Our own ensure step says so in words when every install attempt failed (autopsy 12c642ed).
+    || /(?:^|\n)NBAI_TSC_UNAVAILABLE:/.test(output);
 }
 
 /**
@@ -118,9 +120,22 @@ export function tscOutputProvesClean(output: string | null | undefined): boolean
  * answer came from. Any other command with no code keeps `exit ?`: we do not know, and say so. Pure.
  */
 export function commandOutcomeText(rec: { command: string; exitCode: number | null; stdout?: string | null; stderr?: string | null }): string {
-  if (rec.exitCode !== null && rec.exitCode !== undefined) return `exit ${rec.exitCode}`;
-  if (!looksLikeTypecheckCommand(rec.command)) return 'exit ?';
+  const known = rec.exitCode !== null && rec.exitCode !== undefined;
+  if (!looksLikeTypecheckCommand(rec.command)) return known ? `exit ${rec.exitCode}` : 'exit ?';
   const out = `${rec.stdout ?? ''}\n${rec.stderr ?? ''}`;
+  if (known) {
+    // 🔴 AUTOPSY 12c642ed. `./node_modules/.bin/tsc --noEmit 2>&1 | head -40 → exit 0` — about a compiler
+    // that did not exist. A piped typecheck's code is the LAST stage's, so a 0 there says nothing about
+    // tsc. The code is still shown, but never alone when the output says the compiler did not answer.
+    const v = tscVerdict(out);
+    if (v === 'not-run') return `exit ${rec.exitCode}, but the compiler did not run (help page or missing binary)`;
+    if (v === 'unknown') return `exit ${rec.exitCode}, but no verdict (the compiler was stopped before it could check)`;
+    if (v === 'failed' && rec.exitCode === 0) {
+      const n = countTscErrors(out);
+      return `exit 0 from the pipe, but ${n} type error${n === 1 ? '' : 's'} in the output`;
+    }
+    return `exit ${rec.exitCode}`;
+  }
   switch (tscVerdict(out)) {
     case 'passed': return 'clean (read from the output; the pipe hides tsc\'s own exit code)';
     case 'failed': {

@@ -85162,6 +85162,38 @@ the architect. The Frontend specialist that actually writes the AI client never 
 - Locked in `tests/anAiAppNeedsNoKey.test.ts`.
 
 **Admin action:** set `APP_AI_GATEWAY=on` in Cloud Run.
+
+## 2026-09-30 — The stored report kept forty copies of one prompt (the a5b661c8 open item, closed)
+
+**What was wrong.** The a5b661c8 report stored 40 of 151 model calls, and every stored call carried the
+same first 800 characters of the architect's system prompt. So no stored call said what it was asked,
+the 12:16–12:20 gap could not be read, and the origin of the `CollectionTheme` import could not be proven.
+
+**Root cause, two caps:**
+- **The recorder** capped the WHOLE preview (`system head + separator + last message`) at 2,000 characters.
+  A 46 KB system prompt always filled that, so the turn's own message never reached the report.
+- **The store** cut every preview again to 800 characters. With every stored call the same size and
+  nearly identical, a fixed forty was really a size decision.
+
+**Fix (`promptPreviewShape.ts`, `DiagnosticsStore.ts`):**
+- Each half of the preview is capped on its own, in the recorder and in the store, so the last message
+  always survives.
+- A system head identical to the previous STORED call's is written as a one-line marker. The marker is
+  applied after the window is taken, so it never points past a gap.
+- The stored call count comes from a 200 KB byte budget, clamped between 40 and 300. A real-shaped build
+  now keeps 100+ calls instead of 40.
+- `fitReportForStorage` is the one fit for all four save paths and the admin record: trim, then keep only
+  forty calls, and only then drop the heavy channels. The admin record's focused build had no size check
+  at all before this.
+- Earlier builds in an admin session keep forty calls each, so the session fit is unchanged.
+- `buildCostLedger` reads `LEGACY_STORED_LLM_CALLS_MAX = 40` for old reports, so an old 40-call log
+  still reads as possibly truncated.
+
+**Tests:** `tests/theReportKeptFortyCopiesOfOnePrompt.test.ts` (11), reversion-proven for the recorder,
+the marker and the fit. The count and source guards in three existing suites were updated deliberately.
+
+**Still open:** the `CollectionTheme` import origin in a5b661c8 itself cannot be recovered; that report
+is already stored. The next report of that shape will show it.
 ## 2026-09-30 — Autopsy ee0e6de5 ("world's countries and capitals", Weak tier, KIMI rung 2, 6.5 min, green, billed ₹86.23)
 
 The prompt was English written in Devanagari (*"Build an app वेयर वर्ल्ड'एस टोटल कंट्रीज नेम विथ थेइर कैपिटल्स"*). The app is
@@ -85299,6 +85331,65 @@ A 4-screen telecom app (Home, Plans, History, Profile) that rendered, typechecke
    aim is that they find nothing.
 Test-locked and reversion-proven in `tests/theQuestionEndedWithPlease.test.ts`.
 
+## 2026-09-30 — "Nemi Mart": a shop app looked like a plain web page (admin screenshot)
+
+The admin sent a screenshot of a grocery app: the header stacked, the products ran in one column, the
+MRP was not struck through, and "Start Shopping" was a square, underlined box. There was no build
+report, so the diagnosis is from the screenshot and the code. That app was built BEFORE PR #3403
+(the design-kit overhaul) and #3403 is still unmerged, but three of the causes would have survived
+#3403 as well. All three are fixed on the same branch.
+
+- **The class check never saw a plain HTML app.** `CssConsistency` read only `className=`, so a
+  static app's `class="…"` (in the page and in `innerHTML` strings) was invisible. It also counted
+  only kebab-case names, so single-word classes (`header`, `price`, `mrp`) passed silently. Because
+  of both, the CSS repair (`CSS_CLASSES_UNDEFINED`) never ran. Changes:
+  - It now reads `class=`.
+  - It counts single lowercase words, except state words (`active`, `open`, …).
+  - It treats a page's own `<style>` blocks as a stylesheet.
+  - It stays silent for the Tailwind CDN and for Tailwind v4's `@import "tailwindcss"`.
+  - The write-time note also covers `.html` and `.js` screens, and names `style.css` when that is the
+    project's sheet.
+  - The pinned test "ignores single-word tokens" was rewritten deliberately.
+- **Kit: a button class gave the fill but not the shape.** `.btn-primary`, `-secondary`, `-ghost` and
+  `-danger` now share the button geometry on any element, and a link is never underlined on hover.
+  Added `.btn-sm`, `.btn-lg` and `.btn-block`.
+- **Kit: no shop layout.** Added these recipes, named in both builders' prompts:
+  - `.nb-header` / `-brand` / `-search`;
+  - `.nb-chips`;
+  - `.nb-grid` (two per row at 360 px);
+  - `.nb-product`;
+  - `.nb-price-row` / `.nb-price` / `.nb-mrp` (struck through) / `.nb-discount` (new
+    `--success-ink` token, AA in both themes);
+  - `.nb-qty`, `.nb-cart-bar`, `.nb-footer`.
+- Locked and reversion-proven in `tests/theShopLookedLikeAWebPage.test.ts` (17 cases, including a
+  real-browser check at 360 px).
+
+**Open:** the "Made with NavBharatAI" badge is fixed at the bottom-right and can cover a footer or a
+bottom bar. A spacer would add scroll to full-screen games, so this is not guessed at here.
+`.nb-footer` carries bottom padding for it.
+
+## 2026-09-30 — the "made by NavBharatAI" badge gets a × that comes back on refresh (admin)
+
+This was the open item from #3410: the badge is fixed bottom-right and can cover an app's footer or cart
+bar. The admin asked for a close button that returns on every refresh.
+
+- **The × is a checkbox with a scoped `:checked` CSS rule, not a scripted button.** Reasons:
+  - An app whose Content-Security-Policy forbids inline script would turn a scripted × into a dead
+    control. This platform itself recommends adding such a CSP.
+  - `autocomplete="off"` stops the browser restoring the ticked state on reload, so the badge comes back
+    after a refresh.
+  - Nothing is stored.
+  - The ×'s geometry is inline, so an app's own checkbox CSS cannot resize it.
+- **Old badges are upgraded, never doubled.** The marker's value is now the version (`2`).
+  - `injectAppSignature` replaces a version-1 badge in place.
+  - The build skips only a CURRENT badge (`hasCurrentAppSignature`), so an app built earlier gains the ×
+    on its next build.
+  - A badge edited out of recognition is left alone.
+- **The explorer skips the badge.** The post-build button-presser now skips anything inside
+  `[data-nbai-signature]`.
+- **Tests:** `tests/theBadgeCanBeClosed.test.ts`.
+  - It includes a real-browser check under `script-src 'none'`: press ×, the badge hides; reload, it is back.
+  - Reversion-proven: reverting appSignature fails 6 tests, ToolDispatcher 1, clickExplorer 1.
 
 ## 2026-09-30 — Free image generation stopped: the provider closed its anonymous door
 
@@ -85340,6 +85431,49 @@ generator ai ke aage se free word hatao"*.
 - **The no-journey sentence** (#3398, the Gita search box). There is one predicate. The sentence depends on whether the form has any button: a field with no button "acts as you type"; a form with a button has "none of its buttons reads as submitting them".
 - **The Project Mode starter verdict** (#3399, autopsy 6a5fb04b). #3399's `setStarterExpected` flag and `shellModuleFor` are kept. This branch's `setStarterEntryExpected` and its route call are removed, and `starterEntryExpectedFor` / `moduleOwnsAppEntry` now delegate to #3399's helpers.
 - **Why this is recorded:** this is exactly the duplicate-work class `CLAUDE.md` warns about. Neither PR existed when the other started.
+## 2026-09-30 — Autopsies f385a5f9 (JEEVERSE AI) + 12c642ed (simple habit tracker): the two old reports, root-caused
+
+**12c642ed — "Build a simple daily habit tracker" (Weak, 13.7 min against a ~3 min estimate):**
+- **The typecheck said "4 clean" about a compiler that never ran.** Every write-time run printed
+  `node_modules/.bin/tsc: No such file or directory`. `TSC_ENSURE` sent npm's output to `/dev/null`, so
+  the reason was lost. It now logs to `/tmp/nbai-tsc-ensure.log`. It retries with `--legacy-peer-deps`
+  only on a peer failure. If there is still no compiler, it prints `NBAI_TSC_UNAVAILABLE:` with npm's
+  last lines. The dispatcher counts by `tscVerdict`, so a run that never compiled is counted as
+  "never ran", not "clean". A piped `tsc | head` exit 0 no longer stands alone in the report line
+  when the output says the compiler did not answer. Tests: `tests/aCompilerThatNeverRanIsNotClean.test.ts`.
+- **"Simple" was overruled by five domain features.** The requirement-aware block told the builder to
+  INCLUDE categories, search, reminders and drag-and-drop. The builder called them "explicit
+  requirements". `userAskedForSmallScope` now stands the domain half down when the user stated the
+  size ("simple", "basic", "chhota sa"…). The India half stays. The block is labelled as our
+  suggestion. Report code: `REQUIREMENT_GAPS_STOOD_DOWN`. Tests: `tests/aSimpleAppStaysSimple.test.ts`.
+- **The fast lane's plan step spent 60 of its 90 s waiting on a silent first rung.** A deadline-bound
+  call with a next rung now waits at most a third of its time for the first answer, never under 15 s
+  (`firstAnswerBoundMs`; `hasNextRung` is passed by the ladder). The last rung and long steps are
+  unchanged. Tests: `tests/aSilentFirstRungLeavesRoomForTheNext.test.ts`.
+- **41 undefined classes and a 184 s heal.** A screen write was checked, but the three stylesheet
+  rewrites after it were never re-checked. A stylesheet write now re-checks every screen written this
+  build and names what is still missing. Tests: `tests/aStylesheetWriteIsCheckedAgainstTheScreens.test.ts`.
+- **The vulnerability warning outlived `npm audit fix`.** A later "found 0 vulnerabilities" now removes
+  it (`DEPENDENCY_VULNERABILITIES_FIXED`). Tests: `tests/aFixedVulnerabilityIsNotStillReported.test.ts`.
+- **The journey could not reach a form inside a modal.** The runner now presses one visible opener
+  ("+ New …", "Add …") when the submit is not visible, never a `NEVER_PRESS` control. This is proven in
+  a real browser. Tests: `tests/theFormBehindTheButtonIsReached.test.ts`.
+- Already closed by #3402 (O1): the whole-build crawl bench.
+
+**f385a5f9 — JEEVERSE AI (roadmap milestone 1):**
+- "wishlist / favorites NOT BUILT" on milestone 1: already closed by #3399 (`setCoverageRequest`).
+- **The roadmap planned a fake "Rendering…" progress bar** for the video step, despite its own rule 7.
+  `roadmapGuardrail` now finds a step that asks for work to be simulated, whether or not it is negated.
+  It keeps the step, marks it as needing infrastructure, and appends `NO_SIMULATION_CLAUSE`. Tests:
+  `tests/aRoadmapNeverPlansAFakeProgressBar.test.ts`.
+
+**Still open, honestly:**
+- Why `npm install` failed in the 12c642ed sandbox is NOT known. npm's reason was discarded, and the
+  same package.json resolves cleanly outside the sandbox. The next report will carry npm's own words.
+- The off-grid spacing in f385a5f9 is the model's own CSS; our kit lints 100/100. Cosmetic, left as a
+  finding.
+- The education domain suggests "roles / enrolment / fees" for a self-study JEE app. It was recorded
+  only; the roadmap replaced the prompt, so nothing was injected.
 ## 2026-09-30 — Autopsy 53a621e3 ("full-stack Android calculator", Weak, 4.7 min, ₹85.38): green, and routed as a big app
 
 The app rendered and passed the production build. The explorer pressed 12 controls, and nothing wrote to

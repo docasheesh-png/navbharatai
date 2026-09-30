@@ -197,7 +197,7 @@ describe('the route asks the app question, not the routing question', () => {
   });
 
   it('the generated long-tail guidance is gated on that SAME answer', () => {
-    expect(routes).toContain('if (!reqGuidance && askedForAnApp && !answered)');
+    expect(routes).toContain('if (!reqGuidance && askedForAnApp && !answered && !smallScope)');
   });
 
   it('does not reuse the intent verdict for it', () => {

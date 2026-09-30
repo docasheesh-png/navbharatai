@@ -31,6 +31,7 @@ import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBui
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
 import { mergeTruncation, pushBounded, boundedWindow, COMPLETE, type ChannelTruncation, type ReportTruncation } from './reportTruncation';
+import { capPromptPreview } from './promptPreviewShape';
 import { renderProvenByAnyActor, noteRenderSeen, forgetRenderSeen, RENDER_PROVEN_CODES } from './renderProof';
 import { isSelfHeal, isWorkaroundIssue, isNarrationIssue, isLeftOpen, HEAL_RULE } from '../../lib/healIssue';
 
@@ -956,6 +957,22 @@ export class BuildDiagnostics {
             message: note,
             autoResolved: false,
           });
+        } else if (audit && audit.total === 0 && this.lastAuditNote !== null) {
+          // 🔴 AUTOPSY 12c642ed (2026-09-30). `npm install` reported "2 vulnerabilities (1 moderate, 1 high)",
+          // `npm audit fix` then printed "found 0 vulnerabilities" — and the warning stayed, telling the
+          // user to run the very command that had just fixed it. A zero result was ignored because it has
+          // no severity. The LATEST install describes the tree the app ships with, zero included.
+          this.lastAuditNote = null;
+          for (let i = this.issues.length - 1; i >= 0; i--) {
+            if (this.issues[i].code === 'DEPENDENCY_VULNERABILITIES') this.issues.splice(i, 1);
+          }
+          this.record({
+            phase: 'build',
+            severity: 'info',
+            code: 'DEPENDENCY_VULNERABILITIES_FIXED',
+            message: 'The known vulnerabilities reported earlier in this build are gone — the latest install reports 0.',
+            autoResolved: true,
+          });
         }
       } catch { /* a diagnostic must never break the command it is describing */ }
     }
@@ -1292,7 +1309,9 @@ export class BuildDiagnostics {
       ts: this.now(),
       provider: rec.provider,
       model: rec.model,
-      promptPreview: rec.promptPreview != null ? capHead(rec.promptPreview, LLM_PREVIEW_CAP) : undefined,
+      // Each half capped on its own: one cap over the whole string always fell inside a long system
+      // prompt, so the question asked on this turn never reached the report (promptPreviewShape.ts).
+      promptPreview: rec.promptPreview != null ? capPromptPreview(rec.promptPreview, LLM_PREVIEW_CAP / 2, LLM_PREVIEW_CAP / 2) : undefined,
       responsePreview: rec.responsePreview != null ? capHead(rec.responsePreview, LLM_PREVIEW_CAP) : undefined,
       promptChars: rec.promptChars,
       responseChars: rec.responseChars,

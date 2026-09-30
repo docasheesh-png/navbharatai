@@ -175,7 +175,7 @@ describe('the storage path declares its own caps', () => {
     }));
     expect(out.llmCalls).toHaveLength(STORED_LLM_CALLS_MAX);
     expect(out.truncation?.complete).toBe(false);
-    expect(out.truncation?.channels?.llmCalls).toEqual({ kept: STORED_LLM_CALLS_MAX, total: 312, head: 20 });
+    expect(out.truncation?.channels?.llmCalls).toEqual({ kept: STORED_LLM_CALLS_MAX, total: 312, head: STORED_LLM_CALLS_MAX / 2 });
     expect(out.truncation?.channels?.commands).toEqual({ kept: 40, total: 100, head: 20 });
   });
 
@@ -191,7 +191,9 @@ describe('the storage path declares its own caps', () => {
       llmCalls: Array.from({ length: 300 }, (_, i) => call(i)),
       truncation: mergeTruncation(COMPLETE, { llmCalls: { kept: 300, total: 500 } }),
     }));
-    expect(out.truncation?.channels?.llmCalls).toEqual({ kept: STORED_LLM_CALLS_MAX, total: 500, head: 20 });
+    // 300 small calls all fit the byte budget, so the store cuts nothing more; the recorder's loss of
+    // 200 is what the record must still say.
+    expect(out.truncation?.channels?.llmCalls).toEqual({ kept: 300, total: 500 });
   });
 });
 
@@ -216,7 +218,10 @@ describe('the last-resort drop is ONE function, and it declares', () => {
     const src = readFileSync(join(__dirname, '..', 'src/server/AgentV3/DiagnosticsStore.ts'), 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     expect(src).not.toMatch(/\.\.\.stored,[\s\S]{0,120}commands:\s*undefined/);
-    expect(src.match(/dropHeavyChannelsForStorage\(stored\)/g) ?? []).toHaveLength(4);
+    // Since 2026-09-30 the four save paths share ONE fit (trim → minimum calls → drop), so the drop
+    // appears once, inside it, and every save path calls the fit.
+    expect(src.match(/dropHeavyChannelsForStorage\(stored\)/g) ?? []).toHaveLength(1);
+    expect(src.match(/const stored = fitReportForStorage\(report\);/g) ?? []).toHaveLength(4);
   });
 });
 

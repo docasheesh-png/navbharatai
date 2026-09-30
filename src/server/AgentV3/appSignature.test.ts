@@ -42,7 +42,8 @@ describe('injectAppSignature — inserts the badge before </body>', () => {
     const once = injectAppSignature(DOC);
     const twice = injectAppSignature(once);
     expect(twice).toBe(once);
-    const occurrences = twice.split(APP_SIGNATURE_MARKER).length - 1;
+    // Count the ATTRIBUTE (`marker=`): since 2026-09-30 the badge's own scoped CSS names the marker too.
+    const occurrences = twice.split(`${APP_SIGNATURE_MARKER}=`).length - 1;
     expect(occurrences).toBe(1);
   });
 
@@ -69,7 +70,7 @@ describe('injectAppSignature — inserts the badge before </body>', () => {
     const doc = `<body>a</body><!-- note: </body> in comment --><body>real</body>`;
     const out = injectAppSignature(doc);
     // Injected before the final </body>, exactly once.
-    expect(out.split(APP_SIGNATURE_MARKER).length - 1).toBe(1);
+    expect(out.split(`${APP_SIGNATURE_MARKER}=`).length - 1).toBe(1);
     expect(out.lastIndexOf(APP_SIGNATURE_MARKER)).toBeLessThan(out.toLowerCase().lastIndexOf('</body>'));
   });
 });

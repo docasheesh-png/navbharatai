@@ -10,31 +10,50 @@
 // Conservative by design (precision over recall) to avoid false positives on legitimate apps:
 //   • SKIPPED entirely when Tailwind is in use (utility classes are not in .css files).
 //   • only considers STATIC className string literals and `.class` selectors.
-//   • only flags KEBAB-CASE custom classes (e.g. "watch-container") — the kind a generator invents
-//     and must define; single-word/utility tokens are ignored.
+//   • only flags CUSTOM classes: kebab-case ("watch-container") and, since 2026-09-30, a single
+//     lowercase word ("header", "price", "mrp") that is not a STATE word ("active", "open", …).
+//   • reads `className="…"` in components AND `class="…"` in HTML pages and in the markup strings a
+//     plain-JS app builds (`innerHTML = '<div class="product">'`), since 2026-09-30.
 //   • requires the project to actually HAVE a .css file with selectors, and a threshold of misses,
 //     before reporting — so a matched stylesheet (or a CSS-in-JS app) is never flagged.
 //
 // Pure + dependency-free → fully unit-testable.
 
 const SRC_RE = /\.(t|j)sx?$/;
+/** A file whose markup names classes: a component, a script that builds HTML, or an HTML page. */
+const MARKUP_RE = /\.((t|j)sx?|html?)$/;
 /** Every stylesheet dialect whose `.class` selectors define a class (autopsy "Universal Remote": scss/less were invisible). */
 const CSS_RE = /\.(css|scss|sass|less)$/;
+/** A token that can be a CSS class name (used by the class collector). */
+const CLASS_NAME = /^-?[A-Za-z_][\w-]*$/;
 /** Minimum undefined custom classes before we treat it as a real mismatch (avoids odd one-offs). */
 const MISMATCH_THRESHOLD = 3;
 
-/** Collect static className tokens used across the source files (className="a b c"). */
+/**
+ * Collect static class tokens used across the markup files: `className="a b c"` in components, and
+ * `class="a b c"` in HTML pages and in the HTML strings a plain-JS app writes into the page.
+ *
+ * 🔴 AUTOPSY "Nemi Mart" (2026-09-30): a grocery app written as plain HTML + JS shipped with its header
+ * stacked, its MRP not struck through and its buttons square — and this check never spoke, because it
+ * read only `className=`. Every class a static app uses was invisible, so the repair that exists for
+ * exactly this never ran. A token that is an interpolation (`${x}`) is not a class and is skipped.
+ */
 export function collectUsedClasses(files: Record<string, string>): Set<string> {
   const used = new Set<string>();
   // className="..."  |  className='...'  |  className={"..."}  |  className={'...'}  |  className={`...`}
-  const re = /className\s*=\s*(?:\{\s*)?["'`]([^"'`]+)["'`]/g;
+  const reactRe = /className\s*=\s*(?:\{\s*)?["'`]([^"'`]+)["'`]/g;
+  // class="..." | class='...' — `\bclass\s*=` never matches `className=` (an N follows "class").
+  const htmlRe = /\bclass\s*=\s*(?:\\?["'])([^"'`<>]+?)(?:\\?["'])/g;
   for (const [path, content] of Object.entries(files)) {
-    if (!SRC_RE.test(path)) continue;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(content))) {
-      for (const tok of m[1].split(/\s+/)) {
-        const c = tok.trim();
-        if (c) used.add(c);
+    if (!MARKUP_RE.test(path) || typeof content !== 'string') continue;
+    for (const re of [reactRe, htmlRe]) {
+      re.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(content))) {
+        for (const tok of m[1].replace(/\$\{[^}]*\}/g, ' ').split(/\s+/)) {
+          const c = tok.trim();
+          if (c && CLASS_NAME.test(c)) used.add(c);
+        }
       }
     }
   }
@@ -47,10 +66,19 @@ export function collectDefinedClasses(files: Record<string, string>): { defined:
   let cssFiles = 0;
   const re = /\.(-?[A-Za-z_][\w-]*)/g;
   for (const [path, content] of Object.entries(files)) {
-    if (!CSS_RE.test(path)) continue;
+    if (typeof content !== 'string') continue;
+    // A page's own <style> blocks define classes too — a one-file app keeps its whole stylesheet there.
+    let text: string;
+    if (CSS_RE.test(path)) text = content;
+    else if (/\.html?$/.test(path)) {
+      const blocks = [...content.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((b) => b[1]);
+      if (blocks.length === 0) continue;
+      text = blocks.join('\n');
+    } else continue;
     cssFiles++;
     let m: RegExpExecArray | null;
-    while ((m = re.exec(content))) defined.add(m[1]);
+    re.lastIndex = 0;
+    while ((m = re.exec(text))) defined.add(m[1]);
   }
   return { defined, cssFiles };
 }
@@ -71,6 +99,10 @@ function usesExternalStylesheet(files: Record<string, string>): boolean {
 
 function usesTailwind(files: Record<string, string>): boolean {
   for (const [path, content] of Object.entries(files)) {
+    // A static page on the Tailwind CDN: every utility in its `class=` is defined by a script we cannot read.
+    if (/\.html?$/.test(path) && /cdn\.tailwindcss\.com|@tailwindcss\/browser/.test(content)) return true;
+    // Tailwind v4 has no `@tailwind` directive — `@import "tailwindcss"` is the whole setup.
+    if (CSS_RE.test(path) && /@import\s+["']tailwindcss/.test(content)) return true;
     if (/tailwind\.config\.[cm]?[jt]s$/.test(path)) return true;
     if (CSS_RE.test(path) && /@tailwind\b/.test(content)) return true;
     if (/package\.json$/.test(path) && /"tailwindcss"/.test(content)) return true;
@@ -78,9 +110,28 @@ function usesTailwind(files: Record<string, string>): boolean {
   return false;
 }
 
-/** A class is "custom" (generator-defined) when it is kebab-case — the shape a stylesheet must define. */
+/**
+ * Words that name a STATE a script toggles, not a thing a stylesheet must draw. A single-word class in
+ * this list is never reported: `class="active"` with no `.active` rule is a normal, working app.
+ */
+const STATE_WORDS = new Set([
+  'active', 'inactive', 'open', 'opened', 'closed', 'selected', 'hidden', 'hide', 'show', 'shown', 'visible',
+  'invisible', 'disabled', 'enabled', 'checked', 'current', 'done', 'completed', 'complete', 'expanded',
+  'collapsed', 'focused', 'focus', 'hover', 'pressed', 'loading', 'loaded', 'playing', 'paused', 'running',
+  'dark', 'light', 'error', 'success', 'warning', 'valid', 'invalid', 'empty', 'full', 'new', 'old', 'on',
+  'off', 'odd', 'even', 'first', 'last', 'highlight', 'highlighted', 'dragging', 'dragover', 'over', 'win',
+  'lose', 'correct', 'wrong', 'flipped', 'matched', 'animate', 'fade', 'sticky', 'fixed', 'mobile', 'desktop',
+]);
+
+/**
+ * A class is "custom" (generator-defined) when it is the shape a stylesheet must define: kebab-case
+ * ("watch-container"), or a single lowercase word of three or more letters that is not a state word
+ * ("header", "price", "mrp"). Before 2026-09-30 only kebab-case counted, which is why a page whose
+ * classes were all single words could lose every rule and this check would stay silent.
+ */
 function isCustomClass(c: string): boolean {
-  return /^[a-z][a-z0-9]*(-[a-z0-9]+)+$/.test(c);
+  if (/^[a-z][a-z0-9]*(-[a-z0-9]+)+$/.test(c)) return true;
+  return /^[a-z]{3,}[0-9]*$/.test(c) && !STATE_WORDS.has(c);
 }
 
 /**
@@ -118,7 +169,7 @@ export function findUndefinedClasses(files: Record<string, string>): string[] {
  * an external stylesheet, or no stylesheet at all ⇒ [].
  */
 export function undefinedClassesInFile(path: string, content: string, project: Record<string, string>): string[] {
-  if (!SRC_RE.test(path)) return [];
+  if (!MARKUP_RE.test(path)) return [];
   if (usesTailwind(project) || usesExternalStylesheet(project)) return [];
   const { defined, cssFiles } = collectDefinedClasses(project);
   if (cssFiles === 0) return [];
@@ -126,12 +177,12 @@ export function undefinedClassesInFile(path: string, content: string, project: R
 }
 
 /** The note handed back with a write that uses classes nothing defines. '' when there are none. PURE. */
-export function undefinedClassesWriteNote(path: string, missing: readonly string[]): string {
+export function undefinedClassesWriteNote(path: string, missing: readonly string[], sheet = 'src/index.css'): string {
   if (missing.length === 0) return '';
   const shown = missing.slice(0, 8).map((c) => `.${c}`).join(', ');
   const more = missing.length > 8 ? ` and ${missing.length - 8} more` : '';
   return `\n⚠️ ${path} uses ${shown}${more} — no stylesheet in this project defines ${missing.length === 1 ? 'it' : 'them'}, so those elements render UNSTYLED. `
-    + 'Add the rules to src/index.css now (or use a class the stylesheet already has) — not at the end of the build.';
+    + `Add the rules to ${sheet} now (or use a class the stylesheet already has) — not at the end of the build.`;
 }
 
 /** How many class names a sub-agent brief may carry — the kit is 59; an app sheet rarely doubles it. */
@@ -166,9 +217,9 @@ export function cssConsistencyError(files: Record<string, string>): string | nul
   const missing = findUndefinedClasses(files);
   if (missing.length < MISMATCH_THRESHOLD) return null;
   return [
-    `CSS class mismatch: ${missing.length} class name(s) are used in components via className but are NOT defined in any CSS file, so the app renders unstyled / visually broken:`,
+    `CSS class mismatch: ${missing.length} class name(s) are used in the markup (className / class) but are NOT defined in any CSS file, so the app renders unstyled / visually broken:`,
     missing.map((c) => `  .${c}`).join('\n'),
-    'Fix by making the components and the stylesheet AGREE — either add these classes to the CSS with real styles, or rename the className usages to the classes the CSS actually defines. Keep them consistent across all files.',
+    'Fix by making the components and the stylesheet AGREE — either add these classes to the CSS with real styles, or rename the class usages to the classes the CSS actually defines. Keep them consistent across all files.',
     'Removing style rules never fixes this: a stylesheet with fewer rules leaves MORE of these classes unstyled.',
   ].join('\n');
 }

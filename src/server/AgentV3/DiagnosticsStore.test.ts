@@ -32,7 +32,9 @@ describe('trimReportForStorage', () => {
     const trimmed = trimReportForStorage(baseReport({ issues: bigIssues, commands: bigCmds, llmCalls: bigLlm }));
     expect(trimmed.issues!.length).toBeLessThanOrEqual(500);
     expect(trimmed.commands!.length).toBeLessThanOrEqual(40);
-    expect(trimmed.llmCalls!.length).toBeLessThanOrEqual(40);
+    // A byte budget since 2026-09-30, not a fixed 40: the channel stays inside its own allowance.
+    expect(trimmed.llmCalls!.length).toBeLessThanOrEqual(300);
+    expect(Buffer.byteLength(JSON.stringify(trimmed.llmCalls), 'utf8')).toBeLessThanOrEqual(200_000 * 1.05); // one average, not a loop: within 5%
     // newest items are retained (issues end at step 1999)
     expect(trimmed.issues![trimmed.issues!.length - 1].message).toContain('step 1999');
     // heavy strings shrunk + total fits the doc limit

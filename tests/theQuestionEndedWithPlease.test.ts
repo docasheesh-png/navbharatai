@@ -113,7 +113,9 @@ describe('3 · classes no stylesheet defines are named while the model is still 
   });
 
   it('says nothing when everything is defined, for kit classes, and for Tailwind', () => {
-    const full = `${SHEET} .quick-actions{} .btn-sm{} .usage-section{} .status-success{} .status-warning{} .status-danger{} .history-info{} .menu-label{} .btn-danger{}`;
+    // `.btn` too: since #3410 a single-word class ("btn", "price", "header") counts as custom, so a sheet that
+    // claims to define everything the page uses must define it — the kit does; this fixture stands in for it.
+    const full = `${SHEET} .quick-actions{} .btn-sm{} .usage-section{} .status-success{} .status-warning{} .status-danger{} .history-info{} .menu-label{} .btn-danger{} .btn{}`;
     expect(undefinedClassWriteNote({ 'src/index.css': full }, project)).toBe('');
     expect(undefinedClassWriteNote({ 'src/pages/A.tsx': '<div className="nb-made-up nb-other">x</div>' }, { 'src/index.css': SHEET })).toBe('');
     expect(undefinedClassWriteNote({ 'src/pages/A.tsx': HOME }, { 'src/index.css': '@tailwind base;' })).toBe('');

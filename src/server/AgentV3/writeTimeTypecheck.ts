@@ -231,6 +231,11 @@ export interface WriteTypecheckStats {
   runs: number;
   /** Runs that found no error anywhere. */
   cleanRuns: number;
+  /**
+   * Runs whose output said the compiler never looked at the project (a missing binary, a failed install)
+   * — autopsy 12c642ed, where four such runs were reported as "4 clean". Neither clean nor failed.
+   */
+  notRunRuns: number;
   /** Errors quoted back to the model in the written file(s), summed over runs. */
   ownErrorsSurfaced: number;
   /** Sandbox time spent, in total. */
@@ -302,7 +307,7 @@ export interface WriteTypecheckStats {
 
 export function emptyWriteTypecheckStats(): WriteTypecheckStats {
   return {
-    runs: 0, cleanRuns: 0, ownErrorsSurfaced: 0, elapsedMs: 0, timeouts: 0,
+    runs: 0, cleanRuns: 0, notRunRuns: 0, ownErrorsSurfaced: 0, elapsedMs: 0, timeouts: 0,
     skipped: 0, skippedNotTs: 0, skippedNoTsconfig: 0, probeFailures: 0,
     compiledUnprobed: 0, projectVerdict: null, disabledReason: null, qualityNotedFiles: [],
     warmupStarted: false, warmupMs: null,
@@ -459,7 +464,12 @@ export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean, 
     return `Write-time typecheck: no TypeScript source was written this build (${seen}).`;
   }
   const avg = Math.round(s.elapsedMs / s.runs / 100) / 10;
-  return `Write-time typecheck: ${s.runs} run(s), ${s.cleanRuns} clean, ${s.ownErrorsSurfaced} error(s) quoted back in the file just written, `
+  // 🔴 A run the compiler never answered is neither clean nor failed, and it is named (autopsy 12c642ed:
+  // four runs of `tsc: No such file or directory` were printed here as "4 clean").
+  const notRun = (s.notRunRuns ?? 0) > 0
+    ? `, ${s.notRunRuns} where the compiler never ran (it could not be installed or started — nothing was checked)`
+    : '';
+  return `Write-time typecheck: ${s.runs} run(s), ${s.cleanRuns} clean${notRun}, ${s.ownErrorsSurfaced} error(s) quoted back in the file just written, `
     + `${Math.round(s.elapsedMs / 1000)}s total (~${avg}s each)`
     + (s.timeouts ? `, ${s.timeouts} timeout(s)` : '')
     + (s.warmupMs !== null ? `; the cache was warmed at build start in ${Math.round(s.warmupMs / 1000)}s, before the first write` : '')

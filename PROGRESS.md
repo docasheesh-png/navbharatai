@@ -84484,3 +84484,19 @@ six-step roadmap: chat and settings.
 
 **Proactive:** the generated AI app asks the USER for an OpenAI key. The AI gateway (`APP_AI_GATEWAY`,
 built, unset) is what removes that wall.
+
+## 2026-09-30 — AI inside the user's app needs no key when the gateway is on (admin chose "B")
+
+The AI gateway (`APP_AI_GATEWAY`) was built, but no builder was ever told it existed. Turning it on
+alone would have changed no generated app. The d8ed307a app shipped asking for an OpenAI key.
+Autopsy #3387 (the same day) had added `AI_IN_APP_RULE` (server + `AI_API_KEY`), which reached only
+the architect. The Frontend specialist that actually writes the AI client never saw it.
+
+**What changed:**
+- `aiInAppRule()`: with the gateway on, an app with no server takes the keyless `generate_ai`
+  (navbharat) route and tells the user the AI answers after PUBLISH. An app with a server keeps
+  `AI_IN_APP_RULE`. With the gateway off, the prompt is byte-identical to before.
+- The same rule now also reaches sub-agents (`SubAgentDeps.aiRule`).
+- Locked in `tests/anAiAppNeedsNoKey.test.ts`.
+
+**Admin action:** set `APP_AI_GATEWAY=on` in Cloud Run.

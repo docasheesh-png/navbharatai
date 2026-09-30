@@ -1623,6 +1623,12 @@ the code (it is actually read somewhere) on 2026-07-11.
   code never references `window.NavAI` gets nothing at all, not even an identity record. Conservative
   by design — in doubt it stamps nothing, because a false negative is a republish away while a false
   positive is the thing being corrected.
+  🔀 **SINCE 2026-09-30 THE SWITCH ALSO STEERS THE BUILDER (admin chose "B").** With it on, the architect
+  AND every sub-agent read `aiInAppRule()`: an AI app WITHOUT a server of its own takes the keyless route
+  (`run_recipe` → `generate_ai`, provider `navbharat`) and tells the user the assistant answers after
+  PUBLISH, not in the preview; an app with a server keeps `AI_IN_APP_RULE` (#3387) unchanged. Off ⇒ the
+  prompt is byte-identical to before. Before this, nothing told a builder the gateway existed, so turning
+  the key on alone would have changed no generated app (autopsy d8ed307a).
   ⚠️ **BEFORE FLIPPING IT ON:** the switch changes what a PUBLISH does, not what an existing app does —
   apps published before it was set carry no token and are unaffected until they are published again.
   The per-app cap is the platform default for every app; there is deliberately **no owner-facing

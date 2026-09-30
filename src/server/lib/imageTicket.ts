@@ -71,3 +71,49 @@ export function verifyImageTicket(
 export function clientImageFetchEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.IMAGE_GEN_CLIENT_FETCH ?? '').trim().toLowerCase() !== 'off';
 }
+
+/**
+ * "The browser could not get the free picture — finish it here." Honoured ONLY for a link WE minted,
+ * still unexpired, FOR THIS EXACT PROMPT (admin 2026-09-30: "indian face" diya to image bani hi nahi).
+ *
+ * 🔴 WHY THIS EXISTS. Since the browser started fetching free pictures itself (2026-09-21), a free
+ * picture the provider refused, or a link that never loaded, was a dead end: the server had already
+ * answered with the link and returned, so the ladder that used to follow a free-provider failure —
+ * a second try from our side, then the metered paid rungs — never ran. The user saw no image and a
+ * "try again" that would fail the same way. This is that ladder, reached again.
+ *
+ * 🔒 THREE CHECKS, so it cannot become a way to skip the free provider for nothing: the host is on
+ * the exact allowlist, the signature is ours and unexpired, and the prompt inside the link is the
+ * prompt this request would send — so a ticket from one picture cannot unlock the ladder for another.
+ * The paid rungs behind it are metered exactly as before (the user's allowance, then the platform's
+ * daily cap), so the worst a misuse can do is what a provider outage already does.
+ *
+ * PURE apart from the clock the caller passes.
+ */
+export function freeFailureVerified(
+  failed: { url?: unknown; ticket?: unknown; exp?: unknown } | null | undefined,
+  prompt: string,
+  maxPromptChars: number,
+  secret: string,
+  now: number,
+  isAllowedHost: (url: string) => boolean,
+): boolean {
+  if (!failed) return false;
+  const url = String(failed.url ?? '');
+  if (!isAllowedHost(url)) return false;
+  if (!verifyImageTicket(url, failed.exp as number, failed.ticket as string, secret, now)) return false;
+  let path: string;
+  try {
+    path = new URL(url).pathname;
+  } catch {
+    return false;
+  }
+  if (!path.startsWith('/prompt/')) return false;
+  let inLink: string;
+  try {
+    inLink = decodeURIComponent(path.slice('/prompt/'.length));
+  } catch {
+    return false;
+  }
+  return inLink.length > 0 && inLink === String(prompt ?? '').slice(0, maxPromptChars);
+}

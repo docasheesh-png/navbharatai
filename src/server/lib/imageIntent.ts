@@ -86,10 +86,13 @@ export function detectImageIntent(message: string): ImageIntent {
  * (admin 2026-08-02: "koi bhi AI se image banwane ko kahe to sabhi Other AI → AI Image Gen ki guide karein".)
  */
 export function imageGenGuidance(): string {
+  // The chat surfaces (Free chat, every Professional) sit under the Mode button, so its route comes
+  // FIRST — it is one tap from where the user is (admin 2026-09-30: "mode me image generator hai").
+  // The Home route stays for the surfaces that have no Mode button (NavBharatAI Pro).
   return (
-    '🎨 Image banane ke liye NavBharatAI ka dedicated **AI Image Gen** tool use karein:\n\n' +
-    '**Home → Other AI → AI Image Gen**\n\n' +
-    'Wahan image describe karke style aur size chunein, phir **Generate** dabayein — high-quality image ' +
+    '🎨 Image banane ke liye NavBharatAI ka free **Image Generator AI FREE** use karein:\n\n' +
+    '**Mode → Image Generator AI FREE** (chat ke neeche Mode button)  ·  ya **Home → Other AI → AI Image Gen**\n\n' +
+    'Wahan image describe karke type, style aur size chunein, phir bhejein — high-quality image ' +
     'ban jaayegi jise aap download kar sakte hain, aur aapki recent history bhi save rehti hai.'
   );
 }
@@ -97,7 +100,7 @@ export function imageGenGuidance(): string {
 /** A one-line pointer appended to NavBharatAI Free\'s inline-generated image, so even the AI that DOES make
  *  a picture still tells the user about the fuller tool (styles, sizes, download, history). Pure. */
 export function imageGenToolPointer(): string {
-  return '_Zyada options (style, size, download, history) ke liye: **Home → Other AI → AI Image Gen**_';
+  return '_Zyada options (style, size, download, history) ke liye: **Mode → Image Generator AI FREE** ya **Home → Other AI → AI Image Gen**_';
 }
 
 /** Strip the command lead-in ("generate an image of", "banao", …) so the model gets the subject. */

@@ -379,7 +379,9 @@ export function useChatEngine(deps: ChatEngineDeps) {
       const socialTriggers = /^(ram ram|namaste|hello|hi|namaskar|sat sri akal|salam|radhe radhe|jai shri ram|kya haal hai|kaise ho|hello Bhai|o bhai|sun bhai|kya chal raha|sab badhiya)$/i;
       const emotionTriggers = /bad|sad|happy|great|wow|yaar|tension|mood|masti|mazza/i;
       
-      const githubTriggers = /github|repository|repo|commit|push|pull request|git connect|fetch repo|git|version control/i;
+      // Whole words only: as substrings, "git" matched "digital", "repo" matched "report" and "push" matched a
+      // push notification — sending a question about digital marketing down the GitHub path (2026-09-30).
+      const githubTriggers = /\b(?:github|repository|repo|commit|pull request|git connect|fetch repo|git|version control)\b/i;
       
       let detectedIntent = 'social';
       if (messageToSend.includes('Activate GitHub Integration Mode')) {
@@ -394,19 +396,15 @@ export function useChatEngine(deps: ChatEngineDeps) {
           detectedIntent = 'github';
           addLog('Initializing navBharatAI GitHub Core...', 'info');
       } else if (buildTriggers.test(messageToSend)) {
-          if (currentAgent === 'navbharatai') {
-              const aiMessage: Message = {
-                id: (Date.now() + 1).toString(),
-                text: "⚠️ Building applications is only available for NavBharatAI-Pro. Upgrade to unlock the Architect & Build engine! 🙏",
-                sender: 'ai',
-                timestamp: new Date(),
-              };
-              setMessagesForTab((prev) => [...prev, aiMessage]);
-              setIsLoadingForTab(false);
-              addLog('Build Blocked: Pro Only', 'error');
-              return;
-          }
-          if (!user) {
+          // 🔴 THE FREE CHAT IS NEVER ANSWERED FROM HERE (admin 2026-09-30, screenshot: "photo banao" →
+          // "Building applications is only available for NavBharatAI-Pro"). This regex matches banao,
+          // create, generate, program and project — so "photo banao", "chai kaise banao", "generate a
+          // list of names" and "project report likho" were all refused on the phone with a canned line
+          // and never reached the server. The free chat's own server prompt already answers each of
+          // them properly: an app request is sent to NavBharatAI Pro, a picture request to Mode → Image
+          // Generator AI FREE, and everything else is simply answered. So the free agent falls through
+          // to the server; the block below is for the other agents only.
+          if (currentAgent !== 'navbharatai' && !user) {
               const aiMessage: Message = {
                 id: (Date.now() + 1).toString(),
                 text: "⚠️ Building apps is only available for logged-in users. Please login to continue building amazing things! 🙏",

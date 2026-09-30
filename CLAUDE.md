@@ -3305,6 +3305,18 @@ the flag entries above promise.
   `tests/theContractIsAFileNotAParagraph.test.ts`. **What to watch:** the repair-attempt count on Weak
   fast-lane builds — with the symbols homed, the errors that remain should be the mechanical ones the
   deterministic pass already fixes for free.
+  🧰 **AND THE CONTRACT'S HELPERS GET A FILE TOO — `AGENTV3_UTIL_OWNER` (NOT set; default ON; `off` reverts),
+  autopsy 876afca9, 2026-09-30.** The contract file keeps types only. Helper signatures stayed in prose,
+  "implemented in the file the file list names for them", and on "Create a calculation app" the file list
+  named none. `App.tsx` imported all four helpers from `./types`: five tsc errors and a 241 s repair (53% of the
+  lane). Now `utilOwnerFor` picks an owner before file one: a planned file whose purpose names a helper, else
+  a planned `utils`/`helpers` file in the contract's folder, else a new `utils.ts` beside it (generation tier 0,
+  so the screens see its exports). The contract text carries one line saying where they live.
+  🪞 **Same autopsy, `AGENTV3_ENTRY_SHADOW` (NOT set; default ON; `off` reverts):** a Vite plan's
+  `public/index.html` is dropped (`entryShadow.ts`), and the full builder is told at write time. Vite serves
+  `public/` as-is at the root, so that copy shadowed the real entry ("unsupported MIME type ('text/html')") and
+  cost two repair passes. CRA is exempt (there it IS the entry). Test-locked in
+  `tests/theCalculatorsHelpersHadNoHome.test.ts`.
 
 - **`AGENTV3_SNAPSHOT_BUCKET`** (default ON wherever bucket-only publishing is on; `off` reverts
   snapshots alone — added 2026-09-18, admin Monitor capture) — a build SNAPSHOT is now served from the

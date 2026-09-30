@@ -1,3 +1,4 @@
+import { entryShadowNote } from './entryShadow';
 import { repeatedReadNotice, READ_LOOP_LIMIT, repeatedCommandNotice, commandKey } from './repeatedReads';
 import { healWouldOscillate } from './HealLedger';
 import type { AgentEventStream } from './AgentEventStream';
@@ -2974,7 +2975,12 @@ export class ToolDispatcher {
     for (const p of paths) {
       try { security += securityWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
     }
-    return hooks + storeLoop + imports + typecheck + quality + invented + security;
+    // A second index.html in public/ shadows a Vite app's real entry (autopsy 876afca9) — said while open.
+    let shadow = '';
+    for (const p of paths) {
+      try { shadow += entryShadowNote(p, this.framework ?? 'vite-react'); } catch { /* a note is best-effort */ }
+    }
+    return hooks + storeLoop + imports + typecheck + quality + invented + security + shadow;
   }
 
   private async inventedKitClassNotes(files: Record<string, string>): Promise<string> {

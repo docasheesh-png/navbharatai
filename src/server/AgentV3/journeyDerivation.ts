@@ -804,6 +804,22 @@ export function noJourneyReason(files: Record<string, string>): string {
   // One cause, reported as two unrelated lines, and the release gate then said "whether it actually
   // SAVES anything is untested" as though nothing could be done about it. Naming the fix costs nothing
   // and is what turns this line into something a build can act on.
+  // 🔴 THE FIELDS WERE FINE — THE BUTTON WAS THE MISSING PIECE (autopsy 876afca9, 2026-09-30). A
+  // calculator's two inputs had an id and a <label> each, and this sentence told the admin they had
+  // "no name, id, placeholder, label or test id". What the derivation actually could not find was a
+  // button that SUBMITS them: "Calculate" is a plain onClick button, not a submit and not an add/save
+  // word. Same question the derivation asks, answered for the report.
+  const addressableButNoSubmit = pages.some((p) => formSourcesFor(p, files).some((s) => {
+    const tags = formFields(s.source);
+    return tags.length > 0
+      && tags.every(({ tag, labelText }) => targetForInput(tag) !== null || labelText !== null)
+      && submitTargetIn(s.source) === null;
+  }));
+  if (addressableButNoSubmit) {
+    return 'the fields in this app can be addressed, but none of its buttons reads as submitting them (no '
+      + 'submit button and no add / save / create button), so no fill-and-submit journey was derived. That is '
+      + 'a limit of this check, not a defect in the app.';
+  }
   return 'the forms in this app have no field this check could address honestly (no name, id, placeholder, '
     + 'label or test id), so no journey was derived rather than one that would fail for the wrong reason. '
     + 'Give each field a `name` and a label and this check can prove the app really saves what is typed — '

@@ -84607,3 +84607,37 @@ built, unset) is what removes that wall.
 - **Tests:** `tests/aPlanIsAnsweredNotThoughtAbout.test.ts` (7), reversion-proven. `tierLadder.test.ts` is updated.
 - ⚠️ **Open:** Haiku's plan quality here is unmeasured. Read the planner outcome lines on the next Weak builds
   where flashx was benched.
+
+## 2026-09-30 (same day) — Autopsy 876afca9 ("Create a calculation app", Weak, 11.0 min, ₹114.85)
+
+The app works: it rendered, the production build passed and all 5 controls were pressed. But the struggle was out of all proportion to a calculator.
+
+**Tally**
+- **Self-heals: 3.**
+  - The helper imports were repaired (2 rounds, 241 s).
+  - The MIME error was repaired by deleting `public/index.html`.
+  - GLM was abandoned for crawling.
+- **Workarounds: 1.** The first preview-repair pass called the MIME error "transient" and changed nothing.
+- **Skipped: 1.** No journey was derived (the sentence also blamed the fields wrongly).
+- **Still imperfect: 2.**
+  - The user's final message was the repair's sentence, not the build's summary.
+  - The preview copy went stale (the snapshot was taken before the repair deleted a file).
+- **Struggles: 3.**
+  - Repair took 53% of the fast lane.
+  - The ETA was 3.8× over.
+  - After one crawl GLM was benched for the whole build, so every later call went to the reasoning rung. Repair round 1 alone cost 10,616 tokens and 151 s.
+
+**Root causes fixed (PR #3402)**
+1. **Contract helpers had no home.** They get an owner file before file one (`utilOwnerFor`, `AGENTV3_UTIL_OWNER`).
+2. **The plan's `public/index.html` shadowed Vite's entry.** It is dropped from the plan and flagged at write time (`entryShadow.ts`, `AGENTV3_ENTRY_SHADOW`).
+3. **Three heal assignments bypassed `adoptHealResult`:** the two runtime autofix branches and the reviewer autofix. The last sibling hunt missed them. A source guard now allows only the empty-build retry to replace the result.
+4. **The no-journey sentence blamed the fields.** It now says the missing piece was a button that submits them.
+
+**Already closed by this PR:** the bash `rm` after green is now asked of the freeze and seen by `POST_GREEN_WRITES` (`shellWriteTargets`).
+
+**Tests:** `tests/theCalculatorsHelpersHadNoHome.test.ts` (17), each fix reversion-proven.
+
+**Open (recorded, not changed)**
+- **A single crawl benches the lead rung for the whole build.** GLM answered the plan in 2.4 s, crawled once on the contract, and was then gone for 10 minutes. Proposal: a time-bounded crawl bench (re-probe after a few minutes). This is a routing change, so it needs its own measurement first.
+- **The preview snapshot is taken before the runtime autofix.** A file the fix deletes leaves the copy stale.
+- **The first preview repair's "transient, no change needed" was accepted.** The console error survived until the runtime autofix.

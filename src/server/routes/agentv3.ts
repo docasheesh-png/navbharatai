@@ -21323,11 +21323,11 @@ async function noteBuildOutcome(
               try { buildDiag.record({ phase: 'build', ...verifyAfterFixNote('runtime-error fix', vr) }); } catch { /* best-effort */ }
               // Promote the repaired result ONLY when it was kept — a reverted fix leaves the app exactly
               // as green as it was, so `result` must stay the working version, not the broken repair.
-              if (vr.kept && fixResult?.ok) result = fixResult as typeof result;
+              if (vr.kept && fixResult?.ok) result = adoptHealResult(result, fixResult as typeof result);
               if (vr.reverted) break; // the repair broke it and was undone — stop, do not try again
             } else {
               const fix = await applyFix();
-              if (fix.ok) result = fix;
+              if (fix.ok) result = adoptHealResult(result, fix);
             }
           } catch (e) {
             console.log(`[AGENTV3] auto-fix attempt ${attempt} failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -22118,7 +22118,7 @@ async function noteBuildOutcome(
                 // pass (below) leaves reviewCriticalsUnresolved set → the build finalizes honestly NOT-ok.
                 // (A completed pass is trusted here, matching the existing `result = fix` promotion; a
                 // future slice could re-review to confirm the criticals are actually gone.)
-                if (fix.ok) { result = fix; reviewCriticalsUnresolved = []; }
+                if (fix.ok) { result = adoptHealResult(result, fix); reviewCriticalsUnresolved = []; }
                 // Persist the repair's writes — MERGE, never replace: writtenFiles holds only THIS
                 // TURN's writes (on an edit turn that's a handful of files), and the old
                 // saveWorkspaceFiles call REPLACED the whole durable index with that partial set —

@@ -20,6 +20,7 @@ import { memoryAppTsx, puzzleAppTsx, arcadeAppTsx } from './games';
 import { gstBillAppTsx, examPrepAppTsx, societyAppTsx, coachingAppTsx, weddingRsvpAppTsx } from './indiaApps';
 import { courierAppTsx, ngoAppTsx, schoolErpAppTsx } from './indiaOrgs';
 import { geetaAppTsx, quranAppTsx } from './indiaFaith';
+import { gitaChapterFiles } from './gitaText';
 import { panchangAppTsx, kundaliAppTsx } from './indiaPanchang';
 import { proUiTsx, proStoreTs } from './proShell';
 import { saasDashboardAppTsx, crmAppTsx, storeAppTsx } from './proApps';
@@ -42,6 +43,12 @@ export interface GoldenScaffold {
    * is a compile-proven ARCHITECTURE the builder then extends (see proShell.ts for why they differ).
    */
   tier: 'simple' | 'pro';
+  /**
+   * Data files the app imports beside its App.tsx (the Gita's eighteen chapter files). Kept out of
+   * App.tsx on purpose: a builder that opens the app reads the code, and one chapter at a time only if
+   * it asks — never a whole book in one read.
+   */
+  files?: Record<string, string>;
 }
 
 /**
@@ -70,7 +77,7 @@ export const GOLDEN_SCAFFOLDS: readonly GoldenScaffold[] = [
   { id: 'gst-bill', label: 'GST bill maker', title: 'GST Bill', appTsx: gstBillAppTsx, tier: 'simple' },
   { id: 'exam-prep', label: 'Exam mock test', title: 'Mock Test', appTsx: examPrepAppTsx, tier: 'simple' },
   { id: 'panchang', label: 'Panchang & muhurat', title: 'Panchang', appTsx: panchangAppTsx, tier: 'simple' },
-  { id: 'geeta', label: 'Bhagavad Gita reader', title: 'Bhagavad Gita', appTsx: geetaAppTsx, tier: 'simple' },
+  { id: 'geeta', label: 'Bhagavad Gita reader', title: 'Bhagavad Gita', appTsx: geetaAppTsx, tier: 'simple', files: gitaChapterFiles() },
   { id: 'quran', label: 'Quran reader', title: 'Quran', appTsx: quranAppTsx, tier: 'simple' },
   { id: 'wedding-rsvp', label: 'Wedding RSVP manager', title: 'Shaadi RSVP', appTsx: weddingRsvpAppTsx, tier: 'simple' },
   // ── PRO tier: a compile-proven architecture the builder extends ──
@@ -105,7 +112,7 @@ export const GOLDEN_SCAFFOLDS: readonly GoldenScaffold[] = [
  * shared pro foundation when this is a pro scaffold. Pure.
  */
 export function goldenScaffoldFiles(s: GoldenScaffold): Record<string, string> {
-  const base = goldenBaseFiles(s.title, s.appTsx);
+  const base = { ...goldenBaseFiles(s.title, s.appTsx), ...(s.files ?? {}) };
   return s.tier === 'pro' ? { ...base, ...PRO_SHARED_FILES } : base;
 }
 

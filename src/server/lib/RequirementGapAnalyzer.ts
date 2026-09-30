@@ -351,6 +351,12 @@ const NON_DOMAIN_USES: RegExp[] = [
   // read as a social network. Messages an app SHOWS its user are copy, in English or Hinglish word order.
   /\b(?:proper|appropriate|meaningful|clear|user[- ]?friendly|helpful|short|simple)\s+(?:error\s+)?messages?\b/gi,
   /\bmessages?\s+(?:show|dikha\w*|display|bata\w*)\b/gi,
+  // social — a chat with an AI ASSISTANT is a tool, not a social network (autopsy 466c260a: "pdf,
+  // code, file handling, picture editor, pro chat, codestudio" — a productivity workspace — was read
+  // as SOCIAL off "pro chat" and its build was told to include auth, a realtime feed, moderation and
+  // media upload). Chatting with people ("group chat", "chat with friends", "chat app") keeps its meaning.
+  /\b(?:ai|pro|gpt|smart|assistant|bot|llm|help|support|doubt|study|voice)[\s-]+chat(?:bot)?s?\b/gi,
+  /\bchat\s*(?:bot|gpt)s?\b|\bchat\s+(?:with|to)\s+(?:an?\s+|the\s+|our\s+)?(?:ai|assistant|bot|gpt|llm|model|pdfs?|documents?|files?)\b/gi,
   /\bthe\s+following\b|\bas\s+follows\b/gi,
   // ecommerce — purpose, arithmetic, sorting, and "store" as the verb.
   /\bin\s+order\s+to\b/gi,

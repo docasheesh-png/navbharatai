@@ -227,7 +227,8 @@ import { decideGreenGuard, restorePlan, reconcileCapturedWrites, greenGuardMessa
 import { pickCheckRoutes, buildFingerprint, regressedRoutes, regressionMessage, encodeFingerprint, decodeFingerprint, fingerprintWorkspaceKey, routeFingerprintEnabled } from '../AgentV3/RouteFingerprint';
 import { resetHealLedger, healRepeats, healRepeatMessage } from '../AgentV3/HealLedger';
 import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffer } from '../AgentV3/DbCoupledBootAnalysis';
-import { languageInstruction } from '../AgentV3/IndicLanguage';
+import { appLanguageInstruction } from '../AgentV3/LanguageDetect';
+import { findScriptedAssistant, scriptedAssistantNotice } from '../AgentV3/scriptedAssistant';
 import { decidePublishConsent } from '../AgentV3/publishConsent';
 import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
@@ -14378,6 +14379,9 @@ async function noteBuildOutcome(
           : 0),
         // A thunk: `expectsArtifacts` is decided further down, and `intent` can still change before it.
         expectsArtifacts: () => expectsArtifacts,
+        // The SAME language line the architect's prompt opens with (autopsy 466c260a) — the child
+        // writes the labels and never sees the user's words.
+        languageRule: () => appLanguageInstruction(prompt),
       };
       const spawnSubAgent = makeSubAgentSpawn(subAgentDeps);
       // Layer 84 (Multi-Model Ensemble): the Architect can call second_opinion to
@@ -15920,15 +15924,10 @@ async function noteBuildOutcome(
       // language explicitly; otherwise we instruct Claude to mirror whatever
       // language the request used. Best-effort — NEVER blocks a build.
       try {
-        const hint = detectLanguageHint(prompt);
-        // Phase 6.1: the instruction now states its own CONFIDENCE. A distinctive script is proof and
-        // is asserted plainly; a romanized guess ("enakku … venum") says it is a guess and tells the
-        // model to follow the user's actual words if it is wrong — overstating a guess is how a
-        // mis-detection becomes an entire app the user cannot read.
-        const langInstruction = hint
-          ? languageInstruction({ code: hint.code, name: hint.name, evidence: hint.evidence ?? 'script' })
-          : `Language: generate all user-facing text in the app in the SAME language the user used in this request (default to English if it is English). Keep code identifiers and comments in English.`;
-        buildPrompt = `${langInstruction}\n\n${buildPrompt}`;
+        // Phase 6.1: the instruction states its own CONFIDENCE (a script is proof, a romanized guess
+        // says it is a guess). Autopsy 466c260a: a request in Latin letters now says so explicitly and
+        // forbids an unrequested switch of script. ONE function — the sub-agents read the same line.
+        buildPrompt = `${appLanguageInstruction(prompt)}\n\n${buildPrompt}`;
       } catch { /* best-effort — never blocks a build */ }
 
       // Attachments: prepend the extracted file content/description so the build
@@ -21324,6 +21323,29 @@ async function noteBuildOutcome(
               message: `The app shows made-up data about other people or places in ${invented.length} place(s) — disclosed to the user in the summary.`,
               detail: invented.slice(0, 5).map((i) => `${i.file}:${i.line} ${i.snippet}`).join(' · '),
             });
+          }
+        }
+      } catch { /* the disclosure is best-effort — it must never break the build */ }
+
+      // 🤖 A CHAT SOLD AS AN ASSISTANT MUST BE ONE — OR SAY IT IS NOT (autopsy 466c260a). The sibling of
+      // the block above for a made-up MIND: assistant-side messages in an app that makes no network or
+      // AI call anywhere can only be fixed text. Checked first on this turn's writes (free), then
+      // confirmed against the WHOLE project, because the call that makes it real may live in a file an
+      // edit turn did not touch.
+      try {
+        if (result.ok && expectsArtifacts && !isImportTurn && writtenFiles.size > 0) {
+          const written = Object.fromEntries(writtenFiles);
+          if (findScriptedAssistant(written, prompt)) {
+            const whole = { ...(await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>))), ...written };
+            const scripted = findScriptedAssistant(whole, prompt);
+            if (scripted) {
+              result = { ...result, summary: `${result.summary}${scriptedAssistantNotice(scripted)}` };
+              buildDiag.record({
+                phase: 'readiness', severity: 'warning', code: 'SCRIPTED_ASSISTANT_SHIPPED', autoResolved: false,
+                message: 'The app has a chat whose replies are fixed text written into the app — it makes no AI or network call anywhere. Disclosed to the user in the summary.',
+                detail: scripted.files.slice(0, 5).join(' · '),
+              });
+            }
           }
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }

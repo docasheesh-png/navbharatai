@@ -143,6 +143,30 @@ rule says *how* to fix; this fifth rule says *every real report is the trigger a
 of what to fix*. Both are non-negotiable and reinforce the one absolute rule (never break the
 app). Run all four mandatory steps, in order, every time:
 
+### 🧬 EVERY PROBLEM IN EVERY REPORT, FIXED AT THE ROOT, SIBLINGS INCLUDED — so it never comes back (admin-mandated 2026-09-30)
+
+Admin, verbatim: *"jab bhi koi autopsy ki jaye, kisi build report ki ya koi aur report ki — identify ki huyi
+sabhi, choti badi problem ka root cause dhund ke DNA level par fix karni hai. same (with siblings) problem
+wapas na mile!!!!"*
+
+- **Any report, not only a build report.** The admin's build report, a diagnostics report, the Monitor, a
+  scorecard, a screenshot, a user complaint, a CI failure, a Play/App Store rejection — each is an autopsy
+  under this rule.
+- **Every item it surfaces, small or big.** There is no "too small to root-cause". A one-line wrong label and
+  a failed build get the same treatment: the exact origin, the CLASS behind it, and a fix to the class.
+- **"Fixed" means the CLASS cannot return — the instance AND every sibling.** Before calling an item done:
+  (1) name the class in one sentence; (2) hunt its siblings across the whole repo (other lanes, other
+  surfaces, other copies of the same helper — safeguard #6's method, three names, whole repo); (3) fix every
+  sibling found in the same change; (4) lock it with a test that encodes the CLASS, not the instance — a
+  census or source guard that fails when a NEW sibling appears, proven by reversion (put the bug back, watch
+  the test fail).
+- **Check whether it has come back before.** Search `PROGRESS.md` and this file for the same class. If an
+  earlier autopsy "fixed" it, that fix was incomplete — say so plainly in the reply, and fix what the earlier
+  one missed (most often: a sibling lane it never hunted).
+- **Close every autopsy with one ledger row per item:** problem → root cause → class → siblings found and
+  fixed → the test that locks it. An item that genuinely cannot be fixed now is recorded in `PROGRESS.md` as
+  an OPEN root cause with what it needs (rule 6) — never left silent, never counted as done.
+
 ### 🚫 PORNOGRAPHY IS BANNED — and NavBharatAI enforces it, not the model (admin-mandated 2026-09-13)
 
 Admin's ruling: **"पोर्नोग्राफी बैन है!"** The user-facing refusal is firm about the ban and says

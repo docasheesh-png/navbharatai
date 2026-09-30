@@ -176,8 +176,10 @@ describe('the route wires it the only safe way', () => {
   it('the advisory cap is re-armed only with the plan\'s finite bound', () => {
     expect(route).toContain('armAdvisoryCap(plan.capMs)');
     // Every re-arm is named, and each carries a finite bound: the default call, the repair, and (autopsy
-    // 972acde5) the one-off room for re-taking the preview copy after a kept repair.
+    // 972acde5) the one-off room for re-taking the preview copy after a kept repair, and (autopsy 876afca9)
+    // the same bound for the one end-of-build re-take when a later pass left the copy stale.
     expect(route).toContain('armAdvisoryCap(PREVIEW_COPY_REFRESH_MS + 20_000)');
-    expect(route.match(/armAdvisoryCap\(/g)?.length).toBe(3); // the definition is `= (`
+    expect(route.match(/armAdvisoryCap\(PREVIEW_COPY_REFRESH_MS \+ 20_000\)/g)?.length).toBe(2);
+    expect(route.match(/armAdvisoryCap\(/g)?.length).toBe(4); // the definition is `= (`
   });
 });

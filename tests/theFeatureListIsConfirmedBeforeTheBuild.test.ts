@@ -169,7 +169,7 @@ describe('wiring', () => {
 
   it('both audits receive the answer', () => {
     expect(route).toContain('dispatcher.setDeclinedFeatures(declinedLabels(featureConfirmation));');
-    expect((route.match(/checkFeaturePresence\(prompt, [a-zA-Z]+, declinedPresenceFeatures\(featureConfirmation\)\)/g) || []).length).toBe(3);
+    expect((route.match(/checkFeaturePresence\(milestoneRequest \?\? prompt, [a-zA-Z]+, declinedPresenceFeatures\(featureConfirmation\)\)/g) || []).length).toBe(3);
     expect(strip(src('src/server/AgentV3/ToolDispatcher.ts'))).toContain('analyzeRequirementCoverage(requestText, mem.graph(), snap.sources, this.declinedFeatures)');
   });
 

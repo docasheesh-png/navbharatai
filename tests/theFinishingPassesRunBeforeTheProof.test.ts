@@ -313,11 +313,15 @@ describe('the rest of the review, locked at the source', () => {
     expect(block).toContain('const noteFinishingWrite = (path: string) => { finishingPaths.add(path); inBuildWriteTick++; }');
     const sets = block.match(/writtenFiles\.set\(/g)?.length ?? 0;
     const notes = block.match(/noteFinishingWrite\(/g)?.length ?? 0;
-    expect(notes).toBe(sets); // one note per write
+    // The import sweep (moved here, autopsy 728a402d) edits the MODEL's files, which the reviewer must
+    // still see, so it moves the tick directly instead of marking them as ours.
+    const directTicks = (block.match(/inBuildWriteTick\+\+/g)?.length ?? 0) - 1; // minus noteFinishingWrite's own
+    expect(notes + directTicks).toBe(sets); // every write moves the tick
   });
 
   it('the reviewer is not sent to review our own finishing files', () => {
-    expect(src).toContain('changedFiles: [...writtenFiles.keys()].filter((p) => !finishingPaths.has(p))');
+    expect(src).toContain('const reviewChanged = [...writtenFiles.keys()].filter((p) => !finishingPaths.has(p));');
+    expect(src).toContain('changedFiles: reviewChanged,');
   });
 });
 

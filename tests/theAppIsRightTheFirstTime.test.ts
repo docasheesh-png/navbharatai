@@ -40,7 +40,7 @@ describe('1 · a class nothing defines is named while the file is open', () => {
   it('every write door hands it back (source guard)', () => {
     const d = read('src/server/AgentV3/ToolDispatcher.ts');
     expect(d).toContain('const undefinedCss = await this.undefinedClassNotes(files);');
-    expect(d).toContain('return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow;');
+    expect(d).toMatch(/return hooks \+ storeLoop \+ imports \+ typecheck \+ quality \+ invented \+ undefinedCss \+ style \+ security \+ shadow(?: \+ \w+)*;/);
   });
 });
 

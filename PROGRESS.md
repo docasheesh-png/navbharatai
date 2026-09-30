@@ -85524,3 +85524,42 @@ closed before the next report. Status, item by item:
   it rare, not impossible. Turning `strictNullChecks` on needs a measured trial first, because it would
   raise new errors in generated apps.
 - GLM/Kimi latency is provider-side.
+
+## 2026-09-30 — Mobile first: games are playable on a phone, apps are measured on one
+
+Admin: *"mobile friendly game/app bane — mobile first!!!!!!"*, choosing touch controls first.
+
+- **Root cause (games):**
+  - The runtime `Input` had `setAnalogueMove` / `setVirtualButton` from day one, but no recipe drew a
+    control, so a recipe game rendered on a phone and could not be played.
+  - The HUD paused only on Escape.
+  - `AppKnowledgeBase` claimed games "work on a phone". That claim is now true, and says since when.
+- **Fix:**
+  - `touchControls.ts` is part of the game shell; `Game` builds it unless `touchControls: false`.
+  - The HUD has a Pause button.
+  - The tool description and the architect prompt say the shell draws the controls.
+  - A game written without the shell gets `touchPlayableNote` at write time.
+- **Root cause (apps):** every browser check ran at desktop size.
+  - Fix: `mobileLayoutCheck.ts` opens the app once at phone size and measures sideways scroll and tap
+    targets.
+  - Its first version measured `innerWidth`, which grows to fit overflow on a phone. The real-browser
+    test caught this, and it now uses `clientWidth`.
+- **Tests:**
+  - `tests/theGameIsPlayableOnAPhone.test.ts` (13): the real generated module and the real `Input` in a
+    fake DOM (held by CI), plus real Chromium with CDP touch.
+  - `tests/theAppIsOpenedOnAPhone.test.ts` (9): real Chromium on a broken page and a good one.
+  - Both are reversion-proven.
+- **Proven outside tests:** real `tsc` over all seven game recipes (0 errors), and a full game built
+  with Vite and driven by touch:
+  - the joystick moved the player 4.9 units;
+  - Attack held while moving;
+  - everything released on lift;
+  - camera drag turned the view;
+  - Pause tapped;
+  - the portrait hint showed;
+  - a desktop saw no overlay.
+
+**Still open:**
+- The phone check reports and offers a fix; it does not repair on its own. A verified repair (like the
+  explorer's) waits until `MOBILE_LAYOUT_ISSUES` has appeared on real builds.
+- Games built before today get the controls only when rebuilt.

@@ -46,6 +46,7 @@ import { CharacterController } from './play/character';
 import { ParticleSystem } from './fx/particles';
 import { audio } from './fx/audio';
 import { bindGameFeedback } from './fx/feedback';
+import { TouchControls, type TouchControlsOptions } from './ui/touchControls';
 
 /**
  * THE COMPOSITION ROOT. Everything the other five layers expose is wired together here, in the one
@@ -68,6 +69,11 @@ export interface GameOptions {
   setup?: (ctx: GameContext) => THREE.Object3D[] | void;
   /** Your gameplay. Runs at a FIXED 60Hz. */
   update?: (ctx: GameContext, delta: number) => void;
+  /**
+   * On-screen joystick + buttons on a touch screen (shown only there). Pass options to choose the
+   * buttons, or false ONLY for a game that has its own touch controls — never to "simplify".
+   */
+  touchControls?: TouchControlsOptions | false;
 }
 
 export interface GameContext {
@@ -128,6 +134,11 @@ export class Game {
     this.canvas.addEventListener('pointerdown', refocus);
     this.disposers.push(() => this.canvas.removeEventListener('pointerdown', refocus));
     this.input = new Input(this.canvas);
+    // Most players hold a phone. Without these, a game built for WASD + mouse renders and cannot be played.
+    if (options.touchControls !== false) {
+      const touch = new TouchControls(options.container, this.input, options.touchControls || {});
+      this.disposers.push(() => touch.dispose());
+    }
 
     this.disposers.push(handleResize(this.renderer, this.rig.camera, options.container));
     this.disposers.push(bindGameFeedback({
@@ -402,7 +413,7 @@ export function Hud({ game }: { game: Game }) {
   return (
     <>
       {/* pointerEvents none, or the HUD silently eats clicks meant for the game */}
-      <div style={{ position: 'absolute', top: 12, left: 12, right: 12, display: 'flex', justifyContent: 'space-between', color: '#fff', pointerEvents: 'none', textShadow: '0 1px 3px rgba(0,0,0,0.8)', zIndex: 5 }}>
+      <div style={{ position: 'absolute', top: 'max(12px, env(safe-area-inset-top))', left: 'max(12px, env(safe-area-inset-left))', right: 'max(12px, env(safe-area-inset-right))', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#fff', pointerEvents: 'none', textShadow: '0 1px 3px rgba(0,0,0,0.8)', zIndex: 5 }}>
         <div style={{ fontWeight: 700, fontSize: 18 }}>Score {s.score}</div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
           <div style={{ width: 120, height: 10, background: 'rgba(255,255,255,0.25)', borderRadius: 999, overflow: 'hidden' }}>
@@ -411,6 +422,10 @@ export function Hud({ game }: { game: Game }) {
             <div style={{ width: \`\${Math.max(0, Math.min(100, (s.health / Math.max(1, s.maxHealth)) * 100))}%\`, height: '100%', background: s.health > s.maxHealth * 0.3 ? '#4ade80' : '#f87171', transition: 'width 160ms ease-out' }} />
           </div>
           <div style={{ fontWeight: 700 }}>x{s.lives}</div>
+          {/* Esc is a keyboard; a phone has none. Without this a player on a phone can never pause. */}
+          {s.status === 'playing' ? (
+            <button type="button" aria-label="Pause" onClick={() => game.pause()} style={{ pointerEvents: 'auto', width: 44, height: 44, borderRadius: 999, border: '2px solid rgba(255,255,255,0.5)', background: 'rgba(0,0,0,0.35)', color: '#fff', fontWeight: 800, fontSize: 16, cursor: 'pointer' }}>II</button>
+          ) : null}
         </div>
       </div>
 
@@ -437,13 +452,296 @@ export function Hud({ game }: { game: Game }) {
 }
 `;
 
+const TOUCH_CONTROLS = `import type { Input } from '../core/input';
+
+/**
+ * ON-SCREEN CONTROLS FOR A TOUCH SCREEN — the difference between a game and a picture of one on a phone.
+ *
+ * Most people who play what NavBharatAI builds hold a phone. The input layer has always accepted a
+ * touch joystick and virtual buttons (setAnalogueMove / setVirtualButton), but nothing DREW them, so a
+ * game built for "WASD + mouse" rendered beautifully on a phone and could not be played at all.
+ *
+ * What this draws, and why each piece is shaped the way it is:
+ *   • A JOYSTICK where the left thumb lands (anywhere in the left half), not at one fixed spot a
+ *     thumb has to find. Its resting ghost sits in the bottom-left corner so the player knows it exists.
+ *   • CAMERA LOOK by dragging anywhere in the right half — the same lookX/lookY a mouse feeds.
+ *   • ACTION BUTTONS in the bottom-right corner, 64px (a 44px minimum is a thumb's, not a finger-tip's),
+ *     spaced so a thumb pressing one never brushes another.
+ *   • MULTI-TOUCH by construction: every control tracks its OWN pointer id, so moving and attacking at
+ *     the same time works — the one thing a single-touch implementation always gets wrong.
+ *
+ * Shown only where it belongs: a device whose PRIMARY pointer is coarse (a phone, a tablet), or the
+ * moment a touch lands on a laptop with a touch screen. A desktop with a mouse never sees it.
+ * Everything is released on blur / tab hide, or the player keeps running after they come back.
+ */
+export interface TouchButton {
+  /** An Input action name — the same names the keyboard uses ('jump', 'attack', …). */
+  action: string;
+  label: string;
+}
+
+export interface TouchControlsOptions {
+  /** Which buttons to draw, bottom-right. Default: Attack, Jump, Use, Run. */
+  buttons?: TouchButton[];
+  /** Drag in the right half to turn the camera. Default true; set false for a fixed-camera game. */
+  look?: boolean;
+  /** Camera pixels per finger pixel. Default 1.6 (a thumb covers less ground than a mouse). */
+  lookSensitivity?: number;
+  /** Show even on a device with no touch screen — for testing on a desktop. */
+  force?: boolean;
+}
+
+export const DEFAULT_TOUCH_BUTTONS: TouchButton[] = [
+  { action: 'attack', label: 'Attack' },
+  { action: 'jump', label: 'Jump' },
+  { action: 'interact', label: 'Use' },
+  { action: 'sprint', label: 'Run' },
+];
+
+/** Is the PRIMARY pointer a finger? A touch-screen laptop answers no until it is actually touched. */
+export function prefersTouch(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (typeof window.matchMedia === 'function') return window.matchMedia('(pointer: coarse)').matches;
+  return 'ontouchstart' in window;
+}
+
+const STICK_RADIUS = 56;
+const DEAD_ZONE = 0.15;
+
+const CSS = [
+  '.nbg-tc{position:absolute;inset:0;z-index:4;pointer-events:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;display:none}',
+  '.nbg-tc.on{display:block}',
+  '.nbg-tc *{-webkit-tap-highlight-color:transparent;touch-action:none;box-sizing:border-box}',
+  '.nbg-tc-move{position:absolute;left:0;bottom:0;width:50%;height:65%;pointer-events:auto}',
+  '.nbg-tc-look{position:absolute;right:0;top:0;width:50%;height:100%;pointer-events:auto}',
+  '.nbg-tc-base{position:absolute;width:' + STICK_RADIUS * 2 + 'px;height:' + STICK_RADIUS * 2 + 'px;margin:-' + STICK_RADIUS + 'px 0 0 -' + STICK_RADIUS + 'px;border-radius:50%;background:rgba(255,255,255,0.12);border:2px solid rgba(255,255,255,0.35);opacity:0.55;transition:opacity 120ms}',
+  '.nbg-tc-base.live{opacity:1}',
+  '.nbg-tc-knob{position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px 0 0 -26px;border-radius:50%;background:rgba(255,255,255,0.55)}',
+  '.nbg-tc-buttons{position:absolute;right:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(2,64px);gap:14px;pointer-events:none}',
+  '.nbg-tc-btn{pointer-events:auto;width:64px;height:64px;border-radius:50%;border:2px solid rgba(255,255,255,0.5);background:rgba(0,0,0,0.35);color:#fff;font:600 13px/1 system-ui,sans-serif;display:grid;place-items:center;padding:0}',
+  '.nbg-tc-btn.down{background:rgba(255,255,255,0.45);color:#111}',
+  '.nbg-tc-hint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:10px 16px;border-radius:10px;background:rgba(0,0,0,0.6);color:#fff;font:500 14px/1.3 system-ui,sans-serif;text-align:center;pointer-events:none;display:none}',
+  '@media (orientation: portrait){.nbg-tc.hinting .nbg-tc-hint{display:block}}',
+].join('');
+
+export class TouchControls {
+  private readonly root: HTMLDivElement;
+  private readonly base: HTMLDivElement;
+  private readonly knob: HTMLDivElement;
+  private readonly detach: Array<() => void> = [];
+  private readonly buttonsDown = new Map<number, { action: string; el: HTMLElement }>();
+  private stickId = -1;
+  private stickX = 0;
+  private stickY = 0;
+  private lookId = -1;
+  private lookX = 0;
+  private lookY = 0;
+  private shown = false;
+
+  constructor(
+    private readonly container: HTMLElement,
+    private readonly input: Input,
+    private readonly options: TouchControlsOptions = {},
+  ) {
+    // The overlay is positioned against the game's own container, never the page.
+    if (getComputedStyle(container).position === 'static') container.style.position = 'relative';
+
+    const style = document.createElement('style');
+    style.textContent = CSS;
+    this.root = document.createElement('div');
+    this.root.className = 'nbg-tc';
+    this.root.appendChild(style);
+
+    const look = document.createElement('div');
+    look.className = 'nbg-tc-look';
+    if (options.look !== false) this.root.appendChild(look);
+
+    const move = document.createElement('div');
+    move.className = 'nbg-tc-move';
+    this.base = document.createElement('div');
+    this.base.className = 'nbg-tc-base';
+    this.knob = document.createElement('div');
+    this.knob.className = 'nbg-tc-knob';
+    this.base.appendChild(this.knob);
+    move.appendChild(this.base);
+    this.root.appendChild(move);
+    this.restStick();
+
+    const buttons = document.createElement('div');
+    buttons.className = 'nbg-tc-buttons';
+    for (const b of options.buttons ?? DEFAULT_TOUCH_BUTTONS) {
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'nbg-tc-btn';
+      el.textContent = b.label;
+      el.setAttribute('aria-label', b.label);
+      this.on(el, 'pointerdown', (e) => this.pressButton(e, b.action, el));
+      for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) this.on(el, t, (e) => this.releaseButton(e));
+      buttons.appendChild(el);
+    }
+    this.root.appendChild(buttons);
+
+    const hint = document.createElement('div');
+    hint.className = 'nbg-tc-hint';
+    hint.textContent = 'Turn your phone sideways to play';
+    this.root.appendChild(hint);
+
+    this.on(move, 'pointerdown', (e) => this.startStick(e, move));
+    this.on(move, 'pointermove', (e) => this.moveStick(e));
+    for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) this.on(move, t, (e) => this.endStick(e));
+    this.on(look, 'pointerdown', (e) => this.startLook(e, look));
+    this.on(look, 'pointermove', (e) => this.moveLook(e));
+    for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) this.on(look, t, (e) => this.endLook(e));
+    // A long press must not open the browser's menu over the game.
+    this.on(this.root, 'contextmenu', (e) => e.preventDefault());
+
+    const releaseAll = () => this.releaseAll();
+    const onVisibility = () => { if (document.hidden) this.releaseAll(); };
+    window.addEventListener('blur', releaseAll);
+    document.addEventListener('visibilitychange', onVisibility);
+    this.detach.push(() => window.removeEventListener('blur', releaseAll));
+    this.detach.push(() => document.removeEventListener('visibilitychange', onVisibility));
+
+    container.appendChild(this.root);
+
+    if (options.force || prefersTouch()) this.show();
+    else {
+      // A touch-screen laptop: stay hidden until a finger actually touches the game.
+      const onFirstTouch = (e: PointerEvent) => { if (e.pointerType === 'touch') this.show(); };
+      container.addEventListener('pointerdown', onFirstTouch, true);
+      this.detach.push(() => container.removeEventListener('pointerdown', onFirstTouch, true));
+    }
+  }
+
+  /** Is the overlay on screen? */
+  get visible(): boolean { return this.shown; }
+
+  show(): void {
+    if (this.shown) return;
+    this.shown = true;
+    this.root.classList.add('on', 'hinting');
+    const t = setTimeout(() => this.root.classList.remove('hinting'), 4000);
+    this.detach.push(() => clearTimeout(t));
+  }
+
+  private on(el: EventTarget, type: string, fn: (e: PointerEvent) => void): void {
+    const h = (e: Event) => fn(e as PointerEvent);
+    el.addEventListener(type, h);
+    this.detach.push(() => el.removeEventListener(type, h));
+  }
+
+  private capture(el: HTMLElement, e: PointerEvent): void {
+    // preventDefault on pointerdown also suppresses the compatibility mouse events a browser fires
+    // after a tap — without it a tap on Jump would ALSO be read as a click on the game.
+    e.preventDefault();
+    try { el.setPointerCapture(e.pointerId); } catch { /* an old browser simply loses the capture */ }
+  }
+
+  private restStick(): void {
+    this.base.classList.remove('live');
+    this.base.style.left = 'calc(max(16px, env(safe-area-inset-left)) + ' + STICK_RADIUS + 'px)';
+    this.base.style.top = 'calc(100% - max(16px, env(safe-area-inset-bottom)) - ' + STICK_RADIUS + 'px)';
+    this.knob.style.transform = 'translate(0px, 0px)';
+  }
+
+  private startStick(e: PointerEvent, zone: HTMLElement): void {
+    if (this.stickId !== -1) return;
+    this.capture(zone, e);
+    this.stickId = e.pointerId;
+    const r = zone.getBoundingClientRect();
+    // The joystick appears under the thumb, kept whole inside its zone.
+    this.stickX = Math.min(Math.max(e.clientX, r.left + STICK_RADIUS), r.right - STICK_RADIUS);
+    this.stickY = Math.min(Math.max(e.clientY, r.top + STICK_RADIUS), r.bottom - STICK_RADIUS);
+    this.base.style.left = this.stickX - r.left + 'px';
+    this.base.style.top = this.stickY - r.top + 'px';
+    this.base.classList.add('live');
+    this.moveStick(e);
+  }
+
+  private moveStick(e: PointerEvent): void {
+    if (e.pointerId !== this.stickId) return;
+    let dx = e.clientX - this.stickX;
+    let dy = e.clientY - this.stickY;
+    const len = Math.hypot(dx, dy);
+    if (len > STICK_RADIUS) { dx = (dx / len) * STICK_RADIUS; dy = (dy / len) * STICK_RADIUS; }
+    this.knob.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
+    const nx = dx / STICK_RADIUS;
+    const ny = dy / STICK_RADIUS;
+    // Screen-down is +y, which is exactly what Input.axis() calls "down": no sign flip.
+    if (Math.hypot(nx, ny) < DEAD_ZONE) this.input.setAnalogueMove(0, 0);
+    else this.input.setAnalogueMove(nx, ny);
+  }
+
+  private endStick(e: PointerEvent): void {
+    if (e.pointerId !== this.stickId) return;
+    this.stickId = -1;
+    this.input.setAnalogueMove(0, 0);
+    this.restStick();
+  }
+
+  private startLook(e: PointerEvent, zone: HTMLElement): void {
+    if (this.lookId !== -1) return;
+    this.capture(zone, e);
+    this.lookId = e.pointerId;
+    this.lookX = e.clientX;
+    this.lookY = e.clientY;
+  }
+
+  private moveLook(e: PointerEvent): void {
+    if (e.pointerId !== this.lookId) return;
+    const k = this.options.lookSensitivity ?? 1.6;
+    this.input.lookX += (e.clientX - this.lookX) * k;
+    this.input.lookY += (e.clientY - this.lookY) * k;
+    this.lookX = e.clientX;
+    this.lookY = e.clientY;
+  }
+
+  private endLook(e: PointerEvent): void {
+    if (e.pointerId === this.lookId) this.lookId = -1;
+  }
+
+  private pressButton(e: PointerEvent, action: string, el: HTMLElement): void {
+    this.capture(el, e);
+    this.buttonsDown.set(e.pointerId, { action, el });
+    el.classList.add('down');
+    this.input.setVirtualButton(action, true);
+  }
+
+  private releaseButton(e: PointerEvent): void {
+    const held = this.buttonsDown.get(e.pointerId);
+    if (!held) return;
+    this.buttonsDown.delete(e.pointerId);
+    held.el.classList.remove('down');
+    // Another finger may still hold the same action; release it only when none does.
+    if (![...this.buttonsDown.values()].some((b) => b.action === held.action)) this.input.setVirtualButton(held.action, false);
+  }
+
+  private releaseAll(): void {
+    for (const held of this.buttonsDown.values()) { held.el.classList.remove('down'); this.input.setVirtualButton(held.action, false); }
+    this.buttonsDown.clear();
+    this.stickId = -1;
+    this.lookId = -1;
+    this.input.setAnalogueMove(0, 0);
+    this.restStick();
+  }
+
+  dispose(): void {
+    this.releaseAll();
+    for (const off of this.detach) { try { off(); } catch { /* teardown never throws */ } }
+    this.detach.length = 0;
+    this.root.parentElement?.removeChild(this.root);
+  }
+}
+`;
+
 const FILES: Record<string, string> = {
   'src/game/Game.ts': GAME,
   'src/game/GameCanvas.tsx': GAME_CANVAS,
   'src/game/ui/Hud.tsx': HUD,
+  'src/game/ui/touchControls.ts': TOUCH_CONTROLS,
 };
 
-export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud'];
+export const GAME_SHELL_MODULES: readonly string[] = ['game', 'gamecanvas', 'hud', 'touchcontrols'];
 
 /**
  * Generate the shell. `gamecanvas` renders the HUD and constructs the Game, so a subset that would not
@@ -467,6 +765,8 @@ export function generateGameShell(include?: string[]): GameShellResult {
     if (files['src/game/GameCanvas.tsx'] || files['src/game/ui/Hud.tsx']) {
       files['src/game/Game.ts'] = FILES['src/game/Game.ts'];
     }
+    // Game draws the touch controls, so it never ships without them (and they are useless alone).
+    if (files['src/game/Game.ts']) files['src/game/ui/touchControls.ts'] = FILES['src/game/ui/touchControls.ts'];
     if (files['src/game/GameCanvas.tsx']) files['src/game/ui/Hud.tsx'] = FILES['src/game/ui/Hud.tsx'];
     if (Object.keys(files).length === 0) files = { ...FILES };
   }
@@ -503,6 +803,10 @@ export function generateGameShell(include?: string[]): GameShellResult {
       '- The HUD updates on EVENTS, never per frame. Do not add per-frame setState — it costs more than\n' +
       '  the game does.\n' +
       '- Audio is unlocked on the first gesture, and the canvas takes touch without scrolling the page.\n' +
+      '- ON A PHONE OR TABLET the shell draws the controls itself: a joystick under the left thumb, camera\n' +
+      '  drag on the right, Attack/Jump/Use/Run buttons bottom-right, and a Pause button in the HUD. They\n' +
+      '  drive the same Input actions as the keyboard. Choose the buttons with\n' +
+      "  touchControls: { buttons: [{ action: 'attack', label: 'Punch' }, …] } — never hand-roll a joystick.\n" +
       '- No WebGL on the device gives an honest message, never a blank screen.',
   };
 }

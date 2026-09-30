@@ -3313,6 +3313,29 @@ the flag entries above promise.
   Real-browser tests in `tests/weLookBehindTheSignInPage.test.ts`. ⚠️ The same change makes a sign-in form
   that STARTS with a password typed in a medium security finding (`prefilled-password`) — so new apps
   mostly ship the demo account as source/hint text, which this reads too.
+- **📱 MOBILE FIRST — games get touch controls, apps are measured on a phone (admin 2026-09-30, verbatim:
+  *"mobile friendly game/app bane — mobile first!!!!!!"*).** Two keys, NEITHER set, both default ON.
+  🔴 **WHY:** the game runtime's `Input` has accepted a touch joystick and virtual buttons since it was
+  written, but NOTHING DREW THEM — a game built for WASD + mouse (autopsy 6a55d939, "god of war")
+  rendered on a phone and could not be played, the HUD paused only on Escape, and `AppKnowledgeBase`
+  told users all along that games "work on a phone". And every browser check we own opened apps at
+  1280×720 — nothing ever looked at an app on a phone.
+  - **The game shell draws the controls** (`GameShellGenerator` → `src/game/ui/touchControls.ts`, no
+    flag — it is part of the recipe): joystick under the left thumb, camera drag on the right,
+    Attack/Jump/Use/Run bottom-right (64px), a HUD Pause button for every device, multi-touch by
+    pointer id, everything released on blur. Shown where the PRIMARY pointer is coarse, or on the first
+    real touch; a mouse never sees it. `touchControls: { buttons: [...] }` chooses buttons; `false` only
+    for a game with its own. Proven with real `tsc` over all seven recipes and real CDP touch events.
+  - **`AGENTV3_TOUCH_GAME_NOTE`** (`off` disables): a game written WITHOUT the shell (a single-file HTML
+    game, a hand-rolled canvas loop) whose file has a render loop, keyboard control keys and no touch
+    handling gets a write-time note, once per build (`touchPlayableGame.ts`).
+  - **`AGENTV3_MOBILE_LAYOUT`** (`off` disables): after the app renders, it is opened ONCE at 390×844
+    with touch (`mobileLayoutCheck.ts`) and measured for sideways scroll and tap targets under 32px.
+    ⚠️ **Measure against `documentElement.clientWidth`, never `innerWidth`**: at phone size `innerWidth`
+    GROWS to fit overflowing content (measured 708 on a 390px screen with a 700px box), which hides
+    exactly the sideways scroll being looked for — the first version of this check did that. Evidence,
+    never a gate; `MOBILE_LAYOUT_ISSUES` becomes the one-tap offer "Make it fit a phone".
+    `MOBILE_LAYOUT_OK` / `_NOT_RUN` are process-only.
 - **`AGENTV3_CLICK_EXPLORE`** (default ON, set `off` to disable — added 2026-09-28, competitive gap G1,
   admin: *"best solution jo gaps ko fill kar ke navbharatai ko compatitors se aage la jaye"*) — **the
   app is PRESSED, not only painted.** Every post-build check watched the app render or drove ONE derived

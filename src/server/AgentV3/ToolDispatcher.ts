@@ -179,6 +179,7 @@ import { analyzeDependencyConstraints } from '../AI/reasoning/ConstraintSolver';
 import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis';
 import { analyzeRequirementCoverage, requirementCoverageSummary, currentRequestForCoverage } from './RequirementCoverage';
 import { binaryTextWriteRefusal } from './binaryTextWrite';
+import { isKeyboardOnlyGame, touchGameNoteEnabled, touchPlayableNote } from './touchPlayableGame';
 import { generateReadme } from './ReadmeGenerator';
 import { generateEnvExample } from './EnvExampleGenerator';
 import { generateGitignore } from './GitignoreGenerator';
@@ -723,6 +724,8 @@ export class ToolDispatcher {
    * own request, exactly as before.
    */
   private coverageRequest: string | null = null;
+  /** The keyboard-only-game note is said once per build (touchPlayableGame.ts). */
+  private _touchGameNoted = false;
   setCoverageRequest(text: string | null): void {
     this.coverageRequest = typeof text === 'string' && text.trim() ? text : null;
   }
@@ -3102,8 +3105,17 @@ export class ToolDispatcher {
     // At a STYLESHEET write, every screen's classes still without a rule; and a page's own design defects
     // (autopsy e6d46cde) — both used to wait for a 100-second repair pass after the app was done. A SCREEN
     // write's own undefined classes are `undefinedClassNotes` above, never repeated here.
+    // A game only a keyboard can play (admin 2026-09-30: "mobile first") — once per build, file open.
+    let touch = '';
+    if (!this._touchGameNoted && touchGameNoteEnabled()) {
+      for (const p of paths) {
+        try {
+          if (isKeyboardOnlyGame(p, files[p])) { touch = touchPlayableNote(p); this._touchGameNoted = true; break; }
+        } catch { /* a note is best-effort */ }
+      }
+    }
     const style = await this.styleWriteNotes(files);
-    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow;
+    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow + touch;
   }
 
   /** Most project files one style note may read — a note must never cost more than the write it follows. */

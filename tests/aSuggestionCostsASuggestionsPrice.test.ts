@@ -139,10 +139,10 @@ describe('the wiring in routes/agentv3.ts', () => {
   it('the plan is asked with previewGreen, previewProvenBroken and result.ok', () => {
     expect(src).toMatch(/const reviewPlan = greenReviewPlan\(\{ previewGreen, previewProvenBroken, buildOk: result\.ok \}\);/);
   });
-  it('the lean spawn is the SAME deps with only the step cap (and its own stop signal) changed', () => {
+  it('the lean spawn is the SAME deps with only the step cap, its own stop signal and (when all code is inline) no tools changed', () => {
     // The review has carried its own abort signal since autopsy 3a0a8f7f — see
     // theReviewerStopsWhenWeStopWaiting.test.ts. The step cap still applies only when the plan sets one.
-    expect(src).toMatch(/makeSubAgentSpawn\(\{\s*\.\.\.subAgentDeps,\s*signal: reviewAbort\.signal,\s*\.\.\.\(reviewPlan\.maxSteps !== undefined \? \{ maxSteps: reviewPlan\.maxSteps \} : \{\}\),\s*\}\)/);
+    expect(src).toMatch(/makeSubAgentSpawn\(\{\s*\.\.\.subAgentDeps,\s*signal: reviewAbort\.signal,\s*\.\.\.\(reviewPlan\.maxSteps !== undefined \? \{ maxSteps: reviewPlan\.maxSteps \} : \{\}\),\s*\.\.\.\(reviewOneCall \? \{ toolsOverride: \[\] \} : \{\}\),\s*\}\)/);
     expect(src).toMatch(/const spawnSubAgent = makeSubAgentSpawn\(subAgentDeps\);/);
   });
   it('the budget and the review are both told', () => {

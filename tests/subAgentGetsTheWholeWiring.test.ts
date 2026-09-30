@@ -136,7 +136,7 @@ describe('🔴 the child runner gets the five options it never had', () => {
 
   it('and the artifact expectation, gated on the role', () => {
     expect(runnerBlock).toContain('deps.expectsArtifacts');
-    expect(runnerBlock).toContain('roleExpectsArtifacts(cfg.tools)');
+    expect(runnerBlock).toContain('roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools)');
   });
 });
 

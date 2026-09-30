@@ -347,6 +347,30 @@ export function leanReviewInline(
   return { files, omitted };
 }
 
+/** Changed files first, then the rest, capped at `REVIEW_TREE_CAP` with the remainder counted. Pure. */
+export const REVIEW_TREE_CAP = 60;
+export function reviewFileList(fileTree: readonly string[], changed: readonly string[]): string {
+  const ordered = [...new Set([...changed, ...fileTree])];
+  const shown = ordered.slice(0, REVIEW_TREE_CAP);
+  const rest = ordered.length - shown.length;
+  return shown.join('\n') + (rest > 0 ? `\n…and ${rest} more (use glob to list them)` : '');
+}
+
+/**
+ * 🔴 ADVICE WAS NOT ENOUGH (autopsy bee95692, 2026-09-30). The lean review was handed all eleven
+ * changed files in full and told not to read them again, and it ran `glob` and then read all eleven
+ * anyway, one call each, and timed out at 45 s with no verdict — in three of that day's four reports.
+ * A green app's review is also what finds a real bug for the one verified repair
+ * (`selectGreenRepairable`), so a review that never lands loses that repair too.
+ *
+ * So when EVERY changed source file is in the instruction, the review is given NO tools: it can only
+ * answer, in one call. When a changed file did not fit (`omitted`), or nothing could be inlined, it
+ * keeps its read tools, because then reading is the only way to see the code. PURE.
+ */
+export function leanReviewAnswersInOneCall(inline: LeanReviewInline | undefined): boolean {
+  return !!inline && inline.files.length > 0 && inline.omitted.length === 0;
+}
+
 /**
  * The reviewer's instruction, as a pure function of its inputs — exported so the suggest-mode block
  * can be asserted rather than trusted. PURE.
@@ -368,7 +392,12 @@ export function reviewerInstruction(opts: Omit<ReviewBuildOpts, 'spawn'>): strin
     `USER REQUEST: "${userRequest}"`,
     '',
     `FILES BUILT (${fileTree.length} total):`,
-    fileTree.slice(0, 20).join('\n'),
+    // 🔴 THE FILES THIS TURN WROTE COME FIRST, AND THE LIST IS LONG ENOUGH TO HOLD THEM (autopsy 0bb437b4).
+    // A game carries ~30 platform library files; the first 20 of the tree were all library, the app's own
+    // src/game/racing/* were cut, and the reviewer guessed `src/components/RaceGame.tsx` and three other
+    // paths that did not exist, spent its budget finding them, and timed out with no suggestions. Paths
+    // are cheap; a guessed path costs a step.
+    reviewFileList(fileTree, scope.files),
     '',
     ...(scope.focused ? [
       `CHANGED THIS TURN (${scope.files.length} file(s)) — REVIEW THESE:`,
@@ -419,10 +448,15 @@ export function reviewerInstruction(opts: Omit<ReviewBuildOpts, 'spawn'>): strin
       '',
       'THIS APP IS PROVEN TO RENDER IN A REAL BROWSER, AND THIS REVIEW IS SUGGEST-ONLY: nothing you',
       'report can fail the build, and no repair will run from it — your findings are shown to the user as',
+      ...(leanReviewAnswersInOneCall(opts.inlineFiles) ? [
+      'an offer. You have NO tools in this review: every file that changed is above, in full. Answer',
+      'from it now, in this one reply. If nothing is genuinely wrong, say [PASS] immediately.',
+      ] : [
       'an offer. So spend accordingly. Read each file you need ONCE (you were already handed samples above',
       'and a file you have read does not change while you review it — re-reading it buys nothing and costs',
       'the user money). Do not survey the project; look at what changed and answer. Do not call',
       'second_opinion. If nothing is genuinely wrong, say [PASS] immediately.',
+      ]),
     ] : []),
   ].join('\n');
 }

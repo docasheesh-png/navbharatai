@@ -50,3 +50,20 @@ export function fastLaneRungDecision(
     reason: `The build opens on ${rung.provider} ${rung.model}, which always reasons before it answers; the fast lane's single plan call is bounded for a rung that answers directly, so it would spend its cap and hand over with nothing. Going straight to the full builder on the same model.`,
   };
 }
+
+/**
+ * 🔴 A GAME IS BUILT WITH THE GAME TOOLS, AND THE FAST LANE HAS NO TOOLS (autopsy 0bb437b4, 2026-09-30).
+ *
+ * "Make a racing game": the lane's plan listed five files — main.tsx, App.tsx, index.css, vite-env.d.ts and
+ * a README — then spent 90 s designing a contract for them and handed off having written nothing. The
+ * full builder then did what its own prompt requires for ANY game ("GAMES ARE BUILT WITH THE GAME TOOLS —
+ * NEVER HAND-ROLL THE ENGINE"): it ran six recipes and built on them. The lane cannot call a recipe, so for
+ * a game its best case is a hand-rolled loop the architect prompt forbids, and its usual case is 96 s of
+ * nothing. The domain is the platform's own classifier (`analyzeRequirementGaps`), passed in by the route.
+ *
+ * `AGENTV3_FASTLANE_GAMES=on` lets the lane try games again, with no deploy.
+ */
+export function fastLaneSkipsGame(domain: string | null | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (String(env.AGENTV3_FASTLANE_GAMES ?? '').trim().toLowerCase() === 'on') return false;
+  return domain === 'game';
+}

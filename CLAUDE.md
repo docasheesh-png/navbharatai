@@ -1898,6 +1898,35 @@ the code (it is actually read somewhere) on 2026-07-11.
   on restore).
   ⚠️ **Why not zstd:** in Node 22, which is our runtime image, `zlib.zstd*` is still EXPERIMENTAL, and this
   format must stay readable for the life of every stored version. The tag leaves room for `zs1` later.
+- **⏱️ A FREE BUILD HOLDS THE MACHINE FOR LESS (admin 2026-09-30, verbatim: *"han, free build time-limit
+  wala PR banao"*). Two keys, NEITHER set, both with working defaults.** Read by
+  `src/server/AgentV3/freeBuildTimeCap.ts`; applies to every build with `freeTierBuildActive` (free tier or
+  the Weak level, including the admin's own Weak builds).
+  - **`AGENTV3_FREE_BUILD_SECONDS`**: the free build's window. Default **1500 (25 min)**, floor 300. It is
+    never above the paid cap, so the orphan reaper (paid cap + 10 min) stays safe. `off` gives the paid
+    window. An unreadable value falls back to the default, never to "no limit". Applied to
+    `effectiveBuildSeconds`, so the watchdog, the runner's own stop, the reserve and the reviewer's
+    headroom all read the same number. A disabled watchdog (`AGENTV3_MAX_BUILD_SECONDS=0`) stays
+    disabled.
+  - **`AGENTV3_FREE_BUILD_AUTO_SECONDS`**: how long one free request may run unattended across windows.
+    Default **3000 (two default windows)**. Once it is spent, the watchdog pause is sent `resumable:
+    false`. The work is saved, the user is told so in branded words, and each "continue" buys one more
+    window. A new request starts a new allowance. `off` leaves the chain to the client's own bounds, as
+    before.
+  - 🔴 **WHY:** the window was never the bill; the unattended chain was. A free build got the paid
+    30/60-minute window, and the client auto-continued the watchdog pause for up to 8 windows while
+    files grew, plus 2 with no progress at all. That is four hours (eight on a deep prompt) of a machine
+    NavBharatAI pays for, with nobody pressing anything. The chain is bounded on the SERVER because the
+    phone apps are bundled: the server decides whether a pause is resumable, and every client already
+    obeys that.
+  - ⚠️ **The chain is counted in one instance's memory.** An auto-continue that lands on another Cloud
+    Run instance is a new chain there, which is exactly the old behaviour. So it can only fail toward
+    being more generous, never toward stopping a build wrongly. A durable counter is the complete fix;
+    it is an OPEN item in `PROGRESS.md`.
+  - ⚠️ **25 minutes is an assumption, not a measurement.** Watch `FREE_BUILD_TIME_CAP` and
+    `FREE_BUILD_CHAIN_PAUSED` in admin reports. Both are process codes, never app findings. A crop of
+    chain pauses on apps that were nearly done means the window is too short. Test-locked and
+    reversion-proven in `tests/aFreeBuildHoldsTheMachineForLess.test.ts`.
 - **🧾 THE MARKUP IS EARNED BY A PREVIEW THAT RAN (admin-mandated 2026-09-18).** `AGENTV3_MARKUP_NEEDS_PREVIEW`
   — ⚠️ **NOT set, and the code default is ON**; `off` is the instant, no-deploy revert to the
   pre-2026-09-18 behaviour exactly. Read by `src/server/AgentV3/previewEarnsMarkup.ts`; applied at BOTH
@@ -3273,6 +3302,15 @@ the flag entries above promise.
   (`modelAlwaysReasons`). Its single plan call is capped at 90 s, a cap sized for a rung that answers
   directly, so on `kimi-k2.7-code` it spent the whole cap thinking and handed over nothing.
   `fastLaneRungDecision` in `fastLaneRung.ts`; report code `FAST_LANE_SKIPPED_REASONING_RUNG`.
+- **`AGENTV3_FASTLANE_GAMES`** (NOT set; unset ⇒ a GAME skips the fast lane; `on` lets games back in —
+  added 2026-09-30, autopsy 0bb437b4). The lane has no tools, so it cannot run the game recipes the full
+  builder's prompt requires for any game. For "Make a racing game" it planned five generic files, spent
+  96 s and wrote nothing. The domain is `analyzeRequirementGaps(prompt).domain === 'game'`;
+  `fastLaneSkipsGame` in `fastLaneRung.ts`; report code `FAST_LANE_SKIPPED_GAME` (process-only).
+  Same autopsy, no flags: every in-sandbox browser lane opens pages with `reducedMotion: 'reduce'`
+  (`BROWSER_PAGE_OPTIONS`, one definition), because the kit's game button pulses for ever and Playwright
+  never presses a moving element. The explorer dispatches the click on the same element only for a
+  "not stable" failure.
 - **`AGENTV3_GREEN_REVIEW_LEAN`** (default ON, set `off` to disable — added 2026-09-18, autopsy b6f88a72) —
   **a suggestion costs a suggestion's price.** `reviewerShouldWrite` (Green Stop) already makes the
   post-build reviewer suggest-only on a proven-green app — no repair, nothing it says can fail the
@@ -3288,6 +3326,10 @@ the flag entries above promise.
   is in TOKENS, never in strictness. ⚠️ "Could not look" (not green, not proven broken, build ok) is
   ALSO lean, on purpose: Green Stop already made it suggest-only (*ignorance is not a licence to
   edit*, 2026-08-23), so an offer costs an offer's price there too. Report code `REVIEW_LEAN`.
+  🔒 **When every changed file fits inline, the lean review has NO tools (autopsy bee95692, 2026-09-30)** —
+  it was handed the code and read it all again anyway, then timed out; `leanReviewAnswersInOneCall` +
+  `toolsOverride: []`. ⚠️ Do NOT "save money" by skipping this review on green apps: it is also what
+  finds the bugs for `AGENTV3_GREEN_FUNCTIONAL_REPAIR` (the admin was asked and chose the fix).
   Test-locked and reversion-proven four ways in `tests/aSuggestionCostsASuggestionsPrice.test.ts`.
   **What to watch:** reviewer token share on green builds (34% → single digits expected), and that
   the reviewer's findings on NOT-green builds are as complete as before.
@@ -3362,6 +3404,22 @@ the flag entries above promise.
     exactly the sideways scroll being looked for — the first version of this check did that. Evidence,
     never a gate; `MOBILE_LAYOUT_ISSUES` becomes the one-tap offer "Make it fit a phone".
     `MOBILE_LAYOUT_OK` / `_NOT_RUN` are process-only.
+- **🔁 A RENDERED APP'S CONSOLE LINE IS CHECKED AGAIN BEFORE A REPAIR, AND OUR OWN NOTICE IS NOT A REQUEST
+  (autopsy 12511a9c, 2026-09-30).** Two keys, NEITHER set, both default ON; `off` reverts each alone.
+  - **`AGENTV3_CONSOLE_RECHECK`** (`renderCheckConsole.ts`): an app that RENDERED in a real browser, where
+    the only evidence against it is its console, gets one free second look before a repair is paid for
+    (`PREVIEW_CONSOLE_RECHECK`). A calculator (158 CSS rules, 20/20 buttons styled) was repaired twice
+    (~90 s, then ~3 min with a 118 s model call) for "The script has an unsupported MIME type
+    ('text/html')". That is Chrome's message for a service worker whose script came back as HTML. The
+    defaults pass had written `register('/sw.js')` into index.html BEFORE writing public/sw.js. The pass now
+    writes index.html LAST. And the runtime auto-fix reads the console only from the last CLEAN real-browser
+    check (`runtimeAutofixSince`): its fixed 180 s window was the sibling the 7d79254b fix never reached.
+  - **`AGENTV3_NOTICE_ECHO`** (`platformNoticeEcho.ts`): a prompt that IS one of our own notices (the
+    weak-tier welcome or build-failed notice, any language, or a 60+ character piece of one) is answered
+    with a fixed line naming the user's earlier request. No model call, no build, and it is never recorded as a
+    request. The report's prompt was the notice byte for byte, most likely copied from the notice bubble.
+    The build ran on our words and shipped them as the app's og:description. Second instance of the class
+    after fdd59ef8 (our sign-in notice).
 - **`AGENTV3_CLICK_EXPLORE`** (default ON, set `off` to disable — added 2026-09-28, competitive gap G1,
   admin: *"best solution jo gaps ko fill kar ke navbharatai ko compatitors se aage la jaye"*) — **the
   app is PRESSED, not only painted.** Every post-build check watched the app render or drove ONE derived

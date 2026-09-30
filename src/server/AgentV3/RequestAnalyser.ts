@@ -15,6 +15,7 @@
 // cheap start costs ~₹0 and the evaluate-gate catches failures and escalates, so leaning
 // cheap is safe AND is the whole point (a new user's calculator must not cost a fortune).
 
+import { withoutUrls } from '../lib/promptUrls';
 import { isComplexAppPrompt, namesBusinessDomain, namesHeavyGame, namesPersonalTool, SIMPLE_APP_SIGNAL } from '../lib/appComplexitySignals';
 import { userAskedForAnAppToBeBuilt, describesWorkAlreadyStarted, type BuildIntent } from './IntentClassifier';
 import { withoutMachineText } from '../lib/machineText';
@@ -180,9 +181,17 @@ const RE = {
   hardSignal: /\b(production|secure|security|scalable|optimi[sz]e|performance|concurrency|multi[- ]tenant)\b/i,
 };
 
+/**
+ * A build verb whose object is a thing to build — an app, a site, a tool, a game. When it is present, a
+ * feature noun elsewhere in the sentence ("translation", "summary") describes that thing, not the task.
+ */
+const ORDERS_A_BUILD = /\b(?:create|build|make|develop|design|generate|code|banao|bana\s*do|banado|banaiye)\b[^.?!\n]{0,60}?\b(?:app|apps|application|website|web\s*app|site|tool|platform|extension|game|dashboard|portal)\b/i;
+
 function classify(raw: string): { type: TaskType; matched: boolean } {
-  // A reference URL's words are not the request's words (autopsy 33812996) — see `withoutMachineText`.
-  const p = withoutMachineText(raw);
+  // A link is not words: `translate.google.com` is not an order to translate (a9f8d186 / 33812996). Two sessions
+  // fixed this class in parallel — `withoutUrls` (promptUrls.ts) and the shared `withoutMachineText`
+  // (lib/machineText.ts); both run so neither PR's guarantee is weakened.
+  const p = withoutMachineText(withoutUrls(raw));
   // Order matters: most-specific / highest-complexity wins when multiple match.
   if (RE.architecture.test(p)) return { type: 'architecture', matched: true };
   // SHARED complex-app verdict (single source of truth with the pipeline-DEPTH/ETA estimator, so the
@@ -204,7 +213,7 @@ function classify(raw: string): { type: TaskType; matched: boolean } {
    * the app it is (with the second opinion that path already buys). "translate this paragraph to
    * hindi" orders nothing and keeps its task.
    */
-  const ordersAnApp = userAskedForAnAppToBeBuilt(p);
+  const ordersAnApp = userAskedForAnAppToBeBuilt(p) || ORDERS_A_BUILD.test(p);
   if (RE.summary.test(p) && !ordersAnApp) return { type: 'summary', matched: true };
   if (RE.translate.test(p) && !ordersAnApp) return { type: 'translate', matched: true };
   // A heavy game that mentions a technology ("single file html … 3d fight game") is a game, not a

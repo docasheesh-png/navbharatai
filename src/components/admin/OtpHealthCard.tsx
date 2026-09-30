@@ -34,7 +34,8 @@ export const OTP_FIX_HINT: Readonly<Record<string, string>> = {
   network: 'The phone could not reach the provider. Usually the user\'s connection.',
   'invalid-number': 'The number was not valid. A user mistake, not a setting.',
   'code-wrong': 'The user typed the wrong code.',
-  'code-expired': 'The code expired before it was entered.',
+  'code-expired': 'The code was used after it expired — or used a SECOND time: Android read the SMS and signed the person in automatically, and the same code was then typed. Since 2026-09-30 that second use is no longer counted as a failure; a code-expired recorded after that date is a genuinely late code.',
+  'instant-verified': 'Android confirmed the number without an SMS (instant verification). The app then signs in on the phone\'s own session and hands it over through /api/auth/phone-exchange; a failure recorded here is that handover failing, and its code is in the detail. "custom-token-unavailable" means the Cloud Run service account lacks the Service Account Token Creator role (Google Cloud → IAM).',
   internal: 'The provider returned an internal error. Read the detail below; it usually names the real cause.',
   other: 'Not recognised. Read the detail below.',
 };

@@ -177,9 +177,12 @@ function otpHeadline(bySurface: readonly OtpSurfaceTally[]): string {
     if (s.sent === 0 && s.failed > 0) {
       parts.push(`${s.surface}: every send failed (${s.failed})${cat ? ` — mostly "${cat}"${isConfigurationFault(cat) ? ', a setting on our side' : ''}` : ''}.`);
     } else if (s.failed > 0) {
-      parts.push(`${s.surface}: ${s.sent} sent, ${s.failed} failed${cat ? ` — top reason "${cat}"` : ''}.`);
+      // VERIFIED IS SAID TOO (admin page, 2026-09-30): "6 sent, 1 failed" read as one person locked
+      // out, when all six had signed in and the one failure was a code used twice. A failure count
+      // with no success count beside it overstates the problem it is meant to measure.
+      parts.push(`${s.surface}: ${s.sent} sent, ${s.verified} verified, ${s.failed} failed${cat ? ` — top reason "${cat}"` : ''}.`);
     } else {
-      parts.push(`${s.surface}: ${s.sent} sent, none failed.`);
+      parts.push(`${s.surface}: ${s.sent} sent, ${s.verified} verified, none failed.`);
     }
   }
   return parts.join(' ');

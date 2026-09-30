@@ -23,6 +23,7 @@
 
 import { lintDesign, designSummary, type DesignLintResult } from '../AppMakerLab/intelligence/DesignLinter';
 import { lintA11y, type A11yLintResult } from '../AppMakerLab/intelligence/A11yLinter';
+import { stripCommentsForMarkup } from './stripCodeComments';
 
 /** Source files worth linting. Everything else is noise the linters would only mis-read. */
 const LINTABLE = /\.(tsx?|jsx?|css|scss|html)$/i;
@@ -108,8 +109,11 @@ export function lintBuiltApp(files: Record<string, string>): BuildQualityLint | 
     if (typeof path !== 'string' || typeof content !== 'string') continue;
     if (!LINTABLE.test(path) || NOT_APP_DESIGN.test(path) || GENERATED.test(path)) continue;
     if (total + content.length > MAX_LINT_CHARS) { truncated = true; continue; }
-    parts.push(content);
-    selected.push([path, content]);
+    // What a comment says is not what the app shows — neither linter may count it (autopsy 4541f1cf:
+    // a CSS comment naming `<img>` cost every app 8 accessibility points). Length-preserving.
+    const shipped = stripCommentsForMarkup(content);
+    parts.push(shipped);
+    selected.push([path, shipped]);
     total += content.length;
     fileCount++;
   }

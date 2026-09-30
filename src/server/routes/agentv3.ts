@@ -373,7 +373,7 @@ import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairProm
 import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
 import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel } from '../AgentV3/pricing';
 import { tieredMarkupUsd, realProviderCostUsd } from '../AgentV3/providerRates';
-import { splitUnbilledCost } from '../AgentV3/unbilledTurns';
+import { splitUnbilledCost, absorbedWorkDetail } from '../AgentV3/unbilledTurns';
 import { runInBillingPhase, currentBillingPhase, PHASE_POST_BUILD_REVIEW, PHASE_EXPLORER_REPAIR, NO_BARREN_PHASES, type BarrenPhases } from '../AgentV3/billingPhase';
 import { createUsageSink } from '../AgentV3/UsageSink';
 import {
@@ -508,7 +508,7 @@ import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
-import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild, userAskedForAnAppToBeBuilt } from '../AgentV3/IntentClassifier';
+import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild, userAskedForAnAppToBeBuilt, readerlessIntent, describeReaderOutcome, type ReaderOutcome } from '../AgentV3/IntentClassifier';
 import { fastLanePhaseSummary, dominantFastLanePhase } from '../AgentV3/fastLanePhases';
 import { emptyWasteLedger, recordWaste, wasteSummary, totalWasteCalls, type WasteKind } from '../AgentV3/providerWaste';
 import { readTurnAnswer, answeredWithoutBuilding } from '../AgentV3/turnAnswer';
@@ -10463,6 +10463,8 @@ async function noteBuildOutcome(
     let readerAnswered = false;
     /** Set when a BUILD order was turned into an edit by the net below — recorded once a report exists. */
     let buildOrderReadAsEdit: { files: number; ownFiles: number; readerRan: boolean } | null = null;
+    /** What happened to the intention reader, in words the report can print (autopsy 6e646503). */
+    let readerOutcome: ReaderOutcome | undefined;
     try {
       const freeRouter = AIRouterManager.getRouter('free');
       // Bounded (6s) — this LLM upgrade runs before the deadline timer is armed; a stalled free
@@ -10485,7 +10487,14 @@ async function noteBuildOutcome(
       // The deterministic net below stands in for a reader that did not run; it must not overrule one
       // that did. See `SmartIntent.readerAnswered` (autopsy e9b25b08).
       readerAnswered = smart.readerAnswered;
-    } catch { /* LLM upgrade is best-effort — keyword result stands */ }
+      readerOutcome = smart.readerOutcome;
+    } catch {
+      // The reader did not answer in time (or the router threw). A certain keyword verdict stands; an
+      // UNCERTAIN one takes the same readerless fallback the classifier uses when the reader throws —
+      // so a question is answered, not built, on a slow free router too (autopsy 6e646503).
+      readerOutcome = 'failed';
+      if (classifyIntentWithConfidence(prompt).confidence !== 'high') intent = readerlessIntent(prompt);
+    }
 
     /**
      * 🔴 NOTHING TO BUILD FROM — the 5 minute 57 second question (build report 2026-09-13, 541979d2).
@@ -12182,8 +12191,10 @@ async function noteBuildOutcome(
               phase: 'build', severity: 'info', code: 'UNBILLED_BARREN_WORK',
               autoResolved: true,
               message: `₹${(decided.absorbedUnbilledUsd * usdInrRate()).toFixed(2)} of engine work produced nothing and was not billed`,
-              detail: 'One or more model turns spent their whole output budget without producing any text or '
-                + 'tool call. Counted in full in this report\'s real cost, left out of the base the markup is '
+              // The cause is READ from the ledger and the barren-phase verdicts the bill was priced from —
+              // never assumed (autopsy 4541f1cf: this line blamed starved turns for a timed-out review).
+              detail: `Why: ${absorbedWorkDetail(billingCtx.providerLedger.entries(), barrenPhases)}. Counted in full in this `
+                + 'report\'s real cost, left out of the base the markup is '
                 + `applied to. Absorbed: $${decided.absorbedUnbilledUsd.toFixed(6)}.`,
             });
           }
@@ -15303,7 +15314,7 @@ async function noteBuildOutcome(
               code: 'BUILD_ORDER_READ_AS_EDIT',
               autoResolved: true,
               message: 'This message read as an order to BUILD, and was turned into an edit because the workspace already had files.',
-              detail: `${buildOrderReadAsEdit.files} file(s) in the workspace, ${buildOrderReadAsEdit.ownFiles} of them the user's own (the rest are the platform scaffold) · intention reader ${buildOrderReadAsEdit.readerRan ? 'answered' : 'did not run'} · no "start over" wording · not an explicit complete-app request. A plan is created only on a fresh build, so Software Project Mode cannot run on this turn.`,
+              detail: `${buildOrderReadAsEdit.files} file(s) in the workspace, ${buildOrderReadAsEdit.ownFiles} of them the user's own (the rest are the platform scaffold) · ${buildOrderReadAsEdit.readerRan ? 'intention reader answered' : describeReaderOutcome(readerOutcome)} · no "start over" wording · not an explicit complete-app request. A plan is created only on a fresh build, so Software Project Mode cannot run on this turn.`,
             });
           }
           architectSystem = editModePrefix(fileTree) + '\n\n---\n\n' + architectSystem;
@@ -15741,7 +15752,7 @@ async function noteBuildOutcome(
       // what the user themselves said, and only features the end-of-build audit will grade. A request
       // naming no known surface yields '' and leaves buildPrompt byte-identical.
       try {
-        const contract = renderRequestedFeatureContract(confirmedContractLabels(featureLists, featureConfirmation));
+        const contract = renderRequestedFeatureContract(confirmedContractLabels(featureLists, featureConfirmation), prompt);
         if (contract) buildPrompt = `${contract}\n\n---\n\n${buildPrompt}`;
       } catch { /* the contract is best-effort — a fault here must never affect the build */ }
 
@@ -23660,8 +23671,9 @@ async function noteBuildOutcome(
               // Nothing about the app is wrong — this is an accounting fact, so it resolves itself.
               autoResolved: true,
               message: `₹${(decidedAbsorbedUsd * usdInrRate()).toFixed(2)} of engine work produced nothing and was not billed`,
-              detail: 'One or more model turns spent their whole output budget without producing any text or '
-                + 'tool call, so they delivered nothing a caller could use. Their tokens are counted IN FULL in '
+              // The cause is READ from the same ledger and verdicts the bill used (autopsy 4541f1cf).
+              detail: `Why: ${absorbedWorkDetail(providerLedger.entries(), barrenPhases)} — so that work delivered `
+                + 'nothing a caller could use. Its tokens are counted IN FULL in '
                 + `this report's real cost (we paid for them) and were left OUT of the base the markup is applied `
                 + `to, which is why the bill is below cost × markup here. Absorbed: $${decidedAbsorbedUsd.toFixed(6)}. `
                 + 'The real saving is not spending them at all — see unbilledTurns.ts.',

@@ -261,13 +261,13 @@ describe('the astronomy is the SAME in both apps', () => {
 });
 
 describe('the scripture readers state what they hold', () => {
-  it('the Gita reader counts its own selection against the full 700', () => {
+  it('the Gita reader counts what it holds — since 2026-09-30 that is the whole book, counted from its data', () => {
     const src = appSourceFor('geeta');
-    expect(src).toContain('{SHLOKAS.length} चुने हुए श्लोक');
-    expect(src).toContain('कुल 700 में से');
-    // A chapter genuinely absent from the selection must show an empty state, not be hidden.
-    expect(src).toContain('इस चयन में नहीं');
-    expect(src).toContain('ऐप वही दिखाता है जो उसके पास सच में है');
+    // The number on the first screen is COMPUTED from the chapter files, never typed in, so it cannot
+    // claim more than the app carries. tests/theWholeGitaIsHere.test.ts proves the files hold 700.
+    expect(src).toContain('सभी {CHAPTERS.length} अध्याय और पूरे {COUNTED.length} श्लोक');
+    expect(src).toContain('const COUNTED = SHLOKAS.filter((s) => s.v > 0);');
+    expect(src).not.toContain('चुने हुए');
   });
 
   it('the Quran reader counts its surahs against all 114, and carries a Hindi transliteration', () => {

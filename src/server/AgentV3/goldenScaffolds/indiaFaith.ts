@@ -16,11 +16,36 @@
 // in the selection shows a real empty state rather than being hidden, and the Hindi meanings are plain
 // original paraphrase rather than a copied translation. The verse and ayah texts themselves are the
 // ancient public-domain originals.
+//
+// ✅ THE GITA NOW CARRIES THE WHOLE BOOK (admin 2026-09-30: "haan, poori Gita ke 700 shloka daal do"). The
+// licensing question above was about a modern Hindi TRANSLATION; it is answered by writing our own bhavarth
+// for every verse (gitaText.ts says where each half comes from). The size question is answered by keeping
+// the text out of App.tsx: eighteen JSON files, one per chapter. The honesty line still counts what it holds —
+// it now says 700. The Quran reader is unchanged and still a counted selection.
 
 export const geetaAppTsx = `import { useMemo, useState } from 'react';
 import ThemeToggle from './theme';
+import c1 from './gita/01.json';
+import c2 from './gita/02.json';
+import c3 from './gita/03.json';
+import c4 from './gita/04.json';
+import c5 from './gita/05.json';
+import c6 from './gita/06.json';
+import c7 from './gita/07.json';
+import c8 from './gita/08.json';
+import c9 from './gita/09.json';
+import c10 from './gita/10.json';
+import c11 from './gita/11.json';
+import c12 from './gita/12.json';
+import c13 from './gita/13.json';
+import c14 from './gita/14.json';
+import c15 from './gita/15.json';
+import c16 from './gita/16.json';
+import c17 from './gita/17.json';
+import c18 from './gita/18.json';
 
-interface Shloka { ch: number; v: number; sa: string; hi: string }
+interface RawVerse { v: number; sp?: string; sa: string; hi: string }
+interface Shloka extends RawVerse { ch: number }
 
 const CHAPTERS: Array<{ n: number; hi: string; en: string }> = [
   { n: 1, hi: 'अर्जुन विषाद योग', en: 'Despair of Arjuna' },
@@ -43,38 +68,14 @@ const CHAPTERS: Array<{ n: number; hi: string; en: string }> = [
   { n: 18, hi: 'मोक्ष संन्यास योग', en: 'Freedom' },
 ];
 
-// The selection this app carries. The Devanagari is the original text; the Hindi below each verse is a
-// plain paraphrase written for this app, not a copy of any published translation.
-const SHLOKAS: Shloka[] = [
-  { ch: 1, v: 1, sa: 'धर्मक्षेत्रे कुरुक्षेत्रे समवेता युयुत्सवः। मामकाः पाण्डवाश्चैव किमकुर्वत सञ्जय॥', hi: 'धृतराष्ट्र ने पूछा: हे संजय, धर्मभूमि कुरुक्षेत्र में युद्ध की इच्छा से इकट्ठे हुए मेरे और पाण्डु के पुत्रों ने क्या किया?' },
-  { ch: 2, v: 13, sa: 'देहिनोऽस्मिन्यथा देहे कौमारं यौवनं जरा। तथा देहान्तरप्राप्तिर्धीरस्तत्र न मुह्यति॥', hi: 'जैसे इस शरीर में बचपन, जवानी और बुढ़ापा आते जाते हैं, वैसे ही आत्मा एक शरीर छोड़कर दूसरा पा लेती है। समझदार व्यक्ति इस पर घबराता नहीं।' },
-  { ch: 2, v: 20, sa: 'न जायते म्रियते वा कदाचिन्नायं भूत्वा भविता वा न भूयः। अजो नित्यः शाश्वतोऽयं पुराणो न हन्यते हन्यमानेऽस्मिन्शरीरे॥', hi: 'आत्मा कभी जन्म नहीं लेती और कभी मरती नहीं। वह अजन्मा, नित्य और सनातन है। शरीर मारा जाता है, आत्मा नहीं।' },
-  { ch: 2, v: 22, sa: 'वासांसि जीर्णानि यथा विहाय नवानि गृह्णाति नरोऽपराणि। तथा शरीराणि विहाय जीर्णान्यन्यानि संयाति नवानि देही॥', hi: 'जैसे आदमी पुराने कपड़े छोड़कर नए पहन लेता है, वैसे ही आत्मा पुराना शरीर छोड़कर नया शरीर ले लेती है।' },
-  { ch: 2, v: 23, sa: 'नैनं छिन्दन्ति शस्त्राणि नैनं दहति पावकः। न चैनं क्लेदयन्त्यापो न शोषयति मारुतः॥', hi: 'आत्मा को हथियार काट नहीं सकते, आग जला नहीं सकती, पानी गीला नहीं कर सकता और हवा सुखा नहीं सकती।' },
-  { ch: 2, v: 47, sa: 'कर्मण्येवाधिकारस्ते मा फलेषु कदाचन। मा कर्मफलहेतुर्भूर्मा ते सङ्गोऽस्त्वकर्मणि॥', hi: 'तेरा हक़ सिर्फ़ कर्म करने पर है, फल पर नहीं। फल की चाह से काम मत कर, और काम छोड़ भी मत।' },
-  { ch: 2, v: 48, sa: 'योगस्थः कुरु कर्माणि सङ्गं त्यक्त्वा धनञ्जय। सिद्ध्यसिद्ध्योः समो भूत्वा समत्वं योग उच्यते॥', hi: 'आसक्ति छोड़कर, सफलता और असफलता दोनों में एक जैसा रहकर अपना काम कर। इस समता को ही योग कहा जाता है।' },
-  { ch: 2, v: 62, sa: 'ध्यायतो विषयान्पुंसः सङ्गस्तेषूपजायते। सङ्गात्सञ्जायते कामः कामात्क्रोधोऽभिजायते॥', hi: 'जो चीज़ों के बारे में सोचता रहता है, उसका उनसे लगाव हो जाता है। लगाव से इच्छा पैदा होती है और इच्छा से क्रोध।' },
-  { ch: 3, v: 35, sa: 'श्रेयान्स्वधर्मो विगुणः परधर्मात्स्वनुष्ठितात्। स्वधर्मे निधनं श्रेयः परधर्मो भयावहः॥', hi: 'अपना कर्तव्य अधूरा निभाना भी दूसरे का कर्तव्य अच्छी तरह निभाने से बेहतर है। दूसरे का रास्ता डर की ओर ले जाता है।' },
-  { ch: 4, v: 7, sa: 'यदा यदा हि धर्मस्य ग्लानिर्भवति भारत। अभ्युत्थानमधर्मस्य तदात्मानं सृजाम्यहम्॥', hi: 'जब भी धर्म कमज़ोर पड़ता है और अधर्म बढ़ता है, तब मैं स्वयं प्रकट होता हूँ।' },
-  { ch: 4, v: 8, sa: 'परित्राणाय साधूनां विनाशाय च दुष्कृताम्। धर्मसंस्थापनार्थाय सम्भवामि युगे युगे॥', hi: 'सज्जनों की रक्षा, बुराई का नाश और धर्म की स्थापना के लिए मैं हर युग में आता हूँ।' },
-  { ch: 5, v: 10, sa: 'ब्रह्मण्याधाय कर्माणि सङ्गं त्यक्त्वा करोति यः। लिप्यते न स पापेन पद्मपत्रमिवाम्भसा॥', hi: 'जो अपने काम ईश्वर को अर्पित करके, आसक्ति छोड़कर करता है, वह पाप से उतना ही अछूता रहता है जितना कमल का पत्ता पानी से।' },
-  { ch: 6, v: 5, sa: 'उद्धरेदात्मनात्मानं नात्मानमवसादयेत्। आत्मैव ह्यात्मनो बन्धुरात्मैव रिपुरात्मनः॥', hi: 'अपने आप को अपने ही प्रयास से ऊपर उठाओ, अपने आप को गिराओ मत। इंसान का सबसे बड़ा मित्र और सबसे बड़ा शत्रु वह स्वयं है।' },
-  { ch: 6, v: 17, sa: 'युक्ताहारविहारस्य युक्तचेष्टस्य कर्मसु। युक्तस्वप्नावबोधस्य योगो भवति दुःखहा॥', hi: 'जिसका खाना, घूमना, काम करना और सोना जागना संतुलित है, उसका योग दुःख मिटा देता है।' },
-  { ch: 7, v: 7, sa: 'मत्तः परतरं नान्यत्किञ्चिदस्ति धनञ्जय। मयि सर्वमिदं प्रोतं सूत्रे मणिगणा इव॥', hi: 'मुझसे बढ़कर कुछ नहीं है। यह सारा जगत मुझमें उसी तरह पिरोया है जैसे धागे में मोती।' },
-  { ch: 8, v: 7, sa: 'तस्मात्सर्वेषु कालेषु मामनुस्मर युध्य च। मय्यर्पितमनोबुद्धिर्मामेवैष्यस्यसंशयम्॥', hi: 'इसलिए हर समय मुझे याद रखते हुए अपना कर्तव्य निभा। मन और बुद्धि मुझमें लगा देने पर तू निश्चय ही मुझ तक पहुँचेगा।' },
-  { ch: 9, v: 22, sa: 'अनन्याश्चिन्तयन्तो मां ये जनाः पर्युपासते। तेषां नित्याभियुक्तानां योगक्षेमं वहाम्यहम्॥', hi: 'जो लोग बिना किसी और सहारे के मुझमें मन लगाकर मेरी उपासना करते हैं, उनका भार मैं स्वयं उठाता हूँ।' },
-  { ch: 9, v: 26, sa: 'पत्रं पुष्पं फलं तोयं यो मे भक्त्या प्रयच्छति। तदहं भक्त्युपहृतमश्नामि प्रयतात्मनः॥', hi: 'जो शुद्ध मन से प्रेमपूर्वक मुझे एक पत्ता, फूल, फल या पानी भी अर्पित करता है, उसे मैं स्वीकार करता हूँ।' },
-  { ch: 10, v: 20, sa: 'अहमात्मा गुडाकेश सर्वभूताशयस्थितः। अहमादिश्च मध्यं च भूतानामन्त एव च॥', hi: 'मैं हर प्राणी के हृदय में बैठी आत्मा हूँ। सब प्राणियों का आदि, मध्य और अन्त भी मैं ही हूँ।' },
-  { ch: 11, v: 7, sa: 'इहैकस्थं जगत्कृत्स्नं पश्याद्य सचराचरम्। मम देहे गुडाकेश यच्चान्यद्द्रष्टुमिच्छसि॥', hi: 'इस एक ही रूप में सारा चर और अचर जगत देख लो। जो भी और देखना चाहो, वह भी यहीं है।' },
-  { ch: 12, v: 15, sa: 'यस्मान्नोद्विजते लोको लोकान्नोद्विजते च यः। हर्षामर्षभयोद्वेगैर्मुक्तो यः स च मे प्रियः॥', hi: 'जिससे किसी को परेशानी नहीं होती, जो किसी से परेशान नहीं होता, और जो खुशी, जलन, डर और बेचैनी से मुक्त है, वह मुझे प्रिय है।' },
-  { ch: 14, v: 5, sa: 'सत्त्वं रजस्तम इति गुणाः प्रकृतिसम्भवाः। निबध्नन्ति महाबाहो देहे देहिनमव्ययम्॥', hi: 'सत्त्व, रज और तम, ये तीनों गुण प्रकृति से पैदा होते हैं और अविनाशी आत्मा को शरीर में बाँध देते हैं।' },
-  { ch: 15, v: 15, sa: 'सर्वस्य चाहं हृदि सन्निविष्टो मत्तः स्मृतिर्ज्ञानमपोहनं च।', hi: 'मैं सबके हृदय में बसा हूँ। याद, ज्ञान और भूलना भी मुझसे ही होता है।' },
-  { ch: 16, v: 3, sa: 'तेजः क्षमा धृतिः शौचमद्रोहो नातिमानिता। भवन्ति सम्पदं दैवीमभिजातस्य भारत॥', hi: 'तेज, क्षमा, धीरज, शुद्धता, किसी से बैर न रखना और घमंड न करना, ये दैवी स्वभाव वाले व्यक्ति के गुण हैं।' },
-  { ch: 17, v: 3, sa: 'सत्त्वानुरूपा सर्वस्य श्रद्धा भवति भारत। श्रद्धामयोऽयं पुरुषो यो यच्छ्रद्धः स एव सः॥', hi: 'हर व्यक्ति की श्रद्धा उसके स्वभाव के अनुसार होती है। इंसान श्रद्धा से बना है, जिस पर उसकी श्रद्धा है वही वह है।' },
-  { ch: 18, v: 66, sa: 'सर्वधर्मान्परित्यज्य मामेकं शरणं व्रज। अहं त्वां सर्वपापेभ्यो मोक्षयिष्यामि मा शुचः॥', hi: 'सब कुछ छोड़कर केवल मेरी शरण में आ जा। मैं तुझे सब पापों से मुक्त कर दूँगा, चिन्ता मत कर।' },
-];
-
-const CHAPTERS_HELD = new Set(SHLOKAS.map((s) => s.ch)).size;
+// The whole Gita, one JSON file per chapter in src/gita/. The Sanskrit is the ancient public-domain text;
+// the Hindi below each verse is a plain bhavarth written for this app, not a copy of any published translation.
+// Numbering follows Gita Press; 13.0 is Arjuna's question that opens chapter 13 in some editions.
+const BY_CHAPTER: RawVerse[][] = [c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18] as RawVerse[][];
+const SHLOKAS: Shloka[] = BY_CHAPTER.flatMap((verses, i) => verses.map((x) => ({ ...x, ch: i + 1 })));
+/** The 700 verses everyone counts — 13.0 is shown, but not counted, so the number matches every other edition. */
+const COUNTED = SHLOKAS.filter((s) => s.v > 0);
+const SEARCH_LIMIT = 40;
 
 function load(key: string): string[] {
   try {
@@ -88,11 +89,12 @@ function save(key: string, v: string[]) {
 }
 
 const refOf = (s: Shloka) => s.ch + '.' + s.v;
+const refLabel = (s: Shloka) => (s.v === 0 ? 'अध्याय ' + s.ch + ' · आरंभिक प्रश्न' : 'अध्याय ' + s.ch + ' · श्लोक ' + s.v);
 
 /** Verse of the day: the SAME verse for everyone all day, because it is keyed off the date, not random. */
 function verseOfTheDay(d: Date): Shloka {
   const dayNumber = Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
-  return SHLOKAS[((dayNumber % SHLOKAS.length) + SHLOKAS.length) % SHLOKAS.length];
+  return COUNTED[((dayNumber % COUNTED.length) + COUNTED.length) % COUNTED.length];
 }
 
 function App() {
@@ -108,12 +110,13 @@ function App() {
     [openChapter],
   );
   const results = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const raw = search.trim();
+    const q = raw.toLowerCase();
     if (!q) return [];
     return SHLOKAS.filter((s) => {
       const ch = CHAPTERS[s.ch - 1];
-      return s.hi.toLowerCase().includes(q) || s.sa.includes(search.trim())
-        || ch.hi.toLowerCase().includes(q) || ch.en.toLowerCase().includes(q) || refOf(s).includes(q);
+      return s.hi.toLowerCase().includes(q) || s.sa.includes(raw)
+        || ch.hi.toLowerCase().includes(q) || ch.en.toLowerCase().includes(q) || refOf(s) === q;
     });
   }, [search]);
 
@@ -124,13 +127,17 @@ function App() {
     save('geeta-saved-v1', next);
   };
 
-  const openAt = (ch: number, i: number) => { setOpenChapter(ch); setIndex(i); setTab('chapters'); };
+  const openAt = (s: Shloka) => {
+    setOpenChapter(s.ch);
+    setIndex(Math.max(0, SHLOKAS.filter((x) => x.ch === s.ch).findIndex((x) => x.v === s.v)));
+    setTab('chapters');
+  };
 
   const Verse = (props: { s: Shloka; showRef?: boolean }) => (
     <div className="card" style={{ marginBottom: 12 }}>
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
         <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-          अध्याय {props.s.ch} · श्लोक {props.s.v}
+          {refLabel(props.s)}
           {props.showRef ? ' — ' + CHAPTERS[props.s.ch - 1].hi : ''}
         </div>
         <button
@@ -142,7 +149,8 @@ function App() {
           {saved.includes(refOf(props.s)) ? 'सहेजा ✓' : 'सहेजें'}
         </button>
       </div>
-      <p style={{ fontSize: 20, lineHeight: 1.8, margin: '12px 0', fontWeight: 600 }}>{props.s.sa}</p>
+      {props.s.sp ? <div style={{ fontSize: 13, marginTop: 10, color: 'var(--muted)' }}>{props.s.sp}</div> : null}
+      <p style={{ fontSize: 20, lineHeight: 1.8, margin: '8px 0 12px', fontWeight: 600, whiteSpace: 'pre-line' }}>{props.s.sa}</p>
       <p style={{ fontSize: 15, lineHeight: 1.75, margin: 0, color: 'var(--muted)' }}>{props.s.hi}</p>
     </div>
   );
@@ -154,14 +162,15 @@ function App() {
         <ThemeToggle />
       </div>
       <p style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--muted)' }}>
-        Bhagavad Gita — हिन्दी अर्थ सहित
+        Bhagavad Gita — हिन्दी भावार्थ सहित
       </p>
 
-      {/* 🔒 The honesty line, on the first screen and not in a footnote: the app says exactly how much of
-          the text it carries, so it can never imply it holds all 700 shlokas. */}
+      {/* 🔒 The honesty line, on the first screen and not in a footnote: what the app carries and where the
+          Hindi comes from. */}
       <div className="alert" style={{ marginBottom: 16, fontSize: 13 }}>
-        इस ऐप में गीता के <strong>{SHLOKAS.length} चुने हुए श्लोक</strong> हैं (कुल 700 में से),
-        18 अध्यायों में से {CHAPTERS_HELD} अध्यायों से। हिन्दी अर्थ सरल भाषा में इसी ऐप के लिए लिखा गया है।
+        इस ऐप में गीता के <strong>सभी {CHAPTERS.length} अध्याय और पूरे {COUNTED.length} श्लोक</strong> हैं
+        (अध्याय 13 के आरंभ में अर्जुन का प्रश्न भी, जो कुछ संस्करणों में मिलता है)। संस्कृत मूल पाठ है;
+        हर श्लोक का हिन्दी भावार्थ सरल भाषा में इसी ऐप के लिए लिखा गया है।
       </div>
 
       <div className="row" style={{ gap: 6, marginBottom: 16 }}>
@@ -182,15 +191,17 @@ function App() {
           <h2 style={{ fontSize: 15, margin: '0 0 10px', color: 'var(--muted)' }}>आज का श्लोक</h2>
           <Verse s={today} showRef />
           <div className="field" style={{ marginTop: 20 }}>
-            <label htmlFor="q">खोजें (हिन्दी अर्थ या अध्याय)</label>
+            <label htmlFor="q">खोजें (हिन्दी अर्थ, अध्याय या श्लोक संख्या)</label>
             <input id="q" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="जैसे: कर्म, भक्ति, 2.47" />
           </div>
           {search.trim() !== '' && (
             results.length === 0
-              ? <div className="nb-empty">इस चयन में कुछ नहीं मिला।</div>
+              ? <div className="nb-empty">कुछ नहीं मिला। कोई और शब्द आज़माएँ।</div>
               : <div>
-                  <p style={{ fontSize: 12, color: 'var(--muted)' }}>{results.length} श्लोक मिले</p>
-                  {results.map((s) => <Verse key={refOf(s)} s={s} showRef />)}
+                  <p style={{ fontSize: 12, color: 'var(--muted)' }}>
+                    {results.length} श्लोक मिले{results.length > SEARCH_LIMIT ? ' — पहले ' + SEARCH_LIMIT + ' दिखाए गए हैं, खोज को और सटीक करें' : ''}
+                  </p>
+                  {results.slice(0, SEARCH_LIMIT).map((s) => <Verse key={refOf(s)} s={s} showRef />)}
                 </div>
           )}
         </div>
@@ -199,7 +210,7 @@ function App() {
       {tab === 'chapters' && openChapter === null && (
         <div className="stack">
           {CHAPTERS.map((c) => {
-            const count = SHLOKAS.filter((s) => s.ch === c.n).length;
+            const count = BY_CHAPTER[c.n - 1].filter((x) => x.v > 0).length;
             return (
               <button
                 key={c.n}
@@ -208,9 +219,7 @@ function App() {
                 style={{ textAlign: 'left', display: 'block', width: '100%', padding: '12px 14px' }}
               >
                 <div style={{ fontWeight: 600 }}>{c.n}. {c.hi}</div>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                  {c.en} · {count > 0 ? count + ' श्लोक' : 'इस चयन में नहीं'}
-                </div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{c.en} · {count} श्लोक</div>
               </button>
             );
           })}
@@ -226,10 +235,7 @@ function App() {
             अध्याय {openChapter}: {CHAPTERS[openChapter - 1].hi}
           </h2>
           {inChapter.length === 0 ? (
-            <div className="nb-empty">
-              इस अध्याय के श्लोक इस चयन में शामिल नहीं हैं। यह जानबूझकर खाली दिखाया गया है —
-              ऐप वही दिखाता है जो उसके पास सच में है।
-            </div>
+            <div className="nb-empty">इस अध्याय के श्लोक लोड नहीं हो सके।</div>
           ) : (
             <div>
               <Verse s={inChapter[Math.min(index, inChapter.length - 1)]} />
@@ -252,7 +258,7 @@ function App() {
               {SHLOKAS.filter((s) => saved.includes(refOf(s))).map((s) => (
                 <div key={refOf(s)}>
                   <Verse s={s} showRef />
-                  <button className="btn-ghost" onClick={() => openAt(s.ch, SHLOKAS.filter((x) => x.ch === s.ch).findIndex((x) => x.v === s.v))} style={{ marginBottom: 18 }}>
+                  <button className="btn-ghost" onClick={() => openAt(s)} style={{ marginBottom: 18 }}>
                     अध्याय में खोलें →
                   </button>
                 </div>

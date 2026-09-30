@@ -84696,3 +84696,35 @@ the architect. The Frontend specialist that actually writes the AI client never 
 - Locked in `tests/anAiAppNeedsNoKey.test.ts`.
 
 **Admin action:** set `APP_AI_GATEWAY=on` in Cloud Run.
+
+## 2026-09-30 — The stored report kept forty copies of one prompt (the a5b661c8 open item, closed)
+
+**What was wrong.** The a5b661c8 report stored 40 of 151 model calls, and every stored call carried the
+same first 800 characters of the architect's system prompt. So no stored call said what it was asked,
+the 12:16–12:20 gap could not be read, and the origin of the `CollectionTheme` import could not be proven.
+
+**Root cause, two caps:**
+- **The recorder** capped the WHOLE preview (`system head + separator + last message`) at 2,000 characters.
+  A 46 KB system prompt always filled that, so the turn's own message never reached the report.
+- **The store** cut every preview again to 800 characters. With every stored call the same size and
+  nearly identical, a fixed forty was really a size decision.
+
+**Fix (`promptPreviewShape.ts`, `DiagnosticsStore.ts`):**
+- Each half of the preview is capped on its own, in the recorder and in the store, so the last message
+  always survives.
+- A system head identical to the previous STORED call's is written as a one-line marker. The marker is
+  applied after the window is taken, so it never points past a gap.
+- The stored call count comes from a 200 KB byte budget, clamped between 40 and 300. A real-shaped build
+  now keeps 100+ calls instead of 40.
+- `fitReportForStorage` is the one fit for all four save paths and the admin record: trim, then keep only
+  forty calls, and only then drop the heavy channels. The admin record's focused build had no size check
+  at all before this.
+- Earlier builds in an admin session keep forty calls each, so the session fit is unchanged.
+- `buildCostLedger` reads `LEGACY_STORED_LLM_CALLS_MAX = 40` for old reports, so an old 40-call log
+  still reads as possibly truncated.
+
+**Tests:** `tests/theReportKeptFortyCopiesOfOnePrompt.test.ts` (11), reversion-proven for the recorder,
+the marker and the fit. The count and source guards in three existing suites were updated deliberately.
+
+**Still open:** the `CollectionTheme` import origin in a5b661c8 itself cannot be recovered; that report
+is already stored. The next report of that shape will show it.

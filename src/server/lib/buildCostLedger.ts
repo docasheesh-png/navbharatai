@@ -9,7 +9,7 @@
 //   • REAL COST  — `billing.realCostUsd`, the figure the settle priced with the SAME call that priced the
 //     bill (persisted since 2026-09-14; `source: 'settled'`). For a report written BEFORE that, the cost
 //     is recomputed from the stored `llmCalls` through the same rate card (`realRateFor` + `usageCostUsd`)
-//     — and storage keeps only `STORED_LLM_CALLS_MAX` calls (the build's first few and its last few),
+//     — and storage kept only `LEGACY_STORED_LLM_CALLS_MAX` calls (the build's first few and its last few),
 //     so a log that has hit that cap
 //     is a LOWER BOUND (`source: 'call-log-capped'`, `measured: false`), never presented as the cost.
 //     ⚠️ A call with no token counts cannot be priced. It is COUNTED as unmeasured and the row is marked
@@ -30,7 +30,7 @@ import { realRateFor, usageCostUsd } from '../AgentV3/providerRates';
 import { toPowerLevel, type PowerLevel } from '../AgentV3/powerLevel';
 import { tierDisplayName } from '../AgentV3/tierLadder';
 import { healCountOf } from '../../lib/healIssue';
-import { STORED_LLM_CALLS_MAX } from '../AgentV3/DiagnosticsStore';
+import { LEGACY_STORED_LLM_CALLS_MAX } from '../AgentV3/DiagnosticsStore';
 import { channelWasTruncated, type ReportTruncation } from '../AgentV3/reportTruncation';
 
 export type AppSize = 'simple' | 'mid' | 'full-stack' | 'unknown';
@@ -86,7 +86,7 @@ export function realCostFromCalls(
    * The report's OWN statement of what it lost (reportTruncation.ts) — the exact answer where the
    * line below could only guess.
    *
-   * 🔴 THE GUESS HAS A REAL FALSE POSITIVE. `calls.length >= STORED_LLM_CALLS_MAX` marks a build
+   * 🔴 THE GUESS HAS A REAL FALSE POSITIVE. `calls.length >= LEGACY_STORED_LLM_CALLS_MAX` marks a build
    * that genuinely made exactly 40 calls as a lower bound, so its cost is dropped from the admin's
    * measured sample and its margin shown as null — a correct measurement discarded as unreliable.
    * The guess existed only because the stored report could not say; since 2026-09-20 it can.
@@ -108,7 +108,7 @@ export function realCostFromCalls(
   const declared = channelWasTruncated(truncation, 'llmCalls');
   const capped = declared !== undefined
     ? declared                                        // measured: the report says so, either way
-    : (calls?.length ?? 0) >= STORED_LLM_CALLS_MAX;   // legacy: the only signal an old report has
+    : (calls?.length ?? 0) >= LEGACY_STORED_LLM_CALLS_MAX;   // legacy: the only signal an old report has
   return { usd, measuredCalls, unmeasuredCalls, capped, measured: measuredCalls > 0 && unmeasuredCalls === 0 && !capped };
 }
 

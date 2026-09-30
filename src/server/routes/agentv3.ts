@@ -35,7 +35,7 @@ import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAutho
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
-import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange } from '../AgentV3/progressEta';
+import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange, fleetEtaLine } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
 import { decideComplexity, scaffoldedComplexityDecision } from '../AgentV3/complexityRouting';
 import { planningRequest, planningContextNote } from '../AgentV3/planningRequest';
@@ -193,7 +193,7 @@ import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, revi
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver, GreenFreezeError } from '../AgentV3/greenFreeze';
 import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild, IN_BUILD_PROOF_BUDGET_MS, type AttemptOutcome } from '../AgentV3/inBuildGreen';
-import { STARTER_ENTRY_PATHS, isUntouchedStarterEntry, starterEntryIn, starterIsWhatRendered, pageShowsStarter, withStarterVerdict } from '../AgentV3/stillTheStarterApp';
+import { STARTER_ENTRY_PATHS, isUntouchedStarterEntry, starterEntryIn, starterIsWhatRendered, pageShowsStarter, withStarterVerdict, starterLabelFor } from '../AgentV3/stillTheStarterApp';
 import { postGreenWritesNote, endVerdictFrom, type PostGreenWrite } from '../AgentV3/postGreenWrites';
 import { offTopicSummaryNotice } from '../AgentV3/offTopicSummary';
 import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote, strictReverify } from '../AgentV3/verifyAfterFix';
@@ -448,7 +448,7 @@ import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild
 import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE, SNAPSHOT_WAKING_NOTE, PREVIEW_COPY_REFRESH_MS } from '../AgentV3/previewSnapshot';
 import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
 import { canServeFromSnapshot, SNAPSHOT_IDLE_NOTE } from '../AgentV3/snapshotServeDecision';
-import { workspaceContentHash, snapshotConfirmation, snapshotMatchesFiles, identitySource, type SnapshotTaken } from '../AgentV3/snapshotIdentity';
+import { workspaceContentHash, snapshotConfirmation, snapshotMatchesFiles, identitySource, fileContentHashes, savedDivergesFromSandbox, type SnapshotTaken } from '../AgentV3/snapshotIdentity';
 import { sandboxReasonMiddleware } from '../AgentV3/sandboxSessionZone';
 import { PEAK_MEMORY_PROBE, parsePeakMemory, describePeakMemory, describeSession, type SandboxSession } from '../AgentV3/sandboxSessions';
 import { sandboxRamGb } from '../AgentV3/sandboxRate';
@@ -571,7 +571,7 @@ import {
   type VersionPreviewDeps,
 } from '../AgentV3/versionPreview';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
-import { recentBuildHistoryFor, etaBasisNote } from '../AgentV3/etaHistory';
+import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote } from '../AgentV3/etaHistory';
 import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
@@ -13451,7 +13451,15 @@ async function noteBuildOutcome(
             workspaceId, etaComplexity,
             (id, n) => listDiagnosticsHistory(id, n) as Promise<any>,
           );
-          const est = estimateBuildTime(etaComplexity, past);
+          // A FIRST BUILD IS NOT A BUILD WITH NO EVIDENCE (autopsy a5b661c8: "~5–11 min", 24.3 min real).
+          // With no history of its own, the estimate learns from how long the platform's recent builds
+          // of THIS task type took — read from the cost telemetry every build already writes. The app's
+          // own history always wins the moment it exists; a failed read is [] — today's behaviour.
+          let fleet: ReturnType<typeof fleetHistoryFromTelemetry> = { history: [], builds: 0, days: 0 };
+          if (past.length === 0 && analysis?.taskType) {
+            try { fleet = fleetHistoryFromTelemetry(await withTimeout(agentV3CostTelemetry.list(7), 3_000, 'eta-fleet'), analysis.taskType, etaComplexity); } catch { /* best-effort */ }
+          }
+          const est = estimateBuildTime(etaComplexity, past.length > 0 ? past : fleet.history);
           etaTotalMs = est.estimateMs; // feed the live heartbeat so it can revise the remaining time
           etaBaseMs = est.estimateMs;  // the ORIGINAL estimate — sizes each overrun re-baseline step
           // RECORD WHAT THE USER WAS ACTUALLY TOLD, not the point estimate behind it (autopsy f04421ef).
@@ -13483,7 +13491,9 @@ async function noteBuildOutcome(
           // show — see the tick below, which withholds the countdown until something real anchors it.
           etaEvidenced = estimateIsEvidenced(est);
           etaRoughBand = etaEvidenced ? null : roughEstimateBand(est);
-          const etaShown = etaEvidenced ? firstEtaLine(est, past.length) : unevidencedFirstEtaLine(est);
+          const etaShown = etaEvidenced
+            ? (past.length === 0 && fleet.history.length > 0 ? fleetEtaLine(est, fleet.builds) : firstEtaLine(est, past.length))
+            : unevidencedFirstEtaLine(est);
           // KEEP THE PROMISE SO THE ENDING CAN BE MEASURED AGAINST IT (open root cause #6). The
           // `ETA_BASIS` line below records the same numbers as PROSE, for a human; this records them
           // as NUMBERS, so the report can reconcile them against its own clock without anyone parsing
@@ -13497,7 +13507,7 @@ async function noteBuildOutcome(
           buildDiag.record({
             phase: 'plan', severity: 'info', code: 'ETA_BASIS',
             message: `ETA ${formatEtaRange(est.lowMs, est.highMs, est.estimateMs)} (midpoint ${est.etaText}) · basis ${est.basis} · confidence ${est.confidence}`,
-            detail: `${etaBasisNote(past)} ${etaEvidenceNote(est)} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
+            detail: `${past.length === 0 && fleet.history.length > 0 && analysis?.taskType ? fleetEtaBasisNote(analysis.taskType, fleet.builds, fleet.days) : etaBasisNote(past)} ${etaEvidenceNote(est)} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
             autoResolved: true,
           });
           // THE POINT ESTIMATE IS NOT WHAT WE KNOW. `estimateBuildTime` returns lowMs/highMs and a
@@ -15187,7 +15197,7 @@ async function noteBuildOutcome(
             return t.text;
           };
           const scaffold = (await actuator.listFiles(workspaceId).catch(() => [])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
-          const manifest = parseFileManifest(await bpGenerate(manifestSystemPrompt(framework), manifestUserPrompt(prompt, scaffold)));
+          const manifest = parseFileManifest(await bpGenerate(manifestSystemPrompt(framework, scaffold), manifestUserPrompt(prompt, scaffold)));
           // FILE BUDGET honesty (admin 2026-08-02): the plan is NEVER trimmed — shipping an incomplete app
           // would be far worse than shipping a large one — but an overrun is recorded so "this app planned
           // more files than it should need" is measurable instead of invisible.
@@ -16364,6 +16374,13 @@ async function noteBuildOutcome(
       if (fastLaneWouldRun && !fastLaneRung.skip) {
         // Usage ACCUMULATES across every cheap call (manifest + each per-file call), so billing is honest.
         const osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
+        // 🔴 THE SCAFFOLD MUST EXIST BEFORE THE PLAN READS IT (autopsy b47c56d8, 2026-09-30). The
+        // framework scaffold's self-heal runs on the dispatcher's FIRST tool call — which, on a fast-lane
+        // build, is the lane's first file write, AFTER the plan below has already listed an empty
+        // workspace. A Next.js build planned `src/main.tsx` and `public/index.html` for "an empty
+        // project", the scaffold then arrived with `app/page.tsx`, and nothing ever replaced its "Hello
+        // from Next.js!". Ensuring it here (one file probe when it already exists) makes the listing true.
+        await dispatcher.ensureFrameworkScaffold().catch(() => { /* best-effort — the listing still runs */ });
         // The WHOLE listing: this list answers "does this file exist?" for the missing-files gate and the
         // foundation guard, and a capped answer is a wrong one (`find` output is unsorted, so which 80
         // survived was chance — autopsy 2720e553). Prompts that show it cap it themselves (60).
@@ -19235,7 +19252,7 @@ async function noteBuildOutcome(
             if (!starterNoted) {
               starterNoted = true;
               buildDiag.record({ phase: 'preview', severity: 'warning', code: 'STARTER_STILL_SHOWING', autoResolved: false,
-                message: `The preview rendered, but what it showed was the starter template (${p} still says "Hello World") — not the app that was built. Not counted as a render.`,
+                message: `The preview rendered, but what it showed was the starter template (${p} still says "${starterLabelFor(p)}") — not the app that was built. Not counted as a render.`,
                 detail: 'Entry file byte-identical to the seeded starter AND the page carries its heading. Treated as a conclusive not-rendered verdict so the existing repair, reviewer and billing rules apply.' });
             }
             return p;
@@ -19464,7 +19481,10 @@ async function noteBuildOutcome(
             hasPreview: !!lastPreviewUrl,
           });
           if (decision.scaffold) {
-            const plan = planE2eScaffold({ appName: workspaceId, devCommand: 'npm run dev' });
+            // The port the app SAYS it serves on (its dev script, its config) — the suite used to assume
+            // Vite's 5173 for every app, so a Next.js app on 3000 got a suite that could never reach it
+            // (autopsy b47c56d8). Null keeps the Vite default, as before.
+            const plan = planE2eScaffold({ appName: workspaceId, devCommand: 'npm run dev', port: declaredPortFrom(e2eFiles)?.port ?? null });
             const added: string[] = [];
             for (const [path, content] of Object.entries(plan.files) as Array<[string, string]>) {
               // Create-only: an existing file here belongs to the user, and the decision above already
@@ -20627,7 +20647,7 @@ async function noteBuildOutcome(
                       await sandboxStore.saveSnapshot(workspaceId, url, at, filesHash).catch(() => {});
                       // The paths travel with the copy for THIS build only, so a mismatch can say which
                       // side holds what — see staleDetail. The hash is still what decides.
-                      snapshotTaken = { url, filesHash, filePaths: source ? Object.keys(source) : undefined };
+                      snapshotTaken = { url, filesHash, filePaths: source ? Object.keys(source) : undefined, fileHashes: source ? fileContentHashes(source) : undefined };
                       // THE COPY IS CURRENT, AND THE SURFACE SHOULD KNOW NOW (sandboxLifetime.ts).
                       // Raising the flag lets the idle sweep use the shorter snapshot window; the event
                       // lets the frame move to the real build output the moment the build settles,
@@ -22382,11 +22402,29 @@ async function noteBuildOutcome(
       // overwrites a previously-good saved set with nothing. Best-effort — never blocks the build.
       try {
         const toSave: Record<string, string> = {};
+        // Kept apart from `toSave` so the snapshot check can tell a sandbox that MOVED after the copy
+        // from a saved set that holds something the sandbox never ran (autopsy 2d076ce8).
+        let sandboxScan: Record<string, string> | null = null;
         try {
           const scanned = await collectWorkspaceFiles(actuator, workspaceId);
+          sandboxScan = scanned.files;
           Object.assign(toSave, scanned.files);
         } catch { /* listFiles can be flaky — the captured writes below are the reliable source */ }
         for (const [p, c] of writtenFiles) toSave[p] = c; // captured writes win (freshest, reliable)
+        // 🔴 A RECORDED WRITE THAT IS NOT WHAT THE SANDBOX RUNS (autopsy 2d076ce8, 2026-09-30). Every
+        // browser check this build made looked at the SANDBOX; the durable project is `toSave`. A path
+        // where the two disagree means a restore brings back a file no check ever saw. Admin-only
+        // evidence — it changes nothing that is saved.
+        try {
+          const diverged = savedDivergesFromSandbox(identitySource(sandboxScan), identitySource(toSave));
+          if (diverged.length > 0) {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'SAVED_SOURCE_DIVERGES',
+              message: `${diverged.length} file(s) were saved with content different from what the sandbox is running: ${diverged.slice(0, 8).join(', ')}${diverged.length > 8 ? ` and ${diverged.length - 8} more` : ''}. Every browser check this build made looked at the sandbox, so the saved copy of ${diverged.length === 1 ? 'that file was' : 'those files were'} never checked. A write was recorded one way and landed another.`,
+              autoResolved: false,
+            });
+          }
+        } catch { /* evidence gathering must never break a build */ }
         if (Object.keys(toSave).length > 0) {
           // A SELF-HEAL THAT DID NOT LAST (open root cause from report 02be22e3, now measured). Each
           // repair pass re-reads the file fresh from the sandbox and only acts when the defect is
@@ -22563,6 +22601,8 @@ async function noteBuildOutcome(
               taken: snapshotTaken,
               persistedHash: workspaceContentHash(identitySource(persisted)),
               persistedPaths: Object.keys(persisted ?? {}),
+              persistedFileHashes: fileContentHashes(persisted),
+              sandboxFileHashes: sandboxScan && persisted === toSave ? fileContentHashes(sandboxScan) : undefined,
             });
             if (verdict.action === 'restamp') {
               const at = Date.now();

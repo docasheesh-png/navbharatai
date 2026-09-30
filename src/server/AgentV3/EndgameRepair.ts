@@ -44,6 +44,107 @@ export function parseTscErrors(output: string): TscError[] {
   return out;
 }
 
+/**
+ * TS1361 — a VALUE imported with `import type` (an enum, a class, a function). The fix has exactly one
+ * correct form: move that one name into a value import from the same module. Pure.
+ *
+ * 🔴 AUTOPSY b47c56d8 (2026-09-30): the ONLY compile error in a Next.js build was
+ * `src/ThemeToggle.tsx(4,27): error TS1361: 'ThemeMode' cannot be used as a value because it was imported
+ * using 'import type'` — the shared contract declared `ThemeMode` as an enum and one file imported it as a
+ * type. No deterministic pass knew the code, so it went to a model: two reasoning rungs spent 350 s thinking
+ * and returned nothing, and the repair loop took 763 s of a 926 s lane. It is a string edit.
+ *
+ * Acts only when the name appears in exactly ONE import of that file, as a plain or aliased specifier —
+ * anything it cannot match with certainty is left to the model, as before.
+ */
+export function fixTypeOnlyValueImports(
+  files: Record<string, string>,
+  errors: TscError[],
+): { files: Record<string, string>; fixed: string[] } {
+  const fixed: string[] = [];
+  const out = { ...files };
+  for (const e of errors) {
+    if (e.code !== 'TS1361') continue;
+    const name = /^'([A-Za-z_$][\w$]*)' cannot be used as a value because it was imported using 'import type'/.exec(e.message)?.[1];
+    const src = out[e.file];
+    if (!name || typeof src !== 'string') continue;
+    const specRe = new RegExp(`^(?:type\\s+)?(?:[A-Za-z_$][\\w$]*\\s+as\\s+)?${name.replace(/\$/g, '\\$')}$`);
+    const stmts = [...src.matchAll(/import\s+(type\s+)?\{([^}]*)\}\s*from\s*(['"][^'"]+['"])\s*;?/g)]
+      .filter((m) => m[2].split(',').some((sp) => specRe.test(sp.trim())));
+    if (stmts.length !== 1) continue;
+    const m = stmts[0];
+    const specs = m[2].split(',').map((sp) => sp.trim()).filter(Boolean);
+    const target = specs.find((sp) => specRe.test(sp))!;
+    const valueSpec = target.replace(/^type\s+/, '');
+    let replacement: string;
+    if (m[1]) {
+      // `import type { A, X } from 'm'` → keep the types, import X as a value.
+      const rest = specs.filter((sp) => sp !== target);
+      replacement = rest.length
+        ? `import type { ${rest.join(', ')} } from ${m[3]};\nimport { ${valueSpec} } from ${m[3]};`
+        : `import { ${valueSpec} } from ${m[3]};`;
+    } else if (target !== valueSpec) {
+      // `import { type X, B } from 'm'` → drop the inline `type` modifier on X only.
+      replacement = `import { ${specs.map((sp) => (sp === target ? valueSpec : sp)).join(', ')} } from ${m[3]};`;
+    } else {
+      continue; // already a value import — this is not the shape TS1361 describes; leave it to the model
+    }
+    out[e.file] = src.slice(0, m.index!) + replacement + src.slice(m.index! + m[0].length);
+    fixed.push(`${e.file}: imported '${name}' as a value (it was imported with 'import type')`);
+  }
+  return { files: out, fixed };
+}
+
+/**
+ * The property renames tsc itself proposes — TS2551 (`Property 'x' does not exist on type 'T'. Did you
+ * mean 'y'?`) and TS2561 (`… but 'x' does not exist in type 'T'. Did you mean to write 'y'?`). PURE.
+ *
+ * Only PROPERTY suggestions: tsc makes one only when `y` is a real member of `T` within a small edit
+ * distance, so the rename is the type's own spelling. TS2552 (`Cannot find name 'X'. Did you mean 'x'?`)
+ * is deliberately NOT here — autopsy a5b661c8's was `CollectionScene` → `collection`, where the real fix
+ * was a missing import, and following the suggestion would have broken the file further.
+ */
+export function suggestedPropertyRenames(errors: TscError[]): Array<{ file: string; line: number; col: number; from: string; to: string }> {
+  const out: Array<{ file: string; line: number; col: number; from: string; to: string }> = [];
+  for (const e of errors) {
+    if (e.code !== 'TS2551' && e.code !== 'TS2561') continue;
+    const m = /'([A-Za-z_$][\w$]*)' does not exist (?:on|in) type [\s\S]*?Did you mean (?:to write )?'([A-Za-z_$][\w$]*)'\?/.exec(e.message);
+    if (m && m[1] !== m[2]) out.push({ file: e.file, line: e.line, col: e.col, from: m[1], to: m[2] });
+  }
+  return out;
+}
+
+/**
+ * Apply tsc's own property renames, at the exact line and column it names. PURE.
+ *
+ * 🔴 AUTOPSY a5b661c8 (2026-09-30): `PostStep.tsx` used `scheduledDate` where the shared `Campaign` type
+ * says `scheduledAt`, at two places. tsc said so, with the right name, at both — and the file was edited
+ * five times, one occurrence per turn. The token at the reported position must BE the misspelled name,
+ * or nothing is touched: a stale position, a moved line or a shadowing local is left to the model.
+ */
+export function fixSuggestedPropertyNames(
+  files: Record<string, string>,
+  errors: TscError[],
+): { files: Record<string, string>; fixed: string[] } {
+  const fixed: string[] = [];
+  const out = { ...files };
+  // Right-to-left within a line, so an earlier fix never shifts a later column.
+  const renames = suggestedPropertyRenames(errors).sort((a, b) => (a.file === b.file ? (a.line === b.line ? b.col - a.col : a.line - b.line) : a.file.localeCompare(b.file)));
+  for (const r of renames) {
+    const src = out[r.file];
+    if (typeof src !== 'string') continue;
+    const lines = src.split('\n');
+    const text = lines[r.line - 1];
+    if (text === undefined) continue;
+    const at = r.col - 1;
+    if (text.slice(at, at + r.from.length) !== r.from || /[\w$]/.test(text[at + r.from.length] ?? '') || /[\w$]/.test(text[at - 1] ?? '')) continue;
+    lines[r.line - 1] = text.slice(0, at) + r.to + text.slice(at + r.from.length);
+    out[r.file] = lines.join('\n');
+    fixed.push(`${r.file}:${r.line}: renamed '${r.from}' to '${r.to}' (the type's own spelling, as tsc suggested)`);
+  }
+  return { files: out, fixed };
+}
+
 /** The error codes the deterministic layer addresses (everything else goes to the batch LLM call). */
 const UNUSED_CODES = new Set(['TS6133', 'TS6192', 'TS6196']);
 
@@ -113,6 +214,12 @@ export async function endgameDeterministicPass(
 ): Promise<EndgameDeterministicResult> {
   const fixes: string[] = [];
   let cur = files;
+  const typeOnly = fixTypeOnlyValueImports(cur, errors);
+  cur = typeOnly.files;
+  fixes.push(...typeOnly.fixed);
+  const renamed = fixSuggestedPropertyNames(cur, errors);
+  cur = renamed.files;
+  fixes.push(...renamed.fixed);
   const unused = removeUnusedImports(cur, errors);
   cur = unused.files;
   fixes.push(...unused.removed);

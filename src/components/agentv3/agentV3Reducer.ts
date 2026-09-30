@@ -372,6 +372,12 @@ function describeToolCall(tool: string, input: unknown): string {
       return typeof arg.query === 'string' ? `recalling "${arg.query}"` : 'recalling from memory';
     case 'evaluate':
       return 'evaluating the architecture';
+    case 'write_files_batch':
+      return 'writing several files';
+    case 'run_recipe':
+      // Name the recipe itself — "using run_recipe" would say nothing about what is being added.
+      if (typeof arg.name === 'string' && arg.name && arg.name !== 'list') return `using ${arg.name}`;
+      return 'looking up built-in recipes';
     default:
       return `using ${tool}`;
   }

@@ -84121,3 +84121,18 @@ signed out. The normal code path is untouched (the native session is set in the 
 Creator** on itself (IAM signBlob). Without it the exchange answers `custom-token-unavailable`, the person gets
 the old honest Email/Google message, and the OTP card shows that code in the detail — never a fake success.
 - ✅ **Same day, closed: the unnamed `package.json` writer.** It was the `evaluate` tool's dependency reconcile (`landHealWrite`), called by the lean reviewer on a green app. Green Freeze refused it correctly, but the heal ran in no pass, so the report could only say "a later write". `landHealWrite` now runs in the pass `evaluate-heal`. That pass is on no allowlist, so a green app is still untouched; the refusal now names its writer. This is test-locked and reversion-proven in `tests/aStaleCopyCannotRunInsteadOfTheBuild.test.ts`. The e7baf61d `src/types.ts` writer is probably the same heal (the import reconcile uses the same door); the next report will say for certain.
+
+## 2026-09-30 — every tool the builder's prompt names is now reachable (admin chose "one recipe tool")
+
+The #3385 ratchet listed 56 tools named in the architect prompt and offered to no role. Paid in full:
+- **54 code recipes** (`generate_email`, `generate_pdf`, `generate_qr`, `generate_game_runtime`, …) are reached
+  through ONE catalog entry, `run_recipe({ name, input })`, instead of 54 more schemas on every model call. Each
+  runs through its OWN unchanged handler (`this.run` with the inner name), so behaviour is byte-identical to a
+  direct call — a test compares the two. `name: "list"` returns every recipe's inputs; an unknown name or a
+  missing required input gets the inputs back and writes nothing. It cannot reach a non-recipe tool.
+  All 54 are code generators on the user's own keys — none spends NavBharatAI money (checked).
+- **`write_files_batch`** (a full write door with every write-time guard, and a prompt telling builders to use
+  it) was offered to NO role — now in BUILD_TOOLS. **`find_ui_element`** (visual; returns a screenshot, so not a
+  recipe) is now the architect's, beside `screenshot`.
+- The ratchet list is deleted, not emptied: a new prompt promise without a reachable tool fails CI with no escape.
+- The live strip names the recipe ("using generate_pdf"), not "using run_recipe".

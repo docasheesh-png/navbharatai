@@ -373,6 +373,7 @@ export function fileSystemPrompt(framework: string): string {
     NO_EVAL_RULE,
     NO_FAKE_RESULTS_RULE,
     BUILD_WHAT_WAS_ASKED_RULE,
+    ...webPlatformRule(framework),
     ...exportImportConvention(framework),
     ...designContractFor(framework),
   ].join('\n');
@@ -505,6 +506,19 @@ const GENERIC_CONVENTION: string[] = [
  * was fed verbatim to Vue/Nuxt and Svelte builds (ShopSphere autopsy 2026-07-19: a Nuxt app got told to
  * `export default` its components and `import React`), so producers and consumers drifted. Pure.
  */
+/**
+ * A web app's files may not be written for a PHONE framework (autopsy 33812996). One isolated per-file
+ * call in a vite-react Circle to Search app wrote `src/utils/safeImage.ts` against `react-native`
+ * (`ImageSourcePropType`, `Image as RNImage`) — a package the app does not have and a browser cannot
+ * run. The call sees only its own file, so the platform is said to it. React Native / Expo projects get
+ * nothing. PURE.
+ */
+export function webPlatformRule(framework: string): string[] {
+  const fw = (framework || '').toLowerCase();
+  if (!fw || /react-?native|expo/.test(fw)) return [];
+  return ['- This is a WEB app that runs in a browser: never import react-native or react-native-* packages — use HTML elements (<img>, <div>, <button>) instead.'];
+}
+
 export function exportImportConvention(framework: string): string[] {
   const fw = (framework || '').toLowerCase();
   if (/vue|nuxt/.test(fw)) return VUE_CONVENTION;

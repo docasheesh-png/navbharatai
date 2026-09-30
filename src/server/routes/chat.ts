@@ -16,6 +16,7 @@ import { liveSearchContext } from '../lib/liveSearchContext';
 import { detectImageIntent, imageGenGuidance, imageGenToolPointer } from '../lib/imageIntent';
 import { isFirstChatTurn, sessionGreetingRule } from '../lib/sessionGreeting';
 import { fetchPollinationsImage, imageMarkdown, IMAGE_REFUSAL_MESSAGE } from '../lib/imageGen';
+import { withIndianPeopleDefault } from '../lib/imagePeople';
 import { looksLikeImageEdit } from '../../lib/imageEdit';
 import { requireAccountForCostlyAi } from '../lib/costlyAiAccess';
 import { gateToolAction, burnToolAction } from '../tools/toolGate';
@@ -552,7 +553,8 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
         };
         if (isFree) {
           console.log(`[CHAT/IMAGE] tier=${tier} free image intent — prompt="${imgIntent.prompt.slice(0, 80)}"`);
-          const pr = await fetchPollinationsImage(imgIntent.prompt, 'square');
+          // The same Indian-people default the image tool applies (admin 2026-09-30) — one rule, both doors.
+          const pr = await fetchPollinationsImage(withIndianPeopleDefault(imgIntent.prompt), 'square');
           if (pr.blocked) {
             // The Pollinations word scan refused the picture (Play rejection 2026-09-28). Said plainly —
             // never "try again later", which would invite the same request.

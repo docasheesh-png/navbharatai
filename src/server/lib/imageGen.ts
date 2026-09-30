@@ -193,6 +193,41 @@ export function pollinationsImageUrl(
 }
 
 /**
+ * 🔑 THE ACCOUNT KEY FOR THE FREE PROVIDER (2026-09-30: "image banne band ho gaye").
+ *
+ * The provider closed its anonymous door: every generation now needs a key, and a request without one
+ * is answered 401 (their own docs; third-party checks on 2026-08-25 and 2026-09-29 saw the same). Our
+ * free tier was built entirely on that door, so every free picture failed at once.
+ *
+ * A SECRET key (`sk_…`) — the only kind the provider allows off a browser. It is read here and sent
+ * from THIS SERVER only, as an Authorization header, never in a URL: a key in a link the browser
+ * fetches is a key every user can copy. So with a key the picture is fetched here, never by the
+ * browser. Unset ⇒ the anonymous link, exactly as before (and `freeProviderDoor.ts` notices when that
+ * door is shut and stops sending traffic to it).
+ */
+export function pollinationsApiKey(env: NodeJS.ProcessEnv = process.env): string {
+  return String(env.POLLINATIONS_API_KEY ?? '').trim();
+}
+
+/**
+ * The keyed endpoint on the provider's current API. Same word guard, same size and seed rules as the
+ * anonymous link — ONE prompt path, two doors. PURE.
+ */
+export function pollinationsKeyedUrl(
+  prompt: string,
+  size?: string,
+  env: NodeJS.ProcessEnv = process.env,
+  custom?: { width?: unknown; height?: unknown },
+): string {
+  const finalPrompt = String(prompt || '').slice(0, MAX_PROMPT_CHARS);
+  assertPollinationsPromptSafe(finalPrompt);
+  const px = imagePixelsFor(size, custom?.width, custom?.height);
+  const model = (env.IMAGE_GEN_POLLINATIONS_MODEL || '').trim() || 'flux';
+  const base = (env.POLLINATIONS_BASE_URL || '').trim().replace(/\/+$/, '') || 'https://gen.pollinations.ai';
+  return `${base}/image/${encodeURIComponent(finalPrompt)}?width=${px.w}&height=${px.h}&seed=${pollinationsSeed(env)}&model=${encodeURIComponent(model)}&safe=true&nologo=true&private=true`;
+}
+
+/**
  * The model ladder for image generation, newest→older, env-tunable via IMAGE_GEN_MODEL (comma
  * list) without a deploy — same discipline as the other model ladders (Decision "A").
  */
@@ -401,8 +436,12 @@ export async function fetchPollinationsImage(
   const fetchImpl = opts.fetchImpl ?? fetch;
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 45_000);
+  const key = pollinationsApiKey(env);
   try {
-    const r = await fetchImpl(pollinationsImageUrl(prompt, size, env, opts.custom), { signal: ctl.signal });
+    // With a key: the keyed endpoint, the key in a header. Without: the anonymous link, as before.
+    const r = key
+      ? await fetchImpl(pollinationsKeyedUrl(prompt, size, env, opts.custom), { signal: ctl.signal, headers: { Authorization: `Bearer ${key}` } })
+      : await fetchImpl(pollinationsImageUrl(prompt, size, env, opts.custom), { signal: ctl.signal });
     const ct = r.headers.get('content-type') || '';
     if (!r.ok) return { error: `HTTP ${r.status}` };
     if (!ct.startsWith('image/')) return { error: `non-image (${ct || 'unknown'})` };

@@ -1489,6 +1489,33 @@ the code (it is actually read somewhere) on 2026-07-11.
   `pixelEventFor` fails CI until the policy is updated too** (verified to bite). Do not weaken it;
   it exists because the first drift produced no failure of any kind.
 
+- **🔑 `POLLINATIONS_API_KEY` — THE FREE IMAGE PROVIDER CLOSED ITS ANONYMOUS DOOR (2026-09-30, admin:
+  *"image banne band ho gaye hai!!"*). ⚠️ NOT set as of this date.** The provider now answers **401**
+  to any request without an account key, and everything below (`IMAGE_GEN_CLIENT_FETCH`) was built on
+  that anonymous door — so every free picture failed at once, and the bundled phone apps, which cannot
+  fall back on their own, showed *"NavBharatAI's engine could not make that image right now"* with no
+  way out. Nothing on our side changed.
+  🔒 **THE SERVER NOW KNOWS WHEN THE DOOR IS SHUT** (`src/server/lib/freeProviderDoor.ts`): a 401/402/403
+  from its own fetch, from a new client's `freeFailed` report, or from a small probe (at most every
+  10 min; the first on an instance is awaited for ≤ 4 s) closes it for 30 min. While closed, **no link
+  is minted and no anonymous request is made**, so the request goes straight to the metered paid rungs
+  (Gemini → Grok, bounded by `AI_IMAGE_FREE_DAILY_LIMIT` and `AI_IMAGE_FREE_PAID_DAILY_CAP`) and even an
+  old phone app gets the picture bytes. Only an AUTH answer closes it — a timeout, 429 or 5xx is "could
+  not tell", so our own egress failing never moves every free user onto paid engines.
+  `IMAGE_GEN_ANON_PROBE=off` stops the probe (the door then closes only on real failures).
+  💳 **THE REAL FIX IS THE KEY, AND IT COSTS MONEY — the admin's decision.** An account at
+  enter.pollinations.ai issues a SECRET key (`sk_…`); set it as **`POLLINATIONS_API_KEY`** and the
+  picture is fetched by THIS server from `gen.pollinations.ai` with the key in an `Authorization`
+  header — **never in a link**, because a link the browser fetches is a key every user can copy. So with
+  a key the browser-fetch path is off by construction and the per-IP benefit of `IMAGE_GEN_CLIENT_FETCH`
+  is gone (the key's own limits apply instead). Generations spend the account's "pollen"; a 402 (budget
+  out) falls through to the paid rungs. `POLLINATIONS_BASE_URL` overrides the keyed host (default
+  `https://gen.pollinations.ai`). ⚠️ **Never put a publishable `pk_` key here** — the provider limits
+  those to one request per IP per hour and forbids them off a browser.
+  🚑 **No-deploy stopgap:** `IMAGE_GEN_POLLINATIONS=off` skips the free provider entirely (every free
+  picture then comes from the capped paid rungs). ⚠️ **The provider's live behaviour could not be
+  verified from a session** (its hosts are refused by the session's egress policy); the 401 comes from
+  its own published docs. Test-locked and reversion-proven in `tests/theFreeDoorClosedAndNobodyNoticed.test.ts`.
 - **🌐 `IMAGE_GEN_CLIENT_FETCH` — a FREE image is fetched by the USER'S BROWSER, not by this server
   (admin-mandated 2026-09-21: *"free wale me user ki ip, paid me hamari"*). ⚠️ NOT set, and the code
   default is ON**; `off` is the instant, no-deploy revert to the previous behaviour exactly. Read by

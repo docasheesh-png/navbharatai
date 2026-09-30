@@ -8,8 +8,9 @@ import {
   imageSubjectPrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured, isValidImageGenRequest,
   isImageRefusal, extractResponseText, IMAGE_REFUSAL_MESSAGE,
   geminiImageConfigured, grokImageKey, grokImageModel, parseGrokImageResponse,
-  pollinationsEnabled, fetchPollinationsImage, pollinationsImageUrl, MAX_PROMPT_CHARS,
+  pollinationsEnabled, fetchPollinationsImage, pollinationsImageUrl, pollinationsApiKey, MAX_PROMPT_CHARS,
 } from '../lib/imageGen';
+import { checkAnonymousDoor, noteAnonymousResult, anonymousDoorNote } from '../lib/freeProviderDoor';
 import { craftImagePrompt, withInlineNegative } from '../lib/imagePromptCraft';
 import { runImageEdit } from '../lib/imageEditRun';
 import { triageImageRequest } from '../lib/imageSafety';
@@ -308,14 +309,22 @@ export function registerImageGenRoutes(app: Express): void {
           const why = typeof failedFree.reason === 'string' ? failedFree.reason.slice(0, 120) : 'unknown';
           diag.push(`browser fetch: ${why}`);
           console.warn(`[IMAGE_GEN] the browser could not get the free picture (${why}) — finishing it on the server.`);
+          noteAnonymousResult(why);
         }
+        // 🔑 WITH AN ACCOUNT KEY the picture is fetched HERE, never by the browser — a key in a link is
+        // a key every user can copy. WITHOUT one, the anonymous door is used only while it is open
+        // (`freeProviderDoor.ts`, 2026-09-30: the provider closed it and every free picture failed).
+        // A closed door is skipped entirely, so the request reaches the metered paid rungs below and
+        // an installed phone app — which cannot fall back on its own — still gets the picture.
+        const keyed = pollinationsApiKey() !== '';
+        const anonOpen = !keyed && await checkAnonymousDoor();
         // 🔑 THE BROWSER FETCHES IT, NOT US (admin 2026-09-21: "free wale me user ki ip").
         // The provider allows one request every 15 seconds PER ADDRESS, and this server is ONE
         // address — so at any real scale every free user on the platform queues behind every other
         // one. Handing the browser a link puts each user on their own connection. Nothing else
         // moves: the prompt was triaged, crafted and bounded HERE, seconds ago, and the link
         // carries that finished prompt. `IMAGE_GEN_CLIENT_FETCH=off` reverts it with no deploy.
-        if (clientImageFetchEnabled() && !browserFailed) {
+        if (!keyed && anonOpen && clientImageFetchEnabled() && !browserFailed) {
           const url = pollinationsImageUrl(prompt, req.body.size, process.env, {
             width: req.body.width,
             height: req.body.height,
@@ -330,14 +339,20 @@ export function registerImageGenRoutes(app: Express): void {
           });
           return;
         }
-        const pr = await fetchPollinationsImage(prompt, req.body.size, {
-          timeoutMs: ROUTE_TIMEOUT_MS,
-          custom: { width: req.body.width, height: req.body.height },
-        });
-        if (pr.image) { deliver(pr.image); return; }
-        if (pr.error) {
-          diag.push(`pollinations: ${pr.error}`);
-          console.warn(`[IMAGE_GEN] pollinations failed: ${pr.error} — trying paid fallbacks.`);
+        if (keyed || anonOpen) {
+          const pr = await fetchPollinationsImage(prompt, req.body.size, {
+            timeoutMs: ROUTE_TIMEOUT_MS,
+            custom: { width: req.body.width, height: req.body.height },
+          });
+          if (pr.image) { deliver(pr.image); return; }
+          if (pr.error) {
+            // A keyed refusal is about OUR key (wrong, or out of budget), never the anonymous door.
+            if (!keyed) noteAnonymousResult(pr.error);
+            diag.push(`pollinations${keyed ? ' (key)' : ''}: ${pr.error}`);
+            console.warn(`[IMAGE_GEN] pollinations failed: ${pr.error} — trying paid fallbacks.`);
+          }
+        } else {
+          diag.push(anonymousDoorNote() ?? 'free provider: anonymous access closed');
         }
       }
 

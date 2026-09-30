@@ -84879,3 +84879,21 @@ the architect. The Frontend specialist that actually writes the AI client never 
 - Locked in `tests/anAiAppNeedsNoKey.test.ts`.
 
 **Admin action:** set `APP_AI_GATEWAY=on` in Cloud Run.
+
+
+## 2026-09-30 — Free image generation stopped: the provider closed its anonymous door
+
+Admin: *"image banne band ho gaye hai!!"* (Image Generator AI FREE, "make a camera" → "could not make that image").
+
+- **Root cause (provider-side):** Pollinations now requires an account key; anonymous requests get 401. Our free
+  tier handed the browser a link to that anonymous endpoint (`IMAGE_GEN_CLIENT_FETCH`), and the bundled phone apps
+  have no server fallback (#3396 added one only to the new web client).
+- **Fix:** `freeProviderDoor.ts` — the server detects the closed door (own fetch, new-client report, or a probe)
+  and stops minting links, so every client, old phone apps included, gets the picture from the capped paid rungs.
+  `POLLINATIONS_API_KEY` (secret `sk_` key) makes the server fetch from `gen.pollinations.ai` with the key in a
+  header — never in a link.
+- **Admin action:** create a Pollinations account and set `POLLINATIONS_API_KEY` in Cloud Run to restore the
+  free provider (costs pollen). Until then, free pictures are paid rungs capped at 3/user/day and 300/day platform.
+- **Open:** the provider's live answer was not observable from the session (egress blocked) — verify with the
+  `[IMAGE_GEN] the free provider refused an anonymous request` server log line.
+- Tests: `tests/theFreeDoorClosedAndNobodyNoticed.test.ts` (16, reversion-proven).

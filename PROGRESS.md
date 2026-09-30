@@ -84646,3 +84646,38 @@ read fails 1; removing the social-media strip fails 2.
 - **Cost:** a Weak build of a complex app costs about ₹500, which exceeds a new user's whole welcome
   balance. The driver is turn count × context (151 turns × ~37k tokens), not the rung. Raised with the
   admin as a proactive item.
+- **Same day, second half (admin: "ek ek kar ke sabhi fix karne hai"): the five self-heals, prevented
+  upstream (the 50/50 law).**
+  1. **Any class nothing defines is named at write time.** Before, only kit-shaped `nb-` classes were
+     named. Now `undefinedClassesInFile` asks the same question as the end-of-build
+     `findUndefinedClasses`, with the same Tailwind, external-stylesheet and no-sheet guards. Every write
+     door returns it through `writeSteeringNotes` (`undefinedClassNotes`).
+  2. **tsc's own property renames (TS2551/TS2561 "Did you mean 'x'?") are handled.**
+     - `fixSuggestedPropertyNames` applies them at the exact line and column, inside
+       `endgameDeterministicPass`.
+     - A stale position changes nothing.
+     - TS2552 name suggestions are deliberately excluded: this report's was a missing import.
+     - The write-time note now says "rename EVERY x to y (lines …) in ONE edit". `PostStep.tsx` had taken
+       5 edits, one occurrence per turn.
+  3. **UI sub-agents are handed the classes the project's stylesheets define.**
+     - `stylesheetClassBrief` builds the list from the sheets on disk.
+     - It is appended by the `task` tool for the frontend and designer roles.
+     - Before, a sub-agent read the 18.7 KB kit 6× in slices.
+  4. **The React Three Fiber family follows the project's React.**
+     - `r3fRangeForReact`: fiber ^8 / drei ^9 on React 18, and fiber ^9 / drei ^10 on React 19.
+     - It is applied to bare installs and to the missing-dependency reconciler, the same way vitest
+       already follows Vite.
+     - An unknown React stays unpinned.
+  5. **A first build's ETA learns from the platform's recent builds of its task type.**
+     - `fleetHistoryFromTelemetry` reads the daily cost telemetry every build already writes: one entry
+       per day, only days with at least 2 builds.
+     - The app's own history wins once it exists.
+     - The user line (`fleetEtaLine`) says whose builds the figure comes from.
+     - ⚠️ The telemetry mean includes failed builds; it is labelled an average.
+
+  **Tests:** `tests/theAppIsRightTheFirstTime.test.ts` (18).
+
+  **Still open, honestly:**
+  - `CollectionTheme` / `formatCurrency` import origin: not provable from the truncated report.
+  - The 12:16–12:20 gap: 103 timeline entries were cut by the report's storage limit.
+  - Cost per complex Weak build (turn count × context): an admin decision.

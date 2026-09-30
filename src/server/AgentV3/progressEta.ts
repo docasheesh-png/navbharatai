@@ -214,6 +214,16 @@ export function firstEtaLine(est: Pick<BuildEstimate, 'estimateMs' | 'lowMs' | '
 }
 
 /**
+ * The first line when the figure comes from NavBharatAI's recent builds of this kind rather than this
+ * app's own (autopsy a5b661c8). Says whose builds it is from, so it is never read as a promise about this
+ * one. PURE.
+ */
+export function fleetEtaLine(est: Pick<BuildEstimate, 'estimateMs' | 'lowMs' | 'highMs'>, builds: number): string {
+  const range = formatEtaRange(est.lowMs, est.highMs, est.estimateMs);
+  return `⏱️ Estimated build time: ${range} — how long ${builds} recent build${builds === 1 ? '' : 's'} of this kind of app took on NavBharatAI. I'll replace it with your app's own figure as soon as I can measure how big it is.`;
+}
+
+/**
  * Format a low–high band, collapsing to a single figure when the two round to the same thing (a
  * "2–2 min" range is noise, not precision). Falls back to the point estimate if the band is unusable.
  */

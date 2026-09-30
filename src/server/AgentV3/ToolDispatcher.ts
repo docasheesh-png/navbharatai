@@ -41,7 +41,7 @@ import { getWorkspaceMemory } from './WorkspaceMemory';
 import { shellBuildProvesSuccess } from './buildFailurePrediction';
 import { robustTscCommand } from './tscCommand';
 import { parseTscErrors } from './EndgameRepair';
-import { tscOutputProvesClean, looksLikeTypecheckCommand, tscVerdict } from './TscGate';
+import { tscOutputProvesClean, looksLikeTypecheckCommand, tscVerdict, countTscErrors } from './TscGate';
 import { pathMissHint } from './suggestFilePath';
 import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
 import { detectTestPlan, parseTestOutcome, withSandboxBrowsers, withTestFilter } from './testRunner';
@@ -2717,6 +2717,27 @@ export class ToolDispatcher {
   private noteCompileOutput(output: string): void {
     try { if (tscOutputProvesClean(output)) getWorkspaceMemory(this.workspaceId).markTscClean(); }
     catch { /* audit best-effort */ }
+    // The latest compile's own verdict, whoever ran it — see `lastKnownTypeErrors`.
+    try {
+      const v = tscVerdict(output);
+      if (v === 'passed') this._lastTypeErrors = 0;
+      else if (v === 'failed') this._lastTypeErrors = Math.max(1, countTscErrors(output));
+    } catch { /* a reading, never a failure */ }
+  }
+
+  /** Type errors in the LATEST compile this build ran (write-time, the typecheck tool, or a shell `tsc`);
+   *  null when none has run or none produced a verdict. */
+  private _lastTypeErrors: number | null = null;
+
+  /**
+   * How many type errors the latest compile reported — null when unknown. 🔴 Autopsy 33812996: the
+   * done check told the builder *"the app is complete and healthy — 92/100, no blockers"* while the
+   * compile it had just run held errors in Home.tsx; the builder then spent 28 more steps (20 minutes)
+   * after being told to stop. The readiness scan reads code, not the compiler, so the compiler's own
+   * last word is asked too.
+   */
+  lastKnownTypeErrors(): number | null {
+    return this._lastTypeErrors;
   }
 
   /**
@@ -4341,7 +4362,9 @@ export class ToolDispatcher {
         }
         // Read from the OUTPUT, never the exit code: `tsc --noEmit 2>&1 | head -40` exits with head's 0
         // whether or not tsc failed, and that used to be recorded as "TypeScript already checked CLEAN".
-        if (looksLikeTypecheckCommand(command) && exitCode === 0) this.noteCompileOutput(`${stdout}\n${stderr}`);
+        // Every typecheck is noted, whatever its exit code — `noteCompileOutput` marks CLEAN only on proof,
+        // and a failed compile is exactly what `lastKnownTypeErrors` must hear about.
+        if (looksLikeTypecheckCommand(command)) this.noteCompileOutput(`${stdout}\n${stderr}`);
         return out;
       }
 

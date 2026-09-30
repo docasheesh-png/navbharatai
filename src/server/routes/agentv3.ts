@@ -21637,6 +21637,8 @@ async function noteBuildOutcome(
           // the builds where every runtime check skipped.
           filesWritten: writtenFiles.size,
           buildWasRequested: userAskedToBuildAnApp,
+          // "the exact versions you specified" when the request named none (autopsy 33812996).
+          userRequest: prompt,
           // "TypeScript type-check passes cleanly" beside a release gate recording "the typecheck did
           // not run" — both in build 7bc15e40's own report. Read from the gate's own evidence, which
           // starts at 'not-run' and is only ever moved by a check that actually ran, so this cannot

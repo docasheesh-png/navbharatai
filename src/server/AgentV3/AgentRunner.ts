@@ -1220,7 +1220,9 @@ export class AgentRunner {
         try {
           if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled })) {
             const readiness = await dispatcher.assessBuildReadiness();
-            if (appIsDone(readiness)) {
+            // Never "complete and healthy" over a compile that just failed (autopsy 33812996).
+            const typeErrors = typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null;
+            if (appIsDone(readiness) && !(typeErrors !== null && typeErrors > 0)) {
               if (!readyMark) readyMark = { step: steps, elapsedMs: Date.now() - buildStartMs, score: readiness.score };
               doneText = doneSteer(readiness);
               if (doneText) {

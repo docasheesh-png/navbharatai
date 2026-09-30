@@ -132,13 +132,18 @@ describe('languageInstruction — a guess is stated AS a guess', () => {
 describe('wired into the build', () => {
   const route = readFileSync(join(__dirname, '..', 'routes', 'agentv3.ts'), 'utf8');
 
+  // Autopsy 466c260a moved the line into ONE helper (`appLanguageInstruction`) so the sub-agents read the
+  // same sentence as the architect. The claims are unchanged; they are asserted where the code now lives.
+  const detect = readFileSync(join(__dirname, 'LanguageDetect.ts'), 'utf8');
+
   it('the build prompt uses the confidence-aware instruction, not a hard-coded string', () => {
-    expect(route).toContain('languageInstruction({ code: hint.code, name: hint.name');
+    expect(route).toContain('buildPrompt = `${appLanguageInstruction(prompt)}');
+    expect(detect).toContain('languageInstruction({ code: hint.code, name: hint.name');
     // The old always-assertive sentence is gone.
     expect(route).not.toContain('`Language: the user is writing in ${hint.name}.');
   });
 
   it('an undetected language still falls back to mirroring the request', () => {
-    expect(route).toContain('the SAME language the user used in this request');
+    expect(detect).toContain('the SAME language the user used in this request');
   });
 });

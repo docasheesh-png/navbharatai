@@ -84470,6 +84470,36 @@ whose first module did not own the entry could never pass module 1.
 **Still unmeasured:**
 - No plan has yet run end to end in production.
 - A module turn earns no markup (no preview proof), so modules before the shell are billed at real cost.
+## 2026-09-30 — Autopsy ce115e1f ("Bus Simulator India", Gujarati, Weak, 27.8 min, ₹527.99): a working app was reported as not working
+
+**What happened:** the app built, `npm run build` exited 0 and the render rescue succeeded. The readiness
+gate still said "2 unresolved import(s) — the build will fail: /src/context/BusDataContext.tsx -> ../types,
+/src/hooks/useBusData.ts -> ../types". That fed an UNFINISHED_BUILD_RESUMED turn, and the user's summary
+said "⚠️ This app isn't fully working yet".
+
+**Root cause:** `codemod_rename` runs ts-morph on an in-memory file system, which roots every path
+(`src/a.ts` → `/src/a.ts`). The dispatcher indexed those paths into the project graph BESIDE the seeded
+`src/…` keys. The slash twin resolved `../types` to `/src/types.ts`, which is not a key. The same twins
+produced the phantom orphan `BusDataProvider` and the phantom import cycle. `graphReconcile` could not prune
+them, because its `normalizePath` strips the slash and so saw them as present.
+
+**Fixed:**
+- **The class, at the door:** `WorkspaceMemory.indexFile`/`removeFile` normalise every path through
+  `graphKey` (`toWorkspaceRelPath`). One key shape, whoever writes.
+- `renameSymbol` maps ts-morph's rooted paths back to the caller's. `before` was `''` for every change.
+- **50/50 half:** a forecast is not a verdict once the verdict is in. When the agent's OWN unpiped
+  `npm run build` (or vite/next build) exits 0 with the bundler's success line
+  (`shellBuildProvesSuccess`), and no file has been written since, the unresolved-import and
+  node-builtin forecasts become a zero-cost observation inside the loop. Before this they were cleared
+  only at the end (`BUILD_PREDICTION_OVERRULED`), after they had already cost a resume turn and the
+  summary.
+- Locked in `tests/aRenamedFileHasOneKey.test.ts`, reversion-proven for each fix.
+
+**Recorded, not changed:**
+- Unreadable-script prompts route `simple` by the documented rule (`fallbackVerdict`). This build's slowness
+  was GLM throughput, not the routing.
+- The designer sub-agent's ~20 serial `edit_file`s on `index.css`, and HEAL_NOT_DURABLE on `src/types.ts`,
+  are still open. The report was truncated at those points, so the cause is not proven.
 - **Follow-up, same day (admin screenshot: "photo banao" → "Building applications is only available for
   NavBharatAI-Pro").**
   - **Cause:** the free chat's message never reached the server. `useChatEngine.ts` answered any free

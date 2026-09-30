@@ -46,6 +46,7 @@ export const DESIGN_KIT_CSS = `:root {
   --accent-deep: #4338ca;
   --accent-2: #be185d;
   --success: #16a34a;
+  --success-ink: #166534;
   --danger: #dc2626;
   --danger-ink: #b91c1c;
   --warning: #d97706;
@@ -71,6 +72,7 @@ export const DESIGN_KIT_CSS = `:root {
     --accent-strong: #5b52e0;
     --accent-deep: #4a3fd6;
     --danger-ink: #fca5a5;
+    --success-ink: #86efac;
     --card: #17171f;
     --border: #2a2a35;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
@@ -105,8 +107,13 @@ a:hover { text-decoration: underline; }
    never white-on-white. Submit / .primary / .btn-primary are FILLED with a brand gradient and a glow, so
    every form and CTA has real colour out of the box. The element rules are :where() — zero specificity —
    so any rule the app writes for its own button class wins outright. */
-:where(button), .btn {
+/* The geometry below is shared by every button CLASS, whatever element carries it: a "Start shopping"
+   written as <a class="btn-primary"> used to get the fill and none of the shape — a square, underlined
+   box (autopsy "Nemi Mart", 2026-09-30). */
+:where(button), .btn, .btn-primary, .btn-secondary, .btn-ghost, .btn-danger, :where(a.primary) {
   font: inherit;
+  text-decoration: none;
+  line-height: 1.2;
   font-weight: 600;
   cursor: pointer;
   display: inline-flex;
@@ -121,10 +128,15 @@ a:hover { text-decoration: underline; }
   color: var(--accent-ink);
   transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
 }
-:where(button:hover), .btn:hover { background: color-mix(in srgb, var(--accent) 18%, var(--card)); }
+:where(button:hover), .btn:hover, .btn-secondary:hover { background: color-mix(in srgb, var(--accent) 18%, var(--card)); }
+/* A link styled as a button keeps its button face on hover — no underline. */
+.btn:hover, .btn-primary:hover, .btn-secondary:hover, .btn-ghost:hover, .btn-danger:hover { text-decoration: none; }
+.btn-sm { min-height: 32px; padding: 4px 12px; font-size: 0.875rem; }
+.btn-lg { min-height: 48px; padding: 12px 24px; font-size: 1.05rem; }
+.btn-block { display: flex; width: 100%; }
 
 /* A button whose own class says it destroys something reads as dangerous before anyone presses it. */
-:where(button[class*="delete" i], button[class*="danger" i], button[class*="remove" i]) {
+:where(button[class*="delete" i], button[class*="danger" i], button[class*="remove" i]), .btn-danger {
   background: color-mix(in srgb, var(--danger) 12%, var(--card));
   color: var(--danger-ink);
 }
@@ -143,7 +155,7 @@ a:hover { text-decoration: underline; }
   box-shadow: 0 12px 24px -8px color-mix(in srgb, var(--accent-strong) 75%, transparent);
 }
 
-:where(button:disabled), .btn:disabled {
+:where(button:disabled), .btn:disabled, .btn-primary:disabled, .btn-secondary:disabled, .btn-danger:disabled {
   opacity: 0.55;
   cursor: not-allowed;
   transform: none;
@@ -381,6 +393,49 @@ small, .muted { color: var(--muted); }
 .nb-typing > span:nth-child(3) { animation-delay: 0.3s; }
 
 /* ══════════════════════════════════════════════════════════════════════════════════════════════
+   SHOP — a store, a menu, a catalogue (autopsy "Nemi Mart", 2026-09-30)
+   ══════════════════════════════════════════════════════════════════════════════════════════════
+   What made a grocery app look like a plain web page was not its colours: it was a header that
+   stacked, products in one long column, and an MRP that was not struck through. These are the shapes
+   every Indian shopping app shares — Blinkit, Zepto, BigBasket — so they are drawn here once. */
+.nb-header { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 16px; background: color-mix(in srgb, var(--card) 90%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
+.nb-brand { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 1.2rem; font-weight: 800; letter-spacing: -0.01em; color: var(--fg); text-decoration: none; }
+.nb-brand:hover { text-decoration: none; }
+.nb-header-actions { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.nb-search { flex: 1 1 220px; min-width: 0; border-radius: 999px; padding-left: 16px; background: color-mix(in srgb, var(--fg) 5%, var(--card)); }
+/* Horizontal category chips — they scroll sideways on a phone instead of wrapping into a wall. */
+.nb-chips { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0; scrollbar-width: none; }
+.nb-chips::-webkit-scrollbar { display: none; }
+.nb-chip { flex: none; min-height: 36px; padding: 4px 16px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--fg); font-weight: 600; white-space: nowrap; }
+.nb-chip:hover { background: var(--accent-soft); color: var(--accent-ink); }
+.nb-chip.active, .nb-chip[aria-pressed="true"], .nb-chip[aria-selected="true"] { background: var(--accent-strong); border-color: transparent; color: var(--accent-fg); }
+/* Two products side by side on a phone, more as the screen widens. */
+.nb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 12px; }
+@media (min-width: 640px) { .nb-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; } }
+.nb-product { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.nb-product:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+/* The picture: a real <img>, or a big emoji in a tinted square when there is no photo. */
+.nb-product-img { display: grid; place-items: center; width: 100%; aspect-ratio: 1; border-radius: 8px; background: var(--accent-soft); font-size: 2.75rem; object-fit: cover; }
+.nb-product-title { margin: 0; font-size: 0.95rem; font-weight: 600; line-height: 1.3; }
+.nb-product-meta { color: var(--muted); font-size: 0.8rem; }
+.nb-product-cta { width: 100%; margin-top: auto; }
+/* Price: the selling price bold, the MRP struck through beside it, the saving as a green pill. */
+.nb-price-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.nb-price { font-size: 1.1rem; font-weight: 800; color: var(--fg); font-variant-numeric: tabular-nums; }
+.nb-mrp { color: var(--muted); font-size: 0.85rem; text-decoration: line-through; font-variant-numeric: tabular-nums; }
+.nb-discount { display: inline-flex; align-items: center; min-height: 20px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--success) 14%, var(--card)); color: var(--success-ink); font-size: 0.75rem; font-weight: 800; }
+/* The discount on the picture's corner. */
+.nb-product > .nb-discount { position: absolute; top: 8px; left: 8px; z-index: 1; }
+/* Quantity stepper: − 1 + in one pill, replacing "Add" once the item is in the cart. */
+.nb-qty { display: inline-flex; align-items: center; justify-content: space-between; gap: 4px; min-height: 40px; padding: 0 4px; border-radius: var(--radius); background: var(--accent-strong); color: var(--accent-fg); font-weight: 800; font-variant-numeric: tabular-nums; }
+.nb-qty button { min-width: 32px; min-height: 32px; padding: 0; border: 0; background: transparent; color: var(--accent-fg); font-size: 1.1rem; box-shadow: none; }
+.nb-qty button:hover { background: rgba(255, 255, 255, 0.16); }
+/* The cart bar: fixed to the bottom on a phone, above the home indicator. */
+.nb-cart-bar { position: fixed; left: 12px; right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 30; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-radius: var(--radius); background: var(--accent-strong); color: var(--accent-fg); font-weight: 700; box-shadow: var(--shadow-lg); animation: nb-rise var(--dur) var(--ease) both; }
+.nb-cart-bar button, .nb-cart-bar a { background: rgba(255, 255, 255, 0.16); color: var(--accent-fg); }
+.nb-footer { margin-top: 40px; padding: 24px 16px 88px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.875rem; text-align: center; }
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════════
    GAMES
    ══════════════════════════════════════════════════════════════════════════════════════════════
    A game's canvas is drawn by the game; everything AROUND it — the title screen, the start button, the
@@ -439,11 +494,11 @@ small, .muted { color: var(--muted); }
 
 /* Interactive elements acknowledge a press. The lift is 1px: enough to feel, too small to nudge
    the layout or distract. */
-:where(button), .btn, .nb-nav-item, .nb-plan, .card {
+:where(button), .btn, .btn-primary, .btn-secondary, .btn-ghost, .btn-danger, .nb-nav-item, .nb-plan, .card, .nb-product {
   transition: transform var(--dur-fast) var(--ease), background-color var(--dur) var(--ease),
               border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease), color var(--dur) var(--ease);
 }
-:where(button:active), .btn:active { transform: translateY(1px); }
+:where(button:active), .btn:active, .btn-primary:active, .btn-secondary:active, .btn-danger:active { transform: translateY(1px); }
 /* Cards lift only when they are actually clickable — a static panel that moves under the cursor is
    noise pretending to be feedback. */
 a > .card:hover, .card[role="button"]:hover, .card.nb-clickable:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
@@ -497,7 +552,8 @@ a > .card:hover, .card[role="button"]:hover, .card.nb-clickable:hover { transfor
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
-  :where(button:active), .btn:active, .nb-game-btn:hover,
+  :where(button:active), .btn:active, .btn-primary:active, .btn-secondary:active, .btn-danger:active,
+  .btn-primary:hover, .primary:hover, .nb-game-btn:hover, .nb-product:hover,
   a > .card:hover, .card[role="button"]:hover, .card.nb-clickable:hover { transform: none; }
 }
 `;

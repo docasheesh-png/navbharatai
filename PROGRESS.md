@@ -85331,6 +85331,65 @@ A 4-screen telecom app (Home, Plans, History, Profile) that rendered, typechecke
    aim is that they find nothing.
 Test-locked and reversion-proven in `tests/theQuestionEndedWithPlease.test.ts`.
 
+## 2026-09-30 — "Nemi Mart": a shop app looked like a plain web page (admin screenshot)
+
+The admin sent a screenshot of a grocery app: the header stacked, the products ran in one column, the
+MRP was not struck through, and "Start Shopping" was a square, underlined box. There was no build
+report, so the diagnosis is from the screenshot and the code. That app was built BEFORE PR #3403
+(the design-kit overhaul) and #3403 is still unmerged, but three of the causes would have survived
+#3403 as well. All three are fixed on the same branch.
+
+- **The class check never saw a plain HTML app.** `CssConsistency` read only `className=`, so a
+  static app's `class="…"` (in the page and in `innerHTML` strings) was invisible. It also counted
+  only kebab-case names, so single-word classes (`header`, `price`, `mrp`) passed silently. Because
+  of both, the CSS repair (`CSS_CLASSES_UNDEFINED`) never ran. Changes:
+  - It now reads `class=`.
+  - It counts single lowercase words, except state words (`active`, `open`, …).
+  - It treats a page's own `<style>` blocks as a stylesheet.
+  - It stays silent for the Tailwind CDN and for Tailwind v4's `@import "tailwindcss"`.
+  - The write-time note also covers `.html` and `.js` screens, and names `style.css` when that is the
+    project's sheet.
+  - The pinned test "ignores single-word tokens" was rewritten deliberately.
+- **Kit: a button class gave the fill but not the shape.** `.btn-primary`, `-secondary`, `-ghost` and
+  `-danger` now share the button geometry on any element, and a link is never underlined on hover.
+  Added `.btn-sm`, `.btn-lg` and `.btn-block`.
+- **Kit: no shop layout.** Added these recipes, named in both builders' prompts:
+  - `.nb-header` / `-brand` / `-search`;
+  - `.nb-chips`;
+  - `.nb-grid` (two per row at 360 px);
+  - `.nb-product`;
+  - `.nb-price-row` / `.nb-price` / `.nb-mrp` (struck through) / `.nb-discount` (new
+    `--success-ink` token, AA in both themes);
+  - `.nb-qty`, `.nb-cart-bar`, `.nb-footer`.
+- Locked and reversion-proven in `tests/theShopLookedLikeAWebPage.test.ts` (17 cases, including a
+  real-browser check at 360 px).
+
+**Open:** the "Made with NavBharatAI" badge is fixed at the bottom-right and can cover a footer or a
+bottom bar. A spacer would add scroll to full-screen games, so this is not guessed at here.
+`.nb-footer` carries bottom padding for it.
+
+## 2026-09-30 — the "made by NavBharatAI" badge gets a × that comes back on refresh (admin)
+
+This was the open item from #3410: the badge is fixed bottom-right and can cover an app's footer or cart
+bar. The admin asked for a close button that returns on every refresh.
+
+- **The × is a checkbox with a scoped `:checked` CSS rule, not a scripted button.** Reasons:
+  - An app whose Content-Security-Policy forbids inline script would turn a scripted × into a dead
+    control. This platform itself recommends adding such a CSP.
+  - `autocomplete="off"` stops the browser restoring the ticked state on reload, so the badge comes back
+    after a refresh.
+  - Nothing is stored.
+  - The ×'s geometry is inline, so an app's own checkbox CSS cannot resize it.
+- **Old badges are upgraded, never doubled.** The marker's value is now the version (`2`).
+  - `injectAppSignature` replaces a version-1 badge in place.
+  - The build skips only a CURRENT badge (`hasCurrentAppSignature`), so an app built earlier gains the ×
+    on its next build.
+  - A badge edited out of recognition is left alone.
+- **The explorer skips the badge.** The post-build button-presser now skips anything inside
+  `[data-nbai-signature]`.
+- **Tests:** `tests/theBadgeCanBeClosed.test.ts`.
+  - It includes a real-browser check under `script-src 'none'`: press ×, the badge hides; reload, it is back.
+  - Reversion-proven: reverting appSignature fails 6 tests, ToolDispatcher 1, clickExplorer 1.
 
 ## 2026-09-30 — Free image generation stopped: the provider closed its anonymous door
 

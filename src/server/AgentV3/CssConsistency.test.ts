@@ -38,13 +38,24 @@ describe('CssConsistency', () => {
     expect(cssConsistencyError(files)).toBeNull();
   });
 
-  it('ignores single-word / utility-style tokens (only kebab-case custom classes count)', () => {
+  it('ignores STATE words a script toggles (active, hidden, open …) — they need no rule of their own', () => {
     const files = {
-      'src/App.tsx': `export default () => <div className="container active hidden">x</div>;`,
+      'src/App.tsx': `export default () => <div className="active hidden open selected">x</div>;`,
       'src/app.css': `.something { color: blue; }`,
     };
-    // "container", "active", "hidden" are single words → not treated as custom/generator-defined
     expect(findUndefinedClasses(files)).toEqual([]);
+  });
+
+  // 🔴 Changed deliberately 2026-09-30 (autopsy "Nemi Mart"): this test used to assert that single-word
+  // classes are NEVER counted. That is what let a grocery page whose classes were all single words
+  // ("header", "price", "mrp") lose every rule while this check stayed silent. They count now; state
+  // words and one- and two-letter tokens still do not.
+  it('counts a single-word custom class ("header", "price", "mrp") that no stylesheet defines', () => {
+    const files = {
+      'src/App.tsx': `export default () => <div className="header"><b className="price"/><s className="mrp"/><i className="ok x"/></div>;`,
+      'src/app.css': `.something { color: blue; }`,
+    };
+    expect(findUndefinedClasses(files)).toEqual(['header', 'mrp', 'price']);
   });
 
   it('stays below the threshold for a lone mismatch (avoids noisy one-offs)', () => {

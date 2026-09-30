@@ -3531,6 +3531,19 @@ the flag entries above promise.
   `public/` as-is at the root, so that copy shadowed the real entry ("unsupported MIME type ('text/html')") and
   cost two repair passes. CRA is exempt (there it IS the entry). Test-locked in
   `tests/theCalculatorsHelpersHadNoHome.test.ts`.
+  🔁 **The owner rules missed a sibling (build 9762f589, 2026-09-30).** The plan had `src/utils/sales.ts ::
+  Sample sales data generation …` for `generateSampleSalesData`: it described the helpers without naming
+  them, outside the contract's folder, so the lane added a SECOND `src/utils.ts`. Two files wrote the same
+  helpers with different signatures and three repairs chased the mismatch. `helperModuleByWords` now picks a
+  planned plain module (never a `.tsx`, config, entry or `.d.ts`) sharing ≥ 2 word stems with the helpers;
+  a tie picks nobody.
+  🏷️ **`AGENTV3_CONTRACT_NAME_SPLIT` (NOT set; default ON; `off` reverts), same build.** The contract prompt
+  has forbidden a type named after a component since autopsy 121c2431; this contract still declared
+  `interface CitySummary` beside `CitySummary.tsx` (TS2865). `separateTypeFromComponentNames` renames such a
+  type (`CitySummaryData`) before the contract file is written, unless the contract declares the component
+  itself under that name. The net: `fixTypeImportValueClash` in the shared deterministic pass turns a TS2865
+  import type-only (tsc's own fix; a model repair had made it a self-import). Test-locked and
+  reversion-proven in `tests/theSalesSampleHadTwoHelperHomes.test.ts`.
 
 - **`AGENTV3_SNAPSHOT_BUCKET`** (default ON wherever bucket-only publishing is on; `off` reverts
   snapshots alone — added 2026-09-18, admin Monitor capture) — a build SNAPSHOT is now served from the

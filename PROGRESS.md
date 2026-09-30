@@ -85894,6 +85894,23 @@ There were 3 struggles: two needless repairs (~90 s + ~3 min) and App.tsx alone 
 
 **Still open:** the fast lane's contract step for a 4-file app was cut at its own cap. For a simple app the
 contract may not be worth a model call. This is not decided here.
+
+## 2026-09-30 — Autopsy 6db0ff31 ("A app for my online buisness of digital marketing agency", Weak, stopped by the user at 1.9 min, ₹0)
+
+**Tally:** 0 self-heals, 0 workarounds, 1 skip (the architect waited on a specialist that had done nothing), 0 shipped broken
+(nothing shipped). There were 2 struggles: 40 s of reading and planning on a reasoning rung, then a delegation that returned a question.
+The user saw nothing for 111 s and pressed Stop.
+
+| Problem | Root cause | Class | Siblings | Test |
+|---|---|---|---|---|
+| A fresh scaffold was run as "Editing your existing app (1 source file)"; Project Mode said "not a fresh build"; the analyser filed it as `chat` (score 5). | A zero-byte `java` the user created in Code Studio counted as source. `couldBeAppCode` knew binaries (the "Universal Remote" fix added `.apk`) but not the SHAPE of a stray root name. | Something that can never be code counted as the user's app. | The intent reader was handed the raw `projectExists` (e9b25b08 fixed the net, not the reader). The rebuild guard, the rebuild confirmation and the edit banner counted `countEditableSourceFiles`. All now use `appSourceFileCount` / `userAppExists` (with recent requests protecting a one-file App.tsx app). | `theSpecialistAskedNobody` §3 |
+| The Frontend specialist replied "What would you like me to build?" and wrote nothing. | A child is handed only the architect's instruction. Its language and AI rules were threaded (466c260a, d8ed307a); the user's request they derive from never was. | A specialist working without the user's words. | The reviewer gets the request too (without the "build it" line). The task result now names a question-ending, file-less reply as one the user never sees. | §1, §2 |
+| The report graded our starter under "observation about your existing code". | The seeded-files index had the golden scaffolds but not the sandbox starter (`TemplateRegistry`), and any non-seeded file (the empty `java`) counted as user code. | Our own template judged as the user's work. | Every framework's starter is now in the index; empty and stray files are not user code. The CSS-comment `<img>` false positive was already fixed by 4541f1cf, which reached `main` after this build ran. | §4 |
+| MARKUP_WAIVED said "billed at real cost only ($0.1047)" beside a final bill of ₹0. | The admin line was recorded before the zeroing rules; 586295b7 had moved only the user's sentence. | A money statement made before the money is final. | Now recorded at the settle, and it says when a later rule zeroed the bill. | §4 |
+| A user-stopped build had `errors: 1` (RELEASE_GATE) and an unresolved UPSELL_SUPPRESSED warning. | The severity rule read `!result.ok` and not the stop the gate's own headline already reads. | A stop read as a failure. | UPSELL_SUPPRESSED stays a warning for the reasons that name a fault of ours. | §4 |
+
+**Checked, no change:** the `etaAccuracy` line ("UNDER the band") on a stopped build is a per-build fact that nothing aggregates.
+**Still open:** the architect's 35 s after the empty delegation (its last call was aborted by Stop, so what it was doing is not in the report).
 ## 2026-09-30 — CI went red repo-wide on a new `@grpc/grpc-js` advisory; pinned to 1.14.5 by override (the merging session)
 
 - **What happened:** between 18:16 and 18:18 UTC, GitHub published GHSA-m9gg-hp2v-232j (high: `getAuthContext` can
@@ -85916,3 +85933,41 @@ contract may not be worth a model call. This is not decided here.
 - **Open, honestly:** `@firebase/firestore` upstream still declares `~1.9.0`; when Firebase moves its own range the
   override becomes redundant and should be removed (re-check on the next `firebase` bump). The three pre-existing
   allowlisted highs (`axios`, `brace-expansion`, `undici`) are unchanged.
+
+## 2026-09-30 — Autopsy 9762f589: "sirf sample file bana o sales ki city wise jisme only 10 employees ho" (Weak)
+
+The report was taken while the build was still running (minute 7). The conversation had asked "Excel file
+bana sakte ho?", so what the user wanted was a sample Excel file. The engine planned and built a 13-file
+React dashboard instead.
+
+**Tally:**
+- ✅ Self-healed (3):
+  - 4 unused imports removed by the deterministic pass.
+  - 2 import issues fixed before the preview.
+  - A truncated repair was continued.
+- 🔀 Worked around (1): GLM `glm-4.7-flashx` crawled and was benched after 44 s, so the ladder moved on.
+- ⏭️ Skipped (0).
+- ❌ Open at report time (2):
+  - 5 tsc errors: a nonexistent `./components` barrel, and two self-imports made by repair passes.
+  - The deliverable was an app, but the user asked for a file.
+- 🥵 Struggle (4):
+  - Three repair passes. Pass 2 made things worse: it invented `./components` and `./App.css`.
+  - Pass 3 rewrote several files in one answer, took 112 s and hit the 8,000-token ceiling.
+  - Its continuation crawled.
+  - The ETA said "~59s to go" at minute 6, and the build was still running at minute 7.
+
+| Problem | Root cause | Class | Siblings | Locked by |
+|---|---|---|---|---|
+| Two homes for the same helpers (`src/utils/sales.ts` planned, `src/utils.ts` added) with different signatures | `utilOwnerFor` (876afca9) only matched a purpose that NAMES a helper, or a `utils.ts` in the contract's folder | A symbol's home found by exact name only | The sales file was in `utils/`, outside the contract folder | `helperModuleByWords` (≥ 2 shared stems, plain modules only) |
+| `interface CitySummary` beside `CitySummary.tsx` → TS2865, then a self-import from the repair | The prompt rule (121c2431) is persuasion; the model broke it a second time | A rule the model can ignore | Every type/component name pair | `separateTypeFromComponentNames` (by construction, before file one) + `fixTypeImportValueClash` (deterministic net, both lanes) |
+
+Tests: `tests/theSalesSampleHadTwoHelperHomes.test.ts`, reversion-proven for all three fixes.
+
+**Still open:**
+- **A request for a FILE (Excel / CSV / sample data) has no deliverable.** AgentV3 can only build apps, and
+  nothing hands the user a downloadable file. The server already writes real `.xlsx` files with `exceljs`
+  (`routes/export.ts`), so building this is a product decision. Put to the admin; not built here.
+- The fast lane's plan regenerated `package.json` (vite ^6), `tsconfig.json` (added `noUnusedLocals`) and
+  `vite.config.ts` over the scaffold's own. That caused the TS6133s (fixed for free) and a 16 s `npm install`
+  at the first `tsc`. These files are editable on purpose, because apps add dependencies. Whether the plan may
+  REWRITE them wholesale is not decided here.

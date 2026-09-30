@@ -95,3 +95,17 @@ export function decideMarkupOnProof(input: {
       + 'get it running.',
   };
 }
+
+/**
+ * The admin report's MARKUP_WAIVED_NO_PREVIEW line, written once the bill is SETTLED (autopsy 6db0ff31,
+ * 2026-09-30). The waiver's reason names the amount it decided ("billed at real cost only ($0.1047
+ * instead of $0.4188)"), and a later rule can still zero that bill — on the reported build the user
+ * stopped it before a file was written, so the report carried that sentence beside `billedUsd: 0`. The
+ * waiver still happened and is still worth recording; the line now says what became of it. PURE.
+ */
+export function markupWaiverSettledLine(reason: string, finalBilledUsd: number, zeroBillReason?: string): string {
+  const base = String(reason ?? '').trim();
+  if (Number.isFinite(finalBilledUsd) && finalBilledUsd > 0) return base;
+  const why = String(zeroBillReason ?? '').trim();
+  return `${base} Superseded: the final bill is ₹0${why ? ` (${why})` : ''}.`;
+}

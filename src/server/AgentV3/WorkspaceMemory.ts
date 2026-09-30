@@ -352,6 +352,11 @@ export class WorkspaceMemory {
   private lastWriteAt = 0;
 
   markDepsInstalled(): void { this.depsInstalledAt = Date.now(); }
+  private prodBuildCleanAt = 0;
+  /** The agent's own production build ran and succeeded (`shellBuildProvesSuccess`). */
+  markProdBuildClean(ts: number = Date.now()): void { this.prodBuildCleanAt = ts; }
+  /** True while no file has been written since the last successful production build. Strict >, like tsc. */
+  prodBuildCleanSinceLastWrite(): boolean { return this.prodBuildCleanAt > 0 && this.prodBuildCleanAt > this.lastWriteAt; }
   /**
    * A whole-project compile came back clean. Besides the verification ledger, it RESOLVES every
    * compile-class error recorded before it — without this, `projectMap()` kept handing those errors to

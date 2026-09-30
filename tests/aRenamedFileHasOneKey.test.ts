@@ -53,3 +53,38 @@ describe('renameSymbol reports the paths it was given', () => {
     for (const c of r.changes) expect(c.before).toBe(files.find((f) => f.path === c.path)!.content);
   });
 });
+
+import { shellBuildProvesSuccess } from '../src/server/AgentV3/buildFailurePrediction';
+import { readFileSync } from 'node:fs';
+
+describe('a build the agent ran itself overrules a forecast that it would fail', () => {
+  const OK = 'vite v6.0.0 building for production...\n✓ 42 modules transformed.\n✓ built in 3.21s';
+  it('only an unpiped production build, exit 0, with the bundler\'s own success line', () => {
+    expect(shellBuildProvesSuccess('npm run build', 0, OK)).toBe(true);
+    expect(shellBuildProvesSuccess('cd app && npx vite build 2>&1', 0, OK)).toBe(true);
+    expect(shellBuildProvesSuccess('npm run build', 1, OK)).toBe(false);
+    expect(shellBuildProvesSuccess('npm run build | tail -20', 0, OK)).toBe(false);
+    expect(shellBuildProvesSuccess('npm run build', 0, 'error during build:\nCould not resolve "../types"')).toBe(false);
+    expect(shellBuildProvesSuccess('npm run dev', 0, OK)).toBe(false);
+    expect(shellBuildProvesSuccess('npm run build', 0, '')).toBe(false);
+    expect(shellBuildProvesSuccess('npm run build || true', 0, OK)).toBe(true);
+  });
+
+  it('a write after the build retires the proof', () => {
+    const mem = new WorkspaceMemory();
+    mem.indexFile('src/a.ts', 'x');
+    expect(mem.prodBuildCleanSinceLastWrite()).toBe(false);
+    mem.markProdBuildClean(Date.now() + 1000);
+    expect(mem.prodBuildCleanSinceLastWrite()).toBe(true);
+    mem.markProdBuildClean(1); // a build older than the last write
+    expect(mem.prodBuildCleanSinceLastWrite()).toBe(false);
+  });
+
+  it('the readiness gate reads it, and the shell path records it', () => {
+    const src = readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8');
+    expect(src).toMatch(/if \(shellBuildProvesSuccess\(command, exitCode,[^)]*\)\) mem\.markProdBuildClean\(\);/);
+    const gate = src.indexOf('prodBuildCleanSinceLastWrite()');
+    expect(gate).toBeGreaterThan(0);
+    expect(gate).toBeLessThan(src.indexOf('const readiness = assessReadiness(scoredArch, findings, extra);'));
+  });
+});

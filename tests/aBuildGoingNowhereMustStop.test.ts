@@ -232,7 +232,8 @@ describe('the breaker is driven from the TIMER, not from the provider-turn hook'
   });
 
   it('it fires once, records an unresolved finding, and aborts with its own cause', () => {
-    expect(route).toContain('if (!futilityFired)');
+    // Armed at the build-loop start (autopsy a2b9c802 — theJarvisBuildWasStoppedWhileItWorked.test.ts).
+    expect(route).toContain('if (!futilityFired && futilityArmed)');
     expect(route).toContain("code: 'FUTILITY_BREAKER'");
     expect(route).toContain('autoResolved: false');
     expect(route).toContain("abortBuild({ abort: (r?: unknown) => abort.abort(r) }, 'futile')");

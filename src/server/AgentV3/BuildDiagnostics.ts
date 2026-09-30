@@ -26,7 +26,7 @@ import { isModelUnavailableError } from './providerErrorClass';
 import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError } from './turnDeadline';
-import { typecheckEvidenceFromCommands } from './TscGate';
+import { typecheckEvidenceFromCommands, commandOutcomeText } from './TscGate';
 import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
@@ -47,6 +47,10 @@ const PROCESS_ONLY_CODES = new Set([
   'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED',
   // A repair's out-of-scope answer that OUR guard refused to write (autopsy eed79815): engine housekeeping.
   'REPAIR_OUT_OF_SCOPE',
+  // The user named a stack we do not build (unsupportedStack.ts) — a fact about OUR templates, not the app.
+  'UNSUPPORTED_STACK',
+  // Whether OUR checks could sign in behind the app's login page (signInExplore.ts) — our instrument.
+  'AUTH_EXPLORE_SIGNED_IN', 'AUTH_EXPLORE_NOT_RUN',
   // Whether the platform's additions to the reply reached the screen (summaryAdditions.ts): a fact about our delivery.
   'SUMMARY_ADDITIONS_SHOWN', 'SUMMARY_REPLY_NOT_FOUND',
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', // measurements of the ENGINE (postGreenWrites.ts), never app findings
@@ -122,6 +126,8 @@ const PROCESS_ONLY_CODES = new Set([
   'PROJECT_MODE_FAILED',
   // …or stood down because the plan was too small to split — also a fact about OUR planner (6a4a799f).
   'PROJECT_MODE_STOOD_DOWN',
+  // …and the roadmap standing down so ONE planner runs, not two (autopsy a2b9c802) — our routing.
+  'MEGA_ROADMAP_STOOD_DOWN',
   // Whether THIS BUILD left a version in the Time Machine (restorePoint.ts). A statement about our own
   // safety net, never a finding about the user's app — a perfect app whose version write failed is
   // still a perfect app, and counting it against them is the provider-error-as-app-blocker class.
@@ -1022,7 +1028,7 @@ export class BuildDiagnostics {
       phase: 'build',
       severity: failed ? 'error' : 'info',
       code: failed ? 'SANDBOX_CMD_FAILED' : 'SANDBOX_CMD',
-      message: `$ ${cmdHead} → exit ${rec.exitCode ?? '?'}${durTxt}`,
+      message: `$ ${cmdHead} → ${commandOutcomeText(rec)}${durTxt}`,
       autoResolved: !failed,
       detail: failed ? capTail(rec.stderr || rec.stdout, 400) : undefined,
     });

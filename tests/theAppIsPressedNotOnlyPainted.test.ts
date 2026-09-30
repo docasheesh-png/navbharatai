@@ -196,7 +196,8 @@ describe('the wiring (source guards — tsc and vitest cannot see a missing call
   const route = read('src/server/routes/agentv3.ts');
   it('the route runs it behind its switch and passes the user-database rule', () => {
     expect(route).toMatch(/clickExplorerEnabled\(\) && result\.ok && lastPreviewUrl/);
-    expect(route).toMatch(/clickExplorerScript\(lastPreviewUrl, \{ blockWrites: writesToUserDatabase\(exploreFiles\) \}\)/);
+    // The signed-in session rides beside the rule (weLookBehindTheSignInPage.test.ts); the rule itself must stay.
+    expect(route).toMatch(/clickExplorerScript\(lastPreviewUrl, \{ blockWrites: writesToUserDatabase\(exploreFiles\)(?:, storageState: signedInState\(\))? \}\)/);
     expect(route).toMatch(/code: explored\.code/);
   });
   it('the build card is emitted ONCE, merged — a second event would erase the journey\'s proof', () => {

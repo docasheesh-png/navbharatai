@@ -26,6 +26,7 @@
 // browser — no I/O, no clock, no model call in this module.
 
 import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
+import { newPageOptionsExpr, isSignInRoute } from './signInExplore';
 import { rendersDataList } from './DesignCoverage';
 import { scanMarkup, type ScannedTag } from './jsxTags';
 
@@ -872,17 +873,6 @@ export function noJourneyReason(files: Record<string, string>): string {
   // the user to give the field "a `name` and a label": a remedy for a defect the field does not have,
   // on NavBharatAI's own tested template. So: when some form's fields CAN all be addressed and it is
   // only the submit step that is absent, say that — it is a different fact with no fix to ask for.
-  const addressableButNoSubmit = pages.some((p) => formSourcesFor(p, files).some((s) => {
-    const fields = formFields(s.source);
-    if (fields.length === 0) return false;
-    const allAddressable = fields.slice(0, 6).every(({ tag, labelText }) => targetForInput(tag) !== null || !!labelText);
-    return allAddressable && submitTargetIn(s.source) === null;
-  }));
-  if (addressableButNoSubmit) {
-    return 'the fields in this app act as you type (a search or filter) and have no submit or save step, '
-      + 'so there is nothing a journey could submit and then look for after a reload — no journey was derived, '
-      + 'and nothing needs changing for this check.';
-  }
   // ⚠️ THE REMEDY, NOT ONLY THE SYMPTOM (autopsy a48d0f9e, 2026-09-19). This sentence used to stop at
   // "no journey was derived", which reads like an environmental limit of the CHECK. It is not: it is a
   // fixable defect in the generated app, and in that report the SAME build's accessibility pass had
@@ -890,6 +880,31 @@ export function noJourneyReason(files: Record<string, string>): string {
   // One cause, reported as two unrelated lines, and the release gate then said "whether it actually
   // SAVES anything is untested" as though nothing could be done about it. Naming the fix costs nothing
   // and is what turns this line into something a build can act on.
+  // 🔴 THE FIELDS WERE FINE — THE BUTTON WAS THE MISSING PIECE (autopsy 876afca9, 2026-09-30). A
+  // calculator's two inputs had an id and a <label> each, and this sentence told the admin they had
+  // "no name, id, placeholder, label or test id". What the derivation actually could not find was a
+  // button that SUBMITS them: "Calculate" is a plain onClick button, not a submit and not an add/save
+  // word. Same question the derivation asks, answered for the report.
+  // 🔗 ONE PREDICATE, TWO TRUE SENTENCES (merged 2026-09-30). #3398 (the Gita search box) and #3402 (the
+  // calculator) fixed this same false remedy on the same day, each with its own copy of the predicate.
+  // They agree on WHEN — every field addressable, no submit step — and differ only in WHY: a field with
+  // no button at all acts as you type; a form WITH a button has one that does not read as submitting.
+  const noSubmitForms = pages.flatMap((p) => formSourcesFor(p, files)).filter((s) => {
+    const fields = formFields(s.source);
+    if (fields.length === 0) return false;
+    const allAddressable = fields.slice(0, 6).every(({ tag, labelText }) => targetForInput(tag) !== null || !!labelText);
+    return allAddressable && submitTargetIn(s.source) === null;
+  });
+  if (noSubmitForms.length > 0) {
+    if (noSubmitForms.some((s) => /<button\b/i.test(s.source))) {
+      return 'the fields in this app can be addressed, but none of its buttons reads as submitting them (no '
+        + 'submit button and no add / save / create button), so no fill-and-submit journey was derived. That is '
+        + 'a limit of this check, not a defect in the app.';
+    }
+    return 'the fields in this app act as you type (a search or filter) and have no submit or save step, '
+      + 'so there is nothing a journey could submit and then look for after a reload — no journey was derived, '
+      + 'and nothing needs changing for this check.';
+  }
   return 'the forms in this app have no field this check could address honestly (no name, id, placeholder, '
     + 'label or test id), so no journey was derived rather than one that would fail for the wrong reason. '
     + 'Give each field a `name` and a label and this check can prove the app really saves what is typed — '
@@ -924,7 +939,7 @@ function locatorExpr(t: Target): string {
  * anywhere inside — this lives in a TypeScript template literal, where one would close the literal.
  * That mistake has been made here before; it is spelled out so it is not made again.
  */
-export function journeyScript(previewUrl: string, journeys: readonly Journey[], marker: string): string {
+export function journeyScript(previewUrl: string, journeys: readonly Journey[], marker: string, opts: { storageState?: string | null } = {}): string {
   const base = previewUrl.replace(/\/+$/, '');
   const steps = journeys.map((j) => {
     const fills = j.fields.map((f) =>
@@ -933,6 +948,9 @@ export function journeyScript(previewUrl: string, journeys: readonly Journey[], 
     id: ${JSON.stringify(j.id)},
     kind: ${JSON.stringify(j.kind)},
     route: ${JSON.stringify(j.route)},
+    // A sign-in form is driven signed OUT (a session would only redirect away from it); every other
+    // journey runs behind the door when the app has one (signInExplore.ts).
+    pageOpts: ${isSignInRoute(j.route) ? '{}' : newPageOptionsExpr(opts.storageState)},
     fields: (page) => [
 ${fills}
     ],
@@ -952,7 +970,7 @@ for (const j of journeys) {
   // 'unreachable' is the DEFAULT, not a failure state. A journey that never got to press anything has
   // told us nothing about the app, and reporting that as a defect would be an invented alarm.
   const out = { id: j.id, kind: j.kind, route: j.route, verdict: 'unreachable', step: 'load', note: '', errors: [] };
-  const page = await browser.newPage();
+  const page = await browser.newPage(j.pageOpts);
   page.on('pageerror', (e) => { if (out.errors.length < 3) out.errors.push(String(e.message).slice(0, 200)); });
   page.on('console', (m) => { if (m.type() === 'error' && out.errors.length < 3) out.errors.push(String(m.text()).slice(0, 200)); });
   try {

@@ -353,11 +353,38 @@ function planRungFor(lvl: PowerLevel, env: NodeJS.ProcessEnv): LadderRung {
   return PLAN_RUNG[lvl];
 }
 
-/** The plan chain: the tier's plan rung first, then its ladder as the fallback — nothing else. */
+/**
+ * On Weak, a PLAN that the lead rung could not answer goes to Haiku next, before the reasoning rungs
+ * (admin 2026-09-30, verbatim: "haan, plan ladder badal do. planing ke liye haiku accha hai, to lagao").
+ *
+ * 🔴 WHY (autopsy a2b9c802, JARVIS): GLM flashx was benched for crawling, so both planners fell to
+ * kimi-k2.7-code, which always reasons and cannot be told not to. The roadmap came back cut off at its
+ * token limit after 240 s; the project planner spent all 12,000 tokens thinking and returned nothing
+ * after 223 s. A plan is ONE structured answer: a rung that answers directly is the right fallback, and
+ * Haiku costs about what KIMI does per token ($1/$5 against $0.95/$4) while spending none of it on
+ * reasoning nobody reads.
+ *
+ * 🔒 SCOPE, said plainly: the PLAN ladder only, and Weak only. The Weak BUILD ladder is unchanged and
+ * keeps Haiku as its last rung; Normal and Strong carry no Haiku rung at all. Nothing new becomes
+ * reachable — Haiku was already on Weak's ladder, and enforceNoClaude still strips every other Claude
+ * rung. `AGENTV3_WEAK_PLAN_HAIKU=off` restores the previous order with no deploy.
+ */
+export function weakPlanHaikuEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.AGENTV3_WEAK_PLAN_HAIKU ?? '').trim().toLowerCase() !== 'off';
+}
+
+/**
+ * The plan chain: the tier's plan rung first, then its ladder as the fallback — nothing else. On Weak,
+ * Haiku moves up to second (see `weakPlanHaikuEnabled`).
+ */
 export function planLadder(level: PowerLevel | string | boolean | null | undefined, env: NodeJS.ProcessEnv = process.env): LadderRung[] {
   const lvl = toPowerLevel(level as PowerLevel | boolean | string | undefined | null);
   const first = planRungFor(lvl, env);
   const rest = tierLadder(lvl, env).rungs.filter((r) => !(r.provider === first.provider && r.model === first.model));
+  if (lvl === 'weak' && weakPlanHaikuEnabled(env)) {
+    const i = rest.findIndex((r) => r.provider === 'CLAUDE_HAIKU');
+    if (i > 0) rest.unshift(...rest.splice(i, 1));
+  }
   return [first, ...rest];
 }
 

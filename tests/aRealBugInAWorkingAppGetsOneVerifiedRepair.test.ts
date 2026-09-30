@@ -148,7 +148,8 @@ describe('the route wires it the only safe way', () => {
   it('ONE revert for every verifyAfterFix site, and it reconciles the captured writes', () => {
     expect(route.match(/'vaf-remove'/g)?.length).toBe(1);
     // Four since 2026-09-28: the explorer repair (explorerRepair.ts) is the fourth verifyAfterFix site, same helper.
-    expect(route.match(/revert: revertToGreenSnapshot,/g)?.length).toBe(4);
+    // Five since 2026-09-30: the test-suite repair on a green app (autopsy 8e124182), same helper.
+    expect(route.match(/revert: revertToGreenSnapshot,/g)?.length).toBe(5);
     const def = route.slice(route.indexOf('const revertToGreenSnapshot'), route.indexOf('const revertToGreenSnapshot') + 1200);
     expect(def).toContain('reconcileCapturedWrites(writtenFiles, plan)');
     // An empty snapshot is a failed read; restoring from it would delete the whole workspace.
@@ -175,8 +176,10 @@ describe('the route wires it the only safe way', () => {
   it('the advisory cap is re-armed only with the plan\'s finite bound', () => {
     expect(route).toContain('armAdvisoryCap(plan.capMs)');
     // Every re-arm is named, and each carries a finite bound: the default call, the repair, and (autopsy
-    // 972acde5) the one-off room for re-taking the preview copy after a kept repair.
+    // 972acde5) the one-off room for re-taking the preview copy after a kept repair, and (autopsy 876afca9)
+    // the same bound for the one end-of-build re-take when a later pass left the copy stale.
     expect(route).toContain('armAdvisoryCap(PREVIEW_COPY_REFRESH_MS + 20_000)');
-    expect(route.match(/armAdvisoryCap\(/g)?.length).toBe(3); // the definition is `= (`
+    expect(route.match(/armAdvisoryCap\(PREVIEW_COPY_REFRESH_MS \+ 20_000\)/g)?.length).toBe(2);
+    expect(route.match(/armAdvisoryCap\(/g)?.length).toBe(4); // the definition is `= (`
   });
 });

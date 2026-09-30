@@ -108,6 +108,20 @@ export function initialFutilityState(): FutilityState {
   return { last: { ...ZERO }, quietTicks: 0 };
 }
 
+/**
+ * The state at the moment the BUILD starts (autopsy a2b9c802, 2026-09-30 — JARVIS).
+ *
+ * The breaker used to be counted from the REQUEST, so the platform's own bounded preparation — the
+ * mega-app roadmap (240 s there) and the project planner (315 s) — filled the quiet window before the
+ * architect had run a single tool. It was stopped 38 seconds into real work, "0 files, 0 commands".
+ * Those planners are not the build going nowhere; each has its own bound and the wall clock governs
+ * the whole request. So the window opens here, baselined on whatever the preparation already produced
+ * (never on zero, or a pre-seeded file would read as fresh progress). PURE.
+ */
+export function armedFutilityState(now: ProgressSnapshot): FutilityState {
+  return { last: { filesWritten: num(now?.filesWritten), commandsRun: num(now?.commandsRun), stepsDone: num(now?.stepsDone) }, quietTicks: 0 };
+}
+
 /** Did anything at all move? A single field is enough — this is "getting anywhere", not "getting far". */
 function madeProgress(a: ProgressSnapshot, b: ProgressSnapshot): boolean {
   return b.filesWritten > a.filesWritten || b.commandsRun > a.commandsRun || b.stepsDone > a.stepsDone;

@@ -7,6 +7,10 @@ export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts', 'src/**/*.test.{ts,tsx}'],
     environment: 'node',
+    // The image route probes the free provider before handing out a link (freeProviderDoor.ts). A
+    // test must never make that network call, so the probe is off for the suite; the door's own
+    // tests pass their env and fetch explicitly.
+    env: { IMAGE_GEN_ANON_PROBE: 'off' },
     passWithNoTests: true,
     // WHY THIS IS SET, AND WHY 20s (2026-08-06). Vitest's default is 5s, and CI's ONLY test run is now
     // the INSTRUMENTED one (`vitest run --coverage`), where everything is 2–5× slower. Measured: a

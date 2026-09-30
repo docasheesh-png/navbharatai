@@ -49,7 +49,7 @@ describe('wiring', () => {
   const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
 
   it('the route runs it once after the app is proven, before the explorer, and records the verdict', () => {
-    const at = route.indexOf('actuator.runCommand(workspaceId, mobileLayoutScript(lastPreviewUrl))');
+    const at = route.indexOf('actuator.runCommand(workspaceId, mobileLayoutScript(lastPreviewUrl, { storageState: signedInState() }))');
     expect(at).toBeGreaterThan(0);
     expect(at).toBeLessThan(route.indexOf('clickExplorerScript(lastPreviewUrl'));
     expect(route).toContain('mobileLayoutCheckEnabled() && result.ok && lastPreviewUrl && actuator.runCommand');
@@ -60,6 +60,13 @@ describe('wiring', () => {
     expect(s).toContain('PLAYWRIGHT_BROWSERS_PATH=/home/user/.e-tools/.browsers node /tmp/nbai-mobile.mjs');
     expect(s).toContain('"w":390,"h":844');
     expect(s).toContain('isMobile: true, hasTouch: true');
+  });
+
+  it('an app behind a login is measured signed in, with the session the sign-in check saved', () => {
+    expect(mobileLayoutScript('http://localhost:5173')).toContain('"storageState":null');
+    const s = mobileLayoutScript('http://localhost:5173', { storageState: '/tmp/nbai-signed-in.json' });
+    expect(s).toContain('"storageState":"/tmp/nbai-signed-in.json"');
+    expect(s).toContain('...(cfg.storageState ? { storageState: cfg.storageState } : {})');
   });
 
   it('a finding is offered to the user as a one-tap fix; OK and NOT RUN never are', () => {

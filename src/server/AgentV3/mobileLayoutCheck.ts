@@ -38,9 +38,13 @@ export function mobileLayoutCheckEnabled(env: NodeJS.ProcessEnv = process.env): 
   return String(env.AGENTV3_MOBILE_LAYOUT ?? '').trim().toLowerCase() !== 'off';
 }
 
-/** The in-sandbox shell command. PURE. */
-export function mobileLayoutScript(previewUrl: string): string {
-  const cfg = { base: String(previewUrl ?? '').trim(), marker: MOBILE_RESULT_MARKER, w: MOBILE_VIEWPORT.width, h: MOBILE_VIEWPORT.height, minTap: MIN_TAP_PX, loadMs: LOAD_MS };
+/**
+ * The in-sandbox shell command. PURE. `storageState` is the session the sign-in check saved
+ * (signInExplore.ts): with it the phone opens the app signed in, like every other browser check, so an
+ * app behind a login is measured on its own screens and not on the sign-in page.
+ */
+export function mobileLayoutScript(previewUrl: string, opts: { storageState?: string | null } = {}): string {
+  const cfg = { base: String(previewUrl ?? '').trim(), marker: MOBILE_RESULT_MARKER, w: MOBILE_VIEWPORT.width, h: MOBILE_VIEWPORT.height, minTap: MIN_TAP_PX, loadMs: LOAD_MS, storageState: opts.storageState ?? null };
   return `cat > /tmp/nbai-mobile.mjs <<'NBAI_EOF'
 ${mobileLayoutModule(cfg)}
 NBAI_EOF
@@ -54,7 +58,7 @@ const cfg = ${JSON.stringify(cfg)};
 const say = (o) => console.log(cfg.marker + JSON.stringify(o));
 const browser = await chromium.launch();
 try {
-  const ctx = await browser.newContext({ viewport: { width: cfg.w, height: cfg.h }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  const ctx = await browser.newContext({ viewport: { width: cfg.w, height: cfg.h }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, ...(cfg.storageState ? { storageState: cfg.storageState } : {}) });
   const page = await ctx.newPage();
   await page.goto(cfg.base, { waitUntil: 'load', timeout: cfg.loadMs });
   await page.waitForTimeout(1500);

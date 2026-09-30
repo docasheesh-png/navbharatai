@@ -20526,7 +20526,7 @@ async function noteBuildOutcome(
         && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)
       ) {
         try {
-          const out = await withTimeout(actuator.runCommand(workspaceId, mobileLayoutScript(lastPreviewUrl)), MOBILE_CHECK_BUDGET_MS, 'mobile-layout');
+          const out = await withTimeout(actuator.runCommand(workspaceId, mobileLayoutScript(lastPreviewUrl, { storageState: signedInState() })), MOBILE_CHECK_BUDGET_MS, 'mobile-layout');
           const verdict = mobileLayoutVerdict(parseMobileLayout(out.stdout));
           buildDiag.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });
         } catch (err) {

@@ -84303,3 +84303,44 @@ The #3385 ratchet listed 56 tools named in the architect prompt and offered to n
   recipe) is now the architect's, beside `screenshot`.
 - The ratchet list is deleted, not emptied: a new prompt promise without a reachable tool fails CI with no escape.
 - The live strip names the recipe ("using generate_pdf"), not "using run_recipe".
+
+## 2026-09-30 — Autopsy 2d076ce8 ("Bhagavad Gita reader", Hindi, Weak, 7.5 min, user Stop after a working app)
+
+**What happened:** the build started from NavBharatAI's own tested Gita template. The app was verified
+rendering at 190 s. After that, three things in the report were false or unexplained.
+
+**1. "Search has NO visible control" — false, and it cost a paid repair.**
+- The template labels its search box in Hindi (`<label htmlFor="q">खोजें …</label>`, Devanagari placeholder).
+- The Search probe in `FeaturePresence.ts` only accepted the English letters "search", in an attribute.
+- So the feature heal ran on KIMI (rung 2), moved a working search box, re-probed, still found "absent", and
+  the false finding became the build's `rootCause`.
+- **Class:** every probe spoke English only, and `\b` never matches next to Devanagari (the same fact the
+  icon fix of 972acde5 met). **Fix:** `controlPattern` matches any non-ASCII word literally, every probe
+  gained Hindi stems (`HI`), and a `<label>` naming a search field counts (`hasSearchField`). Only the
+  PRESENCE side changed; what counts as REQUESTED is unchanged, so no new probe can fire.
+
+**2. `JOURNEY_NOT_DERIVED` told the user to "give each field a name and a label".** The only field was the
+search box, which has an id and a label and no submit step. `noJourneyReason` now says the fields act as
+you type and nothing needs changing, when every field is addressable and only the submit is absent.
+
+**3. `PREVIEW_SNAPSHOT_STALE` — "the same 21 file(s), so a file's CONTENT changed".**
+- Nothing on the timeline wrote after the copy: the only later actor was a suggest-only reviewer that read
+  five files. The bridge round trip is exact since 3ab40187, and every captured writer I traced writes the
+  same content to the sandbox that it records.
+- **Root cause NOT found — recorded as open.** The report cannot say which file differed.
+- **Instrument shipped:** the copy now carries per-file hashes, and the final save passes the saved AND the
+  raw sandbox per-file hashes. The stale line names the file(s), and says whether the sandbox moved after the
+  copy (a late write) or the saved set holds content the sandbox never ran.
+- The second case is now its own admin finding at every final save, `SAVED_SOURCE_DIVERGES` (process-only):
+  it means a restore would bring back a file no browser check ever saw. The next report carrying either
+  line settles this item.
+
+**Recorded, not changed:**
+- The weak builder was told the template "fully implements the request" and still added work nobody asked
+  for (a wishlist delete), introduced three type errors into a working template, and spent ~80 s repairing
+  them. `READY_BEFORE_END`: judged finished at step 10, then 25 more steps.
+- **Proposed to the admin, not built:** deliver a verbatim starter-chip prompt WITHOUT a model loop
+  (seed → install → typecheck → dev server → preview). This is an architecture change in the build route,
+  so it is the admin's call.
+- Tests: `tests/theSearchBoxWasInHindi.test.ts` (23 cases). Reversion-proven for the probe (8 fail on the
+  old code) and for the journey sentence.

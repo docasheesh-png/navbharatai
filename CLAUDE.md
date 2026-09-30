@@ -1497,6 +1497,43 @@ the code (it is actually read somewhere) on 2026-07-11.
   **What to watch on the first real days:** whether the countdown appears often (the shared-address
   case), and whether pictures still open in "Add text" — if a browser cannot read them the relay
   covers it, but a rise in relay calls means we are paying the address cost after all.
+  🇮🇳 **EVERY PERSON IS INDIAN UNLESS NAMED OTHERWISE, AND NO IMAGE IS NOT A DEAD END (admin
+  2026-09-30: *"jab bhi koi human image banayi jaye to default indian face hi banna chahiye … 'indian
+  face' diya to image bani hi nahi"*). No env key.** (1) `imagePeople.ts` puts
+  `INDIAN_PEOPLE_DIRECTION` straight after the subject whenever a person is in the brief and no other
+  origin, mix or character is named ("a Japanese chef", "diverse team", "spiderman" stand down) —
+  in the craft layer (every rung of the generator), never on an edit, a UI screenshot or a
+  background. Precision-first: player / worker / cook / seller / driver are NOT people words, and a
+  cat's face or a face-wash bottle is not a face. (2) 🔴 **Since this key made the browser fetch the
+  free picture, a picture the engine did not deliver was a dead end** — the server had already
+  returned the link, so the old ladder (a try from our side, then the metered paid rungs) never ran.
+  The browser now probes a link it cannot read (`imageLinkLoads`) and, when no picture came, re-sends
+  the SAME request with `freeFailed` (the signed link and its reason). The server honours it only via
+  `freeFailureVerified` — our signature, unexpired, and the prompt inside the link equal to this
+  request's prompt — and then runs the server ladder; a mismatch is a 403. The paid rungs stay
+  metered exactly as before. ⚠️ **Why "indian face" failed is NOT proven** (the provider cannot be
+  reached from a session); the suspect is the provider's own `safe=true` filter (added 2026-09-28)
+  refusing a close-up face. The `[IMAGE_GEN] the browser could not get the free picture (<reason>)`
+  log line now names it — read it before changing anything else.
+  💬 **NAVBHARATAI FREE DOES NOT MAKE PICTURES, AND IT KNOWS WHERE THEY ARE MADE (admin 2026-09-30:
+  *"photo nahi banata hai = sahi hai, banana bhi nahi hai … navbharatai free ko mode aur uske andar jo
+  hai, sabke bare me batao"*).** The inline Pollinations picture in `routes/chat.ts` is removed — a
+  free picture request now reaches the model with `FREE_IMAGE_REQUEST_DIRECTIVE`, which answers in the
+  user's language and points to **Mode → Image Generator AI FREE**. And `freeChatModeGuide()` is a
+  STANDING part of the free system prompt (every turn, not a keyword match): the Mode sheet's two
+  groups, the studio, every expert by name, the four the phone app hides, and that Pro is not in Mode.
+  🔒 `tests/freeChatKnowsItsModeButton.test.ts` holds the guide equal to the sheet
+  (`newModeEntries`) in both directions — it found the GitHub repo analyst missing on its first run.
+  ⚠️ The free chat's own PHOTO EDIT (an attached picture + "background badlo", 2026-09-21) is
+  deliberately untouched — the admin's word was about MAKING a picture; ask before removing an edit.
+  🔴 **AND ON THE PHONE THE MESSAGE NEVER EVEN REACHED THE SERVER** (admin's screenshot, same day:
+  "photo banao" → *"Building applications is only available for NavBharatAI-Pro"*). `useChatEngine.ts`
+  ran `/bana do|build|create|generate|coding|program|banao|project/i` over every free message and
+  answered a match itself — so "photo banao", "chai kaise banao" and "project report likho" were all
+  refused with a canned line. The free agent now always falls through to the server, whose own prompt
+  sends an app request to Pro and a picture request to Mode. Sibling fixed in the same file:
+  `githubTriggers` matched "git" inside "digital" and "repo" inside "report". ⚠️ Bundled mode: the
+  website has it on deploy; phone users need a fresh `.aab`/`.ipa`.
 
 - **Charging for NavBharat Cloud hosting (built 2026-09-12, ROADMAP §11 slice 2.1 — NOT live yet):**
   `NAVBHARAT_BILL_HOSTING` (⚠️ **UNSET.** Unset means the daily job still MEASURES every hosted app and

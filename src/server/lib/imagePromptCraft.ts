@@ -33,6 +33,8 @@
  * can act on beats a beautiful image with a misspelled shop name on it.
  */
 
+import { INDIAN_PEOPLE_DIRECTION, wantsIndianPeopleDefault } from './imagePeople';
+
 export type ImagePurpose =
   | 'icon' | 'logo' | 'banner' | 'avatar' | 'background'
   | 'illustration' | 'screenshot' | 'thumbnail' | 'general';
@@ -56,6 +58,8 @@ export interface CraftedPrompt {
   /** Honest, user-facing notes — shown, never hidden. */
   notes: string[];
   purpose: ImagePurpose;
+  /** The Indian-people default was applied — a person is in the brief and no other origin was named. */
+  indianPeople: boolean;
 }
 
 /** Longest prompt any provider here accepts. */
@@ -396,6 +400,15 @@ export function craftImagePrompt(input: CraftInput): CraftedPrompt {
   const styleSpec = STYLE_DIRECTION[String(input.style ?? '')];
   const { purpose, styleDropped, realismChip, realism, realismLoses } = resolveImageBrief(input);
 
+  // 🇮🇳 EVERY PERSON IS INDIAN UNLESS THE USER NAMED SOMEBODY ELSE (admin 2026-09-30: "jab tak
+  // specific bola na jaye kisi aur face ke bare me, tab tak 100% indian face hi banna chahiye").
+  // Placed straight after the subject because image models weigh the opening of a prompt most: said
+  // after the art direction, it lost to the model's own default face. A UI screenshot and a
+  // background are left alone — there a word like "student" or "patient" names a DOMAIN, and the
+  // sentence would invite a stranger into a dashboard. See `imagePeople.ts`.
+  const indianPeople = purpose !== 'screenshot' && purpose !== 'background' && wantsIndianPeopleDefault(base);
+  if (indianPeople) parts.push(INDIAN_PEOPLE_DIRECTION);
+
   // 🔴 THE USER'S EXPLICIT ASK BEATS A CHIP THEY NEVER TOUCHED. This module already states that
   // principle, in `styleConflictsWithPrompt`'s own words — "the user's typed intent is the stronger
   // signal of the two — they wrote it, they did not merely leave a chip on" — and applied it to
@@ -487,6 +500,7 @@ export function craftImagePrompt(input: CraftInput): CraftedPrompt {
     negative,
     notes,
     purpose,
+    indianPeople,
   };
 }
 

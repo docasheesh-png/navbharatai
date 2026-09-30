@@ -24,7 +24,8 @@ describe('one reader of a tsc output', () => {
   });
 
   it('project memory and the release gate now agree about a failed install', () => {
-    const install = "npm error could not determine executable to run\nCannot find module 'typescript'";
+    const install = 'npm ERR! code ERESOLVE\nnpm ERR! ERESOLVE unable to resolve dependency tree';
+    expect(tscVerdict(install)).toBe('unknown');
     expect(tscOutputProvesClean(install)).toBe(false);
     // Before: `hasTscErrors(install) ? 'failed' : 'passed'` → 'passed'. A typecheck that never ran
     // was evidence of a clean compile.

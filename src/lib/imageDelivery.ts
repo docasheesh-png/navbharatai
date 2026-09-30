@@ -100,3 +100,9 @@ export function imageWaitMessage(msLeft: number): string {
   const s = Math.max(0, Math.ceil(msLeft / 1000));
   return `NavBharatAI’s engine is busy — trying again (${s}s)`;
 }
+
+/**
+ * The line under a picture while our server finishes it, after the browser's own try came to nothing
+ * (admin 2026-09-30). Branded; never names the provider, and never says "failed" — nothing has.
+ */
+export const IMAGE_SERVER_FALLBACK_NOTE = 'Trying another way to make your picture…';

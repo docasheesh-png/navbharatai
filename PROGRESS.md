@@ -84303,6 +84303,55 @@ Creator** on itself (IAM signBlob). Without it the exchange answers `custom-toke
 the old honest Email/Google message, and the OTP card shows that code in the detail — never a fake success.
 - ✅ **Same day, closed: the unnamed `package.json` writer.** It was the `evaluate` tool's dependency reconcile (`landHealWrite`), called by the lean reviewer on a green app. Green Freeze refused it correctly, but the heal ran in no pass, so the report could only say "a later write". `landHealWrite` now runs in the pass `evaluate-heal`. That pass is on no allowlist, so a green app is still untouched; the refusal now names its writer. This is test-locked and reversion-proven in `tests/aStaleCopyCannotRunInsteadOfTheBuild.test.ts`. The e7baf61d `src/types.ts` writer is probably the same heal (the import reconcile uses the same door); the next report will say for certain.
 
+## 2026-09-30 — the image generator: every person is Indian by default, and "no image" is no longer a dead end
+
+**Admin, verbatim:** *"jab bhi koi face bane to woh bhi chinis face banta hai … jab bhi koi human image banayi
+jaye to default indian face hi banna chahiye (100% indian) jab tak specific bola na jaye kisi aur face ke bare
+me … abhi maine prompt diya 'indian face' to image bani hi nahi, isko bhi fix karna!!"*
+
+**1. Chinese faces — the cause was our brief.** Nothing we sent said who the person is, so the engine used its
+own default face. New `src/server/lib/imagePeople.ts` (pure):
+- It detects a person in the brief (English, Hinglish, Devanagari).
+- It stands down when the user names another origin, a mix or a character.
+- `INDIAN_PEOPLE_DIRECTION` is placed straight after the subject in `craftImagePrompt`, which covers every rung of the generator.
+- Free chat's inline image uses the same rule.
+- It is never applied to an edit of the user's own photo, a UI screenshot, or a background.
+- It is precision-first: `player`, `worker`, `cook`, `seller`, `driver`, `cat face` and `face wash` do not count as people.
+
+**2. "indian face" made no image — the structural half is fixed; the provider's half is unproven.**
+- Our own triage and word scan both pass that brief (measured).
+- Since 2026-09-21 the browser fetches the free picture itself, so when the engine delivered nothing, the old ladder never ran. That ladder was: one try from our side, then the metered paid rungs. A link the browser could not read was also *shown on trust*, even when it was an error.
+- The browser now probes such a link (`imageLinkLoads`). When no picture came, it re-sends the same request with `freeFailed`.
+- The server honours that only through `freeFailureVerified`: our signature, unexpired, and the prompt in the link equal to this request's. It then runs the server ladder. A mismatch gets a 403.
+- **Open root cause:** why the provider refused `"indian face"` is not proven. Its host cannot be reached from a session. The suspect is `safe=true` (added 2026-09-28) refusing a close-up face. The route now logs the browser's reason (`[IMAGE_GEN] the browser could not get the free picture (…)`). Read that before changing the provider call.
+
+**Tests:** `tests/everyFaceIsIndianAndNoImageIsADeadEnd.test.ts`, 57 cases, including the real route. Reversion-proven: removing the placement, or the server fallback, fails 5 cases.
+
+## 2026-09-30 — NavBharatAI FREE stops making pictures, and learns its own Mode button
+
+**Admin, verbatim:** *"navbharat photo nahi banata hai = sahi hai, banana bhi nahi hai! … navbharatai free
+ko pata hi nahi photo kaha banegi! navbharatai free me 'mode' me image generator hai … navbharatai free ko
+mode aur uske andar jo hai, sabke bare me batao!!"*
+
+- **Cause.** The free system prompt never mentioned Mode. App knowledge reached the model only when a
+  message matched an `AppContextInjector` keyword, so a picture request met a model that had never heard of
+  the studio.
+- **The inline picture is removed** from `routes/chat.ts`. It was made from this server's address and ran
+  against the admin's rule. A free picture request now adds `FREE_IMAGE_REQUEST_DIRECTIVE`: the model
+  replies in the user's language, points to **Mode → Image Generator AI FREE**, and can write a
+  paste-ready description.
+- **`src/server/lib/freeChatModeGuide.ts`** (new) is appended to the free system prompt on every turn. It
+  covers:
+  - both groups of the Mode sheet;
+  - what the studio does;
+  - every expert by name, taken from the professional registry plus Doctor AI and the repo analyst;
+  - the four experts the phone app hides;
+  - that Pro is not in Mode.
+- **`imageGenGuidance()`** now leads with the Mode route. It is used by Professionals, Pro and the
+  photo-edit replies.
+- **Deliberately unchanged:** free chat's photo EDIT of an attached picture (admin 2026-09-21).
+- **Tests.** `tests/freeChatKnowsItsModeButton.test.ts` (9) holds the guide equal to `newModeEntries` in
+  both directions. On its first run it found "GitHub Repo Analyst & Improver" missing. Reversion-proven.
 ## 2026-09-30 — What the app still needs from you is the last thing the build says (admin request)
 
 Admin: *"jab user koi aisi app banata hai jisme user se suggestion, question ke answer, API keys ya secret
@@ -84401,3 +84450,13 @@ you type and nothing needs changing, when every field is addressable and only th
   so it is the admin's call.
 - Tests: `tests/theSearchBoxWasInHindi.test.ts` (23 cases). Reversion-proven for the probe (8 fail on the
   old code) and for the journey sentence.
+- **Follow-up, same day (admin screenshot: "photo banao" → "Building applications is only available for
+  NavBharatAI-Pro").**
+  - **Cause:** the free chat's message never reached the server. `useChatEngine.ts` answered any free
+    message matching `/…|create|generate|program|banao|project/i` with that canned line, so the
+    server-side fix above could not run.
+  - **Fix:** the free agent now always goes to the server.
+  - **Sibling fixed in the same file:** `githubTriggers` used substring matching ("git" in "digital",
+    "repo" in "report", "push" in "push notification"). It now matches whole words only.
+  - **Tests:** 2 more in `tests/freeChatKnowsItsModeButton.test.ts`, reversion-proven.
+  - **Reach:** the website gets this on deploy; phones need a fresh bundle.

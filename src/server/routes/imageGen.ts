@@ -8,7 +8,7 @@ import {
   imageSubjectPrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured, isValidImageGenRequest,
   isImageRefusal, extractResponseText, IMAGE_REFUSAL_MESSAGE,
   geminiImageConfigured, grokImageKey, grokImageModel, parseGrokImageResponse,
-  pollinationsEnabled, fetchPollinationsImage, pollinationsImageUrl,
+  pollinationsEnabled, fetchPollinationsImage, pollinationsImageUrl, MAX_PROMPT_CHARS,
 } from '../lib/imageGen';
 import { craftImagePrompt, withInlineNegative } from '../lib/imagePromptCraft';
 import { runImageEdit } from '../lib/imageEditRun';
@@ -16,7 +16,7 @@ import { triageImageRequest } from '../lib/imageSafety';
 import { imageFreePaidBudget, FREE_PAID_CAP_MESSAGE } from '../lib/imageFreePaidBudget';
 import { enhanceImagePrompt, ENHANCE_MAX_INPUT } from '../lib/imagePromptEnhancer';
 import { aiRouter } from '../lib/aiRouter';
-import { clientImageFetchEnabled, imageTicketSecret, signImageTicket, verifyImageTicket } from '../lib/imageTicket';
+import { clientImageFetchEnabled, freeFailureVerified, imageTicketSecret, signImageTicket, verifyImageTicket } from '../lib/imageTicket';
 import { IMAGE_TICKET_TTL_MS, isAllowedImageHost } from '../../lib/imageDelivery';
 import { extractImageText, noTextDirection } from '../../lib/imageTextFromPrompt';
 import { isAgentV3FreeUser } from '../AgentV3/featureFlag';
@@ -56,6 +56,15 @@ const schema = vobject({
   // (initImageTooLarge) rather than by string length. ⚠️ `vobject` drops a key it does not declare,
   // so leaving this out would make the attach button a no-op with nothing failing.
   initImage: vstring({ optional: true, max: 14_000_000 }),
+  // The browser could not get the free picture from the link we handed it — finish it here. Only a
+  // link WE signed, for THIS prompt, is honoured (`freeFailureVerified`). `reason` is the browser's
+  // own account of what went wrong, logged so the next "no image" is explainable.
+  freeFailed: vobject({
+    url: vstring({ max: 4_000 }),
+    ticket: vstring({ max: 120 }),
+    exp: vnumber({ int: true }),
+    reason: vstring({ optional: true, max: 120 }),
+  }, { optional: true }),
 });
 
 // Image generation is costlier than text — its own tighter bucket, separate from the workspace one.
@@ -282,13 +291,31 @@ export function registerImageGenRoutes(app: Express): void {
           res.status(422).json({ error: POLLINATIONS_BLOCK_MESSAGE, code: 'blocked' });
           return;
         }
+        // 🔴 THE BROWSER ALREADY TRIED AND GOT NOTHING (admin 2026-09-30: "indian face" diya to
+        // image bani hi nahi). Handing it the same link again would fail the same way, so a
+        // verified failure takes the ladder that follows a free-provider failure: one try from our
+        // side, then the metered paid rungs. An unverified claim is refused — it is either stale
+        // or not ours, and re-generating mints a fresh link.
+        const failedFree = (req.body as { freeFailed?: { url: string; ticket: string; exp: number; reason?: string } }).freeFailed;
+        const browserFailed = !!failedFree && freeFailureVerified(
+          failedFree, prompt, MAX_PROMPT_CHARS, imageTicketSecret(), Date.now(), isAllowedImageHost,
+        );
+        if (failedFree && !browserFailed) {
+          res.status(403).json({ error: 'That picture link has expired. Please make the image again.' });
+          return;
+        }
+        if (browserFailed) {
+          const why = typeof failedFree.reason === 'string' ? failedFree.reason.slice(0, 120) : 'unknown';
+          diag.push(`browser fetch: ${why}`);
+          console.warn(`[IMAGE_GEN] the browser could not get the free picture (${why}) — finishing it on the server.`);
+        }
         // 🔑 THE BROWSER FETCHES IT, NOT US (admin 2026-09-21: "free wale me user ki ip").
         // The provider allows one request every 15 seconds PER ADDRESS, and this server is ONE
         // address — so at any real scale every free user on the platform queues behind every other
         // one. Handing the browser a link puts each user on their own connection. Nothing else
         // moves: the prompt was triaged, crafted and bounded HERE, seconds ago, and the link
         // carries that finished prompt. `IMAGE_GEN_CLIENT_FETCH=off` reverts it with no deploy.
-        if (clientImageFetchEnabled()) {
+        if (clientImageFetchEnabled() && !browserFailed) {
           const url = pollinationsImageUrl(prompt, req.body.size, process.env, {
             width: req.body.width,
             height: req.body.height,

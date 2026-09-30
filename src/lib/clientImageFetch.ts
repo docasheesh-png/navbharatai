@@ -31,6 +31,11 @@ export interface ClientImageOutcome {
   needsRelay?: boolean;
   /** An honest failure. Branded; never names the provider. */
   error?: string;
+  /**
+   * What actually went wrong, for OUR server (never shown): a status, a decode problem, a spent retry
+   * budget. Sent with the server fallback so the next "no image" report says why.
+   */
+  reason?: string;
 }
 
 /**
@@ -118,7 +123,10 @@ export async function fetchImageFromUser(
         return { dataUrl: await blobToDataUrl(blob) };
       }
       if (!shouldRetryImageStatus(res.status) || attempt >= delays.length) {
-        return { error: 'NavBharatAI’s engine could not make that image right now — please try again.' };
+        return {
+          error: 'NavBharatAI’s engine could not make that image right now — please try again.',
+          reason: `HTTP ${res.status}`,
+        };
       }
     } catch (err) {
       if (opts.signal?.aborted) return { error: 'Cancelled.' };
@@ -129,7 +137,7 @@ export async function fetchImageFromUser(
       // Only a FETCH that never produced a response can be a blocked read. Once `directReadWorks`
       // is true the response arrived, so a later throw is a decode problem and is reported as one.
       if (directReadWorks === true) {
-        return { error: 'That picture could not be opened here — please try again.' };
+        return { error: 'That picture could not be opened here — please try again.', reason: 'decode failed' };
       }
       throws += 1;
       if (throws >= DIRECT_FETCH_THROW_LIMIT) {
@@ -141,7 +149,7 @@ export async function fetchImageFromUser(
     const delay = delays[Math.min(attempt, delays.length - 1)];
     attempt += 1;
     if (attempt > delays.length) {
-      return { error: 'NavBharatAI’s engine is very busy — please try again in a minute.' };
+      return { error: 'NavBharatAI’s engine is very busy — please try again in a minute.', reason: 'retry budget spent' };
     }
     const started = Date.now();
     const tick = setInterval(() => opts.onWait?.(Math.max(0, budgetLeft - (Date.now() - started))), 500);
@@ -153,6 +161,54 @@ export async function fetchImageFromUser(
     }
     budgetLeft = Math.max(0, budgetLeft - delay);
   }
+}
+
+/**
+ * Does this link really load as a picture in THIS browser?
+ *
+ * 🔴 WHY (admin 2026-09-30: "indian face" diya to image bani hi nahi). When a browser may not read
+ * another site's bytes, the picture used to be shown straight from the link on trust. But an ERROR
+ * from the provider — a refusal, an outage — reaches the page the same way a blocked read does: as a
+ * fetch that throws. So a refused picture was "shown" as a broken image and counted as a success. An
+ * `<img>` load needs no permission to read the bytes, and it reports exactly the one thing that
+ * matters here: did a picture arrive.
+ *
+ * Where the page has no `Image` (a test, a worker), it answers `null` — "could not tell" — and the
+ * caller keeps today's behaviour rather than inventing a failure.
+ */
+export function imageLinkLoads(url: string, timeoutMs = 60_000): Promise<boolean | null> {
+  if (typeof Image === 'undefined') return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const img = new Image();
+    let settled = false;
+    const done = (v: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      img.onload = null;
+      img.onerror = null;
+      resolve(v);
+    };
+    const timer = setTimeout(() => done(false), timeoutMs);
+    img.onload = () => done(img.naturalWidth > 0);
+    img.onerror = () => done(false);
+    img.src = url;
+  });
+}
+
+/**
+ * When the browser's own try came to nothing, the reason to hand the server — or `null` when the
+ * picture is here and nothing more is needed. PURE.
+ *
+ * `linkLoaded` is the answer of `imageLinkLoads` for a browser that could not read the bytes: `true`
+ * keeps the picture shown from the link (today's behaviour), `false` means no picture ever arrived,
+ * and `null` means the page could not tell — which also keeps today's behaviour.
+ */
+export function serverFallbackReason(got: ClientImageOutcome, linkLoaded: boolean | null): string | null {
+  if (got.dataUrl) return null;
+  if (got.needsRelay) return linkLoaded === false ? 'link did not load' : null;
+  if (got.error === 'Cancelled.') return null;
+  return got.reason || 'no picture';
 }
 
 /**

@@ -149,7 +149,7 @@ import { analyzeEffectCleanup, effectCleanupSummary } from './effectCleanupAnaly
 import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
-import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, manifestRewrittenBy, viteRangeOf, reactRangeOf, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, npmInstallMaskedFailure } from './DependencyAutoFix';
+import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, manifestRewrittenBy, viteRangeOf, reactRangeOf, capacitorRangeOf, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, npmInstallMaskedFailure } from './DependencyAutoFix';
 import { quoteShellRouteGroupPaths } from './shellCommandSafety';
 import { resolveStringArg, missingArgMessage } from './toolArgRepair';
 import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
@@ -3957,10 +3957,13 @@ export class ToolDispatcher {
         // The vitest family's major follows the PROJECT's Vite, so read it — only when the command names
         // vitest, so no other command pays for the read (autopsy 7d79254b, DependencyAutoFix.ts).
         // The React Three Fiber family follows the project's React the same way (autopsy a5b661c8).
-        const pinPkg = /(?:^|[\s/])(?:@vitest\/|vitest\b|@react-three\/)/.test(command)
+        // …and a Capacitor plugin follows the project's Capacitor major (autopsy a9f8d186).
+        const pinPkg = /(?:^|[\s/])(?:@vitest\/|vitest\b|@react-three\/|@capacitor(?:-[\w-]+)?\/)/.test(command)
           ? await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => undefined)
           : undefined;
-        const pinCtx = pinPkg !== undefined ? { viteRange: viteRangeOf(pinPkg), reactRange: reactRangeOf(pinPkg) } : undefined;
+        const pinCtx = pinPkg !== undefined
+          ? { viteRange: viteRangeOf(pinPkg), reactRange: reactRangeOf(pinPkg), capacitorRange: capacitorRangeOf(pinPkg) }
+          : undefined;
         const effectiveCommand = quoteShellRouteGroupPaths(pinKnownDepsInInstallCommand(command, pinCtx));
         // Inject the user's own vault secrets (Settings → Secrets & API Keys) into the app's .env the first
         // time it installs/builds/runs — so the app runs with real keys the user never pasted in chat.

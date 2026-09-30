@@ -16991,9 +16991,19 @@ async function noteBuildOutcome(
         // (start-tier, escalation, default) sees it.
         if (!sb.ok && !sb.stopped && sb.salvagedPaths?.length) {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_SALVAGE', message: `Fast lane salvaged ${sb.salvagedPaths.length} finished file(s) into the workspace for the full builder to continue from.`, autoResolved: true, detail: sb.salvagedPaths.join(', ') });
+          // Why the lane stopped decides the first sentence: out of time, or finished but not compiling —
+          // and in the second case the compiler's own words come with it, so the builder starts from the
+          // errors instead of re-running the typecheck to find them (autopsy a9f8d186).
+          const salvageWhy = sb.reason === 'verify_failed'
+            ? 'and they do not compile yet'
+            : 'before running out of time';
+          const salvageErrors = sb.reason === 'verify_failed' && sb.verifyErrors
+            ? `The compiler's errors on them right now:\n${sb.verifyErrors.split('\n').slice(0, 20).join('\n')}\n`
+            : '';
           buildPrompt =
-            `${SALVAGE_HANDOFF_MARKER} A faster build lane already generated ${sb.salvagedPaths.length} file(s) of THIS app before running out of time; ` +
-            `they are in the workspace now and they are YOUR OWN prior work:\n${sb.salvagedPaths.slice(0, 40).map((p) => `- ${p}`).join('\n')}\n` +
+            `${SALVAGE_HANDOFF_MARKER} A faster build lane already generated ${sb.salvagedPaths.length} file(s) of THIS app ${salvageWhy}; ` +
+            `they are in the workspace now and they are YOUR OWN prior work (any project context below that lists fewer files was taken before they were written):\n${sb.salvagedPaths.slice(0, 40).map((p) => `- ${p}`).join('\n')}\n` +
+            salvageErrors +
             `READ these files first and COMPLETE the app around them — keep their module structure, types and export names; add only what is missing; ` +
             `fix any error in place. ${HANDOFF_NOTE_FIX_LINE} Do NOT re-plan a parallel structure (no duplicate types/ or utils/ trees), do NOT delete or rewrite them wholesale.\n\n---\n\n${buildPrompt}`;
         }

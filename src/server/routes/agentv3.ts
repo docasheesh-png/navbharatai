@@ -202,6 +202,7 @@ import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext, plannerDomainBrief } from '../AgentV3/RoleChats';
 import { summarizeFileTree, NAVBHARATAI_UI_MAP } from '../AgentV3/systemPrompt';
+import { aiInAppRule } from '../AgentV3/systemPrompt';
 import { weakBuildDisciplineBlock } from '../AgentV3/weakBuildDiscipline';
 import { pickPaletteForPrompt, palettePromptBlock } from '../AgentV3/designPresets';
 import { deadlinePauseMessage } from '../AgentV3/DeadlinePause';
@@ -14382,6 +14383,8 @@ async function noteBuildOutcome(
         // The SAME language line the architect's prompt opens with (autopsy 466c260a) — the child
         // writes the labels and never sees the user's words.
         languageRule: () => appLanguageInstruction(prompt),
+        // The SAME AI-in-app rule the architect reads (autopsy d8ed307a) — the child writes the AI client.
+        aiRule: () => aiInAppRule(),
       };
       const spawnSubAgent = makeSubAgentSpawn(subAgentDeps);
       // Layer 84 (Multi-Model Ensemble): the Architect can call second_opinion to

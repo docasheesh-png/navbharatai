@@ -407,6 +407,7 @@ import { registerPrompt } from '../AgentV3/PromptRegistry';
 import { buildRetrospective, classifyFailure } from '../lib/BuildRetrospectiveEngine';
 import { failureLedgerStore } from '../AgentV3/FailureLedgerStore';
 import { abortOutcomeFor, ABORT_OUTCOME_CODES } from '../AgentV3/abortOutcome';
+import { sandboxWasUnavailable } from '../AgentV3/sandboxAvailability';
 import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured, buildStarvedItsOutputBudget, stoppedByUser, buildWasStopped } from '../AgentV3/BuildDiagnostics';
 import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
@@ -22425,6 +22426,29 @@ async function noteBuildOutcome(
             autoResolved: true,
           });
         } catch { /* partition analysis is best-effort — never blocks a build */ }
+      }
+
+      // 🔴 A SETUP FAILURE IS A FACT ABOUT ONE MOMENT, NOT ABOUT THE BUILD (autopsy a9f8d186, 2026-09-30).
+      // Setup hit a stale handle once; the same build then ran npm in the sandbox and watched the app
+      // render — and this flag, set at second 0 and never re-read, told the user the build could not
+      // run and made a working app free. Re-judged here against what actually ran (sandboxAvailability.ts),
+      // before any reader below sees it.
+      if (sandboxUnavailable) {
+        let servedEvidence: { commands?: ReadonlyArray<{ exitCode?: number | null }>; appRendered: boolean } = { appRendered: false };
+        try { servedEvidence = { commands: buildDiag.report()?.commands ?? [], appRendered: renderProvenNow() || buildObs.previewRendered }; }
+        catch { /* a report that cannot be read keeps the setup verdict, exactly as before */ }
+        if (!sandboxWasUnavailable(true, servedEvidence)) {
+          sandboxUnavailable = false;
+          try {
+            buildDiag.resolveOnRecheck('SANDBOX_UNAVAILABLE');
+            buildDiag.record({
+              phase: 'sandbox', severity: 'info', code: 'SANDBOX_RECOVERED', autoResolved: true,
+              message: 'Setup could not reach the sandbox at first, but it served this build afterwards '
+                + (servedEvidence.appRendered ? '(the app rendered from it)' : '(commands ran in it)')
+                + ' — the build is judged on what it produced, not on the setup attempt.',
+            });
+          } catch { /* diagnostics are best-effort */ }
+        }
       }
 
       // EMPTY-BUILD HONESTY (deep-test App #7 — Trello task-board, 2026-07-13). A build that EXPECTED

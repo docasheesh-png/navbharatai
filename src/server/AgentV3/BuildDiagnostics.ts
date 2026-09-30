@@ -150,6 +150,8 @@ const PROCESS_ONLY_CODES = new Set([
   // too or the split silently turns "we do not know why the run ended" into a blocker counted
   // against the user's app — `tests/everyAbortCauseRecordsAnOutcome.test.ts` caught exactly that.
   'OUTCOME_STOPPED', 'OUTCOME_BUILD_TIMEOUT', 'OUTCOME_ABORTED_UNKNOWN',
+  // …and the sandbox that could not be set up (a9f8d186): infrastructure, the same class as a provider outage.
+  'OUTCOME_SANDBOX_UNAVAILABLE',
 ]);
 
 /**
@@ -283,6 +285,10 @@ export function narrationEchoesPromptSymptom(text: string, prompt: string | unde
 export function isAppFinding(issue: Pick<BuildIssue, 'phase' | 'code'>): boolean {
   if (!issue) return false;
   if (issue.phase === 'provider') return false;
+  // A sandbox that could not be set up is our infrastructure, never the app's code — the same rule as a
+  // provider call, applied BY PHASE for the same reason (autopsy a9f8d186, 2026-09-30: a setup error on a
+  // stale handle was counted as "1 build-breaking blocker" of an app that rendered in a real browser).
+  if (issue.phase === 'sandbox') return false;
   return !PROCESS_ONLY_CODES.has(issue.code);
 }
 

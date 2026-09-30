@@ -85303,6 +85303,49 @@ Test-locked and reversion-proven in `tests/theQuestionEndedWithPlease.test.ts`.
 - **The no-journey sentence** (#3398, the Gita search box). There is one predicate. The sentence depends on whether the form has any button: a field with no button "acts as you type"; a form with a button has "none of its buttons reads as submitting them".
 - **The Project Mode starter verdict** (#3399, autopsy 6a5fb04b). #3399's `setStarterExpected` flag and `shellModuleFor` are kept. This branch's `setStarterEntryExpected` and its route call are removed, and `starterEntryExpectedFor` / `moduleOwnsAppEntry` now delegate to #3399's helpers.
 - **Why this is recorded:** this is exactly the duplicate-work class `CLAUDE.md` warns about. Neither PR existed when the other started.
+## 2026-09-30 — Autopsies f385a5f9 (JEEVERSE AI) + 12c642ed (simple habit tracker): the two old reports, root-caused
+
+**12c642ed — "Build a simple daily habit tracker" (Weak, 13.7 min against a ~3 min estimate):**
+- **The typecheck said "4 clean" about a compiler that never ran.** Every write-time run printed
+  `node_modules/.bin/tsc: No such file or directory`. `TSC_ENSURE` sent npm's output to `/dev/null`, so
+  the reason was lost. It now logs to `/tmp/nbai-tsc-ensure.log`. It retries with `--legacy-peer-deps`
+  only on a peer failure. If there is still no compiler, it prints `NBAI_TSC_UNAVAILABLE:` with npm's
+  last lines. The dispatcher counts by `tscVerdict`, so a run that never compiled is counted as
+  "never ran", not "clean". A piped `tsc | head` exit 0 no longer stands alone in the report line
+  when the output says the compiler did not answer. Tests: `tests/aCompilerThatNeverRanIsNotClean.test.ts`.
+- **"Simple" was overruled by five domain features.** The requirement-aware block told the builder to
+  INCLUDE categories, search, reminders and drag-and-drop. The builder called them "explicit
+  requirements". `userAskedForSmallScope` now stands the domain half down when the user stated the
+  size ("simple", "basic", "chhota sa"…). The India half stays. The block is labelled as our
+  suggestion. Report code: `REQUIREMENT_GAPS_STOOD_DOWN`. Tests: `tests/aSimpleAppStaysSimple.test.ts`.
+- **The fast lane's plan step spent 60 of its 90 s waiting on a silent first rung.** A deadline-bound
+  call with a next rung now waits at most a third of its time for the first answer, never under 15 s
+  (`firstAnswerBoundMs`; `hasNextRung` is passed by the ladder). The last rung and long steps are
+  unchanged. Tests: `tests/aSilentFirstRungLeavesRoomForTheNext.test.ts`.
+- **41 undefined classes and a 184 s heal.** A screen write was checked, but the three stylesheet
+  rewrites after it were never re-checked. A stylesheet write now re-checks every screen written this
+  build and names what is still missing. Tests: `tests/aStylesheetWriteIsCheckedAgainstTheScreens.test.ts`.
+- **The vulnerability warning outlived `npm audit fix`.** A later "found 0 vulnerabilities" now removes
+  it (`DEPENDENCY_VULNERABILITIES_FIXED`). Tests: `tests/aFixedVulnerabilityIsNotStillReported.test.ts`.
+- **The journey could not reach a form inside a modal.** The runner now presses one visible opener
+  ("+ New …", "Add …") when the submit is not visible, never a `NEVER_PRESS` control. This is proven in
+  a real browser. Tests: `tests/theFormBehindTheButtonIsReached.test.ts`.
+- Already closed by #3402 (O1): the whole-build crawl bench.
+
+**f385a5f9 — JEEVERSE AI (roadmap milestone 1):**
+- "wishlist / favorites NOT BUILT" on milestone 1: already closed by #3399 (`setCoverageRequest`).
+- **The roadmap planned a fake "Rendering…" progress bar** for the video step, despite its own rule 7.
+  `roadmapGuardrail` now finds a step that asks for work to be simulated, whether or not it is negated.
+  It keeps the step, marks it as needing infrastructure, and appends `NO_SIMULATION_CLAUSE`. Tests:
+  `tests/aRoadmapNeverPlansAFakeProgressBar.test.ts`.
+
+**Still open, honestly:**
+- Why `npm install` failed in the 12c642ed sandbox is NOT known. npm's reason was discarded, and the
+  same package.json resolves cleanly outside the sandbox. The next report will carry npm's own words.
+- The off-grid spacing in f385a5f9 is the model's own CSS; our kit lints 100/100. Cosmetic, left as a
+  finding.
+- The education domain suggests "roles / enrolment / fees" for a self-study JEE app. It was recorded
+  only; the roadmap replaced the prompt, so nothing was injected.
 ## 2026-09-30 — Autopsy 53a621e3 ("full-stack Android calculator", Weak, 4.7 min, ₹85.38): green, and routed as a big app
 
 The app rendered and passed the production build. The explorer pressed 12 controls, and nothing wrote to

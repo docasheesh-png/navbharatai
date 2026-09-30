@@ -670,9 +670,37 @@ export function missingDomainFeatures(appText: string, source: string): { domain
  *  domain almost always needs but the prompt left implicit — so a rich request never gets a shallow app,
  *  with NO clarifying round-trip (friction-free requirement awareness). Returns '' when there is nothing
  *  worth adding (no domain, or nothing missing), so a clear/generic prompt is left exactly as-is. Pure. */
+/**
+ * Did the user state the app's SIZE themselves — "a simple daily habit tracker", "a basic calculator",
+ * "chhota sa notes app", "keep it simple"? PURE, precision-first.
+ *
+ * 🔴 AUTOPSY 12c642ed (2026-09-30). The prompt was *"Build a simple daily habit tracker"* followed by
+ * the four things it should do. The domain half below then told the builder that "a production
+ * productivity app almost always needs" categories and tags, filter, sort and search, due dates and
+ * reminders, and drag-and-drop ordering — INCLUDE them by default. The builder read that block as
+ * *"the explicit requirements from the request block"*, built all nine, and a 3-minute estimate
+ * became 13.7 minutes plus a 184-second styling heal for 41 classes nobody asked for.
+ *
+ * The requirement-aware switch exists so an AMBIGUOUS domain prompt ("hospital app") is not built
+ * shallow. A user who says "simple" has answered the scope question already; adding a domain's
+ * features on top overrules the one sentence about size they wrote.
+ *
+ * ⚠️ The size word must describe the thing being built (within a few words of an app noun), and a
+ * "simple but …" / "simple yet …" is not a scope limit — "a simple but complete CRM" asks for more.
+ */
+const SMALL_SCOPE_WORD = String.raw`(?:simple|basic|minimal|minimalist|small|tiny|lightweight|bare[- ]?bones|no[- ]frills|chhota|chota|chhoti|choti|sadharan|saadharan|saada|sada)`;
+const APP_NOUN = String.raw`(?:app|apps|application|web ?app|website|site|page|tool|tracker|game|list|calculator|dashboard|form|planner|manager|timer|counter|to-?do|notes?|blog|portfolio|journal|diary|quiz|clock|widget|landing)`;
+const SMALL_SCOPE_RE = new RegExp(String.raw`\b${SMALL_SCOPE_WORD}(?:\s+sa|\s+si)?\s+(?!(?:but|yet|though|however)\b)(?:[\w'-]+\s+){0,3}${APP_NOUN}\b`, 'i');
+const KEEP_IT_SIMPLE_RE = /\bkeep\s+(?:it|this|the\s+(?:app|ui|design))\s+(?:very\s+|really\s+)?(?:simple|basic|minimal)\b/i;
+
+export function userAskedForSmallScope(prompt: string): boolean {
+  const text = String(prompt ?? '');
+  return SMALL_SCOPE_RE.test(text) || KEEP_IT_SIMPLE_RE.test(text);
+}
+
 export function buildRequirementGuidance(
   g: RequirementGaps,
-  opts: { userAskedForAnApp?: boolean } = {},
+  opts: { userAskedForAnApp?: boolean; userAskedForSmallScope?: boolean } = {},
 ): string {
   const parts: string[] = [];
   // 🔒 THE SECOND LAYER (autopsy 424ecdab, 2026-09-14). The keyword fix above stops an idiom SELECTING
@@ -694,12 +722,17 @@ export function buildRequirementGuidance(
   // `renderRequirementGaps`, which only describes — behaves byte-identically.
   const askedForAnApp = opts.userAskedForAnApp !== false;
   // Domain feature guidance — only when a real domain has genuinely-missing features AND an app was asked for.
-  if (askedForAnApp && shouldSurfaceRequirementGaps(g)) {
+  // A user who stated the size ("a simple habit tracker") has already answered the scope question —
+  // see `userAskedForSmallScope`. The India half below is unaffected: it invents no feature.
+  if (askedForAnApp && opts.userAskedForSmallScope !== true && shouldSurfaceRequirementGaps(g)) {
     const feats = g.likelyMissing.slice(0, 6);
     if (feats.length > 0) {
       parts.push([
         `[REQUIREMENT AWARENESS — this looks like a ${g.domain} app]`,
         `A production ${g.domain} app almost always needs the following, which the request left implicit. INCLUDE them by default (real, wired — never stubbed) unless one is clearly out of scope for what the user asked; if it genuinely does not fit, skip it silently rather than asking:`,
+        // These are OUR suggestions. The builder once described them to the user as "the explicit
+        // requirements from the request block" (autopsy 12c642ed).
+        `(These are NavBharatAI's suggestions, not the user's words — never describe them as something the user asked for, and never let them displace or delay what the user did ask for.)`,
         ...feats.map((f) => `- ${f}`),
       ].join('\n'));
     }

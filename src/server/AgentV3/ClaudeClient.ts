@@ -171,6 +171,12 @@ export interface RunTurnParams {
    */
   canAbandonSlowStream?: () => boolean;
   /**
+   * Set by the multi-provider ladder: is there another rung after the one running this call? A call
+   * bounded by our own deadline then waits less for its first answer (autopsy 12c642ed — see
+   * `firstAnswerBoundMs`). Absent ⇒ treated as "no", which changes nothing.
+   */
+  hasNextRung?: boolean;
+  /**
    * ABSOLUTE epoch-ms instant after which the CALLER no longer wants this answer.
    *
    * THE BUG IT CLOSES (admin report 2026-09-13): the fast lane capped its plan call at 90 s while the

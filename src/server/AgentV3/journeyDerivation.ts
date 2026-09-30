@@ -29,6 +29,7 @@ import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, 
 import { newPageOptionsExpr, isSignInRoute } from './signInExplore';
 import { rendersDataList } from './DesignCoverage';
 import { scanMarkup, type ScannedTag } from './jsxTags';
+import { NEVER_PRESS } from './clickExplorer';
 
 /** How a single element is addressed, in the order Playwright should be asked for it. */
 export type SelectorKind = 'testid' | 'name' | 'id' | 'placeholder' | 'label' | 'text' | 'role';
@@ -939,6 +940,13 @@ function locatorExpr(t: Target): string {
  * anywhere inside — this lives in a TypeScript template literal, where one would close the literal.
  * That mistake has been made here before; it is spelled out so it is not made again.
  */
+/**
+ * A control that OPENS a form rather than submitting one: "+ New Habit", "Add task", "Create note",
+ * "New". Anchored at the start of the label so "Add to cart" style side-effects are still subject to
+ * `NEVER_PRESS`, which is checked as well. Pure data, handed to the runner as a pattern.
+ */
+export const JOURNEY_OPENER = /^[+＋\s]*(?:add|new|create|compose|write)\b/i;
+
 export function journeyScript(previewUrl: string, journeys: readonly Journey[], marker: string, opts: { storageState?: string | null } = {}): string {
   const base = previewUrl.replace(/\/+$/, '');
   const steps = journeys.map((j) => {
@@ -965,6 +973,8 @@ const marker = ${JSON.stringify(marker)};
 const journeys = [
 ${steps}
 ];
+const OPENER = new RegExp(${JSON.stringify(JOURNEY_OPENER.source)}, 'i');
+const NEVER = new RegExp(${JSON.stringify(NEVER_PRESS.source)}, 'i');
 const browser = await chromium.launch({ args: ['--no-sandbox'] });
 for (const j of journeys) {
   // 'unreachable' is the DEFAULT, not a failure state. A journey that never got to press anything has
@@ -976,6 +986,26 @@ for (const j of journeys) {
   try {
     await page.goto(base + j.route, { waitUntil: 'domcontentloaded', timeout: ${JOURNEY_TIMEOUT_MS} });
     await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => {});
+    // 🔴 AUTOPSY 12c642ed (2026-09-30). The habit tracker's form lives in a modal behind "+ New Habit",
+    // so its submit control is not on the page until a user presses that button — and the journey
+    // reported "not present" about a form every user reaches in one tap. When the submit is not
+    // visible, press ONE visible opener ("+ New …", "Add …", "Create …"), never a destructive or
+    // outward control, and only then look for the form.
+    out.step = 'open';
+    const submitVisible = async () => { const b = j.submit(page).first(); return (await b.count()) > 0 && await b.isVisible().catch(() => false); };
+    if (!(await submitVisible())) {
+      const cands = page.locator('button, [role=button], a[href="#"], a:not([href])');
+      const n = Math.min(await cands.count(), 40);
+      for (let i = 0; i < n; i++) {
+        const c = cands.nth(i);
+        if (!(await c.isVisible().catch(() => false))) continue;
+        const name = String((await c.innerText().catch(() => '')) || (await c.getAttribute('aria-label').catch(() => '')) || '').trim().slice(0, 60);
+        if (!OPENER.test(name) || NEVER.test(name)) continue;
+        await c.click({ timeout: 4000 }).catch(() => {});
+        await page.waitForTimeout(300);
+        if (await submitVisible()) { out.opener = name; break; }
+      }
+    }
     out.step = 'fill';
     let filled = 0;
     for (const f of j.fields(page)) {

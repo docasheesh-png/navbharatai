@@ -12,7 +12,7 @@
 // orchestrator can fall through to the next (ultimately Claude) provider.
 
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
-import { turnDeadline, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE, SLOW_STREAM_MESSAGE } from '../turnDeadline';
+import { turnDeadline, firstAnswerBoundMs, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE, SLOW_STREAM_MESSAGE } from '../turnDeadline';
 import { glmThinkingParam, isThinkingParamRejection, modelAlwaysReasons, type GlmThinkingLevel } from './glmThinking';
 import { reconcileFloorBudget, turnStarvedItsBudget, starvedBudgetError } from '../floorBudget';
 import { markAbandonedTurn } from '../unbilledTurns';
@@ -445,14 +445,19 @@ export class OpenAiToolRunner implements TurnRunner {
     // The test is arithmetic, not a guess: `idleMs = min(streamIdleMs(), timeoutMs)`, so when
     // `idleMs < timeoutMs` the lane still had more clock than the silence window — whatever fired at
     // `idleMs` was the provider saying nothing, and our budget was not involved.
-    const initialBoundMs = streaming ? idleMs : timeoutMs;
-    const providerWentSilent = streaming && idleMs < timeoutMs;
+    // A deadline-bound step with a next rung waits at most a third of its time for the first answer
+    // (autopsy 12c642ed — see firstAnswerBoundMs).
+    const firstAnswerMs = streaming
+      ? firstAnswerBoundMs(idleMs, timeoutMs, bound.source, params.hasNextRung === true)
+      : timeoutMs;
+    const initialBoundMs = firstAnswerMs;
+    const providerWentSilent = streaming && firstAnswerMs < timeoutMs;
     const raw = await raceStop(
       withTimeout(
         call(),
         initialBoundMs,
         providerWentSilent
-          ? `OpenAI-compatible call (GLM/Kimi) timed out after ${idleMs}ms`
+          ? `OpenAI-compatible call (GLM/Kimi) timed out after ${firstAnswerMs}ms`
           : clockMessage(initialBoundMs),
       ),
       params.signal,

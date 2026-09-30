@@ -68,7 +68,9 @@ describe('1 · the staleness probe asks what is on disk', () => {
   });
 
   it('the typecheck prelude stamps the tree after installing, so it does not reinstall every run', () => {
-    expect(TSC_ENSURE).toContain('npm install >/dev/null 2>&1 && touch node_modules;');
+    // The install is logged since autopsy 12c642ed (npm's reason used to go to /dev/null); the stamp
+    // still follows a successful install, and only that.
+    expect(TSC_ENSURE).toMatch(/then \(npm install >>\S+ 2>&1 \|\| \([^)]*\)\) && touch node_modules; fi/);
   });
 });
 

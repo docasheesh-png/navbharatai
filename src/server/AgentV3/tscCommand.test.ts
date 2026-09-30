@@ -11,7 +11,7 @@ describe('robust tsc command (build report 2026-07-21 — npx tsc → tsc@2.0.4 
   it('ensures the compiler exists first (installs typescript only if the local binary is absent)', () => {
     expect(TSC_ENSURE).toContain('node_modules/.bin/tsc'); // guards on the binary
     expect(TSC_ENSURE).toContain('npm install typescript@5 --no-save'); // installs the REAL compiler, no-save
-    expect(robustTscCommand()).toMatch(/^if \[ ! -d node_modules \]/); // ensure runs before the check
+    expect(robustTscCommand().indexOf('if [ ! -d node_modules ]')).toBeLessThan(robustTscCommand().indexOf('node_modules/.bin/tsc --noEmit')); // ensure runs before the check
   });
 
   it('never installs the bogus `tsc` package (that is the squatter this fixes)', () => {

@@ -202,6 +202,13 @@ describe('WorkspaceMemory', () => {
     expect(map).toContain('App');
     expect(map).toContain('missing module');
   });
+
+  it('names each component with its file, so no agent guesses the path (autopsy 1389f0d5)', () => {
+    const mem = new WorkspaceMemory();
+    mem.indexFile('src/App.tsx', 'export default function App(){ return null; }');
+    mem.indexFile('src/PdfGenesis.tsx', 'export default function PdfGenesis(){ return null; }');
+    expect(mem.projectMap()).toContain('Components: App (src/App.tsx), PdfGenesis (src/PdfGenesis.tsx)');
+  });
 });
 
 describe('getWorkspaceMemory registry', () => {

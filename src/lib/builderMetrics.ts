@@ -51,7 +51,7 @@ export interface BuildMetricInput {
    * WHICH repairs this build ran, with its own completeness. `undefined` ⇒ never measured, and the
    * breakdown EXCLUDES it rather than scoring it as a build that healed nothing.
    */
-  healCodes?: { codes: Record<string, number>; total: number | null; unattributed: number | null } | null;
+  healCodes?: { codes: Record<string, number>; total: number | null; unattributed: number | null; open?: Record<string, number> } | null;
   /**
    * THE THREE FACTS THAT LET A STUCK PROJECT BE NAMED (admin 2026-09-25: "7 projects currently
    * sitting on a failed build" — and the card could not say which seven). All optional and all
@@ -389,6 +389,12 @@ export interface HealBreakdown {
   unattributed: number;
   /** Builds whose total was unrecorded, so nobody can say whether their list was complete. */
   completenessUnknown: number;
+  /**
+   * Non-blocking findings still OPEN when their build ended — the ❌ bucket (2026-09-30). These used to
+   * sit at the top of `top` as "repairs" (READINESS_WARNING ×305); they repaired nothing, so they are
+   * listed here instead, never dropped. `heals` on each row is the number of findings.
+   */
+  openTop: HealCodeRow[];
 }
 
 /** How many codes the headline names. The rest are still counted in `attributed`. */
@@ -420,9 +426,16 @@ export function healBreakdown(builds: readonly BuildMetricInput[]): HealBreakdow
   let attributed = 0;
   let unattributed = 0;
   let completenessUnknown = 0;
+  const openN = new Map<string, number>();
+  const openIn = new Map<string, number>();
 
   for (const b of rows) {
     const tally = b.healCodes as NonNullable<BuildMetricInput['healCodes']>;
+    for (const [code, n] of Object.entries(tally.open ?? {})) {
+      if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) continue;
+      openN.set(code, (openN.get(code) ?? 0) + n);
+      openIn.set(code, (openIn.get(code) ?? 0) + 1);
+    }
     for (const [code, n] of Object.entries(tally.codes ?? {})) {
       if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) continue;
       heals.set(code, (heals.get(code) ?? 0) + n);
@@ -439,7 +452,12 @@ export function healBreakdown(builds: readonly BuildMetricInput[]): HealBreakdow
     .sort((a, b) => (b.heals - a.heals) || a.code.localeCompare(b.code))
     .slice(0, HEAL_CODES_SHOWN);
 
-  return { builds: rows.length, top, attributed, unattributed, completenessUnknown };
+  const openTop = [...openN.entries()]
+    .map(([code, n]) => ({ code, heals: n, builds: openIn.get(code) ?? 0 }))
+    .sort((a, b) => (b.heals - a.heals) || a.code.localeCompare(b.code))
+    .slice(0, HEAL_CODES_SHOWN);
+
+  return { builds: rows.length, top, attributed, unattributed, completenessUnknown, openTop };
 }
 
 export interface BuilderScorecard {
@@ -569,6 +587,15 @@ export function scorecardHeadline(card: BuilderScorecard): string {
       `Most-repaired: ${named} — across ${card.healCodes.builds} build(s) carrying a breakdown, `
       + `${card.healCodes.attributed} repair(s) named.${missing}${unknown}`,
     );
+  }
+
+  // ❌ LEFT OPEN — findings that survived into the delivered app. Its own line, never merged into the
+  // repair list above: a readiness warning that nobody fixed is debt, not a heal.
+  if (card.healCodes.openTop.length > 0) {
+    const named = card.healCodes.openTop
+      .map((r) => `${r.code} ×${r.heals} (${r.builds} build${r.builds === 1 ? '' : 's'})`)
+      .join(', ');
+    lines.push(`Left open, not repaired: ${named} — non-blocking findings still in the app when the build ended.`);
   }
 
   return lines.join('\n');

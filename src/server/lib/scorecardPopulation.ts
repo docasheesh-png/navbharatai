@@ -71,7 +71,7 @@ export function toMetricInput(e: {
   ok?: boolean | null;
   billedInr?: number | null;
   counts?: { autoResolved?: number | null; workarounds?: number | null } | null;
-  healCodes?: { codes: Record<string, number>; total: number | null; unattributed: number | null } | null;
+  healCodes?: { codes: Record<string, number>; total: number | null; unattributed: number | null; open?: Record<string, number> } | null;
   workaroundCount?: number | null;
   rootCause?: string | null;
   prompt?: string | null;
@@ -89,7 +89,10 @@ export function toMetricInput(e: {
     billedInr: typeof e.billedInr === 'number' ? e.billedInr : null,
     // `undefined`, not 0, when the field is absent: healPressure EXCLUDES an unrecorded build and
     // would otherwise score a legacy row as a clean first pass.
-    healCount: typeof e.counts?.autoResolved === 'number' ? e.counts.autoResolved : undefined,
+    // The breakdown's CORRECTED total first (an older report's own count still includes findings that
+    // were left open, not repaired — see healCountOf), then the recorder's field.
+    healCount: typeof e.healCodes?.total === 'number' ? e.healCodes.total
+      : typeof e.counts?.autoResolved === 'number' ? e.counts.autoResolved : undefined,
     // The store's derived count first (it recovers a legacy zero from a complete timeline), then the
     // recorder's own field; `undefined` when neither can say, so the row is EXCLUDED, never scored.
     workaroundCount: typeof e.workaroundCount === 'number' ? e.workaroundCount

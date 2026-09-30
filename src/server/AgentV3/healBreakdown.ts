@@ -39,10 +39,10 @@
 /** A stored report, read structurally — this module never imports the recorder. */
 interface ReportLike {
   issues?: Array<{ code?: unknown; severity?: unknown; autoResolved?: unknown; observation?: unknown }> | null;
-  counts?: { autoResolved?: unknown } | null;
+  counts?: { autoResolved?: unknown; healRule?: unknown } | null;
 }
 
-import { isSelfHeal } from '../../lib/healIssue';
+import { isSelfHeal, isLeftOpen, healCountOf } from '../../lib/healIssue';
 
 /** At most this many distinct codes per build, so one odd build cannot bloat a listing row. */
 export const MAX_CODES_PER_BUILD = 25;
@@ -58,6 +58,12 @@ export interface HealCodeTally {
    * null means nobody can say.
    */
   unattributed: number | null;
+  /**
+   * code → non-blocking findings still open when the build ended (2026-09-30). Kept apart from
+   * `codes` on purpose: they repaired nothing, and folding them in is what made READINESS_WARNING the
+   * "most-repaired" code. Absent on a tally written before the split.
+   */
+  open?: Record<string, number>;
 }
 
 /**
@@ -69,15 +75,19 @@ export interface HealCodeTally {
  */
 export function summarizeHealCodes(report: ReportLike | null | undefined): HealCodeTally | null {
   const issues = Array.isArray(report?.issues) ? report!.issues! : null;
-  const rawTotal = report?.counts?.autoResolved;
-  const total = typeof rawTotal === 'number' && Number.isFinite(rawTotal) && rawTotal >= 0
-    ? Math.floor(rawTotal)
-    : null;
+  // The CORRECTED count: an older report's `autoResolved` still includes left-open rows (see healCountOf).
+  const total = healCountOf(report);
   if (!issues && total === null) return null;
 
   const codes: Record<string, number> = {};
+  const open: Record<string, number> = {};
   let seen = 0;
   for (const issue of issues ?? []) {
+    if (isLeftOpen(issue)) {
+      const code = String(issue.code);
+      if (open[code] !== undefined || Object.keys(open).length < MAX_CODES_PER_BUILD) open[code] = (open[code] ?? 0) + 1;
+      continue;
+    }
     // The recorder's own definition, not the flag: an info row marked autoResolved is the build
     // happening (a tool call, a heartbeat), never a repair.
     if (!isSelfHeal(issue)) continue;
@@ -95,5 +105,7 @@ export function summarizeHealCodes(report: ReportLike | null | undefined): HealC
     // (a count written before a late pass appended to the timeline), and a negative shortfall would
     // subtract from another build's real one in the aggregate.
     unattributed: total === null ? null : Math.max(0, total - seen),
+    // Only when there is something to say, so a build with nothing left open keeps its old shape.
+    ...(Object.keys(open).length > 0 ? { open } : {}),
   };
 }

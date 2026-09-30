@@ -31,7 +31,7 @@ import { isSelfHeal } from './healIssue';
 export interface FirstPassInput {
   ok?: boolean;
   startedAt?: number;
-  counts?: { autoResolved?: number; unresolved?: number };
+  counts?: { autoResolved?: number; unresolved?: number; leftOpen?: number };
   issues?: Array<{ code?: string; severity?: string; autoResolved?: boolean; observation?: boolean }>;
 }
 
@@ -47,7 +47,10 @@ export type FirstPassVerdict = 'clean' | 'healed' | 'failed';
  */
 export function classifyFirstPass(report: FirstPassInput | null | undefined): FirstPassVerdict {
   if (!report || report.ok !== true) return 'failed';
-  const healed = report.counts?.autoResolved ?? 0;
+  // Findings left OPEN (a readiness warning, a stale snapshot) stopped counting as heals on 2026-09-30
+  // and moved to `leftOpen`; a build carrying one was still not right first time, so both count here.
+  // An older report has no `leftOpen` — its `autoResolved` still includes them, so the sum is the same.
+  const healed = (report.counts?.autoResolved ?? 0) + (report.counts?.leftOpen ?? 0);
   const unresolved = report.counts?.unresolved ?? 0;
   return healed === 0 && unresolved === 0 ? 'clean' : 'healed';
 }
@@ -115,6 +118,8 @@ export interface FirstPassMeta {
   ok?: boolean | null;
   healCount?: number;
   unresolvedCount?: number;
+  /** Findings left open (see `classifyFirstPass`). Absent on older rows, whose healCount includes them. */
+  leftOpenCount?: number;
 }
 
 export interface FirstPassMetaStats extends FirstPassStats {
@@ -134,7 +139,7 @@ export function firstPassStatsFromMeta(metas: Array<FirstPassMeta | null | undef
     if (!m) continue;
     if (m.ok === false) { usable.push({ ok: false }); continue; }
     if (typeof m.healCount !== 'number' || typeof m.unresolvedCount !== 'number') { skippedLegacy++; continue; }
-    usable.push({ ok: m.ok === true, counts: { autoResolved: m.healCount, unresolved: m.unresolvedCount } });
+    usable.push({ ok: m.ok === true, counts: { autoResolved: m.healCount, unresolved: m.unresolvedCount, leftOpen: m.leftOpenCount } });
   }
   return { ...firstPassStats(usable), skippedLegacy };
 }

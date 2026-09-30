@@ -15925,6 +15925,7 @@ async function noteBuildOutcome(
       // prompt, and the scaffold alone would still hand back three files. The fast lane reads the same rule.
       const singleHtmlFileRule = framework === 'static' && wantsSingleHtmlFile(prompt) ? SINGLE_HTML_FILE_RULE : '';
       if (singleHtmlFileRule) buildPrompt = `${singleHtmlFileRule}\n\n${buildPrompt}`;
+      const singleHtmlFileSuffix = singleHtmlFileRule ? `\n\n${singleHtmlFileRule}` : ''; // the fast lane's copy of the same rule
 
       // Universal Language (Layer 73): build in the user's language. If the
       // request is written in a distinctive non-Latin script we name the
@@ -16811,7 +16812,7 @@ async function noteBuildOutcome(
           const c = await actuator.readFile(workspaceId, p).catch(() => null);
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
-        const sb = await runSimpleBuild({ prompt: planning.text + (singleHtmlFileRule ? `\n\n${singleHtmlFileRule}` : ''), framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
+        const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
           stopLane: () => (fastLaneReasoningRung
             ? `the lane's engine fell to ${fastLaneReasoningRung}, which reasons before every answer; the lane's per-file budget cannot carry that, so the files finished so far go to the full builder now`
             : null),

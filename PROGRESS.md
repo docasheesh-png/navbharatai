@@ -85299,6 +85299,43 @@ A 4-screen telecom app (Home, Plans, History, Profile) that rendered, typechecke
    aim is that they find nothing.
 Test-locked and reversion-proven in `tests/theQuestionEndedWithPlease.test.ts`.
 
+
+## 2026-09-30 — Free image generation stopped: the provider closed its anonymous door
+
+Admin: *"image banne band ho gaye hai!!"* (Image Generator AI FREE, "make a camera" → "could not make that image").
+
+- **Root cause (provider-side):** Pollinations now requires an account key; anonymous requests get 401. Our free
+  tier handed the browser a link to that anonymous endpoint (`IMAGE_GEN_CLIENT_FETCH`), and the bundled phone apps
+  have no server fallback (#3396 added one only to the new web client).
+- **Fix:** `freeProviderDoor.ts` — the server detects the closed door (own fetch, new-client report, or a probe)
+  and stops minting links, so every client, old phone apps included, gets the picture from the capped paid rungs.
+  `POLLINATIONS_API_KEY` (secret `sk_` key) makes the server fetch from `gen.pollinations.ai` with the key in a
+  header — never in a link.
+- **Admin action:** create a Pollinations account and set `POLLINATIONS_API_KEY` in Cloud Run to restore the
+  free provider (costs pollen). Until then, free pictures are paid rungs capped at 3/user/day and 300/day platform.
+- **Open:** the provider's live answer was not observable from the session (egress blocked) — verify with the
+  `[IMAGE_GEN] the free provider refused an anonymous request` server log line.
+- Tests: `tests/theFreeDoorClosedAndNobodyNoticed.test.ts` (16, reversion-proven).
+
+
+## 2026-09-30 — Image Generator AI: Cloudflare FLUX first, 5 free images a day then ₹1, FREE dropped from the name
+
+Admin: *"haan, cloudflare wala bana do. aur per day 5 image free for user, uske bad 1₹/image. image
+generator ai ke aage se free word hatao"*.
+
+- **Rung 1: FLUX.1 schnell on Cloudflare Workers AI** (`cloudflareImage.ts`), server-side, 1024×1024 only,
+  same word ban. Uses the existing Cloudflare account/token; `CLOUDFLARE_AI_TOKEN` overrides if the DNS
+  token lacks Workers AI permission. Ladder: Cloudflare → Pollinations → Gemini → Grok.
+- **Price** (`imageAllowance.ts`): 5 free delivered pictures a day, then ₹1 each from the wallet; refused
+  up front when the wallet holds under ₹1; counted and charged on delivery only; wallet line `image`.
+- **Name:** "Image Generator AI FREE" → "Image Generator AI" everywhere; every AI states the price.
+- **Found on the way:** `AI_IMAGE_FREE_DAILY_LIMIT` (3/day) was never enforced — it rode
+  `PROFESSIONAL_PAID_ENABLED`, which is unset. Superseded by the new allowance.
+- **Reverses 2026-09-23's "free-only" rule on the admin's word.**
+- **Open:** the Cloudflare call was never made against the live API from the session (egress blocked);
+  the ~170/day figure is from the published rate card. Verify on the first real pictures: an `HTTP 403`
+  in the admin diagnostic means the token needs the Workers AI permission.
+- Tests: `tests/fiveFreeImagesThenOneRupee.test.ts` (25, reversion-proven).
 **Merge note (same day).** Two classes in this PR had been fixed IN PARALLEL by other sessions that merged first. Each is now one definition, not two:
 - **The no-journey sentence** (#3398, the Gita search box). There is one predicate. The sentence depends on whether the form has any button: a field with no button "acts as you type"; a form with a button has "none of its buttons reads as submitting them".
 - **The Project Mode starter verdict** (#3399, autopsy 6a5fb04b). #3399's `setStarterExpected` flag and `shellModuleFor` are kept. This branch's `setStarterEntryExpected` and its route call are removed, and `starterEntryExpectedFor` / `moduleOwnsAppEntry` now delegate to #3399's helpers.

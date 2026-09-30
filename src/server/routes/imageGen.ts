@@ -8,8 +8,21 @@ import {
   imageSubjectPrompt, parseImagePartsResponse, imageGenModels, imageGenConfigured, isValidImageGenRequest,
   isImageRefusal, extractResponseText, IMAGE_REFUSAL_MESSAGE,
   geminiImageConfigured, grokImageKey, grokImageModel, parseGrokImageResponse,
-  pollinationsEnabled, fetchPollinationsImage, pollinationsImageUrl, MAX_PROMPT_CHARS,
+  pollinationsEnabled, fetchPollinationsImage, pollinationsImageUrl, pollinationsApiKey, MAX_PROMPT_CHARS,
+  imagePixelsFor,
 } from '../lib/imageGen';
+import { checkAnonymousDoor, noteAnonymousResult, anonymousDoorNote } from '../lib/freeProviderDoor';
+import { cloudflareImageConfig, cloudflareServesSize, fetchCloudflareImage } from '../lib/cloudflareImage';
+import {
+  imagePricingEnabled, imageFreePerDay, imagePriceInr, decideImageStart, needsBalance,
+  imageFeeForCount, freeImagesLeft,
+} from '../lib/imageAllowance';
+import { toolUsageStore } from '../tools/ToolUsageStore';
+import { isProfessionalFreeUser } from '../professionals/professionalPaid';
+import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
+import { debitWalletRolledUp } from '../lib/walletDebit';
+import { featureLabel, featureRollupRef } from '../lib/walletFeature';
+import { getServerDb } from '../lib/serverDb';
 import { craftImagePrompt, withInlineNegative } from '../lib/imagePromptCraft';
 import { runImageEdit } from '../lib/imageEditRun';
 import { triageImageRequest } from '../lib/imageSafety';
@@ -168,22 +181,48 @@ export function registerImageGenRoutes(app: Express): void {
     // time the ladder is about to touch a paid provider, and BEFORE that provider is called — checking
     // after spending would be theatre. A free image still passes through without a gate lookup, so the
     // ordinary path is unchanged and costs nothing extra.
+    // ── 5 FREE IMAGES A DAY, THEN ₹1 EACH (admin 2026-09-30, `imageAllowance.ts`) ──────────────
+    // Decided BEFORE any engine is called, so a user who cannot pay is refused before anything is
+    // spent. The balance is read only once today's free pictures are used up.
+    const pricing = imagePricingEnabled();
+    const freeListed = isProfessionalFreeUser(account.uid, account.email);
+    const freePerDay = imageFreePerDay();
+    const priceInr = imagePriceInr();
+    if (pricing) {
+      const usedToday = freeListed ? 0 : await toolUsageStore.getTodayCount(account.uid, 'image');
+      const facts = { freeListed, usedToday, freePerDay, priceInr };
+      const balanceInr = needsBalance(facts)
+        ? await readWalletBalanceInr(firestoreWalletReader(getServerDb() as any), account.uid).catch(() => null)
+        : null;
+      const start = decideImageStart({ ...facts, balanceInr });
+      if (!start.allow) {
+        res.status(start.status).json(start.body);
+        return;
+      }
+    }
+
     let gate: Awaited<ReturnType<typeof gateToolAction>> | null = null;
     let gateRefused = false;
+    let paidChecked = false;
     const allowPaidRung = async (): Promise<boolean> => {
       if (gateRefused) return false;
-      if (!gate) {
-        gate = await gateToolAction(account.uid, account.email, 'image');
-        if (!gate.allow) {
-          gateRefused = true;
-          if (!res.headersSent) res.status(gate.status).json(gate.body);
-          return false;
+      if (!paidChecked) {
+        paidChecked = true;
+        // With pricing on, the allowance above has already decided who may start; the old tool gate
+        // is the pre-2026-09-30 rule and runs only when pricing is switched off.
+        if (!pricing) {
+          gate = await gateToolAction(account.uid, account.email, 'image');
+          if (!gate.allow) {
+            gateRefused = true;
+            if (!res.headersSent) res.status(gate.status).json(gate.body);
+            return false;
+          }
         }
         // 🔒 THE PLATFORM'S OWN DAY, after the user's own allowance: a per-user cap bounds one account
         // and nothing bounded the whole platform (PR #3234's open item). Read once per request, before
         // the first paid rung, and never for a free-provider image. Free-listed users (the admin's own
         // test accounts) are not counted against it — they are how the paid rungs get verified at all.
-        if (!gate.isFreeListed) {
+        if (!freeListed) {
           const budget = await imageFreePaidBudget.decide();
           if (!budget.allow) {
             gateRefused = true;
@@ -237,12 +276,33 @@ export function registerImageGenRoutes(app: Express): void {
       // Deliver a generated image: only a genuinely-delivered image spends a PAID allowance (and only when
       // the paywall is active, i.e. the free provider is off — see above). A free Pollinations image never
       // counts against a quota. A failed rung never spends anything.
-      const deliver = (img: { mimeType: string; base64: string }, paidRung = false) => {
+      const deliver = async (img: { mimeType: string; base64: string }, paidRung = false): Promise<void> => {
         // Only a PAID rung spends an allowance. A free Pollinations image never counts against a quota,
         // and a failed rung never spends anything — the burn happens on delivery, not on attempt.
-        if (paidRung && gate && gate.allow && gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
+        if (!pricing && paidRung && gate && gate.allow && gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
         // The platform's count moves on DELIVERY, like the user's — never on an attempt that failed.
-        if (paidRung && gate && gate.allow && !gate.isFreeListed) void imageFreePaidBudget.record();
+        if (paidRung && !freeListed) void imageFreePaidBudget.record();
+        // The user's day moves on DELIVERY too, whichever engine drew the picture, and the charge is
+        // decided from the count AFTER this one, so two pictures at once cannot both be the free fifth.
+        let allowance: { freeLeftToday: number; chargedInr: number } | null = null;
+        if (pricing && !freeListed) {
+          const countAfter = await toolUsageStore.increment(account.uid, 'image').catch(() => 0);
+          const fee = imageFeeForCount(countAfter, freePerDay, priceInr);
+          if (fee > 0) {
+            // Fire-and-forget like every other small charge: a money-path failure must never cost the
+            // user the picture they have already been given.
+            const now = Date.now();
+            void debitWalletRolledUp(getServerDb() as any, account.uid, {
+              billedInr: fee,
+              rollupRef: featureRollupRef('image', now),
+              description: featureLabel('image'),
+              feature: 'image',
+            }).then((r) => {
+              if (!r.ok) console.error(`[IMAGE_GEN] ₹${fee} image charge FAILED for ${account.uid}: ${r.error} — the picture was served but not charged.`);
+            }).catch(() => undefined);
+          }
+          allowance = countAfter > 0 ? { freeLeftToday: freeImagesLeft(countAfter, freePerDay), chargedInr: fee } : null;
+        }
         // `notes` carries the honest caveats (a style chip that was overruled, or the warning that
         // image engines cannot spell). Surfacing them is the point: a user who knows their shop name
         // may come out garbled can shorten it, where a silent bad spelling just wastes their time.
@@ -252,6 +312,7 @@ export function registerImageGenRoutes(app: Express): void {
           // An edit's notes would be art direction for a picture that is not being invented — the
           // style chip was never applied and saying it was overruled would be noise.
           ...(!editing && crafted.notes.length > 0 ? { notes: crafted.notes } : {}),
+          ...(allowance ? allowance : {}),
         });
       };
       // Track WHY every rung failed so the final error is HONEST (rule 5): a content refusal (the model
@@ -271,7 +332,7 @@ export function registerImageGenRoutes(app: Express): void {
         if (!(await allowPaidRung())) return;
         const out = await runImageEdit(rawInit, editWords, { timeoutMs: ROUTE_TIMEOUT_MS });
         if (out.blocked) { res.status(422).json({ error: POLLINATIONS_BLOCK_MESSAGE, code: 'blocked' }); return; }
-        if (out.image) { deliver(out.image, true); return; }
+        if (out.image) { await deliver(out.image, true); return; }
         if (out.refusal) { res.status(422).json({ error: IMAGE_REFUSAL_MESSAGE }); return; }
         diag.push(...(out.diag || []));
         // Falls through to the honest transient failure below. Deliberately NOT to the text-to-image
@@ -282,6 +343,25 @@ export function registerImageGenRoutes(app: Express): void {
       // ₹0 (no key, no per-image charge), so it removes the paid-provider margin problem entirely. Unlike
       // the old raw client hot-link, the route PROXIES it — the bytes are fetched here and re-served as a
       // data URL, so the user never talks to a third party and the result is branded NavBharatAI.
+      // ── FIRST RUNG: FLUX on Cloudflare Workers AI (admin 2026-09-30, `cloudflareImage.ts`) ────────
+      // ~170 pictures a day inside the account's free allowance, then a fraction of a paisa each —
+      // fetched HERE, so every client (old phone apps included) gets bytes back. It makes only
+      // 1024×1024, so any other size goes to a rung that honours it. Skipped on the follow-up of a
+      // browser that could not load a free link: this rung was tried seconds earlier for that request.
+      const cfConfig = cloudflareImageConfig();
+      const px = imagePixelsFor(req.body.size, req.body.width, req.body.height);
+      if (cfConfig && !editing && !(req.body as { freeFailed?: unknown }).freeFailed && cloudflareServesSize(px)) {
+        // The same word ban the free provider has, for the same reason: an image model draws.
+        if (!scanPollinationsPrompt(prompt).ok) {
+          res.status(422).json({ error: POLLINATIONS_BLOCK_MESSAGE, code: 'blocked' });
+          return;
+        }
+        const cr = await fetchCloudflareImage(prompt, { timeoutMs: 30_000 });
+        if (cr.image) { await deliver(cr.image); return; }
+        diag.push(`cloudflare: ${cr.error ?? 'no image'}`);
+        console.warn(`[IMAGE_GEN] cloudflare failed: ${cr.error ?? 'no image'} — trying the next rung.`);
+      }
+
       if (pollinationsEnabled() && !editing) {
         // 🔒 THE POLLINATIONS WORD SCAN (Play rejection 2026-09-28 — Google's evidence was a nude
         // "Photograph" from this screen). Run on the FINISHED prompt, the exact text the link would
@@ -308,14 +388,22 @@ export function registerImageGenRoutes(app: Express): void {
           const why = typeof failedFree.reason === 'string' ? failedFree.reason.slice(0, 120) : 'unknown';
           diag.push(`browser fetch: ${why}`);
           console.warn(`[IMAGE_GEN] the browser could not get the free picture (${why}) — finishing it on the server.`);
+          noteAnonymousResult(why);
         }
+        // 🔑 WITH AN ACCOUNT KEY the picture is fetched HERE, never by the browser — a key in a link is
+        // a key every user can copy. WITHOUT one, the anonymous door is used only while it is open
+        // (`freeProviderDoor.ts`, 2026-09-30: the provider closed it and every free picture failed).
+        // A closed door is skipped entirely, so the request reaches the metered paid rungs below and
+        // an installed phone app — which cannot fall back on its own — still gets the picture.
+        const keyed = pollinationsApiKey() !== '';
+        const anonOpen = !keyed && await checkAnonymousDoor();
         // 🔑 THE BROWSER FETCHES IT, NOT US (admin 2026-09-21: "free wale me user ki ip").
         // The provider allows one request every 15 seconds PER ADDRESS, and this server is ONE
         // address — so at any real scale every free user on the platform queues behind every other
         // one. Handing the browser a link puts each user on their own connection. Nothing else
         // moves: the prompt was triaged, crafted and bounded HERE, seconds ago, and the link
         // carries that finished prompt. `IMAGE_GEN_CLIENT_FETCH=off` reverts it with no deploy.
-        if (clientImageFetchEnabled() && !browserFailed) {
+        if (!keyed && anonOpen && clientImageFetchEnabled() && !browserFailed) {
           const url = pollinationsImageUrl(prompt, req.body.size, process.env, {
             width: req.body.width,
             height: req.body.height,
@@ -330,14 +418,20 @@ export function registerImageGenRoutes(app: Express): void {
           });
           return;
         }
-        const pr = await fetchPollinationsImage(prompt, req.body.size, {
-          timeoutMs: ROUTE_TIMEOUT_MS,
-          custom: { width: req.body.width, height: req.body.height },
-        });
-        if (pr.image) { deliver(pr.image); return; }
-        if (pr.error) {
-          diag.push(`pollinations: ${pr.error}`);
-          console.warn(`[IMAGE_GEN] pollinations failed: ${pr.error} — trying paid fallbacks.`);
+        if (keyed || anonOpen) {
+          const pr = await fetchPollinationsImage(prompt, req.body.size, {
+            timeoutMs: ROUTE_TIMEOUT_MS,
+            custom: { width: req.body.width, height: req.body.height },
+          });
+          if (pr.image) { await deliver(pr.image); return; }
+          if (pr.error) {
+            // A keyed refusal is about OUR key (wrong, or out of budget), never the anonymous door.
+            if (!keyed) noteAnonymousResult(pr.error);
+            diag.push(`pollinations${keyed ? ' (key)' : ''}: ${pr.error}`);
+            console.warn(`[IMAGE_GEN] pollinations failed: ${pr.error} — trying paid fallbacks.`);
+          }
+        } else {
+          diag.push(anonymousDoorNote() ?? 'free provider: anonymous access closed');
         }
       }
 
@@ -356,7 +450,7 @@ export function registerImageGenRoutes(app: Express): void {
               config: { responseModalities: ['IMAGE', 'TEXT'] },
             }));
             const img = parseImagePartsResponse(result);
-            if (img) { deliver(img, true); return; }
+            if (img) { await deliver(img, true); return; }
             if (isImageRefusal(result)) {
               sawRefusal = true;
               console.warn(`[IMAGE_GEN] ${model} declined the prompt (content refusal): ${extractResponseText(result) || 'no reason given'}`);
@@ -392,7 +486,7 @@ export function registerImageGenRoutes(app: Express): void {
           const data: any = await r.json().catch(() => null);
           if (r.ok) {
             const img = parseGrokImageResponse(data);
-            if (img) { deliver(img, true); return; }
+            if (img) { await deliver(img, true); return; }
             diag.push(`${gModel}: no image in response`);
           } else {
             diag.push(`${gModel}: ${r.status} ${JSON.stringify(data?.error || data || '').slice(0, 140)}`);

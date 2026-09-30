@@ -51,7 +51,7 @@ describe('the Recent group lists every window, numbered, each with a ✕', () =>
 
   it('two FREE rows and two image rows, numbered like a professional\'s', () => {
     expect(recent.map((e) => e.name)).toEqual([
-      'NavBharatAI FREE (1)', 'NavBharatAI FREE (2)', 'Image Generator AI FREE (1)', 'Image Generator AI FREE (2)',
+      'NavBharatAI FREE (1)', 'NavBharatAI FREE (2)', 'Image Generator AI (1)', 'Image Generator AI (2)',
     ]);
   });
   it('the first window keeps the plain id it always had; the others carry their window', () => {

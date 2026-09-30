@@ -125,6 +125,7 @@
     "vitest": "^5.0.1"
   },
   "overrides": {
+    "@grpc/grpc-js": "^1.14.5",
     "fast-uri": "^3.1.5",
     "ip-address": "^10.3.1",
     "axios": "$axios",

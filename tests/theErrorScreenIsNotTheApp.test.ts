@@ -157,6 +157,7 @@ export function Layout() {
   it('reaches every write tool through the one steering-note door (source guard)', () => {
     const d = read('src/server/AgentV3/ToolDispatcher.ts');
     expect(d).toContain('storeLoop = storeEffectLoopNote(files)');
-    expect(d).toContain('return hooks + storeLoop + imports + typecheck + quality;');
+    // 466c260a appended the invented-kit-class note after `quality` — the store note is still returned.
+    expect(d).toContain('return hooks + storeLoop + imports + typecheck + quality + invented;');
   });
 });

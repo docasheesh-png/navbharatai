@@ -495,6 +495,13 @@ export interface DiagnosticsHistoryEntry {
    */
   workaroundCount?: number | null;
   /**
+   * Did the USER stop this build? The same `stoppedByUser` read the all-builds index already carries —
+   * projected on the per-workspace HISTORY too (2026-09-30), because the Builder scorecard reads its
+   * builds from history and, without it, counted a person's own Stop as a failed build and a stuck
+   * project. `null` when the report has no timeline to read.
+   */
+  userStopped?: boolean | null;
+  /**
    * Did GreenGuard put the last WORKING version back at the end of this build? Read off the stored
    * timeline (`GREEN_GUARD_RESTORED`), so the scorecard can say whether a "stuck" project's user still
    * has a running app. `null` when the report carries no timeline to read.
@@ -733,6 +740,7 @@ async function listDiagnosticsHistoryInner(
         healCodes: (() => { try { return summarizeHealCodes(r); } catch { return null; } })(),
         workaroundCount: (() => { try { return workaroundCountOf(r); } catch { return null; } })(),
         restoredToGreen: restoredToGreenOf(r),
+        userStopped: Array.isArray(r.issues) ? stoppedByUser(r.issues) : null,
       }];
     });
   }

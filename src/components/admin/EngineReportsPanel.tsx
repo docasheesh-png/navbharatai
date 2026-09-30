@@ -245,7 +245,8 @@ export function EngineReportsPanel({ adminToken, onStatus }: EngineReportsPanelP
             </div>
             <p className={NOTE}>
               From {num(d.reportsRead)} stored reports · success measured on {num(d.success?.total)} finished
-              builds ({num(d.success?.skipped)} in flight or without a verdict, excluded) ·
+              builds ({num(d.success?.skipped)} in flight or without a verdict, excluded
+              {d.success?.stoppedByUser ? `; ${num(d.success.stoppedByUser)} stopped by their own user, counted as neither` : ''}) ·
               heal pressure on {num(d.heal?.builds)} builds that carry the signal.
             </p>
             {Array.isArray(d.survival?.broken) && d.survival.broken.length > 0 ? (

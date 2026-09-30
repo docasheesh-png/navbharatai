@@ -354,7 +354,7 @@ import { decideCancelledBuildBill } from '../AgentV3/cancelledBuildBilling';
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
-import { projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, starterEntryExpectedFor, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, starterEntryExpectedFor, reconcilePlanWithWrites, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
@@ -22279,9 +22279,16 @@ async function noteBuildOutcome(
       // note reflects the settled statuses. Best-effort — never affects the build result.
       if (projectPlanRef && projectModuleRef) {
         try {
-          const settled = result.ok
+          let settled = result.ok
             ? markModuleStatus(projectPlanRef, projectModuleRef.id, 'done')
             : markModuleStatus(projectPlanRef, projectModuleRef.id, 'failed', (result.summary || 'The build turn for this module failed.').slice(0, 300));
+          // A turn that built other modules' files too: those modules are done — never queue a turn to
+          // rebuild what this one already wrote (autopsy 8e124182; reconcilePlanWithWrites).
+          if (result.ok) {
+            const rec = reconcilePlanWithWrites(settled, writtenFiles.keys());
+            settled = rec.plan;
+            if (rec.alsoDone.length > 0) events.emit({ type: 'narration', agent: 'architect', text: `🧩 This step also built ${rec.alsoDone.length} more module(s): ${rec.alsoDone.slice(0, 4).join(', ')}${rec.alsoDone.length > 4 ? '…' : ''}.`, ts: Date.now() });
+          }
           await saveProjectPlan(workspaceId, settled);
           projectPlanRef = settled;
           state.setTodos(projectPlanTodos(settled));

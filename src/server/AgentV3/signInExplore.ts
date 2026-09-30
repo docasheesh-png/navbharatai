@@ -89,6 +89,18 @@ export function signInCandidates(files: Readonly<Record<string, string>>): SignI
     if (id && pw) add(id[1], pw[1], 'sign-in form default');
   }
 
+  // A demo map keyed by email whose password is a constant in the same file — the report's own shape:
+  // `const commonPassword = '…'; export const passwordMap = { 'admin@x.ai': commonPassword, … }`.
+  for (const [, c] of sources) {
+    if (!/password/i.test(c)) continue;
+    const consts = new Map<string, string>();
+    for (const m of c.matchAll(new RegExp(String.raw`\bconst\s+(\w*pass\w*)\s*(?::\s*string)?\s*=\s*${Q}([^'"\x60\n]{3,64})${Q}`, 'gi'))) consts.set(m[1], m[2]);
+    for (const m of c.matchAll(new RegExp(String.raw`${Q}(${EMAIL})${Q}\s*:\s*(?:${Q}([^'"\x60\n]{3,64})${Q}|(\w+))`, 'g'))) {
+      const pwv = m[2] ?? (m[3] ? consts.get(m[3]) : undefined);
+      if (pwv) add(m[1], pwv, 'demo account in the source');
+    }
+  }
+
   const hint = new RegExp(String.raw`\b(?:demo|test|sample)\b[^\n<]{0,40}?(${EMAIL})[^\n<]{0,40}?\b(?:password|pass|pwd)\b\s*[:=]?\s*${Q}?([^\s'"\x60<,)]{3,40})`, 'gi');
   for (const [, c] of sources) for (const m of c.matchAll(hint)) add(m[1], m[2], 'demo hint on the page');
 

@@ -3202,6 +3202,21 @@ the flag entries above promise.
   mislabelled empty pass. A sudden crop of `JOURNEY_FAILED` is not a regression — it is the check
   working for the first time, and each one is a real app that looks like it saves data and does not.
 
+- **`AGENTV3_SIGNIN_EXPLORE`** (default ON, set `off` to disable — added 2026-09-30, autopsy 8e124182, admin:
+  *"login ke andar wali jaanch bhi banao"*) — **the checks look behind the sign-in page.** A stock app put
+  every screen behind `/login`, and the page check, the form journeys, the click explorer and the feature
+  probe all stopped at the door (the probe then called the stock list missing and spent a repair on it).
+  `signInExplore.ts` signs in ONCE, in the sandbox browser, with credentials THE APP ITSELF SHIPS — the form
+  it pre-fills, a seed/demo account in its source (object pairs, an email→password-constant map, a demo hint)
+  — saves the session to `/tmp/nbai-signed-in.json`, and the page check, the journeys (except the sign-in form
+  itself) and the explorer open the app with it; the feature probe reads up to 6 screens behind the door.
+  🔒 **It never guesses a password, never tries more than 3 candidates, never creates an account, and never
+  prints a credential** — the report says only where the account came from. A failed sign-in is never read
+  as success (the password field must be gone). No credentials ⇒ `AUTH_EXPLORE_NOT_RUN` with the reason, and
+  every check runs signed-out as before. Codes are `PROCESS_ONLY_CODES`/`NEVER_SUGGEST` (our instrument).
+  Real-browser tests in `tests/weLookBehindTheSignInPage.test.ts`. ⚠️ The same change makes a sign-in form
+  that STARTS with a password typed in a medium security finding (`prefilled-password`) — so new apps
+  mostly ship the demo account as source/hint text, which this reads too.
 - **`AGENTV3_CLICK_EXPLORE`** (default ON, set `off` to disable — added 2026-09-28, competitive gap G1,
   admin: *"best solution jo gaps ko fill kar ke navbharatai ko compatitors se aage la jaye"*) — **the
   app is PRESSED, not only painted.** Every post-build check watched the app render or drove ONE derived
@@ -4719,12 +4734,14 @@ app, so module 1 ("Core Types") failed (before 2026-09-26) or was told to keep g
 built the whole app inside module 1 while the plan recorded 1 of 14 done. `starterEntryExpectedFor` now
 tells the dispatcher that an entry-less module turn EXPECTS the starter. And the gate that opened it was
 counting a prompt template's `# Steps` as features — `enumeratedFeatures.ts` now skips instruction sections
-and the prose of a structured spec. ⚠️ **Still open:** a module turn that over-builds is not reconciled
-against the disk.
+and the prose of a structured spec. (A module turn that over-builds is reconciled — see below.)
 🔒 **SAME AUTOPSY: THE SHELL IS NO WAY AROUND THE GREEN FREEZE.** A model refused twice wrote the file with
 `cat >`. The bash tool now asks the freeze about every file a command plainly writes (`shellWriteTargets`).
-⚠️ The vaccine's repair is still on no allowlist, so on a green app it cannot change anything — recorded in
-`PROGRESS.md` as an open decision, not widened here.
+✅ **Closed the same day (admin: "baaki bhi fix karo"):** the vaccine's repair is now the allowlisted pass
+`vaccine-repair` — its own snapshot, kept only if the suite then passes with the same command AND the app
+still renders (`strictReverify`), undone otherwise, and it may write neither a `.env` nor a test file.
+⚠️ **And a module turn that over-builds is now reconciled** (`reconcilePlanWithWrites`): every pending module
+whose owned files this turn wrote is marked done, so no turn is queued to rebuild them.
 
 ⚠️ **Three honest gaps, from that same entry and still open:** an IMPORTED repo never creates a plan
 (creation fires only on a fresh `new_build`); a reopened incomplete plan needs a typed "continue"

@@ -64,6 +64,12 @@ interface FeatureSpec {
    * tested. See `featureAskedFor` for why this matters more than a false audit line.
    */
   notRequest?: RegExp;
+  /**
+   * Evidence that counts ONLY when the request itself describes the feature that way. "Alert
+   * notifications for current stock levels (e.g. low stock warnings)" asks for in-app ALERTS, and a
+   * dashboard panel of low-stock warnings is exactly that — but for "push notifications" it would not be.
+   */
+  evidenceWhen?: { request: RegExp; evidence: RegExp };
 }
 
 // Curated, high-signal app surfaces only. Each `artifact` is deliberately broad
@@ -96,7 +102,11 @@ const FEATURES: FeatureSpec[] = [
     notRequest: /\bchat[- ]bubbles?\b/gi,
     artifact: /(chat|message|messaging|conversation)/i,
   },
-  { label: 'notifications', request: /\bnotification/i, artifact: /(notification|toast|snackbar)/i, evidence: /\b(?:toast\.(?:success|error|info)|useToast|notify\(|showNotification|enqueueSnackbar)\b/i },
+  { label: 'notifications', request: /\bnotification/i, artifact: /(notification|toast|snackbar)/i, evidence: /\b(?:toast\.(?:success|error|info)|useToast|notify\(|showNotification|enqueueSnackbar)\b/i,
+    // Autopsy 8e124182: "alert notifications … (low stock warnings)" was reported NOT BUILT, and the user
+    // told so, while the dashboard carried low-stock alerts. When the request frames the notification as an
+    // alert or a warning, an alert the app really renders is that feature.
+    evidenceWhen: { request: /\b(?:alert|warning)s?\b[^.\n]{0,40}\bnotification|\bnotification[^.\n]{0,60}\b(?:alert|warning)s?\b/i, evidence: /role=["']alert["']|\blow[- ]?stock\b|\blowStock\w*|\b(?:stock|expiry|due)Alerts?\b|<Alert\b|className=["'][^"']*\balert\b/i } },
   { label: 'contact page', request: /\bcontact\b/i, artifact: /contact/i },
   { label: 'about page', request: /\babout\b/i, artifact: /about/i },
   // High-signal surfaces users frequently ask for and builders frequently skip silently. Each
@@ -310,6 +320,7 @@ export function analyzeRequirementCoverage(
     if (feat.artifact.test(surface)) { covered.push(feat.label); continue; }
     // Named nowhere — but it may be built INLINE. Check the bodies before calling it missing.
     if (canReadBodies && feat.evidence && feat.evidence.test(bodies)) { covered.push(feat.label); continue; }
+    if (canReadBodies && feat.evidenceWhen && feat.evidenceWhen.request.test(req) && feat.evidenceWhen.evidence.test(bodies)) { covered.push(feat.label); continue; }
     /**
      * 🔴 A ONE-FILE APP KEEPS ITS FEATURES INLINE, SO ITS NAMES NEVER REACH `surface` (build
      * b6f88a72, 2026-09-18). The Gita reader implemented bookmarks completely — a `saved` array, a

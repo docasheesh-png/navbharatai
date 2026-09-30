@@ -1,4 +1,5 @@
 import { collectHandoff, handoffBlock } from './taskHandoff';
+import { parallelHelperScopeNote } from './parallelHelperScope';
 import { withoutPreviewBridge } from './previewBridge';
 import type { AgentEventStream } from './AgentEventStream';
 import type { WorkspaceState } from './WorkspaceState';
@@ -335,6 +336,8 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
         : '',
       verification,
       (() => { try { return deps.languageRule?.() ?? ''; } catch { return ''; } })(),
+      // Two engineers in parallel are told their lane and to reuse before creating (autopsy 8e124182).
+      parallelHelperScopeNote(role, deps.framework),
     ].filter(Boolean);
     // THE HANDOFF CARRIES THE FILES, NOT ONLY A SENTENCE (admin 2026-09-24) — see taskHandoff.ts. The
     // child is told it holds them, so a later re-read of an unchanged one gets the honest notice.

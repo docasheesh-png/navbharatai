@@ -81,6 +81,7 @@ import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepTool
 import { isProjectStylesheet } from './CssConsistency';
 import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
 import { shellWriteTargets } from './shellWriteTargets';
+import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
 import {
@@ -4042,6 +4043,10 @@ export class ToolDispatcher {
           );
           out = `${governanceNote(risk)}\n${out}`;
         }
+        // A package whose advisories have no fix on npm is named at the moment it is installed, with what
+        // to use instead (autopsy 8e124182: xlsx shipped with a high advisory the user was told to
+        // "upgrade", when no upgrade exists). A note, never a refusal — see unfixablePackages.ts.
+        try { const u = unfixableInstallNote(command); if (u) out = `${out}\n${u}`; } catch { /* advisory */ }
         // THE SAME COMMAND, AGAIN, WITH NOTHING CHANGED — the bash half of the read-loop breaker
         // (autopsy "Universal Remote": a no-op ran seven times). See repeatedReads.ts.
         try {

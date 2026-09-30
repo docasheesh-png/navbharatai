@@ -245,3 +245,59 @@ describe('8 · the test-suite repair on a working app is verified or undone', ()
     expect(around).toMatch(/gateEvidence\.tests = 'failed';/);
   });
 });
+
+import { reconcilePlanWithWrites } from '../src/server/AgentV3/ProjectPlan';
+import { analyzeRequirementCoverage } from '../src/server/AgentV3/RequirementCoverage';
+import { vulnScanSummary } from '../src/server/lib/VulnScanner';
+import { unfixableInstallNote, packagesInstalledBy } from '../src/server/lib/unfixablePackages';
+import { parallelHelperScopeNote } from '../src/server/AgentV3/parallelHelperScope';
+import { scanSecurity } from '../src/server/AgentV3/SecurityAnalysis';
+import { signInCandidates } from '../src/server/AgentV3/signInExplore';
+
+describe('9 · the rest of the ledger', () => {
+  it('a module turn that built other modules\' files marks those modules done, and nothing else', () => {
+    const m = (id: string, files: string[], status: 'pending' | 'done' | 'in_progress' = 'pending') => ({ id, name: id, description: '', dependsOn: [], files, contracts: '', status });
+    const plan = { modules: [m('types', ['src/types/index.ts'], 'done'), m('lib', ['src/lib/stock.ts', 'src/lib/auth.ts']), m('ui', ['src/pages/A.tsx', 'src/pages/B.tsx']), m('empty', [])] } as never;
+    const r = reconcilePlanWithWrites(plan, ['src/lib/stock.ts', './src/lib/auth.ts', 'src/pages/A.tsx']);
+    expect(r.alsoDone).toEqual(['lib']);
+    const statuses = Object.fromEntries((r.plan as { modules: { id: string; status: string }[] }).modules.map((x) => [x.id, x.status]));
+    expect(statuses).toEqual({ types: 'done', lib: 'done', ui: 'pending', empty: 'pending' });
+    expect(ROUTE).toMatch(/reconcilePlanWithWrites\(settled, writtenFiles\.keys\(\)\)/);
+  });
+
+  it('"alert notifications (low stock warnings)" is met by the alerts the app renders', () => {
+    const graph = { files: ['src/pages/Dashboard.tsx'], components: ['Dashboard'], routes: ['/dashboard'] } as never;
+    const dash = [{ path: 'src/pages/Dashboard.tsx', content: "const lowStockItems = items.filter((i) => i.quantity <= i.lowStockThreshold);\nreturn <div role=\"alert\">{lowStockItems.length} items low on stock</div>;" }];
+    expect(analyzeRequirementCoverage(PROMPT, graph, dash).confirmedMissing).not.toContain('notifications');
+    // …but "push notifications" is not met by a form-error alert.
+    const formOnly = [{ path: 'src/pages/Dashboard.tsx', content: 'return <p role="alert">Required</p>;' }];
+    expect(analyzeRequirementCoverage('build a chat app with push notifications', graph, formOnly).confirmedMissing).toContain('notifications');
+  });
+
+  it('a package with no fixed release on npm is named with its replacement — at install and in the report', () => {
+    expect(packagesInstalledBy('npm install react-router-dom recharts xlsx lucide-react && npm i -D @types/xlsx')).toEqual(['react-router-dom', 'recharts', 'xlsx', 'lucide-react', '@types/xlsx']);
+    expect(unfixableInstallNote('npm install react-router-dom xlsx')).toMatch(/xlsx.*exceljs/);
+    expect(unfixableInstallNote('npm install exceljs')).toBe('');
+    const sum = vulnScanSummary({ ok: true, scanned: 13, findings: [{ package: 'xlsx', version: '0.18.5', ids: ['GHSA-4r6h-8v6p-xvw6'] }] });
+    expect(sum).toMatch(/exceljs/);
+    expect(sum).toMatch(/where one exists/);
+  });
+
+  it('two engineers in parallel are told their lane — a browser-only backend is told there is no server', () => {
+    expect(parallelHelperScopeNote('backend', 'vite-react')).toMatch(/no server/);
+    expect(parallelHelperScopeNote('frontend', 'vite-react')).toMatch(/list that folder and import what already exists/);
+    expect(parallelHelperScopeNote('reviewer', 'vite-react')).toBe('');
+    expect(readFileSync(join(__dirname, '../src/server/AgentV3/SubAgent.ts'), 'utf8')).toMatch(/parallelHelperScopeNote\(role, deps\.framework\)/);
+  });
+
+  it('a sign-in form that starts with a password typed in is a security finding — an empty one is not', () => {
+    const hit = scanSecurity('src/pages/Login.tsx', "const [password, setPassword] = useState('password');");
+    expect(hit.map((f) => f.rule)).toContain('prefilled-password');
+    expect(scanSecurity('src/pages/Login.tsx', "const [password, setPassword] = useState('');").map((f) => f.rule)).not.toContain('prefilled-password');
+  });
+
+  it('the report\'s own demo map — emails keyed to a password constant — is a sign-in candidate', () => {
+    const got = signInCandidates({ 'src/lib/seed.ts': "const commonPassword = 'demo1234';\nexport const passwordMap: Record<string, string> = {\n  'admin@stock.test': commonPassword,\n};" });
+    expect(got[0]).toMatchObject({ identifier: 'admin@stock.test', password: 'demo1234', source: 'demo account in the source' });
+  });
+});

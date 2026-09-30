@@ -84475,3 +84475,25 @@ demo credentials. Nothing logs in. Every auth-gated app is verified at its front
     "repo" in "report", "push" in "push notification"). It now matches whole words only.
   - **Tests:** 2 more in `tests/freeChatKnowsItsModeButton.test.ts`, reversion-proven.
   - **Reach:** the website gets this on deploy; phones need a fresh bundle.
+
+### 2026-09-30 (same day) — the rest of autopsy 8e124182, and LOGIN-KE-ANDAR JAANCH (admin: "baaki bhi fix karo, login ke andar wali jaanch bhi banao")
+
+- **Authenticated exploration (the missing subsystem), BUILT:** `signInExplore.ts` + session file shared by
+  page check / journeys / explorer; feature probe reads screens behind the door. Only credentials the app
+  ships; ≤3 tries; no sign-up; never printed. Kill switch `AGENTV3_SIGNIN_EXPLORE=off`. Real-browser tests
+  (`tests/weLookBehindTheSignInPage.test.ts`): prefilled form signs in, a source account signs in, a wrong
+  one is never success, and the explorer pressed "Stock Items"/"Show alerts" behind the door and not
+  "Log out".
+- **Vaccine repair on a green app:** allowlisted `vaccine-repair`, verified (tests + render) or undone; never
+  a `.env` or a test file; an undone repair reports the failing suite.
+- **Plan reconciliation:** `reconcilePlanWithWrites` marks modules whose files a turn wrote as done.
+- **"notifications NOT BUILT":** alert/warning-framed requests are met by alerts the app renders
+  (`evidenceWhen`); "push notifications" still needs real evidence.
+- **xlsx:** `unfixablePackages.ts` — named at install time (bash note) and in the dep-health report with the
+  replacement (`exceljs`); "upgrade to a patched version" now says "where one exists".
+- **Duplicate helpers:** `parallelHelperScopeNote` tells parallel Frontend/Backend engineers their lane; a
+  browser-only backend is told there is no server.
+- **Prefilled demo password:** `prefilled-password` security rule (medium, write-time note + readiness).
+- Still recorded, not changed: the ₹490 of markup absorbed by the overdraft floor is policy, not a defect.
+- ⚠️ Pushing needs the admin: the designated branch still carried #3396's (merged) history, and replacing it
+  (force-push) and merging it in were both refused by the session's safety classifier.

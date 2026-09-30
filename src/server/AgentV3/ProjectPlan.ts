@@ -548,6 +548,30 @@ export function markModuleStatus(plan: ProjectPlan, id: string, status: ModuleSt
   };
 }
 
+/**
+ * 🔴 A TURN THAT BUILT MORE THAN ITS MODULE LEFT THE PLAN BELIEVING NOTHING ELSE WAS BUILT (autopsy
+ * 8e124182, 2026-09-30). Module 1's turn wrote 33 files — the whole app — and the plan still recorded 1 of
+ * 14 done, so thirteen more turns were queued to build what already existed, each one billed.
+ *
+ * So after a successful module turn, every OTHER pending module whose owned files ALL exist now and were
+ * written in THIS turn is marked done as well, with a note saying so. Precision over recall: a module
+ * that owns no files, or any one of whose files this turn did not write, is left exactly as it was — its
+ * own turn will build or verify it. PURE.
+ */
+export function reconcilePlanWithWrites(plan: ProjectPlan, writtenThisTurn: Iterable<string>): { plan: ProjectPlan; alsoDone: string[] } {
+  const written = new Set([...writtenThisTurn].map((p) => String(p ?? '').replace(/^\.\//, '')));
+  const alsoDone: string[] = [];
+  let next = plan;
+  for (const m of plan.modules) {
+    if (m.status === 'done' || m.status === 'in_progress') continue;
+    const files = (m.files ?? []).map((f) => String(f ?? '').replace(/^\.\//, '')).filter(Boolean);
+    if (files.length === 0 || !files.every((f) => written.has(f))) continue;
+    next = markModuleStatus(next, m.id, 'done', 'built during an earlier module\'s turn');
+    alsoDone.push(m.name);
+  }
+  return { plan: next, alsoDone };
+}
+
 /** Progress counts + a one-line honest summary. PURE. */
 export function planProgress(plan: ProjectPlan): { done: number; failed: number; total: number; complete: boolean } {
   const done = plan.modules.filter((m) => m.status === 'done').length;

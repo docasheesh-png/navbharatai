@@ -113,12 +113,47 @@ export function turnAskedTheUser(text: string | null | undefined): boolean {
   return before !== undefined && QUESTION_MARKS.test(withoutTrailingDecoration(before));
 }
 
+/**
+ * The user asked for their app as a PHONE PACKAGE — an .apk / .aab / .ipa. PURE.
+ *
+ * A verb of wanting or making, then the package kind (*"Make in .apk files"*, *"apk bana do"*, *"I need
+ * the aab"*), or the package kind as a destination (*"in .apk"*, *"into an apk"*). "Add a download-APK
+ * button" orders a feature and does not match: `add` is not one of the verbs.
+ */
+const PACKAGE_REQUEST = /\b(?:make|build|create|convert|export|generate|get|give|want|need|bana\w*|chahiye)\b[^.\n?]{0,40}?\.?\b(?:apk|aab|ipa)s?\b|\b(?:apk|aab|ipa)s?\s*(?:files?|bana\w*|chahiye|de\s*do|dedo|download)\b|\bin(?:to)?\s+(?:an?\s+)?\.?(?:apk|aab|ipa)\b/i;
+
+export function asksForAppPackage(request: string | null | undefined): boolean {
+  return PACKAGE_REQUEST.test(String(request ?? ''));
+}
+
+/** The names NavBharatAI's own packaging flow goes by on screen (AppKnowledgeBase: "More → Download APK"). */
+const PLATFORM_PACKAGE_PATH = /\bDownload APK\b|\bAPK Builder\b|\bBuild my APK\b/i;
+
+/**
+ * Did this turn ANSWER a packaging request by pointing to NavBharatAI's own APK flow? PURE.
+ *
+ * 🔴 AUTOPSY 0c2a987a (2026-09-30). *"Make in .apk files"* on an existing app. The model answered
+ * correctly in its first turn — More → Download APK → "Get my app ready to build" → "Build my APK now";
+ * no code change is needed, because NavBharatAI builds the package itself. It was nudged twice ("ACT
+ * NOW"), the empty-build retry then ran the whole build again one rung higher, and that attempt was
+ * nudged once more — six model calls and 3.4 minutes for the answer the first call already gave. A
+ * pointer to the platform's own feature is a FINAL answer, like a refusal or a question: the thing the
+ * user asked for is not made by writing files.
+ *
+ * Both halves are required, which is the precision lock: the REQUEST asked for a package, and the
+ * ANSWER names the platform's flow. A build that merely mentions the APK builder in passing, for a
+ * request that asked for an app, is still nudged.
+ */
+export function turnPointedToPlatformFeature(text: string | null | undefined, request: string | null | undefined): boolean {
+  return asksForAppPackage(request) && PLATFORM_PACKAGE_PATH.test(String(text ?? ''));
+}
+
 /** The model said it cannot do the thing. Reuses the repo's ONE refusal test — never a second copy. */
 export function turnDeclined(text: string | null | undefined): boolean {
   return looksLikeRefusal(text);
 }
 
-export type NudgeStandDownReason = 'asked-the-user' | 'declined';
+export type NudgeStandDownReason = 'asked-the-user' | 'declined' | 'pointed-to-feature';
 
 export interface NudgeDecision {
   /** true ⇒ inject `message` and give the model another turn. false ⇒ end the turn as it stands. */
@@ -158,6 +193,8 @@ export interface NudgeInput {
   maxNudges: number;
   /** True when the workspace already holds an app — chooses the wording, and never the decision. */
   editingExistingApp: boolean;
+  /** The user's request — read only by `turnPointedToPlatformFeature`. Absent ⇒ that test never fires. */
+  request?: string;
 }
 
 export function decideBuildNudge(input: NudgeInput): NudgeDecision {
@@ -170,12 +207,16 @@ export function decideBuildNudge(input: NudgeInput): NudgeDecision {
   // one this autopsy turned on. Either alone ends the turn.
   if (turnDeclined(input.text)) return { nudge: false, message: '', standDown: 'declined' };
   if (turnAskedTheUser(input.text)) return { nudge: false, message: '', standDown: 'asked-the-user' };
+  if (turnPointedToPlatformFeature(input.text, input.request)) return { nudge: false, message: '', standDown: 'pointed-to-feature' };
 
   return { nudge: true, message: input.editingExistingApp ? NUDGE_EDIT : NUDGE_FRESH };
 }
 
 /** One sentence for the admin report — never user-facing, so it may name the mechanism. */
 export function standDownNote(reason: NudgeStandDownReason): string {
+  if (reason === 'pointed-to-feature') {
+    return 'The user asked for a phone package and the model pointed to NavBharatAI\'s own APK flow, which needs no code change — so its answer was given to the user instead of being overridden with "act now". Before 2026-09-30 it was nudged twice and the whole build was retried.';
+  }
   return reason === 'declined'
     ? 'The model said it cannot build what was asked, so its answer was given to the user instead of being overridden with "act now". Before 2026-09-18 the engine nudged it to write files anyway.'
     : 'The model asked the user a question, so its answer was given to the user instead of being overridden with "act now". Before 2026-09-18 the engine nudged it to write files anyway.';

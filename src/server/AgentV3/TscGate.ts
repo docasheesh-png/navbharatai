@@ -184,10 +184,12 @@ export function looksLikeTypecheckCommand(command: string | null | undefined): b
  * clean pass, for the same reason the deterministic gate itself refuses to trust one. Pure.
  */
 export function typecheckEvidenceFromCommands(
-  commands: ReadonlyArray<{ command: string; stdout?: string | null; stderr?: string | null }>,
+  commands: ReadonlyArray<{ command: string; stdout?: string | null; stderr?: string | null; exitCode?: number | null }>,
 ): 'passed' | 'failed' | undefined {
   let verdict: 'passed' | 'failed' | undefined;
   for (const c of commands) {
+    const viaBuild = buildScriptTypecheckVerdict(c);
+    if (viaBuild) { verdict = viaBuild; continue; }
     if (!looksLikeTypecheckCommand(c?.command)) continue;
     const v = tscVerdict(`${c.stdout ?? ''}\n${c.stderr ?? ''}`);
     // Never really ran (help page / missing binary), or stopped before it could (a failed install) —
@@ -198,4 +200,28 @@ export function typecheckEvidenceFromCommands(
     verdict = v;
   }
   return verdict;
+}
+
+/**
+ * A project BUILD whose own script runs the compiler first — `npm run build` → `tsc -p tsconfig.build.json
+ * && vite build` — is a typecheck, and its verdict can be read. PURE.
+ *
+ * 🔴 AUTOPSY 0c2a987a (2026-09-30). The agent ran `npm run build`, exit 0, `✓ 1523 modules transformed`,
+ * and the release gate still told the user *"the typecheck did not run"*. npm ECHOES the script it runs
+ * (`> tsc -p tsconfig.build.json && vite build`), so the log itself says the compiler ran — and with `&&`,
+ * a type error stops the chain before the bundler, so a finished bundle is a passed compile.
+ *
+ * Deliberately narrow, like `looksLikeTypecheckCommand`: only a `build` script run through npm / pnpm /
+ * yarn, only when the echoed script line names `tsc` BEFORE `&&`, and a pass needs the bundler's own
+ * "built in" line (with a zero or unknown exit code). Anything less certain is `undefined` — never a promotion.
+ */
+export function buildScriptTypecheckVerdict(c: { command?: string | null; stdout?: string | null; stderr?: string | null; exitCode?: number | null }): 'passed' | 'failed' | undefined {
+  if (!c?.command || !/\b(?:npm|pnpm|yarn)\s+(?:run\s+)?build\b/.test(c.command)) return undefined;
+  const out = `${c.stdout ?? ''}\n${c.stderr ?? ''}`;
+  if (!/^>\s[^\n]*\btsc\b[^\n]*&&/m.test(out)) return undefined;
+  if (/\berror TS\d+:/.test(out)) return 'failed';
+  // A piped run (`npm run build | tail`) reports tail's exit code, so an unknown or zero code is read
+  // together with the bundler's own line — which, after `tsc … &&`, can only appear if tsc passed.
+  if ((c.exitCode === 0 || c.exitCode == null) && /\bbuilt in\s+\d/.test(out)) return 'passed';
+  return undefined;
 }

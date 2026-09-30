@@ -48,6 +48,21 @@ interface Rule {
  */
 const SIMULATED_DATA_RE = /(?<![a-z])(simulat(?:e|ed|es|ing|ion)|mock(?:ed)?|fake|dummy)[\s_-]*(?:[a-z]{0,12}[\s_-]*)?(nearby|vendors?|shops|stores|users|businesses|customers|drivers|riders|merchants|sellers|followers|friends|devices|peers)(?![a-z])/i;
 
+/**
+ * 🔴 THE SIBLING: a made-up RESULT of a capability the app claims (autopsy 33812996, 2026-09-30). A
+ * Circle to Search app "recognised" songs with `MOCK_DB[Math.floor(Math.random() * MOCK_DB.length)]`,
+ * translated with `[Translated to ${lang}]: ${text}`, and wrote its search results and AI overviews into
+ * the code under comments like `// Simulate AI Overview generation` — and this scan found nothing,
+ * because it knew only made-up PEOPLE. Same shape as the rule above (a made-up word, then a noun for what
+ * a real feature would have produced), same severity and the same disclosure path.
+ *
+ * PRECISION: the noun must name a feature's OUTPUT (results, songs, recognition, translation, overview,
+ * answers, predictions, detections, forecast, prices, a mock database or service) — `simulate network
+ * delay`, `simulate processing`, a physics `simulateStep` and a game's `mockBattle` do not match — nor does
+ * the subject of a DETECTOR app ("fake news detection", "fake review checker", "fake currency scanner").
+ */
+const SIMULATED_RESULT_RE = /(?<![a-z])(simulat(?:e|ed|es|ing|ion)|mock(?:ed)?|fake(?![\s_-]*(?:news|reviews?|accounts?|profiles?|calls?|products?|currency|notes?)\b)|dummy)[\s_-]*(?:[a-z]{1,16}[\s_-]+){0,2}(results?|search\s+results|songs?|tracks?|recognition|detection|detections|translations?|translated|overviews?|summar(?:y|ies)|answers?|predictions?|forecasts?|weather|prices?|quotes?|db|database|service|api)(?![a-z])|\bapi\.mock[\w-]*\.|\[translated\s+(?:to|in)\b/i;
+
 /** Paths we never scan — generated, vendored, or test code. */
 const SKIP_PATH = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next)([\\/]|$)|\.test\.|\.spec\.|__tests__|(^|[\\/])tests?([\\/]|$)|(^|[\\/])specs?([\\/]|$)/i;
 
@@ -272,6 +287,8 @@ export function scanAuthenticity(file: string, content: string): AuthenticityIss
     if (line.length > 4000) continue;
     if (SIMULATED_DATA_RE.test(splitHumps(line))) {
       issues.push({ file, line: i + 1, kind: 'simulated-data', severity: 'medium', snippet: trimSnippet(line) });
+    } else if (SIMULATED_RESULT_RE.test(splitHumps(line))) {
+      issues.push({ file, line: i + 1, kind: 'simulated-result', severity: 'medium', snippet: trimSnippet(line) });
     }
   }
   const emptyLine = emptyHandlerLine(lines);
@@ -363,12 +380,38 @@ export function authenticitySummary(issues: AuthenticityIssue[]): string {
 
 /** The simulated-data findings among `files`, mock folders excluded. PURE. */
 export function simulatedDataIssues(files: Record<string, string>): AuthenticityIssue[] {
+  return findingsOfKind(files, 'simulated-data');
+}
+
+/** The simulated-RESULT findings among `files` (see `SIMULATED_RESULT_RE`), mock folders excluded. PURE. */
+export function simulatedResultIssues(files: Record<string, string>): AuthenticityIssue[] {
+  return findingsOfKind(files, 'simulated-result');
+}
+
+function findingsOfKind(files: Record<string, string>, kind: string): AuthenticityIssue[] {
   const out: AuthenticityIssue[] = [];
   for (const [path, content] of Object.entries(files ?? {})) {
     if (typeof content !== 'string' || !content || /(^|[\\/])__mocks__([\\/]|$)|(^|[\\/])mocks?[\\/]/i.test(path)) continue;
-    for (const issue of scanAuthenticity(path, content)) if (issue.kind === 'simulated-data') out.push(issue);
+    for (const issue of scanAuthenticity(path, content)) if (issue.kind === kind) out.push(issue);
   }
   return out;
+}
+
+/**
+ * The line appended to the user's summary when a feature of the delivered app returns made-up results.
+ * Says what is not real, why, and the real path — in plain words and without any engine name. '' when
+ * there is nothing to disclose. PURE.
+ */
+export function simulatedResultNotice(issues: AuthenticityIssue[]): string {
+  if (!issues || issues.length === 0) return '';
+  const files = [...new Set(issues.map((i) => i.file))].slice(0, 3);
+  return [
+    '',
+    '',
+    `⚠️ Heads-up: some features in this app show demo results, not real ones (${files.join(', ')}). They return `
+      + 'made-up answers — for example a random song or placeholder text — instead of calling a real service.',
+    'Making them real needs a real service (some need a free API key). Reply if you want this, and I will connect one.',
+  ].join('\n');
 }
 
 /**
@@ -387,4 +430,19 @@ export function simulatedDataNotice(issues: AuthenticityIssue[]): string {
     'Showing other people\'s data, such as their shops, followers or locations, needs a shared online database. '
       + 'Reply if you want this made real, and I will set one up for it.',
   ].join('\n');
+}
+
+/**
+ * Said at WRITE time, while the file is still open (autopsy 33812996): a line that invents a feature's
+ * result or other people's data. The end-of-build disclosure above tells the USER; this tells the
+ * BUILDER, who can still make it real. '' when the file has neither. PURE.
+ */
+export function fakeResultWriteNote(file: string, content: string): string {
+  if (typeof content !== 'string' || !content || /(^|[\\/])__mocks__([\\/]|$)|(^|[\\/])mocks?[\\/]/i.test(file)) return '';
+  const hits = scanAuthenticity(file, content).filter((i) => i.kind === 'simulated-result' || i.kind === 'simulated-data').slice(0, 3);
+  if (hits.length === 0) return '';
+  const lines = hits.map((h) => `  ${file}:${h.line} ${h.snippet}`).join('\n');
+  return `\n\n⚠️ ${file} makes up a result or data instead of producing it:\n${lines}\n`
+    + 'A feature must not return invented answers. Call a real service, or show an honest "connect X to turn this on" '
+    + 'state and say so in your final message. Example entries for layout are labelled on screen as examples.';
 }

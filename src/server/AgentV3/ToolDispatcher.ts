@@ -3,6 +3,7 @@ import { recordingActuator } from './recordedWrites';
 import { repeatedReadNotice, READ_LOOP_LIMIT, repeatedCommandNotice, commandKey } from './repeatedReads';
 import { repeatedEditNotice } from './repeatedEdits';
 import { missingMembers, declaredMembers, relativeImports, resolveCandidates, memberListNote, RECIPE_LIBRARY_PATH, type MissingMember } from './typeMembers';
+import { fixNodeModulesTypo } from './nodeModulesTypo';
 import { healWouldOscillate } from './HealLedger';
 import type { AgentEventStream } from './AgentEventStream';
 import { parseNpmAuditSummary, looksLikeDependencyInstall } from './npmAuditSummary';
@@ -43,7 +44,7 @@ import { getWorkspaceMemory } from './WorkspaceMemory';
 import { shellBuildProvesSuccess } from './buildFailurePrediction';
 import { robustTscCommand } from './tscCommand';
 import { parseTscErrors, type TscError } from './EndgameRepair';
-import { tscOutputProvesClean, looksLikeTypecheckCommand, tscVerdict } from './TscGate';
+import { tscOutputProvesClean, looksLikeTypecheckCommand, tscVerdict, countTscErrors } from './TscGate';
 import { pathMissHint } from './suggestFilePath';
 import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
 import { detectTestPlan, parseTestOutcome, withSandboxBrowsers, withTestFilter } from './testRunner';
@@ -96,7 +97,7 @@ import {
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
 } from './writeTimeTypecheck';
-import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
+import { scanAuthenticity, authenticitySummary, fakeResultWriteNote } from './AuthenticityAnalysis';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
 import type { AccessibilityIssue } from './AccessibilityAnalysis';
@@ -2761,6 +2762,35 @@ export class ToolDispatcher {
   private noteCompileOutput(output: string): void {
     try { if (tscOutputProvesClean(output)) getWorkspaceMemory(this.workspaceId).markTscClean(); }
     catch { /* audit best-effort */ }
+    this.noteTypeErrorCount(output);
+  }
+
+  /**
+   * The latest compile's own verdict, whoever ran it — see `lastKnownTypeErrors`. `failuresOnly` is for a
+   * compile whose exit code already said it failed: its output may not parse (a bare `TS2304` on stderr),
+   * so it may RAISE the count but never set it to clean.
+   */
+  private noteTypeErrorCount(output: string, failuresOnly = false): void {
+    try {
+      const v = tscVerdict(output);
+      if (v === 'passed' && !failuresOnly) this._lastTypeErrors = 0;
+      else if (v === 'failed') this._lastTypeErrors = Math.max(1, countTscErrors(output));
+    } catch { /* a reading, never a failure */ }
+  }
+
+  /** Type errors in the LATEST compile this build ran (write-time, the typecheck tool, or a shell `tsc`);
+   *  null when none has run or none produced a verdict. */
+  private _lastTypeErrors: number | null = null;
+
+  /**
+   * How many type errors the latest compile reported — null when unknown. 🔴 Autopsy 33812996: the
+   * done check told the builder *"the app is complete and healthy — 92/100, no blockers"* while the
+   * compile it had just run held errors in Home.tsx; the builder then spent 28 more steps (20 minutes)
+   * after being told to stop. The readiness scan reads code, not the compiler, so the compiler's own
+   * last word is asked too.
+   */
+  lastKnownTypeErrors(): number | null {
+    return this._lastTypeErrors;
   }
 
   /**
@@ -3191,6 +3221,8 @@ export class ToolDispatcher {
     let security = '';
     for (const p of paths) {
       try { security += securityWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
+      // A made-up result or made-up people (autopsy 33812996) — the builder hears it with the file open.
+      try { security += fakeResultWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
     }
     // A second index.html in public/ shadows a Vite app's real entry (autopsy 876afca9) — said while open.
     let shadow = '';
@@ -3966,7 +3998,10 @@ export class ToolDispatcher {
       }
 
       case 'bash': {
-        const command = reqStr(input, 'command');
+        // `.node_modules/.bin/X` is a typo, never a folder (autopsy bee95692: four dev-server launches
+        // and two typechecks against it, ~5 min). Corrected before it reaches the shell; the agent is told.
+        const typoFix = fixNodeModulesTypo(reqStr(input, 'command'));
+        const command = typoFix.command;
         // Scaffold guard: create-* generators (`npm create vite`, `npx create-*`,
         // `npm init <gen>`) require a newer Node than the fixed-version sandbox and
         // FAIL — after which the agent tends to improvise a nested project subdir.
@@ -4505,6 +4540,10 @@ export class ToolDispatcher {
         // Read from the OUTPUT, never the exit code: `tsc --noEmit 2>&1 | head -40` exits with head's 0
         // whether or not tsc failed, and that used to be recorded as "TypeScript already checked CLEAN".
         if (looksLikeTypecheckCommand(command) && exitCode === 0) this.noteCompileOutput(`${stdout}\n${stderr}`);
+        if (typoFix.fixed) out = `(Ran it as ./node_modules/… — the folder is node_modules, with no leading dot.)\n${out}`;
+        // A compile whose exit code already said it failed still tells the done check it has errors
+        // (autopsy 33812996) — it can never mark anything clean.
+        if (looksLikeTypecheckCommand(command) && exitCode !== 0) this.noteTypeErrorCount(`${stdout}\n${stderr}`, true);
         return out;
       }
 

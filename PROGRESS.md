@@ -85593,6 +85593,142 @@ Admin: *"mobile friendly game/app bane — mobile first!!!!!!"*, choosing touch 
 - The phone check reports and offers a fix; it does not repair on its own. A verified repair (like the
   explorer's) waits until `MOBILE_LAYOUT_ISSUES` has appeared on real builds.
 - Games built before today get the controls only when rebuilt.
+
+## 2026-09-30 — Autopsies 33812996 (Circle to Search) + 0c2a987a ("Make in .apk files")
+
+Build 33812996: a Weak build that took 31 minutes against an estimate of 5–12. The first real-browser
+render came at 1841 s. Build 0c2a987a took six model calls to answer one question.
+
+**Ledger** (problem → root cause → class → siblings → test):
+
+- **Read as ecommerce, and the estimate doubled**
+  - Root cause: the Play Store link's `store` matched the ecommerce domain, and the link's path counted
+    as modules.
+  - Class: a URL's words were read as the request's words. Already fixed once, for one reader only
+    ("Lekhan Sahyak", 2026-09-27).
+  - Siblings: `lib/machineText.ts` is now the one helper, called by the requirement analyser, the
+    request analyser, the build-time estimator, the enumerated-feature counter, the native-capability
+    reader and the scope feature counter.
+  - Test: `aLinkIsNotTheRequest` (a census: every reader gives the same answer with or without a link).
+- **Filed as a `translate` task, score 15**
+  - Root cause: "screen translation" in the feature list.
+  - Class: a text-processing word used as a feature's name. The Gita fix (b6f88a72) covered "in hindi"
+    only.
+  - Fix: translate and summary stand down when the request orders an app, which sends it to the
+    platform's existing second opinion.
+  - Test: same file.
+- **560 s of fast-lane repair (77%)**
+  - Root cause: flashx crawled inside a repair call, and the same call walked onto `kimi-k2.7-code`
+    (197 s with no answer) and then `glm-5.3`.
+  - Class: `stopLane` (Study-Racer) guarded generation only, and only after a reasoning rung had served
+    a call.
+  - Fix: lane calls carry `stopAtReasoningRung`, and the repair loop asks `stopLane`.
+  - Test: `theLaneStopsBeforeAReasoningRung`.
+- **An LLM heal for three one-line CSS edits**
+  - Root cause: the deterministic wiring knew only global-named sheets.
+  - Fix: `isAppWideStylesheet` covers styles/css folders and theme, token and component names;
+    `dedupeStylesheetImports` removes an import the entry already has. Both lanes call them.
+  - Test: `theStylesheetsAreWiredWithoutAModel`.
+- **Fake results shipped as features**
+  - What happened: song recognition picked a random entry from `MOCK_DB`, translation returned
+    `[Translated to X]: …`, and search results and AI overviews were hard-coded.
+  - Class: made-up results. f15a9bcc covered made-up people only.
+  - Fix:
+    - `NO_FAKE_RESULTS_RULE` in both lanes;
+    - a `simulated-result` finding with a write-time note;
+    - a `SIMULATED_RESULT_SHIPPED` disclosure to the user.
+  - Test: `aFeatureMayNotMakeUpItsResult`, which also checks that no golden scaffold trips it.
+- **"Complete and healthy" said over a failed compile, then 28 more steps**
+  - Root cause: the done check read the static scan only.
+  - Fix: the dispatcher remembers the latest compile's verdict from every door, including a failing
+    shell `tsc`.
+  - Test: `doneIsNeverSaidOverAFailedCompile`.
+- **"The exact versions you specified"**
+  - Root cause: the prompt line from e7baf61d was ignored by the model.
+  - Fix: a `claimAudit` rule, `user-attributed`.
+  - Test: `aPlatformPinIsNotTheUsersRequest`.
+- **A lazy import of a named member that was only the default export (TS2339)**
+  - Fix: `ImportExportReconcile` CASE C.
+  - Test: `aLazyImportGetsTheRightKind`.
+- **`safeImage.ts` written against react-native in a vite-react app**
+  - Fix: web lanes get `webPlatformRule`.
+  - Test: same file.
+- **APK request nudged twice and retried (0c2a987a)**
+  - Class: a pointer to the platform's own feature read as a stall. Refusal and question were already
+    answers.
+  - Fix: `turnPointedToPlatformFeature`, which needs both a package request and a named
+    Download APK / APK Builder; nudge, retry and empty flip all read it.
+  - Test: `aPointerToTheApkBuilderIsAnAnswer`.
+- **"The typecheck did not run" beside `npm run build` exit 0 and PROD_BUILD_OK**
+  - Root cause: only `tsc --noEmit` counted as a typecheck.
+  - Fix: `buildScriptTypecheckVerdict` reads the echoed `> tsc … &&` line. Both the agent's log and the
+    platform's production build feed the gate.
+  - Test: `aBuildThatCompilesIsATypecheck`.
+
+**Already fixed on `main` when these builds ran (deploy lag):**
+- the crawl bench being build-long (#3402);
+- a backend agent spawned for a browser-only app (#3402, `parallelHelperScope`);
+- `TSC_ENSURE` output going to /dev/null, and a piped `tsc | head` reported as exit 0 (#3412).
+
+**Still open:**
+- The contract drifted on key casing (`isFeatureEnabled('qr_scanner')` against `QR_SCANNER`). The
+  shared contract does not carry a constants module's key union. A general fix needs the contract to
+  name every string-literal union a consumer passes; not guessed at here.
+- 111 file reads covered 28 distinct files. The no-progress limit was not reached (every re-read
+  followed a change). This is recorded as measurement only.
+## 2026-09-30 — A free build holds the sandbox for less (E2B cost lever, admin: "han, free build time-limit wala PR banao")
+
+**The problem.** A free (Weak) build got the paid window: 30 minutes, or 60 on a deep prompt. When the
+window ran out, the watchdog pause was always `resumable`. The client auto-continues it for up to 8
+windows while files grow, plus 2 windows with no progress. So one free request could hold an E2B machine
+for four to eight hours with nobody pressing anything, all of it paid by NavBharatAI.
+
+**The fix** (`src/server/AgentV3/freeBuildTimeCap.ts`):
+- **Window:** a free build's window is min(paid cap, `AGENTV3_FREE_BUILD_SECONDS`), default 25 min. It is
+  applied to `effectiveBuildSeconds`, so every budget derived from it moves together.
+- **Unattended chain:** the watchdog pause is resumable only while this request's free windows total less
+  than `AGENTV3_FREE_BUILD_AUTO_SECONDS` (default 50 min). After that the work is saved, the user is told
+  so, and each "continue" buys one window.
+- **Server-side:** the phone apps are bundled, so a client change would not reach them.
+- **Report codes:** `FREE_BUILD_TIME_CAP` and `FREE_BUILD_CHAIN_PAUSED`, both process-only.
+- **Honesty sibling:** the runner's timeout outcome now names the key that actually set the cap.
+- **Tests:** `tests/aFreeBuildHoldsTheMachineForLess.test.ts`, reversion-proven.
+
+**Still open:**
+- The chain is counted per instance. An auto-continue served by another Cloud Run instance starts a
+  fresh chain there, which is the old behaviour. The complete fix is a durable per-workspace counter,
+  for example on the workspace build lease.
+- 25 min / 50 min are assumptions. Read `FREE_BUILD_CHAIN_PAUSED` on real builds before tuning them.
+- Project-mode module turns (`planRemaining`) keep their own chain guard and are not bounded by this.
+## 2026-09-30 — Autopsy bee95692 ("Social media app", Weak, 14.5 min, ₹165.64): green, ~5 min lost to one typo
+
+The app rendered and passed the production build. The explorer pressed 14 controls. The build was
+deployed with today's fixes (#3397–#3411). The complex route was correct for a social app.
+
+**Fixed (all reversion-proven, `tests/theSocialAppAutopsy.test.ts`):**
+1. **`.node_modules/.bin/vite` (4×) and `.node_modules/.bin/tsc` (2×).** No project has that folder.
+   - `fixNodeModulesTypo` corrects the path before the shell runs, and the agent is told.
+   - `DevServerRecovery` classifies `PATH: No such file or directory` as `code_error`. It used to say "no
+     recognisable error" and restart twice, 72 s a time, four times.
+2. **False Rules-of-Hooks blocker.** `return useSyncExternalStore(...)` was read as "a hook after an early
+   return". The return that CONTAINS the call was counted as before it. That fed a resume round, and a
+   correct hooks file was rewritten three times. A return now counts only if it ENDS before the call.
+3. **getSnapshot returned a new array per call → "Maximum update depth exceeded".** The preview crashed and
+   a repair pass ran. `STABLE_SNAPSHOT_RULE` now reaches both lanes.
+4. **The build-start database offer read only the message ("Yes").** It now reads `planning.text`, the same
+   text the complexity score and the plan read. "social media/network app" is now a shared-data signal
+   (social-media marketing is not).
+
+**Recorded, not changed:** the lean post-build reviewer timed out at 45 s in 3 of today's 4 reports. It
+spends tokens and returns nothing. Raising or dropping it is an admin decision.
+
+**Follow-up (admin chose "fix the timeout", after being told that skipping the review on green apps would
+also switch off the one verified functional repair, `selectGreenRepairable`):**
+5. **The lean reviewer was handed all 11 changed files in full and read them all again anyway** (`glob`,
+   then one `read_file` each), then timed out. "Do NOT read these again" was advice, not a mechanism.
+   When every changed source file fits inline (`leanReviewAnswersInOneCall`), the review now spawns with
+   NO tools (`toolsOverride: []` on `makeSubAgentSpawn`): it can only answer, in one call. When a changed
+   file did not fit, it keeps its read tools. The skip-the-review option was withdrawn, not shipped.
 ## 2026-09-30 — Autopsy a9f8d186: "circle to search", Weak, 17.5 min — rendered, then called "sandbox unavailable" and made free
 
 The prompt asked for a circle-to-search app with a QR scanner, screen translation, music recognition, an
@@ -85744,3 +85880,39 @@ not yet deployed when this build ran.
 **OPEN, for the admin:** an unrelated request on an existing app ("a Genesis PDF" on a calculator) is built INTO
 that app (`BUILD_ORDER_READ_AS_EDIT`). Asking once ("add to this app, or start a new one?") is a product
 decision, not a bug fix.
+## 2026-09-30 — Autopsy 12511a9c ("Calculator", Weak, 9.2 min vs ~4 min estimate, billed ₹121.19)
+
+**Tally:** 2 self-heals (GLM crawl benched, then KIMI took over; the preview re-publish), 1 workaround (the contract
+step stopped at its own 55.9 s cap, so the files were written without a shared contract), 0 skipped, 0 shipped broken.
+There were 3 struggles: two needless repairs (~90 s + ~3 min) and App.tsx alone taking 104 s.
+
+| Problem | Root cause | Class | Siblings | Test |
+|---|---|---|---|---|
+| The build prompt was our own weak-tier notice, byte for byte. It became the app's og:description and made REQUIREMENT_GAPS read a "social" domain. | No send path does this (checked every client and server path). The exact bytes come from a copy: every reply bubble has a Copy button, and phone keyboards offer the clipboard as a paste suggestion. | Platform text returned as a request. | fdd59ef8 (sign-in notice via Fix with AI) closed one door; this is the shared door, the route. | `ourOwnNoticeIsNotARequest` |
+| A rendered app (20/20 buttons styled) was judged "not rendered" over one console line, then repaired. | The defaults pass wrote index.html (`register('/sw.js')`) before public/sw.js, and the SPA fallback served HTML for `/sw.js`. | A console line from our own file writes was read as an app defect. | The render rescue and the last-chance proof also record their clean checks. | `theConsoleLineWasOurOwnWrite` |
+| The runtime auto-fix repaired the same line ~116 s after a clean re-check. | Fixed 180 s look-back window. | The stale-console window: 7d79254b fixed the render checks and not this reader. | This was the last reader using a fixed window. | same file |
+
+**Still open:** the fast lane's contract step for a 4-file app was cut at its own cap. For a simple app the
+contract may not be worth a model call. This is not decided here.
+## 2026-09-30 — CI went red repo-wide on a new `@grpc/grpc-js` advisory; pinned to 1.14.5 by override (the merging session)
+
+- **What happened:** between 18:16 and 18:18 UTC, GitHub published GHSA-m9gg-hp2v-232j (high: `getAuthContext` can
+  return unauthorized certificates as authorized) and GHSA-f596-whhp-79r4 (low) for `@grpc/grpc-js` `<1.13.6` and
+  `1.14.0–1.14.4`. The security-audit gate (CI step 6, `scripts/auditGate.mjs`) blocks any un-allowlisted high, so
+  `main` (70b9dd9c, the #3417 squash) and every open PR failed in ~70 s from that minute on. **The same tree had
+  passed CI two minutes earlier** — nothing in the code changed; the advisory did.
+- **Where it lived:** four copies — `1.14.4` under `dockerode`, `firebase-admin → google-gax`, `firebase-tools →
+  @google-cloud/pubsub → google-gax` (all ranges `^1.10+`, so they accept 1.14.5), and `1.9.16` under `firebase →
+  @firebase/firestore@4.17.1`, whose range is `~1.9.0` and which has **no patched 1.9.x** (fixed only in 1.13.6 and
+  1.14.5). `npm audit fix` offered only a semver-major *downgrade* of `firebase` to 9.14.0, which is not a fix.
+- **The fix, and why an override rather than an allowlist row:** `"@grpc/grpc-js": "^1.14.5"` in `package.json`
+  `overrides` (the same mechanism already used for `undici`, `tar`, `nanoid`, …). Rule 4: the allowlist is for
+  advisories with no safe fix; this one has a patched release, and `firebase-admin` already ran 1.14.4 in the same
+  process, so the 1.14 API surface is proven here. `server.ts` and `src/server/lib/db.ts` do import the client
+  `firebase/` SDK in Node, so the Firestore client's Node path now also runs on 1.14.5 — covered by the boot check
+  and the full suite in the gate below, not assumed.
+- **Result:** `npm run audit:gate` → *No new high/critical* (high 10 → 3, all three pre-triaged);
+  `license:gate` clean; full gate on the final state recorded in the PR.
+- **Open, honestly:** `@firebase/firestore` upstream still declares `~1.9.0`; when Firebase moves its own range the
+  override becomes redundant and should be removed (re-check on the next `firebase` bump). The three pre-existing
+  allowlisted highs (`axios`, `brace-expansion`, `undici`) are unchanged.

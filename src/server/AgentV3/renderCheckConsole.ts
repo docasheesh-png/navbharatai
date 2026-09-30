@@ -71,3 +71,46 @@ export function renderCheckConsoleSince(opts: {
   if (!records || !Number.isFinite(opts.checkStartedAt)) return opts.buildStartedAt;
   return Math.max(opts.buildStartedAt, opts.checkStartedAt - RENDER_CHECK_CLOCK_SLACK_MS);
 }
+
+// ── A RENDERED APP WITH ONE CONSOLE LINE IS LOOKED AT AGAIN BEFORE A REPAIR IS PAID FOR ───────────────
+// (autopsy 12511a9c, 2026-09-30). A calculator rendered in a real browser (158 CSS rules, 20 of 20
+// buttons styled) and its check still read "didn't render correctly" because of one line, "The script has
+// an unsupported MIME type ('text/html')". That is Chrome's message for a service worker whose script came
+// back as HTML: the production-defaults pass had just added `register('/sw.js')` to index.html, and the
+// dev server did not serve the new public/sw.js yet. Seconds later /sw.js was served as JavaScript and the
+// line never came back — but a repair pass (~90 s) and then a runtime auto-fix (~3 min, one 118 s model
+// call) were spent on it, and billed.
+//
+// 🔑 THE CLASS: a console line from a moment the platform itself was changing files (a pass writing, Vite
+// reloading, a worker registering) is read as a defect of the app. The cure is not to ignore console
+// errors — a real one must still be repaired — but to ask whether it happens AGAIN on a fresh load. A
+// look costs one browser open and no model call; a repair costs a model pass and can edit working code.
+
+/**
+ * Should this check look once more before a repair? Only when the app visibly RENDERED in a real browser
+ * and the only evidence against it is its console, and only once per verify loop. PURE.
+ */
+export function recheckBeforeRepair(opts: {
+  rendered: boolean;
+  consoleErrorCount: number;
+  source: 'browser' | 'curl' | undefined;
+  recheckSpent: boolean;
+}): boolean {
+  if ((process.env['AGENTV3_CONSOLE_RECHECK'] ?? '').trim().toLowerCase() === 'off') return false;
+  return opts.rendered && opts.consoleErrorCount > 0 && opts.source === 'browser' && !opts.recheckSpent;
+}
+
+/** The runtime auto-fix loop's look-back when no render check has come back clean. */
+export const RUNTIME_AUTOFIX_LOOKBACK_MS = 180_000;
+
+/**
+ * Where the runtime auto-fix loop starts reading the console. A real-browser check that came back CLEAN
+ * has already answered every line logged before it started, so those lines are not handed to a repair —
+ * the same rule `renderCheckConsoleSince` gives the render checks, applied to the one reader that still
+ * used a fixed three-minute window. PURE.
+ */
+export function runtimeAutofixSince(opts: { now: number; lastCleanBrowserCheckAt: number | null }): number {
+  const fixed = opts.now - RUNTIME_AUTOFIX_LOOKBACK_MS;
+  const clean = opts.lastCleanBrowserCheckAt;
+  return clean != null && Number.isFinite(clean) ? Math.max(fixed, clean) : fixed;
+}

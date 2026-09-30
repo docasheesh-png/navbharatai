@@ -4653,6 +4653,19 @@ the two GATES were never hunted.
 request's module plan appears and advances. A build that takes an extra planner call and then
 decomposes is the feature working; a *small* app doing that is the precision lock having been broken.
 
+🔴 **FIRST REAL EVIDENCE, 2026-09-30 (autopsy 6a5fb04b): IT DECOMPOSED A SMALL APP, AND ITS FIRST MODULE
+COULD NOT PASS.** A one-screen voice assistant counted fourteen parts (two were style adjectives, three were
+one feature per language) and became twelve modules. Module 1 (config) wrote its three files and typechecked,
+then failed: the readiness gate's "entry is still the starter" blocker (2026-09-20) knows nothing about a
+module that does not own `src/App.tsx`, two `UNFINISHED_BUILD_RESUMED` nudges pushed the model outside its
+module's scope, and the user read *"Nothing has been built yet"*. The planner orders modules by dependency, so
+the app shell is normally LAST — **so, by construction, a plan whose first module does not own the entry fails
+at module 1**. The precision half is fixed (`enumeratedFeatures.ts`: style adjectives dropped, per-language
+variants collapsed — that prompt now counts 10). **The module-turn half is an OPEN root cause and an admin
+decision**, recorded in `PROGRESS.md`: making the starter blocker, the preview checks and the repair pass
+module-aware touches the route's preview stretch, so it was not guessed at. ⚠️ Until it ships, a plan left
+at "1 failed" is a trap: a later "continue" retries module 1 on top of whatever the user has since built.
+
 ⚠️ **UNSET ⇒ OFF, and every build is byte-identical to today.** The flag takes `on` (everyone),
 `off`/unset (the kill switch), or **anything else as an ALLOWLIST of uids/emails** — built
 deliberately so the admin can enable it for their OWN account and run one real mega-prompt before

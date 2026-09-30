@@ -84303,3 +84303,37 @@ The #3385 ratchet listed 56 tools named in the architect prompt and offered to n
   recipe) is now the architect's, beside `screenshot`.
 - The ratchet list is deleted, not emptied: a new prompt promise without a reachable tool fails CI with no escape.
 - The live strip names the recipe ("using generate_pdf"), not "using run_recipe".
+
+## 2026-09-30 — Autopsy 6a5fb04b + dfd81a3a ("Mohakor Voice AI", Weak, two builds)
+
+**Build 1 (6a5fb04b, 4.4 min, FAILED, ₹0).** A Bengali spec for a voice assistant. Software Project Mode fired
+(14 "parts") and decomposed it into 12 modules; module 1 (config) wrote 3 files, typechecked, and was marked
+FAILED because the readiness gate's starter-entry blocker judged the whole app. Two resume nudges pushed the
+model outside its module; the user read "Nothing has been built yet". The mega-roadmap planner spent 62 s and
+4,000 output tokens on `glm-4.7-flashx` and returned 151 characters.
+
+**Build 2 (dfd81a3a, 17.3 min, green, ₹215.54).** A garbled follow-up, read as an edit; the model built the whole
+app in one pass. GLM timed out twice (120 s), Kimi's first call took 167 s, the model ran `tsc` by hand eight
+times, and the report carried four Green Freeze lines about another user's inventory app.
+
+**Fixed (PR on `claude/charming-bell-htxb9u`):**
+- `greenFreeze.ts` — both observers are a per-workspace set. They were one global slot: the last build to
+  register received every build's refusals and evicted the others' observers (also skewed `POST_GREEN_WRITES`).
+- `answerNotDeliberate.ts` — the plan and fast text runners default every call to `thinking: false`. The three
+  planners and the fast lane's repairs sent no field, which GLM reads as "default reasoning".
+- `writeTimeTypecheck.ts` / `ToolDispatcher` — a write after which the compile printed nothing now says the
+  project is clean. Non-empty output with zero parsed errors is never called clean.
+- `enumeratedFeatures.ts` — single-word style adjectives are not parts; 3+-word items differing only in their
+  first word collapse. The report's prompt counts 10, not 14.
+- `BuildDiagnostics.ts` — negated problem words ("no error", "koi error nahi", Bengali/Hindi forms) and our own
+  ℹ️ notices are no longer filed as warnings/errors.
+- Tests: `tests/theVoiceAppWasNotAnErp.test.ts` (17), reversion-proven per fix.
+
+**OPEN root cause — admin decision:** Software Project Mode cannot pass a module that does not own the app entry
+(starter blocker, starter-render verdict and the preview repair all judge the whole app). Options put to the
+admin: make module turns module-aware (route change), or switch `AGENTV3_PROJECT_MODE` off until then. A plan
+left at "1 failed" also resumes on a later "continue" over an app built since.
+
+**Open, not ours to fix here:** GLM 60 s timeouts (provider); Kimi 167 s first call; the ETA used a complexity
+score the router itself disowned as unreadable (shown as a labelled guess); the scripted "AI" reply is #3389's
+(`SCRIPTED_ASSISTANT_SHIPPED`), not duplicated.

@@ -84098,3 +84098,27 @@ signed out. The normal code path is untouched (the native session is set in the 
 **Still needed from the admin, unverified:** the Cloud Run service account must hold **Service Account Token
 Creator** on itself (IAM signBlob). Without it the exchange answers `custom-token-unavailable`, the person gets
 the old honest Email/Google message, and the OTP card shows that code in the detail — never a fake success.
+
+## 2026-09-30 — the image generator: every person is Indian by default, and "no image" is no longer a dead end
+
+**Admin, verbatim:** *"jab bhi koi face bane to woh bhi chinis face banta hai … jab bhi koi human image banayi
+jaye to default indian face hi banna chahiye (100% indian) jab tak specific bola na jaye kisi aur face ke bare
+me … abhi maine prompt diya 'indian face' to image bani hi nahi, isko bhi fix karna!!"*
+
+**1. Chinese faces — the cause was our brief.** Nothing we sent said who the person is, so the engine used its
+own default face. New `src/server/lib/imagePeople.ts` (pure):
+- It detects a person in the brief (English, Hinglish, Devanagari).
+- It stands down when the user names another origin, a mix or a character.
+- `INDIAN_PEOPLE_DIRECTION` is placed straight after the subject in `craftImagePrompt`, which covers every rung of the generator.
+- Free chat's inline image uses the same rule.
+- It is never applied to an edit of the user's own photo, a UI screenshot, or a background.
+- It is precision-first: `player`, `worker`, `cook`, `seller`, `driver`, `cat face` and `face wash` do not count as people.
+
+**2. "indian face" made no image — the structural half is fixed; the provider's half is unproven.**
+- Our own triage and word scan both pass that brief (measured).
+- Since 2026-09-21 the browser fetches the free picture itself, so when the engine delivered nothing, the old ladder never ran. That ladder was: one try from our side, then the metered paid rungs. A link the browser could not read was also *shown on trust*, even when it was an error.
+- The browser now probes such a link (`imageLinkLoads`). When no picture came, it re-sends the same request with `freeFailed`.
+- The server honours that only through `freeFailureVerified`: our signature, unexpired, and the prompt in the link equal to this request's. It then runs the server ladder. A mismatch gets a 403.
+- **Open root cause:** why the provider refused `"indian face"` is not proven. Its host cannot be reached from a session. The suspect is `safe=true` (added 2026-09-28) refusing a close-up face. The route now logs the browser's reason (`[IMAGE_GEN] the browser could not get the free picture (…)`). Read that before changing the provider call.
+
+**Tests:** `tests/everyFaceIsIndianAndNoImageIsADeadEnd.test.ts`, 57 cases, including the real route. Reversion-proven: removing the placement, or the server fallback, fails 5 cases.

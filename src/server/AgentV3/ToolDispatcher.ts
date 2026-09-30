@@ -3,6 +3,7 @@ import { recordingActuator } from './recordedWrites';
 import { repeatedReadNotice, READ_LOOP_LIMIT, repeatedCommandNotice, commandKey } from './repeatedReads';
 import { repeatedEditNotice } from './repeatedEdits';
 import { missingMembers, declaredMembers, relativeImports, resolveCandidates, memberListNote, RECIPE_LIBRARY_PATH, type MissingMember } from './typeMembers';
+import { fixNodeModulesTypo } from './nodeModulesTypo';
 import { healWouldOscillate } from './HealLedger';
 import type { AgentEventStream } from './AgentEventStream';
 import { parseNpmAuditSummary, looksLikeDependencyInstall } from './npmAuditSummary';
@@ -3966,7 +3967,10 @@ export class ToolDispatcher {
       }
 
       case 'bash': {
-        const command = reqStr(input, 'command');
+        // `.node_modules/.bin/X` is a typo, never a folder (autopsy bee95692: four dev-server launches
+        // and two typechecks against it, ~5 min). Corrected before it reaches the shell; the agent is told.
+        const typoFix = fixNodeModulesTypo(reqStr(input, 'command'));
+        const command = typoFix.command;
         // Scaffold guard: create-* generators (`npm create vite`, `npx create-*`,
         // `npm init <gen>`) require a newer Node than the fixed-version sandbox and
         // FAIL — after which the agent tends to improvise a nested project subdir.
@@ -4505,6 +4509,7 @@ export class ToolDispatcher {
         // Read from the OUTPUT, never the exit code: `tsc --noEmit 2>&1 | head -40` exits with head's 0
         // whether or not tsc failed, and that used to be recorded as "TypeScript already checked CLEAN".
         if (looksLikeTypecheckCommand(command) && exitCode === 0) this.noteCompileOutput(`${stdout}\n${stderr}`);
+        if (typoFix.fixed) out = `(Ran it as ./node_modules/… — the folder is node_modules, with no leading dot.)\n${out}`;
         return out;
       }
 

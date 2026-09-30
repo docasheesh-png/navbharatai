@@ -85593,6 +85593,60 @@ Admin: *"mobile friendly game/app bane — mobile first!!!!!!"*, choosing touch 
 - The phone check reports and offers a fix; it does not repair on its own. A verified repair (like the
   explorer's) waits until `MOBILE_LAYOUT_ISSUES` has appeared on real builds.
 - Games built before today get the controls only when rebuilt.
+
+## 2026-09-30 — A free build holds the sandbox for less (E2B cost lever, admin: "han, free build time-limit wala PR banao")
+
+**The problem.** A free (Weak) build got the paid window: 30 minutes, or 60 on a deep prompt. When the
+window ran out, the watchdog pause was always `resumable`. The client auto-continues it for up to 8
+windows while files grow, plus 2 windows with no progress. So one free request could hold an E2B machine
+for four to eight hours with nobody pressing anything, all of it paid by NavBharatAI.
+
+**The fix** (`src/server/AgentV3/freeBuildTimeCap.ts`):
+- **Window:** a free build's window is min(paid cap, `AGENTV3_FREE_BUILD_SECONDS`), default 25 min. It is
+  applied to `effectiveBuildSeconds`, so every budget derived from it moves together.
+- **Unattended chain:** the watchdog pause is resumable only while this request's free windows total less
+  than `AGENTV3_FREE_BUILD_AUTO_SECONDS` (default 50 min). After that the work is saved, the user is told
+  so, and each "continue" buys one window.
+- **Server-side:** the phone apps are bundled, so a client change would not reach them.
+- **Report codes:** `FREE_BUILD_TIME_CAP` and `FREE_BUILD_CHAIN_PAUSED`, both process-only.
+- **Honesty sibling:** the runner's timeout outcome now names the key that actually set the cap.
+- **Tests:** `tests/aFreeBuildHoldsTheMachineForLess.test.ts`, reversion-proven.
+
+**Still open:**
+- The chain is counted per instance. An auto-continue served by another Cloud Run instance starts a
+  fresh chain there, which is the old behaviour. The complete fix is a durable per-workspace counter,
+  for example on the workspace build lease.
+- 25 min / 50 min are assumptions. Read `FREE_BUILD_CHAIN_PAUSED` on real builds before tuning them.
+- Project-mode module turns (`planRemaining`) keep their own chain guard and are not bounded by this.
+## 2026-09-30 — Autopsy bee95692 ("Social media app", Weak, 14.5 min, ₹165.64): green, ~5 min lost to one typo
+
+The app rendered and passed the production build. The explorer pressed 14 controls. The build was
+deployed with today's fixes (#3397–#3411). The complex route was correct for a social app.
+
+**Fixed (all reversion-proven, `tests/theSocialAppAutopsy.test.ts`):**
+1. **`.node_modules/.bin/vite` (4×) and `.node_modules/.bin/tsc` (2×).** No project has that folder.
+   - `fixNodeModulesTypo` corrects the path before the shell runs, and the agent is told.
+   - `DevServerRecovery` classifies `PATH: No such file or directory` as `code_error`. It used to say "no
+     recognisable error" and restart twice, 72 s a time, four times.
+2. **False Rules-of-Hooks blocker.** `return useSyncExternalStore(...)` was read as "a hook after an early
+   return". The return that CONTAINS the call was counted as before it. That fed a resume round, and a
+   correct hooks file was rewritten three times. A return now counts only if it ENDS before the call.
+3. **getSnapshot returned a new array per call → "Maximum update depth exceeded".** The preview crashed and
+   a repair pass ran. `STABLE_SNAPSHOT_RULE` now reaches both lanes.
+4. **The build-start database offer read only the message ("Yes").** It now reads `planning.text`, the same
+   text the complexity score and the plan read. "social media/network app" is now a shared-data signal
+   (social-media marketing is not).
+
+**Recorded, not changed:** the lean post-build reviewer timed out at 45 s in 3 of today's 4 reports. It
+spends tokens and returns nothing. Raising or dropping it is an admin decision.
+
+**Follow-up (admin chose "fix the timeout", after being told that skipping the review on green apps would
+also switch off the one verified functional repair, `selectGreenRepairable`):**
+5. **The lean reviewer was handed all 11 changed files in full and read them all again anyway** (`glob`,
+   then one `read_file` each), then timed out. "Do NOT read these again" was advice, not a mechanism.
+   When every changed source file fits inline (`leanReviewAnswersInOneCall`), the review now spawns with
+   NO tools (`toolsOverride: []` on `makeSubAgentSpawn`): it can only answer, in one call. When a changed
+   file did not fit, it keeps its read tools. The skip-the-review option was withdrawn, not shipped.
 ## 2026-09-30 — Autopsy a9f8d186: "circle to search", Weak, 17.5 min — rendered, then called "sandbox unavailable" and made free
 
 The prompt asked for a circle-to-search app with a QR scanner, screen translation, music recognition, an
@@ -85744,3 +85798,25 @@ not yet deployed when this build ran.
 **OPEN, for the admin:** an unrelated request on an existing app ("a Genesis PDF" on a calculator) is built INTO
 that app (`BUILD_ORDER_READ_AS_EDIT`). Asking once ("add to this app, or start a new one?") is a product
 decision, not a bug fix.
+## 2026-09-30 — CI went red repo-wide on a new `@grpc/grpc-js` advisory; pinned to 1.14.5 by override (the merging session)
+
+- **What happened:** between 18:16 and 18:18 UTC, GitHub published GHSA-m9gg-hp2v-232j (high: `getAuthContext` can
+  return unauthorized certificates as authorized) and GHSA-f596-whhp-79r4 (low) for `@grpc/grpc-js` `<1.13.6` and
+  `1.14.0–1.14.4`. The security-audit gate (CI step 6, `scripts/auditGate.mjs`) blocks any un-allowlisted high, so
+  `main` (70b9dd9c, the #3417 squash) and every open PR failed in ~70 s from that minute on. **The same tree had
+  passed CI two minutes earlier** — nothing in the code changed; the advisory did.
+- **Where it lived:** four copies — `1.14.4` under `dockerode`, `firebase-admin → google-gax`, `firebase-tools →
+  @google-cloud/pubsub → google-gax` (all ranges `^1.10+`, so they accept 1.14.5), and `1.9.16` under `firebase →
+  @firebase/firestore@4.17.1`, whose range is `~1.9.0` and which has **no patched 1.9.x** (fixed only in 1.13.6 and
+  1.14.5). `npm audit fix` offered only a semver-major *downgrade* of `firebase` to 9.14.0, which is not a fix.
+- **The fix, and why an override rather than an allowlist row:** `"@grpc/grpc-js": "^1.14.5"` in `package.json`
+  `overrides` (the same mechanism already used for `undici`, `tar`, `nanoid`, …). Rule 4: the allowlist is for
+  advisories with no safe fix; this one has a patched release, and `firebase-admin` already ran 1.14.4 in the same
+  process, so the 1.14 API surface is proven here. `server.ts` and `src/server/lib/db.ts` do import the client
+  `firebase/` SDK in Node, so the Firestore client's Node path now also runs on 1.14.5 — covered by the boot check
+  and the full suite in the gate below, not assumed.
+- **Result:** `npm run audit:gate` → *No new high/critical* (high 10 → 3, all three pre-triaged);
+  `license:gate` clean; full gate on the final state recorded in the PR.
+- **Open, honestly:** `@firebase/firestore` upstream still declares `~1.9.0`; when Firebase moves its own range the
+  override becomes redundant and should be removed (re-check on the next `firebase` bump). The three pre-existing
+  allowlisted highs (`axios`, `brace-expansion`, `undici`) are unchanged.

@@ -155,7 +155,7 @@ describe('wiring', () => {
 
   it('the build reads the answer against the same lists, and both instructions obey it', () => {
     expect(route).toContain('sanitizeConfirmation(req.body?.confirmedFeatures, featureLists)');
-    expect(route).toContain('renderRequestedFeatureContract(confirmedContractLabels(featureLists, featureConfirmation))');
+    expect(route).toContain('renderRequestedFeatureContract(confirmedContractLabels(featureLists, featureConfirmation), prompt)');
     expect(route).toContain('buildRequirementGuidance(answered ? { ...gaps, likelyMissing: [] } : gaps');
     expect(route).toContain('if (!reqGuidance && askedForAnApp && !answered && !smallScope)');
   });

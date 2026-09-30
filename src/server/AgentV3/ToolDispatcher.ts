@@ -1,6 +1,8 @@
 import { entryShadowNote } from './entryShadow';
 import { repeatedReadNotice, READ_LOOP_LIMIT, repeatedCommandNotice, commandKey } from './repeatedReads';
 import { repeatedEditNotice } from './repeatedEdits';
+import { missingMembers, declaredMembers, relativeImports, resolveCandidates, memberListNote, RECIPE_LIBRARY_PATH, type MissingMember } from './typeMembers';
+import { fixNodeModulesTypo } from './nodeModulesTypo';
 import { healWouldOscillate } from './HealLedger';
 import type { AgentEventStream } from './AgentEventStream';
 import { parseNpmAuditSummary, looksLikeDependencyInstall } from './npmAuditSummary';
@@ -40,7 +42,7 @@ import { isWorkerRole } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { shellBuildProvesSuccess } from './buildFailurePrediction';
 import { robustTscCommand } from './tscCommand';
-import { parseTscErrors } from './EndgameRepair';
+import { parseTscErrors, type TscError } from './EndgameRepair';
 import { tscOutputProvesClean, looksLikeTypecheckCommand, tscVerdict } from './TscGate';
 import { pathMissHint } from './suggestFilePath';
 import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
@@ -149,7 +151,7 @@ import { analyzeEffectCleanup, effectCleanupSummary } from './effectCleanupAnaly
 import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
-import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, manifestRewrittenBy, viteRangeOf, reactRangeOf, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, npmInstallMaskedFailure } from './DependencyAutoFix';
+import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, manifestRewrittenBy, viteRangeOf, reactRangeOf, capacitorRangeOf, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, npmInstallMaskedFailure } from './DependencyAutoFix';
 import { quoteShellRouteGroupPaths } from './shellCommandSafety';
 import { resolveStringArg, missingArgMessage } from './toolArgRepair';
 import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
@@ -2760,6 +2762,48 @@ export class ToolDispatcher {
     } catch { return ''; }
   }
 
+  /**
+   * "Property 'playCue' does not exist on type 'MelodyPlayer'" says what is wrong, never what is right
+   * (autopsy 0bb437b4). For each such error in the file just written, the declaring module is found among
+   * that file's relative imports (at most six reads, only when such an error exists) and its real members
+   * are listed. See typeMembers.ts. Best-effort: anything unreadable simply adds nothing.
+   */
+  private async missingMemberNote(own: TscError[], sources: Record<string, string>): Promise<string> {
+    try {
+      const wanted = missingMembers(own);
+      if (wanted.length === 0) return '';
+      const found: Array<MissingMember & { declaredIn: string; members: string[]; library: boolean }> = [];
+      const cache = new Map<string, string | null>();
+      let reads = 0;
+      const text = async (path: string): Promise<string | null> => {
+        if (sources[path] !== undefined) return sources[path];
+        if (cache.has(path)) return cache.get(path) ?? null;
+        if (reads >= 6) return null;
+        reads += 1;
+        let t: string | null = null;
+        try { t = await this.actuator.readFile(this.workspaceId, path); } catch { t = null; }
+        cache.set(path, t);
+        return t;
+      };
+      for (const w of wanted) {
+        const src = await text(w.file);
+        const places = [w.file, ...relativeImports(src ?? '').flatMap((spec) => resolveCandidates(w.file, spec))];
+        for (const place of places) {
+          const body = await text(place);
+          if (typeof body !== 'string') continue;
+          const members = declaredMembers(body, w.type);
+          if (members) {
+            found.push({ ...w, declaredIn: place, members, library: RECIPE_LIBRARY_PATH.test(place) });
+            break;
+          }
+        }
+      }
+      return memberListNote(found);
+    } catch {
+      return '';
+    }
+  }
+
   private async writeTypecheckNote(sources: Record<string, string>): Promise<string> {
     const s = this._writeTypecheckStats;
     try {
@@ -2857,6 +2901,9 @@ export class ToolDispatcher {
       // A clean run is SAID, so the model does not re-run the compiler to find out (autopsy dfd81a3a).
       if (errors.length === 0) return silentRun ? writeTypecheckCleanNote(tsPaths) : '';
       sources = { ...(await this.exportTargetSources(splitByWrittenFiles(errors, tsPaths).own, sources)), ...sources };
+      // The members of a type the code guessed at (autopsy 0bb437b4) ride after the typecheck's own note.
+      const members = await this.missingMemberNote(splitByWrittenFiles(errors, tsPaths).own, sources);
+      if (members) return writeTypecheckNote(errors, tsPaths, sources) + members;
       return writeTypecheckNote(errors, tsPaths, sources);
     } catch {
       return ''; // the check's own failure must never reach the write's result as anything but silence
@@ -3804,7 +3851,10 @@ export class ToolDispatcher {
       }
 
       case 'bash': {
-        const command = reqStr(input, 'command');
+        // `.node_modules/.bin/X` is a typo, never a folder (autopsy bee95692: four dev-server launches
+        // and two typechecks against it, ~5 min). Corrected before it reaches the shell; the agent is told.
+        const typoFix = fixNodeModulesTypo(reqStr(input, 'command'));
+        const command = typoFix.command;
         // Scaffold guard: create-* generators (`npm create vite`, `npx create-*`,
         // `npm init <gen>`) require a newer Node than the fixed-version sandbox and
         // FAIL — after which the agent tends to improvise a nested project subdir.
@@ -3957,10 +4007,13 @@ export class ToolDispatcher {
         // The vitest family's major follows the PROJECT's Vite, so read it — only when the command names
         // vitest, so no other command pays for the read (autopsy 7d79254b, DependencyAutoFix.ts).
         // The React Three Fiber family follows the project's React the same way (autopsy a5b661c8).
-        const pinPkg = /(?:^|[\s/])(?:@vitest\/|vitest\b|@react-three\/)/.test(command)
+        // …and a Capacitor plugin follows the project's Capacitor major (autopsy a9f8d186).
+        const pinPkg = /(?:^|[\s/])(?:@vitest\/|vitest\b|@react-three\/|@capacitor(?:-[\w-]+)?\/)/.test(command)
           ? await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => undefined)
           : undefined;
-        const pinCtx = pinPkg !== undefined ? { viteRange: viteRangeOf(pinPkg), reactRange: reactRangeOf(pinPkg) } : undefined;
+        const pinCtx = pinPkg !== undefined
+          ? { viteRange: viteRangeOf(pinPkg), reactRange: reactRangeOf(pinPkg), capacitorRange: capacitorRangeOf(pinPkg) }
+          : undefined;
         const effectiveCommand = quoteShellRouteGroupPaths(pinKnownDepsInInstallCommand(command, pinCtx));
         // Inject the user's own vault secrets (Settings → Secrets & API Keys) into the app's .env the first
         // time it installs/builds/runs — so the app runs with real keys the user never pasted in chat.
@@ -4340,6 +4393,7 @@ export class ToolDispatcher {
         // Read from the OUTPUT, never the exit code: `tsc --noEmit 2>&1 | head -40` exits with head's 0
         // whether or not tsc failed, and that used to be recorded as "TypeScript already checked CLEAN".
         if (looksLikeTypecheckCommand(command) && exitCode === 0) this.noteCompileOutput(`${stdout}\n${stderr}`);
+        if (typoFix.fixed) out = `(Ran it as ./node_modules/… — the folder is node_modules, with no leading dot.)\n${out}`;
         return out;
       }
 

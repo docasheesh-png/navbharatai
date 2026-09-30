@@ -176,41 +176,59 @@ describe('the real route', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('a new client reporting HTTP 401 closes the door, and the NEXT user — an old phone app — gets bytes, not a dead link', async () => {
+  // 🔁 2026-09-30, later the same day (admin: "free wala sabhi ke liye free, agar pollination se image
+  // na bane, to likh kar aye, free server are too busy try on paid service"). Free mode no longer falls
+  // through to a paid engine: a closed door is an honest sentence pointing at Paid mode, in the user's
+  // language — and still never a dead link, which is what this file was written against.
+  it('a new client reporting HTTP 401 closes the door, and the NEXT user — an old phone app — gets the honest answer, not a dead link', async () => {
     process.env.GROK_API_KEY = 'xai-test';
     const first = await generate(body);
     await generate({ ...body, freeFailed: { url: first.body.url, ticket: first.body.ticket, exp: first.body.exp, reason: 'HTTP 401' } });
     expect(anonymousDoorOpen()).toBe(false);
     fetchSpy.mockClear();
 
-    const oldClient = await generate(body); // no freeFailed: the bundled client cannot send it
+    const oldClient = await generate(body); // no freeFailed and no tier: the bundled client sends neither
     expect(oldClient.body.mode).toBeUndefined();
-    expect(String(oldClient.body.image)).toMatch(/^data:image\//);
-    const hosts = fetchSpy.mock.calls.map((c) => new URL(String(c[0])).host);
-    expect(hosts).not.toContain('image.pollinations.ai'); // the closed door is not knocked on again
-    expect(hosts).toContain('api.x.ai');
+    expect(oldClient.body.url).toBeUndefined();
+    expect(oldClient.statusCode).toBe(503);
+    expect(oldClient.body.code).toBe('free_busy');
+    expect(String(oldClient.body.error)).toMatch(/free image servers are too busy.*Paid mode/i);
+    expect(fetchSpy).not.toHaveBeenCalled(); // the closed door is not knocked on, and no paid engine is spent
   });
 
   it('the server\'s own 401 closes the door too', async () => {
     process.env.IMAGE_GEN_CLIENT_FETCH = 'off';
     process.env.GROK_API_KEY = 'xai-test';
     const res = await generate(body);
-    expect(String(res.body.image)).toMatch(/^data:image\//);
+    expect(res.statusCode).toBe(503);
+    expect(res.body.code).toBe('free_busy');
     expect(anonymousDoorOpen()).toBe(false);
+    const hosts = fetchSpy.mock.calls.map((c) => new URL(String(c[0])).host);
+    expect(hosts).not.toContain('api.x.ai');
   });
 
-  it('a closed door with no paid engine is an honest failure, never a link', async () => {
+  it('a closed door is an honest failure, never a link', async () => {
     noteAnonymousResult('HTTP 401');
     const res = await generate(body);
-    expect(res.statusCode).toBe(502);
+    expect(res.statusCode).toBe(503);
     expect(res.body.url).toBeUndefined();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('with an account key: no link is minted, the picture is fetched here with the key in a header', async () => {
+  it('Free mode never spends our account key, even when one is set', async () => {
+    process.env.POLLINATIONS_API_KEY = 'sk_live_abc';
+    process.env.IMAGE_GEN_CLIENT_FETCH = 'off';
+    await generate(body);
+    for (const [url, init] of fetchSpy.mock.calls as [string, RequestInit | undefined][]) {
+      expect(new URL(url).host).not.toBe('gen.pollinations.ai');
+      expect(JSON.stringify(init?.headers ?? {})).not.toContain('sk_live_abc');
+    }
+  });
+
+  it('Paid mode with an account key: no link is minted, the picture is fetched here with the key in a header', async () => {
     process.env.POLLINATIONS_API_KEY = 'sk_live_abc';
     noteAnonymousResult('HTTP 401'); // the anonymous door being shut does not matter with a key
-    const res = await generate(body);
+    const res = await generate({ ...body, tier: 'paid' });
     expect(res.body.mode).toBeUndefined();
     expect(res.body.url).toBeUndefined();
     expect(String(res.body.image)).toMatch(/^data:image\/png;base64,/);

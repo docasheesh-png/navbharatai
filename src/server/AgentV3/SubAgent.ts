@@ -14,8 +14,9 @@ import { catalogForTools } from './ToolCatalog';
 import { agentLifecycle } from './AgentLifecycle';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { DESIGN_KIT_BRIEF } from './systemPrompt';
+import { NO_EVAL_RULE, NO_FAKED_RESULT_RULE } from './noEvalRule';
 import { stylesheetCarriesKit } from './kitRestore';
-import type { AgentRole } from './types';
+import type { AgentRole, ToolName } from './types';
 
 /**
  * Builds the `SubAgentSpawn` the Architect's `task` tool uses to delegate work
@@ -48,6 +49,12 @@ export interface SubAgentDeps {
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   /** Per-sub-agent caps (defaults: 40 steps; budget inherited from parent if unset). */
   maxSteps?: number;
+  /**
+   * Replaces the role's tool list for this spawn. `[]` makes a one-call specialist: the lean
+   * post-build review is handed every changed file in full, and with no read tool it answers from them
+   * instead of reading them again one call at a time (autopsy bee95692). Absent ⇒ the role's own tools.
+   */
+  toolsOverride?: ToolName[];
   maxBudgetUsd?: number;
   /** Max output tokens per turn. The Architect delegates ALL app code to sub-agents, so the top-level
    *  runner's 32000 cap (buildMaxTokensPerTurn) MUST be passed through — otherwise a sub-agent falls
@@ -282,7 +289,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       events: childEvents,
       model: deps.model,
       system: cfg.system,
-      tools: catalogForTools(cfg.tools),
+      tools: catalogForTools(deps.toolsOverride ?? cfg.tools),
       onlyOpus: deps.onlyOpus,
       powerLevel: deps.powerLevel,
       effort: deps.effort,
@@ -314,7 +321,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       // however much it produced — and also withheld the bounded one-time step extension, which is
       // gated on the same flag. Both halves of `AgentRunner`'s own step-cap policy were unreachable.
       expectsArtifacts: (() => {
-        try { return (deps.expectsArtifacts?.() ?? false) && roleExpectsArtifacts(cfg.tools); }
+        try { return (deps.expectsArtifacts?.() ?? false) && roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools); }
         catch { return false; }
       })(),
     });
@@ -352,6 +359,9 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     // files was never told the design kit's classes, so the Frontend sub-agent read `src/index.css` six
     // times in slices to find them before writing a line. Given only when the stylesheet really carries
     // the kit, so a project without it is never told about classes that do not exist.
+    // The two coding rules both prompts carry (noEvalRule.ts) — a writing specialist writes the same
+    // feature code the architect would, so it gets them too (autopsy a9f8d186: a faked recogniser).
+    if (roleExpectsArtifacts(cfg.tools)) contextBlocks.push(`${NO_EVAL_RULE}\n${NO_FAKED_RESULT_RULE}`);
     if (roleExpectsArtifacts(cfg.tools)) {
       try {
         const raw = await deps.actuator.readFile(deps.workspaceId, 'src/index.css');

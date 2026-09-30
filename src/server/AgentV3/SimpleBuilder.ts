@@ -14,7 +14,7 @@
 // fully unit-testable without a sandbox.
 
 import { dropShadowingEntries } from './entryShadow';
-import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE } from './noEvalRule';
+import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE } from './noEvalRule';
 import { posix } from 'node:path';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { deadlineFromBudget } from './turnDeadline';
@@ -372,6 +372,8 @@ export function fileSystemPrompt(framework: string): string {
     '- Match the imports/exports the rest of the app expects (you are given the full file list).',
     NO_EVAL_RULE,
     BUILD_WHAT_WAS_ASKED_RULE,
+    NO_FAKED_RESULT_RULE,
+    STABLE_SNAPSHOT_RULE,
     ...exportImportConvention(framework),
     ...designContractFor(framework),
   ].join('\n');
@@ -1894,7 +1896,8 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
      * something was genuinely changed. Every fix is honest — the reconcilers act on unique owners only
      * and `removeUnusedImports` leaves anything it cannot match confidently to the model.
      */
-    if (!verdict.ok && endgameRepairEnabled()) {
+    const mechanicalPass = async (): Promise<void> => {
+      if (verdict.ok || !endgameRepairEnabled()) return;
       try {
         const errs = parseTscErrors(verdict.errors);
         if (errs.length > 0) {
@@ -1912,7 +1915,8 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           }
         }
       } catch { /* a free fix is best-effort — fall through to the model repair below */ }
-    }
+    };
+    await mechanicalPass();
     let promptingErrors = verdict.errors;
     while (!verdict.ok && attempt < maxRepairs && deps.repair && !deps.signal?.aborted) {
       attempt++;
@@ -1999,6 +2003,12 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         }
         break; // 'keep-and-stop' — coherent but worse; never compound it with another attempt
       }
+      // 🔴 A MODEL REPAIR CAN REINTRODUCE WHAT GREP FIXES (autopsy a9f8d186, 2026-09-30). The free pass
+      // ran once, before the first repair. Round 2 then rewrote App.tsx with a default import of a named
+      // export and without `import React`, and rounds 2 and 3 were spent — and the lane handed off — on
+      // TS2613 and five TS2686 lines, every one of them mechanical. The same pass runs after every kept
+      // repair, so the next round is spent only on what grep cannot fix.
+      await mechanicalPass();
       // Circuit-breaker: the repair produced the identical compiler errors → zero progress, it's stuck.
       if (!verdict.ok && verdict.errors === promptingErrors) {
         // Same rule as the salvage line above: the user has no "full builder" to hand anything to.
@@ -2020,6 +2030,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       return {
         ok: false, filesWritten: files.length, reason: 'verify_failed',
         summary: 'Built the files but the app did not compile cleanly — switching to the full builder to finish it.',
+        // 🔴 THE FILES ARE IN THE WORKSPACE — HAND THEM OVER (autopsy a9f8d186, 2026-09-30). Only the
+        // timeout handoff carried `salvagedPaths`, so after a verify failure the full builder was told
+        // nothing about the 15 files this lane had just written and worked from a project context taken
+        // before the lane ran ("0 files"). It then re-read the workspace to discover its own app.
+        salvagedPaths: [...byPath.keys()],
         outcome: classifyBuildOutcome({ filesWritten: files.length, typecheckOk: false }),
         plannedFiles,
         phases: phasesNow(),

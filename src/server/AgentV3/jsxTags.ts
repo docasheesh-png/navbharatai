@@ -27,6 +27,7 @@
 // needs and a regex cannot carry: whether an enclosing `<label>` is open, and whether the tag is an
 // HTML element at all. Pure, dependency-free, total on its inputs. Plain HTML scans identically —
 // it has no braces to be inside — so a caller that really is handed HTML loses nothing.
+import { stripCommentsForMarkup } from './stripCodeComments';
 
 /** One opening tag found in a source file. */
 export interface ScannedTag {
@@ -179,9 +180,12 @@ export function enclosingTag(source: string, offset: number): string | null {
  * scanner that gave up at the newline would stop reporting on exactly the markup this engine writes
  * most — trading false positives for silence rather than for correctness.
  */
-export function scanMarkup(source: string): ScannedTag[] {
+export function scanMarkup(raw: string): ScannedTag[] {
   const out: ScannedTag[] = [];
-  if (typeof source !== 'string' || source === '') return out;
+  if (typeof raw !== 'string' || raw === '') return out;
+  // A tag inside a comment is not on any screen (autopsy 4541f1cf). Length-preserving, so every
+  // `index` and `line` below still points into the caller's original text.
+  const source = stripCommentsForMarkup(raw);
   let labelDepth = 0;
   let line = 0;
   let scanned = 0;

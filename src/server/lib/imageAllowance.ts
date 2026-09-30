@@ -17,6 +17,10 @@
 //    it arrived, and charging for something that may not have arrived is the thing the billing law
 //    forbids. It costs NavBharatAI nothing, since it is fetched on the user's own connection.
 //
+// 🔁 PAID MODE ONLY (admin 2026-09-30, later the same day): the screen has a Free / Paid toggle again,
+// Free is free for everybody with no count, and this allowance and price apply to Paid mode alone
+// (`imageTier.ts`).
+//
 // 🔁 THIS REVERSES 2026-09-23, on the admin's word. That day the separate PAID image tier (a second
 // engine behind a FREE/PRO switch) was removed and the tool renamed "Image Generator AI FREE". This is
 // not that tier coming back: there is still one generator and one route. It now has a daily allowance
@@ -102,10 +106,13 @@ export function freeImagesLeft(countAfter: number, freePerDay: number): number {
   return Math.max(0, freePerDay - Math.max(0, Math.floor(countAfter)));
 }
 
-/** The rule in one phrase, for every AI that points a user at the image generator. */
+/**
+ * The rule in one phrase, for every AI that points a user at the image generator. Two modes since
+ * 2026-09-30: Free (for everybody, no count) and Paid (this allowance, then the price).
+ */
 export function imagePriceSentence(env: NodeJS.ProcessEnv = process.env): string {
   const free = imageFreePerDay(env);
   const price = imagePriceInr(env);
-  if (!imagePricingEnabled(env) || price <= 0) return 'free';
-  return `${free} free images a day, then ${inr(price)} each from the wallet`;
+  if (!imagePricingEnabled(env) || price <= 0) return 'free in both Free and Paid mode';
+  return `free for everyone in Free mode; Paid mode gives ${free} free images a day, then ${inr(price)} each from the wallet`;
 }

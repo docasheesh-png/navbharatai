@@ -84075,6 +84075,15 @@ escalates. Not wired: a Weak judge would add cost with no repair to act on it �
 - **Billing:** ₹395.75 billed, 15,000 tokens (₹150) actually debited — the overdraft floor clamped a new
   user's first build and NavBharatAI absorbed ₹245.75 on ~₹100 of real cost. One weak build consumed the
   user's whole welcome credit. Policy, not a bug; raised to the admin.
+  - 🔴 **Correction, same day, when the admin asked what NavBharatAI actually paid.** "Absorbed ₹245.75" is
+    unbilled MARKUP, not money spent. The real cash out, from the report's own `billing` block, was
+    **$1.04 ≈ ₹99.89**: KIMI `kimi-k2.7-code` $0.994 (234,937 uncached in × $0.95/M = $0.223; 3,244,800
+    cache-read × $0.19/M = $0.617; 38,599 out × $4.00/M = $0.154) plus E2B $0.046. These are converted at
+    the ~₹96/$ rate the bill itself used. `tieredMarkup($1.0398)` = $4.119 = ₹395.75. The debit took ₹150
+    of gifted credit, and no real rupee came in, so the build's cash cost to NavBharatAI is the ~₹100 above.
+    Telling the admin "₹245.75 ka kharcha" overstated the loss 2.5×.
+  - **Admin decision (2026-09-30): the judge stays OFF on Weak** ("ok"). No code change: Weak never escalates,
+    so the judge has no repair to drive there.
 - **Heal cost — measured, and the first theory was wrong.** The heal was ~$0.46 of the build's $0.99 real
   cost (~2.4 M cache-read tokens at $0.19/M). It is NOT inherited history: `AgentRunner.run` starts every
   run from `[{ role: 'user', content: prompt }]`, and `persistence` only appends. The ~48 K per call is the

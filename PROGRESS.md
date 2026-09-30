@@ -84592,3 +84592,57 @@ six-step roadmap: chat and settings.
 
 **Proactive:** the generated AI app asks the USER for an OpenAI key. The AI gateway (`APP_AI_GATEWAY`,
 built, unset) is what removes that wall.
+
+## 2026-09-30 — Autopsy a5b661c8: a working app, three false readings of it
+
+**Build:** "3d … human approval app for plan, design and posting a collection … transfer revenue to
+bank account … advt on social media". Weak tier, KIMI throughout, 24.3 min against an ETA of 5–11 min.
+- It rendered at 998 s, typechecked, its own tests passed, and 20 pressed controls all worked.
+- It was billed ₹501.95 (real cost $1.54).
+
+**Ledger:**
+- ✅ **Self-healed (9):**
+  - `@react-three/drei` ERESOLVE, fixed by pinning 9.122.0;
+  - 6 write-time type errors (a `className` prop, a missing import, `scheduledDate` vs `scheduledAt`,
+    `mediaUrl`, `headline`/`cta`);
+  - 3 undefined CSS classes (a 63 s heal);
+  - 1 missing import added.
+- 🔀 **Workarounds:** 0.
+- ⏭️ **Skipped (1):** a post-settle write to `useStudioStore.ts`, refused by Green Freeze.
+- ❌ **Shipped imperfect (0 in the app).** Three FALSE platform findings:
+  - "6 component(s) created but never used";
+  - a HUMAN CHARACTER hero spec handed to the builder;
+  - domain = SOCIAL.
+- 🥵 **Struggle:**
+  - 151 KIMI calls at ~37k context (5.86 M input tokens);
+  - index.css was read 16×, 19 of those reads were re-reads of an unchanged file;
+  - 5 edits in a row on `PostStep.tsx` to match a type the frontend sub-agent had not read.
+
+**Root causes fixed:**
+1. **The project graph never read a lazy import or a re-export.** `extractFacts` matched only
+   `import … from` and `require()`. `import('./steps/X')` and `export { X } from './X'` now count, so
+   `findOrphanComponents` (readiness, `ConnectAudit`, the build report) sees a code-split screen as
+   reachable. URL imports are skipped. A genuinely unused component is still reported.
+2. **A catalogue word was read as the object.** `withoutNonObjectSenses` removes these phrases before
+   hero-object matching:
+   - "human/person approval, review, in-the-loop, resources …" (as prefixes, since the prompt said
+     "approvalapp");
+   - "hero section/banner …";
+   - "character limit/count";
+   - "music/video … player".
+
+   A real player or character still matches.
+3. **Posting TO social media was read as a social network.** Two `NON_DOMAIN_USES` patterns now strip
+   "on/to/via … social media (platforms)" and "social media marketing/ads/posts/scheduler/…". "A social
+   media app where friends follow each other" keeps its domain.
+
+**Tests:** `tests/theLazyStepsWereNeverOrphans.test.ts` (8). Reversion-proven: removing the dynamic-import
+read fails 1; removing the social-media strip fails 2.
+
+**Recorded, not changed:**
+- The reviewer's note that `constants.ts` value-imports an interface. `addMissingProjectImports` adds
+  only names USED AS VALUES, so either the model wrote that import or the use was a value. Not proven
+  either way from a truncated report (111 of 151 calls and 103 timeline entries are missing).
+- **Cost:** a Weak build of a complex app costs about ₹500, which exceeds a new user's whole welcome
+  balance. The driver is turn count × context (151 turns × ~37k tokens), not the rung. Raised with the
+  admin as a proactive item.

@@ -19737,44 +19737,6 @@ async function noteBuildOutcome(
           });
         }
       } catch { /* app-scaffold defaults are best-effort — never affect the build result */ }
-      // 🔴 MOVED AHEAD OF THE VERIFICATION (autopsy 728a402d, 2026-09-30). This pass ran AFTER the
-      // settle — after the green latch, the save and the snapshot — as an unnamed writer, so on every
-      // browser-verified build Green Freeze refused it and the report carried a GREEN_FREEZE_DEFERRED
-      // line about the app's own files ("a later write to src/hooks/useCart.ts was NOT applied"). The
-      // sweep never ran where it could matter. Here, beside the production defaults, its edits are part
-      // of the app the render check, the production build and GreenGuard see — verified, not refused.
-      // Named, so a latched path (a resumed green session) says who asked; it stays off every allowlist,
-      // because editing a working app's source is not a finishing pass's job.
-      // U-3 — FIRST-BUILD-CORRECT (prevent-not-heal, admin 2026-07-31): deterministically strip the model's
-      // OWN provably-dead NAMED imports from the files it wrote THIS build, so the reviewer never spends a
-      // whole "fix the error" round removing them and the app ships clean the first time. Safe by
-      // construction (keep-on-any-doubt; never touches side-effect / namespace / default imports — see
-      // UnusedImportSweep). Additive + best-effort; kill switch AGENTV3_IMPORT_SWEEP=off.
-      try {
-        if (result.ok && expectsArtifacts && writtenFiles.size > 0 && importSweepEnabled()) {
-          const src: Record<string, string> = {};
-          for (const [p, c] of writtenFiles) {
-            if (typeof c === 'string' && /\.(mjs|cjs|jsx?|tsx?)$/i.test(p) && !/\.d\.ts$/i.test(p)) src[p] = c;
-          }
-          const cleaned = sweepUnusedImports(src);
-          const savedSweep: Record<string, string> = {};
-          await runInPass('import-sweep', async () => {
-          for (const [p, c] of Object.entries(cleaned)) {
-            try {
-              await actuator.writeFile(workspaceId, p, c);
-              writtenFiles.set(p, c);
-              inBuildWriteTick++; // a proof that collected the tree mid-sweep discards itself
-              try { getWorkspaceMemory(workspaceId).indexFile(p, c); } catch { /* index best-effort */ }
-              savedSweep[p] = c;
-            } catch { /* one write failing must not block the rest */ }
-          }
-          });
-          if (Object.keys(savedSweep).length > 0) {
-            await saveWorkspaceFiles(workspaceId, savedSweep).catch(() => {});
-            events.emit({ type: 'narration', agent: 'architect', text: `🧹 Cleaned unused imports from ${Object.keys(savedSweep).length} file(s) — no wasted fix-up round.`, ts: Date.now() });
-          }
-        }
-      } catch { /* the import sweep is best-effort — never affects the build result */ }
 
       if (
         process.env.AGENTV3_RENDER_RESCUE !== 'off'
@@ -23415,6 +23377,33 @@ async function noteBuildOutcome(
           events.emit({ type: 'narration', agent: 'architect', text: `🧭 Decision trace:\n${decisionTrace.format()}`, ts: Date.now() });
         }
       } catch { /* decision trace is best-effort — never affects the build */ }
+      // U-3 — FIRST-BUILD-CORRECT (prevent-not-heal, admin 2026-07-31): deterministically strip the model's
+      // OWN provably-dead NAMED imports from the files it wrote THIS build, so the reviewer never spends a
+      // whole "fix the error" round removing them and the app ships clean the first time. Safe by
+      // construction (keep-on-any-doubt; never touches side-effect / namespace / default imports — see
+      // UnusedImportSweep). Additive + best-effort; kill switch AGENTV3_IMPORT_SWEEP=off.
+      try {
+        if (result.ok && expectsArtifacts && writtenFiles.size > 0 && importSweepEnabled()) {
+          const src: Record<string, string> = {};
+          for (const [p, c] of writtenFiles) {
+            if (typeof c === 'string' && /\.(mjs|cjs|jsx?|tsx?)$/i.test(p) && !/\.d\.ts$/i.test(p)) src[p] = c;
+          }
+          const cleaned = sweepUnusedImports(src);
+          const savedSweep: Record<string, string> = {};
+          for (const [p, c] of Object.entries(cleaned)) {
+            try {
+              await actuator.writeFile(workspaceId, p, c);
+              writtenFiles.set(p, c);
+              try { getWorkspaceMemory(workspaceId).indexFile(p, c); } catch { /* index best-effort */ }
+              savedSweep[p] = c;
+            } catch { /* one write failing must not block the rest */ }
+          }
+          if (Object.keys(savedSweep).length > 0) {
+            await saveWorkspaceFiles(workspaceId, savedSweep).catch(() => {});
+            events.emit({ type: 'narration', agent: 'architect', text: `🧹 Cleaned unused imports from ${Object.keys(savedSweep).length} file(s) — no wasted fix-up round.`, ts: Date.now() });
+          }
+        }
+      } catch { /* the import sweep is best-effort — never affects the build result */ }
       // U-4 — FIRST-BUILD-CORRECT: a Vite app must ALWAYS have its config (missing-config autopsy 2026-07-31).
       // A real "continue" build FAILED (ok:false) because the app had `vite` in its deps but NO vite.config
       // at all — the reviewer's "Missing vite.config.ts — the build will fail." Materialize a minimal,

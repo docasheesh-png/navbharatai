@@ -10,8 +10,8 @@
 //      admin panel "not found", twice — and the reviewer was asked to judge it on that message too.
 //   4. The suggest-only reviewer was "sampled" five config files at 500 characters each, read the app
 //      one file per call, and timed out without a verdict — as it had on every earlier report.
-//   5. The unused-import sweep ran after the green latch, so Green Freeze refused it on every
-//      verified build; and a healed design finding stayed "unresolved" beside DESIGN_HEALED.
+//   5. A healed design finding stayed "unresolved" beside DESIGN_HEALED. (The same report's refused
+//      import sweep is fixed by PR #3403, which moved it first — not duplicated here.)
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -177,15 +177,6 @@ describe('a lean review is handed the code it judges', () => {
 
 describe('finishing work runs where it can land', () => {
   const route = read('src/server/routes/agentv3.ts');
-
-  it('the unused-import sweep runs before the render check, named — not after the settle, where the freeze refused it', () => {
-    const sweep = route.indexOf("await runInPass('import-sweep'");
-    const defaults = route.indexOf("await runInPass('production-defaults'");
-    const rescue = route.indexOf("process.env.AGENTV3_RENDER_RESCUE !== 'off'");
-    expect(sweep).toBeGreaterThan(defaults);
-    expect(sweep).toBeLessThan(rescue);
-    expect(route.match(/sweepUnusedImports\(/g)?.length).toBe(1);
-  });
 
   it('a design finding the same check no longer sees is resolved', () => {
     expect(route).toContain("if (designRepair && after.ok) { try { buildDiag.resolveOnRecheck('DESIGN_PAGE_INCONSISTENT'); } catch { /* best-effort */ } }");

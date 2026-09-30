@@ -84632,8 +84632,9 @@ carried five defects of ours.
     and told not to re-read them (`leanReviewInline`). It should now answer in one call instead of
     eleven.
 - **The unused-import sweep ran after the settle**, so the freeze refused it on every verified build
-  (`GREEN_FREEZE_DEFERRED … useCart.ts`). It now runs beside the production defaults, before the render
-  check, named `import-sweep`.
+  (`GREEN_FREEZE_DEFERRED … useCart.ts`). **Not fixed here — PR #3403 (another live session) already
+  moves it among the finishing passes.** I built the same move first, found #3403 while checking open
+  PRs, and removed mine to avoid a guaranteed conflict.
 - **`DESIGN_PAGE_INCONSISTENT` stayed unresolved after `DESIGN_HEALED`** and was named in the root-cause
   line. It is now resolved when the same check finds nothing.
 

@@ -418,7 +418,7 @@ import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
 import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, testSkeletonsCanRun, starterTestsNarration, failuresAreOurStarterTests, ourStarterTestFailedNote } from '../AgentV3/TestGenerationAgent';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from '../AgentV3/appDefaults';
-import { resolveAppDisplayName } from '../AgentV3/appDisplayName';
+import { APP_ENTRY_CANDIDATES, resolveAppDisplayName } from '../AgentV3/appDisplayName';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { findingsToDebt } from '../AgentV3/engineeringMemory';
 import { selectZombieBuilds } from '../AgentV3/buildWatchdog';
@@ -9939,7 +9939,7 @@ async function noteBuildOutcome(
         // Persist the turn + memory exactly like the plain-chat lane (best-effort, bounded).
         try {
           const mem = getWorkspaceMemory(roleWorkspaceId);
-          mem.recordRequest(prompt);
+          mem.recordRequest(prompt, undefined, 'chat');
           // 🔴 THIS LANE USED TO CALL `saveWorkspaceMemory` DIRECTLY, and the comment above claimed it
           // persisted "exactly like the plain-chat lane". That lane has one more line — *"ensure
           // durable episodes are loaded first"* — and without it, on a COLD instance this saved a
@@ -10456,6 +10456,12 @@ async function noteBuildOutcome(
     const recentRequests = (() => {
       try { return getWorkspaceMemory(intentWorkspaceId).recentRequests(3); } catch { return [] as string[]; }
     })();
+    // The same turns with the lane that answered each: the planner reads only the BUILD ones, because
+    // a question answered in chat is not a spec for an app (autopsy 6ae30b33). The intention reader
+    // keeps the plain list above: to it, a chat turn is exactly the context it needs.
+    const recentTurns = (() => {
+      try { return getWorkspaceMemory(intentWorkspaceId).recentRequestTurns(6); } catch { return []; }
+    })();
 
     let intent = classifyIntent(prompt);
     // The reader's fourth answer: "they want something made but have not said WHAT" (report
@@ -10858,7 +10864,7 @@ async function noteBuildOutcome(
         try {
           const chatWsId = deriveWorkspaceId(userId, req.body?.sessionId);
           const chatMem = getWorkspaceMemory(chatWsId);
-          chatMem.recordRequest(prompt);
+          chatMem.recordRequest(prompt, undefined, 'chat');
           // Hydration at intent-time is a 3-second RACE, so it can be marked done while the read never
           // landed — `saveWorkspaceMemoryFor` checks the read itself, not the re-entrancy flag.
           void saveWorkspaceMemoryFor(chatWsId, chatMem).catch(() => {});
@@ -11973,7 +11979,7 @@ async function noteBuildOutcome(
      * alone, so `mkdir src` was sized as "hi" while a 35-file shop was built. They all read this one
      * text now. `prompt` itself is unchanged everywhere else (intent, the user's own words, titles).
      */
-    const planning = planningRequest({ prompt, attachmentText: attachmentContext, recentRequests, userAppExists });
+    const planning = planningRequest({ prompt, attachmentText: attachmentContext, recentTurns, userAppExists });
     const buildComplexity = complexityFromPrompt(planning.text);
     const buildDepth: PipelineDepth = resolvePipelineDepth(
       (buildComplexity.moduleCount || 0) + (buildComplexity.featureCount || 0),
@@ -14385,7 +14391,7 @@ async function noteBuildOutcome(
 
       // Remember the build request in project memory (episodic — the team can
       // recall what was asked for during the build).
-      getWorkspaceMemory(workspaceId).recordRequest(prompt);
+      getWorkspaceMemory(workspaceId).recordRequest(prompt, undefined, 'build');
 
       // The Architect can delegate to specialist sub-agents via the task tool.
       // C2 — declared here, BEFORE the spawn factory, so the thunk below can never capture a stale
@@ -19885,7 +19891,12 @@ async function noteBuildOutcome(
           // never the order itself (autopsy d829b523: a phone showed "Build a wate" under the icon).
           let chosenAppName: string | null = null;
           try { chosenAppName = (await getConversationStore().get(workspaceId))?.appName ?? null; } catch { chosenAppName = null; }
-          const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt });
+          // The app's own screen names it (autopsy 6ae30b33) — this turn's copy, else the sandbox's.
+          let appSource: string | null = APP_ENTRY_CANDIDATES.map((p) => writtenFiles.get(p)).find((c): c is string => typeof c === 'string') ?? null;
+          for (const p of appSource == null ? APP_ENTRY_CANDIDATES : []) {
+            try { appSource = await actuator.readFile(workspaceId, p); break; } catch { /* try next */ }
+          }
+          const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt, appSource });
           const appName = display.name;
           const defaults = planAppDefaults(indexHtml, appName, { description: display.description, shortName: display.shortName });
           const savedDefaults: Record<string, string> = {};

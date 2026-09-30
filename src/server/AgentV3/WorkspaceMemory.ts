@@ -68,7 +68,16 @@ export interface Episode {
    * reflection pass learn from the history — but it is no longer shown to an agent as a current error.
    */
   resolvedAt?: number;
+  /**
+   * For a `request`: which lane answered it. A turn answered in CHAT is conversation, not a spec for an
+   * app (autopsy 6ae30b33: three answered questions were planned as an app's three screens). Absent on
+   * episodes written before 2026-09-30 — readers must treat absent as "unknown", never as either lane.
+   */
+  lane?: RequestLane;
 }
+
+/** The lane that answered a user's request. */
+export type RequestLane = 'chat' | 'build';
 
 /**
  * Is this recorded error one a clean, whole-project compile makes stale? The texts are the ones this
@@ -416,14 +425,16 @@ export class WorkspaceMemory {
   // `ts` is optional so a RESTORE from durable storage can preserve each episode's ORIGINAL time
   // instead of re-stamping it to now() — otherwise recency ranking in recall() treats every restored
   // episode as brand-new, inflating old errors/lessons and corrupting cross-session confidence.
-  private episode(kind: EpisodeKind, text: string, file?: string, ts?: number, resolvedAt?: number): void {
+  private episode(kind: EpisodeKind, text: string, file?: string, ts?: number, resolvedAt?: number, lane?: RequestLane): void {
     const ep: Episode = { ts: typeof ts === 'number' && ts > 0 ? ts : Date.now(), kind, text: text.slice(0, 2000), file };
     // Set only when real: an `undefined` field is a value Firestore refuses to store.
     if (typeof resolvedAt === 'number' && resolvedAt > 0) ep.resolvedAt = resolvedAt;
+    if (lane === 'chat' || lane === 'build') ep.lane = lane;
     this.episodes.push(ep);
     if (this.episodes.length > MAX_EPISODES) this.episodes.splice(0, this.episodes.length - MAX_EPISODES);
   }
-  recordRequest(text: string, ts?: number): void { this.episode('request', text, undefined, ts); }
+  /** `lane` says who answered it: the chat reply, or a build. Pass it at every live call site. */
+  recordRequest(text: string, ts?: number, lane?: RequestLane): void { this.episode('request', text, undefined, ts, undefined, lane); }
   /**
    * UNSEND — remove the most-recent 'request' episode AND every episode recorded after it in that turn
    * (its derived error/fix/note/audit), so the unsent message never resurfaces in the agent's memory or
@@ -440,6 +451,16 @@ export class WorkspaceMemory {
   /** The user's most recent request texts (oldest→newest) — conversational context for intent. */
   recentRequests(limit = 3): string[] {
     return this.episodes.filter((e) => e.kind === 'request').slice(-Math.max(1, limit)).map((e) => e.text);
+  }
+  /**
+   * The most recent requests (oldest→newest) with the lane that answered each, `undefined` for an
+   * episode older than the lane tag. For readers that must tell a spec from a conversation.
+   */
+  recentRequestTurns(limit = 3): Array<{ text: string; lane?: RequestLane }> {
+    return this.episodes
+      .filter((e) => e.kind === 'request')
+      .slice(-Math.max(1, limit))
+      .map((e) => (e.lane ? { text: e.text, lane: e.lane } : { text: e.text }));
   }
   recordError(text: string, file?: string, ts?: number, resolvedAt?: number): void { this.episode('error', text, file, ts, resolvedAt); }
   recordFix(text: string, file?: string, ts?: number): void { this.episode('fix', text, file, ts); }

@@ -3482,6 +3482,11 @@ the flag entries above promise.
   `public/` as-is at the root, so that copy shadowed the real entry ("unsupported MIME type ('text/html')") and
   cost two repair passes. CRA is exempt (there it IS the entry). Test-locked in
   `tests/theCalculatorsHelpersHadNoHome.test.ts`.
+  📦 **AND ITS SHARED CONSTANTS GET ONE OWNER (autopsy 6ae30b33, 2026-09-30; rides `AGENTV3_UTIL_OWNER`, no key
+  of its own).** The contract now declares every shared constant (`export declare const gkQuestions:
+  GKQuestion[];`), and `valueOwnerFor` pins them to one file (a planned data/constants file, else a new
+  `data.ts` beside the contract). The types module never carries them. In the report, tier-0 files written in
+  parallel each invented their own names for the same seed data.
 
 - **`AGENTV3_SNAPSHOT_BUCKET`** (default ON wherever bucket-only publishing is on; `off` reverts
   snapshots alone — added 2026-09-18, admin Monitor capture) — a build SNAPSHOT is now served from the

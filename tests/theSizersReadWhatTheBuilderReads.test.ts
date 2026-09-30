@@ -89,7 +89,7 @@ describe('planningRequest — the request as the builder reads it', () => {
 
 describe('the route — every sizer and planner reads planning.text', () => {
   it('builds the planning request once, from what the builder receives', () => {
-    expect(ROUTE).toMatch(/const planning = planningRequest\(\{ prompt, attachmentText: attachmentContext, recentRequests, userAppExists \}\)/);
+    expect(ROUTE).toMatch(/const planning = planningRequest\(\{ prompt, attachmentText: attachmentContext, recentTurns, userAppExists \}\)/);
   });
   it.each([
     ['wall-clock complexity', /const buildComplexity = complexityFromPrompt\(planning\.text\)/],

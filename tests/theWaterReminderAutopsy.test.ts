@@ -116,8 +116,9 @@ describe('1 · the app is named, not ordered', () => {
     const route = codeOnly(readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8'));
     const tool = codeOnly(readFileSync(join(process.cwd(), 'src/server/AgentV3/ToolDispatcher.ts'), 'utf8'));
     expect(route).not.toMatch(/const appName = deriveTitle\(prompt\)/);
-    expect(route).toMatch(/resolveAppDisplayName\(\{ chosenName: chosenAppName, indexHtml, prompt \}\)/);
-    expect(tool).toMatch(/resolveAppDisplayName\(\{ chosenName: optStr\(input, 'app_name'\), indexHtml \}\)/);
+    // Autopsy 6ae30b33 added the app's own screen (`appSource`) as evidence, ahead of the prompt.
+    expect(route).toMatch(/resolveAppDisplayName\(\{ chosenName: chosenAppName, indexHtml, prompt, appSource \}\)/);
+    expect(tool).toMatch(/resolveAppDisplayName\(\{ chosenName: optStr\(input, 'app_name'\), indexHtml, appSource \}\)/);
   });
 });
 

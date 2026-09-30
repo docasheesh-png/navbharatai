@@ -18,7 +18,7 @@
 // PURE — no I/O, no clock. Never throws.
 
 /** Titles that name no app: framework and template defaults, and our own preview placeholders. */
-const PLACEHOLDER_TITLE =
+export const PLACEHOLDER_TITLE =
   /^(?:app|my app|my real app|react app|vite app|vite \+ react(?: \+ ts)?|vite \+ vue(?: \+ ts)?|vite \+ preact|vite \+ svelte|vite \+ solid|vite \+ lit|document|untitled|home|index|preview|navbharatai preview|loading…?|loading\.\.\.|new app|my vue app|my svelte app|my solid app|my preact app|my lit app|my static site|next\.js app|create next app)$/i;
 
 /** An order to the builder rather than a name: "Build a …", "Make me …", "Create …", "banao …". */
@@ -88,6 +88,29 @@ export function titleFromIndexHtml(indexHtml: string | null | undefined): string
   return clip(title, MAX_NAME);
 }
 
+/** Where an app's entry component lives, first match wins. */
+export const APP_ENTRY_CANDIDATES: readonly string[] = ['src/App.tsx', 'src/App.jsx', 'src/App.js', 'src/app/page.tsx', 'app/page.tsx'];
+
+/**
+ * The app's name as its OWN SCREEN states it: the brand in its top bar, else the entry component's
+ * first `<h1>`. Null when neither carries static text.
+ *
+ * 🔴 AUTOPSY 6ae30b33 (2026-09-30). The model left `<title>App</title>` (a placeholder), so the name fell
+ * back to the two-word prompt "Make question": the published page said `og:title "Question"` and
+ * `description "A question."` while every screen of the app said **GK & Study Helper**. The name the user
+ * sees in the app is better evidence of the app's name than the words they used to ask for it.
+ */
+export function headingFromAppSource(appSource: string | null | undefined): string | null {
+  const src = String(appSource ?? '');
+  if (!src) return null;
+  const brand = src.match(/className=["'][^"']*\b(?:[\w-]*brand|[\w-]*logo|app-title|site-title)\b[^"']*["'][^>]*>\s*([^<>{}]+?)\s*</);
+  const heading = brand ?? src.match(/<h1\b[^>]*>\s*([^<>{}]+?)\s*<\/h1>/);
+  if (!heading) return null;
+  const text = decodeEntities(heading[1]).replace(/\s+/g, ' ').replace(/^welcome to\s+/i, '').replace(/[!.]+$/, '').trim();
+  if (text.length < 2 || !/\p{L}/u.test(text) || PLACEHOLDER_TITLE.test(text)) return null;
+  return clip(text, MAX_NAME);
+}
+
 /**
  * A short name recovered from the order itself: the thing asked for, without the verb and without the
  * clause that describes it. "Build a water drinking reminder app which reminds me…" → "Water Drinking
@@ -122,7 +145,8 @@ export function descriptionFromPrompt(prompt: string | null | undefined, fallbac
     .replace(/\bmy\b/gi, 'your')
     .replace(/[.!?]+$/, '')
     .trim();
-  if (!/\p{L}/u.test(body) || body.length < 8) return fallbackName;
+  // A body of one or two words describes nothing ("Make question" → "A question."): the name says more.
+  if (!/\p{L}/u.test(body) || body.length < 8 || body.split(' ').length < 3) return fallbackName;
   const article = opener && /^[aeiou]/i.test(body) ? 'An ' : opener ? 'A ' : '';
   const sentence = article ? `${article}${body}` : body.charAt(0).toUpperCase() + body.slice(1);
   return clip(`${sentence}.`, MAX_DESCRIPTION, true);
@@ -147,7 +171,7 @@ export interface AppDisplayName {
   shortName: string;
   description: string;
   /** Where the name came from — for the report, never shown to a user. */
-  source: 'user-chosen' | 'index-title' | 'prompt' | 'fallback';
+  source: 'user-chosen' | 'index-title' | 'app-heading' | 'prompt' | 'fallback';
 }
 
 /**
@@ -161,13 +185,16 @@ export function resolveAppDisplayName(opts: {
   chosenName?: string | null;
   indexHtml?: string | null;
   prompt?: string | null;
+  /** The entry component's source (`src/App.tsx`), for the name the app's own screen shows. */
+  appSource?: string | null;
 }): AppDisplayName {
   const chosen = String(opts.chosenName ?? '').replace(/\s+/g, ' ').trim();
   const fromChosen = chosen.length >= 2 ? clip(chosen, MAX_NAME) : null;
   const fromTitle = fromChosen ? null : titleFromIndexHtml(opts.indexHtml);
-  const fromPrompt = fromChosen || fromTitle ? null : nameFromPrompt(opts.prompt);
-  const name = fromChosen ?? fromTitle ?? fromPrompt ?? 'App';
-  const source: AppDisplayName['source'] = fromChosen ? 'user-chosen' : fromTitle ? 'index-title' : fromPrompt ? 'prompt' : 'fallback';
+  const fromHeading = fromChosen || fromTitle ? null : headingFromAppSource(opts.appSource);
+  const fromPrompt = fromChosen || fromTitle || fromHeading ? null : nameFromPrompt(opts.prompt);
+  const name = fromChosen ?? fromTitle ?? fromHeading ?? fromPrompt ?? 'App';
+  const source: AppDisplayName['source'] = fromChosen ? 'user-chosen' : fromTitle ? 'index-title' : fromHeading ? 'app-heading' : fromPrompt ? 'prompt' : 'fallback';
   return {
     name,
     shortName: shortNameFor(name),

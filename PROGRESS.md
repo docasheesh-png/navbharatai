@@ -84064,3 +84064,13 @@ server step — phone signs in natively for this one case, sends its native ID t
 issues a custom token (`admin.auth().createCustomToken`) for `signInWithCustomToken`. That needs the Cloud Run
 service account to hold **Service Account Token Creator** (signBlob) — unverified, admin console. Now that the
 category is recorded, the card will say how often it actually happens before anything is built.
+
+### 2026-09-30 (later) — the instant-verification open root cause above is BUILT (admin: "sabhi problem fix? … No - continue")
+When Android confirms a number with no SMS, the app now asks ONCE more with `skipNativeAuth: false`, the phone
+signs in natively, and `src/lib/phoneHandover.ts` sends that session's ID token to `POST /api/auth/phone-exchange`
+(`src/server/lib/phoneTokenExchange.ts`), which mints a custom token for the SAME uid — only for a phone sign-in
+made in the last 5 minutes, rate-limited per address. The web SDK signs in with it and the native session is
+signed out. The normal code path is untouched (the native session is set in the code-less branch only).
+**Still needed from the admin, unverified:** the Cloud Run service account must hold **Service Account Token
+Creator** on itself (IAM signBlob). Without it the exchange answers `custom-token-unavailable`, the person gets
+the old honest Email/Google message, and the OTP card shows that code in the detail — never a fake success.

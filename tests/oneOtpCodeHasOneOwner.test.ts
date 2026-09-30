@@ -27,7 +27,7 @@ describe('instant verification is a named, recorded outcome', () => {
     expect(parseOtpOutcome({ outcome: 'failed', surface: 'android', flow: 'sign-in', stage: 'verify', category: 'instant-verified' }))
       .toMatchObject({ category: 'instant-verified' });
     expect(OTP_FAILURE_CATEGORIES).toContain('instant-verified');
-    expect(OTP_FIX_HINT['instant-verified']).toMatch(/custom|sign-in token/i);
+    expect(OTP_FIX_HINT['instant-verified']).toMatch(/Service Account Token Creator/);
   });
 
   it('the person is told no code is coming and what works instead — never "try again" or "wait"', () => {
@@ -42,10 +42,22 @@ describe('instant verification is a named, recorded outcome', () => {
     expect(isConfigurationFault('instant-verified')).toBe(false);
   });
 
-  it('the listener no longer returns silently when the event carries no code', () => {
+  it('the listener no longer returns silently when the event carries no code: it asks once more with the native session', () => {
     const listener = auth.slice(auth.indexOf("addListener('phoneVerificationCompleted'"), auth.indexOf("addListener('phoneCodeSent'"));
-    expect(listener).toMatch(/if \(!code\) \{[\s\S]*describeOtpFailure\(\{ code: 'instant-verified'/);
+    expect(listener).toMatch(/if \(!code\) \{[\s\S]*phoneSession\.current = 'native';[\s\S]*signInWithPhoneNumber\(\{ phoneNumber: phone, skipNativeAuth: false \}\)/);
     expect(listener).not.toMatch(/if \(!vid \|\| !code\) return;/);
+    // …and a completed native session is handed over, under the same one-owner claim.
+    expect(listener).toMatch(/if \(phoneSession\.current === 'native'\) \{[\s\S]*otpClaim\.current !== 'idle'[\s\S]*finishNativePhoneSession\(\)/);
+  });
+
+  it('the NORMAL path never reaches the native session: it is set only in the code-less branch, and reset per send', () => {
+    expect(auth.match(/phoneSession\.current = 'native'/g)?.length).toBe(1);
+    expect(auth).toMatch(/otpClaim\.current = 'idle';\s*phoneSession\.current = 'web';/);
+  });
+
+  it('a failed handover is recorded as instant-verified with its code, and the person is told what works', () => {
+    const fn = auth.slice(auth.indexOf('const finishNativePhoneSession = async'), auth.indexOf('const handleVerifyOtp = async'));
+    expect(fn).toMatch(/describeOtpFailure\(\{ code: 'instant-verified', message: `Native session handover failed: \$\{why\}` \}, 'verify'\)/);
   });
 });
 

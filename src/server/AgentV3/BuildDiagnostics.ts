@@ -43,11 +43,14 @@ export type IssueSeverity = 'info' | 'warning' | 'error';
  * a human notices them; never a reason to hesitate before shipping the app.
  */
 const PROCESS_ONLY_CODES = new Set([
+  'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED',
   // A repair's out-of-scope answer that OUR guard refused to write (autopsy eed79815): engine housekeeping.
   'REPAIR_OUT_OF_SCOPE',
   // Whether the platform's additions to the reply reached the screen (summaryAdditions.ts): a fact about our delivery.
   'SUMMARY_ADDITIONS_SHOWN', 'SUMMARY_REPLY_NOT_FOUND',
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', // measurements of the ENGINE (postGreenWrites.ts), never app findings
+  // A write OUR engine recorded one way and landed another (snapshotIdentity.ts, autopsy 2d076ce8).
+  'SAVED_SOURCE_DIVERGES',
   // …and its sibling: how far down OUR ladder a build fell (ladderDepth.ts) is a fact about our
   // routing, never about the user's app.
   'LADDER_DEPTH',
@@ -197,7 +200,15 @@ const PROBLEM_WORD_SOURCE =
 function stripBenignCompounds(text: string): string {
   return String(text ?? '')
     .replace(/\berrors?[- ](boundar(?:y|ies)|handling|handlers?|messages?|states?|pages?|toasts?|ui|display)\b/gi, '')
-    .replace(/\bwarnings?[- ](messages?|banners?|badges?|toasts?)\b/gi, '');
+    .replace(/\bwarnings?[- ](messages?|banners?|badges?|toasts?)\b/gi, '')
+    // A NEGATED problem word is a success report (autopsy 6a5fb04b, 2026-09-30): "TypeScript compiled
+    // successfully, কোনো error নেই" ("no error") was filed as a WARNING and listed among the build's
+    // problems. `\berror\b` never matched the plural, so English "no errors" was already safe; the
+    // singular, and the Indian-language negations the model narrates in, were not.
+    .replace(/\b(?:no|zero|0|without)\s+(?:\w+\s+)?(?:error|warning)\b/gi, '')
+    .replace(/\b(?:koi|koyi)\s+(?:bhi\s+)?(?:error|warning)\s+(?:nahi|nahin|nhi)\b/gi, '')
+    .replace(/কোনো\s+(?:error|warning)\s+নেই/gi, '')
+    .replace(/कोई\s+(?:भी\s+)?(?:error|warning)\s+नहीं/gi, '');
 }
 
 /** Non-global: `.test()` on a `/g` regex is STATEFUL (measured true/false/true on one string). */
@@ -1615,7 +1626,11 @@ export class BuildDiagnostics {
         // Gated on `!failureVerb` exactly as `remediationIntent` is, so a genuine failure ("The dev
         // server FAILED to start — port 5173 error.") stays an error even when the prompt says "error".
         const echoesPrompt = narrationEchoesPromptSymptom(tForMatch, this.meta.prompt);
-        if (statusLike && problemWord
+        // ℹ️ IS OUR OWN INFORMATION MARK (autopsy dfd81a3a): "ℹ️ Handling this message normally (project
+        // plan stays paused at … — 1 failed)" was filed as an ERROR because the progress line inside it
+        // counts a failed module. A line the platform opened with ℹ️ is a notice, whatever it quotes.
+        const platformNotice = /^\s*ℹ️/.test(t);
+        if (statusLike && problemWord && !platformNotice
           && !(remediationIntent && !failureVerb)
           && !(echoesPrompt && !failureVerb)) {
           this.record({ phase: 'build', severity: failureVerb ? 'error' : 'warning', code: 'AGENT_NOTE', message: t.slice(0, 400), autoResolved: true });

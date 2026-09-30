@@ -75,7 +75,8 @@ const ENV_TEMPLATE = /(^|\/)\.env\.(example|sample|template)$/i;
 // A NUL byte is the standard heuristic for "this is binary, not source text".
 const NUL = String.fromCharCode(0);
 
-function isExcludedPath(path: string): boolean {
+/** Dependency, build-output, VCS and live-secret paths — never part of the user's project. PURE. */
+export function isExcludedPath(path: string): boolean {
   if (EXCLUDED_DIR.test(path)) return true;
   if (SECRET_ENV.test(path) && !ENV_TEMPLATE.test(path)) return true;
   return false;

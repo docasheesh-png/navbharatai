@@ -14,7 +14,8 @@ describe('the first ETA line is gated on evidence', () => {
   it('chooses the honest phase line when the estimate is not evidenced', () => {
     const at = route.indexOf('const etaShown =');
     expect(at).toBeGreaterThan(-1);
-    const line = route.slice(at, at + 200);
+    // 400, not 200: the evidenced branch now also chooses the fleet line (autopsy a5b661c8).
+    const line = route.slice(at, at + 400);
     expect(line).toContain('etaEvidenced');
     expect(line).toContain('firstEtaLine(');
     // Since 2026-09-26 (admin: "ETA dikhao andaaza label ke saath") the unevidenced line is handed the

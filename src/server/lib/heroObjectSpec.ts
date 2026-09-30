@@ -90,6 +90,31 @@ export function wantsSceneObjects(prompt: string | null | undefined): boolean {
   return !FLAT_GAME.test(text);
 }
 
+/**
+ * Phrases where a catalogue word is NOT the object — an adjective on a process, a web-page part, or a
+ * device. PURE. Removed before matching, so the object words themselves stay exactly as precise as they
+ * were everywhere else.
+ *
+ * 🔴 AUTOPSY a5b661c8 (2026-09-30): "Build a 3d automatic and human approval app for plan, design and
+ * posting a collection" was handed a HUMAN CHARACTER spec — 1.75 m, a part list, a humanoid builder —
+ * because "human" matched, in a workflow app whose "human" is the person who approves. The builder
+ * ignored it; a weaker one would have modelled a person on the product stage (the prompt read
+ * "approvalapp", one word — so the process nouns match as prefixes). The same class catches a
+ * landing page's "hero section" and a "3D music player".
+ */
+const NOT_THE_OBJECT = [
+  /\b(?:human|person|manual)\s*-?\s*(?:approv\w*|review\w*|in\s*-?\s*the\s*-?\s*loop|resources?|verification|oversight|moderation|checks?|sign\s*-?\s*offs?|touch|errors?|rights|intervention|judg(?:e)?ments?|input|agents?|support|readable)\b/gi,
+  /\bhero\s*(?:sections?|banners?|images?|areas?|text|titles?|headers?|blocks?|slides?|videos?|shots?|cards?)\b/gi,
+  /\bcharacters?\s*(?:counts?|limits?|encoding|sets?|lengths?)\b/gi,
+  /\b(?:video|music|media|audio|mp3|youtube|podcast|radio)\s+players?\b/gi,
+];
+
+export function withoutNonObjectSenses(text: string): string {
+  let out = String(text ?? '');
+  for (const re of NOT_THE_OBJECT) out = out.replace(re, ' ');
+  return out;
+}
+
 /** Which hero objects does this prompt need, what must be true of each, and how are they placed? */
 export function heroObjectContract(prompt: string | null | undefined): HeroObjectContract {
   const text = String(prompt ?? '');
@@ -97,7 +122,8 @@ export function heroObjectContract(prompt: string | null | undefined): HeroObjec
   const empty: HeroObjectContract = { specs: [], categories: [], tier, block: '' };
   if (!text.trim()) return empty;
 
-  const specs = HERO_OBJECTS.filter((s) => s.match.test(text)).slice(0, MAX_SPECS);
+  const objectText = withoutNonObjectSenses(text);
+  const specs = HERO_OBJECTS.filter((s) => s.match.test(objectText)).slice(0, MAX_SPECS);
   if (specs.length === 0) return empty;
 
   const categories: ObjectCategory[] = [];

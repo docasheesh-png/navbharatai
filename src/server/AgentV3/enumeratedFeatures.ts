@@ -122,6 +122,41 @@ function isRecordAttribute(item: string): boolean {
 }
 
 /**
+ * 🔴 A LOOK IS NOT A PART, AND A VARIANT IS NOT A SECOND FEATURE (autopsy 6a5fb04b, 2026-09-30).
+ *
+ * A one-screen voice assistant — a microphone button, a reply, three languages, a history list — was
+ * decomposed into TWELVE modules by Software Project Mode, because its request counted fourteen parts.
+ * Four of them were not parts at all:
+ *
+ *   - "Simple, clean, modern AI assistant interface" gave `simple` and `clean` — how the app should LOOK,
+ *     read as two things it should DO;
+ *   - "Bengali language support", "Hindi language support", "English language support" are ONE feature
+ *     (language support) listed per language.
+ *
+ * Both rules are closed and exact, like `RECORD_ATTRIBUTE`, so a gate that spends a planner call can say
+ * why it did not: a single-word style adjective is dropped; items of three or more words that differ ONLY
+ * in their first word collapse into one. Two-word pairs ("new conversation" / "clear conversation") are
+ * two buttons and stay two. A module name is never a style word, so an ERP's list keeps its count.
+ */
+const STYLE_ADJECTIVE =
+  /^(?:simple|clean|modern|minimal|minimalist|beautiful|elegant|sleek|attractive|professional|colou?rful|stylish|premium|fast|smooth|responsive|intuitive|user[- ]friendly|easy|lightweight|polished|good[- ]looking)$/i;
+
+function collapseVariants(items: string[]): string[] {
+  const out: string[] = [];
+  const tails = new Set<string>();
+  for (const item of items) {
+    const parts = item.split(/\s+/);
+    if (parts.length >= 3) {
+      const tail = parts.slice(1).join(' ');
+      if (tails.has(tail)) continue;
+      tails.add(tail);
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+/**
  * Count the distinct parts a prompt enumerates — bullets, numbered lines, and inline comma /
  * "and" / "aur" runs alike.
  *
@@ -141,6 +176,7 @@ export function enumeratedFeatureItems(prompt: string): string[] {
     const item = tidy(raw);
     if (!isItem(item)) return;
     if (isRecordAttribute(item)) return;
+    if (STYLE_ADJECTIVE.test(item)) return;
     seen.add(item.toLowerCase());
   };
 
@@ -177,5 +213,5 @@ export function enumeratedFeatureItems(prompt: string): string[] {
     for (const piece of pieces) add(piece);
   }
 
-  return [...seen];
+  return collapseVariants([...seen]);
 }

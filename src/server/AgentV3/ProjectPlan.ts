@@ -21,6 +21,7 @@
 import type { TodoItem, TodoStatus } from './types';
 import { parseEnvFlag } from '../lib/envFlag';
 import { countEnumeratedFeatures, BIG_SOFTWARE_NOUN } from './enumeratedFeatures';
+import { STARTER_ENTRY_PATHS } from './stillTheStarterApp';
 
 export type ModuleStatus = 'pending' | 'in_progress' | 'done' | 'failed';
 
@@ -551,6 +552,51 @@ export function projectPlanTodos(plan: ProjectPlan): TodoItem[] {
   return plan.modules.map((m) => ({ id: m.id, title: m.name, status: statusMap[m.status] }));
 }
 
+// ── WHICH MODULE ASSEMBLES THE APP? (autopsy 6a5fb04b, 2026-09-30) ────────────────────────────
+//
+// 🔴 A MODULE THAT DOES NOT OWN THE APP'S ENTRY COULD NEVER PASS. The planner orders modules by
+// dependency, so the shell — `src/App.tsx`, the router, the layout — lands LAST: it imports everything
+// else. Every earlier module leaves the seeded starter page in place BY DESIGN. But each module turn
+// ran through the verdicts written for a whole app: the readiness gate's "entry is still the starter"
+// blocker (2026-09-20) failed the turn, two resume nudges pushed the model to build outside its module,
+// the platform started a preview, saw "Hello World", and the user read "Nothing has been built yet".
+// A voice assistant's config module wrote its three files, typechecked, and was marked FAILED; the plan
+// stopped at 0/12. Nothing about the module was wrong — the question asked of it was.
+//
+// So a module turn now knows WHO assembles the app. When another, unfinished module owns the entry, this
+// turn's deliverable is its own files compiling — no starter verdict, no preview — and the app is judged
+// as an app on the turn that builds the shell. When NO module owns the entry, nothing changes: that turn
+// is judged exactly as before, because nobody else is coming to assemble it.
+
+/** The files that make a project an app a browser can open. Owning any of them makes a module the shell. */
+export const APP_ENTRY_FILES: readonly string[] = [...STARTER_ENTRY_PATHS, 'src/main.tsx', 'src/main.jsx', 'index.html'];
+
+const normEntry = (p: string): string => String(p ?? '').replace(/\\/g, '/').replace(/^\.?\//, '');
+
+/** Does this module own a file that makes the project openable in a browser? PURE. */
+export function moduleOwnsEntry(mod: Pick<ProjectModule, 'files'>): boolean {
+  return (mod.files ?? []).some((f) => APP_ENTRY_FILES.includes(normEntry(f)));
+}
+
+/**
+ * The module that will assemble the app, when it is NOT this one and is not built yet — else null.
+ * Null means this turn is judged as a whole app, exactly as before: either it owns the entry itself, or
+ * no module does (so nobody else will assemble it), or the one that does is already done. PURE.
+ */
+export function shellModuleFor(plan: ProjectPlan, mod: ProjectModule): ProjectModule | null {
+  if (moduleOwnsEntry(mod)) return null;
+  return plan.modules.find((m) => m.id !== mod.id && m.status !== 'done' && moduleOwnsEntry(m)) ?? null;
+}
+
+/**
+ * May a paused plan be retired after a direct build delivered a working app? Only when not one of its
+ * modules is done — then nothing a later module depends on exists, and resuming it would rebuild over
+ * the user's app from module 1 (autopsy dfd81a3a). The caller supplies the "working app" proof. PURE.
+ */
+export function retireUnbuiltPlan(plan: ProjectPlan): boolean {
+  return !planComplete(plan) && plan.modules.length > 0 && plan.modules.every((m) => m.status !== 'done');
+}
+
 /**
  * The prompt block for ONE module's build turn — the whole point of project mode. It contains
  * the project goal, THIS module's spec (description + owned files + its own frozen contract),
@@ -589,6 +635,13 @@ export function moduleBuildContext(plan: ProjectPlan, mod: ProjectModule): strin
     '- Do not modify files owned by already-done modules except where this module must register itself (e.g. adding a route/import to an app-level composition file).',
     '- Real, complete code — no TODOs, no placeholders. The module must compile when you finish.',
   ];
+  const shell = shellModuleFor(plan, mod);
+  if (shell) {
+    lines.push(
+      `- The app is assembled into screens by the "${shell.name}" module, in a later turn. Until then the preview still shows the starter page, and that is expected.`,
+      `- So do NOT edit ${shell.files.filter((f) => APP_ENTRY_FILES.includes(normEntry(f))).join(', ') || 'the app entry'} and do NOT start or publish a preview this turn. This module is finished when its files exist and the project typechecks.`,
+    );
+  }
   return lines.join('\n');
 }
 
@@ -761,6 +814,7 @@ export function projectPlanSystemPrompt(framework: string): string {
     '- contracts: exact exported names, types, and signatures — frozen; later modules import these',
     '  verbatim. A module with nothing importable uses "" (e.g. a pure pages module).',
     '- files: relative paths from the project root; each file belongs to exactly ONE module.',
+    '- Exactly ONE module — the app shell, last — lists the app entry (src/App.tsx) in its files. Earlier modules never list it: until the shell is built the app is not assembled, and that is expected.',
     '- Do NOT list node_modules, lockfiles, or build output.',
     `- At most ${MAX_MODULES} modules. Prefer fewer, larger, coherent modules over many fragments.`,
   ].join('\n');

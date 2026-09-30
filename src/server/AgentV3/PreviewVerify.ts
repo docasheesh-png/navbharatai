@@ -223,7 +223,15 @@ export function analyzePreviewHtml(html: string, capture: PreviewCaptureContext 
 
   // Dev-server / routing failures — checked FIRST (an Express "Cannot GET /" page is short, so it
   // must not be misread as a generic blank page by the length check below).
-  if (/cannot get \//i.test(h) || /\b404\b[^<]{0,40}not found/i.test(lower)) {
+  //
+  // 🔴 READ WHAT A PERSON SEES, NOT THE PAGE'S SCRIPTS (autopsy b47c56d8, 2026-09-30). This rule ran on
+  // the raw HTML, and a Next.js App Router page carries its `not-found` boundary's rendered tree inside
+  // the inline flight payload (`self.__next_f.push(...)`) of EVERY page — so the scaffold we seed
+  // (`app/not-found.tsx`: "404 — Page not found") made every healthy Next.js page read as a 404. A
+  // working page was judged broken, the release gate went RED and the user was told their app did not
+  // render. A dev server's 404 page states it in visible text, so visible text is what is judged.
+  const seen = visibleText(h);
+  if (/cannot get \//i.test(seen) || /\b404\b.{0,40}(?:not\s+found|could\s+not\s+be\s+found)/i.test(seen)) {
     problems.push('the server returned 404 / "Cannot GET" — the dev server is not serving the app at this path');
   }
 
@@ -314,7 +322,7 @@ export function analyzePreviewHtml(html: string, capture: PreviewCaptureContext 
   // a cause, asserted from an observation that cannot distinguish a crash from a photograph taken too
   // early. When the capture could not see the app, it now says what actually happened instead.
   const rootEmpty = /<div[^>]*id=["'](?:root|app)["'][^>]*>\s*<\/div>/i.test(h);
-  const text = visibleText(h);
+  const text = seen;
   if (rootEmpty && text.length < 5) {
     // POSITIVE EVIDENCE OUTRANKS BLINDNESS. An error overlay or a host error page in this same html is
     // something we genuinely SAW, and returning "inconclusive" here would throw that away and let a

@@ -62,7 +62,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 }
 `;
 
-const PAGE = `export default function Home() {
+// Exported so the starter check (`stillTheStarterApp.ts`) compares against the page we ACTUALLY seed —
+// a copy of it there would drift the first time this template changed.
+export const NEXTJS_STARTER_PAGE = `export default function Home() {
   return (
     <main style={{ padding: '2rem' }}>
       <h1>Hello from Next.js!</h1>
@@ -129,7 +131,7 @@ export class NextjsProvider implements ITemplateProvider {
       'next.config.js': NEXT_CONFIG,
       'app/globals.css': DESIGN_KIT_CSS + '\n\n' + GLOBALS,
       'app/layout.tsx': LAYOUT,
-      'app/page.tsx': PAGE,
+      'app/page.tsx': NEXTJS_STARTER_PAGE,
       // App Router special files — a production-shaped scaffold, not just page+layout:
       'app/loading.tsx': LOADING,
       'app/error.tsx': ERROR,

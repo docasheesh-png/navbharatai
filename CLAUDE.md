@@ -1611,8 +1611,11 @@ the code (it is actually read somewhere) on 2026-07-11.
   metering puts every hosted app's Cloud Run bill on NavBharatAI with nothing recording it. This is the
   metering. Opening hosting still needs the rates above to be set and a few real days of the admin
   report read first — the switch is not a consequence of this code existing.
-- **AI inside a PUBLISHED app — the gateway (built 2026-09-12, ROADMAP §13 item 3.1, NOT live yet):**
-  `APP_AI_GATEWAY` (the master switch — ⚠️ **UNSET, and unset means today's behaviour exactly**: no token
+- **AI inside a PUBLISHED app — the gateway (built 2026-09-12, ROADMAP §13 item 3.1):**
+  ✅ **LIVE — the admin SET `APP_AI_GATEWAY = on` in Cloud Run on 2026-09-30** (recorded hand-to-hand the
+  same session, right after #3405 taught the builder to use it). Verify on a real build: a published AI
+  app with no server should call `generate_ai` (navbharat) and answer with no key pasted anywhere.
+  `APP_AI_GATEWAY` (the master switch — unset or anything but `on` means the old behaviour exactly: no token
   is minted, no page is stamped, and the endpoint refuses everything). Tunables, all with working code
   defaults: `APP_AI_DAILY_CAP_INR` (**₹20** — what ONE APP's assistant may spend in a day) and
   `APP_AI_VISITOR_CAP_INR` (**₹2** — what one VISITOR may spend of it). Read by
@@ -4737,6 +4740,28 @@ the two GATES were never hunted.
 ⚠️ **What to watch on the first real builds:** the `PROJECT_MODE` report line, and whether a big
 request's module plan appears and advances. A build that takes an extra planner call and then
 decomposes is the feature working; a *small* app doing that is the precision lock having been broken.
+
+🔴 **FIRST REAL EVIDENCE, 2026-09-30 (autopsy 6a5fb04b): IT DECOMPOSED A SMALL APP, AND ITS FIRST MODULE
+COULD NOT PASS.** A one-screen voice assistant counted fourteen parts (two were style adjectives, three were
+one feature per language) and became twelve modules. Module 1 (config) wrote its three files and typechecked,
+then failed: the readiness gate's "entry is still the starter" blocker (2026-09-20) knows nothing about a
+module that does not own `src/App.tsx`, two `UNFINISHED_BUILD_RESUMED` nudges pushed the model outside its
+module's scope, and the user read *"Nothing has been built yet"*. The planner orders modules by dependency, so
+the app shell is normally LAST — **so, by construction, a plan whose first module does not own the entry fails
+at module 1**. The precision half is fixed (`enumeratedFeatures.ts`: style adjectives dropped, per-language
+variants collapsed — that prompt now counts 10).
+✅ **The module-turn half is FIXED the same day (admin: *"cause dhundo! fix karo!!"*).** A module turn now
+knows which module assembles the app (`shellModuleFor` in `ProjectPlan.ts`). Until that module is built, the
+turn is judged on its own files and the typecheck: the starter blocker stands down
+(`dispatcher.setStarterExpected`), the platform starts no preview and a published one is not adopted
+(`moduleAwaitsShell` — every later proof is gated on `lastPreviewUrl`), the reviewer waits for the assembled
+app, and the model is told not to touch the entry. The shell turn is judged as a whole app, exactly as before,
+and so is every turn of a plan in which no module owns the entry. The planner is now told that exactly one
+module, the shell, owns `src/App.tsx`. A paused plan that built nothing is retired once a direct build proves
+a working app (`retireUnbuiltPlan`), so a later "continue" cannot rebuild over it. Report codes
+`PROJECT_MODULE_AWAITS_SHELL` / `REVIEW_DEFERRED_TO_SHELL` / `PROJECT_PLAN_RETIRED`. Tests:
+`tests/aModuleIsNotTheWholeApp.test.ts`. ⚠️ Still unmeasured: no plan has yet run end to end in production,
+and a module turn earns no markup (no preview proof), so each module is billed at real cost.
 
 ⚠️ **UNSET ⇒ OFF, and every build is byte-identical to today.** The flag takes `on` (everyone),
 `off`/unset (the kill switch), or **anything else as an ALLOWLIST of uids/emails** — built

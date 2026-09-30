@@ -84410,6 +84410,106 @@ The #3385 ratchet listed 56 tools named in the architect prompt and offered to n
 - The ratchet list is deleted, not emptied: a new prompt promise without a reachable tool fails CI with no escape.
 - The live strip names the recipe ("using generate_pdf"), not "using run_recipe".
 
+## 2026-09-30 — Autopsy 6a5fb04b + dfd81a3a ("Mohakor Voice AI", Weak, two builds)
+
+**Build 1 (6a5fb04b, 4.4 min, FAILED, ₹0).** A Bengali spec for a voice assistant. Software Project Mode fired
+(14 "parts") and decomposed it into 12 modules; module 1 (config) wrote 3 files, typechecked, and was marked
+FAILED because the readiness gate's starter-entry blocker judged the whole app. Two resume nudges pushed the
+model outside its module; the user read "Nothing has been built yet". The mega-roadmap planner spent 62 s and
+4,000 output tokens on `glm-4.7-flashx` and returned 151 characters.
+
+**Build 2 (dfd81a3a, 17.3 min, green, ₹215.54).** A garbled follow-up, read as an edit; the model built the whole
+app in one pass. GLM timed out twice (120 s), Kimi's first call took 167 s, the model ran `tsc` by hand eight
+times, and the report carried four Green Freeze lines about another user's inventory app.
+
+**Fixed (PR on `claude/charming-bell-htxb9u`):**
+- `greenFreeze.ts` — both observers are a per-workspace set. They were one global slot: the last build to
+  register received every build's refusals and evicted the others' observers (also skewed `POST_GREEN_WRITES`).
+- `answerNotDeliberate.ts` — the plan and fast text runners default every call to `thinking: false`. The three
+  planners and the fast lane's repairs sent no field, which GLM reads as "default reasoning".
+- `writeTimeTypecheck.ts` / `ToolDispatcher` — a write after which the compile printed nothing now says the
+  project is clean. Non-empty output with zero parsed errors is never called clean.
+- `enumeratedFeatures.ts` — single-word style adjectives are not parts; 3+-word items differing only in their
+  first word collapse. The report's prompt counts 10, not 14.
+- `BuildDiagnostics.ts` — negated problem words ("no error", "koi error nahi", Bengali/Hindi forms) and our own
+  ℹ️ notices are no longer filed as warnings/errors.
+- Tests: `tests/theVoiceAppWasNotAnErp.test.ts` (17), reversion-proven per fix.
+
+**OPEN root cause — admin decision:** Software Project Mode cannot pass a module that does not own the app entry
+(starter blocker, starter-render verdict and the preview repair all judge the whole app). Options put to the
+admin: make module turns module-aware (route change), or switch `AGENTV3_PROJECT_MODE` off until then. A plan
+left at "1 failed" also resumes on a later "continue" over an app built since.
+
+**Open, not ours to fix here:** GLM 60 s timeouts (provider); Kimi 167 s first call; the ETA used a complexity
+score the router itself disowned as unreadable (shown as a labelled guess); the scripted "AI" reply is #3389's
+(`SCRIPTED_ASSISTANT_SHIPPED`), not duplicated.
+
+### 2026-09-30 addendum — the Project Mode module-turn root cause is FIXED (admin: "cause dhundo! fix karo!!")
+
+The entry above recorded it as an open admin decision; the admin asked for it to be root-caused and fixed.
+
+**Cause:** modules are built in dependency order, so the shell (the only module that writes `src/App.tsx`) is
+last. Every module turn was judged as a whole app, and three verdicts written for whole apps each read the
+seeded starter page as a failure: the readiness starter blocker (which then fed two `UNFINISHED_BUILD_RESUMED`
+nudges pushing the model out of scope), the platform's own preview, and the starter-render verdict. So a plan
+whose first module did not own the entry could never pass module 1.
+
+**Fix:**
+- `shellModuleFor` / `moduleOwnsEntry` (`ProjectPlan.ts`, pure). Until the shell module is built, a module turn:
+  - is judged on its own files and the typecheck;
+  - stands the starter blocker down (`ToolDispatcher.setStarterExpected`);
+  - starts no platform preview (`shouldAttemptPlatformPreview` `awaitingShell`);
+  - does not adopt a published preview, so every `lastPreviewUrl`-gated proof stands down;
+  - defers the reviewer to the shell turn;
+  - is told in its context not to touch the entry.
+- The shell turn, and every turn of a plan with no entry owner, is judged exactly as before.
+- The planner is told that exactly one module, the shell, owns `src/App.tsx`.
+- `retireUnbuiltPlan`: a paused plan with no done module is deleted after a direct build proves a working app.
+- Tests: `tests/aModuleIsNotTheWholeApp.test.ts` (15), reversion-proven.
+
+**Still unmeasured:**
+- No plan has yet run end to end in production.
+- A module turn earns no markup (no preview proof), so modules before the shell are billed at real cost.
+## 2026-09-30 — Autopsy 2d076ce8 ("Bhagavad Gita reader", Hindi, Weak, 7.5 min, user Stop after a working app)
+
+**What happened:** the build started from NavBharatAI's own tested Gita template. The app was verified
+rendering at 190 s. After that, three things in the report were false or unexplained.
+
+**1. "Search has NO visible control" — false, and it cost a paid repair.**
+- The template labels its search box in Hindi (`<label htmlFor="q">खोजें …</label>`, Devanagari placeholder).
+- The Search probe in `FeaturePresence.ts` only accepted the English letters "search", in an attribute.
+- So the feature heal ran on KIMI (rung 2), moved a working search box, re-probed, still found "absent", and
+  the false finding became the build's `rootCause`.
+- **Class:** every probe spoke English only, and `\b` never matches next to Devanagari (the same fact the
+  icon fix of 972acde5 met). **Fix:** `controlPattern` matches any non-ASCII word literally, every probe
+  gained Hindi stems (`HI`), and a `<label>` naming a search field counts (`hasSearchField`). Only the
+  PRESENCE side changed; what counts as REQUESTED is unchanged, so no new probe can fire.
+
+**2. `JOURNEY_NOT_DERIVED` told the user to "give each field a name and a label".** The only field was the
+search box, which has an id and a label and no submit step. `noJourneyReason` now says the fields act as
+you type and nothing needs changing, when every field is addressable and only the submit is absent.
+
+**3. `PREVIEW_SNAPSHOT_STALE` — "the same 21 file(s), so a file's CONTENT changed".**
+- Nothing on the timeline wrote after the copy: the only later actor was a suggest-only reviewer that read
+  five files. The bridge round trip is exact since 3ab40187, and every captured writer I traced writes the
+  same content to the sandbox that it records.
+- **Root cause NOT found — recorded as open.** The report cannot say which file differed.
+- **Instrument shipped:** the copy now carries per-file hashes, and the final save passes the saved AND the
+  raw sandbox per-file hashes. The stale line names the file(s), and says whether the sandbox moved after the
+  copy (a late write) or the saved set holds content the sandbox never ran.
+- The second case is now its own admin finding at every final save, `SAVED_SOURCE_DIVERGES` (process-only):
+  it means a restore would bring back a file no browser check ever saw. The next report carrying either
+  line settles this item.
+
+**Recorded, not changed:**
+- The weak builder was told the template "fully implements the request" and still added work nobody asked
+  for (a wishlist delete), introduced three type errors into a working template, and spent ~80 s repairing
+  them. `READY_BEFORE_END`: judged finished at step 10, then 25 more steps.
+- **Proposed to the admin, not built:** deliver a verbatim starter-chip prompt WITHOUT a model loop
+  (seed → install → typecheck → dev server → preview). This is an architecture change in the build route,
+  so it is the admin's call.
+- Tests: `tests/theSearchBoxWasInHindi.test.ts` (23 cases). Reversion-proven for the probe (8 fail on the
+  old code) and for the journey sentence.
 ## 2026-09-30 — Autopsy ce115e1f ("Bus Simulator India", Gujarati, Weak, 27.8 min, ₹527.99): a working app was reported as not working
 
 **What happened:** the app built, `npm run build` exited 0 and the render rescue succeeded. The readiness
@@ -84451,6 +84551,110 @@ them, because its `normalizePath` strips the slash and so saw them as present.
   - **Tests:** 2 more in `tests/freeChatKnowsItsModeButton.test.ts`, reversion-proven.
   - **Reach:** the website gets this on deploy; phones need a fresh bundle.
 
+## 2026-09-30 — Autopsy 6a55d939 + 26b03113 ("Build a app like god of war", Weak, two builds)
+
+**Build 1 (6.5 min, stopped by the user, ₹51.87 real cost).** The builder ran the game recipes and skipped
+`generate_game_3d`. It then ran the whole recipe sequence a second time, and the controller three more times
+(three "no progress" nudges). It found `src/game/three/*` missing and wrote those files by hand. A
+missing-import heal fired on `motor.ts`, `ai.ts` and `audio.ts` and was undone by each re-run
+(`HEAL_NOT_DURABLE`). Mid-build the user wrote "For a mobile phone Android".
+
+**Build 2 (11.1 min, green, ₹402.68 on a free welcome balance).** The whole build reconciled `Game.ts` with the
+hand-written three/ files: 30 errors quoted back and 92 model calls. The result has keyboard and mouse controls
+only.
+
+**Measured, not guessed:** every recipe's output was written into a real project with `three` and checked
+with `tsc`. With all seven recipes there was 1 error: `Game3DGenerator` asked for a `'cloth'` surface that
+`SurfaceKind` does not have. Without the 3D layer there were 5, all "Cannot find module", in the shell's
+`Game.ts` and the systems recipe's `spawner.ts`. The missing-import healer, run over the same output, added
+`state`/`load` imports to three files `tsc` passes.
+
+**Fixed:**
+- `gameRecipeLayers.ts` (pure) plus `ToolDispatcher.addMissingRecipeLayers`. After every game recipe, any
+  recipe-owned file its output imports that the project lacks is written from its own recipe. Only absent files
+  are written, and the tool result says so. Proven: the report's recipe set plus the fill gives `tsc` 0 errors.
+- `writeRecipeFiles`: a file already identical to the recipe's content is reported "Unchanged", not rewritten.
+- `Game3DGenerator`: `'cloth'` → `'fabric'`. All seven recipes together: `tsc` 0 errors.
+- `ImportExportReconcile.addMissingProjectImports`: the name of an interface member, class field, method,
+  accessor, enum member or JSX attribute is not a use. It adds nothing to the recipe set now.
+- Tests: `tests/aRecipeBringsTheLayersItImports.test.ts` (10), reversion-proven per fix. This includes a
+  closure test that fails if any recipe imports a file no recipe writes.
+
+**Open (proposed, not built):**
+- No recipe draws on-screen touch controls. `Input` accepts a joystick and virtual buttons, but a game from our
+  recipes cannot be played on a phone unless the model builds that UI, and here it did not, despite the user
+  asking.
+- The ETA showed 2–4 min for a famous-game clone.
+- The lean reviewer timed out on 46 files.
+- `App.tsx` importing `index.css` was healed after the fact (31 s).
+## 2026-09-30 — Autopsy b47c56d8: every Next.js page read as a 404, and fixing that alone would have lied the other way
+
+**Build:** "make app ui theme like this", Weak tier, Next.js. It ran 19.9 min against an ETA of 2–4 min
+and ended RED, billed ₹0.
+- The app never rendered anything but our own starter.
+- The report blamed a 404 that did not exist.
+
+**Ledger:**
+- ✅ Self-healed (4):
+  - the missing `react` dependency was installed;
+  - the dev server was brought up;
+  - three truncated repair outputs were continued;
+  - Haiku's third repair compiled.
+- 🔀 Workarounds (6):
+  - GLM flashx was benched for crawling, then timed out;
+  - KIMI and GLM-5.3 each starved their whole output budget on reasoning (350 s);
+  - Nemotron was overloaded once;
+  - the ladder fell to rung 5 of 5.
+- ⏭️ Skipped (3):
+  - the E2E suite was pointed at 5173 for an app on 3000;
+  - `src/useTheme.ts` was reported ✓ but is not on disk;
+  - the fast lane "skipped" `src/ErrorBoundary.tsx` as provided when a Next.js workspace has none.
+- ❌ Shipped broken (2):
+  - the preview showed "Hello from Next.js!", because the header, footer and theme toggle were written
+    into `src/` and never mounted;
+  - the render-rescue pass told the user "I connected the real components… app/layout.tsx now imports
+    Header" while writing ZERO files.
+- 🥵 Struggle:
+  - the repair phase took 763 s of a 926 s lane (82%) to fix one `TS1361` and then missing CSS classes;
+  - a 20-minute build of four components.
+
+**Root causes (verified in code):**
+1. **False 404 on every healthy Next.js page.** `analyzePreviewHtml`'s 404 rule read the raw HTML. The
+   not-found boundary we SEED (`app/not-found.tsx`: "404 — Page not found") rides inside every page's
+   inline flight payload. The rule now reads `visibleText`, which already strips scripts, and it also
+   recognises Next's own visible "This page could not be found".
+2. **The Next.js starter was not a starter.** `stillTheStarterApp` knew only the Vite `src/App.tsx` /
+   "Hello World". `STARTERS` now carries `app/page.tsx` / "Hello from Next.js!", read from the exported
+   template (`NEXTJS_STARTER_PAGE`), and each entry proves only its own heading.
+   - Without this, fix 1 would have turned the false RED into a false GREEN on a Hello page, with markup.
+3. **The fast lane planned against an empty workspace.** The framework scaffold self-heal runs on the
+   dispatcher's FIRST tool call, which was the lane's first write, after the plan had listed the
+   workspace.
+   - `dispatcher.ensureFrameworkScaffold()` now runs before the listing.
+   - `ensureEntryPlanned` / `unwrittenEntries` know a Next.js page is the only root (a `src/main.tsx` no
+     longer counts).
+   - The planner is told where a Next.js entry lives.
+   - It is promised only boilerplate that is present (`providedBoilerplate`).
+4. **Siblings:**
+   - A dependency the project's scripts run is used (`next dev` → `next`; `findUnusedDependencies`).
+   - Next's `app/**/error.tsx` is an error boundary (`isNextErrorBoundaryFile`).
+   - The E2E suite takes the declared port.
+   - `TS1361` (a value imported with `import type`) is fixed deterministically in
+     `endgameDeterministicPass`, which the fast lane already calls before any model repair.
+
+**Tests:** `tests/theNextJsPageWasNeverA404.test.ts` (17). Reversion-proven: the old 404 rule fails 4 of
+them, and removing the TS1361 pass fails 1.
+
+**Open root causes (not guessed at):**
+- The render-rescue pass narrated a fix it never made (a zero-write pass claiming edits). No claim audit
+  covers a rescue pass's narration.
+- `src/useTheme.ts` was reported written (1/10) and is absent from disk and the manifest. The report does
+  not show why.
+- On Weak, the fast-lane repair climbs to two always-reasoning rungs (KIMI, GLM-5.3), and both starved a
+  12 000-token budget on a one-token fix. The deterministic TS1361 pass removes this instance; the class
+  (a heal ladder of reasoning rungs for mechanical repairs) is the ladder policy's, an admin decision.
+- The `WRITE_TIME_TYPECHECK` line says "8 of them run without the tsconfig probe" out of 4 runs. The
+  counters disagree; not traced.
 ## 2026-09-30 — Autopsy d8ed307a (Bengali "personal AI Assistant", Weak, 19 min, ₹340.91): milestone 1 of 6 shipped and rendered
 
 The app built, rendered and passed the production build (release gate YELLOW). It was step 1 of a
@@ -84485,6 +84689,181 @@ six-step roadmap: chat and settings.
 **Proactive:** the generated AI app asks the USER for an OpenAI key. The AI gateway (`APP_AI_GATEWAY`,
 built, unset) is what removes that wall.
 
+## 2026-09-30 — Autopsy 728a402d ("Nemi Mart", Weak tier, mega-roadmap milestone 1 of 6)
+
+The storefront rendered at 406 s, compiled, built for production and passed every browser check. The
+build took 11.5 min and was billed ₹179.15 (real cost $0.56 + sandbox, 10% discount). The report still
+carried five defects of ours.
+
+**Tally:**
+- ✅ 2 self-heals: the model's second Python script (a tuple bug), and one design page.
+- 🔀 1 workaround: GLM flashx crawled on the roadmap planner for 35 s, and KIMI answered.
+- ⏭️ 2 skipped: the import sweep, refused by the freeze; and the reviewer's findings, timed out.
+- ❌ 2 shipped imperfect:
+  - a zero-byte icon and a missing icon in the saved app;
+  - a false readiness score.
+- 🥵 Struggle:
+  - a 75 s first call;
+  - 11 reviewer calls for no verdict;
+  - the model ran `tsc` by hand twice after 15 clean write-time checks. #3399 covers this: a clean
+    check is now said out loud.
+
+**Fixed (root cause):**
+- **A Python `ModuleNotFoundError` dropped a live sandbox.**
+  - Cause: `ENOTFOUND` was matched case-insensitively and without a word boundary, so it hit the middle
+    of `ModuleNotFoundError`.
+  - Effect: the actuator evicted the machine and re-ran the command, and the report said "sandbox
+    unavailable".
+  - Class: a live program's own stderr was read for network words. That meant an app's
+    "ECONNREFUSED :5432", or a traceback line "503", could do the same and re-run a non-idempotent
+    command.
+  - Fix: a real exit status (≥ 0) now always means a live sandbox, and the Node error codes are matched
+    upper-case as whole words (`sandboxHealth.ts`).
+- **Binary files were written as text and never saved.**
+  - `write_file` wrote an empty `public/nemi-icon-192.png`; its saved hash is the SHA-256 of "".
+  - The real icons the Python script drew were never persisted: the text store skips binaries, and the
+    asset store was written only by imports.
+  - Fix: write tools now refuse binary paths, pointing to `.svg` or a command (`binaryTextWrite.ts`).
+  - Fix: at the kept save, binaries the store does not hold are read as bytes and saved
+    (`buildAssets.ts`, `E2BActuator.readBinaryFile`, `listWorkspaceAssetPaths`; admin code
+    `BUILD_ASSETS_SAVED`).
+  - This also explains that report's `PREVIEW_SNAPSHOT_STALE`: a file-set mismatch on exactly that path.
+- **A milestone was graded on the whole message.**
+  - The storefront was reported as missing login, sign-up, dashboard and admin panel, twice. The
+    reviewer was also asked to judge it against the whole message.
+  - Fix: the readiness audit (`setCoverageRequest`), the feature probe (3 sites) and the reviewer now
+    read the milestone's own brief.
+- **The lean reviewer had never delivered.**
+  - Its "sample" was the first five paths at 500 characters each; here that was `.gitignore`,
+    `package.json` and three config files.
+  - Fix: in suggest mode it is now handed the changed source files in full, bounded to 60K characters,
+    and told not to re-read them (`leanReviewInline`). It should now answer in one call instead of
+    eleven.
+- **The unused-import sweep ran after the settle**, so the freeze refused it on every verified build
+  (`GREEN_FREEZE_DEFERRED … useCart.ts`). **Not fixed here — PR #3403 (another live session) already
+  moves it among the finishing passes.** I built the same move first, found #3403 while checking open
+  PRs, and removed mine to avoid a guaranteed conflict.
+- **`DESIGN_PAGE_INCONSISTENT` stayed unresolved after `DESIGN_HEALED`** and was named in the root-cause
+  line. It is now resolved when the same check finds nothing.
+
+Tests: `tests/theIconWasSavedEmpty.test.ts` (16), reversion-proven.
+
+**Follow-up the same day (admin: "sabhi problem ke root cause ko dna level par fix karo, ek ek kar ke"):**
+- ✅ **A regenerated asset replaces the stored copy.** A marker is touched in the sandbox after setup
+  (`MARK_ASSET_BASELINE_COMMAND`), and `find -newer` names the binaries this build changed. Both ends use
+  the sandbox's own clock. No marker ⇒ only new paths are saved, as before.
+- ✅ **The scaffold dropped `vite-tsconfig-paths`**; Vite 8's `resolve.tsconfigPaths: true` is used
+  instead. Proven on the emitted scaffold:
+  - `npm run build` (with its tsc step) resolves a baseUrl-"src" bare import and an `@/` import, with
+    no deprecation notice;
+  - the dev server serves 200 and rewrites the import.
+  - The template now matches the image's warm primer, so a build installs nothing the image lacks.
+- 🔎 **The "2 moderate" were NOT the scaffold.** A fresh `npm audit` today reports 0 for the scaffold
+  and 0 with the model's four packages added. The advisories came from the sandbox image's warm tree,
+  resolved when the image was built (last Dockerfile change 2026-09-20). **The fix is an E2B template
+  rebuild** (`e2b-template.yml`, manual). It changes every build's machine and has a cost, so it is
+  the admin's call, not run from a session.
+- ⏳ **ETA, first step only:** `TelemetryBreakdown.okDurationMs` now records successful-build
+  wall-clock per task type. A new app has no history of its own, so its first ETA can only be a
+  labelled guess until a platform-wide prior exists.
+  - Wiring that prior into the estimate touches the ETA tick region that PR #3401 is changing, so it
+    waits for #3401 to merge rather than race it.
+- **Left to the admin / other PRs, deliberately:**
+  - GLM flashx crawling on the planner is the Weak plan-rung order, which PR #3402 already raised as
+    the admin's decision.
+  - A click journey for form-less apps (add to cart → reload → still there) touches the journey code
+    that #3401 and #3398 are both changing.
+  - PR #3402 also carries a Project Mode starter-blocker fix overlapping #3399's (`setStarterExpected`
+    vs `starterEntryExpectedFor`), and #3403 carries the same member-name import-heal fix as #3399.
+    The admin should merge one of each pair first; the second is then reconciled.
+## 2026-09-30 — Autopsy a5b661c8: a working app, three false readings of it
+
+**Build:** "3d … human approval app for plan, design and posting a collection … transfer revenue to
+bank account … advt on social media". Weak tier, KIMI throughout, 24.3 min against an ETA of 5–11 min.
+- It rendered at 998 s, typechecked, its own tests passed, and 20 pressed controls all worked.
+- It was billed ₹501.95 (real cost $1.54).
+
+**Ledger:**
+- ✅ **Self-healed (9):**
+  - `@react-three/drei` ERESOLVE, fixed by pinning 9.122.0;
+  - 6 write-time type errors (a `className` prop, a missing import, `scheduledDate` vs `scheduledAt`,
+    `mediaUrl`, `headline`/`cta`);
+  - 3 undefined CSS classes (a 63 s heal);
+  - 1 missing import added.
+- 🔀 **Workarounds:** 0.
+- ⏭️ **Skipped (1):** a post-settle write to `useStudioStore.ts`, refused by Green Freeze.
+- ❌ **Shipped imperfect (0 in the app).** Three FALSE platform findings:
+  - "6 component(s) created but never used";
+  - a HUMAN CHARACTER hero spec handed to the builder;
+  - domain = SOCIAL.
+- 🥵 **Struggle:**
+  - 151 KIMI calls at ~37k context (5.86 M input tokens);
+  - index.css was read 16×, 19 of those reads were re-reads of an unchanged file;
+  - 5 edits in a row on `PostStep.tsx` to match a type the frontend sub-agent had not read.
+
+**Root causes fixed:**
+1. **The project graph never read a lazy import or a re-export.** `extractFacts` matched only
+   `import … from` and `require()`. `import('./steps/X')` and `export { X } from './X'` now count, so
+   `findOrphanComponents` (readiness, `ConnectAudit`, the build report) sees a code-split screen as
+   reachable. URL imports are skipped. A genuinely unused component is still reported.
+2. **A catalogue word was read as the object.** `withoutNonObjectSenses` removes these phrases before
+   hero-object matching:
+   - "human/person approval, review, in-the-loop, resources …" (as prefixes, since the prompt said
+     "approvalapp");
+   - "hero section/banner …";
+   - "character limit/count";
+   - "music/video … player".
+
+   A real player or character still matches.
+3. **Posting TO social media was read as a social network.** Two `NON_DOMAIN_USES` patterns now strip
+   "on/to/via … social media (platforms)" and "social media marketing/ads/posts/scheduler/…". "A social
+   media app where friends follow each other" keeps its domain.
+
+**Tests:** `tests/theLazyStepsWereNeverOrphans.test.ts` (8). Reversion-proven: removing the dynamic-import
+read fails 1; removing the social-media strip fails 2.
+
+**Recorded, not changed:**
+- The reviewer's note that `constants.ts` value-imports an interface. `addMissingProjectImports` adds
+  only names USED AS VALUES, so either the model wrote that import or the use was a value. Not proven
+  either way from a truncated report (111 of 151 calls and 103 timeline entries are missing).
+- **Cost:** a Weak build of a complex app costs about ₹500, which exceeds a new user's whole welcome
+  balance. The driver is turn count × context (151 turns × ~37k tokens), not the rung. Raised with the
+  admin as a proactive item.
+- **Same day, second half (admin: "ek ek kar ke sabhi fix karne hai"): the five self-heals, prevented
+  upstream (the 50/50 law).**
+  1. **Any class nothing defines is named at write time.** Before, only kit-shaped `nb-` classes were
+     named. Now `undefinedClassesInFile` asks the same question as the end-of-build
+     `findUndefinedClasses`, with the same Tailwind, external-stylesheet and no-sheet guards. Every write
+     door returns it through `writeSteeringNotes` (`undefinedClassNotes`).
+  2. **tsc's own property renames (TS2551/TS2561 "Did you mean 'x'?") are handled.**
+     - `fixSuggestedPropertyNames` applies them at the exact line and column, inside
+       `endgameDeterministicPass`.
+     - A stale position changes nothing.
+     - TS2552 name suggestions are deliberately excluded: this report's was a missing import.
+     - The write-time note now says "rename EVERY x to y (lines …) in ONE edit". `PostStep.tsx` had taken
+       5 edits, one occurrence per turn.
+  3. **UI sub-agents are handed the classes the project's stylesheets define.**
+     - `stylesheetClassBrief` builds the list from the sheets on disk.
+     - It is appended by the `task` tool for the frontend and designer roles.
+     - Before, a sub-agent read the 18.7 KB kit 6× in slices.
+  4. **The React Three Fiber family follows the project's React.**
+     - `r3fRangeForReact`: fiber ^8 / drei ^9 on React 18, and fiber ^9 / drei ^10 on React 19.
+     - It is applied to bare installs and to the missing-dependency reconciler, the same way vitest
+       already follows Vite.
+     - An unknown React stays unpinned.
+  5. **A first build's ETA learns from the platform's recent builds of its task type.**
+     - `fleetHistoryFromTelemetry` reads the daily cost telemetry every build already writes: one entry
+       per day, only days with at least 2 builds.
+     - The app's own history wins once it exists.
+     - The user line (`fleetEtaLine`) says whose builds the figure comes from.
+     - ⚠️ The telemetry mean includes failed builds; it is labelled an average.
+
+  **Tests:** `tests/theAppIsRightTheFirstTime.test.ts` (18).
+
+  **Still open, honestly:**
+  - `CollectionTheme` / `formatCurrency` import origin: not provable from the truncated report.
+  - The 12:16–12:20 gap: 103 timeline entries were cut by the report's storage limit.
+  - Cost per complex Weak build (turn count × context): an admin decision.
 ## 2026-09-30 — AI inside the user's app needs no key when the gateway is on (admin chose "B")
 
 The AI gateway (`APP_AI_GATEWAY`) was built, but no builder was ever told it existed. Turning it on

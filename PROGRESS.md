@@ -84171,6 +84171,17 @@ mode aur uske andar jo hai, sabke bare me batao!!"*
 - **Deliberately unchanged:** free chat's photo EDIT of an attached picture (admin 2026-09-21).
 - **Tests.** `tests/freeChatKnowsItsModeButton.test.ts` (9) holds the guide equal to `newModeEntries` in
   both directions. On its first run it found "GitHub Repo Analyst & Improver" missing. Reversion-proven.
+## 2026-09-30 — PR C: the database is offered BEFORE the builder decides where data lives
+`src/server/AgentV3/sharedDataNeed.ts` reads the REQUEST (not the files) for data other people must later see —
+bookings, orders, admissions, records, accounts, an admin dashboard — precision-first, honouring an explicit
+"no backend / static site". On a FRESH build, with nothing connected and the user's Supabase already granted, the
+route asks once (2-minute wait) right after the vault loads; Approve provisions via `provisionDatabaseForUser`
+and re-reads the vault, so `userDatabaseContext` wires the new database into the prompt from the first file. The
+mid-build fallback no longer asks a second time. Report code `DATABASE_OFFER_AT_START`.
+Root cause it closes: autopsy a7aa447c (bookings kept in the visitor's browser; every file-based check said
+"no database needed").
+**Deliberately NOT done:** the post-build "Connect a database" tray row still reads the app's files only, like
+the publish screen it must agree with. Users without a Supabase grant keep today's honest builder guidance.
 ## 2026-09-30 — every tool the builder's prompt names is now reachable (admin chose "one recipe tool")
 
 The #3385 ratchet listed 56 tools named in the architect prompt and offered to no role. Paid in full:

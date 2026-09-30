@@ -96,12 +96,13 @@ describe('dedupeSameModuleImports is idempotent and loses no binding', () => {
 });
 
 describe('every heal write site is guarded — one left out and the loop survives', () => {
-  it('all four consult the ledger before writing', () => {
+  it('all five consult the ledger before writing', () => {
     const src = readFileSync(join(__dirname, '..', 'src/server/AgentV3/ToolDispatcher.ts'), 'utf8');
     // FOUR, not five: the import has no parenthesis, so this pattern counts call sites only. My first
     // expectation said five and the code was right — kept as a note because the number is the point of
     // the test and a wrong one here would eventually be "fixed" by loosening it.
-    expect((src.match(/healWouldOscillate\(/g) ?? []).length).toBe(4);
+    // Five since autopsy f496c75b (2026-09-30): the type-only VALUE import heal is guarded like the rest.
+    expect((src.match(/healWouldOscillate\(/g) ?? []).length).toBe(5);
     expect(src).toContain("import { healWouldOscillate } from './HealLedger';");
   });
 });

@@ -168,7 +168,7 @@ import { analyzeHooksRules, hookViolationWriteNote } from './HooksRulesAnalysis'
 import { dedupeDuplicateImports } from './DuplicateImportGuard';
 import { isReactFamilyFramework } from './frameworkFamily';
 import { analyzeImportExports } from './ImportExportAnalysis';
-import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
+import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports, fixTypeOnlyValueImports } from './ImportExportReconcile';
 import { analyzeJsxComponents } from './JsxComponentAnalysis';
 import { analyzeUndefinedHooks } from './UndefinedHookAnalysis';
 import { analyzeDependencyConstraints } from '../AI/reasoning/ConstraintSolver';
@@ -4602,6 +4602,23 @@ export class ToolDispatcher {
                 if (await this.landHealWrite(file, content, before)) { astFiles[file] = content; landed += 1; }
               }
               if (landed > 0) this.narrate('fix.repointedImports', { count: wrongRes.fixes.filter((f) => astFiles[f.file] === wrongRes.files[f.file]).length });
+            }
+          } catch { /* best-effort — a failure just leaves the honest finding below */ }
+          // TYPE-ONLY VALUE SELF-HEAL (autopsy f496c75b): an enum/const imported with `import type` and then
+          // read as a value is TS1361 on every line. Exact: the target really exports a value under that
+          // name and this file really reads it. Same durable write path and oscillation guard.
+          try {
+            const tov = await fixTypeOnlyValueImports(astFiles);
+            if (tov.fixes.length) {
+              let landed = 0;
+              for (const file of new Set(tov.fixes.map((f) => f.file))) {
+                const content = tov.files[file];
+                if (typeof content !== 'string') continue;
+                const before = astFiles[file];
+                if (healWouldOscillate(this.workspaceId, file, content)) continue;
+                if (await this.landHealWrite(file, content, before)) { astFiles[file] = content; landed += 1; }
+              }
+              if (landed > 0) this.narrate('fix.typeOnlyValueImports', { count: tov.fixes.filter((f) => astFiles[f.file] === tov.files[f.file]).length });
             }
           } catch { /* best-effort — a failure just leaves the honest finding below */ }
           // DUPLICATE-IMPORT SELF-HEAL (build-report autopsy 2026-08-02, RECURRING): the double

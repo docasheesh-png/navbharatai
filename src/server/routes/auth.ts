@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
-import { verifyFirebaseToken, getAdminAuthForPhone } from '../lib/authMiddleware';
+import { verifyFirebaseToken, getAdminAuthForPhone, getAdminAuthForExchange } from '../lib/authMiddleware';
+import { exchangePhoneIdToken } from '../lib/phoneTokenExchange';
 import { otpSendDecision, phoneOwnerUid, phoneForLog, type OtpPurpose } from '../lib/phoneGate';
 import { consumeDurableRate } from '../lib/DurableRateLimit';
 import { normalizePhoneForGift } from '../lib/giftIdentity';
@@ -83,6 +84,22 @@ export function registerAuthRoutes(app: Express): void {
       if (input && otpReportAllowed(ip, Date.now())) void recordOtpOutcome(input).catch(() => {});
     } catch { /* a report must never fail the caller */ }
     res.status(204).end();
+  });
+
+  // ANDROID INSTANT VERIFICATION → a web session (phoneTokenExchange.ts). Reached ONLY when the phone
+  // confirmed the number without an SMS; every other phone sign-in never calls it. Bounded per address.
+  app.post('/api/auth/phone-exchange', async (req: Request, res: Response) => {
+    try {
+      const ip = (req.headers['x-forwarded-for'] as string || req.socket?.remoteAddress || 'unknown-ip').split(',')[0].trim();
+      const now = Date.now();
+      const rate = await consumeDurableRate('phone_exchange_ip', ip, 20, 3_600_000, now);
+      if (!rate.allowed) return res.status(429).json({ ok: false, code: 'rate-limited', message: 'Too many attempts. Please wait a while.' });
+      const result = await exchangePhoneIdToken(req.body?.idToken, await getAdminAuthForExchange(), Math.floor(now / 1000));
+      if (!result.ok) return res.status(result.status).json(result);
+      return res.json({ ok: true, token: result.token });
+    } catch {
+      return res.status(503).json({ ok: false, code: 'unavailable', message: 'Sign-in is not available right now.' });
+    }
   });
 
   // Secure Send-OTP Pre-Request Security Gateway / Cooldown Checker

@@ -119,7 +119,7 @@ describe('5 · the admin card reads the numbers plainly', () => {
       { day: '2026-09-25', counts: { android: { failed: 1 } }, reasons: { android: { 'sign-in:send:app-not-authorized': 1 } }, lastDetail: { 'android:app-not-authorized': { text: 'older', at: 1 } } },
     ]);
     expect(s.headline).toMatch(/android: every send failed \(4\) — mostly "app-not-authorized", a setting on our side/);
-    expect(s.headline).toMatch(/web: 2 sent, none failed/);
+    expect(s.headline).toMatch(/web: 2 sent, 2 verified, none failed/);
     expect(s.latest).toEqual([{ key: 'android:app-not-authorized', text: 'not authorized', at: 5 }]);
   });
   it('an empty tally says nothing was recorded, not that all is well', () => {

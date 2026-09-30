@@ -167,6 +167,7 @@ import { provisionDatabaseForUser, freshAccessToken } from '../lib/supabaseProvi
 import { setupSupabasePayments, supabasePaymentsEnabled, PAYMENT_SECRET_NAMES } from '../lib/supabasePayments';
 import { projectRefFromUrl } from '../lib/supabaseData';
 import { databaseReadiness } from '../AgentV3/databaseNeed';
+import { sharedDataNeed, startOfferDecision, startOfferText, START_OFFER_WAIT_MS } from '../AgentV3/sharedDataNeed';
 import {
   extractPageRoutes, pageCheckScript, parsePageCheck, summarizePageCheck, PAGE_LOAD_TIMEOUT_MS,
   a11yIssueCount, slowRouteCount,
@@ -14727,12 +14728,52 @@ async function noteBuildOutcome(
       // the user's SHARED keys plus the ones tied to THIS app. Keys saved before scoping existed have no
       // workspace, so they count as shared and every existing build behaves exactly as it did.
       let vaultSecrets: Record<string, string> = {};
+      // Set when the build-start database offer was put to the user (sharedDataNeed.ts), so the
+      // mid-build fallback below never asks the same question twice in one build.
+      let databaseOfferedAtStart = false;
       // Tools contributed by services the user connected (MCP). Empty unless they connected one, so
       // every path that reads it is byte-identical to today for everyone else.
       let mcpTools: SafeMcpTool[] = [];
       try {
         if (userId) {
           vaultSecrets = await loadUserVaultSecrets(userId, workspaceId);
+          // THE DATABASE, OFFERED BEFORE THE BUILDER DECIDES WHERE DATA LIVES (sharedDataNeed.ts). An app
+          // whose request needs shared data (bookings, orders, admissions, accounts) used to be built with
+          // that data in the visitor's own browser, and every file-based check then said "no database
+          // needed" (autopsy a7aa447c). Asked once, only on a fresh build, only when nothing is connected
+          // and the user's Supabase account already is. Approve ⇒ the new database is in the vault BEFORE
+          // the prompt below is assembled, so `userDatabaseContext` wires it from the first file.
+          try {
+            const need = sharedDataNeed(prompt);
+            const decision = startOfferDecision({
+              hasUser: true,
+              isEditMode,
+              databaseConnected: !!userDatabaseContext(vaultSecrets),
+              need,
+              supabaseGranted: need.needed && !isEditMode ? !!(await getConnection(userId).catch(() => null))?.orgId : false,
+            });
+            if (decision.offer) {
+              databaseOfferedAtStart = true;
+              const requestId = randomUUID();
+              emit({ type: 'permission_request', agent: 'architect', action: startOfferText(need), callId: requestId, ts: Date.now() });
+              const approved = await awaitApproval(requestId, START_OFFER_WAIT_MS);
+              if (!approved) {
+                emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '👍 Building without a database for now — data will be kept on this device. You can connect one any time in Settings → App Settings → Database.' });
+                buildDiag.record({ phase: 'plan', severity: 'info', code: 'DATABASE_OFFER_AT_START', message: `Offered a database at build start (${need.reasons.join(', ')}); the user declined or did not answer.`, autoResolved: true });
+              } else {
+                emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '🗄️ Creating your database in your Supabase account — this takes a minute or two.' });
+                const made = await provisionDatabaseForUser(userId, { appLabel: prompt.slice(0, 40), workspaceId }).catch(() => null);
+                if (made && made.ok) {
+                  vaultSecrets = await loadUserVaultSecrets(userId, workspaceId).catch(() => vaultSecrets);
+                  emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: '✅ Database created in your Supabase account. Your app will save its data there from the start.' });
+                  buildDiag.record({ phase: 'plan', severity: 'info', code: 'DATABASE_OFFER_AT_START', message: `Created the user's database at build start (${need.reasons.join(', ')}).`, autoResolved: true });
+                } else {
+                  emit({ type: 'narration', agent: 'architect', ts: Date.now(), text: `⚠️ ${made && !made.ok ? made.error : 'Your database could not be created just now.'} I will build with data kept on this device for now.` });
+                  buildDiag.record({ phase: 'plan', severity: 'warning', code: 'DATABASE_OFFER_AT_START', message: 'The user approved a database at build start and it could not be created.', detail: made && !made.ok ? made.error : 'provisioning threw', autoResolved: false });
+                }
+              }
+            }
+          } catch { /* the offer is best-effort — a failure leaves the build exactly as it was */ }
           // ENGINEER_DB_PROVIDER is an internal marker (which DB the user connected), not an app secret —
           // keep it OUT of the built app's .env; it is only used to build the DB context prompt below.
           const { [DB_PROVIDER_MARKER]: _dbMarker, ...appEnv } = vaultSecrets;
@@ -14874,7 +14915,7 @@ async function noteBuildOutcome(
         if (connected?.orgId) {
           let asked = false;
           dispatcher.setDatabaseFallback(async () => {
-            if (asked) return null; // one offer per build — never a loop of prompts
+            if (asked || databaseOfferedAtStart) return null; // one offer per build — never a loop of prompts
             asked = true;
             const requestId = randomUUID();
             emit({

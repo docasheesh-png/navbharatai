@@ -85162,6 +85162,38 @@ the architect. The Frontend specialist that actually writes the AI client never 
 - Locked in `tests/anAiAppNeedsNoKey.test.ts`.
 
 **Admin action:** set `APP_AI_GATEWAY=on` in Cloud Run.
+
+## 2026-09-30 — The stored report kept forty copies of one prompt (the a5b661c8 open item, closed)
+
+**What was wrong.** The a5b661c8 report stored 40 of 151 model calls, and every stored call carried the
+same first 800 characters of the architect's system prompt. So no stored call said what it was asked,
+the 12:16–12:20 gap could not be read, and the origin of the `CollectionTheme` import could not be proven.
+
+**Root cause, two caps:**
+- **The recorder** capped the WHOLE preview (`system head + separator + last message`) at 2,000 characters.
+  A 46 KB system prompt always filled that, so the turn's own message never reached the report.
+- **The store** cut every preview again to 800 characters. With every stored call the same size and
+  nearly identical, a fixed forty was really a size decision.
+
+**Fix (`promptPreviewShape.ts`, `DiagnosticsStore.ts`):**
+- Each half of the preview is capped on its own, in the recorder and in the store, so the last message
+  always survives.
+- A system head identical to the previous STORED call's is written as a one-line marker. The marker is
+  applied after the window is taken, so it never points past a gap.
+- The stored call count comes from a 200 KB byte budget, clamped between 40 and 300. A real-shaped build
+  now keeps 100+ calls instead of 40.
+- `fitReportForStorage` is the one fit for all four save paths and the admin record: trim, then keep only
+  forty calls, and only then drop the heavy channels. The admin record's focused build had no size check
+  at all before this.
+- Earlier builds in an admin session keep forty calls each, so the session fit is unchanged.
+- `buildCostLedger` reads `LEGACY_STORED_LLM_CALLS_MAX = 40` for old reports, so an old 40-call log
+  still reads as possibly truncated.
+
+**Tests:** `tests/theReportKeptFortyCopiesOfOnePrompt.test.ts` (11), reversion-proven for the recorder,
+the marker and the fit. The count and source guards in three existing suites were updated deliberately.
+
+**Still open:** the `CollectionTheme` import origin in a5b661c8 itself cannot be recovered; that report
+is already stored. The next report of that shape will show it.
 ## 2026-09-30 — Autopsy ee0e6de5 ("world's countries and capitals", Weak tier, KIMI rung 2, 6.5 min, green, billed ₹86.23)
 
 The prompt was English written in Devanagari (*"Build an app वेयर वर्ल्ड'एस टोटल कंट्रीज नेम विथ थेइर कैपिटल्स"*). The app is
@@ -85299,6 +85331,102 @@ A 4-screen telecom app (Home, Plans, History, Profile) that rendered, typechecke
    aim is that they find nothing.
 Test-locked and reversion-proven in `tests/theQuestionEndedWithPlease.test.ts`.
 
+## 2026-09-30 — "Nemi Mart": a shop app looked like a plain web page (admin screenshot)
+
+The admin sent a screenshot of a grocery app: the header stacked, the products ran in one column, the
+MRP was not struck through, and "Start Shopping" was a square, underlined box. There was no build
+report, so the diagnosis is from the screenshot and the code. That app was built BEFORE PR #3403
+(the design-kit overhaul) and #3403 is still unmerged, but three of the causes would have survived
+#3403 as well. All three are fixed on the same branch.
+
+- **The class check never saw a plain HTML app.** `CssConsistency` read only `className=`, so a
+  static app's `class="…"` (in the page and in `innerHTML` strings) was invisible. It also counted
+  only kebab-case names, so single-word classes (`header`, `price`, `mrp`) passed silently. Because
+  of both, the CSS repair (`CSS_CLASSES_UNDEFINED`) never ran. Changes:
+  - It now reads `class=`.
+  - It counts single lowercase words, except state words (`active`, `open`, …).
+  - It treats a page's own `<style>` blocks as a stylesheet.
+  - It stays silent for the Tailwind CDN and for Tailwind v4's `@import "tailwindcss"`.
+  - The write-time note also covers `.html` and `.js` screens, and names `style.css` when that is the
+    project's sheet.
+  - The pinned test "ignores single-word tokens" was rewritten deliberately.
+- **Kit: a button class gave the fill but not the shape.** `.btn-primary`, `-secondary`, `-ghost` and
+  `-danger` now share the button geometry on any element, and a link is never underlined on hover.
+  Added `.btn-sm`, `.btn-lg` and `.btn-block`.
+- **Kit: no shop layout.** Added these recipes, named in both builders' prompts:
+  - `.nb-header` / `-brand` / `-search`;
+  - `.nb-chips`;
+  - `.nb-grid` (two per row at 360 px);
+  - `.nb-product`;
+  - `.nb-price-row` / `.nb-price` / `.nb-mrp` (struck through) / `.nb-discount` (new
+    `--success-ink` token, AA in both themes);
+  - `.nb-qty`, `.nb-cart-bar`, `.nb-footer`.
+- Locked and reversion-proven in `tests/theShopLookedLikeAWebPage.test.ts` (17 cases, including a
+  real-browser check at 360 px).
+
+**Open:** the "Made with NavBharatAI" badge is fixed at the bottom-right and can cover a footer or a
+bottom bar. A spacer would add scroll to full-screen games, so this is not guessed at here.
+`.nb-footer` carries bottom padding for it.
+
+## 2026-09-30 — the "made by NavBharatAI" badge gets a × that comes back on refresh (admin)
+
+This was the open item from #3410: the badge is fixed bottom-right and can cover an app's footer or cart
+bar. The admin asked for a close button that returns on every refresh.
+
+- **The × is a checkbox with a scoped `:checked` CSS rule, not a scripted button.** Reasons:
+  - An app whose Content-Security-Policy forbids inline script would turn a scripted × into a dead
+    control. This platform itself recommends adding such a CSP.
+  - `autocomplete="off"` stops the browser restoring the ticked state on reload, so the badge comes back
+    after a refresh.
+  - Nothing is stored.
+  - The ×'s geometry is inline, so an app's own checkbox CSS cannot resize it.
+- **Old badges are upgraded, never doubled.** The marker's value is now the version (`2`).
+  - `injectAppSignature` replaces a version-1 badge in place.
+  - The build skips only a CURRENT badge (`hasCurrentAppSignature`), so an app built earlier gains the ×
+    on its next build.
+  - A badge edited out of recognition is left alone.
+- **The explorer skips the badge.** The post-build button-presser now skips anything inside
+  `[data-nbai-signature]`.
+- **Tests:** `tests/theBadgeCanBeClosed.test.ts`.
+  - It includes a real-browser check under `script-src 'none'`: press ×, the badge hides; reload, it is back.
+  - Reversion-proven: reverting appSignature fails 6 tests, ToolDispatcher 1, clickExplorer 1.
+
+## 2026-09-30 — Free image generation stopped: the provider closed its anonymous door
+
+Admin: *"image banne band ho gaye hai!!"* (Image Generator AI FREE, "make a camera" → "could not make that image").
+
+- **Root cause (provider-side):** Pollinations now requires an account key; anonymous requests get 401. Our free
+  tier handed the browser a link to that anonymous endpoint (`IMAGE_GEN_CLIENT_FETCH`), and the bundled phone apps
+  have no server fallback (#3396 added one only to the new web client).
+- **Fix:** `freeProviderDoor.ts` — the server detects the closed door (own fetch, new-client report, or a probe)
+  and stops minting links, so every client, old phone apps included, gets the picture from the capped paid rungs.
+  `POLLINATIONS_API_KEY` (secret `sk_` key) makes the server fetch from `gen.pollinations.ai` with the key in a
+  header — never in a link.
+- **Admin action:** create a Pollinations account and set `POLLINATIONS_API_KEY` in Cloud Run to restore the
+  free provider (costs pollen). Until then, free pictures are paid rungs capped at 3/user/day and 300/day platform.
+- **Open:** the provider's live answer was not observable from the session (egress blocked) — verify with the
+  `[IMAGE_GEN] the free provider refused an anonymous request` server log line.
+- Tests: `tests/theFreeDoorClosedAndNobodyNoticed.test.ts` (16, reversion-proven).
+
+
+## 2026-09-30 — Image Generator AI: Cloudflare FLUX first, 5 free images a day then ₹1, FREE dropped from the name
+
+Admin: *"haan, cloudflare wala bana do. aur per day 5 image free for user, uske bad 1₹/image. image
+generator ai ke aage se free word hatao"*.
+
+- **Rung 1: FLUX.1 schnell on Cloudflare Workers AI** (`cloudflareImage.ts`), server-side, 1024×1024 only,
+  same word ban. Uses the existing Cloudflare account/token; `CLOUDFLARE_AI_TOKEN` overrides if the DNS
+  token lacks Workers AI permission. Ladder: Cloudflare → Pollinations → Gemini → Grok.
+- **Price** (`imageAllowance.ts`): 5 free delivered pictures a day, then ₹1 each from the wallet; refused
+  up front when the wallet holds under ₹1; counted and charged on delivery only; wallet line `image`.
+- **Name:** "Image Generator AI FREE" → "Image Generator AI" everywhere; every AI states the price.
+- **Found on the way:** `AI_IMAGE_FREE_DAILY_LIMIT` (3/day) was never enforced — it rode
+  `PROFESSIONAL_PAID_ENABLED`, which is unset. Superseded by the new allowance.
+- **Reverses 2026-09-23's "free-only" rule on the admin's word.**
+- **Open:** the Cloudflare call was never made against the live API from the session (egress blocked);
+  the ~170/day figure is from the published rate card. Verify on the first real pictures: an `HTTP 403`
+  in the admin diagnostic means the token needs the Workers AI permission.
+- Tests: `tests/fiveFreeImagesThenOneRupee.test.ts` (25, reversion-proven).
 **Merge note (same day).** Two classes in this PR had been fixed IN PARALLEL by other sessions that merged first. Each is now one definition, not two:
 - **The no-journey sentence** (#3398, the Gita search box). There is one predicate. The sentence depends on whether the form has any button: a field with no button "acts as you type"; a form with a button has "none of its buttons reads as submitting them".
 - **The Project Mode starter verdict** (#3399, autopsy 6a5fb04b). #3399's `setStarterExpected` flag and `shellModuleFor` are kept. This branch's `setStarterEntryExpected` and its route call are removed, and `starterEntryExpectedFor` / `moduleOwnsAppEntry` now delegate to #3399's helpers.

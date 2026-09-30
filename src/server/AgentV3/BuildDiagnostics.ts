@@ -31,6 +31,7 @@ import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBui
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
 import { mergeTruncation, pushBounded, boundedWindow, COMPLETE, type ChannelTruncation, type ReportTruncation } from './reportTruncation';
+import { capPromptPreview } from './promptPreviewShape';
 import { renderProvenByAnyActor, noteRenderSeen, forgetRenderSeen, RENDER_PROVEN_CODES } from './renderProof';
 import { isSelfHeal, isWorkaroundIssue, isNarrationIssue, isLeftOpen, HEAL_RULE } from '../../lib/healIssue';
 
@@ -1308,7 +1309,9 @@ export class BuildDiagnostics {
       ts: this.now(),
       provider: rec.provider,
       model: rec.model,
-      promptPreview: rec.promptPreview != null ? capHead(rec.promptPreview, LLM_PREVIEW_CAP) : undefined,
+      // Each half capped on its own: one cap over the whole string always fell inside a long system
+      // prompt, so the question asked on this turn never reached the report (promptPreviewShape.ts).
+      promptPreview: rec.promptPreview != null ? capPromptPreview(rec.promptPreview, LLM_PREVIEW_CAP / 2, LLM_PREVIEW_CAP / 2) : undefined,
       responsePreview: rec.responsePreview != null ? capHead(rec.responsePreview, LLM_PREVIEW_CAP) : undefined,
       promptChars: rec.promptChars,
       responseChars: rec.responseChars,

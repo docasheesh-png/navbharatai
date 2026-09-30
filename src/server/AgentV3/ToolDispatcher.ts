@@ -71,7 +71,7 @@ import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc, orphanComponentFile } from './ArchitectureAnalysis';
 import { securitySummary, securityWriteNote } from './SecurityAnalysis';
 import { applyPreviewDomain } from './PreviewDomain';
-import { injectAppSignature, hasAppSignature } from './appSignature';
+import { injectAppSignature, hasCurrentAppSignature } from './appSignature';
 import { mergeDotEnv, gitignoreWithEnv, dotEnvValue } from '../secrets/appSecretsEnv';
 import { ensureBootEnv, ENV_SCAN_COMMAND } from './devSecretsBoot';
 import { envNamesFromGrep, detectDatabaseProvider } from './ImportPreview';
@@ -876,7 +876,7 @@ export class ToolDispatcher {
       } catch {
         continue; // no such HTML entry — try the next candidate
       }
-      if (!html || hasAppSignature(html)) return; // already signed (idempotent) or empty
+      if (!html || hasCurrentAppSignature(html)) return; // already signed with the current badge, or empty (an older badge is upgraded below)
       const signed = injectAppSignature(html);
       if (signed === html) return;
       try {
@@ -3186,7 +3186,10 @@ export class ToolDispatcher {
 
   private async undefinedClassNotes(files: Record<string, string>): Promise<string> {
     try {
-      const written = Object.keys(files).filter((p) => /\.(?:t|j)sx?$/.test(p) && /className\s*=/.test(files[p] ?? ''));
+      // A plain-HTML app names its classes with `class=`, in the page or in the strings its script
+      // writes (autopsy "Nemi Mart", 2026-09-30) — those are screens too.
+      const written = Object.keys(files).filter((p) => (/\.(?:t|j)sx?$/.test(p) && /className\s*=/.test(files[p] ?? ''))
+        || (/\.(?:html?|js)$/.test(p) && /\bclass\s*=\s*\\?["']/.test(files[p] ?? '')));
       for (const p of written) {
         this._screensWithClasses.delete(p);
         this._screensWithClasses.set(p, files[p]);
@@ -3200,14 +3203,17 @@ export class ToolDispatcher {
       const content = (p: string) => files[p] ?? this._screensWithClasses.get(p) ?? '';
       const project: Record<string, string> = {};
       for (const [p, c] of Object.entries(files)) if (isProjectStylesheet(p)) project[p] = c;
-      const probes = ['src/index.css', 'src/App.css', 'src/styles.css', 'src/global.css', 'src/styles/globals.css', 'src/styles/index.css', 'package.json', 'index.html']
+      const probes = ['src/index.css', 'src/App.css', 'src/styles.css', 'src/global.css', 'src/styles/globals.css', 'src/styles/index.css', 'style.css', 'styles.css', 'css/style.css', 'package.json', 'index.html']
         .filter((p) => project[p] === undefined);
       const read = await Promise.all(probes.map((p) => this.actuator.readFile(this.workspaceId, p).then((c) => [p, c] as const, () => null)));
       for (const r of read) if (r && typeof r[1] === 'string') project[r[0]] = r[1];
       let out = '';
       for (const p of screens) {
         const missing = undefinedClassesInFile(p, content(p), project).filter((c) => !c.startsWith('nb-'));
-        out += undefinedClassesWriteNote(p, missing);
+        // Name the sheet this project really has: a static app's is style.css, not src/index.css.
+        const sheet = project['src/index.css'] !== undefined ? 'src/index.css'
+          : (['style.css', 'styles.css', 'css/style.css'].find((s) => project[s] !== undefined) ?? 'src/index.css');
+        out += undefinedClassesWriteNote(p, missing, sheet);
       }
       return out;
     } catch {

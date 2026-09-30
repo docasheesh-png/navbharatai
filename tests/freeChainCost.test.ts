@@ -190,10 +190,13 @@ describe('image generation — the paid rungs are metered by who SERVES, not by 
     expect(img.slice(img.lastIndexOf('if (editing) {', at), at)).toContain('await allowPaidRung()');
   });
 
-  it('🔒 only a PAID delivery burns an allowance — a free image still costs the user nothing', () => {
-    expect(img).toContain('if (paidRung && gate && gate.allow && gate.countsAgainstFree)');
+  // 2026-09-30: with image pricing on (the default), every DELIVERED picture counts toward the 5 free a
+  // day whichever rung drew it — the admin's rule, locked in fiveFreeImagesThenOneRupee.test.ts. The old
+  // tool quota below, and its "only a paid rung burns it" rule, apply only with AI_IMAGE_PRICING=off.
+  it('🔒 with pricing off, only a PAID delivery burns the old allowance', () => {
+    expect(img).toContain('if (!pricing && paidRung && gate && gate.allow && gate.countsAgainstFree)');
     // The free rung delivers without the paid flag; both paid rungs pass it.
-    expect(img).toContain('deliver(pr.image); return;');
+    expect(img).toContain('await deliver(pr.image); return;');
     // Three paid deliveries now: Gemini, xAI, and the edit rung.
     expect((img.match(/deliver\(img, true\); return;/g) || []).length).toBe(2);
     expect(img).toContain('deliver(out.image, true); return;');

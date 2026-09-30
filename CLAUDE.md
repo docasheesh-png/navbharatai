@@ -1489,6 +1489,61 @@ the code (it is actually read somewhere) on 2026-07-11.
   `pixelEventFor` fails CI until the policy is updated too** (verified to bite). Do not weaken it;
   it exists because the first drift produced no failure of any kind.
 
+- **🖼️ THE IMAGE GENERATOR: CLOUDFLARE FIRST, 5 FREE A DAY, THEN ₹1 EACH (admin 2026-09-30, verbatim:
+  *"haan, cloudflare wala bana do. aur per day 5 image free for user, uske bad 1₹/image. image generator ai
+  ke aage se free word hatao"*). No key needs setting for the defaults.**
+  **Rung 1 — FLUX.1 schnell on Cloudflare Workers AI** (`src/server/lib/cloudflareImage.ts`), fetched by
+  THIS server so every client, old phone apps included, gets bytes. Reuses `CLOUDFLARE_ACCOUNT_ID` +
+  `CLOUDFLARE_API_TOKEN`; ⚠️ **that token was made for DNS/Pages and may lack the *Workers AI* permission** —
+  then every call is an `HTTP 403` in the admin diagnostic and the request falls to the next rung. Fix by
+  adding Workers AI to that token, or set **`CLOUDFLARE_AI_TOKEN`** (a token made only for Workers AI, which
+  wins). Optional: `CLOUDFLARE_IMAGE_MODEL` (default `@cf/black-forest-labs/flux-1-schnell`),
+  `CLOUDFLARE_IMAGE_STEPS` (default 4, clamped 1–8), `IMAGE_GEN_CLOUDFLARE=off` (removes the rung).
+  💵 The account's free allowance is 10,000 neurons/day ≈ ~170 pictures at published rates, then ~$0.0006
+  each — ⚠️ derived from the rate card, NOT measured; on Cloudflare's free Workers plan calls past the
+  allowance are refused (the next rung serves), on the $5 paid plan they are billed. It draws ONLY
+  1024×1024 (the model has no size input), so Wide/Portrait/custom go to the next rung; it runs the same
+  Pollinations word ban (an image model draws, it does not refuse).
+  **The price** (`src/server/lib/imageAllowance.ts`): `AI_IMAGE_FREE_PER_DAY` (default **5**, India's day),
+  `AI_IMAGE_PRICE_INR` (default **₹1**, capped ₹50; unreadable ⇒ the default), `AI_IMAGE_PRICING=off` (the
+  pre-2026-09-30 behaviour exactly). Counted per DELIVERED picture whichever rung drew it (an edit too),
+  charged from the count AFTER the picture so two at once cannot both be the free fifth, refused BEFORE any
+  engine with the `wallet_empty` code when the free ones are used and the wallet holds under the price.
+  A failed picture is never counted or charged; free-listed accounts are neither; a link the BROWSER
+  fetches (`IMAGE_GEN_CLIENT_FETCH`) is not counted, because we cannot see whether it arrived. Wallet line
+  `image` ("Image Generator AI"). **This supersedes `AI_IMAGE_FREE_DAILY_LIMIT` (3) while pricing is on** —
+  that limit rode `PROFESSIONAL_PAID_ENABLED`, which is unset, so it was never enforced anyway.
+  🔁 **It reverses 2026-09-23's "one tier: FREE" on the admin's word** — still one screen and one route, no
+  PRO switch; the name dropped FREE ("Image Generator AI") the same day. And it amends THE ONE-WALLET LAW's
+  line "Image generation stays on its quota cap": the price is the admin's own fixed number, not an
+  estimated cost. Test-locked and reversion-proven in `tests/fiveFreeImagesThenOneRupee.test.ts`.
+- **🔑 `POLLINATIONS_API_KEY` — THE FREE IMAGE PROVIDER CLOSED ITS ANONYMOUS DOOR (2026-09-30, admin:
+  *"image banne band ho gaye hai!!"*). ⚠️ NOT set as of this date.** The provider now answers **401**
+  to any request without an account key, and everything below (`IMAGE_GEN_CLIENT_FETCH`) was built on
+  that anonymous door — so every free picture failed at once, and the bundled phone apps, which cannot
+  fall back on their own, showed *"NavBharatAI's engine could not make that image right now"* with no
+  way out. Nothing on our side changed.
+  🔒 **THE SERVER NOW KNOWS WHEN THE DOOR IS SHUT** (`src/server/lib/freeProviderDoor.ts`): a 401/402/403
+  from its own fetch, from a new client's `freeFailed` report, or from a small probe (at most every
+  10 min; the first on an instance is awaited for ≤ 4 s) closes it for 30 min. While closed, **no link
+  is minted and no anonymous request is made**, so the request goes straight to the metered paid rungs
+  (Gemini → Grok, bounded by `AI_IMAGE_FREE_DAILY_LIMIT` and `AI_IMAGE_FREE_PAID_DAILY_CAP`) and even an
+  old phone app gets the picture bytes. Only an AUTH answer closes it — a timeout, 429 or 5xx is "could
+  not tell", so our own egress failing never moves every free user onto paid engines.
+  `IMAGE_GEN_ANON_PROBE=off` stops the probe (the door then closes only on real failures).
+  💳 **THE REAL FIX IS THE KEY, AND IT COSTS MONEY — the admin's decision.** An account at
+  enter.pollinations.ai issues a SECRET key (`sk_…`); set it as **`POLLINATIONS_API_KEY`** and the
+  picture is fetched by THIS server from `gen.pollinations.ai` with the key in an `Authorization`
+  header — **never in a link**, because a link the browser fetches is a key every user can copy. So with
+  a key the browser-fetch path is off by construction and the per-IP benefit of `IMAGE_GEN_CLIENT_FETCH`
+  is gone (the key's own limits apply instead). Generations spend the account's "pollen"; a 402 (budget
+  out) falls through to the paid rungs. `POLLINATIONS_BASE_URL` overrides the keyed host (default
+  `https://gen.pollinations.ai`). ⚠️ **Never put a publishable `pk_` key here** — the provider limits
+  those to one request per IP per hour and forbids them off a browser.
+  🚑 **No-deploy stopgap:** `IMAGE_GEN_POLLINATIONS=off` skips the free provider entirely (every free
+  picture then comes from the capped paid rungs). ⚠️ **The provider's live behaviour could not be
+  verified from a session** (its hosts are refused by the session's egress policy); the 401 comes from
+  its own published docs. Test-locked and reversion-proven in `tests/theFreeDoorClosedAndNobodyNoticed.test.ts`.
 - **🌐 `IMAGE_GEN_CLIENT_FETCH` — a FREE image is fetched by the USER'S BROWSER, not by this server
   (admin-mandated 2026-09-21: *"free wale me user ki ip, paid me hamari"*). ⚠️ NOT set, and the code
   default is ON**; `off` is the instant, no-deploy revert to the previous behaviour exactly. Read by
@@ -5144,6 +5199,8 @@ nothing to run and stay free and unmetered; metering them would be friction with
   re-thread costs through call sites by hand — that is the fragility this replaced.**
 - **Image generation stays on its quota cap**: its cost is per-image, not per-token, so there is nothing
   honest to price it with. An invented number would be worse than the cap.
+  ⚠️ **AMENDED 2026-09-30:** images now carry the ADMIN's fixed price (5 free a day, then ₹1 each —
+  `imageAllowance.ts`). That is a price, not an estimated cost, so the rule above still holds.
 
 ### Debit exactness — the remainder is CARRIED, never rounded up (shipped 2026-08-04)
 

@@ -1,5 +1,6 @@
 import { draftAfterFailedSend } from '../../lib/draftAfterSend';
 import { useState, useEffect, useRef } from 'react';
+import { imageAllowanceLine } from '../../lib/imageAllowanceLine';
 import { ComposerShell, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_TEXTAREA_CLASS } from '../chat/ComposerShell';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
@@ -196,6 +197,9 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
   // the Delete button is how a picture leaves the history for good.
   const [reportedIds, setReportedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [craftNotes, setCraftNotes] = useState<string[]>([]);
+  // Free pictures left today, as the server counted them on the last delivered picture (2026-09-30:
+  // 5 free a day, then ₹1 each). Null until the server has said — the header then shows the rule.
+  const [freeLeft, setFreeLeft] = useState<number | null>(null);
   // The countdown shown while the browser waits out the provider's rate limit. Blank the rest of
   // the time. A visible wait is the difference between "busy" and "broken" — the blank-screen
   // failure this repo already root-caused once on the chat path.
@@ -384,6 +388,7 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
       // engines cannot spell. Shown, never swallowed: a user who knows their shop name may come out
       // garbled can shorten it, where a silent misspelling just wastes a generation.
       setCraftNotes(Array.isArray(data.notes) ? data.notes.filter((n: unknown) => typeof n === 'string') : []);
+      if (typeof data.freeLeftToday === 'number' && Number.isFinite(data.freeLeftToday)) setFreeLeft(Math.max(0, Math.floor(data.freeLeftToday)));
       const newItem: GeneratedImage = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         url: imageUrl,
@@ -711,8 +716,8 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
           <Wand2 className="w-5 h-5 text-accent-text" />
         </div>
         <div className="min-w-0">
-          <h2 className="font-semibold text-ink text-base truncate">Image Generator AI FREE</h2>
-          <p className="text-xs text-faint truncate">Write a prompt to generate images — logos, banners, icons</p>
+          <h2 className="font-semibold text-ink text-base truncate">Image Generator AI</h2>
+          <p className="text-xs text-faint truncate">{imageAllowanceLine(freeLeft)}</p>
         </div>
         <div className="ml-auto flex items-center gap-2 shrink-0">
           <span className="hidden sm:inline text-[10px] bg-violet-500/20 text-accent-text px-2 py-1 rounded-full border border-violet-500/30">NavBharatAI</span>

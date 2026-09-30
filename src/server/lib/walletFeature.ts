@@ -30,6 +30,8 @@ export const WALLET_FEATURES = [
   { id: 'professionals', label: 'Professionals AI' },
   { id: 'tools', label: 'AI tools' },
   { id: 'app-assistant', label: "Your app's own assistant" },
+  // 5 free pictures a day, then the admin's fixed price per picture (2026-09-30, `imageAllowance.ts`).
+  { id: 'image', label: 'Image Generator AI' },
   { id: 'api', label: 'Developer API' },
   { id: 'voice', label: 'Voice chat' },
   { id: 'other', label: 'Other' },

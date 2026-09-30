@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { classifyBuildSize, realCostFromCalls, buildCostRow, summarizeCosts, reportPaths, SIMPLE_MAX_FILES, MID_MAX_FILES } from '../src/server/lib/buildCostLedger';
-import { STORED_LLM_CALLS_MAX } from '../src/server/AgentV3/DiagnosticsStore';
+import { LEGACY_STORED_LLM_CALLS_MAX } from '../src/server/AgentV3/DiagnosticsStore';
 import { realRateFor, usageCostUsd } from '../src/server/AgentV3/providerRates';
 
 const files = (n: number, prefix = 'src/components/C'): string[] => Array.from({ length: n }, (_, i) => `${prefix}${i}.tsx`);
@@ -165,10 +165,10 @@ describe('🔒 WHERE the real cost comes from — settled first, the call log on
   });
 
   it('🔒 a call log AT the storage cap is a LOWER BOUND: source says so, measured is false, margin is null', () => {
-    // Storage keeps only the newest STORED_LLM_CALLS_MAX calls. A log of exactly that length may have
+    // Old reports kept only LEGACY_STORED_LLM_CALLS_MAX calls. A log of exactly that length may have
     // lost older calls, so the priced total can only be "at least this much" — and a margin computed
     // from a lower-bound cost would overstate what we made.
-    const row = buildCostRow(report({ llmCalls: Array.from({ length: STORED_LLM_CALLS_MAX }, (_, i) => call(i)) }), 87)!;
+    const row = buildCostRow(report({ llmCalls: Array.from({ length: LEGACY_STORED_LLM_CALLS_MAX }, (_, i) => call(i)) }), 87)!;
     expect(row.source).toBe('call-log-capped');
     expect(row.measured).toBe(false);
     expect(row.realInr).not.toBeNull();
@@ -185,15 +185,18 @@ describe('🔒 WHERE the real cost comes from — settled first, the call log on
     // The spelling moved from `lastN(...)` to `trimChannel(...)` on 2026-09-20, when trimming and
     // declaring the loss became one operation (reportTruncation.ts). The CONSTANT is what this test
     // is about, and it is still the store's, still shared, still the ledger's import.
-    expect(store).toContain('trimChannel(report.llmCalls, STORED_LLM_CALLS_MAX');
-    expect(readFileSync('src/server/lib/buildCostLedger.ts', 'utf8')).toContain("import { STORED_LLM_CALLS_MAX } from '../AgentV3/DiagnosticsStore'");
+    // Since 2026-09-30 the live cap is a byte budget; OLD reports were all trimmed to the fixed 40,
+    // and the ledger's guess about an old report must use THAT number, owned by the store.
+    expect(store).toContain('trimChannel(report.llmCalls, opts.llmCallsCap ?? storedLlmCallsCap(report.llmCalls)');
+    expect(store).toContain('export const LEGACY_STORED_LLM_CALLS_MAX = 40;');
+    expect(readFileSync('src/server/lib/buildCostLedger.ts', 'utf8')).toContain("import { LEGACY_STORED_LLM_CALLS_MAX } from '../AgentV3/DiagnosticsStore'");
   });
 
   it('🔑 a DECLARED loss beats the length guess — and exactly-40 real calls are no longer discarded', () => {
     // The guess (`length >= cap`) had a real false positive: a build that genuinely made 40 calls was
     // marked a lower bound, so a correct measurement was dropped from the admin's measured sample and
     // its margin shown as null. The report now states the truth, so the guess is only the fallback.
-    const exactly40 = Array.from({ length: STORED_LLM_CALLS_MAX }, (_, i) => call(i));
+    const exactly40 = Array.from({ length: LEGACY_STORED_LLM_CALLS_MAX }, (_, i) => call(i));
     const honest = buildCostRow(report({ llmCalls: exactly40, truncation: { complete: true } } as never), 87)!;
     expect(honest.source).toBe('call-log');
     expect(honest.measured).toBe(true);

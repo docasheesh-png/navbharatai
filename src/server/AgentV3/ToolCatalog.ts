@@ -898,6 +898,7 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         type: 'object',
         properties: {
           provider: { type: 'string', enum: ['cashfree', 'razorpay', 'stripe'], description: 'The payment provider to wire up.' },
+          table: { type: 'string', description: 'Only for an app with NO server of its own, using razorpay: the lower-case name of the existing database table that stores the orders/bookings. Payment is then verified in the user\'s own Supabase project.' },
         },
         required: ['provider'],
       },

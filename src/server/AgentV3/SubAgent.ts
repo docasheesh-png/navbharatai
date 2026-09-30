@@ -130,6 +130,11 @@ export interface SubAgentDeps {
   readLedger?: () => ReadLedger | undefined;
   /** The parent's STOP counter, so a sub-agent's read-loop stops reach the report (autopsy ea07382a). */
   readLoopStops?: () => { n: number } | undefined;
+  /**
+   * The payment-verification setup (supabasePayments.ts), read at SPAWN time. Sub-agents write most of
+   * an app's code, so without this `generate_payment` there would always take the "payment pending" path.
+   */
+  serverlessPayment?: () => ReturnType<ToolDispatcher['serverlessPaymentHandler']>;
   /** The parent's design-kit keep tally, so a sub-agent's stylesheet rewrite reaches the report (autopsy e725e002). */
   kitKept?: () => KitKeptTally | undefined;
 
@@ -228,6 +233,10 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       if (sharedStops) childDispatcher.shareReadLoopStops(sharedStops);
       const sharedKit = deps.kitKept?.();
       if (sharedKit) childDispatcher.shareKitKept(sharedKit);
+    } catch { /* never block a spawn */ }
+    try {
+      const pay = deps.serverlessPayment?.();
+      if (pay) childDispatcher.setServerlessPaymentHandler(pay);
     } catch { /* never block a spawn */ }
     // TERMINAL-EVENT ISOLATION — the sub-runner shares the build's event stream, so its own
     // `done`/`error` used to flow to every surface as if the WHOLE build finished: the client

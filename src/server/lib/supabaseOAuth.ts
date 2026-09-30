@@ -24,6 +24,7 @@
 // without network, without a real clock, and without a real secret.
 
 import crypto from 'crypto';
+import { supabasePaymentsEnabled } from './supabasePayments';
 
 /** Supabase's OAuth endpoints. Hosts are fixed — never taken from user input. */
 export const SUPABASE_AUTHORIZE_URL = 'https://api.supabase.com/v1/oauth/authorize';
@@ -49,6 +50,21 @@ export const SUPABASE_SCOPES = [
   'auth.write',
   'database.write',
 ] as const;
+
+/**
+ * The scopes actually requested. The payment-verification path (supabasePayments.ts) deploys an Edge
+ * Function and writes its keys as project secrets, so ONLY when that path is switched on do we ask for
+ * those two extra permissions — with it off the consent screen is exactly the five above.
+ * ⚠️ The Supabase OAuth app itself must also have Edge Functions and Secrets set to write, or Supabase
+ * will not grant them; a user who connected earlier is asked to reconnect by the 403 message.
+ */
+export function supabaseScopes(env: NodeJS.ProcessEnv = process.env): string[] {
+  const base: string[] = [...SUPABASE_SCOPES];
+  if (supabasePaymentsEnabled(env)) {
+    base.push('edge_functions.write', 'secrets.write');
+  }
+  return base;
+}
 
 /** How long a started flow stays valid. Long enough to sign in + consent, short enough to limit replay. */
 export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
@@ -135,7 +151,7 @@ export function buildSupabaseAuthorizeUrl(input: AuthorizeUrlInput): string {
   u.searchParams.set('state', input.state);
   u.searchParams.set('code_challenge', input.codeChallenge);
   u.searchParams.set('code_challenge_method', 'S256');
-  u.searchParams.set('scope', SUPABASE_SCOPES.join(' '));
+  u.searchParams.set('scope', supabaseScopes().join(' '));
   return u.toString();
 }
 

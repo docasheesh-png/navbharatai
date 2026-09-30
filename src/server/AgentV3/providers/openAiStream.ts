@@ -89,6 +89,8 @@ export class OpenAiStreamAccumulator {
   /** Keyed by the stream's `index` so out-of-order or interleaved calls cannot merge. */
   private readonly calls = new Map<number, { id: string; name: string; args: string }>();
   private chunks = 0;
+  /** UTF-8 bytes of everything produced — counted as it arrives, so reading it never rescans. */
+  private bytes = 0;
 
   /** Feed one chunk. Tolerant by construction: an unrecognised chunk advances nothing and throws nothing. */
   push(chunk: OpenAiStreamChunkLike | null | undefined): void {
@@ -106,8 +108,8 @@ export class OpenAiStreamAccumulator {
 
     const delta = choice.delta;
     if (!delta || typeof delta !== 'object') return;
-    if (typeof delta.content === 'string') this.text += delta.content;
-    if (typeof delta.reasoning_content === 'string') this.reasoning += delta.reasoning_content;
+    if (typeof delta.content === 'string') { this.text += delta.content; this.bytes += utf8Bytes(delta.content); }
+    if (typeof delta.reasoning_content === 'string') { this.reasoning += delta.reasoning_content; this.bytes += utf8Bytes(delta.reasoning_content); }
 
     if (!Array.isArray(delta.tool_calls)) return;
     for (const tc of delta.tool_calls) {
@@ -117,8 +119,8 @@ export class OpenAiStreamAccumulator {
       if (typeof tc.id === 'string' && tc.id) current.id = tc.id;
       const fn = tc.function;
       if (fn && typeof fn === 'object') {
-        if (typeof fn.name === 'string' && fn.name) current.name = fn.name;
-        if (typeof fn.arguments === 'string') current.args += fn.arguments;
+        if (typeof fn.name === 'string' && fn.name) { if (!current.name) this.bytes += utf8Bytes(fn.name); current.name = fn.name; }
+        if (typeof fn.arguments === 'string') { current.args += fn.arguments; this.bytes += utf8Bytes(fn.arguments); }
       }
       this.calls.set(index, current);
     }
@@ -152,6 +154,23 @@ export class OpenAiStreamAccumulator {
     let total = this.text.length + this.reasoning.length;
     for (const call of this.calls.values()) total += call.name.length + call.args.length;
     return total;
+  }
+
+  /**
+   * The same measure in UTF-8 BYTES — what the crawl floor reads (autopsy a2b9c802, 2026-09-30).
+   *
+   * 🔴 A CHARACTER IS NOT THE SAME AMOUNT OF WORK IN EVERY SCRIPT. An English token is ~4 characters;
+   * a Telugu, Hindi or Tamil token is ~1–2, because tokenizers split Indic text far finer. So a
+   * provider producing tokens at one steady rate emits 2–4× FEWER characters per second in an Indic
+   * language, and a floor in characters judged exactly the provider that answered our users in their
+   * own language as the slow one. UTF-8 bytes track the work far more evenly (an Indic character is 3
+   * bytes), and for ASCII bytes and characters are the same number — so an English stream is judged
+   * exactly as before, and an Indic stream can only ever look FASTER, never slower. The JARVIS build
+   * abandoned its lead rung for crawling while writing a Telugu plan; whether this was the cause there
+   * is not provable from the report, which is why the change is one-directional.
+   */
+  producedBytes(): number {
+    return this.bytes;
   }
 
   /** Did the provider send anything at all, reasoning included? */
@@ -292,14 +311,16 @@ export function streamThroughputGraceMs(env: NodeJS.ProcessEnv = process.env): n
  * forced-reasoning model thinking hard before it writes is never mistaken for a dead one.
  */
 export function streamIsCrawling(
-  sample: { producedChars: number; elapsedMs: number },
+  sample: { producedChars?: number; producedBytes?: number; elapsedMs: number },
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   const floor = streamMinCharsPerSec(env);
   if (floor <= 0) return false;
   const elapsedMs = Number.isFinite(sample?.elapsedMs) ? sample.elapsedMs : 0;
   if (elapsedMs < streamThroughputGraceMs(env)) return false;
-  const produced = Number.isFinite(sample?.producedChars) ? Math.max(0, sample.producedChars) : 0;
+  // Bytes when the caller has them (the script-neutral measure — see `producedBytes`), else characters.
+  const raw = Number.isFinite(sample?.producedBytes) ? sample.producedBytes : sample?.producedChars;
+  const produced = Number.isFinite(raw) ? Math.max(0, raw as number) : 0;
   return produced / (elapsedMs / 1000) < floor;
 }
 
@@ -330,4 +351,17 @@ export function streamHardCapMs(env: NodeJS.ProcessEnv = process.env): number {
  */
 export function buildStreamingEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.AGENTV3_STREAM_BUILD_CALLS ?? '').trim().toLowerCase() === 'on';
+}
+
+/** UTF-8 byte length of a string, without allocating a buffer. PURE. */
+export function utf8Bytes(text: string): number {
+  let n = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < text.length) { n += 4; i += 1; }
+    else n += 3;
+  }
+  return n;
 }

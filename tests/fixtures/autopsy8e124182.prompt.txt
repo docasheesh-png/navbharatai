@@ -1,0 +1,53 @@
+You are tasked with designing, developing, and building a stock inventory application that is attractive, user-friendly, and compatible with both desktop and mobile platforms using PHP MVC architecture.
+
+The application must include the following features in detail:
+
+1. **Login Page**: Design an engaging login page implementing glass morphism design principles and hover effects to enhance user experience.
+
+2. **Sidebar with Collapse Functionality**: Develop an interactive and visually appealing sidebar that can be collapsed and expanded seamlessly on desktop and mobile devices.
+
+3. **Add New Stock Item Menu**:
+   - Create a form for adding new stock items with inputs for item name, item type, unit of measure, quantity, and vendor.
+   - Ensure each new stock item is assigned a unique item ID that serves as the primary key for CRUD operations.
+   - Implement a data table to display the items with full CRUD functionality.
+   - Integrate a button to allow data export/download in Excel format.
+
+4. **Add Stock to Existing Items Menu**:
+   - Build a form to add stock quantity to existing items with an interactive input field featuring autocomplete based on unique item IDs.
+   - Include a data table showing current stock additions and full CRUD support.
+   - Provide a button to download the data in Excel format.
+
+5. **Reduce Stock Items Menu**:
+   - Design a form to reduce stock quantities from existing items with autocomplete input fields referencing unique item IDs.
+   - Include a data table with CRUD operations to manage stock reductions.
+   - Add functionality to download the data as an Excel file.
+
+6. **Interactive Dashboard**:
+   - Display the latest stock data with a visually appealing layout suitable for both desktop and mobile.
+   - Implement alert notifications for current stock levels (e.g., low stock warnings).
+   - Add data visualization charts that effectively summarize stock information.
+
+Additional Requirements:
+
+- Ensure all interfaces are highly interactive and fully responsive for mobile and desktop platforms.
+- Implement rigorous data validation on both client-side and server-side for all forms.
+- Strengthen application security by implementing:
+  - Cross-Site Scripting (XSS) protection
+  - Cross-Site Request Forgery (CSRF) tokens
+  - Session timeout functionality
+  - Role-based access control for user permissions
+  - Audit logging to track CRUD operations and access events
+
+For each feature, provide detailed explanations of your implementation approach, including design considerations, security measures, and how you ensure responsiveness and user-friendliness.
+
+# Steps
+1. Detail the design and development plan for each required feature.
+2. Describe how to implement interactivity, responsiveness, and visual effects, especially for login and sidebar components.
+3. Explain database schema considerations to support unique IDs and transactional stock updates.
+4. Outline the mechanisms for CRUD operations and data export functionality.
+5. Specify approaches for client-side and server-side validation.
+6. Describe security best practices in PHP MVC context to prevent XSS, CSRF, and enforce role-based access.
+7. Explain audit logging strategy.
+
+# Output Format
+Provide a comprehensive, structured document that clearly explains each feature's implementation. Use separate sections or bullet points for each feature and security aspect. Include example code snippets or pseudo-code where appropriate to illustrate key concepts, but focus primarily on detailed explanations and best practices.

@@ -2069,6 +2069,14 @@ the code (it is actually read somewhere) on 2026-07-11.
   verdict is **latched in the state** because on the real data it flickers (3.43× → **2.46×** → 3.5×);
   the runner happened to latch it in a `Set`, which hid the defect. Test-locked and reversion-proven
   in both halves in `tests/slowRungBench.test.ts`.
+  🌦️ **A CRAWL IS WEATHER, NOT A VERDICT — `AGENTV3_CRAWL_BENCH_SECONDS` (NOT set; default 180; clamped
+  30–1800; unreadable ⇒ 180; `off` ⇒ the old whole-build bench). Autopsy 876afca9, 2026-09-30.** A stream
+  abandoned for crawling used to bench its rung for the WHOLE build on one sample: GLM flashx answered the
+  plan in 2.4 s, crawled once, and every call for ten minutes went to the reasoning rung. Now the crawl bench
+  ends after the window, the rung is re-probed ONCE, and a second crawl benches it for the build
+  (`crawlBench.ts`). At most two abandons per build, the second only on that re-probe (a concurrent call in
+  flight is never the re-probe), so bad weather at every vendor still cannot walk the ladder. The THROUGHPUT
+  bench above is untouched. Test-locked and reversion-proven in `tests/aCrawlIsWeatherNotAVerdict.test.ts`.
   ✅ **AND THIS REPORT SETTLED THE STREAMING ENTRY'S ONE OPEN QUESTION: Z.ai DOES honour
   `stream_options.include_usage`** — real per-call input/output/cache token counts came back on every
   streamed call. The "0 in / 0 out" risk that entry warns to watch for did not materialise.
@@ -3235,6 +3243,21 @@ the flag entries above promise.
   mislabelled empty pass. A sudden crop of `JOURNEY_FAILED` is not a regression — it is the check
   working for the first time, and each one is a real app that looks like it saves data and does not.
 
+- **`AGENTV3_SIGNIN_EXPLORE`** (default ON, set `off` to disable — added 2026-09-30, autopsy 8e124182, admin:
+  *"login ke andar wali jaanch bhi banao"*) — **the checks look behind the sign-in page.** A stock app put
+  every screen behind `/login`, and the page check, the form journeys, the click explorer and the feature
+  probe all stopped at the door (the probe then called the stock list missing and spent a repair on it).
+  `signInExplore.ts` signs in ONCE, in the sandbox browser, with credentials THE APP ITSELF SHIPS — the form
+  it pre-fills, a seed/demo account in its source (object pairs, an email→password-constant map, a demo hint)
+  — saves the session to `/tmp/nbai-signed-in.json`, and the page check, the journeys (except the sign-in form
+  itself) and the explorer open the app with it; the feature probe reads up to 6 screens behind the door.
+  🔒 **It never guesses a password, never tries more than 3 candidates, never creates an account, and never
+  prints a credential** — the report says only where the account came from. A failed sign-in is never read
+  as success (the password field must be gone). No credentials ⇒ `AUTH_EXPLORE_NOT_RUN` with the reason, and
+  every check runs signed-out as before. Codes are `PROCESS_ONLY_CODES`/`NEVER_SUGGEST` (our instrument).
+  Real-browser tests in `tests/weLookBehindTheSignInPage.test.ts`. ⚠️ The same change makes a sign-in form
+  that STARTS with a password typed in a medium security finding (`prefilled-password`) — so new apps
+  mostly ship the demo account as source/hint text, which this reads too.
 - **`AGENTV3_CLICK_EXPLORE`** (default ON, set `off` to disable — added 2026-09-28, competitive gap G1,
   admin: *"best solution jo gaps ko fill kar ke navbharatai ko compatitors se aage la jaye"*) — **the
   app is PRESSED, not only painted.** Every post-build check watched the app render or drove ONE derived
@@ -3334,6 +3357,18 @@ the flag entries above promise.
   `tests/theContractIsAFileNotAParagraph.test.ts`. **What to watch:** the repair-attempt count on Weak
   fast-lane builds — with the symbols homed, the errors that remain should be the mechanical ones the
   deterministic pass already fixes for free.
+  🧰 **AND THE CONTRACT'S HELPERS GET A FILE TOO — `AGENTV3_UTIL_OWNER` (NOT set; default ON; `off` reverts),
+  autopsy 876afca9, 2026-09-30.** The contract file keeps types only. Helper signatures stayed in prose,
+  "implemented in the file the file list names for them", and on "Create a calculation app" the file list
+  named none. `App.tsx` imported all four helpers from `./types`: five tsc errors and a 241 s repair (53% of the
+  lane). Now `utilOwnerFor` picks an owner before file one: a planned file whose purpose names a helper, else
+  a planned `utils`/`helpers` file in the contract's folder, else a new `utils.ts` beside it (generation tier 0,
+  so the screens see its exports). The contract text carries one line saying where they live.
+  🪞 **Same autopsy, `AGENTV3_ENTRY_SHADOW` (NOT set; default ON; `off` reverts):** a Vite plan's
+  `public/index.html` is dropped (`entryShadow.ts`), and the full builder is told at write time. Vite serves
+  `public/` as-is at the root, so that copy shadowed the real entry ("unsupported MIME type ('text/html')") and
+  cost two repair passes. CRA is exempt (there it IS the entry). Test-locked in
+  `tests/theCalculatorsHelpersHadNoHome.test.ts`.
 
 - **`AGENTV3_SNAPSHOT_BUCKET`** (default ON wherever bucket-only publishing is on; `off` reverts
   snapshots alone — added 2026-09-18, admin Monitor capture) — a build SNAPSHOT is now served from the
@@ -4676,6 +4711,16 @@ and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; 
   after 120 s, the decomposition was cut off at the 300 s stream cap — 7 of 24 minutes. Weak is now in
   `PLAN_FORBIDDEN_TIERS` beside Strong, so its plan rung is `glm-4.7-flashx` (thinking disabled) whatever
   the flag says. **Only the plan moved: Weak's JUDGE stays on Nemotron** where the flag names it.
+  🧭 **AND ON WEAK, HAIKU IS THE PLAN'S SECOND RUNG (admin 2026-09-30: *"planing ke liye haiku accha hai,
+  to lagao"*, autopsy a2b9c802).** The Weak plan ladder is `flashx → Haiku → KIMI → glm-5.3 → Nemotron
+  super`. With flashx benched for crawling, both JARVIS planners fell to `kimi-k2.7-code`, which always
+  reasons: one plan was cut off after 240 s, the other spent 12,000 tokens thinking and returned nothing.
+  Haiku answers directly at about KIMI's per-token price ($1/$5 against $0.95/$4). ⚠️ **PLAN ladder only**
+  (`weakPlanHaikuEnabled` in `tierLadder.ts`): the Weak BUILD ladder still has Haiku LAST, Normal and
+  Strong have no Haiku, and `enforceNoClaude` still strips every other Claude rung. **`AGENTV3_WEAK_PLAN_HAIKU`**
+  — NOT set; default ON; `off` restores the old order with no deploy. ⚠️ Haiku's plan quality on this
+  platform was unmeasured when this shipped. Watch planner outcomes (`MEGA_ROADMAP*`, `PROJECT_MODE*`)
+  on Weak builds where flashx was benched. Test-locked in `tests/aPlanIsAnsweredNotThoughtAbout.test.ts`.
 - 🔗 `healLadder` and this router share ONE definition of "the cheap opener"
   (`withoutCheapFlashLead`), applied by `buildTurnRunner` for `heal || complex`. They stay separate
   FLAGS — "this is a repair" and "this is a big app" are different questions with the same answer
@@ -4778,6 +4823,21 @@ with the exact action: set `AGENTV3_PROJECT_MODE=aashishcpmt09@gmail.com` on Clo
 mega-prompt, watch the module plan appear and advance, then `on` for everyone once happy. **That
 question has been open for over two months.** It is recorded here rather than acted on because the
 key lives in a console no session can reach.
+
+🔴 **CORRECTED 2026-09-30 (autopsy 8e124182) — EVERY MODULE BEFORE THE ONE THAT OWNS `src/App.tsx` WAS
+JUDGED "NOTHING BUILT YET".** The end-of-turn readiness gate read the untouched starter entry as an unbuilt
+app, so module 1 ("Core Types") failed (before 2026-09-26) or was told to keep going (after), and the model
+built the whole app inside module 1 while the plan recorded 1 of 14 done. `starterEntryExpectedFor` now
+tells the dispatcher that an entry-less module turn EXPECTS the starter. And the gate that opened it was
+counting a prompt template's `# Steps` as features — `enumeratedFeatures.ts` now skips instruction sections
+and the prose of a structured spec. (A module turn that over-builds is reconciled — see below.)
+🔒 **SAME AUTOPSY: THE SHELL IS NO WAY AROUND THE GREEN FREEZE.** A model refused twice wrote the file with
+`cat >`. The bash tool now asks the freeze about every file a command plainly writes (`shellWriteTargets`).
+✅ **Closed the same day (admin: "baaki bhi fix karo"):** the vaccine's repair is now the allowlisted pass
+`vaccine-repair` — its own snapshot, kept only if the suite then passes with the same command AND the app
+still renders (`strictReverify`), undone otherwise, and it may write neither a `.env` nor a test file.
+⚠️ **And a module turn that over-builds is now reconciled** (`reconcilePlanWithWrites`): every pending module
+whose owned files this turn wrote is marked done, so no turn is queued to rebuild them.
 
 ⚠️ **Three honest gaps, from that same entry and still open:** an IMPORTED repo never creates a plan
 (creation fires only on a fresh `new_build`); a reopened incomplete plan needs a typed "continue"
@@ -5000,7 +5060,7 @@ me" · "mera kharcha kam se kam ho").** Test-locked in `tests/agentRolesPerTier.
 | Credits / abuse / free-clamp | code | code | code | ₹0 — never a model |
 | Safety triage | code | code | code | `triagePrompt` is deterministic, precision-first |
 | Intent doubt-reader | free chat router | free chat router | free chat router | glm-4.7-flash led, $0; one-word answer |
-| **Plan** | glm-5.3-flash → own ladder | glm-5.3-flash → own ladder | glm-5.3 → own ladder | `PLAN_RUNG` / `planLadder`; input-heavy call on the cheapest rung that reasons well; **Grok no longer plans** |
+| **Plan** | glm-4.7-flashx → **Haiku** → rest of own ladder (2026-09-30) | glm-4.7-flashx → own ladder | glm-5.3 → own ladder | `PLAN_RUNG` / `planLadder`; input-heavy call on the cheapest rung that reasons well; **Grok no longer plans** |
 | Builder + sub-agents + fast lane | tier ladder | tier ladder | tier ladder | above |
 | Heals | ladder minus leading flash | same | same | `healLadder` |
 | Lint / typecheck / build / preview / journey / fuzz / CVE | code | code | code | ₹0 |

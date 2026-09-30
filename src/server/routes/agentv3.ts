@@ -358,13 +358,17 @@ import { decideCancelledBuildBill } from '../AgentV3/cancelledBuildBilling';
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
-import { shellModuleFor, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { shellModuleFor, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapStandsDownForProjectMode, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { createLaneWriteFence } from '../AgentV3/laneWriteFence';
 import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
-import { checkFeaturePresence, featurePresenceSummary, featurePresenceEvidence, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
+import { entryShadowRepairHint } from '../AgentV3/entryShadow';
+import { checkFeaturePresence, featurePresenceSummary, featurePresenceEvidence, featurePresenceRepairPrompt, featureHealEnabled, isSignInWall } from '../AgentV3/FeaturePresence';
+import { adoptHealResult } from '../AgentV3/healResult';
+import { signInExploreEnabled, signInScript, signInCandidates, parseSignInOutput, signInReportLine, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
+import { unsupportedStackRequested, unsupportedStackBuilderNote, unsupportedStackUserNote, builtWithLabel } from '../AgentV3/unsupportedStack';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
 import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
 import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel } from '../AgentV3/pricing';
@@ -411,7 +415,7 @@ import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionRe
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
-import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, testSkeletonsCanRun, starterTestsNarration } from '../AgentV3/TestGenerationAgent';
+import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, testSkeletonsCanRun, starterTestsNarration, failuresAreOurStarterTests, ourStarterTestFailedNote } from '../AgentV3/TestGenerationAgent';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from '../AgentV3/appDefaults';
 import { resolveAppDisplayName } from '../AgentV3/appDisplayName';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
@@ -428,7 +432,7 @@ import { provenFromTimeline } from '../AgentV3/provenFromTimeline';
 import { appRenderedRecord } from '../AgentV3/renderProof';
 import { apiTesterHintFor } from '../AgentV3/RuntimeErrorClassify';
 import { buildCostCeilingUsd, ledgerCostUsd, checkCostCeiling, costCeilingDetail } from '../AgentV3/buildCostCeiling';
-import { futilityMinutes, initialFutilityState, tickFutility, futilityDetail } from '../AgentV3/futilityBreaker';
+import { futilityMinutes, initialFutilityState, armedFutilityState, tickFutility, futilityDetail } from '../AgentV3/futilityBreaker';
 /** Hard per-session cost cap (USD). Prevents runaway retry spirals ($26 todo app problem).
  *  Set SESSION_COST_CAP_USD in env to override. Default: $5. */
 function sessionCostCapUsd(): number {
@@ -12507,6 +12511,17 @@ async function noteBuildOutcome(
     let commandsRun = 0;
     let futilityState = initialFutilityState();
     let futilityFired = false;
+    /**
+     * The breaker judges the BUILD, so it starts when the build does (autopsy a2b9c802 — JARVIS).
+     * Before this, the quiet window opened at request time and swallowed the platform's own bounded
+     * planners: a 240 s roadmap and a 315 s project planner left the architect 38 seconds before the
+     * breaker called the build futile. Armed by `armFutilityBreaker` just before the build loop (fast
+     * lane or architect); each planner before it carries its own bound, and the wall clock still
+     * governs the whole request.
+     */
+    let futilityArmed = false;
+    /** A COMPLETED command, from ANY lane — the one door both the architect and its sub-agents use. */
+    const noteCommandCompleted = (): void => { commandsRun += 1; };
 
     // MINUTE-BY-MINUTE TIMELINE — record a "still working" heartbeat every 60 s so the build report
     // shows what the build was doing each minute (and names any in-flight/stuck tool) instead of a
@@ -12525,7 +12540,7 @@ async function noteBuildOutcome(
       // It fires ONCE, like the cost ceiling: a second abort is harmless (AbortController is
       // idempotent) but would record a second identical finding, and a report that says the same
       // thing twice reads like two events.
-      if (!futilityFired) {
+      if (!futilityFired && futilityArmed) {
         try {
           const limit = futilityMinutes();
           const verdict = tickFutility(
@@ -13323,7 +13338,25 @@ async function noteBuildOutcome(
               detail: `scope signals: ${scope.signals.join('; ')} · complexity: simple`,
             });
           }
-          if (scope.decision === 'analyze' && !dispute) {
+          // ONE PLANNER PER BUILD (autopsy a2b9c802 — JARVIS). When Software Project Mode is going to
+          // decompose this prompt, the roadmap is a second planner over the same words: in that report
+          // it spent 240 s, came back cut off, and only THEN did the 315 s project planner start — nine
+          // minutes before the first line of code. Project mode is the stronger strategy for a prompt it
+          // reads as a mega-project (it builds the WHOLE thing across turns; a roadmap narrows it to step
+          // 1), so it owns the build and the roadmap stands down, said aloud in the report.
+          const projectModeOwns = roadmapStandsDownForProjectMode({
+            projectModeOn: projectModeEnabled(process.env, { userId, email }),
+            planFirst,
+            megaProject: detectMegaProject(planning.text),
+          });
+          if (projectModeOwns && scope.decision === 'analyze' && !dispute) {
+            buildDiag.record({
+              phase: 'plan', severity: 'info', code: 'MEGA_ROADMAP_STOOD_DOWN', autoResolved: true,
+              message: 'Mega-app roadmap stood down: Software Project Mode will decompose this build, so one planner runs instead of two.',
+              detail: `scope signals: ${scope.signals.join('; ')}`,
+            });
+          }
+          if (scope.decision === 'analyze' && !dispute && !projectModeOwns) {
             const rmStartedAt = Date.now();
             let rmProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
             const rmCall = makePlanTextRunner((used) => { rmProvider = used; }).runTurn({
@@ -14392,7 +14425,7 @@ async function noteBuildOutcome(
         onCommand: (c) => {
           // A COMPLETED command is one of the futility breaker's three progress signals — counted here,
           // at the one hook that fires on completion, so an attempt can never be mistaken for progress.
-          commandsRun += 1;
+          noteCommandCompleted();
           try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ }
         },
         onLlmCall: (c: Parameters<NonNullable<typeof buildDiag.recordLlmCall>>[0]) => {
@@ -14668,7 +14701,10 @@ async function noteBuildOutcome(
 
       const dispatcher = new ToolDispatcher(actuator, workspaceId, state, events, spawnSubAgent, git, secondOpinion, consensus, webSearch, deploy, onFileWrite, framework,
         // AI Diagnosis Bundle #3 — capture every sandbox command's raw logs into the build report.
-        (c) => { try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
+        // ⚠️ AND COUNT IT (autopsy a2b9c802): this hook only recorded, so the futility breaker never saw
+        // one command the ARCHITECT ran — only sub-agents' — and read a build that had just run `ls`
+        // and was mid-`npm install` as "0 commands".
+        (c) => { noteCommandCompleted(); try { buildDiag.recordCommand(c); } catch { /* diagnostics are best-effort */ } });
       // The spawn factory above holds a thunk to this; assigned here, before any sub-agent can run,
       // so a child's write-time compiles accumulate into the object the report actually reads.
       dispatcherForSubAgents = dispatcher;
@@ -15404,6 +15440,8 @@ async function noteBuildOutcome(
       // outcome — NOT a failed build to retry/escalate. (Real evidence: importing Mitrify escalated
       // 3-4× over 5 min and ran the readiness gate on the user's OWN imported code → "NOT READY 0/100".)
       const expectsArtifacts = (intent === 'new_build' || intent === 'edit_existing') && !isImportTurn;
+      // Only a NEW build is told about the named stack: an edit of an existing app already has one.
+      const unsupportedStackAsked = intent === 'new_build' && !isImportTurn ? unsupportedStackRequested(prompt) : null;
       // The deadline finalizer prices the same build and must use the same fact — see billingCtx.
       billingCtx.expectsArtifacts = expectsArtifacts;
       // The mandatory readiness gate audits code v5.0 BUILT — it must NOT judge a freshly-imported
@@ -15585,6 +15623,17 @@ async function noteBuildOutcome(
       // reconciles to ONE framework before writing features. Applies to any turn on an incoherent workspace;
       // '' (coherent, or flag off) leaves buildPrompt unchanged.
       if (frameworkCoherenceMsg) buildPrompt = `${frameworkCoherenceMsg}\n\n---\n\n${buildPrompt}`;
+      // THE USER NAMED A STACK WE DO NOT BUILD (autopsy 8e124182: "using PHP MVC architecture" was built
+      // in React with a types file claiming a "PHP MVC backend"). Told to the builder here, to the user
+      // in the ready message — see unsupportedStack.ts.
+      if (unsupportedStackAsked) {
+        buildPrompt = `${unsupportedStackBuilderNote(unsupportedStackAsked, framework)}\n\n---\n\n${buildPrompt}`;
+        buildDiag.record({
+          phase: 'plan', severity: 'info', code: 'UNSUPPORTED_STACK',
+          message: `The request names ${unsupportedStackAsked}, which NavBharatAI does not build; built in ${builtWithLabel(framework)} and told the user so.`,
+          autoResolved: true,
+        });
+      }
       // WHICH PREVIEW BROKE (autopsy "Lekhan Sahyak", 2026-09-27): a fix request from the in-browser
       // preview now says so, so the builder does not "fix" our renderer's fault in the user's files.
       // Outside every best-effort try below on purpose — a context-loading fault must not drop it.
@@ -16278,6 +16327,11 @@ async function noteBuildOutcome(
           }
         }
       }
+
+      // THE BUILD STARTS HERE, so the futility breaker's quiet window does too (futilityBreaker.ts,
+      // `armedFutilityState`): everything above is the platform's own bounded preparation.
+      futilityState = armedFutilityState({ filesWritten: writtenFiles.size, commandsRun, stepsDone: etaStepsDone });
+      futilityArmed = true;
 
       // Cost-ladder escalation (P3) — DORMANT unless AGENTV3_ESCALATION=on. When off,
       // this is exactly `await runner.run(buildPrompt)` (the start-tier build, once). When
@@ -19250,6 +19304,28 @@ async function noteBuildOutcome(
       // but was never confirmed to render, so nothing here was proven to RUN" — 1.4 seconds after the
       // same build had watched it render. Nothing failed, nothing logged; the report simply lied.
       let previewVerifiedRendered = false;
+      // LOOK BEHIND THE SIGN-IN PAGE (autopsy 8e124182 — signInExplore.ts). Signed in at most once per
+      // build, lazily, the first time a check meets the app's sign-in wall; every later browser check
+      // reads the same session. Null = never tried.
+      let authSession: SignInRun | null = null;
+      const signInBehindTheDoor = async (previewUrl: string): Promise<SignInRun> => {
+        if (authSession) return authSession;
+        const files = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
+        let run: SignInRun = { ran: false, signedIn: false, note: 'the sign-in check did not run', screens: [] };
+        try {
+          if (actuator.runCommand) {
+            const out = await withTimeout(actuator.runCommand(workspaceId, signInScript(previewUrl, signInCandidates(files))), SIGN_IN_BUDGET_MS + 15_000, 'sign-in-explore');
+            run = parseSignInOutput(out.stdout);
+          }
+        } catch { /* our instrument, never the app's verdict */ }
+        authSession = run;
+        try {
+          const line = signInReportLine(run);
+          buildDiag.record({ phase: 'preview', severity: 'info', code: line.code, message: line.message, autoResolved: true });
+        } catch { /* a report line must never affect a build */ }
+        return run;
+      };
+      const signedInState = (): string | null => (authSession?.signedIn ? SIGNED_IN_STATE_PATH : null);
       /**
        * 🔴 ONE FACT, ONE WRITE — the render proof's only producer (autopsy 697b38ee, 7th appearance).
        *
@@ -20013,7 +20089,14 @@ async function noteBuildOutcome(
             // FEATURE_COVERAGE finding in the report (present vs missing); it NEVER blocks a build (a
             // heuristic must never false-fail a working app). Auto-fixing the gaps is the next slice.
             try {
-              let coverage = checkFeaturePresence(milestoneRequest ?? prompt, html, declinedPresenceFeatures(featureConfirmation));
+              // Behind a sign-in page the features are not on this screen: sign in with the app's own demo
+              // account and probe the screens behind the door instead (signInExplore.ts).
+              let probeHtml = html;
+              if (signInExploreEnabled() && isSignInWall(String(html ?? '').toLowerCase()) && !abort.signal.aborted) {
+                const session = await signInBehindTheDoor(lastPreviewUrl);
+                if (session.signedIn && session.screens.length > 0) probeHtml = session.screens.map((sc) => sc.html).join('\n');
+              }
+              let coverage = checkFeaturePresence(milestoneRequest ?? prompt, probeHtml, declinedPresenceFeatures(featureConfirmation));
               // APP HEALTH CULTURE slice 2 (Phase 1b, opt-in AGENTV3_FEATURE_HEAL=on): the app renders
               // but a REQUESTED control is missing → run ONE bounded heal pass that adds the missing UI,
               // then re-open the running app and re-probe (only a control now in the live DOM counts).
@@ -20058,7 +20141,7 @@ async function noteBuildOutcome(
                     // Only a KEPT heal updates result + coverage; a reverted heal leaves the app exactly as
                     // green as it was, and the honest pre-heal FEATURE_COVERAGE warning below still stands.
                     if (vr.kept && healResult?.ok) {
-                      result = healResult as typeof result;
+                      result = adoptHealResult(result, healResult as typeof result);
                       if (afterHtml) {
                         const afterCoverage = checkFeaturePresence(milestoneRequest ?? prompt, afterHtml, declinedPresenceFeatures(featureConfirmation));
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
@@ -20067,7 +20150,7 @@ async function noteBuildOutcome(
                   } else {
                     const healed = await applyHeal();
                     if (healed.ok) {
-                      result = healed;
+                      result = adoptHealResult(result, healed);
                       try {
                         const after = (await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl')).html;
                         const afterCoverage = checkFeaturePresence(milestoneRequest ?? prompt, after, declinedPresenceFeatures(featureConfirmation));
@@ -20182,6 +20265,9 @@ async function noteBuildOutcome(
           // server, so it can never nudge a correct app. The loop's next iteration re-browses and re-checks
           // `rendered`, so this needs no separate revert net — an unfixed preview is reported honestly below.
           let repairPrompt = buildPreviewRepairPrompt(verdict.problems, consoleErrs);
+          // A cause the platform can already see goes to the repair pass, so it is not called "transient"
+          // (autopsy 876afca9). Best-effort: an unreadable file list simply adds nothing.
+          repairPrompt = entryShadowRepairHint(await actuator.listFiles(workspaceId).catch(() => [] as string[])) + repairPrompt;
           try {
             if (/cannot get|not serving the app|404/i.test(problems.join(' '))) {
               const curFiles = (await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string> }))).files;
@@ -20200,7 +20286,7 @@ async function noteBuildOutcome(
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
             const healed = await healRunner.run(repairPrompt);
-            if (healed.ok) result = healed;
+            if (healed.ok) result = adoptHealResult(result, healed);
           } catch (e) {
             console.log(`[AGENTV3] preview heal attempt ${attempt + 1} failed: ${e instanceof Error ? e.message : String(e)}`);
             break;
@@ -20291,7 +20377,7 @@ async function noteBuildOutcome(
           if (pageRoutes.length === 0) gateEvidence.noPageRoutes = true;
           if (pageRoutes.length > 0) {
             const out = await withTimeout(
-              actuator.runCommand(workspaceId, pageCheckScript(lastPreviewUrl, pageRoutes)),
+              actuator.runCommand(workspaceId, pageCheckScript(lastPreviewUrl, pageRoutes, { storageState: signedInState() })),
               20_000 + pageRoutes.length * PAGE_LOAD_TIMEOUT_MS, 'page-route-check',
             );
             const pageResults = parsePageCheck(out.stdout);
@@ -20370,7 +20456,7 @@ async function noteBuildOutcome(
           });
           if (journeys.length > 0) {
             const out = await withTimeout(
-              actuator.runCommand(workspaceId, journeyScript(lastPreviewUrl, journeys, marker)),
+              actuator.runCommand(workspaceId, journeyScript(lastPreviewUrl, journeys, marker, { storageState: signedInState() })),
               20_000 + journeys.length * JOURNEY_TIMEOUT_MS * 2, 'journey-check',
             );
             const journeyResults = parseJourneyResults(out.stdout);
@@ -20447,7 +20533,7 @@ async function noteBuildOutcome(
         try {
           const exploreFiles = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
           const out = await withTimeout(
-            actuator.runCommand(workspaceId, clickExplorerScript(lastPreviewUrl, { blockWrites: writesToUserDatabase(exploreFiles) })),
+            actuator.runCommand(workspaceId, clickExplorerScript(lastPreviewUrl, { blockWrites: writesToUserDatabase(exploreFiles), storageState: signedInState() })),
             EXPLORE_BUDGET_MS + 20_000, 'click-explorer',
           );
           const exploreRun = parseExploreOutput(out.stdout);
@@ -20825,6 +20911,25 @@ async function noteBuildOutcome(
               buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'TEST_SUITE', message: outcome.summary + (outcome.failingTests.length ? ` — failing: ${outcome.failingTests.slice(0, 8).join(', ')}` : ''), autoResolved: false });
               break;
             }
+            // OURS OR THEIRS, ON THE BRANCH WHERE IT COSTS A REPAIR (autopsy 8e124182). The missing-runner
+            // branch above already asks it; this one did not, so our own crashing starter test sent a model
+            // to rewrite the user's source. Our test failing is our defect — record it and stop.
+            {
+              const failingFiles = outcome.failingTests.map((t) => t.split(' > ')[0].trim()).slice(0, 8);
+              const failingContents: Record<string, string> = {};
+              for (const f of failingFiles) {
+                try { failingContents[f] = await actuator.readFile(workspaceId, f); } catch { /* unreadable ⇒ judged as theirs */ }
+              }
+              if (failuresAreOurStarterTests(outcome.failingTests, failingContents, finishingPaths)) {
+                buildDiag.record({
+                  phase: 'readiness', severity: 'info', code: 'TEST_SUITE_UNVERIFIED',
+                  message: ourStarterTestFailedNote(failingFiles),
+                  detail: outcome.summary,
+                  autoResolved: true, // not an app defect — nothing for the build to resolve
+                });
+                break;
+              }
+            }
             events.emit({ type: 'narration', agent: 'architect', text: `🧬 The app's own tests are failing (${outcome.summary}). Fixing the source now…`, ts: Date.now() });
             try {
               const vaxRunner = new AgentRunner({
@@ -20833,8 +20938,41 @@ async function noteBuildOutcome(
                 model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
+              // ON A WORKING APP THE REPAIR IS VERIFIED OR UNDONE (autopsy 8e124182). After the green latch
+              // this pass named nothing, so the freeze refused every edit — correctly, since nothing checked
+              // it — and a model told "fix the failing tests" then reached for the shell to get round it.
+              // Now it is a named, allowlisted pass ('vaccine-repair', never a .env and never a test file —
+              // greenFreeze.ts), run on a snapshot of the working app and KEPT ONLY IF the suite then passes
+              // with the same command AND the app still renders. Anything unproven goes back as it was.
+              if (isGreenLatched(workspaceId)) {
+                const snap = (await collectWorkspaceFiles(actuator, workspaceId).catch(() => ({ files: {} as Record<string, string> }))).files;
+                if (Object.keys(snap).length === 0) break; // no net ⇒ no repair on a working app
+                let healedRun: Awaited<ReturnType<typeof vaxRunner.run>> | null = null;
+                const vr = await verifyAfterFix<Record<string, string>>({
+                  snapshot: async () => snap,
+                  apply: async () => { healedRun = await runInPass('vaccine-repair', () => vaxRunner.run(testOutcomeRepairPrompt(outcome))); },
+                  reverify: strictReverify(async () => {
+                    if (!healedRun?.ok) return false;
+                    const again = await withTimeout(actuator.runCommand!(workspaceId, withSandboxBrowsers(plan.command, plan.framework)), 180_000, 'vaccine-reverify');
+                    if (!parseTestOutcome(plan, again.exitCode, again.stdout, again.stderr).ok) return false;
+                    if (!lastPreviewUrl || !actuator.browseUrl) return true; // tests pass; no preview to re-open
+                    const shot = await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'vaccine-render-check');
+                    const v = analyzePreviewHtml(shot.html, { painted: shot.painted, source: shot.source });
+                    return v.rendered && !v.inconclusive && !v.serverDown;
+                  }),
+                  revert: revertToGreenSnapshot,
+                });
+                try { buildDiag.record({ phase: 'readiness', ...verifyAfterFixNote('test-suite repair', vr) }); } catch { /* best-effort */ }
+                const kept = healedRun as Awaited<ReturnType<typeof vaxRunner.run>> | null;
+                if (vr.kept && kept?.ok) { result = adoptHealResult(result, kept); continue; }
+                // Undone (or never finished): the suite still fails as it did — say so, as the budget-out
+                // branch above does, instead of leaving the report silent about a real failing test.
+                gateEvidence.tests = 'failed';
+                buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'TEST_SUITE', message: outcome.summary + (outcome.failingTests.length ? ` — failing: ${outcome.failingTests.slice(0, 8).join(', ')}` : ''), autoResolved: false });
+                break;
+              }
               const healed = await vaxRunner.run(testOutcomeRepairPrompt(outcome));
-              if (healed.ok) result = healed; else break;
+              if (healed.ok) result = adoptHealResult(result, healed); else break;
             } catch (e) {
               console.log(`[AGENTV3] vaccine heal failed: ${e instanceof Error ? e.message : String(e)}`);
               break;
@@ -21198,7 +21336,7 @@ async function noteBuildOutcome(
                   persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                 });
                 const healed = await rtRunner.run(fuzzRepairPrompt(findings));
-                if (healed.ok) { result = healed; buildDiag.record({ phase: 'readiness', severity: 'info', code: 'FUZZ_HARDENED', message: `Hardened ${findings.length} input(s) against hostile input.`, autoResolved: true }); }
+                if (healed.ok) { result = adoptHealResult(result, healed); buildDiag.record({ phase: 'readiness', severity: 'info', code: 'FUZZ_HARDENED', message: `Hardened ${findings.length} input(s) against hostile input.`, autoResolved: true }); }
               } catch (e) {
                 console.log(`[AGENTV3] red-team heal failed: ${e instanceof Error ? e.message : String(e)}`);
               }
@@ -21293,7 +21431,8 @@ async function noteBuildOutcome(
             persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
           });
           try {
-            const applyFix = () => runInPass('runtime-error-autofix', () => fixRunner.run(buildRepairPrompt(captured)));
+            const shadowHint = entryShadowRepairHint(await actuator.listFiles(workspaceId).catch(() => [] as string[]));
+            const applyFix = () => runInPass('runtime-error-autofix', () => fixRunner.run(shadowHint + buildRepairPrompt(captured)));
             // VERIFY AFTER FIX (admin 2026-08-12) — this repair is ALLOWED to write to a green app, so it
             // must PROVE the app still works afterwards. Snapshot the working files, apply, re-render; if
             // the fix broke the app, roll back to the snapshot automatically. Only engaged once the app is
@@ -21339,11 +21478,11 @@ async function noteBuildOutcome(
               try { buildDiag.record({ phase: 'build', ...verifyAfterFixNote('runtime-error fix', vr) }); } catch { /* best-effort */ }
               // Promote the repaired result ONLY when it was kept — a reverted fix leaves the app exactly
               // as green as it was, so `result` must stay the working version, not the broken repair.
-              if (vr.kept && fixResult?.ok) result = fixResult as typeof result;
+              if (vr.kept && fixResult?.ok) result = adoptHealResult(result, fixResult as typeof result);
               if (vr.reverted) break; // the repair broke it and was undone — stop, do not try again
             } else {
               const fix = await applyFix();
-              if (fix.ok) result = fix;
+              if (fix.ok) result = adoptHealResult(result, fix);
             }
           } catch (e) {
             console.log(`[AGENTV3] auto-fix attempt ${attempt} failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -22167,7 +22306,7 @@ async function noteBuildOutcome(
                 // pass (below) leaves reviewCriticalsUnresolved set → the build finalizes honestly NOT-ok.
                 // (A completed pass is trusted here, matching the existing `result = fix` promotion; a
                 // future slice could re-review to confirm the criticals are actually gone.)
-                if (fix.ok) { result = fix; reviewCriticalsUnresolved = []; }
+                if (fix.ok) { result = adoptHealResult(result, fix); reviewCriticalsUnresolved = []; }
                 // Persist the repair's writes — MERGE, never replace: writtenFiles holds only THIS
                 // TURN's writes (on an edit turn that's a handful of files), and the old
                 // saveWorkspaceFiles call REPLACED the whole durable index with that partial set —
@@ -22365,9 +22504,16 @@ async function noteBuildOutcome(
       // note reflects the settled statuses. Best-effort — never affects the build result.
       if (projectPlanRef && projectModuleRef) {
         try {
-          const settled = result.ok
+          let settled = result.ok
             ? markModuleStatus(projectPlanRef, projectModuleRef.id, 'done')
             : markModuleStatus(projectPlanRef, projectModuleRef.id, 'failed', (result.summary || 'The build turn for this module failed.').slice(0, 300));
+          // A turn that built other modules' files too: those modules are done — never queue a turn to
+          // rebuild what this one already wrote (autopsy 8e124182; reconcilePlanWithWrites).
+          if (result.ok) {
+            const rec = reconcilePlanWithWrites(settled, writtenFiles.keys());
+            settled = rec.plan;
+            if (rec.alsoDone.length > 0) events.emit({ type: 'narration', agent: 'architect', text: `🧩 This step also built ${rec.alsoDone.length} more module(s): ${rec.alsoDone.slice(0, 4).join(', ')}${rec.alsoDone.length > 4 ? '…' : ''}.`, ts: Date.now() });
+          }
           await saveProjectPlan(workspaceId, settled);
           projectPlanRef = settled;
           state.setTodos(projectPlanTodos(settled));
@@ -22669,6 +22815,33 @@ async function noteBuildOutcome(
             } catch { /* the guard must never cost a user their save — fall through to the plain save */ }
           }
           const finalSave = saved ? Promise.resolve() : saveWorkspaceFiles(workspaceId, toSave).catch(() => {});
+          // THE COPY FOLLOWS EVERY PASS THAT CHANGED THE APP, NOT ONE (autopsy 876afca9, 2026-09-30).
+          // The copy is taken right after the production build, and four passes may still write after it —
+          // the vaccine repair, the runtime auto-fix, the reviewer's repair and the GreenGuard restore. Only
+          // the reviewer's repair re-took it (autopsy 972acde5), so in the calculator build the auto-fix
+          // deleted a file and the user's free preview stayed on the version before it. Asked HERE, once,
+          // of what is about to be persisted, so a pass added later cannot forget it. Bounded and single:
+          // a copy that cannot be re-taken stays what it was, and the line below still says it is stale.
+          if (snapshotTaken && refreshPreviewCopy && !abort.signal.aborted) {
+            const before = snapshotConfirmation({
+              taken: snapshotTaken,
+              persistedHash: workspaceContentHash(identitySource(persisted)),
+              persistedPaths: Object.keys(persisted ?? {}),
+            });
+            if (before.action !== 'restamp') {
+              armAdvisoryCap(PREVIEW_COPY_REFRESH_MS + 20_000);
+              const refreshed = await withTimeout(refreshPreviewCopy(), PREVIEW_COPY_REFRESH_MS, 'snapshot-refresh-final').catch(() => false);
+              try {
+                buildDiag.record({
+                  phase: 'readiness', severity: 'info', autoResolved: true,
+                  code: refreshed ? 'PREVIEW_SNAPSHOT_REFRESHED' : 'PREVIEW_SNAPSHOT_NOT_REFRESHED',
+                  message: refreshed
+                    ? 'A pass changed the app after its preview copy was taken, so the app was rebuilt and a fresh copy taken before the final save.'
+                    : 'A pass changed the app after its preview copy was taken, and a fresh copy could not be made in time — the earlier copy stays a fallback only.',
+                });
+              } catch { /* best-effort */ }
+            }
+          }
           // THE BINARY HALF OF THE SAME SAVE (autopsy 728a402d). The text store skips binaries, so an icon
           // or image a build made with a command lived only as long as this sandbox. Only when the turn's
           // own files are what was kept — a restored turn's pictures belong to the attempt, not the app.
@@ -23686,6 +23859,11 @@ async function noteBuildOutcome(
           }
         }
       } catch { /* the net must never break a settle */ }
+      // Once, on a successful build: the user asked for a stack we did not use (unsupportedStack.ts).
+      if (result.ok && unsupportedStackAsked && typeof result.summary === 'string') {
+        const stackNote = unsupportedStackUserNote(unsupportedStackAsked, framework);
+        if (stackNote && !result.summary.includes(stackNote.trim())) result = { ...result, summary: `${result.summary}${stackNote}` };
+      }
       const livePreviewLine = costBreakdown && result.ok ? livePreviewChargeLine(costBreakdown) : '';
       if (livePreviewLine && typeof result.summary === 'string') {
         result = { ...result, summary: `${result.summary}\n\n${livePreviewLine}` };

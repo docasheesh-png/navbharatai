@@ -180,6 +180,26 @@ export function detectMegaProject(prompt: string): boolean {
   return megaProjectSignals(prompt).fires;
 }
 
+/**
+ * ONE PLANNER PER BUILD (autopsy a2b9c802, 2026-09-30). The mega-app roadmap and Software Project Mode
+ * are both "big app" strategies over the same prompt, and the route ran them in SEQUENCE: the roadmap
+ * first (240 s, cut off at its token limit), then — because it produced nothing — the project planner
+ * (315 s, timed out). Nine minutes of planning before the first line of code, and the futility breaker
+ * then stopped the build 38 seconds into its real work.
+ *
+ * When project mode is on for this account and reads the prompt as a mega-project, it owns the build
+ * and the roadmap does not run. Project mode is the stronger strategy there (it builds the whole thing
+ * module by module; a roadmap narrows it to step 1). A plan-first turn is left alone — it has its own
+ * planner and project mode already stands down for it. PURE.
+ */
+export function roadmapStandsDownForProjectMode(input: {
+  projectModeOn: boolean;
+  planFirst: boolean;
+  megaProject: boolean;
+}): boolean {
+  return !!input.projectModeOn && !input.planFirst && !!input.megaProject;
+}
+
 /** Why Software Project Mode did not steer this build — `null` means it did. */
 export type ProjectModeSkipReason =
   | 'not-configured'
@@ -470,6 +490,36 @@ export function createProjectPlan(goal: string, framework: string, modules: Proj
  * BLOCKED (failed dependency / dependency cycle); use planBlockedReason to tell those apart
  * honestly. PURE.
  */
+/** Does this module own the file the app boots from (the one the "still the starter" check reads)? PURE. */
+export function moduleOwnsAppEntry(mod: Pick<ProjectModule, 'files'>): boolean {
+  // ONE question, one answer: `moduleOwnsEntry` below (autopsy 6a5fb04b) asks the same thing of a wider
+  // entry list, and two copies of "does this module own the entry?" would drift (merged 2026-09-30).
+  return moduleOwnsEntry(mod);
+}
+
+/**
+ * 🔴 A MODULE TURN THAT IS NOT MEANT TO TOUCH THE APP'S ENTRY WAS JUDGED AS AN UNBUILT APP (autopsy
+ * 8e124182, 2026-09-30).
+ *
+ * Module 1 of that plan was "Core Types & Domain Models" — one file, `src/types/index.ts`. It was built
+ * correctly in fifty seconds, and the end-of-turn readiness gate then said *"The app's entry point is
+ * still the starter template we seeded — nothing has been built yet"*. That is TRUE of every module
+ * turn before the one that owns `src/App.tsx`, and it is not a defect of any of them. Before 2026-09-26
+ * it failed the turn (so the plan could never auto-continue past module 1); since then
+ * `unfinishedResume` hands the model that blocker and says "continue" — so the model built the WHOLE
+ * app inside module 1's turn, the plan recorded 1 of 14 modules done, and the next thirteen turns were
+ * queued to rebuild what already existed.
+ *
+ * So the starter entry is EXPECTED on a module turn whose module does not own the entry, as long as a
+ * later module does. When no module owns it, nothing is expected and the gate keeps its question — some
+ * turn must build the entry, and a plan that forgot it must not be allowed to finish on the starter. PURE.
+ */
+export function starterEntryExpectedFor(plan: ProjectPlan, mod: ProjectModule): boolean {
+  // The same answer `shellModuleFor` gives (autopsy 6a5fb04b fixed this class in parallel, 2026-09-30):
+  // a later, unbuilt module assembles the app. Kept as a name so the call sites read as a question.
+  return shellModuleFor(plan, mod) !== null;
+}
+
 export function nextBuildableModule(plan: ProjectPlan): ProjectModule | null {
   const done = new Set(plan.modules.filter((m) => m.status === 'done').map((m) => m.id));
   const inProgress = plan.modules.find((m) => m.status === 'in_progress');
@@ -518,6 +568,30 @@ export function markModuleStatus(plan: ProjectPlan, id: string, status: ModuleSt
       return next;
     }),
   };
+}
+
+/**
+ * 🔴 A TURN THAT BUILT MORE THAN ITS MODULE LEFT THE PLAN BELIEVING NOTHING ELSE WAS BUILT (autopsy
+ * 8e124182, 2026-09-30). Module 1's turn wrote 33 files — the whole app — and the plan still recorded 1 of
+ * 14 done, so thirteen more turns were queued to build what already existed, each one billed.
+ *
+ * So after a successful module turn, every OTHER pending module whose owned files ALL exist now and were
+ * written in THIS turn is marked done as well, with a note saying so. Precision over recall: a module
+ * that owns no files, or any one of whose files this turn did not write, is left exactly as it was — its
+ * own turn will build or verify it. PURE.
+ */
+export function reconcilePlanWithWrites(plan: ProjectPlan, writtenThisTurn: Iterable<string>): { plan: ProjectPlan; alsoDone: string[] } {
+  const written = new Set([...writtenThisTurn].map((p) => String(p ?? '').replace(/^\.\//, '')));
+  const alsoDone: string[] = [];
+  let next = plan;
+  for (const m of plan.modules) {
+    if (m.status === 'done' || m.status === 'in_progress') continue;
+    const files = (m.files ?? []).map((f) => String(f ?? '').replace(/^\.\//, '')).filter(Boolean);
+    if (files.length === 0 || !files.every((f) => written.has(f))) continue;
+    next = markModuleStatus(next, m.id, 'done', 'built during an earlier module\'s turn');
+    alsoDone.push(m.name);
+  }
+  return { plan: next, alsoDone };
 }
 
 /** Progress counts + a one-line honest summary. PURE. */

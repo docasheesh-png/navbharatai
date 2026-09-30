@@ -46,6 +46,24 @@ const DOMAINS: DomainDef[] = [
     ],
   },
   {
+    // A STOCK / INVENTORY REGISTER IS NOT A SHOP (autopsy 8e124182, 2026-09-30). With no domain of its own,
+    // a stock-inventory app (add items, stock in, stock out, low-stock alerts, Excel export) matched
+    // ecommerce on the word "inventory" and would have been told it lacked a cart, checkout and refunds.
+    // Deliberately a PHRASE headline, never the bare word: a shop that "tracks inventory" is still a shop,
+    // and scores higher on ecommerce's own features anyway. Listed before ecommerce so an exact tie —
+    // which only a genuine inventory prompt can produce — goes here.
+    key: 'inventory',
+    re: /\b(?:stock|inventory)\s+(?:management|manager|register|keeping|control|tracker|tracking|system|app(?:lication)?)\b|\bstock\s+(?:in|out)\b|\b(?:add|reduce|issue|receive)\s+stock\b|\bwarehouse\s+(?:stock|inventory)\b|\bgodown\s+stock\b|स्टॉक/i,
+    features: [
+      { label: 'stock in / stock out ledger', re: /stock\s*(?:in|out)|add\s+stock|reduce\s+stock|issue|receive|movement|transaction/i },
+      { label: 'low-stock alerts', re: /low.?stock|reorder|threshold|alert/i },
+      { label: 'items with units + suppliers', re: /unit|vendor|supplier|sku|item/i },
+      { label: 'reports & export', re: /report|export|excel|csv|download/i },
+      { label: 'audit trail of changes', re: /audit|history|log/i },
+      { label: 'roles (who may change stock)', re: /role|rbac|permission|admin|staff/i },
+    ],
+  },
+  {
     key: 'ecommerce',
     // `shop`/`store`/`cart` are boundary-anchored (see the corpus test): unanchored they matched inside
     // "photoshop", "bookstore"/"restore" and "cartoon", turning a drawing app into an ecommerce build.
@@ -420,6 +438,11 @@ const NON_DOMAIN_USES: RegExp[] = [
   // restaurant — a navigation menu is not a food menu; POS is also "position".
   /\b(?:nav(?:igation)?|hamburger|burger|side|slide.?out|drop.?down|context|main|top|bottom|tab|kebab|user|profile|settings?|mobile|left|right)\s*-?\s*menus?\b/gi,
   /\bmenus?\s+(?:bar|item|button|icon|toggle|opens?|closes?)\b/gi,
+  // …and a SECTION of an app's navigation named after what it manages (autopsy 8e124182, 2026-09-30): a
+  // stock-inventory spec's "Add New Stock Item Menu" / "Reduce Stock Items Menu" was read as a restaurant,
+  // and the builder was told to include kitchen order tickets, GST invoices and delivery. A food menu is
+  // never an "items menu" — a restaurant writes "menu items".
+  /\b(?:items?|stocks?|inventory|products?|reports?|admin|dashboard|options?|actions?|features?|app|sub)\s*-?\s*menus?\b/gi,
   // logistics — a device driver is not a delivery rider.
   /\b(?:device|database|db|odbc|jdbc|display|graphics|printer|audio|network|usb|chrome|web)\s+drivers?\b/gi,
   // booking — a support ticket is not an event ticket; a book is a thing on a shelf.

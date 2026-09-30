@@ -72,6 +72,34 @@ export function tscNeverRan(output: string | null | undefined): boolean {
 }
 
 /**
+ * What a `tsc --noEmit` output SAYS, read from the output alone — the ONE reader of that question
+ * (autopsy a2b9c802, 2026-09-30).
+ *
+ * WHY ONE READER: two used to exist and they disagreed. `tscOutputProvesClean` (project memory)
+ * refused an install that failed before tsc could start (`npm ERR!`, `Cannot find module 'typescript'`),
+ * while `typecheckEvidenceFromCommands` (the release gate's evidence) asked only "is there an
+ * `error TS` line?" — so the same output was "not proven" to memory and a PASSING typecheck to the
+ * gate. And the build report could say neither: every piped run is recorded with `exitCode: null`
+ * (the shell's code is `head`'s, not tsc's), so its line read `exit ?` and a reader could not tell a
+ * clean compile from forty errors.
+ *
+ *  • `passed`  — the compiler ran and reported nothing. An EMPTY output is the genuinely clean case.
+ *  • `failed`  — at least one real `error TS####`.
+ *  • `not-run` — a help page or a missing binary: the compiler never looked at the project.
+ *  • `unknown` — something else stopped it (a failed install, a missing module): not a verdict.
+ * Pure.
+ */
+export type TscVerdict = 'passed' | 'failed' | 'not-run' | 'unknown';
+
+export function tscVerdict(output: string | null | undefined): TscVerdict {
+  const out = String(output ?? '');
+  if (hasTscErrors(out)) return 'failed';
+  if (tscNeverRan(out)) return 'not-run';
+  if (/command not found|: not found|No such file or directory|ENOENT|Cannot find module 'typescript'|npm ERR!|npm error/i.test(out)) return 'unknown';
+  return 'passed';
+}
+
+/**
  * Does this `tsc --noEmit` output PROVE the project compiles? Stricter than `!hasTscErrors` on purpose:
  * zero `error TS` lines is also what a help page, a missing binary and a failed install print, and a
  * "clean" read off any of those would resolve real errors from memory and tell agents "tsc already
@@ -79,11 +107,29 @@ export function tscNeverRan(output: string | null | undefined): boolean {
  * counts. An EMPTY output is the genuinely clean case (tsc prints nothing on success). Pure.
  */
 export function tscOutputProvesClean(output: string | null | undefined): boolean {
-  const out = String(output ?? '');
-  // "Did the compiler run?" is asked ONCE, by `tscNeverRan` (help page, missing binary) — this adds only
-  // what that question does not cover: an install that failed before tsc could start.
-  if (hasTscErrors(out) || tscNeverRan(out)) return false;
-  return !/command not found|: not found|No such file or directory|ENOENT|Cannot find module 'typescript'|npm ERR!|npm error/i.test(out);
+  return tscVerdict(output) === 'passed';
+}
+
+/**
+ * The outcome half of a command's report line (autopsy a2b9c802, 2026-09-30). A command with an exit
+ * code says `exit N`, exactly as before. A TYPECHECK recorded without one — every piped `tsc | head`,
+ * whose shell code is `head`'s — used to print `exit ?`, and the report could not tell a clean compile
+ * from forty errors. It now prints what `tscVerdict` reads from the output, and says that is where the
+ * answer came from. Any other command with no code keeps `exit ?`: we do not know, and say so. Pure.
+ */
+export function commandOutcomeText(rec: { command: string; exitCode: number | null; stdout?: string | null; stderr?: string | null }): string {
+  if (rec.exitCode !== null && rec.exitCode !== undefined) return `exit ${rec.exitCode}`;
+  if (!looksLikeTypecheckCommand(rec.command)) return 'exit ?';
+  const out = `${rec.stdout ?? ''}\n${rec.stderr ?? ''}`;
+  switch (tscVerdict(out)) {
+    case 'passed': return 'clean (read from the output; the pipe hides tsc\'s own exit code)';
+    case 'failed': {
+      const n = countTscErrors(out);
+      return `${n} type error${n === 1 ? '' : 's'} (read from the output; the pipe hides tsc's own exit code)`;
+    }
+    case 'not-run': return 'the compiler did not run (help page or missing binary)';
+    default: return 'no verdict (the compiler was stopped before it could check)';
+  }
 }
 
 /**
@@ -128,10 +174,13 @@ export function typecheckEvidenceFromCommands(
   let verdict: 'passed' | 'failed' | undefined;
   for (const c of commands) {
     if (!looksLikeTypecheckCommand(c?.command)) continue;
-    const out = `${c.stdout ?? ''}\n${c.stderr ?? ''}`;
-    if (tscNeverRan(out)) continue; // never really ran (help page / missing binary) — not evidence either way
+    const v = tscVerdict(`${c.stdout ?? ''}\n${c.stderr ?? ''}`);
+    // Never really ran (help page / missing binary), or stopped before it could (a failed install) —
+    // not evidence either way. The second half used to read as a PASS here while project memory
+    // refused it; both now ask `tscVerdict`.
+    if (v !== 'passed' && v !== 'failed') continue;
     // Latest wins — a later run supersedes an earlier one (the agent may have fixed errors in between).
-    verdict = hasTscErrors(out) ? 'failed' : 'passed';
+    verdict = v;
   }
   return verdict;
 }

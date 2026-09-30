@@ -5,6 +5,8 @@
 // network policy), it reports "scan unavailable" — it NEVER fakes a clean "0 vulnerabilities" (a fake all-
 // clear on a vulnerable app is worse than an honest "couldn't scan"). The parse/query/format logic is pure
 // and fully unit-tested with an injected fetch; the live HTTP call runs in the real build sandbox.
+import { unfixablePackageAdvice } from './unfixablePackages';
+
 
 export interface DepRef { name: string; version: string; /** true when the version was inferred from a range, not a lockfile */ approx?: boolean; }
 export interface VulnFinding { package: string; version: string; ids: string[]; approx?: boolean; }
@@ -108,7 +110,10 @@ export async function scanVulnerabilities(deps: ReadonlyArray<DepRef>, fetchFn?:
 export function vulnScanSummary(result: VulnScanResult): string {
   if (!result.ok) return `⚠️ Vulnerability scan could NOT run: ${result.reason}. (Not a clean bill of health — re-run where OSV.dev is reachable.)`;
   if (result.findings.length === 0) return `✓ No known vulnerabilities in ${result.scanned} dependency(ies) (OSV.dev).`;
-  const lines = result.findings.map((f) =>
-    `  ✗ ${f.package}@${f.version}${f.approx ? ' (approx — no lockfile)' : ''}: ${f.ids.length} advisory(ies) — ${f.ids.slice(0, 5).join(', ')}${f.ids.length > 5 ? ', …' : ''} (details: https://osv.dev/vulnerability/${f.ids[0]})`);
-  return `⚠️ ${result.findings.length} vulnerable dependency(ies) found (of ${result.scanned} scanned, via OSV.dev):\n${lines.join('\n')}\nUpgrade each to a patched version.`;
+  const lines = result.findings.map((f) => {
+    const advice = unfixablePackageAdvice(f.package);
+    return `  ✗ ${f.package}@${f.version}${f.approx ? ' (approx — no lockfile)' : ''}: ${f.ids.length} advisory(ies) — ${f.ids.slice(0, 5).join(', ')}${f.ids.length > 5 ? ', …' : ''} (details: https://osv.dev/vulnerability/${f.ids[0]})${advice ? `\n    → ${advice}` : ''}`;
+  });
+  // "Upgrade to a patched version" is advice only where one exists (autopsy 8e124182: xlsx has none on npm).
+  return `⚠️ ${result.findings.length} vulnerable dependency(ies) found (of ${result.scanned} scanned, via OSV.dev):\n${lines.join('\n')}\nUpgrade each to a patched version where one exists; where none does, the line above says what to use instead.`;
 }

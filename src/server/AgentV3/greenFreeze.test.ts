@@ -126,10 +126,25 @@ describe('the allowlist — the user\'s own requests still write to a green app'
     // the click explorer PRESSED in a real browser and saw break. Same restraints as the reviewer repair:
     // an unproven result is undone (strictReverify), every button is pressed again before the change is
     // kept, and no .env file (asserted below).
+    //
+    // 'vaccine-repair' was added 2026-09-30 (autopsy 8e124182, admin: "baaki bhi fix karo") — the app's
+    // OWN test suite failing on a working app. Unnamed, every edit was refused and the model went round
+    // the freeze with the shell. Kept only if the suite then passes with the same command AND the app still
+    // renders (strictReverify), and it may touch neither a .env file nor a test file (asserted below).
     expect([...ALLOWED_PASSES].sort()).toEqual([
       'design-consistency-heal', 'explorer-repair', 'feature-presence-heal', 'green-guard-restore',
-      'reviewer-functional-repair', 'runtime-error-autofix', 'sandbox-file-restore',
+      'reviewer-functional-repair', 'runtime-error-autofix', 'sandbox-file-restore', 'vaccine-repair',
     ]);
+  });
+
+  it('the test-suite repair fixes the SOURCE: never a test file, never a secret', async () => {
+    latchGreen(WS, ['src/App.tsx', 'src/lib/auth.test.ts', '.env']);
+    await runInPass('vaccine-repair', async () => {
+      expect(writeRefused(WS, 'src/lib/auth.ts')).toBe(false);
+      expect(writeRefused(WS, 'src/lib/auth.test.ts')).toBe(true);
+      expect(writeRefused(WS, 'e2e/smoke.spec.ts')).toBe(true);
+      expect(writeRefused(WS, '.env')).toBe(true);
+    });
   });
 });
 

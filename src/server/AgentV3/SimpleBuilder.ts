@@ -13,6 +13,7 @@
 // Side-effects (model call, file writes, preview) are INJECTED so the manifest/parse/prompt logic is
 // fully unit-testable without a sandbox.
 
+import { dropShadowingEntries } from './entryShadow';
 import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE } from './noEvalRule';
 import { posix } from 'node:path';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
@@ -642,6 +643,11 @@ export function contractBlock(contract: string | undefined, at?: { path: string;
 // so once the owner EXISTS, even a file that still guesses is corrected for free before `tsc` runs.
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** Kill switch — `AGENTV3_UTIL_OWNER=off` leaves contract helpers without a named file, as before. Default ON. */
+export function utilOwnerEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.AGENTV3_UTIL_OWNER ?? '').trim().toLowerCase() !== 'off';
+}
+
 /** Kill switch — `off` restores the prose-only contract exactly. Default ON. */
 export function contractFileEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.AGENTV3_CONTRACT_FILE ?? '').trim().toLowerCase() !== 'off';
@@ -672,6 +678,69 @@ export function contractImportSpecifier(fromPath: string, contractPath: string):
   let rel = posix.relative(posix.dirname(fromPath), contractPath).replace(/\.tsx?$/, '');
   if (!rel.startsWith('.')) rel = `./${rel}`;
   return rel;
+}
+
+/**
+ * The utility functions the contract declares WITHOUT a body (`export function calculate(a: number): number;`).
+ *
+ * 🔴 WHY THESE NEED AN OWNER (autopsy 876afca9, 2026-09-30 — "Create a calculation app"). The contract
+ * declared four helpers (`calculate`, `isValidOperand`, `formatResult`, `generateCalculationId`), the
+ * contract FILE rightly kept only the types, and the prompt said helpers "are implemented in the file the
+ * file list names for them". The file list named NO file for them. So `App.tsx` imported all four from
+ * `./types`, `tsc` failed with five errors, and the repair spent 241 s — 53% of the lane — writing the
+ * helpers into the types file. A symbol with no home gets a guessed home, the same defect the contract
+ * file was built to end for types. PURE.
+ */
+export function contractUtilSignatures(contract: string | undefined): string[] {
+  let text = String(contract ?? '').replace(/\r\n?/g, '\n');
+  text = text.replace(/^[ \t]*```[a-zA-Z]*[ \t]*$/gm, '');
+  const names: string[] = [];
+  for (const st of topLevelStatements(text)) {
+    const m = /^(?:export\s+)?(?:declare\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)/.exec(st);
+    if (!m) continue;
+    if (!/;\s*$/.test(st) && /\}\s*$/.test(st)) continue; // ends in `}` with no `;`: it has a body
+    if (!names.includes(m[1])) names.push(m[1]);
+  }
+  return names;
+}
+
+export interface UtilOwner {
+  /** The file that implements and exports the contract's utility functions. */
+  path: string;
+  /** True when the lane ADDED this file to the manifest (no planned file owned the helpers). */
+  added: boolean;
+}
+
+/**
+ * Which file implements the contract's bodiless helpers — the one the manifest already gives them, or a
+ * new `utils.ts` beside the contract file. PURE (the caller applies `added` to its manifest).
+ *
+ * Owner, in order: a planned file whose purpose names one of the helpers; a planned `utils`/`helpers`
+ * file in the contract's folder; otherwise a new `<contract folder>/utils.ts`. Never the contract file
+ * itself — that file holds types only, and a bodiless signature there is a compile error.
+ */
+export function utilOwnerFor(manifest: ReadonlyArray<SimpleFileSpec>, names: readonly string[], contractPath: string): UtilOwner | null {
+  if (names.length === 0) return null;
+  const candidates = manifest.filter((f) => f.path !== contractPath && /\.[jt]sx?$/.test(f.path));
+  const named = candidates.find((f) => names.some((n) => new RegExp(`\\b${n.replace(/\$/g, '\\$')}\\b`).test(f.purpose || '')));
+  if (named) return { path: named.path, added: false };
+  const dir = posix.dirname(contractPath);
+  const inDir = (p: string) => posix.dirname(p) === dir;
+  const helper = candidates.find((f) => inDir(f.path) && /(^|\/)(utils?|helpers?)\.[jt]s$/i.test(f.path));
+  if (helper) return { path: helper.path, added: false };
+  const ext = /\.js$/.test(contractPath) ? 'js' : 'ts';
+  return { path: dir === '.' ? `utils.${ext}` : `${dir}/utils.${ext}`, added: true };
+}
+
+/** The purpose line the lane gives the helpers' owner, naming each helper it must implement. PURE. */
+export function utilOwnerPurpose(names: readonly string[], existing?: string): string {
+  const need = `Implements and exports these shared utility functions exactly as the shared contract declares them: ${names.join(', ')}.`;
+  return existing ? `${existing} ${need}` : need;
+}
+
+/** The note appended to the contract text so every per-file and repair call knows where the helpers live. PURE. */
+export function utilOwnerNote(names: readonly string[], ownerPath: string): string {
+  return `\n// The utility functions above (${names.join(', ')}) are implemented and exported by ${ownerPath} — import them from that file, never from the types file.`;
 }
 
 export interface ContractModule {
@@ -1295,7 +1364,12 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       const planned = parseFileManifest(manifestText);
       const provided = new Set(providedBoilerplate(deps.scaffoldPaths));
       const droppedBoilerplate = planned.filter((m) => provided.has(m.path)).map((m) => m.path);
-      const kept = droppedBoilerplate.length ? planned.filter((m) => !provided.has(m.path)) : planned;
+      const keptBoilerplate = droppedBoilerplate.length ? planned.filter((m) => !provided.has(m.path)) : planned;
+      // A second index.html in public/ shadows a Vite app's real entry (autopsy 876afca9) — see entryShadow.ts.
+      const { kept, dropped: droppedShadow } = dropShadowingEntries(keptBoilerplate, deps.framework);
+      if (droppedShadow.length) {
+        deps.log?.(`Leaving out ${droppedShadow.join(', ')} — in this project the page entry is the root index.html, and a copy in public/ would shadow it.`);
+      }
       // The plan must connect what it builds to the screen — see ensureEntryPlanned.
       const { manifest, injected: injectedEntry } = ensureEntryPlanned(kept, deps.starterEntryPath);
       if (droppedBoilerplate.length) {
@@ -1398,6 +1472,19 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           contractFile = { path: contractPath, content: mod.source };
           generatedSoFar.push(contractFile); // salvageable on a timeout, like any finished file
           deps.log?.(`📐 Wrote the shared contract as ${contractPath} — ${mod.symbols.length} shared symbol(s) every file imports from one place.`);
+        }
+      }
+      // THE HELPERS GET A HOME TOO (autopsy 876afca9) — see `contractUtilSignatures`. A helper the
+      // contract declares and no planned file owns is given one, before file one, and every call is told.
+      if (contract && utilOwnerEnabled() && frameworkSupportsContractFile(deps.framework)) {
+        const names = contractUtilSignatures(contract);
+        const owner = utilOwnerFor(manifest, names, contractPath || contractFilePath(manifest));
+        if (owner) {
+          const existing = manifest.find((f) => f.path === owner.path);
+          if (existing) existing.purpose = utilOwnerPurpose(names, existing.purpose);
+          else manifest.push({ path: owner.path, purpose: utilOwnerPurpose(names) });
+          contract = `${contract}${utilOwnerNote(names, owner.path)}`;
+          if (owner.added) deps.log?.(`🧰 ${names.length} shared helper(s) had no file to live in — added ${owner.path} for them.`);
         }
       }
       deps.log?.(`Building ${manifest.length} file(s) — one focused pass each…`);

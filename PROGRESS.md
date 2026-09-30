@@ -85593,6 +85593,36 @@ Admin: *"mobile friendly game/app bane — mobile first!!!!!!"*, choosing touch 
 - The phone check reports and offers a fix; it does not repair on its own. A verified repair (like the
   explorer's) waits until `MOBILE_LAYOUT_ISSUES` has appeared on real builds.
 - Games built before today get the controls only when rebuilt.
+
+## 2026-09-30 — Autopsy bee95692 ("Social media app", Weak, 14.5 min, ₹165.64): green, ~5 min lost to one typo
+
+The app rendered and passed the production build. The explorer pressed 14 controls. The build was
+deployed with today's fixes (#3397–#3411). The complex route was correct for a social app.
+
+**Fixed (all reversion-proven, `tests/theSocialAppAutopsy.test.ts`):**
+1. **`.node_modules/.bin/vite` (4×) and `.node_modules/.bin/tsc` (2×).** No project has that folder.
+   - `fixNodeModulesTypo` corrects the path before the shell runs, and the agent is told.
+   - `DevServerRecovery` classifies `PATH: No such file or directory` as `code_error`. It used to say "no
+     recognisable error" and restart twice, 72 s a time, four times.
+2. **False Rules-of-Hooks blocker.** `return useSyncExternalStore(...)` was read as "a hook after an early
+   return". The return that CONTAINS the call was counted as before it. That fed a resume round, and a
+   correct hooks file was rewritten three times. A return now counts only if it ENDS before the call.
+3. **getSnapshot returned a new array per call → "Maximum update depth exceeded".** The preview crashed and
+   a repair pass ran. `STABLE_SNAPSHOT_RULE` now reaches both lanes.
+4. **The build-start database offer read only the message ("Yes").** It now reads `planning.text`, the same
+   text the complexity score and the plan read. "social media/network app" is now a shared-data signal
+   (social-media marketing is not).
+
+**Recorded, not changed:** the lean post-build reviewer timed out at 45 s in 3 of today's 4 reports. It
+spends tokens and returns nothing. Raising or dropping it is an admin decision.
+
+**Follow-up (admin chose "fix the timeout", after being told that skipping the review on green apps would
+also switch off the one verified functional repair, `selectGreenRepairable`):**
+5. **The lean reviewer was handed all 11 changed files in full and read them all again anyway** (`glob`,
+   then one `read_file` each), then timed out. "Do NOT read these again" was advice, not a mechanism.
+   When every changed source file fits inline (`leanReviewAnswersInOneCall`), the review now spawns with
+   NO tools (`toolsOverride: []` on `makeSubAgentSpawn`): it can only answer, in one call. When a changed
+   file did not fit, it keeps its read tools. The skip-the-review option was withdrawn, not shipped.
 ## 2026-09-30 — Autopsy a9f8d186: "circle to search", Weak, 17.5 min — rendered, then called "sandbox unavailable" and made free
 
 The prompt asked for a circle-to-search app with a QR scanner, screen translation, music recognition, an

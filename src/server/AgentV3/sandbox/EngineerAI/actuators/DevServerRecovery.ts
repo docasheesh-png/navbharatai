@@ -616,6 +616,19 @@ export function classifyDevServerFailure(log: string): DevServerDiagnosis {
     return make('code_error', `The command changed directory into "${dir}", which does not exist in this project — so the dev server was never started (a restart cannot fix it). Run the command from the project root, or create that directory first.`);
   }
 
+  // 4.95) THE COMMAND ITSELF DOES NOT EXIST. `/bin/bash: line 1: .node_modules/.bin/vite: No such file or
+  //       directory` (autopsy bee95692, 2026-09-30): the builder typed `.node_modules` for `./node_modules`,
+  //       the shell could not even start the program, and this function called it "no recognisable
+  //       error" and restarted the identical command twice — 72 s a time, four times, ~5 min of a 14.5-min
+  //       build. A path that is not there cannot appear by itself, so nothing is retried; the detail names
+  //       the path, and the one typo that produces it most is spelled out.
+  const noExe = text.match(/(?:^|\n)[^\n]*?(?:line \d+:\s*)([.~\/\w-][^\s:]*):\s*No such file or directory/i);
+  if (noExe && !/^cd$/i.test(noExe[1])) {
+    const path = noExe[1].trim();
+    const hint = path.startsWith('.node_modules/') ? ` Did you mean "./${path.slice(1)}"? (the folder is node_modules, with no leading dot)` : '';
+    return make('code_error', `The command tried to run "${path}", which does not exist — so the dev server was never started (a restart cannot fix it).${hint}`);
+  }
+
   // 5) Generic crash signals — retry once.
   if (/\bELIFECYCLE\b/i.test(text) || /npm ERR!/i.test(text) || /exited with (?:code|signal)/i.test(text) || /\bError:/i.test(text)) {
     const line = (text.match(/[^\n]*(?:npm ERR!|ELIFECYCLE|exited with|Error:)[^\n]*/i) || [''])[0].trim().slice(0, 200);

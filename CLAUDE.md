@@ -3297,6 +3297,10 @@ the flag entries above promise.
   is in TOKENS, never in strictness. ⚠️ "Could not look" (not green, not proven broken, build ok) is
   ALSO lean, on purpose: Green Stop already made it suggest-only (*ignorance is not a licence to
   edit*, 2026-08-23), so an offer costs an offer's price there too. Report code `REVIEW_LEAN`.
+  🔒 **When every changed file fits inline, the lean review has NO tools (autopsy bee95692, 2026-09-30)** —
+  it was handed the code and read it all again anyway, then timed out; `leanReviewAnswersInOneCall` +
+  `toolsOverride: []`. ⚠️ Do NOT "save money" by skipping this review on green apps: it is also what
+  finds the bugs for `AGENTV3_GREEN_FUNCTIONAL_REPAIR` (the admin was asked and chose the fix).
   Test-locked and reversion-proven four ways in `tests/aSuggestionCostsASuggestionsPrice.test.ts`.
   **What to watch:** reviewer token share on green builds (34% → single digits expected), and that
   the reviewer's findings on NOT-green builds are as complete as before.

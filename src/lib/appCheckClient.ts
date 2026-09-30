@@ -122,7 +122,17 @@ async function loadNativeAppCheck(): Promise<NativeAppCheck | null> {
   // A phone app built before the plugin shipped has no native half. Asking it would throw
   // "not implemented"; asking first keeps that an ordinary "missing".
   if (!Capacitor.isPluginAvailable('FirebaseAppCheck')) return null;
-  return FirebaseAppCheck as unknown as NativeAppCheck;
+  // 🔴 NEVER `return FirebaseAppCheck` from here (report 2026-09-30, iOS:
+  // `"FirebaseAppCheck.then()" is not implemented on ios @ unhandled promise`). The plugin is a Capacitor
+  // PROXY that turns every property read into a native call, and resolving this async function's promise
+  // reads `.then` off the value to see whether it is a thenable. The proxy dispatched a native method named
+  // `then`, which rejected unhandled — and, because that `then` never called back, `installAppCheck`'s
+  // `await` never settled, so App Check never started on ANY phone. Same class as PlayBilling (2026-09-15);
+  // `tests/aPluginProxyIsNeverAPromisesValue.test.ts` now guards every file, not only the ones reported.
+  return {
+    initialize: (opts) => FirebaseAppCheck.initialize(opts),
+    getToken: (opts) => FirebaseAppCheck.getToken(opts),
+  };
 }
 
 let installed = false;

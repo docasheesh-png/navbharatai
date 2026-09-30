@@ -14,6 +14,8 @@
 //                    they already completed is a dead end that looks like a bug.
 //   • complete     → not done: "Complete →", which lands on the Verifications card of the profile, or on
 //                    the Wallet for the referral code (that box lives there, not on the profile).
+//   • missed       → the chance has passed (the referral code after three app opens or seven days,
+//                    admin 2026-09-30): ❌ and no button, because there is nothing left to complete.
 // The rows themselves come from the SERVER, already filtered to the asking surface — so the website
 // shows its two steps and "refer" appears only while the account can still apply a code.
 
@@ -21,7 +23,7 @@ import type { ChecklistRow } from './referralChecklist';
 import { readyReferralSteps, type ReferralSurface } from './referralClaim';
 import type { RewardStep } from './referralStepNames';
 
-export type RewardRowState = 'done' | 'claim' | 'complete';
+export type RewardRowState = 'done' | 'claim' | 'complete' | 'missed';
 export type RewardRowTarget = 'profile' | 'wallet';
 
 export interface RewardChecklistRow {
@@ -57,6 +59,7 @@ export const REWARD_STEP_NAMES: Record<RewardStep, string> = {
 
 function hintFor(step: RewardStep, state: RewardRowState): string {
   if (state === 'done') return 'Claimed';
+  if (state === 'missed') return 'Missed — a code can be applied only in the first 3 app opens or 7 days';
   if (state === 'claim') return 'Done — tap Claim to add it to your wallet';
   switch (step) {
     case 'signup': return 'Added when you sign in';
@@ -94,7 +97,9 @@ export function rewardsChecklistModel(p: RewardChecklistInput): RewardChecklistM
   }, p.surface));
 
   const rows: RewardChecklistRow[] = p.rows.map((r) => {
-    const state: RewardRowState = r.claimed ? 'done' : ready.has(r.step) ? 'claim' : 'complete';
+    const state: RewardRowState = r.claimed ? 'done'
+      : r.missed ? 'missed'
+      : ready.has(r.step) ? 'claim' : 'complete';
     return {
       step: r.step,
       name: REWARD_STEP_NAMES[r.step],
@@ -105,12 +110,15 @@ export function rewardsChecklistModel(p: RewardChecklistInput): RewardChecklistM
     };
   });
 
-  const pendingRupees = rows.filter((r) => r.state !== 'done').reduce((s, r) => s + r.rupees, 0);
+  const pendingRupees = rows.filter((r) => r.state === 'claim' || r.state === 'complete').reduce((s, r) => s + r.rupees, 0);
   const earnedRupees = rows.filter((r) => r.state === 'done').reduce((s, r) => s + r.rupees, 0);
   const allDone = pendingRupees === 0;
-  const headline = allDone
-    ? `All rewards claimed — ₹${earnedRupees} earned`
-    : `₹${pendingRupees} free credit waiting for you`;
+  const anyMissed = rows.some((r) => r.state === 'missed');
+  const headline = !allDone
+    ? `₹${pendingRupees} free credit waiting for you`
+    : anyMissed
+      ? `₹${earnedRupees} earned — nothing left to claim`
+      : `All rewards claimed — ₹${earnedRupees} earned`;
   const surfaceNote = p.surface === 'web'
     ? `On the website: signup, login and mobile${p.webCapRupees ? `, up to ₹${p.webCapRupees}` : ''}. The referral-code and GitHub rewards are in the Android app.`
     : null;

@@ -41,6 +41,9 @@ import {
   stepIsProven, stepNotDoneMessage, githubIsLinked, friendVerificationStatus,
   ALL_STEPS, WEB_ELIGIBLE_STEPS, canStillRedeem, stepAllowedOnWeb, webHoldUntilMobile, type RewardStep, type StepProof,
 } from '../lib/referralRewards';
+import {
+  accountCreatedAt, codeWindow, countAppOpen, readAppOpenState, type CodeWindow,
+} from '../lib/referralCodeWindow';
 
 /** One person's referral record. Absent until they first open the screen or redeem a code. */
 interface ReferralDoc {
@@ -60,6 +63,10 @@ interface ReferralDoc {
   createdAt?: string;
   /** Set once, by /redeem, the moment a referrer's code was applied. Sorts the Earning list. */
   referredAt?: unknown;
+  /** App opens counted for the referral-code window (`referralCodeWindow.ts`). */
+  appOpens?: unknown;
+  /** When the last COUNTED app open began. */
+  lastAppOpenAt?: unknown;
 }
 
 const REFERRALS = 'user_referrals';
@@ -265,6 +272,39 @@ async function claimWeb(db: any, userId: string, res: Response, surface: 'web' |
   });
 }
 
+/**
+ * The referral-code window for this account (`referralCodeWindow.ts`), counting this request as an app
+ * open when it is one.
+ *
+ * WHY THE STATUS READ IS THE "APP OPEN". Every app build that has the rewards screen — including the
+ * builds already installed on phones — asks for this status as the app starts, so counting here makes the
+ * rule hold for every installed app the moment the server ships, with no new app build needed. The App
+ * screen, the Profile and the Wallet all ask at start-up; the 30-minute rule is what folds those into one
+ * open, and the transaction is what stops two of them racing into two.
+ *
+ * Nothing is counted — and nothing written — once it can no longer matter: a code already applied, an
+ * account that is no longer new, or a window already shut.
+ */
+async function referralCodeWindowFor(db: any, userId: string, rec: ReferralDoc, opts: {
+  createdAt: string | null | undefined;
+  countOpen: boolean;
+  nowMs: number;
+}): Promise<CodeWindow> {
+  const createdAt = accountCreatedAt(opts.createdAt, typeof rec.createdAt === 'string' ? rec.createdAt : null);
+  const before = codeWindow({ appOpens: readAppOpenState(rec).appOpens, accountCreatedAt: createdAt, nowMs: opts.nowMs });
+  const relevant = !rec.referrerUserId && canStillRedeem(rec.paidSteps) && before.open;
+  if (!opts.countOpen || !relevant) return before;
+  const ref = doc(db, REFERRALS, userId);
+  const appOpens = await runTransaction(db, async (tx: any) => {
+    const snap = await tx.get(ref);
+    const live = readAppOpenState((snap.exists() ? snap.data() : {}) as ReferralDoc);
+    const { next, counted } = countAppOpen(live, opts.nowMs);
+    if (counted) tx.set(ref, { appOpens: next.appOpens, lastAppOpenAt: next.lastAppOpenAt }, { merge: true });
+    return next.appOpens;
+  });
+  return codeWindow({ appOpens, accountCreatedAt: createdAt, nowMs: opts.nowMs });
+}
+
 export function registerReferralRoutes(app: Express): void {
   /**
    * The user's own referral state: their code, what they have claimed, what is still pending, and
@@ -284,12 +324,24 @@ export function registerReferralRoutes(app: Express): void {
       // all five — so each is shown only the steps it can actually complete. Client-declared, and it can only
       // ever NARROW what is shown: the claim route re-decides everything server-side regardless.
       const platform = String(req.query?.platform ?? '').trim().toLowerCase() === 'web' ? 'web' : 'android';
+      // The referral-code window: three app opens or seven days (admin 2026-09-30). Only the app counts
+      // opens — the website cannot apply a code at all, so a visit there must not spend a chance.
+      const codeWin = await referralCodeWindowFor(db, userId, rec, {
+        createdAt: contact.createdAt,
+        countOpen: platform === 'android',
+        nowMs: Date.now(),
+      });
       // "Refer — only for new user": the code step is offered while the account can still redeem, and
       // kept (✅ or claimable) once a code has been applied. Otherwise it would be a row nobody can finish.
-      const canRedeem = platform === 'android' && !rec.referrerUserId && canStillRedeem(rec.paidSteps);
+      const canRedeem = platform === 'android' && !rec.referrerUserId && canStillRedeem(rec.paidSteps) && codeWin.open;
+      // "Missed": the app, no code applied, and the account can no longer apply one. Shown as ❌ only to a
+      // client that says it can draw it (`missed=1`); an app build from before this change would render an
+      // unknown row as money still waiting, so it keeps the old behaviour of not showing the row at all.
+      const showsMissed = String(req.query?.missed ?? '') === '1';
+      const codeMissed = platform === 'android' && !rec.referrerUserId && !canRedeem;
       const visibleSteps = selfProgress(rec.paidSteps).filter((s) => {
         if (platform === 'web') return stepAllowedOnWeb(s.step);
-        if (s.step === 'referral-code') return s.claimed || Boolean(rec.referrerUserId) || canRedeem;
+        if (s.step === 'referral-code') return s.claimed || Boolean(rec.referrerUserId) || canRedeem || (codeMissed && showsMissed);
         return true;
       });
       return res.json({
@@ -297,6 +349,8 @@ export function registerReferralRoutes(app: Express): void {
         enabled: true,
         platform,
         canRedeem,
+        // How many more app opens may still apply a code — only while it can; null otherwise.
+        codeOpensLeft: canRedeem && codeWin.open ? codeWin.opensLeft : null,
         webCapRupees: platform === 'web' ? MAX_WEB_GIFT_TOKENS / TOKENS_PER_RUPEE : null,
         webEarnedRupees: num(rec.webGiftedTokens) / TOKENS_PER_RUPEE,
         code,
@@ -311,6 +365,7 @@ export function registerReferralRoutes(app: Express): void {
           step: s.step,
           claimed: s.claimed,
           rupees: s.tokens / TOKENS_PER_RUPEE,
+          missed: s.step === 'referral-code' && !s.claimed && codeMissed,
         })),
         referred: Boolean(rec.referrerUserId),
         earnedTokens: earned,
@@ -401,11 +456,16 @@ export function registerReferralRoutes(app: Express): void {
       const ownerSnap = await getDoc(doc(db, CODES, code));
       const ownerId = ownerSnap.exists() ? String((ownerSnap.data() as { userId?: unknown })?.userId ?? '') : '';
 
-      const [mine, owner, deviceMarker] = await Promise.all([
+      const [mine, owner, deviceMarker, contact] = await Promise.all([
         readReferral(db, userId),
         ownerId ? readReferral(db, ownerId) : Promise.resolve({} as ReferralDoc),
         getDoc(doc(db, DEVICES, deviceId)),
+        resolveAccountContact(userId),
       ]);
+      // Applying a code is not an app open, so nothing is counted here — only read.
+      const codeWin = await referralCodeWindowFor(db, userId, mine, {
+        createdAt: contact.createdAt, countOpen: false, nowMs: Date.now(),
+      });
 
       const verdict = decideAttribution({
         codeOwnerUserId: ownerId || null,
@@ -420,6 +480,8 @@ export function registerReferralRoutes(app: Express): void {
         // "old ko never": an account that already earned a REAL verification predates the referral and
         // cannot be retro-attributed. The automatic Gmail-login grant does not count — see canStillRedeem.
         isNewUser: canStillRedeem(mine.paidSteps),
+        // Three app opens or seven days (admin 2026-09-30) — see referralCodeWindow.ts.
+        codeWindowOpen: codeWin.open,
         platform: claimedPlatform(req) || 'android',
       });
       if (!verdict.ok) return res.status(409).json({ ok: false, message: attributionRefusalMessage(verdict.reason) });

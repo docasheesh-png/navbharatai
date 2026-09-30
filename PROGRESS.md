@@ -84580,3 +84580,71 @@ six-step roadmap: chat and settings.
 
 **Proactive:** the generated AI app asks the USER for an OpenAI key. The AI gateway (`APP_AI_GATEWAY`,
 built, unset) is what removes that wall.
+
+## 2026-09-30 — Autopsy 728a402d ("Nemi Mart", Weak tier, mega-roadmap milestone 1 of 6)
+
+The storefront rendered at 406 s, compiled, built for production and passed every browser check. The
+build took 11.5 min and was billed ₹179.15 (real cost $0.56 + sandbox, 10% discount). The report still
+carried five defects of ours.
+
+**Tally:**
+- ✅ 2 self-heals: the model's second Python script (a tuple bug), and one design page.
+- 🔀 1 workaround: GLM flashx crawled on the roadmap planner for 35 s, and KIMI answered.
+- ⏭️ 2 skipped: the import sweep, refused by the freeze; and the reviewer's findings, timed out.
+- ❌ 2 shipped imperfect:
+  - a zero-byte icon and a missing icon in the saved app;
+  - a false readiness score.
+- 🥵 Struggle:
+  - a 75 s first call;
+  - 11 reviewer calls for no verdict;
+  - the model ran `tsc` by hand twice after 15 clean write-time checks. #3399 covers this: a clean
+    check is now said out loud.
+
+**Fixed (root cause):**
+- **A Python `ModuleNotFoundError` dropped a live sandbox.**
+  - Cause: `ENOTFOUND` was matched case-insensitively and without a word boundary, so it hit the middle
+    of `ModuleNotFoundError`.
+  - Effect: the actuator evicted the machine and re-ran the command, and the report said "sandbox
+    unavailable".
+  - Class: a live program's own stderr was read for network words. That meant an app's
+    "ECONNREFUSED :5432", or a traceback line "503", could do the same and re-run a non-idempotent
+    command.
+  - Fix: a real exit status (≥ 0) now always means a live sandbox, and the Node error codes are matched
+    upper-case as whole words (`sandboxHealth.ts`).
+- **Binary files were written as text and never saved.**
+  - `write_file` wrote an empty `public/nemi-icon-192.png`; its saved hash is the SHA-256 of "".
+  - The real icons the Python script drew were never persisted: the text store skips binaries, and the
+    asset store was written only by imports.
+  - Fix: write tools now refuse binary paths, pointing to `.svg` or a command (`binaryTextWrite.ts`).
+  - Fix: at the kept save, binaries the store does not hold are read as bytes and saved
+    (`buildAssets.ts`, `E2BActuator.readBinaryFile`, `listWorkspaceAssetPaths`; admin code
+    `BUILD_ASSETS_SAVED`).
+  - This also explains that report's `PREVIEW_SNAPSHOT_STALE`: a file-set mismatch on exactly that path.
+- **A milestone was graded on the whole message.**
+  - The storefront was reported as missing login, sign-up, dashboard and admin panel, twice. The
+    reviewer was also asked to judge it against the whole message.
+  - Fix: the readiness audit (`setCoverageRequest`), the feature probe (3 sites) and the reviewer now
+    read the milestone's own brief.
+- **The lean reviewer had never delivered.**
+  - Its "sample" was the first five paths at 500 characters each; here that was `.gitignore`,
+    `package.json` and three config files.
+  - Fix: in suggest mode it is now handed the changed source files in full, bounded to 60K characters,
+    and told not to re-read them (`leanReviewInline`). It should now answer in one call instead of
+    eleven.
+- **The unused-import sweep ran after the settle**, so the freeze refused it on every verified build
+  (`GREEN_FREEZE_DEFERRED … useCart.ts`). It now runs beside the production defaults, before the render
+  check, named `import-sweep`.
+- **`DESIGN_PAGE_INCONSISTENT` stayed unresolved after `DESIGN_HEALED`** and was named in the root-cause
+  line. It is now resolved when the same check finds nothing.
+
+Tests: `tests/theIconWasSavedEmpty.test.ts` (16), reversion-proven.
+
+**Still open:**
+- A build that regenerates an asset the store already holds keeps the older bytes. The listing carries
+  no size or mtime.
+- GLM flashx crawled on the planner (a provider issue).
+- The ETA was 1.5× over.
+- `JOURNEY_NOT_DERIVED`: a storefront with no form yields no journey, so the release gate stays yellow.
+  A click journey (add to cart → reload → still in the cart) would prove it.
+- The starter scaffold's `vite-tsconfig-paths` is deprecated by Vite 8 (`resolve.tsconfigPaths`), and
+  the 2 moderate advisories come from the starter.

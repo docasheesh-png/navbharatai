@@ -85058,3 +85058,8 @@ the architect. The Frontend specialist that actually writes the AI client never 
 - Locked in `tests/anAiAppNeedsNoKey.test.ts`.
 
 **Admin action:** set `APP_AI_GATEWAY=on` in Cloud Run.
+
+**Merge note (same day).** Two classes in this PR had been fixed IN PARALLEL by other sessions that merged first. Each is now one definition, not two:
+- **The no-journey sentence** (#3398, the Gita search box). There is one predicate. The sentence depends on whether the form has any button: a field with no button "acts as you type"; a form with a button has "none of its buttons reads as submitting them".
+- **The Project Mode starter verdict** (#3399, autopsy 6a5fb04b). #3399's `setStarterExpected` flag and `shellModuleFor` are kept. This branch's `setStarterEntryExpected` and its route call are removed, and `starterEntryExpectedFor` / `moduleOwnsAppEntry` now delegate to #3399's helpers.
+- **Why this is recorded:** this is exactly the duplicate-work class `CLAUDE.md` warns about. Neither PR existed when the other started.

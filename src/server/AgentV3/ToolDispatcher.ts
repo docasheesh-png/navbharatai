@@ -83,7 +83,7 @@ import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, usesNonKitNbClass } from './kitRestore';
-import { isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote } from './CssConsistency';
+import { isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, collectDefinedClasses } from './CssConsistency';
 import { pageDesignWriteNote, isPageFile } from './DesignCoverage';
 import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
 import { shellWriteTargets } from './shellWriteTargets';
@@ -3279,8 +3279,22 @@ export class ToolDispatcher {
    */
   private readonly _screensWithClasses = new Map<string, string>();
 
+  /** Stylesheets written this build (path → content) — the candidates for "defined, but nothing imports it". */
+  private readonly _sheetsWritten = new Map<string, string>();
+  /** Every project stylesheet a module written this build imports (autopsy 1389f0d5). */
+  private readonly _importedSheets = new Set<string>();
+
   private async undefinedClassNotes(files: Record<string, string>): Promise<string> {
     try {
+      // What this write teaches about the project: the sheets it writes, and the sheets its modules import.
+      for (const [p, c] of Object.entries(files)) {
+        if (isProjectStylesheet(p)) {
+          this._sheetsWritten.delete(p);
+          this._sheetsWritten.set(p, c);
+          if (this._sheetsWritten.size > 40) this._sheetsWritten.delete(this._sheetsWritten.keys().next().value as string);
+        }
+        if (/\.(?:[cm]?[tj]sx?|css|scss|sass|less)$/.test(p)) for (const sheet of cssImportsOf(p, c)) this._importedSheets.add(sheet);
+      }
       // A plain-HTML app names its classes with `class=`, in the page or in the strings its script
       // writes (autopsy "Nemi Mart", 2026-09-30) — those are screens too.
       const written = Object.keys(files).filter((p) => (/\.(?:t|j)sx?$/.test(p) && /className\s*=/.test(files[p] ?? ''))
@@ -3298,17 +3312,66 @@ export class ToolDispatcher {
       const content = (p: string) => files[p] ?? this._screensWithClasses.get(p) ?? '';
       const project: Record<string, string> = {};
       for (const [p, c] of Object.entries(files)) if (isProjectStylesheet(p)) project[p] = c;
-      const probes = ['src/index.css', 'src/App.css', 'src/styles.css', 'src/global.css', 'src/styles/globals.css', 'src/styles/index.css', 'style.css', 'styles.css', 'css/style.css', 'package.json', 'index.html']
-        .filter((p) => project[p] === undefined);
-      const read = await Promise.all(probes.map((p) => this.actuator.readFile(this.workspaceId, p).then((c) => [p, c] as const, () => null)));
-      for (const r of read) if (r && typeof r[1] === 'string') project[r[0]] = r[1];
+      for (const [p, c] of this._sheetsWritten) if (project[p] === undefined) project[p] = c;
+      const readInto = async (paths: string[]) => {
+        const read = await Promise.all(paths.filter((p) => project[p] === undefined)
+          .map((p) => this.actuator.readFile(this.workspaceId, p).then((c) => [p, c] as const, () => null)));
+        for (const r of read) if (r && typeof r[1] === 'string') project[r[0]] = withoutPreviewBridge(r[0], r[1]);
+      };
+      const entries = ['src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/main.js', 'src/index.tsx', 'src/index.jsx', 'src/index.js'];
+      await readInto(['src/index.css', 'src/App.css', 'src/styles.css', 'src/global.css', 'src/styles/globals.css', 'src/styles/index.css', 'style.css', 'styles.css', 'css/style.css', 'package.json', 'index.html', ...entries]);
+      // The sheets the screens and the entry really import — `src/calculator.css` is not on any list of names.
+      const imported = new Set(this._importedSheets);
+      for (const p of [...screens, ...entries]) {
+        const body = content(p) || project[p] || '';
+        for (const sheet of cssImportsOf(p, body)) imported.add(sheet);
+      }
+      await readInto([...imported].slice(0, 20));
+      for (const e of entries) {
+        if (project[e] === undefined) continue;
+        for (const sh of cssImportsOf(e, project[e])) imported.add(sh);
+        delete project[e];
+      }
+      // A sheet written THIS build that no module imports defines nothing on screen — its classes are
+      // counted apart, so the note can say "import it" instead of "these classes do not exist".
+      const orphans = [...this._sheetsWritten.keys()].filter((sh) => !imported.has(sh)
+        && !['src/index.css', 'style.css', 'styles.css', 'css/style.css'].includes(sh));
+      const defining = () => {
+        const d: Record<string, string> = {};
+        for (const [k, v] of Object.entries(project)) if (!orphans.includes(k)) d[k] = v;
+        return d;
+      };
+      let missingBy = new Map<string, string[]>();
+      const recount = () => {
+        missingBy = new Map();
+        const d = defining();
+        for (const p of screens) {
+          const missing = undefinedClassesInFile(p, content(p), d).filter((c) => !c.startsWith('nb-'));
+          if (missing.length > 0) missingBy.set(p, missing);
+        }
+      };
+      recount();
+      if (missingBy.size === 0) return '';
+      // Something is still missing: before saying so, read every stylesheet in the project — a class a
+      // parent component's sheet defines is not "undefined". Paid only when there is something to say.
+      try {
+        const listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'css-note-listing');
+        await readInto(listing.map((p) => String(p).replace(/^\.?\/+/, '')).filter((p) => isProjectStylesheet(p)).slice(0, 30));
+        recount();
+      } catch { /* the note then speaks from what was read, as before */ }
+      // Name the sheet this project really has: a static app's is style.css, not src/index.css.
+      const sheet = project['src/index.css'] !== undefined ? 'src/index.css'
+        : (['style.css', 'styles.css', 'css/style.css'].find((sh) => project[sh] !== undefined) ?? 'src/index.css');
       let out = '';
-      for (const p of screens) {
-        const missing = undefinedClassesInFile(p, content(p), project).filter((c) => !c.startsWith('nb-'));
-        // Name the sheet this project really has: a static app's is style.css, not src/index.css.
-        const sheet = project['src/index.css'] !== undefined ? 'src/index.css'
-          : (['style.css', 'styles.css', 'css/style.css'].find((s) => project[s] !== undefined) ?? 'src/index.css');
-        out += undefinedClassesWriteNote(p, missing, sheet);
+      for (const [p, missing] of missingBy) {
+        const byOrphan: Array<[string, string[]]> = [];
+        let rest = missing;
+        for (const sh of orphans) {
+          const defined = collectDefinedClasses({ [sh]: project[sh] }).defined;
+          const here = rest.filter((c) => defined.has(c));
+          if (here.length > 0) { byOrphan.push([sh, here]); rest = rest.filter((c) => !defined.has(c)); }
+        }
+        out += unimportedSheetNote(p, byOrphan) + undefinedClassesWriteNote(p, rest, sheet);
       }
       return out;
     } catch {
@@ -3325,7 +3388,11 @@ export class ToolDispatcher {
       // we did not look, which the builder can dismiss in one line.
       const sheets: Record<string, string> = {};
       for (const [p, c] of Object.entries(files)) if (isProjectStylesheet(p)) sheets[p] = c;
-      for (const p of ['src/index.css', 'src/App.css', 'src/styles.css', 'src/global.css', 'src/styles/globals.css', 'src/styles/index.css']) {
+      // …and the sheets this build wrote and the suspects import: a fixed list of names never sees
+      // `src/calculator.css` (autopsy 1389f0d5 — the same blind spot as `undefinedClassNotes`).
+      for (const [p, c] of this._sheetsWritten) if (sheets[p] === undefined) sheets[p] = c;
+      const imported = suspects.flatMap((p) => cssImportsOf(p, files[p]));
+      for (const p of ['src/index.css', 'src/App.css', 'src/styles.css', 'src/global.css', 'src/styles/globals.css', 'src/styles/index.css', ...imported]) {
         if (sheets[p] !== undefined) continue;
         try {
           const raw = await this.actuator.readFile(this.workspaceId, p);

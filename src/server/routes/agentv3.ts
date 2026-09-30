@@ -554,7 +554,7 @@ import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict } from '../AgentV
 import { workspaceHoldsUserApp, userOwnedFileCount } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
-import { persistBuildAssets, buildAssetsNote, type BuildAssetSource } from '../AgentV3/buildAssets';
+import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
 import { attachUserActionRecorder } from '../AgentV3/userActionRecorder';
@@ -15915,6 +15915,11 @@ async function noteBuildOutcome(
       // The original `prompt` is untouched (language detection, telemetry and scope all read it), so only
       // WHAT gets built changes, never the user's identity/intent signals. `megaRoadmapActive` is only ever
       // set when both mega-roadmap flags are on and a guardrailed roadmap exists (see the block above).
+      // Setup (and its asset restore) is done: what is newer than this marker, the build itself made.
+      // `buildAssets.ts` reads it at the save so a regenerated icon replaces the stored one.
+      if (expectsArtifacts && !isImportTurn) {
+        try { await withTimeout(actuator.runCommand(workspaceId, MARK_ASSET_BASELINE_COMMAND), 5_000, 'asset-baseline'); } catch { /* no marker ⇒ only new assets are saved */ }
+      }
       if (megaRoadmapActive && megaRoadmapActive.steps.length > 0) {
         const step1 = megaRoadmapActive.steps[0];
         const total = megaRoadmapActive.steps.length;

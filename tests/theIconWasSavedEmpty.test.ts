@@ -17,7 +17,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { isDeadSandboxSignal, isDeadSandboxError } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/sandboxHealth';
 import { binaryTextWriteRefusal } from '../src/server/AgentV3/binaryTextWrite';
-import { unsavedBuildAssets, persistBuildAssets, buildAssetsNote } from '../src/server/AgentV3/buildAssets';
+import { unsavedBuildAssets, persistBuildAssets, buildAssetsNote, parseChangedListing, CHANGED_SINCE_BASELINE_COMMAND } from '../src/server/AgentV3/buildAssets';
 import { leanReviewInline, reviewerInstruction } from '../src/server/AgentV3/ReviewerAgent';
 import { ToolDispatcher, type ActuatorPort } from '../src/server/AgentV3/ToolDispatcher';
 import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
@@ -118,6 +118,41 @@ describe('a binary file the build made is saved with the app', () => {
     expect(a.standDown).toBe('store-unreadable');
     const b = await persistBuildAssets({ listFiles: async () => ['a.png'] }, 'ws', { heldPaths: async () => [], save });
     expect(b.standDown).toBe('no-binary-read');
+  });
+
+  it('a held icon the build REGENERATED is saved again; an untouched held one is not re-read', async () => {
+    expect(unsavedBuildAssets(['public/a.png', 'public/b.png'], ['public/a.png', 'public/b.png'], 40, new Set(['public/a.png'])).save).toEqual(['public/a.png']);
+    expect(parseChangedListing('./public/a.png\n./src/App.tsx\n\n')).toEqual(['public/a.png', 'src/App.tsx']);
+    const reads: string[] = [];
+    const out = await persistBuildAssets(
+      {
+        listFiles: async () => ['public/a.png', 'public/b.png'],
+        readBinaryFile: async (_w, p) => { reads.push(p); return png; },
+        runCommand: async (_w, cmd) => ({ exitCode: cmd === CHANGED_SINCE_BASELINE_COMMAND ? 0 : 1, stdout: './public/a.png\n', stderr: '' }),
+      },
+      'ws',
+      { heldPaths: async () => ['public/a.png', 'public/b.png'], save: async () => {} },
+    );
+    expect(reads).toEqual(['public/a.png']);
+    expect(out.saved).toEqual(['public/a.png']);
+  });
+
+  it('no marker on the machine ⇒ held assets are left alone (never all re-read)', async () => {
+    const reads: string[] = [];
+    await persistBuildAssets(
+      { listFiles: async () => ['public/a.png'], readBinaryFile: async (_w, p) => { reads.push(p); return png; }, runCommand: async () => ({ exitCode: 1, stdout: '', stderr: '' }) },
+      'ws',
+      { heldPaths: async () => ['public/a.png'], save: async () => {} },
+    );
+    expect(reads).toEqual([]);
+    expect(CHANGED_SINCE_BASELINE_COMMAND.startsWith('test -f /tmp/.nbai-asset-baseline && find . -type f -newer ')).toBe(true);
+  });
+
+  it('the route marks the baseline after setup, before the build writes', () => {
+    const route = read('src/server/routes/agentv3.ts');
+    const mark = route.indexOf('actuator.runCommand(workspaceId, MARK_ASSET_BASELINE_COMMAND)');
+    expect(mark).toBeGreaterThan(route.indexOf("message: `Project checked in ${"));
+    expect(mark).toBeLessThan(route.indexOf('milestoneRequest = step1.buildPrompt;'));
   });
 
   it('the route saves them after the kept save, never for a restored turn', () => {

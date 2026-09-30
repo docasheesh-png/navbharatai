@@ -11,10 +11,11 @@
 // not already hold is read as bytes and saved there, bounded. Imported assets are already held, so an
 // imported app pays no reads here.
 //
-// ⚠️ A path the store ALREADY holds is not re-read: a build that regenerates an existing icon under the
-// same name keeps the older bytes in the store. Detecting that needs the file's size or mtime, which the
-// listing does not carry — recorded as an open item rather than solved by re-reading every asset on
-// every build.
+// A path the store ALREADY holds is re-saved only when THIS build changed it. A marker file is touched
+// in the sandbox once setup (and its asset restore) is done; `find -newer` against it names the files
+// the build itself wrote or regenerated. Both ends read the sandbox's own clock, so a skew between our
+// server and the machine cannot misjudge it. No marker (a machine replaced mid-build) ⇒ only new paths
+// are saved, exactly as if the marker had never existed.
 
 import { isBinaryAsset } from './fileClassification';
 import { isExcludedPath } from './WorkspaceFiles';
@@ -31,20 +32,49 @@ export const MAX_BUILD_ASSET_BYTES = 5 * 1024 * 1024;
  */
 const NOT_THE_APPS = /(^|\/)\.nbai[^/]*|(^|\/)(test-results|playwright-report|blob-report)(\/|$)/i;
 
-/** Binary assets in the project the store does not hold yet, in listing order, capped. PURE. */
+/**
+ * Binary assets to save: every one the store does not hold, plus every held one this build changed
+ * (`changed`, from `changedSinceBaseline`). In listing order, capped. PURE.
+ */
 export function unsavedBuildAssets(
   projectPaths: readonly string[],
   heldPaths: readonly string[],
   max = MAX_BUILD_ASSETS,
+  changed: ReadonlySet<string> = new Set(),
 ): { save: string[]; overCap: string[] } {
   const held = new Set(heldPaths);
-  const candidates = [...new Set(projectPaths)].filter((p) => isBinaryAsset(p) && !isExcludedPath(p) && !NOT_THE_APPS.test(p) && !held.has(p));
+  const candidates = [...new Set(projectPaths)].filter((p) => isBinaryAsset(p) && !isExcludedPath(p) && !NOT_THE_APPS.test(p) && (!held.has(p) || changed.has(p)));
   return { save: candidates.slice(0, max), overCap: candidates.slice(max) };
 }
 
 export interface BuildAssetSource {
   listFiles(workspaceId: string): Promise<string[]>;
   readBinaryFile?(workspaceId: string, filePath: string): Promise<string>;
+  runCommand?(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+}
+
+/** The sandbox file whose mtime marks "setup is done; what is newer, this build wrote". */
+export const ASSET_BASELINE_MARKER = '/tmp/.nbai-asset-baseline';
+export const MARK_ASSET_BASELINE_COMMAND = `touch ${ASSET_BASELINE_MARKER}`;
+/** Fails (non-zero) when the marker is missing, so a machine without one is never read as "nothing changed". */
+export const CHANGED_SINCE_BASELINE_COMMAND = `test -f ${ASSET_BASELINE_MARKER} && find . -type f -newer ${ASSET_BASELINE_MARKER} `
+  + `-not -path './node_modules/*' -not -path './.git/*' -not -path './dist/*' 2>/dev/null | head -2000`;
+
+/** Parse the `find` listing into workspace-relative paths. PURE. */
+export function parseChangedListing(stdout: string): string[] {
+  return String(stdout ?? '').split('\n').map((l) => l.trim().replace(/^\.\//, '')).filter(Boolean);
+}
+
+/** Paths the build changed since the baseline, or null when that cannot be known. Never throws. */
+export async function changedSinceBaseline(source: BuildAssetSource, workspaceId: string): Promise<Set<string> | null> {
+  if (typeof source.runCommand !== 'function') return null;
+  try {
+    const r = await source.runCommand(workspaceId, CHANGED_SINCE_BASELINE_COMMAND);
+    if (r.exitCode !== 0) return null;
+    return new Set(parseChangedListing(r.stdout));
+  } catch {
+    return null;
+  }
 }
 
 export interface BuildAssetDeps {
@@ -77,7 +107,8 @@ export async function persistBuildAssets(
     const held = await deps.heldPaths(workspaceId);
     if (held === null) return { ...out, standDown: 'store-unreadable' };
     const paths = await source.listFiles(workspaceId);
-    const { save, overCap } = unsavedBuildAssets(paths, held);
+    const changed = held.length > 0 ? await changedSinceBaseline(source, workspaceId) : null;
+    const { save, overCap } = unsavedBuildAssets(paths, held, MAX_BUILD_ASSETS, changed ?? new Set());
     out.overCap = overCap;
     const assets: Record<string, string> = {};
     for (const path of save) {

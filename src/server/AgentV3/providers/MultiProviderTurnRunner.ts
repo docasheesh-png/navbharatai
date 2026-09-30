@@ -738,8 +738,9 @@ export function makeMultiProviderTurnRunner(
         // The fast lane stops HERE rather than walk onto a rung that reasons before every answer — see
         // `RunTurnParams.stopAtReasoningRung`. Not the opener (a lane whose opener reasons is never
         // started), and not a failure of this rung: nothing is benched, struck or recorded against it.
-        if (params.stopAtReasoningRung && i > 0 && chain[i].modelId && modelAlwaysReasons(chain[i].modelId)) {
-          throw new ReasoningRungStopError(chain[i].modelId, fellBackFrom);
+        const rungModel = chain[i].modelId;
+        if (params.stopAtReasoningRung && i > 0 && rungModel && modelAlwaysReasons(rungModel)) {
+          throw new ReasoningRungStopError(rungModel, fellBackFrom);
         }
         // 🔴 A BENCH THAT HAS BEEN ANNOUNCED STAYS (autopsy f496c75b, 2026-09-30). The skip used to read
         // only the streak, and a success deletes the streak — so a GLM call already IN FLIGHT when the

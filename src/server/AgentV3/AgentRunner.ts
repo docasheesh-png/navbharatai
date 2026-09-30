@@ -887,6 +887,7 @@ export class AgentRunner {
               nudgesUsed: noBuildNudges,
               maxNudges: MAX_BUILD_NUDGES,
               editingExistingApp: this.opts.editingExistingApp === true,
+              request: userPrompt,
             });
           if (nudge.standDown) {
             try { this.opts.onNote?.({ code: 'BUILD_NUDGE_STOOD_DOWN', message: standDownNote(nudge.standDown), detail: nudge.standDown }); } catch { /* a note must never fail a build */ }

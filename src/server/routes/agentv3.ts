@@ -17482,7 +17482,7 @@ async function noteBuildOutcome(
       }
       // A policy refusal is not a capability failure — see `modelRefused`. Read from the answer the
       // model actually gave, so it holds for any refusal rather than only the pornography one.
-      const firstAttempt = readTurnAnswer(result.summary);
+      const firstAttempt = readTurnAnswer(result.summary, prompt);
       const firstAttemptRefused = firstAttempt.declined;
       // …and its SIBLING, read from the same answer by the same module that already decided this
       // exact question for the nudge, 156ms earlier in this turn (autopsy e628efd4). Never a second
@@ -17512,7 +17512,8 @@ async function noteBuildOutcome(
         withinCostCap: costAfterFirstAttempt <= capUsd,
         userAskedToBuildAnApp,
         modelRefused: firstAttemptRefused,
-        modelAskedTheUser: firstAttemptAskedTheUser,
+        // A pointer to the platform's own APK flow is a final answer too (autopsy 0c2a987a) — `modelAnswered`.
+        modelAskedTheUser: firstAttemptAskedTheUser || firstAttempt.pointed,
       })) {
         // 🔴 THE CLAIM IS DERIVED, NEVER TEMPLATED (autopsy f5351721 — see `retryLeadsHigher`). Both
         // sentences below used to assert "a stronger model" unconditionally, and on STRONG that was
@@ -17587,7 +17588,7 @@ async function noteBuildOutcome(
       // sentence, the empty-build flip and the free-tier upsell. They used to read `result.summary`
       // at their own moment, and the platform had by then overwritten it: the upsell found no refusal
       // in our own "please try again" and asked a user whose request the engine had declined for money.
-      const modelAnswer = readTurnAnswer(result.summary);
+      const modelAnswer = readTurnAnswer(result.summary, prompt);
       if (expectsArtifacts && writtenFiles.size === 0 && modelAnswer.declined && !abort.signal.aborted) {
         try {
           buildDiag.record({
@@ -22535,7 +22536,8 @@ async function noteBuildOutcome(
             // OPPOSITE: what rewrites it is the PLATFORM (this flip, the verified-no-change sentence),
             // and a question asked of our own sentence is not a question about the model's answer.
             // So it is read once, after the last model run — `modelAnswer` — and both halves go in.
-            modelAnswer.asked,
+            // A pointer to the platform's own APK flow is an answer, never "the build produced no files".
+            modelAnswer.asked || modelAnswer.pointed,
             modelAnswer.declined,
           );
           if (emptyFail) {

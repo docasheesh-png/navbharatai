@@ -185,11 +185,40 @@ export function namesPersonalTool(prompt: string): boolean {
   return isPersonalTool(analyzeRequirementGaps(p).domain, p);
 }
 
+/**
+ * A heavy GAME — the game domain with real engineering named (3D, multiplayer, a physics engine, an
+ * open world). The same two facts `isPersonalTool` already combines, asked directly.
+ *
+ * 🔴 AUTOPSY f496c75b (2026-09-30). *"Single file html code se mobile friendly 3d fight game banao
+ * realastic"* scored **30, coding** — the "small snippet" class — because `html` is on the coding list
+ * and that check runs before the domain question. A realistic 3D fight game opened on the cheapest flash
+ * rung, which then spent 196 s timing out, and the 5–11 min estimate became 17.7 min. A technology word
+ * inside an app request does not make the request a snippet. Asked BEFORE `coding` in RequestAnalyser;
+ * a page or document deliverable is still a page. PURE.
+ */
+export function namesHeavyGame(prompt: string): boolean {
+  const p = String(prompt || '');
+  if (PAGE_DELIVERABLE_SIGNAL.test(p) || DOCUMENT_DELIVERABLE_SIGNAL.test(p)) return false;
+  return HEAVY_GAME_SIGNAL.test(p) && analyzeRequirementGaps(p).domain === 'game';
+}
+
 export function isComplexAppPrompt(prompt: string): boolean {
   const p = String(prompt || '');
   if (!COMPLEX_APP_SIGNAL.test(p)) return false;
   if (PAGE_DELIVERABLE_SIGNAL.test(p)) {
     return COMPLEX_APP_SIGNAL.test(p.replace(CATEGORY_THEME_WORDS, ' '));
   }
+  // 🔴 "FULL-STACK" IS A COMPLIMENT, NOT A SCOPE (autopsy 53a621e3, 2026-09-30). "Create a modern,
+  // full-stack Android calculator application" opened on the reasoning rung and skipped the fast lane
+  // — ~4× the lead rung's cost — because `full-stack` alone made a calculator "complex". The same
+  // shape as the landing-page rule above: when the request names one of the small self-contained apps,
+  // the packaging adjectives are removed and the verdict rests on what is left. A calculator with a
+  // database, a login or payments is still complex; a calculator described as "full-stack" is not.
+  if (SIMPLE_APP_SIGNAL.test(p)) {
+    return COMPLEX_APP_SIGNAL.test(p.replace(SCOPE_ADJECTIVES, ' '));
+  }
   return true;
 }
+
+/** Words that describe how complete an app should FEEL, never what it must contain. */
+const SCOPE_ADJECTIVES = /\b(?:full[- ]?stack|full app|complete app)\b/gi;

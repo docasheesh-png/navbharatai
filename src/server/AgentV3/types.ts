@@ -62,6 +62,8 @@ export type ToolName =
   | 'run_recipe'
   | 'write_files_batch'
   | 'find_ui_element'
+  // The read-only object lookup the build prompt names for 3D games (autopsy f496c75b).
+  | 'object_spec'
   | 'task'
   | 'second_opinion'
   | 'consensus'

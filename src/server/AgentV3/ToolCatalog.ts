@@ -3746,6 +3746,9 @@ export const RECIPE_TOOLS = [
   'generate_error_tracking',
   'generate_feature_flags',
   'generate_file_upload',
+  // 🔴 AUTOPSY f496c75b (2026-09-30): the prompt's step 2 for every 3D game, and it was on neither list.
+  // The census that guards this read tool names as `[a-z]+(?:_[a-z]+)+`, so the digit in `3d` hid it.
+  'generate_game_3d',
   'generate_game_controller',
   'generate_game_runtime',
   'generate_game_shell',

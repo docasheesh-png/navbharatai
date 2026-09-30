@@ -15,7 +15,7 @@
 // cheap start costs ~₹0 and the evaluate-gate catches failures and escalates, so leaning
 // cheap is safe AND is the whole point (a new user's calculator must not cost a fortune).
 
-import { isComplexAppPrompt, namesBusinessDomain, namesPersonalTool, SIMPLE_APP_SIGNAL } from '../lib/appComplexitySignals';
+import { isComplexAppPrompt, namesBusinessDomain, namesHeavyGame, namesPersonalTool, SIMPLE_APP_SIGNAL } from '../lib/appComplexitySignals';
 import { userAskedForAnAppToBeBuilt, describesWorkAlreadyStarted, type BuildIntent } from './IntentClassifier';
 
 export type StartTier = 'gemini' | 'haiku' | 'sonnet' | 'opus';
@@ -192,6 +192,9 @@ function classify(p: string): { type: TaskType; matched: boolean } {
   if (RE.simpleApp.test(p) || namesPersonalTool(p)) return { type: 'simple_app', matched: true };
   if (RE.summary.test(p)) return { type: 'summary', matched: true };
   if (RE.translate.test(p)) return { type: 'translate', matched: true };
+  // A heavy game that mentions a technology ("single file html … 3d fight game") is a game, not a
+  // snippet — see `namesHeavyGame` (autopsy f496c75b).
+  if (namesHeavyGame(p)) return { type: 'complex_app', matched: true };
   if (RE.coding.test(p)) return { type: 'coding', matched: true };
   if (RE.greeting.test(p)) return { type: 'chat', matched: true };
   /**

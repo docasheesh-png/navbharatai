@@ -118,7 +118,9 @@ describe('2 · when the scope analyzer and the complexity router disagree, the d
     const route = strip(src('src/server/routes/agentv3.ts'));
     expect(route).toContain('const dispute = scopeDispute(scope, { complex: buildIsComplex });');
     expect(route).toContain("code: 'APP_SCOPE_DISPUTED'");
-    expect(route).toContain("if (scope.decision === 'analyze' && !dispute) {");
+    // The dispute still gates the planner; since autopsy a2b9c802 Project Mode owning the build does too
+    // (theJarvisBuildWasStoppedWhileItWorked.test.ts).
+    expect(route).toContain("if (scope.decision === 'analyze' && !dispute && !projectModeOwns) {");
   });
 });
 

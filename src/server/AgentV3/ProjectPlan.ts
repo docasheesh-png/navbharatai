@@ -21,6 +21,7 @@
 import type { TodoItem, TodoStatus } from './types';
 import { parseEnvFlag } from '../lib/envFlag';
 import { countEnumeratedFeatures, BIG_SOFTWARE_NOUN } from './enumeratedFeatures';
+import { STARTER_ENTRY_PATHS } from './stillTheStarterApp';
 
 export type ModuleStatus = 'pending' | 'in_progress' | 'done' | 'failed';
 
@@ -469,6 +470,34 @@ export function createProjectPlan(goal: string, framework: string, modules: Proj
  * BLOCKED (failed dependency / dependency cycle); use planBlockedReason to tell those apart
  * honestly. PURE.
  */
+/** Does this module own the file the app boots from (the one the "still the starter" check reads)? PURE. */
+export function moduleOwnsAppEntry(mod: Pick<ProjectModule, 'files'>): boolean {
+  const owned = new Set((mod.files ?? []).map((f) => String(f ?? '').replace(/^\.\//, '')));
+  return STARTER_ENTRY_PATHS.some((p) => owned.has(p));
+}
+
+/**
+ * 🔴 A MODULE TURN THAT IS NOT MEANT TO TOUCH THE APP'S ENTRY WAS JUDGED AS AN UNBUILT APP (autopsy
+ * 8e124182, 2026-09-30).
+ *
+ * Module 1 of that plan was "Core Types & Domain Models" — one file, `src/types/index.ts`. It was built
+ * correctly in fifty seconds, and the end-of-turn readiness gate then said *"The app's entry point is
+ * still the starter template we seeded — nothing has been built yet"*. That is TRUE of every module
+ * turn before the one that owns `src/App.tsx`, and it is not a defect of any of them. Before 2026-09-26
+ * it failed the turn (so the plan could never auto-continue past module 1); since then
+ * `unfinishedResume` hands the model that blocker and says "continue" — so the model built the WHOLE
+ * app inside module 1's turn, the plan recorded 1 of 14 modules done, and the next thirteen turns were
+ * queued to rebuild what already existed.
+ *
+ * So the starter entry is EXPECTED on a module turn whose module does not own the entry, as long as a
+ * later module does. When no module owns it, nothing is expected and the gate keeps its question — some
+ * turn must build the entry, and a plan that forgot it must not be allowed to finish on the starter. PURE.
+ */
+export function starterEntryExpectedFor(plan: ProjectPlan, mod: ProjectModule): boolean {
+  if (moduleOwnsAppEntry(mod)) return false;
+  return plan.modules.some((m) => m.id !== mod.id && m.status !== 'done' && moduleOwnsAppEntry(m));
+}
+
 export function nextBuildableModule(plan: ProjectPlan): ProjectModule | null {
   const done = new Set(plan.modules.filter((m) => m.status === 'done').map((m) => m.id));
   const inProgress = plan.modules.find((m) => m.status === 'in_progress');

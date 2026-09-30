@@ -201,7 +201,11 @@ export function setWriteObserver(fn: (info: { workspaceId: string; path: string;
  */
 export class GreenFreezeError extends Error {
   constructor(public readonly path: string, public readonly pass: string | null) {
-    super(`Green freeze: refused to overwrite "${path}" on a verified-working app${pass ? ` from pass "${pass}"` : ' (no allowlisted pass)'}.`);
+    // The second sentence is for the model that reads this as a tool error. Autopsy 8e124182: told only
+    // "refused", a model reasoned its way to `cat > file` to get around it. Say plainly that the answer is
+    // to report, not to find another route — and every route (the shell included) is refused the same way.
+    super(`Green freeze: refused to overwrite "${path}" on a verified-working app${pass ? ` from pass "${pass}"` : ' (no allowlisted pass)'}. `
+      + 'Do not try another way to change it (the shell is refused too) — tell the user what you would change and why.');
     this.name = 'GreenFreezeError';
   }
 }

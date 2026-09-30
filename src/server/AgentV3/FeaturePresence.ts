@@ -247,6 +247,21 @@ const FEATURES: FeatureDef[] = [
  * the build's rootCause on a fully-working app. Detecting the shell lets the caller stay HONEST ("couldn't
  * verify the DOM") instead of lying that a working app has no features. Pure.
  */
+/**
+ * Is this page a SIGN-IN SCREEN — a password field and hardly anything else to press or read? Then the
+ * app's features are behind it, and nothing else can be judged from it. Deliberately narrow: a page with
+ * a table, or more than a handful of fields, is an app screen that happens to contain a password box
+ * (a settings page, a sign-up wizard). PURE.
+ */
+export function isSignInWall(htmlLower: string): boolean {
+  const h = String(htmlLower ?? '').toLowerCase();
+  if (!/<input\b[^>]*\btype=["']?password\b/.test(h)) return false;
+  if (/<table\b/.test(h)) return false;
+  const inputs = (h.match(/<input\b/g) ?? []).length;
+  const buttons = (h.match(/<button\b/g) ?? []).length;
+  return inputs <= 4 && buttons <= 4;
+}
+
 export function isUnrenderedSpaShell(html: string): boolean {
   if (typeof html !== 'string') return true;
   const lower = html.toLowerCase();
@@ -333,6 +348,16 @@ export function checkFeaturePresence(prompt: string, html: string, declined?: Re
   // spends a model pass adding a control that is already there).
   const missingProbes = probes.filter((p) => !p.present);
   if (missingProbes.length > 0 && !presentProbes.some((p) => p.via === 'control')) return empty;
+  // 🔴 A SIGN-IN SCREEN HIDES THE APP, IT DOES NOT LACK IT (autopsy 8e124182, 2026-09-30). The stock
+  // app's every route redirected to /login, so the only page a probe could see held an email box, a
+  // password box and two buttons. "Login" probed present — which made the capture look corroborated —
+  // and "List / items" was reported MISSING from an app whose Stock Items page lists them. That false
+  // verdict spent a feature-heal pass (~2 minutes of model time proving the page existed) and still
+  // held the release gate at YELLOW. Only the sign-in feature can be judged from behind the door.
+  if (missingProbes.some((p) => p.feature !== 'auth') && isSignInWall(htmlLower)) {
+    const judgeable = probes.filter((p) => p.feature === 'auth');
+    return { probes: judgeable, missing: judgeable.filter((p) => !p.present).map((p) => p.label), present: judgeable.filter((p) => p.present).map((p) => p.label) };
+  }
   return {
     probes,
     missing: probes.filter((p) => !p.present).map((p) => p.label),

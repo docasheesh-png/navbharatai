@@ -352,13 +352,15 @@ import { decideCancelledBuildBill } from '../AgentV3/cancelledBuildBilling';
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
-import { projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
+import { projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, starterEntryExpectedFor, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { createLaneWriteFence } from '../AgentV3/laneWriteFence';
 import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceEvidence, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
+import { adoptHealResult } from '../AgentV3/healResult';
+import { unsupportedStackRequested, unsupportedStackBuilderNote, unsupportedStackUserNote, builtWithLabel } from '../AgentV3/unsupportedStack';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
 import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
 import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel } from '../AgentV3/pricing';
@@ -404,7 +406,7 @@ import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionRe
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
-import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, testSkeletonsCanRun, starterTestsNarration } from '../AgentV3/TestGenerationAgent';
+import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, testSkeletonsCanRun, starterTestsNarration, failuresAreOurStarterTests, ourStarterTestFailedNote } from '../AgentV3/TestGenerationAgent';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from '../AgentV3/appDefaults';
 import { resolveAppDisplayName } from '../AgentV3/appDisplayName';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
@@ -15352,6 +15354,8 @@ async function noteBuildOutcome(
       // outcome — NOT a failed build to retry/escalate. (Real evidence: importing Mitrify escalated
       // 3-4× over 5 min and ran the readiness gate on the user's OWN imported code → "NOT READY 0/100".)
       const expectsArtifacts = (intent === 'new_build' || intent === 'edit_existing') && !isImportTurn;
+      // Only a NEW build is told about the named stack: an edit of an existing app already has one.
+      const unsupportedStackAsked = intent === 'new_build' && !isImportTurn ? unsupportedStackRequested(prompt) : null;
       // The deadline finalizer prices the same build and must use the same fact — see billingCtx.
       billingCtx.expectsArtifacts = expectsArtifacts;
       // The mandatory readiness gate audits code v5.0 BUILT — it must NOT judge a freshly-imported
@@ -15533,6 +15537,17 @@ async function noteBuildOutcome(
       // reconciles to ONE framework before writing features. Applies to any turn on an incoherent workspace;
       // '' (coherent, or flag off) leaves buildPrompt unchanged.
       if (frameworkCoherenceMsg) buildPrompt = `${frameworkCoherenceMsg}\n\n---\n\n${buildPrompt}`;
+      // THE USER NAMED A STACK WE DO NOT BUILD (autopsy 8e124182: "using PHP MVC architecture" was built
+      // in React with a types file claiming a "PHP MVC backend"). Told to the builder here, to the user
+      // in the ready message — see unsupportedStack.ts.
+      if (unsupportedStackAsked) {
+        buildPrompt = `${unsupportedStackBuilderNote(unsupportedStackAsked, framework)}\n\n---\n\n${buildPrompt}`;
+        buildDiag.record({
+          phase: 'plan', severity: 'info', code: 'UNSUPPORTED_STACK',
+          message: `The request names ${unsupportedStackAsked}, which NavBharatAI does not build; built in ${builtWithLabel(framework)} and told the user so.`,
+          autoResolved: true,
+        });
+      }
       // WHICH PREVIEW BROKE (autopsy "Lekhan Sahyak", 2026-09-27): a fix request from the in-browser
       // preview now says so, so the builder does not "fix" our renderer's fault in the user's files.
       // Outside every best-effort try below on purpose — a context-loading fault must not drop it.
@@ -16155,6 +16170,10 @@ async function noteBuildOutcome(
               state.setTodos(projectPlanTodos(pPlan));
               projectPlanRef = pPlan;
               projectModuleRef = pPlan.modules.find((m) => m.id === nextMod.id) ?? nextMod;
+              // A module that does not own the app's entry leaves it as the starter ON PURPOSE — the
+              // readiness gate must not call that "nothing built" and push the model to build the whole
+              // app in this module's turn (autopsy 8e124182). See starterEntryExpectedFor.
+              dispatcher.setStarterEntryExpected(starterEntryExpectedFor(pPlan, projectModuleRef));
               buildPrompt = `${moduleBuildContext(pPlan, projectModuleRef)}\n\n---\n\nUser's message this turn:\n${buildPrompt}`;
               // GA-7 — surface the coordinator digest (milestone progress + current role) alongside the
               // plain progress line, closing the previously built-but-unwired coordinatorDigest export.
@@ -19880,7 +19899,7 @@ async function noteBuildOutcome(
                     // Only a KEPT heal updates result + coverage; a reverted heal leaves the app exactly as
                     // green as it was, and the honest pre-heal FEATURE_COVERAGE warning below still stands.
                     if (vr.kept && healResult?.ok) {
-                      result = healResult as typeof result;
+                      result = adoptHealResult(result, healResult as typeof result);
                       if (afterHtml) {
                         const afterCoverage = checkFeaturePresence(prompt, afterHtml, declinedPresenceFeatures(featureConfirmation));
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
@@ -19889,7 +19908,7 @@ async function noteBuildOutcome(
                   } else {
                     const healed = await applyHeal();
                     if (healed.ok) {
-                      result = healed;
+                      result = adoptHealResult(result, healed);
                       try {
                         const after = (await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl')).html;
                         const afterCoverage = checkFeaturePresence(prompt, after, declinedPresenceFeatures(featureConfirmation));
@@ -20022,7 +20041,7 @@ async function noteBuildOutcome(
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
             const healed = await healRunner.run(repairPrompt);
-            if (healed.ok) result = healed;
+            if (healed.ok) result = adoptHealResult(result, healed);
           } catch (e) {
             console.log(`[AGENTV3] preview heal attempt ${attempt + 1} failed: ${e instanceof Error ? e.message : String(e)}`);
             break;
@@ -20624,6 +20643,25 @@ async function noteBuildOutcome(
               buildDiag.record({ phase: 'readiness', severity: 'warning', code: 'TEST_SUITE', message: outcome.summary + (outcome.failingTests.length ? ` — failing: ${outcome.failingTests.slice(0, 8).join(', ')}` : ''), autoResolved: false });
               break;
             }
+            // OURS OR THEIRS, ON THE BRANCH WHERE IT COSTS A REPAIR (autopsy 8e124182). The missing-runner
+            // branch above already asks it; this one did not, so our own crashing starter test sent a model
+            // to rewrite the user's source. Our test failing is our defect — record it and stop.
+            {
+              const failingFiles = outcome.failingTests.map((t) => t.split(' > ')[0].trim()).slice(0, 8);
+              const failingContents: Record<string, string> = {};
+              for (const f of failingFiles) {
+                try { failingContents[f] = await actuator.readFile(workspaceId, f); } catch { /* unreadable ⇒ judged as theirs */ }
+              }
+              if (failuresAreOurStarterTests(outcome.failingTests, failingContents, finishingPaths)) {
+                buildDiag.record({
+                  phase: 'readiness', severity: 'info', code: 'TEST_SUITE_UNVERIFIED',
+                  message: ourStarterTestFailedNote(failingFiles),
+                  detail: outcome.summary,
+                  autoResolved: true, // not an app defect — nothing for the build to resolve
+                });
+                break;
+              }
+            }
             events.emit({ type: 'narration', agent: 'architect', text: `🧬 The app's own tests are failing (${outcome.summary}). Fixing the source now…`, ts: Date.now() });
             try {
               const vaxRunner = new AgentRunner({
@@ -20633,7 +20671,7 @@ async function noteBuildOutcome(
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
               const healed = await vaxRunner.run(testOutcomeRepairPrompt(outcome));
-              if (healed.ok) result = healed; else break;
+              if (healed.ok) result = adoptHealResult(result, healed); else break;
             } catch (e) {
               console.log(`[AGENTV3] vaccine heal failed: ${e instanceof Error ? e.message : String(e)}`);
               break;
@@ -20997,7 +21035,7 @@ async function noteBuildOutcome(
                   persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                 });
                 const healed = await rtRunner.run(fuzzRepairPrompt(findings));
-                if (healed.ok) { result = healed; buildDiag.record({ phase: 'readiness', severity: 'info', code: 'FUZZ_HARDENED', message: `Hardened ${findings.length} input(s) against hostile input.`, autoResolved: true }); }
+                if (healed.ok) { result = adoptHealResult(result, healed); buildDiag.record({ phase: 'readiness', severity: 'info', code: 'FUZZ_HARDENED', message: `Hardened ${findings.length} input(s) against hostile input.`, autoResolved: true }); }
               } catch (e) {
                 console.log(`[AGENTV3] red-team heal failed: ${e instanceof Error ? e.message : String(e)}`);
               }
@@ -23384,6 +23422,11 @@ async function noteBuildOutcome(
           }
         }
       } catch { /* the net must never break a settle */ }
+      // Once, on a successful build: the user asked for a stack we did not use (unsupportedStack.ts).
+      if (result.ok && unsupportedStackAsked && typeof result.summary === 'string') {
+        const stackNote = unsupportedStackUserNote(unsupportedStackAsked, framework);
+        if (stackNote && !result.summary.includes(stackNote.trim())) result = { ...result, summary: `${result.summary}${stackNote}` };
+      }
       const livePreviewLine = costBreakdown && result.ok ? livePreviewChargeLine(costBreakdown) : '';
       if (livePreviewLine && typeof result.summary === 'string') {
         result = { ...result, summary: `${result.summary}\n\n${livePreviewLine}` };

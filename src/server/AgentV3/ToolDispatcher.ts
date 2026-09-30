@@ -78,7 +78,8 @@ import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote } from './writeTimeQualityCheck';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { keepKitOnRewrite, kitKeepToolNote } from './kitRestore';
-import { currentPass, runInPass } from './greenFreeze';
+import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
+import { shellWriteTargets } from './shellWriteTargets';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
 import {
@@ -703,6 +704,16 @@ export class ToolDispatcher {
   private declinedFeatures: ReadonlySet<string> | undefined;
   setDeclinedFeatures(labels: ReadonlySet<string> | undefined): void {
     this.declinedFeatures = labels;
+  }
+
+  /**
+   * A Software Project Mode module turn whose module does not own the app's entry file — the entry is
+   * EXPECTED to still be the starter, so it must not be reported as "nothing has been built yet"
+   * (autopsy 8e124182; see `starterEntryExpectedFor` in ProjectPlan.ts). Set by the route for that turn.
+   */
+  private starterEntryExpected = false;
+  setStarterEntryExpected(expected: boolean): void {
+    this.starterEntryExpected = expected === true;
   }
 
   setIgnoreRules(rules: IgnoreRule[]): void {
@@ -1446,6 +1457,8 @@ export class ToolDispatcher {
    * fail real builds on our own trouble — the same rule the timeout above already follows.
    */
   private async _blockIfStillTheStarterApp(report: ReadinessReport): Promise<ReadinessReport> {
+    // A module turn that is not meant to touch the entry — see `setStarterEntryExpected`.
+    if (this.starterEntryExpected) return report;
     // The SAME question every render proof asks (`entryIsStillTheStarter`) — one answer, so the gate
     // and the proofs can never disagree about the same file again (autopsy 0d297b25).
     try {
@@ -3538,6 +3551,16 @@ export class ToolDispatcher {
             this.state?.appendTerminal(cmsg);
             return cmsg;
           }
+        }
+        // THE SHELL IS NOT A WAY AROUND THE GREEN FREEZE (autopsy 8e124182). The freeze lives in the
+        // actuator's writeFile; `cat > src/lib/seed.ts <<EOF` never passes through it, and in that report
+        // a model refused twice by the freeze said so in as many words and used exactly that. Ask the
+        // freeze about every file the command plainly writes: a refused one throws the same
+        // GreenFreezeError as write_file (and is recorded as deferred); an allowed one is reported to the
+        // write observer, so POST_GREEN_WRITES counts shell writes too. Nothing is asked when the app is
+        // not latched green, so an ordinary build's commands pay nothing.
+        if (isGreenLatched(this.workspaceId)) {
+          for (const target of shellWriteTargets(command)) assertWriteAllowed(this.workspaceId, target);
         }
         // Preview guard: the live preview is MANAGED (E2BActuator detects `npm run dev` and binds
         // host / pins port / sets allowedHosts / health-checks / publishes the URL). When it looks

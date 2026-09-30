@@ -36,7 +36,7 @@
  * summary read that silence as "no TypeScript source was written this build". See
  * `writeTypecheckUntouched` and `writeTypecheckSummary`'s third argument.
  */
-import { robustTscCommand } from './tscCommand';
+import { robustTscCommand, TSC_BIN } from './tscCommand';
 import { suggestedPropertyRenames, type TscError } from './EndgameRepair';
 import { tscErrorCauses, tscCauseNote, remedyFileFor } from './tscErrorCause';
 
@@ -65,6 +65,25 @@ export function shouldTypecheckWrite(path: string): boolean {
 /** The command — the robust local binary, incremental, on the shared cache. Pure. */
 export function writeTypecheckCommand(): string {
   return robustTscCommand(`--noEmit --incremental --tsBuildInfoFile ${WRITE_TYPECHECK_TSBUILDINFO}`, '2>&1 | head -120');
+}
+
+/**
+ * The build-start WARM-UP: the same compile, on the same cache, run once while the model is still
+ * thinking about its first move — so the first write's check reads a warm cache instead of paying a
+ * cold compile (autopsy ee0e6de5, 2026-09-30: the first write-time check took 15 s, every later one
+ * about a second, and the model waited through all fifteen with a file in its hand).
+ *
+ * 🔒 IT MAY CHANGE NOTHING BUT OUR OWN CACHE FILE, which is why it is NOT `robustTscCommand`: that
+ * command's `TSC_ENSURE` prefix runs `npm install` when `node_modules` is missing or older than
+ * `package.json`, and an install started by a warm-up, in the background, at a moment nobody chose, is
+ * a second install racing the build's own. So the warm-up runs only when the compiler is already
+ * there and the install is current, and otherwise does nothing. Its output is discarded: a compile of
+ * the tree as it stood BEFORE the model wrote anything is evidence of nothing, and must never reach
+ * the release gate's typecheck record or project memory. Pure.
+ */
+export function writeTypecheckWarmupCommand(): string {
+  return `if [ -x ${TSC_BIN} ] && [ -f tsconfig.json ] && [ ! package.json -nt node_modules ]; then `
+    + `${TSC_BIN} --noEmit --incremental --tsBuildInfoFile ${WRITE_TYPECHECK_TSBUILDINFO} >/dev/null 2>&1; fi; true`;
 }
 
 function normalizePath(p: string): string {
@@ -177,6 +196,14 @@ export class WriteTypecheckQueue<R> {
   private inFlight: Promise<R> | null = null;
   private pending: Promise<R> | null = null;
 
+  /**
+   * Nothing running and nothing waiting. A caller that must never become the SHARED next run — the
+   * warm-up, whose result is `null` for everyone who joins it — starts only when this is true.
+   */
+  idle(): boolean {
+    return this.inFlight === null && this.pending === null;
+  }
+
   run(exec: () => Promise<R>): Promise<R> {
     if (!this.inFlight) {
       this.inFlight = exec().finally(() => { this.inFlight = null; });
@@ -263,6 +290,14 @@ export interface WriteTypecheckStats {
    */
   projectVerdict: TsProjectVerdict | null;
   disabledReason: string | null;
+  /**
+   * The build-start warm-up (see `writeTypecheckWarmupCommand`). Shared with sub-agents through this
+   * object, so one build warms the cache once however many dispatchers it spawns. `warmupMs` is set
+   * only when the command finished; `null` after a start means it was still running or did not finish.
+   * Neither field makes the stats "touched" — a warm-up is not a write reaching the check.
+   */
+  warmupStarted: boolean;
+  warmupMs: number | null;
 }
 
 export function emptyWriteTypecheckStats(): WriteTypecheckStats {
@@ -270,6 +305,7 @@ export function emptyWriteTypecheckStats(): WriteTypecheckStats {
     runs: 0, cleanRuns: 0, ownErrorsSurfaced: 0, elapsedMs: 0, timeouts: 0,
     skipped: 0, skippedNotTs: 0, skippedNoTsconfig: 0, probeFailures: 0,
     compiledUnprobed: 0, projectVerdict: null, disabledReason: null, qualityNotedFiles: [],
+    warmupStarted: false, warmupMs: null,
   };
 }
 
@@ -426,6 +462,7 @@ export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean, 
   return `Write-time typecheck: ${s.runs} run(s), ${s.cleanRuns} clean, ${s.ownErrorsSurfaced} error(s) quoted back in the file just written, `
     + `${Math.round(s.elapsedMs / 1000)}s total (~${avg}s each)`
     + (s.timeouts ? `, ${s.timeouts} timeout(s)` : '')
+    + (s.warmupMs !== null ? `; the cache was warmed at build start in ${Math.round(s.warmupMs / 1000)}s, before the first write` : '')
     + (s.compiledUnprobed > 0
       ? `, ${s.compiledUnprobed} of them run without the tsconfig.json probe ever answering (${s.probeFailures} failed attempt(s)) — the compiler was asked instead of being switched off`
       : '')

@@ -246,6 +246,22 @@ function kitPreludes(): { top: Set<string>; media: Map<string, Set<string>> } {
   return kitPreludeCache;
 }
 
+/**
+ * Does this stylesheet carry the design kit — at least `KIT_SIGNATURE_MIN` of its rules?
+ *
+ * The same threshold `keepKitOnRewrite` uses to decide a stylesheet "had the kit", so the two can never
+ * disagree about which file the kit lives in. PURE; never throws.
+ */
+export function stylesheetCarriesKit(css: string): boolean {
+  if (typeof css !== 'string' || !css.trim()) return false;
+  const { top } = kitPreludes();
+  let n = 0;
+  for (const b of parseCssBlocks(css)) {
+    if (!b.prelude.startsWith('@') && top.has(norm(b.prelude)) && ++n >= KIT_SIGNATURE_MIN) return true;
+  }
+  return false;
+}
+
 export interface KitKeep {
   /** The content to write: the new content unchanged, plus the kit rules it dropped. */
   content: string;

@@ -689,6 +689,18 @@ export class ToolDispatcher {
     return [...this._writtenPaths];
   }
 
+  /** A sub-agent this one delegated to wrote something (or could not say whether it did). */
+  private _delegateWrote = false;
+
+  /**
+   * Has this agent changed the project yet — itself or through a sub-agent? The done signal asks it, so
+   * an edit is never judged "complete" by the score of the app it has not touched (autopsy 1389f0d5).
+   */
+  wroteAnything(): boolean {
+    this.flushUnrecordedWrites();
+    return this._writtenPaths.size > 0 || this._delegateWrote;
+  }
+
   // Preview loop-breaker state (build-diagnostics root cause: with no cross-call memory the model
   // re-ran update_preview + npm run dev in a loop until the step cap — ~10 min burned on an
   // unreachable preview). Counted per dispatcher (= per build for the Architect).
@@ -9695,6 +9707,7 @@ export class ToolDispatcher {
         }
         this.events?.emit({ type: 'agent_spawned', agent: role, task: instruction, ts: Date.now() });
         const result = await this.spawnSubAgent(role, instruction + await this.stylesheetBriefFor(role));
+        if (!Array.isArray(result.written) || result.written.length > 0) this._delegateWrote = true;
         return taskResultWithWrites(role, result);
       }
 

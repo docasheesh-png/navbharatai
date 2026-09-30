@@ -150,12 +150,17 @@ function hasEarlyReturnBefore(fn: any, call: any): boolean {
   const statements: any[] = body.getStatements?.() ?? [];
   for (const stmt of statements) {
     if (stmt.getStart?.() >= callPos) break; // only statements before the hook call
-    if (stmt.getKindName?.() === 'ReturnStatement') return true;
+    // 🔴 A RETURN THAT *IS* THE HOOK CALL IS NOT BEFORE IT (autopsy bee95692, 2026-09-30).
+    // `return useSyncExternalStore(subscribe, getSnapshot);` starts before the call, so it used to be
+    // counted as an early return — three false "crash at runtime" blockers, a resume round, and the
+    // model rewriting a correct hooks file three times. A return counts only if it ENDS before the call.
+    const endsBefore = (r: any): boolean => (r.getEnd?.() ?? Infinity) <= callPos;
+    if (stmt.getKindName?.() === 'ReturnStatement' && endsBefore(stmt)) return true;
     // An early return nested in a conditional (the classic `if (!x) return null;`).
     const returns = stmt.getDescendantsOfKind?.(TsMorph.SyntaxKind.ReturnStatement) ?? [];
     for (const r of returns) {
       // Ignore returns that belong to a NESTED function (those aren't early returns of this context).
-      if (enclosingFunction(r) === fn) return true;
+      if (enclosingFunction(r) === fn && endsBefore(r)) return true;
     }
   }
   return false;

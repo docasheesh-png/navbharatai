@@ -14829,7 +14829,9 @@ async function noteBuildOutcome(
           // and the user's Supabase account already is. Approve ⇒ the new database is in the vault BEFORE
           // the prompt below is assembled, so `userDatabaseContext` wires it from the first file.
           try {
-            const need = sharedDataNeed(prompt);
+            // The SAME text the complexity score and the plan read (autopsy bee95692): the message was "Yes",
+            // the request ("Social media app") was the turn before it, and reading only the message saw nothing.
+            const need = sharedDataNeed(planning.text);
             const decision = startOfferDecision({
               hasUser: true,
               isEditMode,

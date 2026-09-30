@@ -14,7 +14,7 @@
 // fully unit-testable without a sandbox.
 
 import { dropShadowingEntries } from './entryShadow';
-import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE } from './noEvalRule';
+import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, STABLE_SNAPSHOT_RULE } from './noEvalRule';
 import { posix } from 'node:path';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { deadlineFromBudget } from './turnDeadline';
@@ -372,6 +372,7 @@ export function fileSystemPrompt(framework: string): string {
     '- Match the imports/exports the rest of the app expects (you are given the full file list).',
     NO_EVAL_RULE,
     BUILD_WHAT_WAS_ASKED_RULE,
+    STABLE_SNAPSHOT_RULE,
     ...exportImportConvention(framework),
     ...designContractFor(framework),
   ].join('\n');

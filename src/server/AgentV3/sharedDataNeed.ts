@@ -29,7 +29,7 @@ const SIGNALS: Array<[RegExp, string]> = [
   [/\b(attendance|inventory|stock (management|register|entry)|patients?|(student|customer|employee|member)s?\s+(records?|data|list|database|details))\b/i, 'records'],
   [/\b(admin|owner|staff|seller|vendor)\s+(panel|dashboard|portal)\b/i, 'an admin dashboard'],
   [/\b(sign ?up|log ?in|login|user accounts?|register users?)\b/i, 'user accounts'],
-  [/\b(marketplace|multi[- ]?user|chat app|group chat)\b/i, 'data shared between users'],
+  [/\b(marketplace|multi[- ]?user|chat app|group chat|social (?:media|network(?:ing)?) (?:app|site|website|platform)|a social network)\b/i, 'data shared between users'],
 ];
 
 /** The person said, in words, that the app must NOT have a backend. */

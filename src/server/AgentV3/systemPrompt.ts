@@ -14,7 +14,7 @@ import { EMOJI_RULE } from '../lib/responseEmoji';
 import { DEVICE_POWERS_RULE } from './devicePowers';
 import { LISTENING_PORTS_COMMAND } from './PortDiscovery';
 import { appAiGatewayEnabled } from '../lib/appAiGateway';
-import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE } from './noEvalRule';
+import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, STABLE_SNAPSHOT_RULE } from './noEvalRule';
 
 /**
  * The #1 conversation rule — mirror the user's language, never default to Hindi. The platform's
@@ -579,6 +579,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     aiInAppRule(),
     NO_EVAL_RULE,
     BUILD_WHAT_WAS_ASKED_RULE,
+    STABLE_SNAPSHOT_RULE,
     '',
     'Conversation:',
     '- Reply to anything the user says. If they greet you (e.g. "hello") or ask a',

@@ -22,3 +22,14 @@ export const NO_EVAL_RULE =
 export const BUILD_WHAT_WAS_ASKED_RULE =
   '- Build what the user asked for. Do not add features, screens or buttons they did not ask for (unless the ' +
   'build\'s own requirement notes list them); mention at most one or two optional extras in your final message instead.';
+
+/**
+ * A SNAPSHOT MUST BE THE SAME OBJECT UNTIL THE DATA CHANGES (autopsy bee95692, 2026-09-30). A social app's
+ * store answered `getPosts()` with `[...this.posts].sort(...)` — a NEW array on every call — and passed it to
+ * `useSyncExternalStore` as getSnapshot. React compares snapshots by identity, so every render saw "new"
+ * data and rendered again: "Maximum update depth exceeded", a crashed preview, and a repair pass. The rule
+ * is React's own, stated where the builder decides it.
+ */
+export const STABLE_SNAPSHOT_RULE =
+  '- useSyncExternalStore\'s getSnapshot must return the SAME object until the data changes — never build a new ' +
+  'array/object inside it (no sort/filter/map/spread per call); keep the derived value cached in the store and replace it only on writes.';

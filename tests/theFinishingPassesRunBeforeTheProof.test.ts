@@ -313,7 +313,12 @@ describe('the rest of the review, locked at the source', () => {
     expect(block).toContain('const noteFinishingWrite = (path: string) => { finishingPaths.add(path); inBuildWriteTick++; }');
     const sets = block.match(/writtenFiles\.set\(/g)?.length ?? 0;
     const notes = block.match(/noteFinishingWrite\(/g)?.length ?? 0;
-    expect(notes).toBe(sets); // one note per write
+    // The unused-import sweep (moved here by autopsy f496c75b) rewrites the MODEL's own files, which the
+    // reviewer must still read — so it moves the tick directly instead of marking the path as ours.
+    const directTicks = (block.match(/inBuildWriteTick\+\+;/g)?.length ?? 0) - 1; // minus noteFinishingWrite's own
+    expect(directTicks).toBe(1);
+    expect(block).toContain('const cleaned = sweepUnusedImports(src);');
+    expect(notes + directTicks).toBe(sets); // one tick per write
   });
 
   it('the reviewer is not sent to review our own finishing files', () => {

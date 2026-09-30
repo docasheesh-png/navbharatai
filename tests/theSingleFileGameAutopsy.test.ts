@@ -50,7 +50,7 @@ describe('1 · a single-file HTML ask is built as plain HTML', () => {
     expect(SINGLE_HTML_FILE_RULE).toMatch(/index\.html/);
     expect(route).toContain("framework === 'static' && wantsSingleHtmlFile(prompt) ? SINGLE_HTML_FILE_RULE : ''");
     expect(route).toContain('buildPrompt = `${singleHtmlFileRule}\\n\\n${buildPrompt}`');
-    expect(route).toMatch(/runSimpleBuild\(\{ prompt: singleHtmlFileRule \?/);
+    expect(route).toContain("runSimpleBuild({ prompt: planning.text + (singleHtmlFileRule ? `\\n\\n${singleHtmlFileRule}` : ''),");
   });
 });
 

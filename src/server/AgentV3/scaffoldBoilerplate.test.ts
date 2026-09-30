@@ -192,9 +192,13 @@ describe('both repair paths carry the guard — the drift that cost the seven mi
   it('boilerplate is dropped from the plan, so the FIRST pass cannot overwrite it either', () => {
     // The 50/50 half: restoring after the fact is recovery; keeping it out of the plan is why it never
     // needs recovering. The prompt line alone would be persuasion — the filter is what makes it true.
-    expect(simpleBuilder).toContain('planned.filter((m) => !isScaffoldBoilerplate(m.path))');
+    expect(simpleBuilder).toContain('planned.filter((m) => !provided.has(m.path))');
     expect(manifestSystemPrompt('vite-react')).toContain('src/ErrorBoundary.tsx');
     expect(manifestSystemPrompt('vite-react')).toContain('do NOT list them');
+    // "Provided" means PRESENT (autopsy b47c56d8): a Next.js workspace has no such file, so its planner
+    // is never told one exists — while a Vite workspace that holds it still is.
+    expect(manifestSystemPrompt('vite-react', ['src/App.tsx', 'src/ErrorBoundary.tsx'])).toContain('src/ErrorBoundary.tsx');
+    expect(manifestSystemPrompt('nextjs', ['app/page.tsx', 'app/layout.tsx', 'package.json'])).not.toContain('src/ErrorBoundary.tsx');
   });
 
   it('the fast lane honours the same kill switch as the agentic lane', () => {

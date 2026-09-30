@@ -44,6 +44,57 @@ export function parseTscErrors(output: string): TscError[] {
   return out;
 }
 
+/**
+ * TS1361 — a VALUE imported with `import type` (an enum, a class, a function). The fix has exactly one
+ * correct form: move that one name into a value import from the same module. Pure.
+ *
+ * 🔴 AUTOPSY b47c56d8 (2026-09-30): the ONLY compile error in a Next.js build was
+ * `src/ThemeToggle.tsx(4,27): error TS1361: 'ThemeMode' cannot be used as a value because it was imported
+ * using 'import type'` — the shared contract declared `ThemeMode` as an enum and one file imported it as a
+ * type. No deterministic pass knew the code, so it went to a model: two reasoning rungs spent 350 s thinking
+ * and returned nothing, and the repair loop took 763 s of a 926 s lane. It is a string edit.
+ *
+ * Acts only when the name appears in exactly ONE import of that file, as a plain or aliased specifier —
+ * anything it cannot match with certainty is left to the model, as before.
+ */
+export function fixTypeOnlyValueImports(
+  files: Record<string, string>,
+  errors: TscError[],
+): { files: Record<string, string>; fixed: string[] } {
+  const fixed: string[] = [];
+  const out = { ...files };
+  for (const e of errors) {
+    if (e.code !== 'TS1361') continue;
+    const name = /^'([A-Za-z_$][\w$]*)' cannot be used as a value because it was imported using 'import type'/.exec(e.message)?.[1];
+    const src = out[e.file];
+    if (!name || typeof src !== 'string') continue;
+    const specRe = new RegExp(`^(?:type\\s+)?(?:[A-Za-z_$][\\w$]*\\s+as\\s+)?${name.replace(/\$/g, '\\$')}$`);
+    const stmts = [...src.matchAll(/import\s+(type\s+)?\{([^}]*)\}\s*from\s*(['"][^'"]+['"])\s*;?/g)]
+      .filter((m) => m[2].split(',').some((sp) => specRe.test(sp.trim())));
+    if (stmts.length !== 1) continue;
+    const m = stmts[0];
+    const specs = m[2].split(',').map((sp) => sp.trim()).filter(Boolean);
+    const target = specs.find((sp) => specRe.test(sp))!;
+    const valueSpec = target.replace(/^type\s+/, '');
+    let replacement: string;
+    if (m[1]) {
+      // `import type { A, X } from 'm'` → keep the types, import X as a value.
+      const rest = specs.filter((sp) => sp !== target);
+      replacement = rest.length
+        ? `import type { ${rest.join(', ')} } from ${m[3]};\nimport { ${valueSpec} } from ${m[3]};`
+        : `import { ${valueSpec} } from ${m[3]};`;
+    } else if (target !== valueSpec) {
+      // `import { type X, B } from 'm'` → drop the inline `type` modifier on X only.
+      replacement = `import { ${specs.map((sp) => (sp === target ? valueSpec : sp)).join(', ')} } from ${m[3]};`;
+    } else {
+      continue; // already a value import — this is not the shape TS1361 describes; leave it to the model
+    }
+    out[e.file] = src.slice(0, m.index!) + replacement + src.slice(m.index! + m[0].length);
+    fixed.push(`${e.file}: imported '${name}' as a value (it was imported with 'import type')`);
+  }
+  return { files: out, fixed };
+}
+
 /** The error codes the deterministic layer addresses (everything else goes to the batch LLM call). */
 const UNUSED_CODES = new Set(['TS6133', 'TS6192', 'TS6196']);
 
@@ -113,6 +164,9 @@ export async function endgameDeterministicPass(
 ): Promise<EndgameDeterministicResult> {
   const fixes: string[] = [];
   let cur = files;
+  const typeOnly = fixTypeOnlyValueImports(cur, errors);
+  cur = typeOnly.files;
+  fixes.push(...typeOnly.fixed);
   const unused = removeUnusedImports(cur, errors);
   cur = unused.files;
   fixes.push(...unused.removed);

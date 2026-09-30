@@ -193,7 +193,7 @@ import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, revi
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver, GreenFreezeError } from '../AgentV3/greenFreeze';
 import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, attemptOutcome, inBuildGreenNote, inBuildGreenNarration, snapshotIsFromThisBuild, IN_BUILD_PROOF_BUDGET_MS, type AttemptOutcome } from '../AgentV3/inBuildGreen';
-import { STARTER_ENTRY_PATHS, isUntouchedStarterEntry, starterEntryIn, starterIsWhatRendered, pageShowsStarter, withStarterVerdict } from '../AgentV3/stillTheStarterApp';
+import { STARTER_ENTRY_PATHS, isUntouchedStarterEntry, starterEntryIn, starterIsWhatRendered, pageShowsStarter, withStarterVerdict, starterLabelFor } from '../AgentV3/stillTheStarterApp';
 import { postGreenWritesNote, endVerdictFrom, type PostGreenWrite } from '../AgentV3/postGreenWrites';
 import { offTopicSummaryNotice } from '../AgentV3/offTopicSummary';
 import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote, strictReverify } from '../AgentV3/verifyAfterFix';
@@ -15181,7 +15181,7 @@ async function noteBuildOutcome(
             return t.text;
           };
           const scaffold = (await actuator.listFiles(workspaceId).catch(() => [])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
-          const manifest = parseFileManifest(await bpGenerate(manifestSystemPrompt(framework), manifestUserPrompt(prompt, scaffold)));
+          const manifest = parseFileManifest(await bpGenerate(manifestSystemPrompt(framework, scaffold), manifestUserPrompt(prompt, scaffold)));
           // FILE BUDGET honesty (admin 2026-08-02): the plan is NEVER trimmed — shipping an incomplete app
           // would be far worse than shipping a large one — but an overrun is recorded so "this app planned
           // more files than it should need" is measurable instead of invisible.
@@ -16352,6 +16352,13 @@ async function noteBuildOutcome(
       if (fastLaneWouldRun && !fastLaneRung.skip) {
         // Usage ACCUMULATES across every cheap call (manifest + each per-file call), so billing is honest.
         const osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
+        // 🔴 THE SCAFFOLD MUST EXIST BEFORE THE PLAN READS IT (autopsy b47c56d8, 2026-09-30). The
+        // framework scaffold's self-heal runs on the dispatcher's FIRST tool call — which, on a fast-lane
+        // build, is the lane's first file write, AFTER the plan below has already listed an empty
+        // workspace. A Next.js build planned `src/main.tsx` and `public/index.html` for "an empty
+        // project", the scaffold then arrived with `app/page.tsx`, and nothing ever replaced its "Hello
+        // from Next.js!". Ensuring it here (one file probe when it already exists) makes the listing true.
+        await dispatcher.ensureFrameworkScaffold().catch(() => { /* best-effort — the listing still runs */ });
         // The WHOLE listing: this list answers "does this file exist?" for the missing-files gate and the
         // foundation guard, and a capped answer is a wrong one (`find` output is unsorted, so which 80
         // survived was chance — autopsy 2720e553). Prompts that show it cap it themselves (60).
@@ -19223,7 +19230,7 @@ async function noteBuildOutcome(
             if (!starterNoted) {
               starterNoted = true;
               buildDiag.record({ phase: 'preview', severity: 'warning', code: 'STARTER_STILL_SHOWING', autoResolved: false,
-                message: `The preview rendered, but what it showed was the starter template (${p} still says "Hello World") — not the app that was built. Not counted as a render.`,
+                message: `The preview rendered, but what it showed was the starter template (${p} still says "${starterLabelFor(p)}") — not the app that was built. Not counted as a render.`,
                 detail: 'Entry file byte-identical to the seeded starter AND the page carries its heading. Treated as a conclusive not-rendered verdict so the existing repair, reviewer and billing rules apply.' });
             }
             return p;
@@ -19385,7 +19392,10 @@ async function noteBuildOutcome(
             hasPreview: !!lastPreviewUrl,
           });
           if (decision.scaffold) {
-            const plan = planE2eScaffold({ appName: workspaceId, devCommand: 'npm run dev' });
+            // The port the app SAYS it serves on (its dev script, its config) — the suite used to assume
+            // Vite's 5173 for every app, so a Next.js app on 3000 got a suite that could never reach it
+            // (autopsy b47c56d8). Null keeps the Vite default, as before.
+            const plan = planE2eScaffold({ appName: workspaceId, devCommand: 'npm run dev', port: declaredPortFrom(e2eFiles)?.port ?? null });
             const added: string[] = [];
             for (const [path, content] of Object.entries(plan.files) as Array<[string, string]>) {
               // Create-only: an existing file here belongs to the user, and the decision above already

@@ -84490,3 +84490,72 @@ them, because its `normalizePath` strips the slash and so saw them as present.
     "repo" in "report", "push" in "push notification"). It now matches whole words only.
   - **Tests:** 2 more in `tests/freeChatKnowsItsModeButton.test.ts`, reversion-proven.
   - **Reach:** the website gets this on deploy; phones need a fresh bundle.
+
+## 2026-09-30 — Autopsy b47c56d8: every Next.js page read as a 404, and fixing that alone would have lied the other way
+
+**Build:** "make app ui theme like this", Weak tier, Next.js. It ran 19.9 min against an ETA of 2–4 min
+and ended RED, billed ₹0.
+- The app never rendered anything but our own starter.
+- The report blamed a 404 that did not exist.
+
+**Ledger:**
+- ✅ Self-healed (4):
+  - the missing `react` dependency was installed;
+  - the dev server was brought up;
+  - three truncated repair outputs were continued;
+  - Haiku's third repair compiled.
+- 🔀 Workarounds (6):
+  - GLM flashx was benched for crawling, then timed out;
+  - KIMI and GLM-5.3 each starved their whole output budget on reasoning (350 s);
+  - Nemotron was overloaded once;
+  - the ladder fell to rung 5 of 5.
+- ⏭️ Skipped (3):
+  - the E2E suite was pointed at 5173 for an app on 3000;
+  - `src/useTheme.ts` was reported ✓ but is not on disk;
+  - the fast lane "skipped" `src/ErrorBoundary.tsx` as provided when a Next.js workspace has none.
+- ❌ Shipped broken (2):
+  - the preview showed "Hello from Next.js!", because the header, footer and theme toggle were written
+    into `src/` and never mounted;
+  - the render-rescue pass told the user "I connected the real components… app/layout.tsx now imports
+    Header" while writing ZERO files.
+- 🥵 Struggle:
+  - the repair phase took 763 s of a 926 s lane (82%) to fix one `TS1361` and then missing CSS classes;
+  - a 20-minute build of four components.
+
+**Root causes (verified in code):**
+1. **False 404 on every healthy Next.js page.** `analyzePreviewHtml`'s 404 rule read the raw HTML. The
+   not-found boundary we SEED (`app/not-found.tsx`: "404 — Page not found") rides inside every page's
+   inline flight payload. The rule now reads `visibleText`, which already strips scripts, and it also
+   recognises Next's own visible "This page could not be found".
+2. **The Next.js starter was not a starter.** `stillTheStarterApp` knew only the Vite `src/App.tsx` /
+   "Hello World". `STARTERS` now carries `app/page.tsx` / "Hello from Next.js!", read from the exported
+   template (`NEXTJS_STARTER_PAGE`), and each entry proves only its own heading.
+   - Without this, fix 1 would have turned the false RED into a false GREEN on a Hello page, with markup.
+3. **The fast lane planned against an empty workspace.** The framework scaffold self-heal runs on the
+   dispatcher's FIRST tool call, which was the lane's first write, after the plan had listed the
+   workspace.
+   - `dispatcher.ensureFrameworkScaffold()` now runs before the listing.
+   - `ensureEntryPlanned` / `unwrittenEntries` know a Next.js page is the only root (a `src/main.tsx` no
+     longer counts).
+   - The planner is told where a Next.js entry lives.
+   - It is promised only boilerplate that is present (`providedBoilerplate`).
+4. **Siblings:**
+   - A dependency the project's scripts run is used (`next dev` → `next`; `findUnusedDependencies`).
+   - Next's `app/**/error.tsx` is an error boundary (`isNextErrorBoundaryFile`).
+   - The E2E suite takes the declared port.
+   - `TS1361` (a value imported with `import type`) is fixed deterministically in
+     `endgameDeterministicPass`, which the fast lane already calls before any model repair.
+
+**Tests:** `tests/theNextJsPageWasNeverA404.test.ts` (17). Reversion-proven: the old 404 rule fails 4 of
+them, and removing the TS1361 pass fails 1.
+
+**Open root causes (not guessed at):**
+- The render-rescue pass narrated a fix it never made (a zero-write pass claiming edits). No claim audit
+  covers a rescue pass's narration.
+- `src/useTheme.ts` was reported written (1/10) and is absent from disk and the manifest. The report does
+  not show why.
+- On Weak, the fast-lane repair climbs to two always-reasoning rungs (KIMI, GLM-5.3), and both starved a
+  12 000-token budget on a one-token fix. The deterministic TS1361 pass removes this instance; the class
+  (a heal ladder of reasoning rungs for mechanical repairs) is the ladder policy's, an admin decision.
+- The `WRITE_TIME_TYPECHECK` line says "8 of them run without the tsconfig probe" out of 4 runs. The
+  counters disagree; not traced.

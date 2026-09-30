@@ -365,7 +365,7 @@ import { PUBLISH_NOT_REQUESTED } from './publishConsent';
 import { summarizeBundle, bundleSummaryLine } from './BundleSize';
 import { livenessLine } from './PostDeployLiveness';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
-import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary, looksLikeBrokenErrorBoundary } from './ErrorBoundaryAnalysis';
+import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary, looksLikeBrokenErrorBoundary, isNextErrorBoundaryFile } from './ErrorBoundaryAnalysis';
 import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue } from './SecurityConfigAnalysis';
 import { analyzeSecretLeak, secretLeakSummary, gitignoreWithEnvCoverage } from './SecretLeakAnalysis';
 import { scanHardcodedUrls, hardcodedUrlSummary, type HardcodedUrlIssue } from './HardcodedUrlAnalysis';
@@ -1801,6 +1801,14 @@ export class ToolDispatcher {
   // scaffold GUARD tripped, which a plain `npm install` never does. Now the FIRST tool call of a
   // run ensures the scaffold once (one readFile probe when already scaffolded — ~free).
   private scaffoldEnsured = false;
+  /**
+   * The same once-per-run scaffold guarantee, for a caller that must READ the workspace before any tool
+   * runs — the fast lane plans against the listing, so the scaffold has to be there first (autopsy
+   * b47c56d8). Idempotent with the first-tool-call path: whichever runs first does the work.
+   */
+  ensureFrameworkScaffold(): Promise<void> {
+    return this.ensureScaffoldOnce();
+  }
   private async ensureScaffoldOnce(): Promise<void> {
     if (this.scaffoldEnsured) return;
     this.scaffoldEnsured = true; // set first — a probe failure must not re-run this every call
@@ -2173,7 +2181,7 @@ export class ToolDispatcher {
     const SKIP = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next|\.git)([\\/]|$)|\.test\.|\.spec\.|__tests__/i;
     for (const { path, content } of sources) {
       if (!FRONTEND.test(path) || SKIP.test(path)) continue;
-      if (hasErrorBoundarySignal(content)) return true;
+      if (hasErrorBoundarySignal(content) || isNextErrorBoundaryFile(path, content)) return true;
     }
     return false;
   }

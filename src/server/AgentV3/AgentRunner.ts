@@ -29,6 +29,7 @@ import { turnStarvedItsBudget } from './floorBudget';
 import { decideBuildNudge, standDownNote } from './nudgeToBuild';
 import { decideUnfinishedResume, unfinishedResumeNote } from './unfinishedResume';
 import { streamThinkingToChat } from './thinkingStream';
+import { PROMPT_PREVIEW_SEPARATOR } from './promptPreviewShape';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -232,7 +233,8 @@ export interface AgentRunnerOptions {
  * string is never built in the first place. See the note at the call site.
  */
 const PROMPT_PREVIEW_HEAD = 4000;
-const SEPARATOR = '\n---\n';
+// One definition with the reader that splits it back apart (promptPreviewShape.ts).
+const SEPARATOR = PROMPT_PREVIEW_SEPARATOR;
 
 const PARALLEL_SAFE_TOOLS = new Set<string>([
   'read_file', 'grep', 'glob', 'recall', 'evaluate', 'second_opinion', 'consensus',

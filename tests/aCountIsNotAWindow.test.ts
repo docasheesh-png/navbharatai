@@ -85,17 +85,19 @@ describe('🔴 THE COMPOSED BUG — a 312-call build through the real recorder a
     expect(kept).toContain('call#312');
   });
 
-  it('the cap is unchanged — this buys the head with bytes, not with more storage', () => {
+  it('the cap is a byte budget (2026-09-30): small calls are all kept up to the recorder\'s own 300', () => {
+    // It was a fixed 40 until the stored previews stopped repeating one system prompt forty times;
+    // see theReportKeptFortyCopiesOfOnePrompt.test.ts for the size half of this.
     expect(build(312).llmCalls).toHaveLength(STORED_LLM_CALLS_MAX);
-    expect(STORED_LLM_CALLS_MAX).toBe(40);
+    expect(STORED_LLM_CALLS_MAX).toBe(300);
   });
 
   it('the record STATES the window, so nobody has to trust a docblock', () => {
     const t = build(312).truncation;
-    expect(t?.channels?.llmCalls).toEqual({ kept: 40, total: 312, head: 20 });
-    expect(t?.note).toContain('40 of 312 model calls');
-    expect(t?.note).toContain('the first 20 and the last 20');
-    expect(t?.note).toContain('272 from the middle are gone');
+    expect(t?.channels?.llmCalls).toEqual({ kept: 300, total: 312, head: 150 });
+    expect(t?.note).toContain('300 of 312 model calls');
+    expect(t?.note).toContain('the first 150 and the last 150');
+    expect(t?.note).toContain('12 from the middle are gone');
   });
 
   it('a build under every cap is still reported complete, with no gap invented', () => {
@@ -269,7 +271,7 @@ describe('🔒 REVERSION GUARDS — the source, because no behavioural test can 
 
   it('the store still trims through the one function that declares the loss', () => {
     const src = code(STORE);
-    expect(src).toContain('trimChannel(report.llmCalls, STORED_LLM_CALLS_MAX');
+    expect(src).toContain('trimChannel(report.llmCalls, opts.llmCallsCap ?? storedLlmCallsCap(report.llmCalls)');
     expect(src).toContain('trimChannel(report.commands, 40');
     expect(src).toContain('trimChannel(report.issues, 500');
     expect(src).toContain('trimChannel(report.errors, 50');

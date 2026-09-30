@@ -344,6 +344,23 @@ export function buildTimedOut(startMs: number, maxBuildMs: number | undefined, n
   return typeof maxBuildMs === 'number' && maxBuildMs > 0 && nowMs - startMs >= maxBuildMs;
 }
 
+/**
+ * The turn a message the user sent DURING the build becomes. Pure.
+ *
+ * 🔴 "FOLD THIS IN" WAS READ AS "OPTIONAL" (autopsy e6d46cde, 2026-09-30). The user sent *"Archer Ai"*
+ * mid-build — after the model had asked them what kind of app they wanted. The engine delivered it,
+ * narrated "picked up your message", and the model carried on with the app it had already chosen and
+ * never mentioned it again. A short message is the easiest one to skip and often the most important
+ * (a name, an answer, a "no"). So the turn now says what the user is owed: act on it, or say how it was
+ * read — and account for it in the final reply either way.
+ */
+export function liveUserMessageTurn(message: string): string {
+  return '[USER MESSAGE — sent live during the build.] Act on it now without discarding progress. '
+    + 'If it answers a question you asked, build to that answer. If it is unclear what it asks for, '
+    + 'say in one line how you read it before you continue. Your final reply must say what you did '
+    + `about it.\n${message}`;
+}
+
 export interface AgentRunResult {
   ok: boolean;
   summary: string;
@@ -674,7 +691,7 @@ export class AgentRunner {
         // narration ack is the honest "picked up" signal (the route already acked "queued" instantly).
         const steered = this.opts.steerPoll?.() ?? [];
         for (const sm of steered) {
-          messages.push({ role: 'user', content: `[USER MESSAGE — sent live during the build. Fold this into the current work without discarding progress.]\n${sm}` });
+          messages.push({ role: 'user', content: liveUserMessageTurn(sm) });
           events.emit({ type: 'narration', agent: agentRole, text: `📨 The team picked up your message: “${sm.slice(0, 160)}${sm.length > 160 ? '…' : ''}”`, ts: Date.now() });
         }
 
@@ -873,6 +890,17 @@ export class AgentRunner {
             try { this.opts.onNote?.({ code: 'BUILD_NUDGE_STOOD_DOWN', message: standDownNote(nudge.standDown), detail: nudge.standDown }); } catch { /* a note must never fail a build */ }
           }
           if (nudge.nudge) {
+            // A nudge that FIRED used to leave no line in the report — only a stand-down did — so the
+            // one decision that overrode the model's own words was the one nobody could see afterwards
+            // (autopsy e6d46cde: a question to the user was nudged into a build, and the report showed
+            // only a second model call with no reason for it).
+            try {
+              this.opts.onNote?.({
+                code: 'BUILD_NUDGED',
+                message: 'The model ended its turn without building and without asking or declining, so it was told to act now.',
+                detail: `nudge ${noBuildNudges + 1} of ${MAX_BUILD_NUDGES} · its last words: ${String(turn.text ?? '').trim().slice(-160)}`,
+              });
+            } catch { /* a note must never fail a build */ }
             noBuildNudges++;
             messages.push({ role: 'user', content: nudge.message });
             messageTs.push(Date.now());

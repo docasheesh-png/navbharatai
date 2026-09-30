@@ -12,6 +12,8 @@ import { roleConfig } from './AgentRegistry';
 import { catalogForTools } from './ToolCatalog';
 import { agentLifecycle } from './AgentLifecycle';
 import { getWorkspaceMemory } from './WorkspaceMemory';
+import { DESIGN_KIT_BRIEF } from './systemPrompt';
+import { stylesheetCarriesKit } from './kitRestore';
 import type { AgentRole } from './types';
 
 /**
@@ -343,6 +345,22 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       (() => { try { return deps.languageRule?.() ?? ''; } catch { return ''; } })(),
       (() => { try { return deps.aiRule?.() ?? ''; } catch { return ''; } })(),
     ].filter(Boolean);
+    // 🎨 THE KIT, AS THE ARCHITECT WAS TOLD IT (autopsy ee0e6de5, 2026-09-30). A specialist that writes
+    // files was never told the design kit's classes, so the Frontend sub-agent read `src/index.css` six
+    // times in slices to find them before writing a line. Given only when the stylesheet really carries
+    // the kit, so a project without it is never told about classes that do not exist.
+    if (roleExpectsArtifacts(cfg.tools)) {
+      try {
+        const raw = await deps.actuator.readFile(deps.workspaceId, 'src/index.css');
+        if (typeof raw === 'string' && stylesheetCarriesKit(withoutPreviewBridge('src/index.css', raw))) {
+          contextBlocks.push(
+            'The design kit is ALREADY in `src/index.css`. Its classes are listed here, so there is no need '
+            + 'to read the stylesheet to find them. Append your app\'s own rules; never replace the file.\n'
+            + DESIGN_KIT_BRIEF.join('\n'),
+          );
+        }
+      } catch { /* a head start, never a requirement — the child can still read the stylesheet */ }
+    }
     // THE HANDOFF CARRIES THE FILES, NOT ONLY A SENTENCE (admin 2026-09-24) — see taskHandoff.ts. The
     // child is told it holds them, so a later re-read of an unchanged one gets the honest notice.
     try {

@@ -402,6 +402,44 @@ const DEFECT_TEXT: Record<DesignDefect, string> = {
 };
 
 /**
+ * The defects a page can be told about WHILE IT IS BEING WRITTEN — the ones decided by the page itself
+ * (with its imports resolved from the project). `NO_HEADING` is deliberately absent: whether a layout
+ * already shows the page's title (`shellOwnsPageHeading`) depends on files that may not exist yet, and
+ * a write-time "add a heading" under a shell that owns one is the stacked-title repair autopsy
+ * 466c260a paid 255 s for. The end-of-build check still judges it, with the whole project in hand.
+ */
+export const WRITE_TIME_DESIGN_DEFECTS: ReadonlySet<DesignDefect> = new Set<DesignDefect>([
+  'BARE_MARKUP', 'RAW_TABLE', 'LIST_WITHOUT_EMPTY_STATE',
+]);
+
+/**
+ * The page-design note appended to a write, while the model still has the page open. PURE; `''` when
+ * there is nothing to say.
+ *
+ * 🔴 WHY (autopsy e6d46cde, 2026-09-30). `Plans.tsx` filtered its plan list by a category tab and had no
+ * empty state; nothing said so until the app was finished, and the repair then ran as part of a
+ * 100-second pass in a fresh context that re-read four screens to add one `.nb-empty` block. The same
+ * `analyzePage` judgement, run on the page as it is written, is the rule arriving while it is cheap.
+ */
+export function pageDesignWriteNote(
+  written: Record<string, string>,
+  project: Readonly<Record<string, string>> = {},
+): string {
+  const files = { ...project, ...written };
+  const lines: string[] = [];
+  for (const [path, content] of Object.entries(written)) {
+    if (typeof content !== 'string') continue;
+    let finding: PageFinding | null = null;
+    try { finding = analyzePage(path, content, files); } catch { finding = null; }
+    const defects = (finding?.defects ?? []).filter((d) => WRITE_TIME_DESIGN_DEFECTS.has(d));
+    if (defects.length === 0) continue;
+    lines.push(`Design check on ${path} (fix it now, while you have the file open):`);
+    for (const d of defects) lines.push(`  • ${DEFECT_TEXT[d]}.`);
+  }
+  return lines.length ? `\n\n${lines.join('\n')}` : '';
+}
+
+/**
  * The repair instruction. Names each page and exactly what is wrong with IT, because a generic "make
  * the design better" prompt produces a generic restyle — and usually touches the one page that was
  * already fine.

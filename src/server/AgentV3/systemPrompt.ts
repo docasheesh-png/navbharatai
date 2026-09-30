@@ -14,7 +14,7 @@ import { EMOJI_RULE } from '../lib/responseEmoji';
 import { DEVICE_POWERS_RULE } from './devicePowers';
 import { LISTENING_PORTS_COMMAND } from './PortDiscovery';
 import { appAiGatewayEnabled } from '../lib/appAiGateway';
-import { NO_EVAL_RULE } from './noEvalRule';
+import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE } from './noEvalRule';
 
 /**
  * The #1 conversation rule — mirror the user's language, never default to Hindi. The platform's
@@ -483,6 +483,59 @@ export const NAVBHARATAI_UI_MAP = [
 ].join('\n');
 
 /**
+ * The design kit and its screen recipes, as the builder is told them. ONE copy, read by the architect
+ * prompt and by a writing sub-agent when the stylesheet really carries the kit (`SubAgent.ts`).
+ *
+ * 🔴 WHY IT IS SHARED (autopsy ee0e6de5, 2026-09-30). The architect was told every kit class; the
+ * Frontend sub-agent it handed the whole UI to was told none, so before writing a line it read
+ * `src/index.css` six times in slices (lines 200–327, 150–220, 220–327, 1–160, 100–150) to find them.
+ */
+export const DESIGN_KIT_BRIEF: readonly string[] = [
+  '- 🎨 READY-MADE DESIGN KIT: the Vite+React scaffold\'s `src/index.css` already ships a themed',
+  '  palette (CSS vars: --accent, --accent-hover, --accent-fg, --success/--danger/--warning, --card,',
+  '  --border, --radius, --shadow) AND a small component kit you should REUSE for a consistent premium',
+  '  look: `.card`, `.btn-primary`/`.btn-ghost` (default `<button>` is a secondary), `.badge`',
+  '  (+`.badge-success/-danger/-warning`), `.alert` (+ same variants), `.container` (centred page),',
+  '  `.stack`/`.row` (flex), `.field` (label+input). Headings (h1–h4) already have a type scale.',
+  '  Reach for these classes and the palette vars first; extend them — do not hand-roll unstyled divs.',
+  '- 🧩 SCREEN RECIPES ALREADY IN THE STYLESHEET (Phase 3.2) — USE THESE INSTEAD OF INVENTING YOUR OWN.',
+  '  The screens every app needs are already designed, responsive and dark-mode aware. Writing a fresh',
+  '  version of one is slower AND worse than reaching for these:',
+  '    • DATA TABLE — wrap in `.nb-table-wrap` + `<table class="nb-table">` (sticky header, zebra rows,',
+  '      hover; scrolls sideways INSIDE its box so a phone page never scrolls horizontally). Numeric',
+  '      cells: `.nb-num`.',
+  '    • EMPTY STATE — `.nb-empty` (+ `.nb-empty-icon` / `.nb-empty-title` / `.nb-empty-text`). EVERY',
+  '      list, table and dashboard needs one: a blank panel reads as BROKEN to a first-time user, so say',
+  '      what will appear here and put the action that fills it right there.',
+  '    • DASHBOARD SHELL — `.nb-shell` > `.nb-sidebar` (+ `.nb-nav-item`, `.active`) and `.nb-topbar` +',
+  '      `.nb-main`. Collapses to one column on a phone by itself.',
+  '    • STAT TILES — `.nb-stats` > `.nb-stat` (+ `.nb-stat-label` / `.nb-stat-value`).',
+  '    • HERO — `.nb-hero` (+ `.nb-hero-sub`, `.nb-hero-actions`); the gradient uses the app\'s OWN accent.',
+  '    • PRICING — `.nb-pricing` > `.nb-plan` (+ `.nb-plan-featured` on the recommended one,',
+  '      `.nb-plan-price`, `.nb-plan-cta`).',
+  '    • AUTH SCREEN — `.nb-auth` > `.nb-auth-card` (+ `.nb-auth-sub`).',
+  '    • LOADING — `.nb-skeleton` blocks shaped like the content that is coming, NOT a bare spinner, so',
+  '      the layout does not jump when the data lands.',
+  '    • DIALOG — `.nb-modal-backdrop` > `.nb-modal` (+ `.nb-modal-title`, `.nb-modal-actions`).',
+  '    • TOOLBAR — `.nb-toolbar` with `.nb-spacer` to push actions right.',
+  '    • TABS / FILTERS — `.nb-tabs` > `button.nb-tab`, aria-selected="true" on the chosen one (All · Active',
+  '      · Done, a view switch). Never a row of plain buttons for a single choice.',
+  '    • TOAST — `.nb-toast` for a short "Saved" / "Copied"; never a blocking alert().',
+  '    • CHAT — `.nb-chat` with `.nb-msg nb-msg-user` (right, accent) and `.nb-msg nb-msg-bot` (left, card),',
+  '      `.nb-composer` pinned at the bottom, `.nb-typing` (three <span>) while the reply comes.',
+  '    • GAME UI — see the GAMES rule below: `.nb-game`, `.nb-game-screen`, `.nb-game-title`,',
+  '      `.nb-game-btn`, `.nb-game-hud`, `.nb-game-stat`, `.nb-game-bar`, `.nb-game-pad`, `.nb-game-key`.',
+  '    • `.nb-gradient-text` for a big title; `.nb-stagger` on a list so its items arrive one after another.',
+  '  Bare elements are already styled too: a plain <button> is a tinted secondary (a destructive one —',
+  '  a class containing delete/remove/danger — turns red), a submit button is filled, fields have a focus',
+  '  ring, a classed <ul> has no bullets, a bare <table> looks like a data table. Those are the FLOOR;',
+  '  the recipes are what make a screen look designed.',
+  '  They are `nb-` prefixed so they never collide with Tailwind utilities if the app uses Tailwind too.',
+  '  If a screen needs something the kit does not have, extend the kit in index.css using the palette',
+  '  vars — never drop back to unstyled markup.',
+];
+
+/**
  * THE USER ASKED FOR ONE FILE (autopsy f496c75b, 2026-09-30). Added to the build prompt — and to the fast
  * lane's — only when the request says so AND the framework is `static` (`wantsSingleHtmlFile`,
  * src/lib/frameworkDetect.ts). The scaffold ships index.html, style.css and script.js; without this line a
@@ -518,6 +571,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '',
     aiInAppRule(),
     NO_EVAL_RULE,
+    BUILD_WHAT_WAS_ASKED_RULE,
     '',
     'Conversation:',
     '- Reply to anything the user says. If they greet you (e.g. "hello") or ask a',
@@ -614,48 +668,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  the app to prove it really SAVES what the user types — so an app whose fields cannot be addressed',
     '  ships with "whether it actually saves anything is untested", however good it looks. Placeholder',
     '  text is NOT a label. Do this as you write the field, never as a later pass.',
-    '- 🎨 READY-MADE DESIGN KIT: the Vite+React scaffold\'s `src/index.css` already ships a themed',
-    '  palette (CSS vars: --accent, --accent-hover, --accent-fg, --success/--danger/--warning, --card,',
-    '  --border, --radius, --shadow) AND a small component kit you should REUSE for a consistent premium',
-    '  look: `.card`, `.btn-primary`/`.btn-ghost` (default `<button>` is a secondary), `.badge`',
-    '  (+`.badge-success/-danger/-warning`), `.alert` (+ same variants), `.container` (centred page),',
-    '  `.stack`/`.row` (flex), `.field` (label+input). Headings (h1–h4) already have a type scale.',
-    '  Reach for these classes and the palette vars first; extend them — do not hand-roll unstyled divs.',
-    '- 🧩 SCREEN RECIPES ALREADY IN THE STYLESHEET (Phase 3.2) — USE THESE INSTEAD OF INVENTING YOUR OWN.',
-    '  The screens every app needs are already designed, responsive and dark-mode aware. Writing a fresh',
-    '  version of one is slower AND worse than reaching for these:',
-    '    • DATA TABLE — wrap in `.nb-table-wrap` + `<table class="nb-table">` (sticky header, zebra rows,',
-    '      hover; scrolls sideways INSIDE its box so a phone page never scrolls horizontally). Numeric',
-    '      cells: `.nb-num`.',
-    '    • EMPTY STATE — `.nb-empty` (+ `.nb-empty-icon` / `.nb-empty-title` / `.nb-empty-text`). EVERY',
-    '      list, table and dashboard needs one: a blank panel reads as BROKEN to a first-time user, so say',
-    '      what will appear here and put the action that fills it right there.',
-    '    • DASHBOARD SHELL — `.nb-shell` > `.nb-sidebar` (+ `.nb-nav-item`, `.active`) and `.nb-topbar` +',
-    '      `.nb-main`. Collapses to one column on a phone by itself.',
-    '    • STAT TILES — `.nb-stats` > `.nb-stat` (+ `.nb-stat-label` / `.nb-stat-value`).',
-    '    • HERO — `.nb-hero` (+ `.nb-hero-sub`, `.nb-hero-actions`); the gradient uses the app\'s OWN accent.',
-    '    • PRICING — `.nb-pricing` > `.nb-plan` (+ `.nb-plan-featured` on the recommended one,',
-    '      `.nb-plan-price`, `.nb-plan-cta`).',
-    '    • AUTH SCREEN — `.nb-auth` > `.nb-auth-card` (+ `.nb-auth-sub`).',
-    '    • LOADING — `.nb-skeleton` blocks shaped like the content that is coming, NOT a bare spinner, so',
-    '      the layout does not jump when the data lands.',
-    '    • DIALOG — `.nb-modal-backdrop` > `.nb-modal` (+ `.nb-modal-title`, `.nb-modal-actions`).',
-    '    • TOOLBAR — `.nb-toolbar` with `.nb-spacer` to push actions right.',
-    '    • TABS / FILTERS — `.nb-tabs` > `button.nb-tab`, aria-selected="true" on the chosen one (All · Active',
-    '      · Done, a view switch). Never a row of plain buttons for a single choice.',
-    '    • TOAST — `.nb-toast` for a short "Saved" / "Copied"; never a blocking alert().',
-    '    • CHAT — `.nb-chat` with `.nb-msg nb-msg-user` (right, accent) and `.nb-msg nb-msg-bot` (left, card),',
-    '      `.nb-composer` pinned at the bottom, `.nb-typing` (three <span>) while the reply comes.',
-    '    • GAME UI — see the GAMES rule below: `.nb-game`, `.nb-game-screen`, `.nb-game-title`,',
-    '      `.nb-game-btn`, `.nb-game-hud`, `.nb-game-stat`, `.nb-game-bar`, `.nb-game-pad`, `.nb-game-key`.',
-    '    • `.nb-gradient-text` for a big title; `.nb-stagger` on a list so its items arrive one after another.',
-    '  Bare elements are already styled too: a plain <button> is a tinted secondary (a destructive one —',
-    '  a class containing delete/remove/danger — turns red), a submit button is filled, fields have a focus',
-    '  ring, a classed <ul> has no bullets, a bare <table> looks like a data table. Those are the FLOOR;',
-    '  the recipes are what make a screen look designed.',
-    '  They are `nb-` prefixed so they never collide with Tailwind utilities if the app uses Tailwind too.',
-    '  If a screen needs something the kit does not have, extend the kit in index.css using the palette',
-    '  vars — never drop back to unstyled markup.',
+    ...DESIGN_KIT_BRIEF,
     '  🔴 NEVER REPLACE `src/index.css` WHOLESALE — it IS the kit. Add your app\'s styles by APPENDING',
     '  (edit_file, new rules at the end); to restyle a kit class, write your own rule for it below the',
     '  kit. A rewrite that drops kit rules has them put back automatically, so replacing the file gains',

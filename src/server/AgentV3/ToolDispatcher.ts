@@ -1,4 +1,5 @@
 import { repeatedReadNotice, READ_LOOP_LIMIT, repeatedCommandNotice, commandKey } from './repeatedReads';
+import { repeatedEditNotice } from './repeatedEdits';
 import { healWouldOscillate } from './HealLedger';
 import type { AgentEventStream } from './AgentEventStream';
 import { parseNpmAuditSummary, looksLikeDependencyInstall } from './npmAuditSummary';
@@ -76,15 +77,16 @@ import { envNamesFromGrep, detectDatabaseProvider } from './ImportPreview';
 import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
-import { qualityNote } from './writeTimeQualityCheck';
+import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, usesNonKitNbClass } from './kitRestore';
-import { isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief } from './CssConsistency';
+import { isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote } from './CssConsistency';
+import { pageDesignWriteNote, isPageFile } from './DesignCoverage';
 import { currentPass, runInPass } from './greenFreeze';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
 import {
-  writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckNote, writeTypecheckCleanNote, WriteTypecheckQueue,
+  writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckWarmupCommand, writeTypecheckNote, writeTypecheckCleanNote, WriteTypecheckQueue,
   shouldProbeTsconfig, probeExhausted, isMissingFileError, type TsProjectVerdict,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
@@ -2391,6 +2393,8 @@ export class ToolDispatcher {
    * told STOP three times and the report said "No read reached the no-progress limit").
    */
   private _readLoopStops: { n: number } = { n: 0 };
+  /** Edits per file in this dispatcher's run — see repeatedEdits.ts (autopsy ce115e1f). A full write resets it. */
+  private readonly _editsPerFile = new Map<string, number>();
   /** This agent's own shell commands, for the bash half of the loop breaker (never shared: a sub-agent starts fresh). */
   private _ownCommands = new Map<string, { output: string; writeSeq: number; stalls: number }>();
 
@@ -2647,6 +2651,32 @@ export class ToolDispatcher {
    */
   shareWriteTypecheckStats(stats: WriteTypecheckStats): void {
     this._writeTypecheckStats = stats;
+  }
+
+  /**
+   * Warm the shared compile cache ONCE per build, in the background, so the first write's check is
+   * incremental instead of cold (autopsy ee0e6de5: 15 s cold, ~1 s after). Called by the route when a
+   * build that will write code starts, while the model is still on its first call.
+   *
+   * 🔒 Runs through the SAME queue as the real checks, so a write arriving mid-warm-up waits for it and
+   * then runs its own compile — it never shares the warm-up's `null`. Starts only on an idle queue for
+   * the same reason. Never counts as a run, a clean verdict, a timeout strike or typecheck evidence,
+   * never throws, and never runs `npm install` (see `writeTypecheckWarmupCommand`).
+   */
+  warmTypecheckCache(): void {
+    const s = this._writeTypecheckStats;
+    try {
+      if (!writeTypecheckEnabled() || s.warmupStarted || s.runs > 0 || !this._writeTypecheckQueue.idle()) return;
+      s.warmupStarted = true;
+      const startedAt = Date.now();
+      void this._writeTypecheckQueue.run(async () => {
+        try {
+          await withTimeout(this.actuator.runCommand(this.workspaceId, writeTypecheckWarmupCommand()), WRITE_TYPECHECK_TIMEOUT_MS, 'write-typecheck-warmup');
+          s.warmupMs = Date.now() - startedAt;
+        } catch { /* a warm-up that did not finish is only a cold first check, as before */ }
+        return null;
+      }).catch(() => undefined);
+    } catch { /* never let a warm-up touch the build */ }
   }
 
   /**
@@ -3053,7 +3083,55 @@ export class ToolDispatcher {
     for (const p of paths) {
       try { security += securityWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
     }
-    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + security;
+    // At a STYLESHEET write, every screen's classes still without a rule; and a page's own design defects
+    // (autopsy e6d46cde) — both used to wait for a 100-second repair pass after the app was done. A SCREEN
+    // write's own undefined classes are `undefinedClassNotes` above, never repeated here.
+    const style = await this.styleWriteNotes(files);
+    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security;
+  }
+
+  /** Most project files one style note may read — a note must never cost more than the write it follows. */
+  private static readonly STYLE_NOTE_MAX_READS = 80;
+
+  /**
+   * The stylesheet-write class note and the page-design note, from ONE read of the project. Only a write
+   * that touches a stylesheet or a page pays for the read; anything unreadable is simply left out, so the worst case
+   * is a note that says less, never one that says something false about a file it did not see.
+   */
+  private async styleWriteNotes(files: Record<string, string>): Promise<string> {
+    try {
+      if (!writeQualityEnabled()) return '';
+      const paths = Object.keys(files);
+      const wroteSheet = paths.some((p) => isProjectStylesheet(p));
+      const wrotePage = paths.some((p) => isPageFile(p));
+      if (!wroteSheet && !wrotePage) return '';
+      let listing: string[] = [];
+      try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'style-note-listing'); }
+      catch { return ''; }
+      const wanted = listing
+        .map((p) => String(p).replace(/^\.?\/+/, ''))
+        .filter((p) => !(p in files))
+        .filter((p) => isProjectStylesheet(p) || /^src\/.*\.(tsx|jsx|ts|js)$/.test(p))
+        .filter((p) => !/\.(test|spec)\.[jt]sx?$/.test(p) && !/\.d\.ts$/.test(p))
+        .slice(0, ToolDispatcher.STYLE_NOTE_MAX_READS);
+      const project: Record<string, string> = {};
+      await Promise.all(wanted.map(async (p) => {
+        try {
+          const raw = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'style-note-read');
+          if (typeof raw === 'string') project[p] = withoutPreviewBridge(p, raw);
+        } catch { /* unreadable — left out */ }
+      }));
+      let out = '';
+      if (wroteSheet) {
+        try { out += undefinedClassWriteNote(files, project); } catch { /* a note is best-effort */ }
+      }
+      if (wrotePage) {
+        try { out += pageDesignWriteNote(files, project); } catch { /* a note is best-effort */ }
+      }
+      return out;
+    } catch {
+      return '';
+    }
   }
 
   /**
@@ -3306,6 +3384,7 @@ export class ToolDispatcher {
 
       case 'write_file': {
         let path = reqStr(input, 'path');
+        this._editsPerFile.delete(path); // a whole-file write is exactly what the edit-loop note asks for
         // NEXT.JS MIDDLEWARE LOCATION FIX (CargoPilot autopsy 2026-07-19): Next.js runs middleware ONLY
         // from the project root (`middleware.ts`) or `src/middleware.ts` — a `app/middleware.*` is
         // SILENTLY ignored, so the route guards / auth it holds never run and every guarded route is
@@ -3665,7 +3744,10 @@ export class ToolDispatcher {
         const editSteeringNotes = await this.writeSteeringNotes({ [path]: updated });
         // An edit that changes nothing the app runs is the same trap as a write (autopsy e725e002).
         const editTwinNote = await this.removeShadowTwins(path, agent);
-        return `Edited ${path}.${note}` + editReviewNote + editCascadeNote + editTestHint + editSteeringNotes + editKitNote + editTwinNote;
+        const editCount = (this._editsPerFile.get(path) ?? 0) + 1;
+        this._editsPerFile.set(path, editCount);
+        const editLoopNote = repeatedEditNotice(path, editCount);
+        return `Edited ${path}.${note}` + editReviewNote + editCascadeNote + editTestHint + editSteeringNotes + editKitNote + editTwinNote + editLoopNote;
       }
 
       case 'bash': {

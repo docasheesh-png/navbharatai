@@ -360,8 +360,9 @@ import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { createLaneWriteFence } from '../AgentV3/laneWriteFence';
 import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
-import { checkFeaturePresence, featurePresenceSummary, featurePresenceEvidence, featurePresenceRepairPrompt, featureHealEnabled } from '../AgentV3/FeaturePresence';
+import { checkFeaturePresence, featurePresenceSummary, featurePresenceEvidence, featurePresenceRepairPrompt, featureHealEnabled, isSignInWall } from '../AgentV3/FeaturePresence';
 import { adoptHealResult } from '../AgentV3/healResult';
+import { signInExploreEnabled, signInScript, signInCandidates, parseSignInOutput, signInReportLine, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
 import { unsupportedStackRequested, unsupportedStackBuilderNote, unsupportedStackUserNote, builtWithLabel } from '../AgentV3/unsupportedStack';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
 import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
@@ -19192,6 +19193,28 @@ async function noteBuildOutcome(
       // but was never confirmed to render, so nothing here was proven to RUN" — 1.4 seconds after the
       // same build had watched it render. Nothing failed, nothing logged; the report simply lied.
       let previewVerifiedRendered = false;
+      // LOOK BEHIND THE SIGN-IN PAGE (autopsy 8e124182 — signInExplore.ts). Signed in at most once per
+      // build, lazily, the first time a check meets the app's sign-in wall; every later browser check
+      // reads the same session. Null = never tried.
+      let authSession: SignInRun | null = null;
+      const signInBehindTheDoor = async (previewUrl: string): Promise<SignInRun> => {
+        if (authSession) return authSession;
+        const files = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
+        let run: SignInRun = { ran: false, signedIn: false, note: 'the sign-in check did not run', screens: [] };
+        try {
+          if (actuator.runCommand) {
+            const out = await withTimeout(actuator.runCommand(workspaceId, signInScript(previewUrl, signInCandidates(files))), SIGN_IN_BUDGET_MS + 15_000, 'sign-in-explore');
+            run = parseSignInOutput(out.stdout);
+          }
+        } catch { /* our instrument, never the app's verdict */ }
+        authSession = run;
+        try {
+          const line = signInReportLine(run);
+          buildDiag.record({ phase: 'preview', severity: 'info', code: line.code, message: line.message, autoResolved: true });
+        } catch { /* a report line must never affect a build */ }
+        return run;
+      };
+      const signedInState = (): string | null => (authSession?.signedIn ? SIGNED_IN_STATE_PATH : null);
       /**
        * 🔴 ONE FACT, ONE WRITE — the render proof's only producer (autopsy 697b38ee, 7th appearance).
        *
@@ -19884,7 +19907,14 @@ async function noteBuildOutcome(
             // FEATURE_COVERAGE finding in the report (present vs missing); it NEVER blocks a build (a
             // heuristic must never false-fail a working app). Auto-fixing the gaps is the next slice.
             try {
-              let coverage = checkFeaturePresence(prompt, html, declinedPresenceFeatures(featureConfirmation));
+              // Behind a sign-in page the features are not on this screen: sign in with the app's own demo
+              // account and probe the screens behind the door instead (signInExplore.ts).
+              let probeHtml = html;
+              if (signInExploreEnabled() && isSignInWall(String(html ?? '').toLowerCase()) && !abort.signal.aborted) {
+                const session = await signInBehindTheDoor(lastPreviewUrl);
+                if (session.signedIn && session.screens.length > 0) probeHtml = session.screens.map((sc) => sc.html).join('\n');
+              }
+              let coverage = checkFeaturePresence(prompt, probeHtml, declinedPresenceFeatures(featureConfirmation));
               // APP HEALTH CULTURE slice 2 (Phase 1b, opt-in AGENTV3_FEATURE_HEAL=on): the app renders
               // but a REQUESTED control is missing → run ONE bounded heal pass that adds the missing UI,
               // then re-open the running app and re-probe (only a control now in the live DOM counts).
@@ -20158,7 +20188,7 @@ async function noteBuildOutcome(
           const pageRoutes = extractPageRoutes(Object.fromEntries(writtenFiles));
           if (pageRoutes.length > 0) {
             const out = await withTimeout(
-              actuator.runCommand(workspaceId, pageCheckScript(lastPreviewUrl, pageRoutes)),
+              actuator.runCommand(workspaceId, pageCheckScript(lastPreviewUrl, pageRoutes, { storageState: signedInState() })),
               20_000 + pageRoutes.length * PAGE_LOAD_TIMEOUT_MS, 'page-route-check',
             );
             const pageResults = parsePageCheck(out.stdout);
@@ -20237,7 +20267,7 @@ async function noteBuildOutcome(
           });
           if (journeys.length > 0) {
             const out = await withTimeout(
-              actuator.runCommand(workspaceId, journeyScript(lastPreviewUrl, journeys, marker)),
+              actuator.runCommand(workspaceId, journeyScript(lastPreviewUrl, journeys, marker, { storageState: signedInState() })),
               20_000 + journeys.length * JOURNEY_TIMEOUT_MS * 2, 'journey-check',
             );
             const journeyResults = parseJourneyResults(out.stdout);
@@ -20312,7 +20342,7 @@ async function noteBuildOutcome(
         try {
           const exploreFiles = { ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) };
           const out = await withTimeout(
-            actuator.runCommand(workspaceId, clickExplorerScript(lastPreviewUrl, { blockWrites: writesToUserDatabase(exploreFiles) })),
+            actuator.runCommand(workspaceId, clickExplorerScript(lastPreviewUrl, { blockWrites: writesToUserDatabase(exploreFiles), storageState: signedInState() })),
             EXPLORE_BUDGET_MS + 20_000, 'click-explorer',
           );
           const exploreRun = parseExploreOutput(out.stdout);

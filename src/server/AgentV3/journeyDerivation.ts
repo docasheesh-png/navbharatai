@@ -26,6 +26,7 @@
 // browser — no I/O, no clock, no model call in this module.
 
 import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
+import { newPageOptionsExpr, isSignInRoute } from './signInExplore';
 import { rendersDataList } from './DesignCoverage';
 import { scanMarkup, type ScannedTag } from './jsxTags';
 
@@ -837,7 +838,7 @@ function locatorExpr(t: Target): string {
  * anywhere inside — this lives in a TypeScript template literal, where one would close the literal.
  * That mistake has been made here before; it is spelled out so it is not made again.
  */
-export function journeyScript(previewUrl: string, journeys: readonly Journey[], marker: string): string {
+export function journeyScript(previewUrl: string, journeys: readonly Journey[], marker: string, opts: { storageState?: string | null } = {}): string {
   const base = previewUrl.replace(/\/+$/, '');
   const steps = journeys.map((j) => {
     const fills = j.fields.map((f) =>
@@ -846,6 +847,9 @@ export function journeyScript(previewUrl: string, journeys: readonly Journey[], 
     id: ${JSON.stringify(j.id)},
     kind: ${JSON.stringify(j.kind)},
     route: ${JSON.stringify(j.route)},
+    // A sign-in form is driven signed OUT (a session would only redirect away from it); every other
+    // journey runs behind the door when the app has one (signInExplore.ts).
+    pageOpts: ${isSignInRoute(j.route) ? '{}' : newPageOptionsExpr(opts.storageState)},
     fields: (page) => [
 ${fills}
     ],
@@ -865,7 +869,7 @@ for (const j of journeys) {
   // 'unreachable' is the DEFAULT, not a failure state. A journey that never got to press anything has
   // told us nothing about the app, and reporting that as a defect would be an invented alarm.
   const out = { id: j.id, kind: j.kind, route: j.route, verdict: 'unreachable', step: 'load', note: '', errors: [] };
-  const page = await browser.newPage();
+  const page = await browser.newPage(j.pageOpts);
   page.on('pageerror', (e) => { if (out.errors.length < 3) out.errors.push(String(e.message).slice(0, 200)); });
   page.on('console', (m) => { if (m.type() === 'error' && out.errors.length < 3) out.errors.push(String(m.text()).slice(0, 200)); });
   try {

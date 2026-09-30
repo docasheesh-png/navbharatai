@@ -170,7 +170,14 @@ describe('every caller scans before it reaches Pollinations (source guard)', () 
     expect(linkAt).toBeGreaterThan(scanAt);
   });
 
-  it('free chat answers a blocked picture with the refusal, not "try again later"', () => {
-    expect(chat).toMatch(/if \(pr\.blocked\)\s*\{[\s\S]{0,300}POLLINATIONS_BLOCK_MESSAGE/);
+  it('free chat makes no picture at all, so none can skip the scan (admin 2026-09-30: "banana bhi nahi hai")', () => {
+    // It used to generate inline and had to answer a blocked picture with the refusal. It now points
+    // to Mode → Image Generator AI FREE instead (`freeChatModeGuide.ts`), which is stronger: there is
+    // no Pollinations call in the chat route for a banned prompt to reach.
+    expect(chat).not.toMatch(/fetchPollinationsImage\(|pollinationsImageUrl\(/);
+  });
+
+  it('free chat\'s photo EDIT still answers a blocked picture with the refusal, not "try again later"', () => {
+    expect(chat).toMatch(/if \(out\.blocked\)\s*\{?\s*sendEdit\(POLLINATIONS_BLOCK_MESSAGE\)/);
   });
 });

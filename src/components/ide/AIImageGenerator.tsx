@@ -14,8 +14,10 @@ import { TirangaLoader } from '../ui/TirangaLoader';
 import { dataUrlToBlob, dataUrlToBase64, imageFilename } from '../../lib/imageExport';
 import { imageHistoryStore, pruneHistory, type ImageHistoryItem } from '../../lib/imageHistoryStore';
 import { auth } from '../../lib/firebase';
-import { fetchImageFromUser, relayImage, type ClientFetchTicket } from '../../lib/clientImageFetch';
-import { imageWaitMessage } from '../../lib/imageDelivery';
+import {
+  fetchImageFromUser, imageLinkLoads, relayImage, serverFallbackReason, type ClientFetchTicket,
+} from '../../lib/clientImageFetch';
+import { IMAGE_SERVER_FALLBACK_NOTE, imageWaitMessage } from '../../lib/imageDelivery';
 import { walletEmptyRefusalMessage } from '../../lib/walletEmptyRefusal';
 import { AddCreditNotice } from '../common/AddCreditNotice';
 import { ReportAiContent } from '../chat/ReportAiContent';
@@ -278,28 +280,27 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
       // so WITHOUT this header the server saw an anonymous caller and asked the (already logged-in) user
       // to sign in. Root-caused 2026-07-31: the fetch previously sent no Authorization header.
       const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(await authHeaders()) };
-      const res = await fetch('/api/image/generate', {
-        method: 'POST',
-        headers,
+      // Built once: the server fallback below re-sends exactly this request, so the prompt the
+      // server crafts the second time is the prompt inside the link it signed the first time.
+      const requestBody = {
         // `type` goes as its OWN field (2026-08-14). It used to survive only as a prefix inside the
         // prompt string, so the server could not tell the selected type from the user's own words —
         // and that is precisely the signal the art-direction layer needs to know whether this must
         // read at 48px, leave room for a headline, or survive a circular crop.
-        body: JSON.stringify({
-          prompt: effectivePrompt,
-          style,
-          size,
-          type: imageType,
-          // Sent ONLY for a custom size, and already through the server's own clamp — so the number
-          // in the request is the number the picker printed, and the server cannot quietly make
-          // something else. For a preset these are absent and nothing downstream changes.
-          ...(size === CUSTOM_SIZE_ID ? resolveCustomSize(customW, customH) : {}),
-          // Present ONLY when the user attached their own picture — and its presence is what turns
-          // this into an edit on the server, which skips the art-direction layer and the free
-          // provider (neither of which can serve a picture that exists only inside this request).
-          ...(reference ? { initImage: reference.dataUrl } : {}),
-        }),
-      });
+        prompt: effectivePrompt,
+        style,
+        size,
+        type: imageType,
+        // Sent ONLY for a custom size, and already through the server's own clamp — so the number
+        // in the request is the number the picker printed, and the server cannot quietly make
+        // something else. For a preset these are absent and nothing downstream changes.
+        ...(size === CUSTOM_SIZE_ID ? resolveCustomSize(customW, customH) : {}),
+        // Present ONLY when the user attached their own picture — and its presence is what turns
+        // this into an edit on the server, which skips the art-direction layer and the free
+        // provider (neither of which can serve a picture that exists only inside this request).
+        ...(reference ? { initImage: reference.dataUrl } : {}),
+      };
+      const res = await fetch('/api/image/generate', { method: 'POST', headers, body: JSON.stringify(requestBody) });
       const data = await res.json().catch(() => null);
       // Checked BEFORE the generic throw: this is a bill, not a breakage, and the difference decides
       // which control the user is given. Switching on the server's `wallet_empty` code rather than on
@@ -329,8 +330,42 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
           onWait: (msLeft) => setWaitNote(imageWaitMessage(msLeft)),
         });
         setWaitNote('');
-        if (got.error) throw new Error(got.error);
-        if (got.dataUrl) {
+        // A browser that may not read the bytes shows the picture from the link — but only once the
+        // link has been SEEN to load. An error from the engine throws exactly like a blocked read,
+        // and was being "shown" as a broken image (admin 2026-09-30: "image bani hi nahi").
+        const linkLoaded = got.needsRelay ? await imageLinkLoads(ticket.url) : null;
+        const fallbackReason = serverFallbackReason(got, linkLoaded);
+        if (fallbackReason) {
+          // 🔑 NO IMAGE IS NOT THE END. The server takes the ladder a free-provider failure has always
+          // had — one try from its side, then the metered paid engines — for the SAME request, and
+          // only on the strength of the link it signed for it.
+          setWaitNote(IMAGE_SERVER_FALLBACK_NOTE);
+          const fbRes = await fetch('/api/image/generate', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              ...requestBody,
+              freeFailed: { url: ticket.url, ticket: ticket.ticket, exp: ticket.exp, reason: fallbackReason },
+            }),
+          });
+          const fb = await fbRes.json().catch(() => null);
+          setWaitNote('');
+          const fbNoCredit = walletEmptyRefusalMessage(fbRes.status, fb);
+          if (fbNoCredit) {
+            setBalanceBlock(fbNoCredit);
+            setPrompt((cur) => draftAfterFailedSend(cur, typed));
+            return;
+          }
+          if (!fbRes.ok || !fb || typeof fb.image !== 'string') {
+            throw new Error((fb && typeof fb.error === 'string' && fb.error)
+              || got.error
+              || 'Image generation failed — please try again.');
+          }
+          imageUrl = fb.image;
+          ticket = null; // the server delivered the bytes
+        } else if (got.error) {
+          throw new Error(got.error);
+        } else if (got.dataUrl) {
           imageUrl = got.dataUrl;
           ticket = null; // the bytes are here; nothing will ever need the relay for this one
         } else {

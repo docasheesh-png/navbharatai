@@ -85075,3 +85075,47 @@ Re-read the "Not fixed, recorded" list against the code rather than against my o
 - The 130 s data-file write — its cause is the misroute (a reasoning rung writing 195 rows); fix 1 of the
   first pass is its root fix, and the admin is testing it with real prompts.
 - ⚠️ STILL THE ADMIN'S: Hindi or English UI for English written in Devanagari. A product decision, asked.
+
+## 2026-09-30 — Autopsy e6d46cde ("एक ऐप बनाओटेलीनॉर", Weak, KIMI rung 2, 7.1 min, green, billed ₹115.33)
+
+Real cost $0.314 + $0.020 E2B ≈ ₹29; billed ₹115.33 after the 10% discount (×4 tier, as the policy says).
+A 4-screen telecom app (Home, Plans, History, Profile) that rendered, typechecked and built for production.
+
+**Ledger.** ✅ self-heals 2 · 🔀 workarounds 0 · ⏭️ skipped 1 · ❌ wrong decisions 2 · 🥵 struggles 4.
+- ✅ CSS_CLASSES_UNDEFINED (9 classes used, defined nowhere) and DESIGN_PAGE_INCONSISTENT (Plans.tsx list, no
+  empty state) — both healed by one 100-second post-answer repair pass in a fresh context that re-read four
+  screens. Both were knowable the moment the files were written.
+- ❌ The model's first reply was a question ("क्या आप इसी तरह का ऐप चाहते हैं? … तो बता दीजिए। 🙏").
+  `turnAskedTheUser` read only a `?` at the very end of the last line, so it saw a stall; the build was
+  nudged into the app the user was being asked about, and the fired nudge left NO line in the report.
+- ❌ The user's reply arrived mid-build ("Archer Ai", twice). It was delivered as "fold this into the current
+  work"; the model never acted on it or mentioned it again.
+- ⏭️ REVIEW_LATE — the lean reviewer overran its 45 s budget (one 23 s model call); findings were kept.
+- 🥵 COMPLEXITY_ROUTING = COMPLEX (score 15, model) for an ordinary 4-screen app → reasoning rung, fast lane
+  skipped, 7.1 min against a 2–4 min estimate. Same class as ee0e6de5; the classifier-prompt fix
+  ("if unsure, simple") is in #3401, which this build predates. The first write-time typecheck took 18 s
+  (cold compile + an install, then 6 honest "cannot find module" errors — the model had imported
+  react-router-dom/lucide-react before installing them and fixed it in one step); the warm-up in #3401
+  takes the cold half off the critical path.
+
+**Fixed (same PR, #3401):**
+1. `turnAskedTheUser` — trailing emoji are stripped like other decoration, and a last line with a question mark
+   followed only by an invitation to reply ("बता दीजिए", "let me know", "batao"), or a last line that IS that
+   invitation right after a question, is an ask. "Ready? Let's build it." and "I'll build it now — let me know
+   if you want changes!" are still stalls. Nothing about the nudge's asymmetry changed.
+2. `BUILD_NUDGED` — a nudge that fires is recorded with the model's last words, before it is counted.
+3. `liveUserMessageTurn` — a live message is to be acted on now; if it answers a question the model asked,
+   build to that answer; if unclear, say how it was read; the final reply must account for it.
+4. `undefinedClassWriteNote` (CssConsistency) — at a STYLESHEET write, every screen's classes that still have
+   no rule are named. `nb-` classes are left to the kit. ⚠️ While this was in flight, #3398 (autopsy
+   a5b661c8) landed the SCREEN-write half (`undefinedClassNotes`) and a class-name brief for UI sub-agents
+   (`stylesheetBriefFor`). Rebased onto it: the screen-write note is theirs and is not repeated here; this adds
+   only the stylesheet-write moment, which is where e6d46cde's nine were knowable. The sub-agent brief and
+   ee0e6de5's `DESIGN_KIT_BRIEF` both stay — the first lists the names this project defines, the second the
+   kit's screen recipes (which class for which job); they overlap in cause, not in content.
+5. `pageDesignWriteNote` (DesignCoverage) — `analyzePage` at write time, with the project read so a fixed
+   catalogue is not flagged; BARE_MARKUP / RAW_TABLE / LIST_WITHOUT_EMPTY_STATE only (never NO_HEADING —
+   a layout may own the title). Both notes share one bounded read (`styleWriteNotes`, ≤80 files) and the
+   `AGENTV3_WRITE_QUALITY` kill switch. The end-of-build checks and their repair pass are unchanged; the
+   aim is that they find nothing.
+Test-locked and reversion-proven in `tests/theQuestionEndedWithPlease.test.ts`.

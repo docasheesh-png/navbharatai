@@ -76,10 +76,11 @@ import { envNamesFromGrep, detectDatabaseProvider } from './ImportPreview';
 import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServerRecovery';
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
-import { qualityNote } from './writeTimeQualityCheck';
+import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, usesNonKitNbClass } from './kitRestore';
-import { isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief } from './CssConsistency';
+import { isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote } from './CssConsistency';
+import { pageDesignWriteNote, isPageFile } from './DesignCoverage';
 import { currentPass, runInPass } from './greenFreeze';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
@@ -3079,7 +3080,55 @@ export class ToolDispatcher {
     for (const p of paths) {
       try { security += securityWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
     }
-    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + security;
+    // At a STYLESHEET write, every screen's classes still without a rule; and a page's own design defects
+    // (autopsy e6d46cde) — both used to wait for a 100-second repair pass after the app was done. A SCREEN
+    // write's own undefined classes are `undefinedClassNotes` above, never repeated here.
+    const style = await this.styleWriteNotes(files);
+    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security;
+  }
+
+  /** Most project files one style note may read — a note must never cost more than the write it follows. */
+  private static readonly STYLE_NOTE_MAX_READS = 80;
+
+  /**
+   * The stylesheet-write class note and the page-design note, from ONE read of the project. Only a write
+   * that touches a stylesheet or a page pays for the read; anything unreadable is simply left out, so the worst case
+   * is a note that says less, never one that says something false about a file it did not see.
+   */
+  private async styleWriteNotes(files: Record<string, string>): Promise<string> {
+    try {
+      if (!writeQualityEnabled()) return '';
+      const paths = Object.keys(files);
+      const wroteSheet = paths.some((p) => isProjectStylesheet(p));
+      const wrotePage = paths.some((p) => isPageFile(p));
+      if (!wroteSheet && !wrotePage) return '';
+      let listing: string[] = [];
+      try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'style-note-listing'); }
+      catch { return ''; }
+      const wanted = listing
+        .map((p) => String(p).replace(/^\.?\/+/, ''))
+        .filter((p) => !(p in files))
+        .filter((p) => isProjectStylesheet(p) || /^src\/.*\.(tsx|jsx|ts|js)$/.test(p))
+        .filter((p) => !/\.(test|spec)\.[jt]sx?$/.test(p) && !/\.d\.ts$/.test(p))
+        .slice(0, ToolDispatcher.STYLE_NOTE_MAX_READS);
+      const project: Record<string, string> = {};
+      await Promise.all(wanted.map(async (p) => {
+        try {
+          const raw = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'style-note-read');
+          if (typeof raw === 'string') project[p] = withoutPreviewBridge(p, raw);
+        } catch { /* unreadable — left out */ }
+      }));
+      let out = '';
+      if (wroteSheet) {
+        try { out += undefinedClassWriteNote(files, project); } catch { /* a note is best-effort */ }
+      }
+      if (wrotePage) {
+        try { out += pageDesignWriteNote(files, project); } catch { /* a note is best-effort */ }
+      }
+      return out;
+    } catch {
+      return '';
+    }
   }
 
   /**

@@ -94,7 +94,7 @@ import {
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
 } from './writeTimeTypecheck';
-import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
+import { scanAuthenticity, authenticitySummary, fakeResultWriteNote } from './AuthenticityAnalysis';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
 import type { AccessibilityIssue } from './AccessibilityAnalysis';
@@ -3096,6 +3096,8 @@ export class ToolDispatcher {
     let security = '';
     for (const p of paths) {
       try { security += securityWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
+      // A made-up result or made-up people (autopsy 33812996) — the builder hears it with the file open.
+      try { security += fakeResultWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
     }
     // A second index.html in public/ shadows a Vite app's real entry (autopsy 876afca9) — said while open.
     let shadow = '';

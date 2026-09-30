@@ -14,7 +14,7 @@
 // fully unit-testable without a sandbox.
 
 import { dropShadowingEntries } from './entryShadow';
-import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE } from './noEvalRule';
+import { NO_EVAL_RULE, NO_FAKE_RESULTS_RULE, BUILD_WHAT_WAS_ASKED_RULE } from './noEvalRule';
 import { posix } from 'node:path';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { deadlineFromBudget } from './turnDeadline';
@@ -371,6 +371,7 @@ export function fileSystemPrompt(framework: string): string {
     '- Never generate simulated/mock data about OTHER people (nearby shops, other users, followers, drivers) and present it as real — showing other people\'s data needs a shared online database. Example entries shown for layout must be labelled on screen as examples.',
     '- Match the imports/exports the rest of the app expects (you are given the full file list).',
     NO_EVAL_RULE,
+    NO_FAKE_RESULTS_RULE,
     BUILD_WHAT_WAS_ASKED_RULE,
     ...exportImportConvention(framework),
     ...designContractFor(framework),

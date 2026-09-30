@@ -21,7 +21,7 @@ import { scaffoldRestores, protectBoilerplateInRepair, isScaffoldBoilerplate, SC
 import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
 import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
-import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
+import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports, fixTypeOnlyValueImports } from './ImportExportReconcile';
 import { parseTscErrors, endgameDeterministicPass, endgameRepairEnabled } from './EndgameRepair';
 import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import type { FastLanePhases } from './fastLanePhases';
@@ -493,6 +493,13 @@ export function contractUserPrompt(prompt: string, manifest: SimpleFileSpec[]): 
  * so — with the exact import specifier from `at.from` when that is known — so the isolated per-file
  * call has somewhere to import the shared symbols from instead of a paragraph to guess a path for.
  */
+/**
+ * An enum is a VALUE (autopsy f496c75b, 2026-09-30). The contract declares enums, and the per-file
+ * convention asks for `import type` on types, so `useInput.ts` imported the `InputAction` enum type-only
+ * and read its members: TS1361 on every line, re-quoted by the write-time typecheck for seven minutes.
+ */
+export const ENUM_IMPORT_RULE = 'An ENUM (or a const, function or class) is a VALUE: import it with a plain `import { Name }`, never `import type` — a type-only import of an enum fails to compile the moment a member is read.';
+
 export function contractBlock(contract: string | undefined, at?: { path: string; from?: string }): string {
   const trimmed = (contract || '').trim();
   if (!trimmed) return '';
@@ -509,6 +516,7 @@ export function contractBlock(contract: string | undefined, at?: { path: string;
       'not in the contract file. These symbols are FROZEN and SHARED across files: use these EXACT names,',
       'enum members, types, util signatures, and component prop interfaces. Do NOT rename, re-case,',
       'or invent variants; do NOT import a symbol that is not declared here:',
+      ENUM_IMPORT_RULE,
       '```ts',
       trimmed.slice(0, 12_000),
       '```',
@@ -519,6 +527,7 @@ export function contractBlock(contract: string | undefined, at?: { path: string;
     'SHARED CONTRACT — these symbols are FROZEN and SHARED across files. Use these EXACT names,',
     'enum members, types, util signatures, and component prop interfaces. Do NOT rename, re-case,',
     'or invent variants; do NOT import a symbol that is not declared here:',
+    ENUM_IMPORT_RULE,
     '```ts',
     trimmed.slice(0, 12_000),
     '```',
@@ -1451,9 +1460,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           // (3) re-point a NAMED import at the correct module when the symbol lives in exactly one OTHER
           // module (Kanban build 2026-07-13 — the wrong source file). Unique-owner only; never a guess.
           const wrong = await fixWrongSourceImports(addd.files);
-          const changes = recd.fixes.length + addd.added.length + wrong.fixes.length;
+          // (4) an enum/const imported with `import type` and then read as a value (autopsy f496c75b).
+          const typeOnly = await fixTypeOnlyValueImports(wrong.files);
+          const changes = recd.fixes.length + addd.added.length + wrong.fixes.length + typeOnly.fixes.length;
           if (changes > 0) {
-            for (const f of written) { const nc = wrong.files[f.path]; if (typeof nc === 'string') f.content = nc; }
+            for (const f of written) { const nc = typeOnly.files[f.path]; if (typeof nc === 'string') f.content = nc; }
             deps.log?.(`🔧 Auto-fixed ${changes} import issue(s) (wrong-kind, forgotten, or wrong-source) before preview.`);
           }
         } catch { /* best-effort — a failure just leaves the files as generated */ }

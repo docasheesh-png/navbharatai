@@ -407,6 +407,18 @@ export async function addMissingProjectImports(files: Record<string, string>): P
           if (pk === SyntaxKind.QualifiedName) continue;
           if (pk === SyntaxKind.PropertyAssignment && parent.getNameNode?.() === id) continue;
           if (pk === SyntaxKind.TypeReference) continue;
+          // 🔴 THE NAME OF A MEMBER IS NOT A USE OF A VARIABLE (autopsy f496c75b, 2026-09-30). The list
+          // above names two parents and missed the rest: an interface or class member (`state: MotorState;`),
+          // a method (`async load(name) {…}`), an accessor, an enum member, a JSX attribute. So our OWN game
+          // recipes — with no model involved — came back with `import { state } from '../core/state'` in
+          // motor.ts and ai.ts and `import { load }` in audio.ts: "Added 8 missing import(s)" for nobody,
+          // re-added every time a recipe rewrote the file (HEAL_NOT_DURABLE on ai.ts ×2).
+          // The rule that covers every such parent: an identifier that IS its parent's name node names
+          // something — it does not read a binding. The one exception is the shorthand `{ state }`, which
+          // reads `state` and must keep counting.
+          if (pk !== SyntaxKind.ShorthandPropertyAssignment) {
+            try { if (parent?.getNameNode?.() === id) continue; } catch { /* no name node — fall through */ }
+          }
           // AN IDENTIFIER INSIDE AN IMPORT/EXPORT STATEMENT IS NOT A USE OF IT.
           //
           // `import { other as helper } from './c'` mentions `other`, but nothing in this file USES
@@ -439,6 +451,114 @@ export async function addMissingProjectImports(files: Record<string, string>): P
     try { out[path] = sf.getFullText(); } catch { /* keep original on serialization error */ }
   }
   return { files: out, added };
+}
+
+export interface TypeOnlyValueFix {
+  file: string;
+  name: string;
+  from: string;
+}
+
+/**
+ * Drop `type` from an import whose symbol this file READS AS A VALUE, when the module it names really
+ * exports a value (an enum, a const, a function or a class) under that name.
+ *
+ * 🔴 AUTOPSY f496c75b (2026-09-30). The fast lane wrote `import type { InputAction, PlayerInputState }`
+ * and then `[InputAction.JUMP]: false` — TS1361 ("cannot be used as a value because it was imported using
+ * 'import type'") on every line, quoted back by the write-time typecheck for seven minutes until the model
+ * got to it. The fix is exact and unambiguous: the value exists and is used as one, so the only wrong
+ * thing is the keyword. Types imported in the same statement KEEP their `type` (they become
+ * `import { InputAction, type PlayerInputState }`), so nothing that is only a type starts being emitted.
+ *
+ * Precision: a project module only (never a package — its exports are not in the file set), the target's
+ * declaration must be a value kind, and the name must appear outside type positions. Pure; never throws.
+ */
+export async function fixTypeOnlyValueImports(files: Record<string, string>): Promise<{ files: Record<string, string>; fixes: TypeOnlyValueFix[] }> {
+  const unchanged = { files, fixes: [] as TypeOnlyValueFix[] };
+  const mod = await loadTsMorph();
+  if (!mod) return unchanged;
+  const { SyntaxKind } = mod;
+  let project: any;
+  try {
+    project = new mod.Project({ useInMemoryFileSystem: true, skipAddingFilesFromTsConfig: true, compilerOptions: { allowJs: true, jsx: 2 } });
+  } catch { return unchanged; }
+  const sources = new Map<string, any>();
+  const fileSet = new Set<string>();
+  for (const [path, content] of Object.entries(files)) {
+    if (!CODE_FILE.test(path) || typeof content !== 'string') continue;
+    fileSet.add(path);
+    try { sources.set(path, project.createSourceFile(path, content, { overwrite: true })); } catch { /* skip */ }
+  }
+  if (sources.size === 0) return unchanged;
+
+  const VALUE_KINDS = new Set([SyntaxKind.EnumDeclaration, SyntaxKind.VariableDeclaration, SyntaxKind.FunctionDeclaration, SyntaxKind.ClassDeclaration]);
+  const exportsValue = (target: string, name: string): boolean => {
+    try {
+      const decls: any[] = sources.get(target)?.getExportedDeclarations?.()?.get(name) ?? [];
+      return decls.length > 0 && decls.every((d) => VALUE_KINDS.has(d?.getKind?.()));
+    } catch { return false; }
+  };
+  const TYPE_POSITIONS = new Set([SyntaxKind.TypeReference, SyntaxKind.QualifiedName, SyntaxKind.TypeQuery, SyntaxKind.ExpressionWithTypeArguments]);
+  const readsAsValue = (sf: any, name: string): boolean => {
+    try {
+      for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
+        if (id.getText() !== name) continue;
+        if (id.getFirstAncestorByKind?.(SyntaxKind.ImportDeclaration)) continue;
+        const parent = id.getParent?.();
+        if (TYPE_POSITIONS.has(parent?.getKind?.())) continue;
+        if (parent?.getKind?.() !== SyntaxKind.ShorthandPropertyAssignment && parent?.getNameNode?.() === id) continue;
+        return true;
+      }
+    } catch { /* fall through */ }
+    return false;
+  };
+
+  const fixes: TypeOnlyValueFix[] = [];
+  const touched = new Set<string>();
+  for (const [path, sf] of sources) {
+    let imports: any[];
+    try { imports = sf.getImportDeclarations(); } catch { continue; }
+    for (const imp of imports) {
+      let spec = '';
+      try { spec = imp.getModuleSpecifierValue?.() ?? ''; } catch { continue; }
+      const target = resolveLocalTarget(path, spec, fileSet);
+      if (!target || !sources.has(target)) continue;
+      let declTypeOnly = false;
+      try { declTypeOnly = !!imp.isTypeOnly?.(); } catch { continue; }
+      let named: any[] = [];
+      try { named = imp.getNamedImports?.() ?? []; } catch { continue; }
+      // Only an aliasless name is a fact we can check against the target's export of the same name.
+      const needs = named.filter((ni) => {
+        try {
+          if (ni.getAliasNode?.()) return false;
+          const typeOnly = declTypeOnly || !!ni.isTypeOnly?.();
+          const n = ni.getName?.() ?? '';
+          return typeOnly && !!n && exportsValue(target, n) && readsAsValue(sf, n);
+        } catch { return false; }
+      });
+      if (needs.length === 0) continue;
+      try {
+        if (declTypeOnly) {
+          // `import type { A, B }` → `import { A, type B }`: the statement loses `type`, every name that
+          // is NOT being fixed keeps it on its own specifier.
+          const keep = new Set(needs.map((ni) => ni.getName()));
+          imp.setIsTypeOnly(false);
+          for (const ni of imp.getNamedImports()) if (!keep.has(ni.getName())) ni.setIsTypeOnly(true);
+          if (imp.getDefaultImport?.()) { /* a default in a type-only import would change meaning — leave it */ }
+        } else {
+          for (const ni of needs) ni.setIsTypeOnly(false);
+        }
+        touched.add(path);
+        for (const ni of needs) fixes.push({ file: path, name: ni.getName(), from: spec });
+      } catch { /* leave untouched on any mutation error */ }
+    }
+  }
+  if (fixes.length === 0) return unchanged;
+  const out: Record<string, string> = { ...files };
+  for (const path of touched) {
+    try { out[path] = sources.get(path).getFullText(); } catch { /* keep original */ }
+  }
+  return { files: out, fixes };
 }
 
 export interface WrongSourceFix {

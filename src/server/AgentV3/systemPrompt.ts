@@ -140,7 +140,10 @@ const FRAMEWORK_HINTS: Record<string, string> = {
   'flask': 'SCAFFOLDING — a Flask project is scaffolded (app.py, requirements.txt, dev.sh). Run: `bash dev.sh` → PORT 5000. Call update_preview(5000). Add routes as `@app.route()` decorators. ⚠️ THIS TEMPLATE IS API-ONLY: it has no index.html and no frontend build step, so a React/Vue component written here is NEVER compiled and NEVER served — the preview will show your JSON response instead of a page, and publishing will produce no site. If this app needs a user interface, say so plainly in your reply and ask the user to start it as a web app instead; do NOT write interface components into this project and report it as done.',
   'spring-boot': 'SCAFFOLDING — a Spring Boot (Java 17) + Maven project is scaffolded (pom.xml, src/main/java/com/example/demo/Application.java, HelloController.java, src/main/resources/application.properties which already binds server.address=0.0.0.0 and server.port=${PORT:8080}). Build/run with Maven — NOT npm. Run: `mvn spring-boot:run` → PORT 8080. Call update_preview(8080). Add @RestController classes under src/main/java/com/example/demo/. JDK 17, Maven, MongoDB and Redis are pre-installed in this sandbox (start mongod/redis-server in the background if the app needs them). ⚠️ THIS TEMPLATE IS API-ONLY: it has no index.html and no frontend build step, so a React/Vue component written here is NEVER compiled and NEVER served — the preview will show your JSON response instead of a page, and publishing will produce no site. If this app needs a user interface, say so plainly in your reply and ask the user to start it as a web app instead; do NOT write interface components into this project and report it as done.',
   'go': 'SCAFFOLDING — a Go 1.23 project is scaffolded (go.mod module `myapp`, main.go with a net/http server bound to 0.0.0.0:$PORT default 8080). Build/run with the Go toolchain — NOT npm. Run: `go run main.go` → PORT 8080. Call update_preview(8080). Add handlers with `http.HandleFunc`; run `go mod tidy` after adding imports. Go, MongoDB and Redis are pre-installed in this sandbox (start mongod/redis-server in the background if the app needs them). ⚠️ THIS TEMPLATE IS API-ONLY: it has no index.html and no frontend build step, so a React/Vue component written here is NEVER compiled and NEVER served — the preview will show your JSON response instead of a page, and publishing will produce no site. If this app needs a user interface, say so plainly in your reply and ask the user to start it as a web app instead; do NOT write interface components into this project and report it as done.',
-  'static': 'SCAFFOLDING — a plain HTML/CSS/JS site is scaffolded (index.html, style.css, script.js, package.json). No build step. Run: `npm run dev` → PORT 3000. Call update_preview(3000). Write plain HTML/CSS/JS only.',
+  // The generate_* recipes (games included) emit TypeScript modules for a Vite project; a plain HTML site
+  // has no compiler to run them, so here the rule "games are built with the game tools" cannot apply
+  // (autopsy f496c75b).
+  'static': 'SCAFFOLDING — a plain HTML/CSS/JS site is scaffolded (index.html, style.css, script.js, package.json). No build step. Run: `npm run dev` → PORT 3000. Call update_preview(3000). Write plain HTML/CSS/JS only. The generate_* recipes (the game tools included) emit TypeScript for a Vite project and CANNOT run here — write the code yourself in plain JavaScript; a library such as three.js loads from a CDN with <script type="module"> and an import map.',
 };
 
 /**
@@ -451,6 +454,20 @@ export const NAVBHARATAI_UI_MAP = [
   '- REPORT a bad build → the "Report" button in the header tab row; it goes to NavBharatAI\'s team.',
   '                                                                             [agentv3_build_report]',
   '- ANDROID FILE (.apk) → the "More" tab at the bottom → "Download APK" (details below).  [apk_builder]',
+].join('\n');
+
+/**
+ * THE USER ASKED FOR ONE FILE (autopsy f496c75b, 2026-09-30). Added to the build prompt — and to the fast
+ * lane's — only when the request says so AND the framework is `static` (`wantsSingleHtmlFile`,
+ * src/lib/frameworkDetect.ts). The scaffold ships index.html, style.css and script.js; without this line a
+ * single-file request comes back as three files, which is not what was asked.
+ */
+export const SINGLE_HTML_FILE_RULE = [
+  'ONE FILE — the user asked for the whole app in a SINGLE HTML file. Put all markup, all CSS (in a <style>',
+  'tag) and all JavaScript (in a <script> tag) inside index.html. Do not create other source files; once',
+  'their content is inside index.html, delete the scaffold\'s style.css and script.js. A library may load',
+  'from a CDN (<script src> or an import map, e.g. three.js) — that still keeps the app one file. Keep',
+  'package.json as it is: it only serves the file for the preview.',
 ].join('\n');
 
 export function architectSystemPrompt(framework?: string, opts?: { parallelBuild?: boolean }): string {

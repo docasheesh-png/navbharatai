@@ -113,9 +113,20 @@ function stripLeadingFindingNoise(s: string): string {
 }
 
 /** Parse structured reviewer text into typed issues (best-effort). Exported for direct unit tests. */
+/**
+ * A heading line that names the file the findings under it are about — "Review of `src/a.ts`:",
+ * "### `src/a.ts`", "**src/a.ts**". Only a whole-line heading counts, never a path mentioned inside a
+ * finding. Autopsy f496c75b: the findings came under "Review of `src/hooks/useInput.ts`:" and carried no
+ * file, so once a repair deleted that file the user was still offered a fix for it.
+ */
+const FILE_HEADING_RE = /^\s*(?:#{1,6}\s*)?(?:(?:review|findings|issues)\s+(?:of|for|in)\s+)?[`*]{1,2}([\w./@-]+\.[a-z0-9]{1,5})[`*]{1,2}\s*:?\s*$/i;
+
 export function parseReviewOutput(text: string): ReviewIssue[] {
   const issues: ReviewIssue[] = [];
+  let currentFile: string | undefined;
   for (const line of text.split('\n')) {
+    const heading = FILE_HEADING_RE.exec(line);
+    if (heading) { currentFile = heading[1]; continue; }
     const lower = line.toLowerCase();
     let severity: ReviewIssue['severity'] | null = null;
     if (lower.includes('[critical]') || lower.startsWith('critical:') || line.includes('🚨'))
@@ -150,7 +161,7 @@ export function parseReviewOutput(text: string): ReviewIssue[] {
       // downgrade it to a warning so it is surfaced but never fails a working build. Un-tagged criticals
       // stay critical (backward-safe). Never UPGRADES anything.
       if (effective === 'critical' && LOW_CONFIDENCE_RE.test(line)) effective = 'warning';
-      issues.push({ severity: effective, message });
+      issues.push(currentFile ? { severity: effective, file: currentFile, message } : { severity: effective, message });
     }
   }
   return issues;

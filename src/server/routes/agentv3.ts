@@ -201,7 +201,8 @@ import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
 import { loadQueue, mutateQueue } from '../AgentV3/BuildQueueStore';
 import { parseChatRole, roleSystemPrompt, parseProposedSteps, stripStepsBlock, selectRoleContextFiles, formatRoleContext, plannerDomainBrief } from '../AgentV3/RoleChats';
-import { summarizeFileTree, NAVBHARATAI_UI_MAP } from '../AgentV3/systemPrompt';
+import { summarizeFileTree, NAVBHARATAI_UI_MAP, SINGLE_HTML_FILE_RULE } from '../AgentV3/systemPrompt';
+import { wantsSingleHtmlFile } from '../../lib/frameworkDetect';
 import { weakBuildDisciplineBlock } from '../AgentV3/weakBuildDiscipline';
 import { pickPaletteForPrompt, palettePromptBlock } from '../AgentV3/designPresets';
 import { deadlinePauseMessage } from '../AgentV3/DeadlinePause';
@@ -15919,6 +15920,11 @@ async function noteBuildOutcome(
         }
       }
 
+      // ONE FILE, WHEN ONE FILE WAS ASKED FOR (autopsy f496c75b): the `static` framework was chosen from the
+      // prompt, and the scaffold alone would still hand back three files. The fast lane reads the same rule.
+      const singleHtmlFileRule = framework === 'static' && wantsSingleHtmlFile(prompt) ? SINGLE_HTML_FILE_RULE : '';
+      if (singleHtmlFileRule) buildPrompt = `${singleHtmlFileRule}\n\n${buildPrompt}`;
+
       // Universal Language (Layer 73): build in the user's language. If the
       // request is written in a distinctive non-Latin script we name the
       // language explicitly; otherwise we instruct Claude to mirror whatever
@@ -16804,7 +16810,7 @@ async function noteBuildOutcome(
           const c = await actuator.readFile(workspaceId, p).catch(() => null);
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
-        const sb = await runSimpleBuild({ prompt: planning.text, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
+        const sb = await runSimpleBuild({ prompt: singleHtmlFileRule ? `${planning.text}\n\n${singleHtmlFileRule}` : planning.text, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
           stopLane: () => (fastLaneReasoningRung
             ? `the lane's engine fell to ${fastLaneReasoningRung}, which reasons before every answer; the lane's per-file budget cannot carry that, so the files finished so far go to the full builder now`
             : null),
@@ -19360,6 +19366,39 @@ async function noteBuildOutcome(
       // `finishingPaths`, so the post-build reviewer is not sent to review NavBharatAI's own files.
       const finishingPaths = new Set<string>();
       const noteFinishingWrite = (path: string) => { finishingPaths.add(path); inBuildWriteTick++; };
+      // ⚠️ MOVED HERE FROM AFTER THE GREEN LATCH (autopsy f496c75b, 2026-09-30). It ran after the app was
+      // verified, wrote with no pass name, and Green Freeze refused it — so on every PROVEN build the
+      // sweep did nothing but add a GREEN_FREEZE_DEFERRED line ("src/game/FightGame.tsx"), and it ran
+      // after the reviewer, whose round it exists to save. Here, like the other finishing passes, its
+      // result is part of what the preview proof and the production build check.
+      // U-3 — FIRST-BUILD-CORRECT (prevent-not-heal, admin 2026-07-31): deterministically strip the model's
+      // OWN provably-dead NAMED imports from the files it wrote THIS build, so the reviewer never spends a
+      // whole "fix the error" round removing them and the app ships clean the first time. Safe by
+      // construction (keep-on-any-doubt; never touches side-effect / namespace / default imports — see
+      // UnusedImportSweep). Additive + best-effort; kill switch AGENTV3_IMPORT_SWEEP=off.
+      try {
+        if (result.ok && expectsArtifacts && writtenFiles.size > 0 && importSweepEnabled()) {
+          const src: Record<string, string> = {};
+          for (const [p, c] of writtenFiles) {
+            if (typeof c === 'string' && /\.(mjs|cjs|jsx?|tsx?)$/i.test(p) && !/\.d\.ts$/i.test(p)) src[p] = c;
+          }
+          const cleaned = sweepUnusedImports(src);
+          const savedSweep: Record<string, string> = {};
+          for (const [p, c] of Object.entries(cleaned)) {
+            try {
+              await actuator.writeFile(workspaceId, p, c);
+              writtenFiles.set(p, c);
+              inBuildWriteTick++; // a concurrent in-build proof must not save a tree this write changed
+              try { getWorkspaceMemory(workspaceId).indexFile(p, c); } catch { /* index best-effort */ }
+              savedSweep[p] = c;
+            } catch { /* one write failing must not block the rest */ }
+          }
+          if (Object.keys(savedSweep).length > 0) {
+            await saveWorkspaceFiles(workspaceId, savedSweep).catch(() => {});
+            events.emit({ type: 'narration', agent: 'architect', text: `🧹 Cleaned unused imports from ${Object.keys(savedSweep).length} file(s) — no wasted fix-up round.`, ts: Date.now() });
+          }
+        }
+      } catch { /* the import sweep is best-effort — never affects the build result */ }
       // E2E NET, WRITTEN NOT RUN (ROADMAP #1 Phase 4.3). `generate_e2e` was a tool the agent MAY call,
       // which in practice meant most apps shipped without one. This makes it a system reflex.
       //
@@ -21929,7 +21968,26 @@ async function noteBuildOutcome(
               }
             }
             // The app is verified working. Surface what was NOT repaired as an offer, never a silent edit.
-            const offered = [...new Set([...autoFixItems, ...greenRepairable])].filter((t) => !greenRepaired.includes(t) && !greenRefuted.includes(t));
+            const offeredBeforeGone = [...new Set([...autoFixItems, ...greenRepairable])].filter((t) => !greenRepaired.includes(t) && !greenRefuted.includes(t));
+            // AN OFFER ABOUT A FILE THAT IS GONE IS NOT AN OFFER (autopsy f496c75b). The repair deleted
+            // src/hooks/useInput.ts — dead code nothing imported — and the user was then offered a fix for
+            // "event listeners registered every render" in that same file. Checked against the workspace as
+            // it is now; a finding with no attributed file, or a lookup that fails, is kept exactly as before.
+            let offered = offeredBeforeGone;
+            try {
+              const fileOf = new Map((review?.issues ?? []).filter((i) => i.file).map((i) => [i.message.trim(), i.file as string]));
+              if (offeredBeforeGone.some((t) => fileOf.has(t))) {
+                const present = new Set(Object.keys((await collectWorkspaceFiles(actuator, workspaceId)).files));
+                const gone = offeredBeforeGone.filter((t) => { const f = fileOf.get(t); return !!f && !present.has(f); });
+                if (gone.length > 0) {
+                  offered = offeredBeforeGone.filter((t) => !gone.includes(t));
+                  buildDiag.record({
+                    phase: 'build', severity: 'info', code: 'REVIEW_OFFER_FILE_GONE', autoResolved: true,
+                    message: `${gone.length} reviewer finding(s) were not offered: the file each was about no longer exists in the app (${[...new Set(gone.map((t) => fileOf.get(t)))].join(', ')}).`,
+                  });
+                }
+              }
+            } catch { offered = offeredBeforeGone; /* could not look ⇒ today's behaviour */ }
             const suggestions = toReviewSuggestions(
               offered.map((t) => ({ text: t, functional: criticals.includes(t) || greenRepairable.includes(t) })),
             );
@@ -23301,33 +23359,6 @@ async function noteBuildOutcome(
           events.emit({ type: 'narration', agent: 'architect', text: `🧭 Decision trace:\n${decisionTrace.format()}`, ts: Date.now() });
         }
       } catch { /* decision trace is best-effort — never affects the build */ }
-      // U-3 — FIRST-BUILD-CORRECT (prevent-not-heal, admin 2026-07-31): deterministically strip the model's
-      // OWN provably-dead NAMED imports from the files it wrote THIS build, so the reviewer never spends a
-      // whole "fix the error" round removing them and the app ships clean the first time. Safe by
-      // construction (keep-on-any-doubt; never touches side-effect / namespace / default imports — see
-      // UnusedImportSweep). Additive + best-effort; kill switch AGENTV3_IMPORT_SWEEP=off.
-      try {
-        if (result.ok && expectsArtifacts && writtenFiles.size > 0 && importSweepEnabled()) {
-          const src: Record<string, string> = {};
-          for (const [p, c] of writtenFiles) {
-            if (typeof c === 'string' && /\.(mjs|cjs|jsx?|tsx?)$/i.test(p) && !/\.d\.ts$/i.test(p)) src[p] = c;
-          }
-          const cleaned = sweepUnusedImports(src);
-          const savedSweep: Record<string, string> = {};
-          for (const [p, c] of Object.entries(cleaned)) {
-            try {
-              await actuator.writeFile(workspaceId, p, c);
-              writtenFiles.set(p, c);
-              try { getWorkspaceMemory(workspaceId).indexFile(p, c); } catch { /* index best-effort */ }
-              savedSweep[p] = c;
-            } catch { /* one write failing must not block the rest */ }
-          }
-          if (Object.keys(savedSweep).length > 0) {
-            await saveWorkspaceFiles(workspaceId, savedSweep).catch(() => {});
-            events.emit({ type: 'narration', agent: 'architect', text: `🧹 Cleaned unused imports from ${Object.keys(savedSweep).length} file(s) — no wasted fix-up round.`, ts: Date.now() });
-          }
-        }
-      } catch { /* the import sweep is best-effort — never affects the build result */ }
       // U-4 — FIRST-BUILD-CORRECT: a Vite app must ALWAYS have its config (missing-config autopsy 2026-07-31).
       // A real "continue" build FAILED (ok:false) because the app had `vite` in its deps but NO vite.config
       // at all — the reviewer's "Missing vite.config.ts — the build will fail." Materialize a minimal,

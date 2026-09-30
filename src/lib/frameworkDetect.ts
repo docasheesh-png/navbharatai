@@ -14,6 +14,33 @@ interface FrameworkRule {
   re: RegExp;
 }
 
+/**
+ * 🔴 AUTOPSY f496c75b (2026-09-30). *"Single file html code se mobile friendly 3d fight game banao"* was
+ * scaffolded as Vite + React and delivered as FIFTY files — while the `static` template (plain HTML/CSS/JS,
+ * no build step) sat in the registry, picker and system prompt, reachable only by clicking it. No rule here
+ * could ever select it: every RULE names a framework, and "single file html" names none. The user asked for
+ * one file and got a project.
+ *
+ * PRECISION-FIRST, because this runs on EVERY turn's prompt, edits included: a bare "html" ("fix the
+ * index.html file", "an html page for my shop") never matches. Only an explicit request for ONE HTML file,
+ * or for plain HTML + CSS + JS, does.
+ */
+export const SINGLE_HTML_FILE_SIGNAL =
+  /\b(?:single|one|ek|1)[\s-]*(?:hi[\s-]+)?(?:self[\s-]?contained[\s-]+)?html[\s-]+(?:file|page\s+file)\b|\bsingle[\s-]?file\b[^.\n]{0,24}\bhtml\b|\bhtml\b[^.\n]{0,24}\b(?:single|one|ek)[\s-]+(?:hi[\s-]+)?file\b/i;
+const PLAIN_HTML_SIGNAL =
+  /\b(?:plain|pure|sirf|only|vanilla)\s+html\b|\bhtml\s*(?:,|\/|\+|&|and|aur)\s*css\s*(?:,|\/|\+|&|and|aur)\s*(?:js|javascript)\b/i;
+
+/** Did the user ask for the whole app in ONE HTML file? PURE. */
+export function wantsSingleHtmlFile(prompt: string): boolean {
+  return SINGLE_HTML_FILE_SIGNAL.test(typeof prompt === 'string' ? prompt : '');
+}
+
+/** Did the user ask for plain HTML/CSS/JS — one file, or no framework at all? PURE. */
+export function wantsPlainHtml(prompt: string): boolean {
+  const p = typeof prompt === 'string' ? prompt : '';
+  return SINGLE_HTML_FILE_SIGNAL.test(p) || PLAIN_HTML_SIGNAL.test(p);
+}
+
 // Order matters: a meta-framework is checked BEFORE the base library it builds on (SvelteKit before
 // Svelte, Nuxt before Vue), so "Nuxt app" picks 'nuxt', not 'vue'.
 const RULES: FrameworkRule[] = [
@@ -38,7 +65,12 @@ const RULES: FrameworkRule[] = [
   { id: 'alpine', re: /\balpine(\.js|js)?\b/i },
   // Vue — the base library, checked after Nuxt. Pinia / Vue Router are strong Vue-only signals.
   { id: 'vue', re: /\bvue(\.js|js|\s?[23])?\b|\bpinia\b|\bvue-?router\b/i },
+  // PLAIN HTML — checked LAST, so a named framework always wins ("a single-file Vue app" is Vue). See
+  // `PLAIN_HTML_SIGNAL` for why the bare word "html" is never enough.
+  // An explicit "react" keeps the React default (React is the default, not a RULE, so it cannot win by order).
+  { id: 'static', re: new RegExp(`^(?![\\s\\S]*\\breact\\b)[\\s\\S]*?(?:${SINGLE_HTML_FILE_SIGNAL.source}|${PLAIN_HTML_SIGNAL.source})`, 'i') },
 ];
+
 
 /** Any signal that a browser UI is wanted → the app is front-end-first; keep the React/meta default and
  *  let the builder add the backend. Deliberately broad so a backend id is chosen only for a clearly

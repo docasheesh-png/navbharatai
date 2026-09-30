@@ -98,6 +98,57 @@ export const WRITE_VERBS = /\b(add|new|create|save|submit|post|publish|book|conf
  */
 export const CONSOLE_NOISE = /^(warning:|download the react devtools|\[vite\]|\[hmr\]|failed to load resource|%c)|favicon|react-refresh|each child in a list should have a unique/i;
 
+/**
+ * 🔎 A SEARCH BOX AND A SORT MENU ARE TRIED TOO (admin 2026-09-30, after autopsy ee0e6de5: *"haan,
+ * search/sort wala check bana do"*). Pressing buttons proves nothing about a control you TYPE into or
+ * PICK from, so a lookup app — a table of every country with a search box and an A–Z / Z–A sort — had
+ * both of its controls go untested ("nothing safe to press"), and a search box that filters nothing
+ * would have passed every check we own. After the first-screen presses, each qualifying control is tried
+ * on a fresh load: a word from the list's own items is typed, or another option is chosen, and the
+ * screen's text is compared before and after.
+ *
+ * 🔒 PRECISION FIRST, because a failure here offers — and on a paid tier runs — a repair:
+ *   • only a control that NAMES itself a search (type="search", role="searchbox", or its label, name,
+ *     placeholder or id says search / filter / find, in English or Hindi) or a sort/filter menu (its
+ *     name or its options say sort, order, filter, category, A–Z, newest, price …);
+ *   • never one inside a form (the journey owns forms), a dialog, or a row of the list itself (a row's
+ *     own "status" menu is that row's setting, and changing it may save something);
+ *   • no menu at all when the app writes to the user's own database;
+ *   • only with a list of at least three items (search) or two different items (sort) on the screen,
+ *     and a search word taken from those items that not every item contains;
+ *   • "did nothing" is decided only after the typing, a wait, Enter and another wait — and a search box
+ *     with a button beside it is reported as untested, never as broken, because it may search only
+ *     when that button is pressed.
+ * A control that did nothing is `unresponsive`: a failure, reported and repaired like a crash.
+ */
+export const MAX_NARROWING_PROBES = 3;
+
+/** Names that make an input a search box. Hindi forms included: the lookup app in that autopsy said "खोजें". */
+export const SEARCH_CONTROL = /search|filter|find|look ?up|query|खोज|ढूं?ढ|ढूँढ|khoj|dhoon?dh|dhund/i;
+
+/** Names or options that make a menu a sort or filter menu. Deliberately not "type", "status" or "show". */
+export const SORT_CONTROL = /sort|order by|arrange|filter|categor|\ba\s*[-–]\s*z\b|\bz\s*[-–]\s*a\b|ascending|descending|\basc\b|\bdesc\b|newest|oldest|latest|price|low to high|high to low|क्रम|छा[ँं]ट|श्रेणी/i;
+
+/**
+ * The word to type into a search box: a word of three or more letters from one of the list's own items
+ * that NOT every item contains — so a working search must change what is shown. Unicode-aware, marks
+ * included, because a Hindi word split at its vowel signs is not a word. '' when no such word exists.
+ * PURE; the runner carries a copy of this body (it cannot import), and a test holds the two equal.
+ */
+export function pickSearchWord(items: readonly string[]): string {
+  const list = (items ?? []).map((t) => String(t ?? ''));
+  const lower = list.map((t) => t.toLowerCase());
+  const order = [Math.floor(list.length / 2), list.length - 1, 1, 0];
+  for (const i of order) {
+    const words = (list[i] || '').match(/[\p{L}\p{M}\p{N}]{3,}/gu) || [];
+    for (const w of words) {
+      const n = lower.filter((t) => t.includes(w.toLowerCase())).length;
+      if (n >= 1 && n < list.length) return w;
+    }
+  }
+  return '';
+}
+
 /** Whether a control should be pressed, and if not, why — the one rule the in-page collector mirrors. */
 export function pressDecision(input: {
   label: string;
@@ -123,7 +174,10 @@ export function pressDecision(input: {
   return { press: true };
 }
 
-export type PressVerdict = 'ok' | 'crashed' | 'blank' | 'broken-link' | 'error' | 'skipped';
+export type PressVerdict = 'ok' | 'crashed' | 'blank' | 'broken-link' | 'error' | 'unresponsive' | 'skipped';
+
+/** How a control was tried: pressed, typed into (a search box) or picked from (a sort/filter menu). */
+export type PressKind = 'press' | 'type' | 'pick';
 
 export interface PressResult {
   /** The control's visible name, as a person would read it. */
@@ -136,6 +190,8 @@ export interface PressResult {
   errors: string[];
   /** Whether anything on the page visibly changed — recorded, never judged (a Copy button changes nothing). */
   changed: boolean;
+  /** How it was tried. Absent means pressed — every record written before 2026-09-30. */
+  kind?: PressKind;
   /**
    * The first-screen control pressed to REACH this one, when it is a second-level control. Absent on
    * a first-screen press. It is a name a person can follow ("open Settings, then press Save").
@@ -169,7 +225,7 @@ export interface ExploreRun {
   diagnostic: string | null;
 }
 
-const VERDICTS: ReadonlySet<string> = new Set(['ok', 'crashed', 'blank', 'broken-link', 'error', 'skipped']);
+const VERDICTS: ReadonlySet<string> = new Set(['ok', 'crashed', 'blank', 'broken-link', 'error', 'unresponsive', 'skipped']);
 
 /** Parse the runner's output. Malformed lines are dropped, never guessed at. PURE; never throws. */
 export function parseExploreOutput(stdout: string | null | undefined): ExploreRun {
@@ -198,6 +254,7 @@ export function parseExploreOutput(stdout: string | null | undefined): ExploreRu
         note: String(o.note ?? '').slice(0, 200),
         errors: Array.isArray(o.errors) ? o.errors.slice(0, 3).map((e: unknown) => String(e).slice(0, 200)) : [],
         changed: o.changed === true,
+        ...(o.kind === 'type' || o.kind === 'pick' ? { kind: o.kind as PressKind } : {}),
         ...(typeof o.via === 'string' && o.via.trim() ? { via: o.via.slice(0, 60) } : {}),
       });
     } else if (o.type === 'out-of-time') {
@@ -207,7 +264,24 @@ export function parseExploreOutput(stdout: string | null | undefined): ExploreRu
   return run;
 }
 
-const FAILING: ReadonlySet<PressVerdict> = new Set(['crashed', 'blank', 'broken-link', 'error']);
+/**
+ * The verdicts that mean the app is broken. ONE set, read by the summary here AND by the repair
+ * (`explorerRepair.ts`), which used to keep its own copy — a new failure kind added to one would have
+ * been reported and never repaired, or repaired and never reported.
+ */
+export const FAILING_VERDICTS: ReadonlySet<PressVerdict> = new Set<PressVerdict>(['crashed', 'blank', 'broken-link', 'error', 'unresponsive']);
+const FAILING = FAILING_VERDICTS;
+
+/** "Pressed 3 control(s)", "Tried 2 search or sort control(s)", or both. PURE. */
+export function describeTries(presses: readonly PressResult[]): string {
+  const pressed = presses.filter((p) => !p.kind || p.kind === 'press').length;
+  const tried = presses.length - pressed;
+  const parts = [
+    pressed > 0 ? `pressed ${pressed} control(s)` : '',
+    tried > 0 ? `tried ${tried} search or sort control(s)` : '',
+  ].filter(Boolean).join(' and ');
+  return parts ? parts.charAt(0).toUpperCase() + parts.slice(1) : 'Tried nothing';
+}
 
 export type ExploreOutcome = 'passed' | 'failed' | 'nothing' | 'not-run';
 
@@ -221,6 +295,8 @@ export interface ExploreVerdict {
   detail: string;
   pressed: number;
   failures: PressResult[];
+  /** Every control actually tried (pressed, typed into or picked from), for the user's card. */
+  attempts?: PressResult[];
 }
 
 /** Decide what the run proved. PURE; never throws. */
@@ -251,13 +327,13 @@ export function summarizeExplore(run: ExploreRun): ExploreVerdict {
   if (failures.length > 0) {
     const names = failures.slice(0, 3).map(pressName).join(', ');
     return {
-      outcome: 'failed', code: 'EXPLORE_FAILED', pressed: presses.length, failures, detail,
-      message: `Pressed ${presses.length} control(s) in a real browser; ${failures.length} broke the app: ${names}.`,
+      outcome: 'failed', code: 'EXPLORE_FAILED', pressed: presses.length, failures, attempts: presses, detail,
+      message: `${describeTries(presses)} in a real browser; ${failures.length} did not work: ${names}.`,
     };
   }
   return {
-    outcome: 'passed', code: 'EXPLORE_PASSED', pressed: presses.length, failures: [], detail,
-    message: `Pressed ${presses.length} control(s) in a real browser; every one responded without breaking the app.`,
+    outcome: 'passed', code: 'EXPLORE_PASSED', pressed: presses.length, failures: [], attempts: presses, detail,
+    message: `${describeTries(presses)} in a real browser; every one responded without breaking the app.`,
   };
 }
 
@@ -268,12 +344,29 @@ export interface UserProof {
 }
 
 function failureSentence(p: PressResult): string {
+  const doing = p.kind === 'type' ? 'Typing into' : p.kind === 'pick' ? 'Changing' : 'Pressing';
   switch (p.verdict) {
-    case 'crashed': return `Pressing ${pressName(p)} crashed the app into an error screen.`;
-    case 'blank': return `Pressing ${pressName(p)} left the screen blank.`;
+    case 'crashed': return `${doing} ${pressName(p)} crashed the app into an error screen.`;
+    case 'blank': return `${doing} ${pressName(p)} left the screen blank.`;
     case 'broken-link': return `${pressName(p)} leads to a page that does not exist.`;
-    default: return `Pressing ${pressName(p)} caused an error in the app.`;
+    case 'unresponsive': return p.kind === 'pick'
+      ? `Choosing a different option in ${pressName(p)} changed nothing on the screen.`
+      : `Typing into ${pressName(p)} changed nothing on the screen — it does not search the list.`;
+    default: return `${doing} ${pressName(p)} caused an error in the app.`;
   }
+}
+
+/** The pass sentences for the user's card, one per kind of control that was tried. PURE. */
+function passSentences(attempts: readonly PressResult[], fallbackCount: number): string[] {
+  const all = attempts.length ? attempts : [];
+  const pressed = all.length ? all.filter((p) => !p.kind || p.kind === 'press').length : fallbackCount;
+  const typed = all.filter((p) => p.kind === 'type').length;
+  const picked = all.filter((p) => p.kind === 'pick').length;
+  const out: string[] = [];
+  if (pressed > 0) out.push(`Pressed ${pressed} button${pressed === 1 ? '' : 's'} and link${pressed === 1 ? '' : 's'} one by one — every one worked.`);
+  if (typed > 0) out.push(`Typed into the search box — the list changed to match.`);
+  if (picked > 0) out.push(`Changed the sort or filter menu — the list changed with it.`);
+  return out;
 }
 
 /**
@@ -286,7 +379,7 @@ export function exploreUserSummary(verdict: ExploreVerdict): UserProof {
     return {
       ok: true,
       headline: 'NavBharatAI tested your app in a real browser',
-      steps: [`Pressed ${verdict.pressed} button${verdict.pressed === 1 ? '' : 's'} and link${verdict.pressed === 1 ? '' : 's'} one by one — every one worked.`],
+      steps: passSentences(verdict.attempts ?? [], verdict.pressed),
     };
   }
   if (verdict.outcome === 'failed') {
@@ -296,7 +389,7 @@ export function exploreUserSummary(verdict: ExploreVerdict): UserProof {
       steps: [
         ...verdict.failures.slice(0, 3).map(failureSentence),
         ...(verdict.pressed > verdict.failures.length
-          ? [`The other ${verdict.pressed - verdict.failures.length} button(s) pressed worked.`]
+          ? [`The other ${verdict.pressed - verdict.failures.length} control(s) tried worked.`]
           : []),
       ],
     };
@@ -339,6 +432,9 @@ export function clickExplorerScript(previewUrl: string, opts: { blockWrites: boo
     neverSrc: NEVER_PRESS.source, neverFlags: NEVER_PRESS.flags,
     writeSrc: WRITE_VERBS.source, writeFlags: WRITE_VERBS.flags,
     noiseSrc: CONSOLE_NOISE.source, noiseFlags: CONSOLE_NOISE.flags,
+    maxNarrow: MAX_NARROWING_PROBES,
+    searchSrc: SEARCH_CONTROL.source, searchFlags: SEARCH_CONTROL.flags,
+    sortSrc: SORT_CONTROL.source, sortFlags: SORT_CONTROL.flags,
   };
   return `cat > /tmp/nbai-explore.mjs <<'NBAI_EOF'
 ${clickExplorerModule(cfg)}
@@ -407,6 +503,89 @@ function measure() {
   const rich = !!(root && root.querySelector('img, svg, canvas, video, iframe, input, button, textarea, select'));
   const hash = (s) => { let x = 5381; for (let i = 0; i < s.length; i++) x = ((x << 5) + x + s.charCodeAt(i)) | 0; return x; };
   return { len: text.length, head: text.slice(0, 160), rich, sig: document.body ? hash(document.body.innerHTML) + ':' + hash(document.body.innerText || '') : '' };
+}
+
+// Runs INSIDE the page, so it must be self-contained (page.evaluate sends only this function's
+// source). One function, three answers, chosen by a.mode:
+//   'list'   — the text of the main list's items: the element with the most visible same-tag
+//              children that carry text. Its items are what a search narrows and a sort reorders.
+//   'text'   — the screen's words with every form control taken out, so a typed query or a chosen
+//              option is never mistaken for the app responding to it.
+//   'narrow' — the search boxes and sort/filter menus worth trying (see SEARCH_CONTROL), marked.
+function narrowingPage(a) {
+  const root = document.querySelector('#root, #app, #__next') || document.body;
+  const listItems = () => {
+    let best = [];
+    for (const el of Array.from(root.querySelectorAll('*'))) {
+      if (el.closest('select, nav, header, footer, form, vite-error-overlay')) continue;
+      const kids = Array.from(el.children);
+      if (kids.length < 2) continue;
+      const tag = kids[0].tagName;
+      const same = kids.filter((k) => k.tagName === tag);
+      if (same.length < kids.length * 0.8) continue;
+      const vis = same.filter((k) => { const r = k.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (k.innerText || '').trim().length > 0; });
+      if (vis.length > best.length) best = vis;
+    }
+    return best;
+  };
+  const textOf = (node) => {
+    if (!node) return '';
+    const c = node.cloneNode(true);
+    for (const x of Array.from(c.querySelectorAll('input, select, textarea, option, script, style'))) x.remove();
+    return (c.textContent || '').replace(/\\s+/g, ' ').trim();
+  };
+  if (a.mode === 'list') return listItems().map((k) => (k.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 200));
+  if (a.mode === 'text') return textOf(root);
+
+  for (const old of Array.from(document.querySelectorAll('[data-nbai-n]'))) old.removeAttribute('data-nbai-n');
+  const search = new RegExp(a.searchSrc, a.searchFlags);
+  const sort = new RegExp(a.sortSrc, a.sortFlags);
+  const rows = listItems();
+  const out = [];
+  for (const el of Array.from(document.querySelectorAll('input, select'))) {
+    if (out.length >= a.maxNarrow) break;
+    const r = el.getBoundingClientRect();
+    const st = getComputedStyle(el);
+    if (r.width < 2 || r.height < 2 || st.visibility === 'hidden' || st.display === 'none') continue;
+    if (el.disabled || el.readOnly) continue;
+    if (el.closest('form, dialog, [role=dialog], vite-error-overlay')) continue;
+    // A control inside a row of the list is that row's own setting, not the list's filter.
+    if (rows.some((row) => row.contains(el))) continue;
+    const tag = el.tagName.toLowerCase();
+    const byFor = el.id ? document.querySelector('label[for="' + CSS.escape(el.id) + '"]') : null;
+    const labelText = textOf(byFor) || textOf(el.closest('label'));
+    const name = [el.getAttribute('aria-label'), el.getAttribute('placeholder'), el.getAttribute('name'), el.id, el.getAttribute('title'), labelText].filter(Boolean).join(' ');
+    if (tag === 'input') {
+      const type = (el.getAttribute('type') || 'text').toLowerCase();
+      if (type !== 'search' && type !== 'text') continue;
+      if (type !== 'search' && el.getAttribute('role') !== 'searchbox' && !search.test(name)) continue;
+    } else {
+      if (a.blockWrites) continue;
+      const opts = Array.from(el.options).filter((o) => !o.disabled);
+      if (opts.length < 2) continue;
+      if (!sort.test(name) && !sort.test(opts.map((o) => o.text).join(' '))) continue;
+    }
+    const shown = (el.getAttribute('aria-label') || labelText || el.getAttribute('placeholder') || '').replace(/\\s+/g, ' ').trim().slice(0, 60)
+      || (tag === 'input' ? 'the search box' : 'the sort menu');
+    el.setAttribute('data-nbai-n', String(out.length));
+    out.push({ i: out.length, tag, label: shown, key: tag + '|' + shown + '|' + out.length });
+  }
+  return out;
+}
+
+// The word to type — the same body as pickSearchWord() in clickExplorer.ts, held equal by a test.
+function pickSearchWord(items) {
+  const list = (items || []).map((t) => String(t || ''));
+  const lower = list.map((t) => t.toLowerCase());
+  const order = [Math.floor(list.length / 2), list.length - 1, 1, 0];
+  for (const i of order) {
+    const words = (list[i] || '').match(/[\\p{L}\\p{M}\\p{N}]{3,}/gu) || [];
+    for (const w of words) {
+      const n = lower.filter((t) => t.includes(w.toLowerCase())).length;
+      if (n >= 1 && n < list.length) return w;
+    }
+  }
+  return '';
 }
 
 async function freshPage(browser) {
@@ -488,6 +667,80 @@ async function pressOne(browser, target, discoverAgainst) {
   return { res, revealed };
 }
 
+// Tries one search box or sort menu on a fresh load: type a word from the list, or choose another
+// option, and see whether the screen's words change. Nothing typed is ever submitted.
+async function narrowOne(browser, target) {
+  const kind = target.tag === 'select' ? 'pick' : 'type';
+  const res = { type: 'press', kind, label: target.label, tag: target.tag, verdict: 'skipped', note: '', errors: [], changed: false };
+  const page = await freshPage(browser);
+  let armed = false;
+  page.on('pageerror', (e) => { if (armed && res.errors.length < 3) res.errors.push(String(e && e.message || e).slice(0, 200)); });
+  page.on('console', (m) => { if (armed && m.type() === 'error') { const t = String(m.text()); if (!noise.test(t) && res.errors.length < 3) res.errors.push(t.slice(0, 200)); } });
+  try {
+    await load(page);
+    const found = await page.evaluate(narrowingPage, Object.assign({}, cfg, { mode: 'narrow' }));
+    const hit = found.find((c) => c.key === target.key);
+    if (!hit) { res.note = 'the control was not there on a fresh load'; await page.close().catch(() => {}); return res; }
+    const loc = page.locator('[data-nbai-n="' + hit.i + '"]').first();
+    const items = await page.evaluate(narrowingPage, { mode: 'list' });
+    const enough = kind === 'type' ? items.length >= 3 : new Set(items).size >= 2;
+    if (!enough) { res.note = 'there was no list on the screen for it to change'; await page.close().catch(() => {}); return res; }
+    const before = await page.evaluate(narrowingPage, { mode: 'text' });
+    const beforeMeasure = await page.evaluate(measure);
+    const waitChange = async (ms) => {
+      const until = Date.now() + ms;
+      for (;;) {
+        const now = await page.evaluate(narrowingPage, { mode: 'text' }).catch(() => null);
+        if (now !== before) return true;
+        if (Date.now() >= until) return false;
+        await page.waitForTimeout(250);
+      }
+    };
+    let tried = '';
+    let changed = false;
+    if (kind === 'type') {
+      tried = pickSearchWord(items);
+      if (!tried) { res.note = 'every item on the list shares the same words, so no search could narrow it'; await page.close().catch(() => {}); return res; }
+      armed = true;
+      await loc.fill(tried, { timeout: 4000 });
+      changed = await waitChange(2500);
+      if (!changed) { await loc.press('Enter', { timeout: 2000 }).catch(() => {}); changed = await waitChange(1500); }
+    } else {
+      const choices = await loc.evaluate((s) => Array.from(s.options).filter((o) => !o.disabled && o.value !== s.value).map((o) => ({ v: o.value, t: (o.text || '').trim() })));
+      if (!choices.length) { res.note = 'it has no other option to choose'; await page.close().catch(() => {}); return res; }
+      armed = true;
+      for (const c of choices.slice(0, 2)) {
+        tried = c.t || c.v;
+        await loc.selectOption(c.v, { timeout: 4000 });
+        changed = await waitChange(2000);
+        if (changed) break;
+      }
+    }
+    await settle(page);
+    const overlay = await page.locator('vite-error-overlay, #nextjs-portal, .react-error-overlay').count().catch(() => 0);
+    const after = await page.evaluate(measure).catch(() => null);
+    res.changed = changed;
+    if (overlay > 0) { res.verdict = 'crashed'; res.note = 'the app crashed into an error overlay'; }
+    else if (beforeMeasure.len > 0 && after && after.len === 0 && !after.rich) { res.verdict = 'blank'; res.note = 'the screen went blank'; }
+    else if (res.errors.length > 0) { res.verdict = 'error'; res.note = 'the app threw an error when it was used'; }
+    else if (changed) { res.verdict = 'ok'; res.note = (kind === 'type' ? 'typing "' : 'choosing "') + tried + '" changed what the screen shows'; }
+    else {
+      const buttonBeside = kind === 'type' && await loc.evaluate((el) => {
+        const box = el.parentElement && (el.parentElement.parentElement || el.parentElement);
+        return !!(box && box.querySelector('button, [role=button], input[type=submit], input[type=button]'));
+      }).catch(() => true);
+      if (buttonBeside) { res.verdict = 'skipped'; res.note = 'nothing changed while typing; it may search only when the button beside it is pressed'; }
+      else { res.verdict = 'unresponsive'; res.note = (kind === 'type' ? 'typing "' : 'choosing "') + tried + '" changed nothing on the screen'; }
+    }
+  } catch (e) {
+    res.verdict = 'skipped';
+    res.note = 'could not be used: ' + String(e && e.message || e).split('\\n')[0].slice(0, 120);
+  }
+  armed = false;
+  await page.close().catch(() => {});
+  return res;
+}
+
 const browser = await chromium.launch({ args: ['--no-sandbox'] });
 try {
   let plan;
@@ -496,7 +749,10 @@ try {
     try {
       const resp = await load(page);
       if (resp && resp.status() >= 400) { say({ type: 'summary', loaded: false, note: 'the app answered HTTP ' + resp.status(), found: 0, chosen: 0, skipped: [] }); plan = null; }
-      else plan = await page.evaluate(collect, cfg);
+      else {
+        plan = await page.evaluate(collect, cfg);
+        plan.narrow = await page.evaluate(narrowingPage, Object.assign({}, cfg, { mode: 'narrow' })).catch(() => []);
+      }
     } catch (e) {
       say({ type: 'summary', loaded: false, note: 'the app could not be opened: ' + String(e && e.message || e).slice(0, 120), found: 0, chosen: 0, skipped: [] });
       plan = null;
@@ -522,6 +778,11 @@ try {
         second.push({ key: c.key, label: c.label, tag: c.tag, parentKey: target.key, via: target.label });
         taken++;
       }
+    }
+    // The search boxes and sort menus of the first screen, before any inner screen.
+    for (const target of (plan.narrow || [])) {
+      if (outOfTime || Date.now() - started > cfg.budgetMs - 8000) { outOfTime = true; break; }
+      say(await narrowOne(browser, target));
     }
     for (const target of second.slice(0, cfg.maxSecond)) {
       if (outOfTime || Date.now() - started > cfg.budgetMs - 8000) { outOfTime = true; break; }

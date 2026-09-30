@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { checkFeaturePresence } from '../src/server/AgentV3/FeaturePresence';
 import { injectPreviewBridge } from '../src/server/AgentV3/previewBridge';
-import { noJourneyReason } from '../src/server/AgentV3/journeyDerivation';
+import { noJourneyReason, LOOKUP_ONLY_REASON } from '../src/server/AgentV3/journeyDerivation';
 import {
   workspaceContentHash,
   identitySource,
@@ -213,8 +213,19 @@ describe('A live search box is not told to fix a label it already has', () => {
 }`,
   };
 
-  it('says the field acts as you type — never "give each field a name and a label"', () => {
+  it('a pure lookup (nothing anywhere saves) gets the lookup-only reason — never "give each field a name and a label"', () => {
+    // Since #3401 (autopsy ee0e6de5) met this fix at merge: the reader as written saves nothing, so the
+    // most specific true sentence is the lookup-only one, and the gate reads it as none-derivable.
     const reason = noJourneyReason(GITA_APP);
+    expect(reason).toBe(LOOKUP_ONLY_REASON);
+    expect(reason).not.toContain('`name`');
+    expect(reason).not.toContain('no field this check could address');
+  });
+
+  it('says the field acts as you type when the app DOES save somewhere but this form has no submit step', () => {
+    // The case this sentence is for: addressable fields, no submit, and a save elsewhere (an autosave).
+    const saving = { ...GITA_APP, 'src/App.tsx': GITA_APP['src/App.tsx'].replace('setSearch(e.target.value)', "{ setSearch(e.target.value); localStorage.setItem('q', e.target.value); }") };
+    const reason = noJourneyReason(saving);
     expect(reason).toContain('act as you type');
     expect(reason).not.toContain('`name`');
     expect(reason).not.toContain('no field this check could address');

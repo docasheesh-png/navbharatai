@@ -176,7 +176,7 @@ describe('5 · a kit-looking class the kit does not have is named at write time'
   it('the dispatcher hands the note back with the write', () => {
     const d = read('src/server/AgentV3/ToolDispatcher.ts');
     expect(d).toContain('const invented = await this.inventedKitClassNotes(files);');
-    expect(d).toContain('return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + security + shadow;');
+    expect(d).toContain('return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow;');
   });
 });
 

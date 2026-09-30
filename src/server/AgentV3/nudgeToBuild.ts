@@ -53,6 +53,35 @@ const QUESTION_MARKS = /[?？؟]$/;
 const TRAILING_DECORATION = /[*_`)\]"'”’»]+$/;
 
 /**
+ * Emoji (and the joiners and variation selectors that build them) after a question: *"Shall I
+ * continue? 🙏"*. A courtesy mark does not turn a question into a statement.
+ */
+const TRAILING_EMOJI = /[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{1F3FB}-\u{1F3FF}\s]+$/u;
+
+/**
+ * A closing request for the user's reply — *"let me know"*, *"बता दीजिए"*, *"batao"*. On its own it is
+ * the commonest courtesy after a plan (*"I'll build it now — let me know if you want changes!"*), so
+ * it counts ONLY beside a real question mark: see `turnAskedTheUser`.
+ */
+const INVITATION_TO_REPLY = new RegExp(
+  '(?:let (?:me|us) know|tell me|please (?:confirm|reply)|just say'
+  + '|बता(?:\\s*दीजिए|\\s*दीजिये|\\s*दें|\\s*दो|इए|इये|एं|एँ|ओ|ना)|बताएं|कहिए|कहें'
+  + '|bata(?:\\s*dijiye|\\s*dijie|\\s*do|\\s*dena|iye|ye|yein|yen|en|o|na))'
+  + '[\\s.!।॥…,:;—–-]*$',
+  'iu',
+);
+
+function withoutTrailingDecoration(line: string): string {
+  let s = line;
+  for (let i = 0; i < 4; i++) {
+    const next = s.replace(TRAILING_EMOJI, '').replace(TRAILING_DECORATION, '').trimEnd();
+    if (next === s) break;
+    s = next;
+  }
+  return s;
+}
+
+/**
  * Did this turn ASK the user something, rather than narrate a plan it failed to carry out?
  *
  * Deliberately narrow: only the LAST non-empty line counts. A stall regularly contains a rhetorical
@@ -67,7 +96,21 @@ export function turnAskedTheUser(text: string | null | undefined): boolean {
   const lines = String(text ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
   const last = lines[lines.length - 1];
   if (last === undefined) return false;
-  return QUESTION_MARKS.test(last.replace(TRAILING_DECORATION, ''));
+  const tail = withoutTrailingDecoration(last);
+  if (QUESTION_MARKS.test(tail)) return true;
+  // 🔴 A QUESTION FOLLOWED BY "PLEASE TELL ME" IS STILL A QUESTION (autopsy e6d46cde, 2026-09-30). The
+  // model answered *"एक ऐप बनाओ टेलीनॉर"* with *"क्या आप इसी तरह का ऐप चाहते हैं? अगर आपके मन में कुछ और
+  // है … तो बता दीजिए। 🙏"* — a question, then "if you had something else in mind, tell me". The line
+  // ended on the invitation, not on the question mark, so this read it as a stall; the build was
+  // nudged into an app the user had just been asked about, and their reply ("Archer Ai") arrived
+  // mid-build and was never acted on.
+  // A question mark in the last line with only an invitation to reply after it — or a last line that
+  // IS only that invitation, right after a line ending in a question — is the turn handing the
+  // decision back. *"Ready? Let's build it."* is still a stall: what follows its question is an intent.
+  if (!INVITATION_TO_REPLY.test(tail)) return false;
+  if (/[?？؟]/.test(tail)) return true;
+  const before = lines[lines.length - 2];
+  return before !== undefined && QUESTION_MARKS.test(withoutTrailingDecoration(before));
 }
 
 /** The model said it cannot do the thing. Reuses the repo's ONE refusal test — never a second copy. */

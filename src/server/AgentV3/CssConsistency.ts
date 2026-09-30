@@ -173,6 +173,55 @@ export function cssConsistencyError(files: Record<string, string>): string | nul
   ].join('\n');
 }
 
+/** At most this many class names in one write-time note. */
+export const MAX_CLASSES_IN_WRITE_NOTE = 12;
+
+/**
+ * The write-time half of `CSS_CLASSES_UNDEFINED` — said while the model is still writing, instead of by a
+ * repair pass after the app is finished. PURE; `''` when there is nothing to say.
+ *
+ * 🔴 WHY (autopsy e6d46cde, 2026-09-30). The model wrote four screens, then appended their styles to
+ * `src/index.css` — and missed nine of the classes the screens use (`.btn-sm`, `.status-success`, …).
+ * Nothing told it: it declared the app complete, and the end-of-build check then spent a 100-second
+ * repair pass, in a fresh context that had to re-read every screen, adding nine rules the first
+ * model could have added in one edit. The mismatch was knowable the moment the stylesheet was written.
+ *
+ * Which classes are named depends on what was written:
+ *   • a STYLESHEET write → every screen's undefined classes, because the model just said "these are the
+ *     styles" and any class still missing is exactly what it forgot;
+ *   • a SCREEN write → only that screen's own undefined classes, so a note never lists work the model
+ *     has not touched.
+ * `nb-` classes are left to the kit (`kitRestore` puts back the kit's own rules, and
+ * `inventedKitClassNote` names an invented one) so the same class is never reported twice.
+ */
+export function undefinedClassWriteNote(
+  written: Record<string, string>,
+  project: Record<string, string>,
+): string {
+  const merged = { ...project, ...written };
+  const missing = findUndefinedClasses(merged).filter((c) => !c.startsWith('nb-'));
+  if (missing.length === 0) return '';
+  const wroteSheet = Object.keys(written).some((p) => isProjectStylesheet(p));
+  const scope = wroteSheet
+    ? missing
+    : (() => {
+      const screens: Record<string, string> = {};
+      for (const [p, c] of Object.entries(written)) if (SRC_RE.test(p)) screens[p] = c;
+      const used = collectUsedClasses(screens);
+      return missing.filter((c) => used.has(c));
+    })();
+  if (scope.length === 0) return '';
+  const shown = scope.slice(0, MAX_CLASSES_IN_WRITE_NOTE).map((c) => `.${c}`).join(', ');
+  const more = scope.length > MAX_CLASSES_IN_WRITE_NOTE ? ` and ${scope.length - MAX_CLASSES_IN_WRITE_NOTE} more` : '';
+  return [
+    '',
+    wroteSheet
+      ? `Style check after this write: ${scope.length} class name(s) the screens use still have no rule in any stylesheet, so those parts render unstyled: ${shown}${more}.`
+      : `Style check after this write: ${scope.length} class name(s) in this file have no rule in any stylesheet yet: ${shown}${more}.`,
+    'Define each one in the global stylesheet with the palette variables, or use a class that already exists, before you finish.',
+  ].join('\n');
+}
+
 /** A token that can be a CSS class name. */
 const CLASS_TOKEN = /^-?[A-Za-z_][\w-]*$/;
 

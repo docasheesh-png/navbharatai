@@ -71,7 +71,9 @@ describe('🔒 SOURCE — one reader, after the user\'s own allowance, and the c
   it('the count is recorded inside deliver(), only for a PAID rung, never for the free provider', () => {
     const deliver = free.slice(free.indexOf('const deliver = async ('), free.indexOf('let sawRefusal'));
     expect(free.indexOf('const deliver = async (')).toBeGreaterThan(-1);
-    expect(deliver).toMatch(/if \(paidRung && !freeListed\) void imageFreePaidBudget\.record\(\);/);
+    // 2026-09-30: with pricing on, each user's own 5 a day bounds Paid mode, so the platform count is
+    // the pricing-off rule only.
+    expect(deliver).toMatch(/if \(paidRung && !freeListed && !pricing\) void imageFreePaidBudget\.record\(\);/);
     expect(free.split('imageFreePaidBudget.record(').length).toBe(2);
   });
 });

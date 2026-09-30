@@ -126,7 +126,7 @@ describe('wiring — the build records the identity, the final save confirms it,
   it('the restamp waits for the save it must outdate', () => {
     const i = route.indexOf('if (snapshotTaken) {\n            await finalSave;');
     expect(i).toBeGreaterThan(-1);
-    expect(route.slice(i, i + 400)).toContain('const at = Date.now();');
+    expect(route.slice(i, i + 700)).toContain('const at = Date.now();');
   });
 
   it('the report says which it was', () => {

@@ -48,6 +48,8 @@ const PROCESS_ONLY_CODES = new Set([
   // Whether the platform's additions to the reply reached the screen (summaryAdditions.ts): a fact about our delivery.
   'SUMMARY_ADDITIONS_SHOWN', 'SUMMARY_REPLY_NOT_FOUND',
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', // measurements of the ENGINE (postGreenWrites.ts), never app findings
+  // A write OUR engine recorded one way and landed another (snapshotIdentity.ts, autopsy 2d076ce8).
+  'SAVED_SOURCE_DIVERGES',
   // …and its sibling: how far down OUR ladder a build fell (ladderDepth.ts) is a fact about our
   // routing, never about the user's app.
   'LADDER_DEPTH',

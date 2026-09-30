@@ -443,7 +443,7 @@ import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild
 import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE, SNAPSHOT_WAKING_NOTE, PREVIEW_COPY_REFRESH_MS } from '../AgentV3/previewSnapshot';
 import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
 import { canServeFromSnapshot, SNAPSHOT_IDLE_NOTE } from '../AgentV3/snapshotServeDecision';
-import { workspaceContentHash, snapshotConfirmation, snapshotMatchesFiles, identitySource, type SnapshotTaken } from '../AgentV3/snapshotIdentity';
+import { workspaceContentHash, snapshotConfirmation, snapshotMatchesFiles, identitySource, fileContentHashes, savedDivergesFromSandbox, type SnapshotTaken } from '../AgentV3/snapshotIdentity';
 import { sandboxReasonMiddleware } from '../AgentV3/sandboxSessionZone';
 import { PEAK_MEMORY_PROBE, parsePeakMemory, describePeakMemory, describeSession, type SandboxSession } from '../AgentV3/sandboxSessions';
 import { sandboxRamGb } from '../AgentV3/sandboxRate';
@@ -20549,7 +20549,7 @@ async function noteBuildOutcome(
                       await sandboxStore.saveSnapshot(workspaceId, url, at, filesHash).catch(() => {});
                       // The paths travel with the copy for THIS build only, so a mismatch can say which
                       // side holds what — see staleDetail. The hash is still what decides.
-                      snapshotTaken = { url, filesHash, filePaths: source ? Object.keys(source) : undefined };
+                      snapshotTaken = { url, filesHash, filePaths: source ? Object.keys(source) : undefined, fileHashes: source ? fileContentHashes(source) : undefined };
                       // THE COPY IS CURRENT, AND THE SURFACE SHOULD KNOW NOW (sandboxLifetime.ts).
                       // Raising the flag lets the idle sweep use the shorter snapshot window; the event
                       // lets the frame move to the real build output the moment the build settles,
@@ -22262,11 +22262,29 @@ async function noteBuildOutcome(
       // overwrites a previously-good saved set with nothing. Best-effort — never blocks the build.
       try {
         const toSave: Record<string, string> = {};
+        // Kept apart from `toSave` so the snapshot check can tell a sandbox that MOVED after the copy
+        // from a saved set that holds something the sandbox never ran (autopsy 2d076ce8).
+        let sandboxScan: Record<string, string> | null = null;
         try {
           const scanned = await collectWorkspaceFiles(actuator, workspaceId);
+          sandboxScan = scanned.files;
           Object.assign(toSave, scanned.files);
         } catch { /* listFiles can be flaky — the captured writes below are the reliable source */ }
         for (const [p, c] of writtenFiles) toSave[p] = c; // captured writes win (freshest, reliable)
+        // 🔴 A RECORDED WRITE THAT IS NOT WHAT THE SANDBOX RUNS (autopsy 2d076ce8, 2026-09-30). Every
+        // browser check this build made looked at the SANDBOX; the durable project is `toSave`. A path
+        // where the two disagree means a restore brings back a file no check ever saw. Admin-only
+        // evidence — it changes nothing that is saved.
+        try {
+          const diverged = savedDivergesFromSandbox(identitySource(sandboxScan), identitySource(toSave));
+          if (diverged.length > 0) {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'SAVED_SOURCE_DIVERGES',
+              message: `${diverged.length} file(s) were saved with content different from what the sandbox is running: ${diverged.slice(0, 8).join(', ')}${diverged.length > 8 ? ` and ${diverged.length - 8} more` : ''}. Every browser check this build made looked at the sandbox, so the saved copy of ${diverged.length === 1 ? 'that file was' : 'those files were'} never checked. A write was recorded one way and landed another.`,
+              autoResolved: false,
+            });
+          }
+        } catch { /* evidence gathering must never break a build */ }
         if (Object.keys(toSave).length > 0) {
           // A SELF-HEAL THAT DID NOT LAST (open root cause from report 02be22e3, now measured). Each
           // repair pass re-reads the file fresh from the sandbox and only acts when the defect is
@@ -22443,6 +22461,8 @@ async function noteBuildOutcome(
               taken: snapshotTaken,
               persistedHash: workspaceContentHash(identitySource(persisted)),
               persistedPaths: Object.keys(persisted ?? {}),
+              persistedFileHashes: fileContentHashes(persisted),
+              sandboxFileHashes: sandboxScan && persisted === toSave ? fileContentHashes(sandboxScan) : undefined,
             });
             if (verdict.action === 'restamp') {
               const at = Date.now();

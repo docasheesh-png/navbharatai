@@ -26,11 +26,12 @@ import { isModelUnavailableError } from './providerErrorClass';
 import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError } from './turnDeadline';
-import { typecheckEvidenceFromCommands } from './TscGate';
+import { typecheckEvidenceFromCommands, commandOutcomeText } from './TscGate';
 import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
 import { agentRunEvidence as readAgentRunEvidence, type AgentRunEvidence } from './agentRunEvidence';
 import { mergeTruncation, pushBounded, boundedWindow, COMPLETE, type ChannelTruncation, type ReportTruncation } from './reportTruncation';
+import { capPromptPreview } from './promptPreviewShape';
 import { renderProvenByAnyActor, noteRenderSeen, forgetRenderSeen, RENDER_PROVEN_CODES } from './renderProof';
 import { isSelfHeal, isWorkaroundIssue, isNarrationIssue, isLeftOpen, HEAL_RULE } from '../../lib/healIssue';
 
@@ -46,6 +47,10 @@ const PROCESS_ONLY_CODES = new Set([
   'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED',
   // A repair's out-of-scope answer that OUR guard refused to write (autopsy eed79815): engine housekeeping.
   'REPAIR_OUT_OF_SCOPE',
+  // The user named a stack we do not build (unsupportedStack.ts) — a fact about OUR templates, not the app.
+  'UNSUPPORTED_STACK',
+  // Whether OUR checks could sign in behind the app's login page (signInExplore.ts) — our instrument.
+  'AUTH_EXPLORE_SIGNED_IN', 'AUTH_EXPLORE_NOT_RUN',
   // Whether the platform's additions to the reply reached the screen (summaryAdditions.ts): a fact about our delivery.
   'SUMMARY_ADDITIONS_SHOWN', 'SUMMARY_REPLY_NOT_FOUND',
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', // measurements of the ENGINE (postGreenWrites.ts), never app findings
@@ -121,6 +126,8 @@ const PROCESS_ONLY_CODES = new Set([
   'PROJECT_MODE_FAILED',
   // …or stood down because the plan was too small to split — also a fact about OUR planner (6a4a799f).
   'PROJECT_MODE_STOOD_DOWN',
+  // …and the roadmap standing down so ONE planner runs, not two (autopsy a2b9c802) — our routing.
+  'MEGA_ROADMAP_STOOD_DOWN',
   // Whether THIS BUILD left a version in the Time Machine (restorePoint.ts). A statement about our own
   // safety net, never a finding about the user's app — a perfect app whose version write failed is
   // still a perfect app, and counting it against them is the provider-error-as-app-blocker class.
@@ -1021,7 +1028,7 @@ export class BuildDiagnostics {
       phase: 'build',
       severity: failed ? 'error' : 'info',
       code: failed ? 'SANDBOX_CMD_FAILED' : 'SANDBOX_CMD',
-      message: `$ ${cmdHead} → exit ${rec.exitCode ?? '?'}${durTxt}`,
+      message: `$ ${cmdHead} → ${commandOutcomeText(rec)}${durTxt}`,
       autoResolved: !failed,
       detail: failed ? capTail(rec.stderr || rec.stdout, 400) : undefined,
     });
@@ -1286,7 +1293,9 @@ export class BuildDiagnostics {
       ts: this.now(),
       provider: rec.provider,
       model: rec.model,
-      promptPreview: rec.promptPreview != null ? capHead(rec.promptPreview, LLM_PREVIEW_CAP) : undefined,
+      // Each half capped on its own: one cap over the whole string always fell inside a long system
+      // prompt, so the question asked on this turn never reached the report (promptPreviewShape.ts).
+      promptPreview: rec.promptPreview != null ? capPromptPreview(rec.promptPreview, LLM_PREVIEW_CAP / 2, LLM_PREVIEW_CAP / 2) : undefined,
       responsePreview: rec.responsePreview != null ? capHead(rec.responsePreview, LLM_PREVIEW_CAP) : undefined,
       promptChars: rec.promptChars,
       responseChars: rec.responseChars,

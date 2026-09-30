@@ -183,11 +183,12 @@ describe('the wiring — each half reaches the place that was blank', () => {
     expect(runner).toContain("return 'slow';");
   });
 
-  it('🔒 only the LADDER may allow it, and at most once per build', () => {
+  it('🔒 only the LADDER may allow it, and the total cost stays capped', () => {
     // readStream cannot see the chain, so left to itself it could abandon the LAST engine and turn a
-    // slow success into a failure. Once per build caps the total cost at one abandoned call.
-    // The once-per-build flag lives on the build's shared bench registry since 2026-09-25.
-    expect(multi).toContain('const canAbandonSlowStream = () => !bench.abandonedSlowRung && i + 1 < chain.length;');
+    // slow success into a failure. The cap was once per build; since autopsy 876afca9 (2026-09-30) a
+    // crawl bench ends after a window and the SAME rung gets one re-probe, so the cap is two abandons,
+    // the second only on that re-probe (crawlBench.ts `mayAbandonCrawl`, tested there).
+    expect(multi).toContain('const canAbandonSlowStream = () => mayAbandonCrawl({\n            hasNextRung: i + 1 < chain.length,');
     expect(multi).toContain('abandonedSlowRung = true;');
   });
 

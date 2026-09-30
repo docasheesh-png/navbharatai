@@ -6,7 +6,7 @@ import { API_SCOPES } from '../src/server/lib/ApiKeyManager';
 import { WALLET_FEATURES } from '../src/server/lib/walletFeature';
 
 /**
- * THE IMAGE GENERATOR HAS ONE TIER: FREE (admin-mandated 2026-09-23).
+ * THE IMAGE GENERATOR HAS ONE TIER (admin-mandated 2026-09-23; priced after 5 free a day since 2026-09-30).
  *
  * Admin, verbatim: *"aap free image ho rakho … permanently remove kar do!!!"*. There is no second,
  * charged tier — no switch on the screen, no second route, no API door that sells a picture, and no
@@ -36,8 +36,11 @@ describe('the image generator has one tier', () => {
     expect(code(read('src/server/routes/developerApi.ts'))).not.toMatch(/\/api\/images\//);
   });
 
-  it('the wallet has no image-purchase line', () => {
-    for (const f of WALLET_FEATURES) expect(f.id).not.toMatch(/image/);
+  // 🔁 2026-09-30 (admin: "per day 5 image free for user, uske bad 1₹/image"): the ONE generator now
+  // has a daily allowance and a price after it, so the wallet has exactly one image line. Still one
+  // tier: one screen, one route, no switch.
+  it('the wallet has exactly one image line — the per-image charge after the free ones', () => {
+    expect(WALLET_FEATURES.filter((f) => /image/.test(f.id)).map((f) => f.id)).toEqual(['image']);
   });
 
   it('🔒 the options fold is still remembered on the device — a layout convenience, not money', () => {
@@ -46,10 +49,10 @@ describe('the image generator has one tier', () => {
     expect(gen).toMatch(/readOptionsOpen/);
   });
 
-  it('AppKnowledgeBase describes one free tool and names the TEXT opacity slider', () => {
+  it('AppKnowledgeBase describes one tool, its price, and names the TEXT opacity slider', () => {
     const kb = read('src/server/AppContext/AppKnowledgeBase.ts');
     const entry = kb.slice(kb.indexOf("id: 'ai_image_gen'"), kb.indexOf("id: 'ai_image_gen'") + 30000);
-    expect(entry).not.toMatch(/₹1/);
+    expect(entry).toMatch(/the first 5 images every day are FREE, then ₹1 per image/);
     expect(entry).not.toMatch(/TWO TIERS/);
     expect(entry).toMatch(/TEXT OPACITY with the slider directly under Size/);
     expect(entry).toMatch(/SEPARATE slider/);

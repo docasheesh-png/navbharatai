@@ -34,6 +34,7 @@
 // label[for], a wrapping label, and a hidden input).
 
 import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
+import { newPageOptionsExpr } from './signInExplore';
 
 /** How many page routes to actually open. A 40-page app must not add minutes to every build. */
 export const MAX_PAGE_ROUTES = 6;
@@ -161,7 +162,7 @@ export function pagesFolderIsRouteTable(files: Record<string, string>): boolean 
  *   errors  — uncaught page errors and console errors, capped so one noisy page cannot flood the log.
  * PURE string builder.
  */
-export function pageCheckScript(previewUrl: string, routes: string[]): string {
+export function pageCheckScript(previewUrl: string, routes: string[], opts: { storageState?: string | null } = {}): string {
   const base = previewUrl.replace(/\/+$/, '');
   const list = JSON.stringify(routes);
   return `cat > /tmp/nbai-pagecheck.mjs <<'NBAI_EOF'
@@ -177,7 +178,8 @@ const routes = ${list};
 const browser = await chromium.launch({ args: ['--no-sandbox'] });
 for (const route of routes) {
   const out = { route, status: null, text: 0, errors: [], settled: false, vitals: null, a11y: [], finalPath: null };
-  const page = await browser.newPage();
+  // Signed in when the app's screens are behind a sign-in page (signInExplore.ts), anonymous otherwise.
+  const page = await browser.newPage(${newPageOptionsExpr(opts.storageState)});
   page.on('pageerror', (e) => { if (out.errors.length < 3) out.errors.push(String(e.message).slice(0, 200)); });
   page.on('console', (m) => { if (m.type() === 'error' && out.errors.length < 3) out.errors.push(String(m.text()).slice(0, 200)); });
   try {

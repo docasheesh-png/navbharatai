@@ -84410,6 +84410,61 @@ The #3385 ratchet listed 56 tools named in the architect prompt and offered to n
 - The ratchet list is deleted, not emptied: a new prompt promise without a reachable tool fails CI with no escape.
 - The live strip names the recipe ("using generate_pdf"), not "using run_recipe".
 
+## 2026-09-30 — Autopsy 8e124182: a stock-inventory app (Weak, 30.5 min, ₹639.85 billed) — the app worked; the chain around it did not
+
+Prompt: a prompt-generator template asking for a stock-inventory app "using PHP MVC architecture", with six
+numbered features, `# Steps` (seven writing instructions) and `# Output Format`. Result: a React app that
+rendered, typechecked, built and passed a journey — plus seven defects of ours around it.
+
+**Tally (honest):** ✅ self-healed 3 (two `edit_file` old_string misses; CSS classes + accessibility healed) ·
+🔀 workaround 1 (the model beat the green freeze with `cat >` — see 4) · ⏭️ skipped 1 (vaccine repair left the
+unrun e2e suite "for the user to install") · ❌ shipped imperfect 5 (summary replaced by a test-repair reply;
+"List / items" + "notifications" reported missing; `types/index.ts` claims a "PHP MVC backend"; xlsx high
+vuln with no fix; duplicate `exportToExcel`/`generateId` helpers) · 🥵 struggle: 30.5 min vs a 7–16 min
+estimate; a module-1 turn that became the whole build; a ~2 min feature heal proving a page existed; a
+~2 min vaccine repair of a test we wrote.
+
+**Fixed (all in `tests/theStockAppWasNotAProject.test.ts`, 22 cases, reversion-proven per file):**
+1. `enumeratedFeatures.ts` — lines under `# Steps` / `# Output Format` / `Notes:` are instructions; in a
+   structured spec (≥5 list markers) prose adds no inline runs. The prompt counted 16 (≥14 ⇒ Project Mode);
+   now 7.
+2. `starterEntryExpectedFor` (ProjectPlan) + `ToolDispatcher.setStarterEntryExpected` — a module turn whose
+   module does not own `src/App.tsx` is not "nothing built yet". Before 2026-09-26 that verdict failed every
+   early module (the plan could never auto-continue); since then `unfinishedResume` pushed the model to build
+   the whole app inside module 1, while the plan recorded 1/14 and queued 13 more turns.
+3. `testRunner.parseTestOutcome` strips ANSI (vitest colours even when piped: the report could only say
+   `FAIL (exit=1)`), counts a test FILE that failed to load, names it; the repair is told the exact command
+   (with the e2e exclude). Starter tests carry `STARTER_TEST_MARKER` and an in-memory `localStorage` stand-in
+   via `vi.hoisted` when the app uses browser storage (verified with real vitest: fails without, passes with).
+   The vaccine asks `failuresAreOurStarterTests` before spending a repair on the user's source.
+   `adoptHealResult`: a repair on a successful build keeps the build's answer (5 sites did `result = healed`).
+4. `shellWriteTargets` + bash guard: the shell is asked about by the green freeze like `writeFile`
+   (refused ⇒ same GreenFreezeError, recorded as deferred; allowed ⇒ seen by POST_GREEN_WRITES, which had
+   reported "nothing wrote to it afterwards"). The freeze error now tells the model not to look for another way.
+5. `FeaturePresence.isSignInWall` — behind a sign-in page only the sign-in feature is judged.
+6. `RequirementGapAnalyzer` — "Items Menu" is navigation (was `restaurant`: KOT, GST, delivery), and a new
+   `inventory` domain (was about to become `ecommerce`: cart, checkout, refunds).
+7. `unsupportedStack.ts` — PHP / Rails / .NET named as the stack to build with: the builder is told never to
+   claim it, the user is told once in the ready message; `UNSUPPORTED_STACK` admin line.
+
+**Missing subsystem named: AUTHENTICATED EXPLORATION.** Page render, journey, click explorer and feature
+probe all stopped at `/login` — five routes "redirected", two journeys "unreachable". The app even prefilled
+demo credentials. Nothing logs in. Every auth-gated app is verified at its front door only. OPEN.
+
+**Open root causes (rule 6):**
+- The vaccine repair runs after the green latch but is on no allowlist, so it can never repair a genuine
+  user-test failure on a green app (that is why the model reached for the shell). Needs a named pass wrapped
+  in `verifyAfterFix` — an admin decision, not taken here.
+- A module turn that over-builds is never reconciled against the disk (the plan only learns its own module).
+- `notifications NOT BUILT` may be false (the dashboard likely has low-stock alerts); unverified — the
+  report does not carry the dashboard's code.
+- `xlsx@0.18.5` has no fixed npm release; the dep-health line still says "Upgrade each to a patched version".
+  The builder should prefer `exceljs` (or SheetJS's CDN tarball).
+- Parallel FE/BE sub-agents on a client-only app (FE_BE_PARTITION: 0 backend files) duplicated helpers.
+- The login page shipped prefilled with demo credentials and a shared password in `seed.ts` on a request
+  that asked for security; the reviewer reported no security issues.
+- Billing: ₹639.85 billed, wallet debited ₹150 (overdraft floor), so ~₹490 of markup absorbed; real cost
+  $1.80 (KIMI 6.84M input, 6.47M cached).
 ## 2026-09-30 — Autopsy 6a5fb04b + dfd81a3a ("Mohakor Voice AI", Weak, two builds)
 
 **Build 1 (6a5fb04b, 4.4 min, FAILED, ₹0).** A Bengali spec for a voice assistant. Software Project Mode fired
@@ -84596,6 +84651,63 @@ The user asked for ONE html file and got a 25-file Vite + TypeScript project; mo
 - The ETA was 2.4× under the real time.
 - The step limit of 80 was reached.
 
+### 2026-09-30 (same day) — the rest of autopsy 8e124182, and LOGIN-KE-ANDAR JAANCH (admin: "baaki bhi fix karo, login ke andar wali jaanch bhi banao")
+
+- **Authenticated exploration (the missing subsystem), BUILT:** `signInExplore.ts` + session file shared by
+  page check / journeys / explorer; feature probe reads screens behind the door. Only credentials the app
+  ships; ≤3 tries; no sign-up; never printed. Kill switch `AGENTV3_SIGNIN_EXPLORE=off`. Real-browser tests
+  (`tests/weLookBehindTheSignInPage.test.ts`): prefilled form signs in, a source account signs in, a wrong
+  one is never success, and the explorer pressed "Stock Items"/"Show alerts" behind the door and not
+  "Log out".
+- **Vaccine repair on a green app:** allowlisted `vaccine-repair`, verified (tests + render) or undone; never
+  a `.env` or a test file; an undone repair reports the failing suite.
+- **Plan reconciliation:** `reconcilePlanWithWrites` marks modules whose files a turn wrote as done.
+- **"notifications NOT BUILT":** alert/warning-framed requests are met by alerts the app renders
+  (`evidenceWhen`); "push notifications" still needs real evidence.
+- **xlsx:** `unfixablePackages.ts` — named at install time (bash note) and in the dep-health report with the
+  replacement (`exceljs`); "upgrade to a patched version" now says "where one exists".
+- **Duplicate helpers:** `parallelHelperScopeNote` tells parallel Frontend/Backend engineers their lane; a
+  browser-only backend is told there is no server.
+- **Prefilled demo password:** `prefilled-password` security rule (medium, write-time note + readiness).
+- Still recorded, not changed: the ₹490 of markup absorbed by the overdraft floor is policy, not a defect.
+- ⚠️ Pushing needs the admin: the designated branch still carried #3396's (merged) history, and replacing it
+  (force-push) and merging it in were both refused by the session's safety classifier.
+- ✅ **Resolved the same day:** the admin said "force push kar do", so the branch was replaced and PR #3402 was opened.
+  The merged-state suite caught the vaccine repair's render check browsing the branded host. It now goes
+  through `internalPreviewUrl`.
+
+## 2026-09-30 — Autopsy a2b9c802 ("JARVIS Mobile Edition", Telugu, Weak): the first build was stopped 38 s into its real work
+
+**Two builds.**
+- **Build 1 (7ba4e63d):** 10 min, 0 files, ended by the futility breaker. Billed at real cost only, and shown free to the user.
+- **Build 2 (47b4a5e8, "continue"):** 8 min. It delivered a working voice app with first render at 393 s, then preview, prod build, runtime and explorer checks all passed. Release gate YELLOW (no journey).
+
+**Tally**
+- **Self-heals: 2.** The loop guard broke a typecheck loop. The slow-rung abandon moved past crawling GLM.
+- **Workarounds: 3.** The roadmap and the project planner both failed and the build went direct. The fast lane was skipped for a reasoning rung.
+- **Skipped: 1.** No journey was derived: the fields had no name or label.
+- **Still imperfect: 2.** `react-router-dom` installed and never used. 6 off-grid spacing values.
+- **Struggles: 4.**
+  - 240 s roadmap cut off at max_tokens on KIMI.
+  - 315 s project planner timed out, with KIMI starving 12,000 tokens on reasoning.
+  - 256 s of provider time wasted (69% of build 1).
+  - The breaker fired on a working build.
+
+**Root causes fixed (PR #3402, second part)**
+1. **The architect's commands never counted.** The ToolDispatcher's `onCommand` recorded each command but never incremented `commandsRun`; only sub-agents did. So `ls` plus four reads plus a todo update plus an in-flight `npm install` read as "0 commands". One door now, `noteCommandCompleted`, used by both lanes.
+2. **The quiet window opened at request time.** The platform's own bounded planners filled nine of its ten minutes. It now opens where the build loop starts (`armedFutilityState`, `futilityArmed`), baselined on what preparation already produced.
+3. **Two planners over one prompt, in sequence.**
+   - When Project Mode is on and reads the prompt as a mega-project, it owns the build, and the roadmap stands down (`roadmapStandsDownForProjectMode`, `MEGA_ROADMAP_STOOD_DOWN`).
+   - For THIS prompt the 8e124182 counter fix already makes it not a mega-project (15 → 6: "Development Order — Step N →" is an instruction). So only the roadmap would run.
+4. **The crawl floor measured UTF-16 characters.** Indic tokens are ~1–2 characters against English ~4, so a Telugu answer looked 2–4× slower at the same token rate. It now measures UTF-8 bytes (`producedBytes`, `utf8Bytes`). This is identical for ASCII, and an Indic stream can only look faster. Whether this caused the 33 s GLM abandon here is NOT provable from the report.
+
+**Tests:** `tests/theJarvisBuildWasStoppedWhileItWorked.test.ts` (14), each of the four fixes reversion-proven. `aBuildGoingNowhereMustStop.test.ts` was updated for the armed check.
+
+**Open root causes (not guessed at)**
+- **A Weak plan has no direct-answering rung after flashx except Haiku.** Once GLM was benched for crawling, both planners fell to KIMI k2.7-code, which always reasons: 12,000 tokens were spent thinking (planner) or cut off mid-JSON (roadmap).
+  - Moving Haiku ahead of KIMI for plans would change the admin's "Haiku last" rule on Weak. That is the admin's call.
+  - A plan written in Telugu is also token-heavy. Asking planners for English structure plus a user-language message only is a candidate.
+- **Write-time typecheck commands record `exit ?`.** `runCommand` returns no exit code on that path, so the report cannot say pass or fail per run.
 ## 2026-09-30 — Autopsy 6a55d939 + 26b03113 ("Build a app like god of war", Weak, two builds)
 
 **Build 1 (6.5 min, stopped by the user, ₹51.87 real cost).** The builder ran the game recipes and skipped
@@ -84793,6 +84905,73 @@ divs was plain text. Most generated markup is the second kind, so that is what u
 - Apps built before this keep their old `index.css`. Only kit classes they use are restored.
 - Tailwind apps do not use the kit and are unchanged.
 
+## 2026-09-30 (same day) — Weak plan ladder: Haiku second (admin: "haan, plan ladder badal do … planing ke liye haiku accha hai, to lagao")
+
+- The Weak PLAN ladder is now `flashx → Haiku → KIMI → glm-5.3 → Nemotron super` (`weakPlanHaikuEnabled`,
+  `tierLadder.ts`). The reason is JARVIS (a2b9c802). Once flashx was benched, both planners fell to KIMI,
+  which always reasons first, and got nothing back.
+- **Unchanged:** the Weak BUILD ladder, which keeps Haiku last. Normal and Strong carry no Haiku.
+- **Revert:** `AGENTV3_WEAK_PLAN_HAIKU=off`.
+- **Tests:** `tests/aPlanIsAnsweredNotThoughtAbout.test.ts` (7), reversion-proven. `tierLadder.test.ts` is updated.
+- ⚠️ **Open:** Haiku's plan quality here is unmeasured. Read the planner outcome lines on the next Weak builds
+  where flashx was benched.
+
+## 2026-09-30 (same day) — Autopsy 876afca9 ("Create a calculation app", Weak, 11.0 min, ₹114.85)
+
+The app works: it rendered, the production build passed and all 5 controls were pressed. But the struggle was out of all proportion to a calculator.
+
+**Tally**
+- **Self-heals: 3.**
+  - The helper imports were repaired (2 rounds, 241 s).
+  - The MIME error was repaired by deleting `public/index.html`.
+  - GLM was abandoned for crawling.
+- **Workarounds: 1.** The first preview-repair pass called the MIME error "transient" and changed nothing.
+- **Skipped: 1.** No journey was derived (the sentence also blamed the fields wrongly).
+- **Still imperfect: 2.**
+  - The user's final message was the repair's sentence, not the build's summary.
+  - The preview copy went stale (the snapshot was taken before the repair deleted a file).
+- **Struggles: 3.**
+  - Repair took 53% of the fast lane.
+  - The ETA was 3.8× over.
+  - After one crawl GLM was benched for the whole build, so every later call went to the reasoning rung. Repair round 1 alone cost 10,616 tokens and 151 s.
+
+**Root causes fixed (PR #3402)**
+1. **Contract helpers had no home.** They get an owner file before file one (`utilOwnerFor`, `AGENTV3_UTIL_OWNER`).
+2. **The plan's `public/index.html` shadowed Vite's entry.** It is dropped from the plan and flagged at write time (`entryShadow.ts`, `AGENTV3_ENTRY_SHADOW`).
+3. **Three heal assignments bypassed `adoptHealResult`:** the two runtime autofix branches and the reviewer autofix. The last sibling hunt missed them. A source guard now allows only the empty-build retry to replace the result.
+4. **The no-journey sentence blamed the fields.** It now says the missing piece was a button that submits them.
+
+**Already closed by this PR:** the bash `rm` after green is now asked of the freeze and seen by `POST_GREEN_WRITES` (`shellWriteTargets`).
+
+**Tests:** `tests/theCalculatorsHelpersHadNoHome.test.ts` (17), each fix reversion-proven.
+
+**Open (recorded, not changed)**
+- **A single crawl benches the lead rung for the whole build.** GLM answered the plan in 2.4 s, crawled once on the contract, and was then gone for 10 minutes. Proposal: a time-bounded crawl bench (re-probe after a few minutes). This is a routing change, so it needs its own measurement first.
+- **The preview snapshot is taken before the runtime autofix.** A file the fix deletes leaves the copy stale.
+- **The first preview repair's "transient, no change needed" was accepted.** The console error survived until the runtime autofix.
+
+## 2026-09-30 (same day) — the four open items from autopsies a2b9c802 + 876afca9, closed (admin: "kya sabhi problem ke root cause dna level par fixed huye? agar nahi to karo!")
+
+Asked directly, the honest answer was **no**: four items had been recorded as open. All four are now fixed in PR #3402, each test-locked and reversion-proven.
+
+1. **A single crawl benched a rung for the whole build** (876afca9: GLM flashx crawled once, then every call for ten minutes went to the reasoning rung). A crawl bench now lasts `AGENTV3_CRAWL_BENCH_SECONDS` (default 180 s). The rung is then re-probed once, and a second crawl benches it for the build. At most two abandons per build, the second only on that re-probe; a concurrent call in flight is never counted as the re-probe. The throughput bench (three measured calls, latched) is unchanged. `off` restores the old rule exactly. `crawlBench.ts`; `tests/aCrawlIsWeatherNotAVerdict.test.ts` (10).
+2. **The first preview repair called the MIME error "transient"** (876afca9). It was not guessed at:
+   - **Measured on Vite 8:** the dev server serves the root entry for `/`, but `/index.html` returns `public/index.html` as-is, so the error depends on the URL. That is why a reload of `/` looked clean.
+   - **Production build:** not affected (`dist/index.html` is the built entry).
+   - **Fix:** the platform already knew the cause. `entryShadowRepairHint` (read from the file list) is now handed to both console-driven repair passes, the preview verify loop and the runtime auto-fix. `tests/aKnownCauseIsNotTransient.test.ts` (8).
+3. **The preview copy went stale after a later pass changed the app** (876afca9).
+   - **Root cause:** four passes may still write after the copy is taken (vaccine repair, runtime auto-fix, reviewer repair, GreenGuard restore), and only the reviewer's repair re-took the copy (972acde5). The explorer repair runs before the copy.
+   - **Fix:** one bounded refresh just before the final save comparison, only when the copy no longer matches what is persisted. A pass added later is covered without remembering it. `tests/theCopyFollowsEveryPass.test.ts` (6).
+   - **Scope:** separate from #3398's open `PREVIEW_SNAPSHOT_STALE` investigation (a divergence with no writer), which is untouched.
+4. **Write-time typecheck commands read `exit ?`** (a2b9c802).
+   - **Cause:** the command is piped through `head`, so tsc's own exit code is unknowable by construction.
+   - **Fix:** the report line now prints the verdict read from the output (`clean` / `N type errors` / `did not run` / `no verdict`).
+   - **Sibling found:** two readers of "was tsc clean?" disagreed. The release gate counted a failed install (`npm ERR!`, no `error TS` line) as a PASSING typecheck, while project memory refused it. One reader now, `tscVerdict`, serves all three. `tests/theReportSaysWhatTheCompilerSaid.test.ts` (8).
+
+**Still not fixed, said plainly:**
+- **JARVIS installed `react-router-dom` and never imported it.** Our scaffold does not ship it; the model did it. `DependencyAnalysis` reports it (low). Removing packages automatically is not safe, because config and tooling can use them without an import.
+- **Six off-grid spacing values.** The write-time quality note already flags them; they are cosmetic.
+- **Haiku's plan quality on Weak is unmeasured.** Read the planner lines on the next Weak builds where flashx was benched.
 ## 2026-09-30 — Autopsy 728a402d ("Nemi Mart", Weak tier, mega-roadmap milestone 1 of 6)
 
 The storefront rendered at 406 s, compiled, built for production and passed every browser check. The
@@ -84983,6 +85162,38 @@ the architect. The Frontend specialist that actually writes the AI client never 
 - Locked in `tests/anAiAppNeedsNoKey.test.ts`.
 
 **Admin action:** set `APP_AI_GATEWAY=on` in Cloud Run.
+
+## 2026-09-30 — The stored report kept forty copies of one prompt (the a5b661c8 open item, closed)
+
+**What was wrong.** The a5b661c8 report stored 40 of 151 model calls, and every stored call carried the
+same first 800 characters of the architect's system prompt. So no stored call said what it was asked,
+the 12:16–12:20 gap could not be read, and the origin of the `CollectionTheme` import could not be proven.
+
+**Root cause, two caps:**
+- **The recorder** capped the WHOLE preview (`system head + separator + last message`) at 2,000 characters.
+  A 46 KB system prompt always filled that, so the turn's own message never reached the report.
+- **The store** cut every preview again to 800 characters. With every stored call the same size and
+  nearly identical, a fixed forty was really a size decision.
+
+**Fix (`promptPreviewShape.ts`, `DiagnosticsStore.ts`):**
+- Each half of the preview is capped on its own, in the recorder and in the store, so the last message
+  always survives.
+- A system head identical to the previous STORED call's is written as a one-line marker. The marker is
+  applied after the window is taken, so it never points past a gap.
+- The stored call count comes from a 200 KB byte budget, clamped between 40 and 300. A real-shaped build
+  now keeps 100+ calls instead of 40.
+- `fitReportForStorage` is the one fit for all four save paths and the admin record: trim, then keep only
+  forty calls, and only then drop the heavy channels. The admin record's focused build had no size check
+  at all before this.
+- Earlier builds in an admin session keep forty calls each, so the session fit is unchanged.
+- `buildCostLedger` reads `LEGACY_STORED_LLM_CALLS_MAX = 40` for old reports, so an old 40-call log
+  still reads as possibly truncated.
+
+**Tests:** `tests/theReportKeptFortyCopiesOfOnePrompt.test.ts` (11), reversion-proven for the recorder,
+the marker and the fit. The count and source guards in three existing suites were updated deliberately.
+
+**Still open:** the `CollectionTheme` import origin in a5b661c8 itself cannot be recovered; that report
+is already stored. The next report of that shape will show it.
 ## 2026-09-30 — Autopsy ee0e6de5 ("world's countries and capitals", Weak tier, KIMI rung 2, 6.5 min, green, billed ₹86.23)
 
 The prompt was English written in Devanagari (*"Build an app वेयर वर्ल्ड'एस टोटल कंट्रीज नेम विथ थेइर कैपिटल्स"*). The app is
@@ -85179,6 +85390,47 @@ bar. The admin asked for a close button that returns on every refresh.
 - **Tests:** `tests/theBadgeCanBeClosed.test.ts`.
   - It includes a real-browser check under `script-src 'none'`: press ×, the badge hides; reload, it is back.
   - Reversion-proven: reverting appSignature fails 6 tests, ToolDispatcher 1, clickExplorer 1.
+
+## 2026-09-30 — Free image generation stopped: the provider closed its anonymous door
+
+Admin: *"image banne band ho gaye hai!!"* (Image Generator AI FREE, "make a camera" → "could not make that image").
+
+- **Root cause (provider-side):** Pollinations now requires an account key; anonymous requests get 401. Our free
+  tier handed the browser a link to that anonymous endpoint (`IMAGE_GEN_CLIENT_FETCH`), and the bundled phone apps
+  have no server fallback (#3396 added one only to the new web client).
+- **Fix:** `freeProviderDoor.ts` — the server detects the closed door (own fetch, new-client report, or a probe)
+  and stops minting links, so every client, old phone apps included, gets the picture from the capped paid rungs.
+  `POLLINATIONS_API_KEY` (secret `sk_` key) makes the server fetch from `gen.pollinations.ai` with the key in a
+  header — never in a link.
+- **Admin action:** create a Pollinations account and set `POLLINATIONS_API_KEY` in Cloud Run to restore the
+  free provider (costs pollen). Until then, free pictures are paid rungs capped at 3/user/day and 300/day platform.
+- **Open:** the provider's live answer was not observable from the session (egress blocked) — verify with the
+  `[IMAGE_GEN] the free provider refused an anonymous request` server log line.
+- Tests: `tests/theFreeDoorClosedAndNobodyNoticed.test.ts` (16, reversion-proven).
+
+
+## 2026-09-30 — Image Generator AI: Cloudflare FLUX first, 5 free images a day then ₹1, FREE dropped from the name
+
+Admin: *"haan, cloudflare wala bana do. aur per day 5 image free for user, uske bad 1₹/image. image
+generator ai ke aage se free word hatao"*.
+
+- **Rung 1: FLUX.1 schnell on Cloudflare Workers AI** (`cloudflareImage.ts`), server-side, 1024×1024 only,
+  same word ban. Uses the existing Cloudflare account/token; `CLOUDFLARE_AI_TOKEN` overrides if the DNS
+  token lacks Workers AI permission. Ladder: Cloudflare → Pollinations → Gemini → Grok.
+- **Price** (`imageAllowance.ts`): 5 free delivered pictures a day, then ₹1 each from the wallet; refused
+  up front when the wallet holds under ₹1; counted and charged on delivery only; wallet line `image`.
+- **Name:** "Image Generator AI FREE" → "Image Generator AI" everywhere; every AI states the price.
+- **Found on the way:** `AI_IMAGE_FREE_DAILY_LIMIT` (3/day) was never enforced — it rode
+  `PROFESSIONAL_PAID_ENABLED`, which is unset. Superseded by the new allowance.
+- **Reverses 2026-09-23's "free-only" rule on the admin's word.**
+- **Open:** the Cloudflare call was never made against the live API from the session (egress blocked);
+  the ~170/day figure is from the published rate card. Verify on the first real pictures: an `HTTP 403`
+  in the admin diagnostic means the token needs the Workers AI permission.
+- Tests: `tests/fiveFreeImagesThenOneRupee.test.ts` (25, reversion-proven).
+**Merge note (same day).** Two classes in this PR had been fixed IN PARALLEL by other sessions that merged first. Each is now one definition, not two:
+- **The no-journey sentence** (#3398, the Gita search box). There is one predicate. The sentence depends on whether the form has any button: a field with no button "acts as you type"; a form with a button has "none of its buttons reads as submitting them".
+- **The Project Mode starter verdict** (#3399, autopsy 6a5fb04b). #3399's `setStarterExpected` flag and `shellModuleFor` are kept. This branch's `setStarterEntryExpected` and its route call are removed, and `starterEntryExpectedFor` / `moduleOwnsAppEntry` now delegate to #3399's helpers.
+- **Why this is recorded:** this is exactly the duplicate-work class `CLAUDE.md` warns about. Neither PR existed when the other started.
 ## 2026-09-30 — Autopsy 53a621e3 ("full-stack Android calculator", Weak, 4.7 min, ₹85.38): green, and routed as a big app
 
 The app rendered and passed the production build. The explorer pressed 12 controls, and nothing wrote to

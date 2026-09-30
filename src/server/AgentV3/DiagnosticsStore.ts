@@ -13,6 +13,7 @@ import { getServerDb } from '../lib/serverDb';
 import { audit, truncateForAudit } from '../lib/audit';
 import { capProblems, outcomeCodeOf, severityOfOutcome, appWasSeenRunning, stoppedByUser, type BuildDiagnosticsReport } from './BuildDiagnostics';
 import { trimChannel, dropChannel, mergeTruncation } from './reportTruncation';
+import { compactPromptPreviews } from './promptPreviewShape';
 import { redactSecrets } from './SecretRedactor';
 import { summarizeModelPerformance, type ModelPerformanceSummary } from './modelPerformance';
 import { summarizeHealCodes, type HealCodeTally } from './healBreakdown';
@@ -167,14 +168,58 @@ export function redactReportSecrets(report: BuildDiagnosticsReport): BuildDiagno
  * SECURITY 2.1: secrets are redacted first, so every persisted/downloaded copy is clean.
  */
 /**
- * How many per-call LLM records the STORED report keeps — the build's first half and its last half,
- * never a plain tail (`boundedWindow`). Exported because the admin
- * cost card recomputes an old build's cost from this list, and a list that has hit the cap is a
- * lower bound, not a measurement — the reader must know the cap to say so.
+ * How many per-call LLM records the STORED report keeps — always the build's first half and its last
+ * half, never a plain tail (`boundedWindow`).
+ *
+ * 🔴 IT WAS A FIXED 40 UNTIL 2026-09-30, AND FORTY WAS A SIZE DECISION WEARING A COUNT (autopsy
+ * a5b661c8). Every stored call carried the same first 800 characters of the system prompt, so forty
+ * was roughly what fitted. With each preview now saying what the call was ASKED, and a repeated
+ * system head replaced by a one-line marker (`promptPreviewShape.ts`), the same bytes hold several
+ * times as many calls. So the count is derived from a BYTE budget: never fewer than the old forty,
+ * never more than the recorder itself keeps.
  */
-export const STORED_LLM_CALLS_MAX = 40;
+export const STORED_LLM_CALLS_MIN = 40;
+export const STORED_LLM_CALLS_MAX = 300;
+/** Bytes the stored llmCalls channel may spend, against a 900 KB document. */
+export const LLM_CALLS_STORAGE_BYTES = 200_000;
+/**
+ * The fixed cap every report stored BEFORE 2026-09-30 was trimmed to. Readers of OLD reports need it
+ * (`buildCostLedger` treats an old log of exactly this length as possibly truncated); it must never
+ * move with the live cap, or every old report would suddenly read as complete.
+ */
+export const LEGACY_STORED_LLM_CALLS_MAX = 40;
 
-export function trimReportForStorage(reportIn: BuildDiagnosticsReport): BuildDiagnosticsReport {
+const STORED_PROMPT_SYSTEM_CAP = 500;
+const STORED_PROMPT_MESSAGE_CAP = 700;
+const STORED_RESPONSE_CAP = 800;
+
+/** The stored shape of a list of calls: each half of the prompt capped, repeats marked, reply capped. */
+function shapeLlmCalls<T extends { promptPreview?: string; responsePreview?: string }>(list: readonly T[]): T[] {
+  return compactPromptPreviews(list, STORED_PROMPT_SYSTEM_CAP, STORED_PROMPT_MESSAGE_CAP)
+    .map((c) => ({ ...c, responsePreview: cap(c.responsePreview, STORED_RESPONSE_CAP) }));
+}
+
+/**
+ * How many calls fit the byte budget, measured on this build's own calls in their stored shape.
+ * One measurement, no loop: the average stored call against the budget, clamped to [MIN, MAX].
+ */
+export function storedLlmCallsCap(
+  calls: readonly { promptPreview?: string; responsePreview?: string }[] | undefined,
+  budgetBytes: number = LLM_CALLS_STORAGE_BYTES,
+): number {
+  if (!calls || calls.length === 0) return STORED_LLM_CALLS_MIN;
+  let bytes: number;
+  try { bytes = Buffer.byteLength(JSON.stringify(shapeLlmCalls(calls)), 'utf8'); } catch { return STORED_LLM_CALLS_MIN; }
+  const perCall = Math.max(1, bytes / calls.length);
+  return Math.max(STORED_LLM_CALLS_MIN, Math.min(STORED_LLM_CALLS_MAX, Math.floor(budgetBytes / perCall)));
+}
+
+export interface StorageTrimOptions {
+  /** Force the llmCalls cap (the over-limit fallback uses STORED_LLM_CALLS_MIN). */
+  llmCallsCap?: number;
+}
+
+export function trimReportForStorage(reportIn: BuildDiagnosticsReport, opts: StorageTrimOptions = {}): BuildDiagnosticsReport {
   const report = redactReportSecrets(reportIn);
   const prior = report.truncation;
   // 🔒 EVERY CAP BELOW GOES THROUGH `trimChannel`, WHICH RETURNS THE LOSS WITH THE LIST. That is the
@@ -183,7 +228,7 @@ export function trimReportForStorage(reportIn: BuildDiagnosticsReport): BuildDia
   // and declaring are now ONE operation and cannot be done separately. See reportTruncation.ts.
   const issues = trimChannel(report.issues, 500, prior?.channels?.issues);
   const commands = trimChannel(report.commands, 40, prior?.channels?.commands);
-  const llmCalls = trimChannel(report.llmCalls, STORED_LLM_CALLS_MAX, prior?.channels?.llmCalls);
+  const llmCalls = trimChannel(report.llmCalls, opts.llmCallsCap ?? storedLlmCallsCap(report.llmCalls), prior?.channels?.llmCalls);
   const errors = trimChannel(report.errors, 50, prior?.channels?.errors);
   const trimmedIssues = issues.list ?? [];
   return {
@@ -194,7 +239,9 @@ export function trimReportForStorage(reportIn: BuildDiagnosticsReport): BuildDia
     // itself bypass this function's byte-budget trimming with an unbounded list of its own.
     problems: capProblems(trimmedIssues.filter((i) => i.severity !== 'info')),
     commands: commands.list?.map((c) => ({ ...c, stdout: cap(c.stdout, 1500) ?? '', stderr: cap(c.stderr, 1500) ?? '' })),
-    llmCalls: llmCalls.list?.map((c) => ({ ...c, promptPreview: cap(c.promptPreview, 800), responsePreview: cap(c.responsePreview, 800) })),
+    // Shaped AFTER the window is taken, so a "same as the previous call" marker always points at a
+    // call that is still in the stored list.
+    llmCalls: llmCalls.list ? shapeLlmCalls(llmCalls.list) : undefined,
     errors: errors.list?.map((e) => ({ ...e, message: cap(e.message, 2000) ?? '', stack: cap(e.stack, 1500) })),
     // generatedFiles already capped at 20 × 6000 chars by BuildDiagnostics — kept as-is (the bug evidence).
     generatedFiles: report.generatedFiles,
@@ -202,6 +249,23 @@ export function trimReportForStorage(reportIn: BuildDiagnosticsReport): BuildDia
       issues: issues.fact, commands: commands.fact, llmCalls: llmCalls.fact, errors: errors.fact,
     }),
   };
+}
+
+/**
+ * The ONE way a report is made to fit a document: trim → if still too big, keep only the minimum
+ * model calls → only then drop the heavy channels whole.
+ *
+ * The middle step is new (2026-09-30). The llmCalls channel is the one that grew, so an over-limit
+ * report first gives back exactly what it gained, and a build too big for the budget keeps the forty
+ * calls it always had instead of losing its commands and every call together.
+ */
+export function fitReportForStorage(report: BuildDiagnosticsReport, maxBytes: number = MAX_DOC_BYTES): BuildDiagnosticsReport {
+  const bytes = (r: BuildDiagnosticsReport) => Buffer.byteLength(JSON.stringify(r), 'utf8');
+  let stored = trimReportForStorage(report);
+  if (bytes(stored) <= maxBytes) return stored;
+  stored = trimReportForStorage(report, { llmCallsCap: STORED_LLM_CALLS_MIN });
+  if (bytes(stored) <= maxBytes) return stored;
+  return dropHeavyChannelsForStorage(stored);
 }
 
 /**
@@ -336,12 +400,7 @@ export async function saveDiagnostics(workspaceId: string, report: BuildDiagnost
   if (!workspaceId || !report) return;
   if (process.env.VITEST) return; // unit-test contract: no Firestore, no stash (see DiagnosticsStore.test.ts)
   try {
-    let stored = trimReportForStorage(report);
-    // Final safety net: if it is still somehow over the limit, drop the heaviest channels entirely
-    // rather than fail the write (an empty-channel report still beats no report at all).
-    if (Buffer.byteLength(JSON.stringify(stored), 'utf8') > MAX_DOC_BYTES) {
-      stored = dropHeavyChannelsForStorage(stored);
-    }
+    const stored = fitReportForStorage(report);
     const db = getDb();
     if (!db) { reportSaveFailure('workspace', workspaceId, stored, new Error('Firestore unavailable (init failed)')); return; }
     const result = await persistWithRetry(async () => {
@@ -406,10 +465,7 @@ export async function saveLatestForUser(userId: string | null, report: BuildDiag
   if (!report || !uid) return; // no real user → no shared 'anon' bucket (privacy)
   if (process.env.VITEST) return; // unit-test contract: no Firestore, no stash (see DiagnosticsStore.test.ts)
   try {
-    let stored = trimReportForStorage(report);
-    if (Buffer.byteLength(JSON.stringify(stored), 'utf8') > MAX_DOC_BYTES) {
-      stored = dropHeavyChannelsForStorage(stored);
-    }
+    const stored = fitReportForStorage(report);
     const db = getDb();
     if (!db) { reportSaveFailure('user', uid, stored, new Error('Firestore unavailable (init failed)')); return; }
     const result = await persistWithRetry(async () => {
@@ -528,12 +584,7 @@ export async function saveDiagnosticsHistory(workspaceId: string, report: BuildD
   if (!workspaceId || !report || report.endedAt === undefined) return;
   if (process.env.VITEST) return; // unit-test contract: no Firestore (see DiagnosticsStore.test.ts)
   try {
-    let stored = trimReportForStorage(report);
-    // Same final safety net as saveDiagnostics — a history entry that fails to write because it's
-    // over budget is worse than a lighter one that succeeds.
-    if (Buffer.byteLength(JSON.stringify(stored), 'utf8') > MAX_DOC_BYTES) {
-      stored = dropHeavyChannelsForStorage(stored);
-    }
+    const stored = fitReportForStorage(report);
     const db = getDb();
     // History gets retry + LOUD failure but no emergency stash: the same report is already held by
     // the workspace + per-user latest paths (both stash), so the user-facing report survives; only
@@ -579,10 +630,7 @@ export async function upsertDiagnosticsHistoryProgress(workspaceId: string, repo
   if (!workspaceId || !report || typeof report.startedAt !== 'number') return;
   if (process.env.VITEST) return; // unit-test contract: no Firestore (see DiagnosticsStore.test.ts)
   try {
-    let stored = trimReportForStorage(report);
-    if (Buffer.byteLength(JSON.stringify(stored), 'utf8') > MAX_DOC_BYTES) {
-      stored = dropHeavyChannelsForStorage(stored);
-    }
+    const stored = fitReportForStorage(report);
     const db = getDb();
     if (!db) return; // the latest-doc + per-user paths still hold this report; the archive entry is optional here
     await persistWithRetry(async () => {

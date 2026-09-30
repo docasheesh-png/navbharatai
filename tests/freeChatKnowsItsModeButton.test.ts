@@ -4,7 +4,7 @@
  *    nahi photo kaha banegi! … navbharatai free ko mode aur uske andar jo hai, sabke bare me batao!!"
  *
  * The free chat must (1) not make pictures itself, (2) send a picture request to
- * Mode → Image Generator AI FREE, and (3) know everything the Mode sheet really lists.
+ * Mode → Image Generator AI, and (3) know everything the Mode sheet really lists.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';

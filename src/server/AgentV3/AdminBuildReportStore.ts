@@ -13,7 +13,7 @@ import * as admin from 'firebase-admin';
 import { applyReportMark, type ReportTriage } from './reportTriage';
 import { getServerDb } from '../lib/serverDb';
 import { audit } from '../lib/audit';
-import { trimReportForStorage } from './DiagnosticsStore';
+import { trimReportForStorage, fitReportForStorage, STORED_LLM_CALLS_MIN } from './DiagnosticsStore';
 import { outcomeCodeOf, severityOfOutcome, type BuildDiagnosticsReport } from './BuildDiagnostics';
 
 import { fitNewestPacked, packJson, unpackJson, utf8Bytes, compactStorageEnabled, type PackedEncoding } from '../lib/compactStore';
@@ -337,7 +337,9 @@ export function buildAdminReportRecord(
   historyUnreadable?: boolean,
   env: NodeJS.ProcessEnv = process.env,
 ): AdminBuildReportRecord {
-  const trimmed = trimReportForStorage(report);
+  // The focused build gets the full call budget, and is guaranteed to fit the document by the same
+  // function every other durable copy uses. Before 2026-09-30 it was trimmed with no size check at all.
+  const trimmed = fitReportForStorage(report);
   const id = `${ctx.reportedAt}_${(ctx.workspaceId ?? 'nows').replace(/[^A-Za-z0-9_-]/g, '')}`;
   const userTier = cap(trimmed.billing?.userTier, 80);
   const buildMs =
@@ -361,7 +363,9 @@ export function buildAdminReportRecord(
   // Firestore's own accounting. Reusing a fixed cap sized for a different sink is exactly how a change
   // like this turns "the admin now gets more" into "the admin now gets NOTHING", because an oversized
   // document is rejected outright and the report never lands.
-  const trimmedSession = (sessionBuilds ?? []).map((b) => trimReportForStorage(b));
+  // Earlier builds of the session keep the old forty calls each: they share what the focused build
+  // leaves, and more of them fitting beats each of them carrying more.
+  const trimmedSession = (sessionBuilds ?? []).map((b) => trimReportForStorage(b, { llmCallsCap: STORED_LLM_CALLS_MIN }));
   let fittedSession: { kept: BuildDiagnosticsReport[]; omitted: number } | null = null;
   if (trimmedSession.length > 1) {
     let overhead = ADMIN_RECORD_SAFETY_BYTES;

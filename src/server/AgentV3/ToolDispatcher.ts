@@ -1,3 +1,4 @@
+import { entryShadowNote } from './entryShadow';
 import { repeatedReadNotice, READ_LOOP_LIMIT, repeatedCommandNotice, commandKey } from './repeatedReads';
 import { repeatedEditNotice } from './repeatedEdits';
 import { healWouldOscillate } from './HealLedger';
@@ -82,7 +83,9 @@ import { storeEffectLoopNote } from './storeEffectLoop';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, usesNonKitNbClass } from './kitRestore';
 import { isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote } from './CssConsistency';
 import { pageDesignWriteNote, isPageFile } from './DesignCoverage';
-import { currentPass, runInPass } from './greenFreeze';
+import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
+import { shellWriteTargets } from './shellWriteTargets';
+import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
 import {
@@ -3083,11 +3086,16 @@ export class ToolDispatcher {
     for (const p of paths) {
       try { security += securityWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
     }
+    // A second index.html in public/ shadows a Vite app's real entry (autopsy 876afca9) — said while open.
+    let shadow = '';
+    for (const p of paths) {
+      try { shadow += entryShadowNote(p, this.framework ?? 'vite-react'); } catch { /* a note is best-effort */ }
+    }
     // At a STYLESHEET write, every screen's classes still without a rule; and a page's own design defects
     // (autopsy e6d46cde) — both used to wait for a 100-second repair pass after the app was done. A SCREEN
     // write's own undefined classes are `undefinedClassNotes` above, never repeated here.
     const style = await this.styleWriteNotes(files);
-    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security;
+    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow;
   }
 
   /** Most project files one style note may read — a note must never cost more than the write it follows. */
@@ -3804,6 +3812,16 @@ export class ToolDispatcher {
             return cmsg;
           }
         }
+        // THE SHELL IS NOT A WAY AROUND THE GREEN FREEZE (autopsy 8e124182). The freeze lives in the
+        // actuator's writeFile; `cat > src/lib/seed.ts <<EOF` never passes through it, and in that report
+        // a model refused twice by the freeze said so in as many words and used exactly that. Ask the
+        // freeze about every file the command plainly writes: a refused one throws the same
+        // GreenFreezeError as write_file (and is recorded as deferred); an allowed one is reported to the
+        // write observer, so POST_GREEN_WRITES counts shell writes too. Nothing is asked when the app is
+        // not latched green, so an ordinary build's commands pay nothing.
+        if (isGreenLatched(this.workspaceId)) {
+          for (const target of shellWriteTargets(command)) assertWriteAllowed(this.workspaceId, target);
+        }
         // Preview guard: the live preview is MANAGED (E2BActuator detects `npm run dev` and binds
         // host / pins port / sets allowedHosts / health-checks / publishes the URL). When it looks
         // blank the agent tends to improvise — `pkill -f vite`, `serve dist`, `vite preview`,
@@ -4252,6 +4270,10 @@ export class ToolDispatcher {
           );
           out = `${governanceNote(risk)}\n${out}`;
         }
+        // A package whose advisories have no fix on npm is named at the moment it is installed, with what
+        // to use instead (autopsy 8e124182: xlsx shipped with a high advisory the user was told to
+        // "upgrade", when no upgrade exists). A note, never a refusal — see unfixablePackages.ts.
+        try { const u = unfixableInstallNote(command); if (u) out = `${out}\n${u}`; } catch { /* advisory */ }
         // THE SAME COMMAND, AGAIN, WITH NOTHING CHANGED — the bash half of the read-loop breaker
         // (autopsy "Universal Remote": a no-op ran seven times). See repeatedReads.ts.
         try {

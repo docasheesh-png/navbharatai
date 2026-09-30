@@ -416,7 +416,7 @@ export function mergeUserProofs(...proofs: ReadonlyArray<UserProof | null | unde
 }
 
 /** Build the in-sandbox runner. PURE — returns a shell command string. */
-export function clickExplorerScript(previewUrl: string, opts: { blockWrites: boolean; maxClicks?: number; budgetMs?: number }): string {
+export function clickExplorerScript(previewUrl: string, opts: { blockWrites: boolean; maxClicks?: number; budgetMs?: number; storageState?: string | null }): string {
   const base = String(previewUrl ?? '').trim();
   const cfg = {
     base,
@@ -427,6 +427,8 @@ export function clickExplorerScript(previewUrl: string, opts: { blockWrites: boo
     budgetMs: Math.max(10_000, opts.budgetMs ?? EXPLORE_BUDGET_MS),
     loadMs: EXPLORE_LOAD_TIMEOUT_MS,
     blockWrites: opts.blockWrites === true,
+    // Behind the sign-in page when the app has one — see signInExplore.ts. Null opens it signed out.
+    storageState: opts.storageState ?? null,
     neverSrc: NEVER_PRESS.source, neverFlags: NEVER_PRESS.flags,
     writeSrc: WRITE_VERBS.source, writeFlags: WRITE_VERBS.flags,
     noiseSrc: CONSOLE_NOISE.source, noiseFlags: CONSOLE_NOISE.flags,
@@ -589,7 +591,7 @@ function pickSearchWord(items) {
 }
 
 async function freshPage(browser) {
-  const page = await browser.newPage();
+  const page = await browser.newPage(cfg.storageState ? { storageState: cfg.storageState } : {});
   page.on('dialog', (d) => d.dismiss().catch(() => {}));
   page.on('popup', (p) => p.close().catch(() => {}));
   return page;

@@ -374,6 +374,16 @@ const RULES: Rule[] = [
     ignore: (_m, line) => /\bsecure\s*:\s*true\b/i.test(line),
   },
   {
+    // A SIGN-IN FORM THAT STARTS WITH A PASSWORD ALREADY TYPED IN (autopsy 8e124182, 2026-09-30). A
+    // stock app asked for "rigorous security" shipped a login page pre-filled with an admin email and its
+    // password, so anyone who opened the link could press Sign in. The reviewer reported no security issue,
+    // because nothing looked for it.
+    rule: 'prefilled-password',
+    severity: 'medium',
+    re: /\[\s*\w*pass(?:word)?\w*\s*,\s*set\w*\s*\]\s*=\s*useState(?:<[^>]*>)?\(\s*['"`]([^'"`\s]{1,64})['"`]\s*\)/i,
+    message: 'The sign-in form starts with a password already typed in — anyone who opens the app can sign in with it. Start the password field empty; show a demo account as text if one is needed.',
+  },
+  {
     rule: 'dangerous-html',
     severity: 'medium',
     re: /dangerouslySetInnerHTML/,

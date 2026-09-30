@@ -20,11 +20,12 @@
 //
 // PURE — no env, no I/O.
 
+import { imagePriceSentence } from './imageAllowance';
 import { listProfessionals } from '../professionals/registry';
 import { isMedicalProfessionalId } from '../../lib/playCompliance';
 
 /** The image studio's name in the Mode sheet (`IMAGE_MODE_NAME` in modePicker.ts; a test pins them equal). */
-export const IMAGE_STUDIO_MODE_NAME = 'Image Generator AI FREE';
+export const IMAGE_STUDIO_MODE_NAME = 'Image Generator AI';
 
 /** Every expert the Mode sheet lists, in the sheet's order: Doctor AI first, then the registry. */
 export function modeExperts(): Array<{ id: string; name: string; medical: boolean }> {
@@ -58,7 +59,7 @@ export function freeChatModeGuide(): string {
     '• Under this chat there is a **Mode** button (in the bottom bar on a phone; beside the message box on a computer). Tapping it opens a list with two groups: "Recent chat" (every chat open right now — tap one to go straight back to it, ✕ closes it) and "New chat" (tap any row to start a fresh conversation with that AI). Up to 5 chats can be open at once.',
     '• "New chat" contains, in this order:',
     '  1. **NavBharatAI FREE** — a brand-new free chat like this one (the old one stays in History).',
-    `  2. **${IMAGE_STUDIO_MODE_NAME}** — THE place where pictures are made, free: photos, logos, banners, app icons, posters, avatars, backgrounds, thumbnails. Choose Image type, Style and Size, describe the picture, press send. It can also change a photo the user attaches, and add text that is always spelled correctly (a shop name, a phone number, Hindi) with its "Add text" button.`,
+    `  2. **${IMAGE_STUDIO_MODE_NAME}** — THE place where pictures are made (${imagePriceSentence()}): photos, logos, banners, app icons, posters, avatars, backgrounds, thumbnails. Choose Image type, Style and Size, describe the picture, press send. It can also change a photo the user attaches, and add text that is always spelled correctly (a shop name, a phone number, Hindi) with its "Add text" button.`,
     `  3. **Expert AIs**, each a separate chat that specialises in one field: ${names}.`,
     `• ${medical.join(', ')} are on the NavBharatAI website (navbharatai.com); the phone app does not show them.`,
     '• NavBharatAI Pro (the app builder) is NOT in Mode — it has its own tile on the Home screen.',
@@ -74,5 +75,5 @@ export function freeChatModeGuide(): string {
 export const FREE_IMAGE_REQUEST_DIRECTIVE =
   'THIS MESSAGE ASKS FOR A PICTURE. Do not describe or imagine one, and do not say only that you cannot. '
   + `Reply briefly and warmly, in the user's language: pictures are made in **${IMAGE_STUDIO_MODE_NAME}** — `
-  + `tap **Mode** (below this chat) → **${IMAGE_STUDIO_MODE_NAME}**, describe the picture, press send; it is free. `
+  + `tap **Mode** (below this chat) → **${IMAGE_STUDIO_MODE_NAME}**, describe the picture, press send (${imagePriceSentence()}). `
   + 'Then, if it helps, give them a ready-to-paste description of the picture they asked for, in one or two lines.';

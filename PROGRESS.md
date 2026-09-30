@@ -84071,3 +84071,32 @@ production. Its report still said three things that were not true.
   repair costs a production build plus a deploy, and is its own change.
 - `requestAnalysis.startTier` still reads `gemini`, a label from before the tier ladders. It is
   admin-only and cosmetic, but it is untrue.
+
+### 2026-09-30 (same day) — the three "still open" items from the entry above, and one more bug
+
+The admin asked whether everything was fixed. It was not, so the open items were worked in the same PR.
+
+- **`startTier: gemini` — the entry above was WRONG to list this as open.** A session on 2026-09-17
+  (autopsy 2b0a3ed5) deliberately kept the key, because it is a complexity band that months of cost
+  telemetry is keyed on. It added `startBand` ("cheapest band"), and this report prints both. Nothing to
+  fix. The lesson is safeguard #6 again: re-grep before calling something open.
+- **The ~7 s before the first model call.** `warmIndexFiles` read the project from the sandbox one file
+  at a time, up to 200 files per call. It now reads 8 at a time and still indexes in the original order.
+  The project-context step also records its own `SETUP_TIMING` line (memory restore · listing ·
+  indexing), so the next report shows where this window goes instead of leaving it to be inferred.
+  ⚠️ Whether this was the whole 7 s is unproven until a report carries that line.
+- **The stale preview copy after a kept repair.** The copy-taking code is now one closure
+  (`takePreviewCopy`). After a kept review repair that changed files, `refreshPreviewCopy` rebuilds the
+  app and takes a fresh copy: bounded to 60 s on a re-armed, still-finite advisory cap. The outcome is
+  recorded as `PREVIEW_SNAPSHOT_REFRESHED`, or `_NOT_REFRESHED` with the old copy kept as a fallback.
+- **The calculator template had a real bug, and the reviewer did not find it.** Running the template's
+  own code by pressing its own buttons showed two things:
+  - The reviewer's CRITICAL (`2+3+4=`) was false: it gives 9.
+  - `5 + 50 % + 2 =` gave **2.5**, because an operator after `%` dropped the pending `5 +`.
+
+  The template now tracks whether the display holds an unused operand. The template's arithmetic is
+  locked by 13 key-sequence tests that compile and run the real TSX (`tests/theCalculatorAutopsy.test.ts`).
+
+**Proactive, not done here:** the other golden templates with logic (tip split, stopwatch, pomodoro) have
+no behavioural test of this kind. The same harness would lock them, so any false reviewer claim against
+them is answered by evidence rather than a repair call.

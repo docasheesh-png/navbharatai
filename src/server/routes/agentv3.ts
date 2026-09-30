@@ -438,7 +438,7 @@ import { previewDoorEnabled, verifyDoorToken, doorSecret, makeDoorPath, doorPage
 import { previewKeepAliveEnabled, isTopLevelNavigation } from '../AgentV3/previewKeepAlive';
 import { judgeRuntimeRepair } from '../AgentV3/repairAcceptance';
 import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild, prodBuildUserNote, PROD_BUILD_TIMEOUT_MS } from '../AgentV3/prodBuildGate';
-import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE, SNAPSHOT_WAKING_NOTE } from '../AgentV3/previewSnapshot';
+import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE, SNAPSHOT_WAKING_NOTE, PREVIEW_COPY_REFRESH_MS } from '../AgentV3/previewSnapshot';
 import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
 import { canServeFromSnapshot, SNAPSHOT_IDLE_NOTE } from '../AgentV3/snapshotServeDecision';
 import { workspaceContentHash, snapshotConfirmation, snapshotMatchesFiles, identitySource, type SnapshotTaken } from '../AgentV3/snapshotIdentity';
@@ -12383,6 +12383,13 @@ async function noteBuildOutcome(
      */
     let snapshotTaken: SnapshotTaken | null = null;
     /**
+     * Take the preview copy again from the workspace as it is NOW — rebuild, then copy. Set by the
+     * production-build step when this app can have a copy at all; null otherwise. Used after a kept
+     * repair that changed files the first copy was built from (autopsy 972acde5), so the copy never
+     * silently describes the app from before that repair.
+     */
+    let refreshPreviewCopy: (() => Promise<boolean>) | null = null;
+    /**
      * THE PROJECT AS IT STOOD WHEN THIS TURN BEGAN — every file, not just the ones this turn writes.
      *
      * ⚠️ WHY (five real build reports, 2026-08-24: JOURNEY_NOT_DERIVED in four of five builds). The
@@ -15611,9 +15618,22 @@ async function noteBuildOutcome(
         // snapshot first — episodes (the user's prior requests) + the project graph survive a Cloud
         // Run restart / a different instance. Previously this restore ran ONLY in edit mode, so a
         // "continue" that landed on a fresh instance lost the memory. Now it runs for every build.
+        // Timed step by step (autopsy 972acde5): ~7 s before the first model call sat in this stretch
+        // with no line of its own, so nothing could say which step it was.
+        const ctxT0 = Date.now();
         await restoreWorkspaceMemory(workspaceId, ctxMem).catch(() => {});
+        const ctxT1 = Date.now();
         const tree = await actuator.listFiles(workspaceId).catch(() => [] as string[]);
-        await warmIndexFiles(ctxMem, tree, (p) => actuator.readFile(workspaceId, p).catch(() => ''), { maxFiles: 200 });
+        const ctxT2 = Date.now();
+        const ctxIndexed = await warmIndexFiles(ctxMem, tree, (p) => actuator.readFile(workspaceId, p).catch(() => ''), { maxFiles: 200 });
+        const ctxT3 = Date.now();
+        try {
+          buildDiag.record({
+            phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
+            message: `Project context prepared in ${Math.round((ctxT3 - ctxT0) / 100) / 10}s`,
+            detail: `memory restore ${ctxT1 - ctxT0}ms · file listing ${ctxT2 - ctxT1}ms (${tree.length} path(s)) · indexed ${ctxIndexed.length} file(s) in ${ctxT3 - ctxT2}ms`,
+          });
+        } catch { /* diagnostics are best-effort */ }
         const ctxEpisodes = ctxMem.snapshot().episodes;
         const recentRequests = ctxEpisodes.filter((e) => e.kind === 'request').map((e) => e.text);
         // MEMORY FIX 4 (plan carry-over): surface the plan (todo statuses) the LAST build was
@@ -20435,48 +20455,65 @@ async function noteBuildOutcome(
             // version somebody deliberately shipped. Skipped entirely for a full-stack app, whose
             // server lives inside the sandbox — a static copy of that would render the shell and fail
             // every request behind it, which is worse than an honest expiry.
-            if (verdict.ok && previewSnapshotEnabled() && snapshotSuitable(pkgRaw) && actuator.downloadDistFiles) {
-              try {
-                const dist = await withTimeout(actuator.downloadDistFiles(workspaceId), 60_000, 'snapshot-dist');
-                if (dist && dist.size > 0) {
-                  const url = await withTimeout(
-                    new FirebaseHostingDeployer().deployStatic(workspaceId, dist, snapshotChannelId(workspaceId)),
-                    90_000, 'snapshot-deploy',
-                  );
-                  if (url) {
-                    const at = Date.now();
-                    // WHAT THE COPY WAS BUILT FROM. Read now, from the same tree `npm run build` just
-                    // consumed — nothing writes between the two. The final durable save compares this
-                    // with what it persists; a copy whose source could not be read is never promoted.
-                    const source = await withTimeout(collectWorkspaceFiles(actuator, workspaceId), 15_000, 'snapshot-identity')
-                      .then((c) => c.files as Record<string, string>).catch(() => null);
-                    // The SANDBOX copy of index.html carries our preview bridge the moment a dev server
-                    // has run; the durable copy never does. Hash the APP, not our console mirror —
-                    // see identitySource (autopsy Study-Racer, 2026-09-25: PREVIEW_SNAPSHOT_STALE on a
-                    // build where nothing had written after the copy).
-                    const filesHash = source ? workspaceContentHash(identitySource(source)) : null;
-                    await sandboxStore.saveSnapshot(workspaceId, url, at, filesHash).catch(() => {});
-                    // The paths travel with the copy for THIS build only, so a mismatch can say which
-                    // side holds what — see staleDetail. The hash is still what decides.
-                    snapshotTaken = { url, filesHash, filePaths: source ? Object.keys(source) : undefined };
-                    // THE COPY IS CURRENT, AND THE SURFACE SHOULD KNOW NOW (sandboxLifetime.ts).
-                    // Raising the flag lets the idle sweep use the shorter snapshot window; the event
-                    // lets the frame move to the real build output the moment the build settles,
-                    // instead of on the next 150-second poll. The actuator clears the flag by itself
-                    // on the next write, so a later heal pass that changes a file cannot leave a
-                    // stale copy counted as current.
-                    try { actuator.noteSnapshotCurrent?.(workspaceId, true); } catch { /* advisory */ }
-                    // The `snapshot` event is emitted at the FINAL durable save, once the copy is
-                    // proven to match what was persisted — the surface only applies it after the
-                    // build ends anyway, so nothing is lost and nothing stale is ever announced.
-                    buildDiag.record({
-                      phase: 'readiness', severity: 'info', code: 'PREVIEW_SNAPSHOT_SAVED',
-                      message: 'Kept a permanent copy of this build, so the preview still works after its live server expires.',
-                      autoResolved: true,
-                    });
+            if (verdict.ok && previewSnapshotEnabled() && snapshotSuitable(pkgRaw)) {
+              // ONE definition of "take the copy", run here and again after a kept repair (refreshPreviewCopy).
+              const takePreviewCopy = async (): Promise<boolean> => {
+                if (!actuator.downloadDistFiles) return false;
+                try {
+                  const dist = await withTimeout(actuator.downloadDistFiles(workspaceId), 60_000, 'snapshot-dist');
+                  if (dist && dist.size > 0) {
+                    const url = await withTimeout(
+                      new FirebaseHostingDeployer().deployStatic(workspaceId, dist, snapshotChannelId(workspaceId)),
+                      90_000, 'snapshot-deploy',
+                    );
+                    if (url) {
+                      const at = Date.now();
+                      // WHAT THE COPY WAS BUILT FROM. Read now, from the same tree `npm run build` just
+                      // consumed — nothing writes between the two. The final durable save compares this
+                      // with what it persists; a copy whose source could not be read is never promoted.
+                      const source = await withTimeout(collectWorkspaceFiles(actuator, workspaceId), 15_000, 'snapshot-identity')
+                        .then((c) => c.files as Record<string, string>).catch(() => null);
+                      // The SANDBOX copy of index.html carries our preview bridge the moment a dev server
+                      // has run; the durable copy never does. Hash the APP, not our console mirror —
+                      // see identitySource (autopsy Study-Racer, 2026-09-25: PREVIEW_SNAPSHOT_STALE on a
+                      // build where nothing had written after the copy).
+                      const filesHash = source ? workspaceContentHash(identitySource(source)) : null;
+                      await sandboxStore.saveSnapshot(workspaceId, url, at, filesHash).catch(() => {});
+                      // The paths travel with the copy for THIS build only, so a mismatch can say which
+                      // side holds what — see staleDetail. The hash is still what decides.
+                      snapshotTaken = { url, filesHash, filePaths: source ? Object.keys(source) : undefined };
+                      // THE COPY IS CURRENT, AND THE SURFACE SHOULD KNOW NOW (sandboxLifetime.ts).
+                      // Raising the flag lets the idle sweep use the shorter snapshot window; the event
+                      // lets the frame move to the real build output the moment the build settles,
+                      // instead of on the next 150-second poll. The actuator clears the flag by itself
+                      // on the next write, so a later heal pass that changes a file cannot leave a
+                      // stale copy counted as current.
+                      try { actuator.noteSnapshotCurrent?.(workspaceId, true); } catch { /* advisory */ }
+                      // The `snapshot` event is emitted at the FINAL durable save, once the copy is
+                      // proven to match what was persisted — the surface only applies it after the
+                      // build ends anyway, so nothing is lost and nothing stale is ever announced.
+                      buildDiag.record({
+                        phase: 'readiness', severity: 'info', code: 'PREVIEW_SNAPSHOT_SAVED',
+                        message: 'Kept a permanent copy of this build, so the preview still works after its live server expires.',
+                        autoResolved: true,
+                      });
+                      return true;
+                    }
                   }
-                }
-              } catch { /* a fallback copy must never be able to affect the build it is copying */ }
+                } catch { /* a fallback copy must never be able to affect the build it is copying */ }
+                return false;
+              };
+              await takePreviewCopy();
+              refreshPreviewCopy = async () => {
+                // The copy is the output of `npm run build`, so a changed source needs a new build first;
+                // a build that does not pass leaves the earlier copy exactly as it was.
+                try {
+                  const r = await withTimeout(actuator.runCommand(workspaceId, prodBuildCommand()), PROD_BUILD_TIMEOUT_MS, 'snapshot-rebuild');
+                  const rebuilt = judgeProdBuild({ ran: true, exitCode: typeof r.exitCode === 'number' ? r.exitCode : null, output: `${r.stdout || ''}\n${r.stderr || ''}` });
+                  if (!rebuilt.ok) return false;
+                } catch { return false; }
+                return takePreviewCopy();
+              };
             }
           }
         } catch { /* the detector must never affect a build it is only observing */ }
@@ -21752,6 +21789,24 @@ async function noteBuildOutcome(
                     greenRepaired = repairVerdicts?.read ? repairVerdicts.confirmed.map((i) => greenRepairable[i]) : greenRepairable.slice();
                     result = { ...result, summary: `${result.summary || ''}${greenRepairUserLine(greenRepaired.length, repairChanged)}` };
                     if (writtenFiles.size > 0) { try { await mergeWorkspaceFiles(workspaceId, Object.fromEntries(writtenFiles)); } catch { /* best-effort */ } }
+                  }
+                  // THE COPY FOLLOWS THE REPAIR (autopsy 972acde5): the preview copy was built before this
+                  // pass changed the app, so without a fresh one it is stale for the rest of its life and the
+                  // user's free preview falls back to a live machine. Bounded; a copy that cannot be refreshed
+                  // stays what it was, and the final save still says so (PREVIEW_SNAPSHOT_STALE).
+                  if (vr.kept && repairOk && repairChanged !== 0 && snapshotTaken && refreshPreviewCopy) {
+                    // Room for the rebuild and the copy, once, on the same finite cap (never open-ended).
+                    armAdvisoryCap(PREVIEW_COPY_REFRESH_MS + 20_000);
+                    const refreshed = await withTimeout(refreshPreviewCopy(), PREVIEW_COPY_REFRESH_MS, 'snapshot-refresh').catch(() => false);
+                    try {
+                      buildDiag.record({
+                        phase: 'readiness', severity: 'info', autoResolved: true,
+                        code: refreshed ? 'PREVIEW_SNAPSHOT_REFRESHED' : 'PREVIEW_SNAPSHOT_NOT_REFRESHED',
+                        message: refreshed
+                          ? 'The repair changed the app after its preview copy was taken, so the app was rebuilt and a fresh copy taken.'
+                          : 'The repair changed the app after its preview copy was taken, and a fresh copy could not be made in time — the earlier copy stays a fallback only.',
+                      });
+                    } catch { /* best-effort */ }
                   }
                   try {
                     buildDiag.record({

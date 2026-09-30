@@ -152,24 +152,29 @@ function App() {
   const [acc, setAcc] = useState<number | null>(null);
   const [op, setOp] = useState<Op | null>(null);
   const [fresh, setFresh] = useState(true);
+  // The display holds a number no operator has used yet (typed, or made by %). Without it, an operator
+  // pressed after % dropped the pending one: 5 + 50 % + 2 = gave 2.5.
+  const [operand, setOperand] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
 
   const inputDigit = (d: string) => {
+    setOperand(true);
     if (fresh) { setDisplay(d === '.' ? '0.' : d); setFresh(false); return; }
     if (d === '.' && display.includes('.')) return;
     setDisplay(display === '0' && d !== '.' ? d : display + d);
   };
   const chooseOp = (nextOp: Op) => {
     const cur = parseFloat(display);
-    if (acc !== null && op !== null && !fresh) {
+    if (acc !== null && op !== null && operand) {
       const r = compute(acc, cur, op);
       setAcc(r);
       setDisplay(fmt(r));
-    } else {
+    } else if (acc === null || op === null) {
       setAcc(cur);
-    }
+    } // else: a second operator in a row only replaces the first
     setOp(nextOp);
     setFresh(true);
+    setOperand(false);
   };
   const equals = () => {
     if (acc === null || op === null) return;
@@ -180,13 +185,14 @@ function App() {
     setAcc(null);
     setOp(null);
     setFresh(true);
+    setOperand(false);
   };
-  const clearAll = () => { setDisplay('0'); setAcc(null); setOp(null); setFresh(true); };
+  const clearAll = () => { setDisplay('0'); setAcc(null); setOp(null); setFresh(true); setOperand(false); };
   const backspace = () => {
     if (fresh) return;
     setDisplay(display.length > 1 ? display.slice(0, -1) : '0');
   };
-  const percent = () => { setDisplay(fmt(parseFloat(display) / 100)); setFresh(true); };
+  const percent = () => { setDisplay(fmt(parseFloat(display) / 100)); setFresh(true); setOperand(true); };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

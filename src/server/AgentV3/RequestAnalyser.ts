@@ -15,6 +15,7 @@
 // cheap start costs ~₹0 and the evaluate-gate catches failures and escalates, so leaning
 // cheap is safe AND is the whole point (a new user's calculator must not cost a fortune).
 
+import { withoutUrls } from '../lib/promptUrls';
 import { isComplexAppPrompt, namesBusinessDomain, namesHeavyGame, namesPersonalTool, SIMPLE_APP_SIGNAL } from '../lib/appComplexitySignals';
 import { userAskedForAnAppToBeBuilt, describesWorkAlreadyStarted, type BuildIntent } from './IntentClassifier';
 
@@ -179,7 +180,15 @@ const RE = {
   hardSignal: /\b(production|secure|security|scalable|optimi[sz]e|performance|concurrency|multi[- ]tenant)\b/i,
 };
 
-function classify(p: string): { type: TaskType; matched: boolean } {
+/**
+ * A build verb whose object is a thing to build — an app, a site, a tool, a game. When it is present, a
+ * feature noun elsewhere in the sentence ("translation", "summary") describes that thing, not the task.
+ */
+const ORDERS_A_BUILD = /\b(?:create|build|make|develop|design|generate|code|banao|bana\s*do|banado|banaiye)\b[^.?!\n]{0,60}?\b(?:app|apps|application|website|web\s*app|site|tool|platform|extension|game|dashboard|portal)\b/i;
+
+function classify(raw: string): { type: TaskType; matched: boolean } {
+  // A link is not words: `translate.google.com` is not an order to translate (a9f8d186). See promptUrls.ts.
+  const p = withoutUrls(raw);
   // Order matters: most-specific / highest-complexity wins when multiple match.
   if (RE.architecture.test(p)) return { type: 'architecture', matched: true };
   // SHARED complex-app verdict (single source of truth with the pipeline-DEPTH/ETA estimator, so the
@@ -190,8 +199,16 @@ function classify(p: string): { type: TaskType; matched: boolean } {
   // A personal tool (reminder, planner, habit tracker…) is the todo family, named by the domain
   // analyser rather than a keyword here — see PERSONAL_TOOL_DOMAINS (autopsy d829b523).
   if (RE.simpleApp.test(p) || namesPersonalTool(p)) return { type: 'simple_app', matched: true };
-  if (RE.summary.test(p)) return { type: 'summary', matched: true };
-  if (RE.translate.test(p)) return { type: 'translate', matched: true };
+  // 🔴 A FEATURE NAMED INSIDE AN APP ORDER IS NOT THE TASK (autopsy a9f8d186, 2026-09-30). *"Create circle
+  // to search app … add features like qr scanner, screen translation, music recognition, ai overview"*
+  // was filed as `translate`, score 15 — a six-feature app sized as a one-line translation, on the
+  // cheapest rung, with no second opinion asked. The object decides: "translate this paragraph" asks for
+  // a translation; "create an app with screen translation" asks for an app that has one. The b6f88a72
+  // fix removed the bare language phrases; this is the other half, the noun inside an order.
+  if (!ORDERS_A_BUILD.test(p)) {
+    if (RE.summary.test(p)) return { type: 'summary', matched: true };
+    if (RE.translate.test(p)) return { type: 'translate', matched: true };
+  }
   // A heavy game that mentions a technology ("single file html … 3d fight game") is a game, not a
   // snippet — see `namesHeavyGame` (autopsy f496c75b).
   if (namesHeavyGame(p)) return { type: 'complex_app', matched: true };

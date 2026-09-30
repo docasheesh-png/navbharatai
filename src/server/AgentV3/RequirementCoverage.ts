@@ -244,7 +244,7 @@ export function featureAskedFor(request: string, feature: { request: RegExp; not
  * labels the end-of-build audit will grade. It is a restatement, not an addition — which is why it
  * needs no flag, unlike the requirement-GAP guidance that proposes features the user never mentioned.
  */
-export function renderRequestedFeatureContract(labels: readonly string[]): string {
+export function renderRequestedFeatureContract(labels: readonly string[], request?: string): string {
   const list = (Array.isArray(labels) ? labels : []).filter((l) => typeof l === 'string' && l.trim());
   if (!list.length) return '';
   // Capped so a kitchen-sink request cannot crowd out the user's actual prompt. The audit still checks
@@ -253,7 +253,10 @@ export function renderRequestedFeatureContract(labels: readonly string[]): strin
   const more = list.length - shown.length;
   return [
     'WHAT THE USER EXPLICITLY ASKED FOR — build every one of these, in this app:',
-    ...shown.map((l) => `  • ${l}`),
+    ...shown.map((l) => {
+      const word = request ? usersWordFor(l, request) : null;
+      return word ? `  • ${l} — they called it "${word}": use THEIR word in the app and in your reply` : `  • ${l}`;
+    }),
     ...(more > 0 ? [`  • …and ${more} more named in the request above.`] : []),
     '',
     'These are not suggestions and not extras: each one was named in the user\'s own words, and the',
@@ -261,6 +264,25 @@ export function renderRequestedFeatureContract(labels: readonly string[]): strin
     'page (a search box at the top of a list is fine — it does not need its own file), but it must',
     'really work. Shipping without one of these is shipping an app that does not do what was asked.',
   ].join('\n');
+}
+
+/**
+ * The word the USER used for a feature, when our label names it differently (autopsy 4541f1cf).
+ *
+ * A Gita reader was asked for "bookmarks". The contract said "wishlist / favorites" — our CATEGORY — and
+ * the builder then told the user it would "add the missing search and wishlist features" and that the
+ * app has "bookmarks / favorites / wishlist". A shopping word, in a scripture app, from a list of ours.
+ * The category stays the key the audit grades by; the builder is simply told what the user said.
+ * null when the label already contains the user's word. PURE.
+ */
+export function usersWordFor(label: string, request: string): string | null {
+  const feat = FEATURES.find((f) => f.label === label);
+  if (!feat) return null;
+  const re = new RegExp(feat.request.source, feat.request.flags.replace('g', ''));
+  const m = re.exec(String(request ?? ''));
+  const word = m?.[0]?.trim().toLowerCase();
+  if (!word) return null;
+  return label.toLowerCase().includes(word) ? null : word;
 }
 
 /** Bound on how many features the contract restates. The audit is unbounded; only the prompt is. */

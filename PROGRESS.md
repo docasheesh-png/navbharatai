@@ -84529,3 +84529,62 @@ six-step roadmap: chat and settings.
 
 **Proactive:** the generated AI app asks the USER for an OpenAI key. The AI gateway (`APP_AI_GATEWAY`,
 built, unset) is what removes that wall.
+## 2026-09-30 — apps and games look designed without being asked (admin: "ek dam simple se html bante hai")
+
+**Evidence, not theory.** The design kit and a hand-written "typical model" screen were rendered in Chromium. A screen
+using the KIT's class names looked designed. The same screen using the MODEL's own class names (`.app`, `.todo-list`,
+a bare `<button>`) rendered as raw HTML: white buttons with a grey hairline and a bulleted list. A game menu written as
+divs was plain text. Most generated markup is the second kind, so that is what users saw.
+
+**Root causes:**
+- The kit's element layer was a thin floor (white-on-white buttons).
+- The fast lane, where most small apps are built, was never told the kit exists:
+  - its `DESIGN_CONTRACT` asked for "good design" in five generic lines;
+  - so every per-file call invented class names;
+  - its stylesheet call was told to re-style every used class, the kit's included.
+- The static template put page-wide rules after the kit (`* { margin:0; padding:0 }`, a centred `body`, one flat
+  button fill), overriding it on every plain-HTML app.
+- The one-file rule (#3403) told the model to copy ~450 lines of kit CSS into `index.html`. A cheap model would not
+  do that, so one-file apps would have lost the kit.
+- There were no recipes for games, AI chat, tabs or toasts.
+
+**Fixed:**
+- **Element layer:** `designKit.ts` now has a designed element layer, all inside `:where()` (zero specificity):
+  - tinted secondary buttons and filled gradient primaries;
+  - destructive buttons shown in red;
+  - focus rings, accent-coloured form controls, classed lists without bullets, and styled bare tables;
+  - an app's own class always wins. The old `button[type="submit"]` (0,1,1) used to beat it.
+- **Fill vs ink tokens:** the new `--accent-strong` / `--accent-deep` / `--accent-ink` / `--danger-ink` tokens exist
+  because white on the dark theme's `--accent` is 3.4:1.
+- **Contrast:** every new colour pair is WCAG-AA tested in both themes. The unselected tab was 3.9:1 and is fixed.
+- **Golden templates:** their theme switch carries the new tokens.
+- **New recipes:**
+  - games: `.nb-game` stage, `-screen`, `-title`, a pulsing real `button.nb-game-btn`, `-hud`/`-stat`, `-bar` (a
+    `scaleX` fill), and `-pad`/`-key` touch keys;
+  - chat: bubbles, a composer and a typing indicator;
+  - `.nb-tabs`, `.nb-toast`, `.nb-gradient-text`, `.nb-stagger`.
+  - The architect prompt names them all, and says a game's start button is a real `<button>`.
+- **Fast lane:** gets `DESIGN_KIT_VOCABULARY` only where the scaffold really ships the kit.
+  - `designKitReach.ts` derives that from `TemplateRegistry`, not a hand-written list.
+  - `stylesheetClassContext` now lists kit classes as "already styled — do not restyle".
+- **Static starter styles** are scoped to `.starter`.
+- **One-file apps:** the model keeps `style.css` linked, and a finishing pass (`singleFileKit.ts`,
+  `SINGLE_FILE_KIT_INLINED`) folds it into `index.html` and removes the file. The preview bridge is stripped first.
+- **Knowledge base:** `AppKnowledgeBase.ts` gains a "Designed by default" bullet.
+- **Tests:** `tests/theAppLooksDesignedWithoutBeingAsked.test.ts` covers contrast, specificity, wiring and a
+  real-browser cascade check. It is reversion-proven four ways.
+
+**The external (ChatGPT) suggestion, adapted rather than copied:**
+- **Rejected:** "25 repos as knowledge bases". A model cannot learn from a repo list; it already knows shadcn,
+  Radix and Tailwind. Vendoring HeroUI/Flowbite/Tremor into every scaffold would add install time, preview-fidelity
+  risk and licence bookkeeping for a look the kit can give in CSS.
+- **Adopted:** the useful part, pattern CATEGORIES the kit was missing — AI chat UI, tabs, toast, game UI — written
+  once in our own kit.
+
+**Still open:**
+- If the model rewrites `index.css` wholesale, the kit-keep guard restores class rules only, so the element layer
+  (bare `button`, lists, tables) is lost. Measure how often before building more.
+- A page the model leaves without any container is still flush to the edge. A page-level default would break
+  full-bleed games and dashboards, so this stays the prompt's job.
+- Apps built before this keep their old `index.css`. Only kit classes they use are restored.
+- Tailwind apps do not use the kit and are unchanged.

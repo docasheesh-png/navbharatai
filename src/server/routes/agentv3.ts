@@ -476,6 +476,8 @@ import '../AgentV3/VercelProvider';
 import '../AgentV3/NetlifyProvider';
 import '../AgentV3/CloudflareProvider';
 import { describeVisionAttachments } from '../lib/visionDescribe';
+import { isVisionAttachment } from '../lib/attachmentText';
+import { visionFate, unreadImagesBlock, attachmentsReadNote, type VisionFate } from '../lib/attachmentReadOutcome';
 import {
   parseDesignContract,
   stripContractBlock,
@@ -10384,14 +10386,24 @@ async function noteBuildOutcome(
     // AP-8 — the structured design contract extracted from an uploaded mockup, when there was one.
     // Held outside the try so it survives to the build prompt AND to the post-build verification.
     let designContract: DesignContract | null = null;
+    // What came of reading the pictures — recorded once the build report exists (attachmentReadOutcome.ts).
+    let attachmentRead: { files: number; images: number; fate: VisionFate; ms: number; descriptionChars: number } | null = null;
     if (docAttachments.length > 0) {
       send({ type: 'narration', agent: 'architect', text: `📎 Reading ${docAttachments.length} file(s)…`, ts: Date.now() });
       try {
         const docs = await buildDocumentContext(docAttachments);
         // Bounded (8s) — a stalled vision provider must not hang the request before the deadline
         // timer is armed; on timeout we proceed without the image description.
-        const vis = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: powerSpecResolved.powerMode /* Strong: Claude-first (Haiku describe tier); Weak/Normal: Gemini → Grok */, noClaude: noClaudeBuild, designContract: true }), 8_000, 'describeVisionAttachments')
-          .catch(() => '');
+        const images = docAttachments.filter((a) => isVisionAttachment(a.type, a.name));
+        const visStart = Date.now();
+        let visError: unknown = null;
+        const visRaw = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: powerSpecResolved.powerMode /* Strong: Claude-first (Haiku describe tier); Weak/Normal: Gemini → Grok */, noClaude: noClaudeBuild, designContract: true }), 8_000, 'describeVisionAttachments')
+          .catch((e) => { visError = e; return ''; });
+        // A picture nobody could read is still a picture the user sent: the builder is told so, instead of
+        // the attachment vanishing without a word (autopsy 1389f0d5).
+        const fate = visionFate(images.length, visRaw, visError);
+        const vis = images.length > 0 && !visRaw.trim() ? unreadImagesBlock(images) : visRaw;
+        attachmentRead = { files: docAttachments.length, images: images.length, fate, ms: Date.now() - visStart, descriptionChars: visRaw.trim().length };
         // AP-8: pull the contract OUT of the description and strip its JSON from the prose, so the
         // build prompt carries the requirements once as instructions rather than twice — once as
         // advice it can ignore and once as raw JSON it has to interpret.
@@ -12805,6 +12817,15 @@ async function noteBuildOutcome(
       try { buildDiag.setRequestAnalysis(analysis); } catch { /* observation only — never a build's problem */ }
       // Say when the sizers read more than the message — a report showing `prompt: "mkdir src"` beside
       // a complexity of 60 must explain where the rest came from (autopsy e725e002).
+      if (attachmentRead) {
+        try {
+          buildDiag.record({
+            phase: 'plan', severity: attachmentRead.fate === 'read' || attachmentRead.fate === 'no-images' ? 'info' : 'warning',
+            code: 'ATTACHMENTS_READ', autoResolved: attachmentRead.fate === 'read' || attachmentRead.fate === 'no-images',
+            message: attachmentsReadNote(attachmentRead),
+          });
+        } catch { /* observation only */ }
+      }
       if (planning.sources.length > 0) {
         try {
           buildDiag.record({ phase: 'plan', severity: 'info', code: 'PLANNING_CONTEXT', autoResolved: true, message: planningContextNote(planning, prompt.length) });

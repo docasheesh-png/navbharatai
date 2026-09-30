@@ -257,6 +257,8 @@ export async function resolveVerifiedEmail(uid: string): Promise<string | null> 
  * file's own history (the `FIREBASE_PROJECT_ID` mix-up recorded in CLAUDE.md) is what that costs.
  */
 export const getAdminAuthForPhone = getAdminAuth as unknown as () => Promise<import('./phoneGate').PhoneLookupAuth | null>;
+/** The same admin SDK, typed for the phone token exchange (phoneTokenExchange.ts). */
+export const getAdminAuthForExchange = getAdminAuth as unknown as () => Promise<import('./phoneTokenExchange').ExchangeAuth | null>;
 
 /** Testable CORE: resolve the account DISPLAY NAME for an already-verified uid. Best-effort — null on a
  *  missing provider, a lookup throw, or an empty/absent name. Mirrors resolveVerifiedEmailWith so the

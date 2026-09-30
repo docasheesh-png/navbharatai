@@ -295,6 +295,8 @@ export interface ContactLookupAuth {
     email?: string | null; emailVerified?: boolean; phoneNumber?: string | null;
     /** Firebase's record of HOW this account can sign in — 'google.com', 'github.com', 'phone', … */
     providerData?: Array<{ providerId?: string | null }> | null;
+    /** Firebase's own record of when the account was created (`creationTime`, a UTC date string). */
+    metadata?: { creationTime?: string | null } | null;
   }>;
 }
 
@@ -310,6 +312,12 @@ export interface AccountContact {
    * that step provable rather than claimable.
    */
   providers: string[];
+  /**
+   * When the account was created, as Firebase records it (ISO), or null when it could not be read.
+   * Added 2026-09-30 for the referral-code window: "only in the first seven days" needs the account's
+   * own age, which the client cannot be trusted to state.
+   */
+  createdAt?: string | null;
 }
 
 /** Testable CORE — the provider is injected, so every branch can be exercised without firebase-admin. */
@@ -328,7 +336,9 @@ export async function resolveAccountContactWith(
     const providers = (Array.isArray(user.providerData) ? user.providerData : [])
       .map((p) => String(p?.providerId ?? '').trim().toLowerCase())
       .filter(Boolean);
-    return { email, emailVerified: user.emailVerified !== false, phone, providers };
+    const created = Date.parse(String(user.metadata?.creationTime ?? ''));
+    const createdAt = Number.isFinite(created) ? new Date(created).toISOString() : null;
+    return { email, emailVerified: user.emailVerified !== false, phone, providers, createdAt };
   } catch {
     // Every failure is "we could not find out", never "yes". The referral steps read this to decide
     // whether money moves, so an unreadable account must prove nothing.

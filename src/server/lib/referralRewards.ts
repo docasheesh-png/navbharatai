@@ -87,6 +87,7 @@
 import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
 import { parseEnvFlag } from './envFlag';
 import { capSelfGift, capReferrerPerFriend, capWebGift } from './giftPolicy';
+import { codeWindowClosedMessage } from './referralCodeWindow';
 
 /** The five things a new user can do, each worth one payment, ever. In the admin's order. */
 export type RewardStep = 'signup' | 'referral-code' | 'email' | 'mobile' | 'github';
@@ -425,6 +426,7 @@ export type AttributionReason =
   | 'self-referral'        // the same account, or the same DEVICE, on both sides
   | 'already-referred'     // attribution is one-time and immutable
   | 'not-new-user'         // admin: "agar b new user hai to, old ko never"
+  | 'code-window-closed'   // admin 2026-09-30: only in the first 3 app opens or 7 days
   | 'device-used'          // this handset has already been somebody's referred friend
   | 'not-android'
   | 'disabled';
@@ -454,6 +456,11 @@ export function decideAttribution(input: {
   deviceAlreadyReferred: boolean;
   /** False for an account that existed before this device/app — "old ko never". */
   isNewUser: boolean;
+  /**
+   * False once the account has used its three app opens or is seven days old (`referralCodeWindow.ts`).
+   * Omitted ⇒ open, so a caller written before the window existed decides exactly as it did.
+   */
+  codeWindowOpen?: boolean;
   platform: 'android' | 'ios' | 'web' | string;
   env?: NodeJS.ProcessEnv;
 }): Attribution {
@@ -476,6 +483,7 @@ export function decideAttribution(input: {
   if (input.alreadyReferred) return { ok: false, reason: 'already-referred' };
   if (input.deviceAlreadyReferred) return { ok: false, reason: 'device-used' };
   if (!input.isNewUser) return { ok: false, reason: 'not-new-user' };
+  if (input.codeWindowOpen === false) return { ok: false, reason: 'code-window-closed' };
 
   return { ok: true, reason: 'attributed' };
 }
@@ -502,6 +510,8 @@ export function attributionRefusalMessage(reason: AttributionReason): string {
       return 'This device has already used a referral code. The bonus is one per device.';
     case 'not-new-user':
       return 'Referral codes are for new accounts. Your account still earns every other bonus.';
+    case 'code-window-closed':
+      return codeWindowClosedMessage();
     case 'not-android':
       return 'Referral codes are applied in the NavBharatAI Android app.';
     default:

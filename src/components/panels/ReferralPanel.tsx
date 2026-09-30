@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { AlertCircle, CheckCircle2, Circle, Copy, Gift, Loader2, Share2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Circle, Copy, Gift, Loader2, Share2, CircleX } from 'lucide-react';
 import { shareReferral } from '../../lib/shareReferral';
 import { postReferral, type ReferralSurface } from '../../lib/referralClaim';
 import { normalizeReferralCodeClient } from '../../lib/referralCodeClient';
@@ -36,6 +36,8 @@ export const ReferralPanel: React.FC<{
   surface: ReferralSurface;
   /** May this account still apply a friend's code? App only, and only while it is still "new". */
   canRedeem: boolean;
+  /** App opens left in which a code may still be applied (server's answer), or null. */
+  codeOpensLeft?: number | null;
   /** The website's own ceiling (₹200), or null in the app. */
   webCapRupees: number | null;
   /** What the account has actually done, so a row can say what is missing instead of failing. */
@@ -230,12 +232,18 @@ export const ReferralPanel: React.FC<{
                 <span className="flex min-w-0 items-center gap-2">
                   {row.claimed
                     ? <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
-                    : <Circle className="h-4 w-4 shrink-0 opacity-40" />}
-                  <span className={`truncate text-[11px] font-semibold ${row.claimed ? 'text-muted line-through' : 'text-ink'}`}>
+                    : row.missed
+                      ? <CircleX className="h-4 w-4 shrink-0 text-danger" aria-label="Missed" />
+                      : <Circle className="h-4 w-4 shrink-0 opacity-40" />}
+                  <span className={`truncate text-[11px] font-semibold ${row.claimed || row.missed ? 'text-muted line-through' : 'text-ink'}`}>
                     {row.label}
                   </span>
                 </span>
-                {!row.claimed && (
+                {row.missed && !row.claimed && (
+                  // The chance has passed (admin 2026-09-30): say so, and offer nothing — there is nothing to do.
+                  <span className="shrink-0 text-[10px] font-black uppercase tracking-widest text-danger">Missed</span>
+                )}
+                {!row.claimed && !row.missed && (
                   blocked
                     ? (
                       <span className="flex shrink-0 items-center gap-2">
@@ -291,7 +299,13 @@ export const ReferralPanel: React.FC<{
                 {busy === 'redeem' && <Loader2 className="h-3 w-3 animate-spin" />} Apply
               </button>
             </div>
-            <p className="mt-2 text-[10px] font-semibold text-muted">A code can be applied once, to a new account.</p>
+            <p className="mt-2 text-[10px] font-semibold text-muted">
+              A code can be applied once, to a new account{typeof props.codeOpensLeft === 'number'
+                ? <> — only in your first 3 app opens or 7 days. {props.codeOpensLeft === 0
+                  ? 'This is your last chance.'
+                  : `${props.codeOpensLeft} more app open${props.codeOpensLeft === 1 ? '' : 's'} after this one.`}</>
+                : '.'}
+            </p>
           </div>
         )}
 

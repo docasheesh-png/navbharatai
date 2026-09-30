@@ -798,6 +798,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       the app does not have, so call this too and a game is never silent: synthesised music and',
     '       cues (coin, success, level-up) from notes, no file, no dependency, no cost.',
     '    6. generate_game_shell    — LAST. Composes all of the above into something playable, with HUD,',
+    '       on-screen TOUCH CONTROLS (joystick, camera drag, Attack/Jump/Use/Run, Pause — shown only on a',
+    '       touch screen; choose buttons with `touchControls`, never hand-roll a joystick),',
     '       pause and restart, and handles WebGL teardown so the tab does not die after a few visits.',
     '  Then write only the GAME ITSELF — the levels, the rules, the content — passing it to the shell',
     '  through setup() and update(). Emit events for anything that should be seen or heard; never call',

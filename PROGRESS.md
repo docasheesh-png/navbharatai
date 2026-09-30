@@ -85563,3 +85563,86 @@ Admin: *"mobile friendly game/app bane — mobile first!!!!!!"*, choosing touch 
 - The phone check reports and offers a fix; it does not repair on its own. A verified repair (like the
   explorer's) waits until `MOBILE_LAYOUT_ISSUES` has appeared on real builds.
 - Games built before today get the controls only when rebuilt.
+
+## 2026-09-30 — Autopsies 33812996 (Circle to Search) + 0c2a987a ("Make in .apk files")
+
+Build 33812996: a Weak build that took 31 minutes against an estimate of 5–12. The first real-browser
+render came at 1841 s. Build 0c2a987a took six model calls to answer one question.
+
+**Ledger** (problem → root cause → class → siblings → test):
+
+- **Read as ecommerce, and the estimate doubled**
+  - Root cause: the Play Store link's `store` matched the ecommerce domain, and the link's path counted
+    as modules.
+  - Class: a URL's words were read as the request's words. Already fixed once, for one reader only
+    ("Lekhan Sahyak", 2026-09-27).
+  - Siblings: `lib/machineText.ts` is now the one helper, called by the requirement analyser, the
+    request analyser, the build-time estimator, the enumerated-feature counter, the native-capability
+    reader and the scope feature counter.
+  - Test: `aLinkIsNotTheRequest` (a census: every reader gives the same answer with or without a link).
+- **Filed as a `translate` task, score 15**
+  - Root cause: "screen translation" in the feature list.
+  - Class: a text-processing word used as a feature's name. The Gita fix (b6f88a72) covered "in hindi"
+    only.
+  - Fix: translate and summary stand down when the request orders an app, which sends it to the
+    platform's existing second opinion.
+  - Test: same file.
+- **560 s of fast-lane repair (77%)**
+  - Root cause: flashx crawled inside a repair call, and the same call walked onto `kimi-k2.7-code`
+    (197 s with no answer) and then `glm-5.3`.
+  - Class: `stopLane` (Study-Racer) guarded generation only, and only after a reasoning rung had served
+    a call.
+  - Fix: lane calls carry `stopAtReasoningRung`, and the repair loop asks `stopLane`.
+  - Test: `theLaneStopsBeforeAReasoningRung`.
+- **An LLM heal for three one-line CSS edits**
+  - Root cause: the deterministic wiring knew only global-named sheets.
+  - Fix: `isAppWideStylesheet` covers styles/css folders and theme, token and component names;
+    `dedupeStylesheetImports` removes an import the entry already has. Both lanes call them.
+  - Test: `theStylesheetsAreWiredWithoutAModel`.
+- **Fake results shipped as features**
+  - What happened: song recognition picked a random entry from `MOCK_DB`, translation returned
+    `[Translated to X]: …`, and search results and AI overviews were hard-coded.
+  - Class: made-up results. f15a9bcc covered made-up people only.
+  - Fix:
+    - `NO_FAKE_RESULTS_RULE` in both lanes;
+    - a `simulated-result` finding with a write-time note;
+    - a `SIMULATED_RESULT_SHIPPED` disclosure to the user.
+  - Test: `aFeatureMayNotMakeUpItsResult`, which also checks that no golden scaffold trips it.
+- **"Complete and healthy" said over a failed compile, then 28 more steps**
+  - Root cause: the done check read the static scan only.
+  - Fix: the dispatcher remembers the latest compile's verdict from every door, including a failing
+    shell `tsc`.
+  - Test: `doneIsNeverSaidOverAFailedCompile`.
+- **"The exact versions you specified"**
+  - Root cause: the prompt line from e7baf61d was ignored by the model.
+  - Fix: a `claimAudit` rule, `user-attributed`.
+  - Test: `aPlatformPinIsNotTheUsersRequest`.
+- **A lazy import of a named member that was only the default export (TS2339)**
+  - Fix: `ImportExportReconcile` CASE C.
+  - Test: `aLazyImportGetsTheRightKind`.
+- **`safeImage.ts` written against react-native in a vite-react app**
+  - Fix: web lanes get `webPlatformRule`.
+  - Test: same file.
+- **APK request nudged twice and retried (0c2a987a)**
+  - Class: a pointer to the platform's own feature read as a stall. Refusal and question were already
+    answers.
+  - Fix: `turnPointedToPlatformFeature`, which needs both a package request and a named
+    Download APK / APK Builder; nudge, retry and empty flip all read it.
+  - Test: `aPointerToTheApkBuilderIsAnAnswer`.
+- **"The typecheck did not run" beside `npm run build` exit 0 and PROD_BUILD_OK**
+  - Root cause: only `tsc --noEmit` counted as a typecheck.
+  - Fix: `buildScriptTypecheckVerdict` reads the echoed `> tsc … &&` line. Both the agent's log and the
+    platform's production build feed the gate.
+  - Test: `aBuildThatCompilesIsATypecheck`.
+
+**Already fixed on `main` when these builds ran (deploy lag):**
+- the crawl bench being build-long (#3402);
+- a backend agent spawned for a browser-only app (#3402, `parallelHelperScope`);
+- `TSC_ENSURE` output going to /dev/null, and a piped `tsc | head` reported as exit 0 (#3412).
+
+**Still open:**
+- The contract drifted on key casing (`isFeatureEnabled('qr_scanner')` against `QR_SCANNER`). The
+  shared contract does not carry a constants module's key union. A general fix needs the contract to
+  name every string-literal union a consumer passes; not guessed at here.
+- 111 file reads covered 28 distinct files. The no-progress limit was not reached (every re-read
+  followed a change). This is recorded as measurement only.

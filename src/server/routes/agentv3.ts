@@ -242,6 +242,7 @@ import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMe
 import { clampPowerForUser } from '../AgentV3/powerGating';
 import { weakTierWelcomeNotice, weakTierBuildFailedNotice } from '../AgentV3/weakTierNotice';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
+import { summaryAdditions } from '../AgentV3/summaryAdditions';
 import { credentialGuardEnabled, credentialGuardInstruction, findBootKillingEnvGuards, bootKillingGuardSummary, bootKillerRepairInstruction } from '../AgentV3/missingCredentialGuard';
 import { inrToWalletTokens } from '../lib/payments';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
@@ -11843,6 +11844,13 @@ async function noteBuildOutcome(
     // actually open the running app in a browser and verify it rendered.
     let lastPreviewUrl = '';
     events.subscribe((e) => { if ((e as { type?: string }).type === 'preview') { const u = (e as { url?: unknown }).url; if (typeof u === 'string' && u) lastPreviewUrl = u; } }, false);
+    // Every chat line the user has already SEEN — so the end of a successful build can show only what
+    // the platform added to the reply (summaryAdditions.ts). Short status blips are not kept.
+    const narratedTexts: string[] = [];
+    events.subscribe((e) => {
+      const ev = e as { type?: string; text?: unknown };
+      if (ev.type === 'narration' && typeof ev.text === 'string' && ev.text.trim().length >= 40 && narratedTexts.length < 400) narratedTexts.push(ev.text);
+    }, false);
 
     // HARD WALL-CLOCK DEADLINE — guarantees the build can NEVER spin at "working…" forever.
     // If the build body hangs on an UN-abortable await (a stalled model HTTP call, a sandbox
@@ -23509,6 +23517,23 @@ async function noteBuildOutcome(
         } catch {
           // A notice is never worth failing a successful build over — stay silent and ship the app.
         }
+      }
+      // WHAT THE USER STILL HAS TO DO IS THE LAST THING THEY SEE (admin 2026-09-30). On success the panel
+      // shows the model's streamed reply and never `summary`, so everything appended to it above — the
+      // key checklist, corrections, offers — reached no screen. Sent here as the build's final chat line;
+      // a server line reaches the bundled phone apps too. Kill switch AGENTV3_SUMMARY_ADDITIONS=off.
+      if (result.ok && typeof result.summary === 'string' && (process.env.AGENTV3_SUMMARY_ADDITIONS ?? '').trim().toLowerCase() !== 'off') {
+        try {
+          const added = summaryAdditions(result.summary, narratedTexts);
+          if (added.text) events.emit({ type: 'narration', agent: 'architect', text: added.text, ts: Date.now() });
+          buildDiag.record({
+            phase: 'build', severity: 'info', autoResolved: true,
+            code: added.matched ? 'SUMMARY_ADDITIONS_SHOWN' : 'SUMMARY_REPLY_NOT_FOUND',
+            message: added.matched
+              ? (added.text ? `The platform's additions to the reply were shown as the last chat line (${added.text.length} characters).` : 'The reply had no platform additions to show.')
+              : 'The model\u2019s reply could not be found in the final summary, so its additions were not shown (nothing is sent rather than risk repeating the reply).',
+          });
+        } catch { /* the closing line is never worth failing a finished build */ }
       }
       // THE ONE FACT THE CLIENT WAS MISSING (admin 2026-09-14). The platform knows whether it opened
       // this app in a real browser and saw it render — it is the same observation `GREEN_GUARD_SAVE`

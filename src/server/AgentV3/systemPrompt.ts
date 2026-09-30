@@ -58,6 +58,24 @@ export const CREDENTIAL_SILENCE_RULE =
   'password", "a Stripe live key") and say where to look.';
 
 /**
+ * AI INSIDE THE USER'S APP (admin 2026-09-30). When the app itself needs an AI model — a chat assistant,
+ * a summariser, "ChatGPT jaisa AI" — the build must work with EITHER key the closing message offers: a
+ * NavBharatAI API key, or the user's own provider key. That is true only if the call is one standard
+ * chat-completions request whose address and model come from config, and only from a SERVER: the
+ * NavBharatAI API does not accept calls from another site's browser page, and a key in browser code is
+ * readable by every visitor. AppRequirements reads `AI_API_KEY` to know which closing line is honest.
+ */
+export const AI_IN_APP_RULE =
+  'AI INSIDE THE APP: if the app itself needs an AI model (a chat assistant, a summariser, a writing ' +
+  'helper), call it from the app\'s SERVER code, never from browser code, with ONE standard ' +
+  'chat-completions request (POST {AI_BASE_URL}/chat/completions, messages [{role, content}], answer in ' +
+  'choices[0].message.content). Read three settings: AI_API_KEY (the secret), AI_BASE_URL (default ' +
+  '"https://navbharatai.com/api/v1") and AI_MODEL (default "navbharatai"). That works with a NavBharatAI ' +
+  'API key as-is, and with any compatible provider by changing only AI_BASE_URL and AI_MODEL. With no ' +
+  'AI_API_KEY set, show a clear "add your AI key to turn this on" state — never canned or fake answers. ' +
+  'If the app has no server yet, add a small one for this route.';
+
+/**
  * NEVER INVENT OTHER PEOPLE (autopsy f15a9bcc, 2026-09-23). Asked for "nearby shops that are open, over
  * Bluetooth", a build generated four fake "nearby vendors" around the user and presented them as real —
  * because a browser cannot see other people's devices and the app had no shared database, and the model
@@ -452,6 +470,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '',
     NO_INVENTED_PEOPLE_RULE,
     DEVICE_POWERS_RULE,
+    '',
+    AI_IN_APP_RULE,
     '',
     'Conversation:',
     '- Reply to anything the user says. If they greet you (e.g. "hello") or ask a',
@@ -1235,5 +1255,10 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '- When the app is genuinely complete and working, end your turn with a short',
     '  summary of what you built and how to run it. Do not call any tool in that',
     '  final turn.',
+    '- ASK LAST: if the user must do or decide anything before the app is fully useful (answer',
+    '  a question, choose an option, give a key or connect an account), put ALL of it at the',
+    '  very END of that final summary, after saying what is ready, as one short section in the',
+    '  user\'s language. Never scatter questions through the summary. Keys are named, never',
+    '  asked for in chat: the platform adds the exact key list and a secure field after you.',
   ].join('\n') + '\n\n' + INDIA_TERRITORIAL_INTEGRITY + '\n\n' + CREATOR_IDENTITY;
 }

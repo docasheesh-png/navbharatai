@@ -84138,3 +84138,36 @@ signed out. The normal code path is untouched (the native session is set in the 
 **Still needed from the admin, unverified:** the Cloud Run service account must hold **Service Account Token
 Creator** on itself (IAM signBlob). Without it the exchange answers `custom-token-unavailable`, the person gets
 the old honest Email/Google message, and the OTP card shows that code in the detail — never a fake success.
+
+## 2026-09-30 — What the app still needs from you is the last thing the build says (admin request)
+
+Admin: *"jab user koi aisi app banata hai jisme user se suggestion, question ke answer, API keys ya secret
+keys chahiye — to app banne ke last me clearly user ko dikhe, user ki language me."* The example was
+"ChatGPT jaisa AI": after 100% ready, say it needs an AI key, which may be a NavBharatAI API key (Other →
+NavBharatAI API) or a ChatGPT/Claude/Grok/Gemini key, and offer help.
+
+**What already existed:** a localized key checklist (`AppRequirements`, 2026-08-03), a closing key-entry
+card, and the user-action tray.
+
+**What the investigation found, and it is the headline:** on a SUCCESSFUL build, `result.summary` is never
+rendered. The panel shows it only on failure. So the checklist and every other line appended to a
+successful reply reached no screen.
+
+**Built:**
+- `summaryAdditions.ts`: the part of the summary the user has not seen is sent as the build's final chat
+  line. It is sent from the server, so the bundled phone apps get it without a new store build.
+- `AI_IN_APP_RULE`: an AI feature is built on the app's server, as one standard request configured by
+  `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL`. That makes "use a NavBharatAI key" true. The NavBharatAI API
+  refuses other sites' browser pages, so a browser-side call could never have used it.
+- The checklist's two-option AI line, in 11 languages, shown only when the app reads `AI_API_KEY`.
+- Detection now covers Anthropic, Gemini and xAI keys, and the `@anthropic-ai/sdk` and `@google/genai`
+  packages.
+- A "NavBharatAI API" option in the key recipe.
+- The architect's ASK LAST rule.
+
+**Open:**
+- The model's own questions still stream before the platform's closing line. They are at the end of the
+  model's reply, not after the checklist.
+- The fast lane and sub-agents do not carry `AI_IN_APP_RULE` yet; only the architect does.
+- An app written against a provider's own client still gets that provider's line only. That is honest,
+  but it is not the two-option choice.

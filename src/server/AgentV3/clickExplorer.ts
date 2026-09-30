@@ -371,6 +371,8 @@ function collect(a) {
     if (r.width < 2 || r.height < 2 || st.visibility === 'hidden' || st.display === 'none') continue;
     if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
     if (el.closest('vite-error-overlay, #nextjs-portal')) continue;
+    // Our own "made by NavBharatAI" badge is not the app's control (its × hides it; nothing to test).
+    if (el.closest('[data-nbai-signature]')) continue;
     const tag = el.tagName.toLowerCase();
     const label = (el.innerText || el.getAttribute('aria-label') || el.getAttribute('title') || '').replace(/\\s+/g, ' ').trim().slice(0, 60);
     const href = tag === 'a' ? (el.getAttribute('href') || '') : '';

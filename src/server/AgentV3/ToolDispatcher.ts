@@ -69,7 +69,7 @@ import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { analyzeArchitecture, architectureSummary, generateArchitectureDoc, orphanComponentFile } from './ArchitectureAnalysis';
 import { securitySummary, securityWriteNote } from './SecurityAnalysis';
 import { applyPreviewDomain } from './PreviewDomain';
-import { injectAppSignature, hasAppSignature } from './appSignature';
+import { injectAppSignature, hasCurrentAppSignature } from './appSignature';
 import { mergeDotEnv, gitignoreWithEnv, dotEnvValue } from '../secrets/appSecretsEnv';
 import { ensureBootEnv, ENV_SCAN_COMMAND } from './devSecretsBoot';
 import { envNamesFromGrep, detectDatabaseProvider } from './ImportPreview';
@@ -871,7 +871,7 @@ export class ToolDispatcher {
       } catch {
         continue; // no such HTML entry — try the next candidate
       }
-      if (!html || hasAppSignature(html)) return; // already signed (idempotent) or empty
+      if (!html || hasCurrentAppSignature(html)) return; // already signed with the current badge, or empty (an older badge is upgraded below)
       const signed = injectAppSignature(html);
       if (signed === html) return;
       try {

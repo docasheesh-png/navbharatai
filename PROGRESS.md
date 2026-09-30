@@ -85020,3 +85020,26 @@ report, so the diagnosis is from the screenshot and the code. That app was built
 **Open:** the "Made with NavBharatAI" badge is fixed at the bottom-right and can cover a footer or a
 bottom bar. A spacer would add scroll to full-screen games, so this is not guessed at here.
 `.nb-footer` carries bottom padding for it.
+
+## 2026-09-30 — the "made by NavBharatAI" badge gets a × that comes back on refresh (admin)
+
+This was the open item from #3410: the badge is fixed bottom-right and can cover an app's footer or cart
+bar. The admin asked for a close button that returns on every refresh.
+
+- **The × is a checkbox with a scoped `:checked` CSS rule, not a scripted button.** Reasons:
+  - An app whose Content-Security-Policy forbids inline script would turn a scripted × into a dead
+    control. This platform itself recommends adding such a CSP.
+  - `autocomplete="off"` stops the browser restoring the ticked state on reload, so the badge comes back
+    after a refresh.
+  - Nothing is stored.
+  - The ×'s geometry is inline, so an app's own checkbox CSS cannot resize it.
+- **Old badges are upgraded, never doubled.** The marker's value is now the version (`2`).
+  - `injectAppSignature` replaces a version-1 badge in place.
+  - The build skips only a CURRENT badge (`hasCurrentAppSignature`), so an app built earlier gains the ×
+    on its next build.
+  - A badge edited out of recognition is left alone.
+- **The explorer skips the badge.** The post-build button-presser now skips anything inside
+  `[data-nbai-signature]`.
+- **Tests:** `tests/theBadgeCanBeClosed.test.ts`.
+  - It includes a real-browser check under `script-src 'none'`: press ×, the badge hides; reload, it is back.
+  - Reversion-proven: reverting appSignature fails 6 tests, ToolDispatcher 1, clickExplorer 1.

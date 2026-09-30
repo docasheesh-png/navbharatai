@@ -330,6 +330,16 @@ export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
         packages: ['openai'],
         vars: [{ name: 'OPENAI_API_KEY', where: 'Shown ONCE when created — copy it immediately', serverOnly: true }],
       },
+      {
+        // Chosen only when the app's own code reads AI_API_KEY (the builder's AI_IN_APP_RULE): that app
+        // sends one standard request to a configurable address, which is what makes this key work there.
+        provider: 'NavBharatAI API',
+        link: 'https://navbharatai.com',
+        linkLabel: 'navbharatai.com',
+        path: 'Home → Other AI → Developer Tools → NavBharatAI API → Create key',
+        cost: 'Paid from your NavBharatAI wallet at the same price as in the app, with a daily limit you set on each key.',
+        vars: [{ name: 'AI_API_KEY', where: 'Shown ONCE when created — copy it immediately (it starts with nbai_)', serverOnly: true }],
+      },
     ],
   },
   {

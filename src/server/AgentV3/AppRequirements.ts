@@ -136,8 +136,11 @@ const SERVICES: ServiceSpec[] = [
   // ── AI inside the USER'S app (their own key — nothing to do with which model builds it) ──────────
   {
     id: 'app_ai_key', label: "Your app's own AI key", kind: 'user', settingsPath: SECRETS_PATH,
-    packages: ['openai', '@google/generative-ai'], envVars: ['OPENAI_API_KEY', 'GOOGLE_API_KEY'],
-    envHints: ['OPENAI_API_KEY', 'VITE_OPENAI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GENAI_API_KEY'],
+    // `AI_API_KEY` is the name AI_IN_APP_RULE (systemPrompt.ts) builds with: one standard request whose
+    // address and model come from config, so a NavBharatAI API key and a provider key both work.
+    packages: ['openai', '@google/generative-ai', '@google/genai', '@anthropic-ai/sdk'],
+    envVars: ['AI_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_API_KEY', 'GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'XAI_API_KEY'],
+    envHints: ['AI_API_KEY', 'OPENAI_API_KEY', 'VITE_OPENAI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GENAI_API_KEY', 'GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'XAI_API_KEY', 'GROK_API_KEY', 'NAVBHARATAI_API_KEY'],
   },
   // ── Storage (uploads) — has its own dedicated settings screen ────────────────────────────────────
   {
@@ -297,6 +300,13 @@ export function unconfiguredRequirements(
 
 interface NoticeStrings {
   head: (n: number) => string;
+  /**
+   * The line for an app built to AI_IN_APP_RULE (it reads `AI_API_KEY`): either key works, and it says
+   * which two, where each comes from, and that the user can ask for help (admin 2026-09-30). Shown only
+   * when the app's own code reads `AI_API_KEY` — for an app written against one provider's own client,
+   * a NavBharatAI key would not work, and saying it would is the fake the second absolute rule forbids.
+   */
+  aiChoice: (path: string) => string;
   add: string;
   /**
    * "…where you get it from", given an already-rendered link.
@@ -329,6 +339,7 @@ const KEYLESS_EN: Record<KeylessRoute, string> = {
 
 const STRINGS: Record<string, NoticeStrings> = {
   hi: {
+    aiChoice: (path) => `• **आपके ऐप का AI** — ${path} → \`AI_API_KEY\` डालें। इनमें से कोई भी key चलेगी: NavBharatAI API key (Home → Other AI → Developer Tools → NavBharatAI API), या OpenAI (ChatGPT), Anthropic (Claude), Google (Gemini) या xAI (Grok) की आपकी अपनी key — उनके लिए \`AI_BASE_URL\` और \`AI_MODEL\` भी उसी provider के हिसाब से भरें। कोई दिक़्क़त हो तो मुझसे पूछें, मैं मदद करूँगा।`,
     head: (n) => `🔑 यह ऐप बन गया है। इसे पूरी तरह चालू करने के लिए ${n === 1 ? '1 चीज़' : `${n} चीज़ें`} आपके अपने account से चाहिए:`,
     add: 'डालें',
     from: (src) => `${src} से लें`,
@@ -337,6 +348,7 @@ const STRINGS: Record<string, NoticeStrings> = {
     tail: 'तब तक वे बटन “Coming soon” दिखाएँगे — बाक़ी पूरा ऐप सामान्य रूप से चलेगा।',
   },
   bn: {
+    aiChoice: (path) => `• **আপনার অ্যাপের AI** — ${path} → \`AI_API_KEY\` দিন। যেকোনো একটি key চলবে: NavBharatAI API key (Home → Other AI → Developer Tools → NavBharatAI API), অথবা OpenAI (ChatGPT), Anthropic (Claude), Google (Gemini) বা xAI (Grok)-এর আপনার নিজের key — সেক্ষেত্রে \`AI_BASE_URL\` ও \`AI_MODEL\`-ও সেই provider অনুযায়ী দিন। অসুবিধা হলে আমাকে জিজ্ঞেস করুন, আমি সাহায্য করব।`,
     head: (n) => `🔑 অ্যাপটি তৈরি হয়ে গেছে। এটি সম্পূর্ণ চালু করতে ${n === 1 ? '১টি জিনিস' : `${n}টি জিনিস`} আপনার নিজের account থেকে দরকার:`,
     add: 'দিন', from: (src) => `${src} থেকে নিন`,
     keylessHead: '💡 হয়তো এর কয়েকটির দরকারই নেই —',
@@ -344,6 +356,7 @@ const STRINGS: Record<string, NoticeStrings> = {
     tail: 'ততক্ষণ ওই বোতামগুলি “Coming soon” দেখাবে — বাকি পুরো অ্যাপ স্বাভাবিক ভাবে চলবে।',
   },
   pa: {
+    aiChoice: (path) => `• **ਤੁਹਾਡੀ ਐਪ ਦਾ AI** — ${path} → \`AI_API_KEY\` ਪਾਓ। ਕੋਈ ਵੀ ਇੱਕ key ਚੱਲੇਗੀ: NavBharatAI API key (Home → Other AI → Developer Tools → NavBharatAI API), ਜਾਂ OpenAI (ChatGPT), Anthropic (Claude), Google (Gemini) ਜਾਂ xAI (Grok) ਦੀ ਤੁਹਾਡੀ ਆਪਣੀ key — ਉਸ ਲਈ \`AI_BASE_URL\` ਅਤੇ \`AI_MODEL\` ਵੀ ਉਸੇ provider ਅਨੁਸਾਰ ਪਾਓ। ਕੋਈ ਮੁਸ਼ਕਲ ਹੋਵੇ ਤਾਂ ਮੈਨੂੰ ਪੁੱਛੋ, ਮੈਂ ਮਦਦ ਕਰਾਂਗਾ।`,
     head: (n) => `🔑 ਐਪ ਬਣ ਗਈ ਹੈ। ਇਸਨੂੰ ਪੂਰੀ ਤਰ੍ਹਾਂ ਚਲਾਉਣ ਲਈ ${n === 1 ? '1 ਚੀਜ਼' : `${n} ਚੀਜ਼ਾਂ`} ਤੁਹਾਡੇ ਆਪਣੇ account ਤੋਂ ਚਾਹੀਦੀਆਂ ਹਨ:`,
     add: 'ਪਾਓ', from: (src) => `${src} ਤੋਂ ਲਵੋ`,
     keylessHead: '💡 ਸ਼ਾਇਦ ਇਹਨਾਂ ਵਿੱਚੋਂ ਕੁਝ ਦੀ ਲੋੜ ਹੀ ਨਾ ਪਵੇ —',
@@ -351,6 +364,7 @@ const STRINGS: Record<string, NoticeStrings> = {
     tail: 'ਉਦੋਂ ਤੱਕ ਉਹ ਬਟਨ “Coming soon” ਦਿਖਾਉਣਗੇ — ਬਾਕੀ ਪੂਰੀ ਐਪ ਆਮ ਵਾਂਗ ਚੱਲੇਗੀ।',
   },
   gu: {
+    aiChoice: (path) => `• **તમારી એપનું AI** — ${path} → \`AI_API_KEY\` ઉમેરો. કોઈ પણ એક key ચાલશે: NavBharatAI API key (Home → Other AI → Developer Tools → NavBharatAI API), અથવા OpenAI (ChatGPT), Anthropic (Claude), Google (Gemini) કે xAI (Grok) ની તમારી પોતાની key — તે માટે \`AI_BASE_URL\` અને \`AI_MODEL\` પણ એ જ provider મુજબ ભરો. કોઈ મુશ્કેલી હોય તો મને પૂછો, હું મદદ કરીશ.`,
     head: (n) => `🔑 એપ બની ગઈ છે. તેને પૂરેપૂરી ચાલુ કરવા ${n === 1 ? '1 વસ્તુ' : `${n} વસ્તુઓ`} તમારા પોતાના account માંથી જોઈએ:`,
     add: 'ઉમેરો', from: (src) => `${src} પરથી લો`,
     keylessHead: '💡 કદાચ આમાંથી કેટલીક વસ્તુની જરૂર જ ન પડે —',
@@ -358,6 +372,7 @@ const STRINGS: Record<string, NoticeStrings> = {
     tail: 'ત્યાં સુધી એ બટન “Coming soon” બતાવશે — બાકીની આખી એપ સામાન્ય રીતે ચાલશે.',
   },
   or: {
+    aiChoice: (path) => `• **ଆପଣଙ୍କ ଆପ୍‌ର AI** — ${path} → \`AI_API_KEY\` ଦିଅନ୍ତୁ। ଯେକୌଣସି ଗୋଟିଏ key ଚାଲିବ: NavBharatAI API key (Home → Other AI → Developer Tools → NavBharatAI API), କିମ୍ବା OpenAI (ChatGPT), Anthropic (Claude), Google (Gemini) ବା xAI (Grok) ର ଆପଣଙ୍କ ନିଜ key — ସେଥିପାଇଁ \`AI_BASE_URL\` ଓ \`AI_MODEL\` ମଧ୍ୟ ସେହି provider ଅନୁସାରେ ଦିଅନ୍ତୁ। କୌଣସି ଅସୁବିଧା ହେଲେ ମୋତେ ପଚାରନ୍ତୁ, ମୁଁ ସାହାଯ୍ୟ କରିବି।`,
     head: (n) => `🔑 ଆପ୍‌ ତିଆରି ହୋଇଗଲା। ଏହାକୁ ସମ୍ପୂର୍ଣ୍ଣ ଚଳାଇବା ପାଇଁ ${n === 1 ? '୧ଟି ଜିନିଷ' : `${n}ଟି ଜିନିଷ`} ଆପଣଙ୍କ ନିଜ account ରୁ ଦରକାର:`,
     add: 'ଦିଅନ୍ତୁ', from: (src) => `${src} ରୁ ନିଅନ୍ତୁ`,
     keylessHead: '💡 ହୁଏତ ଏଥିରୁ କେତେକର ଆବଶ୍ୟକତା ହିଁ ନାହିଁ —',
@@ -365,6 +380,7 @@ const STRINGS: Record<string, NoticeStrings> = {
     tail: 'ସେ ପର୍ଯ୍ୟନ୍ତ ସେହି ବଟନ୍‌ “Coming soon” ଦେଖାଇବ — ବାକି ପୂରା ଆପ୍‌ ସ୍ୱାଭାବିକ ଭାବେ ଚାଲିବ।',
   },
   ta: {
+    aiChoice: (path) => `• **உங்கள் ஆப்பின் AI** — ${path} → \`AI_API_KEY\` சேர்க்கவும். ஏதாவது ஒரு key போதும்: NavBharatAI API key (Home → Other AI → Developer Tools → NavBharatAI API), அல்லது OpenAI (ChatGPT), Anthropic (Claude), Google (Gemini) அல்லது xAI (Grok) இன் உங்கள் சொந்த key — அதற்கு \`AI_BASE_URL\`, \`AI_MODEL\` இரண்டையும் அந்த provider-க்கு ஏற்ப அமைக்கவும். ஏதேனும் சிக்கல் என்றால் என்னிடம் கேளுங்கள், நான் உதவுகிறேன்.`,
     head: (n) => `🔑 ஆப் தயாராகிவிட்டது. இதை முழுமையாக இயக்க ${n === 1 ? '1 விஷயம்' : `${n} விஷயங்கள்`} உங்கள் சொந்த account-லிருந்து தேவை:`,
     add: 'சேர்க்கவும்', from: (src) => `${src} இல் இருந்து பெறவும்`,
     keylessHead: '💡 இவற்றில் சிலவற்றுக்கு தேவையே இல்லாமல் இருக்கலாம் —',
@@ -372,6 +388,7 @@ const STRINGS: Record<string, NoticeStrings> = {
     tail: 'அதுவரை அந்த பட்டன்கள் “Coming soon” எனக் காட்டும் — மீதி முழு ஆப்பும் வழக்கம் போல் இயங்கும்.',
   },
   te: {
+    aiChoice: (path) => `• **మీ యాప్ AI** — ${path} → \`AI_API_KEY\` జోడించండి. ఏదో ఒక key సరిపోతుంది: NavBharatAI API key (Home → Other AI → Developer Tools → NavBharatAI API), లేదా OpenAI (ChatGPT), Anthropic (Claude), Google (Gemini) లేదా xAI (Grok) నుండి మీ సొంత key — దానికి \`AI_BASE_URL\`, \`AI_MODEL\` కూడా ఆ provider ప్రకారం సెట్ చేయండి. ఏదైనా ఇబ్బంది ఉంటే నన్ను అడగండి, నేను సహాయం చేస్తాను.`,
     head: (n) => `🔑 యాప్ తయారైంది. దీన్ని పూర్తిగా నడపడానికి ${n === 1 ? '1 విషయం' : `${n} విషయాలు`} మీ సొంత account నుండి కావాలి:`,
     add: 'జోడించండి', from: (src) => `${src} నుండి తీసుకోండి`,
     keylessHead: '💡 వీటిలో కొన్ని అవసరమే లేకపోవచ్చు —',
@@ -379,6 +396,7 @@ const STRINGS: Record<string, NoticeStrings> = {
     tail: 'అప్పటివరకు ఆ బటన్లు “Coming soon” అని చూపిస్తాయి — మిగిలిన యాప్ మామూలుగా పనిచేస్తుంది.',
   },
   kn: {
+    aiChoice: (path) => `• **ನಿಮ್ಮ ಆ್ಯಪ್‌ನ AI** — ${path} → \`AI_API_KEY\` ಸೇರಿಸಿ. ಯಾವುದಾದರೂ ಒಂದು key ಸಾಕು: NavBharatAI API key (Home → Other AI → Developer Tools → NavBharatAI API), ಅಥವಾ OpenAI (ChatGPT), Anthropic (Claude), Google (Gemini) ಅಥವಾ xAI (Grok) ನ ನಿಮ್ಮ ಸ್ವಂತ key — ಅದಕ್ಕೆ \`AI_BASE_URL\` ಮತ್ತು \`AI_MODEL\` ಅನ್ನೂ ಆ provider ಪ್ರಕಾರ ಹೊಂದಿಸಿ. ಏನಾದರೂ ತೊಂದರೆ ಇದ್ದರೆ ನನ್ನನ್ನು ಕೇಳಿ, ನಾನು ಸಹಾಯ ಮಾಡುತ್ತೇನೆ.`,
     head: (n) => `🔑 ಆ್ಯಪ್ ಸಿದ್ಧವಾಗಿದೆ. ಇದನ್ನು ಸಂಪೂರ್ಣವಾಗಿ ಚಲಾಯಿಸಲು ${n === 1 ? '1 ವಿಷಯ' : `${n} ವಿಷಯಗಳು`} ನಿಮ್ಮ ಸ್ವಂತ account ನಿಂದ ಬೇಕು:`,
     add: 'ಸೇರಿಸಿ', from: (src) => `${src} ಇಂದ ಪಡೆಯಿರಿ`,
     keylessHead: '💡 ಇವುಗಳಲ್ಲಿ ಕೆಲವು ಬೇಕಾಗದೇ ಇರಬಹುದು —',
@@ -386,6 +404,7 @@ const STRINGS: Record<string, NoticeStrings> = {
     tail: 'ಅಲ್ಲಿಯವರೆಗೆ ಆ ಬಟನ್‌ಗಳು “Coming soon” ಎಂದು ತೋರಿಸುತ್ತವೆ — ಉಳಿದ ಪೂರ್ತಿ ಆ್ಯಪ್ ಎಂದಿನಂತೆ ಚಲಿಸುತ್ತದೆ.',
   },
   ml: {
+    aiChoice: (path) => `• **നിങ്ങളുടെ ആപ്പിലെ AI** — ${path} → \`AI_API_KEY\` ചേർക്കുക. ഏതെങ്കിലും ഒരു key മതി: NavBharatAI API key (Home → Other AI → Developer Tools → NavBharatAI API), അല്ലെങ്കിൽ OpenAI (ChatGPT), Anthropic (Claude), Google (Gemini) അല്ലെങ്കിൽ xAI (Grok) എന്നിവയിൽ നിന്നുള്ള നിങ്ങളുടെ സ്വന്തം key — അതിന് \`AI_BASE_URL\`, \`AI_MODEL\` എന്നിവയും ആ provider അനുസരിച്ച് നൽകുക. എന്തെങ്കിലും പ്രശ്നമുണ്ടെങ്കിൽ എന്നോട് ചോദിക്കൂ, ഞാൻ സഹായിക്കാം.`,
     head: (n) => `🔑 ആപ്പ് തയ്യാറായി. ഇത് പൂർണ്ണമായി പ്രവർത്തിപ്പിക്കാൻ ${n === 1 ? '1 കാര്യം' : `${n} കാര്യങ്ങൾ`} നിങ്ങളുടെ സ്വന്തം account-ൽ നിന്ന് വേണം:`,
     add: 'ചേർക്കുക', from: (src) => `${src} ൽ നിന്ന് എടുക്കുക`,
     keylessHead: '💡 ഇവയിൽ ചിലത് വേണ്ടിവരില്ലായിരിക്കാം —',
@@ -393,6 +412,7 @@ const STRINGS: Record<string, NoticeStrings> = {
     tail: 'അതുവരെ ആ ബട്ടണുകൾ “Coming soon” എന്ന് കാണിക്കും — ബാക്കി ആപ്പ് പതിവുപോലെ പ്രവർത്തിക്കും.',
   },
   ar: {
+    aiChoice: (path) => `• **آپ کی ایپ کا AI** — ${path} → \`AI_API_KEY\` ڈالیں۔ کوئی بھی ایک key چلے گی: NavBharatAI API key (Home → Other AI → Developer Tools → NavBharatAI API)، یا OpenAI (ChatGPT)، Anthropic (Claude)، Google (Gemini) یا xAI (Grok) کی آپ کی اپنی key — اُن کے لیے \`AI_BASE_URL\` اور \`AI_MODEL\` بھی اُسی provider کے مطابق بھریں۔ کوئی مشکل ہو تو مجھ سے پوچھیں، میں مدد کروں گا۔`,
     head: (n) => `🔑 ایپ بن گئی ہے۔ اِسے پوری طرح چلانے کے لیے ${n === 1 ? '1 چیز' : `${n} چیزیں`} آپ کے اپنے account سے چاہیے:`,
     add: 'ڈالیں', from: (src) => `${src} سے لیں`,
     keylessHead: '💡 شاید اِن میں سے کچھ کی ضرورت ہی نہ پڑے —',
@@ -402,6 +422,7 @@ const STRINGS: Record<string, NoticeStrings> = {
 };
 
 const ENGLISH: NoticeStrings = {
+  aiChoice: (path) => `• **AI for your app** — ${path} → add \`AI_API_KEY\`. Either key works: a NavBharatAI API key (Home → Other AI → Developer Tools → NavBharatAI API), or your own key from OpenAI (ChatGPT), Anthropic (Claude), Google (Gemini) or xAI (Grok) — for those, also set \`AI_BASE_URL\` and \`AI_MODEL\` to that provider's values. Stuck? Just ask me and I'll help.`,
   head: (n) => `🔑 Your app is built. ${n === 1 ? '1 thing needs' : `${n} things need`} a key from your own account to go fully live:`,
   add: 'add',
   from: (src) => `get it from ${src}`,
@@ -420,6 +441,7 @@ export function appRequirementsNotice(missing: AppRequirement[], langCode?: stri
   if (items.length === 0) return '';
   const s = (langCode && STRINGS[langCode]) || ENGLISH;
   const lines = items.map((r) => {
+    if (r.id === 'app_ai_key' && (r.matchedEnvVars ?? []).includes('AI_API_KEY')) return s.aiChoice(r.settingsPath);
     const option = preferredOption(recipeFor(r.id), { envVars: r.matchedEnvVars, packages: r.matchedPackages });
     // NAME ONLY THE CHOSEN PROVIDER'S KEYS. `envVars` is an ANY-ONE-OF list — "Maps" carries both
     // GOOGLE_MAPS_API_KEY and MAPBOX_ACCESS_TOKEN — and rendering it verbatim reads as "go and get all

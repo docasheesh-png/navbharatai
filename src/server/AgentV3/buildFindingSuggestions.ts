@@ -169,6 +169,7 @@ const NEVER_SUGGEST = new Set([
   'RESTORE_POINT',
   // A repair answer our guard refused to write (autopsy eed79815) — nothing for the user to do.
   'REPAIR_OUT_OF_SCOPE',
+  'SUMMARY_ADDITIONS_SHOWN', 'SUMMARY_REPLY_NOT_FOUND', // how our closing line reached the screen
 ]);
 
 /**

@@ -398,11 +398,13 @@ function collect(a) {
   return { found: nodes.length, chosen, skipped, keys: Array.from(seen) };
 }
 
+// The page's CONTENT, not its size: a calculator's 0 becoming 7 changes no length (autopsy 972acde5).
 function measure() {
   const root = document.querySelector('#root, #app, #__next') || document.body;
   const text = (root && root.innerText || '').trim();
   const rich = !!(root && root.querySelector('img, svg, canvas, video, iframe, input, button, textarea, select'));
-  return { len: text.length, head: text.slice(0, 160), rich, sig: document.body ? document.body.innerHTML.length + ':' + (document.body.innerText || '').length : '' };
+  const hash = (s) => { let x = 5381; for (let i = 0; i < s.length; i++) x = ((x << 5) + x + s.charCodeAt(i)) | 0; return x; };
+  return { len: text.length, head: text.slice(0, 160), rich, sig: document.body ? hash(document.body.innerHTML) + ':' + hash(document.body.innerText || '') : '' };
 }
 
 async function freshPage(browser) {

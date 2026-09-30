@@ -49,7 +49,8 @@ describe('🔴 a repair that changed nothing is not a repair', () => {
     expect(route).toContain('repairChanged = changedWorkspacePaths(greenSnap, (await collectWorkspaceFiles(actuator, workspaceId)).files).length;');
     expect(route).toContain('if (vr.kept && repairOk && repairChanged !== 0) {');
     expect(route).toContain('greenRepairUserLine(greenRepaired.length, repairChanged)');
-    expect(route).toContain('changed: repairChanged }');
+    // Autopsy 972acde5 added `refuted` after it; the count still reaches the outcome.
+    expect(route).toContain('changed: repairChanged, refuted: repairRefutedAll() && repairChanged !== 0 }');
     // The narration no longer calls a reviewer's claim "real" before anyone has checked it.
     expect(route).not.toContain('fixing ${greenRepairable.length} real problem(s)');
   });

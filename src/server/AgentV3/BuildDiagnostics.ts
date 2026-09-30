@@ -47,6 +47,8 @@ const PROCESS_ONLY_CODES = new Set([
   'REPAIR_OUT_OF_SCOPE',
   // The user named a stack we do not build (unsupportedStack.ts) — a fact about OUR templates, not the app.
   'UNSUPPORTED_STACK',
+  // Whether the platform's additions to the reply reached the screen (summaryAdditions.ts): a fact about our delivery.
+  'SUMMARY_ADDITIONS_SHOWN', 'SUMMARY_REPLY_NOT_FOUND',
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', // measurements of the ENGINE (postGreenWrites.ts), never app findings
   // …and its sibling: how far down OUR ladder a build fell (ladderDepth.ts) is a fact about our
   // routing, never about the user's app.

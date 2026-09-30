@@ -1497,6 +1497,43 @@ the code (it is actually read somewhere) on 2026-07-11.
   **What to watch on the first real days:** whether the countdown appears often (the shared-address
   case), and whether pictures still open in "Add text" — if a browser cannot read them the relay
   covers it, but a rise in relay calls means we are paying the address cost after all.
+  🇮🇳 **EVERY PERSON IS INDIAN UNLESS NAMED OTHERWISE, AND NO IMAGE IS NOT A DEAD END (admin
+  2026-09-30: *"jab bhi koi human image banayi jaye to default indian face hi banna chahiye … 'indian
+  face' diya to image bani hi nahi"*). No env key.** (1) `imagePeople.ts` puts
+  `INDIAN_PEOPLE_DIRECTION` straight after the subject whenever a person is in the brief and no other
+  origin, mix or character is named ("a Japanese chef", "diverse team", "spiderman" stand down) —
+  in the craft layer (every rung of the generator), never on an edit, a UI screenshot or a
+  background. Precision-first: player / worker / cook / seller / driver are NOT people words, and a
+  cat's face or a face-wash bottle is not a face. (2) 🔴 **Since this key made the browser fetch the
+  free picture, a picture the engine did not deliver was a dead end** — the server had already
+  returned the link, so the old ladder (a try from our side, then the metered paid rungs) never ran.
+  The browser now probes a link it cannot read (`imageLinkLoads`) and, when no picture came, re-sends
+  the SAME request with `freeFailed` (the signed link and its reason). The server honours it only via
+  `freeFailureVerified` — our signature, unexpired, and the prompt inside the link equal to this
+  request's prompt — and then runs the server ladder; a mismatch is a 403. The paid rungs stay
+  metered exactly as before. ⚠️ **Why "indian face" failed is NOT proven** (the provider cannot be
+  reached from a session); the suspect is the provider's own `safe=true` filter (added 2026-09-28)
+  refusing a close-up face. The `[IMAGE_GEN] the browser could not get the free picture (<reason>)`
+  log line now names it — read it before changing anything else.
+  💬 **NAVBHARATAI FREE DOES NOT MAKE PICTURES, AND IT KNOWS WHERE THEY ARE MADE (admin 2026-09-30:
+  *"photo nahi banata hai = sahi hai, banana bhi nahi hai … navbharatai free ko mode aur uske andar jo
+  hai, sabke bare me batao"*).** The inline Pollinations picture in `routes/chat.ts` is removed — a
+  free picture request now reaches the model with `FREE_IMAGE_REQUEST_DIRECTIVE`, which answers in the
+  user's language and points to **Mode → Image Generator AI FREE**. And `freeChatModeGuide()` is a
+  STANDING part of the free system prompt (every turn, not a keyword match): the Mode sheet's two
+  groups, the studio, every expert by name, the four the phone app hides, and that Pro is not in Mode.
+  🔒 `tests/freeChatKnowsItsModeButton.test.ts` holds the guide equal to the sheet
+  (`newModeEntries`) in both directions — it found the GitHub repo analyst missing on its first run.
+  ⚠️ The free chat's own PHOTO EDIT (an attached picture + "background badlo", 2026-09-21) is
+  deliberately untouched — the admin's word was about MAKING a picture; ask before removing an edit.
+  🔴 **AND ON THE PHONE THE MESSAGE NEVER EVEN REACHED THE SERVER** (admin's screenshot, same day:
+  "photo banao" → *"Building applications is only available for NavBharatAI-Pro"*). `useChatEngine.ts`
+  ran `/bana do|build|create|generate|coding|program|banao|project/i` over every free message and
+  answered a match itself — so "photo banao", "chai kaise banao" and "project report likho" were all
+  refused with a canned line. The free agent now always falls through to the server, whose own prompt
+  sends an app request to Pro and a picture request to Mode. Sibling fixed in the same file:
+  `githubTriggers` matched "git" inside "digital" and "repo" inside "report". ⚠️ Bundled mode: the
+  website has it on deploy; phone users need a fresh `.aab`/`.ipa`.
 
 - **Charging for NavBharat Cloud hosting (built 2026-09-12, ROADMAP §11 slice 2.1 — NOT live yet):**
   `NAVBHARAT_BILL_HOSTING` (⚠️ **UNSET.** Unset means the daily job still MEASURES every hosted app and
@@ -2928,6 +2965,43 @@ the flag entries above promise.
   says so, `null` means *not supplied* and never zero, and `writeTypecheckUntouched` makes the
   silence unrepresentable as a fact about the build. Test-locked and reversion-proven four ways in
   `tests/theCounterWatchedOneLaneOfTwo.test.ts`.
+- **`AGENTV3_WRITE_SECURITY`** (NOT set; default ON, `off` disables — added 2026-09-30, autopsy 466c260a) —
+  `scanSecurity`'s medium/high findings (an XSS sink such as `dangerouslySetInnerHTML` / raw `innerHTML`, a
+  hardcoded secret) are handed back with every write (`securityWriteNote`, via `writeSteeringNotes`). Before
+  this they surfaced only at readiness, after the app was green, where the reviewer is suggest-only — so
+  three sinks shipped with a warning nobody acted on. Advisory, never blocks a write, no model call.
+  Same PR, no flag: an `nb-` class the design kit does not define and no stylesheet defines is named at
+  write time too (`inventedKitClassNote`).
+- **📣 `AGENTV3_SUMMARY_ADDITIONS` — THE END OF A SUCCESSFUL BUILD IS WHAT THE USER STILL HAS TO DO (admin
+  2026-09-30: *"app banne ke last me clearly user ko dikhe"*). ⚠️ NOT set, and the code default is ON**; `off`
+  restores the old behaviour. `summaryAdditions.ts`.
+  🔴 **WHY: on a SUCCESSFUL build the chat panel never rendered `result.summary`**. It is rendered only on
+  failure. So every line the platform appended to a successful reply never reached a screen:
+  - the "what this app needs from you" key checklist (AppRequirements, since 2026-08-03);
+  - claim corrections;
+  - the green-repair line;
+  - the review offers;
+  - the live-preview line.
+
+  Only the separate cards (the key-entry card, the suggestion card) were visible. The route now records
+  every chat line the user has seen and sends the summary minus the model's reply as the build's final
+  chat line.
+  🔒 **It is sent from the SERVER on purpose:** the phone apps are bundled, so a panel change would reach
+  them only with a new store build. If the reply cannot be found in the summary, nothing is sent
+  (`SUMMARY_REPLY_NOT_FOUND`), because a repeated reply is worse than a missing note.
+  🤖 **AI inside the app, same change:**
+  - **Builder:** `AI_IN_APP_RULE` makes the builder call AI from the app's server through one standard
+    request configured by `AI_API_KEY` / `AI_BASE_URL` (default `https://navbharatai.com/api/v1`) /
+    `AI_MODEL` (default `navbharatai`). The NavBharatAI API does not accept calls from other sites'
+    browser pages, so a browser-side call could never work with it.
+  - **Checklist:** for an app that reads `AI_API_KEY`, it offers both a NavBharatAI API key (Home → Other
+    AI → Developer Tools → NavBharatAI API) and the user's own OpenAI / Anthropic / Google / xAI key, in
+    11 languages. For an app written against one provider's client, the NavBharatAI option is never
+    offered, because it would not work there.
+  - **Asking last:** the architect prompt's ASK LAST rule puts the model's own questions at the end of
+    its reply.
+
+  Test-locked in `tests/theAskComesLast.test.ts`.
 - **`AGENTV3_STORE_LOOP_NOTE`** (default ON, `off` disables — added 2026-09-29, autopsy 6a4a799f) — a
   write-time note (`storeEffectLoop.ts`, via `ToolDispatcher.writeSteeringNotes`) when a file binds a
   zustand hook with NO selector (`const store = useMusicStore()`), lists that bare name in an effect's
@@ -3039,6 +3113,15 @@ the flag entries above promise.
   `revertToGreenSnapshot`, which calls `reconcileCapturedWrites` (`GreenGuard.ts`). It also refuses an
   EMPTY snapshot, because `restorePlan({}, cur)` would delete the whole workspace. Test-locked and
   reversion-proven in `tests/aRealBugInAWorkingAppGetsOneVerifiedRepair.test.ts`.
+  🔴 **THE FINDING IS PROVEN BEFORE THE APP IS EDITED (autopsy 972acde5, 2026-09-30).** The pass was
+  handed `judgeRepairPrompt`, which calls every finding a "real problem that must be fixed". That is true
+  of a failed build's judge verdict and false of a reviewer's reading of working code. On a correct
+  calculator, the repair traced the reviewer's CRITICAL and wrote *"this happened to work"*, then edited
+  the app anyway. The user was told a real problem had been fixed. It now gets `greenRepairPrompt`: prove
+  each finding with one concrete input, change nothing for the rest, and end with `CONFIRMED n` /
+  `NOT A BUG n` lines, read by `readRepairVerdicts`. When every finding is refuted, whatever it changed
+  is undone (`REVIEW_FUNCTIONAL_REFUTED`). A refuted finding is never claimed as fixed and never offered
+  to the user. Unreadable verdicts ⇒ the previous behaviour. Test-locked in `tests/theCalculatorAutopsy.test.ts`.
 - **ONE BUILD PER APP ACROSS SERVERS, AND SCOPED REPAIRS — built ONCE, by #3331 (autopsy eed79815 =
   "4D Future City Drive", 2026-09-26).** The lease is `AgentV3/workspaceBuildLease.ts` (kill switch
   `AGENTV3_WORKSPACE_LEASE=off`; see SCALE PLAN §2), the repair scope is `limitRepairToScope` +
@@ -4750,6 +4833,15 @@ rung only when it is the known-weak 4.7-flash.
   the judge and the plan ARE on for that tier. ⚠️ **Since 2026-09-29 only the JUDGE is** — Weak joined
   Strong in `PLAN_FORBIDDEN_TIERS` after both Ultra plans on autopsy 6a4a799f came back unusable; the
   flag value was not changed and does not need to be.
+  🔴 **CORRECTED 2026-09-30 (autopsy 466c260a) — THE JUDGE DOES NOT RUN ON A WEAK BUILD EITHER, AND NEVER
+  HAS.** `judgeBuild` is called in exactly one place in `routes/agentv3.ts`: inside the escalation block,
+  which is gated `!freeTierBuildActive && tierEscalationPath.length > 1` — and `escalationPathForTier('weak')`
+  returns ONE element by design ("Weak never escalates"). So on the build engine `AGENTV3_NEMOTRON=weak`
+  reaches no role at all today; only the keyed Super ladder rung is live. The report shows it: no
+  `CHEAP_REVIEW` line of any kind on that weak build. ⚠️ **Wiring it is an admin decision, not a fix:** the
+  judge acts only by driving an escalation repair, which Weak never takes, so a Weak judge would add cost
+  and a verdict with nothing to act on it. The "judge = 78% of a cheap-lead build's cost" figure below was
+  therefore measured on a build that escalates (Normal/Strong), not on Weak.
   🔴 **AND THIS ENTRY SAID OTHERWISE FOR HALF A DAY, WHICH IS THE PART WORTH KEEPING.** It read *"the
   admin reported setting `AGENTV3_NEMOTRON=week`… the judge and the plan stayed OFF"*, ending with the
   exact sentence **"this must be verified in the console, not assumed from this entry"** — and a
@@ -4859,7 +4951,7 @@ me" · "mera kharcha kam se kam ho").** Test-locked in `tests/agentRolesPerTier.
 | Builder + sub-agents + fast lane | tier ladder | tier ladder | tier ladder | above |
 | Heals | ladder minus leading flash | same | same | `healLadder` |
 | Lint / typecheck / build / preview / journey / fuzz / CVE | code | code | code | ₹0 |
-| **Judge / Reviewer** | **glm-5.3** | **glm-5.3** | **Grok** | a DIFFERENT model from the builder at the lowest input price that reasons well (glm-5.3 $1.40 in vs Grok $3); Strong builds on glm-5.3 so its judge is Grok, outside every ladder; `AGENTV3_REVIEWER=sonnet` forces Sonnet; no keys ⇒ Sonnet; **Opus is never the judge**. ⚠️ The user-facing review narration used to print the judge's vendor name ("🔎 Grok is reviewing…") — a White-Label breach, fixed |
+| **Judge / Reviewer** | **none — Weak never escalates, and the judge runs only inside escalation (verified 2026-09-30)** | **glm-5.3** | **Grok** | a DIFFERENT model from the builder at the lowest input price that reasons well (glm-5.3 $1.40 in vs Grok $3); Strong builds on glm-5.3 so its judge is Grok, outside every ladder; `AGENTV3_REVIEWER=sonnet` forces Sonnet; no keys ⇒ Sonnet; **Opus is never the judge**. ⚠️ The user-facing review narration used to print the judge's vendor name ("🔎 Grok is reviewing…") — a White-Label breach, fixed |
 | Vision (describe) | Gemini → Grok | Gemini → Grok | Claude(Haiku describe tier) → Gemini → Grok | `useClaude` follows `powerMode` |
 | Escalation | never | own ladder from Sonnet | own ladder from Opus | `escalationPathForTier` |
 

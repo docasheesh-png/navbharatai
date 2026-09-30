@@ -670,14 +670,29 @@ export async function warmIndexFiles(
   const stubs = new Set(mem.restoredStubPaths());
   const known = new Set(mem.graph().files.filter((f) => !stubs.has(f)));
   const targets = fileTree.filter((f) => isCode(f) && !known.has(f)).slice(0, maxFiles);
+  // READ TOGETHER, INDEX IN ORDER (autopsy 972acde5). Each read is a sandbox round trip, and one at a
+  // time they sat in the silent stretch before the build's first model call. Reads run WARM_READ_CONCURRENCY
+  // at a time; indexing still walks `targets` in order, so the graph is exactly what the loop built.
+  const contents: Array<string | null> = new Array(targets.length).fill(null);
+  let next = 0;
+  const worker = async () => {
+    while (next < targets.length) {
+      const i = next++;
+      try {
+        const content = await read(targets[i]);
+        if (typeof content === 'string' && content.length <= maxBytes) contents[i] = content;
+      } catch { /* unreadable file — skip, never block the build */ }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(WARM_READ_CONCURRENCY, targets.length) }, worker));
   const indexed: string[] = [];
-  for (const file of targets) {
-    try {
-      const content = await read(file);
-      if (typeof content !== 'string' || content.length > maxBytes) continue;
-      mem.indexFile(file, content);
-      indexed.push(file);
-    } catch { /* unreadable file — skip, never block the build */ }
-  }
+  targets.forEach((file, i) => {
+    const content = contents[i];
+    if (content === null) return;
+    try { mem.indexFile(file, content); indexed.push(file); } catch { /* never block the build */ }
+  });
   return indexed;
 }
+
+/** How many sandbox reads `warmIndexFiles` keeps in flight at once. */
+export const WARM_READ_CONCURRENCY = 8;

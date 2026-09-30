@@ -84058,6 +84058,127 @@ Admin: *"Sabhi problem fix? Yes than merge, No - continue"*. The answer was no. 
 - **A write to `package.json` during the reviewer's `evaluate` was refused by Green Freeze.** The writer is unnamed (the same shape as e7baf61d's `src/types.ts`). No harm was done. The writer is still to be identified.
 - **17 hard-coded colours, 2 moderate npm advisories, 2 journeys behind login.** These are advisory findings or the known lane-B limit.
 
+## 2026-09-30 — Autopsy 466c260a ("NavAI Workspace", Weak tier, KIMI rung 2, 16.6 min, green, billed ₹395.75)
+
+Prompt, verbatim: *"Notes , Visualizeusing, pdf code file handling picture editor , pro chat codestudeo and
+more"*. Built, rendered at 429 s, typechecked, production build clean, 16 controls pressed without a break.
+
+**Ledger.** ✅ 3 self-heals (a missing `MessageSquare` import; 3 undefined `nb-` classes; 5 "no heading"
+pages) · 🔀 0 · ⏭️ 2 (3 XSS sinks reported and left; no journey derivable) · ❌ 2 (UI shipped in Hindi for an
+English request, with the summary claiming the user asked for it; a "Pro Chat" answering with text written
+into the app, sold as an "instant assistant response") · 🥵 3 (the 255 s post-answer design heal, ~40 calls at
+~48 K input each, the largest slice of the build's cost; the frontend agent's 5 minutes after first render;
+an ETA of 5–11 min against 16.6).
+
+**Fixed (PR after this entry):**
+- **Language** — the detector was right (null), the instruction was the gap: "same language as the request"
+  left a bias-prone model to pick Hindi. `appLanguageInstruction` now tells a Latin-letter request with no
+  language named to stay in Latin letters and never switch script or claim the user asked for one; an
+  explicit ask ("hindi me", "in Tamil", "bilingual") is never overridden. The SAME line reaches every
+  sub-agent (`languageRule`) — the frontend specialist wrote `locales/hi.ts` because the architect's choice was
+  the only language it had ever heard of.
+- **Domain** — "pro chat" made the workspace SOCIAL and its build was told to include auth, a realtime feed,
+  moderation and media upload. AI-assistant chat idioms are stripped; chatting with people keeps its meaning.
+- **NO_HEADING** — the pages rendered inside `DashboardShell`, whose topbar carries `{title}`. A page under a
+  LAYOUT (header/nav/sidebar/topbar) with a dynamic heading now counts as titled. A brand-only header, a
+  card or a modal does not.
+- **Scripted assistant** — `findScriptedAssistant`: assistant-side messages in a project that makes no
+  network or AI call anywhere are disclosed in the summary (`SCRIPTED_ASSISTANT_SHIPPED`), confirmed on the
+  whole durable project so an edit turn is never judged on its own few files.
+- **Invented kit classes** — an `nb-` class the kit does not define and no stylesheet defines is named at
+  WRITE time (`inventedKitClassNote`), instead of at the end-of-build check inside a heal.
+Test-locked and reversion-proven six ways in `tests/theWorkspaceNobodyAskedToBeHindi.test.ts`.
+
+**Corrected record (CLAUDE.md):** the Nemotron JUDGE has never run on a Weak build. `judgeBuild` lives only
+inside the escalation block (`!freeTierBuildActive && tierEscalationPath.length > 1`) and Weak never
+escalates. Not wired: a Weak judge would add cost with no repair to act on it — raised to the admin.
+
+**Open, not decided here:**
+- **Billing:** ₹395.75 billed, 15,000 tokens (₹150) actually debited — the overdraft floor clamped a new
+  user's first build and NavBharatAI absorbed ₹245.75 on ~₹100 of real cost. One weak build consumed the
+  user's whole welcome credit. Policy, not a bug; raised to the admin.
+  - 🔴 **Correction, same day, when the admin asked what NavBharatAI actually paid.** "Absorbed ₹245.75" is
+    unbilled MARKUP, not money spent. The real cash out, from the report's own `billing` block, was
+    **$1.04 ≈ ₹99.89**: KIMI `kimi-k2.7-code` $0.994 (234,937 uncached in × $0.95/M = $0.223; 3,244,800
+    cache-read × $0.19/M = $0.617; 38,599 out × $4.00/M = $0.154) plus E2B $0.046. These are converted at
+    the ~₹96/$ rate the bill itself used. `tieredMarkup($1.0398)` = $4.119 = ₹395.75. The debit took ₹150
+    of gifted credit, and no real rupee came in, so the build's cash cost to NavBharatAI is the ~₹100 above.
+    Telling the admin "₹245.75 ka kharcha" overstated the loss 2.5×.
+  - **Admin decision (2026-09-30): the judge stays OFF on Weak** ("ok"). No code change: Weak never escalates,
+    so the judge has no repair to drive there.
+- **Heal cost — measured, and the first theory was wrong.** The heal was ~$0.46 of the build's $0.99 real
+  cost (~2.4 M cache-read tokens at $0.19/M). It is NOT inherited history: `AgentRunner.run` starts every
+  run from `[{ role: 'user', content: prompt }]`, and `persistence` only appends. The ~48 K per call is the
+  heal's OWN transcript — ~50 calls, re-reading a 25 KB `index.css` repeatedly between edits. The cause of
+  the calls was the NO_HEADING false positive (5 pages), which this PR removes; a "fresh context" change
+  would have fixed nothing.
+- ~~**XSS sinks**~~ — **fixed upstream in the same PR:** `securityWriteNote` runs the same `scanSecurity` on
+  every write and hands medium/high findings back with the file (kill switch `AGENTV3_WRITE_SECURITY=off`).
+  At readiness they were only ever reported, because the reviewer is suggest-only on a green app.
+## 2026-09-30 — Autopsy 972acde5 ("Calculator", Weak tier): a working app, reported three untrue things about itself
+
+The build succeeded in 5.6 min from our tested calculator template, rendered, typechecked and built for
+production. Its report still said three things that were not true.
+
+**Ledger:** ✅ 0 self-heals · 🔀 1 workaround (GLM `glm-4.7-flashx` crawled 34.5 s, benched, fell to KIMI) ·
+⏭️ 0 skips · ❌ 3 false verdicts (below) · 🥵 3 struggles:
+- 17 s before the first model call;
+- KIMI's first call took 40 s to say "let me run a type check";
+- a 2-minute repair of a bug that did not exist.
+
+**Fixed, each reversion-proven in `tests/theCalculatorAutopsy.test.ts`:**
+1. **"Delete / remove has no visible control" was the build's root cause, and it was false.** The
+   calculator has a `DEL` key. The probe did not know `del`/`backspace`/`⌫`. The same line hid a larger
+   class: every icon in every probe (`✕ × 🗑 ✏ ✓ 🌙`) sat inside `\b…\b`, which cannot match next to a
+   symbol. So an icon-only delete, edit or done button had never been recognised. `controlPattern()`
+   matches words with boundaries and icons on their own.
+2. **The template's glyph keys had no accessible names** (`C`, `DEL`, `x`, `/`). They now have them:
+   Clear, Backspace, Multiply, Divide, Plus, Minus, Equals, Percent, Decimal point.
+3. **The explorer said pressing "7" changed nothing.** Its change signature compared the page's text and
+   HTML **lengths**, and `0` → `7` has the same length. It now hashes the content.
+4. **The review repair edited a working app for a bug that was not there, and the user was told it was a
+   real fix.** Full account in CLAUDE.md under `AGENTV3_GREEN_FUNCTIONAL_REPAIR`. This is the second
+   instance of the class after build 15151196, which had only handled the "changed nothing" ending.
+5. **Template seeding wrote 12 files one after another** (~5 s of the pre-call wait). The writes are now
+   concurrent, and any failure still drops the seed.
+
+**Still open (rule 6):**
+- ~7 s between "personal context loaded" and the project-mode decision is unaccounted for. No timing line
+  covers that window; the next step is an instrument, not a guess.
+- A CONFIRMED repair after the preview copy was taken still leaves the copy stale
+  (`PREVIEW_SNAPSHOT_STALE`); a refuted-and-undone repair no longer does. Re-taking the copy after a kept
+  repair costs a production build plus a deploy, and is its own change.
+- `requestAnalysis.startTier` still reads `gemini`, a label from before the tier ladders. It is
+  admin-only and cosmetic, but it is untrue.
+
+### 2026-09-30 (same day) — the three "still open" items from the entry above, and one more bug
+
+The admin asked whether everything was fixed. It was not, so the open items were worked in the same PR.
+
+- **`startTier: gemini` — the entry above was WRONG to list this as open.** A session on 2026-09-17
+  (autopsy 2b0a3ed5) deliberately kept the key, because it is a complexity band that months of cost
+  telemetry is keyed on. It added `startBand` ("cheapest band"), and this report prints both. Nothing to
+  fix. The lesson is safeguard #6 again: re-grep before calling something open.
+- **The ~7 s before the first model call.** `warmIndexFiles` read the project from the sandbox one file
+  at a time, up to 200 files per call. It now reads 8 at a time and still indexes in the original order.
+  The project-context step also records its own `SETUP_TIMING` line (memory restore · listing ·
+  indexing), so the next report shows where this window goes instead of leaving it to be inferred.
+  ⚠️ Whether this was the whole 7 s is unproven until a report carries that line.
+- **The stale preview copy after a kept repair.** The copy-taking code is now one closure
+  (`takePreviewCopy`). After a kept review repair that changed files, `refreshPreviewCopy` rebuilds the
+  app and takes a fresh copy: bounded to 60 s on a re-armed, still-finite advisory cap. The outcome is
+  recorded as `PREVIEW_SNAPSHOT_REFRESHED`, or `_NOT_REFRESHED` with the old copy kept as a fallback.
+- **The calculator template had a real bug, and the reviewer did not find it.** Running the template's
+  own code by pressing its own buttons showed two things:
+  - The reviewer's CRITICAL (`2+3+4=`) was false: it gives 9.
+  - `5 + 50 % + 2 =` gave **2.5**, because an operator after `%` dropped the pending `5 +`.
+
+  The template now tracks whether the display holds an unused operand. The template's arithmetic is
+  locked by 13 key-sequence tests that compile and run the real TSX (`tests/theCalculatorAutopsy.test.ts`).
+
+**Proactive, not done here:** the other golden templates with logic (tip split, stopwatch, pomodoro) have
+no behavioural test of this kind. The same harness would lock them, so any false reviewer claim against
+them is answered by evidence rather than a repair call.
 ## 2026-09-30 — Builder scorecard autopsy (admin Diagnostics capture, 254 builds): two defects, both ours
 
 The admin sent the Builder scorecard with no text. Headline numbers: build success 62.2% of 254,
@@ -84182,6 +84303,87 @@ Creator** on itself (IAM signBlob). Without it the exchange answers `custom-toke
 the old honest Email/Google message, and the OTP card shows that code in the detail — never a fake success.
 - ✅ **Same day, closed: the unnamed `package.json` writer.** It was the `evaluate` tool's dependency reconcile (`landHealWrite`), called by the lean reviewer on a green app. Green Freeze refused it correctly, but the heal ran in no pass, so the report could only say "a later write". `landHealWrite` now runs in the pass `evaluate-heal`. That pass is on no allowlist, so a green app is still untouched; the refusal now names its writer. This is test-locked and reversion-proven in `tests/aStaleCopyCannotRunInsteadOfTheBuild.test.ts`. The e7baf61d `src/types.ts` writer is probably the same heal (the import reconcile uses the same door); the next report will say for certain.
 
+## 2026-09-30 — the image generator: every person is Indian by default, and "no image" is no longer a dead end
+
+**Admin, verbatim:** *"jab bhi koi face bane to woh bhi chinis face banta hai … jab bhi koi human image banayi
+jaye to default indian face hi banna chahiye (100% indian) jab tak specific bola na jaye kisi aur face ke bare
+me … abhi maine prompt diya 'indian face' to image bani hi nahi, isko bhi fix karna!!"*
+
+**1. Chinese faces — the cause was our brief.** Nothing we sent said who the person is, so the engine used its
+own default face. New `src/server/lib/imagePeople.ts` (pure):
+- It detects a person in the brief (English, Hinglish, Devanagari).
+- It stands down when the user names another origin, a mix or a character.
+- `INDIAN_PEOPLE_DIRECTION` is placed straight after the subject in `craftImagePrompt`, which covers every rung of the generator.
+- Free chat's inline image uses the same rule.
+- It is never applied to an edit of the user's own photo, a UI screenshot, or a background.
+- It is precision-first: `player`, `worker`, `cook`, `seller`, `driver`, `cat face` and `face wash` do not count as people.
+
+**2. "indian face" made no image — the structural half is fixed; the provider's half is unproven.**
+- Our own triage and word scan both pass that brief (measured).
+- Since 2026-09-21 the browser fetches the free picture itself, so when the engine delivered nothing, the old ladder never ran. That ladder was: one try from our side, then the metered paid rungs. A link the browser could not read was also *shown on trust*, even when it was an error.
+- The browser now probes such a link (`imageLinkLoads`). When no picture came, it re-sends the same request with `freeFailed`.
+- The server honours that only through `freeFailureVerified`: our signature, unexpired, and the prompt in the link equal to this request's. It then runs the server ladder. A mismatch gets a 403.
+- **Open root cause:** why the provider refused `"indian face"` is not proven. Its host cannot be reached from a session. The suspect is `safe=true` (added 2026-09-28) refusing a close-up face. The route now logs the browser's reason (`[IMAGE_GEN] the browser could not get the free picture (…)`). Read that before changing the provider call.
+
+**Tests:** `tests/everyFaceIsIndianAndNoImageIsADeadEnd.test.ts`, 57 cases, including the real route. Reversion-proven: removing the placement, or the server fallback, fails 5 cases.
+
+## 2026-09-30 — NavBharatAI FREE stops making pictures, and learns its own Mode button
+
+**Admin, verbatim:** *"navbharat photo nahi banata hai = sahi hai, banana bhi nahi hai! … navbharatai free
+ko pata hi nahi photo kaha banegi! navbharatai free me 'mode' me image generator hai … navbharatai free ko
+mode aur uske andar jo hai, sabke bare me batao!!"*
+
+- **Cause.** The free system prompt never mentioned Mode. App knowledge reached the model only when a
+  message matched an `AppContextInjector` keyword, so a picture request met a model that had never heard of
+  the studio.
+- **The inline picture is removed** from `routes/chat.ts`. It was made from this server's address and ran
+  against the admin's rule. A free picture request now adds `FREE_IMAGE_REQUEST_DIRECTIVE`: the model
+  replies in the user's language, points to **Mode → Image Generator AI FREE**, and can write a
+  paste-ready description.
+- **`src/server/lib/freeChatModeGuide.ts`** (new) is appended to the free system prompt on every turn. It
+  covers:
+  - both groups of the Mode sheet;
+  - what the studio does;
+  - every expert by name, taken from the professional registry plus Doctor AI and the repo analyst;
+  - the four experts the phone app hides;
+  - that Pro is not in Mode.
+- **`imageGenGuidance()`** now leads with the Mode route. It is used by Professionals, Pro and the
+  photo-edit replies.
+- **Deliberately unchanged:** free chat's photo EDIT of an attached picture (admin 2026-09-21).
+- **Tests.** `tests/freeChatKnowsItsModeButton.test.ts` (9) holds the guide equal to `newModeEntries` in
+  both directions. On its first run it found "GitHub Repo Analyst & Improver" missing. Reversion-proven.
+## 2026-09-30 — What the app still needs from you is the last thing the build says (admin request)
+
+Admin: *"jab user koi aisi app banata hai jisme user se suggestion, question ke answer, API keys ya secret
+keys chahiye — to app banne ke last me clearly user ko dikhe, user ki language me."* The example was
+"ChatGPT jaisa AI": after 100% ready, say it needs an AI key, which may be a NavBharatAI API key (Other →
+NavBharatAI API) or a ChatGPT/Claude/Grok/Gemini key, and offer help.
+
+**What already existed:** a localized key checklist (`AppRequirements`, 2026-08-03), a closing key-entry
+card, and the user-action tray.
+
+**What the investigation found, and it is the headline:** on a SUCCESSFUL build, `result.summary` is never
+rendered. The panel shows it only on failure. So the checklist and every other line appended to a
+successful reply reached no screen.
+
+**Built:**
+- `summaryAdditions.ts`: the part of the summary the user has not seen is sent as the build's final chat
+  line. It is sent from the server, so the bundled phone apps get it without a new store build.
+- `AI_IN_APP_RULE`: an AI feature is built on the app's server, as one standard request configured by
+  `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL`. That makes "use a NavBharatAI key" true. The NavBharatAI API
+  refuses other sites' browser pages, so a browser-side call could never have used it.
+- The checklist's two-option AI line, in 11 languages, shown only when the app reads `AI_API_KEY`.
+- Detection now covers Anthropic, Gemini and xAI keys, and the `@anthropic-ai/sdk` and `@google/genai`
+  packages.
+- A "NavBharatAI API" option in the key recipe.
+- The architect's ASK LAST rule.
+
+**Open:**
+- The model's own questions still stream before the platform's closing line. They are at the end of the
+  model's reply, not after the checklist.
+- The fast lane and sub-agents do not carry `AI_IN_APP_RULE` yet; only the architect does.
+- An app written against a provider's own client still gets that provider's line only. That is honest,
+  but it is not the two-option choice.
 ## 2026-09-30 — PR C: the database is offered BEFORE the builder decides where data lives
 `src/server/AgentV3/sharedDataNeed.ts` reads the REQUEST (not the files) for data other people must later see —
 bookings, orders, admissions, records, accounts, an admin dashboard — precision-first, honouring an explicit
@@ -84263,3 +84465,13 @@ demo credentials. Nothing logs in. Every auth-gated app is verified at its front
   that asked for security; the reviewer reported no security issues.
 - Billing: ₹639.85 billed, wallet debited ₹150 (overdraft floor), so ~₹490 of markup absorbed; real cost
   $1.80 (KIMI 6.84M input, 6.47M cached).
+- **Follow-up, same day (admin screenshot: "photo banao" → "Building applications is only available for
+  NavBharatAI-Pro").**
+  - **Cause:** the free chat's message never reached the server. `useChatEngine.ts` answered any free
+    message matching `/…|create|generate|program|banao|project/i` with that canned line, so the
+    server-side fix above could not run.
+  - **Fix:** the free agent now always goes to the server.
+  - **Sibling fixed in the same file:** `githubTriggers` used substring matching ("git" in "digital",
+    "repo" in "report", "push" in "push notification"). It now matches whole words only.
+  - **Tests:** 2 more in `tests/freeChatKnowsItsModeButton.test.ts`, reversion-proven.
+  - **Reach:** the website gets this on deploy; phones need a fresh bundle.

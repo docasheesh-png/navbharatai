@@ -737,3 +737,27 @@ export function securitySummary(findings: SecurityFinding[]): string {
   const body = sorted.slice(0, 20).map((f) => `  - [${f.severity}] ${f.file}:${f.line} ${f.rule} — ${f.message}`);
   return [head, ...body].join('\n');
 }
+
+/**
+ * 🔴 SAID WHILE THE FILE IS OPEN (autopsy 466c260a, 2026-09-29). A chat page rendered its messages with
+ * `dangerouslySetInnerHTML` and a code runner wrote raw `innerHTML`. `scanSecurity` saw both — at
+ * READINESS, after the app was green, where the reviewer is suggest-only — so three XSS sinks shipped
+ * with a warning nobody acted on. The same scan now runs on every write and hands its medium/high
+ * findings back with the file, the one moment fixing them costs nothing.
+ *
+ * Advisory, never blocking: the builder may keep a sink it genuinely needs (a sandboxed code runner),
+ * but it decides with the finding in front of it. Low-severity findings (credentials in a fixture or a
+ * dotenv file) are not repeated here. Kill switch: AGENTV3_WRITE_SECURITY=off. PURE.
+ */
+export function securityWriteNote(file: string, content: string, env: NodeJS.ProcessEnv = process.env): string {
+  if (String(env.AGENTV3_WRITE_SECURITY ?? '').trim().toLowerCase() === 'off') return '';
+  if (typeof content !== 'string' || !content.trim()) return '';
+  if (!/\.(?:[cm]?[jt]sx?|vue|svelte|html?|ejs|hbs|handlebars)$/i.test(file) || isFixtureFile(file)) return '';
+  if (/\.(?:test|spec)\.|(^|\/)(?:__tests__|e2e|tests?)\//i.test(file)) return '';
+  let findings: SecurityFinding[];
+  try { findings = scanSecurity(file, content).filter((f) => f.severity !== 'low'); } catch { return ''; }
+  if (findings.length === 0) return '';
+  const lines = findings.slice(0, 4).map((f) => `  • line ${f.line}: ${f.message}`);
+  const more = findings.length > 4 ? `\n  …and ${findings.length - 4} more.` : '';
+  return `\nSecurity check on ${file} (fix it now, while you have the file open):\n${lines.join('\n')}${more}`;
+}

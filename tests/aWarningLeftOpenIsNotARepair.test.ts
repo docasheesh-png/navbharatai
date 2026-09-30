@@ -108,3 +108,24 @@ describe('5 · first-pass quality does not get better by renaming', () => {
     expect(s.healed).toBe(1);
   });
 });
+
+describe('6 · a build its own user stopped is neither a failure nor a stuck project', () => {
+  // Two of the four "stuck projects" on the 2026-09-30 card said, in their own root cause, "STOPPED BY
+  // THE USER — no failure of the app or the engine is implied". The failure panel already excluded
+  // them (`isUserStoppedBuild`); the scorecard did not.
+  const b = (ws: string, t: number, ok: boolean, userStopped?: boolean) => ({ workspaceId: ws, reportedAt: t, ok, userStopped });
+
+  it('🔴 the card: a project whose latest build was a Stop is not stuck, and the Stop is not a failure', () => {
+    const card = builderScorecard([b('a', 1, true), b('a', 2, false, true), b('c', 1, true), b('c', 2, false)]);
+    expect(card.survival.broken.map((p) => p.workspaceId)).toEqual(['c']);
+    expect(card.survival.stoppedByUser).toBe(1);
+    expect(card.success).toMatchObject({ total: 3, succeeded: 2, failed: 1, stoppedByUser: 1, skipped: 0 });
+    expect(scorecardHeadline(card)).toMatch(/Stopped by their own user: 1 build/);
+  });
+
+  it('a stop that is NOT the user (no flag) still counts, and the history row carries the flag', () => {
+    expect(builderScorecard([b('x', 1, false)]).success.failed).toBe(1);
+    expect(toMetricInput({ workspaceId: 'w', startedAt: 1, endedAt: 2, ok: false, userStopped: true }).userStopped).toBe(true);
+    expect(toMetricInput({ workspaceId: 'w', startedAt: 1, endedAt: 2, ok: false }).userStopped).toBeUndefined();
+  });
+});

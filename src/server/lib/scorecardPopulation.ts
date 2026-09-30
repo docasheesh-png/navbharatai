@@ -76,6 +76,7 @@ export function toMetricInput(e: {
   rootCause?: string | null;
   prompt?: string | null;
   restoredToGreen?: boolean | null;
+  userStopped?: boolean | null;
 }): BuildMetricInput {
   const started = typeof e.startedAt === 'number' ? e.startedAt : null;
   const ended = typeof e.endedAt === 'number' ? e.endedAt : null;
@@ -105,6 +106,8 @@ export function toMetricInput(e: {
     rootCause: typeof e.rootCause === 'string' && e.rootCause ? e.rootCause : undefined,
     prompt: typeof e.prompt === 'string' && e.prompt ? e.prompt : undefined,
     restoredToGreen: typeof e.restoredToGreen === 'boolean' ? e.restoredToGreen : undefined,
+    // The store's timeline read; `undefined` when absent so a legacy row keeps its old shape.
+    userStopped: typeof e.userStopped === 'boolean' ? e.userStopped : undefined,
   };
 }
 

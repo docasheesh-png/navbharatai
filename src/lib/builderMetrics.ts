@@ -67,11 +67,23 @@ export interface BuildMetricInput {
    * are looking at; `null`/undefined means the report cannot say.
    */
   restoredToGreen?: boolean | null;
+  /**
+   * Did the USER stop this build (the store's `stoppedByUser` read of the timeline)? Such a build is
+   * neither a success nor a failure — the failure panel's rule (`isUserStoppedBuild`), which this
+   * scorecard did not share until 2026-09-30, so a person's own Stop was counted as a failed build and
+   * listed as a "stuck project" whose own root cause said no failure was implied.
+   */
+  userStopped?: boolean | null;
 }
 
-/** Builds that can actually be judged: finished, with a real verdict. */
+/** A build its own user stopped. Excluded from every verdict and counted on its own. */
+export function wasStoppedByUser(b: BuildMetricInput | null | undefined): boolean {
+  return !!b && b.userStopped === true;
+}
+
+/** Builds that can actually be judged: finished, with a real verdict, and not stopped by their user. */
 export function judgeable(builds: readonly BuildMetricInput[]): BuildMetricInput[] {
-  return (builds ?? []).filter((b) => !!b && b.inFlight !== true && typeof b.ok === 'boolean');
+  return (builds ?? []).filter((b) => !!b && b.inFlight !== true && typeof b.ok === 'boolean' && !wasStoppedByUser(b));
 }
 
 export interface EditSurvival {
@@ -101,6 +113,8 @@ export interface EditSurvival {
   broken: StuckProject[];
   /** Builds excluded because they were in flight or had no verdict. */
   skipped: number;
+  /** Builds their own user stopped — neither survived nor broke, so excluded. */
+  stoppedByUser: number;
 }
 
 /** One project whose latest build failed, with everything the stored report can say about it. */
@@ -203,7 +217,8 @@ export function editSurvival(builds: readonly BuildMetricInput[]): EditSurvival 
     restoredToGreen,
     restoredUnknown,
     broken: broken.slice(0, STUCK_PROJECTS_SHOWN),
-    skipped: all.length - usable.length,
+    skipped: all.length - usable.length - all.filter(wasStoppedByUser).length,
+    stoppedByUser: all.filter(wasStoppedByUser).length,
   };
 }
 
@@ -262,6 +277,8 @@ export interface BuildSuccess {
   rate: number | null;
   /** In-flight or verdict-less records, excluded rather than counted as failures. */
   skipped: number;
+  /** Builds their own user stopped — a person's choice, not a failure and not a success. */
+  stoppedByUser: number;
 }
 
 /** Build success rate — the directive's headline §51 metric. */
@@ -269,12 +286,14 @@ export function buildSuccess(builds: readonly BuildMetricInput[]): BuildSuccess 
   const all = builds ?? [];
   const usable = judgeable(all);
   const succeeded = usable.filter((b) => b.ok === true).length;
+  const stoppedByUser = all.filter(wasStoppedByUser).length;
   return {
     total: usable.length,
     succeeded,
     failed: usable.length - succeeded,
     rate: usable.length > 0 ? succeeded / usable.length : null,
-    skipped: all.length - usable.length,
+    skipped: all.length - usable.length - stoppedByUser,
+    stoppedByUser,
   };
 }
 
@@ -507,6 +526,10 @@ export function scorecardHeadline(card: BuilderScorecard): string {
   } else {
     const note = card.success.total < MIN_SAMPLES_FOR_RATE ? ' (too few builds to read a trend into)' : '';
     lines.push(`Build success: ${pct(card.success.rate)} of ${card.success.total}${note}.`);
+  }
+  // Said, never silently dropped: a Stop is excluded from both tallies, and the reader must see how many.
+  if (card.success.stoppedByUser > 0) {
+    lines.push(`Stopped by their own user: ${card.success.stoppedByUser} build(s) — counted as neither a success nor a failure, and never as a stuck project.`);
   }
 
   if (card.survival.rate === null) {

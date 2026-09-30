@@ -4630,6 +4630,19 @@ mega-prompt, watch the module plan appear and advance, then `on` for everyone on
 question has been open for over two months.** It is recorded here rather than acted on because the
 key lives in a console no session can reach.
 
+🔴 **CORRECTED 2026-09-30 (autopsy 8e124182) — EVERY MODULE BEFORE THE ONE THAT OWNS `src/App.tsx` WAS
+JUDGED "NOTHING BUILT YET".** The end-of-turn readiness gate read the untouched starter entry as an unbuilt
+app, so module 1 ("Core Types") failed (before 2026-09-26) or was told to keep going (after), and the model
+built the whole app inside module 1 while the plan recorded 1 of 14 done. `starterEntryExpectedFor` now
+tells the dispatcher that an entry-less module turn EXPECTS the starter. And the gate that opened it was
+counting a prompt template's `# Steps` as features — `enumeratedFeatures.ts` now skips instruction sections
+and the prose of a structured spec. ⚠️ **Still open:** a module turn that over-builds is not reconciled
+against the disk.
+🔒 **SAME AUTOPSY: THE SHELL IS NO WAY AROUND THE GREEN FREEZE.** A model refused twice wrote the file with
+`cat >`. The bash tool now asks the freeze about every file a command plainly writes (`shellWriteTargets`).
+⚠️ The vaccine's repair is still on no allowlist, so on a green app it cannot change anything — recorded in
+`PROGRESS.md` as an open decision, not widened here.
+
 ⚠️ **Three honest gaps, from that same entry and still open:** an IMPORTED repo never creates a plan
 (creation fires only on a fresh `new_build`); a reopened incomplete plan needs a typed "continue"
 (restore does not re-emit resumable); and contract DRIFT — a module deviating from its own frozen

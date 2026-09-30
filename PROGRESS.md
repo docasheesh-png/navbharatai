@@ -84207,3 +84207,59 @@ The #3385 ratchet listed 56 tools named in the architect prompt and offered to n
   recipe) is now the architect's, beside `screenshot`.
 - The ratchet list is deleted, not emptied: a new prompt promise without a reachable tool fails CI with no escape.
 - The live strip names the recipe ("using generate_pdf"), not "using run_recipe".
+
+## 2026-09-30 — Autopsy 8e124182: a stock-inventory app (Weak, 30.5 min, ₹639.85 billed) — the app worked; the chain around it did not
+
+Prompt: a prompt-generator template asking for a stock-inventory app "using PHP MVC architecture", with six
+numbered features, `# Steps` (seven writing instructions) and `# Output Format`. Result: a React app that
+rendered, typechecked, built and passed a journey — plus seven defects of ours around it.
+
+**Tally (honest):** ✅ self-healed 3 (two `edit_file` old_string misses; CSS classes + accessibility healed) ·
+🔀 workaround 1 (the model beat the green freeze with `cat >` — see 4) · ⏭️ skipped 1 (vaccine repair left the
+unrun e2e suite "for the user to install") · ❌ shipped imperfect 5 (summary replaced by a test-repair reply;
+"List / items" + "notifications" reported missing; `types/index.ts` claims a "PHP MVC backend"; xlsx high
+vuln with no fix; duplicate `exportToExcel`/`generateId` helpers) · 🥵 struggle: 30.5 min vs a 7–16 min
+estimate; a module-1 turn that became the whole build; a ~2 min feature heal proving a page existed; a
+~2 min vaccine repair of a test we wrote.
+
+**Fixed (all in `tests/theStockAppWasNotAProject.test.ts`, 22 cases, reversion-proven per file):**
+1. `enumeratedFeatures.ts` — lines under `# Steps` / `# Output Format` / `Notes:` are instructions; in a
+   structured spec (≥5 list markers) prose adds no inline runs. The prompt counted 16 (≥14 ⇒ Project Mode);
+   now 7.
+2. `starterEntryExpectedFor` (ProjectPlan) + `ToolDispatcher.setStarterEntryExpected` — a module turn whose
+   module does not own `src/App.tsx` is not "nothing built yet". Before 2026-09-26 that verdict failed every
+   early module (the plan could never auto-continue); since then `unfinishedResume` pushed the model to build
+   the whole app inside module 1, while the plan recorded 1/14 and queued 13 more turns.
+3. `testRunner.parseTestOutcome` strips ANSI (vitest colours even when piped: the report could only say
+   `FAIL (exit=1)`), counts a test FILE that failed to load, names it; the repair is told the exact command
+   (with the e2e exclude). Starter tests carry `STARTER_TEST_MARKER` and an in-memory `localStorage` stand-in
+   via `vi.hoisted` when the app uses browser storage (verified with real vitest: fails without, passes with).
+   The vaccine asks `failuresAreOurStarterTests` before spending a repair on the user's source.
+   `adoptHealResult`: a repair on a successful build keeps the build's answer (5 sites did `result = healed`).
+4. `shellWriteTargets` + bash guard: the shell is asked about by the green freeze like `writeFile`
+   (refused ⇒ same GreenFreezeError, recorded as deferred; allowed ⇒ seen by POST_GREEN_WRITES, which had
+   reported "nothing wrote to it afterwards"). The freeze error now tells the model not to look for another way.
+5. `FeaturePresence.isSignInWall` — behind a sign-in page only the sign-in feature is judged.
+6. `RequirementGapAnalyzer` — "Items Menu" is navigation (was `restaurant`: KOT, GST, delivery), and a new
+   `inventory` domain (was about to become `ecommerce`: cart, checkout, refunds).
+7. `unsupportedStack.ts` — PHP / Rails / .NET named as the stack to build with: the builder is told never to
+   claim it, the user is told once in the ready message; `UNSUPPORTED_STACK` admin line.
+
+**Missing subsystem named: AUTHENTICATED EXPLORATION.** Page render, journey, click explorer and feature
+probe all stopped at `/login` — five routes "redirected", two journeys "unreachable". The app even prefilled
+demo credentials. Nothing logs in. Every auth-gated app is verified at its front door only. OPEN.
+
+**Open root causes (rule 6):**
+- The vaccine repair runs after the green latch but is on no allowlist, so it can never repair a genuine
+  user-test failure on a green app (that is why the model reached for the shell). Needs a named pass wrapped
+  in `verifyAfterFix` — an admin decision, not taken here.
+- A module turn that over-builds is never reconciled against the disk (the plan only learns its own module).
+- `notifications NOT BUILT` may be false (the dashboard likely has low-stock alerts); unverified — the
+  report does not carry the dashboard's code.
+- `xlsx@0.18.5` has no fixed npm release; the dep-health line still says "Upgrade each to a patched version".
+  The builder should prefer `exceljs` (or SheetJS's CDN tarball).
+- Parallel FE/BE sub-agents on a client-only app (FE_BE_PARTITION: 0 backend files) duplicated helpers.
+- The login page shipped prefilled with demo credentials and a shared password in `seed.ts` on a request
+  that asked for security; the reviewer reported no security issues.
+- Billing: ₹639.85 billed, wallet debited ₹150 (overdraft floor), so ~₹490 of markup absorbed; real cost
+  $1.80 (KIMI 6.84M input, 6.47M cached).

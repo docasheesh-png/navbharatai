@@ -78,7 +78,9 @@ describe('a check that did not run can never count against the user app', () => 
 
   it('and is never offered to the user as something to fix', () => {
     const sugg = fs.readFileSync('src/server/AgentV3/buildFindingSuggestions.ts', 'utf8');
-    const block = sugg.slice(sugg.indexOf('const NEVER_SUGGEST'), sugg.indexOf('const NEVER_SUGGEST') + 600);
+    // The whole Set literal, not a fixed character window: a window broke the day another code joined the list.
+    const start = sugg.indexOf('const NEVER_SUGGEST');
+    const block = sugg.slice(start, sugg.indexOf(']);', start));
     expect(block).toContain("'PAGE_RENDER_NOT_RUN'");
   });
 });

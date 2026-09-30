@@ -161,7 +161,8 @@ describe('The build asks — but only when it can honour a yes', () => {
   it('it asks at most ONCE per build', () => {
     const at = agentv3Src.indexOf('dispatcher.setDatabaseFallback(');
     const block = agentv3Src.slice(at, at + 3000);
-    expect(block).toContain('if (asked) return null;');
+    // Since 2026-09-30 the build-start offer (sharedDataNeed.ts) counts too: one question per build in all.
+    expect(block).toContain('if (asked || databaseOfferedAtStart) return null;');
   });
 
   it('the offer names the real cost to the user, not just the benefit', () => {

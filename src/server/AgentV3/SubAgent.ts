@@ -4,6 +4,7 @@ import type { AgentEventStream } from './AgentEventStream';
 import type { WorkspaceState } from './WorkspaceState';
 import type { TurnRunner } from './ClaudeClient';
 import type { ActuatorPort, SubAgentSpawn, ReadLedger, KitKeptTally } from './ToolDispatcher';
+import type { ShadowTwinTally } from './shadowTwin';
 import type { Checkpointer } from './GitManager';
 import { ToolDispatcher } from './ToolDispatcher';
 import { AgentRunner } from './AgentRunner';
@@ -137,6 +138,8 @@ export interface SubAgentDeps {
   serverlessPayment?: () => ReturnType<ToolDispatcher['serverlessPaymentHandler']>;
   /** The parent's design-kit keep tally, so a sub-agent's stylesheet rewrite reaches the report (autopsy e725e002). */
   kitKept?: () => KitKeptTally | undefined;
+  /** The parent's stale-module-copy guard (shadowTwin.ts), so a sub-agent's writes are covered too (autopsy e725e002). */
+  shadowTwins?: () => ShadowTwinTally | undefined;
 
   /**
    * The raw result of every sandbox `bash` command. Position 13, and never passed — so **not one
@@ -233,6 +236,8 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       if (sharedStops) childDispatcher.shareReadLoopStops(sharedStops);
       const sharedKit = deps.kitKept?.();
       if (sharedKit) childDispatcher.shareKitKept(sharedKit);
+      const sharedTwins = deps.shadowTwins?.();
+      if (sharedTwins) childDispatcher.shareShadowTwins(sharedTwins);
     } catch { /* never block a spawn */ }
     try {
       const pay = deps.serverlessPayment?.();

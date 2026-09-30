@@ -3720,8 +3720,126 @@ export function consensusToolDef(): ClaudeToolDef {
 }
 
 /** Build the tool definitions for a given allowed-tool list (incl. `task`). Never returns duplicate names. */
+/**
+ * RECIPES — tools the builder may run through ONE catalog entry, `run_recipe` (admin 2026-09-30, choosing
+ * "one recipe tool" over offering 54 more schemas on every model call).
+ *
+ * 🔴 WHY: the architect prompt named 56 tools that no role was offered, because `catalogForTools` silently
+ * drops what a role does not list (found 2026-09-29, #3385). Offering each one directly would add ~54 tool
+ * schemas to every call of every build. Instead each recipe keeps its OWN handler, unchanged, and is
+ * reached through `run_recipe({ name, input })`; `name: "list"` returns the full inputs of any recipe.
+ * Every recipe here is a code generator that runs on the USER's own keys — none spends NavBharatAI money.
+ */
+export const RECIPE_TOOLS = [
+  'generate_ai',
+  'generate_analytics',
+  'generate_architecture_docs',
+  'generate_cache',
+  'generate_captcha',
+  'generate_cors',
+  'generate_csv',
+  'generate_currency',
+  'generate_datetime',
+  'generate_email',
+  'generate_email_template',
+  'generate_env_validation',
+  'generate_error_tracking',
+  'generate_feature_flags',
+  'generate_file_upload',
+  'generate_game_controller',
+  'generate_game_runtime',
+  'generate_game_shell',
+  'generate_game_systems',
+  'generate_game_vfx',
+  'generate_geocoding',
+  'generate_graceful_shutdown',
+  'generate_http_client',
+  'generate_ids',
+  'generate_image',
+  'generate_indian_validators',
+  'generate_jobs',
+  'generate_logging',
+  'generate_map',
+  'generate_markdown',
+  'generate_melody',
+  'generate_moderation',
+  'generate_money_format',
+  'generate_newsletter',
+  'generate_notify',
+  'generate_otp',
+  'generate_pagination',
+  'generate_password',
+  'generate_pdf',
+  'generate_qr',
+  'generate_ratelimit',
+  'generate_realtime',
+  'generate_retry',
+  'generate_sanitize_html',
+  'generate_scheduler',
+  'generate_search',
+  'generate_security_headers',
+  'generate_seo',
+  'generate_slug',
+  'generate_sms',
+  'generate_storage',
+  'generate_translation',
+  'generate_validation',
+  'generate_weather',
+] as const;
+
+export type RecipeName = (typeof RECIPE_TOOLS)[number];
+
+export function isRecipeName(name: unknown): name is RecipeName {
+  return typeof name === 'string' && (RECIPE_TOOLS as readonly string[]).includes(name);
+}
+
+function firstSentence(text: string): string {
+  const s = String(text ?? '').replace(/\s+/g, ' ').trim();
+  const cut = s.search(/[.:](\s|$)/);
+  const one = cut > 0 ? s.slice(0, cut) : s;
+  return one.length > 110 ? `${one.slice(0, 107)}…` : one;
+}
+
+/** The `run_recipe` tool. Its description lists every recipe in one line each. */
+export function recipeToolDef(): ClaudeToolDef {
+  const byName = new Map(defaultToolCatalog().map((t) => [t.name, t]));
+  const lines = RECIPE_TOOLS.map((n) => `- ${n}: ${firstSentence(byName.get(n)?.description ?? '')}`);
+  return {
+    name: 'run_recipe',
+    description:
+      'Run one of the built-in code recipes below by name. Each writes real, working code into the app ' +
+      '(on the user\'s own keys where a service is involved). Call with name "list" (or with a recipe name ' +
+      'and no input) to see that recipe\'s exact inputs first. Recipes:\n' + lines.join('\n'),
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', enum: ['list', ...RECIPE_TOOLS], description: 'The recipe to run, or "list" for every recipe\'s inputs.' },
+        input: { type: 'object', description: 'The recipe\'s own inputs, exactly as "list" describes them.' },
+      },
+      required: ['name'],
+    },
+  };
+}
+
+/** What `run_recipe({ name: "list" })` returns: each recipe's description and inputs. */
+export function recipeListing(only?: string): string {
+  const byName = new Map(defaultToolCatalog().map((t) => [t.name, t]));
+  const pick = isRecipeName(only) ? [only] : [...RECIPE_TOOLS];
+  return pick.map((n) => {
+    const def = byName.get(n);
+    const schema = (def?.input_schema ?? {}) as { properties?: Record<string, { type?: unknown; enum?: unknown; description?: unknown }>; required?: string[] };
+    const req = new Set(schema.required ?? []);
+    const params = Object.entries(schema.properties ?? {}).map(([k, v]) => {
+      const kind = Array.isArray(v?.enum) ? (v.enum as unknown[]).map((e) => JSON.stringify(e)).join(' | ') : String(v?.type ?? 'any');
+      return `    ${k}${req.has(k) ? '' : '?'}: ${kind}${v?.description ? ` — ${String(v.description)}` : ''}`;
+    });
+    return `${n}\n  ${String(def?.description ?? '').replace(/\s+/g, ' ').trim()}\n  input:${params.length ? `\n${params.join('\n')}` : ' (none)'}`;
+  }).join('\n\n');
+}
+
 export function catalogForTools(allowed: ToolName[]): ClaudeToolDef[] {
   const base = defaultToolCatalog().filter((t) => (allowed as string[]).includes(t.name));
+  if ((allowed as string[]).includes('run_recipe')) base.push(recipeToolDef());
   if ((allowed as string[]).includes('task')) base.push(taskToolDef());
   if ((allowed as string[]).includes('second_opinion')) base.push(secondOpinionToolDef());
   if ((allowed as string[]).includes('consensus')) base.push(consensusToolDef());

@@ -11,81 +11,25 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { roleConfig } from '../src/server/AgentV3/AgentRegistry';
+import { RECIPE_TOOLS } from '../src/server/AgentV3/ToolCatalog';
 import { projectHasServer, noServerPaymentGuidance } from '../src/server/lib/PaymentGenerator';
 
-const NOT_YET_OFFERED: readonly string[] = [
-  'find_ui_element',
-  'generate_ai',
-  'generate_analytics',
-  'generate_architecture_docs',
-  'generate_cache',
-  'generate_captcha',
-  'generate_cors',
-  'generate_csv',
-  'generate_currency',
-  'generate_datetime',
-  'generate_email',
-  'generate_email_template',
-  'generate_env_validation',
-  'generate_error_tracking',
-  'generate_feature_flags',
-  'generate_file_upload',
-  'generate_game_controller',
-  'generate_game_runtime',
-  'generate_game_shell',
-  'generate_game_systems',
-  'generate_game_vfx',
-  'generate_geocoding',
-  'generate_graceful_shutdown',
-  'generate_http_client',
-  'generate_ids',
-  'generate_image',
-  'generate_indian_validators',
-  'generate_jobs',
-  'generate_logging',
-  'generate_map',
-  'generate_markdown',
-  'generate_melody',
-  'generate_moderation',
-  'generate_money_format',
-  'generate_newsletter',
-  'generate_notify',
-  'generate_otp',
-  'generate_pagination',
-  'generate_password',
-  'generate_pdf',
-  'generate_qr',
-  'generate_ratelimit',
-  'generate_realtime',
-  'generate_retry',
-  'generate_sanitize_html',
-  'generate_scheduler',
-  'generate_search',
-  'generate_security_headers',
-  'generate_seo',
-  'generate_slug',
-  'generate_sms',
-  'generate_storage',
-  'generate_translation',
-  'generate_validation',
-  'generate_weather',
-  'write_files_batch',
-];
+// The debt that stood here — 56 named tools no role was offered — is paid (2026-09-30): 54 are recipes
+// reached through `run_recipe`, and `write_files_batch` / `find_ui_element` are offered directly. The
+// list is gone rather than empty, so a new unoffered promise fails the first test below with no escape.
 
 const catalog = readFileSync('src/server/AgentV3/ToolCatalog.ts', 'utf8');
 const catalogNames = new Set([...catalog.matchAll(/name:\s*'([a-z_]+)'/g)].map((m) => m[1]));
 const prompt = readFileSync('src/server/AgentV3/systemPrompt.ts', 'utf8');
 const promised = new Set([...prompt.matchAll(/\b([a-z]+(?:_[a-z]+)+)\b/g)].map((m) => m[1]).filter((n) => catalogNames.has(n)));
-const architect = new Set<string>(roleConfig('architect').tools as string[]);
+const architectTools = roleConfig('architect').tools as string[];
+/** What the architect can actually reach: its own tools, plus every recipe when it holds run_recipe. */
+const architect = new Set<string>([...architectTools, ...(architectTools.includes('run_recipe') ? RECIPE_TOOLS : [])]);
 
 describe('every tool the architect prompt names is one it can call', () => {
   it('no NEW promise without the tool', () => {
-    const missing = [...promised].filter((n) => !architect.has(n) && !NOT_YET_OFFERED.includes(n));
+    const missing = [...promised].filter((n) => !architect.has(n));
     expect(missing).toEqual([]);
-  });
-  it('the debt list holds no stale entry (offered now, or no longer named)', () => {
-    const stale = NOT_YET_OFFERED.filter((n) => architect.has(n) || !promised.has(n));
-    expect(stale).toEqual([]);
   });
   it('the payment, webhook, database and key-popup tools are offered', () => {
     for (const t of ['generate_payment', 'generate_webhook', 'generate_idempotency', 'generate_db_config', 'request_secrets']) {

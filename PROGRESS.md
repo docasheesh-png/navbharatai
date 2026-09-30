@@ -84897,3 +84897,23 @@ Admin: *"image banne band ho gaye hai!!"* (Image Generator AI FREE, "make a came
 - **Open:** the provider's live answer was not observable from the session (egress blocked) — verify with the
   `[IMAGE_GEN] the free provider refused an anonymous request` server log line.
 - Tests: `tests/theFreeDoorClosedAndNobodyNoticed.test.ts` (16, reversion-proven).
+
+
+## 2026-09-30 — Image Generator AI: Cloudflare FLUX first, 5 free images a day then ₹1, FREE dropped from the name
+
+Admin: *"haan, cloudflare wala bana do. aur per day 5 image free for user, uske bad 1₹/image. image
+generator ai ke aage se free word hatao"*.
+
+- **Rung 1: FLUX.1 schnell on Cloudflare Workers AI** (`cloudflareImage.ts`), server-side, 1024×1024 only,
+  same word ban. Uses the existing Cloudflare account/token; `CLOUDFLARE_AI_TOKEN` overrides if the DNS
+  token lacks Workers AI permission. Ladder: Cloudflare → Pollinations → Gemini → Grok.
+- **Price** (`imageAllowance.ts`): 5 free delivered pictures a day, then ₹1 each from the wallet; refused
+  up front when the wallet holds under ₹1; counted and charged on delivery only; wallet line `image`.
+- **Name:** "Image Generator AI FREE" → "Image Generator AI" everywhere; every AI states the price.
+- **Found on the way:** `AI_IMAGE_FREE_DAILY_LIMIT` (3/day) was never enforced — it rode
+  `PROFESSIONAL_PAID_ENABLED`, which is unset. Superseded by the new allowance.
+- **Reverses 2026-09-23's "free-only" rule on the admin's word.**
+- **Open:** the Cloudflare call was never made against the live API from the session (egress blocked);
+  the ~170/day figure is from the published rate card. Verify on the first real pictures: an `HTTP 403`
+  in the admin diagnostic means the token needs the Workers AI permission.
+- Tests: `tests/fiveFreeImagesThenOneRupee.test.ts` (25, reversion-proven).

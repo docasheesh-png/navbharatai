@@ -2036,6 +2036,14 @@ the code (it is actually read somewhere) on 2026-07-11.
   verdict is **latched in the state** because on the real data it flickers (3.43× → **2.46×** → 3.5×);
   the runner happened to latch it in a `Set`, which hid the defect. Test-locked and reversion-proven
   in both halves in `tests/slowRungBench.test.ts`.
+  🌦️ **A CRAWL IS WEATHER, NOT A VERDICT — `AGENTV3_CRAWL_BENCH_SECONDS` (NOT set; default 180; clamped
+  30–1800; unreadable ⇒ 180; `off` ⇒ the old whole-build bench). Autopsy 876afca9, 2026-09-30.** A stream
+  abandoned for crawling used to bench its rung for the WHOLE build on one sample: GLM flashx answered the
+  plan in 2.4 s, crawled once, and every call for ten minutes went to the reasoning rung. Now the crawl bench
+  ends after the window, the rung is re-probed ONCE, and a second crawl benches it for the build
+  (`crawlBench.ts`). At most two abandons per build, the second only on that re-probe (a concurrent call in
+  flight is never the re-probe), so bad weather at every vendor still cannot walk the ladder. The THROUGHPUT
+  bench above is untouched. Test-locked and reversion-proven in `tests/aCrawlIsWeatherNotAVerdict.test.ts`.
   ✅ **AND THIS REPORT SETTLED THE STREAMING ENTRY'S ONE OPEN QUESTION: Z.ai DOES honour
   `stream_options.include_usage`** — real per-call input/output/cache token counts came back on every
   streamed call. The "0 in / 0 out" risk that entry warns to watch for did not materialise.

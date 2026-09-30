@@ -84641,3 +84641,26 @@ The app works: it rendered, the production build passed and all 5 controls were 
 - **A single crawl benches the lead rung for the whole build.** GLM answered the plan in 2.4 s, crawled once on the contract, and was then gone for 10 minutes. Proposal: a time-bounded crawl bench (re-probe after a few minutes). This is a routing change, so it needs its own measurement first.
 - **The preview snapshot is taken before the runtime autofix.** A file the fix deletes leaves the copy stale.
 - **The first preview repair's "transient, no change needed" was accepted.** The console error survived until the runtime autofix.
+
+## 2026-09-30 (same day) — the four open items from autopsies a2b9c802 + 876afca9, closed (admin: "kya sabhi problem ke root cause dna level par fixed huye? agar nahi to karo!")
+
+Asked directly, the honest answer was **no**: four items had been recorded as open. All four are now fixed in PR #3402, each test-locked and reversion-proven.
+
+1. **A single crawl benched a rung for the whole build** (876afca9: GLM flashx crawled once, then every call for ten minutes went to the reasoning rung). A crawl bench now lasts `AGENTV3_CRAWL_BENCH_SECONDS` (default 180 s). The rung is then re-probed once, and a second crawl benches it for the build. At most two abandons per build, the second only on that re-probe; a concurrent call in flight is never counted as the re-probe. The throughput bench (three measured calls, latched) is unchanged. `off` restores the old rule exactly. `crawlBench.ts`; `tests/aCrawlIsWeatherNotAVerdict.test.ts` (10).
+2. **The first preview repair called the MIME error "transient"** (876afca9). It was not guessed at:
+   - **Measured on Vite 8:** the dev server serves the root entry for `/`, but `/index.html` returns `public/index.html` as-is, so the error depends on the URL. That is why a reload of `/` looked clean.
+   - **Production build:** not affected (`dist/index.html` is the built entry).
+   - **Fix:** the platform already knew the cause. `entryShadowRepairHint` (read from the file list) is now handed to both console-driven repair passes, the preview verify loop and the runtime auto-fix. `tests/aKnownCauseIsNotTransient.test.ts` (8).
+3. **The preview copy went stale after a later pass changed the app** (876afca9).
+   - **Root cause:** four passes may still write after the copy is taken (vaccine repair, runtime auto-fix, reviewer repair, GreenGuard restore), and only the reviewer's repair re-took the copy (972acde5). The explorer repair runs before the copy.
+   - **Fix:** one bounded refresh just before the final save comparison, only when the copy no longer matches what is persisted. A pass added later is covered without remembering it. `tests/theCopyFollowsEveryPass.test.ts` (6).
+   - **Scope:** separate from #3398's open `PREVIEW_SNAPSHOT_STALE` investigation (a divergence with no writer), which is untouched.
+4. **Write-time typecheck commands read `exit ?`** (a2b9c802).
+   - **Cause:** the command is piped through `head`, so tsc's own exit code is unknowable by construction.
+   - **Fix:** the report line now prints the verdict read from the output (`clean` / `N type errors` / `did not run` / `no verdict`).
+   - **Sibling found:** two readers of "was tsc clean?" disagreed. The release gate counted a failed install (`npm ERR!`, no `error TS` line) as a PASSING typecheck, while project memory refused it. One reader now, `tscVerdict`, serves all three. `tests/theReportSaysWhatTheCompilerSaid.test.ts` (8).
+
+**Still not fixed, said plainly:**
+- **JARVIS installed `react-router-dom` and never imported it.** Our scaffold does not ship it; the model did it. `DependencyAnalysis` reports it (low). Removing packages automatically is not safe, because config and tooling can use them without an import.
+- **Six off-grid spacing values.** The write-time quality note already flags them; they are cosmetic.
+- **Haiku's plan quality on Weak is unmeasured.** Read the planner lines on the next Weak builds where flashx was benched.

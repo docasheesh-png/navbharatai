@@ -188,3 +188,12 @@ describe('4 · the no-journey sentence names the missing piece', () => {
     expect(reason).not.toContain('no name, id, placeholder');
   });
 });
+
+describe('one "addressable but nothing submits" predicate, not two (merged with #3398, 2026-09-30)', () => {
+  it('noJourneyReason asks it once, and picks the sentence by whether the form has a button', () => {
+    const src = readFileSync(join(__dirname, '../src/server/AgentV3/journeyDerivation.ts'), 'utf8');
+    const body = src.slice(src.indexOf('export function noJourneyReason'));
+    expect(body.split('submitTargetIn(s.source) === null').length - 1).toBe(1);
+    expect(body).toContain("noSubmitForms.some((s) => /<button\\b/i.test(s.source))");
+  });
+});

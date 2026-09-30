@@ -804,17 +804,6 @@ export function noJourneyReason(files: Record<string, string>): string {
   // the user to give the field "a `name` and a label": a remedy for a defect the field does not have,
   // on NavBharatAI's own tested template. So: when some form's fields CAN all be addressed and it is
   // only the submit step that is absent, say that — it is a different fact with no fix to ask for.
-  const addressableButNoSubmit = pages.some((p) => formSourcesFor(p, files).some((s) => {
-    const fields = formFields(s.source);
-    if (fields.length === 0) return false;
-    const allAddressable = fields.slice(0, 6).every(({ tag, labelText }) => targetForInput(tag) !== null || !!labelText);
-    return allAddressable && submitTargetIn(s.source) === null;
-  }));
-  if (addressableButNoSubmit) {
-    return 'the fields in this app act as you type (a search or filter) and have no submit or save step, '
-      + 'so there is nothing a journey could submit and then look for after a reload — no journey was derived, '
-      + 'and nothing needs changing for this check.';
-  }
   // ⚠️ THE REMEDY, NOT ONLY THE SYMPTOM (autopsy a48d0f9e, 2026-09-19). This sentence used to stop at
   // "no journey was derived", which reads like an environmental limit of the CHECK. It is not: it is a
   // fixable defect in the generated app, and in that report the SAME build's accessibility pass had
@@ -827,16 +816,25 @@ export function noJourneyReason(files: Record<string, string>): string {
   // "no name, id, placeholder, label or test id". What the derivation actually could not find was a
   // button that SUBMITS them: "Calculate" is a plain onClick button, not a submit and not an add/save
   // word. Same question the derivation asks, answered for the report.
-  const addressableButNoSubmit = pages.some((p) => formSourcesFor(p, files).some((s) => {
-    const tags = formFields(s.source);
-    return tags.length > 0
-      && tags.every(({ tag, labelText }) => targetForInput(tag) !== null || labelText !== null)
-      && submitTargetIn(s.source) === null;
-  }));
-  if (addressableButNoSubmit) {
-    return 'the fields in this app can be addressed, but none of its buttons reads as submitting them (no '
-      + 'submit button and no add / save / create button), so no fill-and-submit journey was derived. That is '
-      + 'a limit of this check, not a defect in the app.';
+  // 🔗 ONE PREDICATE, TWO TRUE SENTENCES (merged 2026-09-30). #3398 (the Gita search box) and #3402 (the
+  // calculator) fixed this same false remedy on the same day, each with its own copy of the predicate.
+  // They agree on WHEN — every field addressable, no submit step — and differ only in WHY: a field with
+  // no button at all acts as you type; a form WITH a button has one that does not read as submitting.
+  const noSubmitForms = pages.flatMap((p) => formSourcesFor(p, files)).filter((s) => {
+    const fields = formFields(s.source);
+    if (fields.length === 0) return false;
+    const allAddressable = fields.slice(0, 6).every(({ tag, labelText }) => targetForInput(tag) !== null || !!labelText);
+    return allAddressable && submitTargetIn(s.source) === null;
+  });
+  if (noSubmitForms.length > 0) {
+    if (noSubmitForms.some((s) => /<button\b/i.test(s.source))) {
+      return 'the fields in this app can be addressed, but none of its buttons reads as submitting them (no '
+        + 'submit button and no add / save / create button), so no fill-and-submit journey was derived. That is '
+        + 'a limit of this check, not a defect in the app.';
+    }
+    return 'the fields in this app act as you type (a search or filter) and have no submit or save step, '
+      + 'so there is nothing a journey could submit and then look for after a reload — no journey was derived, '
+      + 'and nothing needs changing for this check.';
   }
   return 'the forms in this app have no field this check could address honestly (no name, id, placeholder, '
     + 'label or test id), so no journey was derived rather than one that would fail for the wrong reason. '

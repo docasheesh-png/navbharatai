@@ -28,13 +28,14 @@ export type OtpFailureCategory =
   | 'recaptcha'
   | 'code-wrong'
   | 'code-expired'
+  | 'instant-verified'
   | 'internal'
   | 'other';
 
 export const OTP_FAILURE_CATEGORIES: readonly OtpFailureCategory[] = [
   'invalid-number', 'too-many-requests', 'quota-exceeded', 'network', 'region-blocked',
   'provider-disabled', 'billing', 'app-not-authorized', 'app-check', 'recaptcha',
-  'code-wrong', 'code-expired', 'internal', 'other',
+  'code-wrong', 'code-expired', 'instant-verified', 'internal', 'other',
 ];
 
 /** Categories the PERSON cannot fix — a setting on our side. Retrying never helps these. */
@@ -76,6 +77,11 @@ export function otpFailureCategory(err: unknown): OtpFailureCategory {
   if (has('invalid-phone-number', 'missing-phone-number', 'format of the phone number', 'phone number provided is incorrect', 'too_short', 'too_long', 'invalid_phone_number')) return 'invalid-number';
   if (has('invalid-verification-code', 'missing-verification-code', 'sms verification code used to create the phone auth credential is invalid', 'invalid_code')) return 'code-wrong';
   if (has('code-expired', 'sms code has expired', 'session_expired', 'session-expired')) return 'code-expired';
+  // ANDROID INSTANT VERIFICATION (2026-09-30): the phone confirmed the number itself and no code was
+  // ever sent. The sign-in keeps ONE session, the web one (skipNativeAuth), and a code-less native
+  // credential cannot be handed to it. Sign-in sees an event with no code; linking sees the plugin try
+  // to link natively and fail with "No user is signed in." — the same event, seen from each flow.
+  if (has('instant-verified', 'no user is signed in')) return 'instant-verified';
   if (has('region enabled', 'region is not enabled', 'sms unable to be sent', 'region_not_allowed', 'unsupported region')) return 'region-blocked';
   if (has('quota-exceeded', 'quota for the project has been exceeded', 'quota_exceeded', 'sms quota')) return 'quota-exceeded';
   if (has('too-many-requests', 'unusual activity', 'too_many_attempts', 'too many requests', 'blocked all requests')) return 'too-many-requests';
@@ -121,6 +127,9 @@ export function otpUserMessage(category: OtpFailureCategory): string {
       return 'That code is not correct. Please check it and try again.';
     case 'code-expired':
       return 'That code has expired. Please request a new one.';
+    case 'instant-verified':
+      // No SMS is coming, so "wait for the code" or "try again" would both be false instructions.
+      return 'Your phone confirmed this number without sending a code, and this sign-in needs the code. Please use Email or Google sign-in for now.';
     case 'region-blocked':
     case 'provider-disabled':
     case 'billing':

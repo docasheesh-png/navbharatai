@@ -37,7 +37,7 @@ import { BUILD_STOPPED_MESSAGE, isBuildStoppedError, throwIfStopped } from './st
 import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 import { wireOrphanPages } from './orphanPageWiring';
-import { injectGlobalStylesheetImport } from './ProjectIntegrityChecks';
+import { injectGlobalStylesheetImport, dedupeStylesheetImports } from './ProjectIntegrityChecks';
 import { frameworkShipsDesignKit } from './designKitReach';
 import { kitClasses } from './kitRestore';
 import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, canAffordSharedContract, preambleBailReason } from './FastLaneBudget';
@@ -1712,6 +1712,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           if (wired.injected.length > 0) {
             for (const f of written) { const nc = wired.files[f.path]; if (typeof nc === 'string') f.content = nc; }
             deps.log?.(`🎨 Wired ${wired.injected.length} orphaned global stylesheet(s) into the entry so the app is actually styled.`);
+          }
+          // …and a sheet the entry AND another module both import keeps only the entry's line (autopsy 33812996).
+          const deduped = dedupeStylesheetImports(Object.fromEntries(written.map((f) => [f.path, f.content])));
+          if (deduped.removed.length > 0) {
+            for (const f of written) { const nc = deduped.files[f.path]; if (typeof nc === 'string') f.content = nc; }
           }
         } catch { /* best-effort — a failure just leaves the files as generated */ }
       }

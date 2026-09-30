@@ -338,7 +338,7 @@ import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, 
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled } from '../AgentV3/fastLaneRung';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, type RepairStrategy } from '../AgentV3/SimpleBuilder';
-import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
+import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, dedupeStylesheetImports, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
 import { buildNestedRepoCommand, parseNestedRepoRoots, nestedRepoNote } from '../AgentV3/nestedRepoProbe';
 // The sandbox's workspace root, from the module CLAUDE.md names as this class's one home (the
 // `safeRelPath` centralisation). Five files carry a private copy of this string; the probe takes the
@@ -18150,6 +18150,18 @@ async function noteBuildOutcome(
                 writtenFiles.set(inj.entry, newEntry);
               }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_CSS_WIRED', message: `"${inj.stylesheet}" was imported by NOTHING (app would render unstyled) — injected its import into ${inj.entry}.`, autoResolved: true });
+            }
+          }
+          // The same certainty for a DUPLICATE import the entry already covers (autopsy 33812996) — the
+          // second line is a no-op for a global sheet, so it is removed here instead of by a heal pass.
+          const deduped = dedupeStylesheetImports(integrityFiles);
+          for (const r of deduped.removed) {
+            const next = deduped.files[r.from];
+            if (typeof next !== 'string') continue;
+            if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, r.from, next))) {
+              integrityFiles[r.from] = next;
+              writtenFiles.set(r.from, next);
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_CSS_DEDUPED', message: `"${r.stylesheet}" was imported by the entry AND by ${r.from} — removed the second import (a global stylesheet applies once, whoever imports it).`, autoResolved: true });
             }
           }
         }

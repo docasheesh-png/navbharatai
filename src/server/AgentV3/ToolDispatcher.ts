@@ -199,7 +199,7 @@ import { detectMigrationPlan, migrationPlanSummary } from './MigrationPlanner';
 import { planProductionMigration, isProductionSafeCommand, migrationOutcome } from './productionMigration';
 import { loadMigrationHistory, recordMigrationRun, summarizeMigrationHistory } from './migrationHistory';
 import { generateDbConfig, isDbProvider } from '../lib/DbConfigGenerator';
-import { generatePaymentIntegration, isPaymentProvider } from '../lib/PaymentGenerator';
+import { generatePaymentIntegration, isPaymentProvider, projectHasServer, noServerPaymentGuidance } from '../lib/PaymentGenerator';
 import { generateOtpIntegration, isOtpProvider } from '../lib/OtpGenerator';
 import { generateTotpIntegration } from '../lib/TotpGenerator';
 import { generateIndianValidatorsIntegration } from '../lib/IndianValidatorsGenerator';
@@ -7398,6 +7398,12 @@ export class ToolDispatcher {
         // into .env (NavBharatAI never stores them). Pure generator in PaymentGenerator.ts.
         const pProvider = optStr(input, 'provider');
         if (!isPaymentProvider(pProvider)) return 'generate_payment: pass provider = "cashfree" | "razorpay" | "stripe".';
+        // No server ⇒ nothing to mount the route in, and nothing is written (see projectHasServer).
+        {
+          const pkgText = await this.actuator.readFile(this.workspaceId, 'package.json').catch(() => null);
+          const paths = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
+          if (!projectHasServer(pkgText, paths)) return noServerPaymentGuidance(pProvider);
+        }
         const pcfg = generatePaymentIntegration(pProvider);
         const payWritten: string[] = [];
         for (const [path, content] of Object.entries(pcfg.files)) {

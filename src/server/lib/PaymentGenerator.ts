@@ -325,3 +325,38 @@ export function generatePaymentIntegration(provider: PaymentProvider): PaymentCo
 export function isPaymentProvider(v: unknown): v is PaymentProvider {
   return v === 'cashfree' || v === 'razorpay' || v === 'stripe';
 }
+
+/**
+ * DOES THIS APP HAVE A SERVER THE PAYMENT ROUTE CAN RUN IN? (2026-09-29)
+ *
+ * `generatePaymentIntegration` emits an Express router — order creation and the signature check both
+ * need a secret that must never reach a browser. A Vite/React app with no server has nowhere to mount
+ * it: the files would be written, nothing would run them, and the builder would go on to call the
+ * browser checkout's success callback "paid" — which a user can fake from the dev tools. So the tool
+ * asks first. A server is a framework the project depends on, or a server folder it already has. PURE.
+ */
+const SERVER_DEPENDENCIES = ['express', 'fastify', 'hono', 'koa', '@nestjs/core', 'next', '@remix-run/node', '@sveltejs/kit', 'nuxt'];
+
+export function projectHasServer(packageJson: string | null | undefined, paths: readonly string[]): boolean {
+  try {
+    const pkg = JSON.parse(String(packageJson ?? '')) as { dependencies?: Record<string, string> };
+    if (SERVER_DEPENDENCIES.some((d) => pkg?.dependencies && d in pkg.dependencies)) return true;
+  } catch { /* unreadable package.json — decide from the file list alone */ }
+  return paths.some((p) => /^(?:server|backend|api)\/.+\.(?:[cm]?[jt]s)$/.test(p.replace(/^\.?\//, '')));
+}
+
+/**
+ * What the builder is told when the app has no server. Nothing is written: a route nothing mounts is a
+ * payment feature that only looks done. The rule it states holds for every app, with or without keys.
+ */
+export function noServerPaymentGuidance(provider: PaymentProvider): string {
+  return [
+    `generate_payment: this app has no server, so a ${provider} payment cannot be VERIFIED here and no files were written.`,
+    'A payment is PAID only when a server has checked the gateway\'s signature with the secret key. The browser',
+    'checkout\'s success callback is NOT proof — anyone can trigger it from the browser\'s developer tools.',
+    'So: record each booking/order with status "payment pending", never "paid", from the browser. Keep offline',
+    'payment (pay at the office/on delivery) fully working. Show online payment as a visibly disabled',
+    '"Online payment — coming soon" option, and tell the user in your summary, plainly, that verified online',
+    'payments need a server-side check this app does not have yet.',
+  ].join('\n');
+}

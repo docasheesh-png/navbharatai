@@ -84519,7 +84519,7 @@ typecheck, production build and runtime check. Real cost $0.206 (KIMI) + $0.018 
   told them, it had not). One write call took 130 s (7,252 output tokens: the 195-row data file on a
   reasoning model). The first write-time typecheck took 15 s (cold compile).
 
-**Fixed (PR #3389, same branch):**
+**Fixed (a new PR on the same branch, after #3389 merged):**
 1. `complexityPrompt` — a long list of fixed facts is simple however many rows; if unsure, simple (the
    module's own default, never told to the model). ⚠️ Model behaviour itself is not testable here; the next
    Devanagari lookup-app report is the evidence.

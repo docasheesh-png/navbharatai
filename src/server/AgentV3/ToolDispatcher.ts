@@ -173,6 +173,7 @@ import { analyzeUndefinedHooks } from './UndefinedHookAnalysis';
 import { analyzeDependencyConstraints } from '../AI/reasoning/ConstraintSolver';
 import { analyzeTestCoverage, testCoverageSummary } from './TestCoverageAnalysis';
 import { analyzeRequirementCoverage, requirementCoverageSummary, currentRequestForCoverage } from './RequirementCoverage';
+import { binaryTextWriteRefusal } from './binaryTextWrite';
 import { generateReadme } from './ReadmeGenerator';
 import { generateEnvExample } from './EnvExampleGenerator';
 import { generateGitignore } from './GitignoreGenerator';
@@ -708,6 +709,19 @@ export class ToolDispatcher {
     this.declinedFeatures = labels;
   }
 
+  /**
+   * What THIS build was asked to build, when that is not the user's message (autopsy 728a402d). A
+   * mega-app roadmap builds milestone 1 of 6 from the planner's brief ("buyer storefront — browse and
+   * cart") and tells the builder, in as many words, not to build the later milestones; the audit then
+   * graded the storefront on the whole message and reported login, sign-up, dashboard and admin panel
+   * "not found" — five warnings, twice, about work nobody asked this build to do. Null ⇒ the user's
+   * own request, exactly as before.
+   */
+  private coverageRequest: string | null = null;
+  setCoverageRequest(text: string | null): void {
+    this.coverageRequest = typeof text === 'string' && text.trim() ? text : null;
+  }
+
   setIgnoreRules(rules: IgnoreRule[]): void {
     this.ignoreRules = Array.isArray(rules) ? rules : [];
   }
@@ -781,6 +795,19 @@ export class ToolDispatcher {
    * same lesson the deploy tool learned when its failure messages were being RETURNED and the build
    * timeline recorded two successful no-op deploys.
    */
+  /**
+   * A write tool writes TEXT; a `.png`/`.woff2`/`.pdf` written as text is a broken file (autopsy
+   * 728a402d: a zero-byte icon was saved as the app's PWA icon). Thrown, like `assertWritable`, so the
+   * model gets an error it must handle rather than a sentence it may read as success. Not applied to a
+   * rename — moving a real binary file is legitimate.
+   */
+  private assertTextWritable(path: string): void {
+    const refusal = binaryTextWriteRefusal(path);
+    if (!refusal) return;
+    try { getWorkspaceMemory(this.workspaceId).recordAudit(`[BINARY-AS-TEXT] refused text write to ${path}`); } catch { /* audit best-effort */ }
+    throw new Error(refusal);
+  }
+
   private assertWritable(path: string): void {
     if (this.ignoreRules.length === 0) return;
     const rule = matchingIgnoreRule(path, this.ignoreRules);
@@ -3241,6 +3268,7 @@ export class ToolDispatcher {
         // preview shows "Blocked request … is not allowed" instead of the app. No-op for non-configs
         // or a config that already sets allowedHosts. (Mirrors ScaffoldGuard: prompts are advisory.)
         this.assertWritable(path); // C2 — checked AFTER any relocation, so the REAL destination is judged
+        this.assertTextWritable(path);
         let content = guardConfigContent(path, this.applyPostgresProviderLock(path, reqStr(input, 'content')));
         // THE OTHER END OF THE SAME GUARD (see read_file above). The model is not supposed to be able
         // to see the preview bridge at all — but "cannot see it" and "cannot store it" are different
@@ -3378,6 +3406,7 @@ export class ToolDispatcher {
           const obj = f as Record<string, unknown>;
           const p = reqStr(obj, 'path');
           this.assertWritable(p); // C2 — one protected entry fails the whole batch, never half-applies
+          this.assertTextWritable(p);
           // Same Vite-preview-host backstop as write_file, applied per batched file.
           return { path: p, content: guardConfigContent(p, this.applyPostgresProviderLock(p, reqStr(obj, 'content'))) };
         });
@@ -3522,6 +3551,7 @@ export class ToolDispatcher {
       case 'edit_file': {
         const path = reqStr(input, 'path');
         this.assertWritable(path); // C2 — an edit is a write; the same protection applies
+        this.assertTextWritable(path);
         const oldStr = reqStr(input, 'old_string');
         const newStr = reqStr(input, 'new_string');
         const existing = await this.actuator.readFile(this.workspaceId, path);
@@ -4224,7 +4254,7 @@ export class ToolDispatcher {
           .snapshot()
           .episodes.filter((e) => e.kind === 'request')
           .map((e) => e.text);
-        const requestText = currentRequestForCoverage(requestEpisodes);
+        const requestText = this.coverageRequest ?? currentRequestForCoverage(requestEpisodes);
         // The file BODIES are passed alongside the graph so a feature built INLINE (a search box
         // inside a list page owns no file of its own) is seen as built instead of reported missing —
         // and so a feature found in neither names nor bodies is a CONFIRMED absence rather than a

@@ -257,6 +257,24 @@ export async function loadWorkspaceAssetsWithCompleteness(
   }
 }
 
+/**
+ * The paths the store already holds, from the metadata document alone — no asset bytes are read.
+ * `null` when the store could not be read: "we do not know" must never pass for "it holds nothing",
+ * or a caller would re-save every asset on a Firestore hiccup. Never throws.
+ */
+export async function listWorkspaceAssetPaths(workspaceId: string): Promise<string[] | null> {
+  const db = getDb();
+  if (!db) return null;
+  try {
+    const meta = await db.collection(COLLECTION).doc(workspaceId).get();
+    if (!meta.exists) return [];
+    const paths = meta.data()?.paths;
+    return Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string') : [];
+  } catch {
+    return null;
+  }
+}
+
 /** The minimal actuator slice needed to write an asset's raw bytes into the sandbox. */
 export interface BinaryFileSink {
   writeBinaryFile(workspaceId: string, filePath: string, base64: string): Promise<void>;

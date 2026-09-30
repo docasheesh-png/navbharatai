@@ -516,7 +516,7 @@ import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrches
 import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
-import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable } from '../AgentV3/ReviewerAgent';
+import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline } from '../AgentV3/ReviewerAgent';
 import { refuteReviewByEvidence, missingClassClaim } from '../AgentV3/reviewEvidence';
 import { SALVAGE_HANDOFF_MARKER, HANDOFF_NOTE_FIX_LINE } from '../AgentV3/handoffRule';
 import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
@@ -553,7 +553,8 @@ import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } 
 import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict } from '../AgentV3/buildAbortCause';
 import { workspaceHoldsUserApp, userOwnedFileCount } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
-import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets } from '../AgentV3/WorkspaceAssetStore';
+import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
+import { persistBuildAssets, buildAssetsNote, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
 import { attachUserActionRecorder } from '../AgentV3/userActionRecorder';
@@ -13301,6 +13302,8 @@ async function noteBuildOutcome(
       // Fully wrapped: a small app, an edit, or ANY failure ⇒ the build runs exactly as today. Billed like
       // every other planner call (blueprintUsage + buildUsage) when it fires, and only on large-app builds.
       let megaRoadmapActive: MegaRoadmap | null = null;
+      /** The milestone's brief when a roadmap step is being built — what the feature checks grade. */
+      let milestoneRequest: string | null = null;
       if (envFlag('AGENTV3_MEGA_ROADMAP', true) && intent === 'new_build' && !isEditMode) {
         try {
           const scope = analyzeAppScope(planning.text);
@@ -15915,6 +15918,10 @@ async function noteBuildOutcome(
       if (megaRoadmapActive && megaRoadmapActive.steps.length > 0) {
         const step1 = megaRoadmapActive.steps[0];
         const total = megaRoadmapActive.steps.length;
+        // The build is JUDGED on what it is ASKED to build (autopsy 728a402d): the milestone's brief,
+        // not the whole message whose later parts this build is told not to build.
+        milestoneRequest = step1.buildPrompt;
+        dispatcher.setCoverageRequest(step1.buildPrompt);
         buildPrompt = `${step1.buildPrompt}\n\n(This is milestone 1 of ${total} for a larger app the user is building step by step: "${step1.title}". Build THIS milestone as a complete, standalone, fully-working and polished app on its own — do NOT stub the later milestones, and do NOT try to build them now. Later milestones will be added in their own separate builds.)`;
         // 🔴 THE USER'S OWN RULES SURVIVE THE SWAP (build 681bd91b). This line REPLACES the user's words
         // with the planner's, so "no React, one single file, no fake responses, no placeholder buttons"
@@ -18694,6 +18701,10 @@ async function noteBuildOutcome(
                       : `Design repair improved ${design.findings.length - after.findings.length} of ${design.findings.length} page(s); ${after.findings.length} still fall short.`,
                     autoResolved: after.ok,
                   });
+                  // The same check, over the same files, looked again and found nothing: the page
+                  // findings it raised describe pages that are now fine (autopsy 728a402d — they stayed
+                  // "unresolved" beside DESIGN_HEALED and were named in the build's root-cause line).
+                  if (designRepair && after.ok) { try { buildDiag.resolveOnRecheck('DESIGN_PAGE_INCONSISTENT'); } catch { /* best-effort */ } }
                   if (a11yAsk) {
                     // The earlier ACCESSIBILITY line describes the app BEFORE this repair; say what is
                     // true now, either way, rather than leave a fixed finding standing or a failed one hidden.
@@ -19726,6 +19737,44 @@ async function noteBuildOutcome(
           });
         }
       } catch { /* app-scaffold defaults are best-effort — never affect the build result */ }
+      // 🔴 MOVED AHEAD OF THE VERIFICATION (autopsy 728a402d, 2026-09-30). This pass ran AFTER the
+      // settle — after the green latch, the save and the snapshot — as an unnamed writer, so on every
+      // browser-verified build Green Freeze refused it and the report carried a GREEN_FREEZE_DEFERRED
+      // line about the app's own files ("a later write to src/hooks/useCart.ts was NOT applied"). The
+      // sweep never ran where it could matter. Here, beside the production defaults, its edits are part
+      // of the app the render check, the production build and GreenGuard see — verified, not refused.
+      // Named, so a latched path (a resumed green session) says who asked; it stays off every allowlist,
+      // because editing a working app's source is not a finishing pass's job.
+      // U-3 — FIRST-BUILD-CORRECT (prevent-not-heal, admin 2026-07-31): deterministically strip the model's
+      // OWN provably-dead NAMED imports from the files it wrote THIS build, so the reviewer never spends a
+      // whole "fix the error" round removing them and the app ships clean the first time. Safe by
+      // construction (keep-on-any-doubt; never touches side-effect / namespace / default imports — see
+      // UnusedImportSweep). Additive + best-effort; kill switch AGENTV3_IMPORT_SWEEP=off.
+      try {
+        if (result.ok && expectsArtifacts && writtenFiles.size > 0 && importSweepEnabled()) {
+          const src: Record<string, string> = {};
+          for (const [p, c] of writtenFiles) {
+            if (typeof c === 'string' && /\.(mjs|cjs|jsx?|tsx?)$/i.test(p) && !/\.d\.ts$/i.test(p)) src[p] = c;
+          }
+          const cleaned = sweepUnusedImports(src);
+          const savedSweep: Record<string, string> = {};
+          await runInPass('import-sweep', async () => {
+          for (const [p, c] of Object.entries(cleaned)) {
+            try {
+              await actuator.writeFile(workspaceId, p, c);
+              writtenFiles.set(p, c);
+              inBuildWriteTick++; // a proof that collected the tree mid-sweep discards itself
+              try { getWorkspaceMemory(workspaceId).indexFile(p, c); } catch { /* index best-effort */ }
+              savedSweep[p] = c;
+            } catch { /* one write failing must not block the rest */ }
+          }
+          });
+          if (Object.keys(savedSweep).length > 0) {
+            await saveWorkspaceFiles(workspaceId, savedSweep).catch(() => {});
+            events.emit({ type: 'narration', agent: 'architect', text: `🧹 Cleaned unused imports from ${Object.keys(savedSweep).length} file(s) — no wasted fix-up round.`, ts: Date.now() });
+          }
+        }
+      } catch { /* the import sweep is best-effort — never affects the build result */ }
 
       if (
         process.env.AGENTV3_RENDER_RESCUE !== 'off'
@@ -19891,7 +19940,7 @@ async function noteBuildOutcome(
             // FEATURE_COVERAGE finding in the report (present vs missing); it NEVER blocks a build (a
             // heuristic must never false-fail a working app). Auto-fixing the gaps is the next slice.
             try {
-              let coverage = checkFeaturePresence(prompt, html, declinedPresenceFeatures(featureConfirmation));
+              let coverage = checkFeaturePresence(milestoneRequest ?? prompt, html, declinedPresenceFeatures(featureConfirmation));
               // APP HEALTH CULTURE slice 2 (Phase 1b, opt-in AGENTV3_FEATURE_HEAL=on): the app renders
               // but a REQUESTED control is missing → run ONE bounded heal pass that adds the missing UI,
               // then re-open the running app and re-probe (only a control now in the live DOM counts).
@@ -19938,7 +19987,7 @@ async function noteBuildOutcome(
                     if (vr.kept && healResult?.ok) {
                       result = healResult as typeof result;
                       if (afterHtml) {
-                        const afterCoverage = checkFeaturePresence(prompt, afterHtml, declinedPresenceFeatures(featureConfirmation));
+                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? prompt, afterHtml, declinedPresenceFeatures(featureConfirmation));
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
                       }
                     }
@@ -19948,7 +19997,7 @@ async function noteBuildOutcome(
                       result = healed;
                       try {
                         const after = (await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl')).html;
-                        const afterCoverage = checkFeaturePresence(prompt, after, declinedPresenceFeatures(featureConfirmation));
+                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? prompt, after, declinedPresenceFeatures(featureConfirmation));
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
                       } catch { /* re-open best-effort — keep the pre-heal coverage */ }
                     }
@@ -21665,8 +21714,13 @@ async function noteBuildOutcome(
           // descendant, so the sub-agent's calls carry it without a line of their own; and because it
           // survives `raceTimeout` giving up, a reviewer we WALKED AWAY FROM keeps tagging its turns.
           // Nothing here decides whether to charge — see the REVIEW_INCOMPLETE branch below.
+          const reviewChanged = [...writtenFiles.keys()].filter((p) => !finishingPaths.has(p));
           const reviewPromise = runInBillingPhase(PHASE_POST_BUILD_REVIEW, async () => reviewBuild({
-              userRequest: prompt,
+              // A roadmap milestone is reviewed against its own brief (autopsy 728a402d), never against
+              // the later milestones this build was told not to build.
+              userRequest: milestoneRequest ?? prompt,
+              // A suggest-only review is handed the changed code in full, so it answers in one call.
+              ...(reviewPlan.mode === 'suggest' ? { inlineFiles: leanReviewInline(reviewChanged, (p) => writtenFiles.get(p)) } : {}),
               fileTree: rFiles,
               fileSample: rSample,
               spawn: reviewSpawn,
@@ -21677,7 +21731,7 @@ async function noteBuildOutcome(
               // …and not the files the platform's own finishing passes wrote (skeletons, PWA files,
               // the architecture note): reviewing NavBharatAI's scaffolding spends the user's money and
               // can send a repair pass after our own files.
-              changedFiles: [...writtenFiles.keys()].filter((p) => !finishingPaths.has(p)),
+              changedFiles: reviewChanged,
           }));
           try {
             review = await raceTimeout(reviewPromise, reviewBudget, 'post-build-review');
@@ -22499,6 +22553,19 @@ async function noteBuildOutcome(
             } catch { /* the guard must never cost a user their save — fall through to the plain save */ }
           }
           const finalSave = saved ? Promise.resolve() : saveWorkspaceFiles(workspaceId, toSave).catch(() => {});
+          // THE BINARY HALF OF THE SAME SAVE (autopsy 728a402d). The text store skips binaries, so an icon
+          // or image a build made with a command lived only as long as this sandbox. Only when the turn's
+          // own files are what was kept — a restored turn's pictures belong to the attempt, not the app.
+          if (persisted === toSave && expectsArtifacts && !isImportTurn) {
+            try {
+              const assetsOutcome = await withTimeout(
+                persistBuildAssets(actuator as BuildAssetSource, workspaceId, { heldPaths: listWorkspaceAssetPaths, save: saveWorkspaceAssets }),
+                20_000, 'build-assets',
+              );
+              const assetsNote = buildAssetsNote(assetsOutcome);
+              if (assetsNote) buildDiag.record({ phase: 'build', severity: 'info', code: 'BUILD_ASSETS_SAVED', message: assetsNote, autoResolved: true });
+            } catch { /* best-effort — the text files are saved either way */ }
+          }
           // THE COPY IS THE APP — AND ONLY NOW CAN THAT BE SAID (snapshotIdentity.ts). The save above
           // moves the workspace's durable stamp PAST the copy, so every clock-based "nothing written
           // since" rule would call the copy stale from here on — which is exactly what silently killed
@@ -23348,33 +23415,6 @@ async function noteBuildOutcome(
           events.emit({ type: 'narration', agent: 'architect', text: `🧭 Decision trace:\n${decisionTrace.format()}`, ts: Date.now() });
         }
       } catch { /* decision trace is best-effort — never affects the build */ }
-      // U-3 — FIRST-BUILD-CORRECT (prevent-not-heal, admin 2026-07-31): deterministically strip the model's
-      // OWN provably-dead NAMED imports from the files it wrote THIS build, so the reviewer never spends a
-      // whole "fix the error" round removing them and the app ships clean the first time. Safe by
-      // construction (keep-on-any-doubt; never touches side-effect / namespace / default imports — see
-      // UnusedImportSweep). Additive + best-effort; kill switch AGENTV3_IMPORT_SWEEP=off.
-      try {
-        if (result.ok && expectsArtifacts && writtenFiles.size > 0 && importSweepEnabled()) {
-          const src: Record<string, string> = {};
-          for (const [p, c] of writtenFiles) {
-            if (typeof c === 'string' && /\.(mjs|cjs|jsx?|tsx?)$/i.test(p) && !/\.d\.ts$/i.test(p)) src[p] = c;
-          }
-          const cleaned = sweepUnusedImports(src);
-          const savedSweep: Record<string, string> = {};
-          for (const [p, c] of Object.entries(cleaned)) {
-            try {
-              await actuator.writeFile(workspaceId, p, c);
-              writtenFiles.set(p, c);
-              try { getWorkspaceMemory(workspaceId).indexFile(p, c); } catch { /* index best-effort */ }
-              savedSweep[p] = c;
-            } catch { /* one write failing must not block the rest */ }
-          }
-          if (Object.keys(savedSweep).length > 0) {
-            await saveWorkspaceFiles(workspaceId, savedSweep).catch(() => {});
-            events.emit({ type: 'narration', agent: 'architect', text: `🧹 Cleaned unused imports from ${Object.keys(savedSweep).length} file(s) — no wasted fix-up round.`, ts: Date.now() });
-          }
-        }
-      } catch { /* the import sweep is best-effort — never affects the build result */ }
       // U-4 — FIRST-BUILD-CORRECT: a Vite app must ALWAYS have its config (missing-config autopsy 2026-07-31).
       // A real "continue" build FAILED (ok:false) because the app had `vite` in its deps but NO vite.config
       // at all — the reviewer's "Missing vite.config.ts — the build will fail." Materialize a minimal,

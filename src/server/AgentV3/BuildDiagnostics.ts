@@ -43,7 +43,7 @@ export type IssueSeverity = 'info' | 'warning' | 'error';
  * a human notices them; never a reason to hesitate before shipping the app.
  */
 const PROCESS_ONLY_CODES = new Set([
-  'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL',
+  'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED',
   // A repair's out-of-scope answer that OUR guard refused to write (autopsy eed79815): engine housekeeping.
   'REPAIR_OUT_OF_SCOPE',
   // Whether the platform's additions to the reply reached the screen (summaryAdditions.ts): a fact about our delivery.

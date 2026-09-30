@@ -3404,6 +3404,22 @@ the flag entries above promise.
     exactly the sideways scroll being looked for — the first version of this check did that. Evidence,
     never a gate; `MOBILE_LAYOUT_ISSUES` becomes the one-tap offer "Make it fit a phone".
     `MOBILE_LAYOUT_OK` / `_NOT_RUN` are process-only.
+- **🔁 A RENDERED APP'S CONSOLE LINE IS CHECKED AGAIN BEFORE A REPAIR, AND OUR OWN NOTICE IS NOT A REQUEST
+  (autopsy 12511a9c, 2026-09-30).** Two keys, NEITHER set, both default ON; `off` reverts each alone.
+  - **`AGENTV3_CONSOLE_RECHECK`** (`renderCheckConsole.ts`): an app that RENDERED in a real browser, where
+    the only evidence against it is its console, gets one free second look before a repair is paid for
+    (`PREVIEW_CONSOLE_RECHECK`). A calculator (158 CSS rules, 20/20 buttons styled) was repaired twice
+    (~90 s, then ~3 min with a 118 s model call) for "The script has an unsupported MIME type
+    ('text/html')". That is Chrome's message for a service worker whose script came back as HTML. The
+    defaults pass had written `register('/sw.js')` into index.html BEFORE writing public/sw.js. The pass now
+    writes index.html LAST. And the runtime auto-fix reads the console only from the last CLEAN real-browser
+    check (`runtimeAutofixSince`): its fixed 180 s window was the sibling the 7d79254b fix never reached.
+  - **`AGENTV3_NOTICE_ECHO`** (`platformNoticeEcho.ts`): a prompt that IS one of our own notices (the
+    weak-tier welcome or build-failed notice, any language, or a 60+ character piece of one) is answered
+    with a fixed line naming the user's earlier request. No model call, no build, and it is never recorded as a
+    request. The report's prompt was the notice byte for byte, most likely copied from the notice bubble.
+    The build ran on our words and shipped them as the app's og:description. Second instance of the class
+    after fdd59ef8 (our sign-in notice).
 - **`AGENTV3_CLICK_EXPLORE`** (default ON, set `off` to disable — added 2026-09-28, competitive gap G1,
   admin: *"best solution jo gaps ko fill kar ke navbharatai ko compatitors se aage la jaye"*) — **the
   app is PRESSED, not only painted.** Every post-build check watched the app render or drove ONE derived
@@ -3515,6 +3531,19 @@ the flag entries above promise.
   `public/` as-is at the root, so that copy shadowed the real entry ("unsupported MIME type ('text/html')") and
   cost two repair passes. CRA is exempt (there it IS the entry). Test-locked in
   `tests/theCalculatorsHelpersHadNoHome.test.ts`.
+  🔁 **The owner rules missed a sibling (build 9762f589, 2026-09-30).** The plan had `src/utils/sales.ts ::
+  Sample sales data generation …` for `generateSampleSalesData`: it described the helpers without naming
+  them, outside the contract's folder, so the lane added a SECOND `src/utils.ts`. Two files wrote the same
+  helpers with different signatures and three repairs chased the mismatch. `helperModuleByWords` now picks a
+  planned plain module (never a `.tsx`, config, entry or `.d.ts`) sharing ≥ 2 word stems with the helpers;
+  a tie picks nobody.
+  🏷️ **`AGENTV3_CONTRACT_NAME_SPLIT` (NOT set; default ON; `off` reverts), same build.** The contract prompt
+  has forbidden a type named after a component since autopsy 121c2431; this contract still declared
+  `interface CitySummary` beside `CitySummary.tsx` (TS2865). `separateTypeFromComponentNames` renames such a
+  type (`CitySummaryData`) before the contract file is written, unless the contract declares the component
+  itself under that name. The net: `fixTypeImportValueClash` in the shared deterministic pass turns a TS2865
+  import type-only (tsc's own fix; a model repair had made it a self-import). Test-locked and
+  reversion-proven in `tests/theSalesSampleHadTwoHelperHomes.test.ts`.
 
 - **`AGENTV3_SNAPSHOT_BUCKET`** (default ON wherever bucket-only publishing is on; `off` reverts
   snapshots alone — added 2026-09-18, admin Monitor capture) — a build SNAPSHOT is now served from the

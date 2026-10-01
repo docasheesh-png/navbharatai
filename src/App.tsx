@@ -508,6 +508,8 @@ export default function App() {
    * so, so the store's own default (Browse) is untouched for every other way in.
    */
   const [storeTarget, setStoreTarget] = useState<{ tab?: 'browse' | 'publish' | 'mine' | 'review'; workspaceId: string | null } | null>(null);
+  /** Which App Mart app's comments to open — set by a tapped App Mart notification. */
+  const [storeSocialTarget, setStoreSocialTarget] = useState<{ key: string; nonce: number } | null>(null);
   const [githubRedirectingMessage, setGithubRedirectingMessage] = useState<string | null>(null);
   /**
    * A mirror of the message above, for the native listeners.
@@ -1622,7 +1624,7 @@ export default function App() {
   // `navbharat:navigate` with { detail: { view } } instead of threading a prop through every layer.
   useEffect(() => {
     const onNavigate = (e: Event) => {
-      const detail = (e as CustomEvent<{ view?: ViewType; settingsScreen?: string; fixPrompt?: string; autoSend?: boolean; signIn?: 'phone'; storeTab?: 'browse' | 'publish' | 'mine' | 'review'; storeWorkspaceId?: string }>).detail;
+      const detail = (e as CustomEvent<{ view?: ViewType; settingsScreen?: string; fixPrompt?: string; autoSend?: boolean; signIn?: 'phone'; storeTab?: 'browse' | 'publish' | 'mine' | 'review'; storeWorkspaceId?: string; storeSocialKey?: string }>).detail;
       // OPEN THE SIGN-IN SCREEN (admin 2026-08-22). The verify sheet refuses a number that belongs to
       // another account and offers the one thing that helps — signing in with it, which opens that
       // account. It rides this existing event rather than a new prop chain: the sheet lives four
@@ -1643,6 +1645,11 @@ export default function App() {
       // find their own way to the form they just asked for.
       if (detail?.storeTab || detail?.storeWorkspaceId) {
         setStoreTarget({ tab: detail.storeTab, workspaceId: detail.storeWorkspaceId ?? null });
+      }
+      // A tapped App Mart notification names the app whose comments to open. The nonce lets a second
+      // tap on the SAME app open it again.
+      if (typeof detail?.storeSocialKey === 'string' && detail.storeSocialKey) {
+        setStoreSocialTarget({ key: detail.storeSocialKey, nonce: Date.now() });
       }
     };
     window.addEventListener('navbharat:navigate', onNavigate as EventListener);
@@ -4404,6 +4411,7 @@ export default function App() {
             effectiveDeviceMode={effectiveDeviceMode}
             storeInitialTab={storeTarget?.tab}
             storePublishWorkspaceId={storeTarget?.workspaceId ?? null}
+            storeSocialTarget={storeSocialTarget}
             v3Preview={v3Preview}
             previousFiles={previousFiles}
             onV3FixError={(errText) => setV3PendingFix({ text: platformFixRequestPrompt(errText), nonce: Date.now() })}

@@ -1,6 +1,28 @@
 import type { Express, Request, Response } from 'express';
 import { verifyFirebaseToken, resolveVerifiedEmail } from '../lib/authMiddleware';
 import { listNotificationsForUser, markNotificationsRead, dismissNotifications } from '../lib/AdminNotificationStore';
+import { listSocialInbox, updateSocialInbox } from '../lib/appMartSocialStore';
+import { isSocialInboxId } from '../lib/appMartSocialRules';
+
+/**
+ * App Mart notifications ("Ravi liked your app", "Asha commented …") are delivered through THIS inbox,
+ * so the panel every client already draws — including phone apps installed before App Mart social
+ * existed — shows them with no new screen. They live in their OWN per-person collection and carry
+ * their OWN read state (appMartSocialStore.ts), and the two are split here by id shape:
+ *
+ *   · the broadcast store reads the latest 50 messages platform-wide and filters per person, so one
+ *     popular app's likes written there would push everybody's real messages out of that window;
+ *   · its read list keeps the newest 500 ids, so a stream of like-notification ids would rotate old
+ *     broadcast ids out of it and make them unread again.
+ *
+ * Neither can happen when the social rows never enter that store.
+ */
+function splitIds(ids: string[]): { social: string[]; admin: string[] } {
+  const social: string[] = [];
+  const admin: string[] = [];
+  for (const id of ids) (isSocialInboxId(id) ? social : admin).push(id);
+  return { social, admin };
+}
 
 /**
  * User-facing notification delivery (admin 2026-07-30). The admin sends messages from the admin panel
@@ -14,7 +36,11 @@ export function registerNotificationRoutes(app: Express): void {
     const uid = await verifyFirebaseToken(req);
     if (!uid) { res.status(401).json({ error: 'Please sign in.' }); return; }
     const email = await resolveVerifiedEmail(uid).catch(() => null);
-    const notifications = await listNotificationsForUser(uid, email);
+    const [broadcasts, social] = await Promise.all([
+      listNotificationsForUser(uid, email),
+      listSocialInbox(uid).catch(() => []),
+    ]);
+    const notifications = [...broadcasts, ...social].sort((a, b) => b.createdAt - a.createdAt);
     res.json({ notifications, unread: notifications.filter((n) => !n.read).length });
   });
 
@@ -23,7 +49,8 @@ export function registerNotificationRoutes(app: Express): void {
     const uid = await verifyFirebaseToken(req);
     if (!uid) { res.status(401).json({ error: 'Please sign in.' }); return; }
     const ids = Array.isArray((req.body as { ids?: unknown[] })?.ids) ? ((req.body as { ids: unknown[] }).ids.filter((x): x is string => typeof x === 'string')) : [];
-    await markNotificationsRead(uid, ids);
+    const { social, admin } = splitIds(ids);
+    await Promise.all([markNotificationsRead(uid, admin), updateSocialInbox(uid, social, 'readVersion')]);
     res.json({ ok: true });
   });
 
@@ -56,7 +83,8 @@ export function registerNotificationRoutes(app: Express): void {
       ? (body.ids as unknown[]).filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length <= 128).slice(0, 200)
       : [];
 
-    await dismissNotifications(uid, ids);
+    const { social, admin } = splitIds(ids);
+    await Promise.all([dismissNotifications(uid, admin), updateSocialInbox(uid, social, 'dismissedVersion')]);
     res.json({ ok: true, deleted: ids.length });
   });
 }

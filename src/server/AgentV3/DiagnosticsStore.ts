@@ -516,6 +516,8 @@ export interface DiagnosticsHistoryEntry {
   summary?: string;
   rootCause?: string;
   counts: BuildDiagnosticsReport['counts'];
+  /** Time the build waited for the user's answer — taken off its duration by the ETA history (autopsy 1219c639). */
+  userWaitMs?: number;
   /** The build's own id (the history doc is keyed by `startedAt`, which is not the same thing). */
   buildId?: string;
   /**
@@ -777,6 +779,7 @@ async function listDiagnosticsHistoryInner(
       if (!r || typeof r !== 'object') return [];
       return [{
         id: d.id, buildId: r.buildId, startedAt: r.startedAt, endedAt: r.endedAt, ok: r.ok,
+        ...(typeof r.userWaitMs === 'number' && r.userWaitMs > 0 ? { userWaitMs: r.userWaitMs } : {}),
         summary: r.summary, rootCause: r.rootCause, counts: r.counts,
         // Carried so a SESSION summary can be built from the history we already read (admin 2026-08-06):
         // the guardian records every workspace wipe, but each report shows one TURN, so three wipes

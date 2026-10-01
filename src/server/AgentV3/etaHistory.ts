@@ -33,6 +33,15 @@ export interface BuildRecordLike {
   /** Whether it finished successfully; a failed build's duration must not teach the estimate. */
   ok?: boolean;
   outcome?: string;
+  /** Time spent waiting for the user's answer — not build time (autopsy 1219c639). */
+  userWaitMs?: number;
+}
+
+/** The build's own working time: wall clock minus the time it waited for the user. PURE. */
+export function workingMs(r: BuildRecordLike): number {
+  const wall = (r.endedAt as number) - (r.startedAt as number);
+  const wait = Number(r.userWaitMs);
+  return Number.isFinite(wait) && wait > 0 ? Math.max(0, wall - wait) : wall;
 }
 
 /**
@@ -56,7 +65,7 @@ export const MAX_SANE_BUILD_MS = 45 * 60_000;    // past 45 min it was almost ce
  */
 export function isTeachableBuild(r: BuildRecordLike): boolean {
   if (!r || typeof r.startedAt !== 'number' || typeof r.endedAt !== 'number') return false;
-  const ms = r.endedAt - r.startedAt;
+  const ms = workingMs(r);
   if (!(ms >= MIN_SANE_BUILD_MS && ms <= MAX_SANE_BUILD_MS)) return false;
   // `ok` is authoritative when present; otherwise fall back to the recorded outcome string.
   if (typeof r.ok === 'boolean') return r.ok;
@@ -91,7 +100,7 @@ export function historyFromRecords(
     if (!isTeachableBuild(r)) continue;
     out.push({
       complexity: currentComplexity,
-      durationMs: (r.endedAt as number) - (r.startedAt as number),
+      durationMs: workingMs(r),
     });
   }
   return out;
@@ -168,9 +177,29 @@ export function fleetHistoryFromTelemetry(
   return { history, builds, days: history.length };
 }
 
+/**
+ * The telemetry slice a build is counted under, and the one its ETA learns from.
+ *
+ * 🔴 A BUILD THAT STARTS FROM A TESTED TEMPLATE IS NOT A FROM-SCRATCH BUILD OF THE SAME PROMPT (autopsy
+ * 4a1c0157, 2026-10-01). A starter chip's login page scored 58 (`complex_app`): routing already knew the
+ * template was seeded and opened it on the cheap rung (`scaffoldedComplexityDecision`), but the ETA asked
+ * the fleet how long `complex_app` builds take and told the user ~11 min. The build verified and polished
+ * the template in 3.8. The same key also poured every short template build into the `complex_app`
+ * average, pulling a from-scratch complex build's estimate down. Routing, the ETA and the history now
+ * agree on one answer: a seeded build is its own kind. PURE.
+ */
+export const SCAFFOLD_TASK_KEY = 'scaffold';
+export function etaTaskKey(taskType: string | null | undefined, scaffolded: boolean): string {
+  if (scaffolded) return SCAFFOLD_TASK_KEY;
+  return String(taskType ?? '').trim() || 'unknown';
+}
+
 /** The admin line for an estimate taught by the platform's recent builds of this kind. PURE. */
 export function fleetEtaBasisNote(taskType: string, builds: number, days: number): string {
-  return `No past builds of this app — using NavBharatAI's recent average for "${taskType}" builds (${builds} build${builds === 1 ? '' : 's'} over ${days} day${days === 1 ? '' : 's'}).`;
+  const kind = taskType === SCAFFOLD_TASK_KEY
+    ? 'builds that start from a tested template (verify and polish)'
+    : `"${taskType}" builds`;
+  return `No past builds of this app — using NavBharatAI's recent average for ${kind} (${builds} build${builds === 1 ? '' : 's'} over ${days} day${days === 1 ? '' : 's'}).`;
 }
 
 /**

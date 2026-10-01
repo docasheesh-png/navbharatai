@@ -17,7 +17,7 @@ import { dropShadowingEntries } from './entryShadow';
 import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE } from './noEvalRule';
 import { posix } from 'node:path';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
-import { deadlineFromBudget } from './turnDeadline';
+import { deadlineFromBudget, isReasoningRungHandoff } from './turnDeadline';
 import { judgeRepair } from './repairAcceptance';
 import { scaffoldRestores, protectBoilerplateInRepair, SCAFFOLD_BOILERPLATE } from './scaffoldBoilerplate';
 import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
@@ -867,9 +867,39 @@ export function valueOwnerFor(manifest: ReadonlyArray<SimpleFileSpec>, names: re
   if (named) return { path: named.path, added: false };
   const dataFile = candidates.find((f) => /(^|\/)(data|constants?|mocks?|mockData|fixtures?|seed(?:Data)?)\.[jt]sx?$/i.test(f.path));
   if (dataFile) return { path: dataFile.path, added: false };
+  const inDataDir = dataDirOwner(candidates, names);
+  if (inDataDir) return { path: inDataDir.path, added: false };
   const dir = posix.dirname(contractPath);
   const ext = /\.js$/.test(contractPath) ? 'js' : 'ts';
   return { path: dir === '.' ? `data.${ext}` : `${dir}/data.${ext}`, added: true };
+}
+
+/**
+ * A planned plain module inside a constants / data / mocks / fixtures / seed FOLDER. PURE.
+ *
+ * 🔴 WHY (autopsy de3bb2bb, 2026-10-01). The plan had `src/constants/chat.ts` for the app's error
+ * messages and timeout, and the contract declared `DEFAULT_LOCALE`, `ERROR_MESSAGES`, `API_TIMEOUT`. The rule
+ * above matches a file NAMED `constants.ts`, never one that lives in `constants/`, so the lane ADDED
+ * `src/data.ts`. The lane handed off before writing it, and the files it had written imported `../data`, a
+ * module that did not exist: 21 type errors for the full builder to fix first. The planned file had written
+ * exactly those three constants.
+ *
+ * One such module ⇒ it owns the constants. Several ⇒ the one whose name and purpose share the most word
+ * stems with the constants, and a tie picks nobody (the lane then adds `data.ts`, as before). A `.tsx`
+ * component, a declaration file and a config file are never owners.
+ */
+export function dataDirOwner(candidates: ReadonlyArray<SimpleFileSpec>, names: readonly string[]): SimpleFileSpec | null {
+  const inDir = candidates.filter((f) => /(^|\/)(constants?|data|mocks?|fixtures?|seeds?)\/[^/]+\.[jt]s$/i.test(f.path)
+    && !/\.d\.ts$/i.test(f.path) && !/(^|\/)[^/]*\.config\.[jt]s$/i.test(f.path));
+  if (inDir.length === 0) return null;
+  if (inDir.length === 1) return inDir[0];
+  const want = new Set<string>();
+  for (const n of names) for (const s of ownerStems(n)) want.add(s);
+  const scored = inDir
+    .map((f) => ({ f, score: [...ownerStems(`${posix.basename(f.path).replace(/\.[jt]s$/, '')} ${f.purpose || ''}`)].filter((s) => want.has(s)).length }))
+    .sort((a, b) => b.score - a.score);
+  if (scored[0].score === 0 || (scored.length > 1 && scored[1].score === scored[0].score)) return null;
+  return scored[0].f;
 }
 
 /** The purpose line the constants' owner is given, naming each constant it must export. PURE. */
@@ -1651,7 +1681,22 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
               { deadlineAt: deadlineFromBudget(contractCap) },
             ),
             contractCap, 'simple-contract') || '').trim();
-        } catch { contract = ''; }
+        } catch (err) {
+          contract = '';
+          // 🔴 A HAND-OFF DURING THE CONTRACT ENDS THE LANE HERE (autopsy 1219c639), the sibling of the stop
+          // below (31254f9a). The engine crawled and the next one reasons before every answer, so the
+          // provider chain declined to call it — a deliberate hand-off. The lane read it as an empty
+          // contract: the report said it "came back with nothing usable, so the files were written without
+          // a shared contract", and the user was told "Building 10 file(s)" — then not one file was
+          // written, because every file call would have met the same rung. The plan goes to the full
+          // builder instead, exactly as a hand-off during planning does.
+          if (isReasoningRungHandoff(err)) {
+            clock.contractMs = Math.min(Math.max(0, Date.now() - contractStartedAt), contractCap);
+            clock.contractCapMs = contractCap;
+            clock.contractOutcome = 'handed-off';
+            throw err;
+          }
+        }
         // 🔴 A STOP DURING THE CONTRACT ENDS THE LANE HERE (autopsy 31254f9a). The call came back empty
         // because the user pressed Stop, and the lane carried on: it recorded the contract as having "come
         // back with nothing usable", and told the user it was "Building 9 file(s)" a few milliseconds

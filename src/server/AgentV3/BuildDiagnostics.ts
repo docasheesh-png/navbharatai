@@ -137,6 +137,12 @@ const PROCESS_ONLY_CODES = new Set([
   'CHEAP_REVIEW_NOT_RUN',
   // How this turn was ROUTED is a fact about our engine, never a finding about the user's app.
   'BUILD_ORDER_READ_AS_EDIT',
+  // How often the MODEL re-read files, a scan of the workspace we could not do, and a retry of our own:
+  // three facts about our engine (autopsy de3bb2bb — REPEATED_READS was one of the two open warnings that
+  // held a working app at YELLOW: "2 thing(s) worth a look").
+  'REPEATED_READS',
+  'WORKSPACE_SCAN_FAILED',
+  'EMPTY_BUILD_RETRY',
   // …and its sibling: our own page-render browser produced nothing (autopsy c6e4c6ff). Same rule —
   // a check that did not run is a fact about OUR instrument, never about the user's pages.
   'PAGE_RENDER_NOT_RUN',
@@ -299,6 +305,39 @@ export function narrationEchoesPromptSymptom(text: string, prompt: string | unde
   const known = new Set((asked.match(PROBLEM_WORD_RE_G) ?? []).map((w) => w.toLowerCase()));
   return said.every((w) => known.has(w));
 }
+
+/**
+ * WHAT EACH HEAL RESOLVES (autopsy de3bb2bb, 2026-10-01). Every heal below records its `*_HEALED` /
+ * `*_REPAIRED` line only after re-running the check that raised the finding and seeing it pass — and then
+ * left that finding OPEN. The release gate counts open warnings, so a fixed problem kept the app YELLOW
+ * ("2 thing(s) worth a look" on that build: one was an integrity warning its own heal had just fixed).
+ * The design heal and the explorer repair resolved theirs by hand (`resolveOnRecheck`); the rest never did.
+ *
+ * Resolution now happens in `record` itself, so a heal cannot forget it. `[]` means the heal resolves its
+ * finding some other way (a readiness blocker re-judged by `recordReadinessRecovery`, or nothing recorded
+ * before the heal). `tests/theCoactCollectorAutopsy.test.ts` (its census) fails when a heal code in the route is
+ * missing here.
+ */
+export const HEAL_RESOLVES: Readonly<Record<string, readonly string[]>> = {
+  MISSING_FILES_HEALED: ['MISSING_FILES_DETECTED'],
+  SYNTAX_HEALED: ['SYNTAX_ERROR_DETECTED'],
+  MISSING_EXPORT_HEALED: ['MISSING_EXPORT_DETECTED'],
+  PREVIEW_COMPILE_HEALED: ['PREVIEW_COMPILE_DIVERGENCE'],
+  BOOT_KILLING_ENV_GUARD_HEALED: ['BOOT_KILLING_ENV_GUARD'],
+  INTEGRITY_HEALED: ['INTEGRITY_FOCUS_CONFLICT', 'INTEGRITY_ORPHAN_STYLESHEET', 'INTEGRITY_DUPLICATE_ENTRY', 'INTEGRITY_DUPLICATE_MODULE'],
+  DESIGN_HEALED: ['DESIGN_PAGE_INCONSISTENT'],
+  CSS_CLASSES_HEALED: ['CSS_CLASSES_UNDEFINED'],
+  ACCESSIBILITY_HEALED: ['ACCESSIBILITY'],
+  EXPLORE_REPAIRED: ['EXPLORE_FAILED'],
+  REVIEW_FUNCTIONAL_REPAIRED: [],
+  HOOKS_RULES_HEALED: [],
+  INCOMPLETE_CODE_HEALED: [],
+  HTML_ENTRY_REPAIRED: [],
+  IMPORT_PATH_AUTOFIXED: [],
+  LABELS_REPAIRED: [],
+  SCRIPT_INTEGRITY_REPAIRED: [],
+  TSCONFIG_EXTENDS_REPAIRED: [],
+};
 
 export function isAppFinding(issue: Pick<BuildIssue, 'phase' | 'code'>): boolean {
   if (!issue) return false;
@@ -624,6 +663,11 @@ export interface BuildDiagnosticsReport {
    * turn that showed no ETA (chat), on a legacy record, and on a build that has not ended.
    */
   etaAccuracy?: EtaAccuracy;
+  /**
+   * Milliseconds the build spent waiting for the USER's answer (a key, a plan, a database offer) — not build
+   * time (autopsy 1219c639). Carried so the ETA history learns from the build's work only. Absent when 0.
+   */
+  userWaitMs?: number;
   /** The post-build quality reviewer's FULL findings (every small problem it listed) — not the
    *  400-char timeline snippet. This is what makes the report's "all problems" list complete. */
   review?: string;
@@ -793,6 +837,8 @@ export class BuildDiagnostics {
   private billing?: BuildBillingRecord;
   /** What the user was promised at t=0 — see `etaAccuracy`. Absent on turns that show no ETA. */
   private etaPromise?: EtaPromise;
+  /** Time the build spent waiting for the USER to answer (a key, a plan, a database offer) — see `addUserWait`. */
+  private userWaitMs = 0;
   private reviewText?: string;
   private manifest?: BuildManifestV1;
   private priorFailedBuilds: number | undefined;
@@ -835,6 +881,9 @@ export class BuildDiagnostics {
     if (this.meta.workspaceId && issue.severity === 'info' && typeof issue.code === 'string' && RENDER_PROVEN_CODES.has(issue.code)) {
       noteRenderSeen(this.meta.workspaceId);
     }
+    // A heal that re-checked and passed resolves what it healed — see HEAL_RESOLVES.
+    const healed = typeof issue.code === 'string' ? HEAL_RESOLVES[issue.code] : undefined;
+    if (healed && issue.autoResolved === true) for (const code of healed) this.resolveOnRecheck(code);
     const last = this.issues[this.issues.length - 1];
     if (last && last.phase === issue.phase && last.code === issue.code && last.message === issue.message) {
       last.repeatCount = (last.repeatCount ?? 1) + 1;
@@ -1997,6 +2046,17 @@ export class BuildDiagnostics {
     };
   }
 
+  /**
+   * Record time the build spent waiting for the user's answer (autopsy 1219c639). A ten-minute key popup was
+   * scored as build time: "the build took 11.5 min — 1.7× the midpoint and OVER the band", about a build
+   * whose own work took 1.5 minutes. The estimate predicts the build's work, never how long a person takes
+   * to find a key, so `etaAccuracy` takes this off the clock. Never throws.
+   */
+  addUserWait(ms: number): void {
+    const n = Number(ms);
+    if (Number.isFinite(n) && n > 0) this.userWaitMs += n;
+  }
+
   setBilling(b: BuildBillingRecord): void {
     this.billing = b;
     this.notify();
@@ -2407,7 +2467,8 @@ export class BuildDiagnostics {
       billing: this.billing,
       // DERIVED AT SERIALIZATION, so no ending path can forget it — the same reasoning as
       // `endedWithoutOutcome` above. Pure: `report()` stays safe to call repeatedly mid-build.
-      etaAccuracy: etaAccuracy(this.etaPromise, this.startedAt, this.endedAt, outcomeCodeOf(this.issues)) ?? undefined,
+      etaAccuracy: etaAccuracy(this.etaPromise, this.startedAt, this.endedAt, outcomeCodeOf(this.issues), this.userWaitMs) ?? undefined,
+      ...(this.userWaitMs > 0 ? { userWaitMs: Math.round(this.userWaitMs) } : {}),
       review: this.reviewText,
       priorFailedBuilds: this.priorFailedBuilds,
       session: this.session,
@@ -3146,13 +3207,16 @@ export function etaAccuracy(
   startedAt: number | null | undefined,
   endedAt: number | null | undefined,
   outcomeCode: string = '',
+  userWaitMs: number = 0,
 ): EtaAccuracy | null {
   const promisedMs = Number(promise?.estimateMs);
   const a = Number(startedAt);
   const b = Number(endedAt);
   if (!Number.isFinite(promisedMs) || promisedMs <= 0) return null;
   if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return null;
-  const actualMs = b - a;
+  // The user's thinking time is not build time (autopsy 1219c639) — see `addUserWait`.
+  const waited = Number.isFinite(Number(userWaitMs)) && Number(userWaitMs) > 0 ? Math.min(Number(userWaitMs), b - a) : 0;
+  const actualMs = Math.max(1, b - a - waited);
   const lowMs = Number.isFinite(Number(promise?.lowMs)) ? Number(promise?.lowMs) : promisedMs;
   const highMs = Number.isFinite(Number(promise?.highMs)) ? Number(promise?.highMs) : promisedMs;
   const ratio = actualMs / promisedMs;
@@ -3160,6 +3224,7 @@ export function etaAccuracy(
   const mins = (ms: number) => `${(ms / 60000).toFixed(1)} min`;
   const evidenced = promise?.evidenced === true;
   const band = `${mins(lowMs)}–${mins(highMs)}`;
+  const waitNote = waited >= 1000 ? ` (not counting ${mins(waited)} spent waiting for the user's answer)` : '';
   const head = evidenced
     ? `The user was shown ${band} (midpoint ${mins(promisedMs)})`
     : /rough estimate/i.test(String(promise?.shown ?? ''))
@@ -3171,13 +3236,13 @@ export function etaAccuracy(
   if (ETA_UNTESTED_OUTCOMES.has(outcomeCode) && actualMs < highMs && !withinBand) {
     return {
       promisedMs, lowMs, highMs, actualMs, ratio, withinBand, evidenced, untested: true,
-      line: `${head}; the build was cut short (${outcomeCode}) at ${mins(actualMs)}, before the band ended, so it does not test the estimate.`,
+      line: `${head}; the build was cut short (${outcomeCode}) at ${mins(actualMs)}${waitNote}, before the band ended, so it does not test the estimate.`,
     };
   }
   const verdict = withinBand
     ? 'the build landed INSIDE that band'
     : `the build took ${mins(actualMs)} — ${ratio.toFixed(1)}× the midpoint and ${actualMs > highMs ? 'OVER' : 'UNDER'} the band`;
-  return { promisedMs, lowMs, highMs, actualMs, ratio, withinBand, evidenced, line: `${head}; ${verdict}.` };
+  return { promisedMs, lowMs, highMs, actualMs, ratio, withinBand, evidenced, line: `${head}; ${verdict}${waitNote}.` };
 }
 
 /**

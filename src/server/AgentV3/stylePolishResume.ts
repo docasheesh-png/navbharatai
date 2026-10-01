@@ -55,6 +55,12 @@ export interface StyleResumeInput {
   producedFiles?: boolean;
   /** Screens with controls a screen reader cannot use (Q-002) — handed back in the same message. */
   a11y?: ReadonlyArray<{ file: string; issues: ReadonlyArray<string> }>;
+  /**
+   * Spacing values off the 4px grid in files THIS build wrote (Q-037 / Q-022) — the `DESIGN_CONSISTENCY`
+   * finding, handed back in the same message instead of shipping as a warning. `offGridHandBack` has
+   * already applied the finding's own threshold and the this-build-wrote-it scope.
+   */
+  offGrid?: ReadonlyArray<{ file: string; values: ReadonlyArray<string> }>;
 }
 
 export interface StyleResumeDecision {
@@ -69,24 +75,14 @@ export function decideStyleResume(input: StyleResumeInput): StyleResumeDecision 
   const missing = [...new Set((input.missing ?? []).map((c) => String(c ?? '').trim().replace(/^\./, '')).filter(Boolean))];
   const pages = (input.pages ?? []).filter((p) => p && p.file && p.defects?.length).slice(0, MAX_PAGES_LISTED);
   const a11y = (input.a11y ?? []).filter((a) => a && a.file && a.issues?.length);
-  if (missing.length === 0 && pages.length === 0 && a11y.length === 0) return { resume: false, message: '', standDown: 'nothing-missing' };
+  const offGrid = (input.offGrid ?? []).filter((o) => o && o.file && o.values?.length);
+  if (missing.length === 0 && pages.length === 0 && a11y.length === 0 && offGrid.length === 0) return { resume: false, message: '', standDown: 'nothing-missing' };
   if (input.resumesUsed >= MAX_STYLE_RESUMES) return { resume: false, message: '', standDown: 'limit' };
   if (turnDeclined(input.text)) return { resume: false, message: '', standDown: 'declined' };
   if (!input.producedFiles && turnAskedTheUser(input.text)) return { resume: false, message: '', standDown: 'asked-the-user' };
   const sheet = String(input.sheet ?? '').trim() || 'src/index.css';
   const parts: string[] = [];
-  if (missing.length) {
-    const shown = missing.slice(0, MAX_CLASSES_LISTED).map((c) => `.${c}`).join(', ');
-    const more = missing.length > MAX_CLASSES_LISTED ? ` and ${missing.length - MAX_CLASSES_LISTED} more` : '';
-    parts.push(
-      `${missing.length} class name(s) the screens use have NO rule in any stylesheet, so those parts of the app `
-      + `render as plain unstyled HTML: ${shown}${more}. Add a real rule for every one of them in ONE edit_file `
-      + `call on ${sheet} with an EMPTY old_string (an empty old_string appends to the end of the file — no anchor `
-      + 'needed). Use the palette variables already defined at the top of that file (var(--accent), var(--card), '
-      + 'var(--border), var(--muted), var(--radius), …) and the kit classes it already has. Do not rename classes in '
-      + 'the screens and do not remove existing rules.',
-    );
-  }
+  if (missing.length) parts.push(missingClassesInstruction(missing, sheet));
   if (pages.length) {
     parts.push(
       `These page(s) fall short of the app's own design standard:\n`
@@ -99,6 +95,14 @@ export function decideStyleResume(input: StyleResumeInput): StyleResumeDecision 
       'These screens have controls a screen-reader user cannot use:\n'
       + a11y.map((a) => `- ${a.file}: ${a.issues.join('; ')}.`).join('\n')
       + '\nGive each one a real, specific name that says what it does (not "button" or "icon").',
+    );
+  }
+  if (offGrid.length) {
+    parts.push(
+      'These files you wrote use padding/margin/gap values off the 4px spacing grid:\n'
+      + offGrid.map((o) => `- ${o.file}: ${o.values.join(', ')}.`).join('\n')
+      + '\nChange each to the nearest multiple of 4px (for example 10px → 8px or 12px, 6px → 4px or 8px). '
+      + 'Change only those values; leave every other rule as it is.',
     );
   }
   return {
@@ -115,9 +119,35 @@ export function decideStyleResume(input: StyleResumeInput): StyleResumeDecision 
   };
 }
 
+/** The instruction that names undefined classes and how to add them in one edit. PURE. */
+export function missingClassesInstruction(missing: readonly string[], sheet: string): string {
+  const shown = missing.slice(0, MAX_CLASSES_LISTED).map((c) => `.${c}`).join(', ');
+  const more = missing.length > MAX_CLASSES_LISTED ? ` and ${missing.length - MAX_CLASSES_LISTED} more` : '';
+  return `${missing.length} class name(s) the screens use have NO rule in any stylesheet, so those parts of the app `
+    + `render as plain unstyled HTML: ${shown}${more}. Add a real rule for every one of them in ONE edit_file `
+    + `call on ${sheet} with an EMPTY old_string (an empty old_string appends to the end of the file — no anchor `
+    + 'needed). Use the palette variables already defined at the top of that file (var(--accent), var(--card), '
+    + 'var(--border), var(--muted), var(--radius), …) and the kit classes it already has. Do not rename classes in '
+    + 'the screens and do not remove existing rules.';
+}
+
+/**
+ * 🔴 "THE APP LOOKS COMPLETE" WAS SAID OVER UNSTYLED SCREENS (autopsy 2f723acb, 2026-10-01). The done
+ * check reads code health only, so it told the user "✅ The app looks complete — wrapping up." while the
+ * screens used 19 classes no stylesheet defined; the end of the turn then sent the model back to style
+ * them, and the user watched "wrapping up" turn into more work. When classes are missing, the done steer
+ * carries this instead, and the user is not told the app is complete. PURE; '' when nothing is missing.
+ */
+export function doneStyleNote(missing: readonly string[], sheet: string | undefined): string {
+  const list = [...new Set((missing ?? []).map((c) => String(c ?? '').trim().replace(/^\./, '')).filter(Boolean))];
+  if (list.length === 0) return '';
+  return `Before you finish: ${missingClassesInstruction(list, String(sheet ?? '').trim() || 'src/index.css')}`;
+}
+
 /** One sentence for the admin report — never user-facing, so it may name the mechanism. */
-export function styleResumeNote(missingCount: number, pageCount = 0): string {
-  return `The model ended its turn while ${missingCount} class name(s) had no style rule and ${pageCount} page(s) fell `
-    + 'short of the design standard, so it was handed them and told to fix them before finishing (once). Before '
+export function styleResumeNote(missingCount: number, pageCount = 0, offGridFiles = 0): string {
+  return `The model ended its turn while ${missingCount} class name(s) had no style rule, ${pageCount} page(s) fell `
+    + `short of the design standard and ${offGridFiles} file(s) it wrote had spacing off the 4px grid, so it was handed them`
+    + ' and told to fix them before finishing (once). Before '
     + '2026-10-01 the turn ended here and a separate end-of-build repair pass, in a fresh context, fixed them.';
 }

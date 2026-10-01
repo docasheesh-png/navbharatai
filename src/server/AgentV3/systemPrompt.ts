@@ -96,6 +96,10 @@ export const GATEWAY_AI_RULE =
   'through NavBharatAI with no key. Use generateText()/chat() from it, and show isAiReady() === false as ' +
   'a clear "the assistant starts working once you publish this app" state, never canned answers. In your ' +
   'final message tell the user plainly: the AI answers after they PUBLISH, not in the preview. ' +
+  'A provider the user NAMES (ChatGPT, Perplexity, Gemini, Claude…) describes what the assistant should do, ' +
+  'not a key to fetch: still use this keyless route, never add a server just to reach that provider, and ' +
+  'never stop the build to ask for an AI key — say in your final message that they can add their own ' +
+  'provider key later if they want one. ' +
   'Only if the app already has, or genuinely needs, a server: follow the server rule below instead.';
 
 /** The AI-in-app rule for THIS deployment. Gateway off ⇒ AI_IN_APP_RULE byte-for-byte. */
@@ -509,8 +513,8 @@ export const DESIGN_KIT_BRIEF: readonly string[] = [
   '    • EMPTY STATE — `.nb-empty` (+ `.nb-empty-icon` / `.nb-empty-title` / `.nb-empty-text`). EVERY',
   '      list, table and dashboard needs one: a blank panel reads as BROKEN to a first-time user, so say',
   '      what will appear here and put the action that fills it right there.',
-  '    • DASHBOARD SHELL — `.nb-shell` > `.nb-sidebar` (+ `.nb-nav-item`, `.active`) and `.nb-topbar` +',
-  '      `.nb-main`. Collapses to one column on a phone by itself.',
+  '    • DASHBOARD SHELL — `.nb-shell` > `.nb-sidebar` (+ `.nb-brand` with `img.nb-brand-icon`, `nav.nb-nav` >',
+  '      `.nb-nav-item` / `.active`) and `.nb-topbar` + `.nb-main`. Collapses to one column on a phone by itself.',
   '    • STAT TILES — `.nb-stats` > `.nb-stat` (+ `.nb-stat-label` / `.nb-stat-value`).',
   '    • HERO — `.nb-hero` (+ `.nb-hero-sub`, `.nb-hero-actions`); the gradient uses the app\'s OWN accent.',
   '    • PRICING — `.nb-pricing` > `.nb-plan` (+ `.nb-plan-featured` on the recommended one,',

@@ -400,6 +400,20 @@ export function inventedKitClasses(content: string, path: string, stylesheets: R
   return used.filter((c) => !defined.has(c)).sort();
 }
 
+/**
+ * Is this class the KIT's to put back — an `nb-` name the kit really defines? PURE.
+ *
+ * 🔴 THE ONE ANSWER TO "MAY A CLASS CHECK SKIP THIS NAME?" (autopsy 2f723acb, 2026-10-01). The end-of-turn
+ * style check skipped EVERY `nb-` class as "left to the kit", so it handed the model 2 classes
+ * (`.badge-soft`, `.text-muted`) while 17 invented ones (`.nb-demo-roles`, `.nb-option-key`, …) that the
+ * kit has never had went unmentioned, and the end-of-build check then spent a 95-second repair pass on
+ * them. Only a name the kit DEFINES is restored by `kitRestorePatch`; an invented `nb-` name has no kit
+ * rule to restore and must be reported like any other undefined class.
+ */
+export function leftToTheKit(className: string): boolean {
+  return typeof className === 'string' && className.startsWith('nb-') && kitClasses().has(className);
+}
+
 /** Fast pre-check (no I/O): does this file use an `nb-` class the kit does not have? PURE. */
 export function usesNonKitNbClass(content: string, path: string): boolean {
   return inventedKitClasses(content, path, {}).length > 0;

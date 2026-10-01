@@ -21,7 +21,9 @@
 // affect an app. The call site wraps it the same way its neighbours are wrapped, so a throw here can
 // never reach the build.
 
-import { lintDesign, designSummary, type DesignLintResult } from '../AppMakerLab/intelligence/DesignLinter';
+import {
+  lintDesign, designSummary, extractSpacingPx, offGridSpacing, MAX_OFFGRID, SPACING_GRID, type DesignLintResult,
+} from '../AppMakerLab/intelligence/DesignLinter';
 import { lintA11y, type A11yLintResult } from '../AppMakerLab/intelligence/A11yLinter';
 import { stripCommentsForMarkup } from './stripCodeComments';
 
@@ -224,4 +226,42 @@ export function a11yHandBack(r: BuildQualityLint | null | undefined, max = 6): A
     }
   }
   return [...byFile.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(0, max).map(([file, issues]) => ({ file, issues }));
+}
+
+/** At most this many distinct values named per file in the hand-back. */
+export const OFF_GRID_VALUES_LISTED = 10;
+
+/**
+ * Spacing values off the 4px grid in the files THIS build wrote, for the end-of-turn hand-back
+ * (Q-037 / Q-022, autopsies dfd24058 and e49afa97). Both builds shipped `DESIGN_CONSISTENCY` warnings for
+ * spacing in a stylesheet the build itself wrote, after the write-time note had named it and the model
+ * had moved on — and nothing at the end of the turn asked again.
+ *
+ * 🔒 ONLY WHAT THIS BUILD WROTE (Q-015: the same finding on a build that never touched the file). A value
+ * in a file the build did not write is the user's, and handing it back would send the model to restyle
+ * code nobody asked it to change.
+ * 🔒 THE SAME THRESHOLD AS THE FINDING: nothing is handed back unless the written files together carry more
+ * than `MAX_OFFGRID` off-grid values, so a hand-back never costs a turn over a value the report would not
+ * even have named. Same file selection and comment stripping as `lintBuiltApp`. PURE.
+ */
+export function offGridHandBack(
+  files: Record<string, string>,
+  written: Iterable<string>,
+  max = 6,
+): Array<{ file: string; values: string[]; count: number }> {
+  const wrote = new Set([...(written ?? [])].map((p) => String(p).replace(/^\.?\/+/, '')));
+  const found: Array<{ file: string; values: string[]; count: number }> = [];
+  let total = 0;
+  for (const [path, content] of Object.entries(files || {})) {
+    if (!wrote.has(path) || typeof content !== 'string') continue;
+    if (!LINTABLE.test(path) || NOT_APP_DESIGN.test(path) || GENERATED.test(path)) continue;
+    let off: number[] = [];
+    try { off = offGridSpacing(extractSpacingPx(stripCommentsForMarkup(content)), SPACING_GRID); } catch { continue; }
+    if (off.length === 0) continue;
+    total += off.length;
+    const values = [...new Set(off)].sort((a, b) => a - b).slice(0, OFF_GRID_VALUES_LISTED).map((v) => `${v}px`);
+    found.push({ file: path, values, count: off.length });
+  }
+  if (total <= MAX_OFFGRID) return [];
+  return found.sort((a, b) => (b.count - a.count) || a.file.localeCompare(b.file)).slice(0, max);
 }

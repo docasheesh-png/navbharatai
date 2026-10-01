@@ -194,6 +194,6 @@ describe('the promise is stored as NUMBERS, never parsed back out of our own pro
 
   it('the reconciliation is derived at serialization, so no ending path can forget it', () => {
     // Since autopsy 19641ab5 the build's own outcome rides along, so a stopped build is `untested`.
-    expect(diag).toContain('etaAccuracy(this.etaPromise, this.startedAt, this.endedAt, outcomeCodeOf(this.issues))');
+    expect(diag).toContain('etaAccuracy(this.etaPromise, this.startedAt, this.endedAt, outcomeCodeOf(this.issues), this.userWaitMs)'); // + the user's wait (autopsy 1219c639)
   });
 });

@@ -69,6 +69,40 @@ export const NEVER_ASK = [
   /^FIREBASE_PROJECT_ID$/i, /^GOOGLE_CLOUD_PROJECT$/i, /^CASHFREE_/i,
 ];
 
+/**
+ * Keys for a third-party AI MODEL. While the in-app AI gateway is on, an app needs none of them: the
+ * `generate_ai` recipe answers through NavBharatAI with no key at all (systemPrompt.ts GATEWAY_AI_RULE).
+ *
+ * 🔴 WHY THIS IS CODE AND NOT ONLY A PROMPT LINE (autopsy 1219c639). Asked for an app that "matches ChatGPT
+ * and Perplexity", the builder planned its own server, asked mid-build for PERPLEXITY_API_KEY (its
+ * OPENAI_API_KEY ask was refused as a platform name, so the plan could never have worked) and the user sat
+ * in a key popup for ten minutes, then stopped the build. The continue build used the keyless route and the
+ * app answered with no key. Naming a provider is a description of what the user wants the app to DO, not
+ * a request to pay that provider. `AI_API_KEY` is deliberately NOT here: an app with a server of its own
+ * legitimately reads it (AI_IN_APP_RULE). PURE.
+ */
+export const AI_MODEL_KEY_NAMES = [
+  /^PERPLEXITY_/i, /^OPENAI_/i, /^ANTHROPIC_/i, /^CLAUDE_/i, /^GEMINI_/i, /^GOOGLE_AI_/i, /^GOOGLE_GENERATIVE_AI_/i,
+  /^GROQ_/i, /^MISTRAL_/i, /^DEEPSEEK_/i, /^COHERE_/i, /^TOGETHER_/i, /^OPENROUTER_/i, /^XAI_/i, /^GROK_/i,
+  /^HUGGINGFACE_/i, /^HF_/i, /^REPLICATE_/i, /^FIREWORKS_/i, /^MOONSHOT_/i, /^KIMI_/i, /^GLM_/i, /^ZHIPU_/i,
+  /^CHATGPT_/i,
+];
+
+/** True when this name is an AI-model provider key (see AI_MODEL_KEY_NAMES). PURE. */
+export function isAiModelKey(name: string): boolean {
+  const n = String(name ?? '').trim();
+  return AI_MODEL_KEY_NAMES.some((re) => re.test(n));
+}
+
+/** What the builder is told instead of showing the popup for an AI-model key. PURE. */
+export function keylessAiNote(names: readonly string[]): string {
+  if (names.length === 0) return '';
+  return `Not asked: ${names.join(', ')}. An AI model needs NO key in this app — call run_recipe with name "generate_ai" `
+    + 'and input { "provider": "navbharat" } and use generateText()/chat() from src/lib/ai.ts. Do not add a server or '
+    + 'an SDK for the AI. In your final message, tell the user the assistant answers after they publish, and that '
+    + 'they can add their own provider key later in Settings → Secrets & API Keys if they want a specific provider.';
+}
+
 /** True when this name is one of NavBharatAI's own platform credentials. PURE. */
 export function isPlatformSecret(name: string): boolean {
   const n = String(name ?? '').trim();
@@ -184,7 +218,19 @@ export function postBuildKeyPrompt(count: number): string {
     + 'Don’t have one? Tap "Guide me" and I’ll walk you to it step by step.';
 }
 
-export type SecretRequestOutcome = 'saved' | 'skipped' | 'nothing-to-ask';
+export type SecretRequestOutcome = 'saved' | 'skipped' | 'timed-out' | 'stopped' | 'nothing-to-ask';
+
+/**
+ * What the ask returns to the dispatcher. The saved pairs, `null` when the user skipped (or nothing could be
+ * saved), or WHY nobody answered: the ask ran out of time, or the build was stopped while it waited.
+ *
+ * 🔴 THOSE TWO ARE NOT A SKIP (autopsy 1219c639). Both used to come back as `null`, and the build told a user
+ * who had pressed Stop — and whose popup simply timed out ten minutes later — "👍 Skipped for now".
+ */
+export type SecretAnswer = Record<string, string> | null | 'timed-out' | 'stopped';
+
+/** How long the key popup waits before the build carries on without the key (the approval default). */
+export const SECRET_ASK_WAIT_MINUTES = 10;
 
 /**
  * What the build says after the user answers.
@@ -198,6 +244,12 @@ export function secretRequestResult(outcome: SecretRequestOutcome, names: readon
   if (outcome === 'nothing-to-ask') return '';
   if (outcome === 'saved') {
     return `🔐 Saved ${names.length === 1 ? 'your key' : `${names.length} keys`} (${list}) and wired ${names.length === 1 ? 'it' : 'them'} into the app.`;
+  }
+  // A stopped build says nothing here: the stop message already tells the user where things stand, and
+  // nothing will carry on to "stay switched off".
+  if (outcome === 'stopped') return '';
+  if (outcome === 'timed-out') {
+    return `⏳ No answer came in ${SECRET_ASK_WAIT_MINUTES} minutes, so I carried on without ${list}. The feature that needs ${names.length === 1 ? 'it' : 'them'} stays switched off until you add ${names.length === 1 ? 'it' : 'them'} in Settings → Secrets & API Keys.`;
   }
   return `👍 Skipped for now. The feature that needs ${list} will stay switched off until you add ${names.length === 1 ? 'it' : 'them'} in Settings → Secrets & API Keys.`;
 }

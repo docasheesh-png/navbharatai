@@ -67,7 +67,8 @@ describe('2 · a fast lane that never reached the entry says so, by name', () =>
     expect(route).toContain("const salvageEntryLine = entryFirstHandoffLine(unwrittenEntries((sb.plannedPaths ?? []).map((path) => ({ path, purpose: '' })), sb.salvagedPaths));");
     expect(route).toContain("(salvageEntryLine ? ` ${salvageEntryLine}` : '') +");
     expect(route).toContain("const planEntryLine = entryFirstHandoffLine(unwrittenEntries(sb.plannedPaths.map((path) => ({ path, purpose: '' })), []));");
-    expect(route).toContain("(planEntryLine ? ` ${planEntryLine}` : '') +");
+    // Since autopsy 1219c639 the plan hand-off text is built by planHandoffText, which carries the line.
+    expect(route).toContain('planHandoffText(sb.plannedPaths, planExisting, planEntryLine)');
   });
 });
 

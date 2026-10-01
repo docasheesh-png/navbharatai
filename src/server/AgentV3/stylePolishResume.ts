@@ -53,6 +53,8 @@ export interface StyleResumeInput {
   env?: NodeJS.ProcessEnv;
   /** This run already wrote the screens — a closing question is an offer, not a decision (see unfinishedResume.ts). */
   producedFiles?: boolean;
+  /** Screens with controls a screen reader cannot use (Q-002) — handed back in the same message. */
+  a11y?: ReadonlyArray<{ file: string; issues: ReadonlyArray<string> }>;
 }
 
 export interface StyleResumeDecision {
@@ -66,7 +68,8 @@ export function decideStyleResume(input: StyleResumeInput): StyleResumeDecision 
   if (!styleResumeEnabled(input.env)) return { resume: false, message: '', standDown: 'disabled' };
   const missing = [...new Set((input.missing ?? []).map((c) => String(c ?? '').trim().replace(/^\./, '')).filter(Boolean))];
   const pages = (input.pages ?? []).filter((p) => p && p.file && p.defects?.length).slice(0, MAX_PAGES_LISTED);
-  if (missing.length === 0 && pages.length === 0) return { resume: false, message: '', standDown: 'nothing-missing' };
+  const a11y = (input.a11y ?? []).filter((a) => a && a.file && a.issues?.length);
+  if (missing.length === 0 && pages.length === 0 && a11y.length === 0) return { resume: false, message: '', standDown: 'nothing-missing' };
   if (input.resumesUsed >= MAX_STYLE_RESUMES) return { resume: false, message: '', standDown: 'limit' };
   if (turnDeclined(input.text)) return { resume: false, message: '', standDown: 'declined' };
   if (!input.producedFiles && turnAskedTheUser(input.text)) return { resume: false, message: '', standDown: 'asked-the-user' };
@@ -89,6 +92,13 @@ export function decideStyleResume(input: StyleResumeInput): StyleResumeDecision 
       `These page(s) fall short of the app's own design standard:\n`
       + pages.map((p) => `- ${p.file}: ${p.defects.map((d) => DEFECT_TEXT[d]).join('; ')}.`).join('\n')
       + '\nFix only these pages, with the kit classes the app already uses.',
+    );
+  }
+  if (a11y.length) {
+    parts.push(
+      'These screens have controls a screen-reader user cannot use:\n'
+      + a11y.map((a) => `- ${a.file}: ${a.issues.join('; ')}.`).join('\n')
+      + '\nGive each one a real, specific name that says what it does (not "button" or "icon").',
     );
   }
   return {

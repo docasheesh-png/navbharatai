@@ -200,3 +200,28 @@ export function a11yRepairAddendum(r: BuildQualityLint | null | undefined): stri
   const lines = v.map((x) => `- WCAG ${x.wcag}: ${x.fix}${offenderNote(r, x.type)}`);
   return `\n\nWhile you are in these pages, also fix these accessibility failures (a screen-reader user cannot use the app with them):\n${lines.join('\n')}`;
 }
+
+/** The accessibility findings the end-of-turn hand-back gives the builder, and their plain wording. */
+const HAND_BACK_A11Y: Record<string, string> = {
+  'control-name': 'button/link with no accessible name (add visible text or an aria-label)',
+  'input-label': 'form field with no label (a <label htmlFor> or an aria-label)',
+  'img-alt': 'image with no alt text',
+};
+
+/**
+ * The files to hand back for accessibility, worst first, from a lint result already computed. These are
+ * the defects only the builder can fix well — a name for an icon button has to MEAN something, so it is
+ * never guessed by a deterministic pass. PURE.
+ */
+export function a11yHandBack(r: BuildQualityLint | null | undefined, max = 6): Array<{ file: string; issues: string[] }> {
+  if (!r) return [];
+  const byFile = new Map<string, string[]>();
+  for (const [type, text] of Object.entries(HAND_BACK_A11Y)) {
+    for (const o of r.offenders?.[type] ?? []) {
+      const list = byFile.get(o.path) ?? [];
+      list.push(`${o.count} ${text}`);
+      byFile.set(o.path, list);
+    }
+  }
+  return [...byFile.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(0, max).map(([file, issues]) => ({ file, issues }));
+}

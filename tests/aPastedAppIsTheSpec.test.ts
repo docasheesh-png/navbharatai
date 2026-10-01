@@ -17,7 +17,6 @@ import { sanitizeResponseEmoji } from '../src/server/lib/responseEmoji';
 import { declaredRoutes } from '../src/server/AgentV3/routerPaths';
 import { extractPageRoutes } from '../src/server/AgentV3/PageRouteCheck';
 import { routeFromRouter } from '../src/server/AgentV3/journeyDerivation';
-import { decideUnstyledResume } from '../src/server/AgentV3/unstyledResume';
 import { detectTypesMajorMismatch } from '../src/server/AgentV3/DependencyAnalysis';
 import { analyzeDependencyConstraints } from '../src/server/AI/reasoning/ConstraintSolver';
 
@@ -204,26 +203,6 @@ export default function App() {
     const files = { 'src/App.tsx': APP, 'src/pages/NewBill.tsx': 'export function NewBill(){return <form/>}', 'src/pages/Dashboard.tsx': 'export function Dashboard(){return null}' };
     expect(routeFromRouter('src/pages/NewBill.tsx', files)).toBe('/new');
     expect(routeFromRouter('src/pages/Dashboard.tsx', files)).toBe('/');
-  });
-});
-
-describe('8 · a screen with unstyled classes is handed back once', () => {
-  it('resumes once, with the note; never after a question or a refusal; never twice', () => {
-    const note = '⚠️ src/components/Shell.tsx uses .nb-nav — no stylesheet defines it';
-    const d = decideUnstyledResume({ text: 'Your app is ready.', note, resumesUsed: 0 });
-    expect(d.resume).toBe(true);
-    expect(d.message).toContain('.nb-nav');
-    expect(decideUnstyledResume({ text: 'Your app is ready.', note, resumesUsed: 1 }).resume).toBe(false);
-    expect(decideUnstyledResume({ text: 'Should I use blue or gold for the header?', note, resumesUsed: 0 }).resume).toBe(false);
-    expect(decideUnstyledResume({ text: 'Your app is ready.', note: '', resumesUsed: 0 }).resume).toBe(false);
-    expect(decideUnstyledResume({ text: 'ok', note, resumesUsed: 0, env: { AGENTV3_UNSTYLED_RESUME: 'off' } as NodeJS.ProcessEnv }).resume).toBe(false);
-  });
-
-  it('the runner asks the dispatcher at the end of a ready turn (source guard)', () => {
-    const runner = src('src/server/AgentV3/AgentRunner.ts');
-    expect(runner).toMatch(/await dispatcher\.classesStillUnstyled\(\)/);
-    expect(runner).toMatch(/code: 'UNSTYLED_CLASSES_RESUMED'/);
-    expect(src('src/server/AgentV3/ToolDispatcher.ts')).toMatch(/sheetWritten \|\| opts\.allScreens/);
   });
 });
 

@@ -28,7 +28,8 @@ import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
 import { decideBuildNudge, standDownNote } from './nudgeToBuild';
 import { decideUnfinishedResume, unfinishedResumeNote } from './unfinishedResume';
-import { decideUnstyledResume, MAX_UNSTYLED_RESUMES, unstyledResumeEnabled } from './unstyledResume';
+import { decideStyleResume, styleResumeNote } from './stylePolishResume';
+import { asPlatformRequest } from './platformRequest';
 import { streamThinkingToChat } from './thinkingStream';
 import { PROMPT_PREVIEW_SEPARATOR } from './promptPreviewShape';
 
@@ -175,6 +176,12 @@ export interface AgentRunnerOptions {
    * user-facing. Omitted by every caller but the top-level build.
    */
   onNote?: (note: { code: string; message: string; detail?: string }) => void;
+  /**
+   * The run's instruction comes from one of the platform's own checks (a repair pass), not from the
+   * user. The model is told so, so its reply — narrated into the user's chat — never thanks the user
+   * for a request they did not make (platformRequest.ts, autopsy 1be16985).
+   */
+  platformRequest?: boolean;
   /**
    * Optional durable persistence of the transcript (D7). When provided, the build is created
    * in the store at the start, the new transcript turns are appended as the loop runs, and the
@@ -508,11 +515,11 @@ export class AgentRunner {
     let noBuildNudges = 0;
     /** Times a prose-ended turn was handed the readiness blockers and told to continue (unfinishedResume.ts). */
     let unfinishedResumes = 0;
-    /** Times a finished turn was handed back screens with unstyled classes (unstyledResume.ts). */
-    let unstyledResumes = 0;
+    /** Times a turn that ended with unstyled screens was handed the class list (stylePolishResume.ts). */
+    let styleResumes = 0;
     const MAX_BUILD_NUDGES = 2;
 
-    const messages: unknown[] = [{ role: 'user', content: userPrompt }];
+    const messages: unknown[] = [{ role: 'user', content: this.opts.platformRequest ? asPlatformRequest(userPrompt) : userPrompt }];
     // Wall-clock CREATION time of each message, parallel to `messages` (which stays exactly the
     // Claude-API shape — never mutated). Persisted copies are stamped from this so a reopened
     // session interleaves prose with the timeline in the LIVE order: the assistant message is
@@ -959,6 +966,19 @@ export class AgentRunner {
               const readiness = await dispatcher.assessBuildReadiness();
               // Surface the verdict to the UI as a build-health card (R2 §4.6) — pass or fail.
               buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier };
+              if (readiness.ready && styleResumes === 0 && !this.opts.signal?.aborted) {
+                // SCREENS THAT USE CLASSES NO STYLESHEET DEFINES ARE HANDED BACK ONCE, while the model still
+                // holds them (autopsy 1be16985 — 63 undefined classes, then a 174 s fresh-context repair).
+                const style = await dispatcher.undefinedClassesNow();
+                const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, resumesUsed: styleResumes });
+                if (decision.resume) {
+                  styleResumes++;
+                  try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length), detail: style.missing.slice(0, 20).map((c) => `.${c}`).join(' ') }); } catch { /* a note must never fail a build */ }
+                  messages.push({ role: 'user', content: decision.message });
+                  messageTs.push(Date.now());
+                  continue;
+                }
+              }
               if (!readiness.ready) {
                 // A MODEL THAT STOPPED IN PROSE WHILE THE APP IS STILL UNBUILT GETS THE GATE'S FINDINGS
                 // AND ANOTHER TURN (autopsy 121c2431 — the build ended FAILED with 1,418 s of budget
@@ -998,19 +1018,6 @@ export class AgentRunner {
                   summary = starterSummary(turn.text);
                 } else {
                   summary = `⚠️ This app isn't fully working yet — a couple of things still need fixing before it's ready to use.`;
-                }
-              }
-              // A READY APP WHOSE SCREENS STILL USE UNSTYLED CLASSES GETS ONE MORE TURN to define them, in
-              // the context that wrote them — not a fresh-context repair after the build (unstyledResume.ts).
-              if (readiness.ready && !this.opts.signal?.aborted) {
-                const styleNote = unstyledResumeEnabled() && unstyledResumes < MAX_UNSTYLED_RESUMES ? await dispatcher.classesStillUnstyled() : '';
-                const styleResume = decideUnstyledResume({ text: turn.text, note: styleNote, resumesUsed: unstyledResumes });
-                if (styleResume.resume) {
-                  unstyledResumes++;
-                  try { this.opts.onNote?.({ code: 'UNSTYLED_CLASSES_RESUMED', message: 'The model ended its turn with screens using classes no stylesheet defines; it was handed the list and one more turn to add the rules.', detail: styleNote.slice(0, 600) }); } catch { /* a note must never fail a build */ }
-                  messages.push({ role: 'user', content: styleResume.message });
-                  messageTs.push(Date.now());
-                  continue;
                 }
               }
             } catch { /* gate is best-effort — a scan error never fails a real build */ }

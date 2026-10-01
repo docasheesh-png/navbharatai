@@ -3154,8 +3154,7 @@ the flag entries above promise.
 
   Test-locked in `tests/theAskComesLast.test.ts`.
 - **📋 A PASTED APP IS THE SPEC, AND PASTED CODE IS NOT PROSE (autopsy a106df77, 2026-10-01).** Two keys, NEITHER
-  set, both default ON: **`AGENTV3_PASTED_APP_BRIEF`** (`off` drops the brief) and **`AGENTV3_UNSTYLED_RESUME`**
-  (`off` drops the end-of-turn style hand-back). A user pasted their own HTML bill maker with no other words.
+  set, default ON: **`AGENTV3_PASTED_APP_BRIEF`** (`off` drops the brief). A user pasted their own HTML bill maker with no other words.
   The published title became `<!doctype html> <html lang="en"> <head>`, a `<meta content="width=…">` was shown
   to them as "the app you asked for", and the rebuild dropped their "Items" tab.
   - `lib/pastedSource.ts` is the ONE detector: an HTML document, or 8+ code lines making up most of the paste.
@@ -3167,8 +3166,8 @@ the flag entries above promise.
   - Same autopsy, no keys: nested `<Route path="new">` routes are joined to their parents
     (`routerPaths.ts`), and the page check and the journey read them. `summaryAdditions` matches through the
     narration's emoji rule. `@types/X` beside a self-typed X is advised "remove it" (`lib/selfTypedPackages.ts`).
-  - A READY turn whose screens still use undefined classes gets them back once (`UNSTYLED_CLASSES_RESUMED`).
-    This is the fourth report of that class.
+  - The end-of-turn hand-back for undefined classes is #3425's `stylePolishResume.ts` (`AGENTV3_STYLE_RESUME`).
+    This PR had built a duplicate of it; the duplicate was removed when `main` was merged in.
   - ⚠️ Precision first: an ordinary prompt is returned byte for byte. A one-tag sentence or a stack trace is
     not pasted source.
   - Test-locked and reversion-proven in `tests/aPastedAppIsTheSpec.test.ts`.
@@ -3835,6 +3834,17 @@ the flag entries above promise.
   `openErrors`, one output-read door `noteCompileOutput` — the shell path had marked tsc clean on a `| head`
   exit code of 0); and when the release gate's typecheck passed, a reviewer finding claiming the project does
   not compile is dropped before the user sees it (`reviewEvidence.ts`, `REVIEW_REFUTED_BY_EVIDENCE`).
+- **🎨 `AGENTV3_STYLE_RESUME` — A TURN THAT ENDS WITH UNSTYLED SCREENS IS HANDED THE CLASS LIST ONCE (autopsy
+  1be16985, 2026-10-01). ⚠️ NOT set; default ON; `off` reverts.** `stylePolishResume.ts`, applied in
+  `AgentRunner` after a READY readiness verdict. The write-time note (`undefinedClassWriteNote`, e6d46cde)
+  had no end-of-turn check behind it: 63 classes survived, the model's one append missed its anchor and was
+  never retried, and a 174 s fresh-context repair pass added the rules afterwards. Now the architect gets the
+  list (`ToolDispatcher.undefinedClassesNow` — an unread stylesheet means "unknown", never a list) and is told
+  to append in ONE `edit_file` with an empty `old_string`. Once, never after a refusal or a question. Code
+  `STYLE_RULES_RESUMED` (process-only). Same change: an edit that misses its anchor in a long file is shown
+  the END of the file too and told how to append; the post-write "no React import" note is gone (the automatic
+  JSX runtime needs none; only `React.` without an import is flagged); and every repair runner is marked
+  `platformRequest`, so its reply never thanks the user for "the fixes you requested" (`platformRequest.ts`).
 - **🙋 A QUESTION IS AN ANSWER, NOT AN EMPTY BUILD — the retry overrode a correct reply and billed
   ₹196.28 for it (autopsy `e628efd4`, 2026-09-25; no flag, on by construction).** A free-tier user
   asked *"if we don't have a chat in next 2 hours can you send a message to initiate the chat
@@ -4900,6 +4910,12 @@ and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; 
   `kimi-k2.7-code` ($0.95/$4.00) instead of `glm-4.7-flashx` ($0.07/$0.40) — ~13× the input price for
   THOSE builds. The bet is that a cheap rung which fails is paid twice, once in the wasted call and
   once in the heal. **Watch: the share of builds routed complex, and whether their heal count drops.**
+- 📏 **A REQUEST THAT STATES NOTHING TO SIZE BUYS NO SECOND OPINION (autopsy 1be16985, 2026-10-01; no flag).**
+  *"Make biology learning app"* — four words, no features — was read as `complex` by the classifier, opened
+  on KIMI and skipped the fast lane. A request the scorer read but did not recognise now buys the call only
+  when it STATES a scope (`statesAScope`: ≥ 2 named features via `countEnumeratedFeatures`, or
+  `BIG_SOFTWARE_NOUN`); otherwise it is an admitted unknown and opens on the cheap rung. A script the scorer
+  cannot read still buys the call. This also closes the "a bare question buys a call" cost item.
 - 🧩 **A TESTED TEMPLATE OPENS ON THE FIRST RUNG (admin accepted 2026-09-27, autopsy 15151196).** A
   golden scaffold is seeded only for a starter chip's prompt VERBATIM, so the template already is the
   request and the job is verify-and-polish. The memory-match chip still scored 63 and opened on KIMI for

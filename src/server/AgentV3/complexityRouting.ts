@@ -25,6 +25,7 @@
 
 import { isCheapFlashRung, withoutCheapFlashLead, type LadderRung } from './tierLadder';
 import { signalsCouldNotRead, signalsMatchedNothing } from './RequestAnalyser';
+import { BIG_SOFTWARE_NOUN, countEnumeratedFeatures } from './enumeratedFeatures';
 
 /**
  * 🔒 ONE IMPLEMENTATION, OWNED BY THE MODULE THE FACT IS ABOUT (2026-09-17, later the same day).
@@ -126,8 +127,38 @@ export function needsSecondOpinion(score: number, prompt?: string): boolean {
   // with total confidence and sends the biggest app on the cheapest rung. A confident wrong answer is
   // worse than an admitted unknown. `'E commerce website'` is exactly that request: one space away
   // from a pattern that would have scored it 58, and it opened a 26.7-minute build on the flash rung.
-  if (prompt !== undefined && signalsMatchedNothing(prompt)) return true;
+  if (prompt !== undefined && signalsMatchedNothing(prompt)) return statesAScope(prompt);
   return Number.isFinite(score) && Math.abs(score - COMPLEX_SCORE_LINE) <= BORDERLINE_MARGIN;
+}
+
+/**
+ * How many separately-named features a request must state before its size is a question at all.
+ * Two, because one named thing is the app's subject, not a list of what it does.
+ */
+export const MIN_STATED_FEATURES = 2;
+
+/**
+ * PURE. Does a request the scorer read but did not recognise STATE anything a size could be read from?
+ *
+ * 🔴 WHY (autopsy 1be16985, 2026-10-01). *"Make biology learning app"* names a subject and nothing
+ * else. The scorer recognised none of it, so a second opinion was bought, and it answered `complex`.
+ * The build opened on the reasoning rung at ~13× the lead rung's input price, the fast lane was
+ * skipped, and a 14-file, five-screen app with no accounts and no server took 9.7 minutes against a
+ * 6–8 minute estimate. Four words carry no scope; the classifier could only answer from its own idea
+ * of what a "learning app" usually contains, which is a guess the build then had to pay for.
+ *
+ * 🔒 THE CLASS: a model asked to size a request that states nothing to size. The answer is not in the
+ * request, so it cannot be read out of it. The evidence a size CAN be read from is the same two facts
+ * the project gate already uses: a list of named features (`countEnumeratedFeatures`) or a request for
+ * big software by name (`BIG_SOFTWARE_NOUN`). Without either, the request is an admitted unknown, and
+ * this module's own rule for an unknown applies: open on the cheap rung, and let the ladder climb.
+ *
+ * ⚠️ Only for a request the scorer READ. One in a script it cannot read still buys the call, because
+ * neither the feature count nor the noun list can see a Devanagari "management system".
+ */
+export function statesAScope(prompt: string): boolean {
+  const text = String(prompt ?? '');
+  return BIG_SOFTWARE_NOUN.test(text) || countEnumeratedFeatures(text) >= MIN_STATED_FEATURES;
 }
 
 /**
@@ -265,11 +296,15 @@ export async function decideComplexity(
       + `decide the routing: this build opens on the cheap rung and the ladder climbs if it has to.`
     : `${why}; ${how}, so the score stands`;
   if (!needsSecondOpinion(score, input?.prompt) || !llmCall) {
+    const nothingToSize = unmatched && !statesAScope(input?.prompt ?? '');
     return {
       ...base,
       verdict: unknownFallback,
       source: 'deterministic',
-      reason: couldNotTell
+      reason: nothingToSize
+        ? `${why}, and it names no features and no large system, so there is nothing a second opinion `
+          + `could size; this build opens on the cheap rung and the ladder climbs if it has to`
+        : couldNotTell
         ? standsOrNot('no second opinion was available')
         : `score ${score} is ${deterministic === 'complex' ? 'above' : 'at or below'} the ${COMPLEX_SCORE_LINE} line`,
     };

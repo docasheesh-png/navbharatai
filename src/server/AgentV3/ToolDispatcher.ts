@@ -84,7 +84,7 @@ import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, usesNonKitNbClass } from './kitRestore';
-import { isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, collectDefinedClasses } from './CssConsistency';
+import { findUndefinedClasses, isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, collectDefinedClasses } from './CssConsistency';
 import { pageDesignWriteNote, isPageFile } from './DesignCoverage';
 import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
 import { shellWriteTargets } from './shellWriteTargets';
@@ -3260,6 +3260,44 @@ export class ToolDispatcher {
   private static readonly STYLE_NOTE_MAX_READS = 80;
 
   /**
+   * The class names the screens use that no stylesheet defines, read from the workspace NOW — the
+   * end-of-turn half of the write-time note (stylePolishResume.ts, autopsy 1be16985). `nb-` classes are
+   * left to the kit, exactly as the write-time note leaves them.
+   *
+   * 🔒 UNKNOWN IS EMPTY. A project with more files than one read may cover, a listing that fails, or a
+   * stylesheet that cannot be read returns `[]`: this answer sends a model back to work, so it must never
+   * name a class as undefined because the file that defines it was not read.
+   */
+  async undefinedClassesNow(): Promise<{ missing: string[]; sheet?: string }> {
+    try {
+      let listing: string[] = [];
+      try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'style-resume-listing'); }
+      catch { return { missing: [] }; }
+      const paths = listing.map((p) => String(p).replace(/^\.?\/+/, ''));
+      const sheets = paths.filter((p) => isProjectStylesheet(p));
+      const code = paths
+        .filter((p) => /^src\/.*\.(tsx|jsx|ts|js)$/.test(p))
+        .filter((p) => !/\.(test|spec)\.[jt]sx?$/.test(p) && !/\.d\.ts$/.test(p));
+      if (sheets.length === 0 || sheets.length + code.length > ToolDispatcher.STYLE_NOTE_MAX_READS) return { missing: [] };
+      const project: Record<string, string> = {};
+      let unreadSheet = false;
+      await Promise.all([...sheets, ...code].map(async (p) => {
+        try {
+          const raw = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'style-resume-read');
+          if (typeof raw === 'string') project[p] = withoutPreviewBridge(p, raw);
+          else if (isProjectStylesheet(p)) unreadSheet = true;
+        } catch { if (isProjectStylesheet(p)) unreadSheet = true; }
+      }));
+      if (unreadSheet) return { missing: [] };
+      const missing = findUndefinedClasses(project).filter((c) => !c.startsWith('nb-'));
+      const sheet = sheets.includes('src/index.css') ? 'src/index.css' : sheets[0];
+      return { missing, sheet };
+    } catch {
+      return { missing: [] };
+    }
+  }
+
+  /**
    * The stylesheet-write class note and the page-design note, from ONE read of the project. Only a write
    * that touches a stylesheet or a page pays for the read; anything unreadable is simply left out, so the worst case
    * is a note that says less, never one that says something false about a file it did not see.
@@ -3339,19 +3377,7 @@ export class ToolDispatcher {
   /** Every project stylesheet a module written this build imports (autopsy 1389f0d5). */
   private readonly _importedSheets = new Set<string>();
 
-  /**
-   * The style notes for EVERY screen written this build, asked once more as the turn ends — '' when
-   * every class has a rule. The write-time notes fire per write and are easy to defer; this is what the
-   * runner hands back before it accepts "done" (unstyledResume.ts, autopsy a106df77).
-   */
-  async classesStillUnstyled(): Promise<string> {
-    if (this._screensWithClasses.size === 0) return '';
-    const missing = await this.undefinedClassNotes({}, { allScreens: true });
-    const invented = await this.inventedKitClassNotes(Object.fromEntries(this._screensWithClasses));
-    return `${missing}${invented}`.trim();
-  }
-
-  private async undefinedClassNotes(files: Record<string, string>, opts: { allScreens?: boolean } = {}): Promise<string> {
+  private async undefinedClassNotes(files: Record<string, string>): Promise<string> {
     try {
       // What this write teaches about the project: the sheets it writes, and the sheets its modules import.
       for (const [p, c] of Object.entries(files)) {
@@ -3374,7 +3400,7 @@ export class ToolDispatcher {
       // A stylesheet write re-asks the question for the screens already written; the note then says
       // what is STILL missing after this sheet, not merely what was missing before it.
       const sheetWritten = Object.keys(files).some((p) => isProjectStylesheet(p));
-      const screens = sheetWritten || opts.allScreens ? [...this._screensWithClasses.keys()] : written;
+      const screens = sheetWritten ? [...this._screensWithClasses.keys()] : written;
       if (screens.length === 0) return '';
       const content = (p: string) => files[p] ?? this._screensWithClasses.get(p) ?? '';
       const project: Record<string, string> = {};
@@ -10321,8 +10347,21 @@ export function nearestEditRegion(existing: string, oldStr: string, windowLines 
   if (hit < 0) {
     // No anchor located anywhere — the intended text may be entirely gone/hallucinated. Show the head,
     // honestly labelled as such (not the target), so the model re-reads instead of trusting a wrong region.
-    const head = existing.length <= maxChars ? existing : existing.slice(0, maxChars) + '\n…(truncated — call read_file for the region you want)';
-    return `Current file content (top of file — your target text was not located anywhere):\n\`\`\`\n${head}\n\`\`\`\n`;
+    if (existing.length <= maxChars) {
+      return `Current file content (top of file — your target text was not located anywhere):\n\`\`\`\n${existing}\n\`\`\`\n`;
+    }
+    // 🔴 AND THE END OF A LONG FILE (autopsy 1be16985, 2026-10-01). A model ADDING rules to a 529-line
+    // stylesheet anchored its edit on the last lines it guessed the file ended with; the miss showed it
+    // the first 60 lines, it read the tail, and then ended its turn — and the 3,067 tokens of CSS it had
+    // just written were never applied. An edit that adds to the end of a file is anchored on the END,
+    // so the end is what the model needs to see. It is also told that an empty old_string appends,
+    // which needs no anchor at all.
+    const tailChars = Math.floor(maxChars * 0.4);
+    const head = existing.slice(0, maxChars - tailChars);
+    const tail = existing.slice(existing.length - tailChars);
+    return `Current file content (your target text was not located anywhere). Top of the file:\n\`\`\`\n${head}\n…\n\`\`\`\n`
+      + `End of the file:\n\`\`\`\n…\n${tail}\n\`\`\`\n`
+      + 'To ADD content at the end of this file, call edit_file again with an EMPTY old_string and the same new_string — it appends, no anchor needed.\n';
   }
   const from = Math.max(0, hit - windowLines);
   const to = Math.min(lines.length, hit + windowLines + 1);

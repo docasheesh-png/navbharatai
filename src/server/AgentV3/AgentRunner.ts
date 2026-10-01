@@ -28,6 +28,8 @@ import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
 import { decideBuildNudge, standDownNote } from './nudgeToBuild';
 import { decideUnfinishedResume, unfinishedResumeNote } from './unfinishedResume';
+import { decideStyleResume, styleResumeNote } from './stylePolishResume';
+import { asPlatformRequest } from './platformRequest';
 import { streamThinkingToChat } from './thinkingStream';
 import { PROMPT_PREVIEW_SEPARATOR } from './promptPreviewShape';
 
@@ -174,6 +176,12 @@ export interface AgentRunnerOptions {
    * user-facing. Omitted by every caller but the top-level build.
    */
   onNote?: (note: { code: string; message: string; detail?: string }) => void;
+  /**
+   * The run's instruction comes from one of the platform's own checks (a repair pass), not from the
+   * user. The model is told so, so its reply — narrated into the user's chat — never thanks the user
+   * for a request they did not make (platformRequest.ts, autopsy 1be16985).
+   */
+  platformRequest?: boolean;
   /**
    * Optional durable persistence of the transcript (D7). When provided, the build is created
    * in the store at the start, the new transcript turns are appended as the loop runs, and the
@@ -507,9 +515,11 @@ export class AgentRunner {
     let noBuildNudges = 0;
     /** Times a prose-ended turn was handed the readiness blockers and told to continue (unfinishedResume.ts). */
     let unfinishedResumes = 0;
+    /** Times a turn that ended with unstyled screens was handed the class list (stylePolishResume.ts). */
+    let styleResumes = 0;
     const MAX_BUILD_NUDGES = 2;
 
-    const messages: unknown[] = [{ role: 'user', content: userPrompt }];
+    const messages: unknown[] = [{ role: 'user', content: this.opts.platformRequest ? asPlatformRequest(userPrompt) : userPrompt }];
     // Wall-clock CREATION time of each message, parallel to `messages` (which stays exactly the
     // Claude-API shape — never mutated). Persisted copies are stamped from this so a reopened
     // session interleaves prose with the timeline in the LIVE order: the assistant message is
@@ -644,6 +654,8 @@ export class AgentRunner {
       const doneCfg = doneSignalConfig();
       let readyMark: ReadyMark | null = null;
       let doneSignalled = false;
+      /** A due done-check skipped because its step failed — the next clean step runs it (autopsy 6ae30b33). */
+      let doneMissedAt: number | undefined;
       // The ONE ending for an aborted build — reached between turns, and (since autopsy 2720e553) also
       // from INSIDE a turn, when the stop cancelled the model call this loop was waiting on.
       const endAborted = async () => {
@@ -887,6 +899,7 @@ export class AgentRunner {
               nudgesUsed: noBuildNudges,
               maxNudges: MAX_BUILD_NUDGES,
               editingExistingApp: this.opts.editingExistingApp === true,
+              request: userPrompt,
             });
           if (nudge.standDown) {
             try { this.opts.onNote?.({ code: 'BUILD_NUDGE_STOOD_DOWN', message: standDownNote(nudge.standDown), detail: nudge.standDown }); } catch { /* a note must never fail a build */ }
@@ -953,6 +966,19 @@ export class AgentRunner {
               const readiness = await dispatcher.assessBuildReadiness();
               // Surface the verdict to the UI as a build-health card (R2 §4.6) — pass or fail.
               buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier };
+              if (readiness.ready && styleResumes === 0 && !this.opts.signal?.aborted) {
+                // SCREENS THAT USE CLASSES NO STYLESHEET DEFINES ARE HANDED BACK ONCE, while the model still
+                // holds them (autopsy 1be16985 — 63 undefined classes, then a 174 s fresh-context repair).
+                const style = await dispatcher.undefinedClassesNow();
+                const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, resumesUsed: styleResumes });
+                if (decision.resume) {
+                  styleResumes++;
+                  try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length), detail: style.missing.slice(0, 20).map((c) => `.${c}`).join(' ') }); } catch { /* a note must never fail a build */ }
+                  messages.push({ role: 'user', content: decision.message });
+                  messageTs.push(Date.now());
+                  continue;
+                }
+              }
               if (!readiness.ready) {
                 // A MODEL THAT STOPPED IN PROSE WHILE THE APP IS STILL UNBUILT GETS THE GATE'S FINDINGS
                 // AND ANOTHER TURN (autopsy 121c2431 — the build ended FAILED with 1,418 s of budget
@@ -1217,9 +1243,15 @@ export class AgentRunner {
         // once. Best-effort by construction: a scan that throws leaves the build exactly as it was.
         let doneText: string | null = null;
         try {
-          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled })) {
+          const lastStepFailed = resultBlocks.some((b) => (b as { is_error?: boolean }).is_error === true);
+          const doneDue = shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything() });
+          if (doneDue && lastStepFailed) doneMissedAt = doneMissedAt ?? steps;
+          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, lastStepFailed, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything() })) {
+            doneMissedAt = undefined;
             const readiness = await dispatcher.assessBuildReadiness();
-            if (appIsDone(readiness)) {
+            // Never "complete and healthy" over a compile that just failed (autopsy 33812996).
+            const typeErrors = typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null;
+            if (appIsDone(readiness) && !(typeErrors !== null && typeErrors > 0)) {
               if (!readyMark) readyMark = { step: steps, elapsedMs: Date.now() - buildStartMs, score: readiness.score };
               doneText = doneSteer(readiness);
               if (doneText) {

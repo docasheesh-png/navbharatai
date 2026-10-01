@@ -56,11 +56,15 @@ const PROCESS_ONLY_CODES = new Set([
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', // measurements of the ENGINE (postGreenWrites.ts), never app findings
   // A write OUR engine recorded one way and landed another (snapshotIdentity.ts, autopsy 2d076ce8).
   'SAVED_SOURCE_DIVERGES',
+  // Whether OUR vision call read the user's attachment in time (attachmentReadOutcome.ts, autopsy 1389f0d5).
+  'ATTACHMENTS_READ',
   // …and its sibling: how far down OUR ladder a build fell (ladderDepth.ts) is a fact about our
   // routing, never about the user's app.
   'LADDER_DEPTH',
   // How long OUR platform let a free build hold the sandbox (freeBuildTimeCap.ts) — a policy, never the app.
   'FREE_BUILD_TIME_CAP', 'FREE_BUILD_CHAIN_PAUSED',
+  // OUR end-of-turn steer that handed the model its undefined classes (stylePolishResume.ts, autopsy 1be16985).
+  'STYLE_RULES_RESUMED',
   // A reviewer finding OUR evidence refuted (reviewEvidence.ts) is a fact about the reviewer, not the app.
   'REVIEW_REFUTED_BY_EVIDENCE',
   // …and a finding not offered because its file no longer exists (autopsy f496c75b): about the reviewer.

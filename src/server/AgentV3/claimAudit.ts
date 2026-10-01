@@ -98,9 +98,24 @@ export interface MeasuredFacts {
    * `true` only on a measured unstyled verdict; omitted or `false` means nothing is contradicted.
    */
   renderUnstyled?: boolean;
+  /**
+   * The user's own request, when the caller has it — read only by the `user-attributed` check. Omitted
+   * ⇒ that check never runs (silence is never an accusation).
+   */
+  userRequest?: string;
 }
 
-export type ClaimKind = 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed';
+export type ClaimKind = 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed';
+
+/**
+ * "the exact versions you specified" — a PLATFORM requirement credited to the user (autopsy 33812996).
+ * The phone-plugin brief pins versions and already says, in words, *"never tell the user they asked for
+ * versions"* (autopsy e7baf61d); the model said it anyway: *"uses the exact Capacitor plugin versions you
+ * specified"*. A prompt instruction the model can ignore is not a fix, so the claim is checked.
+ */
+const VERSIONS_ATTRIBUTED_TO_USER = /\bversions?\s+(?:that\s+)?you\s+(?:specified|asked\s+for|requested|gave|mentioned|wanted|provided)\b|\byour\s+(?:specified|requested)\s+versions?\b/i;
+/** A version number the user could have written: 7.6.9, v5, 18.3.1, @7.5.0. */
+const A_VERSION_NUMBER = /(?:^|[\s@v^~=])\d+\.\d+(?:\.\d+)?\b|\bv\d+\b/i;
 
 export interface ClaimContradiction {
   kind: ClaimKind;
@@ -380,6 +395,15 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
       kind: 'app-delivered',
       claimed: 'that the app you asked for is built and ready',
       measured: 'not one file was created or changed on this turn, so nothing was actually built',
+    });
+  }
+
+  // "the exact versions you specified" when the user wrote no version at all (autopsy 33812996).
+  if (typeof facts.userRequest === 'string' && VERSIONS_ATTRIBUTED_TO_USER.test(text) && !A_VERSION_NUMBER.test(facts.userRequest)) {
+    out.push({
+      kind: 'user-attributed',
+      claimed: 'that you specified the package versions it used',
+      measured: 'your request named no versions — NavBharatAI pinned them so the phone build matches',
     });
   }
 

@@ -133,9 +133,31 @@ export function parseGuardDecision(
     if (!introducesDuplicate) return null; // was already broken (non-duplicate) → allow the repair write
   }
   const loc = errNew.line ? ` (line ${errNew.line}${errNew.column != null ? `:${errNew.column}` : ''})` : '';
-  return `WRITE REJECTED — your change introduces a SYNTAX ERROR in ${path}${loc}: ${errNew.message}\n` +
-    `It was NOT saved (the app would not compile). The most common cause is a DUPLICATE declaration — a ` +
+  const head = `WRITE REJECTED — your change introduces a SYNTAX ERROR in ${path}${loc}: ${errNew.message}\n` +
+    `It was NOT saved (the app would not compile). `;
+  // 🔴 THE HINT NAMES THE ERROR'S OWN CLASS (autopsy 1389f0d5, 2026-09-30). Two edits that wrapped part of
+  // App.tsx's JSX in a condition were refused with "The character "}" is not valid inside a JSX element" —
+  // and a hint that led with DUPLICATE declarations, which it was not. The model patched a fragment again,
+  // was refused again, and only then rewrote the component with replace_symbol, which worked first time.
+  if (isJsxStructureError(errNew) && !isDuplicateDeclarationError(errNew)) {
+    return head +
+      `An edit that wraps, moves or adds JSX left a tag or a brace unbalanced. Patching fragments of a ` +
+      `component's markup is where this happens: re-read the component and rewrite it WHOLE with ` +
+      `replace_symbol (path, symbol, code) — the AST-safe way to change a component's JSX — instead of ` +
+      `another partial edit.`;
+  }
+  return head + `The most common cause is a DUPLICATE declaration — a ` +
     `const / function / interface that ALREADY EXISTS in this file. Do NOT add a second copy; EDIT the ` +
     `existing one instead. Other causes: an unwrapped or unbalanced JSX tag, or a missing ")" / "}". Fix ` +
     `your change so the file parses cleanly, then retry.`;
+}
+
+/** A parse error about JSX's own structure — an unbalanced tag or a brace where markup was expected. PURE. */
+export function isJsxStructureError(info: SyntaxErrorInfo | null | undefined): boolean {
+  const m = info?.message || '';
+  return /not valid inside a JSX element/i.test(m)
+    || /Expected corresponding JSX closing tag/i.test(m)
+    || /Unterminated JSX/i.test(m)
+    || /Adjacent JSX elements must be wrapped/i.test(m)
+    || /Unexpected closing .* tag does not match/i.test(m);
 }

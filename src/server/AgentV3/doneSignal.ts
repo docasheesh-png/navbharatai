@@ -77,12 +77,33 @@ export function shouldCheckDone(p: {
   step: number;
   toolUses: number;
   alreadySignalled: boolean;
+  /**
+   * Did a tool call in THIS step fail? 🔴 Autopsy 6ae30b33: the architect's `edit_file` on
+   * `src/index.css` came back "Error: fetch failed", and "STOP HERE, the app is complete" was
+   * attached to the same message. The model stopped; the styles were never written. A step that
+   * just failed is not the moment to say "you are done". The check waits for a clean step.
+   */
+  lastStepFailed?: boolean;
+  /** The step on which a due check was skipped because that step failed; the next step runs it. */
+  missedAt?: number;
+  /**
+   * Has this run changed the project yet? `false` ⇒ never check. 🔴 AUTOPSY 1389f0d5 (2026-09-30): on an
+   * EDIT the project is an app that already scores 100 — the user's calculator — so ten steps of reading
+   * and web searches for a new Genesis-PDF page were judged "complete", the user was told "✅ The app looks
+   * complete — wrapping up." before one line of the feature existed, and the model was told to stop. A
+   * count of tool uses is not a count of changes. Omitted ⇒ unknown, and the old rule applies.
+   */
+  wroteThisRun?: boolean;
 }): boolean {
-  const { cfg, step, toolUses, alreadySignalled } = p;
+  const { cfg, step, toolUses, alreadySignalled, wroteThisRun } = p;
   if (!cfg.enabled || alreadySignalled) return false;
+  if (wroteThisRun === false) return false; // the project is exactly what it was — whatever it scores, it is not this run's work
+  if (p.lastStepFailed) return false;
   if (toolUses <= 0) return false;      // nothing written yet — nothing can be finished
   if (step < cfg.minStep) return false; // warm-up
-  return step % cfg.everyN === 0;
+  // A skipped step must not cost the check its whole next window, so the cadence is ANY step at or
+  // past a multiple the check has not yet run on — the caller passes the step it last checked.
+  return step % cfg.everyN === 0 || (p.missedAt !== undefined && step > p.missedAt);
 }
 
 /**

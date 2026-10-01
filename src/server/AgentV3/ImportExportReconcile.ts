@@ -188,10 +188,38 @@ export async function reconcileImportExports(files: Record<string, string>): Pro
     }
   }
 
+  // CASE C — a lazy() DYNAMIC import that picks a NAMED member the module only exports as DEFAULT.
+  // 🔴 Autopsy 33812996: `lazy(() => import("./components/QRScanner").then(mod => ({ default: mod.QRScanner })))`
+  // over a `export default QRScanner` — TS2339, one of the errors the fast lane's 560 s repair never
+  // cleared. Cases A/B only read import DECLARATIONS, so the dynamic form was invisible. The same proof is
+  // required (the member's name IS the default export's own name, and it is not exported by name), and the
+  // fix is the form `lazy()` was made for: `import("./x")` already resolves to `{ default }`.
+  const rewritten = new Map<string, string>();
+  const DYNAMIC_NAMED = /import\(\s*(['"])([^'"]+)\1\s*\)\s*\.then\(\s*\(?\s*([A-Za-z_$][\w$]*)\s*\)?\s*=>\s*\(\s*\{\s*default\s*:\s*\3\.([A-Za-z_$][\w$]*)\s*\}\s*\)\s*\)/g;
+  for (const [path, sf] of sources) {
+    let text: string;
+    try { text = sf.getFullText(); } catch { continue; }
+    if (!text.includes('.then(')) continue;
+    let changed = false;
+    const next = text.replace(DYNAMIC_NAMED, (m: string, q: string, spec: string, _param: string, name: string, offset: number) => {
+      const target = resolveLocalTarget(path, spec, fileSet);
+      if (!target) return m;
+      const shape = shapeOf(target);
+      if (shape.parseFailed || shape.hasWildcard || shape.named.has(name) || !shape.hasDefault || shape.defaultName !== name) return m;
+      const after = `import(${q}${spec}${q})`;
+      fixes.push({ file: path, line: text.slice(0, offset).split('\n').length, name, from: spec, kind: 'named-to-default', before: m, after });
+      changed = true;
+      return after;
+    });
+    if (changed) { rewritten.set(path, next); touched.add(path); }
+  }
+
   if (fixes.length === 0) return unchanged;
 
   const out: Record<string, string> = { ...files };
   for (const path of touched) {
+    const override = rewritten.get(path);
+    if (override !== undefined) { out[path] = override; continue; }
     const sf = sources.get(path);
     if (!sf) continue;
     try { out[path] = sf.getFullText(); } catch { /* keep original on serialization error */ }

@@ -162,6 +162,41 @@ export function bananaMeansBuild(lower: string): boolean {
   return mentionsBuildNoun(lower) || BANANA_INTENT_AUX.test(lower);
 }
 
+/**
+ * WRITTEN CONTENT: the things a chat reply writes itself (questions, an essay, notes, a poem, a summary).
+ *
+ * 🔴 AUTOPSY 6ae30b33 (2026-09-30). A student on the free tier asked, one message at a time, for a
+ * 2,888-word Hindi essay on swimming, two hard SSC GK questions with answers, and history. All three
+ * were answered as chat. The next message was **"Make question"**. `make` is a build verb, so it
+ * hard-locked to `new_build` at HIGH, the intention reader was never asked, and a 7-minute build shipped
+ * a "GK & Study Helper" app with four invented facts, one of them nonsense. They were charged ₹88.15.
+ *
+ * 🔑 THE CLASS: a build verb whose OBJECT is text the reply can write, read as an order for an app. It
+ * was never one word. Measured before the fix, all HIGH `new_build`: "make notes on history", "create a
+ * poem", "make a summary of chapter 3", "5 question bana do", "nibandh likho".
+ *
+ * 🔒 PRECISION-FIRST, because a false positive here turns an order into a chat reply. A content noun
+ * counts only when the message names NOTHING buildable (`mentionsBuildNoun`: "make a quiz app" stays a
+ * build), names no screen part ("make the question card bigger" is an edit), and does not point at
+ * something that already exists ("the notes"). Wrong toward chat costs one message, and the chat reply
+ * offers to build; wrong toward build cost this user seven minutes and ₹88.
+ */
+const CONTENT_NOUN =
+  /\b(?:question paper|questions?|mcqs?|answers?|essays?|poems?|poetry|story|stories|notes|summary|summaries|paragraphs?|speech|speeches|articles?|captions?|jokes?|cover letter|letters?|emails?|resume|cv|bio|outline|translation|worksheets?|shayari|shayri|kavita|nibandh|kahani|kahaniyan|patra|lekh|bhashan|sawal|sawaal|savaal|prashn|prashna|uttar|jawab)\b/;
+/** Screen parts: "make the question CARD bigger" is an edit of an app, not a request for questions. */
+const SCREEN_PART =
+  /\b(?:card|cards|section|tab|tabs|field|box|font|colou?r|size|bigger|smaller|larger|style|view|panel|item|items|row|rows|column|image|icon|heading|title|label|list)\b/;
+/** A content noun pointed at ("the notes", "my resume") names something that may already exist. */
+const POINTED_CONTENT = new RegExp(`\\b(?:the|this|that|these|those|my|our|its|yeh|ye|iska|isko)\\s+${CONTENT_NOUN.source.slice(2, -2)}\\b`);
+
+/** Does this ORDER ask for written content rather than an app? PURE. See `CONTENT_NOUN`. */
+export function ordersWrittenContent(lower: string): boolean {
+  if (!CONTENT_NOUN.test(lower)) return false;
+  if (mentionsBuildNoun(lower)) return false;
+  if (SCREEN_PART.test(lower)) return false;
+  return !POINTED_CONTENT.test(lower);
+}
+
 export function firstNewBuildOrder(lower: string): string | undefined {
   const listed = firstSignalWord(lower, NEW_BUILD_SIGNALS);
   if (listed) return listed;
@@ -902,6 +937,10 @@ function classifyIntentWithConfidenceCore(message: string): IntentWithConfidence
   // object-less order ("app banana") is already answered downstream by a clarifying question (#3039).
   const doubt = question || hasNegation(lower);
   const nbSignal = firstNewBuildOrder(lower);
+  // An order for WRITTEN CONTENT ("make questions", "nibandh likho") is answered in the reply (autopsy
+  // 6ae30b33). LOW, so the intention reader still decides with the project in view: "make 10 more
+  // questions" on an existing quiz app can still come back as an edit.
+  if (nbSignal && ordersWrittenContent(lower)) return { intent: 'chat', confidence: 'low', signal: 'content-request' };
   if (nbSignal) return { intent: 'new_build', confidence: doubt ? 'low' : 'high', signal: nbSignal };
   const editSignal = firstSignalWord(lower, EDIT_SIGNALS);
   if (editSignal) return { intent: 'edit_existing', confidence: doubt ? 'low' : 'high', signal: editSignal };
@@ -1093,6 +1132,9 @@ export async function classifyIntentSmartDetailed(
     // already free to OFFER to build — so "chat" is never a refusal, only a faster first response.
     'If they are ASKING something, the answer is "chat" — even when their sentence contains a word like',
     'build, make, create or generate. Choose "build" only when they want an app produced NOW.',
+    // Autopsy 6ae30b33: "Make question" after three chat questions was built as an app.
+    'Asking for WRITTEN CONTENT (questions, answers, an essay, notes, a poem, a summary, a letter) is',
+    '"chat": the reply writes it. Choose "build" only when they ask for an app or tool that does it.',
     'Choose exactly one of five categories:',
     '  chat    — plain conversation, a greeting, a question, thanks, or asking how something works',
     '  help    — asking how to use NAVBHARATAI ITSELF: where a button is, how to open or see their',

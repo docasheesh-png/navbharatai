@@ -31,10 +31,10 @@ const code = (p: string) => read(p).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\
 
 describe('reading the answer', () => {
   it('a refusal is declined, a question is asked, a delivery is neither', () => {
-    expect(readTurnAnswer(REFUSAL)).toEqual({ declined: true, asked: false });
-    expect(readTurnAnswer(QUESTION)).toEqual({ declined: false, asked: true });
-    expect(readTurnAnswer(BUILT)).toEqual({ declined: false, asked: false });
-    expect(readTurnAnswer(undefined)).toEqual({ declined: false, asked: false });
+    expect(readTurnAnswer(REFUSAL)).toEqual({ declined: true, asked: false, pointed: false });
+    expect(readTurnAnswer(QUESTION)).toEqual({ declined: false, asked: true, pointed: false });
+    expect(readTurnAnswer(BUILT)).toEqual({ declined: false, asked: false, pointed: false });
+    expect(readTurnAnswer(undefined)).toEqual({ declined: false, asked: false, pointed: false });
   });
 
   it('either one is an answer given instead of a build', () => {
@@ -96,12 +96,12 @@ describe('🔒 WIRING — one reading, taken before the platform writes a word',
   const route = code('src/server/routes/agentv3.ts');
 
   it('the reading is taken exactly once', () => {
-    expect(route.match(/const modelAnswer = readTurnAnswer\(result\.summary\);/g) ?? []).toHaveLength(1);
+    expect(route.match(/const modelAnswer = readTurnAnswer\(result\.summary, prompt\);/g) ?? []).toHaveLength(1);
   });
 
   it('it is taken AFTER the last model run and BEFORE the platform rewrites the summary', () => {
     const retry = route.indexOf('result = retry;');
-    const capture = route.indexOf('const modelAnswer = readTurnAnswer(result.summary);');
+    const capture = route.indexOf('const modelAnswer = readTurnAnswer(result.summary, prompt);');
     const verified = route.indexOf('result = { ...result, summary: verifiedNoChange };');
     const flip = route.indexOf('result = { ...result, ok: false, summary: emptyFail };');
     const proof = route.indexOf('const runProof = () => runProvenApp({');
@@ -123,7 +123,7 @@ describe('🔒 WIRING — one reading, taken before the platform writes a word',
   it('every reader is given the captured reading', () => {
     expect(route).toContain('deliveryRefused: modelAnswer.declined,');
     expect(route).toContain('modelAnsweredTheUser: answeredWithoutBuilding(modelAnswer),');
-    expect(route).toMatch(/modelAnswer\.asked,\s*modelAnswer\.declined,\s*\)/);
+    expect(route).toMatch(/modelAnswer\.asked \|\| modelAnswer\.pointed,\s*modelAnswer\.declined,\s*\)/);
     expect(route).toContain('const refused = !stopped && modelAnswer.declined;');
   });
 

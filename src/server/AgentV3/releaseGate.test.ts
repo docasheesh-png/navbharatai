@@ -375,7 +375,9 @@ describe('the gate, as corrected by the first build that used it', () => {
     const routes = require('fs').readFileSync(
       require('path').join(__dirname, '../routes/agentv3.ts'), 'utf8',
     ) as string;
-    expect(routes).toContain("gate.state === 'red' && !result.ok ? 'error'");
+    // Widened, not weakened (autopsy 6db0ff31): a build the USER stopped is not a failed build either, so
+    // its RED gate is a warning too. A RED that agrees with a genuinely failed build is still an error.
+    expect(routes).toContain("gate.state === 'red' && !result.ok && gateEvidence.stoppedByUser !== true ? 'error'");
   });
 });
 

@@ -31,9 +31,13 @@ import {
   streamHardCapMs,
   streamIdleMs,
   streamIsCrawling,
+  streamThroughputGraceMs,
   type OpenAiStreamChunkLike,
   type StreamStopCause,
 } from './openAiStream';
+
+/** How often a stream waiting on its next chunk wakes to judge its rate (only while an abandon is allowed). */
+const CRAWL_POLL_MS = 2_500;
 
 /** The narrow slice of an OpenAI-compatible SDK the runner needs (DI/tests). */
 export interface OpenAiChatClient {
@@ -139,12 +143,23 @@ async function readStream(
   const stoppedTick = new Promise<typeof stoppedMark>((resolve) => { resolveStopped = resolve; });
   const offStop = onStop(opts.signal, () => resolveStopped?.(stoppedMark));
 
+  // 🔴 SILENCE IS THE SLOWEST RATE THERE IS (autopsy 1389f0d5, 2026-09-30). The throughput floor used to be
+  // judged only when a chunk ARRIVED, so a rung that trickled was abandoned at ~20 s while a rung that sent
+  // NOTHING waited out the whole 60 s silence window — the report's GLM call did exactly that. While the
+  // caller allows an abandon, the wait for the next chunk now wakes every few seconds to ask the same
+  // question, and zero bytes past the grace period is below any floor. Without `canAbandon` nothing changes.
+  const pollMs = opts.canAbandon ? CRAWL_POLL_MS : Number.POSITIVE_INFINITY;
+  let lastChunkAt = now();
+  let pending: Promise<IteratorResult<OpenAiStreamChunkLike>> | null = null;
+  const disarm = () => { pending?.catch(() => { /* abandoned — see the stall branch below */ }); };
+
   try {
     for (;;) {
-      if (opts.signal?.aborted) { abort(); throw new BuildStoppedError(); }
+      if (opts.signal?.aborted) { disarm(); abort(); throw new BuildStoppedError(); }
       const msToCeiling = opts.endAt - now();
-      if (msToCeiling <= 0) { abort(); return 'deadline'; }
-      const waitMs = Math.min(opts.idleMs, msToCeiling);
+      if (msToCeiling <= 0) { disarm(); abort(); return 'deadline'; }
+      const idleLeft = opts.idleMs - (now() - lastChunkAt);
+      const waitMs = Math.max(1, Math.min(idleLeft, msToCeiling, pollMs));
 
       let timer: ReturnType<typeof setTimeout> | undefined;
       const stalled = Symbol('stalled');
@@ -152,7 +167,8 @@ async function readStream(
         timer = setTimeout(() => resolve(stalled), waitMs);
       });
 
-      const advance = iterator.next();
+      if (!pending) pending = iterator.next();
+      const advance = pending;
       let step: IteratorResult<OpenAiStreamChunkLike> | typeof stalled | typeof stoppedMark;
       try {
         step = await Promise.race([advance, tick, stoppedTick]);
@@ -161,23 +177,36 @@ async function readStream(
       }
 
       if (step === stoppedMark) {
-        advance.catch(() => { /* abandoned by a stop — see the stall branch below */ });
+        disarm();
         abort();
         throw new BuildStoppedError();
       }
 
       if (step === stalled) {
+        // A poll wake-up with time still on both clocks: judge the rate, and keep waiting on the SAME read.
+        const idleOver = now() - lastChunkAt >= opts.idleMs;
+        const ceilingOver = opts.endAt - now() <= 0;
+        if (!idleOver && !ceilingOver) {
+          if (opts.canAbandon?.() && streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt })) {
+            disarm();
+            abort();
+            return 'slow';
+          }
+          continue;
+        }
         // 🔴 THE ABANDONED PROMISE MUST BE DISARMED. We stop waiting on `advance`, but it is still
         // live — and aborting the stream is precisely what makes it reject a moment later. With no
         // handler attached that is an unhandled rejection in the build server, from a path that
         // exists to make builds MORE reliable. Swallowed deliberately: the value can no longer be
         // read by anybody, and the stall is already being reported by the return below.
-        advance.catch(() => { /* abandoned by our clock — see above */ });
+        disarm();
         abort();
         // Which clock ran out decides the caller's wording — and a provider must never be blamed
-        // for our budget (turnDeadline.ts). `waitMs` was the ceiling only when it was the smaller.
-        return msToCeiling <= opts.idleMs ? 'deadline' : 'idle';
+        // for our budget (turnDeadline.ts).
+        return ceilingOver && !idleOver ? 'deadline' : 'idle';
       }
+      pending = null;
+      lastChunkAt = now();
       if (step.done) return 'complete';
 
       const before = acc.textSoFar().length;
@@ -450,16 +479,32 @@ export class OpenAiToolRunner implements TurnRunner {
     const firstAnswerMs = streaming
       ? firstAnswerBoundMs(idleMs, timeoutMs, bound.source, params.hasNextRung === true)
       : timeoutMs;
-    const initialBoundMs = firstAnswerMs;
+    // …and a provider that has not even OPENED its stream by the end of the throughput grace period has
+    // produced nothing at all — below any floor — so, while an abandon is allowed, it is judged exactly as
+    // a crawling stream is (autopsy 1389f0d5: a silent first rung held the build for 60 s before the next
+    // rung was tried). Same message, so the ladder's crawl accounting — not the timeout bench — decides.
+    const silentBoundMs = streaming && params.canAbandonSlowStream?.()
+      ? Math.min(firstAnswerMs, streamThroughputGraceMs())
+      : null;
+    const initialBoundMs = silentBoundMs ?? firstAnswerMs;
     const providerWentSilent = streaming && firstAnswerMs < timeoutMs;
+    // A stream that opens AFTER we gave up on it is closed on arrival, so it never generates (and bills)
+    // for nobody — the stop path below already did this; the give-up path did not.
+    const opened = call();
+    const closeIfLate = (e: unknown) => {
+      opened.then((late) => { if (isChatStream(late)) { try { late.controller?.abort(); } catch { /* best-effort */ } } }, () => { /* already failed */ });
+      throw e;
+    };
     const raw = await raceStop(
       withTimeout(
-        call(),
+        opened,
         initialBoundMs,
-        providerWentSilent
-          ? `OpenAI-compatible call (GLM/Kimi) timed out after ${firstAnswerMs}ms`
-          : clockMessage(initialBoundMs),
-      ),
+        silentBoundMs !== null
+          ? `${SLOW_STREAM_MESSAGE} after ${silentBoundMs}ms`
+          : providerWentSilent
+            ? `OpenAI-compatible call (GLM/Kimi) timed out after ${firstAnswerMs}ms`
+            : clockMessage(initialBoundMs),
+      ).catch(closeIfLate),
       params.signal,
       // A stream that opens AFTER the stop is closed on arrival, so it never generates for nobody.
       (late) => { if (isChatStream(late)) { try { late.controller?.abort(); } catch { /* best-effort */ } } },

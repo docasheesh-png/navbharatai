@@ -60,7 +60,10 @@ describe('WIRING — the intent survives the whole way to the store', () => {
 
   it('ViewPanels hands it to the store — the link `_lz` erases the types on', () => {
     // `_lz` returns ComponentType<any>, so tsc CANNOT catch this dropping. Only this assertion can.
-    expect(panels).toContain('<NavAppStore initialTab={storeInitialTab} initialPublishWorkspaceId={storePublishWorkspaceId} />');
+    // Each prop is asserted on its own so a later prop (App Mart social's `socialTarget`) cannot hide a dropped one.
+    const tag = panels.match(/<NavAppStore\b[^>]*\/>/)?.[0] ?? '';
+    expect(tag).toContain('initialTab={storeInitialTab}');
+    expect(tag).toContain('initialPublishWorkspaceId={storePublishWorkspaceId}');
   });
 
   it('the store opens on that tab and pre-selects that app', () => {

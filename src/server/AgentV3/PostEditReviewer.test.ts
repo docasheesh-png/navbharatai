@@ -36,14 +36,30 @@ describe('reviewEdit', () => {
     expect(result.issues.some((i) => i.includes('console.log'))).toBe(true);
   });
 
-  it('flags JSX with no React/react import', () => {
+  // Autopsy 1be16985 (2026-10-01): plain JSX needs no React import under the automatic runtime every
+  // generated project uses, so it is no longer flagged; naming `React.` without importing it still is.
+  it('does not flag plain JSX with no React import (automatic JSX runtime)', () => {
     const content = [
       'export function App() {',
       '  return <div>Hello</div>;',
       '}',
     ].join('\n');
     const result = reviewEdit('src/App.tsx', content);
-    expect(result.issues.some((i) => /react/i.test(i))).toBe(true);
+    expect(result.issues.some((i) => /react/i.test(i))).toBe(false);
+  });
+
+  it('flags the React namespace used without importing React', () => {
+    const content = [
+      "import { useState } from 'react';",
+      'export const App: React.FC = () => {',
+      '  const [n] = useState(0);',
+      '  return <div>{n}</div>;',
+      '};',
+    ].join('\n');
+    const result = reviewEdit('src/App.tsx', content);
+    expect(result.issues.some((i) => i.includes('`React.`'))).toBe(true);
+    const imported = reviewEdit('src/App.tsx', `import React from 'react';\n${content}`);
+    expect(imported.issues.some((i) => i.includes('`React.`'))).toBe(false);
   });
 
   it('flags missing useNavigate import in a tsx file', () => {

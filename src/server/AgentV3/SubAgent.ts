@@ -208,6 +208,40 @@ export interface SubAgentDeps {
    * lived only in the ARCHITECT's prompt, which the child never sees. Absent ⇒ nothing is added.
    */
   aiRule?: () => string;
+  /**
+   * The USER'S OWN REQUEST, verbatim (autopsy 6db0ff31, 2026-09-30). A child was handed only the
+   * architect's instruction and never the user's words, so an under-specified instruction had nothing
+   * behind it: the Frontend specialist read the fresh scaffold and replied *"What would you like me to
+   * build?"* — to the architect, since a specialist cannot reach the user — and wrote nothing. The
+   * language and AI rules above were each threaded for exactly this reason; the request they are
+   * derived from never was. Absent ⇒ nothing is added.
+   */
+  userRequest?: () => string;
+}
+
+/** How much of the user's request a child is handed — a request, not an attachment dump. */
+export const CHILD_REQUEST_MAX_CHARS = 2000;
+
+/**
+ * The context block that hands a specialist the user's own words. PURE.
+ *
+ * It is CONTEXT, not a second task: the architect's instruction still decides what this child does,
+ * and the block says so — otherwise a Frontend specialist told "build the landing page" would read the
+ * whole request and try to build the whole app. It also states the one fact every specialist was
+ * missing: nobody on the other end of its final message is the user.
+ */
+export function userRequestBlock(request: string | null | undefined, writes = true): string {
+  const text = String(request ?? '').trim();
+  if (!text) return '';
+  const capped = text.length > CHILD_REQUEST_MAX_CHARS
+    ? `${text.slice(0, CHILD_REQUEST_MAX_CHARS)}… [request truncated]`
+    : text;
+  const head = 'The user\'s own request, verbatim — context for YOUR task below, which is what you do:\n'
+    + `<<<\n${capped}\n>>>`;
+  if (!writes) return head;
+  return `${head}\n`
+    + 'You cannot talk to the user: your final message goes to the architect, not to them. Never end by '
+    + 'asking what to build — where your task leaves something open, decide it from this request and build.';
 }
 
 /**
@@ -355,6 +389,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       // Two engineers in parallel are told their lane and to reuse before creating (autopsy 8e124182).
       parallelHelperScopeNote(role, deps.framework),
       (() => { try { return deps.aiRule?.() ?? ''; } catch { return ''; } })(),
+      (() => { try { return userRequestBlock(deps.userRequest?.(), roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools)); } catch { return ''; } })(),
     ].filter(Boolean);
     // 🎨 THE KIT, AS THE ARCHITECT WAS TOLD IT (autopsy ee0e6de5, 2026-09-30). A specialist that writes
     // files was never told the design kit's classes, so the Frontend sub-agent read `src/index.css` six

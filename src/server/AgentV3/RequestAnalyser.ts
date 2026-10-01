@@ -18,6 +18,7 @@
 import { withoutUrls } from '../lib/promptUrls';
 import { isComplexAppPrompt, namesBusinessDomain, namesHeavyGame, namesPersonalTool, SIMPLE_APP_SIGNAL } from '../lib/appComplexitySignals';
 import { userAskedForAnAppToBeBuilt, describesWorkAlreadyStarted, type BuildIntent } from './IntentClassifier';
+import { withoutMachineText } from '../lib/machineText';
 
 export type StartTier = 'gemini' | 'haiku' | 'sonnet' | 'opus';
 
@@ -187,8 +188,10 @@ const RE = {
 const ORDERS_A_BUILD = /\b(?:create|build|make|develop|design|generate|code|banao|bana\s*do|banado|banaiye)\b[^.?!\n]{0,60}?\b(?:app|apps|application|website|web\s*app|site|tool|platform|extension|game|dashboard|portal)\b/i;
 
 function classify(raw: string): { type: TaskType; matched: boolean } {
-  // A link is not words: `translate.google.com` is not an order to translate (a9f8d186). See promptUrls.ts.
-  const p = withoutUrls(raw);
+  // A link is not words: `translate.google.com` is not an order to translate (a9f8d186 / 33812996). Two sessions
+  // fixed this class in parallel — `withoutUrls` (promptUrls.ts) and the shared `withoutMachineText`
+  // (lib/machineText.ts); both run so neither PR's guarantee is weakened.
+  const p = withoutMachineText(withoutUrls(raw));
   // Order matters: most-specific / highest-complexity wins when multiple match.
   if (RE.architecture.test(p)) return { type: 'architecture', matched: true };
   // SHARED complex-app verdict (single source of truth with the pipeline-DEPTH/ETA estimator, so the
@@ -199,16 +202,20 @@ function classify(raw: string): { type: TaskType; matched: boolean } {
   // A personal tool (reminder, planner, habit tracker…) is the todo family, named by the domain
   // analyser rather than a keyword here — see PERSONAL_TOOL_DOMAINS (autopsy d829b523).
   if (RE.simpleApp.test(p) || namesPersonalTool(p)) return { type: 'simple_app', matched: true };
-  // 🔴 A FEATURE NAMED INSIDE AN APP ORDER IS NOT THE TASK (autopsy a9f8d186, 2026-09-30). *"Create circle
-  // to search app … add features like qr scanner, screen translation, music recognition, ai overview"*
-  // was filed as `translate`, score 15 — a six-feature app sized as a one-line translation, on the
-  // cheapest rung, with no second opinion asked. The object decides: "translate this paragraph" asks for
-  // a translation; "create an app with screen translation" asks for an app that has one. The b6f88a72
-  // fix removed the bare language phrases; this is the other half, the noun inside an order.
-  if (!ORDERS_A_BUILD.test(p)) {
-    if (RE.summary.test(p)) return { type: 'summary', matched: true };
-    if (RE.translate.test(p)) return { type: 'translate', matched: true };
-  }
+  /**
+   * 🔴 A FEATURE NAMED IN AN APP ORDER IS NOT THE TASK (autopsy 33812996, 2026-09-30). *"Create circle
+   * to search app … add features like qr scanner, screen translation, music recognition, ai overview"*
+   * was filed as `taskType: 'translate'`, score 15 — the cheapest band — off the word "translation" in
+   * its feature list, and a 26-file app opened on the weakest engine. The Gita fix (b6f88a72) removed
+   * the bare "in hindi"; this is the same class in its other form: a text-processing word used as the
+   * name of one of the app's features. When the request ORDERS AN APP, summary and translation are
+   * things the app does — the request falls through, and `anAppWasOrderedButNotRecognised` treats it as
+   * the app it is (with the second opinion that path already buys). "translate this paragraph to
+   * hindi" orders nothing and keeps its task.
+   */
+  const ordersAnApp = userAskedForAnAppToBeBuilt(p) || ORDERS_A_BUILD.test(p);
+  if (RE.summary.test(p) && !ordersAnApp) return { type: 'summary', matched: true };
+  if (RE.translate.test(p) && !ordersAnApp) return { type: 'translate', matched: true };
   // A heavy game that mentions a technology ("single file html … 3d fight game") is a game, not a
   // snippet — see `namesHeavyGame` (autopsy f496c75b).
   if (namesHeavyGame(p)) return { type: 'complex_app', matched: true };
@@ -597,7 +604,8 @@ export function rankFeatures(prompt: string): FeatureRanking {
  * PURE — no I/O. `ambiguous` flags borderline cases for optional LLM refinement.
  */
 export function analyzeRequest(input: AnalyserInput): AnalysisResult {
-  const prompt = (input?.prompt ?? '').toString();
+  // Read without machine text: a pasted link is neither request size nor request words (autopsy 33812996).
+  const prompt = withoutMachineText((input?.prompt ?? '').toString(), { drop: true });
   const p = prompt.toLowerCase();
   const detected = detectTaskType(p);
   /**

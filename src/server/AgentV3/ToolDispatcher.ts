@@ -1,4 +1,5 @@
 import { entryShadowNote } from './entryShadow';
+import { recordingActuator } from './recordedWrites';
 import { repeatedReadNotice, READ_LOOP_LIMIT, repeatedCommandNotice, commandKey } from './repeatedReads';
 import { repeatedEditNotice } from './repeatedEdits';
 import { missingMembers, declaredMembers, relativeImports, resolveCandidates, memberListNote, RECIPE_LIBRARY_PATH, type MissingMember } from './typeMembers';
@@ -43,7 +44,7 @@ import { getWorkspaceMemory } from './WorkspaceMemory';
 import { shellBuildProvesSuccess } from './buildFailurePrediction';
 import { robustTscCommand } from './tscCommand';
 import { parseTscErrors, type TscError } from './EndgameRepair';
-import { tscOutputProvesClean, looksLikeTypecheckCommand, tscVerdict } from './TscGate';
+import { tscOutputProvesClean, looksLikeTypecheckCommand, tscVerdict, countTscErrors } from './TscGate';
 import { pathMissHint } from './suggestFilePath';
 import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
 import { detectTestPlan, parseTestOutcome, withSandboxBrowsers, withTestFilter } from './testRunner';
@@ -61,7 +62,7 @@ import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
 import { assessFullRewrite } from './rewriteRisk';
 import { analyzeToolchain } from './toolchainPins';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from './appDefaults';
-import { resolveAppDisplayName } from './appDisplayName';
+import { APP_ENTRY_CANDIDATES, resolveAppDisplayName } from './appDisplayName';
 import { computeMove, type MoveFile } from './codemodMoveFile';
 import { buildArchitectureMap, renderArchitectureMap } from './architectureMap';
 import { findUnwiredFiles, unwiredFilesSummary } from './deadCode';
@@ -83,7 +84,7 @@ import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, usesNonKitNbClass } from './kitRestore';
-import { isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote } from './CssConsistency';
+import { findUndefinedClasses, isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, collectDefinedClasses } from './CssConsistency';
 import { pageDesignWriteNote, isPageFile } from './DesignCoverage';
 import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
 import { shellWriteTargets } from './shellWriteTargets';
@@ -96,7 +97,7 @@ import {
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
 } from './writeTimeTypecheck';
-import { scanAuthenticity, authenticitySummary } from './AuthenticityAnalysis';
+import { scanAuthenticity, authenticitySummary, fakeResultWriteNote } from './AuthenticityAnalysis';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
 import type { AccessibilityIssue } from './AccessibilityAnalysis';
@@ -405,6 +406,7 @@ import { webFetchUrl, formatWebFetchResult } from './webFetch';
 import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ignoreRules';
 import { withoutPreviewBridge, bridgeShellNote } from './previewBridge';
 import { LIST_PRUNE_DIRS, isListPrunedPath } from '../lib/generatedDirs';
+import { turnAskedTheUser } from './nudgeToBuild';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -432,6 +434,16 @@ export function taskResultWithWrites(
   if (!Array.isArray(result.written)) return head;
   const w = result.written;
   if (w.length === 0) {
+    // 🔴 A SPECIALIST THAT ASKED A QUESTION ASKED IT OF NOBODY (autopsy 6db0ff31, 2026-09-30). The
+    // Frontend specialist ended *"What would you like me to build?"* — a question only the user can
+    // answer, and the user never sees a specialist's final message. Read as a result, it left the
+    // architect holding a delegation that did nothing and no instruction about what to do next; the
+    // user watched 35 s of silence and pressed Stop. Say what it was, and what to do instead.
+    if (turnAskedTheUser(result.summary)) {
+      return `${head}\n\n[Platform check — this agent wrote NO files and stopped to ask a question. It cannot reach the user; `
+        + 'your reply to it is never delivered. Answer the question yourself from the user\'s request and either do the work '
+        + 'directly or delegate again with an instruction that says exactly what to build.]';
+    }
     return `${head}\n\n[Platform check — this agent wrote NO files. Anything the text above says it created, changed or wired up does not exist on disk; check before relying on it.]`;
   }
   const named = w.slice(0, TASK_RESULT_MAX_PATHS).join(', ');
@@ -571,8 +583,19 @@ export class ToolDispatcher {
   /** Grant permission to publish for this dispatcher's lifetime (one turn). */
   setPublishConsent(granted: boolean): void { this._publishConsent = granted === true; }
 
+  /**
+   * The sandbox, as every tool in this class sees it: each write through it is noted, and one the
+   * call site did not record itself is recorded when the tool call ends (`flushUnrecordedWrites`).
+   * See recordedWrites.ts — `replace_symbol` and ~170 other writes used to skip the saved project.
+   */
+  private readonly actuator: ActuatorPort;
+  /** The sandbox unwrapped — only for the platform's own starter files (see `ensureViteScaffold`). */
+  private readonly _rawActuator: ActuatorPort;
+  /** Writes made through `actuator` that no call site has recorded yet (path → content). */
+  private readonly _unrecorded = new Map<string, string>();
+
   constructor(
-    private readonly actuator: ActuatorPort,
+    actuatorRaw: ActuatorPort,
     private readonly workspaceId: string,
     private readonly state?: WorkspaceState,
     private readonly events?: AgentEventStream,
@@ -598,7 +621,23 @@ export class ToolDispatcher {
      * full — the single highest-value "why won't the app run" signal. Best-effort; never blocks.
      */
     private readonly onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number }) => void,
-  ) {}
+  ) {
+    this._rawActuator = actuatorRaw;
+    this.actuator = recordingActuator(actuatorRaw, workspaceId, (path, content) => { this._unrecorded.set(path, content); });
+  }
+
+  /**
+   * Record every write a call site did not record itself. Runs when a tool call starts and when it
+   * ends, and the route calls it before the durable save — so a write made outside a tool call is
+   * recorded too.
+   */
+  flushUnrecordedWrites(): void {
+    const pending = [...this._unrecorded];
+    this._unrecorded.clear();
+    for (const [path, content] of pending) {
+      try { this.onFileWrite(path, content); } catch { /* the durable record is best-effort */ }
+    }
+  }
 
   /**
    * THE DURABLE STORE IS WHAT A PUBLISH SERVES, SO NOTHING OF OURS MAY REACH IT (autopsy fd021c64).
@@ -641,6 +680,7 @@ export class ToolDispatcher {
   private readonly onFileWrite = (path: string, content: string): void => {
     this._writeSeq++; // see the docblock — one door, so "did anything change?" is true by construction
     this.onFileWriteRaw?.(path, withoutPreviewBridge(path, content));
+    this._unrecorded.delete(path); // recorded here — see `flushUnrecordedWrites`
     this._writtenPaths.add(path); // what THIS agent really wrote — see `writtenPaths`
   };
 
@@ -660,6 +700,18 @@ export class ToolDispatcher {
   /** The paths this agent wrote, in write order. */
   writtenPaths(): string[] {
     return [...this._writtenPaths];
+  }
+
+  /** A sub-agent this one delegated to wrote something (or could not say whether it did). */
+  private _delegateWrote = false;
+
+  /**
+   * Has this agent changed the project yet — itself or through a sub-agent? The done signal asks it, so
+   * an edit is never judged "complete" by the score of the app it has not touched (autopsy 1389f0d5).
+   */
+  wroteAnything(): boolean {
+    this.flushUnrecordedWrites();
+    return this._writtenPaths.size > 0 || this._delegateWrote;
   }
 
   // Preview loop-breaker state (build-diagnostics root cause: with no cross-call memory the model
@@ -1778,7 +1830,9 @@ export class ToolDispatcher {
       for (const [path, content] of Object.entries(files)) {
         const exists = await this.actuator.readFile(this.workspaceId, path).then(() => true).catch(() => false);
         if (exists) continue; // never clobber real (e.g. salvaged) work with the starter
-        await this.actuator.writeFile(this.workspaceId, path, content).catch(() => {});
+        // The platform's starter, not the model's work: written UNRECORDED on purpose, exactly as before
+        // recordedWrites.ts, so the authorship gates never judge our template as the build's code.
+        await this._rawActuator.writeFile(this.workspaceId, path, content).catch(() => {});
       }
     } catch {
       /* self-heal is best-effort; the redirect message still guides the agent */
@@ -2720,6 +2774,35 @@ export class ToolDispatcher {
   private noteCompileOutput(output: string): void {
     try { if (tscOutputProvesClean(output)) getWorkspaceMemory(this.workspaceId).markTscClean(); }
     catch { /* audit best-effort */ }
+    this.noteTypeErrorCount(output);
+  }
+
+  /**
+   * The latest compile's own verdict, whoever ran it — see `lastKnownTypeErrors`. `failuresOnly` is for a
+   * compile whose exit code already said it failed: its output may not parse (a bare `TS2304` on stderr),
+   * so it may RAISE the count but never set it to clean.
+   */
+  private noteTypeErrorCount(output: string, failuresOnly = false): void {
+    try {
+      const v = tscVerdict(output);
+      if (v === 'passed' && !failuresOnly) this._lastTypeErrors = 0;
+      else if (v === 'failed') this._lastTypeErrors = Math.max(1, countTscErrors(output));
+    } catch { /* a reading, never a failure */ }
+  }
+
+  /** Type errors in the LATEST compile this build ran (write-time, the typecheck tool, or a shell `tsc`);
+   *  null when none has run or none produced a verdict. */
+  private _lastTypeErrors: number | null = null;
+
+  /**
+   * How many type errors the latest compile reported — null when unknown. 🔴 Autopsy 33812996: the
+   * done check told the builder *"the app is complete and healthy — 92/100, no blockers"* while the
+   * compile it had just run held errors in Home.tsx; the builder then spent 28 more steps (20 minutes)
+   * after being told to stop. The readiness scan reads code, not the compiler, so the compiler's own
+   * last word is asked too.
+   */
+  lastKnownTypeErrors(): number | null {
+    return this._lastTypeErrors;
   }
 
   /**
@@ -2930,7 +3013,13 @@ export class ToolDispatcher {
       const visual = call.name === 'screenshot' || call.name === 'browser_action' || call.name === 'find_ui_element'
         ? await this.runVisual(call)
         : null;
-      const content = visual ? visual.content : await this.run(call, agent);
+      this.flushUnrecordedWrites(); // anything written outside a tool call, before this one runs
+      let content: string;
+      try {
+        content = visual ? visual.content : await this.run(call, agent);
+      } finally {
+        this.flushUnrecordedWrites(); // every write this call made reaches the saved project
+      }
       this.events?.emit({
         type: 'tool_result',
         agent,
@@ -3144,6 +3233,8 @@ export class ToolDispatcher {
     let security = '';
     for (const p of paths) {
       try { security += securityWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
+      // A made-up result or made-up people (autopsy 33812996) — the builder hears it with the file open.
+      try { security += fakeResultWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
     }
     // A second index.html in public/ shadows a Vite app's real entry (autopsy 876afca9) — said while open.
     let shadow = '';
@@ -3168,6 +3259,44 @@ export class ToolDispatcher {
 
   /** Most project files one style note may read — a note must never cost more than the write it follows. */
   private static readonly STYLE_NOTE_MAX_READS = 80;
+
+  /**
+   * The class names the screens use that no stylesheet defines, read from the workspace NOW — the
+   * end-of-turn half of the write-time note (stylePolishResume.ts, autopsy 1be16985). `nb-` classes are
+   * left to the kit, exactly as the write-time note leaves them.
+   *
+   * 🔒 UNKNOWN IS EMPTY. A project with more files than one read may cover, a listing that fails, or a
+   * stylesheet that cannot be read returns `[]`: this answer sends a model back to work, so it must never
+   * name a class as undefined because the file that defines it was not read.
+   */
+  async undefinedClassesNow(): Promise<{ missing: string[]; sheet?: string }> {
+    try {
+      let listing: string[] = [];
+      try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'style-resume-listing'); }
+      catch { return { missing: [] }; }
+      const paths = listing.map((p) => String(p).replace(/^\.?\/+/, ''));
+      const sheets = paths.filter((p) => isProjectStylesheet(p));
+      const code = paths
+        .filter((p) => /^src\/.*\.(tsx|jsx|ts|js)$/.test(p))
+        .filter((p) => !/\.(test|spec)\.[jt]sx?$/.test(p) && !/\.d\.ts$/.test(p));
+      if (sheets.length === 0 || sheets.length + code.length > ToolDispatcher.STYLE_NOTE_MAX_READS) return { missing: [] };
+      const project: Record<string, string> = {};
+      let unreadSheet = false;
+      await Promise.all([...sheets, ...code].map(async (p) => {
+        try {
+          const raw = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'style-resume-read');
+          if (typeof raw === 'string') project[p] = withoutPreviewBridge(p, raw);
+          else if (isProjectStylesheet(p)) unreadSheet = true;
+        } catch { if (isProjectStylesheet(p)) unreadSheet = true; }
+      }));
+      if (unreadSheet) return { missing: [] };
+      const missing = findUndefinedClasses(project).filter((c) => !c.startsWith('nb-'));
+      const sheet = sheets.includes('src/index.css') ? 'src/index.css' : sheets[0];
+      return { missing, sheet };
+    } catch {
+      return { missing: [] };
+    }
+  }
 
   /**
    * The stylesheet-write class note and the page-design note, from ONE read of the project. Only a write
@@ -3244,8 +3373,22 @@ export class ToolDispatcher {
    */
   private readonly _screensWithClasses = new Map<string, string>();
 
+  /** Stylesheets written this build (path → content) — the candidates for "defined, but nothing imports it". */
+  private readonly _sheetsWritten = new Map<string, string>();
+  /** Every project stylesheet a module written this build imports (autopsy 1389f0d5). */
+  private readonly _importedSheets = new Set<string>();
+
   private async undefinedClassNotes(files: Record<string, string>): Promise<string> {
     try {
+      // What this write teaches about the project: the sheets it writes, and the sheets its modules import.
+      for (const [p, c] of Object.entries(files)) {
+        if (isProjectStylesheet(p)) {
+          this._sheetsWritten.delete(p);
+          this._sheetsWritten.set(p, c);
+          if (this._sheetsWritten.size > 40) this._sheetsWritten.delete(this._sheetsWritten.keys().next().value as string);
+        }
+        if (/\.(?:[cm]?[tj]sx?|css|scss|sass|less)$/.test(p)) for (const sheet of cssImportsOf(p, c)) this._importedSheets.add(sheet);
+      }
       // A plain-HTML app names its classes with `class=`, in the page or in the strings its script
       // writes (autopsy "Nemi Mart", 2026-09-30) — those are screens too.
       const written = Object.keys(files).filter((p) => (/\.(?:t|j)sx?$/.test(p) && /className\s*=/.test(files[p] ?? ''))
@@ -3263,17 +3406,66 @@ export class ToolDispatcher {
       const content = (p: string) => files[p] ?? this._screensWithClasses.get(p) ?? '';
       const project: Record<string, string> = {};
       for (const [p, c] of Object.entries(files)) if (isProjectStylesheet(p)) project[p] = c;
-      const probes = ['src/index.css', 'src/App.css', 'src/styles.css', 'src/global.css', 'src/styles/globals.css', 'src/styles/index.css', 'style.css', 'styles.css', 'css/style.css', 'package.json', 'index.html']
-        .filter((p) => project[p] === undefined);
-      const read = await Promise.all(probes.map((p) => this.actuator.readFile(this.workspaceId, p).then((c) => [p, c] as const, () => null)));
-      for (const r of read) if (r && typeof r[1] === 'string') project[r[0]] = r[1];
+      for (const [p, c] of this._sheetsWritten) if (project[p] === undefined) project[p] = c;
+      const readInto = async (paths: string[]) => {
+        const read = await Promise.all(paths.filter((p) => project[p] === undefined)
+          .map((p) => this.actuator.readFile(this.workspaceId, p).then((c) => [p, c] as const, () => null)));
+        for (const r of read) if (r && typeof r[1] === 'string') project[r[0]] = withoutPreviewBridge(r[0], r[1]);
+      };
+      const entries = ['src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/main.js', 'src/index.tsx', 'src/index.jsx', 'src/index.js'];
+      await readInto(['src/index.css', 'src/App.css', 'src/styles.css', 'src/global.css', 'src/styles/globals.css', 'src/styles/index.css', 'style.css', 'styles.css', 'css/style.css', 'package.json', 'index.html', ...entries]);
+      // The sheets the screens and the entry really import — `src/calculator.css` is not on any list of names.
+      const imported = new Set(this._importedSheets);
+      for (const p of [...screens, ...entries]) {
+        const body = content(p) || project[p] || '';
+        for (const sheet of cssImportsOf(p, body)) imported.add(sheet);
+      }
+      await readInto([...imported].slice(0, 20));
+      for (const e of entries) {
+        if (project[e] === undefined) continue;
+        for (const sh of cssImportsOf(e, project[e])) imported.add(sh);
+        delete project[e];
+      }
+      // A sheet written THIS build that no module imports defines nothing on screen — its classes are
+      // counted apart, so the note can say "import it" instead of "these classes do not exist".
+      const orphans = [...this._sheetsWritten.keys()].filter((sh) => !imported.has(sh)
+        && !['src/index.css', 'style.css', 'styles.css', 'css/style.css'].includes(sh));
+      const defining = () => {
+        const d: Record<string, string> = {};
+        for (const [k, v] of Object.entries(project)) if (!orphans.includes(k)) d[k] = v;
+        return d;
+      };
+      let missingBy = new Map<string, string[]>();
+      const recount = () => {
+        missingBy = new Map();
+        const d = defining();
+        for (const p of screens) {
+          const missing = undefinedClassesInFile(p, content(p), d).filter((c) => !c.startsWith('nb-'));
+          if (missing.length > 0) missingBy.set(p, missing);
+        }
+      };
+      recount();
+      if (missingBy.size === 0) return '';
+      // Something is still missing: before saying so, read every stylesheet in the project — a class a
+      // parent component's sheet defines is not "undefined". Paid only when there is something to say.
+      try {
+        const listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'css-note-listing');
+        await readInto(listing.map((p) => String(p).replace(/^\.?\/+/, '')).filter((p) => isProjectStylesheet(p)).slice(0, 30));
+        recount();
+      } catch { /* the note then speaks from what was read, as before */ }
+      // Name the sheet this project really has: a static app's is style.css, not src/index.css.
+      const sheet = project['src/index.css'] !== undefined ? 'src/index.css'
+        : (['style.css', 'styles.css', 'css/style.css'].find((sh) => project[sh] !== undefined) ?? 'src/index.css');
       let out = '';
-      for (const p of screens) {
-        const missing = undefinedClassesInFile(p, content(p), project).filter((c) => !c.startsWith('nb-'));
-        // Name the sheet this project really has: a static app's is style.css, not src/index.css.
-        const sheet = project['src/index.css'] !== undefined ? 'src/index.css'
-          : (['style.css', 'styles.css', 'css/style.css'].find((s) => project[s] !== undefined) ?? 'src/index.css');
-        out += undefinedClassesWriteNote(p, missing, sheet);
+      for (const [p, missing] of missingBy) {
+        const byOrphan: Array<[string, string[]]> = [];
+        let rest = missing;
+        for (const sh of orphans) {
+          const defined = collectDefinedClasses({ [sh]: project[sh] }).defined;
+          const here = rest.filter((c) => defined.has(c));
+          if (here.length > 0) { byOrphan.push([sh, here]); rest = rest.filter((c) => !defined.has(c)); }
+        }
+        out += unimportedSheetNote(p, byOrphan) + undefinedClassesWriteNote(p, rest, sheet);
       }
       return out;
     } catch {
@@ -3290,7 +3482,11 @@ export class ToolDispatcher {
       // we did not look, which the builder can dismiss in one line.
       const sheets: Record<string, string> = {};
       for (const [p, c] of Object.entries(files)) if (isProjectStylesheet(p)) sheets[p] = c;
-      for (const p of ['src/index.css', 'src/App.css', 'src/styles.css', 'src/global.css', 'src/styles/globals.css', 'src/styles/index.css']) {
+      // …and the sheets this build wrote and the suspects import: a fixed list of names never sees
+      // `src/calculator.css` (autopsy 1389f0d5 — the same blind spot as `undefinedClassNotes`).
+      for (const [p, c] of this._sheetsWritten) if (sheets[p] === undefined) sheets[p] = c;
+      const imported = suspects.flatMap((p) => cssImportsOf(p, files[p]));
+      for (const p of ['src/index.css', 'src/App.css', 'src/styles.css', 'src/global.css', 'src/styles/globals.css', 'src/styles/index.css', ...imported]) {
         if (sheets[p] !== undefined) continue;
         try {
           const raw = await this.actuator.readFile(this.workspaceId, p);
@@ -4395,6 +4591,9 @@ export class ToolDispatcher {
         // whether or not tsc failed, and that used to be recorded as "TypeScript already checked CLEAN".
         if (looksLikeTypecheckCommand(command) && exitCode === 0) this.noteCompileOutput(`${stdout}\n${stderr}`);
         if (typoFix.fixed) out = `(Ran it as ./node_modules/… — the folder is node_modules, with no leading dot.)\n${out}`;
+        // A compile whose exit code already said it failed still tells the done check it has errors
+        // (autopsy 33812996) — it can never mark anything clean.
+        if (looksLikeTypecheckCommand(command) && exitCode !== 0) this.noteTypeErrorCount(`${stdout}\n${stderr}`, true);
         return out;
       }
 
@@ -5220,7 +5419,12 @@ export class ToolDispatcher {
         }
         // The name the model passed wins; without one, the app's own <title> — never a bare "App" when
         // the app already says what it is called (autopsy d829b523).
-        const display = resolveAppDisplayName({ chosenName: optStr(input, 'app_name'), indexHtml });
+        // …and before the prompt, the name the app's own screen shows (autopsy 6ae30b33).
+        let appSource: string | null = null;
+        for (const p of APP_ENTRY_CANDIDATES) {
+          try { appSource = await this.actuator.readFile(this.workspaceId, p); break; } catch { /* try next */ }
+        }
+        const display = resolveAppDisplayName({ chosenName: optStr(input, 'app_name'), indexHtml, appSource });
         const appName = display.name;
         const plan = planAppDefaults(indexHtml, appName, { shortName: display.shortName });
         const written: string[] = [];
@@ -9624,6 +9828,7 @@ export class ToolDispatcher {
         }
         this.events?.emit({ type: 'agent_spawned', agent: role, task: instruction, ts: Date.now() });
         const result = await this.spawnSubAgent(role, instruction + await this.stylesheetBriefFor(role));
+        if (!Array.isArray(result.written) || result.written.length > 0) this._delegateWrote = true;
         return taskResultWithWrites(role, result);
       }
 
@@ -10170,8 +10375,21 @@ export function nearestEditRegion(existing: string, oldStr: string, windowLines 
   if (hit < 0) {
     // No anchor located anywhere — the intended text may be entirely gone/hallucinated. Show the head,
     // honestly labelled as such (not the target), so the model re-reads instead of trusting a wrong region.
-    const head = existing.length <= maxChars ? existing : existing.slice(0, maxChars) + '\n…(truncated — call read_file for the region you want)';
-    return `Current file content (top of file — your target text was not located anywhere):\n\`\`\`\n${head}\n\`\`\`\n`;
+    if (existing.length <= maxChars) {
+      return `Current file content (top of file — your target text was not located anywhere):\n\`\`\`\n${existing}\n\`\`\`\n`;
+    }
+    // 🔴 AND THE END OF A LONG FILE (autopsy 1be16985, 2026-10-01). A model ADDING rules to a 529-line
+    // stylesheet anchored its edit on the last lines it guessed the file ended with; the miss showed it
+    // the first 60 lines, it read the tail, and then ended its turn — and the 3,067 tokens of CSS it had
+    // just written were never applied. An edit that adds to the end of a file is anchored on the END,
+    // so the end is what the model needs to see. It is also told that an empty old_string appends,
+    // which needs no anchor at all.
+    const tailChars = Math.floor(maxChars * 0.4);
+    const head = existing.slice(0, maxChars - tailChars);
+    const tail = existing.slice(existing.length - tailChars);
+    return `Current file content (your target text was not located anywhere). Top of the file:\n\`\`\`\n${head}\n…\n\`\`\`\n`
+      + `End of the file:\n\`\`\`\n…\n${tail}\n\`\`\`\n`
+      + 'To ADD content at the end of this file, call edit_file again with an EMPTY old_string and the same new_string — it appends, no anchor needed.\n';
   }
   const from = Math.max(0, hit - windowLines);
   const to = Math.min(lines.length, hit + windowLines + 1);

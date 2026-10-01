@@ -79,6 +79,12 @@ describe('the page and the deletion code do not drift apart', () => {
       // Added 2026-09-22 with "gift a promo code". Note what the page ALSO has to say: the codes
       // themselves survive, because a code already given away is somebody else's to redeem.
       gift_code_daily: /gift-code purchase tally/i,
+      // Added 2026-09-30 with App Mart social.
+      app_mart_reactions: /App Mart likes, dislikes and comments/i,
+      app_mart_comments: /every comment and reply you wrote/i,
+      app_mart_blocks: /people you blocked/i,
+      app_mart_notifications: /your App Mart notifications/i,
+      app_mart_creator_ids: /public creator code/i,
     };
     for (const { collection } of USER_SCOPED_COLLECTIONS) {
       const phrase = described[collection];

@@ -17,6 +17,7 @@
 // real prompts (the admin will eye-ball the classifications) and tuned here.
 
 import { countEnumeratedFeatures, BIG_SOFTWARE_NOUN } from '../AgentV3/enumeratedFeatures';
+import { withoutMachineText } from './machineText';
 
 export type AppSize = 'small' | 'large';
 
@@ -180,7 +181,10 @@ const CLEARLY_SMALL = /\b(?:calculator|to-?do|todo|task list|timer|stopwatch|cou
  * This gate spends a real planner call (up to a minute, on every user's build, since
  * AGENTV3_MEGA_ROADMAP is on by default), so it may only ever become MORE right, never more eager.
  */
-function featureCount(text: string): number {
+function featureCount(raw: string): number {
+  // A pasted link is not a feature (autopsy 33812996). The famous-app check above still reads the
+  // whole text on purpose: "a clone of https://zomato.com" names its product in the link.
+  const text = withoutMachineText(raw, { drop: true });
   const numbered = (text.match(/^\s*(?:\d+[.)]|[-*•])\s+\S/gm) || []).length;
   const verbs = (text.match(/\b(add|build|create|include|with|support|allow|enable|manage|integrate)\b/gi) || []).length;
   // Numbered lists are the strongest signal; verbs are a softer one (halved).

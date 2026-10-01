@@ -41,16 +41,23 @@ describe('the prompt that failed, and the space that caused it', () => {
     expect(signalsMatchedNothing('ek cheez banao jisme naam aur number rakh saku')).toBe(true);
   });
 
-  it('and that admission is what buys the second opinion', () => {
+  // ⚠️ UPDATED 2026-10-01 (autopsy 1be16985). The admission now buys a call only when the request
+  // STATES something to size — named features or a big-software noun (`statesAScope`). The two
+  // witnesses above state neither, so they no longer buy one; a witness that names its features
+  // takes their place here, and the featureless pair is asserted to stay unasked.
+  const WITH_FEATURES = 'a tool for my uncle to keep track of names, phone numbers and birthdays';
+  it('and that admission is what buys the second opinion — when the request states a scope', () => {
     // 5 is nowhere near the 40 line, so the score-based ask cannot catch it on its own.
     expect(Math.abs(5 - COMPLEX_SCORE_LINE)).toBeGreaterThan(3);
-    expect(needsSecondOpinion(5, 'a tool for my uncle to keep track of things')).toBe(true);
-    expect(needsSecondOpinion(5, 'ek cheez banao jisme naam aur number rakh saku')).toBe(true);
+    expect(signalsMatchedNothing(WITH_FEATURES)).toBe(true);
+    expect(needsSecondOpinion(5, WITH_FEATURES)).toBe(true);
+    expect(needsSecondOpinion(5, 'a tool for my uncle to keep track of things')).toBe(false);
+    expect(needsSecondOpinion(5, 'ek cheez banao jisme naam aur number rakh saku')).toBe(false);
   });
 
   it('a model that reads it as complex flips the verdict', async () => {
     const d = await decideComplexity(
-      { prompt: 'a tool for my uncle to keep track of things', score: 5 },
+      { prompt: WITH_FEATURES, score: 5 },
       async () => 'complex',
       { env: {} as NodeJS.ProcessEnv },
     );

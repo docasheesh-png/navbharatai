@@ -47,3 +47,18 @@ export const NO_FAKED_RESULT_RULE =
 export const STABLE_SNAPSHOT_RULE =
   '- useSyncExternalStore\'s getSnapshot must return the SAME object until the data changes — never build a new ' +
   'array/object inside it (no sort/filter/map/spread per call); keep the derived value cached in the store and replace it only on writes.';
+
+/**
+ * NEVER FAKE A FEATURE'S RESULT (autopsy 33812996, 2026-09-30). Asked for a Circle to Search app with
+ * music recognition, screen translation, AI overview and multi-engine search, the build shipped a song
+ * "recognised" by `MOCK_DB[Math.random() * MOCK_DB.length]`, a translator returning `[Translated to hi]: …`,
+ * and search results and AI overviews written into the code — and the summary described every one as a
+ * working feature. NO_INVENTED_PEOPLE_RULE covered made-up PEOPLE; this is its sibling for made-up RESULTS.
+ * Shared by both lanes, like the rules above.
+ */
+export const NO_FAKE_RESULTS_RULE =
+  '- Never fake what a feature returns: song recognition that picks a random song, a translator that echoes ' +
+  '"[Translated to X]: text", or search results and AI answers written into the code are not features. Call a ' +
+  'real service (keyless where one exists — e.g. open the chosen search engine\'s results page), or, when the ' +
+  'feature needs a key or a server the app does not have, show an honest "connect X to turn this on" state and ' +
+  'say so in your final message. Sample entries shown for layout are labelled on screen as examples.';

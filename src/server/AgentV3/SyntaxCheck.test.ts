@@ -27,6 +27,12 @@ describe('parseGuardDecision — refuse a write that breaks a CLEAN file, allow 
     expect(msg).toMatch(/DUPLICATE declaration/);
     expect(msg).toMatch(/EDIT the/);
   });
+  it('a JSX-structure error gets the JSX hint, not the duplicate one (autopsy 1389f0d5)', () => {
+    const msg = parseGuardDecision('src/App.tsx', null, err('The character "}" is not valid inside a JSX element'), true);
+    expect(msg).toMatch(/WRITE REJECTED/);
+    expect(msg).toMatch(/rewrite it WHOLE with replace_symbol/);
+    expect(msg).not.toMatch(/most common cause is a DUPLICATE/);
+  });
   it('ALLOWS a repair on an already-broken file (old was broken → never block)', () => {
     expect(parseGuardDecision('src/App.tsx', err('old broke'), err('still broken'), true)).toBeNull();
   });

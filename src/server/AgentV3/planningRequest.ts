@@ -24,7 +24,17 @@
 //     the earlier turns are the spec being built (the builder already receives them as project
 //     context); on an existing app they describe work already done, and adding them to "make the
 //     button blue" would size a colour change as the whole app.
+//   • 🔴 and ONLY the earlier turns that were BUILD requests (autopsy 6ae30b33, 2026-09-30). A student
+//     asked, as three chat messages, for a Hindi essay on swimming, two SSC GK questions and history —
+//     all three answered in chat — then typed "Make question". This block called those three answers
+//     "the app being asked for", the fast lane planned a GK / swimming / history app from them, and the
+//     builder shipped it. A question someone asked is conversation, never a spec. The lane that
+//     answered each turn is recorded in memory (`Episode.lane`); a turn older than that tag is kept
+//     only when the classifier does not read it as chat.
 // Kill switch: AGENTV3_PLANNING_CONTEXT=off returns the message alone — the pre-change behaviour.
+
+import { classifyIntentWithConfidence } from './IntentClassifier';
+import type { RequestLane } from './WorkspaceMemory';
 
 /** Kill switch. Default ON. */
 export function planningContextEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -45,8 +55,13 @@ export interface PlanningRequestInput {
   prompt: string;
   /** Text extracted from files attached to THIS turn ('' when none). */
   attachmentText?: string | null;
-  /** This workspace's earlier requests, oldest → newest (as `WorkspaceMemory.recentRequests()` returns them). */
+  /** Earlier requests the caller vouches were BUILD requests, oldest → newest. */
   recentRequests?: readonly string[] | null;
+  /**
+   * Earlier turns with the lane that answered each (`WorkspaceMemory.recentRequestTurns()`), oldest →
+   * newest. A chat turn is dropped; an untagged (older) turn is kept unless it reads as chat.
+   */
+  recentTurns?: ReadonlyArray<{ text: string; lane?: RequestLane }> | null;
   /** Does the workspace already hold a user app? Earlier requests are added only when it does not. */
   userAppExists: boolean;
   env?: NodeJS.ProcessEnv;
@@ -57,6 +72,18 @@ export interface PlanningRequest {
   text: string;
   /** What was added beyond the message — empty when `text === prompt`. For the build report. */
   sources: PlanningSource[];
+}
+
+/**
+ * Was this earlier turn a request to BUILD? A turn answered in chat never is. A turn older than the lane
+ * tag is judged by what it says: the classifier's own verdict, so this cannot drift from the router's.
+ * PURE.
+ */
+export function wasBuildRequest(turn: { text: string; lane?: RequestLane }): boolean {
+  if (!turn || typeof turn.text !== 'string') return false;
+  if (turn.lane === 'chat') return false;
+  if (turn.lane === 'build') return true;
+  return classifyIntentWithConfidence(turn.text).intent !== 'chat';
 }
 
 function clip(s: string, max: number): string {
@@ -84,9 +111,13 @@ export function planningRequest(input: PlanningRequestInput): PlanningRequest {
     sources.push('attachment');
   }
 
-  if (!input.userAppExists && Array.isArray(input.recentRequests)) {
+  const candidates: string[] = [
+    ...(Array.isArray(input.recentRequests) ? input.recentRequests : []),
+    ...(Array.isArray(input.recentTurns) ? input.recentTurns.filter(wasBuildRequest).map((t) => t.text) : []),
+  ];
+  if (!input.userAppExists && candidates.length > 0) {
     const own = prompt.trim();
-    const earlier = input.recentRequests
+    const earlier = candidates
       .filter((r): r is string => typeof r === 'string' && r.trim().length > 0 && r.trim() !== own)
       .slice(-PLANNING_EARLIER_REQUESTS);
     if (earlier.length > 0) {

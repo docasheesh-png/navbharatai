@@ -1,3 +1,4 @@
+import { NOT_READY_HEADLINE, NOT_READY_HEADLINE_CONTINUE } from './notReadyHeadline';
 import type { AgentEventStream } from './AgentEventStream';
 import { isStarterBlocker, starterSummary } from './stillTheStarterApp';
 import type { WorkspaceState } from './WorkspaceState';
@@ -27,7 +28,7 @@ import { isBuildStoppedError } from './stopSignal';
 import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
 import { decideBuildNudge, standDownNote } from './nudgeToBuild';
-import { decideUnfinishedResume, unfinishedResumeNote } from './unfinishedResume';
+import { decideUnfinishedResume, unfinishedResumeStandDownNote, unfinishedResumeNote } from './unfinishedResume';
 import { decideStyleResume, styleResumeNote } from './stylePolishResume';
 import { asPlatformRequest } from './platformRequest';
 import { streamThinkingToChat } from './thinkingStream';
@@ -393,6 +394,14 @@ export interface AgentRunResult {
    *  "budget reached — continue" state instead of a hard failure. */
   budgetReached?: boolean;
   /**
+   * The model's own closing words, kept when the readiness gate replaced them with the platform's
+   * not-ready headline (`NOT_READY_HEADLINE`). A later proof that the app works (the route's render
+   * rescue) must hand the user THESE words back — not leave our "isn't fully working" sentence on a
+   * build it has just upgraded to success and charged for (autopsy 6461025c). Absent ⇒ the summary
+   * is already the model's own.
+   */
+  modelAnswer?: string;
+  /**
    * The run stopped ONLY because it hit the wall-clock cap (`buildTimedOut`, AGENTV3_MAX_BUILD_SECONDS).
    *
    * 🔴 WHY THIS EXISTS (admin diagnostics report, 2026-09-10). A build died at 29m59s — one second under
@@ -526,6 +535,20 @@ export class AgentRunner {
     // created BEFORE its tools run, but the whole turn is only written AFTER they finish — an
     // end-of-write stamp made every reopened turn read backwards (action rows above their prose).
     const messageTs: number[] = [Date.now()];
+    // 🔴 WHO WROTE EACH USER TURN (autopsy 1be16985, 2026-10-01). Every steer the engine injects —
+    // a nudge, a resume, a checkpoint, a repair pass's own instruction — travels as `role: 'user'`,
+    // and the persisted copy was indistinguishable from what the person typed, so a reopened session
+    // showed "The app is built and compiles. These pages do not match…" as the user's own bubble. The
+    // indices of platform-authored turns are kept here and stamped `origin: 'platform'` on the
+    // PERSISTED copy only (the live array stays the exact API shape), and the restore skips them.
+    const platformMsgIdx = new Set<number>();
+    if (this.opts.platformRequest) platformMsgIdx.add(0);
+    /** Push an engine-authored user turn: transcript, its timestamp and its origin move together. */
+    const pushPlatformTurn = (content: unknown): void => {
+      messages.push({ role: 'user', content });
+      messageTs.push(Date.now());
+      platformMsgIdx.add(messages.length - 1);
+    };
     const usage: TurnUsage = {
       inputTokens: 0,
       outputTokens: 0,
@@ -548,9 +571,13 @@ export class AgentRunner {
           userId: persistence.userId,
           workspaceId: persistence.workspaceId,
           title: persistence.title,
-          messages: compactMessagesForPersist(messages).map((m, i) =>
-            m && typeof m === 'object' && (m as { ts?: unknown }).ts === undefined ? { ...m, ts: messageTs[i] ?? now() } : m,
-          ),
+          messages: compactMessagesForPersist(messages).map((m, i) => {
+            if (!m || typeof m !== 'object') return m;
+            let out = m as Record<string, unknown>;
+            if (out.ts === undefined) out = { ...out, ts: messageTs[i] ?? now() };
+            if (platformMsgIdx.has(i)) out = { ...out, origin: 'platform' };
+            return out;
+          }),
           createdAt: now(),
         });
         persistedCount = messages.length;
@@ -562,11 +589,13 @@ export class AgentRunner {
     // session interleaves prose with the durable timeline in the LIVE order. The live `messages`
     // array is never touched — it stays exactly the Claude-API shape the model consumes.
     const stampForPersist = (msgs: unknown[], startIdx: number, fallback: number): unknown[] =>
-      msgs.map((m, i) =>
-        m && typeof m === 'object' && (m as { ts?: unknown }).ts === undefined
-          ? { ...m, ts: messageTs[startIdx + i] ?? fallback }
-          : m,
-      );
+      msgs.map((m, i) => {
+        if (!m || typeof m !== 'object') return m;
+        let out = m as Record<string, unknown>;
+        if (out.ts === undefined) out = { ...out, ts: messageTs[startIdx + i] ?? fallback };
+        if (platformMsgIdx.has(startIdx + i)) out = { ...out, origin: 'platform' };
+        return out;
+      });
     // Persist any transcript turns added since the last call, plus the latest usage/billing and
     // (optionally) a terminal status. Uses appendMessages when there are new turns, else update.
     // Every persisted turn is COMPACTED first (base64 screenshots stripped, giant tool payloads
@@ -706,6 +735,7 @@ export class AgentRunner {
         const steered = this.opts.steerPoll?.() ?? [];
         for (const sm of steered) {
           messages.push({ role: 'user', content: liveUserMessageTurn(sm) });
+          messageTs.push(Date.now()); // the person's own words: a user turn, kept in step with its timestamp
           events.emit({ type: 'narration', agent: agentRole, text: `📨 The team picked up your message: “${sm.slice(0, 160)}${sm.length > 160 ? '…' : ''}”`, ts: Date.now() });
         }
 
@@ -917,8 +947,7 @@ export class AgentRunner {
               });
             } catch { /* a note must never fail a build */ }
             noBuildNudges++;
-            messages.push({ role: 'user', content: nudge.message });
-            messageTs.push(Date.now());
+            pushPlatformTurn(nudge.message);
             continue; // give the model another turn to actually build
           }
           // A build/edit that NEVER called a single tool produced nothing — that is a FAILED
@@ -930,6 +959,7 @@ export class AgentRunner {
           // WHITE-LABEL LAW: the honest sentence names OUR limit, never a vendor, a model or a ceiling
           // the user cannot act on. "The model replied without building" was false here in the one way
           // that matters — nothing replied — and it is the sentence that sent the user to buy credits.
+          let modelAnswer: string | undefined;
           let summary = builtNothing
             ? (starvedTurn
                 ? 'The build could not start writing files: NavBharatAI\u2019s engine ran out of room to answer before it began. '
@@ -970,12 +1000,11 @@ export class AgentRunner {
                 // SCREENS THAT USE CLASSES NO STYLESHEET DEFINES ARE HANDED BACK ONCE, while the model still
                 // holds them (autopsy 1be16985 — 63 undefined classes, then a 174 s fresh-context repair).
                 const style = await dispatcher.undefinedClassesNow();
-                const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, resumesUsed: styleResumes });
+                const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, resumesUsed: styleResumes, producedFiles: producingToolUses > 0 });
                 if (decision.resume) {
                   styleResumes++;
-                  try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length), detail: style.missing.slice(0, 20).map((c) => `.${c}`).join(' ') }); } catch { /* a note must never fail a build */ }
-                  messages.push({ role: 'user', content: decision.message });
-                  messageTs.push(Date.now());
+                  try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`)].join(' ') }); } catch { /* a note must never fail a build */ }
+                  pushPlatformTurn(decision.message);
                   continue;
                 }
               }
@@ -984,12 +1013,13 @@ export class AgentRunner {
                 // AND ANOTHER TURN (autopsy 121c2431 — the build ended FAILED with 1,418 s of budget
                 // unspent). Never after a refusal or a question to the user; at most twice. See
                 // unfinishedResume.ts.
-                const resume = decideUnfinishedResume({ text: turn.text, blockers: readiness.blockers, resumesUsed: unfinishedResumes });
+                const resume = decideUnfinishedResume({ text: turn.text, blockers: readiness.blockers, resumesUsed: unfinishedResumes, producedFiles: producingToolUses > 0 });
+                const standDownNote = resume.resume ? null : unfinishedResumeStandDownNote(resume.standDown, readiness.blockers.length);
+                if (standDownNote) { try { this.opts.onNote?.({ code: 'UNFINISHED_RESUME_STOOD_DOWN', message: standDownNote, detail: readiness.blockers.slice(0, 5).join(' | ') }); } catch { /* a note must never fail a build */ } }
                 if (resume.resume && !this.opts.signal?.aborted) {
                   unfinishedResumes++;
                   try { this.opts.onNote?.({ code: 'UNFINISHED_BUILD_RESUMED', message: unfinishedResumeNote(unfinishedResumes, readiness.blockers.length), detail: readiness.blockers.slice(0, 5).join(' | ') }); } catch { /* a note must never fail a build */ }
-                  messages.push({ role: 'user', content: resume.message });
-                  messageTs.push(Date.now());
+                  pushPlatformTurn(resume.message);
                   continue;
                 }
                 ok = false;
@@ -1017,7 +1047,8 @@ export class AgentRunner {
                   // (autopsy 0d297b25: it had correctly found the project was never in the workspace).
                   summary = starterSummary(turn.text);
                 } else {
-                  summary = `⚠️ This app isn't fully working yet — a couple of things still need fixing before it's ready to use.`;
+                  if (turn.text.trim()) modelAnswer = turn.text.trim();
+                  summary = NOT_READY_HEADLINE;
                 }
               }
             } catch { /* gate is best-effort — a scan error never fails a real build */ }
@@ -1072,7 +1103,7 @@ export class AgentRunner {
           if (ok) summary = `${summary}${missingFeatureNotice(buildHealth?.warnings)}`;
           await persist(ok ? 'complete' : 'error');
           events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });
-          return { ok, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
+          return { ok, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}), ...(!ok && modelAnswer ? { modelAnswer } : {}) };
         }
         totalToolUses += turn.toolUses.length;
         producingToolUses += turn.toolUses.filter(toolUseCouldProduceWork).length;
@@ -1264,6 +1295,7 @@ export class AgentRunner {
         const steer = [truncationSteer, loopSteer, budgetText, doneText].filter(Boolean).join('\n\n') || null;
         messages.push({ role: 'user', content: steer ? [...resultBlocks, { type: 'text', text: steer }] : resultBlocks });
         messageTs.push(Date.now());
+        if (steer) platformMsgIdx.add(messages.length - 1);
 
         // Budget guardrail (CostGuard / D5) — stop honestly, never silently.
         if (maxBudgetUsd !== undefined && billed() >= maxBudgetUsd) {
@@ -1291,7 +1323,7 @@ export class AgentRunner {
             const readiness = await dispatcher.assessBuildReadiness();
             const steer = weakCheckpointSteer(readiness);
             if (steer) {
-              messages.push({ role: 'user', content: steer });
+              pushPlatformTurn(steer);
               checkpointNudges++;
               events.emit({ type: 'narration', agent: agentRole, text: '🔎 Checkpoint: fixing a build-breaker before adding more…', ts: Date.now() });
             }
@@ -1314,7 +1346,7 @@ export class AgentRunner {
               );
               if (verdict.attempted && verdict.errorsAfter < verdict.errorsBefore) {
                 // Tell the model the grind is over so it spends the remaining steps on FEATURES.
-                messages.push({ role: 'user', content: `[BUILD CHECKPOINT] ${verdict.errorsBefore - verdict.errorsAfter} compile error(s) were just auto-fixed for you (${verdict.errorsAfter} remain). Do NOT re-fix them one by one — run tsc once to confirm, then continue completing the app's remaining FEATURES.` });
+                pushPlatformTurn(`[BUILD CHECKPOINT] ${verdict.errorsBefore - verdict.errorsAfter} compile error(s) were just auto-fixed for you (${verdict.errorsAfter} remain). Do NOT re-fix them one by one — run tsc once to confirm, then continue completing the app's remaining FEATURES.`);
               }
             }
           } catch { /* trend checkpoint is best-effort — never blocks or fails a build */ }
@@ -1346,7 +1378,7 @@ export class AgentRunner {
               // admin report; AGENTV3_VERBOSE_READINESS=on restores the detailed line for debugging.
               summary = (process.env.AGENTV3_VERBOSE_READINESS ?? '').trim().toLowerCase() === 'on'
                 ? `Step limit reached (${stepCap}) — and the build is NOT ready (score ${readiness.score}/100).${readiness.blockers.length ? ` Must fix: ${readiness.blockers.join('; ')}.` : ''}`
-                : `⚠️ This app isn't fully working yet — a couple of things still need fixing. Send another message and I'll keep going.`;
+                : NOT_READY_HEADLINE_CONTINUE;
               // ENDGAME REPAIR (QuizArena autopsy 2026-07-17, Slice 1): the builder died grinding the
               // last compile errors ONE per 4-5 step round-trip. Fix them OUTSIDE the step loop —
               // deterministic tsc-error fixers first (unused imports, import/export drift — pure code,
@@ -1416,7 +1448,7 @@ export class AgentRunner {
           const blockerNote = buildHealth?.blockers.length
             ? ` Remaining blockers to fix: ${buildHealth.blockers.join('; ')}.`
             : '';
-          messages.push({ role: 'user', content: `[BUILD RESUME] The step budget was extended ONCE to let you finish — do not start over and do not rebuild what exists.${blockerNote} Fix what is listed, verify with tsc, and finish.` });
+          pushPlatformTurn(`[BUILD RESUME] The step budget was extended ONCE to let you finish — do not start over and do not rebuild what exists.${blockerNote} Fix what is listed, verify with tsc, and finish.`);
           events.emit({ type: 'narration', agent: agentRole, text: '🔁 The build hit its step budget while unfinished — extending once to complete the remaining blockers…', ts: Date.now() });
           continue stepResumeLoop;
         }

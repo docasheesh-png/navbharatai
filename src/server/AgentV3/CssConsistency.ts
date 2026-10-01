@@ -243,6 +243,61 @@ export function unimportedSheetNote(screen: string, sheets: ReadonlyArray<readon
   return out;
 }
 
+/**
+ * The note for a screen that imports its OWN stylesheet — `import './Header.css'` — which does not exist.
+ *
+ * 🔴 AUTOPSY 120eb52f (2026-09-30). Header.tsx, DayCell.tsx, AddEventModal.tsx and CalendarPage.tsx each
+ * imported a `./X.css` that was never written. `tsc` cannot see it (the project declares `*.css` as a
+ * module), so every check called the code clean — and the class note said "Add the rules to
+ * src/index.css". The model did exactly that, the four imports stayed, and Vite cannot build an import
+ * of a missing file. Where the screen already says where its rules live, that file is the remedy. PURE.
+ */
+export function missingImportedSheetNote(screen: string, sheet: string, missing: readonly string[]): string {
+  const shown = missing.slice(0, 8).map((c) => `.${c}`).join(', ');
+  const more = missing.length > 8 ? ` and ${missing.length - 8} more` : '';
+  const uses = missing.length > 0 ? ` for ${shown}${more}` : '';
+  return `\n⚠️ ${screen} imports '${relativeSpecifier(screen, sheet)}', but ${sheet} does not exist — the app will NOT build until it does `
+    + `(Vite cannot import a missing file, and tsc does not check stylesheet imports). Write ${sheet} now with the rules${uses}. `
+    + `Do not put them in another stylesheet and leave this import behind; if you would rather not have the file, remove the import.`;
+}
+
+/**
+ * The side-effect stylesheet imports in a module whose target is not in the project — `import './Header.css';`
+ * with no `src/components/Header.css`. Only the side-effect form: a CSS-module import (`import s from …`)
+ * binds a name the code uses, so removing it would trade a build error for a runtime one. PURE.
+ */
+export function danglingStylesheetImports(
+  files: Readonly<Record<string, string>>,
+): Array<{ file: string; specifier: string; sheet: string }> {
+  const out: Array<{ file: string; specifier: string; sheet: string }> = [];
+  const present = new Set(Object.keys(files).map(normalizePath));
+  for (const [file, body] of Object.entries(files)) {
+    if (!/\.(?:[cm]?[tj]sx?)$/.test(file) || /(^|\/)node_modules\//.test(file)) continue;
+    const re = /^[ \t]*import\s+(['"])(\.{1,2}\/[^'"]+\.(?:css|scss|sass|less))\1\s*;?[ \t]*$/gm;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(String(body ?? '')))) {
+      const sheet = normalizePath(`${posixDir(file)}/${m[2]}`);
+      if (!present.has(sheet)) out.push({ file, specifier: m[2], sheet });
+    }
+  }
+  return out;
+}
+
+/** `file` with the named side-effect stylesheet imports removed (and nothing else). PURE. */
+export function withoutStylesheetImports(source: string, specifiers: readonly string[]): string {
+  let out = String(source ?? '');
+  for (const spec of specifiers) {
+    const esc = spec.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    out = out.replace(new RegExp(`^[ \\t]*import\\s+(['"])${esc}\\1\\s*;?[ \\t]*\\r?\\n?`, 'm'), '');
+  }
+  return out;
+}
+
+function posixDir(p: string): string {
+  const i = p.lastIndexOf('/');
+  return i < 0 ? '.' : p.slice(0, i);
+}
+
 /** How many class names a sub-agent brief may carry — the kit is 59; an app sheet rarely doubles it. */
 const BRIEF_MAX_CLASSES = 160;
 

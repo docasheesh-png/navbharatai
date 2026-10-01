@@ -6,6 +6,7 @@
 // finishes. The specialist roster (the "AI team") is injected from the
 // AgentRegistry so the Architect always delegates by real, current capability.
 
+import { shellEarlyRule } from './earlyPreview';
 import { IMAGE_IN_APP_RULE } from './inAppImageGeneration';
 import { HANDOFF_MECHANICAL_FIX_RULE } from './handoffRule';
 import { rosterBriefing } from './AgentRegistry';
@@ -15,7 +16,7 @@ import { EMOJI_RULE } from '../lib/responseEmoji';
 import { DEVICE_POWERS_RULE } from './devicePowers';
 import { LISTENING_PORTS_COMMAND } from './PortDiscovery';
 import { appAiGatewayEnabled } from '../lib/appAiGateway';
-import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE } from './noEvalRule';
+import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE } from './noEvalRule';
 
 /**
  * The #1 conversation rule — mirror the user's language, never default to Hindi. The platform's
@@ -584,6 +585,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     BUILD_WHAT_WAS_ASKED_RULE,
     NO_FAKED_RESULT_RULE,
     STABLE_SNAPSHOT_RULE,
+    CORS_RULE,
+    SEED_PASSWORD_RULE,
     '',
     'Conversation:',
     '- Reply to anything the user says. If they greet you (e.g. "hello") or ask a',
@@ -651,6 +654,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '      files that import it. NEVER import a type from `App.tsx` or from a file you have',
     '      not written yet — the root imports its children, so a child importing from the',
     '      root fails to compile until the root is rewritten.',
+    ...shellEarlyRule(),
     '    • Add defensive guards (null/undefined checks, sensible defaults, try/catch at',
     '      I/O and async boundaries) so missing data degrades instead of crashing.',
     '    • No fragile magic: avoid hidden ordering dependencies, side effects on import,',

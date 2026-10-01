@@ -709,6 +709,26 @@ function capTail(s: string | undefined, cap: number): string {
   const t = String(s ?? '');
   return t.length <= cap ? t : `…[${t.length - cap} chars truncated]…\n${t.slice(t.length - cap)}`;
 }
+/** How much of a shell command a report keeps. */
+export const CMD_TEXT_CAP = 500;
+
+/**
+ * Keep BOTH ends of a long command. PURE.
+ *
+ * 🔴 AUTOPSY 39955124 (2026-10-01). Every typecheck the platform runs is `TSC_ENSURE; node_modules/.bin/tsc
+ * --noEmit …`, and the ensure prefix alone is longer than the 500 characters a report kept. Cut from the
+ * head, the stored command never contained `tsc --noEmit`, so the gate's evidence readers
+ * (`typecheckEvidenceFromCommands`, `agentRunEvidence`) could not recognise six clean write-time checks
+ * and the release gate said "the typecheck did not run". The command's own words are at its END; a
+ * prefix of boilerplate is the part that can go.
+ */
+export function clipCommand(command: string, cap: number = CMD_TEXT_CAP): string {
+  const t = String(command ?? '');
+  if (t.length <= cap) return t;
+  const head = Math.floor(cap * 0.4);
+  return `${t.slice(0, head)} … ${t.slice(t.length - (cap - head - 3))}`;
+}
+
 /** Keep the first `cap` chars — for prompts/responses where the head is the informative part. */
 function capHead(s: string | undefined, cap: number): string {
   const t = String(s ?? '');
@@ -1002,7 +1022,7 @@ export class BuildDiagnostics {
     // it. The cap is unchanged; which commands fill it is what changed.
     pushBounded(this.commands, {
       ts: this.now(),
-      command: rec.command.slice(0, 500),
+      command: clipCommand(rec.command),
       exitCode: rec.exitCode,
       durationMs: rec.durationMs,
       stdout: capTail(rec.stdout, CMD_OUTPUT_CAP),

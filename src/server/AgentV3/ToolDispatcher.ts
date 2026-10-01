@@ -41,7 +41,7 @@ import type { ToolUse } from './ClaudeClient';
 import type { AgentRole, ToolName, TodoItem, TodoStatus } from './types';
 import { defaultToolCatalog, isRecipeName, recipeListing } from './ToolCatalog';
 import type { Checkpointer } from './GitManager';
-import { isWorkerRole } from './AgentRegistry';
+import { isWorkerRole, isPlanningOnlyRole, PLAN_YOURSELF_NOTE } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { shellBuildProvesSuccess } from './buildFailurePrediction';
 import { robustTscCommand } from './tscCommand';
@@ -10042,6 +10042,7 @@ export class ToolDispatcher {
         if (!isWorkerRole(role)) {
           throw new Error(`task: unknown role "${role}".`);
         }
+        if (isPlanningOnlyRole(role)) return PLAN_YOURSELF_NOTE;
         this.events?.emit({ type: 'agent_spawned', agent: role, task: instruction, ts: Date.now() });
         const result = await this.spawnSubAgent(role, instruction + await this.stylesheetBriefFor(role));
         if (!Array.isArray(result.written) || result.written.length > 0) this._delegateWrote = true;

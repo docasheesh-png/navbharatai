@@ -3242,6 +3242,16 @@ the flag entries above promise.
   an app ("game mode", "pdf download") and continue/fix all stand it down, and so does a workspace we cannot read
   or name. A 22-message precision lock in `tests/askBeforeBuildingSomethingElseIntoThisApp.test.ts` fails CI if
   an ordinary edit ever meets the question. The reply never falls through to a build if the chat model fails.
+- **📊 `AGENTV3_SPREADSHEET_FILE` — A SPREADSHEET IS A FILE, NOT AN APP (admin 2026-10-01, verbatim: *"A karo!!"*).
+  ⚠️ NOT set; default ON; `off` builds such requests as before.** "Make a sample Excel file" was built as a React
+  dashboard and the user got no `.xlsx`. `spreadsheetRequest.ts` (precision first: a spreadsheet noun + a create
+  verb or "sample data", and no software word, how-to, existing-file handling or other format) turns the turn into a
+  chat turn; `spreadsheetTurn.ts` asks the free router for JSON rows; `lib/spreadsheetFile.ts` clamps them and
+  writes `.xlsx` (exceljs) / `.csv` (BOM + formula-injection guard); rows live in `agentv3_sheet_files` under the
+  VERIFIED uid; `routes/spreadsheetFiles.ts` downloads through the App Mart ticket shape (HMAC over file + format +
+  sheet + account, 10 min). The chat line and the persisted turn carry `file`, so the Download card survives a
+  reopen. ₹0, like the chat lane. ⚠️ The card reaches phone users only with a fresh `.aab`/`.ipa`. Test-locked in
+  `tests/aSpreadsheetIsAFileNotAnApp.test.ts`.
 - **🧩 `AGENTV3_DANGLING_CSS_GUARD` — AN IMPORT OF A STYLESHEET THAT DOES NOT EXIST IS REMOVED (autopsy 120eb52f).
   ⚠️ NOT set; default ON; `off` leaves such imports.** Four components imported `./X.css` files nobody wrote;
   `tsc` cannot see a stylesheet import, and Vite cannot build one. At the end of a build, a SIDE-EFFECT import of
@@ -3353,6 +3363,12 @@ the flag entries above promise.
   🔴 **Same autopsy: the scaffold's own ErrorBoundary screen is now judged NOT rendered**
   (`scaffoldCrashScreen` in `PreviewVerify.ts`). Before, it was saved as the last known good at 809 s.
   Do not loosen that match to the bare words; an app's designed error card must stay a render.
+- **🧭 A FORM ON A WIZARD STEP IS REACHED (Q-016, autopsy 2b1f845e; no flag).** A form-bearing component no
+  page reaches (`src/steps/DesignStep.tsx`) gets a save journey on `/` that first presses the ONE visible control
+  named after its screen (`reachWordFor` → "design"), and presses it again after the reload. 🔒 An action word
+  ("post", "pay", "send", "delete", "add") never becomes the reach word, a destructive or creating control is
+  never pressed, and a form whose submit is outward gets no journey. No matching control ⇒ `unreachable`, never
+  a failure. Real-browser test: `tests/aFormOnAWizardStepIsReached.test.ts`.
 - **`AGENTV3_NPM_VERSION_HINT`** (NOT set; default ON, `off` disables — added 2026-10-01, autopsy 2b1f845e) — an
   `npm install` that fails with ETARGET (a guessed range such as `cors@^4` that does not exist) gets the real latest
   version from one `npm view`, appended to the same tool result (`npmVersionHint.ts`). Advice only. Same autopsy, no

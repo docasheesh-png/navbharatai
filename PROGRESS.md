@@ -87351,3 +87351,34 @@ open PR's CI failed with it (#3462 first).
   server-deps) was run on the final state before the PR.
 - **Class:** an upstream advisory landing between a PR's green CI and its merge. The gate is doing its job; the
   honest response is the pin, not an allowlist entry, because a fixed release exists.
+
+## 2026-10-01 — Autopsy de3bb2bb follow-up: the five decisions (PR #3467)
+
+The admin decided the five 🟡 rows the de3bb2bb autopsy left open. Ledger:
+
+BUILD REPORT de3bb2bb — RESOLUTION (follow-up)
+Items: 5 · ✅ Resolved on merge of #3467: 5 · 🟡 Blocked: 0 · Remaining: 0
+- **Q-064 ✅ (not our defect, admin: "leave")** — GLM flashx crawled twice; provider speed is Z.ai's. The crawl bench
+  (180 s, one re-probe) did what it was built to do. Third instance of Q-009.
+- **Q-065 ✅** — a 189 s KIMI call wrote 7 files in one `write_files_batch`, so nothing reached the preview for three
+  minutes. Root cause: the prompt told the builder to "pass all files in one call … 3× faster", which was never
+  measured. Class: a size limit stated nowhere, so the call's length was the size of the app. Fix:
+  `MAX_FILES_PER_BATCH = 3` in `batchSize.ts`, read by the prompt, the tool description and the dispatcher (which
+  still writes an oversized batch and tells the model to shrink the next one). Siblings: the tool description said
+  "faster" too; fixed in the same change.
+- **Q-066 ✅** — the end-of-turn style hand-back (`stylePolishResume`) ran only inside the top-level readiness gate,
+  so a Frontend sub-agent's undefined classes waited for the architect. Class: an end-of-turn check living on one
+  lane of two. Fix: `styleHandBack` for writing sub-agents, scoped to the files they wrote (`scopeStyleHandBack` —
+  parallel siblings keep their own classes); `onNote` added to `SubAgentDeps` so the note reaches the report.
+- **Q-067 ✅ (class)** — "COACT" (most likely "collect") became a chat to "the COACT backend". Class: an unknown word
+  becomes an imaginary integration. Fix: `unknownName.ts` — new builds only, precision-first (acronyms, known
+  services, emphasis words, a word the request itself names as a service, and all-caps prompts stand down); the
+  builder, the planner and the fast lane are told to build no client / API URL / env var for it and to say how
+  they read it. Kill switch `AGENTV3_UNKNOWN_NAME_NOTE=off`, report code `UNKNOWN_NAME_IN_REQUEST`. ⚠️ Whether
+  `chatApi.ts` was dead code in that one shipped app stays unverifiable (the report carries no source).
+- **Q-068 ✅** — five items agreed as correct reports (admin: "jo chahiye banao"); the real noise, "No tests at all"
+  recorded twice by two runners' `done` events, is now recorded once per build (`readinessWarningsSeen`).
+
+Proof: `tests/theDe3bb2bbFollowUp.test.ts` (17 cases), each fix reverted and its tests seen failing.
+**What to watch:** smaller `write_files_batch` calls; `STYLE_RULES_RESUMED` lines prefixed with a sub-agent role;
+`UNKNOWN_NAME_IN_REQUEST` on a real prompt with a typo in capitals.

@@ -4096,6 +4096,22 @@ the flag entries above promise.
   `openErrors`, one output-read door `noteCompileOutput` — the shell path had marked tsc clean on a `| head`
   exit code of 0); and when the release gate's typecheck passed, a reviewer finding claiming the project does
   not compile is dropped before the user sees it (`reviewEvidence.ts`, `REVIEW_REFUTED_BY_EVIDENCE`).
+- **🧩 FOLLOW-UP TO AUTOPSY de3bb2bb — THREE BUILDER RULES AND ONE REPORT FIX (admin decisions 2026-10-01, PR #3467).**
+  - **Small batches, no flag:** `write_files_batch` carries at most `MAX_FILES_PER_BATCH = 3` new files
+    (`batchSize.ts`, read by the prompt, the tool text and the dispatcher). One 189 s call had written 7 files, so
+    the preview showed nothing for three minutes. The old prompt line ("pass all files in one call … 3× faster")
+    was never measured; do not restore it. An oversized batch is still written in full and told to shrink.
+  - **Sub-agents get the style hand-back, no flag of its own** (rides `AGENTV3_STYLE_RESUME`): a writing
+    specialist is handed back, once, the undefined classes / page defects / unnamed controls in the files IT
+    wrote (`scopeStyleHandBack`). A sibling's class is the sibling's, because specialists run in parallel.
+  - **`AGENTV3_UNKNOWN_NAME_NOTE`** (NOT set; default ON; `off` disables), `unknownName.ts`: on a NEW build, an
+    all-caps word NavBharatAI does not know ("COACT", most likely "collect") is not built as an outside service.
+    The builder, planner and fast lane are told: no client, no API URL, no env variable for it; build
+    self-contained; say in one sentence how the word was read. Precision-first: acronyms, known services,
+    emphasis words, a word the request names as a service ("ACME API", "ACME se connect") and all-caps prompts
+    stand down. Report code `UNKNOWN_NAME_IN_REQUEST` (process-only).
+  - A readiness warning is recorded once per build (`readinessWarningsSeen` in `BuildDiagnostics`); each runner's
+    `done` had recorded "No tests at all" again.
 - **🎨 `AGENTV3_STYLE_RESUME` — A TURN THAT ENDS WITH UNSTYLED SCREENS IS HANDED THE CLASS LIST ONCE (autopsy
   1be16985, 2026-10-01). ⚠️ NOT set; default ON; `off` reverts.** `stylePolishResume.ts`, applied in
   `AgentRunner` after a READY readiness verdict. The write-time note (`undefinedClassWriteNote`, e6d46cde)

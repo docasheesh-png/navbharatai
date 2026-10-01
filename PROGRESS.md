@@ -86144,3 +86144,27 @@ tail and the runner census.
 **Still open:**
 - Each repair pass's instruction is still persisted into the main conversation as a `user` turn. Whether a
   reopened session shows it as something the user typed was not checked here.
+
+## 2026-10-01 — A bulleted spec read as pasted code: #3426's detector met #3427's spec fixture (the merging session)
+
+**Found by the merge, not by a report.** #3426 (autopsy a106df77, "pasted code is not prose") and #3427
+(autopsy 6461025c, "a written spec is its own contract") were each green alone. Merged, two of #3427's own
+tests failed: `countEnumeratedFeatures` returned **0** for a 35-line Markdown spec, and `readsAsSpecification`
+was false.
+
+- **Root cause:** `isCodeLine` in `src/server/lib/pastedSource.ts` counted any line beginning with `* ` as a
+  comment (the shape of a JSDoc continuation). A Markdown bullet has the same shape, so a written spec
+  ("## Overview / * Total Advertisers / …") had 27 of 35 lines read as code, `isPastedSource` said yes, and
+  `withoutMachineText` handed every sizer the 62 characters around the "paste". On `main` since #3426 merged,
+  that meant every bulleted spec a user typed was invisible to the complexity score, the ETA, the enumerated-
+  feature count and the mega-project gate.
+- **Class:** two text shapes told apart by a one-line regex, where the distinguishing fact is positional (is
+  this line inside a `/* … */` block?) rather than lexical. Fixed where the shapes are told apart:
+  `pastedSpan` now tracks the open block comment and counts its continuation lines as code by position; a
+  bare `* ` line outside any block is prose. The a106df77 HTML-page shape is unchanged.
+- **Siblings hunted:** `-` and `1.` bullets never matched; `#` headings never matched; fenced code and
+  `//` comments unchanged. `withoutMachineText`'s readers (RequestAnalyser, BuildTimeEstimator,
+  enumeratedFeatures, RequirementGapAnalyzer, offTopicSummary) all go through the one detector, so one fix
+  covers them.
+- **Locked:** `tests/aBulletedSpecIsNotPastedCode.test.ts` — proven by reversion both ways (restoring
+  `\*\s` fails the spec case; dropping the block tracking fails the JSDoc case).

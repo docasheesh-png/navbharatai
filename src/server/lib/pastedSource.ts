@@ -36,7 +36,10 @@ export function isCodeLine(raw: string): boolean {
   if (/^<[a-zA-Z!/?]/.test(line)) return true; // markup
   if (/^[{}()[\]]/.test(line)) return true; // a bracket opening or closing a block
   if (/[{};]$/.test(line) || /=>\s*\{?$/.test(line)) return true; // a statement or a block's edge
-  if (/^(?:\/\/|\/\*|\*\/|\*\s)/.test(line)) return true; // a comment
+  // A comment — but NOT a line that merely starts with `* `: that is a Markdown bullet in a written
+  // spec ("* Total Advertisers"), and a bulleted spec is the opposite of pasted code. A JSDoc
+  // continuation line still counts, because `pastedSpan` tracks the `/* … */` block it sits in.
+  if (/^(?:\/\/|\/\*|\*\/)/.test(line)) return true;
   if (/^(?:let|const|var|function|import|export|return|if|else|for|while|switch|case|class|def|async|await|try|catch)\b/.test(line)) return true;
   if (/^--?[\w-]+\s*:\s*\S/.test(line)) return true; // a CSS custom property
   if (/^[a-z-]+:\S/.test(line)) return true; // `box-sizing:border-box` — no space after the colon
@@ -51,9 +54,16 @@ function pastedSpan(lines: readonly string[]): { first: number; last: number; co
   let last = -1;
   let codeLines = 0;
   let inFence = false;
+  let inBlockComment = false;
   for (let i = 0; i < lines.length; i++) {
     const isFence = FENCE.test(lines[i]);
-    const code = inFence || isCodeLine(lines[i]);
+    // Every line of a `/* … */` block is code, including its ` * ` continuations — tracked here rather
+    // than by the shape of the line, so a Markdown bullet outside any block is never mistaken for one.
+    const wasInBlock = inBlockComment;
+    const t = lines[i].trim();
+    if (inBlockComment && /\*\//.test(t)) inBlockComment = false;
+    else if (!inBlockComment && /\/\*/.test(t) && !/\*\/.*$/.test(t.slice(t.indexOf('/*') + 2))) inBlockComment = true;
+    const code = inFence || wasInBlock || isCodeLine(lines[i]);
     if (isFence) inFence = !inFence;
     if (!code) continue;
     codeLines++;

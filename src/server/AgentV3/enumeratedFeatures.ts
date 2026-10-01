@@ -87,6 +87,7 @@ function words(s: string): number {
 function tidy(raw: string): string {
   return String(raw ?? '')
     .replace(/^\s*(?:[-*•]|\d{1,3}[.)])\s+/, '')
+    .replace(/^[\s:–—-]+/, '')
     .replace(TRAILING_FILLER, ' ')
     .replace(/[.!?]+\s*$/, '')
     .replace(/\s+/g, ' ')
@@ -214,7 +215,7 @@ export const SPEC_FEATURE_COUNT = 14;
  * the map verb) and that will never be complete; a spec that long already says exactly what to build.
  */
 export function readsAsSpecification(prompt: string): boolean {
-  return countEnumeratedFeatures(prompt) >= SPEC_FEATURE_COUNT;
+  return Math.min(enumeratedFeatureItems(prompt, { plainLines: true }).length, MAX_COUNTED) >= SPEC_FEATURE_COUNT;
 }
 
 /**
@@ -228,7 +229,7 @@ export function countEnumeratedFeatures(prompt: string): number {
 }
 
 /** The items themselves, in first-seen order — what `countEnumeratedFeatures` counts. PURE. */
-export function enumeratedFeatureItems(prompt: string): string[] {
+export function enumeratedFeatureItems(prompt: string, opts: { plainLines?: boolean } = {}): string[] {
   // A pasted link is not a list item (autopsy 33812996) — dropped before anything is counted.
   const text = withoutMachineText(String(prompt ?? ''), { drop: true });
   if (!text.trim()) return [];
@@ -244,8 +245,45 @@ export function enumeratedFeatureItems(prompt: string): string[] {
 
   const lines = appLines(text);
   const structured = lines.filter((l) => LINE_MARKER.test(l)).length >= STRUCTURED_MIN;
+
+  // A LIST WITHOUT MARKERS (autopsy 39955124, 2026-10-01). A phone keyboard has no bullet key, so a
+  // 79-line game spec arrived as "Include:" followed by one feature per line — and only bullet lines and
+  // inline comma runs were counted, so it read as 13 garbage fragments, under the spec line, and was
+  // handed a generic keyword contract (an "about page" from "learn about the stories"). A run of short
+  // plain lines directly under a line that ENDS IN A COLON is that list. Strict on purpose: no colon
+  // opener ⇒ nothing changes, and a run's last line is dropped when what follows it is another opener or
+  // prose — that line is the next section's heading ("Visual Style", then "Use a cinematic …:").
+  // ⚠️ ONLY THE SPEC STAND-DOWN READS IT (`plainLines`). It can only LOWER what the keyword contract
+  // orders; the project gates spend a planner call on a higher count, and a one-app spec decomposed into
+  // modules is the SignBridge harm (315 s of planner) — so they keep counting exactly as before.
+  let colonOpen = false;
+  let run: string[] = [];
+  const flushRun = (next: string | null): void => {
+    if (run.length && next !== null) {
+      const t = next.trim();
+      if (t.endsWith(':') || words(t) > PROSE_WORDS) run.pop();
+    }
+    if (run.length >= MIN_RUN_ITEMS) for (const r of run) add(r);
+    run = [];
+  };
+  const plainItem = (line: string): boolean => {
+    const t = line.trim();
+    if (t.endsWith(':') || SENTENCE_END.test(t) || CODE_LINE.test(t)) return false;
+    if (t.split(ITEM_SEPARATOR).filter((p) => p.trim()).length >= MIN_RUN_ITEMS) return false;
+    return isItem(tidy(t));
+  };
+
   for (const line of lines) {
-    if (!line.trim()) continue;
+    if (!line.trim()) { flushRun(null); colonOpen = false; continue; }
+
+    if (!structured && !LINE_MARKER.test(line)) {
+      if (opts.plainLines && colonOpen && plainItem(line)) { run.push(line); continue; }
+      flushRun(line);
+      colonOpen = line.trim().endsWith(':');
+    } else {
+      flushRun(line);
+      colonOpen = false;
+    }
 
     // A bullet / numbered line is ONE item — the signal that already worked, kept exactly.
     if (LINE_MARKER.test(line)) {
@@ -272,12 +310,15 @@ export function enumeratedFeatureItems(prompt: string): string[] {
     // …unless its commas really do separate short parts: "स्कूल ईआरपी बनाओ जिसमें छात्र, शिक्षक, … हो।" is a
     // list that happens to end in a full stop (the danda suite). What marks prose is a CLAUSE between its
     // commas — "उसका screenshot यहाँ भेज देना—मैं उसी के हिसाब से अगला code/fix दूँगा" — and a list has none.
-    const hasClause = pieces.some((p) => words(p) > MAX_ITEM_WORDS + 2);
+    // A piece longer than an item can be is a CLAUSE (autopsy 39955124: "Do not portray sacred characters in
+    // disrespectful, comedic, or inappropriate situations." counted three features at the old +2 margin).
+    const hasClause = pieces.some((p) => words(p) > MAX_ITEM_WORDS);
     if (!(opener >= 0 && opened) && SENTENCE_END.test(plain.trim()) && words(plain) > PROSE_WORDS && hasClause) continue;
 
     if (pieces.length < MIN_RUN_ITEMS) continue;
     for (const piece of pieces) add(piece);
   }
+  flushRun(null);
 
   return collapseVariants([...seen]);
 }

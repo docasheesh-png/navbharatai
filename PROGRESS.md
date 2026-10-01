@@ -86796,6 +86796,62 @@ them within `formSourcesFor`'s depth, so no journey was derived and the gate sta
 - Real-browser proof (`tests/aFormOnAWizardStepIsReached.test.ts`, 11 cases): a wizard that saves passes, one
   that only shows the item fails "vanished on reload", one with no matching control is unreachable, and a
   "Delete design" control is never pressed. Five reversions each failed.
+## 2026-10-01 — Autopsy d382b398 ("Create app like a electrical testing", Weak tier, ok, 7.5 min, ₹117.84)
+
+The app was built, typechecked, rendered (GREEN gate, 12 controls pressed, phone layout OK). What struggled was
+the engine and what it said about itself.
+
+### Tally (fifth rule)
+- ✅ Self-healed 4: the salvaged hook's missing React import (architect, 3 edits + 2 typechecks); 68 undefined
+  classes + 2 pages without empty states (STYLE_RULES_RESUMED, one turn); a syntax-rejected edit
+  (CommonProblemsScreen) rewritten whole; IN_BUILD_GREEN_RACED retried and saved at 428 s.
+- 🔀 Workaround 2: the fast lane handed off before KIMI (by design); the platform started the preview itself.
+- ⏭️ Skipped 0.
+- ❌ Shipped wrong words 4: two `LLM_CALL_FAILED` ERRORs for a planned handoff (and the successful build's root
+  cause line, with all 51 GLM keys listed); the user's summary was the reply to our style instruction ("Done — I
+  added all the missing CSS rules to `src/index.css`"); the user was told simulated electrical DEVICES were "people or
+  places — nearby shops or other users"; "this app is bigger than expected" at minute 6 of a 6–8 min promise.
+- 🥵 Struggle 4: GLM benched for the WHOLE build after two crawls in the same second (so every call ran on the
+  reasoning rung — LADDER_DEPTH 2, one 112 s call); the bench line said "rest of this build" and "skipped for 180s"
+  in one sentence; the reviewer read two files that do not exist; the first two write-time typechecks took 15–16 s
+  (no compiler in a starter-fragment workspace).
+
+### Root causes and fixes
+- **A crawl abandon was a timeout strike.** `SLOW_STREAM_MESSAGE` contains "timed out", so it also fed the family's
+  "2 consecutive timeouts" bench; two crawls benched every GLM rung (glm-5.3 too) for the rest of the run, defeating
+  crawlBench.ts (876afca9) on its first real outing. The timeout branch now excludes `isSlowStreamAbandon`.
+- **The "never a concurrent call" rule was decided on a lagging count.** Both crawling calls asked "may I abandon?"
+  before either abandon was recorded (it was recorded in the catch, after an await). `canAbandonSlowStream()` now
+  CLAIMS the abandon synchronously; `{ peek: true }` only asks; the stream reader asks only after judging a crawl;
+  the silent-first-answer bound claims when it fires and rides on to the ordinary bound if another call claimed.
+- **A planned handoff was recorded as a failed call.** `ReasoningRungStopError` → `LLM_CALL_HANDED_OFF` (info,
+  resolved, process-only); `compactFallbackPath` prints a key pool as `GLM ×51 keys` (also in the two
+  "all providers failed" messages).
+- **The bench prefix asserted a duration** its reasons contradict ("KEPT anyway" too). Now `${family} benched: …`.
+- **The fast lane / one-shot lanes have no tool loop to read the write-time React note**, and the salvage path
+  hands files off before verify. `ensureReactValueImport` adds the React import to every accepted file that uses
+  `React.<value>` (same transform as the TS2686 endgame fix, now shared).
+- **The style resume's reply replaced the summary.** AgentRunner keeps the reply that declared the app finished
+  (`summaryBeforeStyleResume`); the resume tells the model the user never saw it and to close in one sentence.
+- **`devices` is a simulated-data noun but the notice only knew people.** Findings carry `subject`; the notice and
+  the admin line name devices as devices (and say a web page cannot read real hardware on its own).
+- **The writers' AI rule (it names `src/lib/ai.ts`) went to every sub-agent role**, including the read-only
+  reviewer, which then read that path in an app with no AI. Now only roles that write files get it.
+  (`src/components/ui/Card.tsx` is named by nothing of ours; the path-miss recovery and a glob handled it.)
+- **ETA overrun wording** claimed the app was bigger; the measured file-phase estimate allows only 60 s for the
+  tail, and this build's tail (style resume + checks) was ~3 min. Now "taking longer than I estimated".
+
+### Ledger
+Q-d1 ✅ crawl ≠ timeout strike · Q-d2 ✅ concurrent abandon race · Q-d3 ✅ handoff ≠ LLM_CALL_FAILED · Q-d4 ✅ 51-key
+chain · Q-d5 ✅ bench prefix · Q-d6 ✅ fast-lane React import · Q-d7 ✅ summary replaced by resume reply · Q-d8 ✅
+devices ≠ people · Q-d9 ✅ AI rule to reviewer · Q-d10 ✅ ETA "bigger than expected" · Q-d11 ✅ review "85/100" shown
+with findings only — resolved by #3442's `scoreStated` (merged); the next report's review line confirms it · Q-009 🟡 provider crawl/30 s wasted ·
+Q-010 🟡 third occurrence (`started-by=files · starter=completed 11`) incl. the no-compiler warm-up ·
+Q-024 🟡 seven items argued not defects (agreement). Locked in `tests/theElectricalTestingAutopsy.test.ts`
+(21 cases); each fix reverted-and-failed in the session.
+**Live effect to watch:** no `consecutive timeouts` bench after a crawl; at most one `abandoned for crawling` per
+moment; `LLM_CALL_HANDED_OFF` instead of `LLM_CALL_FAILED` on handoffs; the user summary after
+`STYLE_RULES_RESUMED` is the app description.
 
 ### 2026-10-01 — Autopsy 042e472f + dfd24058 (the JARVIS report): a Kotlin request is built as a phone-ready web app
 

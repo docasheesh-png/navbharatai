@@ -59,15 +59,27 @@ export const BUDGET_REACHED_MESSAGE = 'build budget reached while this call was 
  * A provider we ABANDONED for crawling — answering, but far below the rate at which waiting is worth
  * it (autopsy 2b0a3ed5, 2026-09-17).
  *
- * ⚠️ IT MUST READ AS A TIMEOUT AND BE TELLABLE FROM ONE. `isTimeout` matches "timed out", and that is
- * deliberate here: a rung we walked away from should bench exactly like one that hung. But the ladder
- * ALSO needs to know this particular ending, because it is the one case where the rung would probably
- * have answered eventually — so it benches the family at once instead of spending a second slow turn
- * proving the same thing.
+ * ⚠️ IT READS AS A TIMEOUT AND MUST BE TOLD FROM ONE. `isTimeout` matches "timed out" (the shared
+ * cooldown still sees it). But since 2026-10-01 (autopsy d382b398) it no longer counts toward the
+ * family's "2 consecutive timeouts" bench: the crawl bench (crawlBench.ts) owns it — one rung, a window,
+ * one re-probe — and two crawls used to bench every rung of the family for the whole build.
  *
  * 🔒 NEVER a user-facing string: it names the engines, so it stays in the admin report (White-Label).
  */
 export const SLOW_STREAM_MESSAGE = 'OpenAI-compatible call (GLM/Kimi) timed out — abandoned for crawling';
+
+/**
+ * The words a fast-lane call ends with when it stops in front of a reasoning rung and hands its files to
+ * the full builder (`ReasoningRungStopError`). A deliberate handoff, never a failed call (autopsy
+ * d382b398 recorded it as an unresolved ERROR that became a successful build's "root cause").
+ */
+export const REASONING_RUNG_HANDOFF_MARKER = 'the fast lane stops here and hands off';
+
+/** Did this call end because the fast lane handed off before a reasoning rung? PURE. */
+export function isReasoningRungHandoff(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? '');
+  return message.includes(REASONING_RUNG_HANDOFF_MARKER);
+}
 
 /** Was this error our own decision to walk away from a crawling provider? PURE. */
 export function isSlowStreamAbandon(err: unknown): boolean {

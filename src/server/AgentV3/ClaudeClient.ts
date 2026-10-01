@@ -168,8 +168,11 @@ export interface RunTurnParams {
    *
    * A predicate rather than a boolean because the answer changes DURING a build: once a rung has been
    * benched, the set of places left to go is smaller.
+   *
+   * A plain call is the DECISION and claims the abandon at once; `{ peek: true }` only asks (autopsy
+   * d382b398: two concurrent calls each got "yes" before either abandon was counted).
    */
-  canAbandonSlowStream?: () => boolean;
+  canAbandonSlowStream?: (o?: { peek?: boolean }) => boolean;
   /**
    * Set by the multi-provider ladder: is there another rung after the one running this call? A call
    * bounded by our own deadline then waits less for its first answer (autopsy 12c642ed — see

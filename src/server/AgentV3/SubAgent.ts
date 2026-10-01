@@ -389,7 +389,10 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       (() => { try { return deps.languageRule?.() ?? ''; } catch { return ''; } })(),
       // Two engineers in parallel are told their lane and to reuse before creating (autopsy 8e124182).
       parallelHelperScopeNote(role, deps.framework),
-      (() => { try { return deps.aiRule?.() ?? ''; } catch { return ''; } })(),
+      // How to WRITE AI into the app is for a specialist that writes files. Handed to the read-only
+      // reviewer it named a file — "run_recipe generate_ai … writes src/lib/ai.ts" — that the reviewer then
+      // tried to read in an app with no AI at all (autopsy d382b398, a failed read_file).
+      (() => { try { return roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools) ? (deps.aiRule?.() ?? '') : ''; } catch { return ''; } })(),
       (() => { try { return userRequestBlock(deps.userRequest?.(), roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools)); } catch { return ''; } })(),
     ].filter(Boolean);
     // 🎨 THE KIT, AS THE ARCHITECT WAS TOLD IT (autopsy ee0e6de5, 2026-09-30). A specialist that writes

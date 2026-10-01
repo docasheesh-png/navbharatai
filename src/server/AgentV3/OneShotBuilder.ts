@@ -14,6 +14,7 @@
 // This module is dependency-light and the side-effects (model call, file writes, preview) are
 // INJECTED, so the parsing/classification/prompt logic is fully unit-testable without a sandbox.
 
+import { ensureReactValueImport } from './EndgameRepair';
 import type { StartTier } from './RequestAnalyser';
 // ONE timeout helper for the whole build pipeline. This module used to carry its own private copy,
 // and that duplication is the direct reason the July zombie-write fix landed in `SimpleBuilder` and
@@ -302,7 +303,9 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
       // Checked BEFORE parsing as well as before writing: a lane that has already been handed off must
       // stop at the first opportunity, not merely stop short of the damage.
       if (lapsed) throw new Error('one-shot-cancelled');
-      const parsed = parseFileBlocks(text);
+      // Same lane shape as the fast lane's per-file calls: no tool loop to read a write-time note, so a
+      // missing React import is added here (autopsy d382b398, see ensureReactValueImport).
+      const parsed = parseFileBlocks(text).map((f) => ({ ...f, content: ensureReactValueImport(f.path, f.content) }));
       if (parsed.length < minFiles) throw new Error('no_files_parsed');
       if (lapsed) throw new Error('one-shot-cancelled');
       await deps.writeFiles(parsed);

@@ -544,6 +544,32 @@ export async function listListedWebApps(limit = 60): Promise<WebStoreApp[]> {
   return listEqNewestFirst<WebStoreApp>(d.collection(COLLECTION), [['status', 'listed']], 'publishedAt', limit);
 }
 
+/**
+ * Apps by several owners at once — the App Mart "Following" view (2026-10-01). Firestore's `in` filter
+ * takes at most 30 values, so the owners are read in chunks; a single-field `in` needs no composite
+ * index. Unsorted: the caller orders and filters (status, 18+) in one place.
+ */
+export async function listWebAppsByOwners(uids: readonly string[], perChunk = 200): Promise<WebStoreApp[]> {
+  const d = db();
+  const owners = [...new Set(uids.filter(Boolean))];
+  if (!d || owners.length === 0) return [];
+  const out: WebStoreApp[] = [];
+  for (let i = 0; i < owners.length; i += 30) {
+    const snap = await d.collection(COLLECTION).where('uid', 'in', owners.slice(i, i + 30)).limit(perChunk).get();
+    for (const doc of snap.docs) out.push(doc.data() as WebStoreApp);
+  }
+  return out;
+}
+
+/** Several apps by id in one round trip, in the order asked for; missing ones are skipped. */
+export async function getWebAppsByIds(ids: readonly string[]): Promise<WebStoreApp[]> {
+  const d = db();
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (!d || unique.length === 0) return [];
+  const snaps = await d.getAll(...unique.map((id) => d.collection(COLLECTION).doc(id)));
+  return snaps.filter((s) => s.exists).map((s) => s.data() as WebStoreApp);
+}
+
 export async function listMyWebApps(uid: string, limit = 50): Promise<WebStoreApp[]> {
   const d = db();
   if (!d) return [];

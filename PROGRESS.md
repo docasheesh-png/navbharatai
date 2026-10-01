@@ -86144,3 +86144,41 @@ tail and the runner census.
 **Still open:**
 - Each repair pass's instruction is still persisted into the main conversation as a `user` turn. Whether a
   reopened session shows it as something the user typed was not checked here.
+## 2026-10-01 — App Mart social, phase 2: push tap, comment word filter, follow, Browse views
+
+Admin: *"teeno kaam karo! … user jis jis creator ko follow kare, uski apps usko app mart me alag se dikhe … browser
+me 3 button — general, follower, likes app … sabhi page me upar play instantly aur apk filter"*. Defaults chosen by
+the admin: an abusive comment is BLOCKED (not masked); the filter row sits on the three Browse views only. Built on
+the same branch as #3424 (still open at the time).
+This closes three "still open" items of the 2026-09-30 entry above (push tap, word filter, follow).
+
+**What shipped:**
+- **Push tap → the app's page.** The phone handler followed only `open_store`, so an App Mart push opened Home.
+  `src/lib/appMartTarget.ts` is now the one grammar of where an App Mart notification leads (`web:`/`apk:` app,
+  `profile:<code>`, `followers:me`); the bell, the push handler and App Mart all read it. New pushes carry `target`;
+  the first pushes' `appKey` is still followed. Reaches phones only with a fresh `.aab`/`.ipa`.
+- **Comment word filter.** `commentAbuse` (appMartSocialRules.ts) reads `scanProfanity`, the image generator's own
+  profanity list with its disguise-undoing — ONE list, two readers. Profanity only, so "a sex-education app for
+  schools" is allowed. Bare "bc"/"mc" are not words on the list ("bc" = because); "mc bc", "bkl", "bsdk" are.
+  Checked before anything is stored or anyone notified.
+- **Follow.** `app_mart_follows`, one doc per (follower, creator). Counts counted (public); who follows is
+  creator-only (`/api/app-mart/social/followers`). Follow refused across a block in either direction; blocking ends a
+  follow both ways; cap 1,000 follows. Creator notified (grouped per day); followers notified (bell only, bounded at
+  5,000, `create` so never twice a day) when an app becomes visible on EITHER approval path (APK approve, web list).
+  Erased from both ends with either account. Android apps' public shape gained `creatorId` (public code, never the
+  uid) so their page can open the creator's profile and Follow.
+- **Browse: General · Following · Liked apps**, with **All · Play instantly · APK** above all three
+  (`appMart/browseViews.ts`). The personal views come from `/api/app-mart/feed`, which applies the General view's
+  own filters (listed/approved, 18+, native shell). The filter row is hidden on iPhone; an Android shelf never shows
+  there.
+
+Tests: `tests/appMartSocialPhase2.test.ts` (24), reversion-proven for the word-filter order, the push handler and the
+two-ended erase.
+
+**Still open:**
+- New-app announcements ring the bell only, no phone push — a push per follower per publish is the fan-out that
+  would need its own throttle.
+- The Following feed reads the 300 most recently followed creators (Firestore `in` chunks of 30); someone following
+  more sees the newest 300's apps.
+- Phone users get all of this only with a fresh `.aab`/`.ipa`. Admin instruction: build them only AFTER every open
+  PR is merged.

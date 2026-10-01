@@ -638,16 +638,22 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socialTargetNonce]);
 
-  /** Following / Liked: read from the server each time the view is opened, so it is never stale. */
+  /**
+   * Following / Liked: read from the server each time the view is opened, so it is never stale.
+   * Only the LATEST request may write: switching views quickly would otherwise let a slow answer for
+   * the view you left overwrite the one you are on, and leave it spinning for ever.
+   */
+  const feedRequest = useRef(0);
   const loadFeed = useCallback(async (view: BrowseView) => {
     if (view === 'general') return;
+    const req = ++feedRequest.current;
     if (!signedIn) { setFeed({ view, webApps: [], apps: [], followingCount: null, loading: false, error: '' }); return; }
     setFeed((f) => ({ ...f, view, loading: true, error: '' }));
     try {
       const d = await fetchFeed<WebApp, PublicApp>(view);
-      if (liveRef.current) setFeed({ view, webApps: d.webApps, apps: d.apps, followingCount: d.followingCount, loading: false, error: '' });
+      if (liveRef.current && req === feedRequest.current) setFeed({ view, webApps: d.webApps, apps: d.apps, followingCount: d.followingCount, loading: false, error: '' });
     } catch (e) {
-      if (liveRef.current) setFeed({ view, webApps: [], apps: [], followingCount: null, loading: false, error: e instanceof Error ? e.message : 'These apps could not be loaded.' });
+      if (liveRef.current && req === feedRequest.current) setFeed({ view, webApps: [], apps: [], followingCount: null, loading: false, error: e instanceof Error ? e.message : 'These apps could not be loaded.' });
     }
   }, [signedIn]);
   useEffect(() => { if (tab === 'browse') void loadFeed(browseView); }, [tab, browseView, loadFeed]);

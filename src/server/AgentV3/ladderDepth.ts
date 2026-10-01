@@ -158,7 +158,9 @@ export function describeLadderDepth(d: LadderDepth, openedAt?: number): string {
   const openedNote = opened > 1 ? ` — it opened there, past the cheap lead rung` : '';
   if (d.depth <= opened) {
     return opened === 1
-      ? `Finished on rung 1 of ${d.rungCount} — the lead rung delivered the whole build${tail}.`
+      // "Delivered the whole build" was said about a build stopped before one file (autopsy 31254f9a). This
+      // line describes the ROUTING — which rung the answers came from — never how much was built.
+      ? `Finished on rung 1 of ${d.rungCount} — every answer came from the lead rung${tail}.`
       : `Finished on rung ${opened} of ${d.rungCount}${openedNote}, and fell no further${tail}.`;
   }
   const from = opened > 1 ? ` from rung ${opened}, where it opened` : '';

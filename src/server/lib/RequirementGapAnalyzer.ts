@@ -647,8 +647,12 @@ export function analyzeRequirementGaps(prompt: string): RequirementGaps {
   // Ask about the highest-value missing pieces first (cap at 6 so we never over-ask — the admin's rule).
   const clarifyingQuestions: string[] = [];
   for (const label of likelyMissing.slice(0, 4)) clarifyingQuestions.push(`Does it need ${label}?`);
-  if (!nonFunctional.security) clarifyingQuestions.push('Who are the user roles, and does it need login / access control?');
-  if (!nonFunctional.scale) clarifyingQuestions.push('Roughly how many users / how much data should it handle?');
+  // A single-player GAME has a player, not user roles, and no data volume to size (autopsy 39955124,
+  // 2026-10-01: a Dwarka adventure game was asked "who are the user roles?" and "how many users?"). A
+  // game that names other people — multiplayer, online, a leaderboard — still gets both questions.
+  const soloGame = domain?.key === 'game' && !/multi-?player|online|leaderboard|friends|pvp|co-?op|server/i.test(text);
+  if (!nonFunctional.security && !soloGame) clarifyingQuestions.push('Who are the user roles, and does it need login / access control?');
+  if (!nonFunctional.scale && !soloGame) clarifyingQuestions.push('Roughly how many users / how much data should it handle?');
   if (!nonFunctional.offline && domain?.key === 'healthcare') clarifyingQuestions.push('Does it need to work offline?');
 
   return {

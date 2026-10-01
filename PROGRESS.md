@@ -86562,6 +86562,33 @@ the one unguarded instance.
   limit on a CGNAT phone network) and gets its own fix. **Tried:** read every guard in front of the route;
   the route and its four helpers cannot throw on their own.
 
+## 2026-10-01 — Autopsy 39955124 (Dwarkadhish game, stopped by the user at 5.7 min)
+
+Sixth-rule ledger (every item ✅ or 🟡):
+- **D1 ✅** A bare `about` keyword ordered an "about page" from "learn about the stories" (the model's
+  first line repeated it). `about page` / `contact page` now need the page sense — "about page / us /
+  section", "contact form / us / page", or a place in a list of site pages (`sitePageListed`).
+- **D2 ✅** A 79-line spec typed one feature per line (no markers) counted 13 fragments, under the
+  spec line. Plain short lines under a colon opener now count — for the SPEC STAND-DOWN only
+  (`plainLines`); the project gates keep their count, because a one-app spec decomposed into modules is
+  the SignBridge harm. A comma sentence with a clause longer than an item is prose (lowers counts only).
+  SignBridge's 200-line prompt now reads as a spec too; its test asserts that, and the sense-filter lock
+  moved to a short prompt.
+- **D3 ✅** RELEASE_GATE said "the typecheck did not run" beside six clean write-time typechecks:
+  `recordCommand` kept the first 500 chars, and the `TSC_ENSURE` prefix is longer than that, so every
+  platform typecheck lost its `tsc --noEmit` and no evidence reader recognised it. `clipCommand` keeps
+  both ends. Covers the `typecheck` tool and the endgame re-check as well (same command builder).
+- **D4 ✅** The architect delegated planning to a `planner` sub-agent that re-read the scaffold for 116 s.
+  Planning-only roles (requirement / planner / product) now return `PLAN_YOURSELF_NOTE` instead of a
+  sub-agent; the `task` description says so.
+- **D5 ✅** A single-player game was asked "who are the user roles?" and "how many users?" — skipped for
+  a solo game; a multiplayer / online / leaderboard game still gets them.
+- **D6 🟡 → Q-010** Warm sandbox held only part of our starter again (11 files completed) — the first
+  typecheck then paid for installing the compiler. Second occurrence recorded on Q-010.
+- **D7 🟡 → Q-020** Stopped at 5.7 min with no preview; what the screen showed is not in the report.
+- Not defects: `run_recipe` listing (0 s), COMPLEXITY 90 vs APP_SCOPE "single-purpose" (each serves its
+  own gate), the prompt itself being pasted out of order (user input).
+Tests: `tests/theDwarkaGameAutopsy.test.ts` (real prompt as fixture), each fix proven by reversion.
 ---
 
 ## 2026-10-01 — Autopsy 4d538ca3 (second build of the Bengali personal-AI-assistant report; Weak tier, ok, 8.0 min, ₹205.97)
@@ -86754,8 +86781,8 @@ Q-d1 ✅ crawl ≠ timeout strike · Q-d2 ✅ concurrent abandon race · Q-d3 �
 chain · Q-d5 ✅ bench prefix · Q-d6 ✅ fast-lane React import · Q-d7 ✅ summary replaced by resume reply · Q-d8 ✅
 devices ≠ people · Q-d9 ✅ AI rule to reviewer · Q-d10 ✅ ETA "bigger than expected" · Q-d11 ✅ review "85/100" shown
 with findings only — resolved by #3442's `scoreStated` (merged); the next report's review line confirms it · Q-009 🟡 provider crawl/30 s wasted ·
-Q-010 🟡 second instance (`started-by=files · starter=completed 11`) incl. the no-compiler warm-up ·
-Q-020 🟡 seven items argued not defects (agreement). Locked in `tests/theElectricalTestingAutopsy.test.ts`
+Q-010 🟡 third occurrence (`started-by=files · starter=completed 11`) incl. the no-compiler warm-up ·
+Q-022 🟡 seven items argued not defects (agreement). Locked in `tests/theElectricalTestingAutopsy.test.ts`
 (21 cases); each fix reverted-and-failed in the session.
 **Live effect to watch:** no `consecutive timeouts` bench after a crawl; at most one `abandoned for crawling` per
 moment; `LLM_CALL_HANDED_OFF` instead of `LLM_CALL_FAILED` on handoffs; the user summary after

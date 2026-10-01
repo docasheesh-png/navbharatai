@@ -73,6 +73,18 @@ interface FeatureSpec {
   evidenceWhen?: { request: RegExp; evidence: RegExp };
 }
 
+/** The other pages a website lists beside "about" and "contact" — "Home, About, Services, Contact". */
+const SITE_PAGES = 'home|about|contact|services|gallery|blog|portfolio|pricing|faq|team|testimonials|menu|careers|products|shop';
+
+/**
+ * `word` as an item in a run of site-page names: next to another page name across a comma, "and", "&",
+ * "|" or "/". PURE — returns regex source.
+ */
+function sitePageListed(word: string): string {
+  const sep = '\\s*(?:,|&|\\||/|\\band\\b)\\s*';
+  return `\\b(?:${SITE_PAGES})${sep}${word}\\b|\\b${word}${sep}(?:${SITE_PAGES})\\b`;
+}
+
 // Curated, high-signal app surfaces only. Each `artifact` is deliberately broad
 // (synonyms) so a feature built under a reasonable alternate name still counts.
 const FEATURES: FeatureSpec[] = [
@@ -108,8 +120,13 @@ const FEATURES: FeatureSpec[] = [
     // told so, while the dashboard carried low-stock alerts. When the request frames the notification as an
     // alert or a warning, an alert the app really renders is that feature.
     evidenceWhen: { request: /\b(?:alert|warning)s?\b[^.\n]{0,40}\bnotification|\bnotification[^.\n]{0,60}\b(?:alert|warning)s?\b/i, evidence: /role=["']alert["']|\blow[- ]?stock\b|\blowStock\w*|\b(?:stock|expiry|due)Alerts?\b|<Alert\b|className=["'][^"']*\balert\b/i } },
-  { label: 'contact page', request: /\bcontact\b/i, artifact: /contact/i },
-  { label: 'about page', request: /\babout\b/i, artifact: /about/i },
+  // 🔴 A PREPOSITION IS NOT A PAGE (autopsy 39955124, 2026-10-01). "about" is one of the commonest words in
+  // English, and a bare `\babout\b` turned "learn about the stories of Dwarka" into an ordered about page;
+  // "contact" did the same for "contact the seller on WhatsApp". Each now needs the page-naming company
+  // the word keeps when it IS a page: "about page / about us / about section", or a place in a list of
+  // other site pages ("home, about, contact").
+  { label: 'contact page', request: new RegExp(`\\bcontact(?:[- ]us\\b|\\s+(?:page|form|section|screen|tab|info|details)\\b)|${sitePageListed('contact')}`, 'i'), artifact: /contact/i },
+  { label: 'about page', request: new RegExp(`\\babout(?:[- ](?:us|me)\\b|\\s+(?:page|section|screen|tab)\\b)|${sitePageListed('about')}`, 'i'), artifact: /about/i },
   // High-signal surfaces users frequently ask for and builders frequently skip silently. Each
   // `artifact` is broad (synonyms + common real component names) so a feature built under a
   // reasonable alternate name still counts — the module stays high-precision, not nagging.

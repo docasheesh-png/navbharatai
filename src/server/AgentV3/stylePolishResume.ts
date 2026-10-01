@@ -82,18 +82,7 @@ export function decideStyleResume(input: StyleResumeInput): StyleResumeDecision 
   if (!input.producedFiles && turnAskedTheUser(input.text)) return { resume: false, message: '', standDown: 'asked-the-user' };
   const sheet = String(input.sheet ?? '').trim() || 'src/index.css';
   const parts: string[] = [];
-  if (missing.length) {
-    const shown = missing.slice(0, MAX_CLASSES_LISTED).map((c) => `.${c}`).join(', ');
-    const more = missing.length > MAX_CLASSES_LISTED ? ` and ${missing.length - MAX_CLASSES_LISTED} more` : '';
-    parts.push(
-      `${missing.length} class name(s) the screens use have NO rule in any stylesheet, so those parts of the app `
-      + `render as plain unstyled HTML: ${shown}${more}. Add a real rule for every one of them in ONE edit_file `
-      + `call on ${sheet} with an EMPTY old_string (an empty old_string appends to the end of the file — no anchor `
-      + 'needed). Use the palette variables already defined at the top of that file (var(--accent), var(--card), '
-      + 'var(--border), var(--muted), var(--radius), …) and the kit classes it already has. Do not rename classes in '
-      + 'the screens and do not remove existing rules.',
-    );
-  }
+  if (missing.length) parts.push(missingClassesInstruction(missing, sheet));
   if (pages.length) {
     parts.push(
       `These page(s) fall short of the app's own design standard:\n`
@@ -128,6 +117,31 @@ export function decideStyleResume(input: StyleResumeInput): StyleResumeDecision 
       + 'reply with ONE short sentence about the app (for example "Every screen is now fully styled.") — do not '
       + 'repeat the summary, and do not mention class names, stylesheets or file names.',
   };
+}
+
+/** The instruction that names undefined classes and how to add them in one edit. PURE. */
+export function missingClassesInstruction(missing: readonly string[], sheet: string): string {
+  const shown = missing.slice(0, MAX_CLASSES_LISTED).map((c) => `.${c}`).join(', ');
+  const more = missing.length > MAX_CLASSES_LISTED ? ` and ${missing.length - MAX_CLASSES_LISTED} more` : '';
+  return `${missing.length} class name(s) the screens use have NO rule in any stylesheet, so those parts of the app `
+    + `render as plain unstyled HTML: ${shown}${more}. Add a real rule for every one of them in ONE edit_file `
+    + `call on ${sheet} with an EMPTY old_string (an empty old_string appends to the end of the file — no anchor `
+    + 'needed). Use the palette variables already defined at the top of that file (var(--accent), var(--card), '
+    + 'var(--border), var(--muted), var(--radius), …) and the kit classes it already has. Do not rename classes in '
+    + 'the screens and do not remove existing rules.';
+}
+
+/**
+ * 🔴 "THE APP LOOKS COMPLETE" WAS SAID OVER UNSTYLED SCREENS (autopsy 2f723acb, 2026-10-01). The done
+ * check reads code health only, so it told the user "✅ The app looks complete — wrapping up." while the
+ * screens used 19 classes no stylesheet defined; the end of the turn then sent the model back to style
+ * them, and the user watched "wrapping up" turn into more work. When classes are missing, the done steer
+ * carries this instead, and the user is not told the app is complete. PURE; '' when nothing is missing.
+ */
+export function doneStyleNote(missing: readonly string[], sheet: string | undefined): string {
+  const list = [...new Set((missing ?? []).map((c) => String(c ?? '').trim().replace(/^\./, '')).filter(Boolean))];
+  if (list.length === 0) return '';
+  return `Before you finish: ${missingClassesInstruction(list, String(sheet ?? '').trim() || 'src/index.css')}`;
 }
 
 /** One sentence for the admin report — never user-facing, so it may name the mechanism. */

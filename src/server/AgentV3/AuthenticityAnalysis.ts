@@ -55,6 +55,20 @@ interface Rule {
 const SIMULATED_DATA_RE = /(?<![a-z])(simulat(?:e|ed|es|ing|ion)|mock(?:ed)?|fake|dummy)[\s_-]*(?:[a-z]{0,12}[\s_-]*)?(nearby|vendors?|shops|stores|users|businesses|customers|drivers|riders|merchants|sellers|followers|friends|devices|peers)(?![a-z])/i;
 
 /**
+ * 🔴 A MOCK TEST IS AN EXAM, NOT FAKE DATA (autopsy 2f723acb, 2026-10-01). A UPSC mock-test app was told
+ * *"some features in this app show demo results … for example a random song"* — off one heading,
+ * `<h3>Latest mock test result</h3>`, that showed the student's own saved score. In "mock test", "mock
+ * exam", "mock interview", "simulated exam" and "simulation test" the made-up word names a kind of
+ * PRACTICE, which is the app's whole subject; the result after it is the user's real result. So the
+ * made-up word does not count when one of these nouns follows it within two words. The reviewer found the
+ * same thing in the same build and called the finding false; it was. A text the user wrote for people
+ * ("Your mock test result") and an identifier (`mockTestResult`) are read alike, because both are the
+ * domain's own name for the thing.
+ */
+const PRACTICE_NOUNS = String.raw`(?:tests?|exams?|examinations?|papers?|interviews?|drills?|trials?|quiz(?:zes)?|olympiads?|test[\s_-]*series|rounds?|practice)`;
+const PRACTICE_AHEAD = String.raw`[\s_-]*(?:[a-z0-9]{1,16}[\s_-]+){0,2}?${PRACTICE_NOUNS}(?![a-z])`;
+
+/**
  * 🔴 THE SIBLING: a made-up RESULT of a capability the app claims (autopsy 33812996, 2026-09-30). A
  * Circle to Search app "recognised" songs with `MOCK_DB[Math.floor(Math.random() * MOCK_DB.length)]`,
  * translated with `[Translated to ${lang}]: ${text}`, and wrote its search results and AI overviews into
@@ -67,7 +81,7 @@ const SIMULATED_DATA_RE = /(?<![a-z])(simulat(?:e|ed|es|ing|ion)|mock(?:ed)?|fak
  * delay`, `simulate processing`, a physics `simulateStep` and a game's `mockBattle` do not match — nor does
  * the subject of a DETECTOR app ("fake news detection", "fake review checker", "fake currency scanner").
  */
-const SIMULATED_RESULT_RE = /(?<![a-z])(simulat(?:e|ed|es|ing|ion)|mock(?:ed)?|fake(?![\s_-]*(?:news|reviews?|accounts?|profiles?|calls?|products?|currency|notes?)\b)|dummy)[\s_-]*(?:[a-z]{1,16}[\s_-]+){0,2}(results?|search\s+results|songs?|tracks?|recognition|detection|detections|translations?|translated|overviews?|summar(?:y|ies)|answers?|predictions?|forecasts?|weather|prices?|quotes?|db|database|service|api)(?![a-z])|\bapi\.mock[\w-]*\.|\[translated\s+(?:to|in)\b/i;
+const SIMULATED_RESULT_RE = new RegExp(String.raw`(?<![a-z])(simulat(?:e|ed|es|ing|ion)(?!${PRACTICE_AHEAD})|mock(?:ed)?(?!${PRACTICE_AHEAD})|fake(?![\s_-]*(?:news|reviews?|accounts?|profiles?|calls?|products?|currency|notes?)\b)|dummy)[\s_-]*(?:[a-z]{1,16}[\s_-]+){0,2}(results?|search\s+results|songs?|tracks?|recognition|detection|detections|translations?|translated|overviews?|summar(?:y|ies)|answers?|predictions?|forecasts?|weather|prices?|quotes?|db|database|service|api)(?![a-z])|\bapi\.mock[\w-]*\.|\[translated\s+(?:to|in)\b`, 'i');
 
 /** Paths we never scan — generated, vendored, or test code. */
 const SKIP_PATH = /(^|[\\/])(node_modules|dist|build|coverage|vendor|\.next)([\\/]|$)|\.test\.|\.spec\.|__tests__|(^|[\\/])tests?([\\/]|$)|(^|[\\/])specs?([\\/]|$)/i;
@@ -417,7 +431,7 @@ export function simulatedResultNotice(issues: AuthenticityIssue[]): string {
     '',
     '',
     `⚠️ Heads-up: some features in this app show demo results, not real ones (${files.join(', ')}). They return `
-      + 'made-up answers — for example a random song or placeholder text — instead of calling a real service.',
+      + 'made-up answers — picked at random or written into the code — instead of calling a real service.',
     'Making them real needs a real service (some need a free API key). Reply if you want this, and I will connect one.',
   ].join('\n');
 }

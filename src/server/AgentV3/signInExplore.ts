@@ -204,6 +204,42 @@ async function attempt(page, cand) {
   return (await wallVisible(page)) ? 'still-on-wall' : 'signed-in';
 }
 
+// A ONE-TAP demo sign-in ("Demo Student", "Try the demo", "Continue as guest"): no password involved.
+// No backslashes here on purpose — this module is a TS template, where one would be swallowed.
+const DEMO = /(^|[^a-z])(demo|guest)([^a-z]|$)|try (it|the app) free/i;
+async function demoButtons(page) {
+  const all = page.locator('button, a[href], [role=button]');
+  const n = Math.min(await all.count(), 40);
+  const names = [];
+  for (let i = 0; i < n; i++) {
+    const el = all.nth(i);
+    if (!(await el.isVisible().catch(() => false))) continue;
+    const name = ((await el.innerText().catch(() => '')) || (await el.getAttribute('aria-label').catch(() => '')) || '').trim();
+    if (name && name.length <= 40 && DEMO.test(name) && !NEVER.test(name)) names.push(name);
+  }
+  return names;
+}
+async function attemptDemo(page, name) {
+  await page.goto(cfg.base, { waitUntil: 'domcontentloaded', timeout: 12000 });
+  await settle(page);
+  if (!(await wallVisible(page))) return 'no-wall';
+  const el = page.locator('button, a[href], [role=button]').filter({ hasText: name }).first();
+  if (await el.count() === 0) return 'still-on-wall';
+  await el.click({ timeout: 4000 });
+  await settle(page);
+  if (!(await wallVisible(page))) return 'signed-in';
+  // Many demo buttons only FILL the form: submit it when the password box now holds a value.
+  const pw = page.locator('input[type=password]').first();
+  if (!(await pw.inputValue().catch(() => ''))) return 'still-on-wall';
+  const form = pw.locator('xpath=ancestor::form[1]');
+  const scope = (await form.count()) > 0 ? form : page.locator('body');
+  const submit = scope.locator('button[type=submit], input[type=submit]').first();
+  if (await submit.count() > 0) await submit.click({ timeout: 4000 });
+  else await pw.press('Enter');
+  await settle(page);
+  return (await wallVisible(page)) ? 'still-on-wall' : 'signed-in';
+}
+
 const browser = await chromium.launch({ args: ['--no-sandbox'] });
 try {
   const ctx = await browser.newContext(${JSON.stringify(BROWSER_PAGE_OPTIONS)});
@@ -219,8 +255,18 @@ try {
     if (r === 'no-wall') { note = 'the app did not show a sign-in page'; break; }
     if (r === 'signed-in') { signed = true; note = cand ? cand.source : 'sign-in form default'; break; }
   }
+  if (!signed && !note) {
+    let names = [];
+    try { await page.goto(cfg.base, { waitUntil: 'domcontentloaded', timeout: 12000 }); await settle(page); names = await demoButtons(page); } catch (e) { names = []; }
+    for (const name of names.slice(0, 3)) {
+      if (Date.now() - started > cfg.budgetMs - 10000) { note = 'ran out of time before signing in'; break; }
+      let r;
+      try { r = await attemptDemo(page, name); } catch (e) { r = 'error'; }
+      if (r === 'signed-in') { signed = true; note = 'one-tap demo button on the sign-in page'; break; }
+    }
+  }
   if (!signed) {
-    if (!note) note = cfg.candidates.length ? 'none of the demo accounts the app ships got past its sign-in page' : 'the app ships no demo account to sign in with';
+    if (!note) note = cfg.candidates.length ? 'none of the demo accounts the app ships got past its sign-in page' : 'the app ships no demo account or demo button to sign in with';
     say({ signedIn: false, note, screens: [] });
   } else {
     await ctx.storageState({ path: cfg.state });

@@ -330,9 +330,18 @@ export function isSignInWall(htmlLower: string): boolean {
   if (!/<input\b[^>]*\btype=["']?password\b/.test(h)) return false;
   if (/<table\b/.test(h)) return false;
   const inputs = (h.match(/<input\b/g) ?? []).length;
-  const buttons = (h.match(/<button\b/g) ?? []).length;
+  // 🔴 A SIGN-IN PAGE'S OWN BUTTONS ARE NOT APP BUTTONS (autopsy 2f723acb, 2026-10-01). A mock-test app's
+  // sign-in page carried "Log in", "Create new account" and three one-tap "Demo Student / Teacher / Admin"
+  // buttons — five, one over the old limit — so it was read as an app screen with a password box, nothing
+  // signed in, and the page check counted only /login while five routes redirected to it. Buttons that
+  // belong to signing in (log in, sign up, demo, guest, forgot, show password, a provider) are not counted.
+  const buttons = (h.match(/<button\b[^>]*>[\s\S]*?<\/button>/g) ?? [])
+    .filter((b) => !SIGN_IN_COMPANION.test(b.replace(/<[^>]*>/g, ' '))).length;
   return inputs <= 4 && buttons <= 4;
 }
+
+/** The text of a button that belongs to the sign-in page itself. */
+const SIGN_IN_COMPANION = /\b(?:log\s?-?in|sign\s?-?(?:in|up)|register|create\s+(?:an?\s+|new\s+|your\s+)?account|demo|guest|try\s+it|forgot|reset\s+password|show|hide|continue\s+with|google|github|apple|facebook|microsoft|otp|already\s+have|new\s+here)\b/i;
 
 export function isUnrenderedSpaShell(html: string): boolean {
   if (typeof html !== 'string') return true;

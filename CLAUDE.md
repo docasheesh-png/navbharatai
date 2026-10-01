@@ -2285,6 +2285,12 @@ the code (it is actually read somewhere) on 2026-07-11.
   (`crawlBench.ts`). At most two abandons per build, the second only on that re-probe (a concurrent call in
   flight is never the re-probe), so bad weather at every vendor still cannot walk the ladder. The THROUGHPUT
   bench above is untouched. Test-locked and reversion-proven in `tests/aCrawlIsWeatherNotAVerdict.test.ts`.
+  🔴 **ITS FIRST REAL OUTING WAS DEFEATED BY A SECOND BENCH (autopsy d382b398, 2026-10-01).** A crawl abandon's
+  message contains "timed out", so it ALSO counted toward the family's "2 consecutive timeouts" bench, and two
+  fast-lane calls crawling in the same second both abandoned (the "never a concurrent call" check read a count
+  recorded only after an await). Result: every GLM rung, glm-5.3 included, benched for the whole build. Now a
+  crawl abandon never feeds the timeout streak, and `canAbandonSlowStream()` CLAIMS the abandon when it is
+  decided (`{ peek: true }` only asks). Locked in `tests/theElectricalTestingAutopsy.test.ts`.
   ✅ **AND THIS REPORT SETTLED THE STREAMING ENTRY'S ONE OPEN QUESTION: Z.ai DOES honour
   `stream_options.include_usage`** — real per-call input/output/cache token counts came back on every
   streamed call. The "0 in / 0 out" risk that entry warns to watch for did not materialise.

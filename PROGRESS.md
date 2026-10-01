@@ -86195,3 +86195,52 @@ two-ended erase.
   more sees the newest 300's apps.
 - Phone users get all of this only with a fresh `.aab`/`.ipa`. Admin instruction: build them only AFTER every open
   PR is merged.
+
+---
+
+## 2026-10-01 — Autopsy 19641ab5: "Create full image" + a portrait photo was built as an app
+
+**The report.** Weak tier, free user. Prompt "Create full image", one attached photo of a woman. Pro scored it
+83 ("complex", ~11 features), the mega-app roadmap planned a six-step image-generator app, KIMI read a
+`package.json` that did not exist and wrote a single-file HTML page over our starter's `index.html`. The user
+stopped it at 108 s; billed ₹7.62 (real cost, margin waived).
+
+**Ledger — problem → root cause → class → siblings → lock** (`tests/aPictureIsNotAnApp.test.ts`, 20 cases, every
+fix reversion-proven):
+1. **A picture was built as an app.** `detectImageIntent` points a picture request to Image Generator AI in free
+   chat, Doctor AI and every Professional; Pro never asked, while `AppKnowledgeBase` (`ai_image_gen`) said it did.
+   Class: a picture request reaching a surface that only builds. Fix: `AgentV3/pictureRequest.ts` — a picture
+   request that names no software, in a workspace with no user app, is answered on the chat lane (model steer +
+   deterministic fallback, ₹0) with the way to the studio and an offer to build an image app. Kill switch
+   `AGENTV3_PICTURE_ANSWER=off`. Precision cases ("image generator app", "photo gallery", "image slider banao") still
+   build — and #3430 makes such apps draw real pictures.
+2. **The photo's description was read as a feature list.** `planningRequest` labelled every attachment "describes
+   what to build"; the photo's 1,374 characters (hair, jewellery, saree, light) made the scope LARGE and the score 83.
+   Class: a judge reading a subject as a spec. Fix: the sizers get documents and UI-design pictures only (a design
+   contract was parsed); a photo is set aside and the `PLANNING_CONTEXT` line says so. The builder still sees it.
+3. **The roadmap guardrail rewrote an honest step.** "Do not use a placeholder **or a fake** loading animation" was
+   flagged as asking for simulation — the negator was five words back. Fix: a mention coordinated ("or"/"nor"/",")
+   with a negator in the same clause is negated; a clause boundary or "but/instead/then" still ends it.
+4. **ETA honesty, three siblings.** (a) A build the user stopped at 1.8 min was scored "0.2× and UNDER the band" —
+   now `untested` when cut short (user stop, deploy drain, reaper, …) before the band ended, and the admin
+   aggregate counts no ratio for it. (b) The platform prior (`fleetHistoryFromTelemetry`) averaged EVERY build,
+   stopped and failed included, though `okDurationMs` has existed since 728a402d — it now averages successful
+   builds (legacy days keep the old mean). (c) The evidence line said "this workspace's own past builds" beside
+   "No past builds of this app" — it now says whose builds taught it.
+5. **The workspace held only our starter's `index.html`.** The machine was created by a Files request
+   (`started-by=files`) and refilled from an empty store plus a one-file warm cache; `ensureWorkspace` then saw the
+   directory and skipped the template. Class: a presence check answering a different question. Fix:
+   `starterFragment.ts` — when everything present is a byte-identical piece of our own starter (or the root is
+   empty), the missing template files are put back; any user or edited file means a project and nothing is written.
+   `SETUP_TIMING` says `starter=completed N`.
+6. **A FULL-REWRITE WARNING for replacing our own starter file** — dropped when the old content is an untouched
+   template file (`isOurStarterFile`).
+
+**Checked, no change:** `requestAnalysis.startTier: "sonnet"` on a Weak build — a complexity band (2b0a3ed5), not a
+provider; `PROVIDER_TIME_WASTED calls=0` — no call was wasted.
+
+**Still open:**
+- Why the workspace's earlier machine left only `index.html` in the warm cache with nothing durable is not proven
+  from this report (no earlier build is in it). The completion above makes the outcome right whatever the cause.
+- Whether the user wanted a full-body version of the photo (an outpaint) cannot be served by Pro at all; Image
+  Generator AI's Paid edit is the place, and the answer now says so.

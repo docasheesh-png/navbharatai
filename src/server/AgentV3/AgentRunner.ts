@@ -1,3 +1,4 @@
+import { NOT_READY_HEADLINE, NOT_READY_HEADLINE_CONTINUE } from './notReadyHeadline';
 import type { AgentEventStream } from './AgentEventStream';
 import { isStarterBlocker, starterSummary } from './stillTheStarterApp';
 import type { WorkspaceState } from './WorkspaceState';
@@ -384,6 +385,14 @@ export interface AgentRunResult {
    *  build can be continued — a fresh run gets a fresh budget window). Lets the client show an honest
    *  "budget reached — continue" state instead of a hard failure. */
   budgetReached?: boolean;
+  /**
+   * The model's own closing words, kept when the readiness gate replaced them with the platform's
+   * not-ready headline (`NOT_READY_HEADLINE`). A later proof that the app works (the route's render
+   * rescue) must hand the user THESE words back — not leave our "isn't fully working" sentence on a
+   * build it has just upgraded to success and charged for (autopsy 6461025c). Absent ⇒ the summary
+   * is already the model's own.
+   */
+  modelAnswer?: string;
   /**
    * The run stopped ONLY because it hit the wall-clock cap (`buildTimedOut`, AGENTV3_MAX_BUILD_SECONDS).
    *
@@ -920,6 +929,7 @@ export class AgentRunner {
           // WHITE-LABEL LAW: the honest sentence names OUR limit, never a vendor, a model or a ceiling
           // the user cannot act on. "The model replied without building" was false here in the one way
           // that matters — nothing replied — and it is the sentence that sent the user to buy credits.
+          let modelAnswer: string | undefined;
           let summary = builtNothing
             ? (starvedTurn
                 ? 'The build could not start writing files: NavBharatAI\u2019s engine ran out of room to answer before it began. '
@@ -994,7 +1004,8 @@ export class AgentRunner {
                   // (autopsy 0d297b25: it had correctly found the project was never in the workspace).
                   summary = starterSummary(turn.text);
                 } else {
-                  summary = `⚠️ This app isn't fully working yet — a couple of things still need fixing before it's ready to use.`;
+                  if (turn.text.trim()) modelAnswer = turn.text.trim();
+                  summary = NOT_READY_HEADLINE;
                 }
               }
             } catch { /* gate is best-effort — a scan error never fails a real build */ }
@@ -1049,7 +1060,7 @@ export class AgentRunner {
           if (ok) summary = `${summary}${missingFeatureNotice(buildHealth?.warnings)}`;
           await persist(ok ? 'complete' : 'error');
           events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });
-          return { ok, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
+          return { ok, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}), ...(!ok && modelAnswer ? { modelAnswer } : {}) };
         }
         totalToolUses += turn.toolUses.length;
         producingToolUses += turn.toolUses.filter(toolUseCouldProduceWork).length;
@@ -1323,7 +1334,7 @@ export class AgentRunner {
               // admin report; AGENTV3_VERBOSE_READINESS=on restores the detailed line for debugging.
               summary = (process.env.AGENTV3_VERBOSE_READINESS ?? '').trim().toLowerCase() === 'on'
                 ? `Step limit reached (${stepCap}) — and the build is NOT ready (score ${readiness.score}/100).${readiness.blockers.length ? ` Must fix: ${readiness.blockers.join('; ')}.` : ''}`
-                : `⚠️ This app isn't fully working yet — a couple of things still need fixing. Send another message and I'll keep going.`;
+                : NOT_READY_HEADLINE_CONTINUE;
               // ENDGAME REPAIR (QuizArena autopsy 2026-07-17, Slice 1): the builder died grinding the
               // last compile errors ONE per 4-5 step round-trip. Fix them OUTSIDE the step loop —
               // deterministic tsc-error fixers first (unused imports, import/export drift — pure code,

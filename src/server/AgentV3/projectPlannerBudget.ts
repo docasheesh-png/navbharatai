@@ -27,6 +27,17 @@
 import { buildStreamingEnabled, streamHardCapMs } from './providers/openAiStream';
 import { FLOOR_TIMEOUT_CAP_MS } from './floorBudget';
 
+/**
+ * The project planner's OUTPUT allowance. It was a flat 8,000 — the same number every small text call
+ * uses — for an answer the prompt allows to run to 60 modules, each with frozen TypeScript contracts.
+ * Autopsy 6461025c: a 40-part ads-and-rewards spec came back cut off at exactly 8,000 tokens (26,889
+ * characters, 79 s) before the module list ended, and the plan was thrown away. An allowance smaller
+ * than the answer the prompt asks for is a guaranteed failure on precisely the projects this mode is
+ * for. 16,000 fits a full plan with compact contracts (`projectPlanSystemPrompt` now asks for those),
+ * and on the direct-answering plan rung it stays inside the planner's own time bound above.
+ */
+export const PROJECT_PLANNER_MAX_TOKENS = 16_000;
+
 /** Slack past the inner call's own bound, so the outer race fires only when that bound failed to. */
 export const PROJECT_PLANNER_SLACK_MS = 15_000;
 /** An env override below this could not carry even a small plan; above this it exceeds any sane lane. */

@@ -261,6 +261,7 @@ import { saveSpreadsheetFile, newSpreadsheetFileId } from '../lib/spreadsheetFil
 import { starterCompletedNote, srcHoldsOnlyOurStarter, holdsOnlyOurStarter, MAX_FRAGMENT_FILES } from '../AgentV3/starterFragment';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
 import { summaryAdditions } from '../AgentV3/summaryAdditions';
+import { deletedFilesNotice, userVisibleDeletions } from '../AgentV3/deletedFilesNotice';
 import { credentialGuardEnabled, credentialGuardInstruction, findBootKillingEnvGuards, bootKillingGuardSummary, bootKillerRepairInstruction } from '../AgentV3/missingCredentialGuard';
 import { inrToWalletTokens } from '../lib/payments';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
@@ -12716,6 +12717,9 @@ async function noteBuildOutcome(
     let etaRoughBand: string | null = null;
     // Its top end, so the tick stops restating a band the build has already outrun.
     let etaRoughHighMs: number | null = null;
+    // The HIGH end of the band the user was shown first. The live tick never calls a build "bigger than
+    // expected" while it is still inside that band (autopsy e49afa97).
+    let etaPromisedHighMs = 0;
     // MEASURED ETA state (2026-08-23). Everything above predicts from the PROMPT, which is how "Make an
     // VPN App" — a prompt with no page-words and no feature-words — scored the floor of the formula and
     // promised ~3 min for a build that ran 18m 42s. These two fields let the heartbeat stop predicting
@@ -12896,7 +12900,7 @@ async function noteBuildOutcome(
             events.emit({ type: 'narration', agent: 'architect', text: unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000, etaRoughBand, etaRoughHighMs), ts: now, id: 'eta-live' });
             return;
           }
-          const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs, etaRevisions);
+          const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs, etaRevisions, etaPromisedHighMs);
           etaTotalMs = tick.totalMs;
           // Carry the revision count forward: it is what stops the countdown resuming its "~1 min to
           // go" promise after the estimate has already been broken (mitrify autopsy 2026-08-04).
@@ -13839,6 +13843,7 @@ async function noteBuildOutcome(
           etaEvidenced = estimateIsEvidenced(est);
           etaRoughBand = etaEvidenced ? null : roughEstimateBand(est);
           etaRoughHighMs = etaRoughBand ? Number(est.highMs) || null : null;
+          etaPromisedHighMs = etaEvidenced || etaRoughBand ? Number(est.highMs) || 0 : 0;
           const etaShown = etaEvidenced
             ? (past.length === 0 && fleet.history.length > 0 ? fleetEtaLine(est, fleet.builds) : firstEtaLine(est, past.length))
             : unevidencedFirstEtaLine(est);
@@ -15054,9 +15059,13 @@ async function noteBuildOutcome(
       // writes (autopsy e725e002). Armed with the files this build wrote, so a twin it wrote itself is
       // never touched; unarmed, nothing is removed.
       dispatcher.armShadowTwins(() => modelAuthoredPaths(writtenFiles));
+      // Every file this build removed, in order — the user is told about the ones their app had
+      // (deletedFilesNotice.ts, queue Q-019). The admin line below stays as it was.
+      const deletedThisBuild: string[] = [];
       dispatcher.setFileDeletionSink((paths) => {
         for (const p of paths) {
           writtenFiles.delete(p);
+          deletedThisBuild.push(p);
           try { buildDiag.record({ phase: 'build', severity: 'info', code: 'FILE_DELETED', message: `Removed from the project: ${p}`, autoResolved: true }); }
           catch { /* diagnostics are best-effort */ }
         }
@@ -17523,6 +17532,13 @@ async function noteBuildOutcome(
         // viable. It then ran for 150 seconds on the SAME degraded provider chain that had just
         // failed three times, and failed the same way. Re-running a lane against a provider that is
         // timing out is not a retry; it is the identical failure at full price.
+        // 🔴 A LANE THAT HANDED OFF AT A REASONING RUNG TAKES THE ONE-SHOT WITH IT (autopsy e49afa97).
+        // The one-shot walks the SAME chain with the same stop, so it reached the same rung 12 ms later,
+        // stopped again, and wrote a second "Model call failed" plus "One-shot could not generate the
+        // app" — for a call that was never made.
+        else if (!sb.ok && !sb.stopped && classifyForOneShot(analysis?.startTier) && fastLaneReasoningRung) {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: `Skipped the one-shot fast lane: the fast lane's engine fell to ${fastLaneReasoningRung}, which reasons before every answer, and a one-shot on the same engine would stop at the same place. Going straight to the full builder.`, autoResolved: true, detail: sb.reason });
+        }
         else if (!sb.ok && !sb.stopped && classifyForOneShot(analysis?.startTier) && !anotherLaneWorthTrying(sb.reason)) {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: 'Skipped the one-shot fast lane: the previous lane failed because the engine did not respond in time, not because of the app — a second lane on the same engine would fail the same way. Going straight to the full builder.', autoResolved: true, detail: sb.reason });
         }
@@ -17531,7 +17547,7 @@ async function noteBuildOutcome(
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'VERIFY_DID_NOT_RUN', message: 'The fast-lane type-check could not execute in the sandbox (after one retry) — the app shipped unverified; the agentic readiness gate stays ON.', autoResolved: false });
           }
           fastResult(sb.summary, sb.filesWritten, sb.typecheckRan !== false);
-        } else if (!sb.stopped && !abort.signal.aborted && classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb) && anotherLaneWorthTrying(sb.reason)) {
+        } else if (!sb.stopped && !abort.signal.aborted && classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb) && anotherLaneWorthTrying(sb.reason) && !fastLaneReasoningRung) {
           // 2) ONE-SHOT (secondary) — a single call still suits a TRIVIAL one-file app the manifest
           //    skips. Gated to the simple tiers only: a sonnet-tier (complex) prompt can never fit in
           //    one 8k-token call — it falls straight through to the agentic loop instead.
@@ -17916,6 +17932,7 @@ async function noteBuildOutcome(
         const twins = [...new Set(dispatcher.shadowTwinTally().removed)];
         if (twins.length > 0) {
           await removeWorkspaceFiles(workspaceId, twins).catch(() => 0);
+          deletedThisBuild.push(...twins);
           buildDiag.record({
             phase: 'build', severity: 'info', code: 'SHADOW_TWIN_REMOVED', autoResolved: true,
             message: `Removed ${twins.length} stale copy(ies) of modules this build wrote — each would have been loaded INSTEAD of the new file (the dev server resolves .js before .ts/.tsx): ${twins.slice(0, 12).join(', ')}${twins.length > 12 ? ` and ${twins.length - 12} more` : ''}.`,
@@ -21097,7 +21114,11 @@ async function noteBuildOutcome(
             // nothing about the app, and either other answer would be invented.
             if (journeyResults.some((r) => r.verdict === 'failed')) gateEvidence.journeys = 'failed';
             else if (journeyResults.some((r) => r.verdict === 'passed')) gateEvidence.journeys = 'passed';
-            else if (journeyResults.length > 0) gateEvidence.journeys = 'unreachable';
+            else if (journeyResults.length > 0) {
+              gateEvidence.journeys = 'unreachable';
+              const why = journeyResults.find((r) => r.note)?.note;
+              if (why) gateEvidence.journeyUnreachableWhy = why;
+            }
             buildDiag.record({
               phase: 'preview',
               severity: verdict.ok ? 'info' : 'warning',
@@ -24677,6 +24698,34 @@ async function noteBuildOutcome(
         const stackNote = unsupportedStackUserNote(unsupportedStackAsked, framework, result.summary);
         if (stackNote && !result.summary.includes(stackNote.trim())) result = { ...result, summary: `${result.summary}${stackNote}` };
       }
+      // A FILE THIS BUILD REMOVED FROM THE USER'S APP IS NAMED (queue Q-019, autopsy 4d538ca3). Only
+      // files the app had before this build, only when there was an app, and only those still absent at
+      // the end — a later write or the GreenGuard restore may have put one back, and the sentence must
+      // be true of the app the user receives. A read that fails is "absent"; a read that hangs past 5 s
+      // leaves the path off the list (silence is the old behaviour, a false claim would be worse).
+      try {
+        const candidates = userVisibleDeletions(deletedThisBuild, projectFilePaths, userAppExists)
+          .filter((p) => !writtenFiles.has(p))
+          .slice(0, 40);
+        if (candidates.length > 0 && typeof result.summary === 'string') {
+          const stillGone: string[] = [];
+          for (const p of candidates) {
+            const present = await raceTimeout(
+              actuator.readFile(workspaceId, p).then(() => true, () => false),
+              5_000, 'deletedFileProbe',
+            ).catch(() => null);
+            if (present === false) stillGone.push(p);
+          }
+          const note = deletedFilesNotice(stillGone);
+          if (note) {
+            result = { ...result, summary: `${result.summary}${note}` };
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: 'FILES_REMOVED_TOLD', autoResolved: true,
+              message: `The user's summary names ${stillGone.length} file(s) this build removed from their app: ${stillGone.slice(0, 12).join(', ')}${stillGone.length > 12 ? ` and ${stillGone.length - 12} more` : ''}.`,
+            });
+          }
+        }
+      } catch { /* telling the user is never worth failing a settle */ }
       const livePreviewLine = costBreakdown && result.ok ? livePreviewChargeLine(costBreakdown) : '';
       if (livePreviewLine && typeof result.summary === 'string') {
         result = { ...result, summary: `${result.summary}\n\n${livePreviewLine}` };

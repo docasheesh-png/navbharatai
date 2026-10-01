@@ -86808,6 +86808,24 @@ Q-016 OPEN journeys cannot reach state-switched forms (capability). All ✅ item
 **Live effect to watch:** `PREVIEW_REVIVAL_RECIPE` details naming a real server command; no `🧹 … port 49983`; no
 "looks complete" narration on edit turns; `[version hint]` after an ETARGET.
 
+### 2026-10-01 — Queue Q-019: a file the build removed from the user's app is told to them (follow-up to #3446)
+
+Autopsy 4d538ca3 left Q-019 OPEN: `FILE_DELETED` was admin-only, so a build that removed a file the user's
+app had said nothing in the summary they read. #3442 had already made deleting the user's OWN Code Studio
+file impossible unless asked; a file the build itself wrote earlier could still vanish silently.
+- **Fix:** `deletedThisBuild` collects every deletion the dispatcher confirmed (the existing
+  `setFileDeletionSink`) and every shadow twin removed (the sibling road). At settle, `userVisibleDeletions`
+  keeps the paths that were in the project BEFORE the build (`projectFilePaths`), only when the user had an
+  app (`userAppExists`), never `.nbai*`, and the route keeps only those still absent in the sandbox (a later
+  write or a GreenGuard restore may have put one back). `deletedFilesNotice` appends one line to the summary,
+  which `summaryAdditions` already shows as the closing chat line, pointing at Files → History.
+- **Not done, said plainly:** the durable store is not changed here. If the end-of-build sandbox scan fails,
+  the save merges and a deleted file can return on the next restore. That is the pre-existing merge-save
+  behaviour, and it is recorded here rather than widened into this change.
+- Test: `tests/aDeletedFileIsToldToTheUser.test.ts` (14), reverted-and-failed twice (sink push removed;
+  prior-paths filter removed). Admin code `FILES_REMOVED_TOLD` (process-only).
+- **Live effect to watch:** a `🗑️ This build removed …` line on an edit turn that deleted an existing file,
+  and `FILES_REMOVED_TOLD` in the admin report.
 ### 2026-10-01 (follow-up to #3441, which merged before this commit reached it) — Q-016: a form on a wizard step is reached
 
 The 2b1f845e app kept its forms in `src/steps/*.tsx`, shown by pressing "2 Design" on `/`; no page reaches
@@ -86909,6 +86927,48 @@ Sixth-rule ledger:
 - Not defects: the reviewer's "second read" note (the file WAS handed to it — true), one manual `tsc`
   after the clean note (one 2 s step), a 4px-grid advisory at grade A, "No tests" before the E2E scaffold.
 Tests: `tests/aStoppedRequestLeftNothing.test.ts`, each fix proven by reversion.
+### 2026-10-01 — autopsy e49afa97 ("App for old person help", Weak, ok, 6.8 min, ₹108.26)
+
+The app was built, rendered, typechecked and pressed in a real browser (15 controls). What was wrong was
+the report and one line the user read.
+
+### Tally (fifth rule)
+- ✅ Self-healed 3: two undefined classes + one page without an empty state (`STYLE_RULES_RESUMED`, one turn);
+  `IN_BUILD_GREEN_RACED` retried and saved; 4 typecheck errors quoted back at write time and fixed.
+- 🔀 Workaround 2: the fast lane handed off before the reasoning rung (by design); GLM crawled, KIMI built.
+- ⏭️ Skipped 0.
+- ❌ Shipped wrong words 5: "bigger than expected" inside the promised band; a focus conflict about three
+  modal inputs; three journeys "not present" about forms two taps away, plus a gate guessing "a login wall";
+  two `LLM_CALL_FAILED` errors for a planned hand-off; a fresh reviewer told it had read a file "the second time".
+- 🥵 Struggle 2: 15 s of GLM crawl before the hand-off; the one-shot ran on the chain that had just handed off.
+
+### Root causes and fixes (this PR)
+- **ETA:** a plan-pace measurement re-anchored the budget below the band the user was shown, then stopped
+  applying. `liveEtaTick(…, promisedHighMs)`: before the first revision the countdown runs to the high end of
+  the band actually shown (`etaPromisedHighMs`, set only when a band was shown).
+- **Focus:** `findFocusOwners` counted any `autoFocus`. One inside a dialog (`<dialog>`, `role="dialog"`,
+  `aria-modal`, a modal class/component) or in a `*Modal`/`*Dialog` file is not page focus. New
+  `openTagsAt` in `jsxTags.ts` (the shared JSX reader).
+- **Journeys:** `src/screens/*.tsx` are page files, so #3443's `reach` (built for non-page screens) never
+  applied, and `routeForFile` fell back to `/`. `screenReachedByControl` gives such a screen its `reach`; the
+  runner reads text, aria-label and title, and a lone "+" opens a form. The gate's "unreachable" sentence
+  carries the runner's own reason (`journeyUnreachableWhy`) instead of a guess.
+- **One-shot after hand-off:** skipped when `fastLaneReasoningRung` is set; `laneFailure` classifies
+  "reasons before every answer" as provider-degraded.
+- **Handed files:** `noteHandedOff` marks the copy; the first read says "was given to you in full in your task".
+
+### Ledger
+Q-030 ETA band · Q-031 dialog focus · Q-032 state-switched journeys + gate reason · Q-033 one-shot after
+hand-off · Q-034 handed-file notice — IN PROGRESS (#3451) · Q-035 → #3448 (same class, d382b398: hand-off
+record, 51-key list, crawl≠timeout, bench prefix) · React-import note ✅ already fixed by #3442 (merged after this
+build ran) · Q-036 🟡 GLM crawl (Q-009, external) · Q-037 🟡 off-grid spacing (decision, recommend (b)) ·
+Q-038 🟡 "No tests at all" accurate (agreement). Locked in `tests/theOldPersonHelperAutopsy.test.ts`
+(29 cases, one real-browser), each fix reverted-and-failed in the session.
+**Live effect to watch:** no `INTEGRITY_FOCUS_CONFLICT` for modal inputs; `JOURNEY_PASSED`/`FAILED` on
+bottom-nav apps; no overrun line before the promised band's high end; `ONESHOT_SKIPPED` after a hand-off.
+**Note (same day):** #3448 merged; verified on `main` that it covers all four Q-035 items (`LLM_CALL_HANDED_OFF`,
+no key list for a hand-off, a crawl is not a timeout strike, `${family} benched:` prefix) — Q-035 ✅, removed from the open table.
+
 ### 2026-10-01 — Autopsy 042e472f + dfd24058 (the JARVIS report): a Kotlin request is built as a phone-ready web app
 
 **Build 1 (042e472f, Weak, stopped by the user, ₹21.85 real cost).** "Technology: Kotlin, Jetpack Compose … must

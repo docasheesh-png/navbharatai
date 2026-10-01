@@ -570,6 +570,8 @@ export type ReadLedgerEntry = {
    * of a part of the file not yet seen, is ordinary work and is never counted here.
    */
   unchangedRereads?: number;
+  /** The first copy came in the agent's task (taskHandoff.ts), not from a read_file (autopsy e49afa97). */
+  handed?: boolean;
 };
 export type ReadLedger = Map<string, ReadLedgerEntry>;
 /** Stylesheet rewrites whose dropped design-kit rules were kept, and the classes kept (kitRestore.ts). */
@@ -2697,7 +2699,7 @@ export class ToolDispatcher {
    */
   noteHandedOff(path: string, content: string): void {
     if (!path || typeof content !== 'string') return;
-    this._ownReads.set(path, { count: 1, content, writeSeq: this._writeSeq, stalls: 0 });
+    this._ownReads.set(path, { count: 1, content, writeSeq: this._writeSeq, stalls: 0, handed: true });
   }
 
   // ── WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068) — see writeTimeTypecheck.ts ──
@@ -3799,7 +3801,9 @@ export class ToolDispatcher {
         const ownUnchanged = own !== undefined && own.content === full;
         const ownStalls = ownUnchanged && own.writeSeq === this._writeSeq ? own.stalls + 1 : 0;
         this._ownReads.set(ledgerKey, { count: ownCount, content: full, writeSeq: this._writeSeq, stalls: ownStalls });
-        const notice = repeatedReadNotice(shownPath, ownCount, ownUnchanged, ownStalls);
+        // A file handed over in the task, read for the first time, is a copy the agent HOLDS — but it did
+        // not "read it before", and saying so to a fresh reviewer read as a false claim (autopsy e49afa97).
+        const notice = repeatedReadNotice(shownPath, ownCount, ownUnchanged, ownStalls, ownCount === 2 && own?.handed === true);
         if (ownStalls >= READ_LOOP_LIMIT) this._readLoopStops.n++;
 
         if (!ranged) return notice ? `${notice}${full}` : full;

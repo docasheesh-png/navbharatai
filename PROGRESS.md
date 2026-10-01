@@ -87357,7 +87357,7 @@ open PR's CI failed with it (#3462 first).
 Weak build, 6.9 min, ₹96.58, rendered at 268 s, inside its ETA band. The build itself went well. The judges around it did not.
 
 **Ledger (problem → root cause → class → siblings → lock):**
-- **Q-087 · the sizers were blind.** "Can you make this app" had no attachment and no earlier BUILD request; the app was
+- **Q-089 · the sizers were blind.** "Can you make this app" had no attachment and no earlier BUILD request; the app was
   described in CHAT, which `planningRequest` drops by design (6ae30b33). Complexity 15 ("recognised nothing"), and the
   fast-lane planner planned "Main app component with counter logic". **Class:** a judge that reads less than the
   worker (e725e002), here via a pointer ("this app") into the conversation. **Fix:** `conversationReference.ts`
@@ -87366,19 +87366,74 @@ Weak build, 6.9 min, ₹96.58, rendered at 268 s, inside its ETA band. The build
   workspace with no finished app. **Siblings:** every sizer already reads `planning.text`, so one input covers the
   complexity score, routing, ETA, project mode, scope and the fast lane. **Lock:** `tests/theMandiBhavAutopsy.test.ts`,
   reverted-and-failed.
-- **Q-088 · the gate said "untested" about an app with nothing to save.** The journey check (correctly) said the filters
+- **Q-090 · the gate said "untested" about an app with nothing to save.** The journey check (correctly) said the filters
   act as you type; the gate's `appOnlyShowsWhatItHolds` counted the bottom tab bar (`onClick={() => setScreen('mandi')}`)
   as a save. **Class:** two readers of "does this app keep input?" disagreeing. **Fix:** a plain button / click counts
   unless its handler only changes what is shown (`handlerOnlyChangesView`, `pressCanKeepInput`). The stale comment that a
   `none-derivable` app "can never earn GREEN" is corrected (it can since 8257ca59, when its controls were pressed).
   **Lock:** same file, reverted-and-failed; the existing lookup suite (74 tests) unchanged.
-- **Q-089 · a skipped press gave no cause.** "Mausam — Timeout 4000ms exceeded" was the error's first line only.
+- **Q-091 · a skipped press gave no cause.** "Mausam — Timeout 4000ms exceeded" was the error's first line only.
   **Fix:** `pressFailureNote` adds Playwright's call-log line naming the cause; the runner embeds the function by value
   (bound to a const, so a bundler rename cannot break it — checked with the real esbuild bundle and `node --check`).
 - **Already fixed by PRs merged after this build ran (19:53 IST):** the plan hand-off's "NOT written yet" (Q-079, #3461),
   the contract hand-off narration (Q-078, #3461), the reviewer told to run tsc (Q-080, #3461), "✅ The app looks
   complete" over undefined classes (2f723acb, #3459), the non-unique `edit_file` error without match regions (#3459),
   the 12 off-grid values in a stylesheet this build wrote (#3458).
-- **Open:** Q-090 (why the third tab could not be pressed — needs the cause line or the source), Q-091
-  (`LIST_WITHOUT_EMPTY_STATE` on function-returned sample lists — your choice), Q-092 (four items argued not defects).
-  Recurrences recorded on Q-009 (GLM crawl ×2), Q-063 (17 s first typecheck) and Q-052 (`startTier: "gemini"`).
+- **Open:** Q-092 (why the third tab could not be pressed — needs the cause line or the source), Q-093
+  (`LIST_WITHOUT_EMPTY_STATE` on function-returned sample lists — your choice), Q-094 (four items argued not defects).
+  Recurrences recorded on Q-063 (17 s first typecheck) and Q-052 (`startTier: "gemini"`). The two GLM crawls (30 s, 7%)
+  fall under Q-009, which you closed as provider weather in #3465; the crawl bench behaved as designed.
+## 2026-10-01 — Autopsy 52471441 ("Build a calculator", Weak, stopped by the user at 38 s)
+
+**What happened.** Setup took 8 s. The fast lane's file-list call (a ~500-token prompt) crawled on GLM `glm-4.7-flashx`
+and was abandoned at 15 s, then handed off because the next rung (KIMI) reasons before every answer. The full builder
+started on KIMI and read the starter files. No file had been written when the user pressed Stop at 38 s. Bill ₹0.
+
+**Tally:** 0 self-heals · 1 workaround (fast lane → full builder after the crawl) · 0 skips · 0 shipped broken ·
+1 struggle (15 s crawl = 37% of the clock, before anything reached the screen).
+
+| Item | Root cause | State |
+|---|---|---|
+| Nothing on screen in 38 s; the tested calculator template was not used | `goldenScaffoldForPrompt` seeds a template only for the chip's exact text; "Build a calculator" is shorter | Q-087 🟡 admin decision (option a recommended: verb + template name only) |
+| GLM crawl, 15 s | Provider latency (Z.ai) | Recurrence of Q-009, which #3465 closes as accepted provider weather. This instance (15 s) is under that decision's reopen line (60 s per build) |
+| Five lines read as defects but are true | See the row | Q-088 🟡 needs the admin's yes |
+
+**Missing subsystem (Step 2):** none new. The lever is Q-087: a bare request for a thing we already have a tested
+template for should get that template, which removes the plan call, the crawl and the wait together.
+
+**Proactive (Step 6), not built:** the crawl grace (`STREAM_THROUGHPUT_GRACE_MS`, 15 s) was sized for a 26,569-token
+prompt's ingestion. The fast lane's plan call is ~500 tokens, where a healthy `glm-4.7-flashx` (thinking disabled)
+answered in 2.4 s in autopsy 876afca9. A grace scaled by prompt size would cut a dead call's cost from 15 s to a few
+seconds. It changes when the ladder moves to KIMI, so it touches the admin's routing decision on Q-009; offered, not
+built.
+## 2026-10-01 — Admin decisions on Q-009, Q-014, Q-015, Q-023 (and Q-064 folded into Q-009)
+
+The admin answered "karo" to the line naming these rows. Each decision row had a recommended option, and that option
+is what was adopted. The rows leave `BUILD_REPORT_QUEUE.md`; this entry is their ledger.
+
+- **Q-014 ✅ (option a, keep).** When `.env.example` and the server's own `process.env.PORT || N` fallback disagree,
+  the env example still ranks higher in `DECLARED_PORT` (`declaredPort.test.ts` unchanged). It has no practical
+  effect, because the proven recipe port (recorded from the real launch since the 2b1f845e autopsy) outranks the
+  declared port, so the preview door reaches the port the server really listens on. **Reopen if** a report shows the
+  door on the example's port while the recipe names another.
+- **Q-015 ✅ (option a, agreed not defects).** The three 2b1f845e warnings were correct reports:
+  - `read_file .env.example`: the file really did not exist, and the model created it next.
+  - The `edit_file` miss on `tsconfig.server.json`: the tool showed the real file, and the next write landed.
+  - The 21 off-grid values: 18 of them are in a `src/index.css` written by the earlier build. `lintDesign` on the
+    kit itself scores 100.
+
+  #3458 already keeps an untouched file out of the end-of-turn hand-back.
+- **Q-023 ✅ (option a, keep).** A 9-section spec of about 40 listed parts is a project, so 16 modules is the
+  intended decomposition. The JARVIS failure was the modules being written in Kotlin, and the planner's stack note
+  fixed that. **Reopen if** a spec made mostly of one-line commands ("Open YouTube", "Open Maps") decomposes and its
+  modules fail for being too thin.
+- **Q-009 ✅ (accepted as provider weather, Q-064 folded in).**
+  - **What happened:** the GLM lead rung (`glm-4.7-flashx`) crawled in six reports: 6461025c, d382b398, e49afa97,
+    1219c639, de3bb2bb and 2f723acb. Each crawl cost 15–30 s (4–7% of the build).
+  - **Why accepted:** the crawl is on Z.ai's side, so no code here can make their model faster. Our part works: the
+    crawl bench abandons after 15 s, benches for 180 s, re-probes once, and benches for the build on a second crawl
+    (#3448 fixed the one defect on our side). Q-064 (de3bb2bb) was the same thing, the re-probe crawling as well.
+  - **Reopen if:** a single build loses more than 60 s to crawls, or crawls exceed 10% of builds' wall time over a
+    day.
+  - **The real lever then:** a ladder change (another lead rung on Weak/Normal). That is the admin's routing
+    decision, not a code fix.

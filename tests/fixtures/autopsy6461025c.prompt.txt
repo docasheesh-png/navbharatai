@@ -1,0 +1,1000 @@
+हाँ. इस model में dashboard सिर्फ advertiser dashboard नहीं होना चाहिए। इसे **“Ads + User Rewards + Target Completion + Coin Economy”** का पूरा control center बनाना चाहिए।
+
+सबसे जरूरी architecture यह रहेगा:
+
+**Advertiser पैसे देता है → Campaign/Target बनता है → User eligible task देखता है → Valid action पूरा करता है → Verification होती है → Coins मिलते हैं → Fraud check → Advertiser को verified result मिलता है।**
+
+और एक जरूरी distinction: **सिर्फ ad impression देखकर coin देना risky है**। Reward केवल ऐसे verified actions पर देना बेहतर है जिन्हें campaign ने explicitly define किया हो, वरना bots और fake engagement आपका पूरा हिसाब-किताब खा जाएंगे।
+
+नीचे मैं पूरा **Professional-level Ads & Rewards Dashboard** दे रहा हूँ।
+
+# ADS & REWARDS DASHBOARD
+
+## 1. DASHBOARD OVERVIEW
+
+### Main Command Center
+
+* Total Advertisers
+* Active Advertisers
+* Total Campaigns
+* Active Campaigns
+* Total Ads
+* Active Ads
+* Total Ad Impressions
+* Verified Ad Views
+* Total Clicks
+* Verified Clicks
+* Total Target Completions
+* Pending Target Completions
+* Approved Target Completions
+* Rejected Target Completions
+* Total Coins Issued
+* Total Coins Pending
+* Total Coins Redeemed
+* Total Coins Expired
+* Total Advertiser Spend
+* Platform Ad Revenue
+* Reward Pool
+* Platform Margin
+* Fraud Prevention Savings
+
+### Real-Time Monitoring
+
+* Live Campaign Activity
+* Live Ad Delivery
+* Live Target Completion
+* Live Coin Distribution
+* Live Verification
+* Live Fraud Alerts
+* Live Budget Usage
+* Live Reward Pool Usage
+
+---
+
+# 2. ADVERTISER MANAGEMENT
+
+## Advertiser Accounts
+
+* All Advertisers
+* Verified Advertisers
+* Pending Verification
+* Restricted Advertisers
+* Suspended Advertisers
+* Advertiser Profiles
+* Advertiser Activity
+* Advertiser Spending
+* Advertiser Campaign History
+* Advertiser Billing
+* Advertiser Risk Score
+* Advertiser Compliance Status
+
+## Advertiser Wallet
+
+* Current Balance
+* Available Balance
+* Reserved Balance
+* Campaign Budget
+* Reward Budget
+* Spent Amount
+* Refunds
+* Credits
+* Transactions
+* Payment History
+* Invoices
+
+---
+
+# 3. CAMPAIGN MANAGEMENT
+
+## Create Campaign
+
+### Campaign Information
+
+* Campaign Name
+* Campaign Description
+* Advertiser
+* Campaign Objective
+* Start Date
+* End Date
+* Campaign Status
+
+### Campaign Objectives
+
+* Brand Awareness
+* Ad View
+* Video View
+* Website Visit
+* App Visit
+* App Install
+* Product Discovery
+* Engagement
+* Qualified Action
+* Custom Target
+
+### Campaign Budget
+
+* Total Budget
+* Daily Budget
+* Maximum Spend
+* Reward Budget
+* Advertising Budget
+* Platform Fee
+* Remaining Budget
+* Automatic Budget Controls
+
+---
+
+# 4. AD MANAGEMENT
+
+## Supported Ad Formats
+
+* Banner Ads
+* Native Ads
+* In-Feed Ads
+* Story Ads
+* Reel Ads
+* Short-Video Ads
+* Video Ads
+* Pre-Roll Ads
+* Mid-Roll Ads
+* Post-Roll Ads
+* Search Ads
+* Sponsored Posts
+* Rewarded Ads
+* App-Open Ads
+* Interactive Ads
+
+## Ad Creative
+
+* Image
+* Video
+* Title
+* Description
+* Brand Name
+* Logo
+* CTA
+* Destination
+* Landing Page
+* Ad Preview
+* Multiple Creative Versions
+
+## Creative Testing
+
+* A/B Testing
+* Multiple Creatives
+* Creative Performance
+* Creative Comparison
+* Creative Rotation
+* Underperforming Creative Detection
+
+---
+
+# 5. TARGET MANAGEMENT
+
+## Create User Target
+
+Advertiser campaign के अंदर specific targets बना सकेगा।
+
+### Target Types
+
+* Watch Advertisement
+* Complete Video
+* Visit Destination
+* Click Advertisement
+* Install App
+* Complete Registration
+* Complete Verified Action
+* Visit Sponsored Page
+* Engage With Sponsored Content
+* Complete Campaign Task
+* Custom Verified Target
+
+### Target Conditions
+
+* Minimum Watch Time
+* Required Action
+* Completion Percentage
+* Valid Click
+* Valid Visit
+* Conversion Event
+* Verification Requirement
+* Daily Limit
+* Campaign Limit
+
+---
+
+# 6. COIN REWARD SYSTEM
+
+## Reward Configuration
+
+हर target के लिए advertiser reward configure कर सकेगा:
+
+* Reward Coins
+* Bonus Coins
+* First-Time Bonus
+* Completion Bonus
+* Streak Bonus
+* Campaign Bonus
+* Limited-Time Bonus
+* Maximum Rewards Per User
+* Daily User Reward Limit
+* Campaign Reward Limit
+* Total Reward Pool
+
+### Example
+
+```text
+Campaign
+   ↓
+Watch Advertisement
+   ↓
+Complete Required Watch Time
+   ↓
+Verification
+   ↓
+Target Completed
+   ↓
++10 Coins
+```
+
+### Important Reward States
+
+* Reward Pending
+* Verification Pending
+* Reward Approved
+* Reward Rejected
+* Reward Reversed
+* Reward Expired
+* Reward Locked
+
+---
+
+# 7. USER REWARD CENTER
+
+## User Dashboard
+
+हर user के लिए:
+
+### Coin Balance
+
+* Available Coins
+* Pending Coins
+* Locked Coins
+* Lifetime Earned
+* Lifetime Spent
+* Lifetime Redeemed
+* Expired Coins
+
+### Earning Activity
+
+* Ads Watched
+* Targets Completed
+* Tasks Completed
+* Coins Earned
+* Bonuses Earned
+* Rejected Rewards
+* Reversed Rewards
+
+### Available Opportunities
+
+* Available Ads
+* Available Targets
+* Recommended Targets
+* High-Reward Targets
+* Limited-Time Targets
+* Personalized Campaigns
+
+---
+
+# 8. TARGET PROGRESS SYSTEM
+
+User को हर target का clear progress दिखे:
+
+```text
+Campaign: Example Brand
+
+Target:
+Watch Video
+
+Progress:
+████████░░ 80%
+
+Required:
+60 Seconds
+
+Completed:
+48 Seconds
+
+Reward:
++10 Coins
+
+Status:
+In Progress
+```
+
+Completion के बाद:
+
+```text
+Target Completed
+       ↓
+Verification
+       ↓
+Approved
+       ↓
++10 Coins
+```
+
+---
+
+# 9. COIN WALLET
+
+## Wallet Dashboard
+
+* Coin Balance
+* Pending Coins
+* Locked Coins
+* Earned Coins
+* Spent Coins
+* Redeemed Coins
+* Expired Coins
+
+## Transaction History
+
+* Date
+* Campaign
+* Target
+* Coins
+* Status
+* Transaction ID
+* Verification Status
+* Reason
+
+## Wallet Security
+
+* Duplicate Reward Prevention
+* Transaction Validation
+* Reward Reversal
+* Suspicious Transaction Detection
+* Wallet Audit Log
+
+---
+
+# 10. REWARD VERIFICATION ENGINE
+
+यह system का सबसे महत्वपूर्ण हिस्सा है।
+
+```text
+User Starts Target
+        ↓
+Target Activity Tracking
+        ↓
+Action Verification
+        ↓
+Eligibility Check
+        ↓
+Fraud Check
+        ↓
+Completion Validation
+        ↓
+Reward Calculation
+        ↓
+Coin Approval
+        ↓
+Coin Wallet
+```
+
+### Verification Checks
+
+* Watch-Time Verification
+* Action Verification
+* Session Verification
+* Device Signals
+* Duplicate Completion Detection
+* Abnormal Activity Detection
+* Campaign Eligibility
+* User Eligibility
+* Frequency Limit
+* Reward Limit
+* Campaign Budget Availability
+
+---
+
+# 11. ANTI-FRAUD SYSTEM
+
+## User Fraud Detection
+
+* Bot Detection
+* Automated Activity Detection
+* Fake View Detection
+* Fake Click Detection
+* Abnormal Watch-Time Detection
+* Repeated Action Detection
+* Multi-Account Abuse Detection
+* Reward Farming Detection
+* Suspicious Device Activity
+* Suspicious Session Activity
+
+## Advertiser Fraud Protection
+
+* Fake Campaign Detection
+* Invalid Traffic Detection
+* Suspicious Conversion Detection
+* Abnormal Campaign Activity
+* Budget Abuse Detection
+
+## Fraud Actions
+
+* Flag
+* Hold Reward
+* Reject Reward
+* Reverse Reward
+* Limit Account
+* Suspend Campaign
+* Escalate for Review
+
+---
+
+# 12. REWARD ECONOMY CONTROL
+
+Admin को पूरे coin economy पर control होना चाहिए।
+
+### Coin Controls
+
+* Coin Creation Rules
+* Reward Rate
+* Campaign Reward Rate
+* Bonus Rate
+* Maximum Daily Earnings
+* Maximum Campaign Earnings
+* Expiration Rules
+* Redemption Rules
+* Reward Limits
+* Global Reward Limits
+
+### Economy Monitoring
+
+* Coins Issued
+* Coins Pending
+* Coins Redeemed
+* Coins Expired
+* Coins Reversed
+* Outstanding Coin Liability
+* Reward Pool Balance
+* Campaign Reward Utilization
+
+---
+
+# 13. AD AUCTION & DELIVERY
+
+जब multiple campaigns eligible हों:
+
+```text
+Ad Request
+    ↓
+Eligible Campaigns
+    ↓
+Targeting Check
+    ↓
+User Eligibility
+    ↓
+Budget Check
+    ↓
+Reward Availability
+    ↓
+Bid / Quality / Relevance
+    ↓
+Auction
+    ↓
+Winning Campaign
+    ↓
+Ad Delivery
+```
+
+### Delivery Controls
+
+* Frequency Cap
+* User Eligibility
+* Placement Eligibility
+* Geographic Eligibility
+* Budget Availability
+* Reward Availability
+* Campaign Priority
+* Schedule
+* Pacing
+
+---
+
+# 14. USER TARGETING
+
+### Basic Targeting
+
+* Country
+* State
+* City
+* Language
+* Age Range
+* Device
+
+### Advanced Targeting
+
+* Interests
+* Content Categories
+* Engagement
+* Device Type
+* Operating System
+* Platform
+* Usage Patterns
+* Campaign History
+
+### Audience Controls
+
+* Custom Audience
+* Saved Audience
+* Lookalike Audience
+* Retargeting Audience
+* Excluded Audience
+* Frequency Controls
+
+Targeting को applicable privacy, consent और platform rules के अनुसार implement किया जाना चाहिए।
+
+---
+
+# 15. ADVERTISER ANALYTICS
+
+## Campaign Analytics
+
+* Impressions
+* Reach
+* Verified Views
+* Clicks
+* CTR
+* Video Completion
+* Watch Time
+* Target Completion Rate
+* Conversion Rate
+* Cost Per Result
+* Cost Per Verified Target
+* Reward Cost
+* Total Spend
+* ROAS
+
+## Reward Analytics
+
+* Total Rewards
+* Coins Issued
+* Cost Per Reward
+* Completion Rate
+* Reward Approval Rate
+* Reward Rejection Rate
+* Reward Reversal Rate
+* Average Coins Per User
+* Cost Per Completed Target
+
+---
+
+# 16. USER ANALYTICS
+
+Admin और advertiser के लिए aggregated analytics:
+
+* Active Reward Users
+* Target Participants
+* Completion Rate
+* Average Targets Completed
+* Average Coins Earned
+* Reward Engagement
+* Campaign Participation
+* Retention After Reward
+* Repeat Participation
+* Reward Conversion
+
+Individual users की unnecessary personal data exposure से बचते हुए analytics को appropriate aggregation और privacy controls के साथ रखा जाए।
+
+---
+
+# 17. AI OPTIMIZATION
+
+## AI Campaign Intelligence
+
+* Campaign Performance Analysis
+* Target Performance Analysis
+* Reward Optimization Suggestions
+* Budget Optimization
+* Placement Optimization
+* Audience Optimization
+* Creative Recommendations
+* Underperforming Campaign Detection
+* Reward Abuse Detection
+* Anomaly Detection
+* Campaign Forecasting
+
+## AI Recommendations
+
+उदाहरण:
+
+```text
+Campaign Performance Alert
+
+Target Completion Rate: 18%
+
+AI Recommendation:
+The current target has low completion.
+Consider reviewing:
+• Required action
+• Reward amount
+• Ad length
+• Placement
+```
+
+AI को recommendation देना चाहिए, लेकिन advertiser को बिना स्पष्ट authorization के महत्वपूर्ण financial changes नहीं करने चाहिए।
+
+---
+
+# 18. ADMIN CONTROL CENTER
+
+## Platform Administration
+
+* All Advertisers
+* All Campaigns
+* All Ads
+* All Targets
+* All Rewards
+* All Coin Transactions
+* All Users
+* Fraud Alerts
+* Compliance Alerts
+* Revenue
+* Reward Liability
+
+## Admin Actions
+
+* Approve Campaign
+* Reject Campaign
+* Pause Campaign
+* Resume Campaign
+* Suspend Advertiser
+* Review Reward
+* Reverse Reward
+* Investigate Fraud
+* Adjust Campaign Limits
+* Configure Platform Rules
+
+---
+
+# 19. MODERATION & COMPLIANCE
+
+### Ad Review
+
+* Pending Review
+* Approved
+* Rejected
+* Restricted
+* Suspended
+
+### Review Checks
+
+* Ad Content
+* Landing Page
+* Destination
+* Claims
+* User Safety
+* Policy Compliance
+* Targeting Compliance
+* Reward Conditions
+
+### Appeals
+
+* Appeal Submission
+* Appeal Status
+* Review History
+* Final Decision
+* Decision Reason
+
+---
+
+# 20. BILLING & FINANCE
+
+## Advertiser Billing
+
+* Wallet
+* Payments
+* Deposits
+* Spending
+* Refunds
+* Credits
+* Invoices
+* Taxes
+* Transactions
+
+## Financial Separation
+
+System में इन balances को अलग रखना चाहिए:
+
+```text
+Advertising Budget
+        +
+Reward Budget
+        +
+Platform Revenue
+        +
+Pending Reward Liability
+        +
+Refund / Reserve Balance
+```
+
+इससे accounting में यह गड़बड़ नहीं होगी कि advertiser का पैसा, platform revenue और users के pending rewards एक ही bucket में पड़े हैं। इंसानों ने accounting इसी तरह कठिन बनाई है, इसलिए software को कम-से-कम समझदार होना चाहिए।
+
+---
+
+# 21. NOTIFICATION CENTER
+
+### User Notifications
+
+* New Target Available
+* Target Completed
+* Coins Earned
+* Reward Pending
+* Reward Approved
+* Reward Rejected
+* Reward Reversed
+* Bonus Available
+* Campaign Ending
+
+### Advertiser Notifications
+
+* Campaign Approved
+* Campaign Rejected
+* Budget Low
+* Reward Budget Low
+* Target Performance Alert
+* Fraud Alert
+* Campaign Completed
+
+### Admin Notifications
+
+* Fraud Alert
+* System Alert
+* High Reward Liability
+* Unusual Campaign Activity
+* Payment Issue
+* Compliance Issue
+
+---
+
+# 22. REPORTING CENTER
+
+### Reports
+
+* Campaign Report
+* Ad Performance Report
+* Target Report
+* Reward Report
+* Coin Economy Report
+* User Participation Report
+* Fraud Report
+* Revenue Report
+* Financial Report
+* Advertiser Report
+* Compliance Report
+
+### Export
+
+* CSV
+* XLSX
+* PDF
+* API
+* Scheduled Reports
+
+---
+
+# 23. ROLE & PERMISSION SYSTEM
+
+### Roles
+
+* Super Admin
+* Admin
+* Ads Manager
+* Finance Manager
+* Fraud Analyst
+* Compliance Manager
+* Support Agent
+* Advertiser
+* Advertiser Manager
+* Advertiser Analyst
+
+### Permission Controls
+
+* View
+* Create
+* Edit
+* Approve
+* Reject
+* Pause
+* Delete
+* Refund
+* Reward Adjustment
+* Financial Access
+* Analytics Access
+* Fraud Access
+* Compliance Access
+
+---
+
+# 24. COMPLETE DASHBOARD NAVIGATION
+
+```text
+ADS & REWARDS
+│
+├── Overview
+│
+├── Advertisers
+│   ├── All Advertisers
+│   ├── Verification
+│   ├── Accounts
+│   ├── Wallets
+│   └── Activity
+│
+├── Campaigns
+│   ├── All Campaigns
+│   ├── Active
+│   ├── Draft
+│   ├── Scheduled
+│   ├── Completed
+│   └── Archived
+│
+├── Ads
+│   ├── All Ads
+│   ├── Creatives
+│   ├── Videos
+│   ├── Images
+│   └── Placements
+│
+├── Targets
+│   ├── All Targets
+│   ├── Active Targets
+│   ├── Completed Targets
+│   ├── Pending Verification
+│   └── Rejected Targets
+│
+├── Rewards
+│   ├── Reward Rules
+│   ├── Reward Queue
+│   ├── Approved
+│   ├── Rejected
+│   ├── Reversed
+│   └── Reward Pool
+│
+├── Coins
+│   ├── Coin Economy
+│   ├── Issued
+│   ├── Pending
+│   ├── Redeemed
+│   ├── Expired
+│   └── Transactions
+│
+├── Users
+│   ├── Participants
+│   ├── Earnings
+│   ├── Activity
+│   └── Reward History
+│
+├── Targeting
+│   ├── Audiences
+│   ├── Custom Audiences
+│   ├── Retargeting
+│   ├── Lookalikes
+│   └── Exclusions
+│
+├── Analytics
+│   ├── Campaign
+│   ├── Ads
+│   ├── Targets
+│   ├── Rewards
+│   ├── Coins
+│   └── Revenue
+│
+├── Optimization
+│   ├── AI Insights
+│   ├── A/B Testing
+│   ├── Automated Rules
+│   └── Recommendations
+│
+├── Fraud & Security
+│   ├── Fraud Alerts
+│   ├── Investigations
+│   ├── Risk Monitoring
+│   └── Audit Logs
+│
+├── Moderation
+│   ├── Ad Review
+│   ├── Campaign Review
+│   ├── Policy
+│   └── Appeals
+│
+├── Billing & Finance
+│   ├── Advertiser Wallets
+│   ├── Payments
+│   ├── Transactions
+│   ├── Invoices
+│   ├── Refunds
+│   └── Financial Reports
+│
+├── Reports
+│   ├── Campaign Reports
+│   ├── Reward Reports
+│   ├── Coin Reports
+│   ├── Revenue Reports
+│   ├── Fraud Reports
+│   └── Export Center
+│
+├── Notifications
+│
+├── Team & Permissions
+│
+├── Integrations & API
+│
+└── Settings
+    ├── Ad Settings
+    ├── Reward Settings
+    ├── Coin Settings
+    ├── Fraud Settings
+    ├── Billing Settings
+    ├── Notification Settings
+    └── Security Settings
+```
+
+# CORE BUSINESS FLOW
+
+```text
+ADVERTISER
+     │
+     ↓
+Create Campaign
+     │
+     ↓
+Set Target
+     │
+     ↓
+Set Reward
+     │
+     ↓
+Fund Campaign
+     │
+     ↓
+Ad Approval
+     │
+     ↓
+Ad Goes Live
+     │
+     ↓
+USER SEES ELIGIBLE TARGET
+     │
+     ↓
+USER COMPLETES REQUIRED ACTION
+     │
+     ↓
+VERIFICATION ENGINE
+     │
+     ├── Invalid → Reject
+     │
+     └── Valid
+           ↓
+      Target Approved
+           ↓
+       Coins Awarded
+           ↓
+      User Coin Wallet
+           ↓
+    Redemption / Spending
+```
+
+# KEY RULE
+
+**Coins should never be granted merely because an ad loaded.**
+
+The system should distinguish:
+
+**Ad Served → Ad Viewed → Required Action Completed → Action Verified → Target Approved → Coins Released**
+
+This gives you a proper **performance advertising + rewarded engagement + target completion + coin economy** system rather than a basic ad dashboard.
+
+यह architecture **Basic से Professional level तक एक ही unified system** रखता है, ताकि बाद में अलग-अलग dashboards जोड़कर Frankenstein software न बनाना पड़े।

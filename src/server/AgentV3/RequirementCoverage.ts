@@ -14,6 +14,7 @@
 
 import type { ProjectGraph } from './WorkspaceMemory';
 import { isAffirmativelyRequested } from './featureRequest';
+import { readsAsSpecification } from './enumeratedFeatures';
 
 export interface RequirementFinding {
   level: 'medium';
@@ -113,7 +114,16 @@ const FEATURES: FeatureSpec[] = [
   // `artifact` is broad (synonyms + common real component names) so a feature built under a
   // reasonable alternate name still counts — the module stays high-precision, not nagging.
   { label: 'file / image upload', request: /\b(upload|file upload|image upload|attach(ment)?)\b/i, artifact: /(upload|dropzone|filepicker|attach)/i, evidence: /type\s*=\s*["'{]\s*file\b|\bnew FormData\(|\bmulter\(|\.files\[0\]/i },
-  { label: 'calendar / booking / appointment', request: /\b(calendar|booking|appointment|schedul(e|ing)|reservation)\b/i, artifact: /(calendar|booking|appointment|schedul|reservation|datepicker)/i },
+  {
+    label: 'calendar / booking / appointment',
+    request: /\b(calendar|booking|appointment|schedul(e|ing)|reservation)\b/i,
+    // A SCHEDULED report, post or campaign is a timing setting, not something a customer books
+    // (autopsy 6461025c: an ads platform's "Scheduled Reports" and a campaign's delivery "Schedule"
+    // became a calendar-booking page). "book an appointment", "booking calendar", "class schedule" keep
+    // their meaning.
+    notRequest: /\bschedul(?:e|ed|ing)\s+(?:reports?|exports?|posts?|emails?|jobs?|tasks?|campaigns?|ads?|deliver(?:y|ies)|publish(?:ing)?|backups?)\b|\b(?:reports?|exports?|posts?|emails?|campaigns?|ads?|backups?|cron)\s+schedul(?:e|es|ed|ing)\b|\b(?:campaign|ad|delivery|publishing|posting|report|backup|cron)\s+schedul(?:e|es|ing)\b|\bschedul(?:e|ed)\s*,\s*(?:completed|archived|draft|active)\b/gi,
+    artifact: /(calendar|booking|appointment|schedul|reservation|datepicker)/i,
+  },
   {
     label: 'reviews / ratings',
     request: /\b(review|reviews|rating|ratings)\b/i,
@@ -121,7 +131,9 @@ const FEATURES: FeatureSpec[] = [
     // 2026-09-29): a JEE planner's "Weekly Review — every Sunday, hours studied, weak areas" was handed to
     // the builder as "reviews / ratings — build every one of these", and it built a star-rating page
     // nobody asked for. "product reviews", "ratings and reviews", "customer reviews" keep their meaning.
-    notRequest: /\b(?:daily|nightly|weekly|monthly|quarterly|yearly|annual|sunday|weekend|periodic|self|progress|performance|code|pull[- ]request|pr|peer|design|mid[- ]?term|end[- ]of[- ](?:day|week|month|year))\s*-?\s*reviews?\b|\breviews?\s+(?:of\s+(?:the\s+|my\s+|your\s+)?(?:day|week|month|year|progress|mistakes|goals)|(?:every|each)\s+(?:day|night|week|sunday|month))\b/gi,
+    // …and neither is a MODERATION review — an ad, campaign or content item waiting for an admin's
+    // approval (autopsy 6461025c: "Ad Review", "Pending Review", "Review Checks" became a star-rating page).
+    notRequest: /\b(?:ad|ads|campaign|content|policy|compliance|moderation|manual|admin|kyc|account|application|appeal|security|risk|fraud)\s+reviews?\b|\b(?:pending|under|awaiting|in|for|escalate\s+for)\s+review\b|\breview\s+(?:checks?|queue|history|status|process|flow|workflow|pending|required|period)\b|\b(?:daily|nightly|weekly|monthly|quarterly|yearly|annual|sunday|weekend|periodic|self|progress|performance|code|pull[- ]request|pr|peer|design|mid[- ]?term|end[- ]of[- ](?:day|week|month|year))\s*-?\s*reviews?\b|\breviews?\s+(?:of\s+(?:the\s+|my\s+|your\s+)?(?:day|week|month|year|progress|mistakes|goals)|(?:every|each)\s+(?:day|night|week|sunday|month))\b/gi,
     artifact: /(review|rating|star)/i,
   },
   { label: 'comments', request: /\bcomments?\b/i, artifact: /(comment|discuss|reply|replies)/i },
@@ -213,6 +225,9 @@ export function currentRequestForCoverage(requests: ReadonlyArray<string>): stri
 export function requestedFeatureLabels(request: string): string[] {
   const req = (request || '').toString();
   if (!req.trim()) return [];
+  // A written specification already names what to build, in its own terms; our table would only
+  // restate it as ten generic categories, some of them misread (see `readsAsSpecification`).
+  if (readsAsSpecification(req)) return [];
   // Negation-aware, exactly like the audit — "no login" must not become a requirement to build one.
   return FEATURES.filter((f) => featureAskedFor(req, f)).map((f) => f.label);
 }
@@ -334,7 +349,9 @@ export function analyzeRequirementCoverage(
   const confirmedMissing: string[] = [];
   const graded = declined && declined.size ? FEATURES.filter((f) => !declined.has(f.label)) : FEATURES;
 
-  for (const feat of graded) {
+  // Graded on the same list the builder was given: none, for a written specification.
+  const specification = readsAsSpecification(req);
+  for (const feat of specification ? [] : graded) {
     // Negation-aware (deep-test App #1): "No settings, no other features" must NOT count settings as
     // requested — a plain keyword test flagged a false "Requested feature not found: settings".
     if (!featureAskedFor(req, feat)) continue;

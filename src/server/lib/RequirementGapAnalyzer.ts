@@ -340,6 +340,10 @@ const NON_DOMAIN_USES: RegExp[] = [
   /\bjobs?\s+(?:is|was|are|were)\s+to\b/gi,
   /\b(?:cron|background|scheduled|batch|build|queue|worker|async|print)\s+jobs?\b/gi,
   /\bjobs?\s+(?:queue|runner|scheduler|id)\b/gi,
+  // An ad PLACEMENT is where an advert is shown, not a hire (autopsy 6461025c: an ads platform's
+  // "Placement Eligibility" and "Placement Optimization" made it a jobs app).
+  /\b(?:ad|ads|banner|campaign|in-feed|native)\s+placements?\b/gi,
+  /\bplacements?\s+(?:eligibility|optimi[sz]ation|targeting|controls?|rules?|performance|slots?)\b/gi,
   // jobs — "resume the build", "resume from where you left off": continue, not a CV.
   /\bresumes?\s+(?:the|this|that|my|our|it|from|where|building|work|again)\b/gi,
   // jobs — resuming MEDIA or a transfer is a player control, not a CV (autopsy 6a4a799f: a music app's

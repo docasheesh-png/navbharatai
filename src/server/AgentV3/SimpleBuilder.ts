@@ -14,7 +14,7 @@
 // fully unit-testable without a sandbox.
 
 import { dropShadowingEntries } from './entryShadow';
-import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE } from './noEvalRule';
+import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE } from './noEvalRule';
 import { posix } from 'node:path';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { deadlineFromBudget } from './turnDeadline';
@@ -375,6 +375,8 @@ export function fileSystemPrompt(framework: string): string {
     BUILD_WHAT_WAS_ASKED_RULE,
     NO_FAKED_RESULT_RULE,
     STABLE_SNAPSHOT_RULE,
+    CORS_RULE,
+    SEED_PASSWORD_RULE,
     ...webPlatformRule(framework),
     ...exportImportConvention(framework),
     ...designContractFor(framework),

@@ -29,7 +29,7 @@ import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
 import { decideBuildNudge, standDownNote } from './nudgeToBuild';
 import { decideUnfinishedResume, unfinishedResumeStandDownNote, unfinishedResumeNote } from './unfinishedResume';
-import { decideStyleResume, styleResumeNote } from './stylePolishResume';
+import { decideStyleResume, doneStyleNote, styleResumeEnabled, styleResumeNote } from './stylePolishResume';
 import { asPlatformRequest } from './platformRequest';
 import { streamThinkingToChat } from './thinkingStream';
 import { PROMPT_PREVIEW_SEPARATOR } from './promptPreviewShape';
@@ -1294,7 +1294,17 @@ export class AgentRunner {
               doneText = doneSteer(readiness);
               if (doneText) {
                 doneSignalled = true;
-                events.emit({ type: 'narration', agent: agentRole, ts: Date.now(), text: '✅ The app looks complete — wrapping up.' });
+                // Not "complete" while the screens use classes no stylesheet defines (autopsy 2f723acb): the
+                // model is told which, in the same steer, and the user is not told the app is finished.
+                let styleNote = '';
+                try {
+                  if (styleResumeEnabled()) {
+                    const style = await dispatcher.undefinedClassesNow();
+                    styleNote = doneStyleNote(style.missing, style.sheet);
+                  }
+                } catch { /* the style read is advisory — the done steer stands without it */ }
+                if (styleNote) doneText = `${doneText}\n\n${styleNote}`;
+                else events.emit({ type: 'narration', agent: agentRole, ts: Date.now(), text: '✅ The app looks complete — wrapping up.' });
               }
             }
           }

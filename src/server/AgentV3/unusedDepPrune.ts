@@ -197,3 +197,27 @@ export async function pruneBuildAddedDeps(candidates: readonly string[], package
     return { status: 'reverted', reason: 'the removal could not be completed', tried: remove, keptForPeers };
   }
 }
+
+/**
+ * The report line for a declared package no project file imports. PURE.
+ *
+ * 🔴 AUTOPSY 73648e12 (2026-10-01). The user stopped a build 108 s in, right after it had run
+ * `npm install react-router-dom` and before it had written the screens that import it; the report then
+ * WARNED that react-router-dom was unused and suggested removing it. On a build that did not finish, a
+ * package THIS build added is "not used yet", not unused — removing it would break the next turn, which
+ * writes the screens that need it. Such a line is information about where the build stopped, never a
+ * finding against the app. A package the user already had is reported as before.
+ */
+export function unusedDependencyLine(name: string, opts: { unfinished: boolean; addedThisBuild: boolean }): { severity: 'info' | 'warning'; message: string; autoResolved?: true } {
+  if (opts.unfinished && opts.addedThisBuild) {
+    return {
+      severity: 'info',
+      autoResolved: true,
+      message: `"${name}" was installed by this build, which ended before the files that use it were written — it is not used yet, and it is kept for the next turn.`,
+    };
+  }
+  return {
+    severity: 'warning',
+    message: `"${name}" is declared in package.json dependencies but no project file imports it. If it is used only via config, a CLI, or a runtime string-load, ignore this; otherwise removing it shrinks the install.`,
+  };
+}

@@ -20,6 +20,13 @@
 //   • the user's own message, always, first, unchanged — nothing here can hide it;
 //   • attached-file text (already extracted, redacted and fenced by the caller), because the file IS
 //     this turn's request — capped, so a 200-page PDF cannot turn a sizing heuristic into a stall;
+//   • 🔴 …and while the app that exists is still UNBUILT (autopsy 2f723acb, 2026-10-01). A UPSC mock-test
+//     build was stopped at 108 s after writing `types.ts` and `store.tsx`; the user then pressed Continue.
+//     Two files of their own made the workspace "an app", so this block dropped the original request and
+//     every sizer read "Continue from where you left off…" alone: complexity 5 (the score of "hi"), a
+//     3–5 minute estimate, the cheapest rung — for an 11.5-minute, 26-file build the builder made from
+//     the very request this block had set aside. The entry point was still our starter, which is a
+//     positive reading that the app was never assembled; the route passes it as `appStillUnbuilt`.
 //   • the earlier requests of this workspace, ONLY while no user app exists yet. On a fresh workspace
 //     the earlier turns are the spec being built (the builder already receives them as project
 //     context); on an existing app they describe work already done, and adding them to "make the
@@ -77,6 +84,13 @@ export interface PlanningRequestInput {
   recentTurns?: ReadonlyArray<{ text: string; lane?: RequestLane }> | null;
   /** Does the workspace already hold a user app? Earlier requests are added only when it does not. */
   userAppExists: boolean;
+  /**
+   * The workspace holds files of the user's, but the app's entry point is still OUR starter — an earlier
+   * build was stopped or failed before the app was assembled (autopsy 2f723acb). The earlier requests are
+   * then still the spec being built, exactly as on an empty workspace. Only a POSITIVE reading sets this;
+   * an unreadable entry leaves it false, which is today's behaviour.
+   */
+  appStillUnbuilt?: boolean;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -132,14 +146,17 @@ export function planningRequest(input: PlanningRequestInput): PlanningRequest {
     ...(Array.isArray(input.recentRequests) ? input.recentRequests : []),
     ...(Array.isArray(input.recentTurns) ? input.recentTurns.filter(wasBuildRequest).map((t) => t.text) : []),
   ];
-  if (!input.userAppExists && candidates.length > 0) {
+  const noFinishedApp = !input.userAppExists || input.appStillUnbuilt === true;
+  if (noFinishedApp && candidates.length > 0) {
     const own = prompt.trim();
     const earlier = candidates
       .filter((r): r is string => typeof r === 'string' && r.trim().length > 0 && r.trim() !== own)
       .slice(-PLANNING_EARLIER_REQUESTS);
     if (earlier.length > 0) {
       parts.push([
-        '[Earlier in this conversation — no app has been built yet, so these describe the app being asked for:]',
+        input.userAppExists
+          ? '[Earlier in this conversation — the app was started but never finished, so these still describe the app being asked for:]'
+          : '[Earlier in this conversation — no app has been built yet, so these describe the app being asked for:]',
         ...earlier.map((r) => `- ${clip(r, PLANNING_EARLIER_REQUEST_MAX)}`),
       ].join('\n'));
       sources.push('earlier-requests');

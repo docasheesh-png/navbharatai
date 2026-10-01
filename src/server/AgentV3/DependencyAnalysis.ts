@@ -391,7 +391,7 @@ export function detectVersionConflicts(packageJsonContent: string | null): Depen
  * Handles the double-underscore scoped convention: `@types/babel__core` → `@babel/core`.
  * `@types/node` maps to `node` (which is never a declared dependency, so it is naturally skipped).
  */
-function typesToRuntime(name: string): string | null {
+export function typesToRuntime(name: string): string | null {
   if (!name.startsWith('@types/')) return null;
   const sub = name.slice('@types/'.length);
   if (!sub) return null;
@@ -404,7 +404,7 @@ function typesToRuntime(name: string): string | null {
 }
 
 /** The major-version number a range's lowest admissible version carries (e.g. "^18.2.0" → 18), or null. */
-function rangeMajor(range: string): number | null {
+export function rangeMajor(range: string): number | null {
   const floor = rangeFloor(range);
   if (!floor) return null;
   const major = Number.parseInt(floor.split('.')[0], 10);

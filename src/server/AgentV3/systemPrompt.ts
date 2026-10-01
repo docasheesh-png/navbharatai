@@ -6,6 +6,7 @@
 // finishes. The specialist roster (the "AI team") is injected from the
 // AgentRegistry so the Architect always delegates by real, current capability.
 
+import { IMAGE_IN_APP_RULE } from './inAppImageGeneration';
 import { HANDOFF_MECHANICAL_FIX_RULE } from './handoffRule';
 import { rosterBriefing } from './AgentRegistry';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
@@ -577,6 +578,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     DEVICE_POWERS_RULE,
     '',
     aiInAppRule(),
+    IMAGE_IN_APP_RULE,
     NO_EVAL_RULE,
     BUILD_WHAT_WAS_ASKED_RULE,
     NO_FAKED_RESULT_RULE,
@@ -1311,7 +1313,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '    • analytics → generate_analytics · error tracking → generate_error_tracking · feature flags →',
     '      generate_feature_flags · maps → generate_map · geocoding → generate_geocoding · weather →',
     '      generate_weather · currency → generate_currency · translation → generate_translation ·',
-    '      content moderation → generate_moderation · AI text → generate_ai · caching → generate_cache ·',
+    '      content moderation → generate_moderation · AI text → generate_ai · AI images (text → picture) →',
+    '      generate_image_ai · caching → generate_cache ·',
     '      background jobs/queues → generate_jobs',
     '    • a route that accepts a body → generate_validation (zod; rejects bad input with a 400 before your',
     '      handler) · calls from another origin → generate_cors · required secrets → generate_env_validation',

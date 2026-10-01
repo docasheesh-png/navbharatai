@@ -337,6 +337,7 @@ import { runOneShot, classifyForOneShot, classifyForSimpleLane, oneShotEnabled, 
 import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/laneFailure';
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame } from '../AgentV3/fastLaneRung';
+import { fastLaneSkipsImageApp } from '../AgentV3/inAppImageGeneration';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, type RepairStrategy } from '../AgentV3/SimpleBuilder';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
@@ -16540,10 +16541,18 @@ async function noteBuildOutcome(
           buildDiag.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_SKIPPED_GAME', autoResolved: true, message: 'Skipped the fast lane: a game is built with the game tools (loop, input, 3D, audio), and only the full builder can run them. Building directly with the full builder.' });
         }
       }
+      // An app that makes pictures is built with the image recipe, which only the full builder can run.
+      let fastLaneImageSkip = false;
+      if (fastLaneWouldRun && !fastLaneRung.skip && !fastLaneGameSkip) {
+        try { fastLaneImageSkip = fastLaneSkipsImageApp(prompt); } catch { fastLaneImageSkip = false; }
+        if (fastLaneImageSkip) {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_SKIPPED_IMAGE_APP', autoResolved: true, message: 'Skipped the fast lane: an app that makes pictures is built with the image-generation recipe, and only the full builder can run it. Building directly with the full builder.' });
+        }
+      }
       if (fastLaneRung.skip) {
         buildDiag.record({ phase: 'build', severity: 'info', code: 'FAST_LANE_SKIPPED_REASONING_RUNG', message: 'Skipped the fast lane: the engine this build opens on always reasons first, so the lane could not finish its plan step in time. Building directly with the full builder.', autoResolved: true, detail: fastLaneRung.reason });
       }
-      if (fastLaneWouldRun && !fastLaneRung.skip && !fastLaneGameSkip) {
+      if (fastLaneWouldRun && !fastLaneRung.skip && !fastLaneGameSkip && !fastLaneImageSkip) {
         // Usage ACCUMULATES across every cheap call (manifest + each per-file call), so billing is honest.
         const osUsage = { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 };
         // 🔴 THE SCAFFOLD MUST EXIST BEFORE THE PLAN READS IT (autopsy b47c56d8, 2026-09-30). The

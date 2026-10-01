@@ -171,6 +171,7 @@ const NEVER_SUGGEST = new Set([
   // Our own lane's phase timings — a measurement, never a next move for the user.
   'FAST_LANE_PHASES',
   'FAST_LANE_SKIPPED_GAME',
+  'FAST_LANE_SKIPPED_IMAGE_APP',
   // What our own failed provider calls cost — our routing's problem, never the user's next move.
   'PROVIDER_TIME_WASTED',
   'PREVIEW_SERVER_RESTARTED',

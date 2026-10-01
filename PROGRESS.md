@@ -85995,3 +85995,61 @@ Tests: `tests/theSalesSampleHadTwoHelperHomes.test.ts`, reversion-proven for all
   `vite.config.ts` over the scaffold's own. That caused the TS6133s (fixed for free) and a 16 s `npm install`
   at the first `tsc`. These files are editable on purpose, because apps add dependencies. Whether the plan may
   REWRITE them wholesale is not decided here.
+
+## 2026-10-01 — Autopsy a106df77: the user pasted their own app, and every reader read the markup
+
+The user pasted a whole HTML file into the build box, with nothing else written. It was their own "A1 Decor
+India" bill maker, version 40. The build ran on Weak, cost ₹184.34 and took 8.4 min. It succeeded: the app
+rendered, typechecked and built for production. But the prompt was read as if it were a sentence:
+- The published `<title>`, og tags and manifest name became `<!doctype html> <html lang="en"> <head>`.
+- The summary opened with a false warning: "You asked for “width=device-width,initial-scale=1”…".
+- The feature probe looked for controls named after words in the CSS and JS.
+- The new app dropped the "Items" tab the user already had.
+
+**Tally:**
+- ✅ Self-healed (3):
+  - 14 undefined classes and one unstyled page were fixed by the design pass, which took 183 s after the answer.
+  - Two type errors were fixed in two edits.
+  - One missing import was added by the deterministic pass.
+- 🔀 Worked around (0).
+- ⏭️ Skipped (2):
+  - An unused `recharts` dependency was installed and never imported.
+  - A deprecated `@types/react-router-dom@5` was installed beside RR6, and the advice said to "set it to ^6", a version that does not exist.
+- ❌ Shipped imperfect (4):
+  - The published name and description were raw HTML.
+  - The off-topic warning was false, and it was shown above the summary.
+  - The platform's closing additions were never shown (`SUMMARY_REPLY_NOT_FOUND`).
+  - The "Items" screen from the user's app was missing.
+- 🥵 Struggle (3):
+  - The write-time "classes have no rule" note fired on five writes and was deferred every time.
+  - The page check found "no separate page routes" for an app with four.
+  - The New Bill journey ran on `/`, where the form is not.
+
+| Problem | Root cause | Class | Siblings found and fixed | Locked by |
+|---|---|---|---|---|
+| Published name/description = raw HTML | `nameFromPrompt` / `descriptionFromPrompt` read the prompt as words | A reader of the user's WORDS reads pasted code | `deriveTitle` (History title + GitHub repo name), `quotedAppName`, the feature readers via `withoutMachineText`, `rankFeatures` | `pastedSource.ts` (one detector); `withoutMachineText` reads `requestWords`; the size readers pass `keepPasted` so routing is unchanged (73, complex) |
+| False "You asked for “width=…”" warning | `quotedAppName` took the first quoted run with 2+ words: a `<meta content>` | Same | — | `readablePrompt` + a quoted run with `= < > { } ;` is never a name |
+| Feature probe asked for delete/filter | `.tabs` in the CSS and `removeItem` in the script | Same | RequirementGapAnalyzer, nativeCapabilities, enumeratedFeatures, appScopeAnalyzer (all via the choke point) | `requestWords`: the words around the paste, plus the page's visible text |
+| "Items" tab dropped | Nothing told the builder the paste WAS the spec | A pasted app read as loose inspiration | The fast lane gets the same brief | `pastedAppBrief.ts` (`PASTED_APP_BRIEF`; kill switch `AGENTV3_PASTED_APP_BRIEF=off`): name, every control, field and colour; "improve, never remove" |
+| `SUMMARY_REPLY_NOT_FOUND` | Narration strips celebration emoji while the build is running; the summary does not, so "ready. 🎉" never matched "ready." | Two views of one text, only one passed through the sanitizer | — | `summaryAdditions` compares through `sanitizeResponseEmoji(…, 'working')` |
+| "No separate page routes"; journey on `/` | Both readers dropped relative child `<Route path="new">` ("needs a parent to mean anything") | Nested React Router routes unreadable | `extractPageRoutes`, `routeFromRouter` | `routerPaths.ts` `declaredRoutes` joins parents (index routes, pathless layouts, comments skipped; an expression path is never guessed) |
+| Undefined classes deferred until a 183 s heal | Write-time notes are advisory and can be put off | The fourth report of this class (466c260a, 1389f0d5, 12c642ed, a106df77): each earlier fix added a better NOTE | — | `unstyledResume.ts`: a READY turn whose screens still use undefined classes gets the list and one more turn, in the same context (`UNSTYLED_CLASSES_RESUMED`; kill switch `AGENTV3_UNSTYLED_RESUME=off`) |
+| "Set @types/react-router-dom to ^6" | Both dependency checks compared majors and never asked whether the package ships its own types | Advice that names a version that does not exist | `DependencyAnalysis` and `ConstraintSolver` both | `lib/selfTypedPackages.ts` (one list): the advice is "remove it" |
+
+Tests: `tests/aPastedAppIsTheSpec.test.ts` (23 cases, using the report prompt verbatim in
+`tests/fixtures/autopsyA106df77.prompt.txt`). Each of seven fixes was reverted on its own, and each
+reversion fails the suite. Updated test: `theVenvWasNeverTheProject` ("a relative child path is not
+guessed"), which now expects `/app/new`. The parent is in the same file, so this is no longer a guess.
+
+**Still open (recorded, not changed):**
+- **The feature probe reads the HOME screen only.** On a multi-route app, a control that lives on another
+  route reads as absent. The sign-in case (8e124182) reads screens behind the door; a probe over
+  `extractPageRoutes` (which now finds nested routes) is the natural sibling. Not built here: it opens one
+  more browser per route, and its cost is a decision to make.
+- **Dependencies the build installed and never imported (`recharts`).** Each one adds to the install and
+  can bring advisories (2 moderate here, source not identified). An end-of-build tidy that uninstalls only
+  packages THIS build added and nothing imports would change the user's dependency set. That is put to the
+  admin, not done silently.
+- The pasted app was rebuilt as React with the kit. Whether a pasted single-file HTML app should stay a
+  single HTML file (the user's file mentions an Android WebView) is a product question. The brief now
+  keeps its features, name and colours either way.

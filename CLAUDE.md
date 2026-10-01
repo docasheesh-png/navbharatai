@@ -3153,6 +3153,25 @@ the flag entries above promise.
     its reply.
 
   Test-locked in `tests/theAskComesLast.test.ts`.
+- **📋 A PASTED APP IS THE SPEC, AND PASTED CODE IS NOT PROSE (autopsy a106df77, 2026-10-01).** Two keys, NEITHER
+  set, both default ON: **`AGENTV3_PASTED_APP_BRIEF`** (`off` drops the brief) and **`AGENTV3_UNSTYLED_RESUME`**
+  (`off` drops the end-of-turn style hand-back). A user pasted their own HTML bill maker with no other words.
+  The published title became `<!doctype html> <html lang="en"> <head>`, a `<meta content="width=…">` was shown
+  to them as "the app you asked for", and the rebuild dropped their "Items" tab.
+  - `lib/pastedSource.ts` is the ONE detector: an HTML document, or 8+ code lines making up most of the paste.
+  - Every reader of the user's WORDS reads `readablePrompt` (the text around the paste) or, through
+    `withoutMachineText`, those words plus the page's visible text. The size readers (`RequestAnalyser`,
+    `BuildTimeEstimator`) pass `keepPasted`, so routing is unchanged.
+  - The builder (both lanes) gets `pastedAppBrief`: the page's name, every tab, button, field and colour, and
+    "improve, never remove".
+  - Same autopsy, no keys: nested `<Route path="new">` routes are joined to their parents
+    (`routerPaths.ts`), and the page check and the journey read them. `summaryAdditions` matches through the
+    narration's emoji rule. `@types/X` beside a self-typed X is advised "remove it" (`lib/selfTypedPackages.ts`).
+  - A READY turn whose screens still use undefined classes gets them back once (`UNSTYLED_CLASSES_RESUMED`).
+    This is the fourth report of that class.
+  - ⚠️ Precision first: an ordinary prompt is returned byte for byte. A one-tag sentence or a stack trace is
+    not pasted source.
+  - Test-locked and reversion-proven in `tests/aPastedAppIsTheSpec.test.ts`.
 - **`AGENTV3_STORE_LOOP_NOTE`** (default ON, `off` disables — added 2026-09-29, autopsy 6a4a799f) — a
   write-time note (`storeEffectLoop.ts`, via `ToolDispatcher.writeSteeringNotes`) when a file binds a
   zustand hook with NO selector (`const store = useMusicStore()`), lists that bare name in an effect's

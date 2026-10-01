@@ -261,6 +261,7 @@ import { saveSpreadsheetFile, newSpreadsheetFileId } from '../lib/spreadsheetFil
 import { starterCompletedNote } from '../AgentV3/starterFragment';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
 import { summaryAdditions } from '../AgentV3/summaryAdditions';
+import { deletedFilesNotice, userVisibleDeletions } from '../AgentV3/deletedFilesNotice';
 import { credentialGuardEnabled, credentialGuardInstruction, findBootKillingEnvGuards, bootKillingGuardSummary, bootKillerRepairInstruction } from '../AgentV3/missingCredentialGuard';
 import { inrToWalletTokens } from '../lib/payments';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
@@ -14980,9 +14981,13 @@ async function noteBuildOutcome(
       // writes (autopsy e725e002). Armed with the files this build wrote, so a twin it wrote itself is
       // never touched; unarmed, nothing is removed.
       dispatcher.armShadowTwins(() => modelAuthoredPaths(writtenFiles));
+      // Every file this build removed, in order — the user is told about the ones their app had
+      // (deletedFilesNotice.ts, queue Q-019). The admin line below stays as it was.
+      const deletedThisBuild: string[] = [];
       dispatcher.setFileDeletionSink((paths) => {
         for (const p of paths) {
           writtenFiles.delete(p);
+          deletedThisBuild.push(p);
           try { buildDiag.record({ phase: 'build', severity: 'info', code: 'FILE_DELETED', message: `Removed from the project: ${p}`, autoResolved: true }); }
           catch { /* diagnostics are best-effort */ }
         }
@@ -17807,6 +17812,7 @@ async function noteBuildOutcome(
         const twins = [...new Set(dispatcher.shadowTwinTally().removed)];
         if (twins.length > 0) {
           await removeWorkspaceFiles(workspaceId, twins).catch(() => 0);
+          deletedThisBuild.push(...twins);
           buildDiag.record({
             phase: 'build', severity: 'info', code: 'SHADOW_TWIN_REMOVED', autoResolved: true,
             message: `Removed ${twins.length} stale copy(ies) of modules this build wrote — each would have been loaded INSTEAD of the new file (the dev server resolves .js before .ts/.tsx): ${twins.slice(0, 12).join(', ')}${twins.length > 12 ? ` and ${twins.length - 12} more` : ''}.`,
@@ -24563,6 +24569,34 @@ async function noteBuildOutcome(
         const stackNote = unsupportedStackUserNote(unsupportedStackAsked, framework);
         if (stackNote && !result.summary.includes(stackNote.trim())) result = { ...result, summary: `${result.summary}${stackNote}` };
       }
+      // A FILE THIS BUILD REMOVED FROM THE USER'S APP IS NAMED (queue Q-019, autopsy 4d538ca3). Only
+      // files the app had before this build, only when there was an app, and only those still absent at
+      // the end — a later write or the GreenGuard restore may have put one back, and the sentence must
+      // be true of the app the user receives. A read that fails is "absent"; a read that hangs past 5 s
+      // leaves the path off the list (silence is the old behaviour, a false claim would be worse).
+      try {
+        const candidates = userVisibleDeletions(deletedThisBuild, projectFilePaths, userAppExists)
+          .filter((p) => !writtenFiles.has(p))
+          .slice(0, 40);
+        if (candidates.length > 0 && typeof result.summary === 'string') {
+          const stillGone: string[] = [];
+          for (const p of candidates) {
+            const present = await raceTimeout(
+              actuator.readFile(workspaceId, p).then(() => true, () => false),
+              5_000, 'deletedFileProbe',
+            ).catch(() => null);
+            if (present === false) stillGone.push(p);
+          }
+          const note = deletedFilesNotice(stillGone);
+          if (note) {
+            result = { ...result, summary: `${result.summary}${note}` };
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: 'FILES_REMOVED_TOLD', autoResolved: true,
+              message: `The user's summary names ${stillGone.length} file(s) this build removed from their app: ${stillGone.slice(0, 12).join(', ')}${stillGone.length > 12 ? ` and ${stillGone.length - 12} more` : ''}.`,
+            });
+          }
+        }
+      } catch { /* telling the user is never worth failing a settle */ }
       const livePreviewLine = costBreakdown && result.ok ? livePreviewChargeLine(costBreakdown) : '';
       if (livePreviewLine && typeof result.summary === 'string') {
         result = { ...result, summary: `${result.summary}\n\n${livePreviewLine}` };

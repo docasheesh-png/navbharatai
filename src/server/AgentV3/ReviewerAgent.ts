@@ -347,6 +347,25 @@ export function leanReviewInline(
   return { files, omitted };
 }
 
+/**
+ * The paths this turn really changed, for the review: every written path, minus the files our own finishing
+ * passes wrote, minus a pre-seeded template file the build never touched (its content is still the seed).
+ *
+ * 🔴 WHY (autopsy 8257ca59, 2026-10-01). A calculator's builder edited ONE file, App.tsx. The 12 template
+ * files we pre-seeded were counted as "changed this turn" too, the template's 18 KB stylesheet was over
+ * the inline bound, so the lean review lost its no-tools, one-call mode (`leanReviewAnswersInOneCall`),
+ * ran glob/read/evaluate, overran its 45 s budget, and opened its reply with "I'll help you build the
+ * calculator app" — shown to the user after their app was finished. A template file the builder rewrote
+ * is real work and stays. PURE.
+ */
+export function reviewChangedPaths(
+  written: ReadonlyMap<string, string>,
+  finishing: ReadonlySet<string>,
+  preseeded: ReadonlyMap<string, string> = new Map(),
+): string[] {
+  return [...written.keys()].filter((p) => !finishing.has(p) && !(preseeded.has(p) && preseeded.get(p) === written.get(p)));
+}
+
 /** Changed files first, then the rest, capped at `REVIEW_TREE_CAP` with the remainder counted. Pure. */
 export const REVIEW_TREE_CAP = 60;
 export function reviewFileList(fileTree: readonly string[], changed: readonly string[]): string {

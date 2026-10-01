@@ -180,14 +180,36 @@ export const NO_DATA_ENTRY_REASON =
   + 'nothing to save and reload, so there is no such journey to prove';
 
 export function appHasNoDataEntry(files: Record<string, string>): boolean {
-  for (const src of Object.values(files ?? {})) {
+  return dataEntryEvidence(files) === null;
+}
+
+const DATA_ENTRY_SIGNS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/<(?:input|textarea|select|form)\b/i, 'a form element'],                                                     // real HTML form elements
+  [/<(?:Input|Textarea|TextField|Select|Form|Autocomplete|Checkbox|Radio|Switch|Slider)\b/, 'a form component'], // UI-library form components
+  [/\bon(?:Submit|Change|Input)\s*=/, 'a change/submit handler'],                                               // a change/submit handler
+  [/\bcontentEditable\b/i, 'an editable surface'],                                                             // an editable surface
+];
+
+/**
+ * WHICH file made `appHasNoDataEntry` answer false, and why — or null when nothing did.
+ *
+ * 🔴 WHY (autopsy 8257ca59, 2026-10-01). A calculator built from our own template was reported as a data
+ * app ("whether it actually SAVES anything is untested") although the template and every file the platform
+ * wrote pass this check; the report could not say which file tipped it. The answer is now written beside
+ * JOURNEY_NOT_DERIVED, so the next such report names its cause instead of leaving it to be guessed. PURE.
+ */
+export function dataEntryEvidence(files: Record<string, string>): { path: string; what: string; line: string } | null {
+  for (const [path, src] of Object.entries(files ?? {})) {
     if (!src) continue;
-    if (/<(?:input|textarea|select|form)\b/i.test(src)) return false;           // real HTML form elements
-    if (/<(?:Input|Textarea|TextField|Select|Form|Autocomplete|Checkbox|Radio|Switch|Slider)\b/.test(src)) return false; // UI-library form components
-    if (/\bon(?:Submit|Change|Input)\s*=/.test(src)) return false;              // a change/submit handler
-    if (/\bcontentEditable\b/i.test(src)) return false;                         // an editable surface
+    for (const [re, what] of DATA_ENTRY_SIGNS) {
+      const m = re.exec(src);
+      if (!m) continue;
+      const start = src.lastIndexOf('\n', m.index) + 1;
+      const end = src.indexOf('\n', m.index);
+      return { path, what, line: src.slice(start, end < 0 ? undefined : end).trim().slice(0, 140) };
+    }
   }
-  return true;
+  return null;
 }
 
 /**

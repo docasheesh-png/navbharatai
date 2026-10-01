@@ -86324,6 +86324,79 @@ two-ended erase.
 - Phone users get all of this only with a fresh `.aab`/`.ipa`. Admin instruction: build them only AFTER every open
   PR is merged.
 
+### 2026-10-01 — Autopsy 8257ca59 (calculator, Weak tier, golden scaffold, 4.3 min, ₹30.18)
+
+The build succeeded and the app worked at the end. The bar was not met: one self-heal (a reviewer-driven
+repair on the second rung) put back a feature the polish step had broken, and the report carried four
+statements that were not true.
+
+Tally: ✅ 1 self-heal (theme switch restored by the green repair) · 🔀 0 · ⏭️ 1 (the explorer passed a dead
+switch) · ❌ 0 shipped broken · 🥵 3 (the review overran its 45 s with tools; the first write-time typecheck paid
+15 s for an install; the repair went to rung 2).
+
+| Problem | Root cause | Class | Siblings found and fixed | Locked by |
+|---|---|---|---|---|
+| Polish step replaced the working ThemeToggle with a 🌓 that toggled `.dark`, which nothing styles | Template label "Auto" did not read as a theme switch; nothing at write time checks that a switched root class or attribute is styled | A root theme hook with no rule | `deadThemeSwitch.ts` write-time note (all write doors via `writeSteeringNotes`); template label now 🌓/☀️/🌙; VERIFY & FINISH says keep template controls | test §1, §2 |
+| Explorer passed the dead switch ("nothing visibly changed") | It judges by text; a theme switch changes colours | A control judged by the wrong signal (sibling of the search/sort probe) | Theme-named controls pressed up to 3× and judged by computed colours | test §2b (real browser), reversion-proven |
+| Release gate: "whether it actually SAVES anything is untested" for a calculator that pressed 12 controls cleanly | The gate never read the explorer; why the app read as taking input is not in the report | Evidence one check holds that the verdict ignores | `explore`/`explorePresses` on the gate; a no-data app with pressed controls can be GREEN; `JOURNEY_NOT_DERIVED` names the file and line (`dataEntryEvidence`) | test §3, §4, reversion-proven |
+| Orphan `src/theme.tsx` labelled "this build did not change these files" | Authorship is per file; this build orphaned it by removing the import in App.tsx | Orphaning attributed to the wrong build | `droppedRelativeImports` recorded at write_file and edit_file | test §6 |
+| Lean review used tools, overran 45 s, opened with "I'll help you build the calculator app" | The 12 seeded template files counted as changed; the 18 KB kit stylesheet broke the inline bound | Our own seed counted as the builder's change | `reviewChangedPaths` drops untouched seeds | test §5, reversion-proven |
+| "The cache was warmed at build start in 0s" while the first write paid 15 s | The warm-up's guard skipped the compile on a fresh sandbox and the finish was read as a warm cache | A finished command read as a result | `WARMUP_COMPILED_MARKER`; a skipped warm-up is said as such | test §7 |
+
+- **Checked, no change:** "No tests at all" at step 10 was true when written and is recorded resolved; the
+  starter suite added later is ours, and `TEST_SUITE_UNVERIFIED` says so. `startTier: "gemini"` is a band label
+  (#3429 records the same).
+- **Still open:** which file made this calculator read as taking input is not proven. The template and every
+  file the platform writes pass `appHasNoDataEntry`, so it was most likely the model's own App.tsx edit; the
+  report did not carry that file. The next such report will name it in `JOURNEY_NOT_DERIVED`'s detail.
+---
+
+## 2026-10-01 — Autopsy 19641ab5: "Create full image" + a portrait photo was built as an app
+
+**The report.** Weak tier, free user. Prompt "Create full image", one attached photo of a woman. Pro scored it
+83 ("complex", ~11 features), the mega-app roadmap planned a six-step image-generator app, KIMI read a
+`package.json` that did not exist and wrote a single-file HTML page over our starter's `index.html`. The user
+stopped it at 108 s; billed ₹7.62 (real cost, margin waived).
+
+**Ledger — problem → root cause → class → siblings → lock** (`tests/aPictureIsNotAnApp.test.ts`, 20 cases, every
+fix reversion-proven):
+1. **A picture was built as an app.** `detectImageIntent` points a picture request to Image Generator AI in free
+   chat, Doctor AI and every Professional; Pro never asked, while `AppKnowledgeBase` (`ai_image_gen`) said it did.
+   Class: a picture request reaching a surface that only builds. Fix: `AgentV3/pictureRequest.ts` — a picture
+   request that names no software, in a workspace with no user app, is answered on the chat lane (model steer +
+   deterministic fallback, ₹0) with the way to the studio and an offer to build an image app. Kill switch
+   `AGENTV3_PICTURE_ANSWER=off`. Precision cases ("image generator app", "photo gallery", "image slider banao") still
+   build — and #3430 makes such apps draw real pictures.
+2. **The photo's description was read as a feature list.** `planningRequest` labelled every attachment "describes
+   what to build"; the photo's 1,374 characters (hair, jewellery, saree, light) made the scope LARGE and the score 83.
+   Class: a judge reading a subject as a spec. Fix: the sizers get documents and UI-design pictures only (a design
+   contract was parsed); a photo is set aside and the `PLANNING_CONTEXT` line says so. The builder still sees it.
+3. **The roadmap guardrail rewrote an honest step.** "Do not use a placeholder **or a fake** loading animation" was
+   flagged as asking for simulation — the negator was five words back. Fix: a mention coordinated ("or"/"nor"/",")
+   with a negator in the same clause is negated; a clause boundary or "but/instead/then" still ends it.
+4. **ETA honesty, three siblings.** (a) A build the user stopped at 1.8 min was scored "0.2× and UNDER the band" —
+   now `untested` when cut short (user stop, deploy drain, reaper, …) before the band ended, and the admin
+   aggregate counts no ratio for it. (b) The platform prior (`fleetHistoryFromTelemetry`) averaged EVERY build,
+   stopped and failed included, though `okDurationMs` has existed since 728a402d — it now averages successful
+   builds (legacy days keep the old mean). (c) The evidence line said "this workspace's own past builds" beside
+   "No past builds of this app" — it now says whose builds taught it.
+5. **The workspace held only our starter's `index.html`.** The machine was created by a Files request
+   (`started-by=files`) and refilled from an empty store plus a one-file warm cache; `ensureWorkspace` then saw the
+   directory and skipped the template. Class: a presence check answering a different question. Fix:
+   `starterFragment.ts` — when everything present is a byte-identical piece of our own starter (or the root is
+   empty), the missing template files are put back; any user or edited file means a project and nothing is written.
+   `SETUP_TIMING` says `starter=completed N`.
+6. **A FULL-REWRITE WARNING for replacing our own starter file** — dropped when the old content is an untouched
+   template file (`isOurStarterFile`).
+
+**Checked, no change:** `requestAnalysis.startTier: "sonnet"` on a Weak build — a complexity band (2b0a3ed5), not a
+provider; `PROVIDER_TIME_WASTED calls=0` — no call was wasted.
+
+**Still open:**
+- Why the workspace's earlier machine left only `index.html` in the warm cache with nothing durable is not proven
+  from this report (no earlier build is in it). The completion above makes the outcome right whatever the cause.
+- Whether the user wanted a full-body version of the photo (an outpaint) cannot be served by Pro at all; Image
+  Generator AI's Paid edit is the place, and the answer now says so.
 ## 2026-10-01 — A pasted one-file HTML app stays one file (admin: "banao")
 
 **Decision.** After autopsy a106df77 the admin was asked two open questions. On the second, whether a pasted
@@ -86399,6 +86472,32 @@ lane's CSS guards — recorded here, not attempted.
   restore on a failed build, peer check, mention check). Census of `writtenFiles.set` 30 → 31.
 - **Watch:** `UNUSED_DEPS_REMOVED` / `UNUSED_DEPS_KEPT` in admin reports. A `KEPT … the app did not build without
   them` means the unused-detection was wrong for that package. Name it and widen the exclusions.
+### 2026-10-01 — Autopsy 8257ca59 follow-up, and App Mart "My profile" becomes editable
+
+**Autopsy, the item the first pass left:** the green repair's `find . -maxdepth 3 …` handed the model dozens of
+`node_modules/` and `dist/` paths. `generatedListing.ts` takes those lines out of a shell LISTING (`find`,
+`ls -R`, `tree`, `du`) and says how many, the way `glob` already skips them; a command that names the folder is
+untouched. Test §8 in `tests/theThemeSwitchThatDidNotSwitch.test.ts`.
+
+**Admin ask:** *"app mart me 'my profile' par … naam etc dikhayi nahi de raha hai. wahi par edit button dedo! jo
+settings me profile edit kar sakte hai, wahi yaha bhi edit kar sake! photo bhi laga sake!!!"*
+
+- **Why the name was missing:** the account had no display name in its profile record or its sign-in record, so
+  App Mart showed the anonymous label "NavBharatAI creator". A photo needed a URL pasted in Settings.
+- **One editor (`ProfileEditForm.tsx`)** used by Settings → Profile and by "Edit profile" on your own App Mart
+  profile: display name, bio, phone (private), and a photo UPLOAD (cropped to a 320 px square JPEG in the
+  browser, `avatarImage.ts`). The App Mart profile now shows the bio.
+- **The photo is checked before it is public** (`profileAvatar.ts`): real bytes (JPEG/PNG/WebP, ≤300 KB), then a
+  one-word vision check (no Claude). Only a clear SAFE is saved; a check that cannot run refuses. Stored in
+  `profile_avatars/<creatorCode>`, served by `GET /api/app-mart/avatar/:creatorId` (versioned URL, long cache).
+- **Only vouched-for photos are shown to others** (`publicPhotoUrl`): our uploaded avatar or a Google/GitHub
+  sign-in picture. A URL pasted before uploads existed was never checked, so it is now shown only to its owner.
+- **Name and bio pass the comments' word list** on save; an older bio that fails it is not shown publicly.
+- **Fresh after an edit:** the profile route reads your own profile without the 10-minute cache, and a save drops
+  both caches on that server. ⚠️ Other Cloud Run instances can show the old name/photo for up to 10 minutes.
+- Erased with the account (`USER_SCOPED_COLLECTIONS`), named on the deletion page and in the Privacy Policy.
+- Tests: `tests/theProfileIsEditableWhereItIsSeen.test.ts`.
+- ⚠️ Phone users get the editor only with a fresh `.aab`/`.ipa` (bundled mode); the server half is live on deploy.
 ## 2026-10-01 — BUILD_REPORT_QUEUE worked (the sixth absolute rule's first pass)
 
 - **Q-001 ✅** `@types/express` v5 beside `express` v4. Root: a hand rewrite of package.json after

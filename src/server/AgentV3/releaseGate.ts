@@ -83,6 +83,19 @@ export interface RuntimeEvidence {
   testSuitePresent?: boolean;
 
   /**
+   * Did the click explorer press the app's controls in a real browser, and how many did it press?
+   *
+   * 🔴 WHY (autopsy 8257ca59, 2026-10-01). A calculator — no form, nothing to save — had twelve of its
+   * controls pressed in a real browser (`EXPLORE_PASSED`), and the gate still said *"its interactive
+   * behaviour was not machine-verified"* or, worse, *"whether it actually SAVES anything is untested"*.
+   * The first is false and the second is about a capability the app does not have. For an app with
+   * nothing to save, pressing its controls IS its user journey; for any other app it is proof of
+   * interaction, never of saving. Optional: omitted keeps every sentence and verdict as before.
+   */
+  explore?: 'passed' | 'failed' | 'nothing' | 'not-run';
+  explorePresses?: number;
+
+  /**
    * Is the ONLY test suite the starter one NavBharatAI wrote into the project this build?
    *
    * 🔴 WHY (autopsy 6bae5835, 2026-09-27). The gate said *"this project HAS a test suite, but it could not
@@ -181,7 +194,7 @@ export interface GateVerdict {
 // ⚠️ Every field added to RuntimeEvidence that is NOT a runtime CHECK must be excluded here, or it
 // silently becomes a row the gate tries to label and grade. tsc catches the omission, which is
 // how `stoppedByUser` was caught the moment it was added.
-export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'noPageRoutes'>;
+export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'noPageRoutes' | 'explore' | 'explorePresses'>;
 
 /** What a PASS means. Phrased as a completed fact, because that is what `proven` is a list of. */
 const RUNTIME_LABEL: Record<CheckKey, string> = {
@@ -330,6 +343,10 @@ export function releaseGate(
   // A game / dashboard / landing page with no data-entry surface at all: there is genuinely no "save"
   // journey to prove, so the YELLOW headline must not imply one is missing.
   const noDataJourney = ev.journeys === 'none-derivable';
+  // Controls pressed in a real browser, none of them broken (see `explore`). Proof of interaction for every
+  // app; for an app with nothing to save it is the whole journey, so it may earn GREEN there and nowhere else.
+  const pressedOk = ev.explore === 'passed' && (ev.explorePresses ?? 0) > 0;
+  if (pressedOk) proven.push(`pressing ${ev.explorePresses} of its controls in a real browser broke nothing`);
 
   if (f.blockers > 0) failures.push(`${f.blockers} build-breaking blocker(s)`);
   if (f.highSeverity > 0) failures.push(`${f.highSeverity} high-severity security/privacy finding(s)`);
@@ -368,7 +385,7 @@ export function releaseGate(
   // GREEN needs the app to have run AND a journey to have held up. Rendering is necessary and not
   // sufficient: an app that paints beautifully and saves nothing renders exactly as well as one that
   // works, which is why "it rendered" alone lands at yellow.
-  const journeyProven = ev.journeys === 'passed';
+  const journeyProven = ev.journeys === 'passed' || (noDataJourney && pressedOk);
   // Measured-in-a-browser quality costs green, but never more than that (see QualitySignals).
   const qualityCaveats: string[] = [];
   if (q.a11yIssues > 0) qualityCaveats.push(`${q.a11yIssues} accessibility problem(s) real users would hit`);
@@ -378,7 +395,9 @@ export function releaseGate(
       && ev.preview === 'passed') {
     return {
       state: 'green',
-      headline: 'Shippable — it runs, and a real user journey held up end to end.',
+      headline: ev.journeys === 'passed'
+        ? 'Shippable — it runs, and a real user journey held up end to end.'
+        : 'Shippable — it runs, it has nothing to save, and pressing its controls in a real browser held up.',
       proven, unproven, failures,
     };
   }
@@ -395,12 +414,16 @@ export function releaseGate(
   // missing capability nor claims a verification we did not do. GREEN is still out of reach (a journey was
   // never proven), so this only changes the WORDING of a YELLOW, never the verdict.
   const notProvenHeadline = noDataJourney
-    ? `It runs and renders. This app has no data-entry flow to exercise, so there was no user journey to prove — its interactive behaviour was not machine-verified${caveat ? ` (also: ${caveat})` : ''}.`
-    : `It runs and renders — but no user journey was proven, so whether it actually SAVES anything is untested${caveat ? ` (also: ${caveat})` : ''}.`;
+    ? (pressedOk
+      ? `It runs, it has nothing to save, and pressing its controls in a real browser broke nothing${caveat ? ` (also: ${caveat})` : ''}.`
+      : `It runs and renders. This app has no data-entry flow to exercise, so there was no user journey to prove — its interactive behaviour was not machine-verified${caveat ? ` (also: ${caveat})` : ''}.`)
+    : pressedOk
+      ? `It runs and renders, and pressing its controls in a real browser broke nothing — but no save-and-reload journey was proven, so whether it keeps what a user enters is untested${caveat ? ` (also: ${caveat})` : ''}.`
+      : `It runs and renders — but no user journey was proven, so whether it actually SAVES anything is untested${caveat ? ` (also: ${caveat})` : ''}.`;
   return {
     state: 'yellow',
     headline: journeyProven
-      ? `It runs and a user journey held up${caveat ? `, with ${caveat} before shipping` : ''}.`
+      ? `It runs and ${ev.journeys === 'passed' ? 'a user journey' : 'pressing its controls'} held up${caveat ? `, with ${caveat} before shipping` : ''}.`
       : notProvenHeadline,
     proven, unproven, failures,
   };

@@ -31,8 +31,9 @@ import {
   resolveTarget, resolvePeople, countsFor, myReactions, pressReaction, likersOf, getComment,
   listComments, addComment, removeComment, reportComment, openCommentReports, resolveReportsFor,
   blockedUids, setBlocked, notifySocial, SocialUnavailable, followCounts, isFollowing, setFollow,
-  endFollowBothWays, followersOf, followedUids, likedAppKeys,
+  endFollowBothWays, followersOf, followedUids, likedAppKeys, forgetPerson,
 } from '../lib/appMartSocialStore';
+import { loadAvatar } from '../lib/profileAvatar';
 
 const COMMENTS_PAGE = 30;
 
@@ -267,6 +268,25 @@ export function registerAppMartSocialRoutes(app: Express): void {
   });
 
   /**
+   * An uploaded profile photo, by public creator code (profileAvatar.ts). Public like the profile it
+   * belongs to; the `?v=` on the URL changes with every upload, so a long cache is safe.
+   */
+  app.get('/api/app-mart/avatar/:creatorId', async (req: Request, res: Response) => {
+    const raw = String(routeParam(req.params.creatorId) || '');
+    if (!isCreatorIdShape(raw)) return res.status(404).end();
+    try {
+      const a = await loadAvatar(raw);
+      if (!a) return res.status(404).end();
+      res.setHeader('Content-Type', a.mime);
+      res.setHeader('Cache-Control', req.query.v ? 'public, max-age=31536000, immutable' : 'public, max-age=300');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return res.end(a.bytes);
+    } catch {
+      return res.status(404).end();
+    }
+  });
+
+  /**
    * A person's App Mart profile: name, photo, and the apps they have on the store. Opened by the public
    * creator code, or `me`. No email, no account id, no unlisted or removed app.
    */
@@ -281,9 +301,11 @@ export function registerAppMartSocialRoutes(app: Express): void {
       uid = await uidForCreatorId(raw);
     }
     if (!uid) return res.status(404).json({ error: 'This profile could not be found.' });
+    // Your own profile is read fresh, so a name or photo you just changed shows at once.
+    if (viewerUid === uid) forgetPerson(uid);
 
     try {
-      const [people, web, apk, viewerPref, blocked, follows, followingThem] = await Promise.all([
+      const [people, web, apk, viewerPref, blocked, follows, followingThem, ownerProfile] = await Promise.all([
         resolvePeople([uid]),
         listMyWebApps(uid, 50).catch(() => []),
         listAppsByUid(uid, 50).catch(() => []),
@@ -293,8 +315,12 @@ export function registerAppMartSocialRoutes(app: Express): void {
         blockedUids(viewerUid),
         followCounts(uid),
         isFollowing(viewerUid, uid),
+        userProfileStore.get(uid).catch(() => null),
       ]);
       const isNative = isNativeRequest(req);
+      // The bio is public on the profile; one saved before the word check existed is shown only if it passes it.
+      const rawBio = String(ownerProfile?.bio ?? '').trim();
+      const bio = rawBio && !commentAbuse(rawBio) ? rawBio.slice(0, 300) : '';
       const apps = [
         ...web
           .filter((a) => a.status === 'listed')
@@ -315,7 +341,13 @@ export function registerAppMartSocialRoutes(app: Express): void {
       const person = people.get(uid) ?? { name: 'NavBharatAI user', photoUrl: '', creatorId: publicCreatorId(uid) };
       res.json({
         person,
+        bio,
         isMe: viewerUid === uid,
+        // Your own profile carries what you saved, for the editor — never another person's, never public.
+        ...(viewerUid === uid ? { mine: {
+          displayName: String(ownerProfile?.displayName ?? ''), bio: String(ownerProfile?.bio ?? ''),
+          phone: String(ownerProfile?.phone ?? ''), photoUrl: String(ownerProfile?.photoUrl ?? ''),
+        } } : {}),
         blockedByMe: blocked.has(uid),
         apps: apps.map((a) => ({ ...a, counts: counts[a.key] ?? ZERO_COUNTS })),
         totals: { apps: apps.length, likes: totalLikes },

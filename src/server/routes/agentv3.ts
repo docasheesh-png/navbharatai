@@ -174,7 +174,7 @@ import {
   a11yIssueCount, slowRouteCount,
 } from '../AgentV3/PageRouteCheck';
 import {
-  deriveJourneys, journeyScript, parseJourneyResults, summarizeJourneys, noJourneyReason, appHasNoDataEntry, appOnlyShowsWhatItHolds,
+  deriveJourneys, journeyScript, parseJourneyResults, summarizeJourneys, noJourneyReason, appHasNoDataEntry, appOnlyShowsWhatItHolds, dataEntryEvidence,
   JOURNEY_TIMEOUT_MS, writesToUserDatabase,
 } from '../AgentV3/journeyDerivation';
 import {
@@ -254,6 +254,8 @@ import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMe
 import { clampPowerForUser } from '../AgentV3/powerGating';
 import { weakTierWelcomeNotice, weakTierBuildFailedNotice } from '../AgentV3/weakTierNotice';
 import { isPlatformNoticeEcho, platformNoticeEchoReply } from '../AgentV3/platformNoticeEcho';
+import { shouldAnswerPictureRequest, PICTURE_REQUEST_STEER, pictureRequestFallback } from '../AgentV3/pictureRequest';
+import { starterCompletedNote } from '../AgentV3/starterFragment';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
 import { summaryAdditions } from '../AgentV3/summaryAdditions';
 import { credentialGuardEnabled, credentialGuardInstruction, findBootKillingEnvGuards, bootKillingGuardSummary, bootKillerRepairInstruction } from '../AgentV3/missingCredentialGuard';
@@ -537,7 +539,7 @@ import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrches
 import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
-import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall } from '../AgentV3/ReviewerAgent';
+import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall, reviewChangedPaths } from '../AgentV3/ReviewerAgent';
 import { refuteReviewByEvidence, missingClassClaim } from '../AgentV3/reviewEvidence';
 import { SALVAGE_HANDOFF_MARKER, HANDOFF_NOTE_FIX_LINE } from '../AgentV3/handoffRule';
 import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
@@ -1872,6 +1874,16 @@ function sandboxOriginOf(actuator: unknown, workspaceId: string): string | null 
  * weeks a report could say "created a fresh machine" beside a blank preview with nothing to point at,
  * because the answer existed nowhere. Same duck-typing and same null-means-unreported contract.
  */
+/** The starter-fragment completion this setup did, as a SETUP_TIMING suffix ('' when none). */
+function starterCompletedOf(actuator: unknown, workspaceId: string): string {
+  try {
+    const fn = (actuator as { starterCompletedCount?: (id: string) => number })?.starterCompletedCount;
+    return typeof fn === 'function' && workspaceId ? starterCompletedNote(fn.call(actuator, workspaceId)) : '';
+  } catch {
+    return ''; // an observation must never be a reason a build fails
+  }
+}
+
 function sandboxRestoreOf(actuator: unknown, workspaceId: string): string | null {
   try {
     const fn = (actuator as { sandboxRestore?: (id: string) => SandboxRestoreOutcome | null })?.sandboxRestore;
@@ -10402,6 +10414,10 @@ async function noteBuildOutcome(
     let designContract: DesignContract | null = null;
     // What came of reading the pictures — recorded once the build report exists (attachmentReadOutcome.ts).
     let attachmentRead: { files: number; images: number; fate: VisionFate; ms: number; descriptionChars: number } | null = null;
+    // What of the attachment DESCRIBES AN APP — every sizer and planner reads this, never `attachmentContext`
+    // (planningRequest.ts). A photo that is not a UI design is left out of it (autopsy 19641ab5).
+    let planningAttachmentText = '';
+    let picturesSetAside = 0;
     if (docAttachments.length > 0) {
       send({ type: 'narration', agent: 'architect', text: `📎 Reading ${docAttachments.length} file(s)…`, ts: Date.now() });
       try {
@@ -10436,6 +10452,14 @@ async function noteBuildOutcome(
         // to read the requirements as data it must not act on — the exact opposite of the point.
         const contractBlock = contractToPromptBlock(designContract);
         if (contractBlock) attachmentContext = `${attachmentContext}\n\n${contractBlock}`;
+        // A picture is part of the spec only when it is a UI design (the describer returned a contract).
+        // A photo of a person or a scene says what the picture shows, not what to build.
+        const pictureIsSpec = designContract !== null;
+        picturesSetAside = images.length > 0 && !pictureIsSpec ? images.length : 0;
+        const specRaw = [docs, pictureIsSpec ? stripContractBlock(vis) : ''].filter(Boolean).join('\n\n');
+        planningAttachmentText = specRaw.trim()
+          ? `${fenceUntrusted('attached files', redactPII(specRaw))}${contractBlock ? `\n\n${contractBlock}` : ''}`
+          : '';
       } catch { /* best-effort — a bad file never blocks the turn */ }
     }
 
@@ -10648,6 +10672,20 @@ async function noteBuildOutcome(
       console.log('[AGENTV3] the prompt is our own notice, copied back — answering instead of building');
       intent = 'chat';
     }
+    // 🔴 A PICTURE IS NOT AN APP (autopsy 19641ab5, `pictureRequest.ts`): "Create full image" with a photo
+    // attached was built as an 11-feature image-generator app. Free chat, Doctor AI and every
+    // Professional already point a picture request to Image Generator AI; Pro was the one surface that
+    // did not. Answered instead — in the user's language, with the way to the studio and an offer to
+    // build an image app if that was what they meant.
+    const answerPictureRequest = !echoesPlatformNotice && !answerProjectElsewhere && shouldAnswerPictureRequest({
+      prompt,
+      userAppExists,
+      importing: zipImports.length > 0 || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== ''),
+    });
+    if (answerPictureRequest) {
+      console.log('[AGENTV3] the prompt asks for a picture, not an app — answering instead of building');
+      intent = 'chat';
+    }
 
     /**
      * WHAT THE USER ASKED FOR, captured BEFORE the workspace's state gets a vote.
@@ -10850,7 +10888,7 @@ async function noteBuildOutcome(
         // prompt-keyed cache could serve one turn's answer to the other. Excluded outright rather
         // than reasoned around: the other conditions happen to cover it today, and that is exactly
         // the kind of coincidence that stops being true after an unrelated edit.
-        const cacheable = !askUnrelated && !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !clarifyWhatToBuild && chatCacheEnabled();
+        const cacheable = !askUnrelated && !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !answerPictureRequest && !clarifyWhatToBuild && chatCacheEnabled();
         const cacheKey = cacheable ? hashKey(['chatv1', prompt]) : '';
         let reply: string;
         const cachedReply = cacheable ? chatResponseCache.get(cacheKey) : undefined;
@@ -10887,7 +10925,8 @@ async function noteBuildOutcome(
                   : '')
                 + (answerProjectElsewhere ? projectElsewhereSteer(projectElsewhere) : '')
                 + (askUnrelated ? unrelatedRequestSteer(unrelated?.existingHint ?? '', rawAttachments.length > 0) : '')
-                + (ambiguousBuildAsk && !clarifyWhatToBuild && !answerProjectElsewhere && !askUnrelated
+                + (answerPictureRequest ? PICTURE_REQUEST_STEER : '')
+                + (ambiguousBuildAsk && !clarifyWhatToBuild && !answerProjectElsewhere && !askUnrelated && !answerPictureRequest
                   ? "\n\nThis message was ambiguous — it might be a request to build or change something "
                     + "in the user's app, phrased in an unusual way, OR it might just be a genuine "
                     + "question/comment. Answer it naturally, but if it plausibly could mean \"build/fix "
@@ -10899,7 +10938,7 @@ async function noteBuildOutcome(
             'chatRouter.route',
           ).catch((err: unknown) => {
             // A turn whose whole point is NOT building must never fall through to a build.
-            if (answerProjectElsewhere) return null;
+            if (answerProjectElsewhere || answerPictureRequest) return null;
             if (askUnrelated) return null;
             throw err;
           });
@@ -10910,6 +10949,8 @@ async function noteBuildOutcome(
               ? projectElsewhereFallback(projectElsewhere)
               : askUnrelated
                 ? unrelatedRequestFallback(unrelated?.existingHint ?? '')
+              : answerPictureRequest
+                ? pictureRequestFallback()
                 : (response?.content ?? '') + (response ? providerDebugTag(response.provider) : '');
           // Cache only a real, non-empty reply (never cache an empty/failed generation).
           if (cacheable && response && response.content && response.content.trim()) {
@@ -11364,6 +11405,7 @@ async function noteBuildOutcome(
             text: `⚠️ This import looks INCOMPLETE — ${unresolved.length} file(s) its code references are missing from the repo: ${list}${more}. The snapshot may have been saved mid-build. Say "create the missing files" and I'll build them to match the imports.`,
           });
           attachmentContext += `\n\n[IMPORT COMPLETENESS] These local imports resolve to NO imported file (the repo snapshot is incomplete): ${unresolved.map((u) => `${u.missing} ← ${u.importedBy}`).join('; ')}. If the user asks to fix/complete/repair the app, CREATE exactly these files (matching what the importing code expects) — do not rename the imports.`;
+          planningAttachmentText += `\n\n[IMPORT COMPLETENESS] These local imports resolve to NO imported file (the repo snapshot is incomplete): ${unresolved.map((u) => `${u.missing} ← ${u.importedBy}`).join('; ')}. If the user asks to fix/complete/repair the app, CREATE exactly these files (matching what the importing code expects) — do not rename the imports.`;
         }
       } catch { /* completeness check is best-effort — never blocks an import */ }
       // Project memory: the import is a durable fact of this session, and the imported sources
@@ -11377,6 +11419,8 @@ async function noteBuildOutcome(
       // The AI turn must work WITH the landed app — never scaffold over it, and answer a plain
       // "read/analyze my app" ask with an honest survey of the real files.
       attachmentContext += `\n\n[APP IMPORT — already completed] The user's app from ${opts.source} has ALREADY been imported into this workspace: ${written.length} files, detected framework ${framework}. Work WITH these existing files (read them as needed) and NEVER scaffold a new app over them. If the user only asked to read/analyze it, give a short honest survey of the app (what it is, key files/structure, how it runs) and ask what they'd like to change.`;
+      // Sized from too, exactly as before the picture split (planningRequest.ts) — an import is unchanged.
+      planningAttachmentText += `\n\n[APP IMPORT — already completed] The user's app from ${opts.source} has ALREADY been imported into this workspace: ${written.length} files, detected framework ${framework}. Work WITH these existing files (read them as needed) and NEVER scaffold a new app over them. If the user only asked to read/analyze it, give a short honest survey of the app (what it is, key files/structure, how it runs) and ask what they'd like to change.`;
       // Background live-preview boot (the actuator handles install + start + health-check).
       // FORENSIC TRAIL (mitrify autopsy 2026-08-04, "Cannot GET /customer/home" AGAIN): the honest
       // boot-verify shipped 2026-08-03 — and today's report contained ZERO preview entries, so the #1
@@ -12056,7 +12100,7 @@ async function noteBuildOutcome(
      * alone, so `mkdir src` was sized as "hi" while a 35-file shop was built. They all read this one
      * text now. `prompt` itself is unchanged everywhere else (intent, the user's own words, titles).
      */
-    const planning = planningRequest({ prompt, attachmentText: attachmentContext, recentTurns, userAppExists });
+    const planning = planningRequest({ prompt, attachmentText: planningAttachmentText, picturesSetAside, recentTurns, userAppExists });
     const buildComplexity = complexityFromPrompt(planning.text);
     const buildDepth: PipelineDepth = resolvePipelineDepth(
       (buildComplexity.moduleCount || 0) + (buildComplexity.featureCount || 0),
@@ -12924,7 +12968,7 @@ async function noteBuildOutcome(
           });
         } catch { /* observation only */ }
       }
-      if (planning.sources.length > 0) {
+      if (planning.sources.length > 0 || planning.picturesSetAside > 0) {
         try {
           buildDiag.record({ phase: 'plan', severity: 'info', code: 'PLANNING_CONTEXT', autoResolved: true, message: planningContextNote(planning, prompt.length) });
         } catch { /* observation only */ }
@@ -13688,7 +13732,7 @@ async function noteBuildOutcome(
           buildDiag.record({
             phase: 'plan', severity: 'info', code: 'ETA_BASIS',
             message: `ETA ${formatEtaRange(est.lowMs, est.highMs, est.estimateMs)} (midpoint ${est.etaText}) · basis ${est.basis} · confidence ${est.confidence}`,
-            detail: `${past.length === 0 && fleet.history.length > 0 && analysis?.taskType ? fleetEtaBasisNote(analysis.taskType, fleet.builds, fleet.days) : etaBasisNote(past)} ${etaEvidenceNote(est)} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
+            detail: `${past.length === 0 && fleet.history.length > 0 && analysis?.taskType ? fleetEtaBasisNote(analysis.taskType, fleet.builds, fleet.days) : etaBasisNote(past)} ${etaEvidenceNote(est, past.length === 0 && fleet.history.length > 0 ? 'platform' : 'workspace')} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
             autoResolved: true,
           });
           // THE POINT ESTIMATE IS NOT WHAT WE KNOW. `estimateBuildTime` returns lowMs/highMs and a
@@ -13791,7 +13835,8 @@ async function noteBuildOutcome(
               // Reading them side by side is the whole point — "created fresh · restored 24/24 ·
               // started-by=preview-door" is a complete story that neither line tells alone.
               + `restore=${sandboxRestoreOf(actuator, workspaceId) ?? 'n/a (warm or resumed)'}`
-              + ` · started-by=${sandboxSessionOf(actuator, workspaceId)?.reason ?? 'unreported'}`,
+              + ` · started-by=${sandboxSessionOf(actuator, workspaceId)?.reason ?? 'unreported'}`
+              + starterCompletedOf(actuator, workspaceId),
           });
         } catch { /* timing is observation only — it must never affect a build */ }
         // PREVIEW SYNC FIX (LearnLoop autopsy): the scaffold's root manifests (package.json, index.html,
@@ -16641,7 +16686,10 @@ async function noteBuildOutcome(
                   `Do NOT rewrite what already works, do NOT re-plan a parallel file structure, and NEVER add an import that already exists.\n\n---\n\n${buildPrompt}`
                 : `[VERIFY & FINISH — DO NOT START OVER] This workspace was just pre-seeded with NavBharatAI's tested, working "${golden.label}" app template. ` +
                   `It already compiles cleanly and fully implements the request below. READ src/App.tsx first. If the request matches the template (it should — the prompt is the template's own), ` +
-                  `make at most SMALL polish edits and finish quickly. Do NOT rewrite it from scratch, do NOT re-plan a parallel file structure, and NEVER add an import that already exists.\n\n---\n\n${buildPrompt}`;
+                  `make at most SMALL polish edits and finish quickly. Do NOT rewrite it from scratch, do NOT re-plan a parallel file structure, and NEVER add an import that already exists. ` +
+                  // Autopsy 8257ca59: a polish step replaced the template's working light/dark switch with a
+                  // hand-rolled one that set a class no stylesheet styles, and a repair pass had to put it back.
+                  `KEEP the template's own working controls — above all its light/dark switch (ThemeToggle in src/theme.tsx, which cycles Auto → Light → Dark through the data-theme attribute the styles use); improve one in place if you must, never replace it with a hand-rolled copy.\n\n---\n\n${buildPrompt}`;
             }
           }
         } catch { /* pre-seed is best-effort — a failure just builds from scratch */ }
@@ -20900,6 +20948,8 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'preview', severity: 'info', code: 'JOURNEY_NOT_DERIVED',
               message: `No user journey was run — ${noJourneyReason(journeyFiles)}.`,
+              // Which file counts as taking input, and the line — so a "data app" verdict names its cause (autopsy 8257ca59).
+              ...(() => { const why = dataEntryEvidence(journeyFiles); return why ? { detail: `Read as taking input because of ${why.what} in ${why.path}: ${why.line}` } : {}; })(),
               autoResolved: true,
             });
             // When the app has NO data-entry surface at all (a game, a dashboard, a landing page), there is
@@ -20967,6 +21017,10 @@ async function noteBuildOutcome(
           });
           const proof = exploreUserSummary(explored);
           if (proof.headline) exploreProof = proof;
+          // The release gate reads it too (autopsy 8257ca59): controls pressed in a real browser are proof of
+          // interaction, and for an app with nothing to save they are its whole journey.
+          gateEvidence.explore = explored.outcome;
+          gateEvidence.explorePresses = explored.pressed;
 
           // A BROKEN BUTTON GETS ONE VERIFIED REPAIR (admin 2026-09-28: "han dono ho jaye … world class
           // banao" — explorerRepair.ts). The explorer's evidence is the strongest this platform has: a
@@ -21048,6 +21102,7 @@ async function noteBuildOutcome(
                     // buttons that now work; clear it so the release gate is not held yellow by it.
                     if (outcome.kept && outcome.judgement && outcome.judgement.remaining.length === 0) {
                       try { buildDiag.resolveOnRecheck('EXPLORE_FAILED'); } catch { /* best-effort */ }
+                      gateEvidence.explore = 'passed';
                     }
                     if (outcome.kept) {
                       const line = explorerRepairUserLine(outcome);
@@ -22348,7 +22403,7 @@ async function noteBuildOutcome(
           else abort.signal.addEventListener('abort', stopReviewWithBuild, { once: true });
           // What THIS turn changed, and — for a suggest-only review — that code in full. Computed before
           // the spawn because whether the review may read at all depends on it (autopsy bee95692).
-          const reviewChanged = [...writtenFiles.keys()].filter((p) => !finishingPaths.has(p));
+          const reviewChanged = reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden);
           const reviewInline = reviewPlan.mode === 'suggest' ? leanReviewInline(reviewChanged, (p) => writtenFiles.get(p)) : undefined;
           const reviewOneCall = leanReviewAnswersInOneCall(reviewInline);
           const reviewSpawn = makeSubAgentSpawn({

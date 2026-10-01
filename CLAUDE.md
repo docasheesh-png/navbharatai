@@ -3669,6 +3669,27 @@ the flag entries above promise.
   row of the list; no menus at all when the app writes to the user's own database; a list of ≥3 items
   (search) or 2 distinct (sort); a search with a button beside it is `skipped`, never called broken.
   Real-browser test: `tests/theSearchBoxIsTypedInto.test.ts`.
+  🌓 **AND A LIGHT/DARK SWITCH IS PRESSED UNTIL THE COLOURS CHANGE (autopsy 8257ca59, 2026-10-01; no flag).**
+  A calculator's polish step replaced the template's working ThemeToggle with a 🌓 button that toggled a `dark`
+  class nothing styles; the explorer called it *"it responded (nothing visibly changed)"* because it compares
+  TEXT. A control named as a theme switch (`THEME_CONTROL`: text, aria-label or title; never a bare "Light"/"Day")
+  is now pressed up to `MAX_THEME_PRESSES` (3, for Auto → Light → Dark) and judged by the computed colours of
+  the page, with the mouse moved away and focus dropped first, so a hover style is never the theme changing.
+  No change ⇒ `unresponsive`, reported and repaired like a broken button. Same autopsy, no flags:
+  - `deadThemeSwitch.ts`: a write that switches a class or `data-*` attribute on `<html>`/`<body>` that no
+    stylesheet, `<style>` string or Tailwind `dark:` styles gets a write-time note naming the project's own
+    mechanism (silent unless the whole project could be read).
+  - The template ThemeToggle reads "🌓 Auto / ☀️ Light / 🌙 Dark" (it read "Auto"), and the VERIFY & FINISH
+    prompt tells the polish step to keep the template's own controls.
+  - The release gate reads the explorer (`explore`, `explorePresses`): pressed controls are proof of
+    interaction for every app, and for an app with nothing to save they are its journey and can earn GREEN.
+    `JOURNEY_NOT_DERIVED` names the file and line that made an app read as taking input (`dataEntryEvidence`).
+  - The review's "changed this turn" leaves out pre-seeded template files the builder never touched
+    (`reviewChangedPaths`), so a scaffolded app's lean review stays one call with no tools.
+  - An untouched file orphaned by this build removing its last import is reported as this build's doing
+    (`droppedRelativeImports`), not as "your existing code".
+  - The write-time typecheck warm-up claims a warm cache only when it compiled (`WARMUP_COMPILED_MARKER`).
+  Test-locked and reversion-proven in `tests/theThemeSwitchThatDidNotSwitch.test.ts`.
   🔧 **AND NOW IT FIXES WHAT IT FINDS — `AGENTV3_EXPLORER_REPAIR` (2026-09-28, admin: *"han dono ho jaye …
   real engineering kar ke, world class banao"*). ⚠️ NOT set; code default ON; `off` restores report-only.**
   `explorerRepair.ts`. One bounded repair pass (allowlisted pass `explorer-repair`, refused every `.env`),
@@ -4023,6 +4044,16 @@ the flag entries above promise.
   - A list of a hand-written record's own field (`topic.sections`) is no longer a "data list" (`recordFieldLiteral`).
   - Every engine-authored user turn is stamped `origin: 'platform'` on its persisted copy (`pushPlatformTurn`), so a
     reopened chat never shows a repair instruction as the user's own message.
+- **🖼️ `AGENTV3_PICTURE_ANSWER` — A PICTURE REQUEST IN PRO IS ANSWERED, NOT BUILT (autopsy 19641ab5, 2026-10-01).
+  ⚠️ NOT set; default ON; `off` builds as before.** `pictureRequest.ts`. "Create full image" + a portrait photo was
+  built as an 11-feature image-generator app (stopped at 108 s, ₹7.62). Free chat, Doctor AI and every Professional
+  already pointed picture requests to Image Generator AI; Pro was the sibling never hunted, while `AppKnowledgeBase`
+  said it did. A `detectImageIntent` request that names no software, in a workspace with no user app, is answered on
+  the chat lane (₹0) with Home → Other AI → AI Image Gen and an offer to build an image app. Same autopsy, no flags:
+  the sizers no longer read a PHOTO's description as a feature list (only documents and UI-design pictures,
+  `planningRequest.ts`); a build cut short before its ETA band is `untested`; the platform ETA prior averages
+  successful builds; and setup puts back the template when a workspace holds only a piece of our own starter
+  (`starterFragment.ts`). Test-locked in `tests/aPictureIsNotAnApp.test.ts`.
 - **🙋 A QUESTION IS AN ANSWER, NOT AN EMPTY BUILD — the retry overrode a correct reply and billed
   ₹196.28 for it (autopsy `e628efd4`, 2026-09-25; no flag, on by construction).** A free-tier user
   asked *"if we don't have a chat in next 2 hours can you send a message to initiate the chat

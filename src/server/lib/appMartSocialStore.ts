@@ -31,12 +31,13 @@ import { getApp } from './navStoreStore';
 import { userProfileStore } from './UserProfileStore';
 import { creatorDisplayName, publicCreatorId } from './storeCreator';
 import { rememberCreatorId } from './appMartCreatorIndex';
+import { publicPhotoUrl } from './profileAvatar';
 import { indiaDay } from './guestDailyQuota';
 import { sendPushToUser } from './PushNotificationService';
 import {
   type AppKey, type Reaction, type SocialCounts, type StoredComment, type PublicPerson,
   type SocialNotificationDoc, type SocialNotificationKind, type RemovedBy,
-  ZERO_COUNTS, reactionDocId, nextReaction, safePhotoUrl, foldActor, socialNotificationDocId,
+  ZERO_COUNTS, reactionDocId, nextReaction, foldActor, socialNotificationDocId,
   socialInboxId, parseSocialInboxId, inboxState, socialNotificationMessage, socialPushBody,
   applyBlock, MAX_REPORT_REASON_CHARS, socialNotificationTarget, followDocId, FEED_FOLLOW_LIMIT,
   MAX_NEW_APP_FANOUT, LIKED_FEED_LIMIT, type FollowCounts,
@@ -100,6 +101,11 @@ export async function resolveTarget(k: AppKey): Promise<SocialTarget | null> {
 const PEOPLE_CACHE_MS = 10 * 60_000;
 const peopleCache = new Map<string, { person: PublicPerson; at: number }>();
 
+/** Drop a person's cached name and photo — after they edit their profile, so the next read is fresh. */
+export function forgetPerson(uid: string): void {
+  peopleCache.delete(uid);
+}
+
 async function authRecord(uid: string): Promise<{ displayName?: string | null; photoURL?: string | null } | null> {
   if (process.env.VITEST || process.env.NODE_ENV === 'test') return null;
   try {
@@ -122,12 +128,13 @@ export async function resolvePeople(uids: readonly string[]): Promise<Map<string
     const hit = peopleCache.get(uid);
     if (hit && now - hit.at < PEOPLE_CACHE_MS) { out.set(uid, hit.person); return; }
     const profile = await userProfileStore.get(uid).catch(() => null);
-    const needAuth = !profile?.displayName?.trim() || !safePhotoUrl(profile?.photoUrl);
+    // Only a photo we can vouch for is shown to other people (profileAvatar.ts → publicPhotoUrl).
+    const needAuth = !profile?.displayName?.trim() || !publicPhotoUrl(profile?.photoUrl);
     const auth = needAuth ? await authRecord(uid) : null;
     const creatorId = publicCreatorId(uid);
     const person: PublicPerson = {
       name: creatorDisplayName(profile?.displayName, auth?.displayName),
-      photoUrl: safePhotoUrl(profile?.photoUrl) || safePhotoUrl(auth?.photoURL),
+      photoUrl: publicPhotoUrl(profile?.photoUrl) || publicPhotoUrl(auth?.photoURL),
       creatorId,
     };
     rememberCreatorId(creatorId, uid);

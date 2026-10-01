@@ -4,6 +4,7 @@ import { shouldRunAuditFix, AUDIT_FIX_COMMAND, AUDIT_FIX_TIMEOUT_MS } from '../.
 import { commandFailureResult, commandLogTail } from '../../../../lib/sandboxCommandError';
 import type { CommandHandle } from 'e2b';
 import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
+import { starterFilesToComplete, MAX_FRAGMENT_FILES } from '../../../starterFragment';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
@@ -676,6 +677,8 @@ export function distReaderScript(dirs: string[], resultPath: string): string {
 export class E2BActuator implements IEngineerActuator {
   private sandboxes = new Map<string, Sandbox>();
   private templateRegistry = new TemplateRegistry();
+  /** Template files put back into a workspace that held only a piece of our starter (starterFragment.ts). */
+  private _starterCompleted = new Map<string, number>();
   // Tracks per-sandbox playwright install progress
   private _playwrightReady = new Map<string, Promise<boolean>>();
   // Tracks per-sandbox persistent-browser daemon launch
@@ -1674,22 +1677,21 @@ export class E2BActuator implements IEngineerActuator {
     const exists = await withTimeout(sandbox.files.exists(WORKSPACE_ROOT), 15_000, 'files.exists');
     if (exists) {
       // Resumed sandbox already has the workspace — just ensure browser tooling is warming up.
+      // 🔴 …unless what is there is only a PIECE of our own starter (autopsy 19641ab5, starterFragment.ts):
+      // "the directory exists" is not "the project is set up". Best-effort and bounded; a failure here is
+      // today's behaviour exactly.
+      await this._completeStarterFragment(sandbox, workspaceId, projectType).catch(() => {});
       this._kickoffPlaywright(sandbox, workspaceId);
       return;
     }
 
     await withTimeout(sandbox.files.makeDir(WORKSPACE_ROOT), 15_000, 'files.makeDir');
 
-    // Resolve template: fall back to vite-react for unknown/auto types.
+    // Resolve template: fall back to vite-react for unknown/auto types (`_templateFilesFor`, shared with
+    // the starter-fragment completion so the two can never seed different templates).
     // Note: this.templateRegistry keys are e.g. 'vite-react', 'nextjs', 'vue' — NOT 'react'.
-    const templateKey =
-      projectType && projectType !== 'auto' && projectType !== 'node' && projectType !== 'python'
-        ? projectType
-        : (projectType === 'python' ? 'python-fastapi' : 'vite-react');
-    const resolveKey = (key: string): string =>
-      this.templateRegistry.listFrameworks().includes(key) ? key : 'vite-react';
     try {
-      const files = this.templateRegistry.getProvider(resolveKey(templateKey)).getFiles([]);
+      const files = this._templateFilesFor(projectType);
       await withTimeout(sandbox.files.writeFiles(
         Object.entries(files).map(([p, content]) => ({ path: `${WORKSPACE_ROOT}/${safeRelPath(p)}`, data: content }))
       ), 30_000, 'files.writeFiles(template)');
@@ -1710,6 +1712,53 @@ export class E2BActuator implements IEngineerActuator {
     // Kick off playwright install in background immediately — by the time the agent
     // builds an app and starts a dev server, it'll be ready.
     this._kickoffPlaywright(sandbox, workspaceId);
+  }
+
+  /** The template files `ensureWorkspace` seeds for this project type — ONE resolution for both paths. */
+  private _templateFilesFor(projectType?: string): Record<string, string> {
+    const templateKey =
+      projectType && projectType !== 'auto' && projectType !== 'node' && projectType !== 'python'
+        ? projectType
+        : (projectType === 'python' ? 'python-fastapi' : 'vite-react');
+    const key = this.templateRegistry.listFrameworks().includes(templateKey) ? templateKey : 'vite-react';
+    return this.templateRegistry.getProvider(key).getFiles([]);
+  }
+
+  /**
+   * Put back the template files a workspace is missing when everything in it is a byte-identical piece
+   * of our own starter (see starterFragment.ts for the report and the precision rule). One `exists`
+   * call on the common path: a workspace holding the template's manifest is set up, full stop.
+   */
+  private async _completeStarterFragment(sandbox: Sandbox, workspaceId: string, projectType?: string): Promise<void> {
+    const template = Object.fromEntries(
+      Object.entries(this._templateFilesFor(projectType)).map(([p, c]) => [safeRelPath(p), c] as const),
+    );
+    const manifest = ['package.json', 'requirements.txt', 'pom.xml', 'go.mod'].find((m) => m in template);
+    if (manifest && await withTimeout(sandbox.files.exists(`${WORKSPACE_ROOT}/${manifest}`), 15_000, 'files.exists(manifest)')) return;
+    const listed = await withTimeout(
+      sandbox.commands.run(buildListFilesCommand(WORKSPACE_ROOT), { timeoutMs: 20_000 }), 25_000, 'files.list(fragment)',
+    );
+    const paths = parseListFilesOutput(listed?.stdout ?? '', WORKSPACE_ROOT).filter((p) => !isIgnoredListPath(p));
+    if (paths.length > MAX_FRAGMENT_FILES) return;
+    const present: Record<string, string | null> = {};
+    for (const p of paths) {
+      present[p] = await withTimeout(sandbox.files.read(`${WORKSPACE_ROOT}/${p}`), 15_000, 'files.read(fragment)')
+        .then((c) => (typeof c === 'string' ? c : null))
+        .catch(() => null);
+    }
+    const missing = starterFilesToComplete(present, template);
+    if (missing.length === 0) return;
+    const files = Object.fromEntries(missing.map((p) => [p, template[p]] as const));
+    await withTimeout(sandbox.files.writeFiles(
+      Object.entries(files).map(([p, content]) => ({ path: `${WORKSPACE_ROOT}/${p}`, data: content })),
+    ), 30_000, 'files.writeFiles(starter fragment)');
+    this._rememberSeededScaffold(workspaceId, files);
+    this._starterCompleted.set(workspaceId, missing.length);
+  }
+
+  /** How many template files the last setup put back into a starter fragment (0 when none). */
+  starterCompletedCount(workspaceId: string): number {
+    return this._starterCompleted.get(workspaceId) ?? 0;
   }
 
   /** Store the scaffold files seeded for a workspace (kept small — a template is a handful of files). */

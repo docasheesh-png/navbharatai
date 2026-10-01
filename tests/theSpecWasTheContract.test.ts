@@ -137,3 +137,23 @@ describe('the style hand-back has the same rule (sibling, #3425)', () => {
     expect(read('src/server/AgentV3/AgentRunner.ts')).toContain('resumesUsed: styleResumes, producedFiles: producingToolUses > 0 });');
   });
 });
+
+describe('a markdown bullet is not a code comment (the real 6461025c prompt, after #3426)', () => {
+  const REAL = read('tests/fixtures/autopsy6461025c.prompt.txt');
+  it('the real spec is prose, counts all its parts, and is its own contract', async () => {
+    const { isPastedSource } = await import('../src/server/lib/pastedSource');
+    expect(isPastedSource(REAL)).toBe(false);
+    expect(countEnumeratedFeatures(REAL)).toBeGreaterThanOrEqual(SPEC_FEATURE_COUNT);
+    expect(readsAsSpecification(REAL)).toBe(true);
+    expect(requestedFeatureLabels(REAL)).toEqual([]);
+  });
+  it('a pasted block of code with a /* … */ comment is still pasted source', async () => {
+    const { isPastedSource } = await import('../src/server/lib/pastedSource');
+    const code = [
+      '/**', ' * Bill maker', ' * keeps totals', ' */',
+      'const items = [];', 'function add(x) {', '  items.push(x);', '}',
+      'function total() {', '  return items.reduce((a, b) => a + b, 0);', '}', 'export { add, total };',
+    ].join('\n');
+    expect(isPastedSource(code)).toBe(true);
+  });
+});

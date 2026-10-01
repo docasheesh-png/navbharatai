@@ -86185,3 +86185,9 @@ tail and the runner census.
 **Still open:**
 - Each repair pass's instruction is still persisted into the main conversation as a `user` turn. Whether a
   reopened session shows it as something the user typed was not checked here.
+7. **#3426 (merged today) read every markdown "* item" as a code comment.** `isCodeLine` counted a line
+   starting `* ` as a comment, so a written spec in markdown bullets became "pasted source", its bullets
+   were removed as machine text, and the REAL 6461025c prompt counted **0** enumerated parts instead of
+   40 — Project Mode, the spec stand-down and every reader through `withoutMachineText` would have gone
+   quiet on it. A `* ` line now counts as code only inside a real `/* … */` block (`pastedSpan` tracks
+   it). Locked with the real prompt as `tests/fixtures/autopsy6461025c.prompt.txt`.

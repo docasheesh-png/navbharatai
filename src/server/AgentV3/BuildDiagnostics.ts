@@ -315,7 +315,7 @@ export function narrationEchoesPromptSymptom(text: string, prompt: string | unde
  *
  * Resolution now happens in `record` itself, so a heal cannot forget it. `[]` means the heal resolves its
  * finding some other way (a readiness blocker re-judged by `recordReadinessRecovery`, or nothing recorded
- * before the heal). `tests/aHealedFindingIsNotStillOpen.test.ts` fails when a heal code in the route is
+ * before the heal). `tests/theCoactCollectorAutopsy.test.ts` (its census) fails when a heal code in the route is
  * missing here.
  */
 export const HEAL_RESOLVES: Readonly<Record<string, readonly string[]>> = {

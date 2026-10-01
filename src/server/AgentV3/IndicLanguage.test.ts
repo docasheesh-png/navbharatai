@@ -137,7 +137,7 @@ describe('wired into the build', () => {
   const detect = readFileSync(join(__dirname, 'LanguageDetect.ts'), 'utf8');
 
   it('the build prompt uses the confidence-aware instruction, not a hard-coded string', () => {
-    expect(route).toContain('buildPrompt = `${appLanguageInstruction(prompt)}');
+    expect(route).toContain('buildPrompt = `${appLanguageInstruction(prompt, ');
     expect(detect).toContain('languageInstruction({ code: hint.code, name: hint.name');
     // The old always-assertive sentence is gone.
     expect(route).not.toContain('`Language: the user is writing in ${hint.name}.');

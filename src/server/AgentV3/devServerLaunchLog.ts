@@ -15,6 +15,8 @@
 // once the launch is proven. A missing entry (another instance, a restart) therefore yields NO recipe
 // rather than a guessed one, which is the whole point: buildRecipe() refuses a partial recipe.
 
+import { isLongRunningCommand, isOneShotSegment } from './sandbox/EngineerAI/actuators/devServerHost';
+
 export interface DevServerLaunch {
   /** The command as handed to the actuator — replaying it re-applies every transformation it does. */
   command: string;
@@ -52,17 +54,34 @@ export function serverLaunchCommand(command: string): string {
   // Newlines and a lone `&` separate commands too: a model backgrounds the server with `… &` and
   // then runs a port probe on the next line (build 75ea6136 stored both as one recipe).
   const segments = cmd.split(/\s*(?:&&|;|\n|(?<![&>|])&(?!&))\s*/).map((x) => x.trim()).filter(Boolean);
-  const serverAt = segments.findIndex((seg) => SERVER_SEGMENT.test(seg.replace(TRUNCATING_PIPE, '')));
+  // A one-shot segment is never the server, whatever words it carries — `(git commit -q -m "edit
+  // vite.config.ts" || true)` names Vite in its MESSAGE (autopsy 2b1f845e). Same predicate the
+  // launcher uses, so the two cannot disagree about which segment started the app.
+  const serverAt = segments.findIndex((seg) => !isOneShotSegment(seg) && SERVER_SEGMENT.test(seg.replace(TRUNCATING_PIPE, '')));
   if (serverAt < 0) return cmd;
   const setup = segments.slice(0, serverAt).filter((seg) => SETUP_SEGMENT.test(seg));
   const server = segments[serverAt].replace(TRUNCATING_PIPE, '').replace(/\s*2>&1\s*$/, '').trim();
   return [...setup, server].join(' && ');
 }
 
+/**
+ * True when the launcher itself would treat `command` as starting a server. PURE.
+ *
+ * Asked of the SAME classifier the actuator used to route the command into the managed boot
+ * (`isLongRunningCommand`), never a second regex — two answers to "is this a launch?" are how a git
+ * commit became a recipe.
+ */
+export function startsAServer(command: string): boolean {
+  return isLongRunningCommand(command);
+}
+
 /** Record a dev-server launch that was observed to come up. Never throws. */
 export function recordDevServerLaunch(workspaceId: string, command: string, port: number, now = Date.now()): void {
   const cmd = serverLaunchCommand(command);
   if (!workspaceId || !cmd) return;
+  // A command in which no segment starts a server is not a launch, whatever port happened to answer
+  // after it — recording it would make the revival recipe replay a git commit (autopsy 2b1f845e).
+  if (!startsAServer(cmd)) return;
   if (!Number.isInteger(port) || port <= 0 || port >= 65536) return;
   launches.set(workspaceId, { command: cmd, port, at: now });
   // Bounded: a long-lived instance must not accumulate a map entry per workspace it ever served.

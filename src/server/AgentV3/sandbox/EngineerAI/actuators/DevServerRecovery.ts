@@ -1,3 +1,4 @@
+import { isNeverAppPort } from '../../../neverAppPorts';
 // AgentV3 — deterministic dev-server failure classification + recovery planning.
 //
 // When a v5.0 dev server does NOT come up (the "Closed Port Error: no service on port 5173" the
@@ -104,7 +105,7 @@ export function unavailableDbEngine(log: string): { id: 'mongodb' | 'mysql' | 'r
  * lost its data store", which is strictly worse than the failure we were repairing. If a log ever names
  * one of these, we report the conflict honestly and free nothing.
  */
-const PROTECTED_PORTS = new Set([5432, 3306, 6379, 27017, 1433, 9200]);
+const PROTECTED_PORTS = { has: (p: number): boolean => isNeverAppPort(p) }; // one list — neverAppPorts.ts
 
 /**
  * The port that is genuinely occupied, read from the failure itself.

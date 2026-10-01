@@ -50,7 +50,10 @@ export interface DuplicateComponentModule {
 }
 
 export interface ProjectIntegrityReport {
-  /** Components that own initial focus. A conflict exists when this has 2+ entries. */
+  /**
+   * Components that own initial focus AND can be on screen with another owner. A conflict exists when
+   * this has 2+ entries. Owners on mutually-exclusive screens are left out (`conflictingFocusOwners`).
+   */
   focusOwners: FocusOwner[];
   /** Stylesheets imported by 2+ modules. */
   duplicateStylesheets: DuplicateStylesheet[];
@@ -426,9 +429,72 @@ export function analyzeProjectIntegrity(
   return analyzeOneProject(files);
 }
 
+/**
+ * Which screen a component is rendered as, in one parent: the `IDENT === 'literal'` guard in front of
+ * `<Name` (`{view === 'chat' && <Chat …/>}`), or the `case 'literal':` of the `switch (IDENT)` it sits
+ * in. `null` when the render is not behind such a guard. Every guard found, one per render site.
+ */
+function screenGuards(parentSrc: string, name: string): Array<{ on: string; value: string } | null> {
+  const out: Array<{ on: string; value: string } | null> = [];
+  const tagRe = new RegExp(`<${name}(?=[\\s/>])`, 'g');
+  let m: RegExpExecArray | null;
+  while ((m = tagRe.exec(parentSrc)) !== null) {
+    const before = parentSrc.slice(Math.max(0, m.index - 240), m.index);
+    // `{view === 'chat' && <Chat` / `view === "chat" && activeChat && (<Chat` — the guard nearest the tag
+    // in the same JSX expression (no `}` between them, so it is not an earlier, closed expression).
+    const expr = before.slice(before.lastIndexOf('}') + 1);
+    const eq = [...expr.matchAll(/([A-Za-z_$][\w$.]*)\s*===\s*['"]([\w-]+)['"]/g)].pop();
+    if (eq) { out.push({ on: eq[1], value: eq[2] }); continue; }
+    // `case 'chat': return <Chat …/>` inside `switch (view) {`.
+    const caseHit = [...before.matchAll(/case\s+['"]([\w-]+)['"]\s*:/g)].pop();
+    if (caseHit) {
+      const head = parentSrc.slice(0, m.index);
+      const sw = [...head.matchAll(/switch\s*\(\s*([A-Za-z_$][\w$.]*)\s*\)/g)].pop();
+      if (sw && (sw.index ?? 0) < m.index - before.length + (caseHit.index ?? 0)) { out.push({ on: sw[1], value: caseHit[1] }); continue; }
+    }
+    out.push(null);
+  }
+  return out;
+}
+
+/**
+ * Two focus owners only CONFLICT when they can be on screen together (autopsy 4d538ca3, 2026-10-01). A
+ * Chat screen and a Memory screen, each picked by `view === 'chat'` / `view === 'memory'`, never mount
+ * at the same time, so each may own focus when it opens. The detector used to count them as a conflict,
+ * and the repair then removed the Memory input's focus: four edits and three type errors, to make the
+ * app slightly worse. Two owners are EXCLUSIVE when one parent renders both, every render of each sits
+ * behind a screen guard on the same value, and the guards' literals differ. Anything less certain —
+ * a component rendered unguarded, by different parents, or not found — stays a conflict, as before.
+ */
+export function conflictingFocusOwners(owners: readonly FocusOwner[], files: Record<string, string>): FocusOwner[] {
+  if (owners.length < 2) return [...owners];
+  const nameOf = (file: string) => (file.split('/').pop() ?? file).replace(/\.(t|j)sx?$/, '');
+  const parents = Object.entries(files)
+    .filter(([f, src]) => isSourceFile(f) && typeof src === 'string')
+    .map(([f, src]) => [f, stripComments(src)] as const);
+  const exclusive = (a: FocusOwner, b: FocusOwner): boolean => {
+    const na = nameOf(a.file);
+    const nb = nameOf(b.file);
+    if (!/^[A-Z][\w]*$/.test(na) || !/^[A-Z][\w]*$/.test(nb) || na === nb) return false;
+    for (const [file, src] of parents) {
+      if (file === a.file || file === b.file) continue;
+      const ga = screenGuards(src, na);
+      const gb = screenGuards(src, nb);
+      if (ga.length === 0 || gb.length === 0) continue;
+      if (ga.some((g) => g === null) || gb.some((g) => g === null)) return false;
+      const ons = new Set([...ga, ...gb].map((g) => g!.on));
+      if (ons.size !== 1) return false;
+      const va = new Set(ga.map((g) => g!.value));
+      return gb.every((g) => !va.has(g!.value));
+    }
+    return false;
+  };
+  return owners.filter((o, i) => owners.some((p, j) => j !== i && !exclusive(o, p)));
+}
+
 /** One project's own integrity — the whole of this function before repository grouping existed. */
 function analyzeOneProject(files: Record<string, string>): ProjectIntegrityReport {
-  const focusOwners = findFocusOwners(files);
+  const focusOwners = conflictingFocusOwners(findFocusOwners(files), files);
   const duplicateStylesheets = findDuplicateStylesheets(files);
   const orphanStylesheets = findOrphanStylesheets(files);
   const duplicateEntryPoints = findDuplicateEntryPoints(files);

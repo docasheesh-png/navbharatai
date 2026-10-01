@@ -413,6 +413,7 @@ import { userLessonBrainStore } from '../AgentV3/UserLessonBrain';
 import { mistakeLedgerStore, mistakeKey } from '../AgentV3/MistakeLedger';
 import { fleetMistakeLedgerStore } from '../AgentV3/FleetMistakeLedger';
 import { LISTENING_PORTS_COMMAND, parseListeningPorts, rankPortCandidates } from '../AgentV3/PortDiscovery';
+import { isSandboxSystemPort } from '../AgentV3/neverAppPorts';
 import { liveChannel, liveEventsAllowedFor } from '../AgentV3/LiveChannel';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
 import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptCache';
@@ -554,7 +555,7 @@ import {
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
 import { saveRestorePointForReport, describeRestorePoint, restorePointSeverity } from '../AgentV3/restorePoint';
-import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesByPath, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
+import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesWithStatus, loadWorkspaceFilesByPath, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps, restoreDroppedDependencies } from '../AgentV3/DependencyAutoFix';
 import { splitCachedSystem } from '../AgentV3/systemPromptCache';
 import { makeFirstPaintHandler, firstPaintEvents, streamingFirstPaintEnabled } from '../AgentV3/streamingFirstPaint';
@@ -582,7 +583,7 @@ import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
-import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
+import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration, userOwnedFiles } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
 import { attachUserActionRecorder } from '../AgentV3/userActionRecorder';
 import {
@@ -7534,7 +7535,9 @@ async function noteBuildOutcome(
       return;
     }
     // parseListeningPorts is PortDiscovery's — the production-proven one, not a second parser.
-    const listening = parseListeningPorts(exec.stdout);
+    // The sandbox's own machinery (its agent, SSH, rpcbind, our browser's debugging port) is not
+    // something the user started and must not be shown as "something else is using the sandbox".
+    const listening = parseListeningPorts(exec.stdout).filter((p) => !isSandboxSystemPort(p));
     const processes = parseProcessList(splitProcsSection(exec.stdout));
     // The EXPECTED half comes from the project's own package.json files (durable, so it works even
     // right after a sandbox recycle). A load failure degrades to "no expected services" — the measured
@@ -14333,8 +14336,21 @@ async function noteBuildOutcome(
           // larger than any single cause. Recording the split is not a fix for the wait — it is what
           // makes the next report able to say WHICH of the three to fix, instead of another 43s void.
           const restoreT0 = Date.now();
-          const saved = await loadWorkspaceFiles(workspaceId);
+          // WITH its status (autopsy 4d538ca3): a failed read and an empty store both used to arrive as
+          // `{}`, and the report then said "durable read (0 file(s))" for either. A failed read is named.
+          const durable = await loadWorkspaceFilesWithStatus(workspaceId);
+          const saved = durable.files;
           const loadMs = Date.now() - restoreT0;
+          if (durable.status === 'unreadable') {
+            try {
+              buildDiag.record({
+                phase: 'build', severity: 'warning', code: 'DURABLE_READ_FAILED', autoResolved: false,
+                message: 'The saved copy of this project could not be read at the start of the turn, so nothing '
+                  + 'was compared or restored from it. This is NOT a report that the saved copy is empty.',
+                detail: durable.error,
+              });
+            } catch { /* diagnostics are best-effort */ }
+          }
           // Reused far below by the journey check (see projectFilesAtTurnStart) — the whole project,
           // read once, rather than a second store round-trip on the critical path.
           projectFilesAtTurnStart = saved;
@@ -14421,7 +14437,7 @@ async function noteBuildOutcome(
               buildDiag.record({
                 phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
                 message: `Project restored in ${Math.round((Date.now() - restoreT0) / 1000)}s`,
-                detail: `durable read ${loadMs}ms (${Object.keys(saved).length} file(s)) · sandbox listing `
+                detail: `durable read ${loadMs}ms (${Object.keys(saved).length} file(s), ${durable.status}) · sandbox listing `
                   + `${scanMs}ms · config read ${configMs}ms · wrote ${plan.count} missing file(s) + assets ${Date.now() - writeT0}ms`,
               });
             } catch { /* timing is observation only — it must never affect a build */ }
@@ -14448,7 +14464,7 @@ async function noteBuildOutcome(
               buildDiag.record({
                 phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
                 message: `Project checked in ${Math.round((Date.now() - restoreT0) / 1000)}s — nothing needed restoring`,
-                detail: `durable read ${loadMs}ms (${Object.keys(saved).length} file(s)) · sandbox listing ${scanMs}ms · config read ${configMs}ms`,
+                detail: `durable read ${loadMs}ms (${Object.keys(saved).length} file(s), ${durable.status}) · sandbox listing ${scanMs}ms · config read ${configMs}ms`,
               });
             } catch { /* timing is observation only — it must never affect a build */ }
           }
@@ -14666,7 +14682,7 @@ async function noteBuildOutcome(
         expectsArtifacts: () => expectsArtifacts,
         // The SAME language line the architect's prompt opens with (autopsy 466c260a) — the child
         // writes the labels and never sees the user's words.
-        languageRule: () => appLanguageInstruction(prompt),
+        languageRule: () => appLanguageInstruction(prompt, { editingExistingApp: intent === 'edit_existing' }),
         // The SAME AI-in-app rule the architect reads (autopsy d8ed307a) — the child writes the AI client.
         aiRule: () => aiInAppRule(),
         // And the user's own words (autopsy 6db0ff31) — the two lines above derive from them, and a
@@ -15339,6 +15355,18 @@ async function noteBuildOutcome(
           if (note) architectSystem = `${note}\n\n---\n\n${architectSystem}`;
           events.emit({ type: 'narration', agent: 'architect', text: manualEditNarration(manual.count), ts: Date.now() });
         }
+        // …AND THE FILES THE USER PUT HERE ARE NOT THE BUILD'S TO DELETE (autopsy 4d538ca3 — see
+        // userFileGuard.ts). The pending set above is cleared every build; `userOwnedFiles` is not,
+        // so a page the user added three builds ago is protected exactly like one added a minute ago.
+        try {
+          const owned = await userOwnedFiles(workspaceId);
+          dispatcher.setUserOwnedFiles([...new Set([...manual.paths, ...owned])], prompt);
+          dispatcher.setUserFileRefusalSink((paths) => {
+            try {
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'USER_FILE_KEPT', message: `Kept the user's own file(s) the build tried to delete: ${paths.join(', ')}`, autoResolved: true });
+            } catch { /* diagnostics are best-effort */ }
+          });
+        } catch { /* the user-file guard is best-effort — an empty set protects nothing, as before */ }
       } catch { /* manual-edit awareness is best-effort — never blocks the build */ }
       // P-AI.5 — Personalization: for a RETURNING user, inject their learned stack preferences
       // (inferred from past successful builds) as advisory defaults so the Architect leans toward
@@ -16329,7 +16357,7 @@ async function noteBuildOutcome(
         // Phase 6.1: the instruction states its own CONFIDENCE (a script is proof, a romanized guess
         // says it is a guess). Autopsy 466c260a: a request in Latin letters now says so explicitly and
         // forbids an unrequested switch of script. ONE function — the sub-agents read the same line.
-        buildPrompt = `${appLanguageInstruction(prompt)}\n\n${buildPrompt}`;
+        buildPrompt = `${appLanguageInstruction(prompt, { editingExistingApp: intent === 'edit_existing' })}\n\n${buildPrompt}`;
       } catch { /* best-effort — never blocks a build */ }
 
       // Attachments: prepend the extracted file content/description so the build
@@ -17711,7 +17739,7 @@ async function noteBuildOutcome(
       try {
         buildDiag.record({
           phase: 'build', severity: 'info', code: 'READY_BEFORE_END',
-          message: readyOverrunNote(result.readyAt, result.steps, Date.now() - buildStartedAt),
+          message: readyOverrunNote(result.readyAt, result.steps, Date.now() - buildStartedAt, { editingExistingApp: isEditMode }),
           autoResolved: true,
         });
       } catch { /* an advisory line must never affect a build */ }
@@ -18988,7 +19016,7 @@ async function noteBuildOutcome(
               // DID THE WRITE-TIME NOTE REACH THE FILE, AND WAS IT IGNORED? (autopsy 6bae5835 could not say.)
               try {
                 const flagged = [...new Set(Object.values(quality.offenders ?? {}).flat().map((o) => o.path))];
-                const wq = writeQualitySummary(dispatcher.writeTypecheckStats().qualityNotedFiles ?? [], flagged);
+                const wq = writeQualitySummary(dispatcher.writeTypecheckStats().qualityNotedFiles ?? [], flagged, modelAuthoredPaths(writtenFiles));
                 if (wq) buildDiag.record({ phase: 'build', severity: 'info', code: 'WRITE_TIME_QUALITY', message: wq, autoResolved: true });
               } catch { /* a measurement is best-effort */ }
             }
@@ -24022,7 +24050,7 @@ async function noteBuildOutcome(
       // deduped+aged by the store; never affects the build or the result.
       if (userId) {
         try {
-          const debtFindings = findingsToDebt({ security: getWorkspaceMemory(workspaceId).securityFindings() });
+          const debtFindings = findingsToDebt({ security: getWorkspaceMemory(workspaceId).appSecurityFindings() });
           if (debtFindings.length) void recordDebt(userId, workspaceId, debtFindings, new Date().toISOString());
         } catch { /* best-effort — never block the result */ }
       }

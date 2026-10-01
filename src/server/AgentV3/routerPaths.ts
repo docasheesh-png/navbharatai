@@ -68,3 +68,33 @@ export function declaredRoutes(source: string | null | undefined): DeclaredRoute
   }
   return out;
 }
+
+/**
+ * The parameter route a path landed on when NO literal route serves it — or null. PURE.
+ *
+ * 🔴 WHY (autopsy 2b1f845e, 2026-10-01). The agent opened `/design` and `/revenue` to check two screens of
+ * a five-step wizard. The app's router declares `/` and `/:collectionId`, so `/design` rendered a
+ * collection page with id "design", not a Design screen — the screens are switched by state. The agent
+ * kept navigating, pressing and grepping for a button that was on another step, until the loop guard
+ * stepped in twice (~90 s). One sentence saying which route the path really matched ends that at once.
+ */
+export function paramOnlyMatch(path: string, routes: readonly DeclaredRoute[]): string | null {
+  const clean = `/${String(path ?? '').split(/[?#]/)[0].replace(/^\/+|\/+$/g, '')}`.replace(/\/$/, '') || '/';
+  const segs = clean === '/' ? [] : clean.slice(1).split('/');
+  let paramHit: string | null = null;
+  for (const r of routes) {
+    if (r.path === '*' || r.path.endsWith('/*')) continue;
+    const rs = r.path === '/' ? [] : r.path.replace(/^\/+|\/+$/g, '').split('/');
+    if (rs.length !== segs.length) continue;
+    let literal = true;
+    let ok = true;
+    for (let i = 0; i < rs.length; i++) {
+      if (rs[i].startsWith(':')) { literal = false; continue; }
+      if (rs[i] !== segs[i]) { ok = false; break; }
+    }
+    if (!ok) continue;
+    if (literal) return null; // a route serves this path by name
+    paramHit = paramHit ?? r.path;
+  }
+  return paramHit;
+}

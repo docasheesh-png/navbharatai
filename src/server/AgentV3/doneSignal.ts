@@ -94,9 +94,21 @@ export function shouldCheckDone(p: {
    * count of tool uses is not a count of changes. Omitted ⇒ unknown, and the old rule applies.
    */
   wroteThisRun?: boolean;
+  /**
+   * Is this turn an EDIT of an app that already existed? `true` ⇒ never check. 🔴 AUTOPSY 2b1f845e
+   * (2026-10-01) — the sibling 1389f0d5 left. Its fix waits for the run's first write, and here the
+   * first write was a `.env.example` at 2.5 min: the check then saw the user's existing 40-file app,
+   * scored it 100, told the user "✅ The app looks complete — wrapping up." and told the model to stop
+   * — while every change the user asked for (design, posting, payments on three screens) was still
+   * unwritten. The model ignored it and worked 13 more minutes. The score measures the PROJECT's
+   * health; on an edit the project was healthy before the turn began, so the score cannot say whether
+   * the REQUEST is done. Omitted ⇒ a fresh build, the old rule.
+   */
+  editingExistingApp?: boolean;
 }): boolean {
   const { cfg, step, toolUses, alreadySignalled, wroteThisRun } = p;
   if (!cfg.enabled || alreadySignalled) return false;
+  if (p.editingExistingApp === true) return false;
   if (wroteThisRun === false) return false; // the project is exactly what it was — whatever it scores, it is not this run's work
   if (p.lastStepFailed) return false;
   if (toolUses <= 0) return false;      // nothing written yet — nothing can be finished
@@ -153,7 +165,10 @@ export interface ReadyMark {
  * This is the number the stop-the-loop decision needs and nobody has. A build that was never judged
  * ready says so plainly — "we did not look" and "it never got there" must not read as zero overrun.
  */
-export function readyOverrunNote(mark: ReadyMark | null | undefined, endStep: number, endMs: number): string {
+export function readyOverrunNote(mark: ReadyMark | null | undefined, endStep: number, endMs: number, opts: { editingExistingApp?: boolean } = {}): string {
+  // An edit is not judged at all (see `shouldCheckDone`), and "never judged finished" would read as
+  // a finding about an app that was working before the turn began.
+  if (!mark && opts.editingExistingApp) return 'Not measured: this turn edited an app that already existed, so the project score cannot say when the request was done.';
   if (!mark) return 'The app was never judged finished during the build.';
   const steps = Math.max(0, endStep - mark.step);
   const secs = Math.max(0, Math.round((endMs - mark.elapsedMs) / 1000));

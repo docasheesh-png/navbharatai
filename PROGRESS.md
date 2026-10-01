@@ -87351,3 +87351,27 @@ open PR's CI failed with it (#3462 first).
   server-deps) was run on the final state before the PR.
 - **Class:** an upstream advisory landing between a PR's green CI and its merge. The gate is doing its job; the
   honest response is the pin, not an allowlist entry, because a fixed release exists.
+
+## 2026-10-01 — Autopsy 52471441 ("Build a calculator", Weak, stopped by the user at 38 s)
+
+**What happened.** Setup took 8 s. The fast lane's file-list call (a ~500-token prompt) crawled on GLM `glm-4.7-flashx`
+and was abandoned at 15 s, then handed off because the next rung (KIMI) reasons before every answer. The full builder
+started on KIMI and read the starter files. No file had been written when the user pressed Stop at 38 s. Bill ₹0.
+
+**Tally:** 0 self-heals · 1 workaround (fast lane → full builder after the crawl) · 0 skips · 0 shipped broken ·
+1 struggle (15 s crawl = 37% of the clock, before anything reached the screen).
+
+| Item | Root cause | State |
+|---|---|---|
+| Nothing on screen in 38 s; the tested calculator template was not used | `goldenScaffoldForPrompt` seeds a template only for the chip's exact text; "Build a calculator" is shorter | Q-087 🟡 admin decision (option a recommended: verb + template name only) |
+| GLM crawl, 15 s | Provider latency (Z.ai) | Recurrence of Q-009, which #3465 closes as accepted provider weather. This instance (15 s) is under that decision's reopen line (60 s per build) |
+| Five lines read as defects but are true | See the row | Q-088 🟡 needs the admin's yes |
+
+**Missing subsystem (Step 2):** none new. The lever is Q-087: a bare request for a thing we already have a tested
+template for should get that template, which removes the plan call, the crawl and the wait together.
+
+**Proactive (Step 6), not built:** the crawl grace (`STREAM_THROUGHPUT_GRACE_MS`, 15 s) was sized for a 26,569-token
+prompt's ingestion. The fast lane's plan call is ~500 tokens, where a healthy `glm-4.7-flashx` (thinking disabled)
+answered in 2.4 s in autopsy 876afca9. A grace scaled by prompt size would cut a dead call's cost from 15 s to a few
+seconds. It changes when the ladder moves to KIMI, so it touches the admin's routing decision on Q-009; offered, not
+built.

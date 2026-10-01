@@ -343,6 +343,11 @@ export function registerAppMartSocialRoutes(app: Express): void {
         person,
         bio,
         isMe: viewerUid === uid,
+        // Your own profile carries what you saved, for the editor — never another person's, never public.
+        ...(viewerUid === uid ? { mine: {
+          displayName: String(ownerProfile?.displayName ?? ''), bio: String(ownerProfile?.bio ?? ''),
+          phone: String(ownerProfile?.phone ?? ''), photoUrl: String(ownerProfile?.photoUrl ?? ''),
+        } } : {}),
         blockedByMe: blocked.has(uid),
         apps: apps.map((a) => ({ ...a, counts: counts[a.key] ?? ZERO_COUNTS })),
         totals: { apps: apps.length, likes: totalLikes },

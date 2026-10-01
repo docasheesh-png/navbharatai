@@ -17,8 +17,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ThumbsUp, ThumbsDown, MessageCircle, Loader2, Flag, Trash2, UserX, Reply, MoreHorizontal, X,
-  Heart, Store, Globe, Package, Send, ShieldCheck, UserPlus, UserCheck,
+  Heart, Store, Globe, Package, Send, ShieldCheck, UserPlus, UserCheck, Pencil,
 } from 'lucide-react';
+import { ProfileEditForm } from '../../profile/ProfileEditForm';
 import {
   type Reaction, type SocialCounts, type PublicComment, type PublicPerson, type Profile, type CommentReportRow,
   NO_COUNTS, fetchComments, postComment, removeComment, reportComment, setBlocked, fetchLikers,
@@ -541,10 +542,15 @@ export function ProfileSheet({ creatorId, onClose, onOpenApp, hideAndroid, onOpe
   const [profile, setProfile] = useState<Profile | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  // Your own profile is editable in place — the same editor Settings → Profile uses (admin 2026-10-01).
+  const [editing, setEditing] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
   useEffect(() => {
-    setProfile(null); setError('');
+    if (reloadTick === 0) setProfile(null);
+    setError('');
     fetchProfile(creatorId).then(setProfile).catch((e) => setError(e instanceof Error ? e.message : 'This profile could not be loaded.'));
-  }, [creatorId]);
+  }, [creatorId, reloadTick]);
+
 
   const apps = (profile?.apps ?? []).filter((a) => !(hideAndroid && a.kind === 'apk'));
 
@@ -573,6 +579,13 @@ export function ProfileSheet({ creatorId, onClose, onOpenApp, hideAndroid, onOpe
             <Avatar person={profile.person} size={84} />
             <h3 className="mt-3 text-lg font-bold text-ink">{profile.person.name}</h3>
             <p className="text-[11px] font-mono text-faint" title="Creator code">{profile.person.creatorId}</p>
+            {profile.bio && <p className="mt-2 text-sm text-body max-w-xs whitespace-pre-line">{profile.bio}</p>}
+            {profile.isMe && !editing && (
+              <button type="button" onClick={() => setEditing(true)}
+                className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line text-xs font-semibold text-ink hover:bg-raised">
+                <Pencil size={13} /> Edit profile
+              </button>
+            )}
             <div className="flex gap-5 mt-3">
               <div><p className="text-lg font-bold text-ink">{compactCount(apps.length)}</p><p className="text-[11px] text-muted">app{apps.length === 1 ? '' : 's'}</p></div>
               <div><p className="text-lg font-bold text-ink">{compactCount(apps.reduce((n, a) => n + (a.counts?.likes ?? 0), 0))}</p><p className="text-[11px] text-muted">likes</p></div>
@@ -607,6 +620,18 @@ export function ProfileSheet({ creatorId, onClose, onOpenApp, hideAndroid, onOpe
               <p className="mt-3 flex items-center gap-1.5 text-[11px] text-muted"><ShieldCheck size={12} /> This is how others see you. Your email is never shown.</p>
             )}
           </div>
+          {profile.isMe && editing && (
+            <div className="mt-4 p-4 rounded-2xl bg-card border border-line text-left">
+              <ProfileEditForm
+                idPrefix="app-mart-profile"
+                // What the person saved — never the anonymous label the public sees when no name is set.
+                initial={profile.mine ?? { displayName: '', bio: profile.bio ?? '', phone: '', photoUrl: profile.person.photoUrl }}
+                onPhotoChange={() => setReloadTick((n) => n + 1)}
+                onSaved={() => { setEditing(false); setReloadTick((n) => n + 1); }}
+                onCancel={() => setEditing(false)}
+              />
+            </div>
+          )}
 
           <p className="mt-5 mb-2 text-xs font-bold uppercase tracking-wider text-faint flex items-center gap-1.5"><Store size={12} /> Apps on App Mart</p>
           {apps.length === 0 ? (

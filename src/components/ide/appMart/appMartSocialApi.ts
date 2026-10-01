@@ -44,7 +44,11 @@ export interface ProfileApp {
 
 export interface Profile {
   person: PublicPerson;
+  /** The person's public bio, '' when they have none. */
+  bio?: string;
   isMe: boolean;
+  /** Only on your own profile: what you saved, for the editor. */
+  mine?: { displayName: string; bio: string; phone: string; photoUrl: string };
   blockedByMe: boolean;
   apps: ProfileApp[];
   totals: { apps: number; likes: number };

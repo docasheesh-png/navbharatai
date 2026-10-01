@@ -11,7 +11,7 @@
 import type { Express, Request, Response } from 'express';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Reads user_token_wallets (owner-only).
 import { doc, getDoc, getServerDb as getDb } from '../lib/serverDb';
-import { verifyFirebaseToken, verifyFirebaseIdentity, deleteAuthAccount } from '../lib/authMiddleware';
+import { verifyFirebaseToken, verifyFirebaseIdentity, deleteAuthAccount, rateLimiter } from '../lib/authMiddleware';
 import { getRetentionDb, deleteUserData } from '../lib/DataRetentionManager';
 import { deleteUserWorkspaceData } from '../lib/workspaceDataErase';
 import { sendSafeError } from '../lib/httpError';
@@ -22,6 +22,30 @@ import { buildCostAlertReport } from '../lib/CostAlertEngine';
 import { usdToInr } from '../lib/UsdInrRate';
 import { adultPreferenceFrom, ADULT_CONFIRMATIONS } from '../../lib/adultContent';
 import { audit } from '../lib/audit';
+import { scanProfanity } from '../lib/pollinationsGuard';
+import { publicCreatorId, forgetCreator } from '../lib/storeCreator';
+import { forgetPerson } from '../lib/appMartSocialStore';
+import {
+  parseAvatarUpload, checkAvatar, saveAvatar, deleteAvatar, avatarUrl, AvatarStoreUnavailable,
+} from '../lib/profileAvatar';
+
+/**
+ * A name or bio other people will read (App Mart profiles, comments, likers) — the same word list the
+ * comments use (admin 2026-10-01: the App Mart profile is now editable in place). PURE.
+ */
+export function profileTextAbuse(fields: { displayName?: unknown; bio?: unknown }): string | null {
+  for (const v of [fields.displayName, fields.bio]) {
+    if (typeof v === 'string' && v.trim() && !scanProfanity(v).ok) {
+      return 'Your name or bio has a word that is not allowed on a public profile. Please change it and save again.';
+    }
+  }
+  return null;
+}
+
+/** A name or photo changed: the next App Mart read of this person must be fresh, on this server at least. */
+function forgetPublicProfile(uid: string): void {
+  try { forgetPerson(uid); forgetCreator(uid); } catch { /* best-effort */ }
+}
 
 export function registerProfileRoutes(app: Express): void {
   // ── GET /api/profile ──────────────────────────────────────────────────────────
@@ -81,12 +105,58 @@ export function registerProfileRoutes(app: Express): void {
     if (Object.keys(update).length === 0) {
       return res.status(400).json({ error: 'No valid fields to update.' });
     }
+    const abuse = profileTextAbuse(update);
+    if (abuse) return res.status(400).json({ error: abuse });
 
     await userProfileStore.update(userId, update);
+    forgetPublicProfile(userId);
     return res.json({ ok: true });
   });
 
   // ── PUT /api/profile/budget ───────────────────────────────────────────────────
+  // ── POST/DELETE /api/profile/photo ────────────────────────────────────────────
+  // An uploaded profile photo (profileAvatar.ts): checked by its real bytes, checked for nudity before
+  // it is saved (a check that cannot run refuses), stored under the public creator code and served by
+  // GET /api/app-mart/avatar/:creatorId. Rate-limited because every upload costs a vision call.
+  const photoLimiter = rateLimiter({ name: 'profile-photo', authed: 20, anon: 5, noun: 'photo uploads' });
+  app.post('/api/profile/photo', photoLimiter, async (req: Request, res: Response) => {
+    const userId = await verifyFirebaseToken(req);
+    if (!userId) return res.status(401).json({ error: 'Authentication required.' });
+    const parsed = parseAvatarUpload((req.body ?? {}).dataUrl);
+    if (!parsed.ok) return res.status(400).json({ error: parsed.error });
+    const verdict = await checkAvatar(parsed.mime, parsed.bytes);
+    if (verdict === 'unsafe') {
+      return res.status(400).json({ error: 'This photo cannot be used on a public profile. Please choose a different one.' });
+    }
+    if (verdict !== 'safe') {
+      return res.status(503).json({ error: 'The photo could not be checked right now, so it was not saved. Please try again in a moment.' });
+    }
+    try {
+      const creatorId = publicCreatorId(userId);
+      const version = await saveAvatar(creatorId, userId, parsed.mime, parsed.bytes);
+      const photoUrl = avatarUrl(creatorId, version);
+      await userProfileStore.update(userId, { photoUrl });
+      forgetPublicProfile(userId);
+      return res.json({ ok: true, photoUrl });
+    } catch (e) {
+      if (e instanceof AvatarStoreUnavailable) return res.status(503).json({ error: 'The photo could not be saved right now. Please try again.' });
+      return sendSafeError(res, 500, 'The photo could not be saved. Please try again.', e);
+    }
+  });
+
+  app.delete('/api/profile/photo', async (req: Request, res: Response) => {
+    const userId = await verifyFirebaseToken(req);
+    if (!userId) return res.status(401).json({ error: 'Authentication required.' });
+    try {
+      await deleteAvatar(publicCreatorId(userId)).catch((e) => { if (!(e instanceof AvatarStoreUnavailable)) throw e; });
+      await userProfileStore.update(userId, { photoUrl: '' });
+      forgetPublicProfile(userId);
+      return res.json({ ok: true });
+    } catch (e) {
+      return sendSafeError(res, 500, 'The photo could not be removed. Please try again.', e);
+    }
+  });
+
   app.put('/api/profile/budget', async (req: Request, res: Response) => {
     const userId = await verifyFirebaseToken(req);
     if (!userId) return res.status(401).json({ error: 'Authentication required.' });

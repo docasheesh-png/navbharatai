@@ -78,6 +78,7 @@ const CLASSIFICATION: Record<string, { kind: 'user' | 'workspace' | 'platform' |
   app_mart_blocks:     { kind: 'user', why: "the people whose comments a reader chose not to see — doc id IS the uid" },
   app_mart_notifications: { kind: 'user', why: "a creator's grouped App Mart notifications, filed under `recipientUid`; also purged at 90 days" },
   app_mart_creator_ids: { kind: 'user', why: 'which account a public creator code belongs to, so a profile can open — holds `uid`, never returned to a client' },
+  profile_avatars:     { kind: 'user', why: 'an uploaded profile photo, one doc per person under their public creator code — erased with the account' },
   app_mart_follows:    { kind: 'user', why: 'who follows which App Mart creator — one doc per (follower, creator), erased from both ends with either account' },
   app_mart_comment_reports: { kind: 'retained', why: 'what readers reported about App Mart comments — a safety record kept 180 days, like safety_flags' },
   safety_flags:        { kind: 'retained', why: 'flagged messages; the policy promises 180 days' },

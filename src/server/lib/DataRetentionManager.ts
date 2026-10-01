@@ -107,6 +107,8 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
    */
   { collection: 'app_mart_follows', key: { field: 'followerUid' } },
   { collection: 'app_mart_follows', key: { field: 'creatorUid' } },
+  /** An uploaded profile photo (profileAvatar.ts, 2026-10-01): one doc under the public creator code, holding `uid`. */
+  { collection: 'profile_avatars', key: { field: 'uid' } },
   /**
    * 🔒 `takedown_records` IS DELIBERATELY ABSENT, and must stay absent.
    *

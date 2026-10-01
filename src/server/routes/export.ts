@@ -11,6 +11,7 @@ import { verifyFirebaseToken } from '../lib/authMiddleware';
 import { userBuildHistoryStore } from '../lib/UserBuildHistoryStore';
 import { sendSafeError } from '../lib/httpError';
 import { userCostStore } from '../lib/UserCostStore';
+import { csvCell, CSV_UTF8_BOM } from '../lib/spreadsheetFile';
 
 export type ExportFormat = 'csv' | 'json' | 'xlsx';
 
@@ -19,11 +20,12 @@ export function parseFormat(raw: unknown): ExportFormat {
   return raw === 'json' || raw === 'xlsx' ? raw : 'csv';
 }
 
-/** Escape one CSV field per RFC 4180: quote when it contains a comma, quote, CR or LF; double inner quotes. */
-function csvField(value: unknown): string {
-  const s = value === null || value === undefined ? '' : String(value);
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
+/**
+ * One CSV field: RFC 4180 quoting PLUS the formula-injection guard, from the one shared writer
+ * (`lib/spreadsheetFile.ts`). This export used to quote only — so a build prompt that began with "="
+ * opened in Excel as a formula. Same class as the engine's spreadsheet files, one implementation.
+ */
+const csvField = csvCell;
 
 /**
  * Serialize an array of flat records to CSV. Header row is the UNION of all keys (stable first-seen
@@ -95,7 +97,8 @@ async function sendExport(res: Response, format: ExportFormat, rows: Record<stri
   }
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${baseName}.csv"`);
-  res.send(toCsv(rows));
+  // The BOM is what makes Excel read the file as UTF-8 — without it ₹ and every Indian script garble.
+  res.send(CSV_UTF8_BOM + toCsv(rows));
 }
 
 export function registerExportRoutes(app: Express): void {

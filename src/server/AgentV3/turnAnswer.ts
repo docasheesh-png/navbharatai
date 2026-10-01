@@ -35,25 +35,28 @@
  */
 
 import { looksLikeRefusal } from '../lib/promptSafety';
-import { turnAskedTheUser } from './nudgeToBuild';
+import { turnAskedTheUser, turnPointedToPlatformFeature } from './nudgeToBuild';
 
 export interface TurnAnswer {
   /** The model said it cannot or will not do what was asked. */
   declined: boolean;
   /** The model ended its turn on a question, handing the decision back to the user. */
   asked: boolean;
+  /** The user asked for a phone package and the model pointed to NavBharatAI's own APK flow (autopsy 0c2a987a). */
+  pointed: boolean;
 }
 
 /** Read the model's own answer. Call it on the MODEL's text, before any platform rewrite. */
-export function readTurnAnswer(answer: string | null | undefined): TurnAnswer {
-  return { declined: looksLikeRefusal(answer), asked: turnAskedTheUser(answer) };
+export function readTurnAnswer(answer: string | null | undefined, request?: string | null): TurnAnswer {
+  return { declined: looksLikeRefusal(answer), asked: turnAskedTheUser(answer), pointed: turnPointedToPlatformFeature(answer, request) };
 }
 
 /**
- * Did the model answer the user instead of building? A refusal and a question are both FINAL answers
- * for this turn — the rule `shouldRetryEmptyBuild` already states for both — so a platform sentence
- * must never be written over either.
+ * Did the model answer the user instead of building? A refusal, a question and a pointer to the
+ * platform's own feature (autopsy 0c2a987a) are all FINAL answers for this turn — the rule
+ * `shouldRetryEmptyBuild` already states for the first two — so a platform sentence must never be
+ * written over any of them.
  */
 export function answeredWithoutBuilding(answer: TurnAnswer): boolean {
-  return answer.declined || answer.asked;
+  return answer.declined || answer.asked || answer.pointed;
 }

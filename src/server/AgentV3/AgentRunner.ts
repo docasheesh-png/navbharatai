@@ -644,6 +644,8 @@ export class AgentRunner {
       const doneCfg = doneSignalConfig();
       let readyMark: ReadyMark | null = null;
       let doneSignalled = false;
+      /** A due done-check skipped because its step failed — the next clean step runs it (autopsy 6ae30b33). */
+      let doneMissedAt: number | undefined;
       // The ONE ending for an aborted build — reached between turns, and (since autopsy 2720e553) also
       // from INSIDE a turn, when the stop cancelled the model call this loop was waiting on.
       const endAborted = async () => {
@@ -887,6 +889,7 @@ export class AgentRunner {
               nudgesUsed: noBuildNudges,
               maxNudges: MAX_BUILD_NUDGES,
               editingExistingApp: this.opts.editingExistingApp === true,
+              request: userPrompt,
             });
           if (nudge.standDown) {
             try { this.opts.onNote?.({ code: 'BUILD_NUDGE_STOOD_DOWN', message: standDownNote(nudge.standDown), detail: nudge.standDown }); } catch { /* a note must never fail a build */ }
@@ -1217,9 +1220,15 @@ export class AgentRunner {
         // once. Best-effort by construction: a scan that throws leaves the build exactly as it was.
         let doneText: string | null = null;
         try {
-          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled })) {
+          const lastStepFailed = resultBlocks.some((b) => (b as { is_error?: boolean }).is_error === true);
+          const doneDue = shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything() });
+          if (doneDue && lastStepFailed) doneMissedAt = doneMissedAt ?? steps;
+          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, lastStepFailed, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything() })) {
+            doneMissedAt = undefined;
             const readiness = await dispatcher.assessBuildReadiness();
-            if (appIsDone(readiness)) {
+            // Never "complete and healthy" over a compile that just failed (autopsy 33812996).
+            const typeErrors = typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null;
+            if (appIsDone(readiness) && !(typeErrors !== null && typeErrors > 0)) {
               if (!readyMark) readyMark = { step: steps, elapsedMs: Date.now() - buildStartMs, score: readiness.score };
               doneText = doneSteer(readiness);
               if (doneText) {

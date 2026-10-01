@@ -185,6 +185,64 @@ export function undefinedClassesWriteNote(path: string, missing: readonly string
     + `Add the rules to ${sheet} now (or use a class the stylesheet already has) — not at the end of the build.`;
 }
 
+/** `a/b/../c` → `a/c`, with no leading `./`. PURE. */
+function normalizePath(p: string): string {
+  const out: string[] = [];
+  for (const seg of p.split('/')) {
+    if (!seg || seg === '.') continue;
+    if (seg === '..') out.pop(); else out.push(seg);
+  }
+  return out.join('/');
+}
+
+/**
+ * The project stylesheets a module or stylesheet pulls in by a RELATIVE path — `import './calculator.css'`,
+ * `import styles from '../a.module.css'`, `require('./b.css')`, `@import './c.css'` — resolved to project
+ * paths. PURE; package imports (`import 'bootstrap/dist/css/bootstrap.css'`) are not project files.
+ *
+ * 🔴 AUTOPSY 1389f0d5 (2026-09-30): the write-time class note looked for stylesheets under a fixed list
+ * of names (`src/index.css`, `src/App.css`, …). The calculator's classes live in `src/calculator.css`,
+ * which `App.tsx` imports — so every write of App.tsx was told that `.calc-display` and sixteen more
+ * "render UNSTYLED", and the model spent five edits copying rules into `src/index.css` that already existed.
+ */
+export function cssImportsOf(path: string, content: string): string[] {
+  const dir = String(path).includes('/') ? String(path).slice(0, String(path).lastIndexOf('/')) : '';
+  const out = new Set<string>();
+  const re = /(?:\bimport\s+(?:[\w{}*\s,]+\s+from\s+)?|\brequire\s*\(\s*|@import\s+(?:url\()?\s*)["'](\.{1,2}\/[^"'\s]+\.(?:css|scss|sass|less))["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(String(content ?? '')))) out.add(normalizePath(dir ? `${dir}/${m[1]}` : m[1]));
+  return [...out];
+}
+
+/** The import specifier that reaches `sheet` from the module at `from`. PURE. */
+export function relativeSpecifier(from: string, sheet: string): string {
+  const fromDir = from.includes('/') ? from.slice(0, from.lastIndexOf('/')).split('/') : [];
+  const to = sheet.split('/');
+  let i = 0;
+  while (i < fromDir.length && i < to.length - 1 && fromDir[i] === to[i]) i++;
+  const up = fromDir.length - i;
+  const rest = to.slice(i).join('/');
+  return up === 0 ? `./${rest}` : `${'../'.repeat(up)}${rest}`;
+}
+
+/**
+ * The note for classes a screen uses that ARE defined — in a stylesheet nothing imports. PURE; '' when
+ * there is none. The remedy is one import line, not new rules: telling the model to "add the rules to
+ * src/index.css" (what the note said before, autopsy 1389f0d5) copies styles that already exist and
+ * still leaves the orphan sheet in the project.
+ */
+export function unimportedSheetNote(screen: string, sheets: ReadonlyArray<readonly [string, readonly string[]]>): string {
+  let out = '';
+  for (const [sheet, classes] of sheets) {
+    if (classes.length === 0) continue;
+    const shown = classes.slice(0, 8).map((c) => `.${c}`).join(', ');
+    const more = classes.length > 8 ? ` and ${classes.length - 8} more` : '';
+    out += `\n⚠️ ${screen} uses ${shown}${more} — ${sheet} defines ${classes.length === 1 ? 'it' : 'them'}, but nothing imports ${sheet}, so those elements render UNSTYLED. `
+      + `Add \`import '${relativeSpecifier(screen, sheet)}';\` to ${screen} — do not copy the rules into another stylesheet.`;
+  }
+  return out;
+}
+
 /** How many class names a sub-agent brief may carry — the kit is 59; an app sheet rarely doubles it. */
 const BRIEF_MAX_CLASSES = 160;
 

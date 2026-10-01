@@ -240,7 +240,7 @@ export async function restoreWorkspaceMemory(
       if (ep.kind === 'error') mem.recordError(ep.text, ep.file, ep.ts, ep.resolvedAt);
       else if (ep.kind === 'fix') mem.recordFix(ep.text, ep.file, ep.ts);
       else if (ep.kind === 'note') mem.recordNote(ep.text, ep.file, ep.ts);
-      else if (ep.kind === 'request') mem.recordRequest(ep.text, ep.ts);
+      else if (ep.kind === 'request') mem.recordRequest(ep.text, ep.ts, ep.lane);
     }
     // ⚠️ THE TWO SENTENCES THAT USED TO STAND HERE CONTRADICTED EACH OTHER, AND THE FALSE ONE IS THE
     // ⚠️ UPDATED 2026-09-18: the FIRST sentence is now the true one. These two comments used to

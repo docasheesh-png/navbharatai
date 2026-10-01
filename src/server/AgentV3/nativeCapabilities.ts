@@ -28,6 +28,8 @@
 //
 // PURE — no I/O.
 
+import { withoutMachineText } from '../lib/machineText';
+
 /** The Capacitor major every version in this table was verified against. */
 export const REGISTRY_CAPACITOR_MAJOR = 7;
 /** The exact Capacitor 7 core the builder installs beside a plugin (latest 7.x on 2026-09-27). */
@@ -264,7 +266,8 @@ export const IMPOSSIBLE_POWERS: readonly ImpossiblePower[] = [
 
 /** The capabilities a request asks for, in table order. */
 export function requestedCapabilities(prompt: string | null | undefined): NativeCapability[] {
-  const text = typeof prompt === 'string' ? prompt : '';
+  // A reference link's words ask for nothing (autopsy 33812996) — read without machine text.
+  const text = typeof prompt === 'string' ? withoutMachineText(prompt) : '';
   if (!text.trim()) return [];
   return NATIVE_CAPABILITIES.filter((c) => c.asks.test(text));
 }

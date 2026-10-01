@@ -61,7 +61,9 @@ describe('an index.html that cannot boot is repaired on EVERY lane', () => {
 
   it('🔒 a repaired entry file is OUR fact, never a finding against the user’s app', () => {
     const diag = fs.readFileSync(path.join(__dirname, '../src/server/AgentV3/BuildDiagnostics.ts'), 'utf8');
-    const set = diag.slice(diag.indexOf('PROCESS_ONLY_CODES'), diag.indexOf('PROCESS_ONLY_CODES') + 2000);
+    // The WHOLE set, to its closing bracket — a fixed-size window broke the moment codes were added above.
+    const start = diag.indexOf('PROCESS_ONLY_CODES = new Set([');
+    const set = diag.slice(start, diag.indexOf(']);', start));
     expect(set).toContain("'HTML_ENTRY_REPAIRED'");
   });
 });

@@ -13,6 +13,7 @@
 
 import { withoutUrls } from './promptUrls';
 import { indicDomainMatches, usesIndicScript } from './indicDomainTerms';
+import { withoutMachineText } from './machineText';
 
 export interface RequirementGaps {
   domain: string;
@@ -466,9 +467,10 @@ const NON_DOMAIN_USES: RegExp[] = [
  * repo's most expensive shape — a fix applied to one of two lanes (see `a38c6fef`). Pure.
  */
 export function stripNonDomainUses(input: string): string {
-  // A link names a place, never a feature — `play.google.com/store/...` made a search app a shop (a9f8d186).
+  // A link names a place, never a feature — `play.google.com/store/...` made a search app a shop
+  // (a9f8d186 / 33812996). Blanked first, by BOTH helpers two sessions wrote for this class.
   const text = withoutUrls(String(input || ''));
-  let out = text;
+  let out = withoutMachineText(text);
   for (const re of NON_DOMAIN_USES) out = out.replace(re, ' ');
   // A prompt that names the React Native toolchain anywhere is using "Expo" as its name every time —
   // "if the project uses Expo, configure EAS" has no construction of its own to match. Conditional on

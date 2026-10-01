@@ -85593,6 +85593,142 @@ Admin: *"mobile friendly game/app bane — mobile first!!!!!!"*, choosing touch 
 - The phone check reports and offers a fix; it does not repair on its own. A verified repair (like the
   explorer's) waits until `MOBILE_LAYOUT_ISSUES` has appeared on real builds.
 - Games built before today get the controls only when rebuilt.
+
+## 2026-09-30 — Autopsies 33812996 (Circle to Search) + 0c2a987a ("Make in .apk files")
+
+Build 33812996: a Weak build that took 31 minutes against an estimate of 5–12. The first real-browser
+render came at 1841 s. Build 0c2a987a took six model calls to answer one question.
+
+**Ledger** (problem → root cause → class → siblings → test):
+
+- **Read as ecommerce, and the estimate doubled**
+  - Root cause: the Play Store link's `store` matched the ecommerce domain, and the link's path counted
+    as modules.
+  - Class: a URL's words were read as the request's words. Already fixed once, for one reader only
+    ("Lekhan Sahyak", 2026-09-27).
+  - Siblings: `lib/machineText.ts` is now the one helper, called by the requirement analyser, the
+    request analyser, the build-time estimator, the enumerated-feature counter, the native-capability
+    reader and the scope feature counter.
+  - Test: `aLinkIsNotTheRequest` (a census: every reader gives the same answer with or without a link).
+- **Filed as a `translate` task, score 15**
+  - Root cause: "screen translation" in the feature list.
+  - Class: a text-processing word used as a feature's name. The Gita fix (b6f88a72) covered "in hindi"
+    only.
+  - Fix: translate and summary stand down when the request orders an app, which sends it to the
+    platform's existing second opinion.
+  - Test: same file.
+- **560 s of fast-lane repair (77%)**
+  - Root cause: flashx crawled inside a repair call, and the same call walked onto `kimi-k2.7-code`
+    (197 s with no answer) and then `glm-5.3`.
+  - Class: `stopLane` (Study-Racer) guarded generation only, and only after a reasoning rung had served
+    a call.
+  - Fix: lane calls carry `stopAtReasoningRung`, and the repair loop asks `stopLane`.
+  - Test: `theLaneStopsBeforeAReasoningRung`.
+- **An LLM heal for three one-line CSS edits**
+  - Root cause: the deterministic wiring knew only global-named sheets.
+  - Fix: `isAppWideStylesheet` covers styles/css folders and theme, token and component names;
+    `dedupeStylesheetImports` removes an import the entry already has. Both lanes call them.
+  - Test: `theStylesheetsAreWiredWithoutAModel`.
+- **Fake results shipped as features**
+  - What happened: song recognition picked a random entry from `MOCK_DB`, translation returned
+    `[Translated to X]: …`, and search results and AI overviews were hard-coded.
+  - Class: made-up results. f15a9bcc covered made-up people only.
+  - Fix:
+    - `NO_FAKE_RESULTS_RULE` in both lanes;
+    - a `simulated-result` finding with a write-time note;
+    - a `SIMULATED_RESULT_SHIPPED` disclosure to the user.
+  - Test: `aFeatureMayNotMakeUpItsResult`, which also checks that no golden scaffold trips it.
+- **"Complete and healthy" said over a failed compile, then 28 more steps**
+  - Root cause: the done check read the static scan only.
+  - Fix: the dispatcher remembers the latest compile's verdict from every door, including a failing
+    shell `tsc`.
+  - Test: `doneIsNeverSaidOverAFailedCompile`.
+- **"The exact versions you specified"**
+  - Root cause: the prompt line from e7baf61d was ignored by the model.
+  - Fix: a `claimAudit` rule, `user-attributed`.
+  - Test: `aPlatformPinIsNotTheUsersRequest`.
+- **A lazy import of a named member that was only the default export (TS2339)**
+  - Fix: `ImportExportReconcile` CASE C.
+  - Test: `aLazyImportGetsTheRightKind`.
+- **`safeImage.ts` written against react-native in a vite-react app**
+  - Fix: web lanes get `webPlatformRule`.
+  - Test: same file.
+- **APK request nudged twice and retried (0c2a987a)**
+  - Class: a pointer to the platform's own feature read as a stall. Refusal and question were already
+    answers.
+  - Fix: `turnPointedToPlatformFeature`, which needs both a package request and a named
+    Download APK / APK Builder; nudge, retry and empty flip all read it.
+  - Test: `aPointerToTheApkBuilderIsAnAnswer`.
+- **"The typecheck did not run" beside `npm run build` exit 0 and PROD_BUILD_OK**
+  - Root cause: only `tsc --noEmit` counted as a typecheck.
+  - Fix: `buildScriptTypecheckVerdict` reads the echoed `> tsc … &&` line. Both the agent's log and the
+    platform's production build feed the gate.
+  - Test: `aBuildThatCompilesIsATypecheck`.
+
+**Already fixed on `main` when these builds ran (deploy lag):**
+- the crawl bench being build-long (#3402);
+- a backend agent spawned for a browser-only app (#3402, `parallelHelperScope`);
+- `TSC_ENSURE` output going to /dev/null, and a piped `tsc | head` reported as exit 0 (#3412).
+
+**Still open:**
+- The contract drifted on key casing (`isFeatureEnabled('qr_scanner')` against `QR_SCANNER`). The
+  shared contract does not carry a constants module's key union. A general fix needs the contract to
+  name every string-literal union a consumer passes; not guessed at here.
+- 111 file reads covered 28 distinct files. The no-progress limit was not reached (every re-read
+  followed a change). This is recorded as measurement only.
+## 2026-09-30 — A free build holds the sandbox for less (E2B cost lever, admin: "han, free build time-limit wala PR banao")
+
+**The problem.** A free (Weak) build got the paid window: 30 minutes, or 60 on a deep prompt. When the
+window ran out, the watchdog pause was always `resumable`. The client auto-continues it for up to 8
+windows while files grow, plus 2 windows with no progress. So one free request could hold an E2B machine
+for four to eight hours with nobody pressing anything, all of it paid by NavBharatAI.
+
+**The fix** (`src/server/AgentV3/freeBuildTimeCap.ts`):
+- **Window:** a free build's window is min(paid cap, `AGENTV3_FREE_BUILD_SECONDS`), default 25 min. It is
+  applied to `effectiveBuildSeconds`, so every budget derived from it moves together.
+- **Unattended chain:** the watchdog pause is resumable only while this request's free windows total less
+  than `AGENTV3_FREE_BUILD_AUTO_SECONDS` (default 50 min). After that the work is saved, the user is told
+  so, and each "continue" buys one window.
+- **Server-side:** the phone apps are bundled, so a client change would not reach them.
+- **Report codes:** `FREE_BUILD_TIME_CAP` and `FREE_BUILD_CHAIN_PAUSED`, both process-only.
+- **Honesty sibling:** the runner's timeout outcome now names the key that actually set the cap.
+- **Tests:** `tests/aFreeBuildHoldsTheMachineForLess.test.ts`, reversion-proven.
+
+**Still open:**
+- The chain is counted per instance. An auto-continue served by another Cloud Run instance starts a
+  fresh chain there, which is the old behaviour. The complete fix is a durable per-workspace counter,
+  for example on the workspace build lease.
+- 25 min / 50 min are assumptions. Read `FREE_BUILD_CHAIN_PAUSED` on real builds before tuning them.
+- Project-mode module turns (`planRemaining`) keep their own chain guard and are not bounded by this.
+## 2026-09-30 — Autopsy bee95692 ("Social media app", Weak, 14.5 min, ₹165.64): green, ~5 min lost to one typo
+
+The app rendered and passed the production build. The explorer pressed 14 controls. The build was
+deployed with today's fixes (#3397–#3411). The complex route was correct for a social app.
+
+**Fixed (all reversion-proven, `tests/theSocialAppAutopsy.test.ts`):**
+1. **`.node_modules/.bin/vite` (4×) and `.node_modules/.bin/tsc` (2×).** No project has that folder.
+   - `fixNodeModulesTypo` corrects the path before the shell runs, and the agent is told.
+   - `DevServerRecovery` classifies `PATH: No such file or directory` as `code_error`. It used to say "no
+     recognisable error" and restart twice, 72 s a time, four times.
+2. **False Rules-of-Hooks blocker.** `return useSyncExternalStore(...)` was read as "a hook after an early
+   return". The return that CONTAINS the call was counted as before it. That fed a resume round, and a
+   correct hooks file was rewritten three times. A return now counts only if it ENDS before the call.
+3. **getSnapshot returned a new array per call → "Maximum update depth exceeded".** The preview crashed and
+   a repair pass ran. `STABLE_SNAPSHOT_RULE` now reaches both lanes.
+4. **The build-start database offer read only the message ("Yes").** It now reads `planning.text`, the same
+   text the complexity score and the plan read. "social media/network app" is now a shared-data signal
+   (social-media marketing is not).
+
+**Recorded, not changed:** the lean post-build reviewer timed out at 45 s in 3 of today's 4 reports. It
+spends tokens and returns nothing. Raising or dropping it is an admin decision.
+
+**Follow-up (admin chose "fix the timeout", after being told that skipping the review on green apps would
+also switch off the one verified functional repair, `selectGreenRepairable`):**
+5. **The lean reviewer was handed all 11 changed files in full and read them all again anyway** (`glob`,
+   then one `read_file` each), then timed out. "Do NOT read these again" was advice, not a mechanism.
+   When every changed source file fits inline (`leanReviewAnswersInOneCall`), the review now spawns with
+   NO tools (`toolsOverride: []` on `makeSubAgentSpawn`): it can only answer, in one call. When a changed
+   file did not fit, it keeps its read tools. The skip-the-review option was withdrawn, not shipped.
 ## 2026-09-30 — Autopsy a9f8d186: "circle to search", Weak, 17.5 min — rendered, then called "sandbox unavailable" and made free
 
 The prompt asked for a circle-to-search app with a QR scanner, screen translation, music recognition, an
@@ -85728,3 +85864,177 @@ and *"isko real word social media jaisa banao!"*
   comment number until the next recount of that comment.
 - "Follow a creator" is a natural phase 2; not built.
 - Phone users get the new screens only with a fresh `.aab`/`.ipa` (bundled mode).
+## 2026-09-30 — Autopsy 6ae30b33: "Make question" built an app
+
+A Weak build (₹88.15, 6.9 min, ok). Earlier in the conversation the user had asked for an essay and for two
+hard GK questions in Hindi, and both were answered in chat. Then the user typed "Make question", and it built
+a 35-file "GK & Study Helper" app that nobody asked for.
+
+| # | Problem | Root cause | Class | Siblings / fix | Locked by |
+|---|---|---|---|---|---|
+| 1 | "Make question" built an app | `firstNewBuildOrder` hard-locked a build verb to `new_build` HIGH, whatever its object was | A build verb whose object is WRITTEN CONTENT is chat | `ordersWrittenContent` (content nouns, English + Hinglish/Hindi) → `chat` LOW `content-request`. A build noun, a screen part or a pointed reference keeps it a build. The reader prompt was told the same | `theQuestionWasContent` S1 (16 cases) |
+| 2 | Earlier chat turns became the app's spec | `planningRequest` read every earlier request, and nothing recorded which lane answered a turn | A turn answered in chat is not a build request | Episodes carry `lane`, set by all three recording lanes and replayed on restore. The planner drops chat turns; an untagged turn is judged by the classifier (`wasBuildRequest`). A source guard fails on an unlabelled `recordRequest` | S2 |
+| 3 | `edit_file` on `index.css` → "fetch failed", never written | `fileOp` dropped the dead handle but threw on the call that found it | A fast dead-connection error loses the operation in flight | One retry on a fresh handle for a dead-sandbox error. A timeout is never retried. All callers are idempotent | S3b source guard |
+| 4 | "STOP, the app is complete" rode the failed step | The done check ran on its cadence, whatever the step's result | A completion steer attached to a failed step | `shouldCheckDone` skips a step with `is_error` and runs on the next clean step (`missedAt`) | S3b |
+| 5 | Fast-lane files disagreed on constant names | The contract pinned types but not shared values; tier-0 files run in parallel | Shared values with no single owner | Contract declares constants; `valueOwnerFor` names one owner file (see the CLAUDE.md note) | S3c |
+| 6 | `<title>App</title>`; meta description = "Make question" | A `<title>` element counted as a name even when it was a placeholder; the description came from the prompt | Placeholder names outrank the app's own heading | Order is now chosen → real title → the app's brand/h1 → prompt. A placeholder `<title>` is replaced. A body under 3 words falls back to the name. Both callers pass `appSource` | S3d |
+| 7 | a11y finding on a CSS file | — | — | Already fixed by #3416 | (#3416) |
+
+**Recorded, not changed:**
+- GLM crawled (25.8 s), then a 60 s timeout. This is provider weather; the crawl bench did its job.
+- The Explorer's "History" click timed out at 4000 ms. The cause is unknown.
+- Installing `react-router-dom` left 2 moderate vulnerabilities.
+- `requestAnalysis.startTier: "gemini"` is a stale label (admin-only).
+- Episodes stored before this change carry no lane. They rely on the classifier.
+
+All 32 cases in `tests/theQuestionWasContent.test.ts` are reversion-proven. Reverting S1 fails 9 cases, S2 fails 2, S3b fails 1, and each half of S3d fails 1.
+## 2026-09-30 — Autopsy 1389f0d5: the saved project, the style note, "complete" before the edit, the silent rung, the unread picture
+
+**The build:** a Weak edit, *"Generate a pdf on genesis 4 with added images with this photo type uploaded"*, on a
+workspace holding a calculator. It added a Genesis-4 PDF page to the calculator in 8 minutes and rendered.
+Billed ₹174.99, real cost $0.51.
+
+**Tally.** 1 self-heal (the orphan stylesheet, wired in by a post-build LLM pass). 1 workaround (GLM timed out
+and crawled; the ladder fell to KIMI). 0 skips. 1 still broken: the saved `src/App.tsx` was not the one that ran.
+Struggle points:
+- 2 rejected JSX edits;
+- 5 edits copying rules into `src/index.css` that already existed;
+- 80 s waiting on a silent rung;
+- a false "✅ The app looks complete" at step 10.
+
+**Ledger (problem → root cause → class → siblings → lock):**
+
+1. **Saved App.tsx ≠ the App.tsx that ran** (`SAVED_SOURCE_DIVERGES`, `PREVIEW_SNAPSHOT_STALE`).
+   - Root cause: `replace_symbol` wrote to the sandbox and never reached `onFileWrite`. The durable save lets recorded writes win, so the save kept the pre-`replace_symbol` copy.
+   - Class: a tool write that skips the save's record.
+   - Siblings: about 170 other dispatcher writes (generators, recipes, release notes, the `.gitignore` heal).
+   - Fix: the dispatcher's actuator is a recording wrapper (`recordedWrites.ts`). An unrecorded write is recorded when the tool call ends, and both durable saves flush first. The platform's starter stays unrecorded, as before.
+   - Lock: `tests/everyToolWriteReachesTheSave.test.ts`, reversion-proven.
+2. **"`.calc-display` … no stylesheet defines them" on every App.tsx write.**
+   - Root cause: the note looked for stylesheets under a fixed list of names, and never saw the `src/calculator.css` that App.tsx imports.
+   - Sibling: `inventedKitClassNotes` had the same blind spot.
+   - Fix: both now read the sheets the screens and the entry import. Before reporting anything, the class note reads every project sheet. A class defined only in a sheet written this build that nothing imports gets "import it" (with the exact line) instead of "add rules".
+   - Lock: `tests/theStyleNoteReadsWhatTheScreenImports.test.ts`.
+   - This is also the upstream half of the orphan-stylesheet self-heal: the model is told at write time. The deterministic end-of-build import is PR #3420's region (`isAppWideStylesheet`), so it is not touched here.
+3. **"✅ The app looks complete — wrapping up." at step 10, before any write.**
+   - Root cause: the done signal scored the untouched calculator (100/100) on an edit turn. `toolUses > 0` counted reads, not changes.
+   - Fix: `shouldCheckDone` takes `wroteThisRun` from `dispatcher.wroteAnything()`, which includes sub-agent writes.
+   - Lock: `tests/anEditIsNotDoneBeforeItStarts.test.ts`.
+4. **80 s of provider time wasted (60 s silent timeout + 20 s crawl).**
+   - Root cause: the throughput floor was judged only when a chunk arrived, so silence waited 60 s while a trickle was dropped at about 20 s.
+   - Fix: while the ladder allows an abandon, the chunk wait wakes every 2.5 s to judge the rate. A request that has not opened by the grace period is abandoned with the crawl message, so the crawl allowance governs it. The last rung is unchanged.
+   - Sibling: a stream that opens after we gave up is now closed on arrival. The pre-existing 60 s give-up path had the same leak.
+   - Lock: `tests/silenceIsTheSlowestRate.test.ts`.
+5. **The user's photo.**
+   - Root cause: the vision race (8 s) turned a lost race into `''`. The builder was never told a picture was attached, and the report had no line about it.
+   - Fix: an unread picture reaches the builder as "attached, could not be read — say so". `ATTACHMENTS_READ` records count, outcome and seconds.
+   - Lock: `tests/aPictureThatWasNotReadIsNotSilent.test.ts`.
+6. **Two WRITE REJECTED JSX edits.**
+   - Root cause: the rejection hint led with "duplicate declaration" for a JSX-structure error.
+   - Fix: the hint now follows the error's class and points at `replace_symbol`, which is what finally worked (`isJsxStructureError`).
+7. **Reviewer read `src/components/PdfGenesis.tsx`, which does not exist.**
+   - Root cause: the project map named components without paths.
+   - Fix: it now prints `PdfGenesis (src/PdfGenesis.tsx)`.
+8. **`TEST_SUITE_UNVERIFIED` (browsers not installed).**
+   - The report cannot say which browser build Playwright wanted, so the fix is observational: the reason now carries it (`wantedBrowserDetail`).
+   - **OPEN root cause:** a project whose `@playwright/test` wants a different chromium build than the sandbox ships. It needs one report with the new detail before the right fix (install the matching build, or pin the version) can be chosen.
+
+**Not bugs:** `startTier: "gemini"` is the historical band name, and the report already prints "cheapest band".
+`DESIGN_CONSISTENCY 60` is the calculator's own stylesheet from an earlier build, which the write-time notes
+flagged. The Latin-language line and "intention reader did not run" are fixed by PR #3416's Part A, which was
+not yet deployed when this build ran.
+
+**OPEN, for the admin:** an unrelated request on an existing app ("a Genesis PDF" on a calculator) is built INTO
+that app (`BUILD_ORDER_READ_AS_EDIT`). Asking once ("add to this app, or start a new one?") is a product
+decision, not a bug fix.
+## 2026-09-30 — Autopsy 12511a9c ("Calculator", Weak, 9.2 min vs ~4 min estimate, billed ₹121.19)
+
+**Tally:** 2 self-heals (GLM crawl benched, then KIMI took over; the preview re-publish), 1 workaround (the contract
+step stopped at its own 55.9 s cap, so the files were written without a shared contract), 0 skipped, 0 shipped broken.
+There were 3 struggles: two needless repairs (~90 s + ~3 min) and App.tsx alone taking 104 s.
+
+| Problem | Root cause | Class | Siblings | Test |
+|---|---|---|---|---|
+| The build prompt was our own weak-tier notice, byte for byte. It became the app's og:description and made REQUIREMENT_GAPS read a "social" domain. | No send path does this (checked every client and server path). The exact bytes come from a copy: every reply bubble has a Copy button, and phone keyboards offer the clipboard as a paste suggestion. | Platform text returned as a request. | fdd59ef8 (sign-in notice via Fix with AI) closed one door; this is the shared door, the route. | `ourOwnNoticeIsNotARequest` |
+| A rendered app (20/20 buttons styled) was judged "not rendered" over one console line, then repaired. | The defaults pass wrote index.html (`register('/sw.js')`) before public/sw.js, and the SPA fallback served HTML for `/sw.js`. | A console line from our own file writes was read as an app defect. | The render rescue and the last-chance proof also record their clean checks. | `theConsoleLineWasOurOwnWrite` |
+| The runtime auto-fix repaired the same line ~116 s after a clean re-check. | Fixed 180 s look-back window. | The stale-console window: 7d79254b fixed the render checks and not this reader. | This was the last reader using a fixed window. | same file |
+
+**Still open:** the fast lane's contract step for a 4-file app was cut at its own cap. For a simple app the
+contract may not be worth a model call. This is not decided here.
+
+## 2026-09-30 — Autopsy 6db0ff31 ("A app for my online buisness of digital marketing agency", Weak, stopped by the user at 1.9 min, ₹0)
+
+**Tally:** 0 self-heals, 0 workarounds, 1 skip (the architect waited on a specialist that had done nothing), 0 shipped broken
+(nothing shipped). There were 2 struggles: 40 s of reading and planning on a reasoning rung, then a delegation that returned a question.
+The user saw nothing for 111 s and pressed Stop.
+
+| Problem | Root cause | Class | Siblings | Test |
+|---|---|---|---|---|
+| A fresh scaffold was run as "Editing your existing app (1 source file)"; Project Mode said "not a fresh build"; the analyser filed it as `chat` (score 5). | A zero-byte `java` the user created in Code Studio counted as source. `couldBeAppCode` knew binaries (the "Universal Remote" fix added `.apk`) but not the SHAPE of a stray root name. | Something that can never be code counted as the user's app. | The intent reader was handed the raw `projectExists` (e9b25b08 fixed the net, not the reader). The rebuild guard, the rebuild confirmation and the edit banner counted `countEditableSourceFiles`. All now use `appSourceFileCount` / `userAppExists` (with recent requests protecting a one-file App.tsx app). | `theSpecialistAskedNobody` §3 |
+| The Frontend specialist replied "What would you like me to build?" and wrote nothing. | A child is handed only the architect's instruction. Its language and AI rules were threaded (466c260a, d8ed307a); the user's request they derive from never was. | A specialist working without the user's words. | The reviewer gets the request too (without the "build it" line). The task result now names a question-ending, file-less reply as one the user never sees. | §1, §2 |
+| The report graded our starter under "observation about your existing code". | The seeded-files index had the golden scaffolds but not the sandbox starter (`TemplateRegistry`), and any non-seeded file (the empty `java`) counted as user code. | Our own template judged as the user's work. | Every framework's starter is now in the index; empty and stray files are not user code. The CSS-comment `<img>` false positive was already fixed by 4541f1cf, which reached `main` after this build ran. | §4 |
+| MARKUP_WAIVED said "billed at real cost only ($0.1047)" beside a final bill of ₹0. | The admin line was recorded before the zeroing rules; 586295b7 had moved only the user's sentence. | A money statement made before the money is final. | Now recorded at the settle, and it says when a later rule zeroed the bill. | §4 |
+| A user-stopped build had `errors: 1` (RELEASE_GATE) and an unresolved UPSELL_SUPPRESSED warning. | The severity rule read `!result.ok` and not the stop the gate's own headline already reads. | A stop read as a failure. | UPSELL_SUPPRESSED stays a warning for the reasons that name a fault of ours. | §4 |
+
+**Checked, no change:** the `etaAccuracy` line ("UNDER the band") on a stopped build is a per-build fact that nothing aggregates.
+**Still open:** the architect's 35 s after the empty delegation (its last call was aborted by Stop, so what it was doing is not in the report).
+## 2026-09-30 — CI went red repo-wide on a new `@grpc/grpc-js` advisory; pinned to 1.14.5 by override (the merging session)
+
+- **What happened:** between 18:16 and 18:18 UTC, GitHub published GHSA-m9gg-hp2v-232j (high: `getAuthContext` can
+  return unauthorized certificates as authorized) and GHSA-f596-whhp-79r4 (low) for `@grpc/grpc-js` `<1.13.6` and
+  `1.14.0–1.14.4`. The security-audit gate (CI step 6, `scripts/auditGate.mjs`) blocks any un-allowlisted high, so
+  `main` (70b9dd9c, the #3417 squash) and every open PR failed in ~70 s from that minute on. **The same tree had
+  passed CI two minutes earlier** — nothing in the code changed; the advisory did.
+- **Where it lived:** four copies — `1.14.4` under `dockerode`, `firebase-admin → google-gax`, `firebase-tools →
+  @google-cloud/pubsub → google-gax` (all ranges `^1.10+`, so they accept 1.14.5), and `1.9.16` under `firebase →
+  @firebase/firestore@4.17.1`, whose range is `~1.9.0` and which has **no patched 1.9.x** (fixed only in 1.13.6 and
+  1.14.5). `npm audit fix` offered only a semver-major *downgrade* of `firebase` to 9.14.0, which is not a fix.
+- **The fix, and why an override rather than an allowlist row:** `"@grpc/grpc-js": "^1.14.5"` in `package.json`
+  `overrides` (the same mechanism already used for `undici`, `tar`, `nanoid`, …). Rule 4: the allowlist is for
+  advisories with no safe fix; this one has a patched release, and `firebase-admin` already ran 1.14.4 in the same
+  process, so the 1.14 API surface is proven here. `server.ts` and `src/server/lib/db.ts` do import the client
+  `firebase/` SDK in Node, so the Firestore client's Node path now also runs on 1.14.5 — covered by the boot check
+  and the full suite in the gate below, not assumed.
+- **Result:** `npm run audit:gate` → *No new high/critical* (high 10 → 3, all three pre-triaged);
+  `license:gate` clean; full gate on the final state recorded in the PR.
+- **Open, honestly:** `@firebase/firestore` upstream still declares `~1.9.0`; when Firebase moves its own range the
+  override becomes redundant and should be removed (re-check on the next `firebase` bump). The three pre-existing
+  allowlisted highs (`axios`, `brace-expansion`, `undici`) are unchanged.
+
+## 2026-09-30 — Autopsy 9762f589: "sirf sample file bana o sales ki city wise jisme only 10 employees ho" (Weak)
+
+The report was taken while the build was still running (minute 7). The conversation had asked "Excel file
+bana sakte ho?", so what the user wanted was a sample Excel file. The engine planned and built a 13-file
+React dashboard instead.
+
+**Tally:**
+- ✅ Self-healed (3):
+  - 4 unused imports removed by the deterministic pass.
+  - 2 import issues fixed before the preview.
+  - A truncated repair was continued.
+- 🔀 Worked around (1): GLM `glm-4.7-flashx` crawled and was benched after 44 s, so the ladder moved on.
+- ⏭️ Skipped (0).
+- ❌ Open at report time (2):
+  - 5 tsc errors: a nonexistent `./components` barrel, and two self-imports made by repair passes.
+  - The deliverable was an app, but the user asked for a file.
+- 🥵 Struggle (4):
+  - Three repair passes. Pass 2 made things worse: it invented `./components` and `./App.css`.
+  - Pass 3 rewrote several files in one answer, took 112 s and hit the 8,000-token ceiling.
+  - Its continuation crawled.
+  - The ETA said "~59s to go" at minute 6, and the build was still running at minute 7.
+
+| Problem | Root cause | Class | Siblings | Locked by |
+|---|---|---|---|---|
+| Two homes for the same helpers (`src/utils/sales.ts` planned, `src/utils.ts` added) with different signatures | `utilOwnerFor` (876afca9) only matched a purpose that NAMES a helper, or a `utils.ts` in the contract's folder | A symbol's home found by exact name only | The sales file was in `utils/`, outside the contract folder | `helperModuleByWords` (≥ 2 shared stems, plain modules only) |
+| `interface CitySummary` beside `CitySummary.tsx` → TS2865, then a self-import from the repair | The prompt rule (121c2431) is persuasion; the model broke it a second time | A rule the model can ignore | Every type/component name pair | `separateTypeFromComponentNames` (by construction, before file one) + `fixTypeImportValueClash` (deterministic net, both lanes) |
+
+Tests: `tests/theSalesSampleHadTwoHelperHomes.test.ts`, reversion-proven for all three fixes.
+
+**Still open:**
+- **A request for a FILE (Excel / CSV / sample data) has no deliverable.** AgentV3 can only build apps, and
+  nothing hands the user a downloadable file. The server already writes real `.xlsx` files with `exceljs`
+  (`routes/export.ts`), so building this is a product decision. Put to the admin; not built here.
+- The fast lane's plan regenerated `package.json` (vite ^6), `tsconfig.json` (added `noUnusedLocals`) and
+  `vite.config.ts` over the scaffold's own. That caused the TS6133s (fixed for free) and a 16 s `npm install`
+  at the first `tsc`. These files are editable on purpose, because apps add dependencies. Whether the plan may
+  REWRITE them wholesale is not decided here.

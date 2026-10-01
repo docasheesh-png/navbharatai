@@ -36,3 +36,29 @@ export const NO_FAKED_RESULT_RULE =
   'image or text detector must call the real API, library or device — or, when that needs a key or a device the app ' +
   'does not have, show a clear on-screen state saying what it needs. Never return a hard-coded, random, "demo" or ' +
   '"mock" result in place of the real one.';
+
+/**
+ * A SNAPSHOT MUST BE THE SAME OBJECT UNTIL THE DATA CHANGES (autopsy bee95692, 2026-09-30). A social app's
+ * store answered `getPosts()` with `[...this.posts].sort(...)` — a NEW array on every call — and passed it to
+ * `useSyncExternalStore` as getSnapshot. React compares snapshots by identity, so every render saw "new"
+ * data and rendered again: "Maximum update depth exceeded", a crashed preview, and a repair pass. The rule
+ * is React's own, stated where the builder decides it.
+ */
+export const STABLE_SNAPSHOT_RULE =
+  '- useSyncExternalStore\'s getSnapshot must return the SAME object until the data changes — never build a new ' +
+  'array/object inside it (no sort/filter/map/spread per call); keep the derived value cached in the store and replace it only on writes.';
+
+/**
+ * NEVER FAKE A FEATURE'S RESULT (autopsy 33812996, 2026-09-30). Asked for a Circle to Search app with
+ * music recognition, screen translation, AI overview and multi-engine search, the build shipped a song
+ * "recognised" by `MOCK_DB[Math.random() * MOCK_DB.length]`, a translator returning `[Translated to hi]: …`,
+ * and search results and AI overviews written into the code — and the summary described every one as a
+ * working feature. NO_INVENTED_PEOPLE_RULE covered made-up PEOPLE; this is its sibling for made-up RESULTS.
+ * Shared by both lanes, like the rules above.
+ */
+export const NO_FAKE_RESULTS_RULE =
+  '- Never fake what a feature returns: song recognition that picks a random song, a translator that echoes ' +
+  '"[Translated to X]: text", or search results and AI answers written into the code are not features. Call a ' +
+  'real service (keyless where one exists — e.g. open the chosen search engine\'s results page), or, when the ' +
+  'feature needs a key or a server the app does not have, show an honest "connect X to turn this on" state and ' +
+  'say so in your final message. Sample entries shown for layout are labelled on screen as examples.';

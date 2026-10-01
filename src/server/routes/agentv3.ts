@@ -1,7 +1,7 @@
 import { toSafeClientMessage } from '../lib/httpError';
 import type { Express, Request, Response } from 'express';
 import { copyName, copyStatus } from '../AgentV3/duplicateApp';
-import { decideMarkupOnProof, markupNeedsPreview } from '../AgentV3/previewEarnsMarkup';
+import { decideMarkupOnProof, markupNeedsPreview, markupWaiverSettledLine } from '../AgentV3/previewEarnsMarkup';
 import { isPlatformFixRequest, inBrowserPreviewFixGuidance } from '../../lib/platformFixRequest';
 import { buildRateLimiter, rateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import express from 'express';
@@ -53,7 +53,7 @@ import { deviceSummaryNotice, deviceSummaryRecord } from '../AgentV3/devicePower
 import { nativeCapabilityBrief, requestedCapabilities } from '../AgentV3/nativeCapabilities';
 import { starterSuiteOnly, starterSuiteNote, testFilesIn } from '../AgentV3/e2eAutoScaffold';
 import { labelFieldsFromPlaceholder } from '../AppMakerLab/intelligence/A11yLinter';
-import { highSeverityAuthenticityIssues, authenticityRepairInstruction, simulatedDataIssues, simulatedDataNotice } from '../AgentV3/AuthenticityAnalysis';
+import { highSeverityAuthenticityIssues, authenticityRepairInstruction, simulatedDataIssues, simulatedDataNotice, simulatedResultIssues, simulatedResultNotice } from '../AgentV3/AuthenticityAnalysis';
 import { isUnreachable } from '../AgentV3/appReachability';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
@@ -234,7 +234,6 @@ import { analyzeDbCoupledBoot, dbCoupledBootFixInstruction, dbCoupledBootFixOffe
 import { appLanguageInstruction } from '../AgentV3/LanguageDetect';
 import { findScriptedAssistant, scriptedAssistantNotice } from '../AgentV3/scriptedAssistant';
 import { decidePublishConsent } from '../AgentV3/publishConsent';
-import { countEditableSourceFiles } from '../AgentV3/fileClassification';
 import { FirestoreConversationStore } from '../AgentV3/FirestoreConversationStore';
 import type { IEngineerActuator } from '../AgentV3/sandbox/EngineerAI/actuators/IEngineerActuator';
 import { userCostStore } from '../lib/UserCostStore';
@@ -247,6 +246,7 @@ import { warnAboutBalance, balanceLooksHealthy } from '../lib/balanceAlert';
 import { freeTierCheapEnabled, isFreeTierBuild, isFreeTierUser, freeTierUpsellMessage, powerModeBlockedForFreeUser, powerModePaidOnlyMessage, type FreeTierWallet } from '../AgentV3/FreeTierBuildRouting';
 import { clampPowerForUser } from '../AgentV3/powerGating';
 import { weakTierWelcomeNotice, weakTierBuildFailedNotice } from '../AgentV3/weakTierNotice';
+import { isPlatformNoticeEcho, platformNoticeEchoReply } from '../AgentV3/platformNoticeEcho';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
 import { summaryAdditions } from '../AgentV3/summaryAdditions';
 import { credentialGuardEnabled, credentialGuardInstruction, findBootKillingEnvGuards, bootKillingGuardSummary, bootKillerRepairInstruction } from '../AgentV3/missingCredentialGuard';
@@ -257,7 +257,7 @@ import { makeResilientTurnRunner } from './agentv3Resilient';
 import { GoogleGenAI } from '@google/genai';
 import { scanGeneratedCode, formatCodeScanReport } from '../AgentV3/CodeSafetyScanner';
 import { GeminiToolRunner, type GeminiGenAiClient } from '../AgentV3/providers/GeminiToolRunner';
-import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, sharedRateLimitCooldowns, createBuildBenchRegistry, type NamedRunner, type BuildBenchRegistry } from '../AgentV3/providers/MultiProviderTurnRunner';
+import { makeMultiProviderTurnRunner, forceModelRunner, sizeGatedRunner, pacedRunner, sharedRateLimitCooldowns, createBuildBenchRegistry, isReasoningRungStop, type NamedRunner, type BuildBenchRegistry } from '../AgentV3/providers/MultiProviderTurnRunner';
 import { modelAlwaysReasons } from '../AgentV3/providers/glmThinking';
 import { OpenAiToolRunner, type OpenAiChatClient } from '../AgentV3/providers/OpenAiToolRunner';
 import { buildStreamingEnabled, streamHardCapMs } from '../AgentV3/providers/openAiStream';
@@ -338,7 +338,7 @@ import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, 
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame } from '../AgentV3/fastLaneRung';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
 import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, type RepairStrategy } from '../AgentV3/SimpleBuilder';
-import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
+import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, dedupeStylesheetImports, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
 import { buildNestedRepoCommand, parseNestedRepoRoots, nestedRepoNote } from '../AgentV3/nestedRepoProbe';
 // The sandbox's workspace root, from the module CLAUDE.md names as this class's one home (the
 // `safeRelPath` centralisation). Five files carry a private copy of this string; the probe takes the
@@ -348,7 +348,7 @@ import { injectDotenvLoad, dotenvWiringMessage } from '../AgentV3/envLoading';
 import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneGate';
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
 import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
-import { hasTscErrors, tscNeverRan } from '../AgentV3/TscGate';
+import { hasTscErrors, tscNeverRan, buildScriptTypecheckVerdict } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, judgeActuallyRan, describeJudgeVerdict, judgeEngineLabel, type JudgeRunTurn, type JudgeVerdict } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
@@ -412,13 +412,14 @@ import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMiscon
 import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
 import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
+import { freeBuildWindow, noteFreeBuildStart, decideFreePause, freePauseMessage } from '../AgentV3/freeBuildTimeCap';
 import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionReserve';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
 import { DecisionTrace, persistDecisionTrace, getDecisionTrace } from '../AgentV3/DecisionTraceManager';
 import { planAutoTests, buildTsconfigPath, testSkeletonsCannotBreakTheBuild, testSkeletonsCanRun, starterTestsNarration, failuresAreOurStarterTests, ourStarterTestFailedNote } from '../AgentV3/TestGenerationAgent';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from '../AgentV3/appDefaults';
-import { resolveAppDisplayName } from '../AgentV3/appDisplayName';
+import { APP_ENTRY_CANDIDATES, resolveAppDisplayName } from '../AgentV3/appDisplayName';
 import { locationTag } from '../AppMakerLab/intelligence/LogIntelligenceEngine';
 import { findingsToDebt } from '../AgentV3/engineeringMemory';
 import { selectZombieBuilds } from '../AgentV3/buildWatchdog';
@@ -427,7 +428,7 @@ import { estimateTokens, contextUsage } from '../AgentV3/TokenEstimator';
 import { buildGroundedContext, contentSearchTerms, selectGroundingCandidates, lastGroundingCost } from '../AgentV3/ContextReranker';
 import { groundingProvenance, dominantGroundingBlock } from '../AgentV3/contextBudget';
 import { fenceUntrusted } from '../AgentV3/UntrustedContent';
-import { renderCheckConsoleSince } from '../AgentV3/renderCheckConsole';
+import { renderCheckConsoleSince, recheckBeforeRepair, runtimeAutofixSince } from '../AgentV3/renderCheckConsole';
 import { autoFixEnabled, reviewerAutoFixEnabled, reviewerWarningAutoFixEnabled, autoFixMaxAttempts, filterActionableErrors, buildRepairPrompt, autoFixWarning, reviewerAutofixOutcome, reviewerFixBudgetMs, reviewerFixShouldRetry, reviewCriticalUnresolvedSummary, releaseGateFailureSummary, runtimeVerifiedRecord, runtimeUncheckedRecord, runtimeErrorsRemainRecord, runtimeRecordFromPageChecks, partitionServerDown, type RuntimeError } from '../AgentV3/AutoFix';
 import { provenFromTimeline } from '../AgentV3/provenFromTimeline';
 import { appRenderedRecord } from '../AgentV3/renderProof';
@@ -476,6 +477,8 @@ import '../AgentV3/VercelProvider';
 import '../AgentV3/NetlifyProvider';
 import '../AgentV3/CloudflareProvider';
 import { describeVisionAttachments } from '../lib/visionDescribe';
+import { isVisionAttachment } from '../lib/attachmentText';
+import { visionFate, unreadImagesBlock, attachmentsReadNote, type VisionFate } from '../lib/attachmentReadOutcome';
 import {
   parseDesignContract,
   stripContractBlock,
@@ -525,7 +528,7 @@ import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrches
 import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
-import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline } from '../AgentV3/ReviewerAgent';
+import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall } from '../AgentV3/ReviewerAgent';
 import { refuteReviewByEvidence, missingClassClaim } from '../AgentV3/reviewEvidence';
 import { SALVAGE_HANDOFF_MARKER, HANDOFF_NOTE_FIX_LINE } from '../AgentV3/handoffRule';
 import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
@@ -560,7 +563,7 @@ import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../A
 import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } from '../AgentV3/buildQualityLint';
 import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict } from '../AgentV3/buildAbortCause';
-import { workspaceHoldsUserApp, userOwnedFileCount } from '../AgentV3/userProjectFiles';
+import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
@@ -9939,7 +9942,7 @@ async function noteBuildOutcome(
         // Persist the turn + memory exactly like the plain-chat lane (best-effort, bounded).
         try {
           const mem = getWorkspaceMemory(roleWorkspaceId);
-          mem.recordRequest(prompt);
+          mem.recordRequest(prompt, undefined, 'chat');
           // 🔴 THIS LANE USED TO CALL `saveWorkspaceMemory` DIRECTLY, and the comment above claimed it
           // persisted "exactly like the plain-chat lane". That lane has one more line — *"ensure
           // durable episodes are loaded first"* — and without it, on a COLD instance this saved a
@@ -10384,14 +10387,24 @@ async function noteBuildOutcome(
     // AP-8 — the structured design contract extracted from an uploaded mockup, when there was one.
     // Held outside the try so it survives to the build prompt AND to the post-build verification.
     let designContract: DesignContract | null = null;
+    // What came of reading the pictures — recorded once the build report exists (attachmentReadOutcome.ts).
+    let attachmentRead: { files: number; images: number; fate: VisionFate; ms: number; descriptionChars: number } | null = null;
     if (docAttachments.length > 0) {
       send({ type: 'narration', agent: 'architect', text: `📎 Reading ${docAttachments.length} file(s)…`, ts: Date.now() });
       try {
         const docs = await buildDocumentContext(docAttachments);
         // Bounded (8s) — a stalled vision provider must not hang the request before the deadline
         // timer is armed; on timeout we proceed without the image description.
-        const vis = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: powerSpecResolved.powerMode /* Strong: Claude-first (Haiku describe tier); Weak/Normal: Gemini → Grok */, noClaude: noClaudeBuild, designContract: true }), 8_000, 'describeVisionAttachments')
-          .catch(() => '');
+        const images = docAttachments.filter((a) => isVisionAttachment(a.type, a.name));
+        const visStart = Date.now();
+        let visError: unknown = null;
+        const visRaw = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: powerSpecResolved.powerMode /* Strong: Claude-first (Haiku describe tier); Weak/Normal: Gemini → Grok */, noClaude: noClaudeBuild, designContract: true }), 8_000, 'describeVisionAttachments')
+          .catch((e) => { visError = e; return ''; });
+        // A picture nobody could read is still a picture the user sent: the builder is told so, instead of
+        // the attachment vanishing without a word (autopsy 1389f0d5).
+        const fate = visionFate(images.length, visRaw, visError);
+        const vis = images.length > 0 && !visRaw.trim() ? unreadImagesBlock(images) : visRaw;
+        attachmentRead = { files: docAttachments.length, images: images.length, fate, ms: Date.now() - visStart, descriptionChars: visRaw.trim().length };
         // AP-8: pull the contract OUT of the description and strip its JSON from the prose, so the
         // build prompt carries the requirements once as instructions rather than twice — once as
         // advice it can ignore and once as raw JSON it has to interpret.
@@ -10456,6 +10469,12 @@ async function noteBuildOutcome(
     const recentRequests = (() => {
       try { return getWorkspaceMemory(intentWorkspaceId).recentRequests(3); } catch { return [] as string[]; }
     })();
+    // The same turns with the lane that answered each: the planner reads only the BUILD ones, because
+    // a question answered in chat is not a spec for an app (autopsy 6ae30b33). The intention reader
+    // keeps the plain list above: to it, a chat turn is exactly the context it needs.
+    const recentTurns = (() => {
+      try { return getWorkspaceMemory(intentWorkspaceId).recentRequestTurns(6); } catch { return []; }
+    })();
 
     let intent = classifyIntent(prompt);
     // The reader's fourth answer: "they want something made but have not said WHAT" (report
@@ -10477,7 +10496,13 @@ async function noteBuildOutcome(
         classifyIntentSmartDetailed(
           prompt,
           (p) => freeRouter.route(p, 'You are a classifier. Reply with one word only.').then((r) => r.response.content),
-          { projectExists, recentRequests },
+          // The reader is told whether the USER has an app here, not whether any file exists (autopsy
+          // 6db0ff31): our own scaffold plus a 0-byte `java` file the user created was read as "the user
+          // ALREADY has a working project", and "A app for my online business…" became an EDIT of it.
+          // `userAppExists` is fail-safe (an unreadable listing answers yes), and an earlier request in this
+          // workspace also counts: a small app living entirely in `src/App.tsx` (a scaffold path) has no
+          // file of its own, and an ambiguous "make it blue" must still be read as an edit of it.
+          { projectExists: userAppExists || recentRequests.length > 0, recentRequests },
         ),
         6_000,
         'classifyIntentSmart',
@@ -10600,6 +10625,14 @@ async function noteBuildOutcome(
     });
     if (answerProjectElsewhere) {
       console.log(`[AGENTV3] the prompt is about an existing app${projectElsewhere.host ? ` in ${projectElsewhere.host}` : ''} that this workspace does not hold — answering instead of building`);
+      intent = 'chat';
+    }
+    // 🔴 OUR OWN NOTICE, SENT BACK AS THE REQUEST (autopsy 12511a9c, `platformNoticeEcho.ts`): a copied
+    // weak-tier notice ran a whole build on our words. It names nothing the user asked for, so it is
+    // answered — deterministically, no model call — and never recorded as one of their requests.
+    const echoesPlatformNotice = isPlatformNoticeEcho(prompt);
+    if (echoesPlatformNotice) {
+      console.log('[AGENTV3] the prompt is our own notice, copied back — answering instead of building');
       intent = 'chat';
     }
 
@@ -10792,11 +10825,13 @@ async function noteBuildOutcome(
         // prompt-keyed cache could serve one turn's answer to the other. Excluded outright rather
         // than reasoned around: the other conditions happen to cover it today, and that is exactly
         // the kind of coincidence that stops being true after an unrelated edit.
-        const cacheable = !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !answerProjectElsewhere && !clarifyWhatToBuild && chatCacheEnabled();
+        const cacheable = !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !clarifyWhatToBuild && chatCacheEnabled();
         const cacheKey = cacheable ? hashKey(['chatv1', prompt]) : '';
         let reply: string;
         const cachedReply = cacheable ? chatResponseCache.get(cacheKey) : undefined;
-        if (cachedReply !== undefined) {
+        if (echoesPlatformNotice) {
+          reply = platformNoticeEchoReply(recentRequests.find((r) => !isPlatformNoticeEcho(r)) ?? null);
+        } else if (cachedReply !== undefined) {
           reply = cachedReply;
         } else {
           const chatRouter = AIRouterManager.getRouter('free');
@@ -10858,7 +10893,8 @@ async function noteBuildOutcome(
         try {
           const chatWsId = deriveWorkspaceId(userId, req.body?.sessionId);
           const chatMem = getWorkspaceMemory(chatWsId);
-          chatMem.recordRequest(prompt);
+          // Our own notice is not one of the user's requests, and must never become "earlier context".
+          if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, 'chat');
           // Hydration at intent-time is a 3-second RACE, so it can be marked done while the read never
           // landed — `saveWorkspaceMemoryFor` checks the read itself, not the re-entrancy flag.
           void saveWorkspaceMemoryFor(chatWsId, chatMem).catch(() => {});
@@ -10963,7 +10999,7 @@ async function noteBuildOutcome(
     const emit = (e: unknown): void => { const ev = redactEventForUser(honestResultEvent(e)); sessionTimeline.record(ev); broadcastBuild(rb, ev); };
     // Exposed to the finally so the LAST background checkpoint is flushed on every exit path
     // (success, error, abort). Held outside the try because `dispatcher` is block-scoped to it.
-    let dispatcherForFlush: { flushCheckpoints: () => Promise<void>; markBuildActive: (active: boolean) => void } | undefined;
+    let dispatcherForFlush: { flushCheckpoints: () => Promise<void>; markBuildActive: (active: boolean) => void; flushUnrecordedWrites: () => void } | undefined;
     let disposeGreenFreezeObserver: (() => void) | null = null;
     let disposeWriteObserver: (() => void) | null = null;
 
@@ -11913,7 +11949,7 @@ async function noteBuildOutcome(
     if (rebuildGuardFlipsToEdit({
       intent,
       isEditMode,
-      durableSourceCount: countEditableSourceFiles(durableFilePaths),
+      durableSourceCount: appSourceFileCount(durableFilePaths),
       freshStart: wantsFreshStart(prompt),
       explicitCompleteBuild,
     })) {
@@ -11928,9 +11964,9 @@ async function noteBuildOutcome(
       intent,
       isEditMode,
       hasImportIntent,
-      durableSourceCount: countEditableSourceFiles(durableFilePaths),
+      durableSourceCount: appSourceFileCount(durableFilePaths),
     })) {
-      const srcCount = countEditableSourceFiles(durableFilePaths);
+      const srcCount = appSourceFileCount(durableFilePaths);
       const confirmId = randomUUID();
       emit({
         type: 'narration', agent: 'architect', ts: Date.now(),
@@ -11973,14 +12009,21 @@ async function noteBuildOutcome(
      * alone, so `mkdir src` was sized as "hi" while a 35-file shop was built. They all read this one
      * text now. `prompt` itself is unchanged everywhere else (intent, the user's own words, titles).
      */
-    const planning = planningRequest({ prompt, attachmentText: attachmentContext, recentRequests, userAppExists });
+    const planning = planningRequest({ prompt, attachmentText: attachmentContext, recentTurns, userAppExists });
     const buildComplexity = complexityFromPrompt(planning.text);
     const buildDepth: PipelineDepth = resolvePipelineDepth(
       (buildComplexity.moduleCount || 0) + (buildComplexity.featureCount || 0),
       onlyOpus,
       largeEditProject,
     );
-    const effectiveBuildSeconds = scaleBuildSeconds(maxBuildSeconds(), buildDepth);
+    /**
+     * A FREE build holds the sandbox for less than a paid one (freeBuildTimeCap.ts, admin 2026-09-30).
+     * Applied HERE because every budget below derives from `effectiveBuildSeconds`, so the watchdog, the
+     * runner's own stop, the reserve and the reviewer's headroom all read the same shorter number.
+     */
+    const freeWindow = freeBuildWindow(scaleBuildSeconds(maxBuildSeconds(), buildDepth), freeTierBuildActive);
+    if (freeTierBuildActive) noteFreeBuildStart(workspaceId, prompt);
+    const effectiveBuildSeconds = freeWindow.seconds;
     const deadlineMs = effectiveBuildSeconds * 1000;
     // P-ARCH+.3 — tokens spent by the optional up-front blueprint step (below). Declared here so the
     // final billing hook can fold them into the user's charge with the same markup as every other
@@ -12073,6 +12116,8 @@ async function noteBuildOutcome(
       // the in-browser preview later found nothing and returned the misleading "No files to preview
       // yet" 404 even though the workspace genuinely had files). Awaited + best-effort: mirrors the
       // "DURABLE FILE SAVE" block at normal completion (captured writes ∪ a live sandbox scan).
+      // A write a tool made without recording it reaches this save too (autopsy 1389f0d5, recordedWrites.ts).
+      try { dispatcherForFlush?.flushUnrecordedWrites(); } catch { /* the durable record is best-effort */ }
       try {
         if (writtenFiles.size > 0) {
           const toSave: Record<string, string> = {};
@@ -12243,7 +12288,17 @@ async function noteBuildOutcome(
       // Computed unconditionally (cheap, pure — just formats `writtenFiles.size`) so both the diagnostics
       // report and the emitted result below use the exact same honest text; not needed for reasoning
       // about the plain success (`ok`) case.
-      const pauseMsgForReport = deadlinePauseMessage(writtenFiles.size);
+      // A FREE build's unattended chain is bounded HERE (freeBuildTimeCap.ts): once this request's free
+      // windows have used their allowance, the pause is not resumable — the work is saved and one
+      // "continue" from the user buys the next window. A paid build, and a finished app, are untouched.
+      const freePause = !ok && freeTierBuildActive ? decideFreePause(workspaceId, deadlineMs) : null;
+      const pauseResumable = freePause ? freePause.resumable : true;
+      if (freePause && !freePause.resumable) {
+        try {
+          buildDiagRef?.record({ phase: 'build', severity: 'info', code: 'FREE_BUILD_CHAIN_PAUSED', message: `Free build paused for the user: ${Math.round(freePause.spentSeconds / 60)} min of unattended windows used (allowance ${Math.round((freePause.allowanceSeconds ?? 0) / 60)} min). Not auto-continued.`, autoResolved: true });
+        } catch { /* observation only */ }
+      }
+      const pauseMsgForReport = pauseResumable ? deadlinePauseMessage(writtenFiles.size) : freePauseMessage(writtenFiles.size);
       let dl: BuildDiagnosticsReport | undefined;
       try {
         if (!ok) buildDiagRef?.record({ phase: 'build', severity: 'error', code: 'BUILD_TIMEOUT', message: `Build exceeded the ${Math.round(deadlineMs / 1000)}s wall-clock cap and was stopped.`, autoResolved: false });
@@ -12311,11 +12366,14 @@ async function noteBuildOutcome(
         // (never rendered as a bubble on the resumable path). RC-4's honest-wording lives in the client
         // stopMessage now, so nothing here can claim "almost done".
         const pauseMsg = pauseMsgForReport;
+        // A pause that waits for the user (free chain spent) is NOT resumable, so the client renders its
+        // `summary` as the build's closing line — which is why freePauseMessage's summary is the full
+        // sentence. No separate narration: it would say the same thing twice.
         // P-Layer3 — mark this result RESUMABLE so the client can auto-continue (bounded) without the
         // user having to type "continue". A normal failure has no `resumable` flag, so it won't auto-retry.
         // `filesWritten` is the PROGRESS signal (FleetOps): the client keeps auto-continuing a wall-clock
         // pause while this strictly increases across windows, so a big full-stack app finishes unattended.
-        emit({ type: 'result', ok: false, resumable: true, summary: pauseMsg.summary, steps: 0, billedUsd: 0, billedInr: 0, filesWritten: writtenFiles.size, ...(dl ? { diagnostics: dl } : {}) });
+        emit({ type: 'result', ok: false, resumable: pauseResumable, summary: pauseMsg.summary, steps: 0, billedUsd: 0, billedInr: 0, filesWritten: writtenFiles.size, ...(dl ? { diagnostics: dl } : {}) });
       }
       // A deadline-finalized build's `finally` may never run (the body is stuck on an un-abortable
       // await) — persist the evidence layer HERE too, after the terminal emit so the recorder has
@@ -12791,6 +12849,13 @@ async function noteBuildOutcome(
         },
       });
       buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
+      // Say when the free limit shortened this build's window (freeBuildTimeCap.ts) — a build that stops
+      // at 25 minutes must not read, in the report, as one that hit the 30-minute paid cap.
+      if (freeWindow.capped) {
+        try {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'FREE_BUILD_TIME_CAP', message: `Free build window: ${Math.round(freeWindow.seconds / 60)} min (a paid build would get ${Math.round(freeWindow.paidSeconds / 60)} min).`, autoResolved: true });
+        } catch { /* observation only */ }
+      }
       // OBSERVABILITY ONLY (2026-09-16) — record what the request analyser concluded above, so a
       // model's measured performance can be correlated with the DIFFICULTY of the work it was handed
       // (modelPerformance.ts). The value was computed long before this line; this only stores it, and
@@ -12803,6 +12868,15 @@ async function noteBuildOutcome(
       try { buildDiag.setRequestAnalysis(analysis); } catch { /* observation only — never a build's problem */ }
       // Say when the sizers read more than the message — a report showing `prompt: "mkdir src"` beside
       // a complexity of 60 must explain where the rest came from (autopsy e725e002).
+      if (attachmentRead) {
+        try {
+          buildDiag.record({
+            phase: 'plan', severity: attachmentRead.fate === 'read' || attachmentRead.fate === 'no-images' ? 'info' : 'warning',
+            code: 'ATTACHMENTS_READ', autoResolved: attachmentRead.fate === 'read' || attachmentRead.fate === 'no-images',
+            message: attachmentsReadNote(attachmentRead),
+          });
+        } catch { /* observation only */ }
+      }
       if (planning.sources.length > 0) {
         try {
           buildDiag.record({ phase: 'plan', severity: 'info', code: 'PLANNING_CONTEXT', autoResolved: true, message: planningContextNote(planning, prompt.length) });
@@ -13483,7 +13557,7 @@ async function noteBuildOutcome(
         decisionTrace.record(
           'intent',
           String(intent),
-          projectExists ? 'workspace already has files' : 'no existing files in workspace',
+          userAppExists ? 'workspace already holds the user\'s app' : (projectExists ? 'workspace holds only starter or non-app files' : 'no existing files in workspace'),
           new Date().toISOString(),
         );
       } catch { /* decision trace is best-effort — never affects the build */ }
@@ -14385,7 +14459,7 @@ async function noteBuildOutcome(
 
       // Remember the build request in project memory (episodic — the team can
       // recall what was asked for during the build).
-      getWorkspaceMemory(workspaceId).recordRequest(prompt);
+      getWorkspaceMemory(workspaceId).recordRequest(prompt, undefined, 'build');
 
       // The Architect can delegate to specialist sub-agents via the task tool.
       // C2 — declared here, BEFORE the spawn factory, so the thunk below can never capture a stale
@@ -14457,6 +14531,9 @@ async function noteBuildOutcome(
         languageRule: () => appLanguageInstruction(prompt),
         // The SAME AI-in-app rule the architect reads (autopsy d8ed307a) — the child writes the AI client.
         aiRule: () => aiInAppRule(),
+        // And the user's own words (autopsy 6db0ff31) — the two lines above derive from them, and a
+        // child handed only a thin instruction asked the ARCHITECT "what would you like me to build?".
+        userRequest: () => prompt,
       };
       const spawnSubAgent = makeSubAgentSpawn(subAgentDeps);
       // Layer 84 (Multi-Model Ensemble): the Architect can call second_opinion to
@@ -14841,7 +14918,9 @@ async function noteBuildOutcome(
           // and the user's Supabase account already is. Approve ⇒ the new database is in the vault BEFORE
           // the prompt below is assembled, so `userDatabaseContext` wires it from the first file.
           try {
-            const need = sharedDataNeed(prompt);
+            // The SAME text the complexity score and the plan read (autopsy bee95692): the message was "Yes",
+            // the request ("Social media app") was the turn before it, and reading only the message saw nothing.
+            const need = sharedDataNeed(planning.text);
             const decision = startOfferDecision({
               hasUser: true,
               isEditMode,
@@ -15301,7 +15380,7 @@ async function noteBuildOutcome(
           // Count EDITABLE SOURCE files (autopsy #2): listFiles includes ~150 binary assets the agent
           // can't touch, so the old raw `fileTree.length` (e.g. 317) contradicted the import banner's
           // "165 files" for the SAME project. One shared count (fileClassification.ts) keeps them honest.
-          const sourceCount = countEditableSourceFiles(fileTree);
+          const sourceCount = appSourceFileCount(fileTree);
           events.emit({
             type: 'narration',
             agent: 'architect',
@@ -16561,6 +16640,9 @@ async function noteBuildOutcome(
               // outlive the wait (turnDeadline.ts). Undefined for every caller that does not set one,
               // which is every lane except the fast lane's plan and contract calls today.
               deadlineAt,
+              // The walk stops BEFORE a rung that reasons before every answer, rather than spending the
+              // lane's clock inside one (autopsy 33812996: 497 s of one repair call on two such rungs).
+              stopAtReasoningRung: fastLaneReasoningGateEnabled(),
               // Stop cancels this call and every later one (stopSignal.ts). The lane never read the
               // build's signal before autopsy 2720e553, so a pressed Stop ran on for minutes.
               signal: abort.signal,
@@ -16574,6 +16656,17 @@ async function noteBuildOutcome(
                 : {}),
             });
           } catch (err) {
+            // The walk reached a rung the lane may not use — the lane hands off at its next boundary.
+            if (isReasoningRungStop(err) && !fastLaneReasoningRung) {
+              fastLaneReasoningRung = err.model;
+              try {
+                buildDiag.record({
+                  phase: 'build', severity: 'info', code: 'FAST_LANE_FELL_TO_REASONING_RUNG', autoResolved: true,
+                  message: `The fast lane's engine was unavailable and the next one (${err.model}) reasons before every answer; the lane stopped before calling it and hands its files to the full builder.`,
+                  detail: err.message,
+                });
+              } catch { /* diagnostics best-effort */ }
+            }
             const failedAs = fastLaneCallIdentity(providerReported, usedProvider, fbModel);
             try { buildDiag.recordLlmCall({ model: failedAs.model, provider: failedAs.provider, promptPreview, promptChars: promptPreview.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) }); } catch { /* diagnostics best-effort */ }
             throw err;
@@ -17465,8 +17558,8 @@ async function noteBuildOutcome(
           buildDiag.record({
             phase: 'build', severity: result.ok ? 'warning' : 'error', code: 'OUTCOME_BUILD_TIMEOUT',
             message: result.ok
-              ? `Build outcome: hit the ${Math.round(effectiveBuildSeconds / 60)}-minute wall-clock cap (AGENTV3_MAX_BUILD_SECONDS) with real work saved — resumable, not a crash.`
-              : `Build outcome: hit the ${Math.round(effectiveBuildSeconds / 60)}-minute wall-clock cap (AGENTV3_MAX_BUILD_SECONDS) before producing anything.`,
+              ? `Build outcome: hit the ${Math.round(effectiveBuildSeconds / 60)}-minute wall-clock cap (${freeWindow.capped ? 'AGENTV3_FREE_BUILD_SECONDS' : 'AGENTV3_MAX_BUILD_SECONDS'}) with real work saved — resumable, not a crash.`
+              : `Build outcome: hit the ${Math.round(effectiveBuildSeconds / 60)}-minute wall-clock cap (${freeWindow.capped ? 'AGENTV3_FREE_BUILD_SECONDS' : 'AGENTV3_MAX_BUILD_SECONDS'}) before producing anything.`,
             autoResolved: false,
           });
         } catch { /* diagnostics best-effort */ }
@@ -17498,7 +17591,7 @@ async function noteBuildOutcome(
       }
       // A policy refusal is not a capability failure — see `modelRefused`. Read from the answer the
       // model actually gave, so it holds for any refusal rather than only the pornography one.
-      const firstAttempt = readTurnAnswer(result.summary);
+      const firstAttempt = readTurnAnswer(result.summary, prompt);
       const firstAttemptRefused = firstAttempt.declined;
       // …and its SIBLING, read from the same answer by the same module that already decided this
       // exact question for the nudge, 156ms earlier in this turn (autopsy e628efd4). Never a second
@@ -17528,7 +17621,8 @@ async function noteBuildOutcome(
         withinCostCap: costAfterFirstAttempt <= capUsd,
         userAskedToBuildAnApp,
         modelRefused: firstAttemptRefused,
-        modelAskedTheUser: firstAttemptAskedTheUser,
+        // A pointer to the platform's own APK flow is a final answer too (autopsy 0c2a987a) — `modelAnswered`.
+        modelAskedTheUser: firstAttemptAskedTheUser || firstAttempt.pointed,
       })) {
         // 🔴 THE CLAIM IS DERIVED, NEVER TEMPLATED (autopsy f5351721 — see `retryLeadsHigher`). Both
         // sentences below used to assert "a stronger model" unconditionally, and on STRONG that was
@@ -17603,7 +17697,7 @@ async function noteBuildOutcome(
       // sentence, the empty-build flip and the free-tier upsell. They used to read `result.summary`
       // at their own moment, and the platform had by then overwritten it: the upsell found no refusal
       // in our own "please try again" and asked a user whose request the engine had declined for money.
-      const modelAnswer = readTurnAnswer(result.summary);
+      const modelAnswer = readTurnAnswer(result.summary, prompt);
       if (expectsArtifacts && writtenFiles.size === 0 && modelAnswer.declined && !abort.signal.aborted) {
         try {
           buildDiag.record({
@@ -18166,6 +18260,18 @@ async function noteBuildOutcome(
                 writtenFiles.set(inj.entry, newEntry);
               }
               buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_CSS_WIRED', message: `"${inj.stylesheet}" was imported by NOTHING (app would render unstyled) — injected its import into ${inj.entry}.`, autoResolved: true });
+            }
+          }
+          // The same certainty for a DUPLICATE import the entry already covers (autopsy 33812996) — the
+          // second line is a no-op for a global sheet, so it is removed here instead of by a heal pass.
+          const deduped = dedupeStylesheetImports(integrityFiles);
+          for (const r of deduped.removed) {
+            const next = deduped.files[r.from];
+            if (typeof next !== 'string') continue;
+            if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, r.from, next))) {
+              integrityFiles[r.from] = next;
+              writtenFiles.set(r.from, next);
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_CSS_DEDUPED', message: `"${r.stylesheet}" was imported by the entry AND by ${r.from} — removed the second import (a global stylesheet applies once, whoever imports it).`, autoResolved: true });
             }
           }
         }
@@ -19346,6 +19452,10 @@ async function noteBuildOutcome(
       // but was never confirmed to render, so nothing here was proven to RUN" — 1.4 seconds after the
       // same build had watched it render. Nothing failed, nothing logged; the report simply lied.
       let previewVerifiedRendered = false;
+      // When a real-browser render check last came back CLEAN (its start time). Every console line logged
+      // before it has been answered by it, so the runtime auto-fix loop does not hand those to a repair
+      // (autopsy 12511a9c — `runtimeAutofixSince`).
+      let lastCleanBrowserCheckAt: number | null = null;
       // LOOK BEHIND THE SIGN-IN PAGE (autopsy 8e124182 — signInExplore.ts). Signed in at most once per
       // build, lazily, the first time a check meets the app's sign-in wall; every later browser check
       // reads the same session. Null = never tried.
@@ -19885,31 +19995,18 @@ async function noteBuildOutcome(
           // never the order itself (autopsy d829b523: a phone showed "Build a wate" under the icon).
           let chosenAppName: string | null = null;
           try { chosenAppName = (await getConversationStore().get(workspaceId))?.appName ?? null; } catch { chosenAppName = null; }
-          const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt });
+          // The app's own screen names it (autopsy 6ae30b33) — this turn's copy, else the sandbox's.
+          let appSource: string | null = APP_ENTRY_CANDIDATES.map((p) => writtenFiles.get(p)).find((c): c is string => typeof c === 'string') ?? null;
+          for (const p of appSource == null ? APP_ENTRY_CANDIDATES : []) {
+            try { appSource = await actuator.readFile(workspaceId, p); break; } catch { /* try next */ }
+          }
+          const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt, appSource });
           const appName = display.name;
           const defaults = planAppDefaults(indexHtml, appName, { description: display.description, shortName: display.shortName });
           const savedDefaults: Record<string, string> = {};
           // Did the index.html patch actually LAND? `defaults.added` lists the TAGS the generator
           // intended, and the files are a separate set — so the two must be reported separately.
           let indexPatched = false;
-          // Patch index.html only when the generator actually changed it.
-          if (defaults.indexHtml != null && indexHtml != null && defaults.indexHtml !== indexHtml) {
-            try {
-              // The SANDBOX copy keeps the preview bridge it was served with (the live console and the
-              // Visual Edit picker); the dev server injects it only when it starts, and nothing re-adds
-              // it after a write. The user's saved source stays clean — the bridge is never theirs.
-              const sandboxIndex = await actuator.readFile(workspaceId, idxPath).catch(() => '');
-              await actuator.writeFile(
-                workspaceId, idxPath,
-                hasPreviewBridge(sandboxIndex) ? injectPreviewBridge(defaults.indexHtml, 'live') : defaults.indexHtml,
-              );
-              writtenFiles.set(idxPath, defaults.indexHtml);
-              noteFinishingWrite(idxPath);
-              try { getWorkspaceMemory(workspaceId).indexFile(idxPath, defaults.indexHtml); } catch { /* index best-effort */ }
-              savedDefaults[idxPath] = defaults.indexHtml;
-              indexPatched = true;
-            } catch { /* one write failing must not block the rest */ }
-          }
           // Standalone files (manifest, robots, icon, sw) — write only when ABSENT (never clobber a real one).
           // FRAMEWORK-AWARE PATH (deploy-report autopsy 2026-08-03): a Vite app ships ONLY what's under
           // public/, so these must land in public/ or `npm run build` drops them from dist/ and the deploy
@@ -19948,6 +20045,30 @@ async function noteBuildOutcome(
                 savedDefaults[rootSw] = upgraded;
               } catch { /* best-effort */ }
             }
+          }
+          // 🔴 index.html LAST (autopsy 12511a9c, 2026-09-30). The patch adds `register('/sw.js')`, the
+          // manifest link and the icon link — references to the files written above. Written first, it
+          // reloaded every open page (Vite reloads on an index.html change) into a request for /sw.js
+          // that did not exist yet; the SPA fallback answered with HTML, and a browser check read
+          // "The script has an unsupported MIME type ('text/html')" as a broken app. The reference now
+          // lands only after the files it names.
+          // Patch index.html only when the generator actually changed it.
+          if (defaults.indexHtml != null && indexHtml != null && defaults.indexHtml !== indexHtml) {
+            try {
+              // The SANDBOX copy keeps the preview bridge it was served with (the live console and the
+              // Visual Edit picker); the dev server injects it only when it starts, and nothing re-adds
+              // it after a write. The user's saved source stays clean — the bridge is never theirs.
+              const sandboxIndex = await actuator.readFile(workspaceId, idxPath).catch(() => '');
+              await actuator.writeFile(
+                workspaceId, idxPath,
+                hasPreviewBridge(sandboxIndex) ? injectPreviewBridge(defaults.indexHtml, 'live') : defaults.indexHtml,
+              );
+              writtenFiles.set(idxPath, defaults.indexHtml);
+              noteFinishingWrite(idxPath);
+              try { getWorkspaceMemory(workspaceId).indexFile(idxPath, defaults.indexHtml); } catch { /* index best-effort */ }
+              savedDefaults[idxPath] = defaults.indexHtml;
+              indexPatched = true;
+            } catch { /* one write failing must not block the rest */ }
           }
           if (Object.keys(savedDefaults).length > 0) {
             await saveWorkspaceFiles(workspaceId, savedDefaults).catch(() => {});
@@ -20008,6 +20129,7 @@ async function noteBuildOutcome(
             try { buildDiag.record({ phase: 'preview', ...starterRenderNote('render rescue') }); } catch { /* best-effort */ }
           }
           if (renderRescueConfirmsSuccess({ rendered: verdict.rendered, consoleErrorCount: consoleErrs.length, runtimeCrashBlocker, stillTheStarter })) {
+            if (shot.source === 'browser') lastCleanBrowserCheckAt = rescueCheckStartedAt;
             result = { ...result, ok: true, summary: result.summary || 'The app builds and the live preview renders correctly.' };
             renderRescued = true;
             previewGreen = true; // real browser, real render — the one thing worth protecting
@@ -20049,6 +20171,7 @@ async function noteBuildOutcome(
         // on its own so a server that refuses to stay up cannot loop.
         const MAX_SERVER_REVIVALS = 2;
         let serverRevivals = 0;
+        let consoleRecheckSpent = false; // one free second look per loop (recheckBeforeRepair)
         for (let attempt = 0; attempt <= healMax && !abort.signal.aborted; attempt++) {
           let shot: { html: string; painted?: boolean; source?: 'browser' | 'curl'; style?: RenderStyleEvidence };
           // 🔴 THIS CHECK IS JUDGED BY ITS OWN CONSOLE, NOT THE WHOLE BUILD'S (autopsy 7d79254b). The log
@@ -20065,6 +20188,19 @@ async function noteBuildOutcome(
             if (actuator.getConsoleErrors) consoleErrs = filterActionableErrors((await actuator.getConsoleErrors(workspaceId, renderCheckConsoleSince({ checkStartedAt: verifyCheckStartedAt, buildStartedAt }))).errors).map((e) => e.text);
           } catch { /* console capture is best-effort */ }
           if (!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true;
+          // THE APP RENDERED AND ONLY ITS CONSOLE SPEAKS AGAINST IT: look once more on a fresh load before
+          // paying for a repair (autopsy 12511a9c). A line from a moment the platform was changing files
+          // does not come back; a real defect does, and then it is repaired exactly as before.
+          if (recheckBeforeRepair({ rendered: verdict.rendered, consoleErrorCount: consoleErrs.length, source: shot.source, recheckSpent: consoleRecheckSpent })) {
+            consoleRecheckSpent = true;
+            buildDiag.record({
+              phase: 'preview', severity: 'info', code: 'PREVIEW_CONSOLE_RECHECK', autoResolved: true,
+              message: `The app rendered, but its console had ${consoleErrs.length} error line(s) — looking once more on a fresh load before any repair (no model call).`,
+              detail: consoleErrs.slice(0, 3).join(' | ').slice(0, 400),
+            });
+            attempt -= 1; // a second look is not a repair attempt
+            continue;
+          }
           if (verdict.rendered) noteRenderStyle(shot, 'preview verify');
           if (verdict.rendered && consoleErrs.length === 0 && await renderIsOnlyTheStarter()) {
             // Rendered — but the starter page, not an app. Not a proof, and not a defect a repair pass
@@ -20073,6 +20209,7 @@ async function noteBuildOutcome(
             break;
           }
           if (verdict.rendered && consoleErrs.length === 0) {
+            if (shot.source === 'browser') lastCleanBrowserCheckAt = verifyCheckStartedAt;
             events.emit({ type: 'narration', agent: 'architect', text: '✅ Preview verified — I opened the running app in a browser and it renders correctly.', ts: Date.now() });
             // Honesty upgrade (autopsy 2026-07-11): the real-browser check just CONFIRMED the app renders,
             // so the deferred previewOk signal is now TRUE — upgrade OUTCOME_BUILD_PARTIAL → BUILD_SUCCESS
@@ -20789,6 +20926,13 @@ async function noteBuildOutcome(
             } catch { ran = false; /* no sandbox, or it outran the bound — UNVERIFIED, never "failed" */ }
             const verdict = judgeProdBuild({ ran, exitCode, output });
             prodBuildOutcome = verdict.code === 'PROD_BUILD_OK' ? 'ok' : verdict.code === 'PROD_BUILD_FAILED' ? 'failed' : 'not-run';
+            // The build script that just ran usually compiles FIRST (`tsc -p tsconfig.build.json && vite
+            // build`) — so it is typecheck evidence too, read from its own echoed script line (autopsy
+            // 0c2a987a: "the typecheck did not run" beside PROD_BUILD_OK). Fills a gap only.
+            if (gateEvidence.typecheck === 'not-run') {
+              const fromBuild = buildScriptTypecheckVerdict({ command: prodBuildCommand(), stdout: output, exitCode });
+              if (fromBuild) gateEvidence.typecheck = fromBuild;
+            }
             buildDiag.record({
               phase: 'readiness',
               severity: verdict.code === 'PROD_BUILD_FAILED' ? 'warning' : 'info',
@@ -21175,6 +21319,7 @@ async function noteBuildOutcome(
             }
             const proven = verdict.rendered && consoleErrs.length === 0 && !starterOnly;
             const broken = !verdict.rendered && !verdict.inconclusive && !verdict.serverDown;
+            if (proven && shot.source === 'browser') lastCleanBrowserCheckAt = proofStartedAt;
             if (proven) gateEvidence.preview = 'passed';
             else if (broken) gateEvidence.preview = 'failed';
             if (proven || broken) gate = releaseGate(gateEvidence, gateFindings(), gateQuality);
@@ -21238,7 +21383,11 @@ async function noteBuildOutcome(
           // A RED gate on a build that SUCCEEDED is a warning about shipping, not an error in the run —
           // recording it as an error made it outrank every real finding and become the report's root
           // cause. Only a gate that agrees with a failed build is an error.
-          severity: gate.state === 'red' && !result.ok ? 'error' : gate.state === 'green' ? 'info' : 'warning',
+          // 🔴 …AND A BUILD THE USER STOPPED DID NOT FAIL (autopsy 6db0ff31). Its gate stays RED — nothing
+          // was proven — but as an ERROR it made `counts.errors = 1` on a report whose own outcome line says
+          // "STOPPED BY THE USER — no failure of the app or the engine is implied". The gate reads the same
+          // `stoppedByUser` fact for its headline; the severity now reads it too.
+          severity: gate.state === 'red' && !result.ok && gateEvidence.stoppedByUser !== true ? 'error' : gate.state === 'green' ? 'info' : 'warning',
           code: 'RELEASE_GATE',
           message: releaseGateSummary(gate),
           autoResolved: gate.state === 'green',
@@ -21415,7 +21564,10 @@ async function noteBuildOutcome(
         const maxAttempts = autoFixMaxAttempts();
         // Advancing window: each capture only considers errors NEWER than the previous fix attempt,
         // so a repaired error logged before the fix is never re-detected and we cannot loop on it.
-        let sinceMs = Date.now() - 180_000;
+        // …and never further back than the last CLEAN real-browser check, which already answered every
+        // line before it (autopsy 12511a9c: a line the verify loop had re-checked clean was handed to a
+        // three-minute repair anyway).
+        let sinceMs = runtimeAutofixSince({ now: Date.now(), lastCleanBrowserCheckAt });
         // Honesty tracking (rule 5): did we EVER actually capture the browser console? An empty capture
         // only means "runtime clean" if a real session was read; otherwise it's "runtime UNCHECKED".
         let captureAvailable = false;
@@ -21633,6 +21785,8 @@ async function noteBuildOutcome(
           // the builds where every runtime check skipped.
           filesWritten: writtenFiles.size,
           buildWasRequested: userAskedToBuildAnApp,
+          // "the exact versions you specified" when the request named none (autopsy 33812996).
+          userRequest: prompt,
           // "TypeScript type-check passes cleanly" beside a release gate recording "the typecheck did
           // not run" — both in build 7bc15e40's own report. Read from the gate's own evidence, which
           // starts at 'not-run' and is only ever moved by a check that actually ran, so this cannot
@@ -21676,6 +21830,24 @@ async function noteBuildOutcome(
               phase: 'readiness', severity: 'warning', code: 'SIMULATED_DATA_SHIPPED', autoResolved: false,
               message: `The app shows made-up data about other people or places in ${invented.length} place(s) — disclosed to the user in the summary.`,
               detail: invented.slice(0, 5).map((i) => `${i.file}:${i.line} ${i.snippet}`).join(' · '),
+            });
+          }
+        }
+      } catch { /* the disclosure is best-effort — it must never break the build */ }
+
+      // 🎭 MADE-UP RESULTS ARE DISCLOSED TOO (autopsy 33812996). The sibling of the block above for a
+      // feature whose OUTPUT is invented — a random "recognised" song, "[Translated to hi]: …", search
+      // results written into the code. Same scope (this turn's reachable writes), same one sentence.
+      try {
+        if (result.ok && expectsArtifacts && !isImportTurn && writtenFiles.size > 0) {
+          const faked = simulatedResultIssues(Object.fromEntries(writtenFiles))
+            .filter((i) => !isUnreachable(dispatcher.lastReachability, i.file));
+          if (faked.length > 0) {
+            result = { ...result, summary: `${result.summary}${simulatedResultNotice(faked)}` };
+            buildDiag.record({
+              phase: 'readiness', severity: 'warning', code: 'SIMULATED_RESULT_SHIPPED', autoResolved: false,
+              message: `A feature of the app returns made-up results in ${faked.length} place(s) — disclosed to the user in the summary.`,
+              detail: faked.slice(0, 5).map((i) => `${i.file}:${i.line} ${i.snippet}`).join(' · '),
             });
           }
         }
@@ -21949,14 +22121,20 @@ async function noteBuildOutcome(
           const stopReviewWithBuild = (): void => reviewAbort.abort();
           if (abort.signal.aborted) reviewAbort.abort();
           else abort.signal.addEventListener('abort', stopReviewWithBuild, { once: true });
+          // What THIS turn changed, and — for a suggest-only review — that code in full. Computed before
+          // the spawn because whether the review may read at all depends on it (autopsy bee95692).
+          const reviewChanged = [...writtenFiles.keys()].filter((p) => !finishingPaths.has(p));
+          const reviewInline = reviewPlan.mode === 'suggest' ? leanReviewInline(reviewChanged, (p) => writtenFiles.get(p)) : undefined;
+          const reviewOneCall = leanReviewAnswersInOneCall(reviewInline);
           const reviewSpawn = makeSubAgentSpawn({
             ...subAgentDeps,
             signal: reviewAbort.signal,
             ...(reviewPlan.maxSteps !== undefined ? { maxSteps: reviewPlan.maxSteps } : {}),
+            ...(reviewOneCall ? { toolsOverride: [] } : {}),
           });
           const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs, projectFileCount, { previewGreen: reviewPlan.mode === 'suggest' });
           if (reviewPlan.mode === 'suggest') {
-            try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_LEAN', message: `The app is proven green, so the post-build review is suggest-only and ran lean: at most ${reviewPlan.maxSteps} steps, ${Math.round(reviewBudget / 1000)}s budget. Its findings are an offer, never a repair.`, autoResolved: true }); } catch { /* best-effort */ }
+            try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_LEAN', message: `The app is proven green, so the post-build review is suggest-only and ran lean: ${reviewOneCall ? `one call, no tools, handed all ${reviewInline?.files.length ?? 0} changed file(s) in full` : `at most ${reviewPlan.maxSteps} steps`}, ${Math.round(reviewBudget / 1000)}s budget.`, autoResolved: true }); } catch { /* best-effort */ }
           }
           let review;
           /** A verdict rebuilt from an unfinished review's own narration — see partialReview.ts. */
@@ -21993,13 +22171,12 @@ async function noteBuildOutcome(
           // descendant, so the sub-agent's calls carry it without a line of their own; and because it
           // survives `raceTimeout` giving up, a reviewer we WALKED AWAY FROM keeps tagging its turns.
           // Nothing here decides whether to charge — see the REVIEW_INCOMPLETE branch below.
-          const reviewChanged = [...writtenFiles.keys()].filter((p) => !finishingPaths.has(p));
           const reviewPromise = runInBillingPhase(PHASE_POST_BUILD_REVIEW, async () => reviewBuild({
               // A roadmap milestone is reviewed against its own brief (autopsy 728a402d), never against
               // the later milestones this build was told not to build.
               userRequest: milestoneRequest ?? prompt,
               // A suggest-only review is handed the changed code in full, so it answers in one call.
-              ...(reviewPlan.mode === 'suggest' ? { inlineFiles: leanReviewInline(reviewChanged, (p) => writtenFiles.get(p)) } : {}),
+              ...(reviewInline ? { inlineFiles: reviewInline } : {}),
               fileTree: rFiles,
               fileSample: rSample,
               spawn: reviewSpawn,
@@ -22544,7 +22721,8 @@ async function noteBuildOutcome(
             // OPPOSITE: what rewrites it is the PLATFORM (this flip, the verified-no-change sentence),
             // and a question asked of our own sentence is not a question about the model's answer.
             // So it is read once, after the last model run — `modelAnswer` — and both halves go in.
-            modelAnswer.asked,
+            // A pointer to the platform's own APK flow is an answer, never "the build produced no files".
+            modelAnswer.asked || modelAnswer.pointed,
             modelAnswer.declined,
           );
           if (emptyFail) {
@@ -22711,6 +22889,8 @@ async function noteBuildOutcome(
       // we captured at write-time (reliable), then supplement with a sandbox scan (catches sub-
       // agent writes when listFiles works). Skip if BOTH are empty so a read hiccup never
       // overwrites a previously-good saved set with nothing. Best-effort — never blocks the build.
+      // A write a tool made without recording it reaches the save too (autopsy 1389f0d5, recordedWrites.ts).
+      try { dispatcher.flushUnrecordedWrites(); } catch { /* the durable record is best-effort */ }
       try {
         const toSave: Record<string, string> = {};
         // Kept apart from `toSave` so the snapshot check can tell a sandbox that MOVED after the copy
@@ -23191,10 +23371,9 @@ async function noteBuildOutcome(
       let waivedMarkupNotice: string | null = null;
       if (!markupDecision.markupApplied) {
         effectiveBilledUsd = markupDecision.billedUsd;
-        buildDiag.record({
-          phase: 'build', severity: 'info', code: 'MARKUP_WAIVED_NO_PREVIEW',
-          message: markupDecision.reason, autoResolved: true,
-        });
+        // The ADMIN line is held to the same rule as the user's sentence (autopsy 6db0ff31): it used to
+        // be recorded HERE and said "billed at real cost only ($0.1047…)" on a stopped build whose final
+        // bill was ₹0 — two money lines in one report, contradicting each other. Recorded at the settle.
         if (markupDecision.userMessage) waivedMarkupNotice = markupDecision.userMessage;
       }
       // WHY a build ended up free — recorded into the build report's billing section (admin
@@ -23333,7 +23512,10 @@ async function noteBuildOutcome(
           }
           if (refused || degraded || misconfigured || starved || stopped || interrupted) {
             buildDiag.record({
-              phase: 'build', severity: 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: false,
+              phase: 'build', severity: stopped ? 'info' : 'warning', code: 'UPSELL_SUPPRESSED', autoResolved: stopped,
+              // A STOPPED build's suppression is the right call and nothing is left to act on — as an
+              // unresolved warning it was one of the two "problems" on a report of a build the user simply
+              // stopped (autopsy 6db0ff31). The other reasons stay warnings: each names a real fault of ours.
               message: stopped
                 ? 'Did not ask this user to add credits: the build was STOPPED, so no engine was ever asked to build anything. There is no capability limit to sell against — a fuller wallet would have changed nothing.'
                 : interrupted
@@ -23475,6 +23657,12 @@ async function noteBuildOutcome(
       // a later rule that zeroed the bill has already said why in its own words.
       if (waivedMarkupNotice && effectiveBilledUsd > 0 && effectiveBilledUsd === markupDecision.billedUsd) {
         events.emit({ type: 'narration', agent: 'architect', text: `🧾 ${waivedMarkupNotice}`, ts: Date.now() });
+      }
+      if (!markupDecision.markupApplied) {
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'MARKUP_WAIVED_NO_PREVIEW', autoResolved: true,
+          message: markupWaiverSettledLine(markupDecision.reason, effectiveBilledUsd, zeroBillReason),
+        });
       }
 
       // Bill the user the marked-up cost (D5/D6), recorded in the same place the

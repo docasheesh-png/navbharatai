@@ -61,6 +61,7 @@ import { lintGateVerdict, type LintGateVerdict } from './LintGate';
 import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
 import { assessFullRewrite } from './rewriteRisk';
 import { isOurStarterFile } from './starterFragment';
+import { applyStrictTrial } from './strictTrial';
 
 /** Every template's files, built once — what "our own starter file" means for a write. */
 let starterTemplateCache: Array<Record<string, string>> | null = null;
@@ -1843,7 +1844,8 @@ export class ToolDispatcher {
       const provider = (() => {
         try { return registry.getProvider(frameworkId); } catch { return new ViteReactProvider(); }
       })();
-      const files = provider.getFiles([]);
+      // Q-008: a workspace in the strict-mode trial gets the strict tsconfig (strictTrial.ts).
+      const files = applyStrictTrial(provider.getFiles([]), this.workspaceId);
       for (const [path, content] of Object.entries(files)) {
         const exists = await this.actuator.readFile(this.workspaceId, path).then(() => true).catch(() => false);
         if (exists) continue; // never clobber real (e.g. salvaged) work with the starter

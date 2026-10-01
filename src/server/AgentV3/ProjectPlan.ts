@@ -20,7 +20,7 @@
 
 import type { TodoItem, TodoStatus } from './types';
 import { parseEnvFlag } from '../lib/envFlag';
-import { countEnumeratedFeatures, BIG_SOFTWARE_NOUN } from './enumeratedFeatures';
+import { countEnumeratedFeatures, BIG_SOFTWARE_NOUN, SPEC_FEATURE_COUNT } from './enumeratedFeatures';
 import { STARTER_ENTRY_PATHS } from './stillTheStarterApp';
 
 export type ModuleStatus = 'pending' | 'in_progress' | 'done' | 'failed';
@@ -128,7 +128,7 @@ export const MEGA_SCALE_MIN = 100;
  * app prompt counts 0-2, every real project prompt counts 5-8. Six sits in the gap, not on an edge.
  */
 export const MEGA_BULLETS_WITH_NOUN = 6;
-export const MEGA_BULLETS_ALONE = 14;
+export const MEGA_BULLETS_ALONE = SPEC_FEATURE_COUNT;
 
 /** The raw signals behind a mega-project verdict, plus the verdict itself. */
 export interface MegaProjectSignals {
@@ -887,6 +887,8 @@ export function projectPlanSystemPrompt(framework: string): string {
     '- dependsOn must reference EARLIER modules only — no cycles, no forward references.',
     '- contracts: exact exported names, types, and signatures — frozen; later modules import these',
     '  verbatim. A module with nothing importable uses "" (e.g. a pure pages module).',
+    '- Keep contracts COMPACT: declarations only, one line per export, never an implementation or a',
+    '  comment. The whole answer must fit in one reply — a plan cut off mid-list cannot be used at all.',
     '- files: relative paths from the project root; each file belongs to exactly ONE module.',
     '- Exactly ONE module — the app shell, last — lists the app entry (src/App.tsx) in its files. Earlier modules never list it: until the shell is built the app is not assembled, and that is expected.',
     '- Do NOT list node_modules, lockfiles, or build output.',

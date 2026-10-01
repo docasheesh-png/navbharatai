@@ -14634,7 +14634,7 @@ async function noteBuildOutcome(
         expectsArtifacts: () => expectsArtifacts,
         // The SAME language line the architect's prompt opens with (autopsy 466c260a) — the child
         // writes the labels and never sees the user's words.
-        languageRule: () => appLanguageInstruction(prompt),
+        languageRule: () => appLanguageInstruction(prompt, { editingExistingApp: intent === 'edit_existing' }),
         // The SAME AI-in-app rule the architect reads (autopsy d8ed307a) — the child writes the AI client.
         aiRule: () => aiInAppRule(),
         // And the user's own words (autopsy 6db0ff31) — the two lines above derive from them, and a
@@ -16309,7 +16309,7 @@ async function noteBuildOutcome(
         // Phase 6.1: the instruction states its own CONFIDENCE (a script is proof, a romanized guess
         // says it is a guess). Autopsy 466c260a: a request in Latin letters now says so explicitly and
         // forbids an unrequested switch of script. ONE function — the sub-agents read the same line.
-        buildPrompt = `${appLanguageInstruction(prompt)}\n\n${buildPrompt}`;
+        buildPrompt = `${appLanguageInstruction(prompt, { editingExistingApp: intent === 'edit_existing' })}\n\n${buildPrompt}`;
       } catch { /* best-effort — never blocks a build */ }
 
       // Attachments: prepend the extracted file content/description so the build

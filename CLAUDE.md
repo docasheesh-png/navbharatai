@@ -4028,6 +4028,16 @@ the flag entries above promise.
   - A list of a hand-written record's own field (`topic.sections`) is no longer a "data list" (`recordFieldLiteral`).
   - Every engine-authored user turn is stamped `origin: 'platform'` on its persisted copy (`pushPlatformTurn`), so a
     reopened chat never shows a repair instruction as the user's own message.
+- **🖼️ `AGENTV3_PICTURE_ANSWER` — A PICTURE REQUEST IN PRO IS ANSWERED, NOT BUILT (autopsy 19641ab5, 2026-10-01).
+  ⚠️ NOT set; default ON; `off` builds as before.** `pictureRequest.ts`. "Create full image" + a portrait photo was
+  built as an 11-feature image-generator app (stopped at 108 s, ₹7.62). Free chat, Doctor AI and every Professional
+  already pointed picture requests to Image Generator AI; Pro was the sibling never hunted, while `AppKnowledgeBase`
+  said it did. A `detectImageIntent` request that names no software, in a workspace with no user app, is answered on
+  the chat lane (₹0) with Home → Other AI → AI Image Gen and an offer to build an image app. Same autopsy, no flags:
+  the sizers no longer read a PHOTO's description as a feature list (only documents and UI-design pictures,
+  `planningRequest.ts`); a build cut short before its ETA band is `untested`; the platform ETA prior averages
+  successful builds; and setup puts back the template when a workspace holds only a piece of our own starter
+  (`starterFragment.ts`). Test-locked in `tests/aPictureIsNotAnApp.test.ts`.
 - **🙋 A QUESTION IS AN ANSWER, NOT AN EMPTY BUILD — the retry overrode a correct reply and billed
   ₹196.28 for it (autopsy `e628efd4`, 2026-09-25; no flag, on by construction).** A free-tier user
   asked *"if we don't have a chat in next 2 hours can you send a message to initiate the chat

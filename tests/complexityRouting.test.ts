@@ -108,7 +108,9 @@ describe('🔴 a request the scorer could not READ is asked about, whatever it s
   it('the score alone never asks about an unread request — reading the prompt is what does', () => {
     const hindi = 'एक ड्रॉइंग ऐप बनाओ जिसमें रंग, ब्रश, मिटाने वाला, परतें, ज़ूम और सेव करने की सुविधा हो';
     const a = analyzeRequest({ prompt: hindi });
-    expect(a.taskType).toBe('chat');                 // a FALLTHROUGH, not a classification
+    // An app ORDER nobody recognised — no longer the 'chat' fallthrough, now that a Devanagari order is
+    // read as one (BUILD_REPORT_QUEUE Q-005); the route already said so via `buildIntent`.
+    expect(a.taskType).toBe('app_unsized');
     expect(a.unreadable).toBe(true);                 // …and the scorer now SAYS so
     expect(a.complexityScore).toBeGreaterThan(20);   // floored on script-neutral evidence, not a 5
     expect(needsSecondOpinion(a.complexityScore)).toBe(false);   // the score alone would NEVER ask

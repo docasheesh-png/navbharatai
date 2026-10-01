@@ -140,11 +140,12 @@ describe('REVERSION GUARDS — the route asks, and a failed reply never becomes 
 
   it('the steer reaches the reply, and the reply is never cached', () => {
     expect(route).toContain('(answerProjectElsewhere ? projectElsewhereSteer(projectElsewhere) : \'\')');
-    expect(route).toMatch(/!answerProjectElsewhere && !clarifyWhatToBuild && chatCacheEnabled\(\)/);
+    // A picture answer (autopsy 19641ab5) is never cached either; it sits between the two.
+    expect(route).toMatch(/!answerProjectElsewhere && (?:!answerPictureRequest && )?!clarifyWhatToBuild && chatCacheEnabled\(\)/);
   });
 
   it('an unreachable engine degrades to the fixed answer, not to the build path', () => {
-    expect(route).toContain('if (answerProjectElsewhere) return null;');
+    expect(route).toMatch(/if \(answerProjectElsewhere(?: \|\| answerPictureRequest)?\) return null;/);
     expect(route).toContain('projectElsewhereFallback(projectElsewhere)');
   });
 });

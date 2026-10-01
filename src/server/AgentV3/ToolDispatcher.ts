@@ -60,6 +60,20 @@ import { detectLinters, parseLintOutcome, type LintOutcome } from './lintRunner'
 import { lintGateVerdict, type LintGateVerdict } from './LintGate';
 import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
 import { assessFullRewrite } from './rewriteRisk';
+import { isOurStarterFile } from './starterFragment';
+
+/** Every template's files, built once — what "our own starter file" means for a write. */
+let starterTemplateCache: Array<Record<string, string>> | null = null;
+function starterTemplates(): Array<Record<string, string>> {
+  if (starterTemplateCache) return starterTemplateCache;
+  const reg = new TemplateRegistry();
+  const out: Array<Record<string, string>> = [];
+  for (const key of reg.listFrameworks()) {
+    try { out.push(reg.getProvider(key).getFiles([])); } catch { /* a template that cannot list is skipped */ }
+  }
+  starterTemplateCache = out;
+  return out;
+}
 import { analyzeToolchain } from './toolchainPins';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from './appDefaults';
 import { APP_ENTRY_CANDIDATES, resolveAppDisplayName } from './appDisplayName';
@@ -82,6 +96,7 @@ import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServ
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
+import { lintBuiltApp, a11yHandBack } from './buildQualityLint';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { rootThemeHooks, deadThemeSwitchNote } from './deadThemeSwitch';
 import { pruneGeneratedListing } from './generatedListing';
@@ -154,7 +169,7 @@ import { analyzeEffectCleanup, effectCleanupSummary } from './effectCleanupAnaly
 import { analyzeCoupling, couplingSummary } from './couplingAnalysis';
 import { analyzeQueryOptimizer, queryOptimizerSummary } from './queryOptimizerAnalysis';
 import { optimizeInfra, infraOptimizeSummary } from '../lib/InfraOptimizer';
-import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, manifestRewrittenBy, viteRangeOf, reactRangeOf, capacitorRangeOf, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, npmInstallMaskedFailure } from './DependencyAutoFix';
+import { planDependencyAutoFix, dependencyAutoFixSummary, applyWellKnownMissingDeps, pinKnownDepsInInstallCommand, manifestRewrittenBy, viteRangeOf, reactRangeOf, capacitorRangeOf, pinKnownDepsInPackageJson, ensureFrameworkCoreDeps, restoreDroppedDependencies, restoreInconsistentDowngrades, npmInstallMaskedFailure } from './DependencyAutoFix';
 import { quoteShellRouteGroupPaths } from './shellCommandSafety';
 import { resolveStringArg, missingArgMessage } from './toolArgRepair';
 import { prismaRepairHint, isPrismaCliMissingError } from './prismaRepairHint';
@@ -3311,7 +3326,7 @@ export class ToolDispatcher {
    * stylesheet that cannot be read returns `[]`: this answer sends a model back to work, so it must never
    * name a class as undefined because the file that defines it was not read.
    */
-  async undefinedClassesNow(): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }> }> {
+  async undefinedClassesNow(): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }> }> {
     try {
       let listing: string[] = [];
       try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'style-resume-listing'); }
@@ -3338,7 +3353,12 @@ export class ToolDispatcher {
       // runs (analyzeDesignCoverage), with the whole project in hand, so the two cannot disagree.
       let pages: Array<{ file: string; defects: DesignDefect[] }> = [];
       try { pages = analyzeDesignCoverage(project).findings.map((f) => ({ file: f.file, defects: f.defects })); } catch { pages = []; }
-      return { missing, sheet, pages };
+      // Controls a screen reader cannot name, fields with no label, images with no alt (Q-002, autopsy
+      // 6461025c: noted at write time, ignored, shipped). The SAME linter the end-of-build ACCESSIBILITY
+      // line uses, over the same files already read here, so the two can never disagree.
+      let a11y: Array<{ file: string; issues: string[] }> = [];
+      try { a11y = a11yHandBack(lintBuiltApp(project)); } catch { a11y = []; }
+      return { missing, sheet, pages, a11y };
     } catch {
       return { missing: [], pages: [] };
     }
@@ -3624,6 +3644,14 @@ export class ToolDispatcher {
         } catch { /* audit best-effort */ }
         this.narrate('fix.restoredDeps', { restored: restored.restored.join('; ') });
       }
+      // A downgrade that left its @types at the old major (autopsy 6461025c) — see the function's header.
+      const downgrade = restoreInconsistentDowngrades(out, existingContent);
+      if (downgrade.restored.length > 0) {
+        out = downgrade.content;
+        try {
+          getWorkspaceMemory(this.workspaceId).recordAudit(`[PKG-DOWNGRADE] kept the installed major in ${path}: ${downgrade.restored.join('; ')}`);
+        } catch { /* audit best-effort */ }
+      }
       return out;
     } catch {
       return content; // never let a pin failure block a write
@@ -3873,6 +3901,10 @@ export class ToolDispatcher {
         // still holds the file (autopsies e706e068, 31dc61fd and the 2026-08-11 import report). ONE
         // helper, shared by all four write doors: see `writeSteeringNotes` for why it is not inlined.
         const steeringNotes = await this.writeSteeringNotes({ [path]: content });
+        // Replacing our own untouched starter file is the job, not a risk (starterFragment.ts).
+        if (kind === 'modify' && isOurStarterFile(path, existingContent, starterTemplates())) {
+          return `Replaced the starter ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + steeringNotes + kitKeep.note + twinNote;
+        }
         if (kind === 'modify') {
           // write_file replaced an EXISTING file wholesale. For anything except a
           // deliberate full-rewrite, this risks silently dropping unrelated code.

@@ -91,7 +91,13 @@ export function reviewEdit(file: string, content: string): PostEditReview {
     // told a model, about a file that typechecked clean, to add an import it did not need — a nudge to
     // edit working code. What IS an error under every runtime is naming `React.` (React.FC,
     // React.useState) without importing it, and the write-time typecheck confirms the rest.
-    const usesReactNamespace = /(^|[^\w.$])React\.[A-Za-z]/m.test(content);
+    //
+    // 🔴 AND NOT "`React.` anywhere" EITHER (autopsy 4d538ca3, 2026-10-01 — five notes on Chat.tsx and
+    // Memory.tsx, every one over a write the typecheck had just called clean). @types/react declares the
+    // `React` namespace as a UMD global, and TypeScript allows a UMD global in a TYPE position: measured
+    // with tsc, `React.FC` / `React.FormEvent` without an import compile clean, while `React.useState(`,
+    // `<React.Fragment>` and `extends React.Component` fail with TS2686. So only a VALUE use is noted.
+    const usesReactNamespace = reactNamespaceValueUse(content);
     const hasReactBinding =
       /import\s+(?:\*\s+as\s+)?React\b/.test(content) ||
       /import\s+type\s+React\b/.test(content);
@@ -127,4 +133,20 @@ export function formatReviewResult(review: PostEditReview, file: string): string
       : '\nConsider addressing these before finishing.',
   ];
   return lines.join('\n');
+}
+
+/**
+ * Does this file use the `React` namespace as a VALUE (which needs an import), not only in types (which
+ * do not — @types/react's UMD global)? A lowercase member (`React.useState`, `React.memo`,
+ * `React.createElement`), a JSX tag (`<React.Fragment>`), a class base (`extends React.Component`) or
+ * `React.Children.` are values. A PascalCase member elsewhere (`React.FC`, `React.ChangeEvent`) is a type.
+ */
+export function reactNamespaceValueUse(content: string): boolean {
+  const src = String(content ?? '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+  return /(^|[^\w.$])React\.[a-z]\w*/m.test(src)
+    || /<\/?React\.[A-Z]/.test(src)
+    || /\bextends\s+React\.(?:Pure)?Component\b/.test(src)
+    || /(^|[^\w.$])React\.Children\./m.test(src);
 }

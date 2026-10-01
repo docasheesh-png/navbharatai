@@ -28,7 +28,7 @@ describe('manualEditContext (pure)', () => {
     expect(note).toContain('…and 5 more'); // 25 - 20 named
   });
   it('instructs the agent not to revert the edits', () => {
-    expect(manualEditContext(['x.ts'])).toMatch(/do NOT overwrite or revert/i);
+    expect(manualEditContext(['x.ts'])).toMatch(/do NOT overwrite, revert or delete/i);
   });
 });
 

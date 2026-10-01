@@ -97,7 +97,9 @@ describe('3 · a stray root file is not an app', () => {
     expect(appSourceFileCount(['src/App.tsx', 'java', 'logo.png'])).toBe(1);
   });
   it('the route: the reader is told whether the USER has an app, and the rebuild guard weighs app code', () => {
-    expect(ROUTE).toContain('{ projectExists: userAppExists || recentRequests.length > 0, recentRequests }');
+    // Since autopsy 3d1bfe2a an earlier request counts only if it left more than our starter.
+    expect(ROUTE).toContain('{ projectExists: earlierRequestLeftAnApp, recentRequests }');
+    expect(ROUTE).toContain('if (userAppExists || recentRequests.length === 0) return userAppExists || recentRequests.length > 0;');
     expect(ROUTE).not.toContain('{ projectExists, recentRequests }');
     expect(ROUTE).toContain('durableSourceCount: appSourceFileCount(durableFilePaths)');
     expect(ROUTE).not.toContain('countEditableSourceFiles(durableFilePaths)');

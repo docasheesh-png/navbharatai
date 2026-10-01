@@ -405,17 +405,24 @@ export class WorkspaceMemory {
   }
 
   /** Prompt-ready shared verification state; '' when nothing is verified yet. */
-  verificationStatus(): string {
+  verificationStatus(opts: { canRunCommands?: boolean } = {}): string {
+    // 🔴 AN INSTRUCTION THE READER CANNOT OBEY IS NOT GUIDANCE (autopsy 1219c639). The post-build reviewer
+    // has no shell, was told "run tsc ONCE at the end of your edits", answered "I don't have a shell to run
+    // tsc directly", and spent its 45 s budget re-reading files instead of reviewing. An agent without a
+    // shell is told the build is re-checked by the platform and to judge by reading.
+    const canRun = opts.canRunCommands !== false;
     const lines: string[] = [];
-    if (this.depsInstalledAt) {
+    if (this.depsInstalledAt && canRun) {
       lines.push('- npm dependencies are ALREADY INSTALLED in this workspace — do NOT run npm install again unless you change package.json.');
     }
     // Strict > : a write in the SAME millisecond as the clean check must invalidate it
     // (conservative — one redundant re-check is cheaper than skipping a needed one).
     if (this.tscCleanAt && this.tscCleanAt > this.lastWriteAt) {
       lines.push('- TypeScript already checked CLEAN (npx tsc --noEmit) and no file has changed since — do NOT re-run tsc until you edit files.');
-    } else if (this.tscCleanAt) {
+    } else if (this.tscCleanAt && canRun) {
       lines.push('- tsc was clean earlier but files have changed since; run tsc ONCE at the end of your edits, not per file.');
+    } else if (this.tscCleanAt) {
+      lines.push('- TypeScript was checked clean earlier; files changed since, and the platform re-checks the build itself. You have no shell — do not try to run tsc; judge the code by reading it.');
     }
     return lines.length
       ? `Verification status (shared across the team — do not repeat verified work):\n${lines.join('\n')}`

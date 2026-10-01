@@ -33,6 +33,15 @@ export interface BuildRecordLike {
   /** Whether it finished successfully; a failed build's duration must not teach the estimate. */
   ok?: boolean;
   outcome?: string;
+  /** Time spent waiting for the user's answer — not build time (autopsy 1219c639). */
+  userWaitMs?: number;
+}
+
+/** The build's own working time: wall clock minus the time it waited for the user. PURE. */
+export function workingMs(r: BuildRecordLike): number {
+  const wall = (r.endedAt as number) - (r.startedAt as number);
+  const wait = Number(r.userWaitMs);
+  return Number.isFinite(wait) && wait > 0 ? Math.max(0, wall - wait) : wall;
 }
 
 /**
@@ -56,7 +65,7 @@ export const MAX_SANE_BUILD_MS = 45 * 60_000;    // past 45 min it was almost ce
  */
 export function isTeachableBuild(r: BuildRecordLike): boolean {
   if (!r || typeof r.startedAt !== 'number' || typeof r.endedAt !== 'number') return false;
-  const ms = r.endedAt - r.startedAt;
+  const ms = workingMs(r);
   if (!(ms >= MIN_SANE_BUILD_MS && ms <= MAX_SANE_BUILD_MS)) return false;
   // `ok` is authoritative when present; otherwise fall back to the recorded outcome string.
   if (typeof r.ok === 'boolean') return r.ok;
@@ -91,7 +100,7 @@ export function historyFromRecords(
     if (!isTeachableBuild(r)) continue;
     out.push({
       complexity: currentComplexity,
-      durationMs: (r.endedAt as number) - (r.startedAt as number),
+      durationMs: workingMs(r),
     });
   }
   return out;

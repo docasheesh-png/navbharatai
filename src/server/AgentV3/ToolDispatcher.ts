@@ -21,7 +21,7 @@ import { pipedGateExitCodeWarning } from './pipedGateExitCode';
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
 import { inspectCredentials } from './credentialSafety';
 import { probeCredentials, realProbeFetch, credentialProbeEnabled, relevantToApp, type ProbeVerdict } from './credentialProbe';
-import { planSecretRequest, secretRequestPrompt, secretRequestResult, type SecretAsk } from './secretRequest';
+import { planSecretRequest, secretRequestPrompt, secretRequestResult, isAiModelKey, keylessAiNote, type SecretAnswer, type SecretAsk } from './secretRequest';
 
 /**
  * Sentinel command that forces the user's vault secrets onto disk regardless of the "is this an app
@@ -1026,10 +1026,10 @@ export class ToolDispatcher {
    * BUILD'S EVENT STREAM — the client writes them straight to the encrypted vault and the caller reads
    * them back server-side (see secretRequest.ts).
    */
-  private onSecretsNeeded?: (asks: SecretAsk[]) => Promise<Record<string, string> | null>;
+  private onSecretsNeeded?: (asks: SecretAsk[]) => Promise<SecretAnswer>;
 
   /** Wire the ask above. Supplied only when there is a verified user whose vault we can write to. */
-  setSecretRequestHandler(fn: (asks: SecretAsk[]) => Promise<Record<string, string> | null>): void {
+  setSecretRequestHandler(fn: (asks: SecretAsk[]) => Promise<SecretAnswer>): void {
     this.onSecretsNeeded = fn;
   }
 
@@ -1075,7 +1075,7 @@ export class ToolDispatcher {
         { name: PAYMENT_SECRET_NAMES.keyId, why: 'Your Razorpay Key ID — Razorpay Dashboard → Account & Settings → API Keys.' },
         { name: PAYMENT_SECRET_NAMES.keySecret, why: 'Your Razorpay Key Secret, from the same page. It is stored only in your own Supabase project.' },
       ]).catch(() => null);
-      result = saved ? await handler({ table }).catch(() => null) : null;
+      result = saved && typeof saved === 'object' && Object.keys(saved).length > 0 ? await handler({ table }).catch(() => null) : null;
     }
     if (!result) return pending;
     if (!result.ok && result.needKeys) {
@@ -7756,12 +7756,24 @@ export class ToolDispatcher {
         // admin report, both of which are stored.
         const reqRec = (input as Record<string, unknown>) || {};
         const rawAsks = Array.isArray(reqRec.secrets) ? (reqRec.secrets as Array<Partial<SecretAsk>>) : [];
-        const plan = planSecretRequest(rawAsks, this.savedSecretNames);
+        const planned = planSecretRequest(rawAsks, this.savedSecretNames);
+        // 🔑 AN AI MODEL NEEDS NO KEY WHILE THE GATEWAY IS ON (autopsy 1219c639) — see AI_MODEL_KEY_NAMES. The
+        // popup is never opened for one; the builder is pointed at the keyless recipe instead.
+        const keyless = appAiGatewayEnabled();
+        const keylessNames = keyless
+          ? [...planned.ask.map((a) => a.name), ...planned.rejected].filter((n) => isAiModelKey(n))
+          : [];
+        const plan = keylessNames.length === 0 ? planned : {
+          ...planned,
+          ask: planned.ask.filter((a) => !keylessNames.includes(a.name)),
+          rejected: planned.rejected.filter((n) => !keylessNames.includes(n)),
+        };
 
         // Report the filtered-out names to the AGENT rather than dropping them silently — it needs to
         // know a key it planned for is already present (so it can wire it) or was refused (so it stops
         // planning around it).
         const notes: string[] = [];
+        if (keylessNames.length) notes.push(keylessAiNote(keylessNames));
         if (plan.alreadyHave.length) notes.push(`Already saved (no need to ask): ${plan.alreadyHave.join(', ')}.`);
         if (plan.rejected.length) notes.push(`Refused — not a usable app key: ${plan.rejected.join(', ')}. Do not ask for NavBharatAI's own provider keys.`);
         if (plan.ask.length === 0) {
@@ -7774,12 +7786,18 @@ export class ToolDispatcher {
         }
 
         this.events?.emit({ type: 'narration', agent: 'architect', text: `🔑 ${secretRequestPrompt(plan)}`, ts: Date.now() });
-        let saved: Record<string, string> | null = null;
-        try { saved = await this.onSecretsNeeded(plan.ask); } catch { saved = null; }
+        let answer: SecretAnswer = null;
+        try { answer = await this.onSecretsNeeded(plan.ask); } catch { answer = null; }
 
         const askedNames = plan.ask.map((a) => a.name);
+        // STOPPED WHILE WAITING (autopsy 1219c639): nothing is said to the user and nothing more is done —
+        // the build is over. This used to read as a skip and the turn's next tool (an npm install) ran.
+        if (answer === 'stopped') {
+          return `The build was stopped while waiting for ${askedNames.join(', ')}. Do nothing more.`;
+        }
+        const saved: Record<string, string> | null = answer && typeof answer === 'object' ? answer : null;
         if (!saved || Object.keys(saved).length === 0) {
-          const line = secretRequestResult('skipped', askedNames);
+          const line = secretRequestResult(answer === 'timed-out' ? 'timed-out' : 'skipped', askedNames);
           this.events?.emit({ type: 'narration', agent: 'architect', text: line, ts: Date.now() });
           // The build CONTINUES. Skipping is a real answer, and the agent is told to leave the feature
           // visibly disabled rather than fake it.

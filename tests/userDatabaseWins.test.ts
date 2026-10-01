@@ -153,7 +153,7 @@ describe('The build asks — but only when it can honour a yes', () => {
     const at = agentv3Src.indexOf('dispatcher.setDatabaseFallback(');
     const block = agentv3Src.slice(at, at + 3000);
     expect(block).toContain("type: 'permission_request'");
-    expect(block).toContain('await awaitApproval(requestId)');
+    expect(block).toContain('await waitForUser(requestId)'); // the one door that also listens to Stop (autopsy 1219c639)
     // Denial is a real outcome that continues the build, never a silent retry.
     expect(block).toContain('return null;');
   });

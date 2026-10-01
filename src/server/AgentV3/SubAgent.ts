@@ -369,7 +369,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     // scratch because nothing told it the work was already done.
     const mem = getWorkspaceMemory(deps.workspaceId);
     const projectMap = mem.projectMap();
-    const verification = mem.verificationStatus();
+    const verification = mem.verificationStatus({ canRunCommands: (deps.toolsOverride ?? cfg.tools).includes('bash' as ToolName) });
     const contextBlocks = [
       projectMap ? `Current project context:\n${projectMap}` : '',
       // 🔴 THE FACT THE ACTOR WAS NEVER TOLD (autopsy c5fd6ad1, 2026-09-21). The architect's own

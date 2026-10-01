@@ -117,7 +117,7 @@ export function etaBasisNote(history: readonly HistoricalBuild[]): string {
 /** The per-day, per-task-type slice of the platform's own cost telemetry the fleet prior reads. */
 export interface FleetTelemetryDayLike {
   date?: string;
-  byTaskType?: Record<string, { builds?: number; durationMs?: number } | undefined>;
+  byTaskType?: Record<string, { builds?: number; durationMs?: number; okBuilds?: number; okDurationMs?: number } | undefined>;
 }
 
 /** Fewer builds of a kind on one day than this, and that day's mean is noise, not a measurement. */
@@ -135,8 +135,9 @@ export const FLEET_MIN_BUILDS_PER_DAY = 2;
  *
  * One entry per day (that day's mean for this task type), newest first, and only days with enough builds
  * of the kind to be a measurement. Stamped with the CURRENT complexity for the reason `historyFromRecords`
- * gives. ⚠️ The mean includes failed builds, because the telemetry does not split durations by outcome;
- * the label says "average", and the workspace's own history still wins the moment it exists.
+ * gives. The mean is of SUCCESSFUL builds (`okDurationMs`) wherever the day records them; only a day
+ * written before that field existed falls back to the mean of every build. The workspace's own history
+ * still wins the moment it exists.
  */
 export function fleetHistoryFromTelemetry(
   days: readonly FleetTelemetryDayLike[],
@@ -149,8 +150,15 @@ export function fleetHistoryFromTelemetry(
   if (!taskType) return { history, builds, days: 0 };
   for (const d of (days ?? []).slice(0, maxDays)) {
     const slice = d?.byTaskType?.[taskType];
-    const n = Number(slice?.builds);
-    const ms = Number(slice?.durationMs);
+    // 🔴 SUCCESSFUL builds only, wherever the day carries them (autopsy 19641ab5). A build the user
+    // stopped at 1.8 min and a failure at 40 s are not how long an app of this kind takes; the
+    // telemetry has split them out since 728a402d (`okDurationMs`), and this reader still averaged
+    // every build. A day written before that field existed keeps the old mean — never a zero.
+    const okN = Number(slice?.okBuilds);
+    const okMs = Number(slice?.okDurationMs);
+    const hasOk = Number.isFinite(okN) && Number.isFinite(okMs) && okN > 0 && okMs > 0;
+    const n = hasOk ? okN : (slice?.okDurationMs === undefined ? Number(slice?.builds) : NaN);
+    const ms = hasOk ? okMs : Number(slice?.durationMs);
     if (!Number.isFinite(n) || !Number.isFinite(ms) || n < FLEET_MIN_BUILDS_PER_DAY || ms <= 0) continue;
     const mean = ms / n;
     if (!(mean >= MIN_SANE_BUILD_MS && mean <= MAX_SANE_BUILD_MS)) continue;

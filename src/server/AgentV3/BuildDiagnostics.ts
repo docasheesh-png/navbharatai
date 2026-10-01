@@ -2344,7 +2344,7 @@ export class BuildDiagnostics {
       billing: this.billing,
       // DERIVED AT SERIALIZATION, so no ending path can forget it — the same reasoning as
       // `endedWithoutOutcome` above. Pure: `report()` stays safe to call repeatedly mid-build.
-      etaAccuracy: etaAccuracy(this.etaPromise, this.startedAt, this.endedAt) ?? undefined,
+      etaAccuracy: etaAccuracy(this.etaPromise, this.startedAt, this.endedAt, outcomeCodeOf(this.issues)) ?? undefined,
       review: this.reviewText,
       priorFailedBuilds: this.priorFailedBuilds,
       session: this.session,
@@ -3036,7 +3036,22 @@ export interface EtaAccuracy {
   withinBand: boolean;
   evidenced: boolean;
   line: string;
+  /**
+   * True when the build was CUT SHORT (stopped by the user, a deploy, the reaper…) before the band ended:
+   * then it never ran long enough to test the estimate, and its ratio must not be counted as a miss.
+   */
+  untested?: boolean;
 }
+
+/**
+ * Outcomes that END a build from outside its own work. A build cut short before the band's top did not
+ * test the estimate (autopsy 19641ab5: a build stopped by the user at 1.8 min was scored "0.2× the
+ * midpoint and UNDER the band" — as if the estimate had been wrong about it).
+ */
+export const ETA_UNTESTED_OUTCOMES: ReadonlySet<string> = new Set([
+  'OUTCOME_USER_STOPPED', 'OUTCOME_STOPPED', 'OUTCOME_DEPLOY_DRAIN', 'OUTCOME_SUPERSEDED',
+  'OUTCOME_REAPED', 'OUTCOME_ABORTED_UNKNOWN', 'OUTCOME_COST_CEILING',
+]);
 
 /**
  * MEASURE THE PROMISE AGAINST THE CLOCK — the half that was missing (open root cause #6, 2026-09-17).
@@ -3067,6 +3082,7 @@ export function etaAccuracy(
   promise: EtaPromise | null | undefined,
   startedAt: number | null | undefined,
   endedAt: number | null | undefined,
+  outcomeCode: string = '',
 ): EtaAccuracy | null {
   const promisedMs = Number(promise?.estimateMs);
   const a = Number(startedAt);
@@ -3087,6 +3103,14 @@ export function etaAccuracy(
       // Admin 2026-09-26: an unevidenced estimate is SHOWN, labelled a guess (etaEvidence.ts).
       ? `The user was shown a ROUGH ESTIMATE, labelled a guess (unevidenced): ${band} (midpoint ${mins(promisedMs)})`
       : `No figure was shown to the user (unevidenced — they saw the PHASE). The estimator's own midpoint was ${mins(promisedMs)}, band ${band}`;
+  // Cut short from outside before the band ended: the clock measured the interruption, not the build.
+  // A build stopped AFTER the band's top still proves the estimate was too low, so that one is judged.
+  if (ETA_UNTESTED_OUTCOMES.has(outcomeCode) && actualMs < highMs && !withinBand) {
+    return {
+      promisedMs, lowMs, highMs, actualMs, ratio, withinBand, evidenced, untested: true,
+      line: `${head}; the build was cut short (${outcomeCode}) at ${mins(actualMs)}, before the band ended, so it does not test the estimate.`,
+    };
+  }
   const verdict = withinBand
     ? 'the build landed INSIDE that band'
     : `the build took ${mins(actualMs)} — ${ratio.toFixed(1)}× the midpoint and ${actualMs > highMs ? 'OVER' : 'UNDER'} the band`;

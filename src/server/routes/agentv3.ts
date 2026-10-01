@@ -579,7 +579,7 @@ import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
 import { mobileLayoutCheckEnabled, mobileLayoutScript, parseMobileLayout, mobileLayoutVerdict, MOBILE_CHECK_BUDGET_MS } from '../AgentV3/mobileLayoutCheck';
-import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration } from '../AgentV3/ManualEditTracker';
+import { recordManualEdits, consumeManualEdits, manualEditContext, manualEditNarration, userOwnedFiles } from '../AgentV3/ManualEditTracker';
 import { saveCheckpoint, loadCheckpoints, dormantGitStatusFromCheckpoints, setCheckpointLabel, normalizeCheckpointLabel, CHECKPOINT_LABEL_MAX } from '../AgentV3/CheckpointStore';
 import { attachUserActionRecorder } from '../AgentV3/userActionRecorder';
 import {
@@ -15294,6 +15294,18 @@ async function noteBuildOutcome(
           if (note) architectSystem = `${note}\n\n---\n\n${architectSystem}`;
           events.emit({ type: 'narration', agent: 'architect', text: manualEditNarration(manual.count), ts: Date.now() });
         }
+        // …AND THE FILES THE USER PUT HERE ARE NOT THE BUILD'S TO DELETE (autopsy 4d538ca3 — see
+        // userFileGuard.ts). The pending set above is cleared every build; `userOwnedFiles` is not,
+        // so a page the user added three builds ago is protected exactly like one added a minute ago.
+        try {
+          const owned = await userOwnedFiles(workspaceId);
+          dispatcher.setUserOwnedFiles([...new Set([...manual.paths, ...owned])], prompt);
+          dispatcher.setUserFileRefusalSink((paths) => {
+            try {
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'USER_FILE_KEPT', message: `Kept the user's own file(s) the build tried to delete: ${paths.join(', ')}`, autoResolved: true });
+            } catch { /* diagnostics are best-effort */ }
+          });
+        } catch { /* the user-file guard is best-effort — an empty set protects nothing, as before */ }
       } catch { /* manual-edit awareness is best-effort — never blocks the build */ }
       // P-AI.5 — Personalization: for a RETURNING user, inject their learned stack preferences
       // (inferred from past successful builds) as advisory defaults so the Architect leans toward
@@ -23977,7 +23989,7 @@ async function noteBuildOutcome(
       // deduped+aged by the store; never affects the build or the result.
       if (userId) {
         try {
-          const debtFindings = findingsToDebt({ security: getWorkspaceMemory(workspaceId).securityFindings() });
+          const debtFindings = findingsToDebt({ security: getWorkspaceMemory(workspaceId).appSecurityFindings() });
           if (debtFindings.length) void recordDebt(userId, workspaceId, debtFindings, new Date().toISOString());
         } catch { /* best-effort — never block the result */ }
       }

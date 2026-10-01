@@ -19,6 +19,8 @@
  * `node -e`) is not caught — the freeze is a guard against the obvious route, not a sandbox. PURE.
  */
 
+import { shellCommandVariants } from './shellNormalize';
+
 const WORKSPACE_ROOT = '/home/user/workspace';
 
 /** A workspace-relative path, or null when the target is outside the workspace or not a file. */
@@ -114,4 +116,37 @@ export function shellWriteTargets(command: string): string[] {
     else if (name === 'rm' || name === 'truncate' || name === 'touch') operands.forEach(add);
   }
   return [...found];
+}
+
+/**
+ * Which workspace files a command REMOVES — `rm` / `unlink` / `git rm` operands, plus the globs among
+ * them (kept apart, because a glob is a pattern to match, not a path). Used to protect files the user put
+ * in the workspace (autopsy 4d538ca3 — see userFileGuard.ts). Reads `sh -c "…"` wrappers too, because a
+ * delete inside one deletes just as thoroughly. PURE; precision over recall, like `shellWriteTargets`.
+ */
+export function shellRemovalTargets(command: string): { paths: string[]; globs: string[] } {
+  const paths = new Set<string>();
+  const globs = new Set<string>();
+  for (const variant of shellCommandVariants(String(command ?? ''))) {
+    for (const words of simpleCommands(withoutHeredocBodies(variant))) {
+      const args = words.filter((w, i) => !/^(?:[0-9]|&)?[<>]/.test(w) && !/^(?:[0-9]|&)?[<>]/.test(words[i - 1] ?? ''));
+      let [cmd, ...rest] = args;
+      if (!cmd) continue;
+      let name = cmd.split('/').pop() ?? cmd;
+      if (name === 'git' && rest[0] === 'rm') { name = 'git-rm'; rest = rest.slice(1); }
+      if (name !== 'rm' && name !== 'unlink' && name !== 'git-rm') continue;
+      for (const operand of rest) {
+        if (operand.startsWith('-')) continue;
+        const raw = operand.replace(/^\.\//, '');
+        if (/[*?]/.test(raw) && !/[$`]/.test(raw)) {
+          const rel = raw.startsWith(`${WORKSPACE_ROOT}/`) ? raw.slice(WORKSPACE_ROOT.length + 1) : raw;
+          if (!rel.startsWith('/') && !rel.startsWith('~') && !rel.startsWith('../')) globs.add(rel);
+          continue;
+        }
+        const p = toWorkspacePath(operand);
+        if (p) paths.add(p);
+      }
+    }
+  }
+  return { paths: [...paths], globs: [...globs] };
 }

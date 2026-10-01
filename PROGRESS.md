@@ -86026,3 +86026,16 @@ tail and the runner census.
 **Still open:**
 - Each repair pass's instruction is still persisted into the main conversation as a `user` turn. Whether a
   reopened session shows it as something the user typed was not checked here.
+
+### 2026-10-01 — Autopsy 1be16985, second pass (admin: "sare chote bade problem … DNA level par fix huye ya nahi?")
+
+The honest answer to that question was **no**. A re-read of the report found four items the first pass missed. Three are fixed:
+
+| Problem | Root cause | Class | Siblings | Locked by |
+|---|---|---|---|---|
+| TopicView's design finding was repaired in the 174 s fresh-context pass | The end-of-turn check I added covered CSS only; the page-design write-time note had the same gap | A write-time steer with nothing at the end of the turn checking it | Both halves now in one message (`undefinedClassesNow` returns `pages` from the same `analyzeDesignCoverage`) | test §5 |
+| `topic.sections.map` flagged LIST_WITHOUT_EMPTY_STATE | A field of a record whose every instance is hand-written data | The app's own fixed content judged as user data (third instance: SignBridge, a7aa447c) | `recordFieldLiteral` (typed prop + exported literal array of that type that writes the field + no growable `useState<T[]>`) | test §6, reversion-proven |
+| A reopened chat showed repair instructions as the person's own bubbles | Engine steers travel as `role: 'user'`; the restore filtered one prefix | Platform-authored turns indistinguishable from the person's in the transcript | All 7 engine pushes go through `pushPlatformTurn`; persisted copies carry `origin: 'platform'`; the restore skips them. Three pushes never advanced `messageTs`, so reopened timestamps shifted; fixed, along with the live-message push. | test §7 (census + restore), reversion-proven |
+
+- **Checked, no change:** `requestAnalysis.startTier: "gemini"`. It is labelled "cheapest band", a complexity band rather than a provider (2b0a3ed5). It disagreed with the KIMI opener only because the classifier overrode it, and fix 1 removes that.
+- **Still open:** why the model writes 63 custom classes and defers their CSS. The write-time note fires on every screen, and the end-of-turn check is now the enforcement. Whether a prompt change can prevent this upstream is unmeasured.

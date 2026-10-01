@@ -86724,7 +86724,7 @@ the engine and what it said about itself.
   in one sentence; the reviewer read two files that do not exist; the first two write-time typechecks took 15–16 s
   (no compiler in a starter-fragment workspace).
 
-### Root causes and fixes (PR #3442, second commit set)
+### Root causes and fixes
 - **A crawl abandon was a timeout strike.** `SLOW_STREAM_MESSAGE` contains "timed out", so it also fed the family's
   "2 consecutive timeouts" bench; two crawls benched every GLM rung (glm-5.3 too) for the rest of the run, defeating
   crawlBench.ts (876afca9) on its first real outing. The timeout branch now excludes `isSlowStreamAbandon`.
@@ -86752,8 +86752,8 @@ the engine and what it said about itself.
 ### Ledger
 Q-d1 ✅ crawl ≠ timeout strike · Q-d2 ✅ concurrent abandon race · Q-d3 ✅ handoff ≠ LLM_CALL_FAILED · Q-d4 ✅ 51-key
 chain · Q-d5 ✅ bench prefix · Q-d6 ✅ fast-lane React import · Q-d7 ✅ summary replaced by resume reply · Q-d8 ✅
-devices ≠ people · Q-d9 ✅ AI rule to reviewer · Q-d10 ✅ ETA "bigger than expected" · Q-d11 (review "85/100" shown
-for an inferred score) → IN PROGRESS, fixed by #3442's `scoreStated` · Q-009 🟡 provider crawl/30 s wasted ·
+devices ≠ people · Q-d9 ✅ AI rule to reviewer · Q-d10 ✅ ETA "bigger than expected" · Q-d11 ✅ review "85/100" shown
+with findings only — resolved by #3442's `scoreStated` (merged); the next report's review line confirms it · Q-009 🟡 provider crawl/30 s wasted ·
 Q-010 🟡 second instance (`started-by=files · starter=completed 11`) incl. the no-compiler warm-up ·
 Q-020 🟡 seven items argued not defects (agreement). Locked in `tests/theElectricalTestingAutopsy.test.ts`
 (21 cases); each fix reverted-and-failed in the session.

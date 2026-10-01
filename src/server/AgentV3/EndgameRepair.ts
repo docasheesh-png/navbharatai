@@ -23,6 +23,7 @@
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
 import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import { tscNeverRan } from './TscGate';
+import { reactNamespaceValueUse } from './PostEditReviewer';
 
 export interface TscError {
   file: string;
@@ -241,6 +242,28 @@ export function removeUnusedImports(
  * is one line and has exactly one right form: add the default React import, beside a named `react` import
  * when there is one. A file whose own code already binds `React` otherwise is left alone. Pure.
  */
+/** Add the React default import (beside a named `react` import when there is one). Pure. */
+function withReactImport(src: string): string {
+  if (/\bimport\s+(?:\*\s+as\s+)?React\b/.test(src)) return src; // React is already imported
+  const named = /^(\s*)import\s+(\{[^}]*\})\s+from\s+(['"])react\3\s*;?/m;
+  return named.test(src)
+    ? src.replace(named, (_m, lead: string, braces: string, q: string) => `${lead}import React, ${braces} from ${q}react${q};`)
+    : `import React from 'react';\n${src}`;
+}
+
+/**
+ * The same fix BEFORE any compiler runs, for a file a lane writes without a tool loop to read the
+ * write-time note (autopsy d382b398): the fast lane wrote a hook with nine `React.useCallback` /
+ * `React.useState` calls and no import, handed it off before its verify step, and the full builder
+ * spent three edits and two typechecks putting the import back. Only a VALUE use counts
+ * (`reactNamespaceValueUse`) — `React.FC` in a type needs nothing — and only a script file. Pure.
+ */
+export function ensureReactValueImport(path: string, content: string): string {
+  if (!/\.(?:tsx|ts|jsx|js)$/i.test(String(path ?? '')) || /\.d\.ts$/i.test(path)) return content;
+  if (typeof content !== 'string' || !reactNamespaceValueUse(content)) return content;
+  return withReactImport(content);
+}
+
 export function fixReactUmdGlobal(
   files: Record<string, string>,
   errors: TscError[],
@@ -251,11 +274,7 @@ export function fixReactUmdGlobal(
   for (const file of targets) {
     const src = out[file];
     if (typeof src !== 'string') continue;
-    if (/\bimport\s+(?:\*\s+as\s+)?React\b/.test(src)) continue; // React is already imported
-    const named = /^(\s*)import\s+(\{[^}]*\})\s+from\s+(['"])react\3\s*;?/m;
-    const next = named.test(src)
-      ? src.replace(named, (_m, lead: string, braces: string, q: string) => `${lead}import React, ${braces} from ${q}react${q};`)
-      : `import React from 'react';\n${src}`;
+    const next = withReactImport(src);
     if (next !== src) {
       out[file] = next;
       fixed.push(`${file}: added the missing React import`);

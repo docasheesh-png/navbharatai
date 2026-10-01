@@ -8,6 +8,7 @@
 
 import { shellEarlyRule } from './earlyPreview';
 import { IMAGE_IN_APP_RULE } from './inAppImageGeneration';
+import { packageChoiceRule } from '../lib/unfixablePackages';
 import { HANDOFF_MECHANICAL_FIX_RULE } from './handoffRule';
 import { rosterBriefing } from './AgentRegistry';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
@@ -584,6 +585,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '',
     aiInAppRule(),
     IMAGE_IN_APP_RULE,
+    packageChoiceRule(),
     NO_EVAL_RULE,
     NO_FAKE_RESULTS_RULE,
     BUILD_WHAT_WAS_ASKED_RULE,

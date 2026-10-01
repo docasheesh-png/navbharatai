@@ -94,7 +94,7 @@ describe('the finding the shared ledger makes reportable', () => {
     expect(line).toContain('10 file reads');
     expect(line).toContain('3 distinct');
     expect(line).toContain('7 of them');
-    expect(line).toContain('7× src/App.tsx');
+    expect(line).toContain('src/App.tsx (6 unchanged of 7 reads)');
   });
 
   it('🔒 stays silent on ordinary work — a couple of re-reads is not a finding', () => {

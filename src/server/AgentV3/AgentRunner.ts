@@ -33,6 +33,7 @@ import { decideStyleResume, doneStyleNote, styleResumeEnabled, styleResumeNote }
 import { asPlatformRequest } from './platformRequest';
 import { streamThinkingToChat } from './thinkingStream';
 import { PROMPT_PREVIEW_SEPARATOR } from './promptPreviewShape';
+import { answerAfterPlanning } from './answerAfterPlanning';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -877,6 +878,15 @@ export class AgentRunner {
             events.emit({ type: 'context_usage', pct: ctx.pct, level: ctx.level, note: ctx.note, ts: Date.now() });
           }
         } catch { /* a meter must never be able to fail a build */ }
+
+        // A reply turn that opens with the model's notes to itself ("Now final summary. No more
+        // tools. … Proceed.") followed by a gap and the real answer shows only the answer
+        // (answerAfterPlanning.ts, autopsy 3f959fde). Applied before the narration and the summary
+        // read the text, so both see the same answer. The diagnostics above keep the raw text.
+        if (turn.toolUses.length === 0) {
+          const answer = answerAfterPlanning(turn.text);
+          if (answer !== turn.text) turn = { ...turn, text: answer };
+        }
 
         usage.inputTokens += turn.usage.inputTokens;
         usage.outputTokens += turn.usage.outputTokens;

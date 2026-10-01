@@ -12226,12 +12226,25 @@ async function noteBuildOutcome(
     // failed or partial read keeps the count: the protective direction.
     let durableSourceCount = appSourceFileCount(durableFilePaths);
     let durableStarterOnlyCount = 0;
-    if (durableSourceCount > 0 && durableSourceCount <= MAX_FRAGMENT_FILES && intent === 'new_build' && !isEditMode) {
+    // 🔴 …AND AN "EDIT" OF OUR STARTER IS A BUILD (autopsy 3f959fde, 2026-10-01). The intention reader
+    // answered edit for "check this data, which algorithm suits" on a workspace holding only our starter
+    // (an earlier build was stopped before its first file). The user was told "✏️ Editing your existing app
+    // (11 source files)", no plan was made and the readiness score was not measured — for an app that did
+    // not exist. The same positive reading turns that edit into the fresh build it is. Never on an import
+    // turn, and never on a partial or failed read: an edit stays an edit unless the files PROVE otherwise.
+    const editOfStarterCandidate = intent === 'edit_existing' && !hasImportIntent && !isImportTurn;
+    let starterEditReadAsBuild = false;
+    if (durableSourceCount > 0 && durableSourceCount <= MAX_FRAGMENT_FILES && ((intent === 'new_build' && !isEditMode) || editOfStarterCandidate)) {
       const codePaths = durableFilePaths.filter((p) => couldBeAppCode(p));
       const contents = await raceTimeout(loadWorkspaceFilesByPath(workspaceId, codePaths), 4_000, 'starterOnlyDurable').catch(() => null);
       if (contents && Object.keys(contents).length === codePaths.length && holdsOnlyOurStarter(contents)) {
         durableStarterOnlyCount = codePaths.length; // recorded once the report exists, below
         durableSourceCount = 0;
+        if (editOfStarterCandidate) {
+          intent = 'new_build';
+          isEditMode = false;
+          starterEditReadAsBuild = true;
+        }
       }
     }
     if (rebuildGuardFlipsToEdit({
@@ -12317,7 +12330,7 @@ async function noteBuildOutcome(
       } catch { return false; }
     })();
     const planning = planningRequest({ prompt, attachmentText: planningAttachmentText, picturesSetAside, recentTurns, userAppExists, appStillUnbuilt });
-    const buildComplexity = complexityFromPrompt(planning.text);
+    const buildComplexity = complexityFromPrompt(planning.sizing);
     const buildDepth: PipelineDepth = resolvePipelineDepth(
       (buildComplexity.moduleCount || 0) + (buildComplexity.featureCount || 0),
       onlyOpus,
@@ -13074,7 +13087,7 @@ async function noteBuildOutcome(
       // No provider name is surfaced to the user (kept to server telemetry only).
       const costLadderOn = process.env.AGENTV3_COST_LADDER !== 'off';
       const analysis = costLadderOn
-        ? analyzeRequest({ prompt: planning.text, powerMode: onlyOpus, pinnedModel: powerSpecResolved.pinnedModel, buildIntent: intent })
+        ? analyzeRequest({ prompt: planning.sizing, powerMode: onlyOpus, pinnedModel: powerSpecResolved.pinnedModel, buildIntent: intent })
         : undefined;
       if (analysis) {
         console.log(
@@ -13113,7 +13126,7 @@ async function noteBuildOutcome(
           ? learnDomain(prompt)
           : null;
       const complexityDecision = scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(
-        { prompt: planning.text, score: analysis?.complexityScore ?? 0 },
+        { prompt: planning.sizing, score: analysis?.complexityScore ?? 0 },
         (p) => AIRouterManager.getRouter('free')
           .route(p, 'You are a classifier. Reply with one word only.')
           .then((r) => r.response.content),
@@ -13207,7 +13220,8 @@ async function noteBuildOutcome(
       if (durableStarterOnlyCount > 0) {
         buildDiag.record({
           phase: 'plan', severity: 'info', code: 'DURABLE_HOLDS_ONLY_STARTER', autoResolved: true,
-          message: `The saved project holds only our own untouched starter (${durableStarterOnlyCount} file(s)), so this is a fresh build, not an edit of an existing app.`,
+          message: `The saved project holds only our own untouched starter (${durableStarterOnlyCount} file(s)), so this is a fresh build, not an edit of an existing app.`
+            + (starterEditReadAsBuild ? ' The request had been read as an edit; it runs as a fresh build instead.' : ''),
         });
       }
       buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
@@ -13298,7 +13312,7 @@ async function noteBuildOutcome(
       // anything. Default is always 'direct'; only a strong mega-signal (famous product / heavy infra /
       // huge feature spec) reads as 'analyze'.
       try {
-        const scope = analyzeAppScope(planning.text);
+        const scope = analyzeAppScope(planning.sizing);
         buildDiag.record({
           phase: 'plan',
           severity: 'info',
@@ -13780,7 +13794,7 @@ async function noteBuildOutcome(
       // A pasted one-file app is improved in place, never split into milestones (pastedAppFormat.ts).
       if (envFlag('AGENTV3_MEGA_ROADMAP', true) && intent === 'new_build' && !isEditMode && !pastedFormat.keep) {
         try {
-          const scope = analyzeAppScope(planning.text);
+          const scope = analyzeAppScope(planning.sizing);
           // TWO CLASSIFIERS DISAGREEING IS A FACT, NOT A TIE THE DEARER ONE WINS (autopsy Study-Racer,
           // 2026-09-25 — see scopeDispute). Recorded as a fact about OUR routing; the build runs direct.
           const dispute = scopeDispute(scope, { complex: buildIsComplex });
@@ -13800,7 +13814,7 @@ async function noteBuildOutcome(
           const projectModeOwns = roadmapStandsDownForProjectMode({
             projectModeOn: projectModeEnabled(process.env, { userId, email }),
             planFirst,
-            megaProject: detectMegaProject(planning.text),
+            megaProject: detectMegaProject(planning.sizing),
           });
           if (projectModeOwns && scope.decision === 'analyze' && !dispute) {
             buildDiag.record({
@@ -13944,7 +13958,7 @@ async function noteBuildOutcome(
           // build records we ALREADY store durably, so this adds no storage and costs no provider spend.
           // Best-effort by construction: a history read that fails yields [], i.e. exactly today's
           // behaviour, and can never delay or fail a build.
-          const etaComplexity = complexityFromPrompt(planning.text);
+          const etaComplexity = complexityFromPrompt(planning.sizing);
           const past = await recentBuildHistoryFor(
             workspaceId, etaComplexity,
             (id, n) => listDiagnosticsHistory(id, n) as Promise<any>,
@@ -14918,7 +14932,12 @@ async function noteBuildOutcome(
         aiRule: () => aiInAppRule(),
         // And the user's own words (autopsy 6db0ff31) — the two lines above derive from them, and a
         // child handed only a thin instruction asked the ARCHITECT "what would you like me to build?".
-        userRequest: () => prompt,
+        // 🔴 …WITH WHAT CAME WITH THEM (autopsy 3f959fde, 2026-10-01). The user wrote "now check this data"
+        // beside an attached lottery sheet; the child was handed those six words and built a generic data
+        // analyser, which the architect then rebuilt itself (~10 minutes). `planning.text` is the request
+        // the architect is sized and planned from: the words plus the attachment (data tables condensed to
+        // their header and size) and, while no app exists yet, the earlier requests.
+        userRequest: () => planning.text,
       };
       const spawnSubAgent = makeSubAgentSpawn(subAgentDeps);
       // Layer 84 (Multi-Model Ensemble): the Architect can call second_opinion to
@@ -15309,7 +15328,7 @@ async function noteBuildOutcome(
           try {
             // The SAME text the complexity score and the plan read (autopsy bee95692): the message was "Yes",
             // the request ("Social media app") was the turn before it, and reading only the message saw nothing.
-            const need = sharedDataNeed(planning.text);
+            const need = sharedDataNeed(planning.sizing);
             const decision = startOfferDecision({
               hasUser: true,
               isEditMode,
@@ -16788,7 +16807,7 @@ async function noteBuildOutcome(
             ppLast.latencyMs = Date.now() - startedAt;
             return t.text;
           };
-          if (!pPlan && intent === 'new_build' && !isEditMode && !pastedFormat.keep && detectMegaProject(planning.text)) {
+          if (!pPlan && intent === 'new_build' && !isEditMode && !pastedFormat.keep && detectMegaProject(planning.sizing)) {
             ppDecompositionAnnounced = true;
             events.emit({ type: 'narration', agent: 'architect', text: '🏗️ This is a large software project — decomposing it into independently-buildable modules with frozen interface contracts…', ts: Date.now() });
             const ppScaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
@@ -17584,7 +17603,11 @@ async function noteBuildOutcome(
           writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3,
           signal: abort.signal });
         // A STOP IS NOT A FALLBACK (autopsy 31254f9a): nothing is handed to the full builder after a Stop.
-        buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : sb.stopped ? 'SIMPLE_BUILD_STOPPED' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
+        // A PLANNED hand-off is not "could not produce the app" (autopsy a4be7fa2, 2026-10-01): the lane stopped
+        // before a reasoning rung by design (LLM_CALL_HANDED_OFF says so), so the outcome line below must not say
+        // BUILD_FAILED about it in the same report.
+        const plannedHandoff = !sb.ok && !sb.stopped && fastLaneReasoningRung !== null;
+        buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : sb.stopped ? 'SIMPLE_BUILD_STOPPED' : 'SIMPLE_BUILD_FALLBACK', message: plannedHandoff ? `The fast lane handed its work to the full builder by design: its engine fell to ${fastLaneReasoningRung}, which reasons before every answer${sb.filesWritten > 0 ? ` (${sb.filesWritten} finished file(s) go with it)` : ''}.` : sb.summary, autoResolved: true, detail: sb.reason });
         // The lane's FILE PLAN is not the plan of record once it hands off (autopsy de3bb2bb): the full builder
         // plans its own files, so "9 of 10 files written · ~1 min to go" at minute 4 counted against a list
         // nobody was following any more. Forget it; the architect's own plan steps drive the ETA from here.
@@ -17620,7 +17643,7 @@ async function noteBuildOutcome(
           buildDiag.record(sb.ok
             ? { phase: 'build', severity: 'info', code: `OUTCOME_${sb.outcome}`, message: `Build outcome: ${sb.outcome}`, autoResolved: true }
             // A stop is not a BUILD_FAILED and is not handed to anyone (autopsy 3d1bfe2a).
-            : { phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_OUTCOME', message: sb.stopped ? 'Fast-lane outcome: stopped by the user — not a failure, and not handed off.' : `Fast-lane outcome (handed off to the full builder): ${sb.outcome}`, autoResolved: true });
+            : { phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_OUTCOME', message: sb.stopped ? 'Fast-lane outcome: stopped by the user — not a failure, and not handed off.' : plannedHandoff ? 'Fast-lane outcome: a planned hand-off to the full builder — not a failure.' : `Fast-lane outcome (handed off to the full builder): ${sb.outcome}`, autoResolved: true });
         }
         // HANDOFF FRAMING (StudySync root cause, 2026-07-16): when the fast lane timed out but SALVAGED
         // its finished files into the workspace, the full builder must treat them as ITS OWN prior work

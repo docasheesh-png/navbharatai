@@ -98,7 +98,24 @@ function tidy(raw: string): string {
 function isItem(s: string): boolean {
   if (!s) return false;
   if (!/\p{L}/u.test(s)) return false;
+  if (isDataValue(s)) return false;
   return words(s) <= MAX_ITEM_WORDS;
+}
+
+/**
+ * 🔴 A CELL OF A DATA TABLE IS NOT A FEATURE (autopsy 3f959fde, 2026-10-01). An attached lottery sheet
+ * arrived as `2012-01-01T00:00:00.000Z,123456` rows. The only letters in a timestamp are `T` and `Z`,
+ * so `isItem` took every date as a named feature: "~40 distinct features", scope LARGE, complexity 88,
+ * and a question about the data opened on the dearer rung. A piece whose digits outnumber its letters
+ * is a value (a date, an amount, an id), never the name of something to build. Names that carry a
+ * digit ("2FA", "MP3 player", "QR code scanner") still have more letters than digits. PURE.
+ */
+export function isDataValue(s: string): boolean {
+  const t = String(s ?? '');
+  const digits = (t.match(/\d/g) ?? []).length;
+  if (digits === 0) return false;
+  const letters = (t.match(/\p{L}/gu) ?? []).length;
+  return digits > letters;
 }
 
 /**

@@ -59,7 +59,7 @@ describe('1 · a specialist is handed the user\'s own words', () => {
   it('the spawn puts it into the child\'s context, and the route hands it the prompt', () => {
     const at = SUBAGENT.indexOf('const contextBlocks = [');
     expect(SUBAGENT.slice(at, SUBAGENT.indexOf('].filter(Boolean);', at))).toContain('userRequestBlock(deps.userRequest?.()');
-    expect(ROUTE).toContain('userRequest: () => prompt,');
+    expect(ROUTE).toContain('userRequest: () => planning.text,');
   });
 });
 

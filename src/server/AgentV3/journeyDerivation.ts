@@ -219,8 +219,9 @@ const DATA_ENTRY_SIGNS: ReadonlyArray<readonly [RegExp, string]> = [
  * JOURNEY_NOT_DERIVED, so the next such report names its cause instead of leaving it to be guessed. PURE.
  */
 export function dataEntryEvidence(files: Record<string, string>): { path: string; what: string; line: string } | null {
+  const unused = unreferencedComponents(files);
   for (const [path, src] of Object.entries(appOwnFiles(files))) {
-    if (!src) continue;
+    if (!src || unused.has(path.replace(/^\.?\/+/, ''))) continue;
     for (const [re, what] of DATA_ENTRY_SIGNS) {
       const m = re.exec(src);
       if (!m) continue;
@@ -230,6 +231,52 @@ export function dataEntryEvidence(files: Record<string, string>): { path: string
     }
   }
   return null;
+}
+
+/** A file the app starts from, or one a framework loads by its place (Next `app/`, `pages/`). */
+const LOADED_BY_PLACE = /(?:^|\/)(?:main|index|App|_app|_document|layout|page)\.(?:tsx|jsx|ts|js)$|(?:^|\/)(?:app|pages|routes)\//;
+const IMPORT_SPEC = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'](\.{1,2}\/[^"']+)["']/g;
+
+function stemOf(path: string): string {
+  return path.replace(/^\.?\/+/, '').replace(/\.(?:tsx|jsx|ts|js|mjs)$/i, '').replace(/\/index$/, '');
+}
+
+function joinRelative(fromFile: string, spec: string): string {
+  const parts = fromFile.replace(/^\.?\/+/, '').split('/');
+  parts.pop();
+  for (const seg of spec.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') parts.pop();
+    else parts.push(seg);
+  }
+  return parts.join('/');
+}
+
+/**
+ * 🔴 A SCREEN NOTHING SHOWS IS NOT THE APP (autopsy 3f959fde, 2026-10-01). The build pivoted from a
+ * generic data analyser to a lottery analyser and left `DataPreview.tsx` and `AlgorithmSuggestions.tsx`
+ * behind, imported by nothing. `JOURNEY_NOT_DERIVED` then named DataPreview's `<select` as the reason the
+ * app "takes input": a fact about code no user can reach.
+ *
+ * The component files (`.tsx` / `.jsx`) that no other file imports and that no framework loads by its
+ * name or place. Precision first: a file is set aside only when it is PROVEN unreferenced — any import
+ * whose path resolves to it, by relative path, keeps it. PURE.
+ */
+export function unreferencedComponents(files: Record<string, string>): Set<string> {
+  const paths = Object.keys(files ?? {}).map((p) => p.replace(/^\.?\/+/, ''));
+  const referenced = new Set<string>();
+  for (const [raw, src] of Object.entries(files ?? {})) {
+    if (typeof src !== 'string') continue;
+    const from = raw.replace(/^\.?\/+/, '');
+    IMPORT_SPEC.lastIndex = 0;
+    for (let m = IMPORT_SPEC.exec(src); m; m = IMPORT_SPEC.exec(src)) referenced.add(stemOf(joinRelative(from, m[1])));
+  }
+  const out = new Set<string>();
+  for (const p of paths) {
+    if (!/\.(?:tsx|jsx)$/i.test(p) || LOADED_BY_PLACE.test(p)) continue;
+    if (!referenced.has(stemOf(p))) out.add(p);
+  }
+  return out;
 }
 
 /**

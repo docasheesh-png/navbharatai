@@ -87133,3 +87133,8 @@ bench prefix ✅ #3448 · reviewer re-reads ✅ #3436 · 85/100 on PASS ✅ #344
 (decision) · 14 s install inside the first edit 🟡 Q-063 (needs the next template build's ensure log).
 **Live effect to watch:** an `ETA_BASIS` line on a chip build that says "builds that start from a tested template",
 or the labelled rough estimate while that slice has under two days of history.
+
+**Note (same day):** #3458 merged (`9fa3e748`) — Q-022 and Q-037 ✅ (off-grid spacing in files the build wrote is
+handed back at the end of the turn), removed from the open table. **What to watch:** on builds that wrote their own
+stylesheet, `DESIGN_CONSISTENCY` off-grid counts should fall, and `STYLE_RULES_RESUMED` details should carry
+`:off-grid(…)` when it fires.

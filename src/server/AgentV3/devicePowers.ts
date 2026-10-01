@@ -95,7 +95,25 @@ export function deviceSummaryNotice(i: {
   const summary = typeof i.summary === 'string' ? i.summary : '';
   const used = ALREADY_SAID_HOW.test(summary) ? [] : capabilitiesInPackageJson(i.packageJson);
   const impossible = ALREADY_SAID.test(summary) ? [] : requestedImpossiblePowers(i.prompt);
-  return nativeCapabilityNotice(used, impossible);
+  const notice = nativeCapabilityNotice(used, impossible);
+  // 🔴 AUTOPSY dfd24058 (2026-10-01): the request ended "… mobile-first and a single page. apk". The app
+  // used no phone plugin, so the line above was empty — and the summary never mentioned the APK at all,
+  // while it told the user to "open dist/index.html in any browser". An APK the user ASKED for gets its
+  // one sentence, unless something already said how to get it.
+  if (!ALREADY_SAID_HOW.test(summary) && !/download\s+apk/i.test(notice) && phoneBuildAsked(i.prompt)) {
+    return `${notice}\n\n📱 **Your Android app (APK):** open **More → Download APK**, connect your GitHub, and NavBharatAI builds the installable APK of this app for you — no Android Studio needed.`;
+  }
+  return notice;
+}
+
+/**
+ * Does the user's own message ask for the installable phone app? Precision-first: a bare `apk`/`aab`, or a
+ * phone-app noun with a get/make verb — never "a mobile-friendly site" or "mobile-first". PURE.
+ */
+export function phoneBuildAsked(prompt: string | null | undefined): boolean {
+  const t = typeof prompt === 'string' ? prompt : '';
+  if (/\b(?:apk|aab)\b|\.apk\b|\bplay\s*store\b/i.test(t)) return true;
+  return /\b(?:android|phone|mobile)\s+(?:app|application)\b[^.\n]{0,40}\b(?:install|download|banao|bana\s+do|chahiye)\b|\b(?:install|download)\b[^.\n]{0,30}\bon\s+(?:my\s+|a\s+)?(?:android|phone|mobile)\b/i.test(t);
 }
 
 /** The admin-report line, or null when the build touched neither half. Names ids only; no user text. */

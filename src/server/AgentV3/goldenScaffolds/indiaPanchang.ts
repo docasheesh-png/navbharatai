@@ -250,22 +250,25 @@ function App() {
     const sunPlace = placeOf(sLon - ayan);
 
     if (sd.sunrise === null || sd.sunset === null) {
-      return { sd: sd, weekday: weekday, noSunEvent: true, tithiName: tithiName, paksha: paksha,
+      return { sd: sd, weekday: weekday, noSunEvent: true, dayLen: 0, tithiName: tithiName, paksha: paksha,
         moonPlace: moonPlace, sunPlace: sunPlace, ayan: ayan, muhurat: [], kaal: [], chogh: [] };
     }
+    // Copied out after the check: a property's narrowing does not reach into the closures below.
+    const sunrise = sd.sunrise;
+    const sunset = sd.sunset;
 
-    const dayLen = sd.sunset - sd.sunrise;
+    const dayLen = sunset - sunrise;
     const eighth = dayLen / 8;
     const muhurta = dayLen / 15;
 
     const muhurat = [
-      { label: 'ब्रह्म मुहूर्त (Brahma Muhurat)', from: sd.sunrise - 96, to: sd.sunrise - 48,
+      { label: 'ब्रह्म मुहूर्त (Brahma Muhurat)', from: sunrise - 96, to: sunrise - 48,
         note: 'सूर्योदय से 96 से 48 मिनट पहले' },
-      { label: 'अभिजित मुहूर्त (Abhijit)', from: sd.sunrise + 7 * muhurta, to: sd.sunrise + 8 * muhurta,
+      { label: 'अभिजित मुहूर्त (Abhijit)', from: sunrise + 7 * muhurta, to: sunrise + 8 * muhurta,
         note: 'दिन के 15 मुहूर्तों में से 8वाँ' },
     ];
 
-    const part = (n: number) => ({ from: sd.sunrise + (n - 1) * eighth, to: sd.sunrise + n * eighth });
+    const part = (n: number) => ({ from: sunrise + (n - 1) * eighth, to: sunrise + n * eighth });
     const kaal = [
       { label: 'राहु काल (Rahu Kaal)', ...part(RAHU_PART[weekday]) },
       { label: 'गुलिक काल (Gulika)', ...part(GULIKA_PART[weekday]) },
@@ -275,10 +278,10 @@ function App() {
     const chogh = [];
     for (let i = 0; i < 8; i += 1) {
       const name = CHOGHADIYA[(CHOGHADIYA_START[weekday] + i) % 7];
-      chogh.push({ name: name, quality: QUALITY[name], from: sd.sunrise + i * eighth, to: sd.sunrise + (i + 1) * eighth });
+      chogh.push({ name: name, quality: QUALITY[name], from: sunrise + i * eighth, to: sunrise + (i + 1) * eighth });
     }
 
-    return { sd: sd, weekday: weekday, noSunEvent: false, tithiName: tithiName, paksha: paksha,
+    return { sd: sd, weekday: weekday, noSunEvent: false, dayLen: dayLen, tithiName: tithiName, paksha: paksha,
       moonPlace: moonPlace, sunPlace: sunPlace, ayan: ayan, muhurat: muhurat, kaal: kaal, chogh: chogh };
   }, [dateISO, place.lat, place.lon]);
 
@@ -338,7 +341,7 @@ function App() {
                 <Row label="सूर्योदय (Sunrise)" value={hhmm(data.sd.sunrise)} />
                 <Row label="सूर्यास्त (Sunset)" value={hhmm(data.sd.sunset)} />
                 <Row label="मध्याह्न (Solar noon)" value={hhmm(data.sd.noon)} />
-                <Row label="दिनमान (Day length)" value={dayLengthText(data.sd.sunset - data.sd.sunrise)} />
+                <Row label="दिनमान (Day length)" value={dayLengthText(data.dayLen)} />
               </div>
             )}
           </div>

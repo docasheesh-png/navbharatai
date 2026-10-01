@@ -543,7 +543,7 @@ export default function App() {
       ) : (
         <Card title="Your runs">
           {recent.length === 0 ? (
-            <Empty title="No runs yet" text="Play a round and your scores land here." />
+            <Empty>No runs yet. Play a round and your scores land here.</Empty>
           ) : (
             <div>
               {recent.map((r) => (

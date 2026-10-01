@@ -52,6 +52,7 @@ import { SCAFFOLD_BOILERPLATE } from './scaffoldBoilerplate';
 import { normalizeAuthoredPath } from './buildAuthorship';
 import { couldBeAppCode } from './userProjectFiles';
 import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';
+import { seededForms } from './strictTrial';
 
 /**
  * path → every byte-exact content NavBharatAI itself seeds at that path.
@@ -71,7 +72,8 @@ function buildSeededIndex(): Map<string, Set<string>> {
     if (!key) return;
     let set = index.get(key);
     if (!set) { set = new Set<string>(); index.set(key, set); }
-    set.add(content);
+    // Both forms of a seeded tsconfig: loose, and strict for a workspace in the strict trial (Q-008).
+    for (const form of seededForms(path, content)) set.add(form);
   };
   try {
     for (const scaffold of GOLDEN_SCAFFOLDS) {

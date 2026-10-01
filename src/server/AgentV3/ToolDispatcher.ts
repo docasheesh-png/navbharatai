@@ -84,6 +84,7 @@ import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { rootThemeHooks, deadThemeSwitchNote } from './deadThemeSwitch';
+import { pruneGeneratedListing } from './generatedListing';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, usesNonKitNbClass } from './kitRestore';
 import { findUndefinedClasses, isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, missingImportedSheetNote, collectDefinedClasses } from './CssConsistency';
 import { pageDesignWriteNote, isPageFile, analyzeDesignCoverage, type DesignDefect } from './DesignCoverage';
@@ -4550,8 +4551,10 @@ export class ToolDispatcher {
         // T1-sec-redact: a command can print a secret (`cat .env`, `printenv`, `echo $API_KEY`).
         // Command stdout/stderr is NEVER an edit_file match source, so — unlike read_file content —
         // it is safe to mask here, closing the leak into BOTH the model transcript and the terminal.
+        // A shell file listing leaves out node_modules / dist, as glob does (autopsy 8257ca59).
+        const listing = pruneGeneratedListing(command, stdout);
         let out =
-          `exit=${exitCode}\n${redactSecrets(stdout)}` + (stderr ? `\n[stderr]\n${redactSecrets(stderr)}` : '');
+          `exit=${exitCode}\n${redactSecrets(listing.stdout)}` + (stderr ? `\n[stderr]\n${redactSecrets(stderr)}` : '');
         // THE PIPE ATE THE EXIT CODE (autopsy 56ee622f, 2026-08-04). `tsc --noEmit 2>&1 | head -30`
         // exits 0 because `head` succeeds — a pipeline reports its LAST command's status. The agent
         // verified its work with exactly that, was told "exit 0", moved on, and shipped an app with ~10

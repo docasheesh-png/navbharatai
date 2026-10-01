@@ -222,3 +222,33 @@ describe('7 · a warm-up that compiled nothing does not claim a warm cache', () 
     expect(read('src/server/AgentV3/ToolDispatcher.ts')).toContain('if (String(r?.stdout ?? \'\').includes(WARMUP_COMPILED_MARKER)) s.warmupMs = Date.now() - startedAt;');
   });
 });
+
+import { pruneGeneratedListing, isPrunableListing } from '../src/server/AgentV3/generatedListing';
+
+describe('8 · a shell file listing leaves out node_modules and dist, as glob does', () => {
+  const findCmd = "find . -maxdepth 3 -type f \\( -name '*.tsx' -o -name '*.js' \\) | head -100";
+  const out = ['./dist/assets/index-Br06EGwa.css', './dist/index.html', './index.html', './src/App.tsx',
+    './node_modules/browserslist/browser.js', './node_modules/browserslist/cli.js', './node_modules/csstype/index.d.ts',
+    './node_modules/detect-libc/index.d.ts', './e2e/smoke.spec.ts'].join('\n');
+
+  it('the report\'s find: the app\'s own files stay, the generated ones go, and the model is told', () => {
+    const r = pruneGeneratedListing(findCmd, out);
+    expect(r.pruned).toBe(6);
+    expect(r.stdout).toContain('./src/App.tsx');
+    expect(r.stdout).toContain('./e2e/smoke.spec.ts');
+    expect(r.stdout).not.toContain('node_modules/browserslist');
+    expect(r.stdout).toContain('6 line(s) inside node_modules, dist');
+  });
+
+  it('a command that names the folder, a non-listing command, or a short listing is left exactly as it was', () => {
+    expect(isPrunableListing('find node_modules/react -name "*.json"')).toBe(false);
+    expect(pruneGeneratedListing('cat package-lock.json', out).stdout).toBe(out);
+    expect(pruneGeneratedListing(findCmd, './src/App.tsx\n./dist/index.html').pruned).toBe(0);
+    expect(isPrunableListing('ls -R src')).toBe(true);
+    expect(isPrunableListing('ls src')).toBe(false);
+  });
+
+  it('the bash tool hands back the pruned listing', () => {
+    expect(read('src/server/AgentV3/ToolDispatcher.ts')).toContain('`exit=${exitCode}\\n${redactSecrets(listing.stdout)}`');
+  });
+});

@@ -551,7 +551,7 @@ import {
 } from '../AgentV3/FirestoreWorkspaceMemoryStore';
 import { purgeWorkspace } from '../AgentV3/WorkspaceManager';
 import { saveRestorePointForReport, describeRestorePoint, restorePointSeverity } from '../AgentV3/restorePoint';
-import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesByPath, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
+import { saveWorkspaceFiles, mergeWorkspaceFiles, loadWorkspaceFiles, loadWorkspaceFilesWithStatus, loadWorkspaceFilesByPath, removeWorkspaceFiles, purgeWorkspaceFiles, countWorkspaceFiles, listWorkspaceFilePaths, reconcileProjectFileTree, resetWorkspaceFilesForApprovedRebuild, savePlanForFileSet, workspaceFilesSavedAt } from '../AgentV3/WorkspaceFileStore';
 import { applyWellKnownMissingDeps, restoreDroppedDependencies } from '../AgentV3/DependencyAutoFix';
 import { splitCachedSystem } from '../AgentV3/systemPromptCache';
 import { makeFirstPaintHandler, firstPaintEvents, streamingFirstPaintEnabled } from '../AgentV3/streamingFirstPaint';
@@ -14288,8 +14288,21 @@ async function noteBuildOutcome(
           // larger than any single cause. Recording the split is not a fix for the wait — it is what
           // makes the next report able to say WHICH of the three to fix, instead of another 43s void.
           const restoreT0 = Date.now();
-          const saved = await loadWorkspaceFiles(workspaceId);
+          // WITH its status (autopsy 4d538ca3): a failed read and an empty store both used to arrive as
+          // `{}`, and the report then said "durable read (0 file(s))" for either. A failed read is named.
+          const durable = await loadWorkspaceFilesWithStatus(workspaceId);
+          const saved = durable.files;
           const loadMs = Date.now() - restoreT0;
+          if (durable.status === 'unreadable') {
+            try {
+              buildDiag.record({
+                phase: 'build', severity: 'warning', code: 'DURABLE_READ_FAILED', autoResolved: false,
+                message: 'The saved copy of this project could not be read at the start of the turn, so nothing '
+                  + 'was compared or restored from it. This is NOT a report that the saved copy is empty.',
+                detail: durable.error,
+              });
+            } catch { /* diagnostics are best-effort */ }
+          }
           // Reused far below by the journey check (see projectFilesAtTurnStart) — the whole project,
           // read once, rather than a second store round-trip on the critical path.
           projectFilesAtTurnStart = saved;
@@ -14376,7 +14389,7 @@ async function noteBuildOutcome(
               buildDiag.record({
                 phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
                 message: `Project restored in ${Math.round((Date.now() - restoreT0) / 1000)}s`,
-                detail: `durable read ${loadMs}ms (${Object.keys(saved).length} file(s)) · sandbox listing `
+                detail: `durable read ${loadMs}ms (${Object.keys(saved).length} file(s), ${durable.status}) · sandbox listing `
                   + `${scanMs}ms · config read ${configMs}ms · wrote ${plan.count} missing file(s) + assets ${Date.now() - writeT0}ms`,
               });
             } catch { /* timing is observation only — it must never affect a build */ }
@@ -14403,7 +14416,7 @@ async function noteBuildOutcome(
               buildDiag.record({
                 phase: 'build', severity: 'info', code: 'SETUP_TIMING', autoResolved: true,
                 message: `Project checked in ${Math.round((Date.now() - restoreT0) / 1000)}s — nothing needed restoring`,
-                detail: `durable read ${loadMs}ms (${Object.keys(saved).length} file(s)) · sandbox listing ${scanMs}ms · config read ${configMs}ms`,
+                detail: `durable read ${loadMs}ms (${Object.keys(saved).length} file(s), ${durable.status}) · sandbox listing ${scanMs}ms · config read ${configMs}ms`,
               });
             } catch { /* timing is observation only — it must never affect a build */ }
           }

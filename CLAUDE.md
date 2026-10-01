@@ -5849,6 +5849,14 @@ pattern): claimed in a transaction before the stream opens, renewed every 20 s, 
 ends, stale after 90 s, and **fail-open** on a store error. A Stop pressed on any instance reaches the
 build through the lease. Kill switch **`AGENTV3_WORKSPACE_LEASE=off`** (NOT set; default ON). The
 table below is otherwise unchanged — rate limiters and the other rows are still per-instance.
+🔴 **AND A STOP FREES THE APP ONLY WHEN THE BUILD HAS LEFT (autopsy 1219c639, 2026-10-01) — the same-instance
+half #3331 never hunted.** `/stop` used to free the memory lock and the lease the instant it was pressed; the stopped
+build was inside a ten-minute key wait that ignored Stop, so a "Continue building" started a second build beside it,
+and the first woke later and ran `npm install` into the second's app. Now every wait for the user goes through the
+route's `waitForUser` (signal-aware `awaitApprovalOutcome` — never call `awaitApproval` bare in the route; a test
+counts), no tool runs after Stop, and `stopRegisteredBuild` keeps the key and lease until the build's `finally`
+(`markBuildExited`). A new build in that workspace waits ≤ 15 s, then is refused with `BUILD_STILL_STOPPING`, and only a
+body stuck ≥ 3 min is reclaimed (`stoppingBuild.ts`). Cleanup releases only the key it owns (`releaseBuildLock`). No env key.
 
 Several things live in one instance's RAM and are therefore wrong the moment there are several:
 

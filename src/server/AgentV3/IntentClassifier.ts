@@ -1320,6 +1320,13 @@ export function describesWorkAlreadyStarted(message: string): boolean {
 export function userAskedForAnAppToBeBuilt(message: string): boolean {
   if (typeof message !== 'string' || !message.trim()) return false;
   if (describesWorkAlreadyStarted(message)) return false;
+  // A build ORDER written in Devanagari (Q-005, autopsy 6461025c). Every Devanagari message is capped at
+  // LOW below — rightly, for routing — so without this an order like "एक todo app बनाओ" could never
+  // answer yes here: no feature card, and no domain guidance, for anyone who writes in Hindi script.
+  if (devanagariBuildOrder(message)) return true;
+  // "हाँ." before an English order: the only Devanagari is the yes, so the order is judged on its own.
+  const afterYes = message.replace(LEADING_DEVANAGARI_YES, '');
+  if (afterYes !== message && afterYes.trim() && !containsDevanagari(afterYes)) return userAskedForAnAppToBeBuilt(afterYes);
   // 🔴 HIGH IS REQUIRED, NOT JUST THE INTENT (report cc8c9075, 2026-09-17). This used to read
   // `.intent === 'new_build'` and discard the confidence — so a LOW-confidence GUESS that a message
   // might be a build request was enough to cancel `shouldRetryEmptyBuild`'s edit-mode exemption and
@@ -1340,6 +1347,26 @@ export function userAskedForAnAppToBeBuilt(message: string): boolean {
   // `emptyBuildFailureSummary`; a wrongly-taken one is a whole second build nobody asked for.
   const verdict = classifyIntentWithConfidence(withoutNounisedBuildWords(message));
   return verdict.intent === 'new_build' && verdict.confidence === 'high';
+}
+
+/** A leading Devanagari yes/okay: "हाँ.", "हां,", "जी हाँ", "ठीक है —". */
+const LEADING_DEVANAGARI_YES = /^\s*(?:जी\s*)?(?:हाँ|हां|हा|ठीक\s*है|अच्छा)(?:\s*जी)?\s*[.,!।:—-]*\s*/;
+/** A Devanagari imperative of making: "बनाओ", "बना दो", "बना दीजिए", "बनाइए", "तैयार करो" … */
+const DEVANAGARI_BUILD_IMPERATIVE = /(?:बनाओ|बनाइए|बनाइये|बनाएं|बनाएँ|बना\s*(?:दो|दीजिए|दीजिये|दें|दे\s*दो)|तैयार\s*(?:करो|कीजिए|कीजिये|कर\s*दो|कर\s*दीजिए))(?![ऀ-ॿ])/;
+/** Something an app builder makes, named in either script. */
+const BUILDABLE_THING = /(?:ऐप|एप|वेबसाइट|साइट|पोर्टल|डैशबोर्ड|सिस्टम|सॉफ्टवेयर|गेम|प्लेटफ़ॉर्म|प्लेटफार्म|\b(?:app|application|website|site|portal|dashboard|system|software|game|platform|tool|tracker|store|shop)\b)/i;
+/** A question in Devanagari: a question word, or a question mark. */
+const DEVANAGARI_QUESTION = /[?？]|(?:^|[\s,।])(?:क्या|कैसे|कब|क्यों|कौन|किस|कहाँ|कहां)(?![ऀ-ॿ])/;
+
+/**
+ * Is this a build ORDER written in Devanagari? Precision-first: a Devanagari imperative of making, a
+ * buildable thing named in the same message, and no question anywhere in it. "क्या आप एक ऐप बना
+ * सकते हैं?" is a question and stays out; "एक todo app बनाओ" and "हाँ, ऐप बना दो" are orders. PURE.
+ */
+export function devanagariBuildOrder(message: string): boolean {
+  const text = String(message ?? '');
+  if (!containsDevanagari(text)) return false;
+  return DEVANAGARI_BUILD_IMPERATIVE.test(text) && BUILDABLE_THING.test(text) && !DEVANAGARI_QUESTION.test(text);
 }
 
 /**

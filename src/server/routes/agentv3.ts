@@ -410,6 +410,7 @@ import { userLessonBrainStore } from '../AgentV3/UserLessonBrain';
 import { mistakeLedgerStore, mistakeKey } from '../AgentV3/MistakeLedger';
 import { fleetMistakeLedgerStore } from '../AgentV3/FleetMistakeLedger';
 import { LISTENING_PORTS_COMMAND, parseListeningPorts, rankPortCandidates } from '../AgentV3/PortDiscovery';
+import { isSandboxSystemPort } from '../AgentV3/neverAppPorts';
 import { liveChannel, liveEventsAllowedFor } from '../AgentV3/LiveChannel';
 import { extractEntities, entityRequirementsContext } from '../AgentV3/EntityExtractor';
 import { chatResponseCache, chatCacheEnabled, hashKey } from '../AgentV3/PromptCache';
@@ -7531,7 +7532,9 @@ async function noteBuildOutcome(
       return;
     }
     // parseListeningPorts is PortDiscovery's — the production-proven one, not a second parser.
-    const listening = parseListeningPorts(exec.stdout);
+    // The sandbox's own machinery (its agent, SSH, rpcbind, our browser's debugging port) is not
+    // something the user started and must not be shown as "something else is using the sandbox".
+    const listening = parseListeningPorts(exec.stdout).filter((p) => !isSandboxSystemPort(p));
     const processes = parseProcessList(splitProcsSection(exec.stdout));
     // The EXPECTED half comes from the project's own package.json files (durable, so it works even
     // right after a sandbox recycle). A load failure degrades to "no expected services" — the measured
@@ -17691,7 +17694,7 @@ async function noteBuildOutcome(
       try {
         buildDiag.record({
           phase: 'build', severity: 'info', code: 'READY_BEFORE_END',
-          message: readyOverrunNote(result.readyAt, result.steps, Date.now() - buildStartedAt),
+          message: readyOverrunNote(result.readyAt, result.steps, Date.now() - buildStartedAt, { editingExistingApp: isEditMode }),
           autoResolved: true,
         });
       } catch { /* an advisory line must never affect a build */ }
@@ -18968,7 +18971,7 @@ async function noteBuildOutcome(
               // DID THE WRITE-TIME NOTE REACH THE FILE, AND WAS IT IGNORED? (autopsy 6bae5835 could not say.)
               try {
                 const flagged = [...new Set(Object.values(quality.offenders ?? {}).flat().map((o) => o.path))];
-                const wq = writeQualitySummary(dispatcher.writeTypecheckStats().qualityNotedFiles ?? [], flagged);
+                const wq = writeQualitySummary(dispatcher.writeTypecheckStats().qualityNotedFiles ?? [], flagged, modelAuthoredPaths(writtenFiles));
                 if (wq) buildDiag.record({ phase: 'build', severity: 'info', code: 'WRITE_TIME_QUALITY', message: wq, autoResolved: true });
               } catch { /* a measurement is best-effort */ }
             }

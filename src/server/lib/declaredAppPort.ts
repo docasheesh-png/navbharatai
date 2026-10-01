@@ -1,3 +1,4 @@
+import { isNeverAppPort } from '../AgentV3/neverAppPorts';
 // WHICH PORT DOES THIS APP ACTUALLY RUN ON? — one answer, from every place an app can say it.
 //
 // 🔴 THE REPORT (admin 2026-09-04): *"jab github se koi repo import karta hai, to kis port par run
@@ -37,8 +38,8 @@ export interface DeclaredPort {
 
 const valid = (n: number): boolean => Number.isInteger(n) && n > 0 && n < 65_536;
 
-/** Ports that belong to infrastructure, never to the app being previewed. */
-const INFRA = new Set([22, 53, 5432, 3306, 27017, 6379, 9229]);
+/** Ports that belong to infrastructure, never to the app being previewed — one list (neverAppPorts.ts). */
+const INFRA = { has: (p: number): boolean => isNeverAppPort(p) };
 
 /**
  * A port explicitly passed on the dev/start/serve command line.

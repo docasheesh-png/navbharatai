@@ -42,11 +42,15 @@ export function resolveStringArg(
   key: string,
 ): { value: string; via: string } | null {
   const direct = input[key];
-  if (typeof direct === 'string') return { value: direct, via: key };
+  // A non-blank canonical value wins outright. A BLANK one does not hide a real value sent under an
+  // alias (`{"command": "", "cmd": "npm run build"}`) — but is still returned when nothing else is
+  // there, because for some arguments an empty string is meaningful (edit_file's `new_string`).
+  if (typeof direct === 'string' && direct.trim() !== '') return { value: direct, via: key };
   for (const alias of ARG_ALIASES[key] ?? []) {
     const v = input[alias];
     if (typeof v === 'string' && v.trim() !== '') return { value: v, via: alias };
   }
+  if (typeof direct === 'string') return { value: direct, via: key };
   return null;
 }
 

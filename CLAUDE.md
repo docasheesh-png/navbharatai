@@ -3353,6 +3353,12 @@ the flag entries above promise.
   🔴 **Same autopsy: the scaffold's own ErrorBoundary screen is now judged NOT rendered**
   (`scaffoldCrashScreen` in `PreviewVerify.ts`). Before, it was saved as the last known good at 809 s.
   Do not loosen that match to the bare words; an app's designed error card must stay a render.
+- **`AGENTV3_NPM_VERSION_HINT`** (NOT set; default ON, `off` disables — added 2026-10-01, autopsy 2b1f845e) — an
+  `npm install` that fails with ETARGET (a guessed range such as `cors@^4` that does not exist) gets the real latest
+  version from one `npm view`, appended to the same tool result (`npmVersionHint.ts`). Advice only. Same autopsy, no
+  flags: one never-the-app port list (`neverAppPorts.ts` — the sandbox agent 49983, rpcbind, SSH, our CDP port and the
+  data services) replaces five drifted copies; a subshell-wrapped `git commit` naming a `vite.*` file is no longer a
+  dev-server launch (`withoutGroupingPrefix`); DB/auth templates never throw at import.
 - **📱 PHONE FEATURES — `nativeCapabilities.ts` is the ONE table (built 2026-09-27, admin: *"jarwis jaisa
   app … navbharatai banayega"*).** It feeds the builder's brief, the user's summary (web / phone app / impossible,
   with More → Download APK + connect GitHub) and the phone build (plugin versions aligned to the app's

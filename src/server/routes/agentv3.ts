@@ -12685,6 +12685,9 @@ async function noteBuildOutcome(
     let etaRoughBand: string | null = null;
     // Its top end, so the tick stops restating a band the build has already outrun.
     let etaRoughHighMs: number | null = null;
+    // The HIGH end of the band the user was shown first. The live tick never calls a build "bigger than
+    // expected" while it is still inside that band (autopsy e49afa97).
+    let etaPromisedHighMs = 0;
     // MEASURED ETA state (2026-08-23). Everything above predicts from the PROMPT, which is how "Make an
     // VPN App" — a prompt with no page-words and no feature-words — scored the floor of the formula and
     // promised ~3 min for a build that ran 18m 42s. These two fields let the heartbeat stop predicting
@@ -12865,7 +12868,7 @@ async function noteBuildOutcome(
             events.emit({ type: 'narration', agent: 'architect', text: unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000, etaRoughBand, etaRoughHighMs), ts: now, id: 'eta-live' });
             return;
           }
-          const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs, etaRevisions);
+          const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs, etaRevisions, etaPromisedHighMs);
           etaTotalMs = tick.totalMs;
           // Carry the revision count forward: it is what stops the countdown resuming its "~1 min to
           // go" promise after the estimate has already been broken (mitrify autopsy 2026-08-04).
@@ -13808,6 +13811,7 @@ async function noteBuildOutcome(
           etaEvidenced = estimateIsEvidenced(est);
           etaRoughBand = etaEvidenced ? null : roughEstimateBand(est);
           etaRoughHighMs = etaRoughBand ? Number(est.highMs) || null : null;
+          etaPromisedHighMs = etaEvidenced || etaRoughBand ? Number(est.highMs) || 0 : 0;
           const etaShown = etaEvidenced
             ? (past.length === 0 && fleet.history.length > 0 ? fleetEtaLine(est, fleet.builds) : firstEtaLine(est, past.length))
             : unevidencedFirstEtaLine(est);
@@ -17495,6 +17499,13 @@ async function noteBuildOutcome(
         // viable. It then ran for 150 seconds on the SAME degraded provider chain that had just
         // failed three times, and failed the same way. Re-running a lane against a provider that is
         // timing out is not a retry; it is the identical failure at full price.
+        // 🔴 A LANE THAT HANDED OFF AT A REASONING RUNG TAKES THE ONE-SHOT WITH IT (autopsy e49afa97).
+        // The one-shot walks the SAME chain with the same stop, so it reached the same rung 12 ms later,
+        // stopped again, and wrote a second "Model call failed" plus "One-shot could not generate the
+        // app" — for a call that was never made.
+        else if (!sb.ok && !sb.stopped && classifyForOneShot(analysis?.startTier) && fastLaneReasoningRung) {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: `Skipped the one-shot fast lane: the fast lane's engine fell to ${fastLaneReasoningRung}, which reasons before every answer, and a one-shot on the same engine would stop at the same place. Going straight to the full builder.`, autoResolved: true, detail: sb.reason });
+        }
         else if (!sb.ok && !sb.stopped && classifyForOneShot(analysis?.startTier) && !anotherLaneWorthTrying(sb.reason)) {
           buildDiag.record({ phase: 'build', severity: 'info', code: 'ONESHOT_SKIPPED', message: 'Skipped the one-shot fast lane: the previous lane failed because the engine did not respond in time, not because of the app — a second lane on the same engine would fail the same way. Going straight to the full builder.', autoResolved: true, detail: sb.reason });
         }
@@ -17503,7 +17514,7 @@ async function noteBuildOutcome(
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'VERIFY_DID_NOT_RUN', message: 'The fast-lane type-check could not execute in the sandbox (after one retry) — the app shipped unverified; the agentic readiness gate stays ON.', autoResolved: false });
           }
           fastResult(sb.summary, sb.filesWritten, sb.typecheckRan !== false);
-        } else if (!sb.stopped && !abort.signal.aborted && classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb) && anotherLaneWorthTrying(sb.reason)) {
+        } else if (!sb.stopped && !abort.signal.aborted && classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb) && anotherLaneWorthTrying(sb.reason) && !fastLaneReasoningRung) {
           // 2) ONE-SHOT (secondary) — a single call still suits a TRIVIAL one-file app the manifest
           //    skips. Gated to the simple tiers only: a sonnet-tier (complex) prompt can never fit in
           //    one 8k-token call — it falls straight through to the agentic loop instead.
@@ -21070,7 +21081,11 @@ async function noteBuildOutcome(
             // nothing about the app, and either other answer would be invented.
             if (journeyResults.some((r) => r.verdict === 'failed')) gateEvidence.journeys = 'failed';
             else if (journeyResults.some((r) => r.verdict === 'passed')) gateEvidence.journeys = 'passed';
-            else if (journeyResults.length > 0) gateEvidence.journeys = 'unreachable';
+            else if (journeyResults.length > 0) {
+              gateEvidence.journeys = 'unreachable';
+              const why = journeyResults.find((r) => r.note)?.note;
+              if (why) gateEvidence.journeyUnreachableWhy = why;
+            }
             buildDiag.record({
               phase: 'preview',
               severity: verdict.ok ? 'info' : 'warning',

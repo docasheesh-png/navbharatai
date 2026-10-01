@@ -155,6 +155,8 @@ describe('a specialist is handed the files its task names', () => {
     await spawn('frontend', 'Add a share button to src/Dashboard.tsx using useBusiness from src/BusinessContext.tsx');
     expect(sent[0]).toContain('export const useBusiness = () => 1;'); // handed over in the task itself
     expect(sent[0]).toContain('You already have them');
-    expect(sent[1]).toMatch(/NOTE — you have now read src\/BusinessContext\.tsx the second time/); // honest: it WAS handed over
+    // Honest: it WAS handed over — and since autopsy e49afa97 the notice says so, rather than "read it the
+    // second time" about a file this agent had never read.
+    expect(sent[1]).toMatch(/NOTE — src\/BusinessContext\.tsx was given to you in full in your task/);
   });
 });

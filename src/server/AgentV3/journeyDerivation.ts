@@ -777,6 +777,20 @@ export function reachWordFor(path: string): string | null {
   return first;
 }
 
+/**
+ * Is this page file a screen the app switches to by STATE rather than by URL? True when its route is
+ * `/` only because nothing named it — no router declares the file, and it is not the home screen by
+ * name. `App.tsx` and `Home.tsx` are on `/` for real; `src/screens/Medicines.tsx` in an app with no
+ * router is not on any URL at all. PURE.
+ */
+export function screenReachedByControl(path: string, route: string, files: Record<string, string>): boolean {
+  if (route !== '/') return false;
+  const stem = (String(path).split('/').pop() ?? '').replace(/\.(t|j)sx?$/i, '').toLowerCase();
+  const key = stem.replace(/(page|screen|view)$/, '') || stem;
+  if (/^(home|index|page|app|main|root|layout)$/.test(key)) return false;
+  return routeFromRouter(path, files) === null;
+}
+
 /** Component files that are neither pages nor tests — where a state-switched screen's form lives. */
 const SCREEN_FILE = /\.(?:t|j)sx$/i;
 
@@ -830,6 +844,12 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
     usedForms.add(formPath);
 
     const route = routeForFile(path, routes, files);
+    // 🔴 A SCREEN NO URL REACHES IS REACHED BY ITS CONTROL (autopsy e49afa97). `src/screens/Medicines.tsx`
+    // is a page file, so it is derived here — but the app switches screens by state, no router names it,
+    // and `routeForFile` FELL BACK to `/`, where its form is not. The journey then loaded the home screen
+    // and reported "none of the form fields were present" three times, about three forms every user
+    // reaches in two taps. Such a screen carries the same `reach` word a non-page screen does.
+    const reach = screenReachedByControl(path, route, files) ? reachWordFor(path) : null;
     const listed = rendersList(source);
     // The marker has to actually be typed somewhere, or "did it appear" is unanswerable.
     const markerTyped = fields.some((f) => f.value.includes(marker));
@@ -843,18 +863,24 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
         id: `create-persists:${path}`,
         kind: 'create-persists',
         route,
-        title: `Create an item on ${route} and check it survives a reload`,
+        title: reach
+          ? `Open the "${reach}" screen, create an item and check it survives a reload`
+          : `Create an item on ${route} and check it survives a reload`,
         fields, submit, writes: true,
+        ...(reach ? { reach } : {}),
       });
     } else {
       out.push({
         id: `form-submit:${path}`,
         kind: 'form-submit',
         route,
-        title: `Fill and submit the form on ${route} without the app breaking`,
+        title: reach
+          ? `Open the "${reach}" screen, fill and submit its form without the app breaking`
+          : `Fill and submit the form on ${route} without the app breaking`,
         fields, submit,
         // A submit still POSTs. Treated as a write unless it is plainly a search/filter form.
         writes: !/search|filter|query/i.test(path),
+        ...(reach ? { reach } : {}),
       });
     }
   }
@@ -1128,15 +1154,22 @@ for (const j of journeys) {
     // name carries the screen's word — never an outward or creating control — and remember it, so the
     // same control can be pressed again after the reload.
     const REACH_SKIP = new RegExp(${JSON.stringify(WRITE_VERBS.source)}, 'i');
+    // Every name a control goes by: its visible text, then its aria-label and title. An icon button
+    // shows "＋" and is NAMED by its label, so reading only the text missed it (autopsy e49afa97).
+    const namesOf = async (c) => [
+      await c.innerText().catch(() => ''),
+      await c.getAttribute('aria-label').catch(() => ''),
+      await c.getAttribute('title').catch(() => ''),
+    ].map((x) => String(x || '').replace(/\\s+/g, ' ').trim().slice(0, 60)).filter(Boolean);
     const pressReach = async (exact) => {
       const cands = page.locator('button, [role=tab], [role=button], a[href="#"], a:not([href])');
       const n = Math.min(await cands.count(), 60);
       for (let i = 0; i < n; i++) {
         const c = cands.nth(i);
         if (!(await c.isVisible().catch(() => false))) continue;
-        const name = String((await c.innerText().catch(() => '')) || (await c.getAttribute('aria-label').catch(() => '')) || '').replace(/\\s+/g, ' ').trim().slice(0, 60);
+        const names = await namesOf(c);
+        const name = exact ? names.find((x) => x === exact) : names.find((x) => x.toLowerCase().includes(j.reach));
         if (!name) continue;
-        if (exact ? name !== exact : !name.toLowerCase().includes(j.reach)) continue;
         if (NEVER.test(name) || REACH_SKIP.test(name)) continue;
         if ((await c.getAttribute('type').catch(() => '')) === 'submit') continue;
         await c.click({ timeout: 4000 }).catch(() => {});
@@ -1156,8 +1189,11 @@ for (const j of journeys) {
       for (let i = 0; i < n; i++) {
         const c = cands.nth(i);
         if (!(await c.isVisible().catch(() => false))) continue;
-        const name = String((await c.innerText().catch(() => '')) || (await c.getAttribute('aria-label').catch(() => '')) || '').trim().slice(0, 60);
-        if (!OPENER.test(name) || NEVER.test(name)) continue;
+        const names = await namesOf(c);
+        // An icon button's visible text is "＋"; its NAME is its aria-label ("Add medicine"). Either may
+        // say it opens a form (autopsy e49afa97), and a control whose whole text is a plus sign does.
+        const name = names.find((x) => OPENER.test(x) || /^[+＋]$/.test(x));
+        if (!name || names.some((x) => NEVER.test(x))) continue;
         await c.click({ timeout: 4000 }).catch(() => {});
         await page.waitForTimeout(300);
         if (await submitVisible()) { out.opener = name; break; }

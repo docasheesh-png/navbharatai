@@ -122,12 +122,13 @@ describe('the wiring, in both lanes', () => {
   });
   it('the BUILDER only adds where the list was silent', () => {
     // `!reqGuidance` is what keeps every existing build prompt byte-identical.
-    expect(route).toContain('if (!reqGuidance && askedForAnApp && !answered && !smallScope)');
+    expect(route).toContain('if (!reqGuidance && askedForAnApp && !answered && !smallScope && !scaffoldWillSeed)');
     expect(route).toContain("learned.source === 'generated'");
   });
   it('the builder still never asks a question — the 2026-07-20 decision is untouched', () => {
-    const at = route.indexOf('if (!reqGuidance && askedForAnApp && !answered && !smallScope)');
-    expect(route.slice(at, at + 1200)).toContain('skip it silently rather than asking');
-    expect(route.slice(at, at + 1200)).not.toContain('learned.questions');
+    const at = route.indexOf('if (!reqGuidance && askedForAnApp && !answered && !smallScope && !scaffoldWillSeed)');
+    // The window grew when the wait started being recorded (autopsy 31254f9a); the invariant did not move.
+    expect(route.slice(at, at + 2000)).toContain('skip it silently rather than asking');
+    expect(route.slice(at, at + 2000)).not.toContain('learned.questions');
   });
 });

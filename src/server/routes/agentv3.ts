@@ -258,9 +258,10 @@ import { shouldAnswerPictureRequest, PICTURE_REQUEST_STEER, pictureRequestFallba
 import { shouldAnswerSpreadsheetRequest } from '../AgentV3/spreadsheetRequest';
 import { runSpreadsheetTurn, SPREADSHEET_FILE_INSTRUCTIONS, type SheetFileRef } from '../AgentV3/spreadsheetTurn';
 import { saveSpreadsheetFile, newSpreadsheetFileId } from '../lib/spreadsheetFileStore';
-import { starterCompletedNote } from '../AgentV3/starterFragment';
+import { starterCompletedNote, srcHoldsOnlyOurStarter, holdsOnlyOurStarter, MAX_FRAGMENT_FILES } from '../AgentV3/starterFragment';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
 import { summaryAdditions } from '../AgentV3/summaryAdditions';
+import { deletedFilesNotice, userVisibleDeletions } from '../AgentV3/deletedFilesNotice';
 import { credentialGuardEnabled, credentialGuardInstruction, findBootKillingEnvGuards, bootKillingGuardSummary, bootKillerRepairInstruction } from '../AgentV3/missingCredentialGuard';
 import { inrToWalletTokens } from '../lib/payments';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
@@ -579,7 +580,7 @@ import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../A
 import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } from '../AgentV3/buildQualityLint';
 import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict } from '../AgentV3/buildAbortCause';
-import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount } from '../AgentV3/userProjectFiles';
+import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount, couldBeAppCode } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
@@ -1882,8 +1883,10 @@ function sandboxOriginOf(actuator: unknown, workspaceId: string): string | null 
 /** The starter-fragment completion this setup did, as a SETUP_TIMING suffix ('' when none). */
 function starterCompletedOf(actuator: unknown, workspaceId: string): string {
   try {
-    const fn = (actuator as { starterCompletedCount?: (id: string) => number })?.starterCompletedCount;
-    return typeof fn === 'function' && workspaceId ? starterCompletedNote(fn.call(actuator, workspaceId)) : '';
+    const a = actuator as { starterCompletedCount?: (id: string) => number; starterPresentBefore?: (id: string) => number | undefined };
+    if (typeof a?.starterCompletedCount !== 'function' || !workspaceId) return '';
+    const before = typeof a.starterPresentBefore === 'function' ? a.starterPresentBefore(workspaceId) : undefined;
+    return starterCompletedNote(a.starterCompletedCount(workspaceId), before);
   } catch {
     return ''; // an observation must never be a reason a build fails
   }
@@ -12081,10 +12084,29 @@ async function noteBuildOutcome(
     // explicit fresh-start / complete-app request) is an EDIT — the destructive rebuild path must never
     // be reachable through an infra hiccup. This read is fetched unconditionally (cheap metadata-only
     // doc) and reused below exactly as before.
+    //
+    // 🔴 …BUT OUR OWN STARTER IS NOT "YOUR APP" (autopsy 31254f9a, 2026-10-01). Setup now writes our starter
+    // into every fresh workspace and saves it durably (#3435), so a build the user STOPPED before its first
+    // file leaves eleven of our files in the store. The count below includes scaffold paths on purpose
+    // (after a build `src/App.tsx` IS the user's app), so the user's retry of the same request would have
+    // been flipped to an EDIT of "your existing app" — no tested template, no fresh plan. Paths cannot tell
+    // the two apart; contents can. Only when the count is small enough to be a starter, and only for a turn
+    // the guard could flip, the files are read and asked the same question the template pre-seed asks. A
+    // failed or partial read keeps the count: the protective direction.
+    let durableSourceCount = appSourceFileCount(durableFilePaths);
+    let durableStarterOnlyCount = 0;
+    if (durableSourceCount > 0 && durableSourceCount <= MAX_FRAGMENT_FILES && intent === 'new_build' && !isEditMode) {
+      const codePaths = durableFilePaths.filter((p) => couldBeAppCode(p));
+      const contents = await raceTimeout(loadWorkspaceFilesByPath(workspaceId, codePaths), 4_000, 'starterOnlyDurable').catch(() => null);
+      if (contents && Object.keys(contents).length === codePaths.length && holdsOnlyOurStarter(contents)) {
+        durableStarterOnlyCount = codePaths.length; // recorded once the report exists, below
+        durableSourceCount = 0;
+      }
+    }
     if (rebuildGuardFlipsToEdit({
       intent,
       isEditMode,
-      durableSourceCount: appSourceFileCount(durableFilePaths),
+      durableSourceCount,
       freshStart: wantsFreshStart(prompt),
       explicitCompleteBuild,
     })) {
@@ -12104,9 +12126,9 @@ async function noteBuildOutcome(
       intent,
       isEditMode,
       hasImportIntent,
-      durableSourceCount: appSourceFileCount(durableFilePaths),
+      durableSourceCount,
     })) {
-      const srcCount = appSourceFileCount(durableFilePaths);
+      const srcCount = durableSourceCount;
       const confirmId = randomUUID();
       emit({
         type: 'narration', agent: 'architect', ts: Date.now(),
@@ -12899,6 +12921,18 @@ async function noteBuildOutcome(
       // scaffoldedComplexityDecision. The same four conditions the seeding below checks up front
       // (flag, a fresh build, not an import, a template for this exact prompt).
       const scaffoldWillSeed = process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !isImportTurn && !!goldenScaffoldForPrompt(prompt);
+      // 🔴 THE DOMAIN QUESTION STARTS HERE, BESIDE SETUP (autopsy 31254f9a, 2026-10-01). It used to be asked
+      // after setup, project restore and context loading, right before the first build call, so its whole
+      // wait was added to the user's: that calculator build sat 6 seconds in silence (the call's own cap)
+      // between "personal context loaded" and "project context prepared", recorded nowhere. Every input is
+      // the prompt, so it is started now and read later; a chip whose tested template is the request never
+      // asks at all. A started-and-unused answer costs nothing — it is the free chat router.
+      const domainKnowledgeStartedAt = Date.now();
+      const domainKnowledgeEarly: Promise<Awaited<ReturnType<typeof learnDomain>>> | null =
+        !scaffoldWillSeed && requirementAwareBuildEnabled() && intent === 'new_build' && !isImportTurn
+          && req.body?.confirmedFeatures == null && userAskedForAnAppToBeBuilt(prompt) && !userAskedForSmallScope(prompt)
+          ? learnDomain(prompt)
+          : null;
       const complexityDecision = scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(
         { prompt: planning.text, score: analysis?.complexityScore ?? 0 },
         (p) => AIRouterManager.getRouter('free')
@@ -12991,6 +13025,12 @@ async function noteBuildOutcome(
           }
         },
       });
+      if (durableStarterOnlyCount > 0) {
+        buildDiag.record({
+          phase: 'plan', severity: 'info', code: 'DURABLE_HOLDS_ONLY_STARTER', autoResolved: true,
+          message: `The saved project holds only our own untouched starter (${durableStarterOnlyCount} file(s)), so this is a fresh build, not an edit of an existing app.`,
+        });
+      }
       buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
       // Say when the free limit shortened this build's window (freeBuildTimeCap.ts) — a build that stops
       // at 25 minutes must not read, in the report, as one that hit the 30-minute paid cap.
@@ -14987,9 +15027,13 @@ async function noteBuildOutcome(
       // writes (autopsy e725e002). Armed with the files this build wrote, so a twin it wrote itself is
       // never touched; unarmed, nothing is removed.
       dispatcher.armShadowTwins(() => modelAuthoredPaths(writtenFiles));
+      // Every file this build removed, in order — the user is told about the ones their app had
+      // (deletedFilesNotice.ts, queue Q-019). The admin line below stays as it was.
+      const deletedThisBuild: string[] = [];
       dispatcher.setFileDeletionSink((paths) => {
         for (const p of paths) {
           writtenFiles.delete(p);
+          deletedThisBuild.push(p);
           try { buildDiag.record({ phase: 'build', severity: 'info', code: 'FILE_DELETED', message: `Removed from the project: ${p}`, autoResolved: true }); }
           catch { /* diagnostics are best-effort */ }
         }
@@ -15989,8 +16033,16 @@ async function noteBuildOutcome(
           // nobody enumerated — and ONLY there: a listed domain returns `listed` and is skipped here,
           // so every existing build prompt is byte-identical. It never asks a question (the 2026-07-20
           // friction-free decision is untouched); it only names what such an app usually needs.
-          if (!reqGuidance && askedForAnApp && !answered && !smallScope) {
-            const learned = await learnDomain(prompt);
+          if (!reqGuidance && askedForAnApp && !answered && !smallScope && !scaffoldWillSeed) {
+            const waitT0 = Date.now();
+            const learned = await (domainKnowledgeEarly ?? learnDomain(prompt));
+            try {
+              buildDiag.record({
+                phase: 'plan', severity: 'info', code: 'DOMAIN_KNOWLEDGE', autoResolved: true,
+                message: `Domain knowledge: ${learned ? learned.source : 'no answer in time'} — the build waited ${Date.now() - waitT0}ms for it`
+                  + (domainKnowledgeEarly ? ` (asked beside setup, ${Date.now() - domainKnowledgeStartedAt}ms in all).` : ' (asked here).'),
+              });
+            } catch { /* observation only */ }
             if (learned && learned.source === 'generated') {
               buildPrompt = [
                 `[REQUIREMENT AWARENESS — this looks like a ${learned.domain} app]`,
@@ -16711,7 +16763,19 @@ async function noteBuildOutcome(
           if (golden) {
             const existingSrc = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
               .filter((p) => p.startsWith('src/'));
-            if (existingSrc.length === 0) {
+            // "Nothing of anybody's is here", not "src/ is empty" — setup writes our own starter into a fresh
+            // workspace, so src/ is never empty any more (autopsy 31254f9a; see `holdsOnlyOurStarter`).
+            const nobodysWorkHere = existingSrc.length === 0 || await srcHoldsOnlyOurStarter(
+              existingSrc, (p) => actuator.readFile(workspaceId, p).then((c) => (typeof c === 'string' ? c : null)),
+            );
+            if (!nobodysWorkHere) {
+              // Said, not swallowed: the routing above already opened this build as a seeded template.
+              buildDiag.record({
+                phase: 'build', severity: 'warning', code: 'GOLDEN_SCAFFOLD_SKIPPED', autoResolved: true,
+                message: `The tested "${golden.label}" template was NOT pre-seeded: the workspace already holds ${existingSrc.length} source file(s) that are not our untouched starter, and a template is never written over somebody's work. The build was routed as a seeded template.`,
+              });
+            }
+            if (nobodysWorkHere) {
               // Q-008: a workspace in the strict-mode trial gets the strict tsconfig (strictTrial.ts).
               const goldenFiles = applyStrictTrial(goldenScaffoldFiles(golden), workspaceId);
               // TOGETHER, not one after another (autopsy 972acde5): twelve sequential sandbox round trips
@@ -16778,7 +16842,16 @@ async function noteBuildOutcome(
                   `KEEP the template's own working controls — above all its light/dark switch (ThemeToggle in src/theme.tsx, which cycles Auto → Light → Dark through the data-theme attribute the styles use); improve one in place if you must, never replace it with a hand-rolled copy.\n\n---\n\n${buildPrompt}`;
             }
           }
-        } catch { /* pre-seed is best-effort — a failure just builds from scratch */ }
+        } catch (seedErr) {
+          // Best-effort — a failure builds from scratch. But it is SAID, because the routing above opened
+          // this build as a seeded template (autopsy 31254f9a: a refused seed was invisible).
+          try {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'GOLDEN_SCAFFOLD_SKIPPED', autoResolved: true,
+              message: `The tested template could not be pre-seeded (${String((seedErr as Error)?.message ?? seedErr).slice(0, 160)}), so the app is built from scratch. The build was routed as a seeded template.`,
+            });
+          } catch { /* observation only */ }
+        }
       }
 
       // ── ONE-SHOT FAST LANE (additive, flag-gated; the agentic loop is untouched) ──
@@ -17325,7 +17398,8 @@ async function noteBuildOutcome(
             : null),
           writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3,
           signal: abort.signal });
-        buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
+        // A STOP IS NOT A FALLBACK (autopsy 31254f9a): nothing is handed to the full builder after a Stop.
+        buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : sb.stopped ? 'SIMPLE_BUILD_STOPPED' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         // WHERE THE FAST LANE'S MINUTES WENT (autopsy 21b431e1). Measurement only — nothing reads it.
         // Recorded on BOTH outcomes, because a lane that handed off is exactly the one whose time
         // needs explaining, and a check only ever visible when it complains cannot be told apart from
@@ -17353,7 +17427,7 @@ async function noteBuildOutcome(
         // rootCause because the report was captured before the full builder emitted its own outcome).
         // Only a SUCCESSFUL fast lane is terminal (the app is done); a fallback's outcome is informational
         // (SIMPLE_BUILD_FALLBACK already frames the handoff) and must NOT feed deriveRootCause.
-        if (sb.outcome) {
+        if (sb.outcome && !sb.stopped) {
           buildDiag.record(sb.ok
             ? { phase: 'build', severity: 'info', code: `OUTCOME_${sb.outcome}`, message: `Build outcome: ${sb.outcome}`, autoResolved: true }
             : { phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_OUTCOME', message: `Fast-lane outcome (handed off to the full builder): ${sb.outcome}`, autoResolved: true });
@@ -17825,6 +17899,7 @@ async function noteBuildOutcome(
         const twins = [...new Set(dispatcher.shadowTwinTally().removed)];
         if (twins.length > 0) {
           await removeWorkspaceFiles(workspaceId, twins).catch(() => 0);
+          deletedThisBuild.push(...twins);
           buildDiag.record({
             phase: 'build', severity: 'info', code: 'SHADOW_TWIN_REMOVED', autoResolved: true,
             message: `Removed ${twins.length} stale copy(ies) of modules this build wrote — each would have been loaded INSTEAD of the new file (the dev server resolves .js before .ts/.tsx): ${twins.slice(0, 12).join(', ')}${twins.length > 12 ? ` and ${twins.length - 12} more` : ''}.`,
@@ -21765,7 +21840,9 @@ async function noteBuildOutcome(
           severity: gate.state === 'red' && !result.ok && gateEvidence.stoppedByUser !== true ? 'error' : gate.state === 'green' ? 'info' : 'warning',
           code: 'RELEASE_GATE',
           message: releaseGateSummary(gate),
-          autoResolved: gate.state === 'green',
+          // A STOPPED build's RED is the user's own decision, not an item anyone must act on — leaving it open
+          // made a clean Stop end with "2 unresolved" problems (autopsy 31254f9a). The verdict stays RED.
+          autoResolved: gate.state === 'green' || gateEvidence.stoppedByUser === true,
         });
         // ── THE VERDICT MAY NO LONGER CONTRADICT THE EVIDENCE ────────────────────────────────────
         //
@@ -24588,6 +24665,34 @@ async function noteBuildOutcome(
         const stackNote = unsupportedStackUserNote(unsupportedStackAsked, framework, result.summary);
         if (stackNote && !result.summary.includes(stackNote.trim())) result = { ...result, summary: `${result.summary}${stackNote}` };
       }
+      // A FILE THIS BUILD REMOVED FROM THE USER'S APP IS NAMED (queue Q-019, autopsy 4d538ca3). Only
+      // files the app had before this build, only when there was an app, and only those still absent at
+      // the end — a later write or the GreenGuard restore may have put one back, and the sentence must
+      // be true of the app the user receives. A read that fails is "absent"; a read that hangs past 5 s
+      // leaves the path off the list (silence is the old behaviour, a false claim would be worse).
+      try {
+        const candidates = userVisibleDeletions(deletedThisBuild, projectFilePaths, userAppExists)
+          .filter((p) => !writtenFiles.has(p))
+          .slice(0, 40);
+        if (candidates.length > 0 && typeof result.summary === 'string') {
+          const stillGone: string[] = [];
+          for (const p of candidates) {
+            const present = await raceTimeout(
+              actuator.readFile(workspaceId, p).then(() => true, () => false),
+              5_000, 'deletedFileProbe',
+            ).catch(() => null);
+            if (present === false) stillGone.push(p);
+          }
+          const note = deletedFilesNotice(stillGone);
+          if (note) {
+            result = { ...result, summary: `${result.summary}${note}` };
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: 'FILES_REMOVED_TOLD', autoResolved: true,
+              message: `The user's summary names ${stillGone.length} file(s) this build removed from their app: ${stillGone.slice(0, 12).join(', ')}${stillGone.length > 12 ? ` and ${stillGone.length - 12} more` : ''}.`,
+            });
+          }
+        }
+      } catch { /* telling the user is never worth failing a settle */ }
       const livePreviewLine = costBreakdown && result.ok ? livePreviewChargeLine(costBreakdown) : '';
       if (livePreviewLine && typeof result.summary === 'string') {
         result = { ...result, summary: `${result.summary}\n\n${livePreviewLine}` };

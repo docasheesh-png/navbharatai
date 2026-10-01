@@ -680,6 +680,8 @@ export class E2BActuator implements IEngineerActuator {
   private templateRegistry = new TemplateRegistry();
   /** Template files put back into a workspace that held only a piece of our starter (starterFragment.ts). */
   private _starterCompleted = new Map<string, number>();
+  /** How many files the workspace held when the starter was completed (0 = it was empty). */
+  private _starterPresentBefore = new Map<string, number>();
   // Tracks per-sandbox playwright install progress
   private _playwrightReady = new Map<string, Promise<boolean>>();
   // Tracks per-sandbox persistent-browser daemon launch
@@ -1756,13 +1758,25 @@ export class E2BActuator implements IEngineerActuator {
     await withTimeout(sandbox.files.writeFiles(
       Object.entries(files).map(([p, content]) => ({ path: `${WORKSPACE_ROOT}/${p}`, data: content })),
     ), 30_000, 'files.writeFiles(starter fragment)');
-    this._rememberSeededScaffold(workspaceId, files);
+    // 🔴 THE WHOLE STARTER IS REMEMBERED, NOT ONLY THE PART WRITTEN NOW (autopsy 31254f9a). The route saves
+    // this map to the durable store, and it used to hold only the MISSING files — so a workspace that had
+    // our `index.html` and gained the other ten was saved without its `index.html`. The next fresh machine
+    // is refilled from that store, finds `package.json`, and is "set up" with no entry document. The
+    // pieces that were already there are byte-identical to the template (`starterFilesToComplete` refuses
+    // anything else), so saving the template's copy of them is exact.
+    this._rememberSeededScaffold(workspaceId, template);
     this._starterCompleted.set(workspaceId, missing.length);
+    this._starterPresentBefore.set(workspaceId, paths.length);
   }
 
   /** How many template files the last setup put back into a starter fragment (0 when none). */
   starterCompletedCount(workspaceId: string): number {
     return this._starterCompleted.get(workspaceId) ?? 0;
+  }
+
+  /** How many files the workspace held before that completion (0 = it was empty), or undefined. */
+  starterPresentBefore(workspaceId: string): number | undefined {
+    return this._starterCompleted.has(workspaceId) ? this._starterPresentBefore.get(workspaceId) : undefined;
   }
 
   /** Store the scaffold files seeded for a workspace (kept small — a template is a handful of files). */

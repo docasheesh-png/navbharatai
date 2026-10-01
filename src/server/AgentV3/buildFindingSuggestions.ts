@@ -145,6 +145,7 @@ const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: string; 
 
 /** Codes that must never become a suggestion — see the header for why each is excluded. */
 const NEVER_SUGGEST = new Set([
+  'GOLDEN_SCAFFOLD_SKIPPED', 'LLM_CALL_STOPPED', 'SIMPLE_BUILD_STOPPED', 'DOMAIN_KNOWLEDGE', 'DURABLE_HOLDS_ONLY_STARTER', // autopsy 31254f9a — engine facts
   'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',
   'CHECKPOINT_SIGNAL', // our checkpoint heuristic, never a finding (autopsy SignBridge, 2026-09-26)
   'REVIEW_SUGGESTIONS_NOT_READY', // a suggest-only review that ran out of time — nothing for the user to do
@@ -153,7 +154,7 @@ const NEVER_SUGGEST = new Set([
   'STYLE_RULES_RESUMED', // our end-of-turn steer (stylePolishResume.ts), never a finding
   'UNSUPPORTED_STACK', // the user is told in the ready message already (unsupportedStack.ts)
   'AUTH_EXPLORE_SIGNED_IN', 'AUTH_EXPLORE_NOT_RUN', // our sign-in instrument, never the app's defect
-  'DESIGN_KIT_RESTORED', 'PLANNING_CONTEXT', 'DESIGN_KIT_KEPT', 'SHADOW_TWIN_REMOVED', 'USER_FILE_KEPT', 'DURABLE_READ_FAILED', 'LLM_CALL_HANDED_OFF', // our own housekeeping (autopsy e725e002, 4d538ca3, d382b398)
+  'DESIGN_KIT_RESTORED', 'PLANNING_CONTEXT', 'DESIGN_KIT_KEPT', 'SHADOW_TWIN_REMOVED', 'USER_FILE_KEPT', 'FILES_REMOVED_TOLD', 'DURABLE_READ_FAILED', 'LLM_CALL_HANDED_OFF', // our own housekeeping (autopsy e725e002, 4d538ca3, d382b398)
   'RELEASE_GATE', 'TIME_TO_FIRST_CALL', 'RUNTIME_UNCHECKED', 'RUNTIME_VERIFIED', 'APP_RENDERED',
   'TEST_SUITE_UNVERIFIED', 'JOURNEY_NOT_DERIVED', 'JOURNEY_NOT_RUN', 'PAGE_RENDER_NOT_RUN',
   // The click explorer's "did not look" outcomes and its pass — nothing for the user to do.

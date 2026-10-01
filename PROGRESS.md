@@ -86562,6 +86562,32 @@ the one unguarded instance.
   limit on a CGNAT phone network) and gets its own fix. **Tried:** read every guard in front of the route;
   the route and its four helpers cannot throw on their own.
 
+
+## 2026-10-01 — Autopsy 31254f9a (calculator chip, Weak, stopped by the user at 23 s)
+
+**Ledger (problem → root cause → class → siblings → lock):**
+- **Chip template never seeded** → the pre-seed required an empty `src/`; #3435 (same day) writes our starter
+  into every fresh workspace → *a presence check standing in for "is anybody's work here?"* → siblings: the
+  rebuild guard (a Stop leaves our starter saved, so the retry would flip to EDIT) — both fixed with
+  `holdsOnlyOurStarter` / `srcHoldsOnlyOurStarter` (starter + chip templates) → `tests/theTemplateWasNeverSeeded.test.ts` §1–2.
+- **SETUP_TIMING called an empty workspace "a piece of our starter"** → the note had no present-count; the
+  image's `WORKDIR` makes the folder exist, so empty takes the completion path → fixed (`starterPresentBefore`) → §3.
+- **Discovered: a completed fragment was saved without its pre-existing piece** (durable lost `index.html`) →
+  only the missing files were remembered → whole template now remembered → §3.
+- **A Stop recorded as unresolved ERROR `LLM_CALL_FAILED (unknown)`** → `stopSignal.ts` (2720e553) never reached
+  the LLM-call recorder → `LLM_CALL_STOPPED` (info, resolved) → §4.
+- **Stopped RELEASE_GATE left "unresolved"** → verdict stays RED (2b0a3ed5 design), record now resolved → §4.
+- **Fast lane after a Stop**: "Building 9 file(s)" announced after the stop, contract "came back with nothing
+  usable", "files finished so far are saved" with none, `SIMPLE_BUILD_OUTCOME … handed off … BUILD_FAILED` →
+  the lane did not check the signal after the contract → ends there (`contractOutcome: 'stopped'`,
+  `stoppedLaneSummary`, `SIMPLE_BUILD_STOPPED`) → §4. A 0 ms stopped contract is now named too.
+- **LADDER_DEPTH "delivered the whole build"** about a build with no files → wording describes routing → §4.
+- **~6 s unrecorded wait before the first build call** → `learnDomain` (free router, 6 s cap) awaited after
+  setup → started beside setup, skipped for a seeded chip, wait recorded as `DOMAIN_KNOWLEDGE` → §5.
+- **`requestAnalysis.startTier: "gemini"`** → already carries `startBand: "cheapest band"` (an earlier autopsy);
+  recorded in `BUILD_REPORT_QUEUE.md` pending the admin's agreement that it is not a defect.
+- **Q-010** (starter fragment) gained evidence: this report's marker was an EMPTY workspace, not a fragment.
+  Still blocked on a report from the session that first created the machine.
 ## 2026-10-01 — Queue decisions: Q-004 and Q-011 closed by the admin, Q-008 strict-mode trial built (admin: "han")
 
 **Decisions (admin accepted every recommendation, 2026-10-01):**
@@ -86782,6 +86808,24 @@ Q-016 OPEN journeys cannot reach state-switched forms (capability). All ✅ item
 **Live effect to watch:** `PREVIEW_REVIVAL_RECIPE` details naming a real server command; no `🧹 … port 49983`; no
 "looks complete" narration on edit turns; `[version hint]` after an ETARGET.
 
+### 2026-10-01 — Queue Q-019: a file the build removed from the user's app is told to them (follow-up to #3446)
+
+Autopsy 4d538ca3 left Q-019 OPEN: `FILE_DELETED` was admin-only, so a build that removed a file the user's
+app had said nothing in the summary they read. #3442 had already made deleting the user's OWN Code Studio
+file impossible unless asked; a file the build itself wrote earlier could still vanish silently.
+- **Fix:** `deletedThisBuild` collects every deletion the dispatcher confirmed (the existing
+  `setFileDeletionSink`) and every shadow twin removed (the sibling road). At settle, `userVisibleDeletions`
+  keeps the paths that were in the project BEFORE the build (`projectFilePaths`), only when the user had an
+  app (`userAppExists`), never `.nbai*`, and the route keeps only those still absent in the sandbox (a later
+  write or a GreenGuard restore may have put one back). `deletedFilesNotice` appends one line to the summary,
+  which `summaryAdditions` already shows as the closing chat line, pointing at Files → History.
+- **Not done, said plainly:** the durable store is not changed here. If the end-of-build sandbox scan fails,
+  the save merges and a deleted file can return on the next restore. That is the pre-existing merge-save
+  behaviour, and it is recorded here rather than widened into this change.
+- Test: `tests/aDeletedFileIsToldToTheUser.test.ts` (14), reverted-and-failed twice (sink push removed;
+  prior-paths filter removed). Admin code `FILES_REMOVED_TOLD` (process-only).
+- **Live effect to watch:** a `🗑️ This build removed …` line on an edit turn that deleted an existing file,
+  and `FILES_REMOVED_TOLD` in the admin report.
 ### 2026-10-01 (follow-up to #3441, which merged before this commit reached it) — Q-016: a form on a wizard step is reached
 
 The 2b1f845e app kept its forms in `src/steps/*.tsx`, shown by pressing "2 Design" on `/`; no page reaches

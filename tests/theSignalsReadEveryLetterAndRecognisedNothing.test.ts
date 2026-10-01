@@ -138,11 +138,14 @@ describe('the signals read every letter and recognised nothing', () => {
    * proven in production, and swapping a cost policy is the admin's call, not a merge conflict's.
    * Pinned so the day it changes, it changes deliberately.
    */
-  it('a bare question still buys a call — the known cost of the broader rule', () => {
+  // ✅ CLOSED 2026-10-01 (autopsy 1be16985), deliberately, as this note asked. A request the scorer
+  // read and did not recognise buys a call only when it STATES a scope (`statesAScope`: two named
+  // features or a big-software noun). A bare question states none, so it no longer pays for one.
+  it('a bare question no longer buys a call — it states nothing to size', () => {
     for (const q of BARE_QUESTIONS) {
       expect(analyzeRequest({ prompt: q }).complexityScore, q).toBe(5);
       expect(scriptNeutralFloor(q), q).toBe(0);
-      expect(needsSecondOpinion(5, q), q).toBe(true);
+      expect(needsSecondOpinion(5, q), q).toBe(false);
     }
   });
 

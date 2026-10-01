@@ -85995,3 +85995,34 @@ Tests: `tests/theSalesSampleHadTwoHelperHomes.test.ts`, reversion-proven for all
   `vite.config.ts` over the scaffold's own. That caused the TS6133s (fixed for free) and a 16 s `npm install`
   at the first `tsc`. These files are editable on purpose, because apps add dependencies. Whether the plan may
   REWRITE them wholesale is not decided here.
+
+## 2026-10-01 — Autopsy 1be16985 ("Make biology  learning app", Weak, 9.7 min vs 6–8 min ETA, app working)
+
+Tally:
+- ✅ Self-healed (3):
+  - 63 undefined CSS classes, fixed by the end-of-build repair pass (174 s).
+  - TopicView's missing empty state.
+  - The platform started the preview itself, because the agent never published one.
+- 🔀 Worked around (1): the in-build green snapshot raced a defaults write at 495 s and was taken at 543 s.
+- ⏭️ Skipped (0).
+- ❌ Open (0).
+- 🥵 Struggle (4):
+  - The build opened on the reasoning rung with the fast lane skipped, from a "complex" guess about four words.
+  - A 3,067-token CSS append missed its anchor and was never retried.
+  - The repair pass re-read files in a fresh context (CellSimulation ×3).
+  - The ETA ran 1.4× over its midpoint.
+
+| Problem | Root cause | Class | Siblings | Locked by |
+|---|---|---|---|---|
+| A four-word request sized `complex` | The "recognised nothing" ask had no evidence floor | A model asked to size a request that states nothing to size | The bare-question call (open cost item, now closed) | `statesAScope` |
+| 63 undefined classes reached the end of the turn | The write-time note had no end-of-turn check | A steer that says "before you finish" with nothing checking it | — | `stylePolishResume.ts` + `undefinedClassesNow` |
+| The append missed its anchor and was abandoned | The miss showed only the top of a 529-line file | An edit miss that never shows where an append anchors | — | `nearestEditRegion` tail + empty-old_string hint |
+| "Add import React" told to a clean file | A classic-runtime rule in a react-jsx world | — | `EndgameRepair.fixReactUmdGlobal` is TS2686-driven, so it is correct | `PostEditReviewer` (`React.` only) |
+| The repair reply said "the fixes you requested" | Every repair pass speaks in the user's seat, and its text is narrated to the user | Platform-authored instructions read as user requests | All 14 heal runners in the route | `platformRequest` + census test |
+
+Tests: `tests/theBiologyAppWasSizedByAGuess.test.ts` (14 cases), reversion-proven for the scope gate, the edit
+tail and the runner census.
+
+**Still open:**
+- Each repair pass's instruction is still persisted into the main conversation as a `user` turn. Whether a
+  reopened session shows it as something the user typed was not checked here.

@@ -4042,6 +4042,11 @@ the flag entries above promise.
   app) all read the four words. `planningRequest.ts` is ONE request (message + capped attachment + the last 3
   earlier requests ONLY while no app exists) that every sizer and planner reads; intent and the golden
   scaffold still read the message. Admin line `PLANNING_CONTEXT`.
+  🔁 **A message that POINTS at the conversation reads the conversation (autopsy 5759ad8b, 2026-10-01).** "Can you
+  make this app" meant an app described in CHAT, which this block drops by design (6ae30b33); the fast lane planned a
+  counter. A short message (≤ 14 words) whose subject is a pointer ("this app", "yeh app", "isko banao", "यह ऐप") on a
+  workspace with no finished app now adds its chat turns and the conversation's last answer (one bounded read,
+  `conversationReference.ts`, `lastAssistantText`). Every other message is unchanged.
   `kitRestore.ts`: the design repair is told the kit is "already in the project" — it was not, the architect
   had rewritten `src/index.css` — so four empty states shipped on undefined `.nb-empty*`. A kit class with no
   rule has exactly one right rule, the kit's, so it is appended deterministically (with its media rules,

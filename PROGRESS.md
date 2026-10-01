@@ -87329,3 +87329,21 @@ bench prefix ✅ #3448 · reviewer re-reads ✅ #3436 · 85/100 on PASS ✅ #344
 (decision) · 14 s install inside the first edit 🟡 Q-063 (needs the next template build's ensure log).
 **Live effect to watch:** an `ETA_BASIS` line on a chip build that says "builds that start from a tested template",
 or the labelled rough estimate while that slice has under two days of history.
+
+## 2026-10-01 — CI red on `main` from a new upstream advisory: `basic-ftp` pinned to 6.2.1 (merging session)
+
+`main` (`a10143f3`, after #3461) went red at the **Security audit gate** with no code change: a new high advisory,
+GHSA-c475-qrg2-pj4r (quadratic-time CPU denial of service in `basic-ftp`'s `Client.list()` parser, every version
+≤ 6.2.0), reached `npm audit` and surfaced through `firebase-tools → proxy-agent → pac-proxy-agent → get-uri →
+basic-ftp@5.3.1`. Four packages (`basic-ftp`, `get-uri`, `pac-proxy-agent`, `proxy-agent`) failed the gate, so every
+open PR's CI failed with it (#3462 first).
+
+- **Fix:** `overrides["basic-ftp"] = "6.2.1"` in `package.json` — the same pattern as the existing `@grpc/grpc-js` /
+  `undici` / `tar` pins. `get-uri@6.0.5` declares `basic-ftp ^5.0.2`; the override lifts it one major to the first
+  fixed release. `get-uri` and `basic-ftp` load, and the audit gate passes with the pre-triaged allowlist only.
+- **Why it is safe:** the whole chain is `firebase-tools`, a devDependency (the deploy CLI) — never imported in
+  `src/`, never bundled into the app or the server. `get-uri` reaches `basic-ftp` only for an `ftp://` proxy
+  auto-config URL, which nothing here uses. The full gate (audit, license, typecheck, tests, build, bundle, boot,
+  server-deps) was run on the final state before the PR.
+- **Class:** an upstream advisory landing between a PR's green CI and its merge. The gate is doing its job; the
+  honest response is the pin, not an allowlist entry, because a fixed release exists.

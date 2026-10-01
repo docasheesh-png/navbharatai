@@ -60,6 +60,20 @@ import { detectLinters, parseLintOutcome, type LintOutcome } from './lintRunner'
 import { lintGateVerdict, type LintGateVerdict } from './LintGate';
 import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
 import { assessFullRewrite } from './rewriteRisk';
+import { isOurStarterFile } from './starterFragment';
+
+/** Every template's files, built once — what "our own starter file" means for a write. */
+let starterTemplateCache: Array<Record<string, string>> | null = null;
+function starterTemplates(): Array<Record<string, string>> {
+  if (starterTemplateCache) return starterTemplateCache;
+  const reg = new TemplateRegistry();
+  const out: Array<Record<string, string>> = [];
+  for (const key of reg.listFrameworks()) {
+    try { out.push(reg.getProvider(key).getFiles([])); } catch { /* a template that cannot list is skipped */ }
+  }
+  starterTemplateCache = out;
+  return out;
+}
 import { analyzeToolchain } from './toolchainPins';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from './appDefaults';
 import { APP_ENTRY_CANDIDATES, resolveAppDisplayName } from './appDisplayName';
@@ -3832,6 +3846,10 @@ export class ToolDispatcher {
         // still holds the file (autopsies e706e068, 31dc61fd and the 2026-08-11 import report). ONE
         // helper, shared by all four write doors: see `writeSteeringNotes` for why it is not inlined.
         const steeringNotes = await this.writeSteeringNotes({ [path]: content });
+        // Replacing our own untouched starter file is the job, not a risk (starterFragment.ts).
+        if (kind === 'modify' && isOurStarterFile(path, existingContent, starterTemplates())) {
+          return `Replaced the starter ${path} (${content.length} bytes).` + reviewNote + cascadeNote + testHint + steeringNotes + kitKeep.note + twinNote;
+        }
         if (kind === 'modify') {
           // write_file replaced an EXISTING file wholesale. For anything except a
           // deliberate full-rewrite, this risks silently dropping unrelated code.

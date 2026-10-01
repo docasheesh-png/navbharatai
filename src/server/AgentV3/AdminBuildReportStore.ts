@@ -406,8 +406,10 @@ export function buildAdminReportRecord(
       outcomeSeverity: severityOfOutcome(trimmed.issues),
       // Guarded field-by-field rather than spread: a legacy or malformed record must leave these
       // undefined ("not known"), never land a NaN that a later average would silently swallow.
-      etaRatio: Number.isFinite(Number(trimmed.etaAccuracy?.ratio)) ? Number(trimmed.etaAccuracy?.ratio) : undefined,
-      etaWithinBand: typeof trimmed.etaAccuracy?.withinBand === 'boolean' ? trimmed.etaAccuracy.withinBand : undefined,
+      // A build cut short before the band ended did not test the estimate (autopsy 19641ab5) — it is
+      // "not known", never a miss an average would count.
+      etaRatio: !trimmed.etaAccuracy?.untested && Number.isFinite(Number(trimmed.etaAccuracy?.ratio)) ? Number(trimmed.etaAccuracy?.ratio) : undefined,
+      etaWithinBand: !trimmed.etaAccuracy?.untested && typeof trimmed.etaAccuracy?.withinBand === 'boolean' ? trimmed.etaAccuracy.withinBand : undefined,
       etaEvidenced: typeof trimmed.etaAccuracy?.evidenced === 'boolean' ? trimmed.etaAccuracy.evidenced : undefined,
       // Already sanitised at the route boundary; sanitised again here so a direct caller (a test, a
       // future path) cannot write raw control characters into the admin table.

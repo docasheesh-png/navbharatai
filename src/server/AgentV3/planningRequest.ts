@@ -31,6 +31,14 @@
 //     builder shipped it. A question someone asked is conversation, never a spec. The lane that
 //     answered each turn is recorded in memory (`Episode.lane`); a turn older than that tag is kept
 //     only when the classifier does not read it as chat.
+//   • 🔴 and an attached PICTURE only when it is a UI design (autopsy 19641ab5, 2026-10-01). A user
+//     attached a portrait photo and typed "Create full image". The photo's description (hair, jewellery,
+//     clothes, light) was added here under "their content describes what to build", counted as ~11
+//     features, scored 83 and sent to the mega-app roadmap — for a request that was a picture. A
+//     picture describes an app only when it IS one (a screenshot, mockup or wireframe — the describer
+//     then returns a design contract); a photo of a person or a scene describes a subject. So the
+//     caller passes only what describes an app, and says how many pictures it set aside. The builder
+//     still receives every description in full; only the sizers stop reading a photo as a spec.
 // Kill switch: AGENTV3_PLANNING_CONTEXT=off returns the message alone — the pre-change behaviour.
 
 import { classifyIntentWithConfidence } from './IntentClassifier';
@@ -53,8 +61,13 @@ export type PlanningSource = 'attachment' | 'earlier-requests';
 export interface PlanningRequestInput {
   /** The user's message for this turn. */
   prompt: string;
-  /** Text extracted from files attached to THIS turn ('' when none). */
+  /**
+   * Text extracted from files attached to THIS turn that DESCRIBES AN APP ('' when none): documents, and
+   * pictures that are UI designs. A photo that is not a design is left out by the caller (see header).
+   */
   attachmentText?: string | null;
+  /** How many attached pictures the caller left out because they are not UI designs. For the report. */
+  picturesSetAside?: number;
   /** Earlier requests the caller vouches were BUILD requests, oldest → newest. */
   recentRequests?: readonly string[] | null;
   /**
@@ -72,6 +85,8 @@ export interface PlanningRequest {
   text: string;
   /** What was added beyond the message — empty when `text === prompt`. For the build report. */
   sources: PlanningSource[];
+  /** Attached pictures NOT read as a spec (photos, not UI designs). For the build report. */
+  picturesSetAside: number;
 }
 
 /**
@@ -100,7 +115,9 @@ function clip(s: string, max: number): string {
  */
 export function planningRequest(input: PlanningRequestInput): PlanningRequest {
   const prompt = typeof input.prompt === 'string' ? input.prompt : '';
-  if (!planningContextEnabled(input.env)) return { text: prompt, sources: [] };
+  if (!planningContextEnabled(input.env)) return { text: prompt, sources: [], picturesSetAside: 0 };
+  const setAside = Number(input.picturesSetAside);
+  const picturesSetAside = Number.isFinite(setAside) && setAside > 0 ? Math.floor(setAside) : 0;
 
   const parts: string[] = [prompt];
   const sources: PlanningSource[] = [];
@@ -129,11 +146,15 @@ export function planningRequest(input: PlanningRequestInput): PlanningRequest {
     }
   }
 
-  return { text: parts.join('\n\n'), sources };
+  return { text: parts.join('\n\n'), sources, picturesSetAside };
 }
 
 /** The admin line for `PLANNING_CONTEXT`. PURE. */
 export function planningContextNote(req: PlanningRequest, promptChars: number): string {
+  const aside = req.picturesSetAside > 0
+    ? ` ${req.picturesSetAside} attached picture(s) were not read as part of the request: they are photos, not UI designs, so their descriptions say what the picture shows, not what to build (the builder still sees them).`
+    : '';
+  if (req.sources.length === 0) return `Sized and planned from the message alone (${promptChars} characters).${aside}`;
   const what = req.sources.map((s) => (s === 'attachment' ? 'the attached file(s)' : 'the earlier requests in this conversation')).join(' and ');
-  return `Sized and planned from the message plus ${what} (${req.text.length} characters read, the message itself is ${promptChars}) — the same request the builder receives, so the complexity score, the ETA and the fast lane's file plan describe the app actually being built.`;
+  return `Sized and planned from the message plus ${what} (${req.text.length} characters read, the message itself is ${promptChars}) — the same request the builder receives, so the complexity score, the ETA and the fast lane's file plan describe the app actually being built.${aside}`;
 }

@@ -177,9 +177,20 @@ export function unevidencedEtaTickLine(
  * The report is the surface that must never be less honest than the screen (autopsy f04421ef), so it
  * states which of the two the user actually saw and why — a number, or the reason there wasn't one.
  */
-export function etaEvidenceNote(est: Pick<BuildEstimate, 'historyWeight' | 'basis'> & Partial<Pick<BuildEstimate, 'estimateMs' | 'lowMs' | 'highMs'>>): string {
+export function etaEvidenceNote(
+  est: Pick<BuildEstimate, 'historyWeight' | 'basis'> & Partial<Pick<BuildEstimate, 'estimateMs' | 'lowMs' | 'highMs'>>,
+  /**
+   * Whose past builds taught it. 🔴 Autopsy 19641ab5: an app with NO builds of its own was estimated from
+   * the platform's recent average, and this line still said "this workspace's own past builds" beside a
+   * basis line saying "No past builds of this app". The caller knows which history it passed in.
+   */
+  source: 'workspace' | 'platform' = 'workspace',
+): string {
   if (estimateIsEvidenced(est)) {
-    return `Shown as a number: ${Math.round(Number(est.historyWeight) * 100)}% of it comes from this workspace's own past builds (basis ${est.basis}).`;
+    const whose = source === 'platform'
+      ? 'NavBharatAI\'s recent builds of this kind (this app has none of its own yet)'
+      : 'this workspace\'s own past builds';
+    return `Shown as a number: ${Math.round(Number(est.historyWeight) * 100)}% of it comes from ${whose} (basis ${est.basis}).`;
   }
   const w = Number(est?.historyWeight);
   const band = roughEstimateBand(est as Pick<BuildEstimate, 'estimateMs' | 'lowMs' | 'highMs'>);

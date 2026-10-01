@@ -86597,3 +86597,56 @@ reversion-proven four ways):
 
 **Still open:** the trial's verdict (Q-008, waiting on data). `byStrictCohort` is in the Firestore day doc
 but has no admin card yet; read it from the usage report data until one is added.
+## 2026-10-01 — Autopsy 2b1f845e: a commit message is not a dev server, the sandbox's agent is not an app, our badge is not input
+
+**Session:** claude/new-session-gx9294. **Report:** build `2b1f845e`, Weak tier, edit turn, 19.1 min, ₹519.10 —
+"Fix all available issue and integration real api for payment, Design, posting" on a 40-file five-step studio app.
+The app ended rendered, typechecked, built and tested; every item below is how it got there, and what it left behind.
+
+### The chain that was one bug (Q-a, Q-b)
+After the model edited `vite.config.ts`, our auto-commit ran `git add -A && (git commit -q -m "edit vite.config.ts" || true)`.
+Split on `&&`/`||`, the second segment starts with `(` — and `ONE_SHOT_PREFIX` is anchored at the start, so the `(`
+hid the `git`, and the word "vite" in the COMMIT MESSAGE made the commit a dev-server launch. It took the managed boot
+(pinned to 5173, two "did not start" restarts — the 54-second command), the in-flight launch coalesced with the model's
+own `npm run server`, the sweep found 3000, and the launch log recorded **the commit** as the command that started the
+app: the stored revival recipe became `(git commit -q -m "edit vite.config.ts" || true)`. Same class as the heredoc fix
+(text that is data read as a command), a different door.
+Separately, `🧹 A previous app … was still serving on port 49983 … (old server stopped)` — 49983 is the sandbox's own
+agent. Our scan in the same build listed `22, 111, 3000, 9222, 49983`; FIVE private "not the app" port lists existed
+(PortDiscovery, devServerHost, previewSupersede, DevServerRecovery, lib/declaredAppPort), none knew 111/9222/49983, and
+they disagreed with each other. The preview flip visits every LISTENING port, so the agent could be adopted as "the app".
+
+### Fixes (DNA level)
+- `withoutGroupingPrefix` / `isOneShotSegment` (devServerHost): segments are judged without `(`/`{`/`!`; the launch log
+  uses the SAME classifier (`startsAServer` = `isLongRunningCommand`) and skips one-shot segments when picking the server.
+- `neverAppPorts.ts` — ONE list (sandbox machinery + data services); all five readers use it; `buildRecipe` and
+  `isUsableRecipe` refuse such a port (a poisoned stored recipe heals on read); supersede ignores it; the user's Ports
+  panel no longer shows the sandbox's machinery. Census test: no private port list, and `CDP_PORT` is in the list.
+- `withoutAppSignature` + `appOwnFiles` (journeyDerivation): the badge's × checkbox is never "the app takes input";
+  the no-journey reason names the real input (`src/steps/…`) instead of "nothing here takes user input".
+- bash: an empty `command` is an error that says so (5 calls had returned exit 0); a blank canonical argument no longer
+  hides a real value sent under an alias.
+- `shouldCheckDone(editingExistingApp)`: an edit is never told "✅ The app looks complete — wrapping up." from the
+  project score (the sibling 1389f0d5 left — its fix waited for the first write, which here was `.env.example` at 2.5 min).
+  READY_BEFORE_END says "Not measured" on an edit.
+- DB/auth templates (`DbConfigGenerator` ×4, `AuthCodeGenerator` supabase) never throw at import: a `…Configured` flag
+  plus a client whose every use throws the clear "not configured" message. In the report the model had to remove our
+  throw to boot the app and left a `{} as` cast the reviewer flagged. Executed in the test with stubbed packages.
+- `tscErrorCause` `void-result`: "Property 'x' does not exist on type 'void'" points at the callee (PostStep: 9 rewrites).
+- `npmVersionHint.ts` (`AGENTV3_NPM_VERSION_HINT=off` reverts): an ETARGET range gets the real latest version in the same
+  tool result, from one `npm view`.
+- System prompt: payments → `generate_payment`, India-first (Cashfree/Razorpay); Stripe only when named or abroad; never
+  hand-write a gateway. (The prompt line still read "Razorpay/Stripe" — Cashfree was added 2026-09-10 and never reached it.)
+- `paramOnlyMatch` (routerPaths): `browser_action` to a URL only a `:param` route serves says so (`/design` matched
+  `/:collectionId`; ~90 s and two loop-guard nudges).
+- `writeQualitySummary`: a flagged file this build never wrote is "not written by this build", not "never got a note".
+
+### Ledger
+Q-a ✅ commit classified as dev server · Q-b ✅ sandbox agent superseded/adoptable, 5 drifted lists · Q-c ✅ badge as input ·
+Q-d ✅ empty bash = exit 0 · Q-e ✅ "app looks complete" on an edit · Q-f ✅ templates crash at import · Q-g ✅ void-result
+loop · Q-h ✅ ETARGET guess · Q-i ✅ Stripe hand-written · Q-j ✅ /design param-route loop · Q-k ✅ untouched-file note blame ·
+Q-014 🟡 env-example vs code fallback port (decision) · Q-015 🟡 three warnings argued not defects (agreement) ·
+Q-016 OPEN journeys cannot reach state-switched forms (capability). All ✅ items locked in
+`tests/theCommitMessageWasNotADevServer.test.ts` (41 cases), each fix reverted-and-failed in the session.
+**Live effect to watch:** `PREVIEW_REVIVAL_RECIPE` details naming a real server command; no `🧹 … port 49983`; no
+"looks complete" narration on edit turns; `[version hint]` after an ETARGET.

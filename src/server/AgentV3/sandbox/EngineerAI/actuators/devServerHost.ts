@@ -1,3 +1,4 @@
+import { isNeverAppPort } from '../../../neverAppPorts';
 /**
  * Force a dev server to listen on 0.0.0.0 so it is reachable through the E2B
  * sandbox's external preview URL (e.g. `{port}-{id}.e2b.app`). A localhost-only
@@ -601,6 +602,30 @@ export function withoutHeredocBodies(command: string): string {
   return out.join('\n');
 }
 
+/**
+ * A segment without the shell grouping that opens it: `(`, `{`, `!` and their spacing.
+ *
+ * 🔴 WHY (autopsy 2b1f845e, 2026-10-01). After the model edited `vite.config.ts`, our own auto-commit
+ * ran `git add -A && (git commit -q -m "edit vite.config.ts" || true)`. Split on `&&`/`||`, the second
+ * segment is `(git commit -q -m "edit vite.config.ts" ` — and `ONE_SHOT_PREFIX` is anchored at the
+ * start, so the `(` hid the `git` that would have marked it one-shot. The word "vite" in the COMMIT
+ * MESSAGE then made the whole commit a dev-server launch: it took the managed boot (pre-kill, launch,
+ * port wait, sweep), the launch log recorded the commit as "the command that started the app", and
+ * the stored revival recipe became `(git commit -q -m "edit vite.config.ts" || true)` — a preview that
+ * could never be woken by replaying it. Every edit of a file named `vite.*` did this.
+ *
+ * The same class as the heredoc fix above (text that is DATA read as a command) through a different
+ * door. `(cd server && npm run dev)` still starts a server: its second segment is `npm run dev)`. PURE.
+ */
+export function withoutGroupingPrefix(segment: string): string {
+  return String(segment ?? '').replace(/^[\s({!]+/, '');
+}
+
+/** True when a segment's own first word marks it as a one-shot command (see ONE_SHOT_PREFIX). */
+export function isOneShotSegment(segment: string): boolean {
+  return ONE_SHOT_PREFIX.test(withoutGroupingPrefix(segment));
+}
+
 export function isLongRunningCommand(rawCommand: string): boolean {
   if (!rawCommand) return false;
   const command = withoutHeredocBodies(rawCommand);
@@ -618,7 +643,7 @@ export function isLongRunningCommand(rawCommand: string): boolean {
   // orphaned + reaped exactly like the original "Killed right after ready" bug, just via a different
   // code path. So: a one-shot-prefixed segment's OWN text is never checked for a dev-server pattern,
   // but every OTHER segment still is — the whole command is long-running if ANY of those matches.
-  const segments = command.split(/&&|\|\||;/);
+  const segments = command.split(/&&|\|\||;/).map(withoutGroupingPrefix);
   // A segment the agent BOUNDED with a short `timeout N` is a smoke test, not a server to manage —
   // see timeBoxedSeconds for the 103 seconds this cost on a command whose own output said the server
   // had started. Same shape as ONE_SHOT_PREFIX: a segment whose form proves it exits.
@@ -973,8 +998,7 @@ export function detectDevPort(output: string, fallback: number): number {
     || /UNHANDLED REJECTION|unhandledRejection|\bwarn(?:ing)?\b/i.test(line)
     || /failed to (?:connect|reach)|could not connect|connection refused/i.test(line);
 
-  /** Ports owned by datastores/infra — a dev server essentially never binds one. */
-  const INFRA_PORTS = new Set([5432, 3306, 27017, 6379, 5672, 9200, 11211, 1433, 9092, 2379]);
+  /** Ports owned by datastores or the sandbox itself — a dev server never binds one (neverAppPorts.ts). */
 
   // Tier 1 — an explicit "I am listening" announcement. High confidence.
   const STRONG: RegExp[] = [
@@ -1006,7 +1030,7 @@ export function detectDevPort(output: string, fallback: number): number {
         if (!(p >= 1 && p <= 65535)) continue;
         // A datastore port from a weak signal is almost certainly a connection string, not our server.
         // It is still honoured when it IS the port we asked for (the caller knows better than we do).
-        if (rejectInfra && INFRA_PORTS.has(p) && p !== fallback) continue;
+        if (rejectInfra && isNeverAppPort(p) && p !== fallback) continue;
         return p;
       }
     }

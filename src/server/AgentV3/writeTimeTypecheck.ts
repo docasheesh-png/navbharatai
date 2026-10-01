@@ -495,12 +495,19 @@ export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean, 
  * The admin line joining the write-time notes with the end-of-build lint. PURE; '' when neither side
  * has anything to say. `stillFlagged` = files the final lint still names for a label/design rule.
  */
-export function writeQualitySummary(noted: readonly string[], stillFlagged: readonly string[]): string {
+export function writeQualitySummary(noted: readonly string[], stillFlagged: readonly string[], writtenThisBuild?: Iterable<string>): string {
   const n = new Set(noted);
+  // 🔴 A FILE THIS BUILD NEVER WROTE CANNOT HAVE MISSED A WRITE-TIME NOTE (autopsy 2b1f845e). The edit
+  // turn never touched src/index.css — the previous build wrote it — and the line still said "1 never
+  // got a note (src/index.css)", reading as a hole in this build's checks. Omitted ⇒ the old two buckets.
+  const written = writtenThisBuild ? new Set(writtenThisBuild) : null;
+  const untouched = written ? stillFlagged.filter((f) => !written.has(f) && !n.has(f)) : [];
   const ignored = stillFlagged.filter((f) => n.has(f));
-  const neverNoted = stillFlagged.filter((f) => !n.has(f));
+  const neverNoted = stillFlagged.filter((f) => !n.has(f) && !untouched.includes(f));
   if (!n.size && !stillFlagged.length) return '';
   const names = (xs: readonly string[]) => (xs.length ? ` (${xs.slice(0, 4).join(', ')}${xs.length > 4 ? ', …' : ''})` : '');
   return `Write-time label/design notes went to ${n.size} file(s). At the end ${stillFlagged.length} file(s) were still flagged: `
-    + `${ignored.length} had been noted and not fixed${names(ignored)}, ${neverNoted.length} never got a note${names(neverNoted)}.`;
+    + `${ignored.length} had been noted and not fixed${names(ignored)}, ${neverNoted.length} never got a note${names(neverNoted)}`
+    + (untouched.length ? `, ${untouched.length} not written by this build${names(untouched)}` : '')
+    + '.';
 }

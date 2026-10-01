@@ -86328,3 +86328,30 @@ what lets it use its children's real props in one pass; on a healthy fast lane t
 after the entry. A further ~20–40 s there (painting before the stylesheet stage) is possible but entangled with the
 lane's CSS guards — recorded here, not attempted.
 **Open:** whether models actually follow the shell-first rule — watch when `src/App.tsx` is first written in admin reports.
+
+### 2026-10-01 — Autopsy 8257ca59 follow-up, and App Mart "My profile" becomes editable
+
+**Autopsy, the item the first pass left:** the green repair's `find . -maxdepth 3 …` handed the model dozens of
+`node_modules/` and `dist/` paths. `generatedListing.ts` takes those lines out of a shell LISTING (`find`,
+`ls -R`, `tree`, `du`) and says how many, the way `glob` already skips them; a command that names the folder is
+untouched. Test §8 in `tests/theThemeSwitchThatDidNotSwitch.test.ts`.
+
+**Admin ask:** *"app mart me 'my profile' par … naam etc dikhayi nahi de raha hai. wahi par edit button dedo! jo
+settings me profile edit kar sakte hai, wahi yaha bhi edit kar sake! photo bhi laga sake!!!"*
+
+- **Why the name was missing:** the account had no display name in its profile record or its sign-in record, so
+  App Mart showed the anonymous label "NavBharatAI creator". A photo needed a URL pasted in Settings.
+- **One editor (`ProfileEditForm.tsx`)** used by Settings → Profile and by "Edit profile" on your own App Mart
+  profile: display name, bio, phone (private), and a photo UPLOAD (cropped to a 320 px square JPEG in the
+  browser, `avatarImage.ts`). The App Mart profile now shows the bio.
+- **The photo is checked before it is public** (`profileAvatar.ts`): real bytes (JPEG/PNG/WebP, ≤300 KB), then a
+  one-word vision check (no Claude). Only a clear SAFE is saved; a check that cannot run refuses. Stored in
+  `profile_avatars/<creatorCode>`, served by `GET /api/app-mart/avatar/:creatorId` (versioned URL, long cache).
+- **Only vouched-for photos are shown to others** (`publicPhotoUrl`): our uploaded avatar or a Google/GitHub
+  sign-in picture. A URL pasted before uploads existed was never checked, so it is now shown only to its owner.
+- **Name and bio pass the comments' word list** on save; an older bio that fails it is not shown publicly.
+- **Fresh after an edit:** the profile route reads your own profile without the 10-minute cache, and a save drops
+  both caches on that server. ⚠️ Other Cloud Run instances can show the old name/photo for up to 10 minutes.
+- Erased with the account (`USER_SCOPED_COLLECTIONS`), named on the deletion page and in the Privacy Policy.
+- Tests: `tests/theProfileIsEditableWhereItIsSeen.test.ts`.
+- ⚠️ Phone users get the editor only with a fresh `.aab`/`.ipa` (bundled mode); the server half is live on deploy.

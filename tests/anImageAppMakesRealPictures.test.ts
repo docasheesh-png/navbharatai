@@ -28,7 +28,7 @@ function compile(files: Record<string, string>, dir: string): string[] {
   const base = join(TMP, dir);
   const names: string[] = [];
   for (const [p, content] of Object.entries(files)) {
-    if (!p.endsWith('.ts')) continue;
+    if (!/[.]tsx?$/.test(p)) continue;
     const full = join(base, p);
     mkdirSync(join(full, '..'), { recursive: true });
     writeFileSync(full, content);
@@ -39,6 +39,7 @@ function compile(files: Record<string, string>, dir: string): string[] {
     module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler,
     lib: ['lib.es2022.d.ts', 'lib.dom.d.ts', 'lib.dom.iterable.d.ts'],
+    jsx: ts.JsxEmit.ReactJSX,
     types: ['node'],
     strict: true,
     noEmit: true,
@@ -420,4 +421,43 @@ describe('6 · the builder reaches it', () => {
     expect(act.files.has('server/lib/imageAi.ts')).toBe(true);
     expect(act.files.has('src/lib/useImageGenerator.ts')).toBe(false);
   });
+});
+
+describe('7 · the AI image generator is the FIRST template (admin 2026-10-01: "sabse pahle … gst, todo uske baad")', () => {
+  it('both tiers open on AI image, then GST bill, then to-do', async () => {
+    const { partitionStarters, pickerSections } = await import('../src/components/agentv3/starterTemplates');
+    for (const unlocked of [false, true]) {
+      const first = pickerSections(partitionStarters(unlocked).tappable).initial.map((t) => t.id).slice(0, 3);
+      expect(first, unlocked ? 'paid' : 'free').toEqual(['ai-image', 'gst-bill', 'todo']);
+    }
+  });
+
+  it('the chip is a free-tier template, so every user can tap it', async () => {
+    const { STARTER_TEMPLATES } = await import('../src/components/agentv3/starterTemplates');
+    const chip = STARTER_TEMPLATES.find((t) => t.id === 'ai-image');
+    expect(chip?.tier).toBe('simple');
+    expect(appGeneratesImages(chip!.prompt)).toBe(true);
+  });
+
+  it('🔒 its golden scaffold runs the recipe\'s own engine, byte for byte — the two cannot drift', async () => {
+    const { GOLDEN_SCAFFOLDS, goldenScaffoldFiles, goldenScaffoldForPrompt } = await import('../src/server/AgentV3/goldenScaffolds/registry');
+    const { STARTER_TEMPLATES } = await import('../src/components/agentv3/starterTemplates');
+    const g = GOLDEN_SCAFFOLDS.find((s) => s.id === 'ai-image')!;
+    const files = goldenScaffoldFiles(g);
+    const recipe = generateImageAiIntegration({ server: false, react: true }).files;
+    expect(files['src/lib/imageAi.ts']).toBe(recipe['src/lib/imageAi.ts']);
+    expect(files['src/lib/useImageGenerator.ts']).toBe(recipe['src/lib/useImageGenerator.ts']);
+    expect(goldenScaffoldForPrompt(STARTER_TEMPLATES.find((t) => t.id === 'ai-image')!.prompt)?.id).toBe('ai-image');
+    expect(files['src/App.tsx']).not.toMatch(/pollinations/i);
+  });
+
+  it('the template compiles in the user\'s app under strict settings (real TypeScript)', () => {
+    const files: Record<string, string> = {
+      ...generateImageAiIntegration({ server: false, react: true }).files,
+    };
+    // App.tsx imports ./theme; a typed stub stands in for the platform's own theme toggle here.
+    files['src/theme.tsx'] = 'export default function ThemeToggle() { return null; }\n';
+    files['src/App.tsx'] = read('src/server/AgentV3/goldenScaffolds/aiImage.ts').split('export const aiImageAppTsx = `')[1]!.split('`;\n')[0]!;
+    expect(compile(files, 'template')).toEqual([]);
+  }, 60_000);
 });

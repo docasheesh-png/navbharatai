@@ -86108,3 +86108,16 @@ tail and the runner census.
 **Still open:**
 - Each repair pass's instruction is still persisted into the main conversation as a `user` turn. Whether a
   reopened session shows it as something the user typed was not checked here.
+
+**Same day, follow-up (admin: "hidden templates me sabse pahle 'AI image generator' … gst, todo uske baad"):**
+- New starter chip `ai-image` (simple tier, so free users can tap it). Its golden scaffold
+  (`goldenScaffolds/aiImage.ts`) holds only the screen; the engine files are the recipe's own output
+  (`aiImageEngineFiles()`), so the template and the builder cannot drift.
+- `pinOrder` on a template puts it ahead of the category order: AI image 1, GST bill 2, to-do 3, on both
+  tiers. Twelve chips stay on the first screen, so QR code (free) and Janam Kundali (paid, now un-featured to
+  keep ≤ 12 featured) moved behind "More templates".
+- The scaffold white-label test has one named exception: the template's `src/lib/imageAi.ts` may name
+  Pollinations (the admin's chosen engine); every other vendor stays forbidden there, and `App.tsx` names
+  nobody. Locked in `tests/anImageAppMakesRealPictures.test.ts` §7, including a real strict-TS compile of the
+  template's App.tsx, proven by reversion.
+

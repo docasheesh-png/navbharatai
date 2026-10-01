@@ -235,7 +235,7 @@ describe('7 · a stack we do not build is said out loud', () => {
     expect(unsupportedStackUserNote('PHP', 'vite-react')).toMatch(/You asked for \*\*PHP\*\*.*React \+ TypeScript/s);
     expect(unsupportedStackUserNote(null, 'vite-react')).toBe('');
     expect(ROUTE).toMatch(/unsupportedStackRequested\(prompt\)/);
-    expect(ROUTE).toMatch(/unsupportedStackUserNote\(unsupportedStackAsked, framework\)/);
+    expect(ROUTE).toMatch(/unsupportedStackUserNote\(unsupportedStackAsked, framework, result\.summary\)/);
   });
 });
 

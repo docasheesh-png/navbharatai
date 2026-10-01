@@ -392,6 +392,46 @@ export function singleSourceDeleteTargets(command: string): string[] {
   return out;
 }
 
+/**
+ * 🔴 THE FILES THAT MAKE THE PROJECT RUN (autopsy 042e472f, 2026-10-01). Asked for a Kotlin app, the builder
+ * decided the web starter "conflicts with the requested Gradle project" and removed it ONE FILE AT A TIME:
+ * `rm -f package.json`, `rm -f vite.config.ts`, `rm -f index.html`, the tsconfigs. Every guard above protects
+ * SOURCE CODE and deliberately allows a single delete by name, so not one of these was refused — and after
+ * them nothing could install, run, preview or package. Nothing a build ever needs is done by deleting the
+ * manifest: a new one is WRITTEN over the old. So these three are never deleted, one at a time or in bulk.
+ *
+ * `vite.config.*` is deliberately NOT here: swapping `vite.config.js` for `.ts` is a delete, and leaving the
+ * `.js` copy would shadow the new one. Only the ROOT copies count — `docs/index.html` is a page. PURE.
+ */
+const RUNTIME_MANIFESTS = new Set(['package.json', 'index.html', 'tsconfig.json']);
+
+export function runtimeManifestDeletionTarget(command: string): string | null {
+  for (const cmd of shellCommandVariants(command)) {
+    for (const seg of cmd.split(/[;&|\n()]+|&&|\|\||\bdo\b|\bthen\b/)) {
+      const m = /^(?:rm|unlink|git\s+rm)\s+(.+)$/i.exec(seg.trim());
+      if (!m) continue;
+      for (const raw of m[1].trim().split(/\s+/)) {
+        const p = cleanPathArg(raw).replace(/^\.\//, '');
+        if (RUNTIME_MANIFESTS.has(p)) return p;
+      }
+    }
+  }
+  for (const target of interpreterTreeRemovalTargets(command)) {
+    const p = target.replace(/^\.\//, '');
+    if (RUNTIME_MANIFESTS.has(p)) return p;
+  }
+  return null;
+}
+
+/** The refusal for deleting a runtime manifest. Pure. */
+export function runtimeManifestDeletionMessage(target: string): string {
+  return (
+    `[GOVERNANCE BLOCKED] Refused to delete "${target}" — it is what makes this project install, run, preview ` +
+    `and package as a phone app; without it nothing works. NavBharatAI builds this project in its own stack ` +
+    `(see the STACK NOTE if there is one). To change "${target}", write the new content over it — never delete it.`
+  );
+}
+
 /** The honest refusal for deleting a source file that other modules still import. Pure. */
 export function importedFileDeletionMessage(target: string, importers: readonly string[]): string {
   const shown = importers.slice(0, 5);

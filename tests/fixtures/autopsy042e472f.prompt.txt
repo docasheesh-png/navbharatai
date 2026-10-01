@@ -1,0 +1,129 @@
+Create a production-ready Android app named "JARVIS AI".
+
+Goal:
+Build a personal AI voice assistant for Android, inspired by a futuristic JARVIS-style assistant.
+
+Technology:
+- Kotlin
+- Jetpack Compose
+- Modern Android architecture
+- Material 3
+- Android permissions handled properly
+- Clean, modular and maintainable code
+
+Main features:
+
+1. VOICE ASSISTANT
+- Microphone button on the main screen.
+- Speech-to-Text for voice commands.
+- Support Hindi, Hinglish and English commands.
+- Show the recognized command on screen.
+- Text-to-Speech response.
+- Assistant should respond naturally.
+
+2. AI CHAT
+- AI conversation screen.
+- User messages and JARVIS responses.
+- Conversation history stored locally.
+- Typing/loading animation while AI is responding.
+- Handle API errors gracefully.
+
+3. JARVIS COMMANDS
+Implement command recognition for:
+- Open YouTube
+- Open Chrome
+- Open Google
+- Open Maps
+- Open Settings
+- Open installed apps when Android allows it
+- Show battery percentage
+- Show device information
+- Tell current time/date
+- Set alarm
+- Create reminder
+- Make phone call after explicit user confirmation
+- Send SMS after explicit user confirmation
+
+4. SAFETY
+- Never make a phone call or send SMS silently.
+- Ask the user for confirmation before sensitive actions.
+- Request Android permissions only when required.
+- Respect Android background execution and microphone restrictions.
+- Do not attempt to bypass Android security restrictions.
+
+5. UI
+Create a futuristic JARVIS interface:
+- Dark background
+- Glowing blue/cyan elements
+- Central animated AI orb
+- Microphone button
+- Voice waveform animation
+- Assistant status: Listening / Thinking / Speaking
+- Chat history
+- Modern animations
+- Responsive design
+
+6. HOME SCREEN
+Display:
+"JARVIS AI"
+"Your Personal AI Assistant"
+
+Include:
+- AI orb
+- Start Listening button
+- Text command input
+- Recent conversation
+- Battery status
+- Current time
+
+7. SETTINGS
+Include:
+- Assistant name
+- User name
+- Language
+- Voice speed
+- Voice pitch
+- Text-to-Speech enable/disable
+- Dark theme
+- AI API configuration
+- Clear conversation history
+
+8. ARCHITECTURE
+Use:
+- MVVM
+- Repository pattern where appropriate
+- ViewModel
+- StateFlow
+- Coroutines
+- Separate modules/classes for:
+  Voice recognition
+  Text-to-Speech
+  AI communication
+  Command processing
+  App launching
+  Device information
+  Alarm/reminders
+  Conversation storage
+
+9. IMPORTANT
+Generate all required files:
+- settings.gradle.kts
+- build.gradle.kts
+- app/build.gradle.kts
+- AndroidManifest.xml
+- Kotlin source files
+- Compose UI files
+- Resources
+- Themes
+- Icons/placeholders if required
+
+The project must compile in Android Studio.
+
+Do not leave pseudocode or TODO placeholders for core functionality.
+
+At the end:
+- Show complete project structure.
+- Explain where to put any API key.
+- Explain required permissions.
+- Explain how to build the APK.
+- Explain how to install the APK on an Android phone.

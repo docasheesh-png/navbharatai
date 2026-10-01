@@ -3123,6 +3123,16 @@ the flag entries above promise.
   three sinks shipped with a warning nobody acted on. Advisory, never blocks a write, no model call.
   Same PR, no flag: an `nb-` class the design kit does not define and no stylesheet defines is named at
   write time too (`inventedKitClassNote`).
+- **🖥️ `AGENTV3_EARLY_PREVIEW` — THE USER SEES THE APP WHILE IT IS BEING BUILT (admin 2026-10-01, verbatim: *"preview
+  jitna jaldi ayega, user utna rukega.... banao"*). ⚠️ NOT set; default ON; `off` reverts all four parts.**
+  `earlyPreview.ts`. In the calendar report the builder wrote five screens and never `src/App.tsx`, so the live preview
+  showed the starter page for five minutes and the user stopped. The architect and the UI specialists now write the
+  entry right after `src/types.ts`; a fast-lane hand-off names an unwritten entry first; while a build runs the
+  in-browser preview (`ReactPreview.ts`, `building`) draws an unwritten screen as a "being built" card and reports no
+  missing file as an error (the honest banner returns after the build); and the live strip offers "watch it live" once
+  the entry is written (`earlyPreviewCue.ts`; a desktop opens the preview itself). 🔒 Only a capitalised import becomes
+  a card — a missing helper keeps the empty stub. The fast lane's tier order is deliberately unchanged. Test-locked
+  with a real-browser render in `tests/theAppIsOnScreenWhileItIsBuilt.test.ts`.
 - **🙋 `AGENTV3_ASK_UNRELATED` — A DIFFERENT APP IS ASKED ABOUT, NOT BUILT INTO THE ONE THAT IS HERE (admin
   2026-09-30, verbatim: *"puch lo user se!"*, on autopsy 1389f0d5: a Genesis-4 PDF was built INTO a calculator).
   ⚠️ NOT set; default ON; `off` restores the old edit-always behaviour.** `unrelatedRequest.ts`. A build order on

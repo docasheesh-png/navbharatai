@@ -86212,3 +86212,34 @@ two-ended erase.
   more sees the newest 300's apps.
 - Phone users get all of this only with a fresh `.aab`/`.ipa`. Admin instruction: build them only AFTER every open
   PR is merged.
+
+## 2026-10-01 — Early preview: the user sees the app while it is being built (admin: "preview jitna jaldi ayega, user utna rukega.... banao")
+
+**Evidence (calendar report 120eb52f / b4901ce5):** nine minutes over two builds and the user never saw the app.
+Build 1: the fast lane salvaged 5 foundation files at 141 s; the full builder then wrote CalendarPage, Header, DayCell,
+AddEventModal and a hook — and never `src/App.tsx`, so the live preview showed the starter page until the user stopped
+at 295 s. Build 2 rewrote App.tsx at ~180 s; the user stopped at 214 s, one second after "the app looks complete".
+
+**Root cause — an order, not a speed.** The preview has re-rendered on every write since streaming first paint, but a
+React app shows nothing of a screen until its ENTRY renders it, and the entry was written last on both lanes.
+
+**Fixed (`AGENTV3_EARLY_PREVIEW`, default ON, `off` reverts all of it):**
+- The architect and the UI specialists (frontend/fullstack/mobile) are told to write the entry right after
+  `src/types.ts`, with the screens it is about to write imported (`earlyPreview.ts` `shellEarlyRule`). The write-time
+  typecheck already routes "cannot find module" to the file that fixes it, so this costs no repair turn.
+- A fast lane that stopped before its entry hands it over by name (`entryFirstHandoffLine`, both hand-offs).
+- In-browser preview while a build runs (`ReactPreview.ts`, `building`): an unwritten screen (capitalised name) is a
+  "⏳ X is being built…" card; a missing lowercase helper keeps the empty stub; neither is reported as an error. After
+  the build the honest "Missing file" banner is back. The client sends `building` and re-renders once when the build ends.
+- The live strip shows "▶ Your app is on screen — watch it live" once THIS build writes the entry
+  (`earlyPreviewCue.ts`, `entryWrittenAt` in the reducer); on a desktop the preview opens by itself at that moment
+  instead of waiting for a dev-server URL.
+
+Tests: `tests/theAppIsOnScreenWhileItIsBuilt.test.ts` (16), including a real-browser render (vendored React,
+skipped in CI) — reversion-proven by disabling the card.
+
+**Not changed, said plainly:** the fast lane's own tier order. Its entry is still generated last, because that is
+what lets it use its children's real props in one pass; on a healthy fast lane the whole app lands at once seconds
+after the entry. A further ~20–40 s there (painting before the stylesheet stage) is possible but entangled with the
+lane's CSS guards — recorded here, not attempted.
+**Open:** whether models actually follow the shell-first rule — watch when `src/App.tsx` is first written in admin reports.

@@ -2487,7 +2487,10 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //   1× the STYLESHEET DEDUPE (autopsy 33812996, 2026-09-30) — inside the
     //      `AGENTV3_CSS_IMPORT_GUARD !== 'off' && !isImportTurn` block, through writeUnlessFrozen; it only
     //      removes a duplicate side-effect css import the entry already covers. Considered ✓.
-    expect(count).toBe(28);
+    //   1× the DANGLING-STYLESHEET guard (autopsy 120eb52f, 2026-09-30) — gated on `expectsArtifacts`
+    //      (false on every import/survey turn), so it never writes on a read-only turn. It removes only a
+    //      side-effect import of a sheet the sandbox confirms absent. Kill switch `AGENTV3_DANGLING_CSS_GUARD`.
+    expect(count).toBe(29);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

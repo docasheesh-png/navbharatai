@@ -6,6 +6,7 @@
 // finishes. The specialist roster (the "AI team") is injected from the
 // AgentRegistry so the Architect always delegates by real, current capability.
 
+import { shellEarlyRule } from './earlyPreview';
 import { HANDOFF_MECHANICAL_FIX_RULE } from './handoffRule';
 import { rosterBriefing } from './AgentRegistry';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
@@ -651,6 +652,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '      files that import it. NEVER import a type from `App.tsx` or from a file you have',
     '      not written yet — the root imports its children, so a child importing from the',
     '      root fails to compile until the root is rewritten.',
+    ...shellEarlyRule(),
     '    • Add defensive guards (null/undefined checks, sensible defaults, try/catch at',
     '      I/O and async boundaries) so missing data degrades instead of crashing.',
     '    • No fragile magic: avoid hidden ordering dependencies, side effects on import,',

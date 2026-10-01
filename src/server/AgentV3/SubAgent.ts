@@ -14,6 +14,7 @@ import { catalogForTools } from './ToolCatalog';
 import { agentLifecycle } from './AgentLifecycle';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { DESIGN_KIT_BRIEF } from './systemPrompt';
+import { shellEarlyRule, writesTheEntry } from './earlyPreview';
 import { NO_EVAL_RULE, NO_FAKED_RESULT_RULE } from './noEvalRule';
 import { stylesheetCarriesKit } from './kitRestore';
 import type { AgentRole, ToolName } from './types';
@@ -397,6 +398,13 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     // The two coding rules both prompts carry (noEvalRule.ts) — a writing specialist writes the same
     // feature code the architect would, so it gets them too (autopsy a9f8d186: a faked recogniser).
     if (roleExpectsArtifacts(cfg.tools)) contextBlocks.push(`${NO_EVAL_RULE}\n${NO_FAKED_RESULT_RULE}`);
+    // 🖥️ THE ENTRY FIRST (earlyPreview.ts): a specialist that writes the UI is the one that writes the
+    // entry, so it is told the same order the architect is — the user's live preview has nothing to
+    // show until the entry renders.
+    if (roleExpectsArtifacts(cfg.tools) && writesTheEntry(role)) {
+      const rule = shellEarlyRule();
+      if (rule.length > 0) contextBlocks.push(rule.map((l) => l.trim()).join('\n'));
+    }
     if (roleExpectsArtifacts(cfg.tools)) {
       try {
         const raw = await deps.actuator.readFile(deps.workspaceId, 'src/index.css');

@@ -4102,6 +4102,9 @@ the flag entries above promise.
   - A list of a hand-written record's own field (`topic.sections`) is no longer a "data list" (`recordFieldLiteral`).
   - Every engine-authored user turn is stamped `origin: 'platform'` on its persisted copy (`pushPlatformTurn`), so a
     reopened chat never shows a repair instruction as the user's own message.
+  - **Q-037 / Q-022 (admin chose option b):** it also carries spacing off the 4px grid, but only in files THIS
+    agent wrote (`offGridHandBack`) and only above the `DESIGN_CONSISTENCY` finding's own threshold. A file the
+    build never touched is not handed back (Q-015). Test: `tests/offGridSpacingIsHandedBack.test.ts`.
 - **🖼️ `AGENTV3_PICTURE_ANSWER` — A PICTURE REQUEST IN PRO IS ANSWERED, NOT BUILT (autopsy 19641ab5, 2026-10-01).
   ⚠️ NOT set; default ON; `off` builds as before.** `pictureRequest.ts`. "Create full image" + a portrait photo was
   built as an 11-feature image-generator app (stopped at 108 s, ₹7.62). Free chat, Doctor AI and every Professional

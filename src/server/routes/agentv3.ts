@@ -10937,9 +10937,8 @@ async function noteBuildOutcome(
             'chatRouter.route',
           ).catch((err: unknown) => {
             // A turn whose whole point is NOT building must never fall through to a build.
-            if (answerProjectElsewhere) return null;
+            if (answerProjectElsewhere || answerPictureRequest) return null;
             if (askUnrelated) return null;
-            if (answerPictureRequest) return null;
             throw err;
           });
           const response = routed?.response;

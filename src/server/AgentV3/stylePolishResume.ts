@@ -51,6 +51,8 @@ export interface StyleResumeInput {
   pages?: ReadonlyArray<{ file: string; defects: ReadonlyArray<DesignDefect> }>;
   resumesUsed: number;
   env?: NodeJS.ProcessEnv;
+  /** This run already wrote the screens — a closing question is an offer, not a decision (see unfinishedResume.ts). */
+  producedFiles?: boolean;
 }
 
 export interface StyleResumeDecision {
@@ -67,7 +69,7 @@ export function decideStyleResume(input: StyleResumeInput): StyleResumeDecision 
   if (missing.length === 0 && pages.length === 0) return { resume: false, message: '', standDown: 'nothing-missing' };
   if (input.resumesUsed >= MAX_STYLE_RESUMES) return { resume: false, message: '', standDown: 'limit' };
   if (turnDeclined(input.text)) return { resume: false, message: '', standDown: 'declined' };
-  if (turnAskedTheUser(input.text)) return { resume: false, message: '', standDown: 'asked-the-user' };
+  if (!input.producedFiles && turnAskedTheUser(input.text)) return { resume: false, message: '', standDown: 'asked-the-user' };
   const sheet = String(input.sheet ?? '').trim() || 'src/index.css';
   const parts: string[] = [];
   if (missing.length) {

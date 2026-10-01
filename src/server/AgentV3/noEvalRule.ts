@@ -49,6 +49,21 @@ export const STABLE_SNAPSHOT_RULE =
   'array/object inside it (no sort/filter/map/spread per call); keep the derived value cached in the store and replace it only on writes.';
 
 /**
+ * CORS AND SEED PASSWORDS, WRITTEN RIGHT THE FIRST TIME (autopsy 6461025c, 2026-10-01). The build's one
+ * release-gate blocker was `cors({ origin: true, credentials: true })` — any website could make
+ * authenticated requests with the user's cookies — in an app whose Vite dev server already proxies
+ * `/api` to the same origin and needs no CORS at all. The same build seeded its demo users with password
+ * hashes typed in as literals that matched no password, so its own login failed and a minute went to
+ * recomputing them with `node -e`. Shared by both lanes, like the rules above.
+ */
+export const CORS_RULE =
+  '- CORS: a frontend that calls its own backend through the dev-server proxy (/api) is same-origin and needs NO CORS. ' +
+  'When CORS is genuinely needed, `origin` is an explicit allow-list (read from an env var), never `true` or "*" together with `credentials: true`.';
+export const SEED_PASSWORD_RULE =
+  '- Seed/demo users: compute each password hash at startup with the app\'s own hash function (e.g. `passwordHash: hashPassword(\'demo123\')`) — ' +
+  'never paste a hash string as a literal, and state the demo login in your reply.';
+
+/**
  * NEVER FAKE A FEATURE'S RESULT (autopsy 33812996, 2026-09-30). Asked for a Circle to Search app with
  * music recognition, screen translation, AI overview and multi-engine search, the build shipped a song
  * "recognised" by `MOCK_DB[Math.random() * MOCK_DB.length]`, a translator returning `[Translated to hi]: …`,

@@ -1,3 +1,4 @@
+import { NOT_READY_HEADLINE, NOT_READY_HEADLINE_CONTINUE } from './notReadyHeadline';
 import type { AgentEventStream } from './AgentEventStream';
 import { isStarterBlocker, starterSummary } from './stillTheStarterApp';
 import type { WorkspaceState } from './WorkspaceState';
@@ -27,7 +28,7 @@ import { isBuildStoppedError } from './stopSignal';
 import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
 import { decideBuildNudge, standDownNote } from './nudgeToBuild';
-import { decideUnfinishedResume, unfinishedResumeNote } from './unfinishedResume';
+import { decideUnfinishedResume, unfinishedResumeStandDownNote, unfinishedResumeNote } from './unfinishedResume';
 import { decideStyleResume, styleResumeNote } from './stylePolishResume';
 import { asPlatformRequest } from './platformRequest';
 import { streamThinkingToChat } from './thinkingStream';
@@ -392,6 +393,14 @@ export interface AgentRunResult {
    *  build can be continued — a fresh run gets a fresh budget window). Lets the client show an honest
    *  "budget reached — continue" state instead of a hard failure. */
   budgetReached?: boolean;
+  /**
+   * The model's own closing words, kept when the readiness gate replaced them with the platform's
+   * not-ready headline (`NOT_READY_HEADLINE`). A later proof that the app works (the route's render
+   * rescue) must hand the user THESE words back — not leave our "isn't fully working" sentence on a
+   * build it has just upgraded to success and charged for (autopsy 6461025c). Absent ⇒ the summary
+   * is already the model's own.
+   */
+  modelAnswer?: string;
   /**
    * The run stopped ONLY because it hit the wall-clock cap (`buildTimedOut`, AGENTV3_MAX_BUILD_SECONDS).
    *
@@ -950,6 +959,7 @@ export class AgentRunner {
           // WHITE-LABEL LAW: the honest sentence names OUR limit, never a vendor, a model or a ceiling
           // the user cannot act on. "The model replied without building" was false here in the one way
           // that matters — nothing replied — and it is the sentence that sent the user to buy credits.
+          let modelAnswer: string | undefined;
           let summary = builtNothing
             ? (starvedTurn
                 ? 'The build could not start writing files: NavBharatAI\u2019s engine ran out of room to answer before it began. '
@@ -990,7 +1000,7 @@ export class AgentRunner {
                 // SCREENS THAT USE CLASSES NO STYLESHEET DEFINES ARE HANDED BACK ONCE, while the model still
                 // holds them (autopsy 1be16985 — 63 undefined classes, then a 174 s fresh-context repair).
                 const style = await dispatcher.undefinedClassesNow();
-                const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, resumesUsed: styleResumes });
+                const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, resumesUsed: styleResumes, producedFiles: producingToolUses > 0 });
                 if (decision.resume) {
                   styleResumes++;
                   try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`)].join(' ') }); } catch { /* a note must never fail a build */ }
@@ -1003,7 +1013,9 @@ export class AgentRunner {
                 // AND ANOTHER TURN (autopsy 121c2431 — the build ended FAILED with 1,418 s of budget
                 // unspent). Never after a refusal or a question to the user; at most twice. See
                 // unfinishedResume.ts.
-                const resume = decideUnfinishedResume({ text: turn.text, blockers: readiness.blockers, resumesUsed: unfinishedResumes });
+                const resume = decideUnfinishedResume({ text: turn.text, blockers: readiness.blockers, resumesUsed: unfinishedResumes, producedFiles: producingToolUses > 0 });
+                const standDownNote = resume.resume ? null : unfinishedResumeStandDownNote(resume.standDown, readiness.blockers.length);
+                if (standDownNote) { try { this.opts.onNote?.({ code: 'UNFINISHED_RESUME_STOOD_DOWN', message: standDownNote, detail: readiness.blockers.slice(0, 5).join(' | ') }); } catch { /* a note must never fail a build */ } }
                 if (resume.resume && !this.opts.signal?.aborted) {
                   unfinishedResumes++;
                   try { this.opts.onNote?.({ code: 'UNFINISHED_BUILD_RESUMED', message: unfinishedResumeNote(unfinishedResumes, readiness.blockers.length), detail: readiness.blockers.slice(0, 5).join(' | ') }); } catch { /* a note must never fail a build */ }
@@ -1035,7 +1047,8 @@ export class AgentRunner {
                   // (autopsy 0d297b25: it had correctly found the project was never in the workspace).
                   summary = starterSummary(turn.text);
                 } else {
-                  summary = `⚠️ This app isn't fully working yet — a couple of things still need fixing before it's ready to use.`;
+                  if (turn.text.trim()) modelAnswer = turn.text.trim();
+                  summary = NOT_READY_HEADLINE;
                 }
               }
             } catch { /* gate is best-effort — a scan error never fails a real build */ }
@@ -1090,7 +1103,7 @@ export class AgentRunner {
           if (ok) summary = `${summary}${missingFeatureNotice(buildHealth?.warnings)}`;
           await persist(ok ? 'complete' : 'error');
           events.emit({ type: 'done', ok, summary, ts: Date.now(), ...(buildHealth ? { readiness: buildHealth } : {}) });
-          return { ok, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}) };
+          return { ok, summary, steps, usage, billedUsd: billed(), ...(readyMark ? { readyAt: readyMark } : {}), ...(!ok && modelAnswer ? { modelAnswer } : {}) };
         }
         totalToolUses += turn.toolUses.length;
         producingToolUses += turn.toolUses.filter(toolUseCouldProduceWork).length;
@@ -1365,7 +1378,7 @@ export class AgentRunner {
               // admin report; AGENTV3_VERBOSE_READINESS=on restores the detailed line for debugging.
               summary = (process.env.AGENTV3_VERBOSE_READINESS ?? '').trim().toLowerCase() === 'on'
                 ? `Step limit reached (${stepCap}) — and the build is NOT ready (score ${readiness.score}/100).${readiness.blockers.length ? ` Must fix: ${readiness.blockers.join('; ')}.` : ''}`
-                : `⚠️ This app isn't fully working yet — a couple of things still need fixing. Send another message and I'll keep going.`;
+                : NOT_READY_HEADLINE_CONTINUE;
               // ENDGAME REPAIR (QuizArena autopsy 2026-07-17, Slice 1): the builder died grinding the
               // last compile errors ONE per 4-5 step round-trip. Fix them OUTSIDE the step loop —
               // deterministic tsc-error fixers first (unused imports, import/export drift — pure code,

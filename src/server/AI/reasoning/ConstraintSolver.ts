@@ -11,6 +11,8 @@
 // complex or multi-major ranges (`>=16 <19`, `a || b`) are treated as "unknown" and never flagged. Pure
 // and deterministic — no registry, no guessing.
 
+import { shipsOwnTypes } from '../../lib/selfTypedPackages';
+
 export type ConflictKind = 'react-dom-mismatch' | 'duplicate-version-conflict' | 'types-mismatch';
 export type ConflictSeverity = 'high' | 'medium' | 'low';
 
@@ -103,6 +105,15 @@ export function analyzeDependencyConstraints(files: Record<string, string>): Con
       if (runtime === undefined || runtime === null) continue;
       const tMajor = dominantMajor(deps[name]);
       const rMajor = dominantMajor(runtime);
+      // A package that ships its own types needs no @types copy at all (autopsy a106df77) — say so,
+      // rather than "the versions don't match", which suggests a matching major that does not exist.
+      if (shipsOwnTypes(target, rMajor)) {
+        conflicts.push({
+          kind: 'types-mismatch', severity: 'low', package: name, file: path,
+          detail: `${target} ships its own type definitions, so ${name} is an outdated copy — remove it (npm uninstall ${name}).`,
+        });
+        continue;
+      }
       if (tMajor !== null && rMajor !== null && tMajor !== rMajor) {
         conflicts.push({
           kind: 'types-mismatch', severity: 'low', package: name, file: path,

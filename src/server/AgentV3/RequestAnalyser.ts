@@ -191,7 +191,7 @@ function classify(raw: string): { type: TaskType; matched: boolean } {
   // A link is not words: `translate.google.com` is not an order to translate (a9f8d186 / 33812996). Two sessions
   // fixed this class in parallel — `withoutUrls` (promptUrls.ts) and the shared `withoutMachineText`
   // (lib/machineText.ts); both run so neither PR's guarantee is weakened.
-  const p = withoutMachineText(withoutUrls(raw));
+  const p = withoutMachineText(withoutUrls(raw), { keepPasted: true });
   // Order matters: most-specific / highest-complexity wins when multiple match.
   if (RE.architecture.test(p)) return { type: 'architecture', matched: true };
   // SHARED complex-app verdict (single source of truth with the pipeline-DEPTH/ETA estimator, so the
@@ -605,7 +605,7 @@ export function rankFeatures(prompt: string): FeatureRanking {
  */
 export function analyzeRequest(input: AnalyserInput): AnalysisResult {
   // Read without machine text: a pasted link is neither request size nor request words (autopsy 33812996).
-  const prompt = withoutMachineText((input?.prompt ?? '').toString(), { drop: true });
+  const prompt = withoutMachineText((input?.prompt ?? '').toString(), { drop: true, keepPasted: true });
   const p = prompt.toLowerCase();
   const detected = detectTaskType(p);
   /**
@@ -752,7 +752,7 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
   // Intelligent Scoping (Phase B): rank features by priority for checkpoint loop.
   // Only rank for app builds (not chat/coding) to avoid noise.
   const features = (taskType === 'simple_app' || taskType === 'complex_app')
-    ? rankFeatures(prompt)
+    ? rankFeatures(withoutMachineText((input?.prompt ?? '').toString(), { drop: true })) // features are the user's WORDS, never a pasted file's code
     : undefined;
 
   return {

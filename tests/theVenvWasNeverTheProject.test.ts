@@ -153,10 +153,12 @@ describe("2 · a journey starts where the app's own router puts the form", () =>
     }
   });
 
-  it('a relative (nested) child path is not guessed, and neighbouring routes never bleed', () => {
+  it('a relative (nested) child path is joined to its parent, and neighbouring routes never bleed', () => {
+    // Until autopsy a106df77 this returned null ("a wrong URL is worse than the heuristic"), which sent
+    // the journey to `/`. The parent is in the same file, so the URL is not a guess: routerPaths.ts.
     const page = 'src/pages/NewNovel.tsx';
     const nested = "import NewNovel from './pages/NewNovel';\n<Route path=\"/app\" element={<Layout />}><Route path=\"new\" element={<NewNovel />} /></Route>";
-    expect(routeFromRouter(page, { [page]: NEW_NOVEL_FORM, 'src/App.tsx': nested })).toBeNull();
+    expect(routeFromRouter(page, { [page]: NEW_NOVEL_FORM, 'src/App.tsx': nested })).toBe('/app/new');
     // Home's path must not be attributed to the page declared after it.
     expect(routeFromRouter('src/pages/Home.tsx', files)).toBe('/');
     expect(routeFromRouter('src/pages/Workspace.tsx', files)).toBe('/workspace/:novelId');

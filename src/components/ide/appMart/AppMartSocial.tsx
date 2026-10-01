@@ -7,6 +7,8 @@
 //  • LikersSheet      — who liked the app. Only its creator can open it; the server enforces that too.
 //                       There is no dislikers sheet — nobody may see who disliked.
 //  • ProfileSheet     — a person's name, photo and the apps they have on App Mart. Never an email.
+//  • FollowButton     — follow a creator (2026-10-01). The follower NUMBER is public; who follows is
+//                       the creator's alone (FollowersSheet), the same split as likes.
 //  • CommentReportsAdmin — the admin's queue of reported comments.
 //
 // Colours are theme TOKENS only (tests/themeTokensOnly.test.ts): a new file has a literal baseline of 0.
@@ -15,12 +17,13 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ThumbsUp, ThumbsDown, MessageCircle, Loader2, Flag, Trash2, UserX, Reply, MoreHorizontal, X,
-  Heart, Store, Globe, Package, Send, ShieldCheck,
+  Heart, Store, Globe, Package, Send, ShieldCheck, UserPlus, UserCheck,
 } from 'lucide-react';
 import {
   type Reaction, type SocialCounts, type PublicComment, type PublicPerson, type Profile, type CommentReportRow,
   NO_COUNTS, fetchComments, postComment, removeComment, reportComment, setBlocked, fetchLikers,
   fetchProfile, fetchCommentReports, keepComment, askToSignIn, useSignedIn, SocialError,
+  setFollow, fetchFollowState, fetchFollowers,
 } from './appMartSocialApi';
 import { compactCount, timeAgo, initialOf } from './socialFormat';
 
@@ -429,13 +432,110 @@ export function LikersSheet({ appKey, appName, onClose, onOpenProfile }: {
   );
 }
 
+/**
+ * Follow / Following. Pressing it signed out asks for a sign-in; on your own profile it is not drawn.
+ * `initial` skips the lookup when the caller already knows the state (the profile sheet does).
+ */
+export function FollowButton({ creatorId, initial, onChange, compact = false }: {
+  creatorId: string;
+  initial?: { following: boolean; isMe: boolean };
+  onChange?: (state: { following: boolean; followers: number | null }) => void;
+  compact?: boolean;
+}) {
+  const signedIn = useSignedIn();
+  const [state, setState] = useState<{ following: boolean; isMe: boolean } | null>(initial ?? null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  useEffect(() => {
+    if (initial) { setState(initial); return; }
+    let live = true;
+    fetchFollowState(creatorId).then((d) => { if (live) setState({ following: d.following, isMe: d.isMe }); }).catch(() => { /* drawn as Follow */ });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creatorId, signedIn, initial?.following, initial?.isMe]);
+
+  if (!creatorId || state?.isMe) return null;
+  const following = state?.following === true;
+
+  const press = async () => {
+    if (!signedIn) { askToSignIn(); return; }
+    if (busy) return;
+    if (following && !window.confirm('Unfollow this creator? Their new apps will no longer appear in your Following view.')) return;
+    setBusy(true); setNote('');
+    try {
+      const r = await setFollow(creatorId, !following);
+      setState((st) => ({ isMe: st?.isMe ?? false, following: r.following }));
+      onChange?.(r);
+    } catch (e) {
+      if (e instanceof SocialError && e.needsSignIn) askToSignIn();
+      else setNote(e instanceof Error ? e.message : 'That did not work.');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <span className="inline-flex flex-col items-center">
+      <button
+        type="button"
+        onClick={() => void press()}
+        disabled={busy}
+        aria-pressed={following}
+        className={`inline-flex items-center gap-1.5 rounded-lg font-semibold transition-colors disabled:opacity-50 ${compact ? 'px-2.5 py-1 text-[11px]' : 'px-4 py-1.5 text-xs'} ${
+          following ? 'border border-line text-body hover:bg-raised' : 'bg-accent text-on-accent hover:opacity-90'
+        }`}
+      >
+        {busy ? <Loader2 size={compact ? 11 : 13} className="animate-spin" /> : following ? <UserCheck size={compact ? 11 : 13} /> : <UserPlus size={compact ? 11 : 13} />}
+        {following ? 'Following' : 'Follow'}
+      </button>
+      {note && <span className="text-[10px] text-warn mt-1 max-w-[14rem] text-center">{note}</span>}
+    </span>
+  );
+}
+
+/** Who follows you — your eyes only. Everyone else sees a number, never this list. */
+export function FollowersSheet({ onClose, onOpenProfile }: { onClose: () => void; onOpenProfile: (creatorId: string) => void }) {
+  const [data, setData] = useState<{ followers: Array<PublicPerson & { at: number }>; counts: { followers: number; following: number } | null } | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    fetchFollowers().then(setData).catch((e) => setError(e instanceof Error ? e.message : 'Could not load your followers.'));
+  }, []);
+  const now = Date.now();
+  return (
+    <Sheet title="Your followers" onClose={onClose}>
+      {error && <p className="text-sm text-warn">{error}</p>}
+      {!data && !error && <p className="flex items-center gap-2 text-xs text-faint py-6 justify-center"><Loader2 size={14} className="animate-spin" /> Loading…</p>}
+      {data && (
+        <>
+          <p className="text-[11px] text-faint mb-2">Only you can see this list. Other people see how many followers you have, never who.</p>
+          {data.followers.length === 0 ? (
+            <p className="text-sm text-muted py-4 text-center">No followers yet. People who follow you see your new apps first.</p>
+          ) : (
+            <ul className="divide-y divide-line">
+              {data.followers.map((p) => (
+                <li key={`${p.creatorId}-${p.at}`} className="flex items-center gap-3 py-2">
+                  <button type="button" onClick={() => onOpenProfile(p.creatorId)} aria-label={`Open ${p.name}'s profile`}><Avatar person={p} size={34} /></button>
+                  <PersonName person={p} onOpen={onOpenProfile} />
+                  <span className="ml-auto text-[11px] text-faint">{timeAgo(p.at, now)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </Sheet>
+  );
+}
+
+const countLabel = (n: number | null | undefined) => (typeof n === 'number' ? compactCount(n) : '—');
+
 /** A person's App Mart profile: photo, name, creator code and their apps. No email, ever. */
-export function ProfileSheet({ creatorId, onClose, onOpenApp, hideAndroid }: {
+export function ProfileSheet({ creatorId, onClose, onOpenApp, hideAndroid, onOpenFollowers }: {
   creatorId: string;
   onClose: () => void;
   onOpenApp: (app: { kind: 'web' | 'apk'; id: string }) => void;
   /** On an iPhone an .apk cannot install, so those apps are not listed (appStoreCompliance.ts). */
   hideAndroid: boolean;
+  /** Your own profile only: open the list of who follows you. */
+  onOpenFollowers?: () => void;
 }) {
   const signedIn = useSignedIn();
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -451,11 +551,12 @@ export function ProfileSheet({ creatorId, onClose, onOpenApp, hideAndroid }: {
   const toggleBlock = async () => {
     if (!profile) return;
     const next = !profile.blockedByMe;
-    if (next && !window.confirm(`Block ${profile.person.name}? You will no longer see their comments, and they will not notify you.`)) return;
+    if (next && !window.confirm(`Block ${profile.person.name}? You will no longer see their comments, they will not notify you, and any follow between you ends.`)) return;
     setBusy(true);
     try {
       await setBlocked(profile.person.creatorId, next);
-      setProfile({ ...profile, blockedByMe: next });
+      // Blocking ends any follow between you (the server does it too); the screen must not keep saying "Following".
+      setProfile({ ...profile, blockedByMe: next, follow: next && profile.follow ? { ...profile.follow, isFollowing: false } : profile.follow });
     } catch (e) {
       if (e instanceof SocialError && e.needsSignIn) askToSignIn();
       else setError(e instanceof Error ? e.message : 'That did not work.');
@@ -472,10 +573,30 @@ export function ProfileSheet({ creatorId, onClose, onOpenApp, hideAndroid }: {
             <Avatar person={profile.person} size={84} />
             <h3 className="mt-3 text-lg font-bold text-ink">{profile.person.name}</h3>
             <p className="text-[11px] font-mono text-faint" title="Creator code">{profile.person.creatorId}</p>
-            <div className="flex gap-6 mt-3">
+            <div className="flex gap-5 mt-3">
               <div><p className="text-lg font-bold text-ink">{compactCount(apps.length)}</p><p className="text-[11px] text-muted">app{apps.length === 1 ? '' : 's'}</p></div>
               <div><p className="text-lg font-bold text-ink">{compactCount(apps.reduce((n, a) => n + (a.counts?.likes ?? 0), 0))}</p><p className="text-[11px] text-muted">likes</p></div>
+              {profile.isMe && onOpenFollowers ? (
+                <button type="button" onClick={onOpenFollowers} className="hover:underline" aria-label="See who follows you">
+                  <p className="text-lg font-bold text-ink">{countLabel(profile.follow?.followers)}</p><p className="text-[11px] text-accent-text">followers</p>
+                </button>
+              ) : (
+                <div><p className="text-lg font-bold text-ink">{countLabel(profile.follow?.followers)}</p><p className="text-[11px] text-muted">followers</p></div>
+              )}
+              <div><p className="text-lg font-bold text-ink">{countLabel(profile.follow?.following)}</p><p className="text-[11px] text-muted">following</p></div>
             </div>
+            {!profile.isMe && !profile.blockedByMe && (
+              <div className="mt-3">
+                <FollowButton
+                  creatorId={profile.person.creatorId}
+                  initial={{ following: profile.follow?.isFollowing === true, isMe: profile.isMe }}
+                  onChange={(r) => setProfile((p) => (p ? {
+                    ...p,
+                    follow: { followers: r.followers ?? p.follow?.followers ?? null, following: p.follow?.following ?? null, isFollowing: r.following },
+                  } : p))}
+                />
+              </div>
+            )}
             {signedIn && !profile.isMe && (
               <button type="button" onClick={() => void toggleBlock()} disabled={busy}
                 className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line text-xs font-semibold text-body hover:bg-raised disabled:opacity-50">

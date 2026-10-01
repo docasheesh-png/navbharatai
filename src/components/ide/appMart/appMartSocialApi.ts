@@ -48,6 +48,8 @@ export interface Profile {
   blockedByMe: boolean;
   apps: ProfileApp[];
   totals: { apps: number; likes: number };
+  /** Counts are public; `null` means the number could not be read (drawn as "—", never as 0). */
+  follow?: { followers: number | null; following: number | null; isFollowing: boolean };
 }
 
 /** A failure the screen can print as-is: the server's own sentence, or an honest generic one. */
@@ -138,6 +140,41 @@ export async function fetchLikers(key: string): Promise<{ likers: Array<PublicPe
 export async function fetchProfile(creatorId: string): Promise<Profile> {
   const d = await get(`/api/app-mart/profile/${encodeURIComponent(creatorId)}`);
   return d as unknown as Profile;
+}
+
+/** Follow or unfollow a creator. Returns the state now held and the creator's follower count. */
+export async function setFollow(creatorId: string, follow: boolean): Promise<{ following: boolean; followers: number | null }> {
+  const d = await post('/api/app-mart/social/follow', { creatorId, follow });
+  return { following: d.following === true, followers: typeof d.followers === 'number' ? d.followers : null };
+}
+
+export async function fetchFollowState(creatorId: string): Promise<{ followers: number | null; following: boolean; isMe: boolean }> {
+  const d = await get(`/api/app-mart/social/follow-state?creatorId=${encodeURIComponent(creatorId)}`);
+  return { followers: typeof d.followers === 'number' ? d.followers : null, following: d.following === true, isMe: d.isMe === true };
+}
+
+/** Who follows the signed-in creator. Only they (and an admin) can see this list. */
+export async function fetchFollowers(): Promise<{ followers: Array<PublicPerson & { at: number }>; counts: { followers: number; following: number } | null }> {
+  const d = await get('/api/app-mart/social/followers');
+  return {
+    followers: Array.isArray(d.followers) ? (d.followers as Array<PublicPerson & { at: number }>) : [],
+    counts: (d.counts as { followers: number; following: number } | null) ?? null,
+  };
+}
+
+export type FeedView = 'following' | 'liked';
+
+/**
+ * The two personal Browse views. The apps come back in exactly the shapes the General view's lists
+ * use, so the same tiles draw them. `T`/`U` are the caller's web-app and Android-app types.
+ */
+export async function fetchFeed<T, U>(view: FeedView): Promise<{ webApps: T[]; apps: U[]; followingCount: number | null }> {
+  const d = await get(`/api/app-mart/feed?view=${view}`);
+  return {
+    webApps: Array.isArray(d.webApps) ? (d.webApps as T[]) : [],
+    apps: Array.isArray(d.apps) ? (d.apps as U[]) : [],
+    followingCount: typeof d.followingCount === 'number' ? d.followingCount : null,
+  };
 }
 
 export interface CommentReportRow {

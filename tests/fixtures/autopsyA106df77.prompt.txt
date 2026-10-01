@@ -1,0 +1,616 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#173f73">
+<title>A1 Decor India - Bill Maker • Pro v40</title>
+
+<style>
+:root{
+--blue:#173f73;
+--blue2:#255a92;
+--light:#eaf2fb;
+--gold:#d9aa28;
+--text:#12263d;
+--bg:#eef2f6
+}
+
+*{
+box-sizing:border-box
+}
+
+body{
+margin:0;
+background:var(--bg);
+font-family:Arial,sans-serif;
+color:#17212b
+}
+
+.app{
+max-width:1000px;
+margin:auto;
+background:#fff;
+min-height:100vh
+}
+
+.top{
+background:var(--blue);
+color:#fff;
+padding:16px 18px
+}
+
+.top h1{
+margin:0;
+font-size:23px
+}
+
+.tabs{
+display:flex;
+gap:8px;
+padding:9px;
+background:#102f50
+}
+
+.tabs button{
+flex:1;
+border:0;
+border-radius:8px;
+padding:11px;
+background:#284f76;
+color:#fff;
+font-weight:bold
+}
+
+.tabs .active{
+background:var(--gold);
+color:#111
+}
+
+main{
+padding:14px
+}
+
+.card{
+border:1px solid #d5dbe2;
+border-radius:12px;
+padding:14px;
+margin-bottom:14px;
+background:#fff
+}
+
+.title{
+font-size:18px;
+font-weight:bold;
+margin-bottom:12px
+}<script>
+(function(){
+  function hideA1Splash(){
+    var x=document.getElementById('a1Splash');
+    if(!x || x.dataset.hidden==='1') return;
+    x.dataset.hidden='1';
+    setTimeout(function(){
+      if(!x || x.dataset.hidden!=='1') return;
+      x.classList.add('hide');
+      setTimeout(function(){
+        if(x && x.parentNode) x.parentNode.removeChild(x);
+      },500);
+    },3000);
+  }
+  if(document.readyState==='loading')
+    document.addEventListener('DOMContentLoaded',hideA1Splash,{once:true});
+  else hideA1Splash();
+})();
+</script>
+
+<!-- Fully offline: IndexedDB storage for reliable Android/WebView uploads and saved bills. --><div class="app">
+
+<div class="top">
+<h1>A1 Decor India</h1>
+<p>Offline Pro Bill Maker</p>
+</div>
+
+<div class="tabs">
+<button class="active" onclick="showTab('home')">Home</button>
+<button onclick="showTab('bill')">Bill</button>
+<button onclick="showTab('items')">Items</button>
+<button onclick="showTab('settings')">Settings</button>
+</div>
+
+
+<main>
+
+<section id="home" class="page">
+
+<div class="card">
+<div class="title">Dashboard</div>
+
+<div>
+Total Bills:
+<span id="totalBills">0</span>
+</div>
+
+<div>
+Total Amount:
+₹ <span id="totalAmount">0</span>
+</div>
+
+</div>
+
+
+<div class="card">
+
+<div class="title">
+A1 Decor India
+</div>
+
+<p>
+Furniture • Interior • Decoration Services
+</p>
+
+</div>
+
+</section>
+
+
+
+<section id="bill" class="page" style="display:none">
+
+<div class="card">
+
+<div class="title">
+Create New Bill
+</div>
+
+
+<label>
+Customer Name
+</label>
+
+<input id="customerName" type="text" placeholder="Enter name">
+
+
+<label>
+Mobile Number
+</label>
+
+<input id="customerMobile" type="number" placeholder="Mobile">
+
+
+<label>
+Address
+</label>
+
+<textarea id="customerAddress" placeholder="Address"></textarea>
+
+
+</div>
+
+
+<div class="card">
+
+<div class="title">
+Add Item
+</div>
+
+
+<input id="itemName" placeholder="Item Name">
+
+
+<input id="itemQty" type="number" placeholder="Quantity">
+
+
+<input id="itemPrice" type="number" placeholder="Price">
+
+
+<button onclick="addItem()">
+Add Item
+</button>
+
+
+</div>
+
+
+<div class="card">
+
+<div class="title">
+Bill Items
+</div>
+
+
+<div id="billItems">
+
+</div>
+
+
+<h3>
+Total ₹ <span id="billTotal">0</span>
+</h3>
+
+
+<button onclick="saveBill()">
+Save Bill
+</button>
+
+
+<button onclick="printBill()">
+Print
+</button>
+
+
+</div>
+
+</section> id="p4x91k"
+<section id="items" class="page" style="display:none">
+
+<div class="card">
+
+<div class="title">
+Item List
+</div>
+
+<div id="savedItems">
+
+</div>
+
+</div>
+
+</section>
+
+
+
+<section id="settings" class="page" style="display:none">
+
+<div class="card">
+
+<div class="title">
+Company Settings
+</div>
+
+
+<input id="companyName" placeholder="Company Name">
+
+
+<input id="companyPhone" placeholder="Phone">
+
+
+<textarea id="companyAddress" placeholder="Company Address"></textarea>
+
+
+<button onclick="saveSettings()">
+Save Settings
+</button>
+
+
+</div>
+
+</section>
+
+
+</main>
+
+</div>
+
+
+<script>
+
+let items=[];
+let bills=[];
+
+
+function showTab(id){
+
+document.querySelectorAll('.page').forEach(function(p){
+p.style.display="none";
+});
+
+document.getElementById(id).style.display="block";
+
+}
+
+
+
+function addItem(){
+
+let name=document.getElementById("itemName").value;
+let qty=Number(document.getElementById("itemQty").value);
+let price=Number(document.getElementById("itemPrice").value);
+
+
+if(!name || !qty || !price){
+alert("Enter item details");
+return;
+}
+
+
+items.push({
+name:name,
+qty:qty,
+price:price,
+total:qty*price
+});
+
+
+renderItems();
+
+
+document.getElementById("itemName").value="";
+document.getElementById("itemQty").value="";
+document.getElementById("itemPrice").value="";
+
+}
+
+
+
+function renderItems(){
+
+let box=document.getElementById("billItems");
+
+let html="";
+let total=0;
+
+
+items.forEach(function(i,index){
+
+total+=i.total;
+
+html+=`
+<div class="card">
+${i.name}<br>
+Qty: ${i.qty}<br>
+Price: ₹${i.price}<br>
+Total: ₹${i.total}
+
+<button onclick="removeItem(${index})">
+Delete
+</button>
+
+</div>
+`;
+
+});
+
+
+box.innerHTML=html;
+
+document.getElementById("billTotal").innerHTML=total;
+
+}
+
+
+
+function removeItem(i){
+
+items.splice(i,1);
+
+renderItems();
+
+}
+
+
+
+function saveBill(){
+
+let bill={
+
+customer:
+document.getElementById("customerName").value,
+
+mobile:
+document.getElementById("customerMobile").value,
+
+address:
+document.getElementById("customerAddress").value,
+
+items:items,
+
+amount:
+Number(document.getElementById("billTotal").innerHTML),
+
+date:new Date().toLocaleString()
+
+};
+
+
+bills.push(bill);
+
+
+localStorage.setItem(
+"a1Bills",
+JSON.stringify(bills)
+);
+
+
+updateDashboard();
+
+alert("Bill Saved");
+
+
+}
+
+
+function updateDashboard(){
+
+document.getElementById("totalBills").innerHTML=bills.length;
+
+
+let total=0;
+
+bills.forEach(function(b){
+total+=b.amount;
+});
+
+
+document.getElementById("totalAmount").innerHTML=total;
+
+}
+
+
+
+function printBill(){
+
+window.print();
+
+}
+
+
+
+function saveSettings(){
+
+let data={
+
+name:
+document.getElementById("companyName").value,
+
+phone:
+document.getElementById("companyPhone").value,
+
+address:
+document.getElementById("companyAddress").value
+
+};
+
+
+localStorage.setItem(
+"a1Settings",
+JSON.stringify(data)
+);
+
+
+alert("Settings Saved");
+
+}
+
+
+window.onload=function(){
+
+let old=localStorage.getItem("a1Bills");
+
+if(old){
+
+bills=JSON.parse(old);
+
+}
+
+updateDashboard();
+
+}
+
+</script>
+
+</body>
+</html>let A1DB = {
+
+save:function(key,data){
+
+localStorage.setItem(
+key,
+JSON.stringify(data)
+);
+
+},
+
+
+get:function(key){
+
+let d=localStorage.getItem(key);
+
+return d ? JSON.parse(d) : null;
+
+},
+
+
+remove:function(key){
+
+localStorage.removeItem(key);
+
+}
+
+};
+
+
+
+function loadBills(){
+
+let data=A1DB.get("a1Bills");
+
+return data || [];
+
+}
+
+
+
+function generateInvoice(){
+
+let bills=loadBills();
+
+let last=bills[bills.length-1];
+
+if(!last){
+
+alert("No Bill Found");
+
+return;
+
+}
+
+
+let text=
+
+"A1 DECOR INDIA\n\n"+
+"Customer: "+last.customer+"\n"+
+"Mobile: "+last.mobile+"\n"+
+"Address: "+last.address+"\n\n"+
+"Items:\n";
+
+
+last.items.forEach(function(i){
+
+text+=
+i.name+
+"  "+
+i.qty+
+" x "+
+i.price+
+" = "+
+i.total+
+"\n";
+
+});
+
+
+text+=
+"\nTotal Amount: ₹"+
+last.amount;
+
+
+return text;
+
+}
+
+
+
+function shareInvoice(){
+
+let invoice=generateInvoice();
+
+
+if(navigator.share){
+
+navigator.share({
+
+title:"A1 Decor India Bill",
+
+text:invoice
+
+});
+
+}
+
+else{
+
+alert(invoice);
+
+}
+
+}

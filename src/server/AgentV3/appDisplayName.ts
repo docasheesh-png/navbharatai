@@ -16,6 +16,7 @@
 // cleaned prompt is only the fallback for an app whose title is a placeholder.
 //
 // PURE — no I/O, no clock. Never throws.
+import { isPastedSource, pastedAppFacts, readablePrompt } from '../lib/pastedSource';
 
 /** Titles that name no app: framework and template defaults, and our own preview placeholders. */
 export const PLACEHOLDER_TITLE =
@@ -117,6 +118,14 @@ export function headingFromAppSource(appSource: string | null | undefined): stri
  * Reminder". Null when nothing name-like is left.
  */
 export function nameFromPrompt(prompt: string | null | undefined): string | null {
+  // A pasted file names itself (autopsy a106df77): its <title>, else its <h1>, else the words around it.
+  if (isPastedSource(prompt)) {
+    const facts = pastedAppFacts(prompt);
+    const own = titleFromIndexHtml(facts.title ? `<title>${facts.title}</title>` : null) ?? facts.heading;
+    if (own) return clip(own, MAX_NAME);
+    const words = readablePrompt(prompt);
+    return words ? nameFromPrompt(words) : null;
+  }
   const one = String(prompt ?? '').replace(/\s+/g, ' ').trim();
   if (!one) return null;
   let rest = withoutOrder(one).rest;
@@ -137,6 +146,13 @@ export function nameFromPrompt(prompt: string | null | undefined): string | null
  * by the app's visitors, not by us.
  */
 export function descriptionFromPrompt(prompt: string | null | undefined, fallbackName: string): string {
+  // A pasted file's own description, else the words written around it, else the name — never the code.
+  if (isPastedSource(prompt)) {
+    const own = pastedAppFacts(prompt).description;
+    if (own) return clip(own, MAX_DESCRIPTION, true);
+    const words = readablePrompt(prompt);
+    return words ? descriptionFromPrompt(words, fallbackName) : fallbackName;
+  }
   const one = String(prompt ?? '').replace(/\s+/g, ' ').trim();
   const firstSentence = one.split(/(?<=[.!?])\s/)[0] ?? one;
   const { rest, hadOpener: opener } = withoutOrder(firstSentence);

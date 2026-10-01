@@ -96,7 +96,11 @@ describe('Browse is two labelled halves, and an empty half never says the store 
      * whole screen read as broken. The store-wide empty state must now require BOTH halves to be
      * empty, and each half owns a message that is true of that half alone.
      */
-    expect(store).toContain('webApps.length === 0 && apps.length === 0');
+    // ⚠️ RE-POINTED 2026-10-01, invariant UNCHANGED: Browse now has three views and a kind filter, so
+    // "both halves empty" is `!anyInView`, which with the default filter (All) is still true only when
+    // BOTH shelves of the open view are empty.
+    expect(store).toContain('const anyInView = (shelves.web && viewWeb.length > 0) || (shelves.apk && viewApk.length > 0);');
+    expect(store).toContain("tab === 'browse' && !viewLoading && !anyInView");
     expect(store).toContain('No instant apps yet');
     expect(store).toContain('No Android apps yet');
     expect(store).not.toContain('No apps published yet.');

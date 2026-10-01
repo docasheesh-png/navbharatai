@@ -209,10 +209,16 @@ const BOUNDED_PROFANITY: readonly string[] = [
   'slut\\p{L}*', 'bastard\\p{L}*', 'asshole\\p{L}*', 'wanker\\p{L}*',
   'madarchod\\p{L}*', 'maderchod\\p{L}*', 'behenchod\\p{L}*', 'bhenchod\\p{L}*', 'bhenchodd?', 'chutiy\\p{L}*', 'chutia\\p{L}*',
   'gandu\\p{L}*', 'lund', 'lauda', 'loda', 'bhosd\\p{L}*', 'bsdk', 'mc\\s?bc', 'harami\\p{L}*', 'kutti\\s+(?:ka|ki)',
+  // Added 2026-10-01 for App Mart comments (one list, two readers — see `commentAbuse` in appMartSocialRules.ts). Bare
+  // "bc" and "mc" are deliberately NOT here: in English chat "bc" means "because", and refusing that
+  // would be a false accusation, not a filter.
+  'bkl', 'mkc', 'tmkc', 'bhenkelod\\p{L}*', 'bhen\\s+ke\\s+lod\\p{L}*', 'maa\\s+ki\\s+chut',
+  'ch[u*]t[i*]y\\p{L}*', 'randi', 'randwa', 'chinal', 'jhaant\\p{L}*', 'jhatu',
   'mierda', 'cabron', 'pendejo', 'merde', 'connard', 'scheisse', 'arschloch', 'cazzo', 'vaffanculo', 'blyat',
 ];
 const SUBSTRING_PROFANITY: readonly string[] = [
   'मादरचोद', 'बहनचोद', 'भेनचोद', 'चूतिया', 'गांडू', 'भोसड़ी', 'लौड़ा', 'हरामी', 'कुत्ती',
+  'रंडी', 'भोसडी', 'चुतिया', 'झांटू', 'माँ की चूत', 'मां की चूत',
   'খানকি', 'சூத்து', 'ధెంగ', 'ماں کی', 'كس أمك', 'блядь', 'сука', 'пизд', 'хуй', '他妈的', '操你', '씨발', '개새끼',
 ];
 
@@ -304,6 +310,26 @@ export function scanPollinationsPrompt(text: string | null | undefined): Pollina
     if (minor && REVEALING_RE.test(f)) return { ok: false, category: 'sexual', term: `${minor[0]} + revealing` };
   }
   return { ok: true };
+}
+
+/**
+ * PROFANITY ONLY — the same list, the same disguise-undoing, without the sexual-content lists.
+ *
+ * For App Mart comments (admin 2026-10-01: "comments me gaali-filter"). Deliberately narrower than the
+ * picture scan: a comment like "a sex-education app for schools — very useful" names what an app is
+ * ABOUT, and refusing it would be wrong. Abuse is not ambiguous in the same way, so that is all this
+ * reads. PURE.
+ */
+export function scanProfanity(text: string | null | undefined): { ok: true } | { ok: false; term: string } {
+  const raw = String(text ?? '');
+  const lowered = raw.normalize('NFKC').toLowerCase();
+  const stripped = lowered.replace(/[​-‍⁠﻿­]/g, '');
+  for (const f of [lowered, normalizeForScan(raw)]) {
+    const p = PROFANITY_RE.exec(f);
+    if (p) return { ok: false, term: p[0] };
+  }
+  const prof = firstSubstring(stripped, SUBSTRING_PROFANITY);
+  return prof ? { ok: false, term: prof } : { ok: true };
 }
 
 /** The net under every caller: throws for a banned prompt. Called by `pollinationsImageUrl`. */

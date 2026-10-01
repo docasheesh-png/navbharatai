@@ -13,8 +13,9 @@ import type { Express, Request, Response } from 'express';
 import { verifyFirebaseIdentity, verifyFirebaseToken, rateLimiter } from '../lib/authMiddleware';
 import { routeParam } from '../lib/expressCompat';
 import { isStoreAdmin } from './navStore';
-import { listMyWebApps } from '../lib/navStoreWeb';
-import { listAppsByUid } from '../lib/navStoreStore';
+import { listMyWebApps, listWebAppsByOwners, getWebAppsByIds, toPublicWebApp, type WebStoreApp } from '../lib/navStoreWeb';
+import { listAppsByUid, listAppsByOwners, getAppsByIds, toPublic, type StoreApp } from '../lib/navStoreStore';
+import { resolveCreators, realCreatorLookupDeps } from '../lib/storeCreator';
 import { userProfileStore } from '../lib/UserProfileStore';
 import { adultPreferenceFrom, hiddenFromBrowse } from '../../lib/adultContent';
 import { isNativeRequest } from '../lib/cors';
@@ -22,13 +23,15 @@ import { publicCreatorId } from '../lib/storeCreator';
 import { uidForCreatorId } from '../lib/appMartCreatorIndex';
 import {
   parseAppKey, parseAppKeyList, parseReaction, cleanCommentText, publicComments, pageOfComments,
-  orderComments, canRemoveComment, removedBy, isCreatorIdShape, ZERO_COUNTS,
+  orderComments, canRemoveComment, removedBy, isCreatorIdShape, ZERO_COUNTS, commentAbuse,
+  followRefusal, parseFeedView, newestFirstCapped, FEED_APP_LIMIT, FOLLOW_NOTIFICATION_KEY,
   type PublicComment, type StoredComment,
 } from '../lib/appMartSocialRules';
 import {
   resolveTarget, resolvePeople, countsFor, myReactions, pressReaction, likersOf, getComment,
   listComments, addComment, removeComment, reportComment, openCommentReports, resolveReportsFor,
-  blockedUids, setBlocked, notifySocial, SocialUnavailable,
+  blockedUids, setBlocked, notifySocial, SocialUnavailable, followCounts, isFollowing, setFollow,
+  endFollowBothWays, followersOf, followedUids, likedAppKeys,
 } from '../lib/appMartSocialStore';
 
 const COMMENTS_PAGE = 30;
@@ -126,6 +129,9 @@ export function registerAppMartSocialRoutes(app: Express): void {
     if (!k) return res.status(400).json({ error: 'That is not an app on App Mart.' });
     const cleaned = cleanCommentText(body.text);
     if (!cleaned.ok) return res.status(400).json({ error: cleaned.error });
+    // Abuse is refused BEFORE anything is stored or anybody is notified (admin 2026-10-01).
+    const abuse = commentAbuse(cleaned.text);
+    if (abuse) return res.status(400).json({ error: abuse, code: 'abusive' });
     const target = await resolveTarget(k);
     if (!target || !target.live) return res.status(404).json({ error: 'This app is no longer on App Mart.' });
 
@@ -244,6 +250,8 @@ export function registerAppMartSocialRoutes(app: Express): void {
     if (targetUid === me.uid) return res.status(400).json({ error: 'You cannot block yourself.' });
     try {
       await setBlocked(me.uid, targetUid, body.blocked !== false);
+      // Blocking someone ends any follow between the two, both ways — the way every social app behaves.
+      if (body.blocked !== false) await endFollowBothWays(me.uid, targetUid);
       res.json({ ok: true, blocked: body.blocked !== false });
     } catch (e) {
       unavailable(res, e);
@@ -275,7 +283,7 @@ export function registerAppMartSocialRoutes(app: Express): void {
     if (!uid) return res.status(404).json({ error: 'This profile could not be found.' });
 
     try {
-      const [people, web, apk, viewerPref, blocked] = await Promise.all([
+      const [people, web, apk, viewerPref, blocked, follows, followingThem] = await Promise.all([
         resolvePeople([uid]),
         listMyWebApps(uid, 50).catch(() => []),
         listAppsByUid(uid, 50).catch(() => []),
@@ -283,6 +291,8 @@ export function registerAppMartSocialRoutes(app: Express): void {
           ? userProfileStore.get(viewerUid).then((p) => adultPreferenceFrom({ optedIn: p?.adultOptIn, optedInAt: p?.adultOptInAt })).catch(() => adultPreferenceFrom(null))
           : Promise.resolve(adultPreferenceFrom(null)),
         blockedUids(viewerUid),
+        followCounts(uid),
+        isFollowing(viewerUid, uid),
       ]);
       const isNative = isNativeRequest(req);
       const apps = [
@@ -309,10 +319,126 @@ export function registerAppMartSocialRoutes(app: Express): void {
         blockedByMe: blocked.has(uid),
         apps: apps.map((a) => ({ ...a, counts: counts[a.key] ?? ZERO_COUNTS })),
         totals: { apps: apps.length, likes: totalLikes },
+        // The NUMBER of followers is public; who they are is the creator's alone (see /followers).
+        follow: { followers: follows?.followers ?? null, following: follows?.following ?? null, isFollowing: followingThem },
       });
     } catch (e) {
       console.warn('[APP_MART_SOCIAL] profile', e instanceof Error ? e.message : String(e));
       res.status(502).json({ error: 'This profile could not be loaded. Please try again.' });
+    }
+  });
+
+  // ─── Following (admin 2026-10-01) ──────────────────────────────────────────────────────────────
+
+  const followLimiter = rateLimiter({ name: 'app-mart-follow', authed: 300, anon: 30, noun: 'follows', durable: false });
+
+  /** Follow (or unfollow) a creator, by their public creator code. */
+  app.post('/api/app-mart/social/follow', followLimiter, async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!me?.uid) return res.status(401).json({ error: 'Sign in to follow creators.', needsSignIn: true });
+    const body = (req.body ?? {}) as { creatorId?: unknown; follow?: unknown };
+    if (!isCreatorIdShape(body.creatorId)) return res.status(400).json({ error: 'That person could not be found.' });
+    const creatorUid = await uidForCreatorId(body.creatorId);
+    if (!creatorUid) return res.status(404).json({ error: 'That person could not be found.' });
+    const follow = body.follow !== false;
+    try {
+      if (follow) {
+        const [mine, theirs, already, counts] = await Promise.all([
+          blockedUids(me.uid), blockedUids(creatorUid), isFollowing(me.uid, creatorUid), followCounts(me.uid),
+        ]);
+        if (mine.has(creatorUid)) return res.status(400).json({ error: 'You blocked this person. Unblock them first to follow.' });
+        // Somebody who blocked you is not told you tried, and is not followed: the same generic answer
+        // as a missing profile, so a block cannot be probed for.
+        if (theirs.has(me.uid)) return res.status(404).json({ error: 'That person could not be found.' });
+        const refusal = followRefusal({ followerUid: me.uid, creatorUid, followingNow: counts?.following ?? 0, alreadyFollowing: already });
+        if (refusal) return res.status(400).json({ error: refusal });
+      }
+      const r = await setFollow(me.uid, creatorUid, follow);
+      if (r.newFollow) {
+        void notifySocial({ recipientUid: creatorUid, kind: 'follow', appKey: FOLLOW_NOTIFICATION_KEY, appName: '', actorUid: me.uid });
+      }
+      const counts = await followCounts(creatorUid);
+      res.json({ following: r.following, followers: counts?.followers ?? null });
+    } catch (e) {
+      unavailable(res, e);
+    }
+  });
+
+  /**
+   * Who follows the viewer — for the creator's own eyes only (and an admin, who may name a creator).
+   * Like likes and unlike dislikes: the NUMBER is public on every profile, the PEOPLE are not.
+   */
+  app.get('/api/app-mart/social/followers', async (req: Request, res: Response) => {
+    const me = await verifyFirebaseIdentity(req);
+    if (!me?.uid) return res.status(401).json({ error: 'Please sign in.', needsSignIn: true });
+    let uid = me.uid;
+    const asked = req.query.creatorId;
+    if (typeof asked === 'string' && asked && asked !== 'me') {
+      const other = isCreatorIdShape(asked) ? await uidForCreatorId(asked) : null;
+      if (!other) return res.status(404).json({ error: 'That person could not be found.' });
+      if (other !== me.uid && !isStoreAdmin(me.email)) return res.status(403).json({ error: 'Only a creator can see who follows them.' });
+      uid = other;
+    }
+    const [followers, counts] = await Promise.all([followersOf(uid), followCounts(uid)]);
+    res.json({ followers, counts });
+  });
+
+  /**
+   * The two personal Browse views (admin 2026-10-01): apps by creators you FOLLOW, newest first, and
+   * apps you LIKED, most recently liked first. Both are private to the viewer and need a sign-in.
+   * The apps come back in exactly the shapes the General view's lists use, filtered by the same rules
+   * (listed / approved only, 18+ hidden unless the viewer opted in, never on the native shell).
+   */
+  app.get('/api/app-mart/feed', async (req: Request, res: Response) => {
+    const view = parseFeedView(req.query.view);
+    if (!view) return res.status(400).json({ error: 'Unknown view.' });
+    const me = await verifyFirebaseIdentity(req);
+    if (!me?.uid) {
+      return res.status(401).json({ error: view === 'following' ? 'Sign in to see apps from creators you follow.' : 'Sign in to see the apps you liked.', needsSignIn: true });
+    }
+    try {
+      const viewerPref = await userProfileStore.get(me.uid)
+        .then((p) => adultPreferenceFrom({ optedIn: p?.adultOptIn, optedInAt: p?.adultOptInAt }))
+        .catch(() => adultPreferenceFrom(null));
+      const isNative = isNativeRequest(req);
+      const showWeb = (a: WebStoreApp) => a.status === 'listed'
+        && !hiddenFromBrowse({ contentClass: a.contentClass }, { optedIn: viewerPref.optedIn, isNative });
+
+      let webRows: Array<{ app: WebStoreApp; at: number }> = [];
+      let apkRows: Array<{ app: StoreApp; at: number }> = [];
+      let followingCount: number | null = null;
+
+      if (view === 'following') {
+        const creators = await followedUids(me.uid);
+        followingCount = creators.length;
+        const [web, apk] = await Promise.all([
+          listWebAppsByOwners(creators).catch(() => []),
+          listAppsByOwners(creators).catch(() => []),
+        ]);
+        webRows = web.map((a) => ({ app: a, at: a.publishedAt || 0 }));
+        apkRows = apk.map((a) => ({ app: a, at: a.reviewedAt || a.submittedAt || 0 }));
+      } else {
+        const liked = await likedAppKeys(me.uid);
+        const when = new Map(liked.map((l) => [l.key, l.at]));
+        const webIds = liked.filter((l) => l.key.startsWith('web:')).map((l) => l.key.slice(4));
+        const apkIds = liked.filter((l) => l.key.startsWith('apk:')).map((l) => l.key.slice(4));
+        const [web, apk] = await Promise.all([getWebAppsByIds(webIds).catch(() => []), getAppsByIds(apkIds).catch(() => [])]);
+        webRows = web.map((a) => ({ app: a, at: when.get(`web:${a.id}`) ?? 0 }));
+        apkRows = apk.map((a) => ({ app: a, at: when.get(`apk:${a.id}`) ?? 0 }));
+      }
+
+      const webShown = newestFirstCapped(webRows.filter((r) => showWeb(r.app)), FEED_APP_LIMIT);
+      const apkShown = newestFirstCapped(apkRows.filter((r) => r.app.status === 'approved'), FEED_APP_LIMIT);
+      const creatorInfo = await resolveCreators(webShown.map((r) => r.app.uid), realCreatorLookupDeps).catch(() => new Map());
+      res.json({
+        view,
+        webApps: webShown.map((r) => toPublicWebApp(r.app, creatorInfo.get(r.app.uid))),
+        apps: apkShown.map((r) => toPublic(r.app)),
+        ...(followingCount !== null ? { followingCount } : {}),
+      });
+    } catch (e) {
+      console.warn('[APP_MART_SOCIAL] feed', e instanceof Error ? e.message : String(e));
+      res.status(502).json({ error: 'These apps could not be loaded. Please try again.' });
     }
   });
 }

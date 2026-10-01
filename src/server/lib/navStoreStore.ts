@@ -195,6 +195,32 @@ export async function listApps(status: SubmissionStatus, limit = 50): Promise<St
 }
 
 /** One developer's own submissions, whatever their state, so they can see where each one stands. */
+/**
+ * Apps by several owners at once — the App Mart "Following" view (2026-10-01). Firestore's `in` filter
+ * takes at most 30 values, so the owners are read in chunks; a single-field `in` needs no composite
+ * index. Unsorted: the caller orders and filters (status, 18+) in one place.
+ */
+export async function listAppsByOwners(uids: readonly string[], perChunk = 200): Promise<StoreApp[]> {
+  const d = db();
+  const owners = [...new Set(uids.filter(Boolean))];
+  if (!d || owners.length === 0) return [];
+  const out: StoreApp[] = [];
+  for (let i = 0; i < owners.length; i += 30) {
+    const snap = await d.collection(COLLECTION).where('uid', 'in', owners.slice(i, i + 30)).limit(perChunk).get();
+    for (const doc of snap.docs) out.push(doc.data() as StoreApp);
+  }
+  return out;
+}
+
+/** Several apps by id in one round trip, in the order asked for; missing ones are skipped. */
+export async function getAppsByIds(ids: readonly string[]): Promise<StoreApp[]> {
+  const d = db();
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (!d || unique.length === 0) return [];
+  const snaps = await d.getAll(...unique.map((id) => d.collection(COLLECTION).doc(id)));
+  return snaps.filter((s) => s.exists).map((s) => s.data() as StoreApp);
+}
+
 export async function listAppsByUid(uid: string, limit = 50): Promise<StoreApp[]> {
   const d = db();
   if (!d) return [];

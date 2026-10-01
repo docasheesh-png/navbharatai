@@ -11,6 +11,7 @@ import { shouldRunAuditFix, auditFixOutcome, AUDIT_FIX_COMMAND } from './npmAudi
 import { narrationText, type NarrationId, type NarrationParams } from './narrationCatalogue';
 import { noteHeal } from './HealLedger';
 import { decideSupersede } from './previewSupersede';
+import { missingRanges, latestVersionsCommand, versionHint } from './npmVersionHint';
 import { DECLARED_PORT_FILES } from './declaredPort';
 import { appPortsFrom, isSecondaryAppPort, type AppPortMap } from './appPorts';
 import { sandboxStore } from './SandboxStore';
@@ -4151,7 +4152,13 @@ export class ToolDispatcher {
       case 'bash': {
         // `.node_modules/.bin/X` is a typo, never a folder (autopsy bee95692: four dev-server launches
         // and two typechecks against it, ~5 min). Corrected before it reaches the shell; the agent is told.
-        const typoFix = fixNodeModulesTypo(reqStr(input, 'command'));
+        const rawCommand = reqStr(input, 'command');
+        // 🔴 AN EMPTY COMMAND IS NOT A COMMAND THAT SUCCEEDED (autopsy 2b1f845e). Five `bash` calls
+        // arrived with `"command": ""`; the shell ran nothing, answered exit 0 with no output, and the
+        // model read that as "done" and moved on, until the loop guard stepped in. A tool that reports
+        // success for work it never did is the fake-success class — so it says what was wrong instead.
+        if (!rawCommand.trim()) throw new Error(emptyCommandMessage(input));
+        const typoFix = fixNodeModulesTypo(rawCommand);
         const command = typoFix.command;
         // Scaffold guard: create-* generators (`npm create vite`, `npx create-*`,
         // `npm init <gen>`) require a newer Node than the fixed-version sandbox and
@@ -4604,6 +4611,18 @@ export class ToolDispatcher {
             const note = bridgeShellNote(typeof html === 'string' ? html : '');
             if (note) out = `${out}\n\n${note}`;
           } catch { /* a note is best-effort — the command's own output stands */ }
+        }
+        // A guessed range that does not exist gets the real version in the same result (npmVersionHint.ts).
+        if (exitCode !== 0 && process.env.AGENTV3_NPM_VERSION_HINT !== 'off') {
+          try {
+            const missing = missingRanges(`${stdout}\n${stderr}`);
+            const viewCmd = latestVersionsCommand(missing);
+            if (viewCmd) {
+              const view = await withTimeout(this.actuator.runCommand(this.workspaceId, viewCmd), 15_000, 'npm-version-hint');
+              const hint = versionHint(missing, view.stdout);
+              if (hint) out = `${out}\n\n${hint}`;
+            }
+          } catch { /* a hint is best-effort — npm's own error is still reported */ }
         }
         if ((process.env.AGENTV3_PIPED_GATE_CHECK ?? '').trim().toLowerCase() !== 'off') {
           const lie = pipedGateExitCodeWarning(command, exitCode, `${stdout}\n${stderr}`);
@@ -10376,6 +10395,14 @@ function testFileHint(filePath: string): string {
     `\nTEST HINT: if a test file exists (e.g. ${basename}.test.tsx), run it to verify: ` +
     `npm test -- --run ${basename}`
   );
+}
+
+/** What the bash tool says about a call that carried no command. Exported for its test. PURE. */
+export function emptyCommandMessage(input: Record<string, unknown>): string {
+  const sent = Object.keys(input ?? {});
+  return 'bash was called with an EMPTY command, so nothing ran — this is not a success. '
+    + (sent.length ? `You sent argument(s): [${sent.join(', ')}]. ` : '')
+    + 'Retry with the shell command in "command", e.g. {"command": "npm run build"} — or skip this call if you meant to do nothing.';
 }
 
 function reqStr(input: Record<string, unknown>, key: string): string {

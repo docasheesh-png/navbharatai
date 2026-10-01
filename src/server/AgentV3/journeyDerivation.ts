@@ -31,6 +31,7 @@ import { declaredRoutes } from './routerPaths';
 import { rendersDataList } from './DesignCoverage';
 import { scanMarkup, type ScannedTag } from './jsxTags';
 import { NEVER_PRESS } from './clickExplorer';
+import { withoutAppSignature } from './appSignature';
 
 /** How a single element is addressed, in the order Playwright should be asked for it. */
 export type SelectorKind = 'testid' | 'name' | 'id' | 'placeholder' | 'label' | 'text' | 'role';
@@ -179,6 +180,18 @@ export const NO_DATA_ENTRY_REASON =
   'this app has no data-entry surface at all — a game, a dashboard or a landing page has '
   + 'nothing to save and reload, so there is no such journey to prove';
 
+/**
+ * The files with OUR markup removed — what every "does the app do X?" question here reads (autopsy
+ * 2b1f845e: the badge's checkbox was read as the app taking input). PURE.
+ */
+export function appOwnFiles(files: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [path, src] of Object.entries(files ?? {})) {
+    out[path] = /\.html?$/i.test(path) && typeof src === 'string' ? withoutAppSignature(src) : src;
+  }
+  return out;
+}
+
 export function appHasNoDataEntry(files: Record<string, string>): boolean {
   return dataEntryEvidence(files) === null;
 }
@@ -199,7 +212,7 @@ const DATA_ENTRY_SIGNS: ReadonlyArray<readonly [RegExp, string]> = [
  * JOURNEY_NOT_DERIVED, so the next such report names its cause instead of leaving it to be guessed. PURE.
  */
 export function dataEntryEvidence(files: Record<string, string>): { path: string; what: string; line: string } | null {
-  for (const [path, src] of Object.entries(files ?? {})) {
+  for (const [path, src] of Object.entries(appOwnFiles(files))) {
     if (!src) continue;
     for (const [re, what] of DATA_ENTRY_SIGNS) {
       const m = re.exec(src);
@@ -262,7 +275,7 @@ const SAVE_ACTION: readonly RegExp[] = [
 export function appOnlyShowsWhatItHolds(files: Record<string, string>): boolean {
   let sawControl = false;
   let sawNarrowing = false;
-  for (const [path, src] of Object.entries(files ?? {})) {
+  for (const [path, src] of Object.entries(appOwnFiles(files))) {
     if (!src || !APP_SOURCE_FILE.test(path) || NOT_APP_UI.test(path) || ERROR_BOUNDARY_FILE.test(path)) continue;
     if (SAVE_ACTION.some((re) => re.test(src))) return false;
     if (/<(?:input|select)\b/i.test(src) || /<(?:Input|Select)\b/.test(src)) sawControl = true;
@@ -738,7 +751,7 @@ export interface DeriveJourneysInput {
  * journey or none, and none is a correct answer.
  */
 export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
-  const files = input?.files ?? {};
+  const files = appOwnFiles(input?.files ?? {});
   const routes = input?.routes ?? [];
   const marker = String(input?.marker || 'nbai-check');
   const out: Journey[] = [];
@@ -890,6 +903,15 @@ export function noJourneyReason(files: Record<string, string>): string {
     // Only an app with a render surface and no data entry anywhere reads as a game.
     if (hasRenderSurface(files ?? {}) && appHasNoDataEntry(files ?? {})) return NO_DATA_ENTRY_REASON;
     if (appOnlyShowsWhatItHolds(files ?? {})) return LOOKUP_ONLY_REASON;
+    // 🔴 "NOTHING HERE TAKES USER INPUT" WAS SAID ABOUT AN APP WHOSE FORMS SIT ON SCREENS NO PAGE REACHES
+    // (autopsy 2b1f845e: a five-step wizard in src/steps/, switched by state, no router). The data-entry
+    // scan reads EVERY file; when it found input, the honest sentence names where and why the check did
+    // not get there, instead of denying that the input exists.
+    const where = dataEntryEvidence(files ?? {});
+    if (where) {
+      return `this app takes input (${where.what} in ${where.path}), but no page reaches that form — `
+        + 'screens switched without a router are not reached by this check';
+    }
     return 'this app has no form for a journey to fill in — nothing here takes user input';
   }
   // 🔗 THE MOST SPECIFIC TRUE REASON FIRST (autopsies ee0e6de5 and 2d076ce8 met at merge, 2026-09-30).

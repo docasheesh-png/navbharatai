@@ -39,9 +39,14 @@
 // Infrastructure ports (databases) are never freed, same rule as DevServerRecovery.
 
 import type { PreviewRecipe } from './previewRevival';
+import { isNeverAppPort } from './neverAppPorts';
 
-/** Same set DevServerRecovery protects — a database is never "the old app". */
-const PROTECTED_PORTS = new Set([5432, 3306, 6379, 27017, 1433, 9200]);
+/**
+ * A database is never "the old app" — and neither is the sandbox's own agent. Autopsy 2b1f845e: a
+ * recipe that had adopted port 49983 (the sandbox agent, which answers HTTP) made this function report
+ * "a previous app was still serving on port 49983" and try to kill it. One list: neverAppPorts.ts.
+ */
+const PROTECTED_PORTS = { has: (p: number): boolean => isNeverAppPort(p) };
 
 export interface SupersedeDecision {
   /** Ports to free — each one named by this workspace's own records and ≠ the new port. */
@@ -111,7 +116,9 @@ export function decideSupersede(input: {
     && p !== input.newPort && !PROTECTED_PORTS.has(p)
     // 🔒 THE VETO. Never free ANY port the app itself declares — see `sourceDeclaredPorts`.
     && !declaredSet.has(p);
-  const recipePort = input.recipe?.port;
+  // A recipe naming a port that can never be the app (the sandbox's own agent, a database) describes no
+  // app at all — not "a previous app". It is ignored here, and the store refuses it on read.
+  const recipePort = isNeverAppPort(input.recipe?.port) ? undefined : input.recipe?.port;
   if (usable(recipePort)) stale.add(recipePort);
   if (usable(input.declaredPort)) stale.add(input.declaredPort as number);
   /**

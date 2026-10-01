@@ -66,7 +66,9 @@ export const MAX_MODULES = 60;
 export const MAX_FILES_PER_MODULE = 150;
 export const MAX_CONTRACT_CHARS = 12_000;
 export const MAX_DESCRIPTION_CHARS = 1_200;
-const MAX_GOAL_CHARS = 4_000;
+// 6,000, not 4,000: a stack note (unsupportedStack.ts, ~1,100 chars) now leads the goal, and a 2,900-char
+// spec plus that note was cutting the user's own closing requirements off the end (autopsy 042e472f).
+const MAX_GOAL_CHARS = 6_000;
 
 /** Same unsafe-path rules as the file manifest: no absolute, no traversal, no heavy dirs. */
 const UNSAFE_PATH_RE = /^(node_modules|\.git|dist|build)\//;

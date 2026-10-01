@@ -541,6 +541,7 @@ import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { recordEngineUse } from '../AgentV3/engineUseStore';
 import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrchestrator';
 import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
+import { applyStrictTrial, strictCohort } from '../AgentV3/strictTrial';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
 import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall, reviewChangedPaths } from '../AgentV3/ReviewerAgent';
@@ -16550,9 +16551,13 @@ async function noteBuildOutcome(
             ppDecompositionAnnounced = true;
             events.emit({ type: 'narration', agent: 'architect', text: '🏗️ This is a large software project — decomposing it into independently-buildable modules with frozen interface contracts…', ts: Date.now() });
             const ppScaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
-            const modules = parsePlannedModules(await ppGenerate(projectPlanSystemPrompt(framework), projectPlanUserPrompt(prompt, ppScaffold)));
+            // The planner decides every module's files before a builder sees the stack note, so it gets the
+            // note too — or a Kotlin request is planned as Gradle modules the builder may not write (autopsy
+            // 042e472f, 2026-10-01). The plan's goal carries it, so every module turn reads it again.
+            const plannerGoal = unsupportedStackAsked ? `${unsupportedStackBuilderNote(unsupportedStackAsked, framework)}\n\n---\n\n${prompt}` : prompt;
+            const modules = parsePlannedModules(await ppGenerate(projectPlanSystemPrompt(framework), projectPlanUserPrompt(plannerGoal, ppScaffold)));
             if (modules.length >= MIN_PROJECT_MODULES) {
-              pPlan = createProjectPlan(prompt, framework, modules, Date.now());
+              pPlan = createProjectPlan(plannerGoal, framework, modules, Date.now());
               await saveProjectPlan(workspaceId, pPlan);
               events.emit({ type: 'narration', agent: 'architect', text: `📦 Project plan ready: ${modules.length} modules — ${modules.map((m) => m.name).join(' → ')}. I will build them one per round, in dependency order, and the plan survives reloads.`, ts: Date.now() });
             } else {
@@ -16703,7 +16708,8 @@ async function noteBuildOutcome(
             const existingSrc = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
               .filter((p) => p.startsWith('src/'));
             if (existingSrc.length === 0) {
-              const goldenFiles = goldenScaffoldFiles(golden);
+              // Q-008: a workspace in the strict-mode trial gets the strict tsconfig (strictTrial.ts).
+              const goldenFiles = applyStrictTrial(goldenScaffoldFiles(golden), workspaceId);
               // TOGETHER, not one after another (autopsy 972acde5): twelve sequential sandbox round trips
               // were ~5 s of the wait before the first model call. A failed write still rejects the whole
               // seed, exactly as the loop did, and the files are recorded only once every write landed.
@@ -22141,6 +22147,9 @@ async function noteBuildOutcome(
           // the builds where every runtime check skipped.
           filesWritten: writtenFiles.size,
           buildWasRequested: userAskedToBuildAnApp,
+          // "Everything lives in one HTML file" about a multi-file project (autopsy dfd24058). Counted only
+          // when the written files ARE the app — an edit turn writes a slice, and a slice of one is not a claim.
+          appSourceFiles: isImportTurn || isEditMode ? undefined : Array.from(writtenFiles.keys()).filter((p) => /\.(?:[cm]?[jt]sx?|css|vue|svelte)$/i.test(p) && !/(?:^|\/)(?:node_modules|dist)\//.test(p)).length,
           // "the exact versions you specified" when the request named none (autopsy 33812996).
           userRequest: prompt,
           // "TypeScript type-check passes cleanly" beside a release gate recording "the typecheck did
@@ -24131,6 +24140,31 @@ async function noteBuildOutcome(
         });
       } catch { /* an observation must never affect a finished build */ }
 
+      /**
+       * Q-008 — THE STRICT-MODE TRIAL'S MEASUREMENT (strictTrial.ts). Which TypeScript mode this app
+       * compiled in, and whether it was a fresh app: `strict-new` against `loose-new` is the comparison
+       * the admin's decision waits on. Read from the app's real tsconfig, never from the trial bucket,
+       * because an app created before the trial stays loose whatever its bucket. Placed beside its
+       * siblings and outside every feature's conditional for the reason `PROVIDER_TIME_WASTED` states.
+       */
+      let strictCohortLabel: ReturnType<typeof strictCohort> = 'unknown';
+      try {
+        const tsconfigNow = writtenFiles.get('tsconfig.json')
+          ?? await Promise.race([
+            actuator.readFile(workspaceId, 'tsconfig.json').catch(() => null),
+            new Promise<null>((r) => setTimeout(() => r(null), 5_000)),
+          ]);
+        strictCohortLabel = strictCohort(tsconfigNow, !userAppExists);
+        buildDiag.record({
+          phase: 'build',
+          severity: 'info',
+          code: 'STRICT_TRIAL',
+          message: `TypeScript mode: ${strictCohortLabel}`,
+          detail: `cohort=${strictCohortLabel} · fresh-app=${!userAppExists}`,
+          autoResolved: true,
+        });
+      } catch { /* an observation must never affect a finished build */ }
+
       // Cost-ladder telemetry (P2 measurement): record this build's task type, start
       // tier, billed amount, tokens, success, and duration so the savings AND the
       // per-tier quality are MEASURABLE (the P8 cutover gate needs this data). Best-
@@ -24156,6 +24190,8 @@ async function noteBuildOutcome(
           // T1-escalation-on — the canary A/B labels: which cohort this build was in ('in'/'out'/'off',
           // same workspaceId key as the gates so labels match behaviour) + whether the ladder climbed.
           escalationCohort: escalationCohort(workspaceId),
+          // Q-008 — the strict-mode trial's A/B label (strict-new vs loose-new is the comparison).
+          strictCohort: strictCohortLabel,
           escalations: escalationsCount,
           // …and how far down the RUNGS it went inside that tier (a different question — see above).
           // Omitted rather than zeroed when it could not be attributed: `0` would read as a real depth.
@@ -24534,7 +24570,7 @@ async function noteBuildOutcome(
       } catch { /* the net must never break a settle */ }
       // Once, on a successful build: the user asked for a stack we did not use (unsupportedStack.ts).
       if (result.ok && unsupportedStackAsked && typeof result.summary === 'string') {
-        const stackNote = unsupportedStackUserNote(unsupportedStackAsked, framework);
+        const stackNote = unsupportedStackUserNote(unsupportedStackAsked, framework, result.summary);
         if (stackNote && !result.summary.includes(stackNote.trim())) result = { ...result, summary: `${result.summary}${stackNote}` };
       }
       const livePreviewLine = costBreakdown && result.ok ? livePreviewChargeLine(costBreakdown) : '';

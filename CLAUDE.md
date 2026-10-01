@@ -4112,6 +4112,15 @@ the flag entries above promise.
   `planningRequest.ts`); a build cut short before its ETA band is `untested`; the platform ETA prior averages
   successful builds; and setup puts back the template when a workspace holds only a piece of our own starter
   (`starterFragment.ts`). Test-locked in `tests/aPictureIsNotAnApp.test.ts`.
+- **🧪 `AGENTV3_STRICT_TRIAL` — A SHARE OF NEW APPS START WITH TYPESCRIPT STRICT MODE ON (queue Q-008, admin "han"
+  2026-10-01). ⚠️ NOT set; default ON; `off` seeds every new app loose as before.** `AGENTV3_STRICT_TRIAL_PCT` (NOT set;
+  default **20**; `0` pauses; unreadable ⇒ 0, never 100). `strictTrial.ts`. The Vite-React starter compiles with strict
+  off, which makes `if (!result.ok)` fail to narrow and lets "may be null" crash on the phone. 20% of NEW workspaces (by
+  workspace id) are seeded with `"strict": true`. 🔒 **An existing app's tsconfig is never rewritten**, and the foundation
+  that fills in a missing tsconfig stays loose. Measured by `STRICT_TRIAL` (process-only) and `byStrictCohort` in the daily
+  cost telemetry: compare `strict-new` with `loose-new`, then the admin decides 100% or off. 🔒 The census in
+  `tests/aNewAppMayStartStrict.test.ts` typechecks every starter in BOTH modes; it found Panchang's null use and Arcade's
+  `<Empty>` called with props it does not take. **Never change a starter without it staying at zero errors.**
 - **🙋 A QUESTION IS AN ANSWER, NOT AN EMPTY BUILD — the retry overrode a correct reply and billed
   ₹196.28 for it (autopsy `e628efd4`, 2026-09-25; no flag, on by construction).** A free-tier user
   asked *"if we don't have a chat in next 2 hours can you send a message to initiate the chat

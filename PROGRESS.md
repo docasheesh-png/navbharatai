@@ -86897,6 +86897,36 @@ Q-024 🟡 seven items argued not defects (agreement). Locked in `tests/theElect
 moment; `LLM_CALL_HANDED_OFF` instead of `LLM_CALL_FAILED` on handoffs; the user summary after
 `STYLE_RULES_RESUMED` is the app description.
 
+## 2026-10-01 — Autopsy 3d1bfe2a ("Automation AI app": stopped at 8 s, then rebuilt as an edit)
+
+Admin answers the same day: **Q-004 = (a)** — keep the tool-reading review above the inline bound (closed);
+**Q-008 = yes** — the strict-mode trial is the next PR; **Q-020** — no answer yet, stays blocked.
+
+Sixth-rule ledger:
+- **C1 ✅** "An AI automation app" ran as an EDIT of our own starter ("✏️ Editing your existing app (11
+  source files)"), so no fast lane and no plan. The intention reader was told a project exists whenever
+  an earlier request exists; the earlier request had been stopped before writing anything. An earlier
+  request now counts only if the workspace holds something other than our starter, byte for byte
+  (`holdsOnlyOurStarter`, read only when it can change the answer; unreadable ⇒ today's behaviour).
+- **C2 ✅** That build was sized as taskType `chat` (chat ETA, 3–6 min for a 6.6 min build) — the
+  consequence of C1: as `new_build` the analyser files it `app_unsized`.
+- **B1 ✅** The stop was recorded as `LLM_CALL_FAILED` at ERROR (provider "unknown", `counts.errors = 1`).
+  Now `LLM_CALL_STOPPED`, info — the same treatment a budget end already had.
+- **B2 ✅** The fast lane filed the stop as `BUILD_FAILED` "handed off", and said "the files finished so
+  far are saved" about zero files. ⚠️ #3449 (autopsy 31254f9a, another session) landed the same fix first
+  (`stoppedLaneSummary`, `LLM_CALL_STOPPED`, `holdsOnlyOurStarter` for the rebuild guard); this PR keeps
+  theirs and adds only what theirs does not cover — the INTENT READER (C1), whose `edit_existing` answer
+  never reaches the rebuild guard's `intent === 'new_build'` check.
+- **C3 ✅** Build 2's setup line reprinted build 1's "completed 11 missing template files" (the count was
+  never cleared) and the machine's creation-time restore ("nothing saved yet") beside `sandbox=warm`.
+  Both now describe THIS setup (`setupRestoreText`).
+- **C4 ✅** The model invented `.nb-nav` and `.nb-brand-icon` for the sidebar shell — the obvious names, absent
+  from the kit — and spent four reads and four edits of `index.css` (one failed) adding them. Both are now
+  kit rules and named in the prompt's shell recipe.
+- **B3 🟡 → Q-010** (third occurrence). **C5 🟡 → Q-009** (GLM crawled twice; the bench worked).
+- Not defects: the reviewer's "second read" note (the file WAS handed to it — true), one manual `tsc`
+  after the clean note (one 2 s step), a 4px-grid advisory at grade A, "No tests" before the E2E scaffold.
+Tests: `tests/aStoppedRequestLeftNothing.test.ts`, each fix proven by reversion.
 ### 2026-10-01 — autopsy e49afa97 ("App for old person help", Weak, ok, 6.8 min, ₹108.26)
 
 The app was built, rendered, typechecked and pressed in a real browser (15 controls). What was wrong was
@@ -87014,7 +87044,7 @@ package.json` / `PREVIEW_SNAPSHOT_STALE`), logged six `INTEGRITY_UNUSED_DEP` war
 same-instance half — a Stop that frees the app before the build has left — was never hunted.
 
 Sixth-rule ledger (every row ✅ on merge of this PR, or 🟡 in `BUILD_REPORT_QUEUE.md`):
-- **Q-053** Two builds in one app. Root: a Stop freed the slot while the stopped build's code was still inside an
+- **Q-069** Two builds in one app. Root: a Stop freed the slot while the stopped build's code was still inside an
   un-abortable wait. Class: *a lock released on a request to stop, not on the stop.* Fixes: (a) `awaitApprovalOutcome`
   takes the build signal, ends at once with `stopped`, and names `timed-out` / `denied`; all five waits go through
   the route's one door `waitForUser` (census: no bare `awaitApproval(` in the route); (b) `AgentRunner` runs no tool
@@ -87022,39 +87052,39 @@ Sixth-rule ledger (every row ✅ on merge of this PR, or 🟡 in `BUILD_REPORT_Q
   until its `finally` runs (`markBuildExited`); a new build waits ≤ 15 s (`STOP_DRAIN_WAIT_MS`), is refused with
   `BUILD_STILL_STOPPING`, or reclaims a body stuck ≥ 3 min; cleanup releases only the key it owns
   (`releaseBuildLock`, 8 sites) — the sibling where an exiting build deleted the NEXT build's lock.
-- **Q-054** The "server restart / Continue building" banner for a build the user stopped — consequence of Q-053 (the
+- **Q-070** The "server restart / Continue building" banner for a build the user stopped — consequence of Q-069 (the
   runner writes `stopped` the moment it sees the signal, which now happens at once); a Continue pressed during the
   drain waits for the exit instead of starting a second build.
-- **Q-055** A Stop and a timeout were both "Skipped for now" — `SecretAnswer` carries `stopped` (silent) / `timed-out`
+- **Q-071** A Stop and a timeout were both "Skipped for now" — `SecretAnswer` carries `stopped` (silent) / `timed-out`
   (says so).
-- **Q-056** "~3 min to go" through a 10-minute popup; the futility breaker (10 quiet minutes) counted the wait; the
+- **Q-072** "~3 min to go" through a 10-minute popup; the futility breaker (10 quiet minutes) counted the wait; the
   ETA verdict ("1.7× and OVER the band") and the ETA history (telemetry `durationMs`, diagnostics history) learned from
   it. The heartbeat shows `waitingForUserLine` and skips futility while `userWait.since` is set; every ETA clock moves
   forward by the wait; `addUserWait` / `userWaitMs` take it off `etaAccuracy` and `workingMs`.
-- **Q-057** An AI-model key asked mid-build while `APP_AI_GATEWAY=on`. `AI_MODEL_KEY_NAMES` / `isAiModelKey`: the popup
+- **Q-073** An AI-model key asked mid-build while `APP_AI_GATEWAY=on`. `AI_MODEL_KEY_NAMES` / `isAiModelKey`: the popup
   is never opened for one (planned OR refused), the builder gets `keylessAiNote` (generate_ai, no server, no SDK);
   `GATEWAY_AI_RULE` says a NAMED provider is not a key to fetch. `AI_API_KEY` deliberately excluded (a server app's
   own setting).
-- **Q-058** The queued `npm install` ran after the Stop — Q-053 (b).
-- **Q-059** `SAVED_SOURCE_DIVERGES` + `PREVIEW_SNAPSHOT_STALE` in build 2 — build 1's late install; Q-053.
-- **Q-060** "I made your change" (ERROR) after a Stop — `greenGuardShouldTellUnverified({ stoppedByUser })`.
-- **Q-061** Six unused-package warnings for packages the Stop kept from being used — one `UNUSED_DEPS_AFTER_STOP` info
+- **Q-074** The queued `npm install` ran after the Stop — Q-069 (b).
+- **Q-075** `SAVED_SOURCE_DIVERGES` + `PREVIEW_SNAPSHOT_STALE` in build 2 — build 1's late install; Q-069.
+- **Q-076** "I made your change" (ERROR) after a Stop — `greenGuardShouldTellUnverified({ stoppedByUser })`.
+- **Q-077** Six unused-package warnings for packages the Stop kept from being used — one `UNUSED_DEPS_AFTER_STOP` info
   line for packages THIS build added; a package the user had still warns.
-- **Q-062** Contract hand-off read as "came back with nothing usable", then "Building 10 file(s)" — sibling of
+- **Q-078** Contract hand-off read as "came back with nothing usable", then "Building 10 file(s)" — sibling of
   31254f9a's stop fix: `contractOutcome: 'handed-off'`, the lane ends, the plan still reaches the full builder.
-- **Q-063** The plan hand-off said "NOT written yet / Nothing below has been created" about `src/App.tsx`,
+- **Q-079** The plan hand-off said "NOT written yet / Nothing below has been created" about `src/App.tsx`,
   `package.json`, `vite.config.ts`… which existed — `planHandoffText` asks the sandbox and names both groups.
-- **Q-064** The reviewer (no shell) was told "run tsc ONCE at the end", replied "I don't have a shell", and timed out
+- **Q-080** The reviewer (no shell) was told "run tsc ONCE at the end", replied "I don't have a shell", and timed out
   — `verificationStatus({ canRunCommands })`, decided from the sub-agent's own tools.
-- ✅ already fixed by PRs merged AFTER this build ran (04:15 UTC; #3448 13:03 UTC, #3449, #3451): **Q-065**
-  `LLM_CALL_FAILED` (error) for the hand-off as build 2's root cause → `LLM_CALL_HANDED_OFF` (#3448); **Q-066** one-shot
-  after the hand-off in build 1 → `ONESHOT_SKIPPED` (#3451); **Q-067** `PROVIDER_BENCHED` "for the rest of this build"
-  after 180 s + the crawl counted toward the timeout bench (double bench) (#3448); **Q-068** stopped build's
+- ✅ already fixed by PRs merged AFTER this build ran (04:15 UTC; #3448 13:03 UTC, #3449, #3451): **Q-081**
+  `LLM_CALL_FAILED` (error) for the hand-off as build 2's root cause → `LLM_CALL_HANDED_OFF` (#3448); **Q-082** one-shot
+  after the hand-off in build 1 → `ONESHOT_SKIPPED` (#3451); **Q-083** `PROVIDER_BENCHED` "for the rest of this build"
+  after 180 s + the crawl counted toward the timeout bench (double bench) (#3448); **Q-084** stopped build's
   `RELEASE_GATE` unresolved (#3449).
-- 🟡 **Q-069** `JOURNEY_NOT_RUN`: the chat form on the state-switched "Bharat AI" screen was not reached (the gate's
+- 🟡 **Q-085** `JOURNEY_NOT_RUN`: the chat form on the state-switched "Bharat AI" screen was not reached (the gate's
   "login wall" guess is #3451's wording fix). Blocked on the app's files and a decision — see the queue row.
 - 🟡 Q-009 (GLM crawl ×2) and Q-022 (8 off-grid spacing values; the `index.css` note "noted and not fixed") recurred.
-- 🟡 **Q-070** argued not defects (agreement): `READY_BEFORE_END` 112 s (dev server + preview publish after "looks
+- 🟡 **Q-086** argued not defects (agreement): `READY_BEFORE_END` 112 s (dev server + preview publish after "looks
   complete" — needed work), build 2's rough ETA 1.5× (labelled a guess, replaced by a measured figure), the reviewer's
   read of a guessed path (`src/lib/data.ts`, a glob followed), ₹9.32 for the stopped build (real cost — the admin's
   rule), the review timeout on 29 files (Q-004, admin chose to keep it).
@@ -87063,3 +87093,93 @@ shapes); ten reversions, one per fixed file, each failed the suite.
 **Live effect to watch:** no second build starting in a workspace while a stopped one is still running
 (`AGENTV3_BUILD_STILL_STOPPING` in the audit log means a Continue arrived during the drain and was held); a key
 popup that ends with ⏳ "No answer came in 10 minutes" instead of "Skipped"; no `request_secrets` popup for an AI key.
+## 2026-10-01 — Autopsy de3bb2bb ("Ye yese app banao jo data COACT oar sake", Weak, ok, 12.6 min vs a 6–8 min ETA, ₹194.19)
+
+Tally: 0 shipped broken · 3 self-heals that should not have been needed (integrity repair of a non-defect, the
+style hand-back, the CSS heal) · 2 struggles (a 189 s single-batch KIMI write; a sub-agent re-reading files the
+architect had already handed it) · 1 workaround (GLM crawl → bench) · release gate YELLOW on two warnings, both
+our own instruments, not the app.
+
+### Fixed (this PR, test-locked and reversion-proven in `tests/theCoactCollectorAutopsy.test.ts`, 27 cases)
+- **A ✅ shared constants in a `constants/` folder had no owner.** The plan named `src/constants/chat.ts`; the
+  value-owner rule only matched a `data`/`constants` BASENAME, so a new `data.ts` was added beside the contract
+  and two files wrote the same arrays. `dataDirOwner` (`SimpleBuilder.ts`) picks a planned module inside a
+  `constants|data|mocks|fixtures|seeds` folder (one ⇒ it; several ⇒ best stem overlap; a tie ⇒ nobody).
+- **B ✅ a repair pass started with the previous pass's read memory.** `ToolDispatcher.beginConversation()`
+  (called once per `AgentRunner.run`) clears the conversation's own reads/commands except handed-off files, so
+  a fresh pass is never told "you already read this" about a file it never saw. The shared report ledger is
+  untouched, so `REPEATED_READS` still counts the whole build.
+- **C ✅ a stylesheet imported by two modules was repaired as a defect.** Vite emits it once (proven with a real
+  Vite build). It no longer makes the integrity gate fail, is no longer in the repair instruction, and is
+  recorded as `info`. This one item cost an LLM pass and the YELLOW gate.
+- **D ✅ a healed finding stayed open.** `BuildDiagnostics.record` resolves the codes a `*_HEALED` line names
+  (`HEAL_RESOLVES`); the census test fails when the route records a new heal code that is not in the table.
+- **E ✅ the integrity after-check read only the files the heal wrote** and called the project fixed; it now
+  reads the whole project (durable + written + sandbox fallback).
+- **F ✅ `REPEATED_READS`, `WORKSPACE_SCAN_FAILED`, `EMPTY_BUILD_RETRY` counted against the app.** Added to
+  `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` — facts about our engine.
+- **G ✅ `vite-env.d.ts` missing from the integrity read** → the Vite env note claimed TypeScript errors that
+  the typecheck did not show. The sandbox fallback list now includes `src/vite-env.d.ts` and both tsconfigs; the
+  note says "would report". ⚠️ Why the durable store lacked the file is NOT proven (the template has it) — open.
+- **H ✅ the explorer could press "Saara data hatayein".** Hindi/Hinglish/Devanagari never-press and write words
+  (`localActionWords.ts`), shared by the click explorer and the sign-in explorer.
+- **I ✅ the platform's own e2e scaffold produced dependency and env findings.** `collectDependencyIssues` /
+  `collectEnvRefs` skip marker-carrying scaffold files (`platformE2eFiles`).
+- **Discovered ✅ the live ETA said "9 of 10 files" through 3 minutes of final checks**, and a failed fast-lane
+  hand-off left its file count in the ETA. `finalChecksEtaLine` takes over once integrity starts; the count is
+  reset when the fast lane hands off.
+- **Discovered ✅ `CSS_CLASSES_HEALED` said "all fixed" with 1–2 classes remaining** — the message now says so.
+
+### Covered by merged PRs (no new work): journey `UNREACHABLE` (#3451 Q-032), empty-workspace SETUP wording
+(#3449 Q-041), durable `index.html` (#3449 Q-042), ETA band (#3451 Q-030), reviewer handed file (#3451 Q-034).
+
+### 🟡 Blocked (rows in `BUILD_REPORT_QUEUE.md`): Q-064 GLM crawl (external) · Q-065 one 189 s 7-file batch
+(decision; recommend ≤3 files per call) · Q-066 sub-agents without the style hand-back (decision; recommend
+yes) · Q-067 "COACT" typo read as a product name (needs the final `useChat.ts`; recommend leave) · Q-068 six
+argued not-defects (needs agreement).
+
+**Live effect to watch:** no `INTEGRITY_HEALED` pass for a shared stylesheet; `INTEGRITY_DUPLICATE_STYLESHEET`
+at `info`; healed findings shown resolved in the report; the release gate GREEN on an app like this one.
+## 2026-10-01 — Autopsy 4a1c0157: a starter chip's login page (Weak, GREEN, 3.8 min, ₹23.11)
+
+The build itself went well: the tested "Login page" template was seeded, the builder made two small edits,
+the app rendered, a real journey passed, 9 controls were pressed, the production build passed, release gate
+GREEN. The report was ~10 hours old when it arrived (03:24 UTC), so every item was first checked against
+current `main`: four had already been fixed by PRs that merged after the build ran.
+
+**Fixed in this PR**
+- **Q-060: the ETA priced template polish as a from-scratch app.** The user was told ~11 min (the `complex_app`
+  fleet average) and the build took 3.8; at two minutes the strip still said "~9 min to go". Routing knew the
+  template was seeded (`scaffoldedComplexityDecision`, "simple (score 58, scaffold)"); the ETA did not, and every
+  template build was also folded into the `complex_app` average it read. `etaTaskKey` (`etaHistory.ts`) is now the
+  one answer: the telemetry counts a seeded build under `scaffold`, and the ETA of a build that will be seeded
+  (`scaffoldWillSeed`) reads that slice. Siblings checked: the 150-step cap and the reviewer gate read
+  `startTier` but only set ceilings; the blueprint gate is off and skips simple-lane tiers.
+  `tests/aTemplateBuildIsTimedAsATemplateBuild.test.ts`.
+- **Q-061: our own templates read `localStorage` unguarded.** Found by the build's own reviewer. The theme switch
+  (in every scaffold), the login form, todos, notes, pomodoro, the memory and puzzle games and the SaaS plan picker would
+  blank the app on blocked storage (private window, sandboxed frame, quota). Half the scaffolds had already been
+  hardened ("private mode" comments); the rest were never revisited. All guarded now, locked by a census that parses
+  every file a scaffold writes with the TypeScript parser and fails on any access outside a `try` block. The recipe
+  generators (game runtime, settings, notifications, consent banner) were already guarded.
+- **Q-062: the recap said "1 component. Components: ThemeToggle".** `extractFacts` read only `export function/const`;
+  `function App() {…}` + `export default App;` and `export { A, B as C }` were invisible. Both are read now through
+  the name's own declaration. The orphan-component check therefore also sees a default-exported screen nobody
+  imports — a real finding that used to be hidden.
+- The reviewer's accessibility suggestions on our login template: `aria-invalid`, `aria-describedby`,
+  `role="alert"` on each message, `aria-pressed` on the Log in / Sign up switch.
+
+**Already fixed on `main` after this build ran** (no new work): the ETA detail calling the platform average "this
+workspace's own past builds" (#3435); "the cache was warmed at build start in 0s" (#3436, `WARMUP_COMPILED_MARKER`);
+`PROVIDER_BENCHED` "for the rest of this build: … skipped for 180s" (#3448); the lean review reading `App.tsx`
+five times in 26 s — with #3436 the pre-seeded template files no longer count as "changed", so this review would
+now be one call with the code inlined and no tools; "⚠️ Build Review (85/100)" on a PASS with no stated score (#3442).
+
+### Ledger — BUILD REPORT 4a1c0157
+Q-060 ETA ✅ (this PR) · Q-061 unguarded storage in templates ✅ (this PR) · Q-062 "1 component" ✅ (this PR) ·
+reviewer a11y suggestions on our template ✅ (this PR) · ETA "workspace's own" ✅ #3435 · warm-up 0 s ✅ #3436 ·
+bench prefix ✅ #3448 · reviewer re-reads ✅ #3436 · 85/100 on PASS ✅ #3442 · GLM crawl 🟡 Q-009/Q-036 (external) ·
+"No tests at all" 🟡 Q-038 (decision) · `IN_BUILD_GREEN_RACED` 🟡 Q-024 (decision) · `startTier: sonnet` 🟡 Q-052
+(decision) · 14 s install inside the first edit 🟡 Q-063 (needs the next template build's ensure log).
+**Live effect to watch:** an `ETA_BASIS` line on a chip build that says "builds that start from a tested template",
+or the labelled rough estimate while that slice has under two days of history.

@@ -867,9 +867,39 @@ export function valueOwnerFor(manifest: ReadonlyArray<SimpleFileSpec>, names: re
   if (named) return { path: named.path, added: false };
   const dataFile = candidates.find((f) => /(^|\/)(data|constants?|mocks?|mockData|fixtures?|seed(?:Data)?)\.[jt]sx?$/i.test(f.path));
   if (dataFile) return { path: dataFile.path, added: false };
+  const inDataDir = dataDirOwner(candidates, names);
+  if (inDataDir) return { path: inDataDir.path, added: false };
   const dir = posix.dirname(contractPath);
   const ext = /\.js$/.test(contractPath) ? 'js' : 'ts';
   return { path: dir === '.' ? `data.${ext}` : `${dir}/data.${ext}`, added: true };
+}
+
+/**
+ * A planned plain module inside a constants / data / mocks / fixtures / seed FOLDER. PURE.
+ *
+ * 🔴 WHY (autopsy de3bb2bb, 2026-10-01). The plan had `src/constants/chat.ts` for the app's error
+ * messages and timeout, and the contract declared `DEFAULT_LOCALE`, `ERROR_MESSAGES`, `API_TIMEOUT`. The rule
+ * above matches a file NAMED `constants.ts`, never one that lives in `constants/`, so the lane ADDED
+ * `src/data.ts`. The lane handed off before writing it, and the files it had written imported `../data`, a
+ * module that did not exist: 21 type errors for the full builder to fix first. The planned file had written
+ * exactly those three constants.
+ *
+ * One such module ⇒ it owns the constants. Several ⇒ the one whose name and purpose share the most word
+ * stems with the constants, and a tie picks nobody (the lane then adds `data.ts`, as before). A `.tsx`
+ * component, a declaration file and a config file are never owners.
+ */
+export function dataDirOwner(candidates: ReadonlyArray<SimpleFileSpec>, names: readonly string[]): SimpleFileSpec | null {
+  const inDir = candidates.filter((f) => /(^|\/)(constants?|data|mocks?|fixtures?|seeds?)\/[^/]+\.[jt]s$/i.test(f.path)
+    && !/\.d\.ts$/i.test(f.path) && !/(^|\/)[^/]*\.config\.[jt]s$/i.test(f.path));
+  if (inDir.length === 0) return null;
+  if (inDir.length === 1) return inDir[0];
+  const want = new Set<string>();
+  for (const n of names) for (const s of ownerStems(n)) want.add(s);
+  const scored = inDir
+    .map((f) => ({ f, score: [...ownerStems(`${posix.basename(f.path).replace(/\.[jt]s$/, '')} ${f.purpose || ''}`)].filter((s) => want.has(s)).length }))
+    .sort((a, b) => b.score - a.score);
+  if (scored[0].score === 0 || (scored.length > 1 && scored[1].score === scored[0].score)) return null;
+  return scored[0].f;
 }
 
 /** The purpose line the constants' owner is given, naming each constant it must export. PURE. */

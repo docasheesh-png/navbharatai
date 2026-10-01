@@ -202,6 +202,40 @@ export function extractFacts(file: string, content: string): FileFacts {
       }
     }
 
+    // 🔴 `export default App;` IS AN EXPORT TOO (autopsy 4a1c0157, 2026-10-01). Every golden scaffold and
+    // most generated Vite apps declare `function App() {…}` and export it by name on the last line, and so
+    // do `export { A, B as C };` lists. Only `export function/const …` was read, so the login page's own
+    // App never entered the graph and the user was told "17 files, 1 component. Components: ThemeToggle".
+    // The name's kind comes from its declaration in this file; a name declared nowhere here is skipped.
+    const declaredKind = (name: string): SymbolKind | null => {
+      const esc = name.replace(/\$/g, '\\$');
+      const decl = new RegExp(`(?:^|[^\\w$.])(?:async\\s+)?(function|class|const|let|var|interface|type|enum)\\s+${esc}(?![\\w$])`).exec(code);
+      if (!decl) return null;
+      return decl[1] === 'let' || decl[1] === 'var' ? 'const' : (decl[1] as SymbolKind);
+    };
+    const seen = new Set(symbols.map((s) => s.name));
+    const addByName = (name: string): void => {
+      if (seen.has(name)) return;
+      const kind = declaredKind(name);
+      if (!kind) return;
+      seen.add(name);
+      symbols.push({ name, kind, file });
+      if ((kind === 'const' || kind === 'function') && isComponentName(name) && /\.(t|j)sx$/.test(file)) {
+        components.push(name);
+      }
+    };
+    const defaultByNameRe = /export\s+default\s+([A-Za-z_$][\w$]*)\s*;?\s*(?:\n|$)/g;
+    for (let m = defaultByNameRe.exec(code); m; m = defaultByNameRe.exec(code)) {
+      if (!/^(function|class|async|abstract)$/.test(m[1])) addByName(m[1]);
+    }
+    const exportListRe = /\bexport\s*\{([^}]*)\}(?!\s*from)/g;
+    for (let m = exportListRe.exec(code); m; m = exportListRe.exec(code)) {
+      for (const part of m[1].split(',')) {
+        const local = part.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0].trim();
+        if (/^[A-Za-z_$][\w$]*$/.test(local)) addByName(local);
+      }
+    }
+
     const importRe = /import\s+[^;]*?from\s+['"]([^'"]+)['"]/g;
     for (let m = importRe.exec(code); m; m = importRe.exec(code)) {
       imports.push(m[1]);

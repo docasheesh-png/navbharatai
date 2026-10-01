@@ -86039,6 +86039,47 @@ Tests: `tests/theSalesSampleHadTwoHelperHomes.test.ts`, reversion-proven for all
   at the first `tsc`. These files are editable on purpose, because apps add dependencies. Whether the plan may
   REWRITE them wholesale is not decided here.
 
+## 2026-10-01 — Autopsy 6461025c ("Ads + Rewards + Coin Economy" spec, Weak, 19.7 min, ₹477.80): the spec lost to a keyword list
+
+The request was a 15,689-character written spec with 40 enumerated parts. The app rendered, typechecked,
+built for production and passed two form journeys — and was a generic ten-feature app.
+
+**Fixed (reversion-proven, `tests/theSpecWasTheContract.test.ts`):**
+1. **The keyword table outranked the spec.** `requestedFeatureLabels` read ten categories from it and the
+   contract handed them to the builder as "not suggestions — build every one of these". "Schedule" (a
+   campaign's delivery window) and "Scheduled Reports" became a booking calendar; "Ad Review" (moderation)
+   became star ratings. The card that lets a user untick a misreading was not shown for this turn, so the
+   misreading went straight in as an order. **A request with ≥14 enumerated parts (`readsAsSpecification`,
+   the same line Project Mode already uses — now one constant) is its own contract**: no keyword
+   categories are restated and none are graded. Plus the three senses for shorter prompts: a scheduled
+   report/campaign is not a booking, a moderation review is not a rating, an ad placement is not a hire.
+2. **"This app isn't fully working yet" on a success we charged for.** The runner wrote its not-ready
+   headline over the model's answer (a CORS blocker); the render rescue then proved the app works and kept
+   the headline (`result.summary || …`). The headline is now named (`notReadyHeadline.ts`), the runner
+   keeps the model's words (`modelAnswer`), and `summaryAfterRescue` hands them back.
+3. **E2E net skipped "because the build did not succeed"** — a second before the rescue proved it did.
+   Since #3313 that pass runs before the proof, so it now treats a rescue-eligible build as built.
+4. **The project planner was cut off at a flat 8,000 tokens** (26,889 chars, 79 s, plan discarded) for an
+   answer allowed 60 modules with frozen contracts. `PROJECT_PLANNER_MAX_TOKENS` = 16,000 and the prompt
+   asks for compact, one-line contracts.
+5. **Upstream rules, both lanes:** `CORS_RULE` (same-origin proxy needs no CORS; never `origin:true` with
+   credentials — the build's one release-gate blocker) and `SEED_PASSWORD_RULE` (hash demo passwords at
+   startup — the seeded literal hashes matched nothing and the agent's own login failed).
+
+**Still open:** `@types/express` v5 beside express v4 (the model rewrote package.json after installing);
+`src/index.css` edited 11 times piecemeal (the existing nudge fired at #6 and #11 and was not obeyed);
+3 unnamed buttons noted at write time and not fixed; the reviewer could not be one-call here (44 files
+exceed the 60K inline bound), so it read files — by design.
+
+**Follow-up, same autopsy (admin: "sab root cause fix huye? nahi to karo"):**
+6. **The CORS blocker was found and the model was never shown it.** The build ended on "App ready hai!"
+   with a blocker and no resume, and nothing recorded why. A question at the end of a run that already
+   WROTE the app is a closing offer, not a decision the blockers wait on, so `decideUnfinishedResume`
+   now stands down on a question only when nothing was produced (`producedFiles`). Every stand-down is
+   now recorded (`UNFINISHED_RESUME_STOOD_DOWN`). ⚠️ The model's full final text is not in the report,
+   so "it ended on a question" is the most likely branch, not a proven one — the new line will say.
+   **Deliberately NOT auto-fixed:** pinning `@types/express` back to v4 — the app typechecked clean on
+   the v5 types, and downgrading them could turn a green build red. It stays a warning.
 ## 2026-10-01 — Autopsy a106df77: the user pasted their own app, and every reader read the markup
 
 The user pasted a whole HTML file into the build box, with nothing else written. It was their own "A1 Decor
@@ -86144,6 +86185,12 @@ tail and the runner census.
 **Still open:**
 - Each repair pass's instruction is still persisted into the main conversation as a `user` turn. Whether a
   reopened session shows it as something the user typed was not checked here.
+7. **#3426 (merged today) read every markdown "* item" as a code comment.** `isCodeLine` counted a line
+   starting `* ` as a comment, so a written spec in markdown bullets became "pasted source", its bullets
+   were removed as machine text, and the REAL 6461025c prompt counted **0** enumerated parts instead of
+   40 — Project Mode, the spec stand-down and every reader through `withoutMachineText` would have gone
+   quiet on it. A `* ` line now counts as code only inside a real `/* … */` block (`pastedSpan` tracks
+   it). Locked with the real prompt as `tests/fixtures/autopsy6461025c.prompt.txt`.
 ## 2026-10-01 — App Mart social, phase 2: push tap, comment word filter, follow, Browse views
 
 Admin: *"teeno kaam karo! … user jis jis creator ko follow kare, uski apps usko app mart me alag se dikhe … browser

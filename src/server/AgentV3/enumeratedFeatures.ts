@@ -197,6 +197,27 @@ function collapseVariants(items: string[]): string[] {
 }
 
 /**
+ * How many enumerated parts make a request a SPECIFICATION — the one number Project Mode already uses
+ * for "a spec that long is a project, whatever it is called" (`MEGA_BULLETS_ALONE` reads this).
+ */
+export const SPEC_FEATURE_COUNT = 14;
+
+/**
+ * Is this request a written specification — one that names its own features, in its own terms, at a
+ * level of detail our feature keyword table cannot match? PURE.
+ *
+ * 🔴 WHY (autopsy 6461025c, 2026-10-01). A 15,689-character "Ads + Rewards + Coin Economy" spec with
+ * 40 enumerated parts was read by the keyword table as ten generic features, and those ten were handed
+ * to the builder as "not suggestions — build every one of these". "Schedule" (a campaign's delivery
+ * window) became a booking calendar; "Ad Review" (moderation) became star ratings. The builder obeyed
+ * the list over the spec. Each misreading has been patched one word at a time (e7baf61d, SignBridge,
+ * the map verb) and that will never be complete; a spec that long already says exactly what to build.
+ */
+export function readsAsSpecification(prompt: string): boolean {
+  return countEnumeratedFeatures(prompt) >= SPEC_FEATURE_COUNT;
+}
+
+/**
  * Count the distinct parts a prompt enumerates — bullets, numbered lines, and inline comma /
  * "and" / "aur" runs alike.
  *

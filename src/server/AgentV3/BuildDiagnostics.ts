@@ -63,6 +63,8 @@ const PROCESS_ONLY_CODES = new Set([
   'LADDER_DEPTH',
   // How long OUR platform let a free build hold the sandbox (freeBuildTimeCap.ts) — a policy, never the app.
   'FREE_BUILD_TIME_CAP', 'FREE_BUILD_CHAIN_PAUSED',
+  // OUR end-of-turn steer that handed the model its undefined classes (stylePolishResume.ts, autopsy 1be16985).
+  'STYLE_RULES_RESUMED',
   // A reviewer finding OUR evidence refuted (reviewEvidence.ts) is a fact about the reviewer, not the app.
   'REVIEW_REFUTED_BY_EVIDENCE',
   // …and a finding not offered because its file no longer exists (autopsy f496c75b): about the reviewer.

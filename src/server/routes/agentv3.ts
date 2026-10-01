@@ -255,6 +255,9 @@ import { clampPowerForUser } from '../AgentV3/powerGating';
 import { weakTierWelcomeNotice, weakTierBuildFailedNotice } from '../AgentV3/weakTierNotice';
 import { isPlatformNoticeEcho, platformNoticeEchoReply } from '../AgentV3/platformNoticeEcho';
 import { shouldAnswerPictureRequest, PICTURE_REQUEST_STEER, pictureRequestFallback } from '../AgentV3/pictureRequest';
+import { shouldAnswerSpreadsheetRequest } from '../AgentV3/spreadsheetRequest';
+import { runSpreadsheetTurn, SPREADSHEET_FILE_INSTRUCTIONS, type SheetFileRef } from '../AgentV3/spreadsheetTurn';
+import { saveSpreadsheetFile, newSpreadsheetFileId } from '../lib/spreadsheetFileStore';
 import { starterCompletedNote } from '../AgentV3/starterFragment';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
 import { summaryAdditions } from '../AgentV3/summaryAdditions';
@@ -538,6 +541,7 @@ import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { recordEngineUse } from '../AgentV3/engineUseStore';
 import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrchestrator';
 import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
+import { applyStrictTrial, strictCohort } from '../AgentV3/strictTrial';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
 import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall, reviewChangedPaths } from '../AgentV3/ReviewerAgent';
@@ -10680,7 +10684,19 @@ async function noteBuildOutcome(
     // Professional already point a picture request to Image Generator AI; Pro was the one surface that
     // did not. Answered instead — in the user's language, with the way to the studio and an offer to
     // build an image app if that was what they meant.
-    const answerPictureRequest = !echoesPlatformNotice && !answerProjectElsewhere && shouldAnswerPictureRequest({
+    // 📊 A SPREADSHEET IS A FILE, NOT AN APP (`spreadsheetRequest.ts`): "make a sample Excel file" was built
+    // as a React dashboard that showed a table — and the user still had no .xlsx. Now the engine writes the
+    // rows, our server writes a real .xlsx and .csv, and the reply carries a Download button. Checked
+    // BEFORE the picture rule, so "an Excel file with photo links" is a file, never a picture request.
+    const answerSpreadsheet = !echoesPlatformNotice && !answerProjectElsewhere && shouldAnswerSpreadsheetRequest({
+      prompt,
+      importing: zipImports.length > 0 || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== ''),
+    });
+    if (answerSpreadsheet) {
+      console.log('[AGENTV3] the prompt asks for a spreadsheet file, not an app — making the file instead of building');
+      intent = 'chat';
+    }
+    const answerPictureRequest = !echoesPlatformNotice && !answerProjectElsewhere && !answerSpreadsheet && shouldAnswerPictureRequest({
       prompt,
       userAppExists,
       importing: zipImports.length > 0 || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== ''),
@@ -10891,12 +10907,42 @@ async function noteBuildOutcome(
         // prompt-keyed cache could serve one turn's answer to the other. Excluded outright rather
         // than reasoned around: the other conditions happen to cover it today, and that is exactly
         // the kind of coincidence that stops being true after an unrelated edit.
-        const cacheable = !askUnrelated && !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !answerPictureRequest && !clarifyWhatToBuild && chatCacheEnabled();
+        const cacheable = !askUnrelated && !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !answerPictureRequest && !answerSpreadsheet && !clarifyWhatToBuild && chatCacheEnabled();
         const cacheKey = cacheable ? hashKey(['chatv1', prompt]) : '';
         let reply: string;
+        // The spreadsheet this reply carries, when it made one — rides on the narration line and the
+        // persisted turn, so the Download button is there live AND after the chat is reopened.
+        let sheetFile: SheetFileRef | null = null;
         const cachedReply = cacheable ? chatResponseCache.get(cacheKey) : undefined;
         if (echoesPlatformNotice) {
           reply = platformNoticeEchoReply(recentRequests.find((r) => !isPlatformNoticeEcho(r)) ?? null);
+        } else if (answerSpreadsheet) {
+          // A turn whose whole point is a FILE must never fall through to a build: every outcome of
+          // runSpreadsheetTurn is an honest reply (made / try again / sign in), never a throw.
+          const sheetTurn = await runSpreadsheetTurn({
+            uid: userId,
+            workspaceId: intentWorkspaceId,
+            newId: newSpreadsheetFileId,
+            save: saveSpreadsheetFile,
+            ask: async () => {
+              const routed = await raceTimeout(
+                AIRouterManager.getRouter('free').route(
+                  chatPrompt,
+                  LANGUAGE_RULE + '\n\n' + CREDENTIAL_SILENCE_RULE + '\n\n'
+                    + "You are NavBharatAI's assistant. Do not mention which model you are.\n\n"
+                    + CREATOR_IDENTITY + '\n\n' + INDIA_TERRITORIAL_INTEGRITY + '\n\n' + recencyDirective()
+                    + '\n\n' + SPREADSHEET_FILE_INSTRUCTIONS,
+                ),
+                // Longer than a chat reply's 30 s: a sheet of 100 rows is several thousand tokens.
+                90_000,
+                'spreadsheetRoute',
+              ).catch(() => null);
+              return routed?.response?.content ?? null;
+            },
+          });
+          console.log(`[AGENTV3] spreadsheet file turn: ${sheetTurn.outcome}${sheetTurn.file ? ` (${sheetTurn.file.sheets.map((m) => `${m.rows}x${m.columns}`).join(', ')})` : ''}`);
+          reply = sheetTurn.reply;
+          sheetFile = sheetTurn.file;
         } else if (cachedReply !== undefined) {
           reply = cachedReply;
         } else {
@@ -10977,7 +11023,7 @@ async function noteBuildOutcome(
         // name, no note — then close out the stream the same way a build does.
         const chatEvents = new AgentEventStream();
         chatEvents.subscribe((e) => send(e), false);
-        chatEvents.emit({ type: 'narration', agent: 'architect', text: reply, ts: Date.now() });
+        chatEvents.emit({ type: 'narration', agent: 'architect', text: reply, ts: Date.now(), ...(sheetFile ? { file: sheetFile } : {}) });
         chatEvents.emit({ type: 'done', ok: true, summary: reply, ts: Date.now() });
         // billedUsd: 0 — the cheap free router is not billed to the user as a build.
         send({ type: 'result', ok: true, summary: reply, steps: 0, billedUsd: 0, billedInr: 0 });
@@ -10996,7 +11042,7 @@ async function noteBuildOutcome(
             title: deriveTitle(prompt),
             turn: [
               { role: 'user', content: prompt },
-              { role: 'assistant', content: reply },
+              { role: 'assistant', content: reply, ...(sheetFile ? { file: sheetFile } : {}) },
             ],
             patch: { status: 'complete', updatedAt: Date.now() },
           }), 8_000, 'persistChatTurn');
@@ -16659,7 +16705,8 @@ async function noteBuildOutcome(
             const existingSrc = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
               .filter((p) => p.startsWith('src/'));
             if (existingSrc.length === 0) {
-              const goldenFiles = goldenScaffoldFiles(golden);
+              // Q-008: a workspace in the strict-mode trial gets the strict tsconfig (strictTrial.ts).
+              const goldenFiles = applyStrictTrial(goldenScaffoldFiles(golden), workspaceId);
               // TOGETHER, not one after another (autopsy 972acde5): twelve sequential sandbox round trips
               // were ~5 s of the wait before the first model call. A failed write still rejects the whole
               // seed, exactly as the loop did, and the files are recorded only once every write landed.
@@ -24090,6 +24137,31 @@ async function noteBuildOutcome(
         });
       } catch { /* an observation must never affect a finished build */ }
 
+      /**
+       * Q-008 — THE STRICT-MODE TRIAL'S MEASUREMENT (strictTrial.ts). Which TypeScript mode this app
+       * compiled in, and whether it was a fresh app: `strict-new` against `loose-new` is the comparison
+       * the admin's decision waits on. Read from the app's real tsconfig, never from the trial bucket,
+       * because an app created before the trial stays loose whatever its bucket. Placed beside its
+       * siblings and outside every feature's conditional for the reason `PROVIDER_TIME_WASTED` states.
+       */
+      let strictCohortLabel: ReturnType<typeof strictCohort> = 'unknown';
+      try {
+        const tsconfigNow = writtenFiles.get('tsconfig.json')
+          ?? await Promise.race([
+            actuator.readFile(workspaceId, 'tsconfig.json').catch(() => null),
+            new Promise<null>((r) => setTimeout(() => r(null), 5_000)),
+          ]);
+        strictCohortLabel = strictCohort(tsconfigNow, !userAppExists);
+        buildDiag.record({
+          phase: 'build',
+          severity: 'info',
+          code: 'STRICT_TRIAL',
+          message: `TypeScript mode: ${strictCohortLabel}`,
+          detail: `cohort=${strictCohortLabel} · fresh-app=${!userAppExists}`,
+          autoResolved: true,
+        });
+      } catch { /* an observation must never affect a finished build */ }
+
       // Cost-ladder telemetry (P2 measurement): record this build's task type, start
       // tier, billed amount, tokens, success, and duration so the savings AND the
       // per-tier quality are MEASURABLE (the P8 cutover gate needs this data). Best-
@@ -24115,6 +24187,8 @@ async function noteBuildOutcome(
           // T1-escalation-on — the canary A/B labels: which cohort this build was in ('in'/'out'/'off',
           // same workspaceId key as the gates so labels match behaviour) + whether the ladder climbed.
           escalationCohort: escalationCohort(workspaceId),
+          // Q-008 — the strict-mode trial's A/B label (strict-new vs loose-new is the comparison).
+          strictCohort: strictCohortLabel,
           escalations: escalationsCount,
           // …and how far down the RUNGS it went inside that tier (a different question — see above).
           // Omitted rather than zeroed when it could not be attributed: `0` would read as a real depth.

@@ -3242,6 +3242,16 @@ the flag entries above promise.
   an app ("game mode", "pdf download") and continue/fix all stand it down, and so does a workspace we cannot read
   or name. A 22-message precision lock in `tests/askBeforeBuildingSomethingElseIntoThisApp.test.ts` fails CI if
   an ordinary edit ever meets the question. The reply never falls through to a build if the chat model fails.
+- **📊 `AGENTV3_SPREADSHEET_FILE` — A SPREADSHEET IS A FILE, NOT AN APP (admin 2026-10-01, verbatim: *"A karo!!"*).
+  ⚠️ NOT set; default ON; `off` builds such requests as before.** "Make a sample Excel file" was built as a React
+  dashboard and the user got no `.xlsx`. `spreadsheetRequest.ts` (precision first: a spreadsheet noun + a create
+  verb or "sample data", and no software word, how-to, existing-file handling or other format) turns the turn into a
+  chat turn; `spreadsheetTurn.ts` asks the free router for JSON rows; `lib/spreadsheetFile.ts` clamps them and
+  writes `.xlsx` (exceljs) / `.csv` (BOM + formula-injection guard); rows live in `agentv3_sheet_files` under the
+  VERIFIED uid; `routes/spreadsheetFiles.ts` downloads through the App Mart ticket shape (HMAC over file + format +
+  sheet + account, 10 min). The chat line and the persisted turn carry `file`, so the Download card survives a
+  reopen. ₹0, like the chat lane. ⚠️ The card reaches phone users only with a fresh `.aab`/`.ipa`. Test-locked in
+  `tests/aSpreadsheetIsAFileNotAnApp.test.ts`.
 - **🧩 `AGENTV3_DANGLING_CSS_GUARD` — AN IMPORT OF A STYLESHEET THAT DOES NOT EXIST IS REMOVED (autopsy 120eb52f).
   ⚠️ NOT set; default ON; `off` leaves such imports.** Four components imported `./X.css` files nobody wrote;
   `tsc` cannot see a stylesheet import, and Vite cannot build one. At the end of a build, a SIDE-EFFECT import of
@@ -4096,6 +4106,15 @@ the flag entries above promise.
   `planningRequest.ts`); a build cut short before its ETA band is `untested`; the platform ETA prior averages
   successful builds; and setup puts back the template when a workspace holds only a piece of our own starter
   (`starterFragment.ts`). Test-locked in `tests/aPictureIsNotAnApp.test.ts`.
+- **🧪 `AGENTV3_STRICT_TRIAL` — A SHARE OF NEW APPS START WITH TYPESCRIPT STRICT MODE ON (queue Q-008, admin "han"
+  2026-10-01). ⚠️ NOT set; default ON; `off` seeds every new app loose as before.** `AGENTV3_STRICT_TRIAL_PCT` (NOT set;
+  default **20**; `0` pauses; unreadable ⇒ 0, never 100). `strictTrial.ts`. The Vite-React starter compiles with strict
+  off, which makes `if (!result.ok)` fail to narrow and lets "may be null" crash on the phone. 20% of NEW workspaces (by
+  workspace id) are seeded with `"strict": true`. 🔒 **An existing app's tsconfig is never rewritten**, and the foundation
+  that fills in a missing tsconfig stays loose. Measured by `STRICT_TRIAL` (process-only) and `byStrictCohort` in the daily
+  cost telemetry: compare `strict-new` with `loose-new`, then the admin decides 100% or off. 🔒 The census in
+  `tests/aNewAppMayStartStrict.test.ts` typechecks every starter in BOTH modes; it found Panchang's null use and Arcade's
+  `<Empty>` called with props it does not take. **Never change a starter without it staying at zero errors.**
 - **🙋 A QUESTION IS AN ANSWER, NOT AN EMPTY BUILD — the retry overrode a correct reply and billed
   ₹196.28 for it (autopsy `e628efd4`, 2026-09-25; no flag, on by construction).** A free-tier user
   asked *"if we don't have a chat in next 2 hours can you send a message to initiate the chat

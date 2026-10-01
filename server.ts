@@ -110,6 +110,7 @@ import { serverLoad } from './src/server/lib/serverLoad';
 import { registerSyncRoutes } from './src/server/routes/sync';
 import { registerProfileRoutes } from './src/server/routes/profile';
 import { registerExportRoutes } from './src/server/routes/export';
+import { registerSpreadsheetFileRoutes } from './src/server/routes/spreadsheetFiles';
 import { registerApiContractRoutes } from './src/server/lib/apiContract';
 import { registerKnowledgeDocsRoutes } from './src/server/lib/KnowledgeDocs';
 import { registerApiKeyRoutes } from './src/server/routes/apiKeys';
@@ -797,6 +798,7 @@ setInterval(() => {
   // User profile (My Profile page: display name, photo, build history, budget).
   registerProfileRoutes(app);
   registerExportRoutes(app); // P-DATA.7 — user data export (build history + usage as CSV/JSON/Excel)
+  registerSpreadsheetFileRoutes(app); // NavBharatAI Pro's engine-made Excel/CSV files (spreadsheetRequest.ts)
   registerApiContractRoutes(app); // P-DATA.5 — OpenAPI 3.0.3 contract at /api/openapi.json + /api/docs viewer
   registerKnowledgeDocsRoutes(app); // U-9 — docs site at /guide + machine-readable /api/knowledge-base
   registerApiKeyRoutes(app); // U-7 — public API keys (/api/keys) + key-gated /api/v1/me

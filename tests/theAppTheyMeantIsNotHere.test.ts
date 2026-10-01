@@ -140,8 +140,9 @@ describe('REVERSION GUARDS — the route asks, and a failed reply never becomes 
 
   it('the steer reaches the reply, and the reply is never cached', () => {
     expect(route).toContain('(answerProjectElsewhere ? projectElsewhereSteer(projectElsewhere) : \'\')');
-    // A picture answer (autopsy 19641ab5) is never cached either; it sits between the two.
-    expect(route).toMatch(/!answerProjectElsewhere && (?:!answerPictureRequest && )?!clarifyWhatToBuild && chatCacheEnabled\(\)/);
+    // A picture answer (autopsy 19641ab5) and a spreadsheet file (spreadsheetRequest.ts) are never cached
+    // either; they sit between the two.
+    expect(route).toMatch(/!answerProjectElsewhere && (?:!answerPictureRequest && )?(?:!answerSpreadsheet && )?!clarifyWhatToBuild && chatCacheEnabled\(\)/);
   });
 
   it('an unreachable engine degrades to the fixed answer, not to the build path', () => {

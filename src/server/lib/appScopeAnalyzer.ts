@@ -110,7 +110,7 @@ const FAMOUS_APPS: Array<{ name: string; re: RegExp }> = [
  * ordinary build (which the feature count may still escalate), while a false clone costs a planner call
  * and hands the build a roadmap for the wrong app.
  */
-const TOOL_BEFORE = /\b(?:using|use|uses|via|through|thru|over|on|with|by|to|into|from|in|share|send|post|login|log\s+in|sign\s+in|signin|integrat\w*|connect\w*|link\w*|embed\w*|se|paste|copy|import|add|fetch|download\w*|convert\w*|unauthori[sz]ed|authori[sz]ed)\s+(?:the\s+|my\s+|your\s+|our\s+|their\s+|a\s+|any\s+)?$/i;
+const TOOL_BEFORE = /\b(?:using|use|uses|via|through|thru|over|on|with|by|to|into|from|in|share|send|post|login|log\s+in|sign\s+in|signin|integrat\w*|connect\w*|link\w*|embed\w*|se|paste|copy|import|add|fetch|download\w*|convert\w*|unauthori[sz]ed|authori[sz]ed|open|opens|opening|launch\w*|play|plays|watch|search|go\s+to|visit)\s+(?:the\s+|my\s+|your\s+|our\s+|their\s+|a\s+|any\s+)?$/i;
 // 🔴 CONTENT FROM A PRODUCT IS NOT THE PRODUCT (autopsy Study-Racer, 2026-09-25). "mai isme notes,
 // youtube video ka link dalunga" — I will paste YouTube video links into it — was classed
 // *"LARGE — clone of YouTube"* while the complexity router scored the same prompt 15 ("simple"). The
@@ -118,7 +118,14 @@ const TOOL_BEFORE = /\b(?:using|use|uses|via|through|thru|over|on|with|by|to|int
 // 3 and built a hard-coded math-quiz racer. A product name followed by a CONTENT noun (video, url,
 // playlist, clip, thumbnail…) or by a Hinglish possessive before an integration noun ("youtube ka
 // link", "instagram ki post") is the product being USED, exactly as a channel preposition before it is.
-const TOOL_AFTER = /^[\s/]*(?:(?:ka|ki|ke|wala|wali|wale|se)\s+)?(?:api|apis|sdk|login|log\s*in|sign[\s-]?in|oauth|auth|share|sharing|button|buttons|integration|notifications?|messages?|link|links|otp|business|pay|s3|web\s+services|account|accounts|group|groups|number|alerts?|widget|embed|embeds|channel|bot|webhook|ads|videos?|urls?|playlists?|clips?|thumbnails?|posts?|reels?|stories|feed|page|pages|content|audio|music|songs?|mp3|data|downloads?)\b|^[\s-]*to[\s-]*(?:mp3|mp4|audio|video|wav|gif|text|pdf)\b/i;
+const TOOL_AFTER = /^[\s/]*(?:(?:ka|ki|ke|wala|wali|wale|se)\s+)?(?:api|apis|sdk|login|log\s*in|sign[\s-]?in|oauth|auth|share|sharing|button|buttons|integration|notifications?|messages?|link|links|otp|business|pay|s3|web\s+services|account|accounts|group|groups|number|alerts?|widget|embed|embeds|channel|bot|webhook|ads|videos?|urls?|playlists?|clips?|thumbnails?|posts?|reels?|stories|feed|page|pages|content|audio|music|songs?|mp3|data|downloads?|kholo|kholna|khol\s+do|chalao|chalana|app\s+(?:kholo|chalao|open))\b|^[\s-]*to[\s-]*(?:mp3|mp4|audio|video|wav|gif|text|pdf)\b/i;
+
+// 🔴 A PRODUCT A COMMAND OPENS IS NOT THE PRODUCT (autopsy 042e472f + dfd24058, 2026-10-01). A voice
+// assistant's command list — "Open YouTube", `"open YouTube"` — was classed "LARGE — clone of YouTube" in
+// BOTH builds of that report, and the first one handed the mega-app planner a YouTube roadmap for a JARVIS
+// app. A verb that LAUNCHES or USES the product (open, launch, play, watch, search, go to, visit; Hinglish
+// "YouTube kholo / chalao") is the fifth shape of "the product being used", after channels, content,
+// markdown and prohibitions — added to the same two lists, never a sixth special case.
 
 // 🔴 A PRODUCT NAMED IN A PROHIBITION IS NOT A CLONE REQUEST (autopsy 6a4a799f, 2026-09-29). "Do NOT use
 // copyrighted Spotify assets or branding" — written by someone asking for ORIGINAL branding — was classed

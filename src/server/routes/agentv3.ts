@@ -16553,9 +16553,13 @@ async function noteBuildOutcome(
             ppDecompositionAnnounced = true;
             events.emit({ type: 'narration', agent: 'architect', text: '🏗️ This is a large software project — decomposing it into independently-buildable modules with frozen interface contracts…', ts: Date.now() });
             const ppScaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
-            const modules = parsePlannedModules(await ppGenerate(projectPlanSystemPrompt(framework), projectPlanUserPrompt(prompt, ppScaffold)));
+            // The planner decides every module's files before a builder sees the stack note, so it gets the
+            // note too — or a Kotlin request is planned as Gradle modules the builder may not write (autopsy
+            // 042e472f, 2026-10-01). The plan's goal carries it, so every module turn reads it again.
+            const plannerGoal = unsupportedStackAsked ? `${unsupportedStackBuilderNote(unsupportedStackAsked, framework)}\n\n---\n\n${prompt}` : prompt;
+            const modules = parsePlannedModules(await ppGenerate(projectPlanSystemPrompt(framework), projectPlanUserPrompt(plannerGoal, ppScaffold)));
             if (modules.length >= MIN_PROJECT_MODULES) {
-              pPlan = createProjectPlan(prompt, framework, modules, Date.now());
+              pPlan = createProjectPlan(plannerGoal, framework, modules, Date.now());
               await saveProjectPlan(workspaceId, pPlan);
               events.emit({ type: 'narration', agent: 'architect', text: `📦 Project plan ready: ${modules.length} modules — ${modules.map((m) => m.name).join(' → ')}. I will build them one per round, in dependency order, and the plan survives reloads.`, ts: Date.now() });
             } else {
@@ -22146,6 +22150,9 @@ async function noteBuildOutcome(
           // the builds where every runtime check skipped.
           filesWritten: writtenFiles.size,
           buildWasRequested: userAskedToBuildAnApp,
+          // "Everything lives in one HTML file" about a multi-file project (autopsy dfd24058). Counted only
+          // when the written files ARE the app — an edit turn writes a slice, and a slice of one is not a claim.
+          appSourceFiles: isImportTurn || isEditMode ? undefined : Array.from(writtenFiles.keys()).filter((p) => /\.(?:[cm]?[jt]sx?|css|vue|svelte)$/i.test(p) && !/(?:^|\/)(?:node_modules|dist)\//.test(p)).length,
           // "the exact versions you specified" when the request named none (autopsy 33812996).
           userRequest: prompt,
           // "TypeScript type-check passes cleanly" beside a release gate recording "the typecheck did
@@ -24566,7 +24573,7 @@ async function noteBuildOutcome(
       } catch { /* the net must never break a settle */ }
       // Once, on a successful build: the user asked for a stack we did not use (unsupportedStack.ts).
       if (result.ok && unsupportedStackAsked && typeof result.summary === 'string') {
-        const stackNote = unsupportedStackUserNote(unsupportedStackAsked, framework);
+        const stackNote = unsupportedStackUserNote(unsupportedStackAsked, framework, result.summary);
         if (stackNote && !result.summary.includes(stackNote.trim())) result = { ...result, summary: `${result.summary}${stackNote}` };
       }
       // A FILE THIS BUILD REMOVED FROM THE USER'S APP IS NAMED (queue Q-019, autopsy 4d538ca3). Only

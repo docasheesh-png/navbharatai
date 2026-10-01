@@ -824,6 +824,13 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   // Guards a compile from overlapping itself (a debounced auto-refresh must not fire a second fetch
   // while the first is still in flight — the slower response could otherwise clobber the newer one).
   const inFlight = useRef(false);
+  // EARLY PREVIEW (server: earlyPreview.ts). While a build runs, the server renders a screen that is
+  // imported but not written yet as a "being built" card. The phase is read through a ref so a phase
+  // change does not rebuild the loader, and the last render remembers whether it was such a render so
+  // the end of the build replaces the cards with the honest final state.
+  const buildingRef = useRef(false);
+  buildingRef.current = !!buildPhase && buildPhase !== 'idle';
+  const renderedWhileBuilding = useRef(false);
   // Returns true when the preview rendered (non-empty HTML) — the "Fix with AI" deep-refresh flow
   // uses this to decide whether the app recovered (skip the AI) or still needs a fix. `fresh:true`
   // asks the server to BYPASS its render cache so a stale cached render can't mask a recovery.
@@ -843,7 +850,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
         headers: await authJsonHeaders(),
         // Send our own origin so the server loads the self-hosted preview compiler via an absolute
         // same-origin URL (a root-relative path doesn't resolve inside the sandboxed iframe srcDoc).
-        body: JSON.stringify({ workspaceId, userId, email, origin: window.location.origin, fresh: opts?.fresh === true }),
+        body: JSON.stringify({ workspaceId, userId, email, origin: window.location.origin, fresh: opts?.fresh === true, building: buildingRef.current }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || `server returned ${res.status}`);
@@ -857,6 +864,7 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
         return false;
       }
       setKnownEmpty(false);
+      renderedWhileBuilding.current = data.building === true;
       const nextHtml = typeof data.html === 'string' ? data.html : '';
       if (nextHtml.length > 0) everRendered.current = true;
       setHtml(nextHtml);
@@ -1011,6 +1019,28 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
     applyReload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buildPhase, heldReloads]);
+
+  // The build ended and the frame on screen was rendered mid-build: render once more, so a "being
+  // built" card never outlives the build that put it there.
+  // A render still in flight when the build ends may land as a mid-build one, so this looks again
+  // shortly after rather than trusting the first answer.
+  useEffect(() => {
+    if (buildingRef.current || mode !== 'inbrowser') return;
+    let tries = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const settle = () => {
+      if (buildingRef.current || tries >= 3) return;
+      tries += 1;
+      if (renderedWhileBuilding.current && !inFlight.current) {
+        renderedWhileBuilding.current = false;
+        void loadInBrowser();
+      }
+      timer = setTimeout(settle, 1_500);
+    };
+    settle();
+    return () => { if (timer) clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildPhase]);
 
   // CONSOLE DRAWER (world-best-preview, 2026-08-06): the preview's mirrored console — every log/warn/
   // error the running app prints, streamed up from the iframe (see ReactPreview's console mirror).

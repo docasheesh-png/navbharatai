@@ -249,8 +249,11 @@ export function conversationToUserMessages(conv: PersistedConversation): Array<{
   const msgs = conv.messages ?? [];
   msgs.forEach((m, idx) => {
     if (!m || typeof m !== 'object') return;
-    const msg = m as { role?: unknown; content?: unknown };
+    const msg = m as { role?: unknown; content?: unknown; origin?: unknown };
     if (msg.role !== 'user') return;
+    // A turn the ENGINE wrote (a nudge, a resume, a repair pass's instruction) is stamped
+    // `origin: 'platform'` when persisted (AgentRunner, autopsy 1be16985) — never the person's words.
+    if (msg.origin === 'platform') return;
     const text = cleanRestoredUserPrompt(messageText(msg.content).trim());
     if (text && !isEngineInjectedUserText(text)) out.push({ role: 'user', text, ts: restoredTs(m, idx) });
   });

@@ -245,6 +245,8 @@ export interface AgentV3ClientState {
   verification?: { ok: boolean; headline: string; steps: string[] };
   /** The running build's cost so far in rupees (`cost_so_far`). Cleared when a new build begins. */
   costSoFarInr?: number;
+  /** When THIS build first wrote the app's entry (earlyPreviewCue.ts) — the app is on screen from here. Cleared when a new build begins. */
+  entryWrittenAt?: number;
   /** A pending plan/permission gate awaiting the user's Approve/Reject (P4). */
   pendingPermission?: { callId: string; action: string };
   /** The build is waiting on credentials the user must type. Names only — values go straight to the vault. */

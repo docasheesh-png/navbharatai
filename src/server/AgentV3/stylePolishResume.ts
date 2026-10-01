@@ -22,11 +22,15 @@
  * by the same two tests `unfinishedResume` reuses. Kill switch: `AGENTV3_STYLE_RESUME=off`. PURE.
  */
 import { turnAskedTheUser, turnDeclined } from './nudgeToBuild';
+import { DEFECT_TEXT, type DesignDefect } from './DesignCoverage';
 
 export const MAX_STYLE_RESUMES = 1;
 
 /** At most this many class names in the message — enough to act on, small enough to read. */
 export const MAX_CLASSES_LISTED = 40;
+
+/** At most this many pages in one message. */
+export const MAX_PAGES_LISTED = 6;
 
 export function styleResumeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return String(env.AGENTV3_STYLE_RESUME ?? '').trim().toLowerCase() !== 'off';
@@ -39,6 +43,12 @@ export interface StyleResumeInput {
   missing: ReadonlyArray<string>;
   /** The stylesheet the rules belong in, when the project has one. */
   sheet?: string;
+  /**
+   * Pages the end-of-build design check would repair (the same `analyzeDesignCoverage`). The sibling the
+   * first version of this module missed: a page with a list and no empty state got a write-time note too,
+   * the model moved on, and the end-of-build repair re-read every screen in a fresh context to add it.
+   */
+  pages?: ReadonlyArray<{ file: string; defects: ReadonlyArray<DesignDefect> }>;
   resumesUsed: number;
   env?: NodeJS.ProcessEnv;
   /** This run already wrote the screens — a closing question is an offer, not a decision (see unfinishedResume.ts). */
@@ -55,29 +65,43 @@ export interface StyleResumeDecision {
 export function decideStyleResume(input: StyleResumeInput): StyleResumeDecision {
   if (!styleResumeEnabled(input.env)) return { resume: false, message: '', standDown: 'disabled' };
   const missing = [...new Set((input.missing ?? []).map((c) => String(c ?? '').trim().replace(/^\./, '')).filter(Boolean))];
-  if (missing.length === 0) return { resume: false, message: '', standDown: 'nothing-missing' };
+  const pages = (input.pages ?? []).filter((p) => p && p.file && p.defects?.length).slice(0, MAX_PAGES_LISTED);
+  if (missing.length === 0 && pages.length === 0) return { resume: false, message: '', standDown: 'nothing-missing' };
   if (input.resumesUsed >= MAX_STYLE_RESUMES) return { resume: false, message: '', standDown: 'limit' };
   if (turnDeclined(input.text)) return { resume: false, message: '', standDown: 'declined' };
   if (!input.producedFiles && turnAskedTheUser(input.text)) return { resume: false, message: '', standDown: 'asked-the-user' };
   const sheet = String(input.sheet ?? '').trim() || 'src/index.css';
-  const shown = missing.slice(0, MAX_CLASSES_LISTED).map((c) => `.${c}`).join(', ');
-  const more = missing.length > MAX_CLASSES_LISTED ? ` and ${missing.length - MAX_CLASSES_LISTED} more` : '';
+  const parts: string[] = [];
+  if (missing.length) {
+    const shown = missing.slice(0, MAX_CLASSES_LISTED).map((c) => `.${c}`).join(', ');
+    const more = missing.length > MAX_CLASSES_LISTED ? ` and ${missing.length - MAX_CLASSES_LISTED} more` : '';
+    parts.push(
+      `${missing.length} class name(s) the screens use have NO rule in any stylesheet, so those parts of the app `
+      + `render as plain unstyled HTML: ${shown}${more}. Add a real rule for every one of them in ONE edit_file `
+      + `call on ${sheet} with an EMPTY old_string (an empty old_string appends to the end of the file — no anchor `
+      + 'needed). Use the palette variables already defined at the top of that file (var(--accent), var(--card), '
+      + 'var(--border), var(--muted), var(--radius), …) and the kit classes it already has. Do not rename classes in '
+      + 'the screens and do not remove existing rules.',
+    );
+  }
+  if (pages.length) {
+    parts.push(
+      `These page(s) fall short of the app's own design standard:\n`
+      + pages.map((p) => `- ${p.file}: ${p.defects.map((d) => DEFECT_TEXT[d]).join('; ')}.`).join('\n')
+      + '\nFix only these pages, with the kit classes the app already uses.',
+    );
+  }
   return {
     resume: true,
     message:
-      `You ended your turn, but ${missing.length} class name(s) the screens use have NO rule in any stylesheet, `
-      + `so those parts of the app render as plain unstyled HTML: ${shown}${more}.\n\n`
-      + `Add a real rule for every one of them NOW, in ONE edit_file call on ${sheet} with an EMPTY old_string `
-      + '(an empty old_string appends to the end of the file — no anchor needed). Use the palette variables '
-      + 'already defined at the top of that file (var(--accent), var(--card), var(--border), var(--muted), var(--radius), …) '
-      + 'and the kit classes it already has. You already wrote these screens, so do not read them again. '
-      + 'Do not rename classes in the screens and do not remove existing rules. Then finish.',
+      `You ended your turn, but the app is not finished yet:\n\n${parts.join('\n\n')}\n\n`
+      + 'Do it NOW, while these files are still in front of you — do not read the screens again. Then finish.',
   };
 }
 
 /** One sentence for the admin report — never user-facing, so it may name the mechanism. */
-export function styleResumeNote(missingCount: number): string {
-  return `The model ended its turn while ${missingCount} class name(s) the screens use had no style rule, so it was `
-    + 'handed the list and told to add the rules in one edit before finishing (once). Before 2026-10-01 the turn '
-    + 'ended here and a separate end-of-build repair pass, in a fresh context, added them.';
+export function styleResumeNote(missingCount: number, pageCount = 0): string {
+  return `The model ended its turn while ${missingCount} class name(s) had no style rule and ${pageCount} page(s) fell `
+    + 'short of the design standard, so it was handed them and told to fix them before finishing (once). Before '
+    + '2026-10-01 the turn ended here and a separate end-of-build repair pass, in a fresh context, fixed them.';
 }

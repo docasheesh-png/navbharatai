@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { offerWatchLive } from './earlyPreviewCue';
 import { platformFixRequestPrompt, fixErrorAndContinuePrompt, errorCanBeFixedByEditingTheApp } from '../../lib/platformFixRequest';
 import { appRanDespiteFailedVerdict, fixRemainingIssuePrompt, appRunningNoticeText } from './failedButRunning';
 import { publicTierLabel } from '../../lib/engineLabels';
@@ -3788,14 +3789,18 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // tap. Auto-open the Preview surface the FIRST time a build produces a live preview URL. Desktop only
   // (split view): on a phone opening the workspace hides the chat (that's gap U2), so mobile keeps the
   // chat + streaming progress and the user taps Preview when ready. Once (a ref) so closing it sticks.
+  // EARLY PREVIEW (earlyPreviewCue.ts): the app is viewable as soon as THIS build writes its entry —
+  // the preview renders it from the files, with "being built" cards for the screens still to come —
+  // so on a desktop the surface opens then, not minutes later when a dev server publishes a URL.
   const autoOpenedPreviewRef = useRef(false);
   useEffect(() => {
-    if (state.previewUrl && !autoOpenedPreviewRef.current && !isTouchDevice) {
+    const appOnScreen = !!state.previewUrl || (running && state.entryWrittenAt !== undefined);
+    if (appOnScreen && !autoOpenedPreviewRef.current && !isTouchDevice) {
       autoOpenedPreviewRef.current = true;
       setTab('preview');
       setShowWorkspace(true);
     }
-  }, [state.previewUrl, isTouchDevice]);
+  }, [state.previewUrl, state.entryWrittenAt, running, isTouchDevice]);
 
   // U1 (audit Batch 4): a monotonic signal that bumps on every file write / diff, so the open Preview
   // surface can AUTO-REFRESH as the build progresses (see PreviewSurface's reloadSignal). The reducer
@@ -4742,7 +4747,10 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               </div>
             )}
             {(running || state.activity.length > 0) && (
-              <WorkingIndicator activity={state.activity} running={running} progress={progress} costInr={state.costSoFarInr} />
+              <WorkingIndicator
+                activity={state.activity} running={running} progress={progress} costInr={state.costSoFarInr}
+                onWatchLive={offerWatchLive({ running, entryWrittenAt: state.entryWrittenAt, previewOpen: showWorkspace && tab === 'preview' }) ? () => openSurfaceFromFooter('preview') : undefined}
+              />
             )}
             {/* THE PROOF THAT WE ACTUALLY CHECKED (gap analysis 2026-09-10). After a build,
                 NavBharatAI drives a real browser through the app's own forms — fills them in,
@@ -6737,7 +6745,7 @@ function fmtElapsed(ms: number): string {
  * REAL engine events (state.activity); no synthetic activity. Renders while running, and stays as a
  * collapsed "view activity" expander after the build finishes so the work is reviewable.
  */
-function WorkingIndicator({ activity, running, progress, costInr }: { activity: ActivityEntry[]; running: boolean; progress?: BuildProgress; costInr?: number }) {
+function WorkingIndicator({ activity, running, progress, costInr, onWatchLive }: { activity: ActivityEntry[]; running: boolean; progress?: BuildProgress; costInr?: number; onWatchLive?: () => void }) {
   const [nowTick, setNowTick] = useState(() => Date.now());
   const mountTsRef = useRef(Date.now());
 
@@ -6791,6 +6799,16 @@ function WorkingIndicator({ activity, running, progress, costInr }: { activity: 
         )}
         <span className="shrink-0 tabular-nums text-faint">{elapsed}</span>
       </div>
+      {/* EARLY PREVIEW (earlyPreviewCue.ts): the app is on screen while it is still being built. */}
+      {running && onWatchLive && (
+        <button
+          type="button"
+          onClick={onWatchLive}
+          className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-accent text-on-accent text-xs font-semibold hover:opacity-90 transition-opacity"
+        >
+          ▶ Your app is on screen — watch it live
+        </button>
+      )}
       {/* A tooltip never appears on a phone, so the explanation opens on a TAP — the place most
           users will read it. */}
       {running && cost && costInfoOpen && (

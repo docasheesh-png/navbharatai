@@ -87028,3 +87028,47 @@ reversions, one per fixed file, each failed the suite.
 **Live effect to watch:** an `UNSUPPORTED_STACK` line naming "native Android (Kotlin)" and a module plan made of
 web modules; no `rm -f package.json` reaching the sandbox (`[BLOCKED-DESTRUCTIVE] refused runtime-manifest
 delete` in the audit instead); no `APP_SCOPE … clone of YouTube` on assistant prompts.
+
+## 2026-10-01 — Autopsy 4a1c0157: a starter chip's login page (Weak, GREEN, 3.8 min, ₹23.11)
+
+The build itself went well: the tested "Login page" template was seeded, the builder made two small edits,
+the app rendered, a real journey passed, 9 controls were pressed, the production build passed, release gate
+GREEN. The report was ~10 hours old when it arrived (03:24 UTC), so every item was first checked against
+current `main`: four had already been fixed by PRs that merged after the build ran.
+
+**Fixed in this PR**
+- **Q-060: the ETA priced template polish as a from-scratch app.** The user was told ~11 min (the `complex_app`
+  fleet average) and the build took 3.8; at two minutes the strip still said "~9 min to go". Routing knew the
+  template was seeded (`scaffoldedComplexityDecision`, "simple (score 58, scaffold)"); the ETA did not, and every
+  template build was also folded into the `complex_app` average it read. `etaTaskKey` (`etaHistory.ts`) is now the
+  one answer: the telemetry counts a seeded build under `scaffold`, and the ETA of a build that will be seeded
+  (`scaffoldWillSeed`) reads that slice. Siblings checked: the 150-step cap and the reviewer gate read
+  `startTier` but only set ceilings; the blueprint gate is off and skips simple-lane tiers.
+  `tests/aTemplateBuildIsTimedAsATemplateBuild.test.ts`.
+- **Q-061: our own templates read `localStorage` unguarded.** Found by the build's own reviewer. The theme switch
+  (in every scaffold), the login form, todos, notes, pomodoro, the memory and puzzle games and the SaaS plan picker would
+  blank the app on blocked storage (private window, sandboxed frame, quota). Half the scaffolds had already been
+  hardened ("private mode" comments); the rest were never revisited. All guarded now, locked by a census that parses
+  every file a scaffold writes with the TypeScript parser and fails on any access outside a `try` block. The recipe
+  generators (game runtime, settings, notifications, consent banner) were already guarded.
+- **Q-062: the recap said "1 component. Components: ThemeToggle".** `extractFacts` read only `export function/const`;
+  `function App() {…}` + `export default App;` and `export { A, B as C }` were invisible. Both are read now through
+  the name's own declaration. The orphan-component check therefore also sees a default-exported screen nobody
+  imports — a real finding that used to be hidden.
+- The reviewer's accessibility suggestions on our login template: `aria-invalid`, `aria-describedby`,
+  `role="alert"` on each message, `aria-pressed` on the Log in / Sign up switch.
+
+**Already fixed on `main` after this build ran** (no new work): the ETA detail calling the platform average "this
+workspace's own past builds" (#3435); "the cache was warmed at build start in 0s" (#3436, `WARMUP_COMPILED_MARKER`);
+`PROVIDER_BENCHED` "for the rest of this build: … skipped for 180s" (#3448); the lean review reading `App.tsx`
+five times in 26 s — with #3436 the pre-seeded template files no longer count as "changed", so this review would
+now be one call with the code inlined and no tools; "⚠️ Build Review (85/100)" on a PASS with no stated score (#3442).
+
+### Ledger — BUILD REPORT 4a1c0157
+Q-060 ETA ✅ (this PR) · Q-061 unguarded storage in templates ✅ (this PR) · Q-062 "1 component" ✅ (this PR) ·
+reviewer a11y suggestions on our template ✅ (this PR) · ETA "workspace's own" ✅ #3435 · warm-up 0 s ✅ #3436 ·
+bench prefix ✅ #3448 · reviewer re-reads ✅ #3436 · 85/100 on PASS ✅ #3442 · GLM crawl 🟡 Q-009/Q-036 (external) ·
+"No tests at all" 🟡 Q-038 (decision) · `IN_BUILD_GREEN_RACED` 🟡 Q-024 (decision) · `startTier: sonnet` 🟡 Q-052
+(decision) · 14 s install inside the first edit 🟡 Q-063 (needs the next template build's ensure log).
+**Live effect to watch:** an `ETA_BASIS` line on a chip build that says "builds that start from a tested template",
+or the labelled rough estimate while that slice has under two days of history.

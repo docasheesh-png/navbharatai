@@ -341,14 +341,21 @@ export function detectTestPlan(files: string[], packageJsonRaw?: string): TestPl
     return { framework: 'pytest', command: 'python -m pytest -q', reason: 'Python test files / conftest.py detected.' };
   }
 
+  // 🔴 A BUILD FILE IS NOT A TEST SUITE (autopsy dfd24058, 2026-10-01). An earlier turn of the same
+  // workspace had written `build.gradle.kts` for a Kotlin app nobody could build here; the next turn built
+  // a web app beside it, and this function reported "this project HAS a test suite" — gradle — which the
+  // release gate held YELLOW as unverified tests. The JS runners above already require the DEPENDENCY,
+  // not the config; the JVM runners now require what proves a suite on their side: a test SOURCE file.
+  const hasJvmTests = has(/(^|\/)src\/(?:test|androidTest)\/.+\.(?:java|kt|kts|groovy|scala)$/);
+
   // 4. Java (Maven) — Surefire runs under `mvn test`.
-  if (has(/(^|\/)pom\.xml$/)) {
+  if (has(/(^|\/)pom\.xml$/) && hasJvmTests) {
     return { framework: 'maven', command: 'mvn -q -B test', reason: 'Maven pom.xml detected — running Surefire tests.' };
   }
 
   // 4b. JVM (Gradle) — build.gradle / build.gradle.kts (Java/Kotlin/Android). Prefer the committed
   // `gradlew` wrapper (pins the exact Gradle version); fall back to a system `gradle` when there is none.
-  if (has(/(^|\/)build\.gradle(\.kts)?$/)) {
+  if (has(/(^|\/)build\.gradle(\.kts)?$/) && hasJvmTests) {
     const wrapper = has(/(^|\/)gradlew$/);
     return {
       framework: 'gradle',

@@ -599,7 +599,7 @@ import {
   type VersionPreviewDeps,
 } from '../AgentV3/versionPreview';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
-import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote } from '../AgentV3/etaHistory';
+import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote, etaTaskKey } from '../AgentV3/etaHistory';
 import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
@@ -13775,8 +13775,12 @@ async function noteBuildOutcome(
           // of THIS task type took — read from the cost telemetry every build already writes. The app's
           // own history always wins the moment it exists; a failed read is [] — today's behaviour.
           let fleet: ReturnType<typeof fleetHistoryFromTelemetry> = { history: [], builds: 0, days: 0 };
-          if (past.length === 0 && analysis?.taskType) {
-            try { fleet = fleetHistoryFromTelemetry(await withTimeout(agentV3CostTelemetry.list(7), 3_000, 'eta-fleet'), analysis.taskType, etaComplexity); } catch { /* best-effort */ }
+          // A seeded template is its own kind of build (autopsy 4a1c0157): the same `scaffoldWillSeed` that
+          // routed it to the cheap rung picks the slice, so the ETA never prices template polish as a
+          // from-scratch `complex_app`.
+          const etaFleetKey = analysis?.taskType ? etaTaskKey(analysis.taskType, scaffoldWillSeed) : null;
+          if (past.length === 0 && etaFleetKey) {
+            try { fleet = fleetHistoryFromTelemetry(await withTimeout(agentV3CostTelemetry.list(7), 3_000, 'eta-fleet'), etaFleetKey, etaComplexity); } catch { /* best-effort */ }
           }
           const est = estimateBuildTime(etaComplexity, past.length > 0 ? past : fleet.history);
           etaTotalMs = est.estimateMs; // feed the live heartbeat so it can revise the remaining time
@@ -13828,7 +13832,7 @@ async function noteBuildOutcome(
           buildDiag.record({
             phase: 'plan', severity: 'info', code: 'ETA_BASIS',
             message: `ETA ${formatEtaRange(est.lowMs, est.highMs, est.estimateMs)} (midpoint ${est.etaText}) · basis ${est.basis} · confidence ${est.confidence}`,
-            detail: `${past.length === 0 && fleet.history.length > 0 && analysis?.taskType ? fleetEtaBasisNote(analysis.taskType, fleet.builds, fleet.days) : etaBasisNote(past)} ${etaEvidenceNote(est, past.length === 0 && fleet.history.length > 0 ? 'platform' : 'workspace')} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
+            detail: `${past.length === 0 && fleet.history.length > 0 && etaFleetKey ? fleetEtaBasisNote(etaFleetKey, fleet.builds, fleet.days) : etaBasisNote(past)} ${etaEvidenceNote(est, past.length === 0 && fleet.history.length > 0 ? 'platform' : 'workspace')} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
             autoResolved: true,
           });
           // THE POINT ESTIMATE IS NOT WHAT WE KNOW. `estimateBuildTime` returns lowMs/highMs and a
@@ -24263,7 +24267,9 @@ async function noteBuildOutcome(
       // effort — never blocks the run. Recorded for every build, signed-in or not.
       agentV3CostTelemetry
         .record({
-          taskType: analysis?.taskType ?? 'unknown',
+          // A seeded template build is counted as its own kind, so the ETA can learn from it and the
+          // `complex_app` average is not pulled down by template polish (autopsy 4a1c0157).
+          taskType: etaTaskKey(analysis?.taskType, goldenPreseeded),
           // Record the tier the build was actually DELIVERED on (after any P3 escalation),
           // so per-tier success rates reflect what really ran, not just the start tier.
           startTier: deliveredTier,

@@ -103,6 +103,7 @@ const PROCESS_ONLY_CODES = new Set([
   'FAST_LANE_SKIPPED_REASONING_RUNG',
   // …and not starting it for a GAME, which only the full builder's game recipes can build (autopsy 0bb437b4).
   'FAST_LANE_SKIPPED_GAME',
+  'FAST_LANE_SKIPPED_IMAGE_APP',
   // …and the lane HANDING OFF because its chain fell to such a rung mid-lane (autopsy Study-Racer).
   'FAST_LANE_FELL_TO_REASONING_RUNG',
   // An observation about OUR checkpoint heuristic (autopsy SignBridge, 2026-09-26) — never the app.

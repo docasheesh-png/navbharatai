@@ -3451,6 +3451,30 @@ the flag entries above promise.
   (`BROWSER_PAGE_OPTIONS`, one definition), because the kit's game button pulses for ever and Playwright
   never presses a moving element. The explorer dispatches the click on the same element only for a
   "not stable" failure.
+- **🖼️ AN APP THAT MAKES PICTURES REALLY MAKES THEM — `generate_image_ai` (admin 2026-10-01, verbatim:
+  *"jab user apni api key dalna chahe kisi aur provider ki to bhi dal sakta ho, jab chahe change kare, agar
+  user keys na de, to default pollination ai"*).** A recipe (`src/server/lib/ImageAiGenerator.ts`, reached
+  through `run_recipe`) writes a modular engine into the USER's app: `ImageGenerationProvider` →
+  `PollinationsProvider` / `ServerImageProvider` in `src/lib/imageAi.ts`, plus `useImageGenerator()` for React.
+  - **Default (`server` left out): the page calls Pollinations directly** (`image.pollinations.ai`, `safe=true`,
+    `private=true`). No key exists, so nothing can leak, and it works the same in the preview and after publish.
+  - **`server: true`: the page posts to the app's own `/api/generate-image`**, and `server/lib/imageAi.ts` picks
+    the engine on every request from the APP's env: no `IMAGE_API_KEY` ⇒ Pollinations; otherwise `IMAGE_PROVIDER`
+    = `pollinations` | `openai` (any OpenAI-compatible images API via `IMAGE_BASE_URL`) | `stability`, with
+    `IMAGE_MODEL`, and `IMAGE_RATE_PER_MINUTE` (default 10 per visitor). The owner sets them in Settings → App
+    Settings → Secrets & API Keys; the vault reaches the app's `.env` at boot (`devSecretsBoot.ts`), so a change
+    applies on the next start with no code change. ⚠️ These are the USER's app keys, not Cloud Run keys.
+  - 🔒 **A key with an unknown `IMAGE_PROVIDER` is sent NOWHERE** (an honest 500): guessing would hand one
+    company's key to another. A provider's refusal reaches the visitor as plain words; the detail goes to the log.
+  - `IMAGE_IN_APP_RULE` (`AgentV3/inAppImageGeneration.ts`) is read by the architect and every writing
+    sub-agent. **`AGENTV3_FASTLANE_IMAGE_APPS`** (NOT set; unset ⇒ an app that makes pictures skips the fast
+    lane, which cannot run a recipe; `on` lets it back) — `appGeneratesImages(prompt)`, report code
+    `FAST_LANE_SKIPPED_IMAGE_APP` (process-only).
+  - ⚠️ **Not verified against the live provider from a session** (its hosts are refused by the session's egress
+    policy). The generated code is compiled with the real TypeScript compiler under strict Vite settings and RUN
+    against a fake network in `tests/anImageAppMakesRealPictures.test.ts`; the first real build is the first live
+    evidence. ⚠️ A published STATIC app has no server, so the own-key path needs the app's server hosted
+    (NavBharat Cloud, which is admin-only today) — the Pollinations default needs nothing.
 - **`AGENTV3_GREEN_REVIEW_LEAN`** (default ON, set `off` to disable — added 2026-09-18, autopsy b6f88a72) —
   **a suggestion costs a suggestion's price.** `reviewerShouldWrite` (Green Stop) already makes the
   post-build reviewer suggest-only on a proven-green app — no repair, nothing it says can fail the

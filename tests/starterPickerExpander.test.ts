@@ -68,8 +68,12 @@ describe('pickerSections — collapsing can never hide a chip permanently', () =
 
   it('the first screen stays in category order, so related apps still sit together', () => {
     const { initial } = pickerSections(partitionStarters(true).tappable, 12);
-    const featuredInOrder = startersByCategory(partitionStarters(true).tappable)
-      .flatMap((g) => g.items).filter((t) => t.featured === true).slice(0, 12).map((t) => t.id);
+    // Pinned chips lead in their own order (admin 2026-10-01: AI image, GST, to-do); everything else
+    // keeps the category order.
+    const featured = startersByCategory(partitionStarters(true).tappable)
+      .flatMap((g) => g.items).filter((t) => t.featured === true);
+    const pinned = featured.filter((t) => typeof t.pinOrder === 'number').sort((a, b) => (a.pinOrder ?? 0) - (b.pinOrder ?? 0));
+    const featuredInOrder = [...pinned, ...featured.filter((t) => typeof t.pinOrder !== 'number')].slice(0, 12).map((t) => t.id);
     expect(initial.slice(0, featuredInOrder.length).map((t) => t.id)).toEqual(featuredInOrder);
   });
 });
@@ -175,13 +179,15 @@ describe('the 2026-09-13 India batch is inside "More templates", for every tier'
 
   it('adding them did NOT change either tier\'s first screen', () => {
     // The whole point of "more button ke andar": the twelve chips a user already sees are untouched.
+    // Changed ON PURPOSE once since (admin 2026-10-01): the AI image generator leads, then GST, then
+    // to-do, for both tiers; the twelfth chip of each (QR code / Janam Kundali) moved one tap away.
     expect(pickerSections(partitionStarters(false).tappable).initial.map((t) => t.id)).toEqual([
-      'gst-bill', 'todo', 'quick-notes', 'calculator', 'memory', 'exam-prep',
-      'panchang', 'geeta', 'quran', 'pomodoro', 'unit-converter', 'qr-generator',
+      'ai-image', 'gst-bill', 'todo', 'quick-notes', 'calculator', 'memory', 'exam-prep',
+      'panchang', 'geeta', 'quran', 'pomodoro', 'unit-converter',
     ]);
     expect(pickerSections(partitionStarters(true).tappable).initial.map((t) => t.id)).toEqual([
-      'gst-bill', 'saas-dashboard', 'store', 'todo', 'quick-notes', 'calculator',
-      'memory', 'exam-prep', 'panchang', 'geeta', 'quran', 'kundali',
+      'ai-image', 'gst-bill', 'todo', 'saas-dashboard', 'store', 'quick-notes',
+      'calculator', 'memory', 'exam-prep', 'panchang', 'geeta', 'quran',
     ]);
   });
 

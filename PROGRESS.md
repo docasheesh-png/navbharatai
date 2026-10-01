@@ -86039,6 +86039,45 @@ Tests: `tests/theSalesSampleHadTwoHelperHomes.test.ts`, reversion-proven for all
   at the first `tsc`. These files are editable on purpose, because apps add dependencies. Whether the plan may
   REWRITE them wholesale is not decided here.
 
+---
+
+## 2026-10-01 — An image app makes real pictures (`generate_image_ai`)
+
+Admin: *"jab user apni api key dalna chahe kisi aur provider ki to bhi dal sakta ho, jab chahe change kare,
+agar user keys na de, to default pollination ai"*, with a brief asking that "build me an AI image generator"
+produce a working app, not a mock-up.
+
+**Found first:** the builder had no capability for it. `generate_image` is image PROCESSING (sharp resize);
+`generate_ai` is TEXT. An image-generator request was hand-written by the model, or filled with stock photos.
+
+**Built (one new recipe, reached through `run_recipe`, plus the rule that points to it):**
+- `src/server/lib/ImageAiGenerator.ts`: pure generator. Browser mode (default) writes `src/lib/imageAi.ts`,
+  which calls Pollinations from the page with no key. Server mode also writes `server/lib/imageAi.ts` and
+  `.env.example`; the server picks the engine from `IMAGE_PROVIDER` / `IMAGE_API_KEY` / `IMAGE_MODEL` /
+  `IMAGE_BASE_URL`. With no key it uses Pollinations. A React app also gets `useImageGenerator()`.
+- `src/server/AgentV3/inAppImageGeneration.ts`: `IMAGE_IN_APP_RULE` (architect + writing sub-agents),
+  `appGeneratesImages`, and `fastLaneSkipsImageApp` (`AGENTV3_FASTLANE_IMAGE_APPS=on` reverts).
+- Catalog, dispatcher, the recipe line in the architect prompt, report code `FAST_LANE_SKIPPED_IMAGE_APP`,
+  and an `AppKnowledgeBase` entry (`agentv3_app_image_ai`).
+
+**Locked by** `tests/anImageAppMakesRealPictures.test.ts` (46 tests):
+- every generated file compiles under strict Vite settings with the real TypeScript compiler;
+- the generated browser and server code RUNS against a fake network: retry, timeout, rate limit, refusal,
+  non-image answer, blocked read, cancel, each provider's request shape, and per-visitor limit;
+- the request is recognised and the builder can reach the recipe.
+
+Reversion-proven: (1) sending a key with an unknown provider to Pollinations fails the test;
+(2) dropping `safe=true` fails two tests.
+
+**Still open:**
+- Not run against the live provider from a session (egress policy). The first real build is the first live
+  evidence; watch `FAST_LANE_SKIPPED_IMAGE_APP` and whether the built app calls `generateImage`.
+- A published static app has no server, so the own-key path needs server hosting (NavBharat Cloud, admin-only
+  today). The keyless default works on static hosting.
+- Pollinations' anonymous door: our own generator recorded a possible 401 on 2026-09-30 (unproven; the admin
+  says it works). If it closes, the generated app shows "The free image service is not accepting requests
+  right now", and the owner's own key on the server path is the way out.
+
 ## 2026-10-01 — Autopsy 120eb52f / b4901ce5 / 0edea014 ("Calendar wala app bnao", Weak, three builds, all stopped by the user) + the admin's "puch lo user se"
 
 Admin decision on the open item from 1389f0d5 (*"puch lo user se!"*): an order for a whole new thing that shares
@@ -86215,6 +86254,18 @@ tail and the runner census.
 **Still open:**
 - Each repair pass's instruction is still persisted into the main conversation as a `user` turn. Whether a
   reopened session shows it as something the user typed was not checked here.
+
+**Same day, follow-up (admin: "hidden templates me sabse pahle 'AI image generator' … gst, todo uske baad"):**
+- New starter chip `ai-image` (simple tier, so free users can tap it). Its golden scaffold
+  (`goldenScaffolds/aiImage.ts`) holds only the screen; the engine files are the recipe's own output
+  (`aiImageEngineFiles()`), so the template and the builder cannot drift.
+- `pinOrder` on a template puts it ahead of the category order: AI image 1, GST bill 2, to-do 3, on both
+  tiers. Twelve chips stay on the first screen, so QR code (free) and Janam Kundali (paid, now un-featured to
+  keep ≤ 12 featured) moved behind "More templates".
+- The scaffold white-label test has one named exception: the template's `src/lib/imageAi.ts` may name
+  Pollinations (the admin's chosen engine); every other vendor stays forbidden there, and `App.tsx` names
+  nobody. Locked in `tests/anImageAppMakesRealPictures.test.ts` §7, including a real strict-TS compile of the
+  template's App.tsx, proven by reversion.
 
 ### 2026-10-01 — Autopsy 1be16985, second pass (admin: "sare chote bade problem … DNA level par fix huye ya nahi?")
 

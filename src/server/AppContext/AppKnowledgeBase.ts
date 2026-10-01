@@ -724,6 +724,16 @@ export const APP_KNOWLEDGE_BASE: AppFeature[] = [
     aiSurface: 'nbi_chat',
   },
   {
+    id: 'agentv3_app_image_ai',
+    name: 'AI image generator inside your own app — free by default, your own key any time',
+    path: 'NavBharatAI Pro → ask in chat (for example "build an AI image generator app"); own key: Settings → App Settings → Secrets & API Keys',
+    description: 'Ask NavBharatAI Pro for an app that makes pictures from words — an AI image generator, an AI art, logo, wallpaper or avatar maker — and the app really makes them: the person types a description, presses Generate, sees a progress state, gets the picture, can download it and make another. It is not a mock-up and never shows a stock or placeholder photo as a result. BY DEFAULT the pictures come from Pollinations AI, which is free and needs no key and no account, so the app works straight away in the preview and after you publish it. Errors are handled in words — an empty description, a busy or slow image service, a lost connection — with Retry. YOUR OWN KEY, WHENEVER YOU WANT: ask NavBharatAI to "use my own image key" and the app gets a small server route; then in Settings → App Settings → Secrets & API Keys set IMAGE_PROVIDER (pollinations, openai or stability), IMAGE_API_KEY and optionally IMAGE_MODEL (and IMAGE_BASE_URL for any OpenAI-compatible image service). Change or remove the key any time — it applies the next time the app starts, with no code change, and with no key the app goes back to Pollinations AI. The key stays on the server and never reaches the browser. Each visitor is limited to 10 pictures a minute by default (IMAGE_RATE_PER_MINUTE).',
+    howToUse: 'Fastest: in NavBharatAI Pro open the templates and tap "AI image" — it is the FIRST template, and it starts from a ready, tested image generator app. Or type, for example, "Create an AI image generator where users enter a prompt and generate images". To switch to your own provider later, say "use my own image API key", then add IMAGE_PROVIDER and IMAGE_API_KEY in Settings → App Settings → Secrets & API Keys.',
+    relatedFeatures: ['agentv3_builder', 'agentv3_app_ai', 'agentv3_deploy'],
+    keywords: ['image generator app', 'ai image generator', 'ai image template', 'image template', 'text to image', 'image maker', 'ai art app', 'logo maker app', 'wallpaper generator', 'pollinations', 'image api key', 'apni image key', 'image banane wala app', 'photo banane wala app', 'tasveer banane wala app', 'prompt se image', 'IMAGE_API_KEY', 'IMAGE_PROVIDER', 'stability', 'dall-e', 'gpt-image'],
+    aiSurface: 'nbi_chat',
+  },
+  {
     id: 'agentv3_build_report',
     name: 'Report a build to NavBharatAI (admin-only report)',
     path: 'NavBharatAI Pro → header tab row → "Report" button',

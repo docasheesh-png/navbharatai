@@ -345,6 +345,7 @@ import { generateCsvIntegration } from '../lib/CsvGenerator';
 import { generateAuditLogIntegration } from '../lib/AuditLogGenerator';
 import { generateSoftDeleteIntegration } from '../lib/SoftDeleteGenerator';
 import { generateImageIntegration } from '../lib/ImageGenerator';
+import { generateImageAiIntegration } from '../lib/ImageAiGenerator';
 import { generateLoggingIntegration } from '../lib/LoggingGenerator';
 import { generateRequestIdIntegration } from '../lib/RequestIdGenerator';
 import { generateFileUploadIntegration } from '../lib/FileUploadGenerator';
@@ -9195,6 +9196,33 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('image processing');
         return `Wired image processing:\n${imgWritten.join('\n')}\nAdd the dependency: ${imgcfg.dependency.name}@${imgcfg.dependency.version}\n\n${imgcfg.instructions}`;
+      }
+
+      case 'generate_image_ai': {
+        // AI image generation inside the user's app (admin 2026-10-01): Pollinations AI by default (no key),
+        // or — with server: true — the app's own route, where the owner's IMAGE_PROVIDER + IMAGE_API_KEY
+        // pick the engine and the key never reaches the browser. Pure generator in ImageAiGenerator.ts.
+        const iaServer = input['server'] === true || input['server'] === 'true';
+        let iaReact = false;
+        try { iaReact = /"react"\s*:/.test(await this.actuator.readFile(this.workspaceId, 'package.json')); } catch { iaReact = false; }
+        const iacfg = generateImageAiIntegration({ server: iaServer, react: iaReact });
+        const iaWritten: string[] = [];
+        for (const [path, content] of Object.entries(iacfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); iaWritten.push(`Kept existing ${path} (add: ${iacfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          iaWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('ai image generation');
+        const iaHeadline = iaServer
+          ? 'Wired AI image generation through the app\'s server (Pollinations AI until the owner sets their own key)'
+          : 'Wired AI image generation with Pollinations AI (no key needed)';
+        return `${iaHeadline}:\n${iaWritten.join('\n')}\n\n${iacfg.instructions}`;
       }
 
       case 'generate_logging': {

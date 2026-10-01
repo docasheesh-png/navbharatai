@@ -3108,6 +3108,13 @@ the flag entries above promise.
   "auto-focus") and a stylesheet imported by 2+ modules. Default OFF only RECORDS the findings honestly;
   `on` runs a bounded LLM self-heal (never blocks/fails a build). Applies to ALL builds when on (no per-user
   scoping yet — fine in test mode; add scoping before wide public exposure).
+  🔴 **CORRECTED 2026-10-01 (autopsy de3bb2bb) — A STYLESHEET IMPORTED BY TWO MODULES IS NOT A DEFECT.**
+  Vite emits the rule ONCE however many modules import the file (proven with a real Vite build), yet the gate
+  spent an LLM repair pass on it and held the release gate YELLOW. It is now an `info` line, never repaired.
+  The same change: a code a heal reports fixed resolves the finding it fixed (`HEAL_RESOLVES` in
+  `BuildDiagnostics.ts`, census-locked against every `*_HEALED / *_REPAIRED / *_AUTOFIXED` the route
+  records), and the after-check reads the WHOLE project, not only the files the heal wrote. Locked in
+  `tests/theCoactCollectorAutopsy.test.ts`.
 - **`AGENTV3_REVIEW_AUTOFIX_WARNINGS`** (= `on`) — canary extension of the C9 reviewer auto-fix: also repair
   the reviewer's **functional** `[WARNING]` findings (e.g. "sort ignores edits", "isAtLimit blocks Add"), not
   just `[CRITICAL]`. Cosmetic/a11y/style warnings are always excluded (`selectAutoFixableWarnings`). Rides the
@@ -3689,6 +3696,9 @@ the flag entries above promise.
   name (an unnamed icon is as likely a trash can) — and, when `writesToUserDatabase` is true, every
   creating verb too (`WRITE_VERBS`), the same rule the journey obeys. Browser dialogs are DISMISSED. The
   in-page collector receives the exported regexes as data rather than a copy of them.
+  ⚠️ **The words are not only English (autopsy de3bb2bb, 2026-10-01):** a Hindi app's "Saara data hatayein"
+  button was a press away. `localActionWords.ts` holds the Hinglish and Devanagari destructive, spending and
+  creating words, read by BOTH `NEVER_PRESS`/`WRITE_VERBS` and the sign-in explorer's `SIGN_IN_NEVER`.
   🔒 **THREE OUTCOMES, never two:** `EXPLORE_PASSED` / `EXPLORE_FAILED` need a loaded app and a completed
   press; `EXPLORE_NOT_RUN` (never reached the app) and `EXPLORE_NOTHING_TO_PRESS` are facts about OUR
   instrument, registered in `PROCESS_ONLY_CODES` and `NEVER_SUGGEST`. A press that could not complete
@@ -4102,6 +4112,9 @@ the flag entries above promise.
   - A list of a hand-written record's own field (`topic.sections`) is no longer a "data list" (`recordFieldLiteral`).
   - Every engine-authored user turn is stamped `origin: 'platform'` on its persisted copy (`pushPlatformTurn`), so a
     reopened chat never shows a repair instruction as the user's own message.
+  - **Q-037 / Q-022 (admin chose option b):** it also carries spacing off the 4px grid, but only in files THIS
+    agent wrote (`offGridHandBack`) and only above the `DESIGN_CONSISTENCY` finding's own threshold. A file the
+    build never touched is not handed back (Q-015). Test: `tests/offGridSpacingIsHandedBack.test.ts`.
 - **🖼️ `AGENTV3_PICTURE_ANSWER` — A PICTURE REQUEST IN PRO IS ANSWERED, NOT BUILT (autopsy 19641ab5, 2026-10-01).
   ⚠️ NOT set; default ON; `off` builds as before.** `pictureRequest.ts`. "Create full image" + a portrait photo was
   built as an 11-feature image-generator app (stopped at 108 s, ₹7.62). Free chat, Doctor AI and every Professional

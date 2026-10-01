@@ -35,7 +35,7 @@ import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAutho
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
-import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange, fleetEtaLine } from '../AgentV3/progressEta';
+import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange, fleetEtaLine, finalChecksEtaLine } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
 import { decideComplexity, scaffoldedComplexityDecision } from '../AgentV3/complexityRouting';
 import { planningRequest, planningContextNote, wasBuildRequest } from '../AgentV3/planningRequest';
@@ -599,7 +599,7 @@ import {
   type VersionPreviewDeps,
 } from '../AgentV3/versionPreview';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
-import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote } from '../AgentV3/etaHistory';
+import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote, etaTaskKey } from '../AgentV3/etaHistory';
 import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
@@ -1890,6 +1890,17 @@ function starterCompletedOf(actuator: unknown, workspaceId: string): string {
   } catch {
     return ''; // an observation must never be a reason a build fails
   }
+}
+
+/**
+ * The `restore=` field of THIS setup's line (autopsy 3d1bfe2a). The actuator keeps the restore of the
+ * fresh machine that it last brought up, and a warm or resumed setup used to print it as its own:
+ * "sandbox=warm · restore=nothing saved yet" about a workspace whose store held 12 files. A machine that
+ * was already up was not restored by this setup. PURE.
+ */
+export function setupRestoreText(origin: string | null, restore: string | null): string {
+  if (origin === 'warm' || origin === 'resumed') return `n/a — the machine was already up${restore ? ` (when it came up: ${restore})` : ''}`;
+  return restore ?? 'n/a (warm or resumed)';
 }
 
 function sandboxRestoreOf(actuator: unknown, workspaceId: string): string | null {
@@ -10523,6 +10534,27 @@ async function noteBuildOutcome(
       try { return getWorkspaceMemory(intentWorkspaceId).recentRequestTurns(6); } catch { return []; }
     })();
 
+    /**
+     * 🔴 AN EARLIER REQUEST COUNTS ONLY IF IT LEFT SOMETHING (autopsy 3d1bfe2a). The reader is told a
+     * project exists whenever there is an earlier request, so a small app living entirely in our
+     * scaffold paths is still edited. But a request stopped before it wrote a file left only our
+     * starter, and the next order was built as an "edit" of it. Read only when it can change the answer
+     * (no app of the user's own, an earlier request present); unreadable or slow ⇒ today's behaviour.
+     */
+    const earlierRequestLeftAnApp = await (async (): Promise<boolean> => {
+      if (userAppExists || recentRequests.length === 0) return userAppExists || recentRequests.length > 0;
+      if (!Array.isArray(projectFilePaths)) return true;
+      const codePaths = projectFilePaths.filter((p) => couldBeAppCode(p));
+      if (codePaths.length === 0) return false;
+      if (codePaths.length > 24) return true;
+      try {
+        const got = await raceTimeout(loadWorkspaceFilesByPath(intentWorkspaceId, codePaths), 3_000, 'starterCheck');
+        const files: Record<string, string | null> = {};
+        for (const p of codePaths) files[p] = typeof got[p] === 'string' ? got[p] : null;
+        return !holdsOnlyOurStarter(files);
+      } catch { return true; }
+    })();
+
     let intent = classifyIntent(prompt);
     // The reader's fourth answer: "they want something made but have not said WHAT" (report
     // d6d664e6). False unless the reader says so, so every path below is unchanged without it.
@@ -10549,7 +10581,7 @@ async function noteBuildOutcome(
           // `userAppExists` is fail-safe (an unreadable listing answers yes), and an earlier request in this
           // workspace also counts: a small app living entirely in `src/App.tsx` (a scaffold path) has no
           // file of its own, and an ambiguous "make it blue" must still be read as an edit of it.
-          { projectExists: userAppExists || recentRequests.length > 0, recentRequests },
+          { projectExists: earlierRequestLeftAnApp, recentRequests },
         ),
         6_000,
         'classifyIntentSmart',
@@ -12739,6 +12771,12 @@ async function noteBuildOutcome(
      * reasoning about "when did settling start" simple.
      */
     let settlingAnnounced = false;
+    /**
+     * The build loop is over and only the platform's own checks and fixes remain (autopsy de3bb2bb: at
+     * minute 12 the line promised "about 7 min more" — the build ended 34 seconds later, inside its final
+     * checks). Set at the post-answer pass; the ETA tick then says where the build IS, with no number.
+     */
+    let etaFinalChecks = false;
     const emitSettlingPhase = (): void => {
       if (settlingAnnounced) return;
       settlingAnnounced = true;
@@ -12836,6 +12874,10 @@ async function noteBuildOutcome(
           // It returns null in every case where it would be guessing — no plan, too few files, or the
           // file phase already over (a repair loop is genuinely unpredictable) — and the honest
           // re-baselining fallback below then owns the line exactly as it does today.
+          if (etaFinalChecks) {
+            events.emit({ type: 'narration', agent: 'architect', text: finalChecksEtaLine(elapsedMs), ts: now, id: 'eta-live' });
+            return;
+          }
           const measured = measuredRemainingMs({ plannedFiles: etaPlannedFiles, filesDone: writtenFiles.size, firstFileAt: etaFirstFileAt, now });
           if (measured !== null) {
             // Re-anchor the fallback's budget too, so if measurement later stops applying (the build
@@ -13789,8 +13831,12 @@ async function noteBuildOutcome(
           // of THIS task type took — read from the cost telemetry every build already writes. The app's
           // own history always wins the moment it exists; a failed read is [] — today's behaviour.
           let fleet: ReturnType<typeof fleetHistoryFromTelemetry> = { history: [], builds: 0, days: 0 };
-          if (past.length === 0 && analysis?.taskType) {
-            try { fleet = fleetHistoryFromTelemetry(await withTimeout(agentV3CostTelemetry.list(7), 3_000, 'eta-fleet'), analysis.taskType, etaComplexity); } catch { /* best-effort */ }
+          // A seeded template is its own kind of build (autopsy 4a1c0157): the same `scaffoldWillSeed` that
+          // routed it to the cheap rung picks the slice, so the ETA never prices template polish as a
+          // from-scratch `complex_app`.
+          const etaFleetKey = analysis?.taskType ? etaTaskKey(analysis.taskType, scaffoldWillSeed) : null;
+          if (past.length === 0 && etaFleetKey) {
+            try { fleet = fleetHistoryFromTelemetry(await withTimeout(agentV3CostTelemetry.list(7), 3_000, 'eta-fleet'), etaFleetKey, etaComplexity); } catch { /* best-effort */ }
           }
           const est = estimateBuildTime(etaComplexity, past.length > 0 ? past : fleet.history);
           etaTotalMs = est.estimateMs; // feed the live heartbeat so it can revise the remaining time
@@ -13842,7 +13888,7 @@ async function noteBuildOutcome(
           buildDiag.record({
             phase: 'plan', severity: 'info', code: 'ETA_BASIS',
             message: `ETA ${formatEtaRange(est.lowMs, est.highMs, est.estimateMs)} (midpoint ${est.etaText}) · basis ${est.basis} · confidence ${est.confidence}`,
-            detail: `${past.length === 0 && fleet.history.length > 0 && analysis?.taskType ? fleetEtaBasisNote(analysis.taskType, fleet.builds, fleet.days) : etaBasisNote(past)} ${etaEvidenceNote(est, past.length === 0 && fleet.history.length > 0 ? 'platform' : 'workspace')} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
+            detail: `${past.length === 0 && fleet.history.length > 0 && etaFleetKey ? fleetEtaBasisNote(etaFleetKey, fleet.builds, fleet.days) : etaBasisNote(past)} ${etaEvidenceNote(est, past.length === 0 && fleet.history.length > 0 ? 'platform' : 'workspace')} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
             autoResolved: true,
           });
           // THE POINT ESTIMATE IS NOT WHAT WE KNOW. `estimateBuildTime` returns lowMs/highMs and a
@@ -13944,7 +13990,7 @@ async function noteBuildOutcome(
               // store (#2818), `started-by=` says what caused the machine to exist at all (#2820).
               // Reading them side by side is the whole point — "created fresh · restored 24/24 ·
               // started-by=preview-door" is a complete story that neither line tells alone.
-              + `restore=${sandboxRestoreOf(actuator, workspaceId) ?? 'n/a (warm or resumed)'}`
+              + `restore=${setupRestoreText(sandboxOriginOf(actuator, workspaceId), sandboxRestoreOf(actuator, workspaceId))}`
               + ` · started-by=${sandboxSessionOf(actuator, workspaceId)?.reason ?? 'unreported'}`
               + starterCompletedOf(actuator, workspaceId),
           });
@@ -17414,6 +17460,10 @@ async function noteBuildOutcome(
           signal: abort.signal });
         // A STOP IS NOT A FALLBACK (autopsy 31254f9a): nothing is handed to the full builder after a Stop.
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : sb.stopped ? 'SIMPLE_BUILD_STOPPED' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
+        // The lane's FILE PLAN is not the plan of record once it hands off (autopsy de3bb2bb): the full builder
+        // plans its own files, so "9 of 10 files written · ~1 min to go" at minute 4 counted against a list
+        // nobody was following any more. Forget it; the architect's own plan steps drive the ETA from here.
+        if (!sb.ok) { etaPlannedFiles = 0; etaFirstFileAt = 0; }
         // WHERE THE FAST LANE'S MINUTES WENT (autopsy 21b431e1). Measurement only — nothing reads it.
         // Recorded on BOTH outcomes, because a lane that handed off is exactly the one whose time
         // needs explaining, and a check only ever visible when it complains cannot be told apart from
@@ -17444,7 +17494,8 @@ async function noteBuildOutcome(
         if (sb.outcome && !sb.stopped) {
           buildDiag.record(sb.ok
             ? { phase: 'build', severity: 'info', code: `OUTCOME_${sb.outcome}`, message: `Build outcome: ${sb.outcome}`, autoResolved: true }
-            : { phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_OUTCOME', message: `Fast-lane outcome (handed off to the full builder): ${sb.outcome}`, autoResolved: true });
+            // A stop is not a BUILD_FAILED and is not handed to anyone (autopsy 3d1bfe2a).
+            : { phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_OUTCOME', message: sb.stopped ? 'Fast-lane outcome: stopped by the user — not a failure, and not handed off.' : `Fast-lane outcome (handed off to the full builder): ${sb.outcome}`, autoResolved: true });
         }
         // HANDOFF FRAMING (StudySync root cause, 2026-07-16): when the fast lane timed out but SALVAGED
         // its finished files into the workspace, the full builder must treat them as ITS OWN prior work
@@ -18581,10 +18632,14 @@ async function noteBuildOutcome(
         // just closed on the import-boot path. Cutting on a guess is how a confident wrong fix ships.
         // So the next report will say where the time actually goes, and THEN it can be fixed with evidence.
         const integrityStartedAt = Date.now();
+        etaFinalChecks = true; // the app's turn is over — the ETA line says so instead of promising minutes
         const storeFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
         const storeLoadMs = Date.now() - integrityStartedAt;
         const integrityFiles: Record<string, string> = { ...storeFiles, ...Object.fromEntries(writtenFiles) };
-        for (const p of ['src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/index.tsx', 'index.html', 'src/index.css']) {
+        // The sandbox is read for the files a check reasons from by their ABSENCE (autopsy de3bb2bb): the
+        // durable map did not hold the starter's `src/vite-env.d.ts`, so `missingViteEnvTypes` wrote one into
+        // a project that already had it and told the user TypeScript had complained — tsc was clean.
+        for (const p of ['src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/index.tsx', 'index.html', 'src/index.css', 'src/vite-env.d.ts', 'tsconfig.json', 'tsconfig.app.json']) {
           if (integrityFiles[p] === undefined) {
             try { integrityFiles[p] = await actuator.readFile(workspaceId, p); } catch { /* absent in sandbox too */ }
           }
@@ -18871,12 +18926,14 @@ async function noteBuildOutcome(
           const line = unusedDependencyLine(u.name, { unfinished: buildUnfinished, addedThisBuild: addedThisBuild.has(u.name) });
           buildDiag.record({ phase: 'build', severity: line.severity, code: 'INTEGRITY_UNUSED_DEP', ...obs(line.message), ...(line.autoResolved ? { autoResolved: true } : {}) });
         }
+        // A shared stylesheet imported by several modules is a FACT, never a defect (autopsy de3bb2bb): a
+        // bundler includes the file once. Recorded at info level, outside `!integrity.ok`, so it is not lost.
+        for (const d of integrity.duplicateStylesheets) {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_DUPLICATE_STYLESHEET', autoResolved: true, message: `"${d.stylesheet}" is imported by ${d.importers.length} modules (${d.importers.join(', ')}). Not a defect: the bundler includes it once.` });
+        }
         if (!integrity.ok) {
           if (integrity.focusOwners.length >= 2) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_FOCUS_CONFLICT', ...obs(`${integrity.focusOwners.length} components grab initial focus: ${integrity.focusOwners.map((o) => `${o.file} (${o.mechanism})`).join(', ')} — only one may own initial focus.`) });
-          }
-          for (const d of integrity.duplicateStylesheets) {
-            buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_DUPLICATE_STYLESHEET', ...obs(`"${d.stylesheet}" imported by ${d.importers.length} modules: ${d.importers.join(', ')}.`) });
           }
           for (const o of integrity.orphanStylesheets) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_ORPHAN_STYLESHEET', ...obs(`"${o.stylesheet}" is imported by nothing (no module import, no HTML link) — the app ships unstyled unless it is wired in.`) });
@@ -18893,7 +18950,7 @@ async function noteBuildOutcome(
           // so the heal must not edit the imported project — the warnings above stay advisory (matches the
           // C9 reviewer-autofix `!isImportTurn` gate). `expectsArtifacts` is false on every import turn.
           if (shouldRunIntegrityHeal({ gateEnabled: envFlag('AGENTV3_INTEGRITY_GATE'), resultOk: result.ok, expectsArtifacts, aborted: abort.signal.aborted })) {
-            events.emit({ type: 'narration', agent: 'architect', text: '🔧 Fixing project-integrity issues (focus ownership / duplicate stylesheet)…', ts: Date.now() });
+            events.emit({ type: 'narration', agent: 'architect', text: '🔧 Fixing project-integrity issues…', ts: Date.now() });
             try {
               const integrityRunner = new AgentRunner({
                 ...baseRunnerOpts,
@@ -18912,8 +18969,10 @@ async function noteBuildOutcome(
                 // I will not make any changes." as the user's build result. Keep the REAL build summary;
                 // the heal contributes its edits, never its chatter.
                 result = { ...healed, summary: result.summary };
-                const after = analyzeProjectIntegrity(Object.fromEntries(writtenFiles));
-                if (after.ok) buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_HEALED', message: 'Project-integrity issues fixed (single focus owner; no duplicate stylesheet).', autoResolved: true });
+                // Re-judged on the WHOLE project, the same map the finding came from — this build's writes
+                // alone cannot see a focus owner or an entry in a file the build did not touch.
+                const after = analyzeProjectIntegrity({ ...integrityFiles, ...Object.fromEntries(writtenFiles) });
+                if (after.ok) buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_HEALED', message: 'Project-integrity issues fixed and re-checked on the whole project.', autoResolved: true });
               }
             } catch { /* self-heal is best-effort — the honest warnings stand */ }
           }
@@ -19341,7 +19400,9 @@ async function noteBuildOutcome(
                       severity: left.length < 3 ? 'info' : 'warning',
                       code: left.length < 3 ? 'CSS_CLASSES_HEALED' : 'CSS_CLASSES_PARTIALLY_HEALED',
                       message: left.length < 3
-                        ? 'Every class the screens use now has a style rule.'
+                        ? (left.length === 0
+                          ? 'Every class the screens use now has a style rule.'
+                          : `The repair added the missing style rules; ${left.length} class name(s) still have none (${left.join(', ')}), under the threshold for a finding.`)
                         : `After the repair ${left.length} class name(s) still have no style rule: ${left.slice(0, 12).join(', ')}.`,
                       autoResolved: left.length < 3,
                     });
@@ -24299,7 +24360,9 @@ async function noteBuildOutcome(
       // effort — never blocks the run. Recorded for every build, signed-in or not.
       agentV3CostTelemetry
         .record({
-          taskType: analysis?.taskType ?? 'unknown',
+          // A seeded template build is counted as its own kind, so the ETA can learn from it and the
+          // `complex_app` average is not pulled down by template polish (autopsy 4a1c0157).
+          taskType: etaTaskKey(analysis?.taskType, goldenPreseeded),
           // Record the tier the build was actually DELIVERED on (after any P3 escalation),
           // so per-tier success rates reflect what really ran, not just the start tier.
           startTier: deliveredTier,

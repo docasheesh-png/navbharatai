@@ -55,8 +55,10 @@ export default function App() {
   const [open, setOpen] = useState<number[]>([]);
   const [moves, setMoves] = useState(0);
   const [best, setBest] = useState<number | null>(() => {
-    const raw = parseInt(localStorage.getItem(BEST_KEY) || '', 10);
-    return Number.isFinite(raw) && raw > 0 ? raw : null;
+    try {
+      const raw = parseInt(localStorage.getItem(BEST_KEY) || '', 10);
+      return Number.isFinite(raw) && raw > 0 ? raw : null;
+    } catch { return null; }
   });
 
   const won = useMemo(() => deck.every((c) => c.done), [deck]);
@@ -218,7 +220,9 @@ const TINT: Record<number, string> = {
 export default function App() {
   const [grid, setGrid] = useState<Grid>(newGrid);
   const [score, setScore] = useState(0);
-  const [best, setBest] = useState(() => parseInt(localStorage.getItem(BEST_KEY) || '0', 10) || 0);
+  const [best, setBest] = useState(() => {
+    try { return parseInt(localStorage.getItem(BEST_KEY) || '0', 10) || 0; } catch { return 0; }
+  });
   const touch = useRef<{ x: number; y: number } | null>(null);
 
   const push = useCallback((dir: 'left' | 'right' | 'up' | 'down') => {

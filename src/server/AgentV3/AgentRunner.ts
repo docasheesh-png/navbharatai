@@ -535,6 +535,9 @@ export class AgentRunner {
     const MAX_BUILD_NUDGES = 2;
 
     const messages: unknown[] = [{ role: 'user', content: this.opts.platformRequest ? asPlatformRequest(userPrompt) : userPrompt }];
+    // This conversation holds one message, so no file is in its context yet (autopsy de3bb2bb) — see
+    // `ToolDispatcher.beginConversation`. A repair pass on the architect's dispatcher starts fresh too.
+    if (typeof dispatcher.beginConversation === 'function') dispatcher.beginConversation();
     // Wall-clock CREATION time of each message, parallel to `messages` (which stays exactly the
     // Claude-API shape — never mutated). Persisted copies are stamped from this so a reopened
     // session interleaves prose with the timeline in the LIVE order: the assistant message is
@@ -1006,11 +1009,11 @@ export class AgentRunner {
                 // SCREENS THAT USE CLASSES NO STYLESHEET DEFINES ARE HANDED BACK ONCE, while the model still
                 // holds them (autopsy 1be16985 — 63 undefined classes, then a 174 s fresh-context repair).
                 const style = await dispatcher.undefinedClassesNow();
-                const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, a11y: style.a11y, resumesUsed: styleResumes, producedFiles: producingToolUses > 0 });
+                const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, a11y: style.a11y, offGrid: style.offGrid, resumesUsed: styleResumes, producedFiles: producingToolUses > 0 });
                 if (decision.resume) {
                   styleResumes++;
                   summaryBeforeStyleResume = turn.text.trim() || null;
-                  try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`)].join(' ') }); } catch { /* a note must never fail a build */ }
+                  try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length, (style.offGrid ?? []).length), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.offGrid ?? []).map((o) => `${o.file}:off-grid(${o.values.join(',')})`)].join(' ') }); } catch { /* a note must never fail a build */ }
                   pushPlatformTurn(decision.message);
                   continue;
                 }

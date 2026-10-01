@@ -8,8 +8,14 @@
 //     Only one component may own initial focus; 2+ owners is a guaranteed UX defect no compiler catches.
 //
 //  2. DUPLICATE STYLESHEET IMPORT — the same stylesheet side-effect-imported from more than one module
-//     (the Notes build imported `global.css` from BOTH main.tsx and App.tsx). It compiles, but doubles
-//     the rules — the class behind duplicated/compounded spacing and specificity surprises.
+//     (the Notes build imported `global.css` from BOTH main.tsx and App.tsx).
+//     🔴 CORRECTED 2026-10-01 (autopsy de3bb2bb): "it doubles the rules" was FALSE, and it cost an LLM
+//     repair pass on that build (three screens importing one shared `Screens.css`). A side-effect CSS import
+//     only works under a bundler, and a bundler includes one file ONCE however many modules import it —
+//     measured with Vite: three importers, the rule emitted once. So this is reported as a fact
+//     (`duplicateStylesheets`) and tidied deterministically (`dedupeStylesheetImports`), but it is no longer
+//     a defect: it does not make `ok` false, it adds nothing to the repair instruction, and the route
+//     records it at info level.
 //
 // PURE & deterministic (files in → findings out), so it is fully unit-testable and free (no LLM, no
 // sandbox). Designed to feed the existing fast-lane repair gate: each finding carries a precise,
@@ -533,7 +539,8 @@ function analyzeOneProject(files: Record<string, string>): ProjectIntegrityRepor
   const orphanStylesheets = findOrphanStylesheets(files);
   const duplicateEntryPoints = findDuplicateEntryPoints(files);
   const duplicateComponentModules = findDuplicateComponentModules(files);
-  const ok = focusOwners.length <= 1 && duplicateStylesheets.length === 0
+  // `duplicateStylesheets` is deliberately NOT here — see the header (a bundler includes a file once).
+  const ok = focusOwners.length <= 1
     && orphanStylesheets.length === 0 && duplicateEntryPoints.length === 0
     && duplicateComponentModules.length === 0;
   return { focusOwners, duplicateStylesheets, orphanStylesheets, duplicateEntryPoints, duplicateComponentModules, ok };
@@ -553,13 +560,6 @@ export function integrityRepairInstruction(report: ProjectIntegrityReport): stri
       `Only ONE component may own the initial page focus. Keep the primary input's focus (the one the ` +
       `app's requirement asks to auto-focus) and REMOVE the mount-time focus (autoFocus attribute or the ` +
       `\`.focus()\` mount effect) from the other component(s).`,
-    );
-  }
-  for (const d of report.duplicateStylesheets) {
-    parts.push(
-      `DUPLICATE STYLESHEET — "${d.stylesheet}" is imported by ${d.importers.length} modules ` +
-      `(${d.importers.join(', ')}). Import a shared/global stylesheet from EXACTLY ONE module (the entry, ` +
-      `e.g. main.tsx) and remove the duplicate import from the other(s).`,
     );
   }
   for (const o of report.orphanStylesheets) {

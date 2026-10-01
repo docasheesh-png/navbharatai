@@ -552,6 +552,33 @@ export function formFeedsList(source: string, submit: Target | null): FormFeedsL
 }
 
 /**
+ * 🤖 AN AI ASK IS SUBMITTED, NOT RELOADED (queue Q-085, autopsy 1219c639, admin-approved 2026-10-01).
+ * A chat that asks the app's AI appends the question and the answer to a list, so it read as a
+ * create form, and the journey then checked that the "item" survived a reload. A chat's messages
+ * usually live in memory, so that check would fail a working app; and in the preview the AI may not
+ * answer at all (the gateway answers after publish). Such a form is checked as a submit that does not
+ * break the app.
+ *
+ * Evidence, not a guess: the form's own file, or a local module it imports directly, calls into an AI
+ * helper (`src/lib/ai`, `window.NavAI`, the gateway route, a chat-completions API or an AI SDK). Pure.
+ */
+const AI_CALL_RE = /from\s*["'][^"']*\/(?:lib|services|api|utils|hooks)\/ai["']|window\.NavAI\b|\bNavAI\.ask\b|\/api\/app-ai\/|\/chat\/completions\b|\/v1\/messages\b|from\s*["'](?:openai|@anthropic-ai\/sdk|@google\/generative-ai|@google\/genai)["']/;
+
+export function formAsksAi(formPath: string, files: Record<string, string>): boolean {
+  const own = files?.[formPath];
+  if (typeof own !== 'string') return false;
+  if (AI_CALL_RE.test(own)) return true;
+  const specs = own.match(/\bfrom\s*["'][^"']+["']/g) || [];
+  for (const raw of specs.slice(0, MAX_IMPORTS_PER_PAGE)) {
+    const spec = /["']([^"']+)["']/.exec(raw)?.[1];
+    if (!spec) continue;
+    const resolved = resolveLocalImport(formPath, spec, files);
+    if (resolved && AI_CALL_RE.test(files[resolved] || '')) return true;
+  }
+  return false;
+}
+
+/**
  * Does this app talk to a database the USER owns?
  *
  * A create journey writes a real row. Against the app's own local state or a sandbox database that is
@@ -857,8 +884,9 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
     // A list on the page is not enough: the form must be one that ADDS to a list (see formFeedsList).
     // Only a handler we could read, and that plainly adds nothing, downgrades the journey.
     const feeds = formFeedsList(source, submit) !== 'no';
+    const asksAi = formAsksAi(formPath, files);
 
-    if (listed && markerTyped && feeds && !noWrites) {
+    if (listed && markerTyped && feeds && !noWrites && !asksAi) {
       out.push({
         id: `create-persists:${path}`,
         kind: 'create-persists',
@@ -874,9 +902,13 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
         id: `form-submit:${path}`,
         kind: 'form-submit',
         route,
-        title: reach
-          ? `Open the "${reach}" screen, fill and submit its form without the app breaking`
-          : `Fill and submit the form on ${route} without the app breaking`,
+        title: asksAi
+          ? (reach
+            ? `Open the "${reach}" screen, ask the app's AI and check the app does not break`
+            : `Ask the app's AI on ${route} and check the app does not break`)
+          : reach
+            ? `Open the "${reach}" screen, fill and submit its form without the app breaking`
+            : `Fill and submit the form on ${route} without the app breaking`,
         fields, submit,
         // A submit still POSTs. Treated as a write unless it is plainly a search/filter form.
         writes: !/search|filter|query/i.test(path),
@@ -917,14 +949,17 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
     const listed = rendersList(src);
     const markerTyped = fields.some((f) => f.value.includes(marker));
     const feeds = formFeedsList(src, submit) !== 'no';
-    const create = listed && markerTyped && feeds && !noWrites;
+    const asksAi = formAsksAi(path, files);
+    const create = listed && markerTyped && feeds && !noWrites && !asksAi;
     out.push({
       id: `${create ? 'create-persists' : 'form-submit'}:${path}`,
       kind: create ? 'create-persists' : 'form-submit',
       route: '/',
       title: create
         ? `Open the "${reach}" screen, create an item and check it survives a reload`
-        : `Open the "${reach}" screen, fill and submit its form without the app breaking`,
+        : asksAi
+          ? `Open the "${reach}" screen, ask the app's AI and check the app does not break`
+          : `Open the "${reach}" screen, fill and submit its form without the app breaking`,
       fields, submit,
       writes: create || !/search|filter|query/i.test(path),
       reach,

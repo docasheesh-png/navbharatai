@@ -87015,7 +87015,7 @@ current `main`: four had already been fixed by PRs that merged after the build r
   `startTier` but only set ceilings; the blueprint gate is off and skips simple-lane tiers.
   `tests/aTemplateBuildIsTimedAsATemplateBuild.test.ts`.
 - **Q-061: our own templates read `localStorage` unguarded.** Found by the build's own reviewer. The theme switch
-  (in every scaffold), the login form, todos, notes, pomodoro, memory match, 2048 and the SaaS plan picker would
+  (in every scaffold), the login form, todos, notes, pomodoro, the memory and puzzle games and the SaaS plan picker would
   blank the app on blocked storage (private window, sandboxed frame, quota). Half the scaffolds had already been
   hardened ("private mode" comments); the rest were never revisited. All guarded now, locked by a census that parses
   every file a scaffold writes with the TypeScript parser and fails on any access outside a `try` block. The recipe

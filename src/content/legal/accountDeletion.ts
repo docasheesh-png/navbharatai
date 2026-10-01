@@ -13,7 +13,7 @@
 // is erased is worse than no page, because people rely on it and stop asking.
 
 export const ACCOUNT_DELETION_TITLE = 'Delete your NavBharatAI account';
-export const ACCOUNT_DELETION_UPDATED = '3 September 2026';
+export const ACCOUNT_DELETION_UPDATED = '1 October 2026';
 
 export const ACCOUNT_DELETION = `# Delete your NavBharatAI account
 
@@ -67,6 +67,7 @@ When your deletion request is completed, we remove:
 - your **gift-code purchase tally** — the running count of how many gift codes you bought on a given
   day. (The codes themselves are **not** deleted: once you have given a code to somebody, it is theirs
   to redeem, and a payment record is one of the things we are required to keep — see below.);
+- your **App Mart likes, dislikes and comments** — every 👍 and 👎 you gave, every comment and reply you wrote, your App Mart notifications, the list of people you blocked, the creators you follow and the people who follow you, and the link between your public creator code and your account (so your App Mart profile stops opening). Other people's replies to your comments are not theirs to lose, but they can no longer be reached once your comment is gone;
 - your **saved sessions and preferences**;
 - your **connection to GitHub**, if you had connected one. (This removes NavBharatAI's access. It does **not** delete anything in your own GitHub account — that stays yours.)
 

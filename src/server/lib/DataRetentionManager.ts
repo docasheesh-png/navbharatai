@@ -83,6 +83,31 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
    */
   { collection: 'gift_code_daily', key: { field: 'uid' } },
   /**
+   * App Mart social (appMartSocialStore.ts, 2026-09-30). A person's own likes, comments, block list and
+   * App Mart notifications, and the record of which public creator code is theirs. Reactions and
+   * comments carry a `uid` field; the block list's doc id IS the uid; a notification is filed under
+   * its `recipientUid`; the creator-code record holds `uid`.
+   *
+   * 🔒 Like/dislike and comment COUNTS stay true after an erase because they are counted from these
+   * very records (`countsFor`), never kept as a separate tally. The one visible trace: a reply written
+   * by someone else under a deleted person's comment loses its thread, and is no longer reachable.
+   *
+   * ⚠️ `app_mart_comment_reports` is deliberately NOT here — a report about a comment is a safety record
+   * with its own 180-day policy below, for the same reason `safety_flags` is kept out.
+   */
+  { collection: 'app_mart_reactions', key: { field: 'uid' } },
+  { collection: 'app_mart_comments', key: { field: 'uid' } },
+  { collection: 'app_mart_blocks', key: 'docId' },
+  { collection: 'app_mart_notifications', key: { field: 'recipientUid' } },
+  { collection: 'app_mart_creator_ids', key: { field: 'uid' } },
+  /**
+   * App Mart follows (2026-10-01): one doc per (follower, creator). Erased from BOTH ends — the people a
+   * deleted account followed, and the follows of everybody who followed it — so a deleted account
+   * neither counts toward anyone's follower number nor appears in anyone's Following view.
+   */
+  { collection: 'app_mart_follows', key: { field: 'followerUid' } },
+  { collection: 'app_mart_follows', key: { field: 'creatorUid' } },
+  /**
    * 🔒 `takedown_records` IS DELIBERATELY ABSENT, and must stay absent.
    *
    * It looks like it belongs here — it carries a uid — and adding it would feel like completing the
@@ -259,6 +284,19 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
    * 30 days cannot change a number anybody is shown.
    */
   { collection: 'site_analytics', ttlDays: 30, timestampField: 'updatedAt', timestampKind: 'epochMs' },
+
+  /**
+   * App Mart creator notifications (appMartSocialStore.ts). One GROUPED document per (person, kind, app,
+   * day), so this grows with activity. 90 days: a notification is read within days, and the inbox shows
+   * the newest 30 anyway. `updatedAt: Date.now()` ⇒ `epochMs`.
+   */
+  { collection: 'app_mart_notifications', ttlDays: 90, timestampField: 'updatedAt', timestampKind: 'epochMs' },
+  /**
+   * What readers reported about App Mart comments — the same 180-day story as `safety_flags`: it must
+   * outlive the reporter's and the author's accounts, and must not become a permanent file.
+   * `at: Date.now()` ⇒ `epochMs`.
+   */
+  { collection: 'app_mart_comment_reports', ttlDays: 180, timestampField: 'at', timestampKind: 'epochMs' },
 ];
 
 /**

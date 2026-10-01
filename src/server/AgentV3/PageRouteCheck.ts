@@ -35,6 +35,7 @@
 
 import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
 import { newPageOptionsExpr } from './signInExplore';
+import { declaredRoutes } from './routerPaths';
 
 /** How many page routes to actually open. A 40-page app must not add minutes to every build. */
 export const MAX_PAGE_ROUTES = 6;
@@ -100,7 +101,10 @@ export function extractPageRoutes(files: Record<string, string> | null | undefin
 
     // React Router — the element is what makes it a page, so a bare `path` string elsewhere is ignored.
     if (/\.(t|j)sx$/.test(path)) {
-      for (const m of String(content ?? '').matchAll(/<Route\b[^>]*\bpath\s*=\s*["']([^"']+)["']/g)) add(m[1]);
+      // Parents joined (routerPaths.ts): `<Route path="new">` under `<Route path="/">` serves `/new`. Reading
+      // only absolute paths dropped every nested screen, and the gate said "no separate page routes"
+      // about an app with four (autopsy a106df77).
+      for (const r of declaredRoutes(String(content ?? ''))) add(r.path);
     }
 
     // Next App Router: app/dashboard/page.tsx -> /dashboard. Route GROUPS `(marketing)` are organisational

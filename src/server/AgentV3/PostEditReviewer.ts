@@ -83,15 +83,21 @@ export function reviewEdit(file: string, content: string): PostEditReview {
       }
     }
 
-    // 4. JSX without a React/react import.
-    // Match any lowercase or PascalCase opening tag (e.g. <div>, <Button>, <>).
-    const hasJsx = /<[A-Za-z][A-Za-z0-9]*[\s/>]/.test(content) || /<>/.test(content);
-    const hasReactImport =
-      /import\s+React\b/.test(content) ||
-      /from\s+['"]react['"]/.test(content);
-    if (hasJsx && !hasReactImport) {
+    // 4. The `React` namespace used without importing it.
+    //
+    // 🔴 NOT "JSX without a react import" (autopsy 1be16985, 2026-10-01). That was the rule, and it is
+    // wrong for every project this platform generates: Vite, Next and our own templates compile JSX with
+    // the automatic runtime (`"jsx": "react-jsx"`), where a file needs no React import at all. The note
+    // told a model, about a file that typechecked clean, to add an import it did not need — a nudge to
+    // edit working code. What IS an error under every runtime is naming `React.` (React.FC,
+    // React.useState) without importing it, and the write-time typecheck confirms the rest.
+    const usesReactNamespace = /(^|[^\w.$])React\.[A-Za-z]/m.test(content);
+    const hasReactBinding =
+      /import\s+(?:\*\s+as\s+)?React\b/.test(content) ||
+      /import\s+type\s+React\b/.test(content);
+    if (usesReactNamespace && !hasReactBinding) {
       issues.push(
-        "JSX used but no 'react' import found — add: import React from 'react' (or import { ... } from 'react').",
+        "`React.` is used but React is not imported — add: import React from 'react' (or import the named export directly).",
       );
     }
   }

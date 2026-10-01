@@ -67,6 +67,7 @@ import { registerMinifyRoutes } from './src/server/routes/minify';
 import { registerWorkspaceFileRoutes } from './src/server/routes/workspaceFiles';
 import { registerMobileSetupRoutes } from './src/server/routes/mobileSetup';
 import { registerNavStoreRoutes } from './src/server/routes/navStore';
+import { registerAppMartSocialRoutes } from './src/server/routes/appMartSocial';
 import { registerAppAiRoutes } from './src/server/routes/appAi';
 import { registerReportRoutes } from './src/server/routes/reports';
 import { registerCloudsyncRoutes } from './src/server/routes/cloudsync';
@@ -669,6 +670,9 @@ setInterval(() => {
   // Nav App Store — user-published Android apps. Every upload is inspected and malware-scanned, and
   // NOTHING becomes public without an explicit admin approval. See routes/navStore.ts.
   registerNavStoreRoutes(app);
+  // App Mart social — likes, dislikes, comments, creator profiles and their notifications. Reads are
+  // open; every write needs a verified sign-in. See routes/appMartSocial.ts.
+  registerAppMartSocialRoutes(app);
 
   // The AI gateway a PUBLISHED app calls — no key to paste, the owner's own wallet pays. Public and
   // cross-origin by design; every defence it has is in routes/appAi.ts. Off unless APP_AI_GATEWAY=on.

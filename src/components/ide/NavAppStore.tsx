@@ -5,7 +5,7 @@ import PullToRefresh from '../PullToRefresh';
 import {
   Store, Loader2, ShieldCheck, ShieldAlert, AlertTriangle, Download,
   CheckCircle2, X, Clock, ExternalLink, Info, Globe, Play, Link2, Trash2, Lock, Package, Flag,
-  Rocket, ImagePlus, Clipboard, Copy,
+  Rocket, ImagePlus, Clipboard, Copy, User,
 } from 'lucide-react';
 import { WebAppPlayer } from './WebAppPlayer';
 import { authedHeaders } from '../../lib/authHeaders';
@@ -19,6 +19,10 @@ import { mergeReviewQueue, pendingReviewCount, reviewStatusLabel, reviewActionsF
 import { publishableApps, publishBlockedReason, type PublishableApp } from './publishablePicker';
 import { readStoreIcon, readStoreIconFromClipboard, type IconCheck } from '../../lib/appIcon';
 import { creatorLine } from './storeCreatorLine';
+import { SocialBar, CommentsSection, LikersSheet, ProfileSheet, CommentReportsAdmin, FollowButton, FollowersSheet } from './appMart/AppMartSocial';
+import { useSocialStats, useSignedIn, webKey, apkKey, fetchFeed, askToSignIn } from './appMart/appMartSocialApi';
+import { BROWSE_VIEWS, kindFilterOptions, shelvesFor, emptyViewMessage, viewNeedsSignIn, type BrowseView, type KindFilter } from './appMart/browseViews';
+import { parseAppMartTarget } from '../../lib/appMartTarget';
 
 // Nav App Store — publish your Android app, and install other people's.
 //
@@ -53,6 +57,8 @@ interface PublicApp {
   shortDescription: string; description: string; category: string; iconDataUrl?: string;
   sizeBytes: number; permissions: string[]; highRisk: HighRisk[]; downloads: number;
   developerName: string; publishedAt: number; sha256: string;
+  /** The uploader's public creator code — opens their profile. Never the account id. */
+  creatorId?: string;
 }
 
 interface MineApp {
@@ -131,6 +137,11 @@ export interface NavAppStoreProps {
    * before then because choosing an app also pre-fills its name from that list.
    */
   initialPublishWorkspaceId?: string | null;
+  /**
+   * Open this app's comments (a tapped App Mart notification — "Ravi commented on your app"). The
+   * nonce lets the SAME app be opened again by a second tap.
+   */
+  socialTarget?: { key: string; nonce: number } | null;
 }
 
 // 🍎 WHICH DEVICE THIS IS, read ONCE at module load rather than per render — `Capacitor.getPlatform()`
@@ -141,9 +152,18 @@ export interface NavAppStoreProps {
 const STORE_PLATFORM = nativePlatformName();
 const HIDE_ANDROID_INSTALLS = androidInstallsHidden(STORE_PLATFORM);
 
-export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initialTab, initialPublishWorkspaceId }) => {
+export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initialTab, initialPublishWorkspaceId, socialTarget }) => {
   const [tab, setTab] = useState<Tab>(initialTab ?? 'browse');
   const [status, setStatus] = useState<StoreStatus | null>(null);
+
+  // ── BROWSE VIEWS + KIND FILTER (admin 2026-10-01: "browser me 3 button … general, follower, likes
+  // app … sabhi page me upar play instantly aur apk filter"). General is the store; Following and
+  // Liked are the viewer's own, fetched from the server on demand. See appMart/browseViews.ts.
+  const [browseView, setBrowseView] = useState<BrowseView>('general');
+  const [kindFilter, setKindFilter] = useState<KindFilter>('all');
+  const [feed, setFeed] = useState<{ view: BrowseView | null; webApps: WebApp[]; apps: PublicApp[]; followingCount: number | null; loading: boolean; error: string }>(
+    { view: null, webApps: [], apps: [], followingCount: null, loading: false, error: '' },
+  );
 
   // ── PUBLISH FROM THIS PAGE (admin 2026-08-26) ────────────────────────────────────────────────
   // The Publish tab used to be directions to another screen. These hold the picker that makes it a
@@ -158,7 +178,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   const [pubBusy, setPubBusy] = useState(false);
   const [pubResult, setPubResult] = useState<{ ok: boolean; message: string; shareUrl?: string } | null>(null);
   const [apps, setApps] = useState<PublicApp[]>([]);
-  const pagedApps = usePagedList(apps);
+  // The Android shelf of whichever Browse view is open. Feed apps pass the same Apple filter as the store's.
+  const viewApk = browseView === 'general' ? apps : (feed.view === browseView ? visibleAndroidApps(feed.apps, STORE_PLATFORM) : []);
+  const pagedApps = usePagedList(viewApk, { resetKey: `${browseView}|${kindFilter}` });
   const [mine, setMine] = useState<MineApp[]>([]);
   const pagedMine = usePagedList(mine);
   const [queue, setQueue] = useState<QueueApp[]>([]);
@@ -197,9 +219,55 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
     }
   };
 
+  /** Open a web app's detail by id — from a profile or a notification, where only the id is known. */
+  const openWebDetailById = async (id: string) => {
+    const known = webApps.find((a) => a.id === id);
+    if (known) { void openWebDetail(known); return; }
+    try {
+      const res = await fetch(`/api/nav-store/web/app/${encodeURIComponent(id)}`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.app) { setError(typeof data?.error === 'string' ? data.error : 'That app is no longer on App Mart.'); return; }
+      setDetailApp(data.app as WebApp);
+      setDetailShots(Array.isArray(data.screenshots) ? data.screenshots.filter((x: unknown): x is string => typeof x === 'string') : []);
+    } catch { setError('That app could not be opened just now.'); }
+  };
+
+  /** Open an Android app's sheet by id. On an iPhone there is no such sheet (appStoreCompliance.ts). */
+  const openApkById = async (id: string) => {
+    if (HIDE_ANDROID_INSTALLS) return;
+    const known = apps.find((a) => a.id === id);
+    if (known) { setOpenApp(known); return; }
+    try {
+      const res = await fetch(`/api/nav-store/app/${encodeURIComponent(id)}`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.app) { setError(typeof data?.error === 'string' ? data.error : 'That app is no longer on App Mart.'); return; }
+      setOpenApp(data.app as PublicApp);
+    } catch { setError('That app could not be opened just now.'); }
+  };
+
   // WEB APPS — run in the viewer's browser, nothing to install. Deep link opens the player directly.
   const [webApps, setWebApps] = useState<WebApp[]>([]);
-  const pagedWebApps = usePagedList(webApps);
+  const viewWeb = browseView === 'general' ? webApps : (feed.view === browseView ? feed.webApps : []);
+  const pagedWebApps = usePagedList(viewWeb, { resetKey: `${browseView}|${kindFilter}` });
+  const viewLoading = browseView === 'general' ? loading : feed.loading || feed.view !== browseView;
+  const shelves = shelvesFor(kindFilter, HIDE_ANDROID_INSTALLS);
+  const anyInView = (shelves.web && viewWeb.length > 0) || (shelves.apk && viewApk.length > 0);
+
+  // ── APP MART SOCIAL (admin 2026-09-30: "app mart me ek social media banana hai!") ──────────────
+  // 👍 · 👎 · 💬 under every app on the page, fetched for the visible tiles in ONE request. Counts are
+  // public; pressing asks for a sign-in. See appMart/AppMartSocial.tsx and routes/appMartSocial.ts.
+  const socialKeys = [
+    ...pagedWebApps.visible.map((a) => webKey(a.id)),
+    ...pagedApps.visible.map((a) => apkKey(a.id)),
+  ];
+  const social = useSocialStats(socialKeys);
+  const signedIn = useSignedIn();
+  /** A person's profile, opened by their PUBLIC creator code (or `me`) — never by an account id. */
+  const [profileId, setProfileId] = useState<string | null>(null);
+  /** The creator's own "who liked this" list. */
+  const [likersFor, setLikersFor] = useState<{ key: string; name: string } | null>(null);
+  /** Your own followers list — opened from your profile, or from a follow notification. */
+  const [followersOpen, setFollowersOpen] = useState(false);
   const [webMine, setWebMine] = useState<WebApp[]>([]);
   const pagedWebMine = usePagedList(webMine);
   const [webQueue, setWebQueue] = useState<WebApp[]>([]);
@@ -551,9 +619,48 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
    * the current state of this screen", and refreshing one tab while leaving the next stale is the kind
    * of half-answer that makes people pull twice.
    */
+  // A tapped App Mart notification (the bell, or a phone push) lands where it is about: an app's
+  // comments, a person's profile, or your own followers. One grammar for all of them: appMartTarget.ts.
+  const socialTargetNonce = socialTarget?.nonce ?? 0;
+  useEffect(() => {
+    const target = parseAppMartTarget(socialTarget?.key);
+    if (!target) return;
+    setTab('browse');
+    if (target.type === 'app') {
+      if (target.kind === 'web') void openWebDetailById(target.id);
+      else void openApkById(target.id);
+    } else if (target.type === 'profile') {
+      setProfileId(target.creatorId);
+    } else {
+      setProfileId('me');
+      setFollowersOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socialTargetNonce]);
+
+  /**
+   * Following / Liked: read from the server each time the view is opened, so it is never stale.
+   * Only the LATEST request may write: switching views quickly would otherwise let a slow answer for
+   * the view you left overwrite the one you are on, and leave it spinning for ever.
+   */
+  const feedRequest = useRef(0);
+  const loadFeed = useCallback(async (view: BrowseView) => {
+    if (view === 'general') return;
+    const req = ++feedRequest.current;
+    if (!signedIn) { setFeed({ view, webApps: [], apps: [], followingCount: null, loading: false, error: '' }); return; }
+    setFeed((f) => ({ ...f, view, loading: true, error: '' }));
+    try {
+      const d = await fetchFeed<WebApp, PublicApp>(view);
+      if (liveRef.current && req === feedRequest.current) setFeed({ view, webApps: d.webApps, apps: d.apps, followingCount: d.followingCount, loading: false, error: '' });
+    } catch (e) {
+      if (liveRef.current && req === feedRequest.current) setFeed({ view, webApps: [], apps: [], followingCount: null, loading: false, error: e instanceof Error ? e.message : 'These apps could not be loaded.' });
+    }
+  }, [signedIn]);
+  useEffect(() => { if (tab === 'browse') void loadFeed(browseView); }, [tab, browseView, loadFeed]);
+
   const handlePullRefresh = useCallback(async () => {
-    await Promise.allSettled([loadStatus(), loadApps(), loadWebApps()]);
-  }, [loadStatus, loadApps, loadWebApps]);
+    await Promise.allSettled([loadStatus(), loadApps(), loadWebApps(), loadFeed(browseView)]);
+  }, [loadStatus, loadApps, loadWebApps, loadFeed, browseView]);
 
   return (
     <PullToRefresh
@@ -569,11 +676,25 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
           <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center flex-shrink-0 text-on-accent">
             <Store size={20} />
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h1 className="text-lg sm:text-xl font-bold truncate">App Mart</h1>
             <p className="text-xs text-muted">Play apps made by other creators — or publish your own</p>
           </div>
+          {signedIn && (
+            <button
+              type="button"
+              onClick={() => setProfileId('me')}
+              className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-raised hover:bg-raised-hover text-xs font-semibold text-body transition-colors"
+            >
+              <User size={14} /> My profile
+            </button>
+          )}
         </div>
+        {social.error && (
+          <p className="mb-3 flex gap-2 px-3 py-2 rounded-lg text-xs text-warn bg-amber-500/10">
+            <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />{social.error}
+          </p>
+        )}
 
         {/* Tabs — scroll rather than overflow on a phone */}
         <div className="flex gap-1.5 mb-5 overflow-x-auto pb-1">
@@ -606,18 +727,81 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
           an empty half says "nothing here yet" instead of contradicting the half above it. When BOTH
           are empty there is one invitation instead of two apologies.
         */}
-        {tab === 'browse' && !loading && webApps.length === 0 && apps.length === 0 && (
-          <div className="text-center py-14 px-4">
-            <Store size={40} className="text-faint mx-auto mb-3" />
-            <p className="text-sm text-muted font-medium">App Mart is just getting started.</p>
-            <p className="text-xs text-faint mt-1.5 max-w-xs mx-auto leading-relaxed">
-              Build something in NavBharatAI Pro and publish it here — it will run in anyone's browser, with nothing to install.
-            </p>
+        {/* ── The three Browse views, and the shelf filter above all of them (admin 2026-10-01) ── */}
+        {tab === 'browse' && (
+          <div className="mb-4 space-y-2.5">
+            <div role="tablist" aria-label="Which apps to show" className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-raised">
+              {BROWSE_VIEWS.map((v) => (
+                <button
+                  key={v.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={browseView === v.id}
+                  onClick={() => { if (viewNeedsSignIn(v.id) && !signedIn) askToSignIn(); setBrowseView(v.id); }}
+                  className={`py-2 rounded-lg text-xs sm:text-sm font-semibold transition-colors ${
+                    browseView === v.id ? 'bg-card text-ink shadow-sm' : 'text-muted hover:text-body'
+                  }`}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+            {kindFilterOptions(HIDE_ANDROID_INSTALLS).length > 0 && (
+              <div className="flex gap-1.5 overflow-x-auto pb-0.5" aria-label="Filter by kind of app">
+                {kindFilterOptions(HIDE_ANDROID_INSTALLS).map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    aria-pressed={kindFilter === f.id}
+                    onClick={() => setKindFilter(f.id)}
+                    className={`flex-shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-full border text-xs font-semibold transition-colors ${
+                      kindFilter === f.id ? 'border-emerald-500 bg-emerald-500/10 text-success' : 'border-line text-muted hover:text-body'
+                    }`}
+                  >
+                    {f.id === 'web' && <Play size={11} />}
+                    {f.id === 'apk' && <Package size={11} />}
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {browseView !== 'general' && feed.error && feed.view === browseView && (
+              <p className="flex gap-2 px-3 py-2 rounded-lg text-xs text-warn bg-amber-500/10">
+                <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />{feed.error}
+              </p>
+            )}
           </div>
         )}
 
+        {tab === 'browse' && !viewLoading && !anyInView && (
+          browseView === 'general' && kindFilter === 'all' ? (
+            <div className="text-center py-14 px-4">
+              <Store size={40} className="text-faint mx-auto mb-3" />
+              <p className="text-sm text-muted font-medium">App Mart is just getting started.</p>
+              <p className="text-xs text-faint mt-1.5 max-w-xs mx-auto leading-relaxed">
+                Build something in NavBharatAI Pro and publish it here — it will run in anyone's browser, with nothing to install.
+              </p>
+            </div>
+          ) : (() => {
+            const empty = emptyViewMessage({ view: browseView, filter: kindFilter, signedIn, followingCount: feed.view === browseView ? feed.followingCount : null });
+            return (
+              <div className="text-center py-12 px-4">
+                <Store size={36} className="text-faint mx-auto mb-3" />
+                <p className="text-sm text-muted font-medium">{empty.title}</p>
+                <p className="text-xs text-faint mt-1.5 max-w-xs mx-auto leading-relaxed">{empty.hint}</p>
+                {viewNeedsSignIn(browseView) && !signedIn && (
+                  <button type="button" onClick={askToSignIn} className="mt-4 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-bold">Sign in</button>
+                )}
+                {browseView === 'following' && signedIn && feed.followingCount === 0 && (
+                  <button type="button" onClick={() => setBrowseView('general')} className="mt-4 px-4 py-2 rounded-lg border border-line text-xs font-semibold text-body hover:bg-raised">Browse General</button>
+                )}
+              </div>
+            );
+          })()
+        )}
+
         {/* ── Half 1: PLAY INSTANTLY (web apps) — tap and it runs ── */}
-        {tab === 'browse' && !loading && (webApps.length > 0 || apps.length > 0) && (
+        {tab === 'browse' && !viewLoading && shelves.web && anyInView && (
           <div className="mb-7">
             {/* 🔴 A FIRST-TIME VISITOR HAS TO BE ABLE TO READ THIS (admin 2026-09-17). It was
                 `text-faint` uppercase at 12px — the lowest-contrast text on the screen, carrying
@@ -628,9 +812,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
               <Play size={13} className="text-success" /> Play instantly
             </p>
             <p className="text-xs text-muted mb-2.5">Tap any app and it opens right here — nothing to install.</p>
-            {webApps.length === 0 ? (
+            {viewWeb.length === 0 ? (
               <p className="text-xs text-faint py-4 px-3 rounded-xl bg-raised border border-line">
-                No instant apps yet — the first one can be yours.
+                {browseView === 'general' ? 'No instant apps yet — the first one can be yours.' : 'No instant apps in this view.'}
               </p>
             ) : (
             /* 🔴 TILES, NOT ROWS (admin 2026-09-17, from a phone screenshot: "app aise list me aa rahi
@@ -686,6 +870,16 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                       {(a.priceInr ?? 0) > 0 && <span className="text-success"> · remix ₹{a.priceInr}</span>}
                     </p>
                   </button>
+                  {/* 👍 · 👎 · 💬 — the numbers every visitor sees, one tap to react (sign-in asked for). */}
+                  <div className="px-2 pb-2">
+                    <SocialBar
+                      compact
+                      counts={social.counts[webKey(a.id)]}
+                      mine={social.mine[webKey(a.id)]}
+                      onReact={(r) => void social.press(webKey(a.id), r)}
+                      onComment={() => void openWebDetail(a)}
+                    />
+                  </div>
                   <button
                     onClick={() => setPlayingId(a.id)}
                     className="m-3 mt-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-bold transition-colors"
@@ -702,7 +896,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
           </div>
         )}
 
-        {tab === 'browse' && loading && (
+        {tab === 'browse' && viewLoading && (
           <p className="flex items-center gap-2 text-sm text-faint py-10 justify-center">
             <Loader2 size={15} className="animate-spin" /> Loading apps…
           </p>
@@ -714,15 +908,15 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
             iPhone that line is not information, it is an apology for a section that could never have
             worked. The two gates are not redundant: the list makes the tiles impossible, this makes
             the section invisible. */}
-        {tab === 'browse' && !loading && !HIDE_ANDROID_INSTALLS && (webApps.length > 0 || apps.length > 0) && (
+        {tab === 'browse' && !viewLoading && !HIDE_ANDROID_INSTALLS && shelves.apk && anyInView && (
           <div className="mb-6">
             <p className="text-sm font-bold text-body mb-0.5 flex items-center gap-1.5">
               <Package size={13} className="text-info" /> Install on Android
             </p>
             <p className="text-xs text-muted mb-2.5">Real apps you download and install on your phone.</p>
-            {apps.length === 0 ? (
+            {viewApk.length === 0 ? (
               <p className="text-xs text-faint py-4 px-3 rounded-xl bg-raised border border-line">
-                No Android apps yet. Every one is scanned and checked by a person before it appears here.
+                {browseView === 'general' ? 'No Android apps yet. Every one is scanned and checked by a person before it appears here.' : 'No Android apps in this view.'}
               </p>
             ) : (
             /* Same tile as the instant apps above, for the same reason and so the two halves of one
@@ -731,10 +925,10 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                 a tile is narrower than the row it replaced. */
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {pagedApps.visible.map((a) => (
+                <div key={a.id} className="flex flex-col rounded-xl bg-card border border-line hover:border-line transition-colors">
                 <button
-                  key={a.id}
                   onClick={() => setOpenApp(a)}
-                  className="flex flex-col items-start gap-2 p-3 rounded-xl bg-card border border-line hover:border-line text-left transition-colors"
+                  className="flex flex-col items-start gap-2 p-3 pb-2 flex-1 text-left"
                 >
                   <div className="w-14 h-14 rounded-2xl bg-raised flex items-center justify-center overflow-hidden flex-shrink-0">
                     {a.iconDataUrl ? <img src={a.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Store size={22} className="text-faint" />}
@@ -749,6 +943,16 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                     </p>
                   )}
                 </button>
+                <div className="px-2 pb-2">
+                  <SocialBar
+                    compact
+                    counts={social.counts[apkKey(a.id)]}
+                    mine={social.mine[apkKey(a.id)]}
+                    onReact={(r) => void social.press(apkKey(a.id), r)}
+                    onComment={() => setOpenApp(a)}
+                  />
+                </div>
+                </div>
               ))}
               <LoadMore list={pagedApps} label="apps" className="col-span-full" />
             </div>
@@ -1100,6 +1304,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
             These were written to Firestore from the day the store shipped and READ BY NOTHING, so
             "Report sent — a person will look at it" was a promise the code could not keep. This is
             the person. Newest first, with the app it is about and a way to open or remove it. */}
+        {/* Reported App Mart COMMENTS — the moderation queue Play's and Apple's user-content rules require. */}
+        {tab === 'review' && status?.isAdmin && <CommentReportsAdmin onOpenProfile={setProfileId} />}
+
         {tab === 'review' && status?.isAdmin && reports.length > 0 && (
           <div className="mb-5">
             <p className="text-xs font-bold uppercase tracking-wider text-danger mb-2 flex items-center gap-1.5">
@@ -1194,7 +1401,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
         {/* ── Admin review ── */}
         {tab === 'review' && status?.isAdmin && (
           queue.length === 0 && webQueue.length === 0 ? (
-            <p className="text-center text-sm text-faint py-12">Nothing waiting for review.</p>
+            <p className="text-center text-sm text-faint py-12">No apps waiting for review.</p>
           ) : (
             <div className="space-y-3">
               {pagedQueue.visible.map((a) => (
@@ -1293,7 +1500,25 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
               <div className="min-w-0 flex-1">
                 <h2 className="text-lg font-bold truncate flex items-center gap-1.5">{detailApp.name}{detailApp.requiresPassword && <Lock size={12} className="text-faint" />}</h2>
                 <p className="text-[11px] text-faint">{detailApp.runs} run{detailApp.runs === 1 ? '' : 's'} · A NavBharatAI-built app</p>
+                {/* The creator's name opens their profile — name, photo and their apps; never an email. */}
+                {detailApp.creatorName && detailApp.creatorId && (
+                  <span className="flex items-center gap-2 mt-0.5 flex-wrap">
+                    <button type="button" onClick={() => setProfileId(detailApp.creatorId!)} className="text-[11px] font-semibold text-accent-text hover:underline">
+                      by {detailApp.creatorName}
+                    </button>
+                    <FollowButton key={detailApp.creatorId} creatorId={detailApp.creatorId} compact />
+                  </span>
+                )}
               </div>
+            </div>
+
+            <div className="mb-3">
+              <SocialBar
+                counts={social.counts[webKey(detailApp.id)]}
+                mine={social.mine[webKey(detailApp.id)]}
+                onReact={(r) => void social.press(webKey(detailApp.id), r)}
+                onComment={() => document.getElementById('app-mart-comments')?.scrollIntoView({ behavior: 'smooth' })}
+              />
             </div>
 
             <p className="text-sm text-body leading-relaxed whitespace-pre-wrap mb-4">{detailApp.description || 'A NavBharatAI-built app.'}</p>
@@ -1316,6 +1541,15 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
             >
               <Play size={14} /> Open the app
             </button>
+            <div id="app-mart-comments">
+              <CommentsSection
+                key={webKey(detailApp.id)}
+                appKey={webKey(detailApp.id)}
+                onOpenProfile={setProfileId}
+                onCounts={(c) => social.setCounts(webKey(detailApp.id), c)}
+                onOpenLikers={() => setLikersFor({ key: webKey(detailApp.id), name: detailApp.name })}
+              />
+            </div>
             <button onClick={() => setDetailApp(null)} className="w-full mt-2 py-2 rounded-lg text-xs text-muted hover:text-body">Close</button>
           </div>
         </div>
@@ -1338,7 +1572,12 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
               </div>
               <div className="min-w-0">
                 <h2 className="text-lg font-bold truncate">{openApp.appName}</h2>
-                <p className="text-xs text-muted">{openApp.developerName} · v{openApp.versionName}</p>
+                <p className="text-xs text-muted">
+                  {openApp.creatorId ? (
+                    <button type="button" onClick={() => setProfileId(openApp.creatorId!)} className="font-semibold text-accent-text hover:underline">{openApp.developerName}</button>
+                  ) : openApp.developerName} · v{openApp.versionName}
+                </p>
+                {openApp.creatorId && <div className="mt-1"><FollowButton key={openApp.creatorId} creatorId={openApp.creatorId} compact /></div>}
                 <p className="text-[11px] text-faint">{openApp.category} · {fmtSize(openApp.sizeBytes)} · {openApp.downloads} downloads</p>
               </div>
             </div>
@@ -1383,6 +1622,24 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
               install only what you actually trust.
             </p>
 
+            <div className="mt-4">
+              <SocialBar
+                counts={social.counts[apkKey(openApp.id)]}
+                mine={social.mine[apkKey(openApp.id)]}
+                onReact={(r) => void social.press(apkKey(openApp.id), r)}
+                onComment={() => document.getElementById('app-mart-apk-comments')?.scrollIntoView({ behavior: 'smooth' })}
+              />
+            </div>
+            <div id="app-mart-apk-comments">
+              <CommentsSection
+                key={apkKey(openApp.id)}
+                appKey={apkKey(openApp.id)}
+                onOpenProfile={setProfileId}
+                onCounts={(c) => social.setCounts(apkKey(openApp.id), c)}
+                onOpenLikers={() => setLikersFor({ key: apkKey(openApp.id), name: openApp.appName })}
+              />
+            </div>
+
             <button onClick={() => setOpenApp(null)} className="w-full mt-3 py-2 rounded-lg text-xs text-muted hover:text-body">
               Close
             </button>
@@ -1390,6 +1647,33 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
         </div>
       )}
       {playingId && <WebAppPlayer appId={playingId} onClose={() => setPlayingId(null)} />}
+      {likersFor && (
+        <LikersSheet
+          appKey={likersFor.key}
+          appName={likersFor.name}
+          onClose={() => setLikersFor(null)}
+          onOpenProfile={(id) => { setLikersFor(null); setProfileId(id); }}
+        />
+      )}
+      {profileId && (
+        <ProfileSheet
+          creatorId={profileId}
+          hideAndroid={HIDE_ANDROID_INSTALLS}
+          onOpenFollowers={() => setFollowersOpen(true)}
+          onClose={() => { setProfileId(null); setFollowersOpen(false); }}
+          onOpenApp={(a) => {
+            setProfileId(null);
+            setDetailApp(null); setOpenApp(null);
+            if (a.kind === 'web') void openWebDetailById(a.id); else void openApkById(a.id);
+          }}
+        />
+      )}
+      {followersOpen && (
+        <FollowersSheet
+          onClose={() => setFollowersOpen(false)}
+          onOpenProfile={(id) => { setFollowersOpen(false); setProfileId(id); }}
+        />
+      )}
     </PullToRefresh>
   );
 };

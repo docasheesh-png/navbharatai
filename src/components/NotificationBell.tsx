@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { X, Trash2, CheckSquare, Square, AlertTriangle } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { authJsonHeaders } from '../lib/authHeaders';
+import { isAppMartTarget } from '../lib/appMartTarget';
 
 /**
  * The app header's own height, restated here because a `fixed` panel cannot inherit it.
@@ -78,7 +79,13 @@ interface NotificationItem {
    * — a free-form link on a broadcast record would turn the admin's message form into a way to send
    * every user a tappable address. An unrecognised value simply renders as a plain message.
    */
-  action?: 'open-reports' | 'open-billing';
+  action?: 'open-reports' | 'open-billing' | 'open-app-mart';
+  /**
+   * For `open-app-mart` only: WHERE in App Mart — an app (`web:<id>` / `apk:<id>`), a profile, or your
+   * followers. Checked against the one grammar in src/lib/appMartTarget.ts before it is used, so it can
+   * never be an address.
+   */
+  target?: string;
 }
 
 export interface NotificationInbox {
@@ -405,6 +412,26 @@ export function NotificationPanel({ inbox, onClose, onOpenReports, pinned }: {
                     >
                       {row}
                       <span className="block text-[10px] font-bold text-warn mt-1">Tap to add credit →</span>
+                    </button>
+                  );
+                }
+                // A like, comment or reply on the user's App Mart app: open that app's comments,
+                // through the same navigation channel as every other cross-screen jump.
+                // The ONE grammar of where an App Mart notification may lead (appMartTarget.ts) — the same
+                // parser a tapped phone push uses, so the two can never disagree.
+                if (n.action === 'open-app-mart' && n.target && isAppMartTarget(n.target)) {
+                  const target = n.target;
+                  return (
+                    <button
+                      key={n.id}
+                      onClick={() => {
+                        close();
+                        window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'appstore', storeSocialKey: target } }));
+                      }}
+                      className="w-full text-left px-4 py-3 hover:bg-raised transition-colors"
+                    >
+                      {row}
+                      <span className="block text-[10px] font-bold text-accent-text mt-1">Tap to open →</span>
                     </button>
                   );
                 }

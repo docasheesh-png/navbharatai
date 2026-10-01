@@ -2465,7 +2465,7 @@ export class E2BActuator implements IEngineerActuator {
     return { exitCode: -1, stdout: '', stderr: 'sandbox unavailable after recreate attempt' };
   }
 
-  async browseUrl(workspaceId: string, url: string): Promise<{ html: string; painted?: boolean; source?: 'browser' | 'curl'; style?: RenderStyleEvidence }> {
+  async browseUrl(workspaceId: string, url: string, opts?: { recordConsole?: boolean }): Promise<{ html: string; painted?: boolean; source?: 'browser' | 'curl'; style?: RenderStyleEvidence }> {
     const sandbox = await this.getSandbox(workspaceId);
 
     // Ensure the shared Playwright install (same one the screenshot path uses) has been kicked
@@ -2535,7 +2535,7 @@ export class E2BActuator implements IEngineerActuator {
       // perfectly clean console, so marking the session unconditionally would let a dead preview earn
       // a render proof. Painted ⇒ the app's own mount root had content ⇒ the app really ran.
       // An error is recorded either way: a crash that prevents paint is exactly what must be reported.
-      const playwrightBody = browsePageScript(url, { recordConsole: browseConsoleCaptureEnabled() });
+      const playwrightBody = browsePageScript(url, { recordConsole: opts?.recordConsole !== false && browseConsoleCaptureEnabled() });
       await sandbox.files.write(browsePath, playwrightBody);
       // 🔴 NO `2>/dev/null`, AND NO `.catch(() => null)` — both discarded the only explanation there
       // would ever be. The SDK REJECTS on a non-zero exit and carries the command's real stdout /

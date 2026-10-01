@@ -196,6 +196,9 @@ import { inBuildGreenEnabled, shouldAttemptInBuildProof, isProvenGreenRender, at
 import { STARTER_ENTRY_PATHS, isUntouchedStarterEntry, starterEntryIn, starterIsWhatRendered, pageShowsStarter, withStarterVerdict, starterLabelFor } from '../AgentV3/stillTheStarterApp';
 import { postGreenWritesNote, endVerdictFrom, type PostGreenWrite } from '../AgentV3/postGreenWrites';
 import { offTopicSummaryNotice } from '../AgentV3/offTopicSummary';
+import { pastedAppBrief, pastedAppBriefEnabled } from '../AgentV3/pastedAppBrief';
+import { combineScreens, featureProbeScreensEnabled, PROBE_SCREENS_BUDGET_MS, screensReadNote, screensToProbe, screenUrl, type ProbedScreen } from '../AgentV3/featureProbeScreens';
+import { pastedAppFacts } from '../lib/pastedSource';
 import { verifyAfterFix, verifyAfterFixEnabled, verifyAfterFixNote, strictReverify } from '../AgentV3/verifyAfterFix';
 import { provisionPathSummary } from '../AgentV3/sandbox/dbProvisionVerify';
 import { ALL_DB_ENV_VARS, dbProvider } from '../../lib/dbProviders';
@@ -15750,6 +15753,21 @@ async function noteBuildOutcome(
         }
       } catch { /* a brief is best-effort — never blocks a build */ }
 
+      // THE USER PASTED THEIR OWN APP (autopsy a106df77): its name, tabs, buttons, fields and colours are
+      // read out of the paste and handed over as a checklist — improve it, never remove from it.
+      let pastedBrief = '';
+      try {
+        pastedBrief = pastedAppBriefEnabled() ? pastedAppBrief(prompt) : '';
+        if (pastedBrief) {
+          buildPrompt = `${pastedBrief}\n\n---\n\n${buildPrompt}`;
+          const facts = pastedAppFacts(prompt);
+          buildDiag.record({
+            phase: 'plan', severity: 'info', code: 'PASTED_APP_BRIEF', autoResolved: true,
+            message: `The request is the user's own pasted HTML app; the builder was told to keep its ${facts.controls.length} button(s)/tab(s), ${facts.fields.length} field(s) and ${facts.colours.length} colour(s).`,
+          });
+        }
+      } catch { /* a brief is best-effort — never blocks a build */ }
+
       // REQUIREMENT-AWARE BUILD (admin-approved option A, 2026-07-20; flag AGENTV3_REQUIREMENT_AWARE, default
       // OFF): on a FRESH build of an ambiguous domain prompt, proactively tell the builder to INCLUDE the
       // features that domain almost always needs but the prompt left implicit (RBAC/audit/EMR for a hospital,
@@ -16118,6 +16136,7 @@ async function noteBuildOutcome(
       const singleHtmlFileRule = framework === 'static' && wantsSingleHtmlFile(prompt) ? SINGLE_HTML_FILE_RULE : '';
       if (singleHtmlFileRule) buildPrompt = `${singleHtmlFileRule}\n\n${buildPrompt}`;
       const singleHtmlFileSuffix = singleHtmlFileRule ? `\n\n${singleHtmlFileRule}` : ''; // the fast lane's copy of the same rule
+      const pastedBriefSuffix = pastedBrief ? `\n\n${pastedBrief}` : ''; // the fast lane reads the pasted app's checklist too
 
       // Universal Language (Layer 73): build in the user's language. If the
       // request is written in a distinctive non-Latin script we name the
@@ -17056,7 +17075,7 @@ async function noteBuildOutcome(
           const c = await actuator.readFile(workspaceId, p).catch(() => null);
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
-        const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
+        const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix + pastedBriefSuffix, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
           stopLane: () => (fastLaneReasoningRung
             ? `the lane's engine fell to ${fastLaneReasoningRung}, which reasons before every answer; the lane's per-file budget cannot carry that, so the files finished so far go to the full builder now`
             : null),
@@ -20281,11 +20300,42 @@ async function noteBuildOutcome(
               // Behind a sign-in page the features are not on this screen: sign in with the app's own demo
               // account and probe the screens behind the door instead (signInExplore.ts).
               let probeHtml = html;
+              let readBehindSignIn = false;
               if (signInExploreEnabled() && isSignInWall(String(html ?? '').toLowerCase()) && !abort.signal.aborted) {
                 const session = await signInBehindTheDoor(lastPreviewUrl);
-                if (session.signedIn && session.screens.length > 0) probeHtml = session.screens.map((sc) => sc.html).join('\n');
+                if (session.signedIn && session.screens.length > 0) { probeHtml = session.screens.map((sc) => sc.html).join('\n'); readBehindSignIn = true; }
               }
               let coverage = checkFeaturePresence(milestoneRequest ?? prompt, probeHtml, declinedPresenceFeatures(featureConfirmation));
+              // A CONTROL ON ANOTHER SCREEN IS NOT MISSING (featureProbeScreens.ts, autopsy a106df77): when the
+              // home screen leaves a requested control unseen, read the app's own routes and judge them together.
+              // Paid only when something would otherwise be called missing; bounded in count and time. The
+              // screens' console is not recorded: a repair re-checks only home, so an error recorded from
+              // another screen would read as surviving a fix it never had a chance to see.
+              const readOtherScreens = async (): Promise<ProbedScreen[]> => {
+                const out: ProbedScreen[] = [];
+                if (!featureProbeScreensEnabled() || !actuator.browseUrl || !lastPreviewUrl) return out;
+                if (effectiveBuildSeconds !== 0 && Date.now() - buildStartedAt > effectiveBuildSeconds * 1000 - 90_000) return out;
+                const routes = screensToProbe(extractPageRoutes({ ...(projectFilesAtTurnStart ?? {}), ...Object.fromEntries(writtenFiles) }));
+                const started = Date.now();
+                for (const route of routes) {
+                  if (abort.signal.aborted || Date.now() - started > PROBE_SCREENS_BUDGET_MS) break;
+                  const url = screenUrl(internalPreviewUrl(lastPreviewUrl), route);
+                  if (!url) break;
+                  try {
+                    const sc = await withTimeout(actuator.browseUrl(workspaceId, url, { recordConsole: false }), 20_000, 'feature-probe-screen');
+                    if (analyzePreviewHtml(sc.html, { painted: sc.painted, source: sc.source }).rendered) out.push({ route, html: sc.html });
+                  } catch { /* an unreadable screen proves nothing either way */ }
+                }
+                return out;
+              };
+              let probedScreens: ProbedScreen[] = [];
+              if (coverage.missing.length > 0 && !readBehindSignIn && !abort.signal.aborted) {
+                probedScreens = await readOtherScreens();
+                if (probedScreens.length > 0) {
+                  const wider = checkFeaturePresence(milestoneRequest ?? prompt, combineScreens(probeHtml, probedScreens), declinedPresenceFeatures(featureConfirmation));
+                  if (wider.probes.length > 0) coverage = wider;
+                }
+              }
               // APP HEALTH CULTURE slice 2 (Phase 1b, opt-in AGENTV3_FEATURE_HEAL=on): the app renders
               // but a REQUESTED control is missing → run ONE bounded heal pass that adds the missing UI,
               // then re-open the running app and re-probe (only a control now in the live DOM counts).
@@ -20333,7 +20383,8 @@ async function noteBuildOutcome(
                     if (vr.kept && healResult?.ok) {
                       result = adoptHealResult(result, healResult as typeof result);
                       if (afterHtml) {
-                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? prompt, afterHtml, declinedPresenceFeatures(featureConfirmation));
+                        const afterScreens = probedScreens.length > 0 ? await readOtherScreens() : [];
+                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? prompt, combineScreens(afterHtml, afterScreens), declinedPresenceFeatures(featureConfirmation));
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
                       }
                     }
@@ -20343,7 +20394,8 @@ async function noteBuildOutcome(
                       result = adoptHealResult(result, healed);
                       try {
                         const after = (await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl')).html;
-                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? prompt, after, declinedPresenceFeatures(featureConfirmation));
+                        const afterScreens = probedScreens.length > 0 ? await readOtherScreens() : [];
+                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? prompt, combineScreens(after, afterScreens), declinedPresenceFeatures(featureConfirmation));
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
                       } catch { /* re-open best-effort — keep the pre-heal coverage */ }
                     }
@@ -20362,7 +20414,7 @@ async function noteBuildOutcome(
                   // what the capture it judged actually was. Without these two lines a false "your
                   // feature is missing" is unauditable from the report — which is how one cost a full
                   // investigation to overturn.
-                  detail: `${featurePresenceEvidence(coverage)} · capture: source=${shot.source ?? 'unknown'} painted=${shot.painted ?? 'unknown'} html=${html.length}B inputs=${(html.match(/<input\b/gi) || []).length} buttons=${(html.match(/<button\b/gi) || []).length}`,
+                  detail: `${featurePresenceEvidence(coverage)} · ${screensReadNote(probedScreens)} · capture: source=${shot.source ?? 'unknown'} painted=${shot.painted ?? 'unknown'} html=${html.length}B inputs=${(html.match(/<input\b/gi) || []).length} buttons=${(html.match(/<button\b/gi) || []).length}`,
                   autoResolved: coverage.missing.length === 0,
                 });
               }

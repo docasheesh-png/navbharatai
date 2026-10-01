@@ -87406,3 +87406,18 @@ is what was adopted. The rows leave `BUILD_REPORT_QUEUE.md`; this entry is their
     day.
   - **The real lever then:** a ladder change (another lead rung on Weak/Normal). That is the admin's routing
     decision, not a code fix.
+
+## 2026-10-01 — Admin decisions on the queue: Q-087, Q-018, Q-085 built; four "not a defect" rows closed
+
+The admin accepted every recommendation in one line (*"aapki salah accepted"*). Q-065, Q-066, Q-067 and Q-068
+were left alone: PR #3467 (another session) already carries them.
+
+| ID | Decision | What changed | Lock |
+|---|---|---|---|
+| Q-087 | (a) | `bareTemplateRequestFor` in `goldenScaffolds/registry.ts`. A build verb plus one SIMPLE template's own name, and nothing else ("Build a calculator", "calculator banao", "ek gita app bana do"), seeds that template. Any other word still builds from scratch. A name two templates could answer ("notes", "timer") is on neither list, and the pro tier is excluded because its chip prompt is the spec that extends it. | `tests/aBareRequestGetsItsTemplate.test.ts`, reversion-proven (14 fail when the door is removed) |
+| Q-018 | (a) | A single text-file upload (`handleFilesUpload` and `resolveFileConflict` in `App.tsx`) now goes through the one edit seam, `applyIdeFileChange` → `source: 'ide-edit'`. **Found on the way: the upload used a raw `setFiles`, so the file never reached the build workspace at all.** The AI could not see a file the user had just uploaded. Now it does, and it joins `userFiles`, so `userFileGuard` protects it. Zip and repo imports keep `source: 'import'` and are not recorded. Binary uploads are not sent, because the seam carries text and a data URL written as text would be a corrupt image. | `tests/anUploadedFileIsTheUsers.test.ts`, reversion-proven |
+| Q-085 | (a) | `formAsksAi` in `journeyDerivation.ts`. A form whose own file, or a module it imports directly, calls an AI helper (`lib/ai`, `window.NavAI`, the gateway route, a chat-completions API, an AI SDK) gets a submit-only journey. It never gets create-and-reload. | `tests/anAiAskIsSubmittedNotReloaded.test.ts`, reversion-proven |
+| Q-024, Q-052, Q-086, Q-088 | not a defect | Closed as RESOLVED-not-a-defect on the admin's agreement. The evidence is in each row as last written (autopsies d382b398, 31254f9a, 1219c639, 52471441). | — |
+
+**Still to watch.** Q-085: the next AI-chat report should show #3451's reach getting to a form held in a sidebar-switched component.
+**Still open.** Binary single-file uploads still stay in the browser. A binary write path from the IDE to the workspace is a separate change, and nothing asked for it yet.

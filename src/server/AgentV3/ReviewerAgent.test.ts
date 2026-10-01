@@ -229,6 +229,28 @@ describe('formatReview', () => {
     expect(formatReview({ passed: false, score: 35, issues: [], summary: 'bad' })).toContain('❌');
   });
 
+  // 🔴 Autopsy 4d538ca3: "⚠️ Build Review (85/100): [PASS]" — the reviewer wrote [PASS] and no score; the
+  // 85 was ours, and so was the ⚠️ it picked. An inferred number is never shown and never picks the icon.
+  it('an INFERRED score is not shown, and a clean pass is ✅', () => {
+    const out = formatReview({ passed: true, score: 85, scoreStated: false, issues: [], summary: '[PASS]' });
+    expect(out).toBe('✅ Build Review: [PASS]');
+    expect(out).not.toContain('85');
+  });
+
+  it('without a stated score the icon follows the findings', () => {
+    expect(formatReview({ passed: true, score: 85, scoreStated: false, issues: [{ severity: 'warning', message: 'w' }], summary: 's' })).toMatch(/^⚠️ Build Review: s/);
+    expect(formatReview({ passed: false, score: 40, scoreStated: false, issues: [{ severity: 'critical', message: 'c' }], summary: 's' })).toMatch(/^❌ Build Review: s/);
+  });
+
+  it('reviewBuild marks whether the reviewer actually wrote a score', async () => {
+    const tree = ['src/App.tsx', 'src/main.tsx', 'package.json'];
+    const noScore = await reviewBuild({ userRequest: 'x', fileTree: tree, fileSample: [], spawn: async () => ({ ok: true, summary: '[PASS] App looks complete.' }) } as never);
+    expect(noScore.scoreStated).toBe(false);
+    const stated = await reviewBuild({ userRequest: 'x', fileTree: tree, fileSample: [], spawn: async () => ({ ok: true, summary: '[PASS] Fine. Score: 92' }) } as never);
+    expect(stated.scoreStated).toBe(true);
+    expect(stated.score).toBe(92);
+  });
+
   it('includes issue lines when issues are present', () => {
     const out = formatReview({
       passed: false,

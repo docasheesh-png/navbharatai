@@ -22,6 +22,12 @@ export interface ReviewResult {
   passed: boolean;
   /** 0 = review was skipped; 1-100 = quality score from the reviewer. */
   score: number;
+  /**
+   * False when the reviewer printed no "Score: N" and `score` is the inferred 85/40 — then the number is
+   * never SHOWN to the user (autopsy 4d538ca3: "⚠️ Build Review (85/100): [PASS]" on a clean review whose
+   * reviewer wrote no score at all). Undefined on results built elsewhere, which keep today's display.
+   */
+  scoreStated?: boolean;
   issues: ReviewIssue[];
   summary: string;
 }
@@ -515,7 +521,7 @@ export async function reviewBuild(opts: ReviewBuildOpts): Promise<ReviewResult> 
       : passed
       ? 85
       : 40;
-    return { passed, score, issues, summary: summary.slice(0, 600) };
+    return { passed, score, scoreStated: Boolean(scoreMatch), issues, summary: summary.slice(0, 600) };
   } catch {
     return { passed: true, score: 0, issues: [], summary: 'Review skipped.' };
   }
@@ -530,8 +536,18 @@ export function isReviewFailureSummary(summary: unknown): boolean {
 /** Format a ReviewResult as a narration string. Returns '' if score is 0 (skipped). */
 export function formatReview(review: ReviewResult): string {
   if (review.score === 0) return '';
-  const icon = review.score >= 90 ? '✅' : review.score >= 70 ? '⚠️' : '❌';
-  const header = `${icon} Build Review (${review.score}/100): ${review.summary}`;
+  // AN INFERRED NUMBER IS NEVER SHOWN, AND NEVER PICKS THE ICON (autopsy 4d538ca3). A clean [PASS]
+  // with no findings was headed "⚠️ (85/100)" because the score it never stated was inferred as 85.
+  // A stated score keeps its bands (it is the reviewer's own judgement); without one, the icon follows
+  // the findings: a critical is ❌, a warning ⚠️, none ✅.
+  const shownScore = review.scoreStated !== false;
+  const icon = shownScore
+    ? (review.score >= 90 ? '✅' : review.score >= 70 ? '⚠️' : '❌')
+    : review.issues.some((i) => i.severity === 'critical') ? '❌'
+      : review.issues.some((i) => i.severity === 'warning') ? '⚠️' : '✅';
+  const header = shownScore
+    ? `${icon} Build Review (${review.score}/100): ${review.summary}`
+    : `${icon} Build Review: ${review.summary}`;
   if (review.issues.length === 0) return header;
   const issueLines = review.issues
     .slice(0, 5)

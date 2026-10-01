@@ -3311,6 +3311,22 @@ the flag entries above promise.
     - ⚠️ **What happens in practice is unmeasured:** no real pasted-page build has run this path yet. Watch
       the first `PASTED_APP_KEPT_ONE_FILE` report for a model that rewrites the file instead of editing it.
     - Test-locked and reversion-proven in `tests/aPastedOneFileAppStaysOneFile.test.ts`.
+  - 🧹 **A PACKAGE THIS BUILD INSTALLED AND NEVER USED IS REMOVED (admin 2026-10-01, the other approved
+    a106df77 item): `AGENTV3_PRUNE_UNUSED_DEPS`** (NOT set; default ON; `off` keeps today's warning-only behaviour).
+    - **Only a package THIS build added** (`unusedDepPrune.ts`). The baseline is the `package.json` read after
+      every platform seed and before the first model call. With no readable baseline nothing is removed. A
+      package the user had is never touched.
+    - **It must also be unused:** `findUnusedDependencies` says so, no other file names it (a config, a CSS
+      `@import`, an HTML tag or a string-load keeps it), it is not tooling (plugin, CLI, compiler, polyfill),
+      and no other declared package lists it as a dependency or peer (read from `node_modules`). At most 5.
+    - **Verify-and-restore:** back up `package.json` and the lock, `npm uninstall`, run the app's own
+      `npm run build`. Kept only if the build passes; otherwise both files go back and `npm install` restores
+      `node_modules`. No build script ⇒ nothing is removed.
+    - **Never on** an import, a project-mode module or roadmap milestone turn (a package for a later module is
+      not unused yet), a stopped build, or a workspace already latched green. Report codes
+      `UNUSED_DEPS_REMOVED` / `UNUSED_DEPS_KEPT`; the user sees one line naming the packages.
+    - Proven on a real npm project in the session (a wrong removal reverted, a real one removed, a peer kept).
+      Test-locked and reversion-proven in `tests/aPackageThisBuildNeverUsedIsRemoved.test.ts`.
 - **`AGENTV3_STORE_LOOP_NOTE`** (default ON, `off` disables — added 2026-09-29, autopsy 6a4a799f) — a
   write-time note (`storeEffectLoop.ts`, via `ToolDispatcher.writeSteeringNotes`) when a file binds a
   zustand hook with NO selector (`const store = useMusicStore()`), lists that bare name in an effect's

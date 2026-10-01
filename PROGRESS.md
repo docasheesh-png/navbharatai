@@ -86561,3 +86561,36 @@ the one unguarded instance.
   `/api/nav-store/status`. If it is the adaptive guard's 429, that is a second real defect (per-IP burst
   limit on a CGNAT phone network) and gets its own fix. **Tried:** read every guard in front of the route;
   the route and its four helpers cannot throw on their own.
+
+---
+
+## 2026-10-01 — A spreadsheet is a FILE, not an app (admin: "A karo!!")
+
+**Report:** a user asked NavBharatAI Pro for a sample Excel file; the builder wrote a React dashboard that
+showed a table, and the user still had no `.xlsx`. Admin chose option A: a real file deliverable.
+
+- **Class:** a request for a DELIVERABLE (here a spreadsheet; before it a picture, `pictureRequest.ts`)
+  reaching a surface that only builds software. Same fix shape — read the request before the builder does —
+  but here NavBharatAI makes the deliverable itself.
+- **Detector** `AgentV3/spreadsheetRequest.ts` (precision-first: a spreadsheet noun + a create verb or
+  "sample data", and nothing that is software, a how-to, handling an existing file, or another format).
+  Decided before the picture rule; turns the turn into a chat turn. Kill switch `AGENTV3_SPREADSHEET_FILE=off`.
+- **Turn** `AgentV3/spreadsheetTurn.ts`: one free-router call asks for strict JSON (message first, in the
+  user's language); `lib/spreadsheetFile.ts` reads it (fence/prose tolerant, truncated answers salvaged to
+  the last complete row), clamps it (5 sheets, 30 columns, 200 rows/sheet, 20,000 cells, 500 chars/cell),
+  and writes `.xlsx` (exceljs: frozen bold header, filters, widths, numbers as numbers) and `.csv`
+  (UTF-8 BOM, formula-injection guard). Rows are stored in `agentv3_sheet_files` (JSON string — Firestore
+  refuses nested arrays) under the VERIFIED uid; signed out ⇒ no model call, an honest "sign in" reply.
+- **Download** `routes/spreadsheetFiles.ts`: the App Mart ticket shape (`downloadTicket.ts`) — an
+  authenticated POST mints a 10-minute HMAC ticket signed over file + format + sheet + account; the GET is a
+  navigation (system browser on the phone). Someone else's file is the same 404 as a missing one.
+- **Client:** narration line + persisted turn carry `file` (name and shape only); `conversationToEvents`
+  replays it, so the button survives a reopened chat; `SheetFileCard.tsx` renders Excel (.xlsx) + one CSV
+  per sheet. ⚠️ Bundled mode: phone users get the button with a fresh `.aab`/`.ipa`.
+- **Sibling fixed:** `routes/export.ts` (account-data CSV export) had no formula-injection guard and no BOM;
+  it now uses the same `csvCell` and sends the BOM.
+- **Tests:** `tests/aSpreadsheetIsAFileNotAnApp.test.ts` (58 cases: a 33-message precision corpus, parsing
+  and clamps, salvage, CSV guard, a real `.xlsx` read back, every turn outcome, the routes' ownership and
+  ticket binding, the chat-lane wiring and the restore path).
+- **Not done, said plainly:** charts and formulas are not written (data only); the free router's leader
+  has a short per-call timeout, so a very large sheet falls to the next rung (slower, not lost).

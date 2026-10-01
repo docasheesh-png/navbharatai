@@ -146,6 +146,14 @@ export interface GitCheckpoint {
   ts: number;
 }
 
+/** A spreadsheet file the engine made for a chat reply (spreadsheetTurn.ts). Name and shape only — no rows. */
+export interface SheetFileRef {
+  id: string;
+  title: string;
+  fileBase: string;
+  sheets: Array<{ name: string; rows: number; columns: number }>;
+}
+
 /**
  * Discriminated union of everything the engine broadcasts to the surfaces
  * (Preview, IDE/Code Studio, File explorer, Git, History). One vocabulary →
@@ -153,7 +161,11 @@ export interface GitCheckpoint {
  */
 export type AgentEvent =
   | { type: 'workspace'; workspaceId: string; ts: number }
-  | { type: 'narration'; agent: AgentRole; text: string; ts: number; id?: string }
+  /**
+   * `file` — a spreadsheet the engine made for this reply (spreadsheetTurn.ts): the chat line shows its
+   * Download buttons. Carries the file's name and shape only, never its rows.
+   */
+  | { type: 'narration'; agent: AgentRole; text: string; ts: number; id?: string; file?: SheetFileRef }
   | { type: 'thinking'; agent: AgentRole; text: string; ts: number }
   | { type: 'stream_delta'; agent: AgentRole; id: string; kind: 'text' | 'thinking'; delta: string; ts: number }
   | { type: 'tool_call'; agent: AgentRole; tool: ToolName; input: unknown; callId: string; ts: number }

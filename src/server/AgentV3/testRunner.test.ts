@@ -92,7 +92,7 @@ describe('detectTestPlan', () => {
   });
 
   it('detects maven and go', () => {
-    expect(detectTestPlan(['pom.xml', 'src/main/java/App.java'])!.framework).toBe('maven');
+    expect(detectTestPlan(['pom.xml', 'src/main/java/App.java', 'src/test/java/AppTest.java'])!.framework).toBe('maven');
     expect(detectTestPlan(['main.go', 'main_test.go'])!.framework).toBe('go');
   });
 
@@ -101,13 +101,18 @@ describe('detectTestPlan', () => {
     expect(withWrapper.framework).toBe('gradle');
     expect(withWrapper.command).toBe('./gradlew test');
 
-    const kts = detectTestPlan(['app/build.gradle.kts', 'settings.gradle.kts'])!;
+    const kts = detectTestPlan(['app/build.gradle.kts', 'settings.gradle.kts', 'app/src/test/kotlin/MainTest.kt'])!;
     expect(kts.framework).toBe('gradle');
     expect(kts.command).toBe('gradle test'); // no wrapper committed → system gradle
   });
 
   it('Maven wins over Gradle when both build files are present (Surefire path)', () => {
-    expect(detectTestPlan(['pom.xml', 'build.gradle'])!.framework).toBe('maven');
+    expect(detectTestPlan(['pom.xml', 'build.gradle', 'src/test/java/AppTest.java'])!.framework).toBe('maven');
+  });
+
+  it('a JVM build file with no test sources is not a suite (autopsy dfd24058: leftover Gradle files beside a web app)', () => {
+    expect(detectTestPlan(['app/build.gradle.kts', 'settings.gradle.kts', 'app/src/main/AndroidManifest.xml', 'src/App.tsx'])).toBeNull();
+    expect(detectTestPlan(['pom.xml', 'src/main/java/App.java'])).toBeNull();
   });
 
   it('returns null when no test suite is present (honest — never a fake pass)', () => {

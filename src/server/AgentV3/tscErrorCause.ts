@@ -336,7 +336,7 @@ export function tscErrorCauses(
     }
 
     // 🔴 A GUARD THAT NARROWS UNDER `strict` AND NOT WITHOUT IT (autopsy d8ed307a, 2026-09-30). Our
-    // scaffold compiles with `"strict": false`, and without strictNullChecks TypeScript does NOT narrow
+    // scaffold compiles with strict off (a trial share of new apps start strict — strictTrial.ts), and without strictNullChecks TypeScript does NOT narrow
     // a `{ ok: true } | { ok: false; message }` union by `if (!result.ok)` — so `result.message` is an
     // error on code that is correct everywhere else. The Bengali AI-assistant build's frontend agent
     // spent ~2.5 minutes and fifteen `node -e` experiments proving the code was right before the
@@ -351,7 +351,7 @@ export function tscErrorCauses(
         const [, prop] = union;
         const flag = guard ? `${guard[1]}.${guard[2]}` : 'result.ok';
         add('union-not-narrowed-nonstrict',
-          `This project compiles with \`"strict": false\`, and in that mode TypeScript does NOT narrow a union `
+          `When a project compiles with \`"strict"\` off (the starter's default), TypeScript does NOT narrow a union `
           + `by a boolean check like \`if (!${flag})\` — so \`${prop}\` looks missing even though the code is right. `
           + `Compare the flag to its literal instead: \`if (${flag} === false)\` (or test the member: \`'${prop}' in `
           + `${flag.split('.')[0]}\`). Do NOT change tsconfig and do not experiment further — that one edit clears it.`);

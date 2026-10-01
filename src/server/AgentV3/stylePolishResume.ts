@@ -105,7 +105,13 @@ export function decideStyleResume(input: StyleResumeInput): StyleResumeDecision 
     resume: true,
     message:
       `You ended your turn, but the app is not finished yet:\n\n${parts.join('\n\n')}\n\n`
-      + 'Do it NOW, while these files are still in front of you — do not read the screens again. Then finish.',
+      + 'Do it NOW, while these files are still in front of you — do not read the screens again. Then finish.\n\n'
+      // The user never saw this message, and already read your description of the app (autopsy d382b398:
+      // the reply to this message — "Done — I added all the missing CSS rules to src/index.css" — became the
+      // build's summary). Keep the closing words about the APP, short, with no class or file names.
+      + 'The user did not see this message and has already read your description of the app. When you finish, '
+      + 'reply with ONE short sentence about the app (for example "Every screen is now fully styled.") — do not '
+      + 'repeat the summary, and do not mention class names, stylesheets or file names.',
   };
 }
 

@@ -22,12 +22,17 @@
 import { withoutPreviewBridge } from './previewBridge';
 import { TemplateRegistry } from './sandbox/AppMakerLab/generator/templates/TemplateRegistry';
 import { GOLDEN_SCAFFOLDS, goldenScaffoldFiles } from './goldenScaffolds/registry';
+import { strictTsconfig } from './strictTrial';
 
 /** More files than this present and it is not a fragment of a starter (a template is a handful). */
 export const MAX_FRAGMENT_FILES = 24;
 
 function sameFile(path: string, present: string, template: string): boolean {
-  return withoutPreviewBridge(path, present).replace(/\r\n/g, '\n').trim() === template.replace(/\r\n/g, '\n').trim();
+  const norm = (c: string) => c.replace(/\r\n/g, '\n').trim();
+  if (norm(withoutPreviewBridge(path, present)) === norm(template)) return true;
+  // A seeded tsconfig has two forms: loose, and strict for a workspace in the strict trial (Q-008,
+  // strictTrial.ts). Either is our own starter, so compare them in their strict form.
+  return path.replace(/^\.?\/+/, '') === 'tsconfig.json' && norm(strictTsconfig(present)) === norm(strictTsconfig(template));
 }
 
 /**

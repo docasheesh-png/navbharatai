@@ -166,7 +166,8 @@ describe('liveEtaTick — the overrun line must keep MOVING (autopsy 2026-08-02:
     expect(new Set(overrun).size).toBe(overrun.length); // every line distinct — the number keeps moving
     expect(lines.join(' ')).not.toContain('wrapping up');
     // And it stays honest about WHY it is longer.
-    expect(overrun[0]).toContain('bigger than expected');
+    expect(overrun[0]).toContain('taking longer than I estimated');
+    expect(overrun[0]).not.toContain('bigger than expected'); // autopsy d382b398: the app was not bigger
   });
 
   it('on overrun it extends the budget, and the NEXT tick no longer promises a countdown', () => {
@@ -229,7 +230,7 @@ describe('liveEtaTick — a broken estimate must stop making fresh promises (mit
 
   it('stops counting down entirely once the estimate has been broken', () => {
     const lines = replay(4, 28);
-    const firstOverrun = lines.findIndex((l) => l.includes('bigger than expected'));
+    const firstOverrun = lines.findIndex((l) => l.includes('taking longer than I estimated'));
     expect(firstOverrun).toBeGreaterThanOrEqual(0);
     for (const line of lines.slice(firstOverrun + 1)) {
       expect(line).not.toMatch(/~?\d+ (?:min|s) to go/);

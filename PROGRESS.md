@@ -86588,6 +86588,41 @@ the one unguarded instance.
   recorded in `BUILD_REPORT_QUEUE.md` pending the admin's agreement that it is not a defect.
 - **Q-010** (starter fragment) gained evidence: this report's marker was an EMPTY workspace, not a fragment.
   Still blocked on a report from the session that first created the machine.
+## 2026-10-01 — Queue decisions: Q-004 and Q-011 closed by the admin, Q-008 strict-mode trial built (admin: "han")
+
+**Decisions (admin accepted every recommendation, 2026-10-01):**
+- **Q-004 ✅ closed as decided:** the lean reviewer keeps reading files with tools when an app exceeds the one-call
+  bound. On 6461025c it finished inside its budget (85/100, 33 s), so this is cost and speed, not a failure.
+  Re-open only if a report shows that review timing out on a big app.
+- **Q-011 ✅ closed as decided:** no outpainting for now. Pro answers a picture request and points to Image
+  Generator AI's Paid edit (#3435). Re-open if users ask for "extend this photo" again.
+- **Q-013 stays 🟡:** the admin will open App Mart → Publish once on iOS build 105+ and send the sentence it prints.
+
+**Q-008 — a measured strict-mode trial (`src/server/AgentV3/strictTrial.ts`).**
+- `AGENTV3_STRICT_TRIAL` (default ON; `off` reverts) and `AGENTV3_STRICT_TRIAL_PCT` (default 20; `0` pauses;
+  unreadable ⇒ 0, never 100). 20% of NEW workspaces, chosen by workspace id, are seeded with
+  `"strict": true`. Seeding paths: E2B setup and starter-fragment completion (`_templateFilesFor`), the golden
+  pre-seed, and the missing-entry self-heal in `ToolDispatcher`. **An existing app's tsconfig is never
+  rewritten**; the foundation that fills in a MISSING tsconfig for an existing app stays loose on purpose.
+- The content-based "is this our starter?" readers (`platformAuthored.ts`, `starterFragment.ts`,
+  `isOurStarterFile`) know both tsconfig forms (`seededForms`, strict-form comparison).
+- The prompt line that said "THE SCAFFOLD COMPILES WITH strict false" and the matching `tscErrorCause`
+  sentence now hold in both modes; the prompt adds the strict-mode rules and "never change strict to clear errors".
+- **Measurement:** `STRICT_TRIAL` report line on every build (process-only) with `strict-new` / `loose-new` /
+  `strict-existing` / `loose-existing`, read from the app's real tsconfig, and `byStrictCohort` in the daily cost
+  telemetry (builds, ok, cost, duration). After about two weeks, compare `strict-new` with `loose-new`.
+
+**Found while building it — our own starters had never been typechecked (the class).** A census now typechecks
+the Vite-React template and all golden scaffolds with strict off AND on (`tests/aNewAppMayStartStrict.test.ts`,
+reversion-proven four ways):
+- **Panchang:** `sd.sunrise` / `sd.sunset` used inside closures after a null check (strict only). Fixed by
+  copying them into locals after the check, and carrying `dayLen` in the result.
+- **Arcade:** `<Empty title=… text=… />` against the pro shell's `Empty({ children })` — a type error in BOTH
+  modes, shipped since the scaffold was written, and at runtime an empty paragraph where the "No runs yet"
+  message should be. Now `<Empty>No runs yet. …</Empty>`.
+
+**Still open:** the trial's verdict (Q-008, waiting on data). `byStrictCohort` is in the Firestore day doc
+but has no admin card yet; read it from the usage report data until one is added.
 ## 2026-10-01 — Autopsy 39955124 (Dwarkadhish game, stopped by the user at 5.7 min)
 
 Sixth-rule ledger (every item ✅ or 🟡):
@@ -86787,3 +86822,118 @@ them within `formSourcesFor`'s depth, so no journey was derived and the gate sta
 - Real-browser proof (`tests/aFormOnAWizardStepIsReached.test.ts`, 11 cases): a wizard that saves passes, one
   that only shows the item fails "vanished on reload", one with no matching control is unreachable, and a
   "Delete design" control is never pressed. Five reversions each failed.
+## 2026-10-01 — Autopsy d382b398 ("Create app like a electrical testing", Weak tier, ok, 7.5 min, ₹117.84)
+
+The app was built, typechecked, rendered (GREEN gate, 12 controls pressed, phone layout OK). What struggled was
+the engine and what it said about itself.
+
+### Tally (fifth rule)
+- ✅ Self-healed 4: the salvaged hook's missing React import (architect, 3 edits + 2 typechecks); 68 undefined
+  classes + 2 pages without empty states (STYLE_RULES_RESUMED, one turn); a syntax-rejected edit
+  (CommonProblemsScreen) rewritten whole; IN_BUILD_GREEN_RACED retried and saved at 428 s.
+- 🔀 Workaround 2: the fast lane handed off before KIMI (by design); the platform started the preview itself.
+- ⏭️ Skipped 0.
+- ❌ Shipped wrong words 4: two `LLM_CALL_FAILED` ERRORs for a planned handoff (and the successful build's root
+  cause line, with all 51 GLM keys listed); the user's summary was the reply to our style instruction ("Done — I
+  added all the missing CSS rules to `src/index.css`"); the user was told simulated electrical DEVICES were "people or
+  places — nearby shops or other users"; "this app is bigger than expected" at minute 6 of a 6–8 min promise.
+- 🥵 Struggle 4: GLM benched for the WHOLE build after two crawls in the same second (so every call ran on the
+  reasoning rung — LADDER_DEPTH 2, one 112 s call); the bench line said "rest of this build" and "skipped for 180s"
+  in one sentence; the reviewer read two files that do not exist; the first two write-time typechecks took 15–16 s
+  (no compiler in a starter-fragment workspace).
+
+### Root causes and fixes
+- **A crawl abandon was a timeout strike.** `SLOW_STREAM_MESSAGE` contains "timed out", so it also fed the family's
+  "2 consecutive timeouts" bench; two crawls benched every GLM rung (glm-5.3 too) for the rest of the run, defeating
+  crawlBench.ts (876afca9) on its first real outing. The timeout branch now excludes `isSlowStreamAbandon`.
+- **The "never a concurrent call" rule was decided on a lagging count.** Both crawling calls asked "may I abandon?"
+  before either abandon was recorded (it was recorded in the catch, after an await). `canAbandonSlowStream()` now
+  CLAIMS the abandon synchronously; `{ peek: true }` only asks; the stream reader asks only after judging a crawl;
+  the silent-first-answer bound claims when it fires and rides on to the ordinary bound if another call claimed.
+- **A planned handoff was recorded as a failed call.** `ReasoningRungStopError` → `LLM_CALL_HANDED_OFF` (info,
+  resolved, process-only); `compactFallbackPath` prints a key pool as `GLM ×51 keys` (also in the two
+  "all providers failed" messages).
+- **The bench prefix asserted a duration** its reasons contradict ("KEPT anyway" too). Now `${family} benched: …`.
+- **The fast lane / one-shot lanes have no tool loop to read the write-time React note**, and the salvage path
+  hands files off before verify. `ensureReactValueImport` adds the React import to every accepted file that uses
+  `React.<value>` (same transform as the TS2686 endgame fix, now shared).
+- **The style resume's reply replaced the summary.** AgentRunner keeps the reply that declared the app finished
+  (`summaryBeforeStyleResume`); the resume tells the model the user never saw it and to close in one sentence.
+- **`devices` is a simulated-data noun but the notice only knew people.** Findings carry `subject`; the notice and
+  the admin line name devices as devices (and say a web page cannot read real hardware on its own).
+- **The writers' AI rule (it names `src/lib/ai.ts`) went to every sub-agent role**, including the read-only
+  reviewer, which then read that path in an app with no AI. Now only roles that write files get it.
+  (`src/components/ui/Card.tsx` is named by nothing of ours; the path-miss recovery and a glob handled it.)
+- **ETA overrun wording** claimed the app was bigger; the measured file-phase estimate allows only 60 s for the
+  tail, and this build's tail (style resume + checks) was ~3 min. Now "taking longer than I estimated".
+
+### Ledger
+Q-d1 ✅ crawl ≠ timeout strike · Q-d2 ✅ concurrent abandon race · Q-d3 ✅ handoff ≠ LLM_CALL_FAILED · Q-d4 ✅ 51-key
+chain · Q-d5 ✅ bench prefix · Q-d6 ✅ fast-lane React import · Q-d7 ✅ summary replaced by resume reply · Q-d8 ✅
+devices ≠ people · Q-d9 ✅ AI rule to reviewer · Q-d10 ✅ ETA "bigger than expected" · Q-d11 ✅ review "85/100" shown
+with findings only — resolved by #3442's `scoreStated` (merged); the next report's review line confirms it · Q-009 🟡 provider crawl/30 s wasted ·
+Q-010 🟡 third occurrence (`started-by=files · starter=completed 11`) incl. the no-compiler warm-up ·
+Q-024 🟡 seven items argued not defects (agreement). Locked in `tests/theElectricalTestingAutopsy.test.ts`
+(21 cases); each fix reverted-and-failed in the session.
+**Live effect to watch:** no `consecutive timeouts` bench after a crawl; at most one `abandoned for crawling` per
+moment; `LLM_CALL_HANDED_OFF` instead of `LLM_CALL_FAILED` on handoffs; the user summary after
+`STYLE_RULES_RESUMED` is the app description.
+
+### 2026-10-01 — Autopsy 042e472f + dfd24058 (the JARVIS report): a Kotlin request is built as a phone-ready web app
+
+**Build 1 (042e472f, Weak, stopped by the user, ₹21.85 real cost).** "Technology: Kotlin, Jetpack Compose … must
+compile in Android Studio." No rule named a native mobile stack, so: the project planner made 16 KOTLIN modules
+(it never saw any stack note), the builder deleted the starter's `package.json`, `vite.config.ts`, `index.html`,
+tsconfigs and `src/*` ONE FILE AT A TIME (every guard protects source code and deliberately allows a single
+delete), wrote four Gradle files nothing here can run, then refused to continue past "base configuration"; the
+user saw "Nothing has been built yet". **Build 2 (dfd24058, ok, ₹79.11)** — the same idea as a web app ending
+"apk" — was planned as "clone of YouTube" (so was build 1), restored the 16 files build 1 had deleted
+(`DATA_LOSS_EVENT`), claimed a gradle test suite from build 1's leftovers (gate YELLOW), never mentioned the APK
+it was asked for, called a 16-file project "one HTML file", shipped `uuid` (+ a moderate advisory and an
+`@types` mismatch) for message ids, and printed "⚠️ Build Review (85/100): [PASS]" — a score nobody wrote.
+
+**Fixes (all in one change):**
+- `unsupportedStack.ts`: native Android (Kotlin / Jetpack Compose / Android Studio / build.gradle), native iOS
+  (Swift / SwiftUI / Xcode), Flutter and React Native are named like PHP/Rails/ASP.NET; a `Technology:` /
+  `Tech stack:` / `Platform:` list is read too. "Swift"/"Expo" count after using/with/in only where the phrase
+  ends there (`STACK_END`: "with swift search", "an expo app for events" stay null). A MOBILE stack gets its own
+  builder note (we build mobile-first web apps; the APK comes from More → Download APK; never write Gradle/Kotlin/
+  Swift/Dart files; never delete package.json / vite.config / index.html / src) and user note (said once — the
+  APK sentence stands down when the summary already has it).
+- Route: the project planner gets the stack-noted goal (`plannerGoal`), and the plan's `goal` carries it, so every
+  module turn reads it again. `MAX_GOAL_CHARS` 4,000 → 6,000 so the note cannot cut the user's closing lines.
+- `CommandGovernance.runtimeManifestDeletionTarget`: `package.json`, root `index.html` and `tsconfig.json` are
+  never deleted (rm / unlink / git rm / a `sh -c` wrapper / an interpreter one-liner); the refusal says to write
+  over them. `vite.config.*` deliberately excluded (a .js→.ts swap is a delete, and a kept .js shadows the .ts).
+- `appScopeAnalyzer`: open / launch / play / watch / search / go to / visit before a product, and "kholo /
+  chalao" after it, are the product being USED — the fifth instance of this class (0d297b25, Study-Racer,
+  4499741f, 6a4a799f), added to the same two lists.
+- `testRunner.detectTestPlan`: Gradle and Maven need a test SOURCE (`src/test|androidTest/**.java|kt|…`), the
+  JVM half of "a config proves intent, the dependency proves a suite".
+- `devicePowers.deviceSummaryNotice`: an APK the user asked for (`phoneBuildAsked`: `apk`/`aab`/Play Store, or a
+  phone-app noun with install/download/banao) gets one "More → Download APK" line when nothing else said it.
+- `ReviewerAgent` (the invented 85/100): ALREADY FIXED on `main` by #3442 (autopsy 4d538ca3, `scoreStated`) while
+  this autopsy ran — the same class reached from two reports at once. This change took #3442's version on merge
+  and dropped its own (`scored`), so there is one fix, not two. (No sibling default score elsewhere — grepped.)
+- `claimAudit` `one-file`: "everything lives in one HTML file" about a project of >1 source files is corrected
+  (fact `appSourceFiles`, new builds only).
+- `unfixablePackages.BUILT_IN_ALTERNATIVES`: `npm install uuid` / `@types/uuid` is answered with
+  `crypto.randomUUID()`; the system prompt's rule (3) now says every id uses it.
+- AppKnowledgeBase: the phone-features entry answers "Kotlin / Flutter / Swift / Android Studio" asks.
+
+### Ledger — BUILD REPORT 042e472f + dfd24058
+J-a ✅ native stack unnamed → builder/user notes (`unsupportedStack.ts`) · J-b ✅ planner never saw the note →
+`plannerGoal` · J-c ✅ manifests deleted one by one → `runtimeManifestDeletionTarget` · J-d ✅ governance message
+read as "delete one at a time" → covered by J-c · J-e ✅ "open YouTube" = clone (both builds) · J-f ✅ gradle
+"suite" from leftovers · J-g ✅ APK ask unanswered · J-h ✅ invented 85/100 · J-i ✅ "one HTML file" claim ·
+J-j ✅ uuid for ids (install note + prompt) · J-k ✅ `DATA_LOSS_EVENT` in build 2 = build 1's deletions restored
+(self-heal; its cause is J-c) · J-l ✅ `SUMMARY_OFF_TOPIC` / "Nothing has been built" / module refusal on build 1 =
+derivatives of J-a/J-b (a Kotlin plan had no module owning `src/App.tsx`) · J-m ✅ stopped build billed at real
+cost only — the admin's own rule executed (`CANCELLED_BUILD_CHARGED`, `MARKUP_WAIVED_NO_PREVIEW`) · Q-009 🟡 GLM
+crawl ×2 (external; bench worked — noted on the row) · Q-022 🟡 off-grid spacing advisory (decision) · Q-023 🟡
+16-module decomposition size (decision). All ✅ code items locked in
+`tests/aKotlinRequestIsBuiltAsAPhoneReadyWebApp.test.ts` (19 cases, the real prompt as a fixture); nine
+reversions, one per fixed file, each failed the suite.
+**Live effect to watch:** an `UNSUPPORTED_STACK` line naming "native Android (Kotlin)" and a module plan made of
+web modules; no `rm -f package.json` reaching the sandbox (`[BLOCKED-DESTRUCTIVE] refused runtime-manifest
+delete` in the audit instead); no `APP_SCOPE … clone of YouTube` on assistant prompts.

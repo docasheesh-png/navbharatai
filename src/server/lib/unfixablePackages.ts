@@ -13,6 +13,20 @@ export const UNFIXABLE_NPM_PACKAGES: Readonly<Record<string, string>> = {
   xlsx: 'no fixed release on npm (SheetJS publishes fixed builds only from cdn.sheetjs.com) — use `exceljs` for Excel files instead',
 };
 
+/**
+ * Packages a built app does not need because the platform already has the thing built in — named at
+ * install time so the builder removes them instead of shipping a dependency (and its advisories).
+ *
+ * 🔴 Autopsy dfd24058 (2026-10-01): a JARVIS web app ran `npm install uuid && npm install --save-dev
+ * @types/uuid` to make chat-message ids. It shipped with a moderate advisory (uuid@9.0.1,
+ * GHSA-w5hq-g745-h8pq) and a type mismatch (`@types/uuid` v10 over `uuid` v9) — both for a function every
+ * browser and Node 19+ has built in. A closed, reviewed list, like the one above. PURE.
+ */
+export const BUILT_IN_ALTERNATIVES: Readonly<Record<string, string>> = {
+  uuid: '`crypto.randomUUID()` is built into every modern browser and Node 19+ — no package needed; uninstall it (`npm uninstall uuid @types/uuid`) and call `crypto.randomUUID()`',
+  '@types/uuid': '`uuid` ships its own types since v10, and `crypto.randomUUID()` needs none — uninstall it',
+};
+
 /** Advice for one package, or null. PURE. */
 export function unfixablePackageAdvice(name: string): string | null {
   return UNFIXABLE_NPM_PACKAGES[String(name ?? '').trim().toLowerCase()] ?? null;
@@ -35,7 +49,10 @@ export function packagesInstalledBy(command: string): string[] {
 
 /** The note the bash tool appends when a command installs one of these. '' when none. PURE. */
 export function unfixableInstallNote(command: string): string {
-  const hits = packagesInstalledBy(command).filter((p) => unfixablePackageAdvice(p));
-  if (hits.length === 0) return '';
-  return hits.map((p) => `⚠️ \`${p}\`: ${unfixablePackageAdvice(p)}.`).join('\n');
+  const installed = packagesInstalledBy(command);
+  const lines = [
+    ...installed.filter((p) => unfixablePackageAdvice(p)).map((p) => `⚠️ \`${p}\`: ${unfixablePackageAdvice(p)}.`),
+    ...installed.filter((p) => BUILT_IN_ALTERNATIVES[p.toLowerCase()]).map((p) => `💡 \`${p}\`: ${BUILT_IN_ALTERNATIVES[p.toLowerCase()]}.`),
+  ];
+  return lines.join('\n');
 }

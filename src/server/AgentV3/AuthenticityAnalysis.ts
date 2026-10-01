@@ -14,6 +14,12 @@ export interface AuthenticityIssue {
   kind: string;
   severity: AuthenticitySeverity;
   snippet: string;
+  /**
+   * For `simulated-data` only: WHAT is made up. Other people or places (vendors, users, followers …) and
+   * hardware the browser cannot reach (devices) need different real paths, so the user is told which
+   * (autopsy d382b398: an electrical-testing app's simulated devices were reported as "people or places").
+   */
+  subject?: 'people' | 'devices';
 }
 
 interface Rule {
@@ -285,8 +291,10 @@ export function scanAuthenticity(file: string, content: string): AuthenticityIss
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.length > 4000) continue;
-    if (SIMULATED_DATA_RE.test(splitHumps(line))) {
-      issues.push({ file, line: i + 1, kind: 'simulated-data', severity: 'medium', snippet: trimSnippet(line) });
+    const data = SIMULATED_DATA_RE.exec(splitHumps(line));
+    if (data) {
+      const subject = /^devices$/i.test(data[2] ?? '') ? 'devices' : 'people';
+      issues.push({ file, line: i + 1, kind: 'simulated-data', severity: 'medium', snippet: trimSnippet(line), subject });
     } else if (SIMULATED_RESULT_RE.test(splitHumps(line))) {
       issues.push({ file, line: i + 1, kind: 'simulated-result', severity: 'medium', snippet: trimSnippet(line) });
     }
@@ -422,14 +430,37 @@ export function simulatedResultNotice(issues: AuthenticityIssue[]): string {
 export function simulatedDataNotice(issues: AuthenticityIssue[]): string {
   if (!issues || issues.length === 0) return '';
   const files = [...new Set(issues.map((i) => i.file))].slice(0, 3);
-  return [
-    '',
-    '',
-    `⚠️ Heads-up: part of this app shows demo data, not real data (${files.join(', ')}). It makes up people or places — `
-      + 'for example nearby shops or other users — instead of reading them from real users.',
-    'Showing other people\'s data, such as their shops, followers or locations, needs a shared online database. '
-      + 'Reply if you want this made real, and I will set one up for it.',
-  ].join('\n');
+  const devices = issues.some((i) => i.subject === 'devices');
+  const people = issues.some((i) => i.subject !== 'devices');
+  const lines = ['', ''];
+  if (people) {
+    lines.push(
+      `⚠️ Heads-up: part of this app shows demo data, not real data (${files.join(', ')}). It makes up people or places — `
+        + 'for example nearby shops or other users — instead of reading them from real users.',
+      'Showing other people\'s data, such as their shops, followers or locations, needs a shared online database. '
+        + 'Reply if you want this made real, and I will set one up for it.',
+    );
+  }
+  if (devices) {
+    // 🔴 A SIMULATED DEVICE IS NOT A PERSON OR A PLACE (autopsy d382b398). An electrical-testing app simulated its
+    // meters because a web page cannot read real hardware on its own; telling the user it "makes up people or
+    // places — nearby shops or other users" described an app they did not have and offered the wrong fix.
+    lines.push(
+      `⚠️ Heads-up: ${people ? 'part of this app also' : 'part of this app'} shows simulated devices and readings, not real ones (${files.join(', ')}). `
+        + 'A web page cannot read real hardware on its own.',
+      'Reading a real device needs a supported connection — Bluetooth or USB in a browser that allows it, or the phone app. '
+        + 'Reply if you want this, and I will connect one.',
+    );
+  }
+  return lines.join('\n');
+}
+
+/** The admin line for these findings — names what was made up, not always "people or places". PURE. */
+export function simulatedDataSubjectLabel(issues: AuthenticityIssue[]): string {
+  const devices = issues.some((i) => i.subject === 'devices');
+  const people = issues.some((i) => i.subject !== 'devices');
+  if (devices && people) return 'other people, places and devices';
+  return devices ? 'devices and their readings' : 'other people or places';
 }
 
 /**

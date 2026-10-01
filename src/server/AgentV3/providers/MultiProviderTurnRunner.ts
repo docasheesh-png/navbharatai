@@ -19,7 +19,7 @@ import { modelAlwaysReasons } from './glmThinking';
 import { pacerEnabled, getSharedPacer } from '../RateLimitPacer';
 import { parseEnvFlag } from '../../lib/envFlag';
 import { isModelUnavailableError } from '../providerErrorClass';
-import { isBudgetEndedError, isSlowStreamAbandon } from '../turnDeadline';
+import { isBudgetEndedError, isSlowStreamAbandon, REASONING_RUNG_HANDOFF_MARKER } from '../turnDeadline';
 import { isStarvedBudgetError, turnStarvedItsBudget } from '../floorBudget';
 import { abandonedTurnUsage } from '../unbilledTurns';
 import { reasoningAwareAsk } from '../reasoningAsk';
@@ -599,9 +599,27 @@ export function createBuildBenchRegistry(): BuildBenchRegistry {
  * The fast lane's walk reached a rung that always reasons (see `RunTurnParams.stopAtReasoningRung`).
  * Not a provider failure: the lane reads it as "hand what you have to the full builder".
  */
+/**
+ * The rungs a call passed, with a key pool collapsed: `GLM → GLM#2 → … → GLM#51` reads as fifty-one
+ * failed providers and once filled a report's root-cause line (autopsy d382b398). Consecutive keys of
+ * one family (`GLM`, `GLM#2` …) become `GLM ×51 keys`; anything else is listed as it was. PURE.
+ */
+export function compactFallbackPath(names: readonly string[]): string {
+  const out: { base: string; count: number }[] = [];
+  for (const raw of names) {
+    const name = String(raw ?? '').trim();
+    if (!name) continue;
+    const base = name.replace(/#\d+$/, '');
+    const last = out[out.length - 1];
+    if (last && last.base === base) last.count += 1;
+    else out.push({ base, count: 1 });
+  }
+  return out.map((g) => (g.count > 1 ? `${g.base} ×${g.count} keys` : g.base)).join(' → ');
+}
+
 export class ReasoningRungStopError extends Error {
   constructor(readonly model: string, readonly fellBackFrom: string[]) {
-    super(`The next engine (${model}) reasons before every answer; the fast lane stops here and hands off (after ${fellBackFrom.join(' → ') || 'the opener'}).`);
+    super(`The next engine (${model}) reasons before every answer; ${REASONING_RUNG_HANDOFF_MARKER} (after ${compactFallbackPath(fellBackFrom) || 'the opener'}).`);
     this.name = 'ReasoningRungStopError';
   }
 }
@@ -799,6 +817,8 @@ export function makeMultiProviderTurnRunner(
         // Measured rather than read from config, so it is right for whatever timeout each provider runs
         // under and stays right when those are retuned.
         const attemptStartedAt = now();
+        /** Did THIS attempt claim a crawl abandon? (see `canAbandonSlowStream`) */
+        let claimedAbandon = false;
         try {
           /**
            * 🔴 MAY WE WALK AWAY FROM THIS RUNG IF IT CRAWLS? (autopsy 2b0a3ed5, 2026-09-17.)
@@ -812,13 +832,28 @@ export function makeMultiProviderTurnRunner(
            *    whole ladder and failing. That caps the total cost of this guard at ONE abandoned
            *    call, however bad the weather is at every vendor.
            */
-          const canAbandonSlowStream = () => mayAbandonCrawl({
-            hasNextRung: i + 1 < chain.length,
-            abandonsSoFar: [...bench.crawlAbandons.values()].reduce((a, b) => a + b, 0),
-            abandonsOfThisRung: bench.crawlAbandons.get(benchKey) ?? 0,
-            isReprobe: bench.crawlReprobed.has(benchKey),
-            windowMs: crawlWindowMs,
-          });
+          //
+          // 🔴 THE ABANDON IS CLAIMED WHEN IT IS DECIDED, NOT WHEN ITS ERROR ARRIVES (autopsy d382b398,
+          // 2026-10-01). Two fast-lane file calls crawled on GLM at the same moment; both asked "may I walk
+          // away?" before either abandon had been counted, so both got yes — the "never a concurrent call"
+          // rule was decided on a count that lagged the event. A plain call (no argument) is the decision and
+          // records the abandon at once; `{ peek: true }` only asks.
+          const canAbandonSlowStream = (o?: { peek?: boolean }): boolean => {
+            if (claimedAbandon) return true;
+            const ok = mayAbandonCrawl({
+              hasNextRung: i + 1 < chain.length,
+              abandonsSoFar: [...bench.crawlAbandons.values()].reduce((a, b) => a + b, 0),
+              abandonsOfThisRung: bench.crawlAbandons.get(benchKey) ?? 0,
+              isReprobe: bench.crawlReprobed.has(benchKey),
+              windowMs: crawlWindowMs,
+            });
+            if (ok && !o?.peek) {
+              claimedAbandon = true;
+              bench.crawlAbandons.set(benchKey, (bench.crawlAbandons.get(benchKey) ?? 0) + 1);
+              bench.crawlReprobed.delete(benchKey);
+            }
+            return ok;
+          };
           // A rung measured to reason before every answer is never asked for less than it needs to
           // BEGIN one — see reasoningAsk.ts. The retirement above stops a starved model being re-proved
           // on fifty keys; this stops it starving in the first place, when the ask came from a call site
@@ -971,7 +1006,11 @@ export function makeMultiProviderTurnRunner(
             bench.abandonedSlowRung = true;
             try {
               const slowKey = slowKeyFor(chain[i]);
-              const abandons = (bench.crawlAbandons.get(slowKey) ?? 0) + 1;
+              // Already counted when the abandon was claimed (see `canAbandonSlowStream`); a runner that
+              // abandoned without asking is counted here, exactly as before.
+              const abandons = claimedAbandon
+                ? (bench.crawlAbandons.get(slowKey) ?? 1)
+                : (bench.crawlAbandons.get(slowKey) ?? 0) + 1;
               bench.crawlAbandons.set(slowKey, abandons);
               bench.crawlReprobed.delete(slowKey);
               if (!slowBenched.has(slowKey) && canBenchAnother(slowBenched.size, distinctSlowRungs)) {
@@ -1030,7 +1069,12 @@ export function makeMultiProviderTurnRunner(
             // the ladder and the Claude/Haiku backstop are untouched, and a run in which every rung dies
             // still ends at the honest "all providers unavailable" throw below rather than silently.
             deadForRun.set(deadKeyFor(chain[i], err), err instanceof Error ? err.message : String(err));
-          } else if (isTimeoutProviderError(err)) {
+          } else if (isTimeoutProviderError(err) && !isSlowStreamAbandon(err)) {
+            // 🔴 A CRAWL ABANDON IS NOT A TIMEOUT STRIKE (autopsy d382b398, 2026-10-01). Its message says
+            // "timed out — abandoned for crawling", so it used to land here too: two crawls became "2
+            // consecutive timeouts", and every GLM rung — glm-5.3 included, which never crawled — was benched
+            // for the rest of the build, while the crawl bench above had just said "skipped for 180s, then
+            // tried once more". The crawl bench (crawlBench.ts) owns a crawl: weather, one rung, a window.
             const familyStreak = (timeoutStreak.get(reportName) ?? 0) + 1;
             timeoutStreak.set(reportName, familyStreak); // bench the FAMILY after 2 in a row, across any of its keys
             if (familyStreak >= TIMEOUT_BENCH_AFTER && !benchedFamilies.has(reportName)) {
@@ -1062,7 +1106,7 @@ export function makeMultiProviderTurnRunner(
             // The PROMPT exceeds every window in the fleet — no later provider can save this turn.
             // Abort now instead of replaying the same doomed multi-megabyte request down the chain.
             const reason0 = err instanceof Error ? err.message : String(err);
-            throw new Error(`This request is too large for every AI provider (${fellBackFrom.join(' → ')} tried). Last error: ${reason0} [The conversation/sub-agent transcript has grown past the largest context window — a shorter request or a fresh turn is required.]`);
+            throw new Error(`This request is too large for every AI provider (${compactFallbackPath(fellBackFrom)} tried). Last error: ${reason0} [The conversation/sub-agent transcript has grown past the largest context window — a shorter request or a fresh turn is required.]`);
           }
           // Fall through to the next provider; the last one is the backstop.
         }
@@ -1070,7 +1114,7 @@ export function makeMultiProviderTurnRunner(
       // Every provider failed (or was known-dead) — surface the final error honestly, and when the
       // cause is a FATAL account problem, say so in plain words (it is the platform, not the app).
       const reason = lastError instanceof Error ? lastError.message : String(lastError);
-      const prefix = alive === 0 ? 'All NavBharatAI Pro providers are unavailable (known-fatal from earlier in this build)' : `All NavBharatAI Pro providers failed (${fellBackFrom.join(' → ')})`;
+      const prefix = alive === 0 ? 'All NavBharatAI Pro providers are unavailable (known-fatal from earlier in this build)' : `All NavBharatAI Pro providers failed (${compactFallbackPath(fellBackFrom)})`;
       throw new Error(`${prefix}. Last error: ${reason}${fatalProviderHint(reason)}`);
     },
   };

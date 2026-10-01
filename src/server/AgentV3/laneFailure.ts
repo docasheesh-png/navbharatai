@@ -60,6 +60,10 @@ const DEGRADED_MARKERS = [
   'socket hang up',
   'all providers failed',
   'no provider',
+  // The fast lane's walk stopped before a rung that reasons before every answer (ReasoningRungStopError,
+  // autopsy e49afa97): the cheap engine did not answer, and every other lane on this chain stops at the
+  // same rung — so a second lane is not worth trying, and the failure is never the app's.
+  'reasons before every answer',
 ];
 
 /** Answers that came back and were unusable — the model's fault, not the network's. */

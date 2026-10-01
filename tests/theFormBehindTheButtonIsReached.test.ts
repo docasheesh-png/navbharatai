@@ -30,7 +30,9 @@ describe('the generated runner', () => {
     expect(open).toBeGreaterThan(-1);
     expect(fill).toBeGreaterThan(open);
     expect(script).toContain('if (!(await submitVisible())) {');
-    expect(script).toContain('if (!OPENER.test(name) || NEVER.test(name)) continue;');
+    // Since autopsy e49afa97 every name the control goes by (text, aria-label, title) is asked.
+    expect(script).toContain('const name = names.find((x) => OPENER.test(x) || /^[+＋]$/.test(x));');
+    expect(script).toContain('if (!name || names.some((x) => NEVER.test(x))) continue;');
   });
 });
 

@@ -72,8 +72,17 @@ export function repeatedReadNotice(
   count: number,
   unchanged: boolean,
   stalledReads = 0,
+  handedInTask = false,
 ): string {
   if (!unchanged || count < 2) return '';
+  // The first copy came in the agent's own task, not from a read (autopsy e49afa97). Same advice, true words.
+  if (handedInTask && stalledReads < READ_LOOP_LIMIT) {
+    return (
+      `[NOTE — ${path} was given to you in full in your task, and it has NOT changed since. The full `
+      + 'content follows again, but you already have it — work from the copy in your task, and read the '
+      + 'file only after you change it.]\n'
+    );
+  }
   const times = count === 2 ? 'the second time' : `the ${count}${ordinalSuffix(count)} time`;
   if (stalledReads >= READ_LOOP_LIMIT) {
     return (

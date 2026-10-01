@@ -118,7 +118,8 @@ export function decideSupersede(input: {
     && !declaredSet.has(p);
   // A recipe naming a port that can never be the app (the sandbox's own agent, a database) describes no
   // app at all — not "a previous app". It is ignored here, and the store refuses it on read.
-  const recipePort = isNeverAppPort(input.recipe?.port) ? undefined : input.recipe?.port;
+  const rawRecipePort = input.recipe?.port;
+  const recipePort = isNeverAppPort(rawRecipePort) ? undefined : rawRecipePort;
   if (usable(recipePort)) stale.add(recipePort);
   if (usable(input.declaredPort)) stale.add(input.declaredPort as number);
   /**
@@ -138,9 +139,10 @@ export function decideSupersede(input: {
    * declares is not stale, whatever we happen to be verified on right now.
    */
   const recipeMatchesApp = declared && typeof recipePort === 'number' && declaredSet.has(recipePort);
-  const retireRecipe = typeof recipePort === 'number' && recipePort !== input.newPort && !recipeMatchesApp;
+  // A recipe naming a never-app port is still RETIRED (it is useless), but silently: it never described an app.
+  const retireRecipe = typeof rawRecipePort === 'number' && rawRecipePort !== input.newPort && !recipeMatchesApp;
   const staleports = [...stale];
-  const note = staleports.length === 0 && !retireRecipe
+  const note = staleports.length === 0 && (!retireRecipe || recipePort === undefined)
     ? ''
     : `A previous app in this workspace was still ${staleports.length ? `serving on port ${staleports.join(', ')}` : 'described by the stored preview recipe'} — `
       + `superseded now that the current app is verified on port ${input.newPort}`

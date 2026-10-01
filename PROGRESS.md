@@ -86039,6 +86039,75 @@ Tests: `tests/theSalesSampleHadTwoHelperHomes.test.ts`, reversion-proven for all
   at the first `tsc`. These files are editable on purpose, because apps add dependencies. Whether the plan may
   REWRITE them wholesale is not decided here.
 
+---
+
+## 2026-10-01 — An image app makes real pictures (`generate_image_ai`)
+
+Admin: *"jab user apni api key dalna chahe kisi aur provider ki to bhi dal sakta ho, jab chahe change kare,
+agar user keys na de, to default pollination ai"*, with a brief asking that "build me an AI image generator"
+produce a working app, not a mock-up.
+
+**Found first:** the builder had no capability for it. `generate_image` is image PROCESSING (sharp resize);
+`generate_ai` is TEXT. An image-generator request was hand-written by the model, or filled with stock photos.
+
+**Built (one new recipe, reached through `run_recipe`, plus the rule that points to it):**
+- `src/server/lib/ImageAiGenerator.ts`: pure generator. Browser mode (default) writes `src/lib/imageAi.ts`,
+  which calls Pollinations from the page with no key. Server mode also writes `server/lib/imageAi.ts` and
+  `.env.example`; the server picks the engine from `IMAGE_PROVIDER` / `IMAGE_API_KEY` / `IMAGE_MODEL` /
+  `IMAGE_BASE_URL`. With no key it uses Pollinations. A React app also gets `useImageGenerator()`.
+- `src/server/AgentV3/inAppImageGeneration.ts`: `IMAGE_IN_APP_RULE` (architect + writing sub-agents),
+  `appGeneratesImages`, and `fastLaneSkipsImageApp` (`AGENTV3_FASTLANE_IMAGE_APPS=on` reverts).
+- Catalog, dispatcher, the recipe line in the architect prompt, report code `FAST_LANE_SKIPPED_IMAGE_APP`,
+  and an `AppKnowledgeBase` entry (`agentv3_app_image_ai`).
+
+**Locked by** `tests/anImageAppMakesRealPictures.test.ts` (46 tests):
+- every generated file compiles under strict Vite settings with the real TypeScript compiler;
+- the generated browser and server code RUNS against a fake network: retry, timeout, rate limit, refusal,
+  non-image answer, blocked read, cancel, each provider's request shape, and per-visitor limit;
+- the request is recognised and the builder can reach the recipe.
+
+Reversion-proven: (1) sending a key with an unknown provider to Pollinations fails the test;
+(2) dropping `safe=true` fails two tests.
+
+**Still open:**
+- Not run against the live provider from a session (egress policy). The first real build is the first live
+  evidence; watch `FAST_LANE_SKIPPED_IMAGE_APP` and whether the built app calls `generateImage`.
+- A published static app has no server, so the own-key path needs server hosting (NavBharat Cloud, admin-only
+  today). The keyless default works on static hosting.
+- Pollinations' anonymous door: our own generator recorded a possible 401 on 2026-09-30 (unproven; the admin
+  says it works). If it closes, the generated app shows "The free image service is not accepting requests
+  right now", and the owner's own key on the server path is the way out.
+
+## 2026-10-01 — Autopsy 120eb52f / b4901ce5 / 0edea014 ("Calendar wala app bnao", Weak, three builds, all stopped by the user) + the admin's "puch lo user se"
+
+Admin decision on the open item from 1389f0d5 (*"puch lo user se!"*): an order for a whole new thing that shares
+nothing with the app already in the workspace is now ANSWERED with a question — add it to this app, or make a
+new app — instead of being built into the app (`unrelatedRequest.ts`, kill switch `AGENTV3_ASK_UNRELATED=off`).
+
+| Problem | Root cause | Class | Siblings found and fixed | Locked by |
+|---|---|---|---|---|
+| Five write-time typechecks and the `typecheck` tool said **clean** while the app held 15 errors | `Cannot find module '../lib/tsc.js'` has no `error TS` line; `tscVerdict` read it as passed | A compiler that crashed is read as a verdict | The `typecheck` tool decided "clean" from zero PARSED errors without asking `tscVerdict` (also a project-level `TS5023` read clean); the endgame called a crash "already clean"; the fast-lane gate sent `TS2318 Cannot find global type 'Array'` (the compiler's own library) to a repair as app errors | `looksLikeBrokenTscInstall` inside `tscNeverRan`/`tscVerdict`; tool, endgame and gate ask it |
+| `typescript` came out with `bin/` and no `lib/` | The typecheck's own `npm install` ran while the background boot install filled the same `node_modules` | Two installs into one tree | Every install path goes through `_npmInstall`, so one lock covers all | `NPM_INSTALL_LOCK` written by `_npmInstall`; `TSC_ENSURE` waits ≤ 20 s for it, then says "still installing" instead of racing; a torn compiler is removed and reinstalled (the ensure step is run for real against a fake npm in the test) |
+| `types.ts` declared `type EventStatus = (typeof EventStatus)[…]` with no `EventStatus` value | `contractModule` keeps enum/interface/type; a `const … as const` had no `: Type` for the constants' owner, so it fell through both | An enum written as data is dropped from the contract | — | `LITERAL_CONST` kept in the contract file (a literal that calls nothing); compiled with real `tsc` in the test |
+| Four components imported `./X.css` files nobody wrote; the model put the rules in `src/index.css` and left the imports | Our own class note said "Add the rules to src/index.css"; `tsc` cannot see stylesheet imports | A dangling stylesheet import, invisible to every check before Vite | — | The note now names the imported missing file as the place for the rules (`missingImportedSheetNote`); end of build removes a side-effect import of a sheet the sandbox confirms absent (`DANGLING_STYLESHEET_IMPORT_REMOVED`, kill switch `AGENTV3_DANGLING_CSS_GUARD=off`) |
+| A stopped edit that changed six files told the user *"before anything was produced … exactly as it was"* | One sentence for every free cancellation | A message chosen without asking what the user holds | — | `freeCancellationMessage(delivery)` |
+| A 9-second build with no model call reported `model: claude-haiku` | The no-call fallback was `selectBuildModel`'s legacy answer (Weak's Claude backstop) | Planned ≠ ran | The signed manifest had the same fallback | Report falls back to the ladder's first rung; manifest says `none (no model call was made)` |
+
+Already fixed on `main` after these builds ran (verified, not assumed): `UPSELL_SUPPRESSED` as an unresolved
+warning (#3420); the second helper home `src/utils.ts` beside a planned `src/utils/dateUtils.ts` (#3419 — the
+plan now picks `dateUtils.ts`); the 60 s silent fast-lane call and 30 s plan timeout (#3422's crawl bound reaches
+the fast lane, which runs through `buildTurnRunner`).
+
+Tests: `theCompilerThatCrashedWasCalledClean`, `theCalendarAutopsy`, `askBeforeBuildingSomethingElseIntoThisApp`
+— each reversion-proven.
+
+**Still open:**
+- **Why the user stopped two builds** is not in the reports. The first was at 5.0 min against an estimate of
+  6–8 min, with no preview yet. A visible preview earlier (the fast lane salvaged 5 files and then handed off)
+  would answer it better than anything here.
+- The question costs one turn; if the reply is "add it to this app", the builder reads the earlier request from
+  project context (every request is listed there). If a report shows the builder losing that request, a
+  deterministic hand-over (the pending request substituted into the turn) is the next step.
 ## 2026-10-01 — Autopsy 6461025c ("Ads + Rewards + Coin Economy" spec, Weak, 19.7 min, ₹477.80): the spec lost to a keyword list
 
 The request was a 15,689-character written spec with 40 enumerated parts. The app rendered, typechecked,
@@ -86186,6 +86255,18 @@ tail and the runner census.
 - Each repair pass's instruction is still persisted into the main conversation as a `user` turn. Whether a
   reopened session shows it as something the user typed was not checked here.
 
+**Same day, follow-up (admin: "hidden templates me sabse pahle 'AI image generator' … gst, todo uske baad"):**
+- New starter chip `ai-image` (simple tier, so free users can tap it). Its golden scaffold
+  (`goldenScaffolds/aiImage.ts`) holds only the screen; the engine files are the recipe's own output
+  (`aiImageEngineFiles()`), so the template and the builder cannot drift.
+- `pinOrder` on a template puts it ahead of the category order: AI image 1, GST bill 2, to-do 3, on both
+  tiers. Twelve chips stay on the first screen, so QR code (free) and Janam Kundali (paid, now un-featured to
+  keep ≤ 12 featured) moved behind "More templates".
+- The scaffold white-label test has one named exception: the template's `src/lib/imageAi.ts` may name
+  Pollinations (the admin's chosen engine); every other vendor stays forbidden there, and `App.tsx` names
+  nobody. Locked in `tests/anImageAppMakesRealPictures.test.ts` §7, including a real strict-TS compile of the
+  template's App.tsx, proven by reversion.
+
 ### 2026-10-01 — Autopsy 1be16985, second pass (admin: "sare chote bade problem … DNA level par fix huye ya nahi?")
 
 The honest answer to that question was **no**. A re-read of the report found four items the first pass missed. Three are fixed:
@@ -86291,3 +86372,59 @@ provider; `PROVIDER_TIME_WASTED calls=0` — no call was wasted.
   from this report (no earlier build is in it). The completion above makes the outcome right whatever the cause.
 - Whether the user wanted a full-body version of the photo (an outpaint) cannot be served by Pro at all; Image
   Generator AI's Paid edit is the place, and the answer now says so.
+## 2026-10-01 — A pasted one-file HTML app stays one file (admin: "banao")
+
+**Decision.** After autopsy a106df77 the admin was asked two open questions. On the second, whether a pasted
+single-file HTML app should stay one file, the recommendation was to keep the format, with React as an explicit
+choice. The admin approved it ("apka prastav accha hai, banao").
+
+- **Why:** the user's v40 bill maker is a file they edit by hand, open offline and share as one file. A React
+  rebuild took that away. It also read none of their saved bills, because the storage keys changed.
+- **What ships (`src/server/AgentV3/pastedAppFormat.ts`, `AGENTV3_PASTED_KEEPS_FORMAT`, default ON):**
+  - A NEW build whose prompt is a whole pasted HTML page runs on `static`, and the client is told.
+  - The user's page is written over the untouched static starter as `index.html`, and `script.js` and
+    `style.css` are removed.
+  - Both lanes get the one-file rule: improve in place, keep its look, no kit link, keep the storage names.
+  - Fast lane, milestones and module plan stand down.
+  - The seeded page counts as not-our-work for the bill.
+  - Report code `PASTED_APP_KEPT_ONE_FILE` (process-only) powers a one-tap "Upgrade to a full app project".
+- **When React is still used:** the words around the paste (never the paste) name a framework or ask for
+  login, a database, a backend, several users or a full app. React is also used when the picker was used, or
+  when the turn is an edit of an existing app; an edit re-read after the decision gives the framework back.
+- **Locked:** `tests/aPastedOneFileAppStaysOneFile.test.ts`, which uses the report's prompt verbatim. Four
+  reversions each fail it: the words gate, storage-name reading, the route's framework switch and the offer.
+- **Still open:**
+  - The first real pasted-page build on this path has not run. Watch the report for a model that rewrites
+    the file instead of editing it.
+  - Question 1, auto-removing packages a build installed but never imported, was approved in principle. It is
+    the next PR and is not in this one.
+## 2026-10-01 — Early preview: the user sees the app while it is being built (admin: "preview jitna jaldi ayega, user utna rukega.... banao")
+
+**Evidence (calendar report 120eb52f / b4901ce5):** nine minutes over two builds and the user never saw the app.
+Build 1: the fast lane salvaged 5 foundation files at 141 s; the full builder then wrote CalendarPage, Header, DayCell,
+AddEventModal and a hook — and never `src/App.tsx`, so the live preview showed the starter page until the user stopped
+at 295 s. Build 2 rewrote App.tsx at ~180 s; the user stopped at 214 s, one second after "the app looks complete".
+
+**Root cause — an order, not a speed.** The preview has re-rendered on every write since streaming first paint, but a
+React app shows nothing of a screen until its ENTRY renders it, and the entry was written last on both lanes.
+
+**Fixed (`AGENTV3_EARLY_PREVIEW`, default ON, `off` reverts all of it):**
+- The architect and the UI specialists (frontend/fullstack/mobile) are told to write the entry right after
+  `src/types.ts`, with the screens it is about to write imported (`earlyPreview.ts` `shellEarlyRule`). The write-time
+  typecheck already routes "cannot find module" to the file that fixes it, so this costs no repair turn.
+- A fast lane that stopped before its entry hands it over by name (`entryFirstHandoffLine`, both hand-offs).
+- In-browser preview while a build runs (`ReactPreview.ts`, `building`): an unwritten screen (capitalised name) is a
+  "⏳ X is being built…" card; a missing lowercase helper keeps the empty stub; neither is reported as an error. After
+  the build the honest "Missing file" banner is back. The client sends `building` and re-renders once when the build ends.
+- The live strip shows "▶ Your app is on screen — watch it live" once THIS build writes the entry
+  (`earlyPreviewCue.ts`, `entryWrittenAt` in the reducer); on a desktop the preview opens by itself at that moment
+  instead of waiting for a dev-server URL.
+
+Tests: `tests/theAppIsOnScreenWhileItIsBuilt.test.ts` (16), including a real-browser render (vendored React,
+skipped in CI) — reversion-proven by disabling the card.
+
+**Not changed, said plainly:** the fast lane's own tier order. Its entry is still generated last, because that is
+what lets it use its children's real props in one pass; on a healthy fast lane the whole app lands at once seconds
+after the entry. A further ~20–40 s there (painting before the stylesheet stage) is possible but entangled with the
+lane's CSS guards — recorded here, not attempted.
+**Open:** whether models actually follow the shell-first rule — watch when `src/App.tsx` is first written in admin reports.

@@ -132,6 +132,15 @@ const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: string; 
     detail: 'Refreshing an inner page can show nothing.',
     prompt: 'Refreshing an inner page shows a blank page or a 404. Fix the routing fallback so any page can be opened or refreshed directly.',
   },
+  {
+    // The user pasted their own one-file HTML app and it was kept as one file (pastedAppFormat.ts, admin
+    // 2026-10-01). Not a defect — the one-tap way to a full project, for when they do want one. Last in
+    // the table: anything actually wrong with the app comes first.
+    code: 'PASTED_APP_KEPT_ONE_FILE',
+    title: 'Upgrade to a full app project',
+    detail: 'Your app was kept as one HTML file, the way you pasted it. A full project is easier to grow.',
+    prompt: 'Turn my one-file HTML app into a full app project (React with Vite) that I can keep growing. Keep every screen, tab, button, field and colour it has now, keep everything it does working, and keep reading the same saved data (the same storage names), so nothing I have saved is lost.',
+  },
 ];
 
 /** Codes that must never become a suggestion — see the header for why each is excluded. */
@@ -172,6 +181,7 @@ const NEVER_SUGGEST = new Set([
   // Our own lane's phase timings — a measurement, never a next move for the user.
   'FAST_LANE_PHASES',
   'FAST_LANE_SKIPPED_GAME',
+  'FAST_LANE_SKIPPED_IMAGE_APP',
   // What our own failed provider calls cost — our routing's problem, never the user's next move.
   'PROVIDER_TIME_WASTED',
   'PREVIEW_SERVER_RESTARTED',

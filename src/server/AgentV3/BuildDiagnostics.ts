@@ -47,6 +47,8 @@ const PROCESS_ONLY_CODES = new Set([
   'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',
   // A repair's out-of-scope answer that OUR guard refused to write (autopsy eed79815): engine housekeeping.
   'REPAIR_OUT_OF_SCOPE',
+  // The user's pasted one-file app was kept as one file (pastedAppFormat.ts) — a decision, not a defect.
+  'PASTED_APP_KEPT_ONE_FILE',
   // The user named a stack we do not build (unsupportedStack.ts) — a fact about OUR templates, not the app.
   'UNSUPPORTED_STACK',
   // Whether OUR checks could sign in behind the app's login page (signInExplore.ts) — our instrument.
@@ -74,6 +76,7 @@ const PROCESS_ONLY_CODES = new Set([
   // app (autopsy 53d43c18). It is recorded as a warning so it is legible in the report and so a rising
   // rate is visible, but it must never count against the app or colour the release gate.
   'HTML_ENTRY_REPAIRED',
+  'DANGLING_STYLESHEET_IMPORT_REMOVED', // our guard removed an import of a missing sheet (autopsy 120eb52f)
   // The decision to leave a turn as the ANSWER it is, rather than rebuild it on a higher rung
   // (autopsy e628efd4): a fact about OUR retry policy, never a defect in the user's app.
   'TURN_ANSWERED_A_QUESTION',
@@ -102,6 +105,7 @@ const PROCESS_ONLY_CODES = new Set([
   'FAST_LANE_SKIPPED_REASONING_RUNG',
   // …and not starting it for a GAME, which only the full builder's game recipes can build (autopsy 0bb437b4).
   'FAST_LANE_SKIPPED_GAME',
+  'FAST_LANE_SKIPPED_IMAGE_APP',
   // …and the lane HANDING OFF because its chain fell to such a rung mid-lane (autopsy Study-Racer).
   'FAST_LANE_FELL_TO_REASONING_RUNG',
   // An observation about OUR checkpoint heuristic (autopsy SignBridge, 2026-09-26) — never the app.
@@ -2285,7 +2289,9 @@ export class BuildDiagnostics {
       // turns was kimi-k2.5 — the admin diagnostic named a model that provably never ran. The report
       // now leads with what ACTUALLY delivered and keeps the intent under `plannedModel`, so no
       // information is lost and the headline field stops asserting something untrue.
-      model: honestModelLabel(this.meta.model, this.llmCalls),
+      // Nothing ran ⇒ the ladder's first rung, the same answer `plannedModel` gives, never the legacy
+      // Claude backstop `meta.model` holds on Weak (autopsy 120eb52f: a 9-second stopped build read Haiku).
+      model: honestModelLabel(this.plannedFirstRung ?? this.meta.model, this.llmCalls),
       // ⚠️ THE LADDER'S FIRST RUNG WHERE WE HAVE IT, not `selectBuildModel`'s answer (autopsy
       // 2b0a3ed5). That helper predates the three-ladder rewrite and still replies in the old
       // Haiku/Sonnet vocabulary, so a weak build reported its Claude BACKSTOP as the model it planned

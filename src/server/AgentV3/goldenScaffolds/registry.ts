@@ -28,6 +28,7 @@ import { restaurantAppTsx, socialFeedAppTsx } from './proAppsB';
 import { invoicingAppTsx, bookingsAppTsx, kanbanAppTsx } from './proAppsC';
 import { notesAppTsx, expenseAppTsx, fitnessAppTsx, portfolioAppTsx } from './proAppsD';
 import { communityAppTsx, eventsAppTsx, lmsAppTsx } from './proAppsE';
+import { aiImageAppTsx, aiImageEngineFiles } from './aiImage';
 
 export interface GoldenScaffold {
   /** Must equal the matching StarterTemplate id (the CI lockstep test enforces this). */
@@ -62,6 +63,7 @@ const PRO_SHARED_FILES: Record<string, string> = {
 
 export const GOLDEN_SCAFFOLDS: readonly GoldenScaffold[] = [
   // ── SIMPLE tier: the scaffold IS the app ──
+  { id: 'ai-image', label: 'AI image generator', title: 'AI Image Generator', appTsx: aiImageAppTsx, tier: 'simple', files: aiImageEngineFiles() },
   { id: 'todo', label: 'To-do list', title: 'To-do List', appTsx: todoAppTsx, tier: 'simple' },
   { id: 'calculator', label: 'Calculator', title: 'Calculator', appTsx: calculatorAppTsx, tier: 'simple' },
   { id: 'stopwatch', label: 'Stopwatch & timer', title: 'Stopwatch & Timer', appTsx: stopwatchAppTsx, tier: 'simple' },

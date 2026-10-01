@@ -5149,6 +5149,15 @@ and costs nothing while off. Read by `src/server/AgentV3/complexityRouting.ts`; 
   21 calls that changed one line. `scaffoldedComplexityDecision` makes it `simple` (source `scaffold`)
   with no model call; the ladder still climbs if the first rung fails. No flag of its own —
   `AGENTV3_GOLDEN_SCAFFOLD=off` turns the scaffold, and so this, off.
+  🔴 **FOR SIX HOURS ON 2026-10-01 NO TEMPLATE WAS SEEDED AT ALL (autopsy 31254f9a).** The pre-seed was
+  guarded by "`src/` holds no file", and #3435 had just made setup write our starter into every fresh
+  workspace (the image's `WORKDIR` means the folder always exists, so an EMPTY workspace takes the starter
+  completion path). The calculator chip was built from scratch by the fast lane while this routing line
+  said the template was seeded. The guard now asks `holdsOnlyOurStarter` ("is anything here somebody's
+  work?" — our untouched starter and chip templates are not), a skipped seed says so
+  (`GOLDEN_SCAFFOLD_SKIPPED`), and the rebuild guard asks the same of the saved files, so a retry after a
+  Stop is not flipped to an EDIT of "your app". ⚠️ **Any check of the form "is the workspace empty?" now
+  means "is it holding only our starter?" — ask `starterFragment.ts`, never count files.**
 - 🗺️ **THE PLANNERS ARE THE ONE EXCEPTION (admin chose "A", 2026-09-26, autopsy 7d79254b).** The
   roadmap, blueprint and project-mode planners are plans, so they climb `planLadder` through
   `makePlanTextRunner` (#3334) instead of the complex build chain — which had cost a large app 76 s of

@@ -47,6 +47,8 @@ const PROCESS_ONLY_CODES = new Set([
   'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',
   // A repair's out-of-scope answer that OUR guard refused to write (autopsy eed79815): engine housekeeping.
   'REPAIR_OUT_OF_SCOPE',
+  // The user's pasted one-file app was kept as one file (pastedAppFormat.ts) — a decision, not a defect.
+  'PASTED_APP_KEPT_ONE_FILE',
   // The user named a stack we do not build (unsupportedStack.ts) — a fact about OUR templates, not the app.
   'UNSUPPORTED_STACK',
   // Whether OUR checks could sign in behind the app's login page (signInExplore.ts) — our instrument.

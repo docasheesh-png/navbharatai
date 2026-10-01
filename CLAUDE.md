@@ -3293,6 +3293,24 @@ the flag entries above promise.
     ⚠️ Those screens are read with `browseUrl(…, { recordConsole: false })`. A repair re-checks only home, so
     an error recorded from another screen would read as surviving its fix. Test-locked in
     `tests/aControlOnAnotherScreenIsNotMissing.test.ts`.
+  - 📄 **A PASTED ONE-FILE APP STAYS ONE FILE (admin 2026-10-01: "banao", after being asked to choose):
+    `AGENTV3_PASTED_KEEPS_FORMAT`** (NOT set; default ON; `off` restores the React rebuild).
+    - **The rule:** the format that was pasted is the format that comes back (`pastedAppFormat.ts`). A NEW
+      build whose prompt is a whole pasted HTML page runs on `static`. The user's page is written over the
+      untouched static starter as `index.html`, and `script.js`/`style.css` are removed. Both lanes get
+      `pastedOneFileRule`: improve in place, one file, keep its own look, never link the kit, and keep the
+      page's storage names, so data already saved on the user's device is still read.
+    - **When React is used instead, exactly as before:** the user's WORDS (never the paste) name a framework
+      or ask for something one file cannot carry (login, database, backend, several users, "full app",
+      React); the user picked a framework in the picker; or the turn is an edit of an app that exists. A
+      turn re-read as an edit gives the framework back.
+    - **Big-app planners stand down:** no fast-lane regeneration, no milestones, no module plan.
+    - **The user's page is not billed as our delivered work** unless the build changed it (`preseededGolden`).
+    - **The upgrade offer:** report code `PASTED_APP_KEPT_ONE_FILE` is process-only. It shows the one-tap
+      "Upgrade to a full app project", which keeps the same screens and storage names.
+    - ⚠️ **What happens in practice is unmeasured:** no real pasted-page build has run this path yet. Watch
+      the first `PASTED_APP_KEPT_ONE_FILE` report for a model that rewrites the file instead of editing it.
+    - Test-locked and reversion-proven in `tests/aPastedOneFileAppStaysOneFile.test.ts`.
 - **`AGENTV3_STORE_LOOP_NOTE`** (default ON, `off` disables — added 2026-09-29, autopsy 6a4a799f) — a
   write-time note (`storeEffectLoop.ts`, via `ToolDispatcher.writeSteeringNotes`) when a file binds a
   zustand hook with NO selector (`const store = useMusicStore()`), lists that bare name in an effect's

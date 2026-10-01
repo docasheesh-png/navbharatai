@@ -209,6 +209,8 @@ import { summarizeFileTree, NAVBHARATAI_UI_MAP } from '../AgentV3/systemPrompt';
 import { SINGLE_HTML_FILE_RULE } from '../AgentV3/systemPrompt';
 import { inlineLinkedStylesheet } from '../AgentV3/singleFileKit';
 import { wantsSingleHtmlFile } from '../../lib/frameworkDetect';
+import { StaticProvider } from '../AgentV3/sandbox/AppMakerLab/generator/templates/StaticProvider';
+import { pastedFormatDecision, pastedHtmlDocument, pastedStorageKeys, pastedOneFileRule, STATIC_SCAFFOLD_EXTRAS, PASTED_ONE_FILE_CODE } from '../AgentV3/pastedAppFormat';
 import { aiInAppRule } from '../AgentV3/systemPrompt';
 import { weakBuildDisciplineBlock } from '../AgentV3/weakBuildDiscipline';
 import { pickPaletteForPrompt, palettePromptBlock } from '../AgentV3/designPresets';
@@ -11123,6 +11125,18 @@ async function noteBuildOutcome(
       clientKnownFramework = fw;
       try { events.emit({ type: 'framework', framework: fw, reason, ts: Date.now() }); } catch { /* never block a build on a label */ }
     };
+    // 📄 A PASTED ONE-FILE APP STAYS ONE FILE (admin 2026-10-01, pastedAppFormat.ts). A new build whose prompt
+    // is the user's own HTML page, with no words asking for a project, runs on `static` and starts from that
+    // page. Decided here, before the sandbox is created, because the framework picks the sandbox's scaffold.
+    const pastedFormat = pastedFormatDecision(prompt, {
+      newBuild: intent === 'new_build' && !userAppExists && !hasImportIntent,
+      frameworkPicked: frameworkExplicit,
+    });
+    const frameworkBeforePastedFormat = framework;
+    if (pastedFormat.keep && framework !== 'static') {
+      framework = 'static';
+      emitFrameworkCorrection('static', 'detected');
+    }
     const importUrl = typeof req.body?.importUrl === 'string' ? req.body.importUrl.trim() : '';
 
     // ── PROJECT LANDING PIPELINE — admin master plan: ONE pipeline for every import source ────
@@ -11982,6 +11996,11 @@ async function noteBuildOutcome(
     })) {
       intent = 'edit_existing';
       isEditMode = true;
+      // The pasted page was judged a NEW build; it is an edit of an app that exists, whose stack wins.
+      if (pastedFormat.keep && framework === 'static' && frameworkBeforePastedFormat !== 'static') {
+        framework = frameworkBeforePastedFormat;
+        emitFrameworkCorrection(framework, 'detected');
+      }
     }
     // REBUILD CONFIRMATION GATE (Fix 28): a turn that is STILL rebuild-shaped over a non-empty
     // workspace (explicit fresh-start / complete-app ask — or a wrong call the guard couldn't
@@ -13439,7 +13458,8 @@ async function noteBuildOutcome(
       let megaRoadmapActive: MegaRoadmap | null = null;
       /** The milestone's brief when a roadmap step is being built — what the feature checks grade. */
       let milestoneRequest: string | null = null;
-      if (envFlag('AGENTV3_MEGA_ROADMAP', true) && intent === 'new_build' && !isEditMode) {
+      // A pasted one-file app is improved in place, never split into milestones (pastedAppFormat.ts).
+      if (envFlag('AGENTV3_MEGA_ROADMAP', true) && intent === 'new_build' && !isEditMode && !pastedFormat.keep) {
         try {
           const scope = analyzeAppScope(planning.text);
           // TWO CLASSIFIERS DISAGREEING IS A FACT, NOT A TIE THE DEARER ONE WINS (autopsy Study-Racer,
@@ -16155,9 +16175,57 @@ async function noteBuildOutcome(
         }
       }
 
+      // 📄 THE USER'S OWN PAGE IS THE STARTING FILE (pastedAppFormat.ts). The pasted document is written as
+      // index.html over the untouched static starter, so the builder improves the user's app instead of
+      // writing a new one from a description of it. The two starter files it does not use are removed.
+      // Remembered as not-our-work for the bill (`pastedSeed`, merged into `preseededGolden` below): a
+      // build that stops before changing it delivered nothing of ours.
+      const pastedSeed = new Map<string, string>();
+      let pastedOneFile = '';
+      if (pastedFormat.keep && intent !== 'new_build' && framework === 'static' && frameworkBeforePastedFormat !== 'static') {
+        framework = frameworkBeforePastedFormat; // re-read as an edit after the decision — the app's stack wins
+        emitFrameworkCorrection(framework, 'detected');
+      }
+      if (pastedFormat.keep && framework === 'static' && intent === 'new_build' && !isImportTurn && !abort.signal.aborted) {
+        try {
+          const doc = pastedHtmlDocument(prompt);
+          const current = await actuator.readFile(workspaceId, 'index.html').catch(() => null);
+          const starter = new StaticProvider().getFiles([])['index.html'];
+          const untouched = current == null || withoutPreviewBridge('index.html', current).trim() === starter.trim();
+          if (doc && untouched) {
+            await actuator.writeFile(workspaceId, 'index.html', doc);
+            writtenFiles.set('index.html', doc);
+            pastedSeed.set('index.html', doc);
+            try { getWorkspaceMemory(workspaceId).indexFile('index.html', doc); } catch { /* index best-effort */ }
+            await saveWorkspaceFiles(workspaceId, { 'index.html': doc }).catch(() => {});
+            const extras = STATIC_SCAFFOLD_EXTRAS.map((f) => `'${f}'`).join(' ');
+            await actuator.runCommand(workspaceId, `rm -f ${extras}`).catch(() => null);
+            for (const f of STATIC_SCAFFOLD_EXTRAS) {
+              writtenFiles.delete(f);
+              try { getWorkspaceMemory(workspaceId).removeFile(f); } catch { /* graph best-effort */ }
+            }
+            await removeWorkspaceFiles(workspaceId, [...STATIC_SCAFFOLD_EXTRAS]).catch(() => 0);
+            if (streamingFirstPaintEnabled()) {
+              for (const e of firstPaintEvents(['index.html'])) events.emit(e);
+            }
+            const keys = pastedStorageKeys(doc);
+            pastedOneFile = pastedOneFileRule(keys);
+            buildDiag.record({
+              phase: 'build', severity: 'info', code: PASTED_ONE_FILE_CODE, autoResolved: false, // open, so the upgrade offer appears
+              message: 'The user pasted their own one-file HTML app, so it stays one file: their page is index.html and is improved in place, not rebuilt as a React project.',
+              detail: `document ${doc.length} chars · storage names kept: ${keys.length ? keys.join(', ') : 'none found'}`,
+            });
+            emit({ type: 'narration', agent: 'architect', text: '📄 Keeping your app as one HTML file, the way you pasted it — improving it in place.', ts: Date.now() });
+          }
+        } catch { /* seeding is best-effort — a failure builds as a plain static page from the brief */ }
+      }
+
       // ONE FILE, WHEN ONE FILE WAS ASKED FOR (autopsy f496c75b): the `static` framework was chosen from the
       // prompt, and the scaffold alone would still hand back three files. The fast lane reads the same rule.
-      const singleHtmlFileRule = framework === 'static' && wantsSingleHtmlFile(prompt) ? SINGLE_HTML_FILE_RULE : '';
+      // A pasted one-file app gets its own rule instead: the kit rule's "keep style.css linked" would
+      // restyle the user's own design.
+      const singleHtmlFileRule = pastedOneFile
+        || (framework === 'static' && wantsSingleHtmlFile(prompt) ? SINGLE_HTML_FILE_RULE : '');
       if (singleHtmlFileRule) buildPrompt = `${singleHtmlFileRule}\n\n${buildPrompt}`;
       const singleHtmlFileSuffix = singleHtmlFileRule ? `\n\n${singleHtmlFileRule}` : ''; // the fast lane's copy of the same rule
       const pastedBriefSuffix = pastedBrief ? `\n\n${pastedBrief}` : ''; // the fast lane reads the pasted app's checklist too
@@ -16356,7 +16424,7 @@ async function noteBuildOutcome(
             ppLast.latencyMs = Date.now() - startedAt;
             return t.text;
           };
-          if (!pPlan && intent === 'new_build' && !isEditMode && detectMegaProject(planning.text)) {
+          if (!pPlan && intent === 'new_build' && !isEditMode && !pastedFormat.keep && detectMegaProject(planning.text)) {
             ppDecompositionAnnounced = true;
             events.emit({ type: 'narration', agent: 'architect', text: '🏗️ This is a large software project — decomposing it into independently-buildable modules with frozen interface contracts…', ts: Date.now() });
             const ppScaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[])).filter((p) => !/^(node_modules|\.git)\//.test(p)).slice(0, 80);
@@ -16505,6 +16573,7 @@ async function noteBuildOutcome(
       let goldenPreseeded = false;
       /** Path → the exact content the platform's own template seeded. See the bill note below. */
       const preseededGolden = new Map<string, string>();
+      for (const [pp, pc] of pastedSeed) preseededGolden.set(pp, pc); // the user's own pasted page — see pastedSeed
       if (process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !projectModuleRef && !isImportTurn) {
         try {
           const golden = goldenScaffoldForPrompt(prompt);
@@ -16603,7 +16672,7 @@ async function noteBuildOutcome(
       // A LANE THAT CANNOT FINISH IS NOT STARTED (autopsy ac41a924). When the rung this build opens on
       // always reasons, the lane's single 90 s plan call spends its cap thinking and hands over with
       // nothing — 90 s the user watched for no file. See fastLaneRung.ts.
-      const fastLaneWouldRun = !goldenPreseeded && oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn;
+      const fastLaneWouldRun = !goldenPreseeded && pastedSeed.size === 0 && oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn;
       const fastLaneRung = fastLaneWouldRun
         ? (() => {
           try {

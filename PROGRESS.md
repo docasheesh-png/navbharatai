@@ -87359,7 +87359,7 @@ The admin decided the five 🟡 rows the de3bb2bb autopsy left open. Ledger:
 BUILD REPORT de3bb2bb — RESOLUTION (follow-up)
 Items: 5 · ✅ Resolved: 5 (Q-064 closed by #3465, folded into Q-009; Q-065–Q-068 on merge of #3467) · 🟡 Blocked: 0 · Remaining: 0
 - **Q-064 ✅ (not our defect, admin: "leave")** — GLM flashx crawled twice; provider speed is Z.ai's. The crawl bench
-  (180 s, one re-probe) did what it was built to do. Third instance of Q-009.
+  (180 s, one re-probe) did what it was built to do. Third instance of Q-009; closed in the queue by #3465, which folded it into Q-009.
 - **Q-065 ✅** — a 189 s KIMI call wrote 7 files in one `write_files_batch`, so nothing reached the preview for three
   minutes. Root cause: the prompt told the builder to "pass all files in one call … 3× faster", which was never
   measured. Class: a size limit stated nowhere, so the call's length was the size of the app. Fix:

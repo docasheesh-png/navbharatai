@@ -541,6 +541,7 @@ import { agentV3CostTelemetry } from '../AgentV3/AgentV3CostTelemetry';
 import { recordEngineUse } from '../AgentV3/engineUseStore';
 import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrchestrator';
 import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
+import { applyStrictTrial, strictCohort } from '../AgentV3/strictTrial';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
 import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall, reviewChangedPaths } from '../AgentV3/ReviewerAgent';
@@ -16700,7 +16701,8 @@ async function noteBuildOutcome(
             const existingSrc = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
               .filter((p) => p.startsWith('src/'));
             if (existingSrc.length === 0) {
-              const goldenFiles = goldenScaffoldFiles(golden);
+              // Q-008: a workspace in the strict-mode trial gets the strict tsconfig (strictTrial.ts).
+              const goldenFiles = applyStrictTrial(goldenScaffoldFiles(golden), workspaceId);
               // TOGETHER, not one after another (autopsy 972acde5): twelve sequential sandbox round trips
               // were ~5 s of the wait before the first model call. A failed write still rejects the whole
               // seed, exactly as the loop did, and the files are recorded only once every write landed.
@@ -24128,6 +24130,31 @@ async function noteBuildOutcome(
         });
       } catch { /* an observation must never affect a finished build */ }
 
+      /**
+       * Q-008 — THE STRICT-MODE TRIAL'S MEASUREMENT (strictTrial.ts). Which TypeScript mode this app
+       * compiled in, and whether it was a fresh app: `strict-new` against `loose-new` is the comparison
+       * the admin's decision waits on. Read from the app's real tsconfig, never from the trial bucket,
+       * because an app created before the trial stays loose whatever its bucket. Placed beside its
+       * siblings and outside every feature's conditional for the reason `PROVIDER_TIME_WASTED` states.
+       */
+      let strictCohortLabel: ReturnType<typeof strictCohort> = 'unknown';
+      try {
+        const tsconfigNow = writtenFiles.get('tsconfig.json')
+          ?? await Promise.race([
+            actuator.readFile(workspaceId, 'tsconfig.json').catch(() => null),
+            new Promise<null>((r) => setTimeout(() => r(null), 5_000)),
+          ]);
+        strictCohortLabel = strictCohort(tsconfigNow, !userAppExists);
+        buildDiag.record({
+          phase: 'build',
+          severity: 'info',
+          code: 'STRICT_TRIAL',
+          message: `TypeScript mode: ${strictCohortLabel}`,
+          detail: `cohort=${strictCohortLabel} · fresh-app=${!userAppExists}`,
+          autoResolved: true,
+        });
+      } catch { /* an observation must never affect a finished build */ }
+
       // Cost-ladder telemetry (P2 measurement): record this build's task type, start
       // tier, billed amount, tokens, success, and duration so the savings AND the
       // per-tier quality are MEASURABLE (the P8 cutover gate needs this data). Best-
@@ -24153,6 +24180,8 @@ async function noteBuildOutcome(
           // T1-escalation-on — the canary A/B labels: which cohort this build was in ('in'/'out'/'off',
           // same workspaceId key as the gates so labels match behaviour) + whether the ladder climbed.
           escalationCohort: escalationCohort(workspaceId),
+          // Q-008 — the strict-mode trial's A/B label (strict-new vs loose-new is the comparison).
+          strictCohort: strictCohortLabel,
           escalations: escalationsCount,
           // …and how far down the RUNGS it went inside that tier (a different question — see above).
           // Omitted rather than zeroed when it could not be attributed: `0` would read as a real depth.

@@ -27,6 +27,7 @@
 
 import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
 import { newPageOptionsExpr, isSignInRoute } from './signInExplore';
+import { declaredRoutes } from './routerPaths';
 import { rendersDataList } from './DesignCoverage';
 import { scanMarkup, type ScannedTag } from './jsxTags';
 import { NEVER_PRESS } from './clickExplorer';
@@ -639,8 +640,9 @@ export function formSourcesFor(
  *
  * Reads the binding the router file imports the page under (default, named, or `lazy(() => import())`),
  * then the `<Route path element={<X …}>` / `Component={X}` or `{ path, element: <X … }` that uses it.
- * Only an ABSOLUTE path is returned: a nested relative child route would need its parents joined, and a
- * wrong URL is worse than the heuristic. Deterministic: files in key order, first match wins. Pure.
+ * A JSX route is returned with its parents joined (routerPaths.ts, autopsy a106df77); a route-OBJECT
+ * child is returned only when its own path is absolute, since a wrong URL is worse than the heuristic.
+ * Deterministic: files in key order, first match wins. Pure.
  */
 export function routeFromRouter(page: string, files: Record<string, string>): string | null {
   for (const [file, src] of Object.entries(files ?? {})) {
@@ -658,6 +660,14 @@ export function routeFromRouter(page: string, files: Record<string, string>): st
       }
     }
     for (const m of src.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:React\s*\.\s*)?lazy\s*\(\s*\(\s*\)\s*=>\s*import\s*\(\s*["']([^"']+)["']\s*\)/g)) bind(m[1], m[2]);
+    // JSX routes first, with their parents joined (routerPaths.ts): a nested `<Route path="new">` serves
+    // `/new`, and dropping it sent the journey to `/`, where the form is not (autopsy a106df77).
+    for (const r of declaredRoutes(src)) {
+      for (const name of bindings) {
+        const n = name.replace(/\$/g, '\\$');
+        if (new RegExp(String.raw`(?:element\s*=\s*\{\s*<\s*${n}\b|Component\s*=\s*\{\s*${n}\b)`).test(r.tag)) return r.path;
+      }
+    }
     for (const name of bindings) {
       const n = name.replace(/\$/g, '\\$');
       const pathValue = String.raw`path\s*[=:]\s*(?:\{\s*)?["'\x60]([^"'\x60]+)["'\x60]`;

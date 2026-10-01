@@ -16,6 +16,7 @@
 // rather than guessed at.
 //
 // PURE — no I/O, never throws.
+import { sanitizeResponseEmoji } from '../lib/responseEmoji';
 
 /** Below this, a narrated line is a status blip, not the model's reply. */
 const MIN_REPLY_CHARS = 40;
@@ -51,7 +52,12 @@ export interface SummaryAdditions {
  * inside what remains. PURE.
  */
 export function summaryAdditions(summary: string, narrated: readonly string[]): SummaryAdditions {
-  const s = String(summary ?? '');
+  // The narrated reply passed through the event stream's emoji rule for a build still running
+  // (AgentEventStream.withHonestEmoji), which drops celebration emoji; the summary did not. So "ready. 🎉"
+  // in the summary never matched "ready." on screen, and every reply that celebrated lost its additions
+  // (autopsy a106df77, SUMMARY_REPLY_NOT_FOUND). Both sides are compared after the same rule — and the
+  // additions are emitted as a narration line, which applies it anyway.
+  const s = sanitizeResponseEmoji(String(summary ?? ''), 'working');
   if (!s.trim()) return { matched: false, text: '' };
   const seen = (Array.isArray(narrated) ? narrated : [])
     .map((t) => String(t ?? ''))

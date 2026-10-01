@@ -28,6 +28,7 @@ import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
 import { decideBuildNudge, standDownNote } from './nudgeToBuild';
 import { decideUnfinishedResume, unfinishedResumeNote } from './unfinishedResume';
+import { decideUnstyledResume, MAX_UNSTYLED_RESUMES, unstyledResumeEnabled } from './unstyledResume';
 import { streamThinkingToChat } from './thinkingStream';
 import { PROMPT_PREVIEW_SEPARATOR } from './promptPreviewShape';
 
@@ -507,6 +508,8 @@ export class AgentRunner {
     let noBuildNudges = 0;
     /** Times a prose-ended turn was handed the readiness blockers and told to continue (unfinishedResume.ts). */
     let unfinishedResumes = 0;
+    /** Times a finished turn was handed back screens with unstyled classes (unstyledResume.ts). */
+    let unstyledResumes = 0;
     const MAX_BUILD_NUDGES = 2;
 
     const messages: unknown[] = [{ role: 'user', content: userPrompt }];
@@ -995,6 +998,19 @@ export class AgentRunner {
                   summary = starterSummary(turn.text);
                 } else {
                   summary = `⚠️ This app isn't fully working yet — a couple of things still need fixing before it's ready to use.`;
+                }
+              }
+              // A READY APP WHOSE SCREENS STILL USE UNSTYLED CLASSES GETS ONE MORE TURN to define them, in
+              // the context that wrote them — not a fresh-context repair after the build (unstyledResume.ts).
+              if (readiness.ready && !this.opts.signal?.aborted) {
+                const styleNote = unstyledResumeEnabled() && unstyledResumes < MAX_UNSTYLED_RESUMES ? await dispatcher.classesStillUnstyled() : '';
+                const styleResume = decideUnstyledResume({ text: turn.text, note: styleNote, resumesUsed: unstyledResumes });
+                if (styleResume.resume) {
+                  unstyledResumes++;
+                  try { this.opts.onNote?.({ code: 'UNSTYLED_CLASSES_RESUMED', message: 'The model ended its turn with screens using classes no stylesheet defines; it was handed the list and one more turn to add the rules.', detail: styleNote.slice(0, 600) }); } catch { /* a note must never fail a build */ }
+                  messages.push({ role: 'user', content: styleResume.message });
+                  messageTs.push(Date.now());
+                  continue;
                 }
               }
             } catch { /* gate is best-effort — a scan error never fails a real build */ }

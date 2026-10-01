@@ -3339,7 +3339,19 @@ export class ToolDispatcher {
   /** Every project stylesheet a module written this build imports (autopsy 1389f0d5). */
   private readonly _importedSheets = new Set<string>();
 
-  private async undefinedClassNotes(files: Record<string, string>): Promise<string> {
+  /**
+   * The style notes for EVERY screen written this build, asked once more as the turn ends — '' when
+   * every class has a rule. The write-time notes fire per write and are easy to defer; this is what the
+   * runner hands back before it accepts "done" (unstyledResume.ts, autopsy a106df77).
+   */
+  async classesStillUnstyled(): Promise<string> {
+    if (this._screensWithClasses.size === 0) return '';
+    const missing = await this.undefinedClassNotes({}, { allScreens: true });
+    const invented = await this.inventedKitClassNotes(Object.fromEntries(this._screensWithClasses));
+    return `${missing}${invented}`.trim();
+  }
+
+  private async undefinedClassNotes(files: Record<string, string>, opts: { allScreens?: boolean } = {}): Promise<string> {
     try {
       // What this write teaches about the project: the sheets it writes, and the sheets its modules import.
       for (const [p, c] of Object.entries(files)) {
@@ -3362,7 +3374,7 @@ export class ToolDispatcher {
       // A stylesheet write re-asks the question for the screens already written; the note then says
       // what is STILL missing after this sheet, not merely what was missing before it.
       const sheetWritten = Object.keys(files).some((p) => isProjectStylesheet(p));
-      const screens = sheetWritten ? [...this._screensWithClasses.keys()] : written;
+      const screens = sheetWritten || opts.allScreens ? [...this._screensWithClasses.keys()] : written;
       if (screens.length === 0) return '';
       const content = (p: string) => files[p] ?? this._screensWithClasses.get(p) ?? '';
       const project: Record<string, string> = {};

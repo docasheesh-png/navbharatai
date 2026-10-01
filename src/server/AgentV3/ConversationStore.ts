@@ -13,6 +13,7 @@
 // Firestore-backed implementation that follows. PURE of any framework so it is fully testable.
 
 import type { TurnUsage } from './ClaudeClient';
+import { isPastedSource, pastedAppFacts, readablePrompt } from '../lib/pastedSource';
 
 /** Lifecycle of a persisted build. Mirrors AgentRunResult.ok + the reason it stopped. */
 export type ConversationStatus = 'running' | 'complete' | 'stopped' | 'error';
@@ -335,6 +336,13 @@ export class InMemoryConversationStore implements ConversationStore {
 
 /** Derive a short, clean title from the first user prompt (for the build list). */
 export function deriveTitle(prompt: string, max = 80): string {
+  // A pasted file is not a title (autopsy a106df77: a whole HTML app became the History entry
+  // "<!doctype html> <html lang=…" and the GitHub repo name). Use the words written around it, else the
+  // file's own <title> or <h1>.
+  if (isPastedSource(prompt)) {
+    const facts = pastedAppFacts(prompt);
+    prompt = readablePrompt(prompt) || facts.title || facts.heading || 'Pasted code';
+  }
   const oneLine = (prompt || '').replace(/\s+/g, ' ').trim();
   if (!oneLine) return 'Untitled build';
   return oneLine.length > max ? oneLine.slice(0, max - 1).trimEnd() + '…' : oneLine;

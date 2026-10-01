@@ -19753,10 +19753,7 @@ async function noteBuildOutcome(
           const e2eFiles = { ...projectFiles, ...Object.fromEntries(writtenFiles) };
           const decision = shouldAutoScaffoldE2e({
             files: e2eFiles,
-            // This pass runs BEFORE the render proof (#3313), so `result.ok` here is the runner's
-            // pre-proof verdict. A build the render rescue may still prove is not a failed build: it
-            // used to be skipped "because the build did not succeed" a second before it rendered
-            // (autopsy 6461025c). The proof that follows checks what this pass writes.
+            // Runs before the render proof (#3313): a rescue-eligible build is not a failed one (6461025c).
             ok: result.ok || renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: writtenFiles.size }),
             isImportTurn,
             hasPreview: !!lastPreviewUrl,

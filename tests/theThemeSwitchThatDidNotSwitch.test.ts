@@ -58,7 +58,7 @@ describe('1 · a theme switch that sets something nothing styles is named while 
   it('is one of the write-time notes every write door asks', () => {
     const src = read('src/server/AgentV3/ToolDispatcher.ts');
     expect(src).toMatch(/const theme = await this\.deadThemeSwitchNotes\(files\);/);
-    expect(src).toMatch(/\+ style \+ theme \+ security/);
+    expect(src).toMatch(/\+ security \+ shadow \+ theme \+ touch;/);
   });
 });
 

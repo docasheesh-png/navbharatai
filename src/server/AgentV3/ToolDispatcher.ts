@@ -3258,7 +3258,7 @@ export class ToolDispatcher {
     const style = await this.styleWriteNotes(files);
     // A light/dark switch that sets a class or attribute nothing styles (autopsy 8257ca59) — said while open.
     const theme = await this.deadThemeSwitchNotes(files);
-    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + theme + security + shadow + touch;
+    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow + theme + touch;
   }
 
   /**

@@ -403,6 +403,23 @@ export function roleConfig(role: AgentRole): RoleConfig {
   return REGISTRY[role];
 }
 
+/**
+ * The note a planning-only delegation gets instead of a sub-agent (autopsy 39955124, 2026-10-01).
+ *
+ * The lead already holds the files it read and owns the todo list, so a requirement / planner / product
+ * sub-agent re-reads the same files and hands back a plan as text the lead then reads again — 116 s of a
+ * build that ended with no preview. Builders, reviewers and testers still delegate exactly as before.
+ */
+export const PLAN_YOURSELF_NOTE =
+  'Not delegated: planning is yours. You already hold the files you read and the todo list — record the plan '
+  + 'with update_todo directly and start writing files. Delegate BUILDING work (frontend, backend, …) or '
+  + 'checking work (reviewer, qa, …) instead.';
+
+/** Is this a planning-only role (it writes no code, only a plan)? PURE. */
+export function isPlanningOnlyRole(role: string): boolean {
+  return isWorkerRole(role) && REGISTRY[role].layer === 'planning';
+}
+
 export function isWorkerRole(role: string): role is AgentRole {
   return (WORKER_ROLES as string[]).includes(role);
 }

@@ -55,7 +55,7 @@ describe('link 2 — the dispatcher asks and does not fake the outcome', () => {
   });
 
   it('a SKIP keeps building and forbids a fake feature', () => {
-    expect(fn).toContain("secretRequestResult('skipped', askedNames)");
+    expect(fn).toContain("secretRequestResult(answer === 'timed-out' ? 'timed-out' : 'skipped', askedNames)"); // a timeout is not a skip (autopsy 1219c639)
     expect(fn).toContain('visibly disabled');
     expect(fn).toContain('never a fake success');
   });
@@ -89,7 +89,7 @@ describe('link 3 — the keys reach the RUNNING app, not just the vault', () => 
 describe('link 4 — the ask reaches the client', () => {
   it('the route emits secret_request and waits for the answer', () => {
     expect(route).toContain("type: 'secret_request'");
-    expect(route).toContain('await awaitApproval(requestId)');
+    expect(route).toContain('await waitForUser(requestId)'); // the one door that also listens to Stop (autopsy 1219c639)
   });
 
   it('it is wired ONLY for a verified user', () => {

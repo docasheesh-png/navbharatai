@@ -29,7 +29,7 @@ import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
 import { decideBuildNudge, standDownNote } from './nudgeToBuild';
 import { decideUnfinishedResume, unfinishedResumeStandDownNote, unfinishedResumeNote } from './unfinishedResume';
-import { decideStyleResume, styleResumeNote } from './stylePolishResume';
+import { decideStyleResume, doneStyleNote, styleResumeEnabled, styleResumeNote } from './stylePolishResume';
 import { asPlatformRequest } from './platformRequest';
 import { streamThinkingToChat } from './thinkingStream';
 import { PROMPT_PREVIEW_SEPARATOR } from './promptPreviewShape';
@@ -1156,6 +1156,14 @@ export class AgentRunner {
            * usually a build converging, and blocking that would stop a build from finishing — a worse
            * failure than the wasted minutes this guard exists to prevent.
            */
+          // 🔴 NOTHING RUNS AFTER A STOP (autopsy 1219c639). One turn asked for the key popup AND an
+          // `npm install express openai …`. The user pressed Stop during the popup; when the popup's wait
+          // ended, the install still ran — into the app a second build was already writing. The loop only
+          // checked the signal BETWEEN turns, and a turn's queued tools are inside one. Every tool now asks
+          // first, serial and parallel alike, and the model is told why it got no result.
+          if (this.opts.signal?.aborted) {
+            return { tool_use_id: tu.id, content: `Not run — the build was stopped before "${tu.name}" started.`, is_error: true };
+          }
           if (loopGuardOn && isProbeBanned(repeatProbe, tu.name, tu.input)) {
             return { tool_use_id: tu.id, content: bannedProbeMessage(tu.name), is_error: true };
           }
@@ -1297,7 +1305,17 @@ export class AgentRunner {
               doneText = doneSteer(readiness);
               if (doneText) {
                 doneSignalled = true;
-                events.emit({ type: 'narration', agent: agentRole, ts: Date.now(), text: '✅ The app looks complete — wrapping up.' });
+                // Not "complete" while the screens use classes no stylesheet defines (autopsy 2f723acb): the
+                // model is told which, in the same steer, and the user is not told the app is finished.
+                let styleNote = '';
+                try {
+                  if (styleResumeEnabled()) {
+                    const style = await dispatcher.undefinedClassesNow();
+                    styleNote = doneStyleNote(style.missing, style.sheet);
+                  }
+                } catch { /* the style read is advisory — the done steer stands without it */ }
+                if (styleNote) doneText = `${doneText}\n\n${styleNote}`;
+                else events.emit({ type: 'narration', agent: agentRole, ts: Date.now(), text: '✅ The app looks complete — wrapping up.' });
               }
             }
           }

@@ -21,7 +21,7 @@ import { pipedGateExitCodeWarning } from './pipedGateExitCode';
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
 import { inspectCredentials } from './credentialSafety';
 import { probeCredentials, realProbeFetch, credentialProbeEnabled, relevantToApp, type ProbeVerdict } from './credentialProbe';
-import { planSecretRequest, secretRequestPrompt, secretRequestResult, type SecretAsk } from './secretRequest';
+import { planSecretRequest, secretRequestPrompt, secretRequestResult, isAiModelKey, keylessAiNote, type SecretAnswer, type SecretAsk } from './secretRequest';
 
 /**
  * Sentinel command that forces the user's vault secrets onto disk regardless of the "is this an app
@@ -90,7 +90,7 @@ import { lintBuiltApp, a11yHandBack, offGridHandBack } from './buildQualityLint'
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { rootThemeHooks, deadThemeSwitchNote } from './deadThemeSwitch';
 import { pruneGeneratedListing } from './generatedListing';
-import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, usesNonKitNbClass } from './kitRestore';
+import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, leftToTheKit, usesNonKitNbClass } from './kitRestore';
 import { findUndefinedClasses, isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, missingImportedSheetNote, collectDefinedClasses } from './CssConsistency';
 import { pageDesignWriteNote, isPageFile, analyzeDesignCoverage, type DesignDefect } from './DesignCoverage';
 import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
@@ -1026,10 +1026,10 @@ export class ToolDispatcher {
    * BUILD'S EVENT STREAM — the client writes them straight to the encrypted vault and the caller reads
    * them back server-side (see secretRequest.ts).
    */
-  private onSecretsNeeded?: (asks: SecretAsk[]) => Promise<Record<string, string> | null>;
+  private onSecretsNeeded?: (asks: SecretAsk[]) => Promise<SecretAnswer>;
 
   /** Wire the ask above. Supplied only when there is a verified user whose vault we can write to. */
-  setSecretRequestHandler(fn: (asks: SecretAsk[]) => Promise<Record<string, string> | null>): void {
+  setSecretRequestHandler(fn: (asks: SecretAsk[]) => Promise<SecretAnswer>): void {
     this.onSecretsNeeded = fn;
   }
 
@@ -1075,7 +1075,7 @@ export class ToolDispatcher {
         { name: PAYMENT_SECRET_NAMES.keyId, why: 'Your Razorpay Key ID — Razorpay Dashboard → Account & Settings → API Keys.' },
         { name: PAYMENT_SECRET_NAMES.keySecret, why: 'Your Razorpay Key Secret, from the same page. It is stored only in your own Supabase project.' },
       ]).catch(() => null);
-      result = saved ? await handler({ table }).catch(() => null) : null;
+      result = saved && typeof saved === 'object' && Object.keys(saved).length > 0 ? await handler({ table }).catch(() => null) : null;
     }
     if (!result) return pending;
     if (!result.ok && result.needKeys) {
@@ -3392,8 +3392,8 @@ export class ToolDispatcher {
 
   /**
    * The class names the screens use that no stylesheet defines, read from the workspace NOW — the
-   * end-of-turn half of the write-time note (stylePolishResume.ts, autopsy 1be16985). `nb-` classes are
-   * left to the kit, exactly as the write-time note leaves them.
+   * end-of-turn half of the write-time note (stylePolishResume.ts, autopsy 1be16985). An `nb-` class the
+   * kit DEFINES is left to the kit (`kitRestorePatch` puts its rule back); an invented `nb-` name is not.
    *
    * 🔒 UNKNOWN IS EMPTY. A project with more files than one read may cover, a listing that fails, or a
    * stylesheet that cannot be read returns `[]`: this answer sends a model back to work, so it must never
@@ -3420,7 +3420,9 @@ export class ToolDispatcher {
         } catch { if (isProjectStylesheet(p)) unreadSheet = true; }
       }));
       if (unreadSheet) return { missing: [], pages: [] };
-      const missing = findUndefinedClasses(project).filter((c) => !c.startsWith('nb-'));
+      // Only a class the KIT defines is left out: kitRestore puts that one back. An invented `nb-` name has
+      // no kit rule, so it is handed back like any other (autopsy 2f723acb — 17 of them went unmentioned).
+      const missing = findUndefinedClasses(project).filter((c) => !leftToTheKit(c));
       const sheet = sheets.includes('src/index.css') ? 'src/index.css' : sheets[0];
       // The page-design half of the same end-of-turn check — the SAME judgement the end-of-build repair
       // runs (analyzeDesignCoverage), with the whole project in hand, so the two cannot disagree.
@@ -3471,7 +3473,7 @@ export class ToolDispatcher {
       }));
       let out = '';
       if (wroteSheet) {
-        try { out += undefinedClassWriteNote(files, project); } catch { /* a note is best-effort */ }
+        try { out += undefinedClassWriteNote(files, project, { kitDefines: (c) => leftToTheKit(c) }); } catch { /* a note is best-effort */ }
       }
       if (wrotePage) {
         try { out += pageDesignWriteNote(files, project); } catch { /* a note is best-effort */ }
@@ -7798,12 +7800,24 @@ export class ToolDispatcher {
         // admin report, both of which are stored.
         const reqRec = (input as Record<string, unknown>) || {};
         const rawAsks = Array.isArray(reqRec.secrets) ? (reqRec.secrets as Array<Partial<SecretAsk>>) : [];
-        const plan = planSecretRequest(rawAsks, this.savedSecretNames);
+        const planned = planSecretRequest(rawAsks, this.savedSecretNames);
+        // 🔑 AN AI MODEL NEEDS NO KEY WHILE THE GATEWAY IS ON (autopsy 1219c639) — see AI_MODEL_KEY_NAMES. The
+        // popup is never opened for one; the builder is pointed at the keyless recipe instead.
+        const keyless = appAiGatewayEnabled();
+        const keylessNames = keyless
+          ? [...planned.ask.map((a) => a.name), ...planned.rejected].filter((n) => isAiModelKey(n))
+          : [];
+        const plan = keylessNames.length === 0 ? planned : {
+          ...planned,
+          ask: planned.ask.filter((a) => !keylessNames.includes(a.name)),
+          rejected: planned.rejected.filter((n) => !keylessNames.includes(n)),
+        };
 
         // Report the filtered-out names to the AGENT rather than dropping them silently — it needs to
         // know a key it planned for is already present (so it can wire it) or was refused (so it stops
         // planning around it).
         const notes: string[] = [];
+        if (keylessNames.length) notes.push(keylessAiNote(keylessNames));
         if (plan.alreadyHave.length) notes.push(`Already saved (no need to ask): ${plan.alreadyHave.join(', ')}.`);
         if (plan.rejected.length) notes.push(`Refused — not a usable app key: ${plan.rejected.join(', ')}. Do not ask for NavBharatAI's own provider keys.`);
         if (plan.ask.length === 0) {
@@ -7816,12 +7830,18 @@ export class ToolDispatcher {
         }
 
         this.events?.emit({ type: 'narration', agent: 'architect', text: `🔑 ${secretRequestPrompt(plan)}`, ts: Date.now() });
-        let saved: Record<string, string> | null = null;
-        try { saved = await this.onSecretsNeeded(plan.ask); } catch { saved = null; }
+        let answer: SecretAnswer = null;
+        try { answer = await this.onSecretsNeeded(plan.ask); } catch { answer = null; }
 
         const askedNames = plan.ask.map((a) => a.name);
+        // STOPPED WHILE WAITING (autopsy 1219c639): nothing is said to the user and nothing more is done —
+        // the build is over. This used to read as a skip and the turn's next tool (an npm install) ran.
+        if (answer === 'stopped') {
+          return `The build was stopped while waiting for ${askedNames.join(', ')}. Do nothing more.`;
+        }
+        const saved: Record<string, string> | null = answer && typeof answer === 'object' ? answer : null;
         if (!saved || Object.keys(saved).length === 0) {
-          const line = secretRequestResult('skipped', askedNames);
+          const line = secretRequestResult(answer === 'timed-out' ? 'timed-out' : 'skipped', askedNames);
           this.events?.emit({ type: 'narration', agent: 'architect', text: line, ts: Date.now() });
           // The build CONTINUES. Skipping is a real answer, and the agent is told to leave the feature
           // visibly disabled rather than fake it.
@@ -10690,6 +10710,31 @@ export interface EditResult {
  * Pure and deterministic — unit-testable without a sandbox. The `path` is only
  * used to make error messages specific.
  */
+/**
+ * Where each match of an ambiguous `old_string` sits, with a line of context either side, so the retry can
+ * pick the one it meant without a read_file round-trip (autopsy 2f723acb: an ambiguous edit to the
+ * stylesheet was followed by a whole re-read of it). At most three matches are shown. PURE.
+ */
+export function ambiguousEditRegions(existing: string, offsets: Iterable<number>, max = 3): string {
+  const lines = existing.split('\n');
+  const lineOf = (offset: number): number => existing.slice(0, offset).split('\n').length; // 1-based
+  const shown: string[] = [];
+  let total = 0;
+  for (const off of offsets) {
+    total++;
+    if (shown.length >= max) continue;
+    const ln = lineOf(off);
+    const from = Math.max(1, ln - 1);
+    const to = Math.min(lines.length, ln + 1);
+    const block: string[] = [];
+    for (let i = from; i <= to; i++) block.push(`${String(i).padStart(5)}| ${lines[i - 1].slice(0, 160)}`);
+    shown.push(`Match at line ${ln}:\n${block.join('\n')}`);
+  }
+  if (shown.length === 0) return '';
+  const more = total > shown.length ? `\n(and ${total - shown.length} more)` : '';
+  return `\n${shown.join('\n')}${more}\nAdd a neighbouring line from the match you mean to old_string so it is unique.`;
+}
+
 export function applyEdit(existing: string, oldStr: string, newStr: string, path = 'file'): EditResult {
   // APPEND MODE (Connectly Edit #1 autopsy 2026-07-21): the model wanted to ADD styles to Navbar.css and
   // called edit_file with an EMPTY old_string. An empty string "matches" at every character position, so
@@ -10713,7 +10758,11 @@ export function applyEdit(existing: string, oldStr: string, newStr: string, path
   }
   if (exact > 1) {
     throw new Error(
-      `edit_file: old_string is not unique in ${path} (${exact} matches) — include more surrounding context.`,
+      `edit_file: old_string is not unique in ${path} (${exact} matches) — include more surrounding context.`
+        + ambiguousEditRegions(existing, (function* () {
+          let at = existing.indexOf(oldStr);
+          while (at >= 0) { yield at; at = existing.indexOf(oldStr, at + Math.max(1, oldStr.length)); }
+        })()),
     );
   }
   // exact === 0 → whitespace-flexible fallback.
@@ -10732,7 +10781,8 @@ export function applyEdit(existing: string, oldStr: string, newStr: string, path
   }
   if (matches.length > 1) {
     throw new Error(
-      `edit_file: old_string is not unique in ${path} (${matches.length} whitespace-flexible matches) — include more surrounding context.`,
+      `edit_file: old_string is not unique in ${path} (${matches.length} whitespace-flexible matches) — include more surrounding context.`
+        + ambiguousEditRegions(existing, matches.map((m) => m.index ?? 0)),
     );
   }
   const m = matches[0];

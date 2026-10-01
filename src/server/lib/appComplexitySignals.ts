@@ -11,7 +11,7 @@
 // Pure, dependency-free, unit-tested. It is a SUPERSET of the historical RE.complexApp alternatives
 // (every prior match is preserved) plus a few unambiguous app-category signals (crm, erp, marketplace,
 // food delivery, ride-hailing) that both detectors previously missed.
-import { analyzeRequirementGaps, withoutDeclinedSentences } from './RequirementGapAnalyzer';
+import { analyzeRequirementGaps, namesASingleLearnerTool, withoutDeclinedSentences } from './RequirementGapAnalyzer';
 
 /** The value `analyzeRequirementGaps` returns when it recognised no business domain at all. */
 export const GENERAL_DOMAIN = 'general';
@@ -123,6 +123,10 @@ export function namesBusinessDomain(prompt: string): boolean {
   // The same guard, in the script the domain regexes already read — see DOCUMENT_DELIVERABLE_SIGNAL.
   if (DOCUMENT_DELIVERABLE_SIGNAL.test(p)) return false;
   if (SIMPLE_APP_SIGNAL.test(p)) return false;
+  // One learner's practice tool is the quiz family, not an education business (autopsy 73648e12: "a mock
+  // test app for UPSC" scored 58 off the word "exam"). Asked of the analyser that owns the vocabulary;
+  // a request naming a coaching, logins, fees or teachers is not a single learner's tool and stays here.
+  if (namesASingleLearnerTool(p)) return false;
   const domain = analyzeRequirementGaps(p).domain;
   return domain !== GENERAL_DOMAIN && !isPersonalTool(domain, p);
 }
@@ -182,6 +186,8 @@ export const PERSONAL_TOOL_DOMAINS: ReadonlySet<string> = new Set(['productivity
 export function namesPersonalTool(prompt: string): boolean {
   const p = String(prompt || '');
   if (PAGE_DELIVERABLE_SIGNAL.test(p) || DOCUMENT_DELIVERABLE_SIGNAL.test(p)) return false;
+  // A learner's practice tool (a mock test, a question bank) is a personal tool too — autopsy 73648e12.
+  if (namesASingleLearnerTool(p)) return true;
   return isPersonalTool(analyzeRequirementGaps(p).domain, p);
 }
 

@@ -314,9 +314,17 @@ export function greenGuardShouldTellUnverified(input: {
   hasSnapshot: boolean;
   previewGreen: boolean;
   filesWrittenThisTurn: number;
+  /**
+   * The user pressed Stop (autopsy 1219c639). That build had run one `npm install` and written no source,
+   * and the user — who had just been told "You stopped this build. Your files are saved" — then read, at
+   * ERROR level, "I made your change, but I could not open your app". A stopped build never got to the
+   * check, by the user's own choice; the stop message already says where things stand.
+   */
+  stoppedByUser?: boolean;
 }): boolean {
   if (!input.hasSnapshot) return false;
   if (input.previewGreen) return false;
+  if (input.stoppedByUser === true) return false;
   // Same rule as `wroteNothing` above: silence is not a zero. A caller that did not state the count
   // gets the pre-2026-09-20 behaviour, never a new silence justified by an absent measurement.
   const n = input.filesWrittenThisTurn;

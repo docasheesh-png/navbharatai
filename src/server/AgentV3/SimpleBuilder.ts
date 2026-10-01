@@ -17,7 +17,7 @@ import { dropShadowingEntries } from './entryShadow';
 import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE } from './noEvalRule';
 import { posix } from 'node:path';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
-import { deadlineFromBudget } from './turnDeadline';
+import { deadlineFromBudget, isReasoningRungHandoff } from './turnDeadline';
 import { judgeRepair } from './repairAcceptance';
 import { scaffoldRestores, protectBoilerplateInRepair, SCAFFOLD_BOILERPLATE } from './scaffoldBoilerplate';
 import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
@@ -1681,7 +1681,22 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
               { deadlineAt: deadlineFromBudget(contractCap) },
             ),
             contractCap, 'simple-contract') || '').trim();
-        } catch { contract = ''; }
+        } catch (err) {
+          contract = '';
+          // 🔴 A HAND-OFF DURING THE CONTRACT ENDS THE LANE HERE (autopsy 1219c639), the sibling of the stop
+          // below (31254f9a). The engine crawled and the next one reasons before every answer, so the
+          // provider chain declined to call it — a deliberate hand-off. The lane read it as an empty
+          // contract: the report said it "came back with nothing usable, so the files were written without
+          // a shared contract", and the user was told "Building 10 file(s)" — then not one file was
+          // written, because every file call would have met the same rung. The plan goes to the full
+          // builder instead, exactly as a hand-off during planning does.
+          if (isReasoningRungHandoff(err)) {
+            clock.contractMs = Math.min(Math.max(0, Date.now() - contractStartedAt), contractCap);
+            clock.contractCapMs = contractCap;
+            clock.contractOutcome = 'handed-off';
+            throw err;
+          }
+        }
         // 🔴 A STOP DURING THE CONTRACT ENDS THE LANE HERE (autopsy 31254f9a). The call came back empty
         // because the user pressed Stop, and the lane carried on: it recorded the contract as having "come
         // back with nothing usable", and told the user it was "Building 9 file(s)" a few milliseconds

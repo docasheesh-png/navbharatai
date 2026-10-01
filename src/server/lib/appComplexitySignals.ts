@@ -11,7 +11,7 @@
 // Pure, dependency-free, unit-tested. It is a SUPERSET of the historical RE.complexApp alternatives
 // (every prior match is preserved) plus a few unambiguous app-category signals (crm, erp, marketplace,
 // food delivery, ride-hailing) that both detectors previously missed.
-import { analyzeRequirementGaps } from './RequirementGapAnalyzer';
+import { analyzeRequirementGaps, withoutDeclinedSentences } from './RequirementGapAnalyzer';
 
 /** The value `analyzeRequirementGaps` returns when it recognised no business domain at all. */
 export const GENERAL_DOMAIN = 'general';
@@ -197,13 +197,15 @@ export function namesPersonalTool(prompt: string): boolean {
  * a page or document deliverable is still a page. PURE.
  */
 export function namesHeavyGame(prompt: string): boolean {
-  const p = String(prompt || '');
+  const p = withoutDeclinedSentences(String(prompt || '')); // "a racing game, no multiplayer" is not heavy
   if (PAGE_DELIVERABLE_SIGNAL.test(p) || DOCUMENT_DELIVERABLE_SIGNAL.test(p)) return false;
   return HEAVY_GAME_SIGNAL.test(p) && analyzeRequirementGaps(p).domain === 'game';
 }
 
 export function isComplexAppPrompt(prompt: string): boolean {
-  const p = String(prompt || '');
+  // A scope word the user DECLINED is not scope ("Do not add a database or login" — autopsy 4d538ca3,
+  // the same class `RequirementGapAnalyzer.withoutDeclinedSentences` closes for the domain reader).
+  const p = withoutDeclinedSentences(String(prompt || ''));
   if (!COMPLEX_APP_SIGNAL.test(p)) return false;
   if (PAGE_DELIVERABLE_SIGNAL.test(p)) {
     return COMPLEX_APP_SIGNAL.test(p.replace(CATEGORY_THEME_WORDS, ' '));

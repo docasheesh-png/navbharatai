@@ -1,3 +1,4 @@
+import { isNeverAppPort } from './neverAppPorts';
 // AgentV3 — Port Discovery: the evidence-first "flip system" (admin 2026-08-07: "ek par na chale to
 // dusra, dusre par na chale to teesra?").
 //
@@ -38,7 +39,10 @@ export function parseListeningPorts(stdout: string | null | undefined): number[]
  * listening in the exact sandboxes this discovery runs in, and publishing it as "the app" would be
  * worse than finding nothing. SSH/DNS + the common DB engines are excluded for the same reason.
  */
-const INFRA_PORTS = new Set([22, 53, 5432, 3306, 27017, 6379, 9229]);
+// 🔒 ONE LIST (autopsy 2b1f845e): it used to be a private copy that did not know the sandbox's own
+// agent (49983), rpcbind (111) or our browser's debugging port (9222) — and the flip below visits every
+// LISTENING port, so it could adopt the sandbox agent as "the app". See neverAppPorts.ts.
+const isInfra = (port: number): boolean => isNeverAppPort(port);
 
 /**
  * Is this port infrastructure rather than the user's app? Exported (B2) so the ports panel can LABEL a
@@ -46,7 +50,7 @@ const INFRA_PORTS = new Set([22, 53, 5432, 3306, 27017, 6379, 9229]);
  * knowledge, one source, rather than a second list that drifts.
  */
 export function isInfraPort(port: number): boolean {
-  return INFRA_PORTS.has(port);
+  return isInfra(port);
 }
 
 /** Common dev-server ports, in rough order of likelihood across the frameworks we build. */
@@ -102,12 +106,12 @@ export function rankPortCandidates(opts: {
 }): number[] {
   const out: number[] = [];
   const push = (p: number | null | undefined): void => {
-    if (typeof p === 'number' && Number.isInteger(p) && p > 0 && p <= 65535 && !INFRA_PORTS.has(p) && !out.includes(p)) out.push(p);
+    if (typeof p === 'number' && Number.isInteger(p) && p > 0 && p <= 65535 && !isInfra(p) && !out.includes(p)) out.push(p);
   };
   push(opts.parsed);
   push(opts.scriptPort);
   push(opts.expected);
-  const listening = (opts.listening ?? []).filter((p) => !INFRA_PORTS.has(p));
+  const listening = (opts.listening ?? []).filter((p) => !isInfra(p));
   for (const p of COMMON_DEV_PORTS) if (listening.includes(p)) push(p);
   for (const p of listening) push(p);
   // Tier 5 — the bounded guess, only ever reaching ports evidence did not already supply.

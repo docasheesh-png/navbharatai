@@ -273,6 +273,8 @@ export function packageOfSpecifier(specifier: string): string {
  * errors from one missing package produce one line, and capped at `MAX_CAUSES`. PURE, never throws.
  */
 /** The recognition half of the Web Speech API, as the compiler reports it missing. */
+/** `Property 'x' does not exist on type 'void'` (or `Promise<void>`) — reading the result of a void call. */
+const VOID_RESULT_RE = /Property '([^']+)' does not exist on type '((?:Promise<)?void>?)'/;
 const WEB_SPEECH_RECOGNITION_RE = /(?:Cannot find name|Property) '(?:webkit)?(?:SpeechRecognition|SpeechRecognitionEvent|SpeechRecognitionErrorEvent|SpeechGrammarList)'/;
 
 export function tscErrorCauses(
@@ -297,6 +299,22 @@ export function tscErrorCauses(
   for (const e of errors || []) {
     if (out.length >= MAX_CAUSES) break;
     const message = String(e?.message ?? '');
+
+    // 🔴 THE RESULT OF A FUNCTION THAT RETURNS NOTHING (autopsy 2b1f845e, 2026-10-01). PostStep.tsx did
+    // `const { campaign, results } = await postCampaign(...)` against a store action declared to return
+    // `void`, and the compiler said "Property 'campaign' does not exist on type 'void'" — on the line in
+    // PostStep. The model rewrote PostStep NINE times over ~90 s (renaming, casting, aliasing) before it
+    // grepped the store and read the action. The remedy is in the CALLEE's declaration — this module's
+    // class exactly: the error names the caller, the fix lives in another file.
+    const voidMember = VOID_RESULT_RE.exec(message);
+    if (voidMember) {
+      add('void-result',
+        `\`${String(e?.file ?? 'this file')}\` reads a property (\`${voidMember[1]}\`) from the RESULT of a call that returns `
+        + `nothing (${voidMember[2]}). The fix is not a rename or a cast here: open the called function's declaration (in the `
+        + 'file it is imported from) and either make it RETURN that value, or stop reading its result in this file. '
+        + 'Rewriting this file without reading that declaration will fail again identically.');
+      continue;
+    }
 
     // THE WEB SPEECH API'S RECOGNITION HALF IS NOT IN TYPESCRIPT'S DOM TYPES (autopsy SignBridge,
     // 2026-09-26: `src/lib/speech.ts` was written four times — each rewrite moved the same missing name

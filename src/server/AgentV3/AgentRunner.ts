@@ -1275,9 +1275,9 @@ export class AgentRunner {
         let doneText: string | null = null;
         try {
           const lastStepFailed = resultBlocks.some((b) => (b as { is_error?: boolean }).is_error === true);
-          const doneDue = shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything() });
+          const doneDue = shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true });
           if (doneDue && lastStepFailed) doneMissedAt = doneMissedAt ?? steps;
-          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, lastStepFailed, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything() })) {
+          if (shouldCheckDone({ cfg: doneCfg, step: steps, toolUses: totalToolUses, alreadySignalled: doneSignalled, lastStepFailed, missedAt: doneMissedAt, wroteThisRun: dispatcher.wroteAnything(), editingExistingApp: this.opts.editingExistingApp === true })) {
             doneMissedAt = undefined;
             const readiness = await dispatcher.assessBuildReadiness();
             // Never "complete and healthy" over a compile that just failed (autopsy 33812996).

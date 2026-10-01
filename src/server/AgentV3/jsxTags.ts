@@ -161,6 +161,42 @@ export function enclosingTag(source: string, offset: number): string | null {
 }
 
 /**
+ * The opening tags still OPEN at `offset`, outermost first — the elements a piece of markup sits inside.
+ *
+ * Written for the focus-owner check (autopsy e49afa97, 2026-10-01): an `autoFocus` input inside
+ * `{showForm && (<div role="dialog" aria-modal="true">…)}` takes focus when that dialog OPENS, not when
+ * the page loads, so it is not competing for the page's first focus. Answering that needs the elements
+ * around the input, across lines. A closing tag pops back to its own opener; anything unreadable is
+ * skipped rather than guessed, and comments are blanked first, length-preserving.
+ */
+export function openTagsAt(raw: string, offset: number): string[] {
+  if (typeof raw !== 'string' || offset <= 0) return [];
+  const source = stripCommentsForMarkup(raw);
+  const stack: Array<{ name: string; tag: string }> = [];
+  const end = Math.min(offset, source.length);
+  let scanned = 0;
+  for (let i = 0; i < end; i++) {
+    if (source[i] !== '<') continue;
+    if (source.startsWith('</', i)) {
+      const close = /^<\/\s*([A-Za-z][\w.-]*)\s*>/.exec(source.slice(i, i + 80));
+      if (close) {
+        const at = stack.map((t) => t.name).lastIndexOf(close[1]);
+        if (at >= 0) stack.length = at;
+      }
+      continue;
+    }
+    if (!/[a-zA-Z]/.test(source[i + 1] ?? '')) continue;
+    const read = readTagAt(source, i);
+    if (!read) continue;
+    if (read.end >= end) break; // the tag that contains the offset is not an ancestor of it
+    if (!/\/\s*>$/.test(read.tag)) stack.push({ name: tagName(read.tag), tag: read.tag });
+    i = read.end;
+    if (++scanned >= MAX_TAGS) break;
+  }
+  return stack.map((t) => t.tag);
+}
+
+/**
  * Every opening tag in a whole source file, each carrying whether a `<label>` encloses it.
  *
  * Two facts a regex cannot carry, and both were false findings in one real report:

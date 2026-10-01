@@ -86997,3 +86997,34 @@ reversions, one per fixed file, each failed the suite.
 **Live effect to watch:** an `UNSUPPORTED_STACK` line naming "native Android (Kotlin)" and a module plan made of
 web modules; no `rm -f package.json` reaching the sandbox (`[BLOCKED-DESTRUCTIVE] refused runtime-manifest
 delete` in the audit instead); no `APP_SCOPE … clone of YouTube` on assistant prompts.
+
+## 2026-10-01 — Autopsy 73648e12 + 2f723acb (the UPSC mock-test report)
+
+"Build a mock test app for UPSC drug inspector exam 2026 based on previous papers, make it interactive", Weak
+tier. Build 1 was stopped by the user at 108 s (₹5.52, real cost). Build 2 ("Continue … Provide me with a
+downloadable APK") ran 11.5 min against a 3–5 min estimate and billed ₹184.41 for an app that had grown Courses,
+Attendance, Fees and an Admin screen around two mock tests.
+
+| # | Problem | Root cause → class | Fix | Lock |
+|---|---|---|---|---|
+| U-a | Education LMS features (roles, courses, attendance, fees) added to a mock-test app | `exam` selects the education domain, whose list is an INSTITUTION's; a learner's practice tool has no second party | `namesASingleLearnerTool` withdraws the list (domain still named) unless an institution word is present | test §1, reverted ⇒ fails |
+| U-b | Scored 58 / complex (KIMI opening, 9–10 min ETA) | `namesBusinessDomain` promoted every labelled domain; the quiz family's practice tools were not in it | the learner tool joins `namesPersonalTool` (simple_app 15) and is excluded from `namesBusinessDomain` | test §1, reverted ⇒ fails |
+| U-c | "Continue…" on the stopped build sized as "hi" (5), ETA 3–5 vs 11.5 min | sibling of e725e002: two files of the user's made the workspace "an app", so `planningRequest` dropped the request being continued, while the entry was still our starter | route reads the entry (one bounded doc read), `appStillUnbuilt` keeps the earlier requests | test §2, reverted ⇒ fails |
+| U-d | 17 invented `nb-` classes reached a 95 s repair pass; style resume handed back only 2 | `undefinedClassesNow` skipped EVERY `nb-` class "for the kit", but the kit restores only classes it defines — the write-time path had a second note for invented ones, the end of the turn did not | `leftToTheKit` (kit-defined only) in the end-of-turn check and in the stylesheet-write note | test §3, reverted ⇒ fails |
+| U-e | "✅ The app looks complete — wrapping up." said over unstyled screens, then more work | the done check reads code health only | the done steer carries the missing classes and the narration is withheld while any are missing | test §3 (source) |
+| U-f | User told "some features show demo results … a random song" about `<h3>Latest mock test result</h3>` | `SIMULATED_RESULT_RE` read the domain noun "mock test" as made-up; the notice carried a fixed example | practice nouns (test, exam, paper, interview…) after mock/simulated exempt it; the notice gives no invented example | test §4, reverted ⇒ fails |
+| U-g | Sign-in never ran; page check counted only /login, 5 routes redirected | `isSignInWall` counted the page's own sign-in buttons (3 demo roles) against a limit of 4; the page check never asked for a sign-in on its own | companion buttons not counted; one-tap demo button sign-in; the page check signs in when routes redirect to a sign-in route (`redirectedTo`) | test §5 + real browser, reverted ⇒ fails |
+| U-h | `INTEGRITY_UNUSED_DEP` warning on react-router-dom in the stopped build | a package an unfinished build just installed was judged as if the build had finished | `unusedDependencyLine`: unfinished + added this build ⇒ info "not used yet" | test §6 |
+| U-i | Ambiguous `edit_file` followed by a full re-read of the stylesheet | the error said "include more context" and nothing else | `ambiguousEditRegions` lists each match with its lines | test §7 |
+| U-j | APK request unanswered in the summary | already fixed by #3447 (`phoneBuildAsked`, merged after this build) — verified on the report's sentence | — | #3447 tests |
+| U-k | GLM benched for the whole build after two crawls ("2 consecutive timeouts") | already fixed by #3448 (a crawl is not a timeout strike, merged after this build) | — | #3448 tests |
+| U-l | GLM crawl ×2 (30 s, 4%) | external provider latency | Q-009 (seen-again note) | — |
+| U-m | TS1005 written into store.tsx, fixed in one edit | caught by the write-time typecheck in 2 s — the designed net | — | — |
+| U-n | Model narrated "single-file, dependency-free" then installed a router | mid-build narration is not a delivered claim; the summary claim audit (`one-file`, #3447) covers the delivered one | — | #3447 tests |
+| U-o | RELEASE_GATE YELLOW, "No tests at all" | only the starter e2e suite exists — the designed honest state | — | — |
+
+`tests/theMockTestAppWasNotAnLms.test.ts` (20 cases, one in a real browser); seven reversions, one per fix, each
+failed the suite. **Live effect to watch:** on a mock-test/quiz prompt, no `REQUIREMENT_GAPS` feature list and a
+`COMPLEXITY_ROUTING` of simple; on a "Continue" after a stopped build, `PLANNING_CONTEXT` naming the earlier
+requests; `STYLE_RULES_RESUMED` listing `nb-` names; `AUTH_EXPLORE_SIGNED_IN (one-tap demo button…)` on apps with
+demo-role buttons.

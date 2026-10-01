@@ -22,6 +22,7 @@ import { creatorLine } from './storeCreatorLine';
 import { SocialBar, CommentsSection, LikersSheet, ProfileSheet, CommentReportsAdmin, FollowButton, FollowersSheet } from './appMart/AppMartSocial';
 import { useSocialStats, useSignedIn, webKey, apkKey, fetchFeed, askToSignIn } from './appMart/appMartSocialApi';
 import { BROWSE_VIEWS, kindFilterOptions, shelvesFor, emptyViewMessage, viewNeedsSignIn, type BrowseView, type KindFilter } from './appMart/browseViews';
+import { readStoreStatus, type StoreStatus } from './appMart/storeStatus';
 import { parseAppMartTarget } from '../../lib/appMartTarget';
 
 // Nav App Store — publish your Android app, and install other people's.
@@ -41,14 +42,8 @@ import { parseAppMartTarget } from '../../lib/appMartTarget';
 
 type Tab = 'browse' | 'publish' | 'mine' | 'review';
 
-interface StoreStatus {
-  acceptingUploads: boolean;
-  uploadFeeInr: number;
-  categories: string[];
-  maxSizeMb: number;
-  isAdmin: boolean;
-  missing: string[];
-}
+// `StoreStatus` and its validator live in ./appMart/storeStatus — the status is accepted only when it IS
+// the status (admin's TestFlight crash, 2026-10-01: an error body was read as the status).
 
 interface HighRisk { permission: string; why: string }
 
@@ -155,6 +150,8 @@ const HIDE_ANDROID_INSTALLS = androidInstallsHidden(STORE_PLATFORM);
 export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initialTab, initialPublishWorkspaceId, socialTarget }) => {
   const [tab, setTab] = useState<Tab>(initialTab ?? 'browse');
   const [status, setStatus] = useState<StoreStatus | null>(null);
+  // Why the status could not be read, when it could not — shown on the Publish tab instead of crashing it.
+  const [statusProblem, setStatusProblem] = useState<string | null>(null);
 
   // ── BROWSE VIEWS + KIND FILTER (admin 2026-10-01: "browser me 3 button … general, follower, likes
   // app … sabhi page me upar play instantly aur apk filter"). General is the store; Following and
@@ -304,7 +301,12 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
     try {
       const res = await fetch('/api/nav-store/status', { headers: await authedHeaders() });
       const data = await res.json().catch(() => null);
-      if (liveRef.current && data) setStatus(data as StoreStatus);
+      // Only the real status may become the status. An `{ error }` body from a guard (429 / 401 / 500)
+      // used to be stored as if it were one, and `.missing.join` then crashed the whole screen.
+      const read = readStoreStatus(res.ok, data, res.status);
+      if (!liveRef.current) return;
+      setStatus(read.status);
+      setStatusProblem(read.problem);
     } catch { /* the browse tab still works from cache-less empty state */ }
   }, []);
 
@@ -961,6 +963,12 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
         )}
 
         {/* ── Publish ── */}
+        {tab === 'publish' && statusProblem && (
+          <p className="mb-3 rounded-lg border border-line bg-raised px-3 py-2 text-xs text-muted leading-relaxed">
+            The store's status could not be checked just now ({statusProblem}). You can still publish; if that
+            fails too, try again in a minute.
+          </p>
+        )}
         {tab === 'publish' && (
           status && !status.acceptingUploads ? (
             <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-4">

@@ -326,3 +326,28 @@ describe('9 · a file this build never wrote did not miss a note', () => {
     expect(writeQualitySummary([], ['src/index.css'])).toMatch(/1 never got a note \(src\/index\.css\)/);
   });
 });
+
+describe('10 · a URL that only a parameter route serves is named as such', () => {
+  // The report's app: `/` and `/:collectionId`. The agent opened /design and /revenue.
+  const APP = '<Routes><Route path="/" element={<Studio/>} /><Route path="/:collectionId" element={<Studio/>} /><Route path="*" element={<NotFound/>} /></Routes>';
+
+  it('/design matched /:collectionId', async () => {
+    const { declaredRoutes, paramOnlyMatch } = await import('../src/server/AgentV3/routerPaths');
+    const routes = declaredRoutes(APP);
+    expect(paramOnlyMatch('/design', routes)).toBe('/:collectionId');
+    expect(paramOnlyMatch('/design?x=1', routes)).toBe('/:collectionId');
+  });
+
+  it('a literal route, the root and a deeper unmatched path say nothing', async () => {
+    const { declaredRoutes, paramOnlyMatch } = await import('../src/server/AgentV3/routerPaths');
+    const routes = declaredRoutes('<Routes><Route path="/design" element={<D/>} /><Route path="/:id" element={<C/>} /></Routes>');
+    expect(paramOnlyMatch('/design', routes)).toBeNull();
+    expect(paramOnlyMatch('/', routes)).toBeNull();
+    expect(paramOnlyMatch('/a/b', routes)).toBeNull();
+  });
+
+  it('browser_action appends the note (source guard)', () => {
+    const src = readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8');
+    expect(src).toMatch(/const routeNote = args\.url \? await this\.paramRouteNote\(args\.url\) : '';/);
+  });
+});

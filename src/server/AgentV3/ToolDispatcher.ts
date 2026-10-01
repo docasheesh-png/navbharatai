@@ -12,6 +12,7 @@ import { narrationText, type NarrationId, type NarrationParams } from './narrati
 import { noteHeal } from './HealLedger';
 import { decideSupersede } from './previewSupersede';
 import { missingRanges, latestVersionsCommand, versionHint } from './npmVersionHint';
+import { declaredRoutes, paramOnlyMatch, type DeclaredRoute } from './routerPaths';
 import { DECLARED_PORT_FILES } from './declaredPort';
 import { appPortsFrom, isSecondaryAppPort, type AppPortMap } from './appPorts';
 import { sandboxStore } from './SandboxStore';
@@ -3150,10 +3151,31 @@ export class ToolDispatcher {
       direction,
     };
     const res = await this.actuator.browserAction(this.workspaceId, action as BrowserActionName, args);
+    const routeNote = args.url ? await this.paramRouteNote(args.url) : '';
     return {
-      content: `Browser ${action}${args.selector ? ` on "${args.selector}"` : ''}${args.url ? ` → ${args.url}` : ''}: ${res.result}. Screenshot attached.`,
+      content: `Browser ${action}${args.selector ? ` on "${args.selector}"` : ''}${args.url ? ` → ${args.url}` : ''}: ${res.result}. Screenshot attached.${routeNote}`,
       image: res.screenshot ? { base64: res.screenshot, mimeType: 'image/png' } : undefined,
     };
+  }
+
+  /**
+   * When a URL the agent opened is served only by a `:param` route, say so (routerPaths.paramOnlyMatch,
+   * autopsy 2b1f845e). Reads at most three router files; '' on anything unreadable. Never throws.
+   */
+  private async paramRouteNote(url: string): Promise<string> {
+    try {
+      let path: string;
+      try { path = new URL(url).pathname; } catch { path = url.startsWith('/') ? url : ''; }
+      if (!path || path === '/') return '';
+      const routes: DeclaredRoute[] = [];
+      for (const f of ['src/App.tsx', 'src/main.tsx', 'src/router.tsx']) {
+        try { routes.push(...declaredRoutes(await this.actuator.readFile(this.workspaceId, f))); } catch { /* absent */ }
+      }
+      const hit = paramOnlyMatch(path, routes);
+      return hit
+        ? `\nNOTE: the app has no \`${path}\` route — this path matched \`${hit}\`, so the page shown is that route with "${path.split('/').filter(Boolean).pop()}" as its parameter. A screen switched by state is reached by pressing its control on \`/\`, not by a URL.`
+        : '';
+    } catch { return ''; }
   }
 
   /**

@@ -35,7 +35,7 @@ import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAutho
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
-import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange, fleetEtaLine } from '../AgentV3/progressEta';
+import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange, fleetEtaLine, finalChecksEtaLine } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
 import { decideComplexity, scaffoldedComplexityDecision } from '../AgentV3/complexityRouting';
 import { planningRequest, planningContextNote, wasBuildRequest } from '../AgentV3/planningRequest';
@@ -12757,6 +12757,12 @@ async function noteBuildOutcome(
      * reasoning about "when did settling start" simple.
      */
     let settlingAnnounced = false;
+    /**
+     * The build loop is over and only the platform's own checks and fixes remain (autopsy de3bb2bb: at
+     * minute 12 the line promised "about 7 min more" — the build ended 34 seconds later, inside its final
+     * checks). Set at the post-answer pass; the ETA tick then says where the build IS, with no number.
+     */
+    let etaFinalChecks = false;
     const emitSettlingPhase = (): void => {
       if (settlingAnnounced) return;
       settlingAnnounced = true;
@@ -12854,6 +12860,10 @@ async function noteBuildOutcome(
           // It returns null in every case where it would be guessing — no plan, too few files, or the
           // file phase already over (a repair loop is genuinely unpredictable) — and the honest
           // re-baselining fallback below then owns the line exactly as it does today.
+          if (etaFinalChecks) {
+            events.emit({ type: 'narration', agent: 'architect', text: finalChecksEtaLine(elapsedMs), ts: now, id: 'eta-live' });
+            return;
+          }
           const measured = measuredRemainingMs({ plannedFiles: etaPlannedFiles, filesDone: writtenFiles.size, firstFileAt: etaFirstFileAt, now });
           if (measured !== null) {
             // Re-anchor the fallback's budget too, so if measurement later stops applying (the build
@@ -17436,6 +17446,10 @@ async function noteBuildOutcome(
           signal: abort.signal });
         // A STOP IS NOT A FALLBACK (autopsy 31254f9a): nothing is handed to the full builder after a Stop.
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : sb.stopped ? 'SIMPLE_BUILD_STOPPED' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
+        // The lane's FILE PLAN is not the plan of record once it hands off (autopsy de3bb2bb): the full builder
+        // plans its own files, so "9 of 10 files written · ~1 min to go" at minute 4 counted against a list
+        // nobody was following any more. Forget it; the architect's own plan steps drive the ETA from here.
+        if (!sb.ok) { etaPlannedFiles = 0; etaFirstFileAt = 0; }
         // WHERE THE FAST LANE'S MINUTES WENT (autopsy 21b431e1). Measurement only — nothing reads it.
         // Recorded on BOTH outcomes, because a lane that handed off is exactly the one whose time
         // needs explaining, and a check only ever visible when it complains cannot be told apart from
@@ -18604,10 +18618,14 @@ async function noteBuildOutcome(
         // just closed on the import-boot path. Cutting on a guess is how a confident wrong fix ships.
         // So the next report will say where the time actually goes, and THEN it can be fixed with evidence.
         const integrityStartedAt = Date.now();
+        etaFinalChecks = true; // the app's turn is over — the ETA line says so instead of promising minutes
         const storeFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
         const storeLoadMs = Date.now() - integrityStartedAt;
         const integrityFiles: Record<string, string> = { ...storeFiles, ...Object.fromEntries(writtenFiles) };
-        for (const p of ['src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/index.tsx', 'index.html', 'src/index.css']) {
+        // The sandbox is read for the files a check reasons from by their ABSENCE (autopsy de3bb2bb): the
+        // durable map did not hold the starter's `src/vite-env.d.ts`, so `missingViteEnvTypes` wrote one into
+        // a project that already had it and told the user TypeScript had complained — tsc was clean.
+        for (const p of ['src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/index.tsx', 'index.html', 'src/index.css', 'src/vite-env.d.ts', 'tsconfig.json', 'tsconfig.app.json']) {
           if (integrityFiles[p] === undefined) {
             try { integrityFiles[p] = await actuator.readFile(workspaceId, p); } catch { /* absent in sandbox too */ }
           }
@@ -18889,12 +18907,14 @@ async function noteBuildOutcome(
           if (prunedDeps.includes(u.name)) continue;
           buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_UNUSED_DEP', ...obs(`"${u.name}" is declared in package.json dependencies but no project file imports it. If it is used only via config, a CLI, or a runtime string-load, ignore this; otherwise removing it shrinks the install.`) });
         }
+        // A shared stylesheet imported by several modules is a FACT, never a defect (autopsy de3bb2bb): a
+        // bundler includes the file once. Recorded at info level, outside `!integrity.ok`, so it is not lost.
+        for (const d of integrity.duplicateStylesheets) {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_DUPLICATE_STYLESHEET', autoResolved: true, message: `"${d.stylesheet}" is imported by ${d.importers.length} modules (${d.importers.join(', ')}). Not a defect: the bundler includes it once.` });
+        }
         if (!integrity.ok) {
           if (integrity.focusOwners.length >= 2) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_FOCUS_CONFLICT', ...obs(`${integrity.focusOwners.length} components grab initial focus: ${integrity.focusOwners.map((o) => `${o.file} (${o.mechanism})`).join(', ')} — only one may own initial focus.`) });
-          }
-          for (const d of integrity.duplicateStylesheets) {
-            buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_DUPLICATE_STYLESHEET', ...obs(`"${d.stylesheet}" imported by ${d.importers.length} modules: ${d.importers.join(', ')}.`) });
           }
           for (const o of integrity.orphanStylesheets) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_ORPHAN_STYLESHEET', ...obs(`"${o.stylesheet}" is imported by nothing (no module import, no HTML link) — the app ships unstyled unless it is wired in.`) });
@@ -18911,7 +18931,7 @@ async function noteBuildOutcome(
           // so the heal must not edit the imported project — the warnings above stay advisory (matches the
           // C9 reviewer-autofix `!isImportTurn` gate). `expectsArtifacts` is false on every import turn.
           if (shouldRunIntegrityHeal({ gateEnabled: envFlag('AGENTV3_INTEGRITY_GATE'), resultOk: result.ok, expectsArtifacts, aborted: abort.signal.aborted })) {
-            events.emit({ type: 'narration', agent: 'architect', text: '🔧 Fixing project-integrity issues (focus ownership / duplicate stylesheet)…', ts: Date.now() });
+            events.emit({ type: 'narration', agent: 'architect', text: '🔧 Fixing project-integrity issues…', ts: Date.now() });
             try {
               const integrityRunner = new AgentRunner({
                 ...baseRunnerOpts,
@@ -18930,8 +18950,10 @@ async function noteBuildOutcome(
                 // I will not make any changes." as the user's build result. Keep the REAL build summary;
                 // the heal contributes its edits, never its chatter.
                 result = { ...healed, summary: result.summary };
-                const after = analyzeProjectIntegrity(Object.fromEntries(writtenFiles));
-                if (after.ok) buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_HEALED', message: 'Project-integrity issues fixed (single focus owner; no duplicate stylesheet).', autoResolved: true });
+                // Re-judged on the WHOLE project, the same map the finding came from — this build's writes
+                // alone cannot see a focus owner or an entry in a file the build did not touch.
+                const after = analyzeProjectIntegrity({ ...integrityFiles, ...Object.fromEntries(writtenFiles) });
+                if (after.ok) buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_HEALED', message: 'Project-integrity issues fixed and re-checked on the whole project.', autoResolved: true });
               }
             } catch { /* self-heal is best-effort — the honest warnings stand */ }
           }
@@ -19359,7 +19381,9 @@ async function noteBuildOutcome(
                       severity: left.length < 3 ? 'info' : 'warning',
                       code: left.length < 3 ? 'CSS_CLASSES_HEALED' : 'CSS_CLASSES_PARTIALLY_HEALED',
                       message: left.length < 3
-                        ? 'Every class the screens use now has a style rule.'
+                        ? (left.length === 0
+                          ? 'Every class the screens use now has a style rule.'
+                          : `The repair added the missing style rules; ${left.length} class name(s) still have none (${left.join(', ')}), under the threshold for a finding.`)
                         : `After the repair ${left.length} class name(s) still have no style rule: ${left.slice(0, 12).join(', ')}.`,
                       autoResolved: left.length < 3,
                     });

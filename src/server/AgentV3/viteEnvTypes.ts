@@ -62,5 +62,5 @@ export function missingViteEnvTypes(
 
 /** The honest one-line report entry. Names the cost that was avoided, not just the action taken. */
 export function viteEnvTypesNote(): string {
-  return `The app reads import.meta.env but nothing declared Vite's client types, so TypeScript reported "Property 'env' does not exist on type 'ImportMeta'". Wrote ${VITE_ENV_DTS_PATH} — a types-only declaration with no runtime effect — instead of spending a repair round discovering it from a compiler error.`;
+  return `The app reads import.meta.env but nothing declared Vite's client types, so TypeScript would report "Property 'env' does not exist on type 'ImportMeta'". Wrote ${VITE_ENV_DTS_PATH} — a types-only declaration with no runtime effect — instead of spending a repair round discovering it from a compiler error.`;
 }

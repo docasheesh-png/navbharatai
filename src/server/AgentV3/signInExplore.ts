@@ -24,6 +24,7 @@
  * PURE: the candidate reader, the script builder and the output parser. The route runs the script.
  */
 import { playwrightImport, browserScriptRunLine } from './sandboxBrowserScript';
+import { DESTRUCTIVE_LOCAL_WORDS, SPENDING_LOCAL_WORDS, DEVANAGARI_NEVER_WORDS } from './localActionWords';
 
 /** Where the signed-in browser session is saved inside the sandbox, for the other checks to load. */
 export const SIGNED_IN_STATE_PATH = '/tmp/nbai-signed-in.json';
@@ -153,13 +154,23 @@ NBAI_EOF
 ${browserScriptRunLine({ toolsDir: SIGN_IN_TOOLS_DIR, scriptPath: '/tmp/nbai-signin.mjs', marker: SIGN_IN_RESULT_MARKER })}`;
 }
 
+/**
+ * Links the signed-in explorer never follows. English as before, plus the Hindi / Hinglish words for the same
+ * actions (autopsy de3bb2bb: the click explorer's English-only list pressed "Itihaas saaf karein") — this
+ * module had its own English-only copy, the sibling that fix had to reach too.
+ */
+export const SIGN_IN_NEVER = new RegExp(
+  `(delete|remove|log ?out|sign ?out|pay|checkout|buy|reset|clear|${DESTRUCTIVE_LOCAL_WORDS}|${SPENDING_LOCAL_WORDS})|${DEVANAGARI_NEVER_WORDS}`,
+  'i',
+);
+
 /** The ES module itself, split out so a test can run it in a real browser. */
 export function signInModule(cfg: Record<string, unknown>, importLine: string = playwrightImport(SIGN_IN_TOOLS_DIR)): string {
   return `${importLine}
 const cfg = ${JSON.stringify(cfg)};
 const started = Date.now();
 const say = (o) => console.log(cfg.marker + JSON.stringify(o));
-const NEVER = /(delete|remove|log ?out|sign ?out|pay|checkout|buy|reset|clear)/i;
+const NEVER = new RegExp(${JSON.stringify(SIGN_IN_NEVER.source)}, 'i');
 
 async function settle(page) {
   await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});

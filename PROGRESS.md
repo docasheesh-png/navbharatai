@@ -87029,6 +87029,53 @@ reversions, one per fixed file, each failed the suite.
 web modules; no `rm -f package.json` reaching the sandbox (`[BLOCKED-DESTRUCTIVE] refused runtime-manifest
 delete` in the audit instead); no `APP_SCOPE … clone of YouTube` on assistant prompts.
 
+## 2026-10-01 — Autopsy de3bb2bb ("Ye yese app banao jo data COACT oar sake", Weak, ok, 12.6 min vs a 6–8 min ETA, ₹194.19)
+
+Tally: 0 shipped broken · 3 self-heals that should not have been needed (integrity repair of a non-defect, the
+style hand-back, the CSS heal) · 2 struggles (a 189 s single-batch KIMI write; a sub-agent re-reading files the
+architect had already handed it) · 1 workaround (GLM crawl → bench) · release gate YELLOW on two warnings, both
+our own instruments, not the app.
+
+### Fixed (this PR, test-locked and reversion-proven in `tests/theCoactCollectorAutopsy.test.ts`, 27 cases)
+- **A ✅ shared constants in a `constants/` folder had no owner.** The plan named `src/constants/chat.ts`; the
+  value-owner rule only matched a `data`/`constants` BASENAME, so a new `data.ts` was added beside the contract
+  and two files wrote the same arrays. `dataDirOwner` (`SimpleBuilder.ts`) picks a planned module inside a
+  `constants|data|mocks|fixtures|seeds` folder (one ⇒ it; several ⇒ best stem overlap; a tie ⇒ nobody).
+- **B ✅ a repair pass started with the previous pass's read memory.** `ToolDispatcher.beginConversation()`
+  (called once per `AgentRunner.run`) clears the conversation's own reads/commands except handed-off files, so
+  a fresh pass is never told "you already read this" about a file it never saw. The shared report ledger is
+  untouched, so `REPEATED_READS` still counts the whole build.
+- **C ✅ a stylesheet imported by two modules was repaired as a defect.** Vite emits it once (proven with a real
+  Vite build). It no longer makes the integrity gate fail, is no longer in the repair instruction, and is
+  recorded as `info`. This one item cost an LLM pass and the YELLOW gate.
+- **D ✅ a healed finding stayed open.** `BuildDiagnostics.record` resolves the codes a `*_HEALED` line names
+  (`HEAL_RESOLVES`); the census test fails when the route records a new heal code that is not in the table.
+- **E ✅ the integrity after-check read only the files the heal wrote** and called the project fixed; it now
+  reads the whole project (durable + written + sandbox fallback).
+- **F ✅ `REPEATED_READS`, `WORKSPACE_SCAN_FAILED`, `EMPTY_BUILD_RETRY` counted against the app.** Added to
+  `PROCESS_ONLY_CODES` and `NEVER_SUGGEST` — facts about our engine.
+- **G ✅ `vite-env.d.ts` missing from the integrity read** → the Vite env note claimed TypeScript errors that
+  the typecheck did not show. The sandbox fallback list now includes `src/vite-env.d.ts` and both tsconfigs; the
+  note says "would report". ⚠️ Why the durable store lacked the file is NOT proven (the template has it) — open.
+- **H ✅ the explorer could press "Saara data hatayein".** Hindi/Hinglish/Devanagari never-press and write words
+  (`localActionWords.ts`), shared by the click explorer and the sign-in explorer.
+- **I ✅ the platform's own e2e scaffold produced dependency and env findings.** `collectDependencyIssues` /
+  `collectEnvRefs` skip marker-carrying scaffold files (`platformE2eFiles`).
+- **Discovered ✅ the live ETA said "9 of 10 files" through 3 minutes of final checks**, and a failed fast-lane
+  hand-off left its file count in the ETA. `finalChecksEtaLine` takes over once integrity starts; the count is
+  reset when the fast lane hands off.
+- **Discovered ✅ `CSS_CLASSES_HEALED` said "all fixed" with 1–2 classes remaining** — the message now says so.
+
+### Covered by merged PRs (no new work): journey `UNREACHABLE` (#3451 Q-032), empty-workspace SETUP wording
+(#3449 Q-041), durable `index.html` (#3449 Q-042), ETA band (#3451 Q-030), reviewer handed file (#3451 Q-034).
+
+### 🟡 Blocked (rows in `BUILD_REPORT_QUEUE.md`): Q-064 GLM crawl (external) · Q-065 one 189 s 7-file batch
+(decision; recommend ≤3 files per call) · Q-066 sub-agents without the style hand-back (decision; recommend
+yes) · Q-067 "COACT" typo read as a product name (needs the final `useChat.ts`; recommend leave) · Q-068 six
+argued not-defects (needs agreement).
+
+**Live effect to watch:** no `INTEGRITY_HEALED` pass for a shared stylesheet; `INTEGRITY_DUPLICATE_STYLESHEET`
+at `info`; healed findings shown resolved in the report; the release gate GREEN on an app like this one.
 ## 2026-10-01 — Autopsy 4a1c0157: a starter chip's login page (Weak, GREEN, 3.8 min, ₹23.11)
 
 The build itself went well: the tested "Login page" template was seeded, the builder made two small edits,

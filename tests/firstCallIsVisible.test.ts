@@ -179,7 +179,8 @@ describe('the wiring — each half reaches the place that was blank', () => {
   const multi = read('src/server/AgentV3/providers/MultiProviderTurnRunner.ts');
 
   it('the read loop judges throughput, and only when the caller allows it', () => {
-    expect(runner).toContain('opts.canAbandon?.() && streamIsCrawling(');
+    // Crawling is judged FIRST and the caller asked only then: asking claims the abandon (autopsy d382b398).
+    expect(runner).toContain('streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt }) && opts.canAbandon?.()');
     expect(runner).toContain("return 'slow';");
   });
 
@@ -188,7 +189,8 @@ describe('the wiring — each half reaches the place that was blank', () => {
     // slow success into a failure. The cap was once per build; since autopsy 876afca9 (2026-09-30) a
     // crawl bench ends after a window and the SAME rung gets one re-probe, so the cap is two abandons,
     // the second only on that re-probe (crawlBench.ts `mayAbandonCrawl`, tested there).
-    expect(multi).toContain('const canAbandonSlowStream = () => mayAbandonCrawl({\n            hasNextRung: i + 1 < chain.length,');
+    expect(multi).toContain('const canAbandonSlowStream = (o?: { peek?: boolean }): boolean => {');
+    expect(multi).toContain('const ok = mayAbandonCrawl({\n              hasNextRung: i + 1 < chain.length,');
     expect(multi).toContain('abandonedSlowRung = true;');
   });
 

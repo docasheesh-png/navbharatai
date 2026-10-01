@@ -54,7 +54,7 @@ import { deviceSummaryNotice, deviceSummaryRecord } from '../AgentV3/devicePower
 import { nativeCapabilityBrief, requestedCapabilities } from '../AgentV3/nativeCapabilities';
 import { starterSuiteOnly, starterSuiteNote, testFilesIn } from '../AgentV3/e2eAutoScaffold';
 import { labelFieldsFromPlaceholder } from '../AppMakerLab/intelligence/A11yLinter';
-import { highSeverityAuthenticityIssues, authenticityRepairInstruction, simulatedDataIssues, simulatedDataNotice, simulatedResultIssues, simulatedResultNotice } from '../AgentV3/AuthenticityAnalysis';
+import { highSeverityAuthenticityIssues, authenticityRepairInstruction, simulatedDataIssues, simulatedDataNotice, simulatedDataSubjectLabel, simulatedResultIssues, simulatedResultNotice } from '../AgentV3/AuthenticityAnalysis';
 import { isUnreachable } from '../AgentV3/appReachability';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
@@ -13362,7 +13362,10 @@ async function noteBuildOutcome(
       const recordProviderBenched = (family: string, reason: string): void => {
         buildDiag.record({
           phase: 'provider', severity: 'info', code: 'PROVIDER_BENCHED',
-          message: `${family} benched for the rest of this build: ${reason}`,
+          // Each reason states its own duration (a 180 s crawl bench, the rest of the build, or "KEPT anyway"
+          // for the last engine), so the prefix must not claim one (autopsy d382b398: "benched for the rest of
+          // this build: … skipped for 180s, then tried once more").
+          message: `${family} benched: ${reason}`,
           autoResolved: true,
         });
       };
@@ -22196,7 +22199,7 @@ async function noteBuildOutcome(
             result = { ...result, summary: `${result.summary}${simulatedDataNotice(invented)}` };
             buildDiag.record({
               phase: 'readiness', severity: 'warning', code: 'SIMULATED_DATA_SHIPPED', autoResolved: false,
-              message: `The app shows made-up data about other people or places in ${invented.length} place(s) — disclosed to the user in the summary.`,
+              message: `The app shows made-up data about ${simulatedDataSubjectLabel(invented)} in ${invented.length} place(s) — disclosed to the user in the summary.`,
               detail: invented.slice(0, 5).map((i) => `${i.file}:${i.line} ${i.snippet}`).join(' · '),
             });
           }

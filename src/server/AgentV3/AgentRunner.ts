@@ -526,6 +526,12 @@ export class AgentRunner {
     let unfinishedResumes = 0;
     /** Times a turn that ended with unstyled screens was handed the class list (stylePolishResume.ts). */
     let styleResumes = 0;
+    /**
+     * The model's own reply at the moment it declared the app finished, kept when a style resume follows
+     * (autopsy d382b398). That reply describes the APP; the reply after the resume answers OUR instruction
+     * ("Done — I added all the missing CSS rules to src/index.css …") and replaced it as the build's summary.
+     */
+    let summaryBeforeStyleResume: string | null = null;
     const MAX_BUILD_NUDGES = 2;
 
     const messages: unknown[] = [{ role: 'user', content: this.opts.platformRequest ? asPlatformRequest(userPrompt) : userPrompt }];
@@ -974,7 +980,7 @@ export class AgentRunner {
                   // was coming. The runner now states only what it knows; the route says what it does.
                   ? `${turn.text.trim()}\n\n(No files were created, so the build did not run.)`
                   : 'The build did not produce any files — the model replied without building.')
-            : (turn.text.trim() || 'Build complete.');
+            : (summaryBeforeStyleResume ?? (turn.text.trim() || 'Build complete.'));
 
           // R2 §1.1 — MANDATORY readiness gate (top-level build only). Before reporting a
           // successful build, run the objective evaluate scan; if it is NOT ready (a build-
@@ -1003,6 +1009,7 @@ export class AgentRunner {
                 const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, a11y: style.a11y, resumesUsed: styleResumes, producedFiles: producingToolUses > 0 });
                 if (decision.resume) {
                   styleResumes++;
+                  summaryBeforeStyleResume = turn.text.trim() || null;
                   try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`)].join(' ') }); } catch { /* a note must never fail a build */ }
                   pushPlatformTurn(decision.message);
                   continue;

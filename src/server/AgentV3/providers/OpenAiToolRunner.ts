@@ -12,7 +12,7 @@
 // orchestrator can fall through to the next (ultimately Claude) provider.
 
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
-import { turnDeadline, firstAnswerBoundMs, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE, SLOW_STREAM_MESSAGE } from '../turnDeadline';
+import { turnDeadline, firstAnswerBoundMs, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE, SLOW_STREAM_MESSAGE, isSlowStreamAbandon } from '../turnDeadline';
 import { glmThinkingParam, isThinkingParamRejection, modelAlwaysReasons, type GlmThinkingLevel } from './glmThinking';
 import { reconcileFloorBudget, turnStarvedItsBudget, starvedBudgetError } from '../floorBudget';
 import { markAbandonedTurn } from '../unbilledTurns';
@@ -123,6 +123,9 @@ async function readStream(
      * ladder, so it must never decide on its own to give up on the LAST engine — a slow app beats no
      * app, and manufacturing a failure where a slow success was coming is the one way this guard
      * could make a build worse. Absent ⇒ never abandon, i.e. today's behaviour exactly.
+     *
+     * ⚠️ Calling it CLAIMS the abandon (autopsy d382b398), so it is asked only once the stream is already
+     * judged crawling — never on every poll.
      */
     canAbandon?: () => boolean;
     /**
@@ -187,7 +190,7 @@ async function readStream(
         const idleOver = now() - lastChunkAt >= opts.idleMs;
         const ceilingOver = opts.endAt - now() <= 0;
         if (!idleOver && !ceilingOver) {
-          if (opts.canAbandon?.() && streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt })) {
+          if (streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt }) && opts.canAbandon?.()) {
             disarm();
             abort();
             return 'slow';
@@ -229,7 +232,7 @@ async function readStream(
       }
       // …and the THIRD state: answering, but so slowly that waiting costs more than moving on. Judged
       // only when the caller says another rung is available — see `canAbandon`.
-      if (opts.canAbandon?.() && streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt })) {
+      if (streamIsCrawling({ producedBytes: acc.producedBytes(), elapsedMs: now() - startedAt }) && opts.canAbandon?.()) {
         abort();
         return 'slow';
       }
@@ -483,7 +486,7 @@ export class OpenAiToolRunner implements TurnRunner {
     // produced nothing at all — below any floor — so, while an abandon is allowed, it is judged exactly as
     // a crawling stream is (autopsy 1389f0d5: a silent first rung held the build for 60 s before the next
     // rung was tried). Same message, so the ladder's crawl accounting — not the timeout bench — decides.
-    const silentBoundMs = streaming && params.canAbandonSlowStream?.()
+    const silentBoundMs = streaming && params.canAbandonSlowStream?.({ peek: true })
       ? Math.min(firstAnswerMs, streamThroughputGraceMs())
       : null;
     const initialBoundMs = silentBoundMs ?? firstAnswerMs;
@@ -495,16 +498,25 @@ export class OpenAiToolRunner implements TurnRunner {
       opened.then((late) => { if (isChatStream(late)) { try { late.controller?.abort(); } catch { /* best-effort */ } } }, () => { /* already failed */ });
       throw e;
     };
+    const ordinaryBoundMessage = providerWentSilent
+      ? `OpenAI-compatible call (GLM/Kimi) timed out after ${firstAnswerMs}ms`
+      : clockMessage(firstAnswerMs);
     const raw = await raceStop(
       withTimeout(
         opened,
         initialBoundMs,
         silentBoundMs !== null
           ? `${SLOW_STREAM_MESSAGE} after ${silentBoundMs}ms`
-          : providerWentSilent
-            ? `OpenAI-compatible call (GLM/Kimi) timed out after ${firstAnswerMs}ms`
-            : clockMessage(initialBoundMs),
-      ).catch(closeIfLate),
+          : ordinaryBoundMessage,
+      ).catch((e: unknown) => {
+        // The silent bound fired. It was only PEEKED at the start, so the abandon is claimed now; if another
+        // call already walked away from this rung (autopsy d382b398), this one rides it out to its
+        // ordinary first-answer bound instead of walking away too.
+        if (silentBoundMs !== null && isSlowStreamAbandon(e) && !params.canAbandonSlowStream?.()) {
+          return withTimeout(opened, Math.max(1, firstAnswerMs - silentBoundMs), ordinaryBoundMessage); // ≥1 ms: 0 would disable the bound
+        }
+        throw e;
+      }).catch(closeIfLate),
       params.signal,
       // A stream that opens AFTER the stop is closed on arrival, so it never generates for nobody.
       (late) => { if (isChatStream(late)) { try { late.controller?.abort(); } catch { /* best-effort */ } } },

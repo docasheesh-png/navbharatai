@@ -86182,3 +86182,29 @@ two-ended erase.
   more sees the newest 300's apps.
 - Phone users get all of this only with a fresh `.aab`/`.ipa`. Admin instruction: build them only AFTER every open
   PR is merged.
+
+### 2026-10-01 — Autopsy 8257ca59 (calculator, Weak tier, golden scaffold, 4.3 min, ₹30.18)
+
+The build succeeded and the app worked at the end. The bar was not met: one self-heal (a reviewer-driven
+repair on the second rung) put back a feature the polish step had broken, and the report carried four
+statements that were not true.
+
+Tally: ✅ 1 self-heal (theme switch restored by the green repair) · 🔀 0 · ⏭️ 1 (the explorer passed a dead
+switch) · ❌ 0 shipped broken · 🥵 3 (the review overran its 45 s with tools; the first write-time typecheck paid
+15 s for an install; the repair went to rung 2).
+
+| Problem | Root cause | Class | Siblings found and fixed | Locked by |
+|---|---|---|---|---|
+| Polish step replaced the working ThemeToggle with a 🌓 that toggled `.dark`, which nothing styles | Template label "Auto" did not read as a theme switch; nothing at write time checks that a switched root class or attribute is styled | A root theme hook with no rule | `deadThemeSwitch.ts` write-time note (all write doors via `writeSteeringNotes`); template label now 🌓/☀️/🌙; VERIFY & FINISH says keep template controls | test §1, §2 |
+| Explorer passed the dead switch ("nothing visibly changed") | It judges by text; a theme switch changes colours | A control judged by the wrong signal (sibling of the search/sort probe) | Theme-named controls pressed up to 3× and judged by computed colours | test §2b (real browser), reversion-proven |
+| Release gate: "whether it actually SAVES anything is untested" for a calculator that pressed 12 controls cleanly | The gate never read the explorer; why the app read as taking input is not in the report | Evidence one check holds that the verdict ignores | `explore`/`explorePresses` on the gate; a no-data app with pressed controls can be GREEN; `JOURNEY_NOT_DERIVED` names the file and line (`dataEntryEvidence`) | test §3, §4, reversion-proven |
+| Orphan `src/theme.tsx` labelled "this build did not change these files" | Authorship is per file; this build orphaned it by removing the import in App.tsx | Orphaning attributed to the wrong build | `droppedRelativeImports` recorded at write_file and edit_file | test §6 |
+| Lean review used tools, overran 45 s, opened with "I'll help you build the calculator app" | The 12 seeded template files counted as changed; the 18 KB kit stylesheet broke the inline bound | Our own seed counted as the builder's change | `reviewChangedPaths` drops untouched seeds | test §5, reversion-proven |
+| "The cache was warmed at build start in 0s" while the first write paid 15 s | The warm-up's guard skipped the compile on a fresh sandbox and the finish was read as a warm cache | A finished command read as a result | `WARMUP_COMPILED_MARKER`; a skipped warm-up is said as such | test §7 |
+
+- **Checked, no change:** "No tests at all" at step 10 was true when written and is recorded resolved; the
+  starter suite added later is ours, and `TEST_SUITE_UNVERIFIED` says so. `startTier: "gemini"` is a band label
+  (#3429 records the same).
+- **Still open:** which file made this calculator read as taking input is not proven. The template and every
+  file the platform writes pass `appHasNoDataEntry`, so it was most likely the model's own App.tsx edit; the
+  report did not carry that file. The next such report will name it in `JOURNEY_NOT_DERIVED`'s detail.

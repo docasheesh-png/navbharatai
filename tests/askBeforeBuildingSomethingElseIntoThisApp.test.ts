@@ -85,8 +85,8 @@ describe('3 · the route', () => {
   });
   it('the chat reply carries the steer, is never cached, and never falls through to a build', () => {
     expect(route).toContain("(askUnrelated ? unrelatedRequestSteer(unrelated?.existingHint ?? '', rawAttachments.length > 0) : '')");
-    expect(route).toMatch(/!clarifyWhatToBuild && !askUnrelated && chatCacheEnabled\(\)/);
-    expect(route).toContain('if (answerProjectElsewhere || askUnrelated) return null;');
+    expect(route).toMatch(/!askUnrelated && [^;]*chatCacheEnabled\(\);/);
+    expect(route).toContain('if (askUnrelated) return null;');
     expect(route).toContain("unrelatedRequestFallback(unrelated?.existingHint ?? '')");
   });
 });

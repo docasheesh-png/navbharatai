@@ -10838,7 +10838,7 @@ async function noteBuildOutcome(
         // prompt-keyed cache could serve one turn's answer to the other. Excluded outright rather
         // than reasoned around: the other conditions happen to cover it today, and that is exactly
         // the kind of coincidence that stops being true after an unrelated edit.
-        const cacheable = !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !clarifyWhatToBuild && !askUnrelated && chatCacheEnabled();
+        const cacheable = !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !askUnrelated && !echoesPlatformNotice && !answerProjectElsewhere && !clarifyWhatToBuild && chatCacheEnabled();
         const cacheKey = cacheable ? hashKey(['chatv1', prompt]) : '';
         let reply: string;
         const cachedReply = cacheable ? chatResponseCache.get(cacheKey) : undefined;
@@ -10887,7 +10887,8 @@ async function noteBuildOutcome(
             'chatRouter.route',
           ).catch((err: unknown) => {
             // A turn whose whole point is NOT building must never fall through to a build.
-            if (answerProjectElsewhere || askUnrelated) return null;
+            if (answerProjectElsewhere) return null;
+            if (askUnrelated) return null;
             throw err;
           });
           const response = routed?.response;

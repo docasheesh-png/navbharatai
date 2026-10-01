@@ -49,7 +49,9 @@ export const INSTALL_WAIT_SECONDS = 20;
 /** A lock older than this is from an install that died (the install itself is bounded at 5 min). */
 export const INSTALL_LOCK_STALE_MINUTES = 6;
 
-const LOCK_FRESH = `[ -n "$(find ${NPM_INSTALL_LOCK} -mmin -${INSTALL_LOCK_STALE_MINUTES} 2>/dev/null)" ]`;
+// `-f` first, so `find` is only asked about a file that exists; its stderr (a lock removed between the two
+// tests) goes to our own log, never to the output a verdict is read from — and never to /dev/null.
+const LOCK_FRESH = `[ -f ${NPM_INSTALL_LOCK} ] && [ -n "$(find ${NPM_INSTALL_LOCK} -mmin -${INSTALL_LOCK_STALE_MINUTES} 2>>${TSC_ENSURE_LOG})" ]`;
 
 export const TSC_ENSURE =
   // Wait (bounded) for an install already filling node_modules. Still busy ⇒ say so and stop: never run
@@ -71,7 +73,7 @@ export const TSC_ENSURE =
   // the pinned install on the next line.
   `if [ -x node_modules/.bin/tsc ] && { [ ! -f node_modules/typescript/lib/tsc.js ] || [ ! -f node_modules/typescript/lib/lib.es5.d.ts ]; }; then ` +
   `rm -rf node_modules/typescript node_modules/.bin/tsc node_modules/.bin/tsserver; ` +
-  `if grep -q '"typescript"' package.json 2>/dev/null; then ${INSTALL('')}; fi; fi; ` +
+  `if [ -f package.json ] && grep -q '"typescript"' package.json; then ${INSTALL('')}; fi; fi; ` +
   `if [ ! -x node_modules/.bin/tsc ]; then ${INSTALL('typescript@5 --no-save')}; fi; ` +
   `if [ ! -x node_modules/.bin/tsc ]; then echo "${TSC_UNAVAILABLE_MARKER}: the TypeScript compiler could not be installed, so nothing was checked. npm said:"; tail -n 6 ${TSC_ENSURE_LOG}; fi`;
 

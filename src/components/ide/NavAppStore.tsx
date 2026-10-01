@@ -5,7 +5,7 @@ import PullToRefresh from '../PullToRefresh';
 import {
   Store, Loader2, ShieldCheck, ShieldAlert, AlertTriangle, Download,
   CheckCircle2, X, Clock, ExternalLink, Info, Globe, Play, Link2, Trash2, Lock, Package, Flag,
-  Rocket, ImagePlus, Clipboard, Copy,
+  Rocket, ImagePlus, Clipboard, Copy, User,
 } from 'lucide-react';
 import { WebAppPlayer } from './WebAppPlayer';
 import { authedHeaders } from '../../lib/authHeaders';
@@ -19,6 +19,8 @@ import { mergeReviewQueue, pendingReviewCount, reviewStatusLabel, reviewActionsF
 import { publishableApps, publishBlockedReason, type PublishableApp } from './publishablePicker';
 import { readStoreIcon, readStoreIconFromClipboard, type IconCheck } from '../../lib/appIcon';
 import { creatorLine } from './storeCreatorLine';
+import { SocialBar, CommentsSection, LikersSheet, ProfileSheet, CommentReportsAdmin } from './appMart/AppMartSocial';
+import { useSocialStats, useSignedIn, webKey, apkKey } from './appMart/appMartSocialApi';
 
 // Nav App Store — publish your Android app, and install other people's.
 //
@@ -131,6 +133,11 @@ export interface NavAppStoreProps {
    * before then because choosing an app also pre-fills its name from that list.
    */
   initialPublishWorkspaceId?: string | null;
+  /**
+   * Open this app's comments (a tapped App Mart notification — "Ravi commented on your app"). The
+   * nonce lets the SAME app be opened again by a second tap.
+   */
+  socialTarget?: { key: string; nonce: number } | null;
 }
 
 // 🍎 WHICH DEVICE THIS IS, read ONCE at module load rather than per render — `Capacitor.getPlatform()`
@@ -141,7 +148,7 @@ export interface NavAppStoreProps {
 const STORE_PLATFORM = nativePlatformName();
 const HIDE_ANDROID_INSTALLS = androidInstallsHidden(STORE_PLATFORM);
 
-export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initialTab, initialPublishWorkspaceId }) => {
+export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initialTab, initialPublishWorkspaceId, socialTarget }) => {
   const [tab, setTab] = useState<Tab>(initialTab ?? 'browse');
   const [status, setStatus] = useState<StoreStatus | null>(null);
 
@@ -197,9 +204,49 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
     }
   };
 
+  /** Open a web app's detail by id — from a profile or a notification, where only the id is known. */
+  const openWebDetailById = async (id: string) => {
+    const known = webApps.find((a) => a.id === id);
+    if (known) { void openWebDetail(known); return; }
+    try {
+      const res = await fetch(`/api/nav-store/web/app/${encodeURIComponent(id)}`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.app) { setError(typeof data?.error === 'string' ? data.error : 'That app is no longer on App Mart.'); return; }
+      setDetailApp(data.app as WebApp);
+      setDetailShots(Array.isArray(data.screenshots) ? data.screenshots.filter((x: unknown): x is string => typeof x === 'string') : []);
+    } catch { setError('That app could not be opened just now.'); }
+  };
+
+  /** Open an Android app's sheet by id. On an iPhone there is no such sheet (appStoreCompliance.ts). */
+  const openApkById = async (id: string) => {
+    if (HIDE_ANDROID_INSTALLS) return;
+    const known = apps.find((a) => a.id === id);
+    if (known) { setOpenApp(known); return; }
+    try {
+      const res = await fetch(`/api/nav-store/app/${encodeURIComponent(id)}`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.app) { setError(typeof data?.error === 'string' ? data.error : 'That app is no longer on App Mart.'); return; }
+      setOpenApp(data.app as PublicApp);
+    } catch { setError('That app could not be opened just now.'); }
+  };
+
   // WEB APPS — run in the viewer's browser, nothing to install. Deep link opens the player directly.
   const [webApps, setWebApps] = useState<WebApp[]>([]);
   const pagedWebApps = usePagedList(webApps);
+
+  // ── APP MART SOCIAL (admin 2026-09-30: "app mart me ek social media banana hai!") ──────────────
+  // 👍 · 👎 · 💬 under every app on the page, fetched for the visible tiles in ONE request. Counts are
+  // public; pressing asks for a sign-in. See appMart/AppMartSocial.tsx and routes/appMartSocial.ts.
+  const socialKeys = [
+    ...pagedWebApps.visible.map((a) => webKey(a.id)),
+    ...pagedApps.visible.map((a) => apkKey(a.id)),
+  ];
+  const social = useSocialStats(socialKeys);
+  const signedIn = useSignedIn();
+  /** A person's profile, opened by their PUBLIC creator code (or `me`) — never by an account id. */
+  const [profileId, setProfileId] = useState<string | null>(null);
+  /** The creator's own "who liked this" list. */
+  const [likersFor, setLikersFor] = useState<{ key: string; name: string } | null>(null);
   const [webMine, setWebMine] = useState<WebApp[]>([]);
   const pagedWebMine = usePagedList(webMine);
   const [webQueue, setWebQueue] = useState<WebApp[]>([]);
@@ -551,6 +598,18 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
    * the current state of this screen", and refreshing one tab while leaving the next stale is the kind
    * of half-answer that makes people pull twice.
    */
+  // A tapped App Mart notification lands on that app's comments, not on the Browse grid.
+  const socialTargetNonce = socialTarget?.nonce ?? 0;
+  useEffect(() => {
+    const key = socialTarget?.key ?? '';
+    const m = /^(web|apk):([A-Za-z0-9_-]+)$/.exec(key);
+    if (!m) return;
+    setTab('browse');
+    if (m[1] === 'web') void openWebDetailById(m[2]);
+    else void openApkById(m[2]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socialTargetNonce]);
+
   const handlePullRefresh = useCallback(async () => {
     await Promise.allSettled([loadStatus(), loadApps(), loadWebApps()]);
   }, [loadStatus, loadApps, loadWebApps]);
@@ -569,11 +628,25 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
           <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center flex-shrink-0 text-on-accent">
             <Store size={20} />
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h1 className="text-lg sm:text-xl font-bold truncate">App Mart</h1>
             <p className="text-xs text-muted">Play apps made by other creators — or publish your own</p>
           </div>
+          {signedIn && (
+            <button
+              type="button"
+              onClick={() => setProfileId('me')}
+              className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-raised hover:bg-raised-hover text-xs font-semibold text-body transition-colors"
+            >
+              <User size={14} /> My profile
+            </button>
+          )}
         </div>
+        {social.error && (
+          <p className="mb-3 flex gap-2 px-3 py-2 rounded-lg text-xs text-warn bg-amber-500/10">
+            <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />{social.error}
+          </p>
+        )}
 
         {/* Tabs — scroll rather than overflow on a phone */}
         <div className="flex gap-1.5 mb-5 overflow-x-auto pb-1">
@@ -686,6 +759,16 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                       {(a.priceInr ?? 0) > 0 && <span className="text-success"> · remix ₹{a.priceInr}</span>}
                     </p>
                   </button>
+                  {/* 👍 · 👎 · 💬 — the numbers every visitor sees, one tap to react (sign-in asked for). */}
+                  <div className="px-2 pb-2">
+                    <SocialBar
+                      compact
+                      counts={social.counts[webKey(a.id)]}
+                      mine={social.mine[webKey(a.id)]}
+                      onReact={(r) => void social.press(webKey(a.id), r)}
+                      onComment={() => void openWebDetail(a)}
+                    />
+                  </div>
                   <button
                     onClick={() => setPlayingId(a.id)}
                     className="m-3 mt-0 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-on-accent text-xs font-bold transition-colors"
@@ -731,10 +814,10 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                 a tile is narrower than the row it replaced. */
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {pagedApps.visible.map((a) => (
+                <div key={a.id} className="flex flex-col rounded-xl bg-card border border-line hover:border-line transition-colors">
                 <button
-                  key={a.id}
                   onClick={() => setOpenApp(a)}
-                  className="flex flex-col items-start gap-2 p-3 rounded-xl bg-card border border-line hover:border-line text-left transition-colors"
+                  className="flex flex-col items-start gap-2 p-3 pb-2 flex-1 text-left"
                 >
                   <div className="w-14 h-14 rounded-2xl bg-raised flex items-center justify-center overflow-hidden flex-shrink-0">
                     {a.iconDataUrl ? <img src={a.iconDataUrl} alt="" className="w-full h-full object-cover" /> : <Store size={22} className="text-faint" />}
@@ -749,6 +832,16 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                     </p>
                   )}
                 </button>
+                <div className="px-2 pb-2">
+                  <SocialBar
+                    compact
+                    counts={social.counts[apkKey(a.id)]}
+                    mine={social.mine[apkKey(a.id)]}
+                    onReact={(r) => void social.press(apkKey(a.id), r)}
+                    onComment={() => setOpenApp(a)}
+                  />
+                </div>
+                </div>
               ))}
               <LoadMore list={pagedApps} label="apps" className="col-span-full" />
             </div>
@@ -1100,6 +1193,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
             These were written to Firestore from the day the store shipped and READ BY NOTHING, so
             "Report sent — a person will look at it" was a promise the code could not keep. This is
             the person. Newest first, with the app it is about and a way to open or remove it. */}
+        {/* Reported App Mart COMMENTS — the moderation queue Play's and Apple's user-content rules require. */}
+        {tab === 'review' && status?.isAdmin && <CommentReportsAdmin onOpenProfile={setProfileId} />}
+
         {tab === 'review' && status?.isAdmin && reports.length > 0 && (
           <div className="mb-5">
             <p className="text-xs font-bold uppercase tracking-wider text-danger mb-2 flex items-center gap-1.5">
@@ -1194,7 +1290,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
         {/* ── Admin review ── */}
         {tab === 'review' && status?.isAdmin && (
           queue.length === 0 && webQueue.length === 0 ? (
-            <p className="text-center text-sm text-faint py-12">Nothing waiting for review.</p>
+            <p className="text-center text-sm text-faint py-12">No apps waiting for review.</p>
           ) : (
             <div className="space-y-3">
               {pagedQueue.visible.map((a) => (
@@ -1293,7 +1389,22 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
               <div className="min-w-0 flex-1">
                 <h2 className="text-lg font-bold truncate flex items-center gap-1.5">{detailApp.name}{detailApp.requiresPassword && <Lock size={12} className="text-faint" />}</h2>
                 <p className="text-[11px] text-faint">{detailApp.runs} run{detailApp.runs === 1 ? '' : 's'} · A NavBharatAI-built app</p>
+                {/* The creator's name opens their profile — name, photo and their apps; never an email. */}
+                {detailApp.creatorName && detailApp.creatorId && (
+                  <button type="button" onClick={() => setProfileId(detailApp.creatorId!)} className="text-[11px] font-semibold text-accent-text hover:underline">
+                    by {detailApp.creatorName}
+                  </button>
+                )}
               </div>
+            </div>
+
+            <div className="mb-3">
+              <SocialBar
+                counts={social.counts[webKey(detailApp.id)]}
+                mine={social.mine[webKey(detailApp.id)]}
+                onReact={(r) => void social.press(webKey(detailApp.id), r)}
+                onComment={() => document.getElementById('app-mart-comments')?.scrollIntoView({ behavior: 'smooth' })}
+              />
             </div>
 
             <p className="text-sm text-body leading-relaxed whitespace-pre-wrap mb-4">{detailApp.description || 'A NavBharatAI-built app.'}</p>
@@ -1316,6 +1427,15 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
             >
               <Play size={14} /> Open the app
             </button>
+            <div id="app-mart-comments">
+              <CommentsSection
+                key={webKey(detailApp.id)}
+                appKey={webKey(detailApp.id)}
+                onOpenProfile={setProfileId}
+                onCounts={(c) => social.setCounts(webKey(detailApp.id), c)}
+                onOpenLikers={() => setLikersFor({ key: webKey(detailApp.id), name: detailApp.name })}
+              />
+            </div>
             <button onClick={() => setDetailApp(null)} className="w-full mt-2 py-2 rounded-lg text-xs text-muted hover:text-body">Close</button>
           </div>
         </div>
@@ -1383,6 +1503,24 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
               install only what you actually trust.
             </p>
 
+            <div className="mt-4">
+              <SocialBar
+                counts={social.counts[apkKey(openApp.id)]}
+                mine={social.mine[apkKey(openApp.id)]}
+                onReact={(r) => void social.press(apkKey(openApp.id), r)}
+                onComment={() => document.getElementById('app-mart-apk-comments')?.scrollIntoView({ behavior: 'smooth' })}
+              />
+            </div>
+            <div id="app-mart-apk-comments">
+              <CommentsSection
+                key={apkKey(openApp.id)}
+                appKey={apkKey(openApp.id)}
+                onOpenProfile={setProfileId}
+                onCounts={(c) => social.setCounts(apkKey(openApp.id), c)}
+                onOpenLikers={() => setLikersFor({ key: apkKey(openApp.id), name: openApp.appName })}
+              />
+            </div>
+
             <button onClick={() => setOpenApp(null)} className="w-full mt-3 py-2 rounded-lg text-xs text-muted hover:text-body">
               Close
             </button>
@@ -1390,6 +1528,26 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
         </div>
       )}
       {playingId && <WebAppPlayer appId={playingId} onClose={() => setPlayingId(null)} />}
+      {likersFor && (
+        <LikersSheet
+          appKey={likersFor.key}
+          appName={likersFor.name}
+          onClose={() => setLikersFor(null)}
+          onOpenProfile={(id) => { setLikersFor(null); setProfileId(id); }}
+        />
+      )}
+      {profileId && (
+        <ProfileSheet
+          creatorId={profileId}
+          hideAndroid={HIDE_ANDROID_INSTALLS}
+          onClose={() => setProfileId(null)}
+          onOpenApp={(a) => {
+            setProfileId(null);
+            setDetailApp(null); setOpenApp(null);
+            if (a.kind === 'web') void openWebDetailById(a.id); else void openApkById(a.id);
+          }}
+        />
+      )}
     </PullToRefresh>
   );
 };

@@ -78,8 +78,16 @@ interface NotificationItem {
    * — a free-form link on a broadcast record would turn the admin's message form into a way to send
    * every user a tappable address. An unrecognised value simply renders as a plain message.
    */
-  action?: 'open-reports' | 'open-billing';
+  action?: 'open-reports' | 'open-billing' | 'open-app-mart';
+  /**
+   * For `open-app-mart` only: WHICH app — an App Mart key (`web:<id>` / `apk:<id>`), checked against
+   * that exact shape before it is used, so it can never be an address.
+   */
+  target?: string;
 }
+
+/** The only App Mart target a notification tap will follow. */
+const APP_MART_TARGET = /^(web|apk):[A-Za-z0-9_-]{4,80}$/;
 
 export interface NotificationInbox {
   items: NotificationItem[];
@@ -405,6 +413,24 @@ export function NotificationPanel({ inbox, onClose, onOpenReports, pinned }: {
                     >
                       {row}
                       <span className="block text-[10px] font-bold text-warn mt-1">Tap to add credit →</span>
+                    </button>
+                  );
+                }
+                // A like, comment or reply on the user's App Mart app: open that app's comments,
+                // through the same navigation channel as every other cross-screen jump.
+                if (n.action === 'open-app-mart' && n.target && APP_MART_TARGET.test(n.target)) {
+                  const target = n.target;
+                  return (
+                    <button
+                      key={n.id}
+                      onClick={() => {
+                        close();
+                        window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'appstore', storeSocialKey: target } }));
+                      }}
+                      className="w-full text-left px-4 py-3 hover:bg-raised transition-colors"
+                    >
+                      {row}
+                      <span className="block text-[10px] font-bold text-accent-text mt-1">Tap to open →</span>
                     </button>
                   );
                 }

@@ -3845,6 +3845,11 @@ the flag entries above promise.
   the END of the file too and told how to append; the post-write "no React import" note is gone (the automatic
   JSX runtime needs none; only `React.` without an import is flagged); and every repair runner is marked
   `platformRequest`, so its reply never thanks the user for "the fixes you requested" (`platformRequest.ts`).
+  **Second pass, same day:**
+  - The end-of-turn message now carries the page-design findings too (the same `analyzeDesignCoverage`).
+  - A list of a hand-written record's own field (`topic.sections`) is no longer a "data list" (`recordFieldLiteral`).
+  - Every engine-authored user turn is stamped `origin: 'platform'` on its persisted copy (`pushPlatformTurn`), so a
+    reopened chat never shows a repair instruction as the user's own message.
 - **🙋 A QUESTION IS AN ANSWER, NOT AN EMPTY BUILD — the retry overrode a correct reply and billed
   ₹196.28 for it (autopsy `e628efd4`, 2026-09-25; no flag, on by construction).** A free-tier user
   asked *"if we don't have a chat in next 2 hours can you send a message to initiate the chat

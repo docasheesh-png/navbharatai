@@ -85,7 +85,7 @@ import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, usesNonKitNbClass } from './kitRestore';
 import { findUndefinedClasses, isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, collectDefinedClasses } from './CssConsistency';
-import { pageDesignWriteNote, isPageFile } from './DesignCoverage';
+import { pageDesignWriteNote, isPageFile, analyzeDesignCoverage, type DesignDefect } from './DesignCoverage';
 import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
 import { shellWriteTargets } from './shellWriteTargets';
 import { unfixableInstallNote } from '../lib/unfixablePackages';
@@ -3268,17 +3268,17 @@ export class ToolDispatcher {
    * stylesheet that cannot be read returns `[]`: this answer sends a model back to work, so it must never
    * name a class as undefined because the file that defines it was not read.
    */
-  async undefinedClassesNow(): Promise<{ missing: string[]; sheet?: string }> {
+  async undefinedClassesNow(): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }> }> {
     try {
       let listing: string[] = [];
       try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'style-resume-listing'); }
-      catch { return { missing: [] }; }
+      catch { return { missing: [], pages: [] }; }
       const paths = listing.map((p) => String(p).replace(/^\.?\/+/, ''));
       const sheets = paths.filter((p) => isProjectStylesheet(p));
       const code = paths
         .filter((p) => /^src\/.*\.(tsx|jsx|ts|js)$/.test(p))
         .filter((p) => !/\.(test|spec)\.[jt]sx?$/.test(p) && !/\.d\.ts$/.test(p));
-      if (sheets.length === 0 || sheets.length + code.length > ToolDispatcher.STYLE_NOTE_MAX_READS) return { missing: [] };
+      if (sheets.length === 0 || sheets.length + code.length > ToolDispatcher.STYLE_NOTE_MAX_READS) return { missing: [], pages: [] };
       const project: Record<string, string> = {};
       let unreadSheet = false;
       await Promise.all([...sheets, ...code].map(async (p) => {
@@ -3288,12 +3288,16 @@ export class ToolDispatcher {
           else if (isProjectStylesheet(p)) unreadSheet = true;
         } catch { if (isProjectStylesheet(p)) unreadSheet = true; }
       }));
-      if (unreadSheet) return { missing: [] };
+      if (unreadSheet) return { missing: [], pages: [] };
       const missing = findUndefinedClasses(project).filter((c) => !c.startsWith('nb-'));
       const sheet = sheets.includes('src/index.css') ? 'src/index.css' : sheets[0];
-      return { missing, sheet };
+      // The page-design half of the same end-of-turn check — the SAME judgement the end-of-build repair
+      // runs (analyzeDesignCoverage), with the whole project in hand, so the two cannot disagree.
+      let pages: Array<{ file: string; defects: DesignDefect[] }> = [];
+      try { pages = analyzeDesignCoverage(project).findings.map((f) => ({ file: f.file, defects: f.defects })); } catch { pages = []; }
+      return { missing, sheet, pages };
     } catch {
-      return { missing: [] };
+      return { missing: [], pages: [] };
     }
   }
 

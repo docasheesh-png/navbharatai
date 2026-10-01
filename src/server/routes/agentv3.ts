@@ -184,8 +184,9 @@ import {
 } from '../AgentV3/clickExplorer';
 import {
   explorerRepairEnabled, repairTargets, explorerRepairPlan, explorerRepairTierGate, runExplorerRepair,
-  explorerRepairOutcomeRecord, explorerRepairProof, explorerRepairUserLine, EXPLORER_REPAIR_PASS,
+  explorerRepairOutcomeRecord, explorerRepairProof, explorerRepairUserLine, EXPLORER_REPAIR_PASS, explorerRepairPrompt,
 } from '../AgentV3/explorerRepair';
+import { withoutPlatformCheckTools } from '../AgentV3/repairScope';
 import { explorerRepairBudget } from '../lib/explorerRepairBudget';
 import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS } from '../AgentV3/liveBuildCost';
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
@@ -21481,15 +21482,20 @@ async function noteBuildOutcome(
                       snapshot: snap,
                       buildSignal: abort.signal,
                       repair: async (findings, signal) => {
+                        // The platform re-presses every button itself, so the repair gets no browser of its own,
+                        // is told to stop once the fix is written, and is handed no extra jobs (repairScope.ts,
+                        // autopsy 6cd698cc — a correct fix undone because the model spent the budget checking it).
                         const runner = new AgentRunner({
                           ...baseRunnerOpts,
                           signal,
                           client: buildTurnRunner(healRunnerOpts()),
                           platformRequest: true,
+                          focusedRepair: true,
+                          tools: withoutPlatformCheckTools(baseRunnerOpts.tools),
                           model: resolveModel(powerLevelReqEffective),
                           persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                         });
-                        const r = await runInBillingPhase(PHASE_EXPLORER_REPAIR, () => runInPass(EXPLORER_REPAIR_PASS, () => runner.run(judgeRepairPrompt(prompt, findings))));
+                        const r = await runInBillingPhase(PHASE_EXPLORER_REPAIR, () => runInPass(EXPLORER_REPAIR_PASS, () => runner.run(explorerRepairPrompt(prompt, findings))));
                         return !!r?.ok;
                       },
                       changedSince: async (s0) => changedWorkspacePaths(s0, (await collectWorkspaceFiles(actuator, workspaceId)).files).length,
@@ -23077,6 +23083,9 @@ async function noteBuildOutcome(
                     signal: repairAbort.signal,
                     client: buildTurnRunner(healRunnerOpts()),
                     platformRequest: true,
+                    // Re-rendered by the platform: no browser of its own, no extra jobs (repairScope.ts).
+                    focusedRepair: true,
+                    tools: withoutPlatformCheckTools(baseRunnerOpts.tools),
                     model: resolveModel(powerLevelReqEffective),
                     persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                   });

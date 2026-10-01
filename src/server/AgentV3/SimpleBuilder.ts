@@ -616,6 +616,27 @@ export function contractUserPrompt(prompt: string, manifest: SimpleFileSpec[]): 
  */
 export const ENUM_IMPORT_RULE = 'An ENUM (or a const, function or class) is a VALUE: import it with a plain `import { Name }`, never `import type` — a type-only import of an enum fails to compile the moment a member is read.';
 
+/**
+ * The fast lane's deterministic import fixes, in one place (autopsy 6cd698cc): (1) a named/default import of
+ * the wrong kind, (2) a shared symbol used but never imported, (3) a named import pointed at the wrong module
+ * when the symbol lives in exactly one other, (4) an enum/const imported with `import type` and read as a value
+ * (autopsy f496c75b). Run on a finished lane before preview AND on the files a timed-out lane hands to the
+ * full builder — before 2026-10-01 only the first, so a handed-over file kept the errors the lane would have
+ * fixed. Every step only turns a broken file into a working one. Never throws.
+ */
+export async function deterministicImportFixes(files: ReadonlyArray<{ path: string; content: string }>): Promise<{ files: Record<string, string>; changes: number }> {
+  const before = Object.fromEntries(files.map((f) => [f.path, f.content]));
+  try {
+    const recd = await reconcileImportExports(before);
+    const addd = await addMissingProjectImports(recd.files);
+    const wrong = await fixWrongSourceImports(addd.files);
+    const typeOnly = await fixTypeOnlyValueImports(wrong.files);
+    return { files: typeOnly.files, changes: recd.fixes.length + addd.added.length + wrong.fixes.length + typeOnly.fixes.length };
+  } catch {
+    return { files: before, changes: 0 };
+  }
+}
+
 export function contractBlock(contract: string | undefined, at?: { path: string; from?: string }): string {
   const trimmed = (contract || '').trim();
   if (!trimmed) return '';
@@ -1908,18 +1929,10 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // build into a working one. Kill switch: AGENTV3_IMPORT_RECONCILE=off.
       if (process.env.AGENTV3_IMPORT_RECONCILE !== 'off') {
         try {
-          const before = Object.fromEntries(written.map((f) => [f.path, f.content]));
-          const recd = await reconcileImportExports(before);
-          const addd = await addMissingProjectImports(recd.files);
-          // (3) re-point a NAMED import at the correct module when the symbol lives in exactly one OTHER
-          // module (Kanban build 2026-07-13 — the wrong source file). Unique-owner only; never a guess.
-          const wrong = await fixWrongSourceImports(addd.files);
-          // (4) an enum/const imported with `import type` and then read as a value (autopsy f496c75b).
-          const typeOnly = await fixTypeOnlyValueImports(wrong.files);
-          const changes = recd.fixes.length + addd.added.length + wrong.fixes.length + typeOnly.fixes.length;
-          if (changes > 0) {
-            for (const f of written) { const nc = typeOnly.files[f.path]; if (typeof nc === 'string') f.content = nc; }
-            deps.log?.(`🔧 Auto-fixed ${changes} import issue(s) (wrong-kind, forgotten, or wrong-source) before preview.`);
+          const fixed = await deterministicImportFixes(written);
+          if (fixed.changes > 0) {
+            for (const f of written) { const nc = fixed.files[f.path]; if (typeof nc === 'string') f.content = nc; }
+            deps.log?.(`🔧 Auto-fixed ${fixed.changes} import issue(s) (wrong-kind, forgotten, or wrong-source) before preview.`);
           }
         } catch { /* best-effort — a failure just leaves the files as generated */ }
       }
@@ -2067,6 +2080,20 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     // files the old path preserved, making the improvement a regression.
     if ((reason.includes('timed out') || reason.includes('stopped early')) && generatedSoFar.length > 0) {
       const salvage = [...generatedSoFar]; // snapshot — in-flight genOne pushes can't mutate mid-write
+      // The import fixes the lane would have made had it finished, made on what it hands over (autopsy
+      // 6cd698cc: four salvaged files carried 17 errors — enums imported with `import type` — and the full
+      // builder spent five edit turns on them). Exact and best-effort: a failure hands the files over as written.
+      if (process.env.AGENTV3_IMPORT_RECONCILE !== 'off') {
+        try {
+          const fixed = await deterministicImportFixes(salvage);
+          if (fixed.changes > 0) {
+            for (let i = 0; i < salvage.length; i++) {
+              const nc = fixed.files[salvage[i].path];
+              if (typeof nc === 'string' && nc !== salvage[i].content) salvage[i] = { ...salvage[i], content: nc };
+            }
+          }
+        } catch { /* best-effort */ }
+      }
       try {
         await withTimeout(deps.writeFiles(salvage), 30_000, 'simple-build-salvage');
         salvagedPaths = salvage.map((f) => f.path);

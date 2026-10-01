@@ -86027,3 +86027,13 @@ built for production and passed two form journeys — and was a generic ten-feat
 `src/index.css` edited 11 times piecemeal (the existing nudge fired at #6 and #11 and was not obeyed);
 3 unnamed buttons noted at write time and not fixed; the reviewer could not be one-call here (44 files
 exceed the 60K inline bound), so it read files — by design.
+
+**Follow-up, same autopsy (admin: "sab root cause fix huye? nahi to karo"):**
+6. **The CORS blocker was found and the model was never shown it.** The build ended on "App ready hai!"
+   with a blocker and no resume, and nothing recorded why. A question at the end of a run that already
+   WROTE the app is a closing offer, not a decision the blockers wait on, so `decideUnfinishedResume`
+   now stands down on a question only when nothing was produced (`producedFiles`). Every stand-down is
+   now recorded (`UNFINISHED_RESUME_STOOD_DOWN`). ⚠️ The model's full final text is not in the report,
+   so "it ended on a question" is the most likely branch, not a proven one — the new line will say.
+   **Deliberately NOT auto-fixed:** pinning `@types/express` back to v4 — the app typechecked clean on
+   the v5 types, and downgrading them could turn a green build red. It stays a warning.

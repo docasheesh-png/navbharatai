@@ -28,7 +28,7 @@ import { isBuildStoppedError } from './stopSignal';
 import { budgetSteer, type BudgetStage } from './buildBudgetSteer';
 import { turnStarvedItsBudget } from './floorBudget';
 import { decideBuildNudge, standDownNote } from './nudgeToBuild';
-import { decideUnfinishedResume, unfinishedResumeNote } from './unfinishedResume';
+import { decideUnfinishedResume, unfinishedResumeStandDownNote, unfinishedResumeNote } from './unfinishedResume';
 import { streamThinkingToChat } from './thinkingStream';
 import { PROMPT_PREVIEW_SEPARATOR } from './promptPreviewShape';
 
@@ -971,7 +971,9 @@ export class AgentRunner {
                 // AND ANOTHER TURN (autopsy 121c2431 — the build ended FAILED with 1,418 s of budget
                 // unspent). Never after a refusal or a question to the user; at most twice. See
                 // unfinishedResume.ts.
-                const resume = decideUnfinishedResume({ text: turn.text, blockers: readiness.blockers, resumesUsed: unfinishedResumes });
+                const resume = decideUnfinishedResume({ text: turn.text, blockers: readiness.blockers, resumesUsed: unfinishedResumes, producedFiles: producingToolUses > 0 });
+                const standDownNote = resume.resume ? null : unfinishedResumeStandDownNote(resume.standDown, readiness.blockers.length);
+                if (standDownNote) { try { this.opts.onNote?.({ code: 'UNFINISHED_RESUME_STOOD_DOWN', message: standDownNote, detail: readiness.blockers.slice(0, 5).join(' | ') }); } catch { /* a note must never fail a build */ } }
                 if (resume.resume && !this.opts.signal?.aborted) {
                   unfinishedResumes++;
                   try { this.opts.onNote?.({ code: 'UNFINISHED_BUILD_RESUMED', message: unfinishedResumeNote(unfinishedResumes, readiness.blockers.length), detail: readiness.blockers.slice(0, 5).join(' | ') }); } catch { /* a note must never fail a build */ }

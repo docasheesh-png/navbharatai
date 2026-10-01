@@ -108,3 +108,22 @@ describe('CORS and seed passwords are written right the first time, in both lane
     }
   });
 });
+
+describe('a closing offer after the app was built does not hide a blocker', () => {
+  it('a question after writing files still resumes; a question before building still stands down', async () => {
+    const { decideUnfinishedResume, unfinishedResumeStandDownNote } = await import('../src/server/AgentV3/unfinishedResume');
+    const text = 'App ready hai! Login, dashboard aur campaigns ban gaye.\nKya aap kuch aur add karna chahenge?';
+    const blockers = ['Security config (cors-credentials-reflect-origin)'];
+    expect(decideUnfinishedResume({ text, blockers, resumesUsed: 0, producedFiles: true }).resume).toBe(true);
+    const before = decideUnfinishedResume({ text, blockers, resumesUsed: 0, producedFiles: false });
+    expect(before).toMatchObject({ resume: false, standDown: 'asked-the-user' });
+    expect(decideUnfinishedResume({ text, blockers, resumesUsed: 0 }).standDown).toBe('asked-the-user');
+    expect(unfinishedResumeStandDownNote('asked-the-user', 1)).toMatch(/not resumed/);
+    expect(unfinishedResumeStandDownNote('no-blockers', 0)).toBeNull();
+  });
+  it('the runner passes what it produced and records a stand-down', () => {
+    const runner = read('src/server/AgentV3/AgentRunner.ts');
+    expect(runner).toContain('resumesUsed: unfinishedResumes, producedFiles: producingToolUses > 0 });');
+    expect(runner).toContain("code: 'UNFINISHED_RESUME_STOOD_DOWN'");
+  });
+});

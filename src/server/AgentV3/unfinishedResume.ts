@@ -38,6 +38,12 @@ export interface UnfinishedResumeInput {
   resumesUsed: number;
   maxResumes?: number;
   env?: NodeJS.ProcessEnv;
+  /**
+   * This run already WROTE the app. A question at the end of a build that produced files is a closing
+   * offer ("anything else to add?"), not a decision the blockers wait on — autopsy 6461025c ended on
+   * "App ready hai!" with a security blocker the model was never shown. Absent ⇒ today's behaviour.
+   */
+  producedFiles?: boolean;
 }
 
 export interface UnfinishedResumeDecision {
@@ -58,7 +64,7 @@ export function decideUnfinishedResume(input: UnfinishedResumeInput): Unfinished
   if (input.resumesUsed >= (input.maxResumes ?? MAX_UNFINISHED_RESUMES)) return { resume: false, message: '', standDown: 'limit' };
   // Declined first: it is the stronger claim, the same order the nudge uses.
   if (turnDeclined(input.text)) return { resume: false, message: '', standDown: 'declined' };
-  if (turnAskedTheUser(input.text)) return { resume: false, message: '', standDown: 'asked-the-user' };
+  if (!input.producedFiles && turnAskedTheUser(input.text)) return { resume: false, message: '', standDown: 'asked-the-user' };
   const listed = blockers.slice(0, MAX_LISTED).map((b) => `- ${b.length > MAX_BLOCKER_CHARS ? `${b.slice(0, MAX_BLOCKER_CHARS)}…` : b}`);
   const more = blockers.length > MAX_LISTED ? `\n- …and ${blockers.length - MAX_LISTED} more.` : '';
   return {
@@ -71,6 +77,19 @@ export function decideUnfinishedResume(input: UnfinishedResumeInput): Unfinished
       + 'or make MECHANICAL fixes (imports, types, props, names, paths) yourself with edit_file, then typecheck. Keep going until the app works. '
       + 'If something genuinely stops you, say what it is in one sentence instead.',
   };
+}
+
+/**
+ * Why a resume that the blockers called for did NOT happen — for the admin report. Before this, a
+ * build that ended with blockers and no resume left no line saying why (autopsy 6461025c). null when
+ * there was nothing to resume for, or the switch is off. PURE.
+ */
+export function unfinishedResumeStandDownNote(standDown: UnfinishedResumeDecision['standDown'], blockerCount: number): string | null {
+  if (!standDown || standDown === 'no-blockers' || standDown === 'disabled') return null;
+  const why = standDown === 'declined' ? 'the model declined the request'
+    : standDown === 'asked-the-user' ? 'the model asked the user a question before building anything'
+    : 'the resume limit was reached';
+  return `The readiness check still found ${blockerCount} blocker(s), but the build was not resumed: ${why}.`;
 }
 
 /** One sentence for the admin report — never user-facing, so it may name the mechanism. */

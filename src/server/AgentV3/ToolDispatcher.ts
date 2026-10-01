@@ -11,6 +11,8 @@ import { shouldRunAuditFix, auditFixOutcome, AUDIT_FIX_COMMAND } from './npmAudi
 import { narrationText, type NarrationId, type NarrationParams } from './narrationCatalogue';
 import { noteHeal } from './HealLedger';
 import { decideSupersede } from './previewSupersede';
+import { missingRanges, latestVersionsCommand, versionHint } from './npmVersionHint';
+import { declaredRoutes, paramOnlyMatch, type DeclaredRoute } from './routerPaths';
 import { DECLARED_PORT_FILES } from './declaredPort';
 import { appPortsFrom, isSecondaryAppPort, type AppPortMap } from './appPorts';
 import { sandboxStore } from './SandboxStore';
@@ -91,7 +93,7 @@ import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepTool
 import { findUndefinedClasses, isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, missingImportedSheetNote, collectDefinedClasses } from './CssConsistency';
 import { pageDesignWriteNote, isPageFile, analyzeDesignCoverage, type DesignDefect } from './DesignCoverage';
 import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
-import { shellWriteTargets } from './shellWriteTargets';
+import { shellWriteTargets, shellRemovalTargets } from './shellWriteTargets';
 import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
@@ -174,6 +176,8 @@ import { STARTER_ENTRY_CONTENT, entryIsStillTheStarter, starterAppBlocker } from
 import { authoredPathSet, splitByAuthorship, preExistingCodeObservation, droppedRelativeImports, droppedImportOrphanLabel, importStem } from './buildAuthorship';
 import { computeReachability, splitByReachability, unreachableCodeObservation, type ReachabilityVerdict } from './appReachability';
 import { deletionCandidates, deletionReconciledMessage } from './fileDeletion';
+import { filesOutsideTheApp, outsideAppMatcher, outsideTheAppNote } from './outsideTheApp';
+import { userFileGuardEnabled, unaskedUserFileRemovals, userFileRemovalMessage } from './userFileGuard';
 import { prunableGraphPaths, pruneWasRefused, pruneRefusedMessage } from './graphReconcile';
 import { analyzeHooksRules, hookViolationWriteNote } from './HooksRulesAnalysis';
 import { dedupeDuplicateImports } from './DuplicateImportGuard';
@@ -789,6 +793,18 @@ export class ToolDispatcher {
     this.coverageRequest = typeof text === 'string' && text.trim() ? text : null;
   }
 
+  /**
+   * Files the USER put in the workspace, and the request this build answers — so a shell delete of one
+   * of them is refused unless the request asks for it (autopsy 4d538ca3, see userFileGuard.ts). Empty
+   * by default, which protects nothing — exactly the behaviour before this existed.
+   */
+  private userOwned: string[] = [];
+  private userRequest: string | null = null;
+  setUserOwnedFiles(paths: readonly string[], request: string | null): void {
+    this.userOwned = (paths ?? []).filter((p): p is string => typeof p === 'string' && p.length > 0);
+    this.userRequest = typeof request === 'string' ? request : null;
+  }
+
   setIgnoreRules(rules: IgnoreRule[]): void {
     this.ignoreRules = Array.isArray(rules) ? rules : [];
   }
@@ -825,6 +841,12 @@ export class ToolDispatcher {
 
   setFileDeletionSink(sink: (paths: string[]) => void): void {
     if (typeof sink === 'function') this.fileDeletionSink = sink;
+  }
+
+  /** Told when a delete of the user's own file is refused, so the build report says so. */
+  private userFileRefusalSink?: (paths: string[]) => void;
+  setUserFileRefusalSink(sink: (paths: string[]) => void): void {
+    if (typeof sink === 'function') this.userFileRefusalSink = sink;
   }
 
   /**
@@ -1517,7 +1539,8 @@ export class ToolDispatcher {
         // runnability claims "no index.html", both HARD blockers, so the gate falsely
         // reports a real, working build as NOT READY ("build did not complete").
         // Reading the actual file tree first makes the gate judge the app that exists.
-        await this.seedGraphFromWorkspace();
+        // (The seed now runs inside `evaluate` itself, so the model's own call is judged on the same
+        // fresh graph — autopsy 4d538ca3.)
         await this.run({ id: '_readiness_gate', name: 'evaluate', input: {} } as ToolUse, 'architect');
         const report = this.lastReadiness ?? permissive;
         // AN UNTOUCHED SCAFFOLD IS NOT A FINISHED APP (autopsy 31dc61fd). Readiness measures CODE
@@ -3136,10 +3159,31 @@ export class ToolDispatcher {
       direction,
     };
     const res = await this.actuator.browserAction(this.workspaceId, action as BrowserActionName, args);
+    const routeNote = args.url ? await this.paramRouteNote(args.url) : '';
     return {
-      content: `Browser ${action}${args.selector ? ` on "${args.selector}"` : ''}${args.url ? ` → ${args.url}` : ''}: ${res.result}. Screenshot attached.`,
+      content: `Browser ${action}${args.selector ? ` on "${args.selector}"` : ''}${args.url ? ` → ${args.url}` : ''}: ${res.result}. Screenshot attached.${routeNote}`,
       image: res.screenshot ? { base64: res.screenshot, mimeType: 'image/png' } : undefined,
     };
+  }
+
+  /**
+   * When a URL the agent opened is served only by a `:param` route, say so (routerPaths.paramOnlyMatch,
+   * autopsy 2b1f845e). Reads at most three router files; '' on anything unreadable. Never throws.
+   */
+  private async paramRouteNote(url: string): Promise<string> {
+    try {
+      let path: string;
+      try { path = new URL(url).pathname; } catch { path = url.startsWith('/') ? url : ''; }
+      if (!path || path === '/') return '';
+      const routes: DeclaredRoute[] = [];
+      for (const f of ['src/App.tsx', 'src/main.tsx', 'src/router.tsx']) {
+        try { routes.push(...declaredRoutes(await this.actuator.readFile(this.workspaceId, f))); } catch { /* absent */ }
+      }
+      const hit = paramOnlyMatch(path, routes);
+      return hit
+        ? `\nNOTE: the app has no \`${path}\` route — this path matched \`${hit}\`, so the page shown is that route with "${path.split('/').filter(Boolean).pop()}" as its parameter. A screen switched by state is reached by pressing its control on \`/\`, not by a URL.`
+        : '';
+    } catch { return ''; }
   }
 
   /**
@@ -4138,7 +4182,13 @@ export class ToolDispatcher {
       case 'bash': {
         // `.node_modules/.bin/X` is a typo, never a folder (autopsy bee95692: four dev-server launches
         // and two typechecks against it, ~5 min). Corrected before it reaches the shell; the agent is told.
-        const typoFix = fixNodeModulesTypo(reqStr(input, 'command'));
+        const rawCommand = reqStr(input, 'command');
+        // 🔴 AN EMPTY COMMAND IS NOT A COMMAND THAT SUCCEEDED (autopsy 2b1f845e). Five `bash` calls
+        // arrived with `"command": ""`; the shell ran nothing, answered exit 0 with no output, and the
+        // model read that as "done" and moved on, until the loop guard stepped in. A tool that reports
+        // success for work it never did is the fake-success class — so it says what was wrong instead.
+        if (!rawCommand.trim()) throw new Error(emptyCommandMessage(input));
+        const typoFix = fixNodeModulesTypo(rawCommand);
         const command = typoFix.command;
         // Scaffold guard: create-* generators (`npm create vite`, `npx create-*`,
         // `npm init <gen>`) require a newer Node than the fixed-version sandbox and
@@ -4237,6 +4287,21 @@ export class ToolDispatcher {
         // (autopsy 8b3dca5c — see `fileDeletion.ts`). They are collected whether or not the guard is
         // armed, because "this command removes src/x.tsx" is a fact about the command, not a policy;
         // only the REFUSAL below is flag-gated, exactly as before.
+        // A FILE THE USER PUT HERE IS NOT THE BUILD'S TO DELETE (autopsy 4d538ca3 — see
+        // userFileGuard.ts). Every guard above protects app SOURCE; a page the user added from Code
+        // Studio had no protection at all, and the model removed it to clear a score.
+        if (userFileGuardEnabled() && this.userOwned.length > 0) {
+          const unasked = unaskedUserFileRemovals(shellRemovalTargets(command), this.userOwned, this.userRequest);
+          if (unasked.length > 0) {
+            const blockMsg = userFileRemovalMessage(unasked);
+            try {
+              getWorkspaceMemory(this.workspaceId).recordAudit(`[BLOCKED-USER-FILE] refused delete of the user's file(s): ${unasked.join(', ')}`);
+            } catch { /* audit best-effort */ }
+            try { this.userFileRefusalSink?.(unasked); } catch { /* the report line is best-effort */ }
+            this.state?.appendTerminal(blockMsg);
+            return blockMsg;
+          }
+        }
         const deleteTargets = singleSourceDeleteTargets(command);
         if (process.env.AGENTV3_DELETE_GUARD !== 'off') {
           for (const target of deleteTargets) {
@@ -4592,6 +4657,18 @@ export class ToolDispatcher {
             if (note) out = `${out}\n\n${note}`;
           } catch { /* a note is best-effort — the command's own output stands */ }
         }
+        // A guessed range that does not exist gets the real version in the same result (npmVersionHint.ts).
+        if (exitCode !== 0 && process.env.AGENTV3_NPM_VERSION_HINT !== 'off') {
+          try {
+            const missing = missingRanges(`${stdout}\n${stderr}`);
+            const viewCmd = latestVersionsCommand(missing);
+            if (viewCmd) {
+              const view = await withTimeout(this.actuator.runCommand(this.workspaceId, viewCmd), 15_000, 'npm-version-hint');
+              const hint = versionHint(missing, view.stdout);
+              if (hint) out = `${out}\n\n${hint}`;
+            }
+          } catch { /* a hint is best-effort — npm's own error is still reported */ }
+        }
         if ((process.env.AGENTV3_PIPED_GATE_CHECK ?? '').trim().toLowerCase() !== 'off') {
           const lie = pipedGateExitCodeWarning(command, exitCode, `${stdout}\n${stderr}`);
           if (lie) out = `${out}\n\n${lie}`;
@@ -4737,13 +4814,37 @@ export class ToolDispatcher {
       }
 
       case 'evaluate': {
+        // THE GRAPH MUST MATCH THE DISK BEFORE ANY VERDICT, ON EVERY ROAD IN (autopsy 4d538ca3). This
+        // seed — which also forgets files that are gone — used to run only inside
+        // `assessBuildReadiness`, so an `evaluate` the MODEL called judged whatever the graph last
+        // held: a file deleted a minute earlier kept its 34 findings, and the model was told the score
+        // was still 0/100 ("the evaluate tool seems to be using a cached result"). Seeding here makes
+        // both roads judge the app that exists.
+        await this.seedGraphFromWorkspace();
         const mem = getWorkspaceMemory(this.workspaceId);
         const archReport = analyzeArchitecture(mem.graph());
-        const findings = mem.securityFindings();
         // Read the source tree ONCE and share it across every file-scanning dimension
         // (was ~7 directory listings + each file read ~5×). `snap.files` is the full
         // name-only list for hygiene/secret-leak; `snap.sources` carries content.
-        const snap = await this.readEvalSnapshot();
+        const fullSnap = await this.readEvalSnapshot();
+        let pkgForRun: string | null = null;
+        try {
+          pkgForRun = await this.actuator.readFile(this.workspaceId, 'package.json');
+        } catch {
+          pkgForRun = null; // no manifest — runnability is simply "not assessable"
+        }
+        // A DOCUMENT THE USER BROUGHT IN IS NOT THE APP (autopsy 4d538ca3, see outsideTheApp.ts): a
+        // reference page the bundle never ships scored this app 0/100, and the model deleted the
+        // user's file to clear it. Such files are set aside from every scan and named in the result.
+        const outsideApp = filesOutsideTheApp(fullSnap.files, pkgForRun, fullSnap.sources);
+        try { mem.setOutsideTheApp(outsideApp); } catch { /* the shared record is best-effort */ }
+        const isOutsideApp = outsideAppMatcher(outsideApp);
+        const snap = outsideApp.size === 0
+          ? fullSnap
+          : { files: fullSnap.files, sources: fullSnap.sources.filter((s) => !isOutsideApp(s.path)) };
+        const allFindings = mem.securityFindings();
+        const findings = outsideApp.size === 0 ? allFindings : allFindings.filter((f) => !isOutsideApp(f.file));
+        const outsideAppLine = outsideTheAppNote([...outsideApp].sort(), allFindings.length - findings.length);
         // Sampled ONCE, here, at the end of the build — see `setAuthoredFiles` for why it is a thunk.
         // `undefined` when nothing armed it, which keeps the pre-authorship behaviour exactly.
         const authoredSet = this.authoredFiles ? authoredPathSet(this.authoredFiles()) : undefined;
@@ -4815,12 +4916,7 @@ export class ToolDispatcher {
         // Best-effort runnability pass (Phase 6 — Execution Quality): can the app
         // actually start/build? Reads package.json; never throws, never breaks
         // evaluate. "Preview is EARNED" — a build that compiles can still not run.
-        let pkgForRun: string | null = null;
-        try {
-          pkgForRun = await this.actuator.readFile(this.workspaceId, 'package.json');
-        } catch {
-          pkgForRun = null; // no manifest — runnability is simply "not assessable"
-        }
+        // (package.json was read once, above, for the outside-the-app decision — `pkgForRun`.)
         const runnability = analyzeRunnability(mem.graph(), pkgForRun);
         // Best-effort SEO/metadata pass (Section I #19): reads the HTML entry and
         // checks the discoverability essentials. Never throws, never breaks evaluate.
@@ -5341,7 +5437,7 @@ export class ToolDispatcher {
             return ciWorkflowSummary(analyzeCiWorkflow(map));
           } catch { return ''; }
         })();
-        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${observabilitySummary(obsIssues)}\n\n${gracefulShutdownSummary(shutdownIssues)}\n\n${securityHeadersSummary(secHeaderIssues)}\n\n${sriSummary(sriIssues)}\n\n${cspSummary(cspIssues)}\n\n${commentLanguageSummary(commentLangIssues)}\n\n${uploadValidationSummary(uploadIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designSummary(design)}\n\n${maintainabilitySummary(analyzeMaintainability(snap.sources))}\n\n${heavyImportSummary(analyzeHeavyImports(snap.sources))}${queryPatternLine ? `\n\n${queryPatternLine}` : ''}${effectLeakLine ? `\n\n${effectLeakLine}` : ''}${queryOptLine ? `\n\n${queryOptLine}` : ''}${couplingLine ? `\n\n${couplingLine}` : ''}${apiWiringLine ? `\n\n${apiWiringLine}` : ''}${threatLine ? `\n\n${threatLine}` : ''}${monorepoLine ? `\n\n${monorepoLine}` : ''}${schemaLine ? `\n\n${schemaLine}` : ''}${sqlSchemaLine ? `\n\n${sqlSchemaLine}` : ''}${ciWorkflowLine ? `\n\n${ciWorkflowLine}` : ''}\n\n${lockfileSummary(analyzeLockfiles(snap.files))}${(() => { const pm = packageManagerSummary(detectPackageManager(snap.files)); return pm ? `\n\n${pm}` : ''; })()}${depAutoFix ? `\n\n${depAutoFix}` : ''}${pwaLine ? `\n\n${pwaLine}` : ''}`;
+        return `${verdict}\n\n${buildConfidenceSummary(confidence)}\n\n${architectureSummary(archReport)}\n\n${securitySummary(findings)}\n\n${authenticitySummary(issues)}\n\n${dependencySummary(depIssues)}\n\n${envVarSummary(envIssues)}\n\n${accessibilitySummary(a11yIssues)}\n\n${observabilitySummary(obsIssues)}\n\n${gracefulShutdownSummary(shutdownIssues)}\n\n${securityHeadersSummary(secHeaderIssues)}\n\n${sriSummary(sriIssues)}\n\n${cspSummary(cspIssues)}\n\n${commentLanguageSummary(commentLangIssues)}\n\n${uploadValidationSummary(uploadIssues)}\n\n${complianceSummary(complianceIssues)}\n\n${testCoverageSummary(testCoverage)}\n\n${requirementCoverageSummary(reqCoverage)}\n\n${runnabilitySummary(runnability)}\n\n${seoSummary(seo)}\n\n${projectHygieneSummary(hygiene)}\n\n${errorBoundarySummary(errorBoundary)}\n\n${securityConfigSummary(securityConfig)}\n\n${secretLeakSummary(secretLeak)}\n\n${hardcodedUrlSummary(hardcodedUrls)}\n\n${portBindingSummary(portBindings)}\n\n${viteEnvSummary(viteEnv)}\n\n${envTemplateSecretSummary(envTemplateSecrets)}\n\n${asyncPatternSummary(asyncPatterns)}\n\n${designSummary(design)}\n\n${maintainabilitySummary(analyzeMaintainability(snap.sources))}\n\n${heavyImportSummary(analyzeHeavyImports(snap.sources))}${queryPatternLine ? `\n\n${queryPatternLine}` : ''}${effectLeakLine ? `\n\n${effectLeakLine}` : ''}${queryOptLine ? `\n\n${queryOptLine}` : ''}${couplingLine ? `\n\n${couplingLine}` : ''}${apiWiringLine ? `\n\n${apiWiringLine}` : ''}${threatLine ? `\n\n${threatLine}` : ''}${monorepoLine ? `\n\n${monorepoLine}` : ''}${schemaLine ? `\n\n${schemaLine}` : ''}${sqlSchemaLine ? `\n\n${sqlSchemaLine}` : ''}${ciWorkflowLine ? `\n\n${ciWorkflowLine}` : ''}\n\n${lockfileSummary(analyzeLockfiles(snap.files))}${(() => { const pm = packageManagerSummary(detectPackageManager(snap.files)); return pm ? `\n\n${pm}` : ''; })()}${depAutoFix ? `\n\n${depAutoFix}` : ''}${pwaLine ? `\n\n${pwaLine}` : ''}${outsideAppLine ? `\n\n${outsideAppLine}` : ''}`;
       }
 
       case 'stop_build': {
@@ -10363,6 +10459,14 @@ function testFileHint(filePath: string): string {
     `\nTEST HINT: if a test file exists (e.g. ${basename}.test.tsx), run it to verify: ` +
     `npm test -- --run ${basename}`
   );
+}
+
+/** What the bash tool says about a call that carried no command. Exported for its test. PURE. */
+export function emptyCommandMessage(input: Record<string, unknown>): string {
+  const sent = Object.keys(input ?? {});
+  return 'bash was called with an EMPTY command, so nothing ran — this is not a success. '
+    + (sent.length ? `You sent argument(s): [${sent.join(', ')}]. ` : '')
+    + 'Retry with the shell command in "command", e.g. {"command": "npm run build"} — or skip this call if you meant to do nothing.';
 }
 
 function reqStr(input: Record<string, unknown>, key: string): string {

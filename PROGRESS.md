@@ -86588,3 +86588,145 @@ the one unguarded instance.
   recorded in `BUILD_REPORT_QUEUE.md` pending the admin's agreement that it is not a defect.
 - **Q-010** (starter fragment) gained evidence: this report's marker was an EMPTY workspace, not a fragment.
   Still blocked on a report from the session that first created the machine.
+---
+
+## 2026-10-01 — Autopsy 4d538ca3 (second build of the Bengali personal-AI-assistant report; Weak tier, ok, 8.0 min, ₹205.97)
+
+**The run:** an English "continue" turn added a Memory screen to a Bengali assistant app. It rendered at 231 s and
+passed every browser check. Then, chasing a readiness score of 0/100, **the model ran `rm` on a page the user had
+added from Code Studio** (`Rabni_Roy_AI_Studio_ALL_IN_ONE-7.html`), against a prompt that said *"do not remove any
+existing working features"*. The deletion appeared only as an admin `FILE_DELETED` line.
+
+**Tally:** ✅ 3 self-healed · 🔀 2 workarounds · ⏭️ 3 skipped · ❌ 5 shipped imperfect · 🥵 6 struggle points.
+
+**Ledger (problem → root cause → class → siblings → lock):**
+1. ❌🔀 **User's file deleted to clear a score.** `evaluate` scored 34 `unsafe-html-sink` findings that were all in a
+   page the Vite bundle never ships. Nothing protects a user's file: every delete guard covers app SOURCE only.
+   **Class:** gates judge files that are not the app, and the bash tool can remove what the user brought in.
+   **Fix:** `outsideTheApp.ts` sets aside an HTML page a bundled project does not ship (not the entry, not in
+   `public/`, named by no bundler config; unknown means judge everything) and names it in the result.
+   `userFileGuard.ts` + `shellRemovalTargets` refuse `rm`/`unlink`/`git rm` of a user-owned file unless the request
+   names it with a delete word (kill switch `AGENTV3_USER_FILE_GUARD=off`; report code `USER_FILE_KEPT`).
+   `ManualEditTracker` now keeps a durable `userFiles` set that a build never clears.
+   **Siblings:** the tech-debt register (`appSecurityFindings`); the manual-edit note now says "do not delete".
+   **Lock:** `tests/theUsersFileIsNotTheBuildsToDelete.test.ts`, reversion-proven three ways.
+2. 🥵 **`evaluate` stayed stale after the delete.** Only `assessBuildReadiness` re-read the disk; an `evaluate` the
+   model called judged the old graph. **Fix:** the seed (which also forgets deleted files) runs inside `evaluate`
+   itself. **Lock:** same file, reversion-proven.
+3. ❌🥵 **INTEGRITY_FOCUS_CONFLICT on two screens never mounted together.** The repair then removed Memory's focus
+   (4 edits, 3 type errors, 35 s). **Fix:** `conflictingFocusOwners` treats two owners as exclusive only when one
+   parent renders both behind guards on the same value with different literals (`&&`, ternary, `switch`); anything
+   less certain stays a conflict. **Lock:** `tests/twoScreensDoNotFightForFocus.test.ts`, reversion-proven.
+4. 🥵 **Five false "React is not imported" notes** over writes tsc had called clean. The #3425 rule flagged any
+   `React.`; measured with tsc, a TYPE use (`React.FC`, `React.FormEvent`) compiles through the UMD global, and only
+   a VALUE use raises TS2686. **Fix:** `reactNamespaceValueUse`. Sibling `fixReactUmdGlobal` is tsc-driven and was
+   already right. **Lock:** `PostEditReviewer.test.ts`; the old test that pinned `React.FC` as an error was wrong
+   and was corrected. Reversion-proven.
+5. ❌ **"⚠️ Build Review (85/100): [PASS]"**: the reviewer wrote no score; 85 was our inferred default, and it picked
+   the warning icon. **Fix:** `ReviewResult.scoreStated`; an inferred score is never shown, and the icon follows the
+   findings. **Lock:** `ReviewerAgent.test.ts`, reversion-proven.
+6. 🥵 **"continue" scored complex_app 63 → reasoning rung, fast lane skipped; REQUIREMENT_GAPS said SaaS.** The word
+   `subscription` came from *"Do not add any … subscription"*. `featureRequest.ts` has refused negated FEATURES
+   since 2026-07-13; the DOMAIN reader never learned it. **Fix:** `withoutDeclinedSentences` inside
+   `stripNonDomainUses`; siblings `isComplexAppPrompt` and `namesHeavyGame`. **Lock:**
+   `tests/aDeclinedWordIsNotTheApp.test.ts` (precision locks included), reversion-proven.
+7. ❌ **"No further tools needed." in the user's summary.** The model answered our own end-of-turn rule. The reply
+   streams, so the fix is the instruction (the summary is read by the user). **Lock:** `tests/theSummaryIsForTheUser.test.ts`.
+8. 🔎 **"durable read (0 file(s))" right after build 1 saved 11.** `loadWorkspaceFiles` answers `{}` for an empty
+   store AND a failed read. **Fix (honesty):** `loadWorkspaceFilesWithStatus`; the turn-start guardian prints the
+   status and records `DURABLE_READ_FAILED`. **Lock:** `tests/aFailedReadIsNotAnEmptyStore.test.ts`, reversion-proven.
+9. ⚠️ **Latent: the language line ordered English labels into a Bengali app** (an English "continue" on a Bengali
+   app got "write ALL user-facing text in the language they wrote in, in Latin letters"). **Fix:** on an edit that
+   names no language, new text matches the app's existing language; only the reply follows the message. Architect
+   and sub-agents read the same line. **Lock:** `tests/anEditKeepsTheAppsLanguage.test.ts`, reversion-proven.
+
+**Recorded, no fix:** ✅ an `edit_file` miss self-healed in 2 s; ✅ the reviewer guessed `src/lib/db.ts` (0 s, the
+tool said it does not exist); 🥵 seven piecemeal `App.tsx` edits (~60 s, model style); ⏭️ 24 off-grid spacings
+noted, not fixed (advisory); ⏭️ `JOURNEY_NOT_RUN` on a state-routed SPA (known open item); the 21.79 kB
+`dist/index.html` is the sandbox's bridged build, which publish and snapshot strip via `downloadDistFiles`.
+
+**OPEN root causes (rule 6)** — tracked in `BUILD_REPORT_QUEUE.md` as Q-017 (with Q-010), Q-018 and Q-019; the
+off-grid spacing and the state-switched journey are already Q-015 and Q-016:
+- **Why the durable store read 0 files** at the start of build 2. ⚠️ **This has come back:** autopsy e725e002
+  (2026-09-29) also found "the durable store held 0 files, the sandbox came up WARM on a resumed id". That fix
+  (shadow twins) handled what the empty store let happen and never asked why it was empty. The next report's `SETUP_TIMING` names the status.
+  `unreadable` means a read fault; `empty` means the store was emptied between builds, a data-safety defect to chase.
+- **Only Code Studio edits are remembered as the user's files.** A zip/repo import or a chat attachment saved into
+  the workspace is not in `userFiles` yet, so the guard does not cover it. Needs a decision on bulk imports
+  (protecting 500 imported files from cleanup is a product call).
+- **A file the build deletes is never told to the user.** `FILE_DELETED` is admin-only; the summary said nothing.
+  With the guard, a USER file can no longer be deleted unasked; a build's own stale file still can, silently.
+- **The user's deleted page is not restored by this fix.** It was added after build 1, so build 1's Time Machine
+  point does not hold it; the user needs their own copy.
+
+**Missing subsystem:** a **file-provenance ledger**: one record of who owns each file (user, this build, an earlier
+build, the platform) and whether it ships. Today the user-file set, the authored set, `isNonAppPath`,
+`outsideTheApp` and `modelAuthoredPaths` each answer part of that question separately.
+## 2026-10-01 — Autopsy 2b1f845e: a commit message is not a dev server, the sandbox's agent is not an app, our badge is not input
+
+**Session:** claude/new-session-gx9294. **Report:** build `2b1f845e`, Weak tier, edit turn, 19.1 min, ₹519.10 —
+"Fix all available issue and integration real api for payment, Design, posting" on a 40-file five-step studio app.
+The app ended rendered, typechecked, built and tested; every item below is how it got there, and what it left behind.
+
+### The chain that was one bug (Q-a, Q-b)
+After the model edited `vite.config.ts`, our auto-commit ran `git add -A && (git commit -q -m "edit vite.config.ts" || true)`.
+Split on `&&`/`||`, the second segment starts with `(` — and `ONE_SHOT_PREFIX` is anchored at the start, so the `(`
+hid the `git`, and the word "vite" in the COMMIT MESSAGE made the commit a dev-server launch. It took the managed boot
+(pinned to 5173, two "did not start" restarts — the 54-second command), the in-flight launch coalesced with the model's
+own `npm run server`, the sweep found 3000, and the launch log recorded **the commit** as the command that started the
+app: the stored revival recipe became `(git commit -q -m "edit vite.config.ts" || true)`. Same class as the heredoc fix
+(text that is data read as a command), a different door.
+Separately, `🧹 A previous app … was still serving on port 49983 … (old server stopped)` — 49983 is the sandbox's own
+agent. Our scan in the same build listed `22, 111, 3000, 9222, 49983`; FIVE private "not the app" port lists existed
+(PortDiscovery, devServerHost, previewSupersede, DevServerRecovery, lib/declaredAppPort), none knew 111/9222/49983, and
+they disagreed with each other. The preview flip visits every LISTENING port, so the agent could be adopted as "the app".
+
+### Fixes (DNA level)
+- `withoutGroupingPrefix` / `isOneShotSegment` (devServerHost): segments are judged without `(`/`{`/`!`; the launch log
+  uses the SAME classifier (`startsAServer` = `isLongRunningCommand`) and skips one-shot segments when picking the server.
+- `neverAppPorts.ts` — ONE list (sandbox machinery + data services); all five readers use it; `buildRecipe` and
+  `isUsableRecipe` refuse such a port (a poisoned stored recipe heals on read); supersede ignores it; the user's Ports
+  panel no longer shows the sandbox's machinery. Census test: no private port list, and `CDP_PORT` is in the list.
+- `withoutAppSignature` + `appOwnFiles` (journeyDerivation): the badge's × checkbox is never "the app takes input";
+  the no-journey reason names the real input (`src/steps/…`) instead of "nothing here takes user input".
+- bash: an empty `command` is an error that says so (5 calls had returned exit 0); a blank canonical argument no longer
+  hides a real value sent under an alias.
+- `shouldCheckDone(editingExistingApp)`: an edit is never told "✅ The app looks complete — wrapping up." from the
+  project score (the sibling 1389f0d5 left — its fix waited for the first write, which here was `.env.example` at 2.5 min).
+  READY_BEFORE_END says "Not measured" on an edit.
+- DB/auth templates (`DbConfigGenerator` ×4, `AuthCodeGenerator` supabase) never throw at import: a `…Configured` flag
+  plus a client whose every use throws the clear "not configured" message. In the report the model had to remove our
+  throw to boot the app and left a `{} as` cast the reviewer flagged. Executed in the test with stubbed packages.
+- `tscErrorCause` `void-result`: "Property 'x' does not exist on type 'void'" points at the callee (PostStep: 9 rewrites).
+- `npmVersionHint.ts` (`AGENTV3_NPM_VERSION_HINT=off` reverts): an ETARGET range gets the real latest version in the same
+  tool result, from one `npm view`.
+- System prompt: payments → `generate_payment`, India-first (Cashfree/Razorpay); Stripe only when named or abroad; never
+  hand-write a gateway. (The prompt line still read "Razorpay/Stripe" — Cashfree was added 2026-09-10 and never reached it.)
+- `paramOnlyMatch` (routerPaths): `browser_action` to a URL only a `:param` route serves says so (`/design` matched
+  `/:collectionId`; ~90 s and two loop-guard nudges).
+- `writeQualitySummary`: a flagged file this build never wrote is "not written by this build", not "never got a note".
+
+### Ledger
+Q-a ✅ commit classified as dev server · Q-b ✅ sandbox agent superseded/adoptable, 5 drifted lists · Q-c ✅ badge as input ·
+Q-d ✅ empty bash = exit 0 · Q-e ✅ "app looks complete" on an edit · Q-f ✅ templates crash at import · Q-g ✅ void-result
+loop · Q-h ✅ ETARGET guess · Q-i ✅ Stripe hand-written · Q-j ✅ /design param-route loop · Q-k ✅ untouched-file note blame ·
+Q-014 🟡 env-example vs code fallback port (decision) · Q-015 🟡 three warnings argued not defects (agreement) ·
+Q-016 OPEN journeys cannot reach state-switched forms (capability). All ✅ items locked in
+`tests/theCommitMessageWasNotADevServer.test.ts` (41 cases), each fix reverted-and-failed in the session.
+**Live effect to watch:** `PREVIEW_REVIVAL_RECIPE` details naming a real server command; no `🧹 … port 49983`; no
+"looks complete" narration on edit turns; `[version hint]` after an ETARGET.
+
+### 2026-10-01 (follow-up to #3441, which merged before this commit reached it) — Q-016: a form on a wizard step is reached
+
+The 2b1f845e app kept its forms in `src/steps/*.tsx`, shown by pressing "2 Design" on `/`; no page reaches
+them within `formSourcesFor`'s depth, so no journey was derived and the gate stayed YELLOW. Now:
+- `reachWordFor(path)` — the word the screen's control carries (`DesignStep` → `design`). Refused when it is
+  an action (`NEVER_PRESS` / `WRITE_VERBS`: "post", "pay", "send", "add"…) or generic ("form", "modal").
+- `deriveJourneys` — after the page journeys, a form-bearing component no page reached gets a journey on `/`
+  with `reach`. A form whose submit text is an outward action gets none.
+- The runner — when the form is not visible, presses the one visible control whose name contains the word
+  (never `NEVER_PRESS`, never a creating verb, never a submit), records it as `via`, and presses the SAME
+  control again after the reload before looking for the item. No such control ⇒ `unreachable`, never failed.
+- Real-browser proof (`tests/aFormOnAWizardStepIsReached.test.ts`, 11 cases): a wizard that saves passes, one
+  that only shows the item fails "vanished on reload", one with no matching control is unreachable, and a
+  "Delete design" control is never pressed. Five reversions each failed.

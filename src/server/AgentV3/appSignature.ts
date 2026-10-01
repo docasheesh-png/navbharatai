@@ -110,3 +110,21 @@ export function injectAppSignature(html: string): string {
   if (idx === -1) return `${html}\n${badge}\n`;
   return `${html.slice(0, idx)}${badge}\n${html.slice(idx)}`;
 }
+
+/** The current badge as `appSignatureHtml` writes it: one <div> holding no other <div>. */
+const CURRENT_BADGE = new RegExp(`<div\\b[^>]*\\b${APP_SIGNATURE_MARKER}="[^"]*"[^>]*>[\\s\\S]*?</div>`, 'g');
+
+/**
+ * The document WITHOUT our badge — for every check that reads the app's own markup. PURE.
+ *
+ * 🔴 WHY (autopsy 2b1f845e, 2026-10-01). The badge's × is an `<input type="checkbox">` (see
+ * `appSignatureHtml` for why it is not a button), and the badge lives in the app's own index.html. The
+ * journey check asked "does this app take input?" and answered yes because of OUR checkbox — the report
+ * said *"Read as taking input because of a form element in index.html: <div data-nbai-signature…"* — so a
+ * missing save journey was blamed on an app for a control we put there. Our markup is never evidence
+ * about the user's app. The badge stays in the file; only the reading of it changes.
+ */
+export function withoutAppSignature(html: string): string {
+  if (typeof html !== 'string' || !html.includes(APP_SIGNATURE_MARKER)) return html;
+  return html.replace(CURRENT_BADGE, '').replace(new RegExp(V1_BADGE.source, 'g'), '');
+}

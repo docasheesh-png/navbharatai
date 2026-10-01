@@ -3353,6 +3353,18 @@ the flag entries above promise.
   🔴 **Same autopsy: the scaffold's own ErrorBoundary screen is now judged NOT rendered**
   (`scaffoldCrashScreen` in `PreviewVerify.ts`). Before, it was saved as the last known good at 809 s.
   Do not loosen that match to the bare words; an app's designed error card must stay a render.
+- **🧭 A FORM ON A WIZARD STEP IS REACHED (Q-016, autopsy 2b1f845e; no flag).** A form-bearing component no
+  page reaches (`src/steps/DesignStep.tsx`) gets a save journey on `/` that first presses the ONE visible control
+  named after its screen (`reachWordFor` → "design"), and presses it again after the reload. 🔒 An action word
+  ("post", "pay", "send", "delete", "add") never becomes the reach word, a destructive or creating control is
+  never pressed, and a form whose submit is outward gets no journey. No matching control ⇒ `unreachable`, never
+  a failure. Real-browser test: `tests/aFormOnAWizardStepIsReached.test.ts`.
+- **`AGENTV3_NPM_VERSION_HINT`** (NOT set; default ON, `off` disables — added 2026-10-01, autopsy 2b1f845e) — an
+  `npm install` that fails with ETARGET (a guessed range such as `cors@^4` that does not exist) gets the real latest
+  version from one `npm view`, appended to the same tool result (`npmVersionHint.ts`). Advice only. Same autopsy, no
+  flags: one never-the-app port list (`neverAppPorts.ts` — the sandbox agent 49983, rpcbind, SSH, our CDP port and the
+  data services) replaces five drifted copies; a subshell-wrapped `git commit` naming a `vite.*` file is no longer a
+  dev-server launch (`withoutGroupingPrefix`); DB/auth templates never throw at import.
 - **📱 PHONE FEATURES — `nativeCapabilities.ts` is the ONE table (built 2026-09-27, admin: *"jarwis jaisa
   app … navbharatai banayega"*).** It feeds the builder's brief, the user's summary (web / phone app / impossible,
   with More → Download APK + connect GitHub) and the phone build (plugin versions aligned to the app's
@@ -4032,6 +4044,18 @@ the flag entries above promise.
   after the run, and the report says `SHADOW_TWIN_REMOVED`. 🔒 Unknown authorship ⇒ nothing is removed;
   a twin the build wrote itself is never touched; a `.d.ts` is never a twin; a later-resolving twin stays
   (it cannot shadow). One sandbox listing per dispatcher, reused.
+- **🗂️ `AGENTV3_USER_FILE_GUARD` — A FILE THE USER PUT HERE IS NEVER DELETED UNASKED, AND A PAGE THE APP DOES NOT
+  SHIP IS NOT SCORED AS THE APP (autopsy 4d538ca3, 2026-10-01). ⚠️ NOT set; default ON; `off` lifts the delete
+  guard only.** `evaluate` scored a Vite app 0/100 on 34 findings inside a page the user had added from Code
+  Studio. The model then ran `rm` on the user's file, under a prompt that said "do not remove any existing
+  working features". `outsideTheApp.ts` sets such a page aside: an HTML file in a project with a bundler that is
+  not the entry, not in `public/`, and named by no bundler config. It is set aside from every scan and the tech-
+  debt register, and named in the result. Unknown means judge everything, so a static site is unchanged.
+  `userFileGuard.ts` refuses `rm`/`unlink`/`git rm` (globs and `sh -c` included) of a file in
+  `ManualEditTracker.userOwnedFiles` (a durable set that a build never clears) unless the request names that
+  file with a delete word (report `USER_FILE_KEPT`). `evaluate` now re-reads the disk itself, so a model-called
+  evaluate is never stale. ⚠️ Only Code Studio edits are remembered as the user's files today; zip and repo
+  imports are an OPEN item in `PROGRESS.md`.
 - **⏯️ `AGENTV3_UNFINISHED_RESUME` — A BUILD THAT STOPPED TALKING IS NOT A BUILD THAT FINISHED (autopsy
   121c2431, 2026-09-26). ⚠️ NOT set, and the code default is ON**; `off` restores the old ending exactly.
   Read by `src/server/AgentV3/unfinishedResume.ts`; applied in `AgentRunner`'s readiness gate.

@@ -195,7 +195,7 @@ function App() {
   const [text, setText] = useState('');
   const [query, setQuery] = useState('');
 
-  useEffect(() => { localStorage.setItem(STORE_KEY, JSON.stringify(notes)); }, [notes]);
+  useEffect(() => { try { localStorage.setItem(STORE_KEY, JSON.stringify(notes)); } catch { /* storage blocked — notes last this visit */ } }, [notes]);
 
   const add = () => {
     const t = text.trim();
@@ -348,6 +348,18 @@ import ThemeToggle from './theme';
 
 const REMEMBER_KEY = 'login-remembered-email';
 
+// Storage can be switched off (a private window, a sandboxed frame), and then every read throws — in the
+// first render that blanks the whole page. Remembering is a convenience, so it simply stops.
+function readRemembered(): string {
+  try { return localStorage.getItem(REMEMBER_KEY) || ''; } catch { return ''; }
+}
+function writeRemembered(value: string | null): void {
+  try {
+    if (value) localStorage.setItem(REMEMBER_KEY, value);
+    else localStorage.removeItem(REMEMBER_KEY);
+  } catch { /* storage blocked — nothing is remembered */ }
+}
+
 function validEmail(v: string): boolean {
   const at = v.indexOf('@');
   const dot = v.lastIndexOf('.');
@@ -356,11 +368,11 @@ function validEmail(v: string): boolean {
 
 function App() {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
-  const [email, setEmail] = useState(() => localStorage.getItem(REMEMBER_KEY) || '');
+  const [email, setEmail] = useState(readRemembered);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [showPw, setShowPw] = useState(false);
-  const [remember, setRemember] = useState(() => !!localStorage.getItem(REMEMBER_KEY));
+  const [remember, setRemember] = useState(() => !!readRemembered());
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [user, setUser] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
@@ -372,8 +384,7 @@ function App() {
     if (mode === 'signup' && confirm !== password) e.confirm = 'Passwords do not match.';
     setErrors(e);
     if (Object.keys(e).length > 0) return;
-    if (remember) localStorage.setItem(REMEMBER_KEY, email);
-    else localStorage.removeItem(REMEMBER_KEY);
+    writeRemembered(remember ? email : null);
     setUser(email);
     setNotice('');
   };

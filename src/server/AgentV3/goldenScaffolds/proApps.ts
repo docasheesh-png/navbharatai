@@ -43,7 +43,9 @@ export default function App() {
   const [screen, setScreen] = useState('overview');
   const members = useCollection<Member>('saas.members', SEED_MEMBERS);
   const events = useCollection<Event>('saas.events', SEED_EVENTS);
-  const [planId, setPlanId] = useState(() => localStorage.getItem('saas.plan') || 'growth');
+  const [planId, setPlanId] = useState(() => {
+    try { return localStorage.getItem('saas.plan') || 'growth'; } catch { return 'growth'; }
+  });
   const [inviting, setInviting] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');

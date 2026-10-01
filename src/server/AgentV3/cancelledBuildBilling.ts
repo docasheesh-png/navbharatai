@@ -329,3 +329,20 @@ export function decideCancelledBuildBill(f: CancelledBuildFacts | null | undefin
       : null,
   };
 }
+
+/**
+ * The user's line when a stopped build costs nothing — chosen by WHAT THEY ARE HOLDING. PURE.
+ *
+ * 🔴 AUTOPSY 120eb52f (2026-09-30). A "Continue … finish the build" turn changed six files, made the
+ * project compile, and was stopped by the user before the app was checked. RULE 5 above correctly made
+ * it free — and the route then told them *"You stopped this build before anything was produced …
+ * Your workspace is exactly as it was"*, one sentence for every free cancellation. Both clauses were
+ * false. An unverified edit is free because we could not show it left the app better; the user must
+ * hear that the changes are saved, not that nothing happened.
+ */
+export function freeCancellationMessage(delivery: CancelledDelivery | null): string {
+  if (delivery === 'unverified-edit') {
+    return '🛡️ You stopped this change before it could be checked, so it is FREE — no charge. What it had changed so far is saved; if your app does not work the way it did, send a message and I will fix it.';
+  }
+  return '🛡️ You stopped this build before anything was produced, so it is FREE — no charge. Your workspace is exactly as it was.';
+}

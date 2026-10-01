@@ -70,7 +70,7 @@ function referencesMissingLocalScript(vfs: VirtualFileSystem): boolean {
   return false;
 }
 
-export function renderPreview(vfs: VirtualFileSystem, origin?: string, workspaceId?: string): string {
+export function renderPreview(vfs: VirtualFileSystem, origin?: string, workspaceId?: string, opts?: { building?: boolean }): string {
   // `origin` (the caller's site origin, e.g. https://navbharatai.com) is used to load the
   // self-hosted compiler via an ABSOLUTE URL. Inside a sandboxed <iframe srcDoc> a root-relative
   // path like "/vendor/babel.min.js" does not reliably resolve to the app origin, so the compiler
@@ -84,7 +84,7 @@ export function renderPreview(vfs: VirtualFileSystem, origin?: string, workspace
   // memory-only — honest, and stated in the preview's console — rather than shared between apps.
   const kind = choosePreviewKind(vfs);
   const html =
-    kind === 'react' ? buildReactPreview(vfs, origin, workspaceId)
+    kind === 'react' ? buildReactPreview(vfs, origin, workspaceId, opts)
     : kind === 'vue' ? buildVuePreview(vfs, origin)
     : buildStaticPreview(vfs);
   return injectPreviewNavGuard(html);

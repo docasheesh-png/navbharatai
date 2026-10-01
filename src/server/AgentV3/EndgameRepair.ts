@@ -22,6 +22,7 @@
 
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
 import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
+import { tscNeverRan } from './TscGate';
 
 export interface TscError {
   file: string;
@@ -463,6 +464,9 @@ export function resolveRepairTarget(
 export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
   try {
     const out1 = await io.runTsc();
+    // A compiler that never ran (missing, a help page, a torn install — autopsy 120eb52f) is not
+    // "already clean": nothing was checked, so nothing is claimed.
+    if (tscNeverRan(out1)) return NO_ATTEMPT;
     const errors1 = parseTscErrors(out1);
     if (errors1.length === 0) return { ...NO_ATTEMPT, attempted: true }; // already clean — nothing to do
     io.log?.(`🔧 Endgame repair: ${errors1.length} compile error(s) left — fixing mechanically first…`);

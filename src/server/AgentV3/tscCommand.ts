@@ -33,7 +33,33 @@ export const TSC_UNAVAILABLE_MARKER = 'NBAI_TSC_UNAVAILABLE';
 const INSTALL = (args: string) =>
   `(npm install${args ? ` ${args}` : ''} >>${TSC_ENSURE_LOG} 2>&1 || (grep -qiE 'ERESOLVE|peer dep' ${TSC_ENSURE_LOG} && npm install${args ? ` ${args}` : ''} --legacy-peer-deps >>${TSC_ENSURE_LOG} 2>&1))`;
 
+/**
+ * Present while one of OUR installs is filling `node_modules` (`E2BActuator._npmInstall` writes it, and
+ * removes it when the install ends).
+ *
+ * 🔴 AUTOPSY 120eb52f (2026-09-30). The typecheck's own `npm install` below ran while the background
+ * boot's install was still filling the same tree — two npm processes into one `node_modules` — and
+ * `typescript` came out with its `bin/` and without its `lib/`. Every check for the next ninety seconds
+ * crashed, and the crash was read as clean. Waiting for the other install is the fix; a second
+ * concurrent install is never "making sure".
+ */
+export const NPM_INSTALL_LOCK = '/tmp/nbai-npm-install.lock';
+/** How long a check waits for our own install to finish before saying it could not check yet. */
+export const INSTALL_WAIT_SECONDS = 20;
+/** A lock older than this is from an install that died (the install itself is bounded at 5 min). */
+export const INSTALL_LOCK_STALE_MINUTES = 6;
+
+// `-f` first, so `find` is only asked about a file that exists; its stderr (a lock removed between the two
+// tests) goes to our own log, never to the output a verdict is read from — and never to /dev/null.
+const LOCK_FRESH = `[ -f ${NPM_INSTALL_LOCK} ] && [ -n "$(find ${NPM_INSTALL_LOCK} -mmin -${INSTALL_LOCK_STALE_MINUTES} 2>>${TSC_ENSURE_LOG})" ]`;
+
 export const TSC_ENSURE =
+  // Wait (bounded) for an install already filling node_modules. Still busy ⇒ say so and stop: never run
+  // a second install into the same tree, and never read a half-filled one (`exit` ends this command
+  // only, so the tsc that would follow is skipped too). The wait stays under the 30 s a write-time
+  // check is allowed.
+  `_nbw=0; while ${LOCK_FRESH} && [ $_nbw -lt ${INSTALL_WAIT_SECONDS} ]; do sleep 1; _nbw=$((_nbw+1)); done; ` +
+  `if ${LOCK_FRESH}; then echo "${TSC_UNAVAILABLE_MARKER}: the app's dependencies are still being installed, so nothing was checked yet."; exit 0; fi; ` +
   `: >${TSC_ENSURE_LOG}; ` +
   // `&& touch node_modules`: an "up to date" install leaves the directory's mtime alone, so without the
   // stamp a rewritten package.json kept this re-running `npm install` before every typecheck.
@@ -41,6 +67,13 @@ export const TSC_ENSURE =
   // PINNED to the major our scaffolds declare (autopsy 4499741f). An unpinned install fetched a newer
   // major that REMOVES `baseUrl`, so a project without its own `typescript` failed on its tsconfig alone
   // (TS5102) — a verdict about the compiler we picked, not about the app.
+  // A TORN compiler (its bin/ without its lib/ — autopsy 120eb52f) passes `-x .bin/tsc` and crashes on
+  // every run. npm will not repair it by itself (the package's own package.json is still there), so it
+  // is removed and installed again: from the project's own lock when it declares typescript, else by
+  // the pinned install on the next line.
+  `if [ -x node_modules/.bin/tsc ] && { [ ! -f node_modules/typescript/lib/tsc.js ] || [ ! -f node_modules/typescript/lib/lib.es5.d.ts ]; }; then ` +
+  `rm -rf node_modules/typescript node_modules/.bin/tsc node_modules/.bin/tsserver; ` +
+  `if [ -f package.json ] && grep -q '"typescript"' package.json; then ${INSTALL('')}; fi; fi; ` +
   `if [ ! -x node_modules/.bin/tsc ]; then ${INSTALL('typescript@5 --no-save')}; fi; ` +
   `if [ ! -x node_modules/.bin/tsc ]; then echo "${TSC_UNAVAILABLE_MARKER}: the TypeScript compiler could not be installed, so nothing was checked. npm said:"; tail -n 6 ${TSC_ENSURE_LOG}; fi`;
 

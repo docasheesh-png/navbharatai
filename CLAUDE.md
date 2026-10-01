@@ -453,6 +453,84 @@ An autopsy that ends at "fixed the reported bug" WITHOUT this forward-looking la
 AIM. The reactive five steps keep the app from breaking; this sixth, proactive step is how it becomes the
 best. Both layers — reactive autopsy AND proactive world-best suggestions — with every single report.
 
+## The sixth absolute rule: ZERO UNRESOLVED — a build report is a contract, and every item in it ends in a recorded state (admin-mandated 2026-10-01)
+
+Admin, verbatim: *"claude md me bhi yahi likh do! aur accha kar ke! yeh chatgpt ka external suggestion hai.
+aap isko improv kar ke claude.md me likho!! strict rule"*. The text below is that suggestion ADAPTED under the
+external-suggestion rule — kept where it fits this repo, sharpened where it was vague, corrected where it would
+have collided with the absolute rules above. **The fifth rule's 2026-09-30 section says HOW each item is fixed
+(root, class, siblings, a test that locks the class). This rule says that EVERY item gets there — none dropped,
+none forgotten between sessions, none called done before it is.**
+
+🔴 **WHY IT WAS NEEDED, IN THIS SESSION'S OWN WORDS (autopsy 6461025c, 2026-10-01).** The first reply to that
+report fixed five root causes and listed four items as "still open" in a footnote. The admin had to ask *"sab
+root cause fix huye?"* before two more were fixed — and the honest answer to the question was "no". A list of
+"still open" items at the bottom of a reply is exactly how an item disappears: nothing owns it, the next report
+arrives, and it is never seen again.
+
+### The contract
+
+1. **Every actionable item gets an ID and a row.** Actionable = every line of the report at warning or error
+   severity, every item in the fifth rule's five buckets (✅ self-heal, 🔀 workaround, ⏭️ skip, ❌ shipped
+   broken, 🥵 struggle), every false finding (a lying analyzer is a defect — fixing the analyzer resolves it),
+   and every defect DISCOVERED while working the report even if the report never showed it (the #3426 bullet
+   bug found while merging #3427 is one). Same root cause behind several items ⇒ one fix, but every item still
+   gets its own row pointing at it, so the count can be checked.
+2. **There are exactly two final states.**
+   - ✅ **RESOLVED** — root cause fixed at the class, siblings hunted, locked by a test proven by reversion
+     (put the bug back, watch it fail), full CI-equivalent gate green on the final merged state. Where the real
+     input exists (a prompt, a log line), the test uses it — a fixture of the real report beats a paraphrase.
+     A fix whose live effect is only visible on the next real build says what to watch for, in the row.
+   - 🟡 **BLOCKED — REQUIRES ACTION** — with all four: *what* is blocked, *why* (one of: external service or
+     limit, missing information such as a truncated report, infrastructure/console only the admin can reach,
+     a decision that is the admin's — money, policy, user-visible behaviour, irreversibility — or a fix whose
+     only available form risks breaking a working app), *what is required* to unblock it, and *what was
+     already tried*. A decision-blocked item comes with the options and a recommendation, never a bare question.
+   - ❌ **"Still open", "noted", "recorded", "deliberately not fixed", "by design" in a footnote are NOT states.**
+     "By design" is a claim — it is either argued with evidence and the admin agrees (then RESOLVED as
+     not-a-defect, with the evidence in the row), or it is BLOCKED pending that agreement.
+3. **The queue is a FILE, not a memory: `BUILD_REPORT_QUEUE.md`.** A session's context dies; an "internal
+   queue" dies with it. Every item that is not ✅ at the end of a turn is a row there: ID, report, problem,
+   state, owner (PR number), last action. Rows move to ✅ only when the PR that resolves them is MERGED, and
+   are then deleted from the open table (their ledger stays in `PROGRESS.md`). With several live sessions
+   (see below), a row carrying another session's PR number is TAKEN — pick another or ask.
+4. **No new self-started work while the queue has an actionable row.** Before starting anything — a feature,
+   a refactor, the fifth rule's proactive suggestions, an idea of our own — read `BUILD_REPORT_QUEUE.md`. If a
+   row is actionable (not BLOCKED), it comes first. **The admin's explicit instruction overrides the order,
+   never the queue:** an admin task runs when asked, the queue stays exactly as it was, and the turn after
+   that task returns to it. A BLOCKED row is re-checked whenever its blocker could have changed (a new report
+   arrives, the admin sets a key, a PR lands).
+5. **Completion words are earned.** "Done", "fixed", "complete", "ready", "sab theek ho gaya" may be said about
+   a report only when every one of its rows is ✅ or 🟡 with all four fields. Anything else is reported as
+   **NOT COMPLETE**, naming the remaining IDs. This is the third absolute rule (honesty) applied to progress:
+   the admin's question *"sab fix huye?"* must never be needed to discover the truth.
+
+### What was ADAPTED from the external text, and why (so nobody "restores" the original)
+
+- **"Fix 20/20, no exceptions" is bounded by the first absolute rule.** A fix that can only be made by risking
+  a working app (6461025c: forcing `@types/express` back to v4 under a codebase that typechecked clean on v5)
+  is not made silently and not dropped silently — it is 🟡 BLOCKED with the risk named and the safe options
+  laid out. Never-break outranks fix-everything; both outrank silence.
+- **"No unnecessary retries / fallbacks" means none used to HIDE a deterministic failure** (the fourth rule's
+  forbidden list). It does NOT ban the engine's own designed resilience — the tier ladder, the 429 bench, the
+  render rescue are the product, not patches.
+- **"Never start new work"** applies to work WE choose. The admin's explicit order always runs; the queue is
+  preserved, not abandoned (point 4).
+- **"Remaining: 0" is only true with evidence.** A test that passed is evidence; "I believe it is fixed" is not.
+  A report that was truncated (e.g. "kept 40 of 42 commands") is recorded as such, and any item whose cause
+  lies in the missing part is BLOCKED on a fuller report, not guessed.
+- **The final report goes to the admin in their language and in plain words**, not as a code-formatted form.
+
+### The closing report for every build report (required, every time)
+
+```
+BUILD REPORT <id> — RESOLUTION
+Items: N · ✅ Resolved: R · 🟡 Blocked: B · Remaining: N − R − B
+Q-xxx ✅ <problem> — root cause · fix (PR) · proof (test, reverted-and-failed)
+Q-yyy 🟡 <problem> — blocked because · needs · already tried
+FINAL: ✅ COMPLETE (Remaining = 0)   or   ❌ NOT COMPLETE — remaining: Q-…, Q-…
+```
+
 ## Working alongside other live sessions (admin-confirmed 2026-09-13)
 
 **Several Claude sessions run on this repo at the same time, on purpose.** On the day this was
@@ -625,6 +703,8 @@ broken `main`. Concurrency is a reason to hold those tighter, never looser.
 ## Where things live
 
 - **`CLAUDE.md`** (this file) — rules that rarely change. Auto-loaded.
+- **`BUILD_REPORT_QUEUE.md`** — every build-report item not yet ✅, with its state and owner (the sixth
+  absolute rule). Read it BEFORE starting any work of our own choosing.
 - **`PROGRESS.md`** — living state: current phase, exact resume point, what's
   done, what's next. Changes constantly. Must be read explicitly (not
   auto-loaded) — see safeguard #1, read it but verify it against real git
@@ -3123,6 +3203,41 @@ the flag entries above promise.
   three sinks shipped with a warning nobody acted on. Advisory, never blocks a write, no model call.
   Same PR, no flag: an `nb-` class the design kit does not define and no stylesheet defines is named at
   write time too (`inventedKitClassNote`).
+- **🖥️ `AGENTV3_EARLY_PREVIEW` — THE USER SEES THE APP WHILE IT IS BEING BUILT (admin 2026-10-01, verbatim: *"preview
+  jitna jaldi ayega, user utna rukega.... banao"*). ⚠️ NOT set; default ON; `off` reverts all four parts.**
+  `earlyPreview.ts`. In the calendar report the builder wrote five screens and never `src/App.tsx`, so the live preview
+  showed the starter page for five minutes and the user stopped. The architect and the UI specialists now write the
+  entry right after `src/types.ts`; a fast-lane hand-off names an unwritten entry first; while a build runs the
+  in-browser preview (`ReactPreview.ts`, `building`) draws an unwritten screen as a "being built" card and reports no
+  missing file as an error (the honest banner returns after the build); and the live strip offers "watch it live" once
+  the entry is written (`earlyPreviewCue.ts`; a desktop opens the preview itself). 🔒 Only a capitalised import becomes
+  a card — a missing helper keeps the empty stub. The fast lane's tier order is deliberately unchanged. Test-locked
+  with a real-browser render in `tests/theAppIsOnScreenWhileItIsBuilt.test.ts`.
+- **🙋 `AGENTV3_ASK_UNRELATED` — A DIFFERENT APP IS ASKED ABOUT, NOT BUILT INTO THE ONE THAT IS HERE (admin
+  2026-09-30, verbatim: *"puch lo user se!"*, on autopsy 1389f0d5: a Genesis-4 PDF was built INTO a calculator).
+  ⚠️ NOT set; default ON; `off` restores the old edit-always behaviour.** `unrelatedRequest.ts`. A build order on
+  a workspace that holds an app is normally turned into an edit (`BUILD_ORDER_READ_AS_EDIT`). Now, when the order
+  names a WHOLE thing (an app, website, game, PDF, store) that shares no word-stem with the app here (its own
+  file names and earlier build requests), the turn is answered in chat with the question: reply "add it to this
+  app", or tap "New" (phone: More → New chat) and send it there. 🔒 Precision first: an edit verb, "app me/ko …",
+  "this/the/my app", "make it …", a style comparison ("like a website"), packaging (android/apk/PWA), a part of
+  an app ("game mode", "pdf download") and continue/fix all stand it down, and so does a workspace we cannot read
+  or name. A 22-message precision lock in `tests/askBeforeBuildingSomethingElseIntoThisApp.test.ts` fails CI if
+  an ordinary edit ever meets the question. The reply never falls through to a build if the chat model fails.
+- **🧩 `AGENTV3_DANGLING_CSS_GUARD` — AN IMPORT OF A STYLESHEET THAT DOES NOT EXIST IS REMOVED (autopsy 120eb52f).
+  ⚠️ NOT set; default ON; `off` leaves such imports.** Four components imported `./X.css` files nobody wrote;
+  `tsc` cannot see a stylesheet import, and Vite cannot build one. At the end of a build, a SIDE-EFFECT import of
+  a sheet the sandbox confirms absent is removed (`DANGLING_STYLESHEET_IMPORT_REMOVED`); a CSS-module import
+  (`import s from …`) is never touched. Upstream half, no flag: the write-time class note now names the missing
+  imported file as the place for the rules instead of "Add the rules to src/index.css", which is how the
+  imports were left behind.
+- **🔒 ONE INSTALL INTO `node_modules` AT A TIME (autopsy 120eb52f, no flag).** The typecheck's own `npm
+  install` raced the background boot install and tore `typescript` (its `bin/` without its `lib/`); the crash was
+  then read as a CLEAN typecheck five times. `_npmInstall` now writes `/tmp/nbai-npm-install.lock`
+  (`NPM_INSTALL_LOCK`); `TSC_ENSURE` waits up to 20 s for it, then prints "still being installed" and checks
+  nothing rather than starting a second install; a torn compiler is removed and reinstalled; and
+  `looksLikeBrokenTscInstall` makes `tscVerdict` call any such output "did not run". ⚠️ A lock older than
+  6 minutes is ignored (an install is bounded at 5).
 - **📣 `AGENTV3_SUMMARY_ADDITIONS` — THE END OF A SUCCESSFUL BUILD IS WHAT THE USER STILL HAS TO DO (admin
   2026-09-30: *"app banne ke last me clearly user ko dikhe"*). ⚠️ NOT set, and the code default is ON**; `off`
   restores the old behaviour. `summaryAdditions.ts`.

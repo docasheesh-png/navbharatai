@@ -86039,6 +86039,36 @@ Tests: `tests/theSalesSampleHadTwoHelperHomes.test.ts`, reversion-proven for all
   at the first `tsc`. These files are editable on purpose, because apps add dependencies. Whether the plan may
   REWRITE them wholesale is not decided here.
 
+## 2026-10-01 — Autopsy 120eb52f / b4901ce5 / 0edea014 ("Calendar wala app bnao", Weak, three builds, all stopped by the user) + the admin's "puch lo user se"
+
+Admin decision on the open item from 1389f0d5 (*"puch lo user se!"*): an order for a whole new thing that shares
+nothing with the app already in the workspace is now ANSWERED with a question — add it to this app, or make a
+new app — instead of being built into the app (`unrelatedRequest.ts`, kill switch `AGENTV3_ASK_UNRELATED=off`).
+
+| Problem | Root cause | Class | Siblings found and fixed | Locked by |
+|---|---|---|---|---|
+| Five write-time typechecks and the `typecheck` tool said **clean** while the app held 15 errors | `Cannot find module '../lib/tsc.js'` has no `error TS` line; `tscVerdict` read it as passed | A compiler that crashed is read as a verdict | The `typecheck` tool decided "clean" from zero PARSED errors without asking `tscVerdict` (also a project-level `TS5023` read clean); the endgame called a crash "already clean"; the fast-lane gate sent `TS2318 Cannot find global type 'Array'` (the compiler's own library) to a repair as app errors | `looksLikeBrokenTscInstall` inside `tscNeverRan`/`tscVerdict`; tool, endgame and gate ask it |
+| `typescript` came out with `bin/` and no `lib/` | The typecheck's own `npm install` ran while the background boot install filled the same `node_modules` | Two installs into one tree | Every install path goes through `_npmInstall`, so one lock covers all | `NPM_INSTALL_LOCK` written by `_npmInstall`; `TSC_ENSURE` waits ≤ 20 s for it, then says "still installing" instead of racing; a torn compiler is removed and reinstalled (the ensure step is run for real against a fake npm in the test) |
+| `types.ts` declared `type EventStatus = (typeof EventStatus)[…]` with no `EventStatus` value | `contractModule` keeps enum/interface/type; a `const … as const` had no `: Type` for the constants' owner, so it fell through both | An enum written as data is dropped from the contract | — | `LITERAL_CONST` kept in the contract file (a literal that calls nothing); compiled with real `tsc` in the test |
+| Four components imported `./X.css` files nobody wrote; the model put the rules in `src/index.css` and left the imports | Our own class note said "Add the rules to src/index.css"; `tsc` cannot see stylesheet imports | A dangling stylesheet import, invisible to every check before Vite | — | The note now names the imported missing file as the place for the rules (`missingImportedSheetNote`); end of build removes a side-effect import of a sheet the sandbox confirms absent (`DANGLING_STYLESHEET_IMPORT_REMOVED`, kill switch `AGENTV3_DANGLING_CSS_GUARD=off`) |
+| A stopped edit that changed six files told the user *"before anything was produced … exactly as it was"* | One sentence for every free cancellation | A message chosen without asking what the user holds | — | `freeCancellationMessage(delivery)` |
+| A 9-second build with no model call reported `model: claude-haiku` | The no-call fallback was `selectBuildModel`'s legacy answer (Weak's Claude backstop) | Planned ≠ ran | The signed manifest had the same fallback | Report falls back to the ladder's first rung; manifest says `none (no model call was made)` |
+
+Already fixed on `main` after these builds ran (verified, not assumed): `UPSELL_SUPPRESSED` as an unresolved
+warning (#3420); the second helper home `src/utils.ts` beside a planned `src/utils/dateUtils.ts` (#3419 — the
+plan now picks `dateUtils.ts`); the 60 s silent fast-lane call and 30 s plan timeout (#3422's crawl bound reaches
+the fast lane, which runs through `buildTurnRunner`).
+
+Tests: `theCompilerThatCrashedWasCalledClean`, `theCalendarAutopsy`, `askBeforeBuildingSomethingElseIntoThisApp`
+— each reversion-proven.
+
+**Still open:**
+- **Why the user stopped two builds** is not in the reports. The first was at 5.0 min against an estimate of
+  6–8 min, with no preview yet. A visible preview earlier (the fast lane salvaged 5 files and then handed off)
+  would answer it better than anything here.
+- The question costs one turn; if the reply is "add it to this app", the builder reads the earlier request from
+  project context (every request is listed there). If a report shows the builder losing that request, a
+  deterministic hand-over (the pending request substituted into the turn) is the next step.
 ## 2026-10-01 — Autopsy 6461025c ("Ads + Rewards + Coin Economy" spec, Weak, 19.7 min, ₹477.80): the spec lost to a keyword list
 
 The request was a 15,689-character written spec with 40 enumerated parts. The app rendered, typechecked,
@@ -86268,3 +86298,33 @@ switch) · ❌ 0 shipped broken · 🥵 3 (the review overran its 45 s with tool
 - **Still open:** which file made this calculator read as taking input is not proven. The template and every
   file the platform writes pass `appHasNoDataEntry`, so it was most likely the model's own App.tsx edit; the
   report did not carry that file. The next such report will name it in `JOURNEY_NOT_DERIVED`'s detail.
+## 2026-10-01 — Early preview: the user sees the app while it is being built (admin: "preview jitna jaldi ayega, user utna rukega.... banao")
+
+**Evidence (calendar report 120eb52f / b4901ce5):** nine minutes over two builds and the user never saw the app.
+Build 1: the fast lane salvaged 5 foundation files at 141 s; the full builder then wrote CalendarPage, Header, DayCell,
+AddEventModal and a hook — and never `src/App.tsx`, so the live preview showed the starter page until the user stopped
+at 295 s. Build 2 rewrote App.tsx at ~180 s; the user stopped at 214 s, one second after "the app looks complete".
+
+**Root cause — an order, not a speed.** The preview has re-rendered on every write since streaming first paint, but a
+React app shows nothing of a screen until its ENTRY renders it, and the entry was written last on both lanes.
+
+**Fixed (`AGENTV3_EARLY_PREVIEW`, default ON, `off` reverts all of it):**
+- The architect and the UI specialists (frontend/fullstack/mobile) are told to write the entry right after
+  `src/types.ts`, with the screens it is about to write imported (`earlyPreview.ts` `shellEarlyRule`). The write-time
+  typecheck already routes "cannot find module" to the file that fixes it, so this costs no repair turn.
+- A fast lane that stopped before its entry hands it over by name (`entryFirstHandoffLine`, both hand-offs).
+- In-browser preview while a build runs (`ReactPreview.ts`, `building`): an unwritten screen (capitalised name) is a
+  "⏳ X is being built…" card; a missing lowercase helper keeps the empty stub; neither is reported as an error. After
+  the build the honest "Missing file" banner is back. The client sends `building` and re-renders once when the build ends.
+- The live strip shows "▶ Your app is on screen — watch it live" once THIS build writes the entry
+  (`earlyPreviewCue.ts`, `entryWrittenAt` in the reducer); on a desktop the preview opens by itself at that moment
+  instead of waiting for a dev-server URL.
+
+Tests: `tests/theAppIsOnScreenWhileItIsBuilt.test.ts` (16), including a real-browser render (vendored React,
+skipped in CI) — reversion-proven by disabling the card.
+
+**Not changed, said plainly:** the fast lane's own tier order. Its entry is still generated last, because that is
+what lets it use its children's real props in one pass; on a healthy fast lane the whole app lands at once seconds
+after the entry. A further ~20–40 s there (painting before the stylesheet stage) is possible but entangled with the
+lane's CSS guards — recorded here, not attempted.
+**Open:** whether models actually follow the shell-first rule — watch when `src/App.tsx` is first written in admin reports.

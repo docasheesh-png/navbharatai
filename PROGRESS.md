@@ -86808,6 +86808,24 @@ Q-016 OPEN journeys cannot reach state-switched forms (capability). All ✅ item
 **Live effect to watch:** `PREVIEW_REVIVAL_RECIPE` details naming a real server command; no `🧹 … port 49983`; no
 "looks complete" narration on edit turns; `[version hint]` after an ETARGET.
 
+### 2026-10-01 — Queue Q-019: a file the build removed from the user's app is told to them (follow-up to #3446)
+
+Autopsy 4d538ca3 left Q-019 OPEN: `FILE_DELETED` was admin-only, so a build that removed a file the user's
+app had said nothing in the summary they read. #3442 had already made deleting the user's OWN Code Studio
+file impossible unless asked; a file the build itself wrote earlier could still vanish silently.
+- **Fix:** `deletedThisBuild` collects every deletion the dispatcher confirmed (the existing
+  `setFileDeletionSink`) and every shadow twin removed (the sibling road). At settle, `userVisibleDeletions`
+  keeps the paths that were in the project BEFORE the build (`projectFilePaths`), only when the user had an
+  app (`userAppExists`), never `.nbai*`, and the route keeps only those still absent in the sandbox (a later
+  write or a GreenGuard restore may have put one back). `deletedFilesNotice` appends one line to the summary,
+  which `summaryAdditions` already shows as the closing chat line, pointing at Files → History.
+- **Not done, said plainly:** the durable store is not changed here. If the end-of-build sandbox scan fails,
+  the save merges and a deleted file can return on the next restore. That is the pre-existing merge-save
+  behaviour, and it is recorded here rather than widened into this change.
+- Test: `tests/aDeletedFileIsToldToTheUser.test.ts` (14), reverted-and-failed twice (sink push removed;
+  prior-paths filter removed). Admin code `FILES_REMOVED_TOLD` (process-only).
+- **Live effect to watch:** a `🗑️ This build removed …` line on an edit turn that deleted an existing file,
+  and `FILES_REMOVED_TOLD` in the admin report.
 ### 2026-10-01 (follow-up to #3441, which merged before this commit reached it) — Q-016: a form on a wizard step is reached
 
 The 2b1f845e app kept its forms in `src/steps/*.tsx`, shown by pressing "2 Design" on `/`; no page reaches

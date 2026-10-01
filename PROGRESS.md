@@ -86588,8 +86588,65 @@ the one unguarded instance.
   recorded in `BUILD_REPORT_QUEUE.md` pending the admin's agreement that it is not a defect.
 - **Q-010** (starter fragment) gained evidence: this report's marker was an EMPTY workspace, not a fragment.
   Still blocked on a report from the session that first created the machine.
+## 2026-10-01 — Autopsy 39955124 (Dwarkadhish game, stopped by the user at 5.7 min)
+
+Sixth-rule ledger (every item ✅ or 🟡):
+- **D1 ✅** A bare `about` keyword ordered an "about page" from "learn about the stories" (the model's
+  first line repeated it). `about page` / `contact page` now need the page sense — "about page / us /
+  section", "contact form / us / page", or a place in a list of site pages (`sitePageListed`).
+- **D2 ✅** A 79-line spec typed one feature per line (no markers) counted 13 fragments, under the
+  spec line. Plain short lines under a colon opener now count — for the SPEC STAND-DOWN only
+  (`plainLines`); the project gates keep their count, because a one-app spec decomposed into modules is
+  the SignBridge harm. A comma sentence with a clause longer than an item is prose (lowers counts only).
+  SignBridge's 200-line prompt now reads as a spec too; its test asserts that, and the sense-filter lock
+  moved to a short prompt.
+- **D3 ✅** RELEASE_GATE said "the typecheck did not run" beside six clean write-time typechecks:
+  `recordCommand` kept the first 500 chars, and the `TSC_ENSURE` prefix is longer than that, so every
+  platform typecheck lost its `tsc --noEmit` and no evidence reader recognised it. `clipCommand` keeps
+  both ends. Covers the `typecheck` tool and the endgame re-check as well (same command builder).
+- **D4 ✅** The architect delegated planning to a `planner` sub-agent that re-read the scaffold for 116 s.
+  Planning-only roles (requirement / planner / product) now return `PLAN_YOURSELF_NOTE` instead of a
+  sub-agent; the `task` description says so.
+- **D5 ✅** A single-player game was asked "who are the user roles?" and "how many users?" — skipped for
+  a solo game; a multiplayer / online / leaderboard game still gets them.
+- **D6 🟡 → Q-010** Warm sandbox held only part of our starter again (11 files completed) — the first
+  typecheck then paid for installing the compiler. Second occurrence recorded on Q-010.
+- **D7 🟡 → Q-020** Stopped at 5.7 min with no preview; what the screen showed is not in the report.
+- Not defects: `run_recipe` listing (0 s), COMPLEXITY 90 vs APP_SCOPE "single-purpose" (each serves its
+  own gate), the prompt itself being pasted out of order (user input).
+Tests: `tests/theDwarkaGameAutopsy.test.ts` (real prompt as fixture), each fix proven by reversion.
 ---
 
+## 2026-10-01 — A spreadsheet is a FILE, not an app (admin: "A karo!!")
+
+**Report:** a user asked NavBharatAI Pro for a sample Excel file; the builder wrote a React dashboard that
+showed a table, and the user still had no `.xlsx`. Admin chose option A: a real file deliverable.
+
+- **Class:** a request for a DELIVERABLE (here a spreadsheet; before it a picture, `pictureRequest.ts`)
+  reaching a surface that only builds software. Same fix shape — read the request before the builder does —
+  but here NavBharatAI makes the deliverable itself.
+- **Detector** `AgentV3/spreadsheetRequest.ts` (precision-first: a spreadsheet noun + a create verb or
+  "sample data", and nothing that is software, a how-to, handling an existing file, or another format).
+  Decided before the picture rule; turns the turn into a chat turn. Kill switch `AGENTV3_SPREADSHEET_FILE=off`.
+- **Turn** `AgentV3/spreadsheetTurn.ts`: one free-router call asks for strict JSON (message first, in the
+  user's language); `lib/spreadsheetFile.ts` reads it (fence/prose tolerant, truncated answers salvaged to
+  the last complete row), clamps it (5 sheets, 30 columns, 200 rows/sheet, 20,000 cells, 500 chars/cell),
+  and writes `.xlsx` (exceljs: frozen bold header, filters, widths, numbers as numbers) and `.csv`
+  (UTF-8 BOM, formula-injection guard). Rows are stored in `agentv3_sheet_files` (JSON string — Firestore
+  refuses nested arrays) under the VERIFIED uid; signed out ⇒ no model call, an honest "sign in" reply.
+- **Download** `routes/spreadsheetFiles.ts`: the App Mart ticket shape (`downloadTicket.ts`) — an
+  authenticated POST mints a 10-minute HMAC ticket signed over file + format + sheet + account; the GET is a
+  navigation (system browser on the phone). Someone else's file is the same 404 as a missing one.
+- **Client:** narration line + persisted turn carry `file` (name and shape only); `conversationToEvents`
+  replays it, so the button survives a reopened chat; `SheetFileCard.tsx` renders Excel (.xlsx) + one CSV
+  per sheet. ⚠️ Bundled mode: phone users get the button with a fresh `.aab`/`.ipa`.
+- **Sibling fixed:** `routes/export.ts` (account-data CSV export) had no formula-injection guard and no BOM;
+  it now uses the same `csvCell` and sends the BOM.
+- **Tests:** `tests/aSpreadsheetIsAFileNotAnApp.test.ts` (58 cases: a 33-message precision corpus, parsing
+  and clamps, salvage, CSV guard, a real `.xlsx` read back, every turn outcome, the routes' ownership and
+  ticket binding, the chat-lane wiring and the restore path).
+- **Not done, said plainly:** charts and formulas are not written (data only); the free router's leader
+  has a short per-call timeout, so a very large sheet falls to the next rung (slower, not lost).
 ## 2026-10-01 — Autopsy 4d538ca3 (second build of the Bengali personal-AI-assistant report; Weak tier, ok, 8.0 min, ₹205.97)
 
 **The run:** an English "continue" turn added a Memory screen to a Bengali assistant app. It rendered at 231 s and

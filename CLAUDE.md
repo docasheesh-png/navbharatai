@@ -3242,6 +3242,16 @@ the flag entries above promise.
   an app ("game mode", "pdf download") and continue/fix all stand it down, and so does a workspace we cannot read
   or name. A 22-message precision lock in `tests/askBeforeBuildingSomethingElseIntoThisApp.test.ts` fails CI if
   an ordinary edit ever meets the question. The reply never falls through to a build if the chat model fails.
+- **📊 `AGENTV3_SPREADSHEET_FILE` — A SPREADSHEET IS A FILE, NOT AN APP (admin 2026-10-01, verbatim: *"A karo!!"*).
+  ⚠️ NOT set; default ON; `off` builds such requests as before.** "Make a sample Excel file" was built as a React
+  dashboard and the user got no `.xlsx`. `spreadsheetRequest.ts` (precision first: a spreadsheet noun + a create
+  verb or "sample data", and no software word, how-to, existing-file handling or other format) turns the turn into a
+  chat turn; `spreadsheetTurn.ts` asks the free router for JSON rows; `lib/spreadsheetFile.ts` clamps them and
+  writes `.xlsx` (exceljs) / `.csv` (BOM + formula-injection guard); rows live in `agentv3_sheet_files` under the
+  VERIFIED uid; `routes/spreadsheetFiles.ts` downloads through the App Mart ticket shape (HMAC over file + format +
+  sheet + account, 10 min). The chat line and the persisted turn carry `file`, so the Download card survives a
+  reopen. ₹0, like the chat lane. ⚠️ The card reaches phone users only with a fresh `.aab`/`.ipa`. Test-locked in
+  `tests/aSpreadsheetIsAFileNotAnApp.test.ts`.
 - **🧩 `AGENTV3_DANGLING_CSS_GUARD` — AN IMPORT OF A STYLESHEET THAT DOES NOT EXIST IS REMOVED (autopsy 120eb52f).
   ⚠️ NOT set; default ON; `off` leaves such imports.** Four components imported `./X.css` files nobody wrote;
   `tsc` cannot see a stylesheet import, and Vite cannot build one. At the end of a build, a SIDE-EFFECT import of

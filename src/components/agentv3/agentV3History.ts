@@ -7,7 +7,7 @@
 // admin-chosen "chat + git-restore" approach). Replaying these events through the existing,
 // tested agentV3Reducer rebuilds the narration feed + workspaceId with no new reducer logic.
 
-import type { AgentV3WireEvent, AgentRole } from './agentV3Types';
+import type { AgentV3WireEvent, AgentRole, SheetFileRef } from './agentV3Types';
 
 /** The shape returned by GET /api/agentv3/conversations/:id (mirror of the server record). */
 export interface PersistedConversation {
@@ -121,6 +121,32 @@ function timelineToWireEvent(e: unknown): AgentV3WireEvent | null {
  * billing/token facts) so the reopened session shows the SAME action rows, Diff/Terminal tabs
  * and done-footer it showed live. A `running` build is left open (no `done`) for Resume.
  */
+/**
+ * The spreadsheet a persisted assistant turn carries (the plain-chat lane stores it beside the reply),
+ * or undefined. Read defensively: a stored document is data, and a malformed one must cost the button,
+ * never the reply above it.
+ */
+export function restoredSheetFile(raw: unknown): SheetFileRef | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== 'string' || !/^[a-f0-9]{24}$/.test(r.id)) return undefined;
+  if (!Array.isArray(r.sheets) || r.sheets.length === 0) return undefined;
+  const sheets = r.sheets.slice(0, 5).map((x, i) => {
+    const m = (x ?? {}) as Record<string, unknown>;
+    return {
+      name: typeof m.name === 'string' && m.name ? m.name : `Sheet${i + 1}`,
+      rows: typeof m.rows === 'number' && m.rows >= 0 ? m.rows : 0,
+      columns: typeof m.columns === 'number' && m.columns >= 0 ? m.columns : 0,
+    };
+  });
+  return {
+    id: r.id,
+    title: typeof r.title === 'string' ? r.title : '',
+    fileBase: typeof r.fileBase === 'string' && r.fileBase ? r.fileBase : 'navbharatai-sheet',
+    sheets,
+  };
+}
+
 export function conversationToEvents(conv: PersistedConversation): AgentV3WireEvent[] {
   const events: AgentV3WireEvent[] = [];
   if (conv.workspaceId) events.push({ type: 'workspace', workspaceId: conv.workspaceId, ts: 0 });
@@ -142,10 +168,11 @@ export function conversationToEvents(conv: PersistedConversation): AgentV3WireEv
   const replayed: AgentV3WireEvent[] = [];
   msgs.forEach((m, idx) => {
     if (!m || typeof m !== 'object') return;
-    const msg = m as { role?: unknown; content?: unknown };
+    const msg = m as { role?: unknown; content?: unknown; file?: unknown };
     if (msg.role !== 'assistant') return;
     const text = messageText(msg.content).trim();
-    if (text) replayed.push({ type: 'narration', agent: 'architect', text, ts: restoredTs(m, idx) });
+    const file = restoredSheetFile(msg.file);
+    if (text) replayed.push({ type: 'narration', agent: 'architect', text, ts: restoredTs(m, idx), ...(file ? { file } : {}) });
   });
   for (const raw of conv.timeline ?? []) {
     const wire = timelineToWireEvent(raw);

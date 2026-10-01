@@ -139,12 +139,12 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
             : -1;
         if (idx >= 0) {
           narration = state.narration.map((line, i) =>
-            i === idx ? { ...line, text: event.text, streaming: false } : line,
+            i === idx ? { ...line, text: event.text, streaming: false, ...(event.file ? { file: event.file } : {}) } : line,
           );
         } else {
           narration = [
             ...state.narration,
-            { agent: event.agent, text: event.text, ts: event.ts, id: event.id },
+            { agent: event.agent, text: event.text, ts: event.ts, id: event.id, ...(event.file ? { file: event.file } : {}) },
           ].slice(-MAX_NARRATION);
         }
       }

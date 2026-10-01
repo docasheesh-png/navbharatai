@@ -3668,7 +3668,8 @@ export function taskToolDef(): ClaudeToolDef {
     description:
       'Delegate a focused task to a specialist agent. The agent runs with its own ' +
       'tools and returns a summary of what it did. Use this to parallelise and ' +
-      'organise the build across the team.',
+      'organise the build across the team. Plan the work yourself with update_todo — ' +
+      'a planning-only role (requirement, planner, product) is not delegated.',
     input_schema: {
       type: 'object',
       properties: {

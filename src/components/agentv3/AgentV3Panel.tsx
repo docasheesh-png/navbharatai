@@ -87,10 +87,11 @@ import { ActionGroupRow } from './ActivityTimelineRow';
 import { trackEvent } from '../../lib/analytics';
 import { normalizeUid } from '../../lib/agentv3Workspace';
 import { deliverTextFile } from '../../lib/downloadFile';
+import SheetFileCard from './SheetFileCard';
 import { FrameworkPicker, FRAMEWORKS } from './FrameworkPicker';
 import { resolveFrameworkSelection } from '../../lib/frameworkDetect';
 import { PreviewSurface } from './PreviewSurface';
-import type { ActivityEntry, AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus } from './agentV3Types';
+import type { ActivityEntry, AgentCard, BuildHealth, GitCheckpoint, TodoItem, TodoStatus, SheetFileRef } from './agentV3Types';
 import {
   EMPTY_LIVE_SYNC_QUEUE, LIVE_SYNC_BATCH_MAX, LIVE_SYNC_WINDOW_MS,
   applyLiveDelete, applyLiveFiles, diffFileEntries, noteChangedPath, requeueFailedBatch, settleSyncBatch, takeSyncBatch,
@@ -125,6 +126,8 @@ interface ChatMsg {
   ts: number;
   kind?: 'text' | 'thinking';
   streaming?: boolean;
+  /** A spreadsheet this reply made — rendered as a Download card under the text. */
+  file?: SheetFileRef;
 }
 
 const V3_EXT_COLOR: Record<string, string> = {
@@ -1115,6 +1118,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       ts: n.ts,
       kind: n.kind,
       streaming: n.streaming,
+      ...(n.file ? { file: n.file } : {}),
     })),
   ]
     // "⏱️ Still building… N min in" is a TRANSIENT live-progress line (server ETA heartbeat), not chat
@@ -1617,6 +1621,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
           text: n.text,
           ts: n.ts,
           kind: n.kind,
+          ...(n.file ? { file: n.file } : {}),
         })),
       ]);
     }
@@ -2032,7 +2037,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     if (state.narration.length > 0) {
       setAgentHistory((h) => [
         ...h,
-        ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind })),
+        ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind, ...(n.file ? { file: n.file } : {}) })),
       ]);
     }
     if (state.checkpoints.length > 0) setCheckpointHistory((h) => [...h, ...state.checkpoints]);
@@ -2067,7 +2072,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
       activeQueuedItemRef.current = item.id;
       setUserMsgs((c) => [...c, { role: 'user', text: item.prompt, ts: Date.now() }]);
       if (state.narration.length > 0) {
-        setAgentHistory((h) => [...h, ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind }))]);
+        setAgentHistory((h) => [...h, ...state.narration.map((n) => ({ role: 'agent' as const, agent: n.agent, text: n.text, ts: n.ts, kind: n.kind, ...(n.file ? { file: n.file } : {}) }))]);
       }
       try { await onBeforeBuild?.(); } catch { /* flush is best-effort */ }
       start(item.prompt, { userId, email, onlyOpus, powerLevel, planFirst, thinking, sessionId: sessionIdRef.current, framework, frameworkExplicit, appSignature: appSignaturePref() });
@@ -6877,6 +6882,7 @@ function Bubble({ msg, onUnsend, onEdit, onSaveTemplate }: { msg: ChatMsg; onUns
             ? <><TypewriterText text={msg.text} streaming={msg.streaming} />{cursor}</>
             : <FoldableMessage text={msg.text} className="whitespace-pre-wrap nb-selectable" />}
         </div>
+        {msg.file && !msg.streaming && <SheetFileCard file={msg.file} />}
       </div>
       {!isThinking && !msg.streaming && (
         <div className="mt-0.5 pl-1 opacity-70 group-hover:opacity-100 transition-opacity">

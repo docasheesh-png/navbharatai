@@ -210,6 +210,7 @@ import { SINGLE_HTML_FILE_RULE } from '../AgentV3/systemPrompt';
 import { inlineLinkedStylesheet } from '../AgentV3/singleFileKit';
 import { wantsSingleHtmlFile } from '../../lib/frameworkDetect';
 import { StaticProvider } from '../AgentV3/sandbox/AppMakerLab/generator/templates/StaticProvider';
+import { pruneUnusedDepsEnabled, pruneCandidates, pruneBuildAddedDeps, prunedNarration } from '../AgentV3/unusedDepPrune';
 import { pastedFormatDecision, pastedHtmlDocument, pastedStorageKeys, pastedOneFileRule, STATIC_SCAFFOLD_EXTRAS, PASTED_ONE_FILE_CODE } from '../AgentV3/pastedAppFormat';
 import { aiInAppRule } from '../AgentV3/systemPrompt';
 import { weakBuildDisciplineBlock } from '../AgentV3/weakBuildDiscipline';
@@ -16669,6 +16670,10 @@ async function noteBuildOutcome(
       // A LANE THAT CANNOT FINISH IS NOT STARTED (autopsy ac41a924). When the rung this build opens on
       // always reasons, the lane's single 90 s plan call spends its cap thinking and hands over with
       // nothing — 90 s the user watched for no file. See fastLaneRung.ts.
+      // 🧹 THE PACKAGE LIST AS THE BUILDER FOUND IT (unusedDepPrune.ts). Read once, after every platform seed
+      // (template, golden scaffold, pasted page) and before the first model call, so a package this build
+      // adds can be told from one the user already had. Unreadable ⇒ null ⇒ nothing is ever removed.
+      const packageJsonAtBuildStart: string | null = await actuator.readFile(workspaceId, 'package.json').catch(() => null);
       const fastLaneWouldRun = !goldenPreseeded && pastedSeed.size === 0 && oneShotEnabled() && intent === 'new_build' && !onlyOpus && classifyForSimpleLane(analysis?.startTier) && !projectModuleRef && !isImportTurn;
       const fastLaneRung = fastLaneWouldRun
         ? (() => {
@@ -18586,10 +18591,49 @@ async function noteBuildOutcome(
             : `${c.cycle.join(' → ')} → ${c.cycle[0]}`;
           buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_CIRCULAR_DEP', ...obs(`Circular import dependency: ${loop}. Many JS/TS cycles are harmless; if this one breaks at runtime (undefined-on-import), break the loop by moving the shared symbol into a third module both sides import.`) });
         }
-        // Advisory-only unused-dependency detection (detection, NOT pruning — a declared dep can be
-        // used via config/CLI/runtime, so removing it is unsafe; never blocks/fails a build). Only
-        // runtime "dependencies" are inspected, with a conservative implicit-use allowlist.
-        for (const u of findUnusedDependencies(integrityFiles)) {
+        // Unused-dependency detection. A declared dep can be used via config/CLI/runtime, so the USER's own
+        // packages are only ever reported; only packages THIS build added are removed, under the checks
+        // below. Never blocks or fails a build. Only runtime "dependencies" are inspected.
+        const unusedDeps = findUnusedDependencies(integrityFiles);
+        // 🧹 A PACKAGE THIS BUILD INSTALLED AND NEVER USED IS TAKEN OUT AGAIN (admin 2026-10-01, unusedDepPrune.ts):
+        // only what this build added, named nowhere else, not tooling, not needed by another package — and kept
+        // only if the app's own production build passes without it. The user's own packages are never touched.
+        const prunedDeps: string[] = [];
+        // Not on a turn of a multi-turn plan: a package added for a later module or milestone is not unused yet.
+        if (pruneUnusedDepsEnabled() && result.ok && expectsArtifacts && !isImportTurn && !projectModuleRef && !megaRoadmapActive && !abort.signal.aborted && !isGreenLatched(workspaceId)) {
+          try {
+            const pkgNow = integrityFiles['package.json'] ?? null;
+            const cands = pruneCandidates({ before: packageJsonAtBuildStart, after: pkgNow, unused: unusedDeps.map((u) => u.name), files: integrityFiles });
+            if (cands.length > 0 && pkgNow) {
+              const outcome = await pruneBuildAddedDeps(cands, pkgNow, {
+                run: (cmd) => actuator.runCommand(workspaceId, cmd),
+                read: (path) => actuator.readFile(workspaceId, path).catch(() => null),
+              });
+              if (outcome.status === 'removed') {
+                prunedDeps.push(...outcome.removed);
+                const changed: Record<string, string> = { 'package.json': outcome.packageJson };
+                if (outcome.lock && (writtenFiles.has('package-lock.json') || storeFiles['package-lock.json'] !== undefined)) changed['package-lock.json'] = outcome.lock;
+                for (const [cp, cc] of Object.entries(changed)) {
+                  writtenFiles.set(cp, cc);
+                  integrityFiles[cp] = cc;
+                  try { getWorkspaceMemory(workspaceId).indexFile(cp, cc); } catch { /* index best-effort */ }
+                }
+                await saveWorkspaceFiles(workspaceId, changed).catch(() => {});
+                emit({ type: 'narration', agent: 'architect', text: prunedNarration(outcome.removed), ts: Date.now() });
+              }
+              buildDiag.record({
+                phase: 'build', severity: 'info', autoResolved: true,
+                code: outcome.status === 'removed' ? 'UNUSED_DEPS_REMOVED' : 'UNUSED_DEPS_KEPT',
+                message: outcome.status === 'removed'
+                  ? `Removed ${outcome.removed.length} package(s) this build added and never used: ${outcome.removed.join(', ')}. The production build passed without them.`
+                  : `Kept the unused package(s) this build added (${cands.join(', ')}): ${outcome.reason}.`,
+                detail: outcome.keptForPeers.length ? `kept because another installed package needs it: ${outcome.keptForPeers.join(', ')}` : undefined,
+              });
+            }
+          } catch { /* removing an unused package is housekeeping — it must never affect a build */ }
+        }
+        for (const u of unusedDeps) {
+          if (prunedDeps.includes(u.name)) continue;
           buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_UNUSED_DEP', ...obs(`"${u.name}" is declared in package.json dependencies but no project file imports it. If it is used only via config, a CLI, or a runtime string-load, ignore this; otherwise removing it shrinks the install.`) });
         }
         if (!integrity.ok) {

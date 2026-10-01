@@ -240,19 +240,25 @@ export function dataEntryEvidence(files: Record<string, string>): { path: string
  */
 export const LOOKUP_ONLY_REASON =
   'this app only looks things up — its inputs (a search box, a sort or a filter) change what is shown, '
-  + 'and it has no button, form or storage that saves anything, so there is no save-and-reload journey to prove';
+  + 'and nothing in it — no form, no storage, no button that adds or saves — keeps anything, so there is no '
+  + 'save-and-reload journey to prove';
 
 const APP_SOURCE_FILE = /\.(?:tsx|jsx|ts|js|mjs|vue|svelte|html)$/i;
 /** Test suites, build config, static assets and our own service worker are not the app's UI. */
 const NOT_APP_UI = /(?:^|\/)(?:e2e|tests?|__tests__|public|node_modules|dist|build)\/|\.(?:test|spec)\.[a-z]+$|(?:^|\/)[\w.-]+\.config\.[a-z]+$|\.d\.ts$/i;
 /** The scaffold's error screen carries a "try again" button that saves nothing. */
 const ERROR_BOUNDARY_FILE = /(?:^|\/)ErrorBoundary\.(?:tsx|jsx|ts|js)$/;
+/**
+ * Signs that something can take what a user gives it and KEEP it. A plain `<button>` and an `onClick` are not
+ * on this list: they are judged one by one in `pressCanKeepInput`, because the commonest button in an app
+ * changes the screen and keeps nothing (autopsy 5759ad8b, below).
+ */
 const SAVE_ACTION: readonly RegExp[] = [
-  /<(?:form|textarea|button)\b/i,
+  /<(?:form|textarea)\b/i,
   /<(?:Form|Textarea|TextField|Button|IconButton)\b/,
   /role\s*=\s*["']button/i,
   /type\s*=\s*["']submit/i,
-  /\bon(?:Submit|Click|DoubleClick|KeyDown|KeyUp|KeyPress|Blur|Drop|PointerDown|MouseDown|TouchStart)\s*=/,
+  /\bon(?:Submit|DoubleClick|KeyDown|KeyUp|KeyPress|Blur|Drop|PointerDown|MouseDown|TouchStart)\s*=/,
   /\bcontentEditable\b/i,
   /\b(?:localStorage|sessionStorage|indexedDB|IDBDatabase|FormData|sendBeacon)\b/,
   /method\s*:\s*["'](?:POST|PUT|PATCH|DELETE)/i,
@@ -276,8 +282,18 @@ const SAVE_ACTION: readonly RegExp[] = [
  * answers false on ANY sign of a way to save: a button, a form, a submit, a click or key handler, an
  * editable surface, browser storage, or a write call to a server or database. A to-do list that adds
  * on Enter, or an app that loses its data on reload, therefore still reads as a data app, and its
- * missing journey is still a gap. The worst a wrong `true` can do is change the WORDING of a YELLOW:
- * `none-derivable` can never earn GREEN. Pure.
+ * missing journey is still a gap. ⚠️ Since autopsy 8257ca59 a `true` here CAN earn GREEN — but only when the
+ * click explorer pressed the app's controls in a real browser and none broke — so a wrong `true` costs more
+ * than wording, and every relaxation of it below stays precision-first.
+ *
+ * 🔴 A BUTTON THAT CHANGES THE SCREEN KEEPS NOTHING (autopsy 5759ad8b, 2026-10-01). A mandi-price app had
+ * crop and district filters (`<select onChange>`) over its own sample data and a bottom bar of three
+ * `<button onClick={() => setScreen('mandi')}>` tabs. The journey check said, correctly, *"the fields act
+ * as you type … nothing needs changing"* — and the release gate still said *"whether it keeps what a user
+ * enters is untested"*, because this predicate counted the tab bar as a way to save. Two readers of one
+ * question disagreed, and the one the user reads was wrong. A plain `<button>` or `onClick` now counts as
+ * a save unless its handler only switches what is shown (see `pressCanKeepInput`); every other press keeps
+ * the old, conservative answer. Pure.
  */
 export function appOnlyShowsWhatItHolds(files: Record<string, string>): boolean {
   let sawControl = false;
@@ -285,12 +301,68 @@ export function appOnlyShowsWhatItHolds(files: Record<string, string>): boolean 
   for (const [path, src] of Object.entries(appOwnFiles(files))) {
     if (!src || !APP_SOURCE_FILE.test(path) || NOT_APP_UI.test(path) || ERROR_BOUNDARY_FILE.test(path)) continue;
     if (SAVE_ACTION.some((re) => re.test(src))) return false;
+    if (pressCanKeepInput(src)) return false;
     if (/<(?:input|select)\b/i.test(src) || /<(?:Input|Select)\b/.test(src)) sawControl = true;
     if (/\bon(?:Change|Input)\s*=/.test(src)) sawNarrowing = true;
   }
   // A control nothing listens to is not a filter; it is an unwired field, and the remedy sentence for
   // an unaddressable form is the right one for it.
   return sawControl && sawNarrowing;
+}
+
+/** The setter or callback names a press may call while only changing what is SHOWN. */
+const SHOW_STATE_NAME = /^(?:set)?(?:active|current|selected)?(?:screen|tab|view|page|route|mode|theme|section|panel|step|menu|open|show|visible|expanded|collapsed|filter|sort|category|lang|language|unit|city|district|crop|region|day|period|range)s?$/i;
+/** A callback prop that navigates: `onNavigate('home')`, `navigate('/x')`, `goTo('a')`. */
+const NAVIGATE_CALL = /^(?:navigate|goTo|go|onNavigate|onSelect|onTabChange|onScreenChange|onChangeScreen|onChangeTab|router\.push|history\.push)$/;
+
+/** The handler expression inside `onClick={…}` starting at `open` (the `{`), brace-matched. */
+function handlerAt(src: string, open: number): string | null {
+  let depth = 0;
+  for (let i = open; i < src.length && i < open + 400; i++) {
+    const c = src[i];
+    if (c === '{') depth++;
+    else if (c === '}') { depth--; if (depth === 0) return src.slice(open + 1, i).trim(); }
+  }
+  return null;
+}
+
+/**
+ * Does this handler only change what is shown — one call that sets a screen/tab/filter-style state to a
+ * literal, a toggled boolean or a list item's own id, or navigates? Anything else (`addItem(text)`,
+ * `setItems([...items, x])`, `save()`, a block of statements) is NOT judged harmless. PURE.
+ */
+export function handlerOnlyChangesView(expr: string): boolean {
+  const body = expr.replace(/^\(\s*\)\s*=>\s*/, '').replace(/^\{\s*([^{};]*?);?\s*\}$/, '$1').trim();
+  const m = /^([\w$]+(?:\.[\w$]+)?)\s*\(([^]*)\)$/.exec(body);
+  if (!m) return false;
+  const name = m[1];
+  const arg = m[2].trim();
+  const literal = /^(?:'[^']*'|"[^"]*"|`[^`$]*`|-?\d+(?:\.\d+)?|true|false|null)$/.test(arg);
+  const toggle = /^!\s*[\w$]+$/.test(arg) || /^\(?\s*[\w$]+\s*\)?\s*=>\s*!\s*[\w$]+$/.test(arg);
+  const ownId = /^[\w$]+\.(?:id|key|value|name|slug|path|href|to)$/.test(arg);
+  if (NAVIGATE_CALL.test(name)) return literal || ownId;
+  if (!/^set[A-Z]/.test(name)) return false;
+  if (literal) return true;
+  return SHOW_STATE_NAME.test(name) && (toggle || ownId);
+}
+
+/**
+ * Could pressing something in this file keep what a user typed? True for any `onClick` whose handler does
+ * more than change what is shown, and for any plain `<button>` that has no `onClick` of its own to judge
+ * (or a submit-reading label). Conservative: an unreadable handler counts as a way to keep. PURE.
+ */
+export function pressCanKeepInput(src: string): boolean {
+  if (submitTargetIn(src) !== null) return true;
+  for (const t of scanMarkup(src)) {
+    if (t.isElement && t.name === 'button' && !/\bonClick\s*=/.test(t.tag)) return true;
+  }
+  const re = /\bonClick\s*=\s*\{/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src)) !== null) {
+    const expr = handlerAt(src, m.index + m[0].length - 1);
+    if (expr === null || !handlerOnlyChangesView(expr)) return true;
+  }
+  return false;
 }
 
 /**

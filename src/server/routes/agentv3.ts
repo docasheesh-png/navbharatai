@@ -369,7 +369,8 @@ import { hasTscErrors, tscNeverRan, looksLikeBrokenTscInstall, buildScriptTypech
 import { judgeBuild, judgeRepairPrompt, judgeActuallyRan, describeJudgeVerdict, judgeEngineLabel, type JudgeRunTurn, type JudgeVerdict } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
-import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
+import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState, lastAssistantText } from '../AgentV3/ProjectContext';
+import { refersToConversation, CONVERSATION_REPLY_MAX } from '../AgentV3/conversationReference';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
 import { decideCancelledBuildBill, freeCancellationMessage } from '../AgentV3/cancelledBuildBilling';
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
@@ -12316,7 +12317,15 @@ async function noteBuildOutcome(
         return entries.some((p) => isUntouchedStarterEntry(got[p]));
       } catch { return false; }
     })();
-    const planning = planningRequest({ prompt, attachmentText: planningAttachmentText, picturesSetAside, recentTurns, userAppExists, appStillUnbuilt });
+    // "Can you make this app" — the app is whatever the conversation described (autopsy 5759ad8b). Read
+    // the last answer only for such a message on a workspace with no finished app; one bounded read, and
+    // anything unreadable leaves the message alone, which is today's behaviour.
+    const conversationReply = (!userAppExists || appStillUnbuilt) && refersToConversation(prompt)
+      ? await raceTimeout(getConversationStore().get(conversationIdForWorkspace(workspaceId)), 3_000, 'pointerConversationRead')
+        .then((rec) => lastAssistantText((rec as { messages?: unknown[] } | null)?.messages ?? [], CONVERSATION_REPLY_MAX))
+        .catch(() => '')
+      : '';
+    const planning = planningRequest({ prompt, attachmentText: planningAttachmentText, picturesSetAside, recentTurns, conversationReply, userAppExists, appStillUnbuilt });
     const buildComplexity = complexityFromPrompt(planning.text);
     const buildDepth: PipelineDepth = resolvePipelineDepth(
       (buildComplexity.moduleCount || 0) + (buildComplexity.featureCount || 0),

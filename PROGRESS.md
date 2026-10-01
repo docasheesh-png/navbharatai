@@ -86585,7 +86585,7 @@ Sixth-rule ledger (every item ✅ or 🟡):
   a solo game; a multiplayer / online / leaderboard game still gets them.
 - **D6 🟡 → Q-010** Warm sandbox held only part of our starter again (11 files completed) — the first
   typecheck then paid for installing the compiler. Second occurrence recorded on Q-010.
-- **D7 🟡 → Q-014** Stopped at 5.7 min with no preview; what the screen showed is not in the report.
+- **D7 🟡 → Q-017** Stopped at 5.7 min with no preview; what the screen showed is not in the report.
 - Not defects: `run_recipe` listing (0 s), COMPLEXITY 90 vs APP_SCOPE "single-purpose" (each serves its
   own gate), the prompt itself being pasted out of order (user input).
 Tests: `tests/theDwarkaGameAutopsy.test.ts` (real prompt as fixture), each fix proven by reversion.

@@ -145,6 +145,7 @@ const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: string; 
 
 /** Codes that must never become a suggestion — see the header for why each is excluded. */
 const NEVER_SUGGEST = new Set([
+  'GOLDEN_SCAFFOLD_SKIPPED', 'LLM_CALL_STOPPED', 'SIMPLE_BUILD_STOPPED', 'DOMAIN_KNOWLEDGE', 'DURABLE_HOLDS_ONLY_STARTER', // autopsy 31254f9a — engine facts
   'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',
   'CHECKPOINT_SIGNAL', // our checkpoint heuristic, never a finding (autopsy SignBridge, 2026-09-26)
   'REVIEW_SUGGESTIONS_NOT_READY', // a suggest-only review that ran out of time — nothing for the user to do

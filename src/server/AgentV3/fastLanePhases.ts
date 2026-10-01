@@ -33,7 +33,7 @@ export interface FastLanePhases {
    * nothing usable; `skipped` = never started (no share left, or not affordable). Optional so an older
    * caller's ledger still prints.
    */
-  contractOutcome?: 'written' | 'cut' | 'failed' | 'skipped';
+  contractOutcome?: 'written' | 'cut' | 'failed' | 'skipped' | 'stopped';
   contractCapMs?: number;
 }
 
@@ -50,6 +50,7 @@ function share(ms: number, totalMs: number): string {
 function contractNote(p: FastLanePhases): string {
   const cap = p.contractCapMs && p.contractCapMs > 0 ? ` at its own ${sec(p.contractCapMs)} cap` : '';
   if (p.contractOutcome === 'cut') return ` — stopped${cap}, so the files were written without a shared contract`;
+  if (p.contractOutcome === 'stopped') return ' — the build was stopped while it ran, so no file was written';
   if (p.contractOutcome === 'failed') return ' — came back with nothing usable, so the files were written without a shared contract';
   return '';
 }
@@ -68,7 +69,7 @@ export function fastLanePhaseSummary(p: FastLanePhases | undefined): string {
   const other = Math.max(0, p.totalMs - measured);
   const parts = [
     `plan ${sec(p.planMs)}${share(p.planMs, p.totalMs)}`,
-    p.contractMs > 0 ? `contract ${sec(p.contractMs)}${share(p.contractMs, p.totalMs)}${contractNote(p)}` : (p.contractOutcome === 'skipped' ? 'contract skipped — no time left for it, so files were written without a shared contract' : ''),
+    p.contractMs > 0 || p.contractOutcome === 'stopped' ? `contract ${sec(p.contractMs)}${share(p.contractMs, p.totalMs)}${contractNote(p)}` : (p.contractOutcome === 'skipped' ? 'contract skipped — no time left for it, so files were written without a shared contract' : ''),
     `generate ${sec(p.generateMs)}${share(p.generateMs, p.totalMs)}`,
     `verify ${sec(p.verifyMs)}${share(p.verifyMs, p.totalMs)} over ${p.verifyRuns} run(s)`,
     `repair ${sec(p.repairMs)}${share(p.repairMs, p.totalMs)} over ${p.repairRuns} round(s)`,

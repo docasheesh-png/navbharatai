@@ -60,20 +60,7 @@ import { detectLinters, parseLintOutcome, type LintOutcome } from './lintRunner'
 import { lintGateVerdict, type LintGateVerdict } from './LintGate';
 import { analyzePackageHealth, packageHealthSummary } from './packageHealth';
 import { assessFullRewrite } from './rewriteRisk';
-import { isOurStarterFile } from './starterFragment';
-
-/** Every template's files, built once — what "our own starter file" means for a write. */
-let starterTemplateCache: Array<Record<string, string>> | null = null;
-function starterTemplates(): Array<Record<string, string>> {
-  if (starterTemplateCache) return starterTemplateCache;
-  const reg = new TemplateRegistry();
-  const out: Array<Record<string, string>> = [];
-  for (const key of reg.listFrameworks()) {
-    try { out.push(reg.getProvider(key).getFiles([])); } catch { /* a template that cannot list is skipped */ }
-  }
-  starterTemplateCache = out;
-  return out;
-}
+import { isOurStarterFile, starterTemplates } from './starterFragment';
 import { analyzeToolchain } from './toolchainPins';
 import { planAppDefaults, defaultAssetPath, upgradeGeneratedServiceWorker, SERVICE_WORKER_FILE } from './appDefaults';
 import { APP_ENTRY_CANDIDATES, resolveAppDisplayName } from './appDisplayName';

@@ -86380,3 +86380,25 @@ what lets it use its children's real props in one pass; on a healthy fast lane t
 after the entry. A further ~20–40 s there (painting before the stylesheet stage) is possible but entangled with the
 lane's CSS guards — recorded here, not attempted.
 **Open:** whether models actually follow the shell-first rule — watch when `src/App.tsx` is first written in admin reports.
+
+## 2026-10-01 — BUILD_REPORT_QUEUE worked (the sixth absolute rule's first pass)
+
+- **Q-001 ✅** `@types/express` v5 beside `express` v4. Root: a hand rewrite of package.json after
+  `npm install` downgraded a runtime major and left its typings at the old one. `restoreInconsistentDowngrades`
+  (in the `pinPackageJsonContent` guard every package.json write passes) keeps the installed range in exactly
+  that case; a downgrade that moves its typings too, an upgrade, or a package without typings is untouched.
+  `tests/theQueueQ001.test.ts`, reversion-proven.
+- **Q-002 ✅** icon buttons with no accessible name, noted at write time and ignored. The end-of-turn
+  hand-back (#3425) now also carries nameless controls, unlabeled fields and images without alt — from the
+  same linter the ACCESSIBILITY line uses (`a11yHandBack`). `tests/theQueueQ002.test.ts`, reversion-proven.
+- **Q-005 ✅** — and wider than the row said: EVERY build order written in Devanagari answered "no" to
+  `userAskedForAnAppToBeBuilt` (Devanagari is capped at LOW for routing; the predicate needs HIGH), so Hindi-
+  script users never saw the feature card and never got domain guidance. `devanagariBuildOrder` (imperative +
+  buildable thing + no question) and a stripped leading "हाँ". `tests/theQueueQ005.test.ts`, reversion-proven.
+  Same class one layer down: `analyzeRequest` without the route's `buildIntent` filed a Hindi app order as
+  `chat`; it is now `app_unsized`, matching what production already decided (`complexityRouting.test.ts` updated).
+- **Q-003 ✅** (index.css piecemeal) — the cause, screens using classes no stylesheet defines, is handed back
+  before the turn ends by #3425, and #3427 stopped a closing question from cancelling it; both test-locked.
+- **Q-006 ✅** (CORS blocker had no repair) — #3427's resume change hands a readiness blocker back to the
+  model after the app was written, which is the repair path; plus `CORS_RULE` upstream. Test-locked there.
+- **Q-004 🟡** moved to BLOCKED with options (an admin trade-off; the review finished on that report).

@@ -86318,6 +86318,8 @@ lane's CSS guards — recorded here, not attempted.
   `userAskedForAnAppToBeBuilt` (Devanagari is capped at LOW for routing; the predicate needs HIGH), so Hindi-
   script users never saw the feature card and never got domain guidance. `devanagariBuildOrder` (imperative +
   buildable thing + no question) and a stripped leading "हाँ". `tests/theQueueQ005.test.ts`, reversion-proven.
+  Same class one layer down: `analyzeRequest` without the route's `buildIntent` filed a Hindi app order as
+  `chat`; it is now `app_unsized`, matching what production already decided (`complexityRouting.test.ts` updated).
 - **Q-003 ✅** (index.css piecemeal) — the cause, screens using classes no stylesheet defines, is handed back
   before the turn ends by #3425, and #3427 stopped a closing question from cancelling it; both test-locked.
 - **Q-006 ✅** (CORS blocker had no repair) — #3427's resume change hands a readiness blocker back to the

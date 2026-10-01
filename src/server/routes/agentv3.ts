@@ -18487,6 +18487,7 @@ async function noteBuildOutcome(
               const integrityRunner = new AgentRunner({
                 ...baseRunnerOpts,
                 client: buildTurnRunner(healRunnerOpts()),
+                platformRequest: true,
                 model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
@@ -18864,6 +18865,7 @@ async function noteBuildOutcome(
                 const designRunner = new AgentRunner({
                   ...baseRunnerOpts,
                   client: buildTurnRunner(healRunnerOpts()),
+                  platformRequest: true,
                   model: resolveModel(powerLevelReqEffective),
                   persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                 });
@@ -19073,6 +19075,7 @@ async function noteBuildOutcome(
               const compileHealRunner = new AgentRunner({
                 ...baseRunnerOpts,
                 client: buildTurnRunner(healRunnerOpts()),
+                platformRequest: true,
                 model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
@@ -19126,6 +19129,7 @@ async function noteBuildOutcome(
             const hooksHealRunner = new AgentRunner({
               ...baseRunnerOpts,
               client: buildTurnRunner(healRunnerOpts()),
+              platformRequest: true,
               model: resolveModel(powerLevelReqEffective),
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
@@ -19181,6 +19185,7 @@ async function noteBuildOutcome(
             const completeRunner = new AgentRunner({
               ...baseRunnerOpts,
               client: buildTurnRunner(healRunnerOpts()),
+              platformRequest: true,
               model: resolveModel(powerLevelReqEffective),
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
@@ -19273,6 +19278,7 @@ async function noteBuildOutcome(
               const guardHealRunner = new AgentRunner({
                 ...baseRunnerOpts,
                 client: buildTurnRunner(healRunnerOpts()),
+                platformRequest: true,
                 model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
@@ -20294,6 +20300,7 @@ async function noteBuildOutcome(
                   const featureRunner = new AgentRunner({
                     ...baseRunnerOpts,
                     client: buildTurnRunner(healRunnerOpts()),
+                    platformRequest: true,
                     model: resolveModel(powerLevelReqEffective),
                     persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                   });
@@ -20465,6 +20472,7 @@ async function noteBuildOutcome(
             const healRunner = new AgentRunner({
               ...baseRunnerOpts,
               client: buildTurnRunner(healRunnerOpts()),
+              platformRequest: true,
               model: resolveModel(powerLevelReqEffective),
               persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
             });
@@ -20802,6 +20810,7 @@ async function noteBuildOutcome(
                           ...baseRunnerOpts,
                           signal,
                           client: buildTurnRunner(healRunnerOpts()),
+                          platformRequest: true,
                           model: resolveModel(powerLevelReqEffective),
                           persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                         });
@@ -21144,6 +21153,7 @@ async function noteBuildOutcome(
               const vaxRunner = new AgentRunner({
                 ...baseRunnerOpts,
                 client: buildTurnRunner(healRunnerOpts()),
+                platformRequest: true,
                 model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });
@@ -21546,6 +21556,7 @@ async function noteBuildOutcome(
                 const rtRunner = new AgentRunner({
                   ...baseRunnerOpts,
                   client: buildTurnRunner(healRunnerOpts()),
+                  platformRequest: true,
                   model: resolveModel(powerLevelReqEffective),
                   persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                 });
@@ -21644,6 +21655,7 @@ async function noteBuildOutcome(
           const fixRunner = new AgentRunner({
             ...baseRunnerOpts,
             client: buildTurnRunner(healRunnerOpts()),
+            platformRequest: true,
             model: resolveModel(powerLevelReqEffective),
             persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
           });
@@ -22383,6 +22395,7 @@ async function noteBuildOutcome(
                     ...baseRunnerOpts,
                     signal: repairAbort.signal,
                     client: buildTurnRunner(healRunnerOpts()),
+                    platformRequest: true,
                     model: resolveModel(powerLevelReqEffective),
                     persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                   });
@@ -22536,6 +22549,7 @@ async function noteBuildOutcome(
               const critFixRunner = new AgentRunner({
                 ...baseRunnerOpts,
                 client: buildTurnRunner(healRunnerOpts()),
+                platformRequest: true,
                 model: resolveModel(powerLevelReqEffective),
                 persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
               });

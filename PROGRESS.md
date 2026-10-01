@@ -85821,6 +85821,49 @@ that Pollinations was working and had not been down.
 - **Honest note:** the "anonymous door closed (401)" diagnosis in #3409 came from the provider's docs and was never observed from a session. The admin says the provider works. The door code only acts on a real 401/402/403, so it stays. The earlier outage's cause is **unproven**.
 - **Tests:** `tests/imageFreeAndPaid.test.ts` (18) is new. `theImageGeneratorHasOneTier` became `theImageGeneratorHasFreeAndPaid`. Updated: `fiveFreeImagesThenOneRupee`, `theFreeDoorClosedAndNobodyNoticed`, `everyFaceIsIndianAndNoImageIsADeadEnd`, `yourPictureComesBackAsYourPicture`, `theUsersOwnConnectionFetchesTheirPicture`, `thePlatformHasADayToo` and `theBoxEmptiesWhenYouPressSend`. Reversion-proven: removing the Free-mode stop, or the `anonymous` flag, fails 5 tests.
 
+## 2026-09-30 — App Mart becomes social: 👍 · 👎 · 💬 under every app, comments, creator profiles
+
+**Admin, verbatim:** *"app mart me ek social media banana hai! … app ke niche 3 option dikhe- like (👍) dislike
+(👎) comment … only login user like dislike comment kar sakta hai … creter ke pas notifications jaye … create
+dekh sake kisne like kiya hai, (dislike kisne kiya hai yeh na dikhe bas number dikhe) … comment wale user ke naam
+par koi other user click kare to, us user ki profile bhi dekhi ka sake … note: user ki email nahi dikhani hai!!"*
+and *"isko real word social media jaisa banao!"*
+
+**What shipped (branch `claude/app-mart-social`):**
+- **Reactions.** One doc per (app, user), toggled in a transaction (like ↔ dislike ↔ none). Counts come from
+  Firestore `count()` aggregations, cached 30 s. No stored tally, so there is no hot document and a deleted
+  account's reactions drop out of the number by themselves. Every user sees the numbers. Only a signed-in user
+  can press (the server refuses with 401 and the client opens sign-in).
+- **Comments and replies.** Up to 1000 characters, one reply level (a reply to a reply attaches to the top
+  comment, as on YouTube). Delete by the author, the app's creator or an admin. A removed comment that has
+  replies becomes a placeholder, and its text is erased, never sent. The creator's comments carry a badge.
+- **Who liked it.** A likers list for the app's creator (and admins) only, 403 for anyone else.
+  **There is no dislikers list anywhere**, server or client; a source guard fails CI if one appears.
+- **Profiles.** Tapping a commenter's name, or "by <creator>" in an app's sheet, opens the public profile: name,
+  photo (https only), creator code, the apps they published to App Mart with counts, total likes. Never an
+  email, never a uid; a source guard checks every `res.json` body. "My profile" is in the App Mart header.
+  An iPhone never lists an `.apk` on a profile.
+- **Notifications to the creator.** Grouped like real social apps: one entry per (kind, app, India day), e.g.
+  "Asha and 3 others liked your app". Replies notify the parent comment's author. Push for comments and
+  replies only, at most one per 10 minutes per app. Tapping one opens App Mart on that app. Kept in their own
+  collection, merged into the bell, read/dismiss state stored on the entry itself.
+- **Safety (needed for user content on Play and the App Store).** Report a comment (reason + text snapshot) into
+  an admin queue in the App Mart Review tab (Keep / Remove); block a person (their comments hidden, their
+  activity never notifies you). Rate limits on reacting, commenting and reporting.
+- **Data.** Reactions, comments, blocks, notifications and the creator-code link are erased with the account.
+  Notifications expire after 90 days; comment reports after 180. Privacy policy (§2.1, §6) and the account
+  deletion page say so; `AppKnowledgeBase` has `app_mart_social`.
+- **Tests:** `tests/appMartSocial.test.ts` (32, server rules + source guards), `tests/appMartSocialClient.test.ts`
+  (12, formatting + wiring).
+
+**Still open (said plainly):**
+- A push notification tap on the phone opens the app, not the specific App Mart page (no native deep-link
+  routing exists for it yet). The in-app bell does open the app's page.
+- No word filter on comments. The admin scoped the word ban to Pollinations only; widening it is their call.
+- Replies under a comment whose author deleted their account are no longer reachable, but still count in the
+  comment number until the next recount of that comment.
+- "Follow a creator" is a natural phase 2; not built.
+- Phone users get the new screens only with a fresh `.aab`/`.ipa` (bundled mode).
 ## 2026-09-30 — Autopsy 6ae30b33: "Make question" built an app
 
 A Weak build (₹88.15, 6.9 min, ok). Earlier in the conversation the user had asked for an essay and for two
@@ -86037,3 +86080,33 @@ exceed the 60K inline bound), so it read files — by design.
    so "it ended on a question" is the most likely branch, not a proven one — the new line will say.
    **Deliberately NOT auto-fixed:** pinning `@types/express` back to v4 — the app typechecked clean on
    the v5 types, and downgrading them could turn a green build red. It stays a warning.
+## 2026-10-01 — Autopsy 1be16985 ("Make biology  learning app", Weak, 9.7 min vs 6–8 min ETA, app working)
+
+Tally:
+- ✅ Self-healed (3):
+  - 63 undefined CSS classes, fixed by the end-of-build repair pass (174 s).
+  - TopicView's missing empty state.
+  - The platform started the preview itself, because the agent never published one.
+- 🔀 Worked around (1): the in-build green snapshot raced a defaults write at 495 s and was taken at 543 s.
+- ⏭️ Skipped (0).
+- ❌ Open (0).
+- 🥵 Struggle (4):
+  - The build opened on the reasoning rung with the fast lane skipped, from a "complex" guess about four words.
+  - A 3,067-token CSS append missed its anchor and was never retried.
+  - The repair pass re-read files in a fresh context (CellSimulation ×3).
+  - The ETA ran 1.4× over its midpoint.
+
+| Problem | Root cause | Class | Siblings | Locked by |
+|---|---|---|---|---|
+| A four-word request sized `complex` | The "recognised nothing" ask had no evidence floor | A model asked to size a request that states nothing to size | The bare-question call (open cost item, now closed) | `statesAScope` |
+| 63 undefined classes reached the end of the turn | The write-time note had no end-of-turn check | A steer that says "before you finish" with nothing checking it | — | `stylePolishResume.ts` + `undefinedClassesNow` |
+| The append missed its anchor and was abandoned | The miss showed only the top of a 529-line file | An edit miss that never shows where an append anchors | — | `nearestEditRegion` tail + empty-old_string hint |
+| "Add import React" told to a clean file | A classic-runtime rule in a react-jsx world | — | `EndgameRepair.fixReactUmdGlobal` is TS2686-driven, so it is correct | `PostEditReviewer` (`React.` only) |
+| The repair reply said "the fixes you requested" | Every repair pass speaks in the user's seat, and its text is narrated to the user | Platform-authored instructions read as user requests | All 14 heal runners in the route | `platformRequest` + census test |
+
+Tests: `tests/theBiologyAppWasSizedByAGuess.test.ts` (14 cases), reversion-proven for the scope gate, the edit
+tail and the runner census.
+
+**Still open:**
+- Each repair pass's instruction is still persisted into the main conversation as a `user` turn. Whether a
+  reopened session shows it as something the user typed was not checked here.

@@ -127,3 +127,13 @@ describe('a closing offer after the app was built does not hide a blocker', () =
     expect(runner).toContain("code: 'UNFINISHED_RESUME_STOOD_DOWN'");
   });
 });
+
+describe('the style hand-back has the same rule (sibling, #3425)', () => {
+  it('a closing offer after writing screens does not stop it', async () => {
+    const { decideStyleResume } = await import('../src/server/AgentV3/stylePolishResume');
+    const text = 'Screens ready hain.\nKuch aur chahiye?';
+    expect(decideStyleResume({ text, missing: ['tx-row'], resumesUsed: 0, producedFiles: true }).resume).toBe(true);
+    expect(decideStyleResume({ text, missing: ['tx-row'], resumesUsed: 0 }).standDown).toBe('asked-the-user');
+    expect(read('src/server/AgentV3/AgentRunner.ts')).toContain('resumesUsed: styleResumes, producedFiles: producingToolUses > 0 });');
+  });
+});

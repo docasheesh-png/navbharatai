@@ -99,6 +99,8 @@ export interface ViewPanelsProps {
    */
   storeInitialTab?: 'browse' | 'publish' | 'mine' | 'review';
   storePublishWorkspaceId?: string | null;
+  /** A tapped App Mart notification: the app whose comments App Mart should open. */
+  storeSocialTarget?: { key: string; nonce: number } | null;
   generatedCode: string;
   setGeneratedCode: (code: string) => void;
   files: FileSystem;
@@ -195,7 +197,7 @@ export interface ViewPanelsProps {
 
 export function ViewPanels({
   effectiveDeviceMode,
-  activeView, storeInitialTab, storePublishWorkspaceId, generatedCode, setGeneratedCode, files, setFiles, onIdeFilesChange, onFlushIdeEdits, onReplaceProjectFiles, onFilesRemoved,
+  activeView, storeInitialTab, storePublishWorkspaceId, storeSocialTarget, generatedCode, setGeneratedCode, files, setFiles, onIdeFilesChange, onFlushIdeEdits, onReplaceProjectFiles, onFilesRemoved,
   hasGeneratedCode, setIsAppBuilt, setHasGeneratedCode,
   user, activeAgent, mode, setMode, isAppBuilt, theme, setTheme,
   messages, input, setInput, setProInput, isLoading, activeIntent,
@@ -692,7 +694,7 @@ export function ViewPanels({
           the real thing: upload an .apk, and install apps other people have published. */}
       {activeView === 'appstore' && (
         <div className="flex-1 h-full overflow-hidden">
-          <NavAppStore initialTab={storeInitialTab} initialPublishWorkspaceId={storePublishWorkspaceId} />
+          <NavAppStore initialTab={storeInitialTab} initialPublishWorkspaceId={storePublishWorkspaceId} socialTarget={storeSocialTarget} />
         </div>
       )}
 

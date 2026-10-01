@@ -31,6 +31,7 @@ import { analyzeRequirementGaps } from '../src/server/lib/RequirementGapAnalyzer
 import { rendersDataList } from '../src/server/AgentV3/DesignCoverage';
 import { plannerCallLabel, fastLaneProviderLabel } from '../src/server/routes/agentv3';
 import { redactSecrets } from '../src/server/AgentV3/SecretRedactor';
+import { readsAsSpecification } from '../src/server/AgentV3/enumeratedFeatures';
 
 const src = (p: string) => readFileSync(join(process.cwd(), p), 'utf8');
 const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
@@ -39,8 +40,13 @@ const PROMPT = src('tests/fixtures/promptSignbridge.txt');
 // ── 1 · a verb is not a feature, and the contract is an order ────────────────────────────────────
 
 describe('1 · what the builder is ORDERED to build is only what the user named', () => {
-  it('🔴 the real SignBridge prompt asks for settings and search — not a map, not a chat app', () => {
-    expect(requestedFeatureLabels(PROMPT)).toEqual(['settings', 'search']);
+  it('🔴 the real SignBridge prompt is ordered no map and no chat app', () => {
+    // Autopsy 39955124 (2026-10-01): this 200-line prompt carries a 15-line "Include:" list with no
+    // bullet markers. Counted, it is a written specification, so no keyword category is restated as an
+    // order at all — the stronger form of this test's original lock (it read ['settings', 'search']).
+    // The sense filters it was guarding are still locked by the two cases below.
+    expect(readsAsSpecification(PROMPT)).toBe(true);
+    expect(requestedFeatureLabels(PROMPT)).toEqual([]);
   });
   it('the verb "map … to …", "chat bubbles" and "clear/status/error messages" ask for nothing', () => {
     expect(requestedFeatureLabels('Map recognized labels to the sign dictionary.')).toEqual([]);
@@ -57,7 +63,10 @@ describe('1 · what the builder is ORDERED to build is only what the user named'
   });
   it('the end-of-build audit asks the SAME question, so the two lists cannot drift', () => {
     const graph = { files: ['src/pages/MapPage.tsx', 'src/pages/ChatPage.tsx', 'src/pages/SettingsPage.tsx'], components: [], routes: [] } as never;
-    expect(analyzeRequirementCoverage(PROMPT, graph).requested).toEqual(['settings', 'search']);
+    const ask = 'Build a sign translator with settings and search. Map recognized labels to the dictionary. Display messages as chat bubbles.';
+    expect(requestedFeatureLabels(ask)).toEqual(['settings', 'search']);
+    expect(analyzeRequirementCoverage(ask, graph).requested).toEqual(['settings', 'search']);
+    expect(analyzeRequirementCoverage(PROMPT, graph).requested).toEqual(requestedFeatureLabels(PROMPT));
     const rc = strip(src('src/server/AgentV3/RequirementCoverage.ts'));
     expect(rc).toContain('return FEATURES.filter((f) => featureAskedFor(req, f)).map((f) => f.label);');
     expect(rc).toContain('if (!featureAskedFor(req, feat)) continue;');

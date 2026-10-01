@@ -1,0 +1,79 @@
+Main Character
+Create a customizable young adventurer.
+Customization options:
+Different outfits
+Hairstyles
+Accessories
+Character names
+Different visual themes
+Krishna & Mythological Characters
+Include respectful, non-combat-focused appearances of Lord Krishna and other mythological characters as important story characters, guides, or quest-givers.
+Do not portray sacred characters in disrespectful, comedic, or inappropriate situations.
+Game Mechanics
+Add:
+Walking/running exploration
+Swimming
+Climbing where appropriate
+Puzzle interaction
+Dialogue choices
+Inventory system
+Map
+Quest tracker
+Collectibles
+XP and rewards
+Visual Style
+Use a cinematic Indian historical-fantasy aesthetic:
+Golden sunsets
+Blue ocean
+Ancient sandstone architecture
+Detailed temples and palaces
+Traditional Indian artistic elements
+Beautiful lighting
+Realistic but respectful environments
+High-quality character animations
+Music & Sound
+Use:
+Peaceful Indian classical-inspired background music
+Temple bells
+Ocean and environmental sounds
+Subtle ambient effects
+Different music for exploration and important story moments
+UI
+Create a clean mobile-friendly interface with: Map | Quests | Inventory | Character | Achievements
+Use elegant gold, blue, and purple accents while keeping text highly readable.
+Game Progression
+Structure the game into chapters:
+Chapter 1 — The Arrival
+Discover the city and learn the basics.
+Chapter 2 — Secrets of Dwarka
+Explore hidden locations and solve ancient puzzles.
+Chapter 3 — The Lost Create a mobile game called “Dwarkadhish”, inspired by the ancient city of Dwarka and Indian mythology.
+Game Concept
+Create an adventure and exploration game where the player enters a beautifully designed ancient-world setting inspired by Dwarka. The game should focus on exploration, puzzles, quests, strategy, and mythology rather than realistic violence.
+Story
+The player begins their journey in the legendary city of Dwarka. They must explore different locations, complete quests, solve ancient puzzles, collect important objects, and learn about the stories and traditions connected with the city.
+The game should have an engaging storyline divided into multiple chapters.
+Gameplay
+Include:
+Open-world or semi-open-world exploration
+Story-based missions
+Ancient puzzles and riddles
+Treasure/object collection
+NPC characters with dialogues
+Side quests
+Hidden locations
+Daily challenges
+Achievement system
+XP and level progression
+Unlockable locations and items
+Locations
+Design beautiful environments inspired by:
+Ancient Dwarka city
+Royal palace
+Temple complex
+Seashore
+Markets
+Gardens
+Ancient pathways
+Underwater ruins
+Caves and secret chambers

@@ -3363,6 +3363,12 @@ the flag entries above promise.
   🔴 **Same autopsy: the scaffold's own ErrorBoundary screen is now judged NOT rendered**
   (`scaffoldCrashScreen` in `PreviewVerify.ts`). Before, it was saved as the last known good at 809 s.
   Do not loosen that match to the bare words; an app's designed error card must stay a render.
+- **🧭 A FORM ON A WIZARD STEP IS REACHED (Q-016, autopsy 2b1f845e; no flag).** A form-bearing component no
+  page reaches (`src/steps/DesignStep.tsx`) gets a save journey on `/` that first presses the ONE visible control
+  named after its screen (`reachWordFor` → "design"), and presses it again after the reload. 🔒 An action word
+  ("post", "pay", "send", "delete", "add") never becomes the reach word, a destructive or creating control is
+  never pressed, and a form whose submit is outward gets no journey. No matching control ⇒ `unreachable`, never
+  a failure. Real-browser test: `tests/aFormOnAWizardStepIsReached.test.ts`.
 - **`AGENTV3_NPM_VERSION_HINT`** (NOT set; default ON, `off` disables — added 2026-10-01, autopsy 2b1f845e) — an
   `npm install` that fails with ETARGET (a guessed range such as `cors@^4` that does not exist) gets the real latest
   version from one `npm view`, appended to the same tool result (`npmVersionHint.ts`). Advice only. Same autopsy, no

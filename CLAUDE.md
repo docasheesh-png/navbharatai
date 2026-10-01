@@ -4032,6 +4032,18 @@ the flag entries above promise.
   after the run, and the report says `SHADOW_TWIN_REMOVED`. 🔒 Unknown authorship ⇒ nothing is removed;
   a twin the build wrote itself is never touched; a `.d.ts` is never a twin; a later-resolving twin stays
   (it cannot shadow). One sandbox listing per dispatcher, reused.
+- **🗂️ `AGENTV3_USER_FILE_GUARD` — A FILE THE USER PUT HERE IS NEVER DELETED UNASKED, AND A PAGE THE APP DOES NOT
+  SHIP IS NOT SCORED AS THE APP (autopsy 4d538ca3, 2026-10-01). ⚠️ NOT set; default ON; `off` lifts the delete
+  guard only.** `evaluate` scored a Vite app 0/100 on 34 findings inside a page the user had added from Code
+  Studio. The model then ran `rm` on the user's file, under a prompt that said "do not remove any existing
+  working features". `outsideTheApp.ts` sets such a page aside: an HTML file in a project with a bundler that is
+  not the entry, not in `public/`, and named by no bundler config. It is set aside from every scan and the tech-
+  debt register, and named in the result. Unknown means judge everything, so a static site is unchanged.
+  `userFileGuard.ts` refuses `rm`/`unlink`/`git rm` (globs and `sh -c` included) of a file in
+  `ManualEditTracker.userOwnedFiles` (a durable set that a build never clears) unless the request names that
+  file with a delete word (report `USER_FILE_KEPT`). `evaluate` now re-reads the disk itself, so a model-called
+  evaluate is never stale. ⚠️ Only Code Studio edits are remembered as the user's files today; zip and repo
+  imports are an OPEN item in `PROGRESS.md`.
 - **⏯️ `AGENTV3_UNFINISHED_RESUME` — A BUILD THAT STOPPED TALKING IS NOT A BUILD THAT FINISHED (autopsy
   121c2431, 2026-09-26). ⚠️ NOT set, and the code default is ON**; `off` restores the old ending exactly.
   Read by `src/server/AgentV3/unfinishedResume.ts`; applied in `AgentRunner`'s readiness gate.

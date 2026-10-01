@@ -84,7 +84,7 @@ describe('the wiring (order matters: the answer must land before the prompt is b
   it('an approved database is re-read from the vault, so the builder is told about it', () => {
     const block = route.slice(offerAt, offerAt + 4000);
     expect(block).toMatch(/provisionDatabaseForUser\(userId[\s\S]*vaultSecrets = await loadUserVaultSecrets\(userId, workspaceId\)/);
-    expect(block).toMatch(/awaitApproval\(requestId, START_OFFER_WAIT_MS\)/);
+    expect(block).toMatch(/waitForUser\(requestId, START_OFFER_WAIT_MS\)/); // the one door that also listens to Stop (autopsy 1219c639)
   });
   it('the mid-build fallback never asks the same question a second time', () => {
     expect(route).toMatch(/if \(asked \|\| databaseOfferedAtStart\) return null;/);

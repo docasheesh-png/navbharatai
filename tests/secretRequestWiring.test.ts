@@ -55,7 +55,7 @@ describe('link 2 — the dispatcher asks and does not fake the outcome', () => {
   });
 
   it('a SKIP keeps building and forbids a fake feature', () => {
-    expect(fn).toContain("secretRequestResult('skipped', askedNames)");
+    expect(fn).toContain("secretRequestResult(answer === 'timed-out' ? 'timed-out' : 'skipped', askedNames)"); // a timeout is not a skip (autopsy 1219c639)
     expect(fn).toContain('visibly disabled');
     expect(fn).toContain('never a fake success');
   });

@@ -143,8 +143,9 @@ describe('🔒 the wiring', () => {
   });
 
   it('the build\'s own finally and the deadline finalizer release the lease', () => {
-    expect(route).toMatch(/activeBuilds\.delete\(buildKey\);\n {6}\/\/ The workspace is free on every instance the moment this build ends \(autopsy eed79815\)\.\n {6}releaseBuildLease\(\);/);
-    expect(route).toMatch(/activeBuilds\.delete\(buildKey\);\n {6}releaseBuildLease\(\);\n {6}if \(runningBuilds\.get\(buildKey\) === rb\) runningBuilds\.delete\(buildKey\);\n {6}endBuild\(rb\);\n {4}\};/);
+    // Since autopsy 1219c639 the lock is released only by its owner (`releaseBuildLock`).
+    expect(route).toMatch(/releaseBuildLock\(buildKey, buildLockToken\);\n {6}\/\/ The workspace is free on every instance the moment this build ends \(autopsy eed79815\)\.\n {6}releaseBuildLease\(\);/);
+    expect(route).toMatch(/releaseBuildLock\(buildKey, buildLockToken\);\n {6}releaseBuildLease\(\);\n {6}if \(runningBuilds\.get\(buildKey\) === rb\) runningBuilds\.delete\(buildKey\);\n {6}endBuild\(rb\);/);
     expect(route).toContain('buildLeaseRb = rb;');
   });
 

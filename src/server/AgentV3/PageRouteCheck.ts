@@ -271,6 +271,8 @@ export interface PageResult {
   a11y?: A11yIssue[];
   errors: string[];
   verdict: PageVerdict;
+  /** Where a `redirected` route ended up — e.g. `/login`, which says the screens are behind a sign-in. */
+  redirectedTo?: string;
   /** What this means, in the words the report should use. */
   note: string;
 }
@@ -290,7 +292,7 @@ export function classifyPage(r: { route: string; status: number | null; text: nu
   // working app). Checked before everything else: a redirect's status and text describe the destination.
   const norm = (p: string) => (p.replace(/\/+$/, '') || '/');
   if (typeof r.finalPath === 'string' && r.finalPath && r.status !== null && norm(r.finalPath) !== norm(r.route)) {
-    return { ...base, verdict: 'redirected', note: `${r.route} redirected to ${norm(r.finalPath)} — that page itself was not shown, so it is not counted` };
+    return { ...base, verdict: 'redirected', redirectedTo: norm(r.finalPath), note: `${r.route} redirected to ${norm(r.finalPath)} — that page itself was not shown, so it is not counted` };
   }
   if (r.status === null) {
     return { ...base, verdict: 'unreachable', note: `${r.route} could not be opened at all${r.errors[0] ? ` (${r.errors[0]})` : ''}` };

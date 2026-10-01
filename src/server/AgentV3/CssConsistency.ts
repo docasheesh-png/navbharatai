@@ -361,11 +361,21 @@ export const MAX_CLASSES_IN_WRITE_NOTE = 12;
 export function undefinedClassWriteNote(
   written: Record<string, string>,
   project: Record<string, string>,
+  opts: { kitDefines?: (className: string) => boolean } = {},
 ): string {
   const merged = { ...project, ...written };
-  const missing = findUndefinedClasses(merged).filter((c) => !c.startsWith('nb-'));
-  if (missing.length === 0) return '';
   const wroteSheet = Object.keys(written).some((p) => isProjectStylesheet(p));
+  // An `nb-` name the kit does not define has no kit rule to restore (autopsy 2f723acb). A screen write
+  // names those through `inventedKitClassNote`; a STYLESHEET write is the moment every screen's missing
+  // rules are listed, so it names them here — except the ones a screen in this same write already uses,
+  // which that note covers, so no class is reported twice.
+  const writtenScreens: Record<string, string> = {};
+  for (const [p, c] of Object.entries(written)) if (SRC_RE.test(p)) writtenScreens[p] = c;
+  const usedByWrittenScreens = collectUsedClasses(writtenScreens);
+  const kitDefines = opts.kitDefines;
+  const missing = findUndefinedClasses(merged).filter((c) => !c.startsWith('nb-')
+    || (wroteSheet && kitDefines !== undefined && !kitDefines(c) && !usedByWrittenScreens.has(c)));
+  if (missing.length === 0) return '';
   const scope = wroteSheet
     ? missing
     : (() => {

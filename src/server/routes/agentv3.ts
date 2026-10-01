@@ -35,7 +35,7 @@ import { projectHasUserCode, modelAuthoredPaths } from '../AgentV3/platformAutho
 import { projectContractCard, declaredPackagesFromPackageJson } from '../AgentV3/projectContractCard';
 import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary } from '../AgentV3/architectureInvariants';
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
-import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange, fleetEtaLine } from '../AgentV3/progressEta';
+import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange, fleetEtaLine, finalChecksEtaLine } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
 import { decideComplexity, scaffoldedComplexityDecision } from '../AgentV3/complexityRouting';
 import { planningRequest, planningContextNote, wasBuildRequest } from '../AgentV3/planningRequest';
@@ -210,7 +210,7 @@ import { SINGLE_HTML_FILE_RULE } from '../AgentV3/systemPrompt';
 import { inlineLinkedStylesheet } from '../AgentV3/singleFileKit';
 import { wantsSingleHtmlFile } from '../../lib/frameworkDetect';
 import { StaticProvider } from '../AgentV3/sandbox/AppMakerLab/generator/templates/StaticProvider';
-import { pruneUnusedDepsEnabled, pruneCandidates, pruneBuildAddedDeps, prunedNarration } from '../AgentV3/unusedDepPrune';
+import { pruneUnusedDepsEnabled, pruneCandidates, pruneBuildAddedDeps, prunedNarration, depsAddedByBuild, unusedDependencyLine } from '../AgentV3/unusedDepPrune';
 import { pastedFormatDecision, pastedHtmlDocument, pastedStorageKeys, pastedOneFileRule, STATIC_SCAFFOLD_EXTRAS, PASTED_ONE_FILE_CODE } from '../AgentV3/pastedAppFormat';
 import { aiInAppRule } from '../AgentV3/systemPrompt';
 import { weakBuildDisciplineBlock } from '../AgentV3/weakBuildDiscipline';
@@ -382,7 +382,7 @@ import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from 
 import { entryShadowRepairHint } from '../AgentV3/entryShadow';
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceEvidence, featurePresenceRepairPrompt, featureHealEnabled, isSignInWall } from '../AgentV3/FeaturePresence';
 import { adoptHealResult } from '../AgentV3/healResult';
-import { signInExploreEnabled, signInScript, signInCandidates, parseSignInOutput, signInReportLine, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
+import { signInExploreEnabled, signInScript, signInCandidates, parseSignInOutput, signInReportLine, isSignInRoute, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
 import { unsupportedStackRequested, unsupportedStackBuilderNote, unsupportedStackUserNote, builtWithLabel } from '../AgentV3/unsupportedStack';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
 import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
@@ -12203,7 +12203,21 @@ async function noteBuildOutcome(
      * alone, so `mkdir src` was sized as "hi" while a 35-file shop was built. They all read this one
      * text now. `prompt` itself is unchanged everywhere else (intent, the user's own words, titles).
      */
-    const planning = planningRequest({ prompt, attachmentText: planningAttachmentText, picturesSetAside, recentTurns, userAppExists });
+    // An app that was STARTED but never assembled (its entry is still our starter — a build stopped or
+    // failed before it) is not a finished app: its earlier requests are still the spec (autopsy 2f723acb,
+    // where "Continue…" on two files of a stopped build was sized as "hi"). One bounded read of the entry
+    // file; anything unreadable leaves today's behaviour.
+    const appStillUnbuilt = await (async (): Promise<boolean> => {
+      if (!userAppExists || !Array.isArray(projectFilePaths)) return false;
+      const present = new Set(projectFilePaths.map((q) => String(q).replace(/^\.?\/+/, '')));
+      const entries = STARTER_ENTRY_PATHS.filter((p) => present.has(p));
+      if (entries.length === 0) return false;
+      try {
+        const got = await raceTimeout(loadWorkspaceFilesByPath(workspaceId, entries), 3_000, 'starterEntryRead');
+        return entries.some((p) => isUntouchedStarterEntry(got[p]));
+      } catch { return false; }
+    })();
+    const planning = planningRequest({ prompt, attachmentText: planningAttachmentText, picturesSetAside, recentTurns, userAppExists, appStillUnbuilt });
     const buildComplexity = complexityFromPrompt(planning.text);
     const buildDepth: PipelineDepth = resolvePipelineDepth(
       (buildComplexity.moduleCount || 0) + (buildComplexity.featureCount || 0),
@@ -12757,6 +12771,12 @@ async function noteBuildOutcome(
      * reasoning about "when did settling start" simple.
      */
     let settlingAnnounced = false;
+    /**
+     * The build loop is over and only the platform's own checks and fixes remain (autopsy de3bb2bb: at
+     * minute 12 the line promised "about 7 min more" — the build ended 34 seconds later, inside its final
+     * checks). Set at the post-answer pass; the ETA tick then says where the build IS, with no number.
+     */
+    let etaFinalChecks = false;
     const emitSettlingPhase = (): void => {
       if (settlingAnnounced) return;
       settlingAnnounced = true;
@@ -12854,6 +12874,10 @@ async function noteBuildOutcome(
           // It returns null in every case where it would be guessing — no plan, too few files, or the
           // file phase already over (a repair loop is genuinely unpredictable) — and the honest
           // re-baselining fallback below then owns the line exactly as it does today.
+          if (etaFinalChecks) {
+            events.emit({ type: 'narration', agent: 'architect', text: finalChecksEtaLine(elapsedMs), ts: now, id: 'eta-live' });
+            return;
+          }
           const measured = measuredRemainingMs({ plannedFiles: etaPlannedFiles, filesDone: writtenFiles.size, firstFileAt: etaFirstFileAt, now });
           if (measured !== null) {
             // Re-anchor the fallback's budget too, so if measurement later stops applying (the build
@@ -17436,6 +17460,10 @@ async function noteBuildOutcome(
           signal: abort.signal });
         // A STOP IS NOT A FALLBACK (autopsy 31254f9a): nothing is handed to the full builder after a Stop.
         buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : sb.stopped ? 'SIMPLE_BUILD_STOPPED' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
+        // The lane's FILE PLAN is not the plan of record once it hands off (autopsy de3bb2bb): the full builder
+        // plans its own files, so "9 of 10 files written · ~1 min to go" at minute 4 counted against a list
+        // nobody was following any more. Forget it; the architect's own plan steps drive the ETA from here.
+        if (!sb.ok) { etaPlannedFiles = 0; etaFirstFileAt = 0; }
         // WHERE THE FAST LANE'S MINUTES WENT (autopsy 21b431e1). Measurement only — nothing reads it.
         // Recorded on BOTH outcomes, because a lane that handed off is exactly the one whose time
         // needs explaining, and a check only ever visible when it complains cannot be told apart from
@@ -18604,10 +18632,14 @@ async function noteBuildOutcome(
         // just closed on the import-boot path. Cutting on a guess is how a confident wrong fix ships.
         // So the next report will say where the time actually goes, and THEN it can be fixed with evidence.
         const integrityStartedAt = Date.now();
+        etaFinalChecks = true; // the app's turn is over — the ETA line says so instead of promising minutes
         const storeFiles = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
         const storeLoadMs = Date.now() - integrityStartedAt;
         const integrityFiles: Record<string, string> = { ...storeFiles, ...Object.fromEntries(writtenFiles) };
-        for (const p of ['src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/index.tsx', 'index.html', 'src/index.css']) {
+        // The sandbox is read for the files a check reasons from by their ABSENCE (autopsy de3bb2bb): the
+        // durable map did not hold the starter's `src/vite-env.d.ts`, so `missingViteEnvTypes` wrote one into
+        // a project that already had it and told the user TypeScript had complained — tsc was clean.
+        for (const p of ['src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/index.tsx', 'index.html', 'src/index.css', 'src/vite-env.d.ts', 'tsconfig.json', 'tsconfig.app.json']) {
           if (integrityFiles[p] === undefined) {
             try { integrityFiles[p] = await actuator.readFile(workspaceId, p); } catch { /* absent in sandbox too */ }
           }
@@ -18885,16 +18917,23 @@ async function noteBuildOutcome(
             }
           } catch { /* removing an unused package is housekeeping — it must never affect a build */ }
         }
+        // A build that stopped or failed before writing the files that import a package it just installed has
+        // not finished using it yet (autopsy 73648e12) — see unusedDependencyLine.
+        const buildUnfinished = abort.signal.aborted || !result.ok;
+        const addedThisBuild = new Set((() => { try { return depsAddedByBuild(packageJsonAtBuildStart, integrityFiles['package.json'] ?? null); } catch { return [] as string[]; } })());
         for (const u of unusedDeps) {
           if (prunedDeps.includes(u.name)) continue;
-          buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_UNUSED_DEP', ...obs(`"${u.name}" is declared in package.json dependencies but no project file imports it. If it is used only via config, a CLI, or a runtime string-load, ignore this; otherwise removing it shrinks the install.`) });
+          const line = unusedDependencyLine(u.name, { unfinished: buildUnfinished, addedThisBuild: addedThisBuild.has(u.name) });
+          buildDiag.record({ phase: 'build', severity: line.severity, code: 'INTEGRITY_UNUSED_DEP', ...obs(line.message), ...(line.autoResolved ? { autoResolved: true } : {}) });
+        }
+        // A shared stylesheet imported by several modules is a FACT, never a defect (autopsy de3bb2bb): a
+        // bundler includes the file once. Recorded at info level, outside `!integrity.ok`, so it is not lost.
+        for (const d of integrity.duplicateStylesheets) {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_DUPLICATE_STYLESHEET', autoResolved: true, message: `"${d.stylesheet}" is imported by ${d.importers.length} modules (${d.importers.join(', ')}). Not a defect: the bundler includes it once.` });
         }
         if (!integrity.ok) {
           if (integrity.focusOwners.length >= 2) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_FOCUS_CONFLICT', ...obs(`${integrity.focusOwners.length} components grab initial focus: ${integrity.focusOwners.map((o) => `${o.file} (${o.mechanism})`).join(', ')} — only one may own initial focus.`) });
-          }
-          for (const d of integrity.duplicateStylesheets) {
-            buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_DUPLICATE_STYLESHEET', ...obs(`"${d.stylesheet}" imported by ${d.importers.length} modules: ${d.importers.join(', ')}.`) });
           }
           for (const o of integrity.orphanStylesheets) {
             buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_ORPHAN_STYLESHEET', ...obs(`"${o.stylesheet}" is imported by nothing (no module import, no HTML link) — the app ships unstyled unless it is wired in.`) });
@@ -18911,7 +18950,7 @@ async function noteBuildOutcome(
           // so the heal must not edit the imported project — the warnings above stay advisory (matches the
           // C9 reviewer-autofix `!isImportTurn` gate). `expectsArtifacts` is false on every import turn.
           if (shouldRunIntegrityHeal({ gateEnabled: envFlag('AGENTV3_INTEGRITY_GATE'), resultOk: result.ok, expectsArtifacts, aborted: abort.signal.aborted })) {
-            events.emit({ type: 'narration', agent: 'architect', text: '🔧 Fixing project-integrity issues (focus ownership / duplicate stylesheet)…', ts: Date.now() });
+            events.emit({ type: 'narration', agent: 'architect', text: '🔧 Fixing project-integrity issues…', ts: Date.now() });
             try {
               const integrityRunner = new AgentRunner({
                 ...baseRunnerOpts,
@@ -18930,8 +18969,10 @@ async function noteBuildOutcome(
                 // I will not make any changes." as the user's build result. Keep the REAL build summary;
                 // the heal contributes its edits, never its chatter.
                 result = { ...healed, summary: result.summary };
-                const after = analyzeProjectIntegrity(Object.fromEntries(writtenFiles));
-                if (after.ok) buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_HEALED', message: 'Project-integrity issues fixed (single focus owner; no duplicate stylesheet).', autoResolved: true });
+                // Re-judged on the WHOLE project, the same map the finding came from — this build's writes
+                // alone cannot see a focus owner or an entry in a file the build did not touch.
+                const after = analyzeProjectIntegrity({ ...integrityFiles, ...Object.fromEntries(writtenFiles) });
+                if (after.ok) buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_HEALED', message: 'Project-integrity issues fixed and re-checked on the whole project.', autoResolved: true });
               }
             } catch { /* self-heal is best-effort — the honest warnings stand */ }
           }
@@ -19359,7 +19400,9 @@ async function noteBuildOutcome(
                       severity: left.length < 3 ? 'info' : 'warning',
                       code: left.length < 3 ? 'CSS_CLASSES_HEALED' : 'CSS_CLASSES_PARTIALLY_HEALED',
                       message: left.length < 3
-                        ? 'Every class the screens use now has a style rule.'
+                        ? (left.length === 0
+                          ? 'Every class the screens use now has a style rule.'
+                          : `The repair added the missing style rules; ${left.length} class name(s) still have none (${left.join(', ')}), under the threshold for a finding.`)
                         : `After the repair ${left.length} class name(s) still have no style rule: ${left.slice(0, 12).join(', ')}.`,
                       autoResolved: left.length < 3,
                     });
@@ -21029,11 +21072,28 @@ async function noteBuildOutcome(
           // Explains a `pages: 'not-run'` truthfully (see RuntimeEvidence.noPageRoutes); never a verdict.
           if (pageRoutes.length === 0) gateEvidence.noPageRoutes = true;
           if (pageRoutes.length > 0) {
-            const out = await withTimeout(
+            let out = await withTimeout(
               actuator.runCommand(workspaceId, pageCheckScript(lastPreviewUrl, pageRoutes, { storageState: signedInState() })),
               20_000 + pageRoutes.length * PAGE_LOAD_TIMEOUT_MS, 'page-route-check',
             );
-            const pageResults = parsePageCheck(out.stdout);
+            let pageResults = parsePageCheck(out.stdout);
+            // ROUTES THAT REDIRECT TO THE SIGN-IN PAGE ARE BEHIND A DOOR (autopsy 2f723acb): five of six routes
+            // went to /login and only /login was counted. When no sign-in was tried yet, sign in with what the
+            // app ships and check the routes again from inside.
+            if (
+              !authSession && signInExploreEnabled() && !abort.signal.aborted
+              && pageResults.some((r) => r.verdict === 'redirected' && typeof r.redirectedTo === 'string' && isSignInRoute(r.redirectedTo))
+            ) {
+              const session = await signInBehindTheDoor(lastPreviewUrl);
+              if (session.signedIn && !abort.signal.aborted) {
+                const again = await withTimeout(
+                  actuator.runCommand(workspaceId, pageCheckScript(lastPreviewUrl, pageRoutes, { storageState: signedInState() })),
+                  20_000 + pageRoutes.length * PAGE_LOAD_TIMEOUT_MS, 'page-route-check-signed-in',
+                ).catch(() => null);
+                const againResults = again ? parsePageCheck(again.stdout) : [];
+                if (again && againResults.length > 0) { out = again; pageResults = againResults; }
+              }
+            }
             const pageSummary = summarizePageCheck(pageResults, pageRoutes.length, out.stdout);
             // KEEP this measurement. Every page here was loaded in the sandbox's own real browser with
             // `pageerror` + `console` listeners attached, so it is genuine runtime evidence — and the

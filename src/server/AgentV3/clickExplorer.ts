@@ -51,6 +51,7 @@
 
 import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, playwrightImport } from './sandboxBrowserScript';
 import { BROWSER_PAGE_OPTIONS } from './signInExplore';
+import { DESTRUCTIVE_LOCAL_WORDS, SPENDING_LOCAL_WORDS, DEVANAGARI_NEVER_WORDS } from './localActionWords';
 
 /** Where the pre-baked Playwright and its browsers live inside the sandbox image. */
 export const EXPLORE_TOOLS_DIR = '/home/user/.e-tools';
@@ -87,10 +88,15 @@ export function clickExplorerEnabled(env: NodeJS.ProcessEnv = process.env): bool
  * "Order summary" is skipped (conservative) while "Borders" is not. Missing a harmless press costs
  * nothing; pressing a harmful one costs the user's data.
  */
-export const NEVER_PRESS = /\b(delete|remove|clear|reset|erase|wipe|empty|discard|archive|trash|destroy|log ?out|sign ?out|logoff|deactivate|unsubscribe|cancel (?:subscription|order|plan|booking)|pay|payment|buy|checkout|check out|purchase|subscribe|donate|order|place order|upgrade|share|send|email|mail|call|whatsapp|sms|print|download|install|upload|export|import|report|block|ban|kick|revoke)\b/i;
+export const NEVER_PRESS = new RegExp(
+  '\\b(?:delete|remove|clear|reset|erase|wipe|empty|discard|archive|trash|destroy|log ?out|sign ?out|logoff|deactivate|unsubscribe|cancel (?:subscription|order|plan|booking)|pay|payment|buy|checkout|check out|purchase|subscribe|donate|order|place order|upgrade|share|send|email|mail|call|whatsapp|sms|print|download|install|upload|export|import|report|block|ban|kick|revoke'
+  + `|${DESTRUCTIVE_LOCAL_WORDS}|${SPENDING_LOCAL_WORDS})\\b`
+  + `|${DEVANAGARI_NEVER_WORDS}`,
+  'i',
+);
 
 /** Names that create or save something — refused only when the app writes to the USER's own database. */
-export const WRITE_VERBS = /\b(add|new|create|save|submit|post|publish|book|confirm|update|apply|join|register|sign ?up|enroll|enrol|invite|approve|reject|accept|decline|mark|complete|done|vote|like|follow|rate|comment)\b/i;
+export const WRITE_VERBS = /\b(add|new|create|save|submit|post|publish|book|confirm|update|apply|join|register|sign ?up|enroll|enrol|invite|approve|reject|accept|decline|mark|complete|done|vote|like|follow|rate|comment|(?:jod|bana|jama)(?:o|e|en|ein|iye|na|dein|do)|jama\s*kar\w*|save\s*kar\w*)\b|जोड़|बनाए|सहेज|जमा कर/i;
 
 /**
  * Console lines that are not a defect of the click: React's development warnings, the DevTools advert,

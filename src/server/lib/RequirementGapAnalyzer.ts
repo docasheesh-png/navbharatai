@@ -639,7 +639,9 @@ export function analyzeRequirementGaps(prompt: string): RequirementGaps {
   // proposed student / teacher / admin roles, enrolment and fees — every one of which needs a second
   // person and a server the user had just ruled out. The domain is still NAMED (reports read it); only
   // the features and questions it would have ADDED are withdrawn, because the user already answered them.
-  if (declaresSinglePersonApp(original)) {
+  // The same withdrawal for one learner's practice tool (autopsy 73648e12): a mock test app has no
+  // teachers, courses or fees unless the user names them.
+  if (declaresSinglePersonApp(original) || namesASingleLearnerTool(original)) {
     likelyMissing.length = 0;
     return { domain: domain ? domain.key : 'general', mentioned, likelyMissing, nonFunctional, india: detectIndiaContext(original), clarifyingQuestions: [] };
   }
@@ -663,6 +665,34 @@ export function analyzeRequirementGaps(prompt: string): RequirementGaps {
     india: detectIndiaContext(original),
     clarifyingQuestions: clarifyingQuestions.slice(0, 6),
   };
+}
+
+/**
+ * The practice tools a learner uses on their own: a mock test, a practice paper, a test series, a question
+ * bank, a quiz, flashcards, previous-year papers. One source for the requirement analyser here and for
+ * `SIMPLE_APP_SIGNAL` (appComplexitySignals.ts), so "is this a quiz-family app?" has one answer.
+ */
+export const PRACTICE_TOOL_SOURCE = String.raw`mock[\s-]?(?:tests?|exams?|papers?)|practice[\s-]?(?:tests?|papers?|sets?)|test[\s-]?series|question[\s-]?banks?|quiz(?:zes)?|flash[\s-]?cards?|pyqs?|previous[\s-]+(?:years?'?[\s-]+)?(?:papers?|questions?)`;
+const PRACTICE_TOOL_RE = new RegExp(String.raw`\b(?:${PRACTICE_TOOL_SOURCE})\b`, 'i');
+/** Words that put a second party or an institution into the request: people who manage, pay, enrol. */
+const INSTITUTION_SCOPE_RE = /\b(?:teachers?|tutors?|admins?|administrators?|staff|roles?|log\s?-?ins?|sign\s?-?(?:in|up)s?|accounts?|multi[\s-]?users?|institutes?|institutions?|coaching|schools?|colleges?|universit(?:y|ies)|academy|management|platform|portal|erp|lms|classrooms?|batch(?:es)?|enrol\w*|fees?|payments?|subscriptions?|courses?|lessons?|attendance)\b/i;
+
+/**
+ * Is this a request for ONE learner's practice tool — a mock test, a quiz, flashcards — and nothing that
+ * brings in an institution? PURE.
+ *
+ * 🔴 AUTOPSY 73648e12 + 2f723acb (2026-10-01). *"Build a mock test app for UPSC drug inspector exam 2026
+ * based on previous papers, make it interactive"* matched the education domain on the word "exam", and
+ * the builder was told that an education app "almost always needs" student / teacher / admin roles,
+ * courses and lessons, enrolment and attendance, progress tracking and fees. It built every one: Courses,
+ * Attendance, Fees, an Admin screen and demo payments — around two mock tests, for ₹184. The request
+ * named a TOOL for one person preparing for an exam; the institution features belong to a school or a
+ * coaching centre the user never mentioned. A request that names one (a coaching, a school, teachers,
+ * logins, fees, courses) keeps the domain's full list.
+ */
+export function namesASingleLearnerTool(prompt: string): boolean {
+  const t = String(prompt || '');
+  return PRACTICE_TOOL_RE.test(t) && !INSTITUTION_SCOPE_RE.test(t);
 }
 
 /**
@@ -701,7 +731,7 @@ export function missingDomainFeatures(appText: string, source: string): { domain
   const domain = selectDomain(text);
   // The same single-person rule as `analyzeRequirementGaps`: the suggestion bulb must not offer roles or
   // payments to an app its user declared has no accounts and keeps its data on the device.
-  if (declaresSinglePersonApp(String(appText || ''))) return { domain: domain ? domain.key : 'general', labels: [] };
+  if (declaresSinglePersonApp(String(appText || '')) || namesASingleLearnerTool(String(appText || ''))) return { domain: domain ? domain.key : 'general', labels: [] };
   const feats = domain ? domain.features : GENERIC_FEATURES;
   const labels = feats.filter((f) => !f.re.test(src) && !f.re.test(text)).map((f) => f.label);
   return { domain: domain ? domain.key : 'general', labels };

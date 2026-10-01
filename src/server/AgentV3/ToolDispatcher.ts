@@ -86,11 +86,11 @@ import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServ
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
-import { lintBuiltApp, a11yHandBack } from './buildQualityLint';
+import { lintBuiltApp, a11yHandBack, offGridHandBack } from './buildQualityLint';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { rootThemeHooks, deadThemeSwitchNote } from './deadThemeSwitch';
 import { pruneGeneratedListing } from './generatedListing';
-import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, usesNonKitNbClass } from './kitRestore';
+import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, leftToTheKit, usesNonKitNbClass } from './kitRestore';
 import { findUndefinedClasses, isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, missingImportedSheetNote, collectDefinedClasses } from './CssConsistency';
 import { pageDesignWriteNote, isPageFile, analyzeDesignCoverage, type DesignDefect } from './DesignCoverage';
 import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
@@ -203,7 +203,7 @@ import { withVitestDeclared, VITEST_RANGE } from './TestGenerationAgent';
 import { renderSeenThisBuild } from './renderProof';
 import { generateIntegrationTests } from '../lib/IntegrationTestGenerator';
 import { addDependency, removeDependency as removeOneDependency, listDependencies } from './packageEdit';
-import { planE2eScaffold, e2eScaffoldSummary } from './e2eScaffold';
+import { planE2eScaffold, e2eScaffoldSummary, isPlatformE2eScaffold } from './e2eScaffold';
 import { pickDevScript, parsePackageJson } from './devScript';
 import { generateObservability, type ObservabilityTarget } from '../AppMakerLab/generator/ObservabilityGenerator';
 import { generateBundleOptimization } from '../AppMakerLab/generator/BundleOptimizationGenerator';
@@ -2397,7 +2397,12 @@ export class ToolDispatcher {
       const graph = getWorkspaceMemory(this.workspaceId).graph();
       const files = new Set(graph.files);
       const external = new Set<string>();
+      // OUR starter e2e suite imports @playwright/test, and the user is told to install it when they run
+      // the suite (E2E_SCAFFOLDED). It is not the app's dependency: counting it took one build's
+      // confidence to 35% "Low" (autopsy de3bb2bb). DependencyAutoFix has excluded it since 7d79254b.
+      const ours = await this.platformE2eFiles([...files]);
       for (const [file, specs] of Object.entries(graph.imports)) {
+        if (ours.has(file)) continue;
         for (const spec of specs) {
           // External = not a resolvable local import. Relative specs resolve via
           // resolveLocalImport; everything else (bare/scoped/alias) is external
@@ -2444,9 +2449,24 @@ export class ToolDispatcher {
     const refs = new Set<string>();
     for (const { path, content } of sources) {
       if (!SOURCE_EXT.test(path) || SKIP.test(path)) continue;
+      // Our own playwright.config.ts reads E2E_BASE_URL for the suite WE added — not a key the app needs.
+      if (isPlatformE2eScaffold(path, content)) continue;
       for (const name of extractEnvRefs(path, content)) refs.add(name);
     }
     return [...refs];
+  }
+
+  /** The files of the starter e2e suite NavBharatAI wrote (read by marker, never by path alone). */
+  private async platformE2eFiles(paths: readonly string[]): Promise<Set<string>> {
+    const out = new Set<string>();
+    for (const p of paths) {
+      if (!/^playwright\.config\.[cm]?[jt]s$|^e2e\//i.test(p)) continue;
+      try {
+        const c = await this.actuator.readFile(this.workspaceId, p);
+        if (typeof c === 'string' && isPlatformE2eScaffold(p, c)) out.add(p);
+      } catch { /* unreadable ⇒ counted, as before */ }
+    }
+    return out;
   }
 
   private async collectEnvVarIssues(sources: EvalSourceFile[]): Promise<EnvVarIssue[]> {
@@ -2700,6 +2720,24 @@ export class ToolDispatcher {
   noteHandedOff(path: string, content: string): void {
     if (!path || typeof content !== 'string') return;
     this._ownReads.set(path, { count: 1, content, writeSeq: this._writeSeq, stalls: 0, handed: true });
+  }
+
+  /**
+   * A NEW CONVERSATION STARTS WITH NOTHING IN IT (autopsy de3bb2bb, 2026-10-01). Called by `AgentRunner.run`,
+   * whose first message is the only one the model has.
+   *
+   * The sub-agent case was fixed on 2026-09-24 by giving each child its own dispatcher. The sibling it
+   * missed: every repair pass (integrity, design, explorer, green repair, runtime auto-fix, a retry) runs a
+   * NEW conversation on the ARCHITECT's dispatcher, so it inherited the architect's "what is in my context"
+   * memory. The integrity repair's first read of `src/main.tsx` came back "you have now read src/main.tsx the
+   * second time … you already have it" — about a file it had never seen.
+   *
+   * Clears THIS agent's own reads and commands only. The shared ledger (the build report's count) is
+   * untouched, and a file handed over in the task (`noteHandedOff`, set before the run) stays in context.
+   */
+  beginConversation(): void {
+    for (const [key, r] of this._ownReads) if (!r.handed) this._ownReads.delete(key);
+    this._ownCommands.clear();
   }
 
   // ── WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068) — see writeTimeTypecheck.ts ──
@@ -3354,14 +3392,14 @@ export class ToolDispatcher {
 
   /**
    * The class names the screens use that no stylesheet defines, read from the workspace NOW — the
-   * end-of-turn half of the write-time note (stylePolishResume.ts, autopsy 1be16985). `nb-` classes are
-   * left to the kit, exactly as the write-time note leaves them.
+   * end-of-turn half of the write-time note (stylePolishResume.ts, autopsy 1be16985). An `nb-` class the
+   * kit DEFINES is left to the kit (`kitRestorePatch` puts its rule back); an invented `nb-` name is not.
    *
    * 🔒 UNKNOWN IS EMPTY. A project with more files than one read may cover, a listing that fails, or a
    * stylesheet that cannot be read returns `[]`: this answer sends a model back to work, so it must never
    * name a class as undefined because the file that defines it was not read.
    */
-  async undefinedClassesNow(): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }> }> {
+  async undefinedClassesNow(): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }>; offGrid?: Array<{ file: string; values: string[] }> }> {
     try {
       let listing: string[] = [];
       try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'style-resume-listing'); }
@@ -3382,7 +3420,9 @@ export class ToolDispatcher {
         } catch { if (isProjectStylesheet(p)) unreadSheet = true; }
       }));
       if (unreadSheet) return { missing: [], pages: [] };
-      const missing = findUndefinedClasses(project).filter((c) => !c.startsWith('nb-'));
+      // Only a class the KIT defines is left out: kitRestore puts that one back. An invented `nb-` name has
+      // no kit rule, so it is handed back like any other (autopsy 2f723acb — 17 of them went unmentioned).
+      const missing = findUndefinedClasses(project).filter((c) => !leftToTheKit(c));
       const sheet = sheets.includes('src/index.css') ? 'src/index.css' : sheets[0];
       // The page-design half of the same end-of-turn check — the SAME judgement the end-of-build repair
       // runs (analyzeDesignCoverage), with the whole project in hand, so the two cannot disagree.
@@ -3393,7 +3433,11 @@ export class ToolDispatcher {
       // line uses, over the same files already read here, so the two can never disagree.
       let a11y: Array<{ file: string; issues: string[] }> = [];
       try { a11y = a11yHandBack(lintBuiltApp(project)); } catch { a11y = []; }
-      return { missing, sheet, pages, a11y };
+      // Spacing off the 4px grid — the DESIGN_CONSISTENCY finding (Q-037 / Q-022) — only in files THIS agent
+      // wrote, so a value in the user's own code is never handed back as ours to restyle (Q-015).
+      let offGrid: Array<{ file: string; values: string[] }> = [];
+      try { offGrid = offGridHandBack(project, this._writtenPaths).map(({ file, values }) => ({ file, values })); } catch { offGrid = []; }
+      return { missing, sheet, pages, a11y, offGrid };
     } catch {
       return { missing: [], pages: [] };
     }
@@ -3429,7 +3473,7 @@ export class ToolDispatcher {
       }));
       let out = '';
       if (wroteSheet) {
-        try { out += undefinedClassWriteNote(files, project); } catch { /* a note is best-effort */ }
+        try { out += undefinedClassWriteNote(files, project, { kitDefines: (c) => leftToTheKit(c) }); } catch { /* a note is best-effort */ }
       }
       if (wrotePage) {
         try { out += pageDesignWriteNote(files, project); } catch { /* a note is best-effort */ }
@@ -10648,6 +10692,31 @@ export interface EditResult {
  * Pure and deterministic — unit-testable without a sandbox. The `path` is only
  * used to make error messages specific.
  */
+/**
+ * Where each match of an ambiguous `old_string` sits, with a line of context either side, so the retry can
+ * pick the one it meant without a read_file round-trip (autopsy 2f723acb: an ambiguous edit to the
+ * stylesheet was followed by a whole re-read of it). At most three matches are shown. PURE.
+ */
+export function ambiguousEditRegions(existing: string, offsets: Iterable<number>, max = 3): string {
+  const lines = existing.split('\n');
+  const lineOf = (offset: number): number => existing.slice(0, offset).split('\n').length; // 1-based
+  const shown: string[] = [];
+  let total = 0;
+  for (const off of offsets) {
+    total++;
+    if (shown.length >= max) continue;
+    const ln = lineOf(off);
+    const from = Math.max(1, ln - 1);
+    const to = Math.min(lines.length, ln + 1);
+    const block: string[] = [];
+    for (let i = from; i <= to; i++) block.push(`${String(i).padStart(5)}| ${lines[i - 1].slice(0, 160)}`);
+    shown.push(`Match at line ${ln}:\n${block.join('\n')}`);
+  }
+  if (shown.length === 0) return '';
+  const more = total > shown.length ? `\n(and ${total - shown.length} more)` : '';
+  return `\n${shown.join('\n')}${more}\nAdd a neighbouring line from the match you mean to old_string so it is unique.`;
+}
+
 export function applyEdit(existing: string, oldStr: string, newStr: string, path = 'file'): EditResult {
   // APPEND MODE (Connectly Edit #1 autopsy 2026-07-21): the model wanted to ADD styles to Navbar.css and
   // called edit_file with an EMPTY old_string. An empty string "matches" at every character position, so
@@ -10671,7 +10740,11 @@ export function applyEdit(existing: string, oldStr: string, newStr: string, path
   }
   if (exact > 1) {
     throw new Error(
-      `edit_file: old_string is not unique in ${path} (${exact} matches) — include more surrounding context.`,
+      `edit_file: old_string is not unique in ${path} (${exact} matches) — include more surrounding context.`
+        + ambiguousEditRegions(existing, (function* () {
+          let at = existing.indexOf(oldStr);
+          while (at >= 0) { yield at; at = existing.indexOf(oldStr, at + Math.max(1, oldStr.length)); }
+        })()),
     );
   }
   // exact === 0 → whitespace-flexible fallback.
@@ -10690,7 +10763,8 @@ export function applyEdit(existing: string, oldStr: string, newStr: string, path
   }
   if (matches.length > 1) {
     throw new Error(
-      `edit_file: old_string is not unique in ${path} (${matches.length} whitespace-flexible matches) — include more surrounding context.`,
+      `edit_file: old_string is not unique in ${path} (${matches.length} whitespace-flexible matches) — include more surrounding context.`
+        + ambiguousEditRegions(existing, matches.map((m) => m.index ?? 0)),
     );
   }
   const m = matches[0];

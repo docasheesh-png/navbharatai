@@ -15,14 +15,18 @@
 //   • Only when the summary mentions NONE of those words. One mention anywhere = silence.
 // A summary that never once utters the name the user themselves gave the app has, at minimum, earned
 // a warning — and the warning states facts only: what was asked, what the summary says. PURE.
+import { readablePrompt } from '../lib/pastedSource';
 
 /** The quoted app name in a prompt, or null. The FIRST quoted run of 2+ words wins. */
 export function quotedAppName(prompt: string): string | null {
-  const p = String(prompt ?? '');
+  // Only the words the user WROTE can quote a name. A pasted file's `content="width=device-width,…"` is an
+  // attribute, and it was once shown to a user as the app they had asked for (autopsy a106df77).
+  const p = readablePrompt(String(prompt ?? ''));
   const m = p.match(/[“"'‘]([^”"'’]{3,80})[”"'’]/g);
   if (!m) return null;
   for (const raw of m) {
     const inner = raw.slice(1, -1).trim();
+    if (/[=<>{};]/.test(inner)) continue; // code, not a name
     if (significantWords(inner).length >= 2) return inner;
   }
   return null;

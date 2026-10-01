@@ -101,6 +101,13 @@ export const USER_SCOPED_COLLECTIONS: readonly UserScopedCollection[] = [
   { collection: 'app_mart_notifications', key: { field: 'recipientUid' } },
   { collection: 'app_mart_creator_ids', key: { field: 'uid' } },
   /**
+   * App Mart follows (2026-10-01): one doc per (follower, creator). Erased from BOTH ends — the people a
+   * deleted account followed, and the follows of everybody who followed it — so a deleted account
+   * neither counts toward anyone's follower number nor appears in anyone's Following view.
+   */
+  { collection: 'app_mart_follows', key: { field: 'followerUid' } },
+  { collection: 'app_mart_follows', key: { field: 'creatorUid' } },
+  /**
    * 🔒 `takedown_records` IS DELIBERATELY ABSENT, and must stay absent.
    *
    * It looks like it belongs here — it carries a uid — and adding it would feel like completing the

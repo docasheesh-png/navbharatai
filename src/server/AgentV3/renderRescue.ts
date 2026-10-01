@@ -1,3 +1,4 @@
+import { isNotReadyHeadline } from './notReadyHeadline';
 // Render rescue (admin 2026-07-30) — a genuinely-rendering app must never be reported as a failure.
 //
 // Root cause it fixes: a build can finish `ok:false` (a late tool error, out-of-steps, or a false
@@ -13,6 +14,23 @@
 /** Is this build even a candidate for a render rescue? Only a build that was SUPPOSED to produce an
  *  app (expectsArtifacts), actually wrote files this turn, and finished NOT ok. A build that is
  *  already ok needs no rescue; a no-artifact turn (chat/import/survey) has nothing to render. */
+/** What the user is told when the rescue proves the app works. PURE.
+ *
+ * The runner replaces the model's closing words with its not-ready headline when the readiness gate
+ * finds a blocker. When a real browser then proves the app renders, that headline is false — and the
+ * build is charged as a success — so it must not survive (autopsy 6461025c). The model's own answer
+ * comes back when we kept it; otherwise the rescue's own sentence. Any other summary is the model's or
+ * a later pass's, and is left exactly as it was.
+ */
+export const RESCUED_SUMMARY = 'Your app is built and the live preview renders correctly.';
+export function summaryAfterRescue(summary: string | null | undefined, modelAnswer?: string | null): string {
+  const s = String(summary ?? '').trim();
+  if (!s) return RESCUED_SUMMARY;
+  if (!isNotReadyHeadline(s)) return String(summary);
+  const answer = String(modelAnswer ?? '').trim();
+  return answer || RESCUED_SUMMARY;
+}
+
 export function renderRescueEligible(input: { ok: boolean; expectsArtifacts: boolean; filesWritten: number }): boolean {
   return input.ok === false && input.expectsArtifacts === true && input.filesWritten > 0;
 }

@@ -252,7 +252,7 @@ export function predictDeadline(estimateMs: number, startMs: number): { finishMs
 export function complexityFromPrompt(prompt: string): Complexity {
   // A reference URL's path segments are not modules or features (autopsy 33812996: a Play Store link
   // took the estimate from 2 modules to 6). Read the request with machine text blanked.
-  const text = withoutMachineText(String(prompt || ''));
+  const text = withoutMachineText(String(prompt || ''), { keepPasted: true });
   const moduleMatches = text.match(/\b(page|pages|screen|screens|view|views|dashboard|section|sections|tab|tabs|route|routes)\b/gi);
   // Feature signals: list separators + common feature verbs/nouns.
   const featureMatches = text.match(/(?:,|\band\b|\bwith\b|\bplus\b|\n[-*•]|\b(auth|login|signup|search|filter|chart|payment|upload|export|profile|admin|cart|checkout|notification|comment|like|follow)\w*)/gi);

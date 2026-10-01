@@ -56,7 +56,7 @@ describe('the route asks it, and says so', () => {
   const route = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
   it('both injection paths stand down', () => {
     expect(route).toContain('userAskedForSmallScope: smallScope,');
-    expect(route).toContain('if (!reqGuidance && askedForAnApp && !answered && !smallScope) {');
+    expect(route).toContain('if (!reqGuidance && askedForAnApp && !answered && !smallScope && !scaffoldWillSeed) {');
   });
   it('the report records why', () => {
     expect(route).toContain("code: 'REQUIREMENT_GAPS_STOOD_DOWN'");

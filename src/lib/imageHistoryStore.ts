@@ -38,6 +38,12 @@ export interface ImageHistoryItem {
    */
   ticket?: string;
   exp?: number;
+  /**
+   * Which screen made this picture — Free or Paid (admin 2026-10-01). Absent on anything saved
+   * before that date, which `imageFeed.ts` reads as Free: the paid screen carries a no-logo promise,
+   * so a picture whose origin we do not know must not be shown there.
+   */
+  tier?: 'free' | 'paid';
 }
 
 /** Pluggable store so the generator's persistence is testable without a real IndexedDB. */

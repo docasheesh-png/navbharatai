@@ -25,11 +25,20 @@ describe('the image generator has a free mode and a paid mode', () => {
     expect(paths).toEqual(['/api/image/enhance-prompt', '/api/image/generate', '/api/image/relay']);
   });
 
-  it('the screen has one Free / Paid switch, opens on Free, and never stores the choice', () => {
+  // 🔁 2026-10-01 — PAID IS A PAGE, NOT A CHIP (admin: "user jab paid me swich kare, to ek dam new
+  // page open ho, abhi usi page me paid aur free swich ho ja rahe hai"). The two assertions this test
+  // used to make — exactly one `role="tablist"` and the `['free', 'paid']` chip map — pinned the
+  // in-place toggle BY NAME, and that toggle is what the admin asked to be removed: pressing it
+  // changed the mode without regenerating, so a watermarked FREE picture stayed on screen under a lit
+  // PAID label. They are replaced here by the rules that still matter, and the page's own behaviour
+  // is locked in `thePaidPageAndTheIndianFace.test.ts`.
+  it('the screen opens on Free, never stores the choice, and leaves for Paid rather than flipping', () => {
     const gen = code(read('src/components/ide/AIImageGenerator.tsx'));
     expect(gen).toContain("useState<ImageTier>('free')");
-    expect(gen.split('role="tablist"').length).toBe(2);
-    expect(gen).toContain("(['free', 'paid'] as const)");
+    // Both pages are still reachable, and leaving one is an explicit act with its own control.
+    expect(gen).toContain("setTier('paid')");
+    expect(gen).toContain("setTier('free')");
+    expect(gen).not.toContain('aria-label="Image mode"');
     // A remembered Paid is a charge the user did not decide on this visit.
     expect(gen).not.toMatch(/localStorage\.[a-zA-Z]+\([^)]*tier/i);
     // The chosen mode reaches the server on every request.
@@ -57,7 +66,7 @@ describe('the image generator has a free mode and a paid mode', () => {
   it('AppKnowledgeBase describes one tool with two modes, the price, and names the TEXT opacity slider', () => {
     const kb = read('src/server/AppContext/AppKnowledgeBase.ts');
     const entry = kb.slice(kb.indexOf("id: 'ai_image_gen'"), kb.indexOf("id: 'ai_image_gen'") + 30000);
-    expect(entry).toMatch(/FREE AND PAID MODE/);
+    expect(entry).toMatch(/FREE AND PAID ARE TWO SEPARATE PAGES/); // 2026-10-01: a page, not a chip
     expect(entry).toMatch(/FREE mode is free for everyone, with no daily limit and no charge/);
     expect(entry).toMatch(/the first 5 Paid images every day are FREE, then ₹1 per image/);
     expect(entry).toMatch(/TEXT OPACITY with the slider directly under Size/);

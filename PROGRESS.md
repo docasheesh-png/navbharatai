@@ -86997,3 +86997,106 @@ reversions, one per fixed file, each failed the suite.
 **Live effect to watch:** an `UNSUPPORTED_STACK` line naming "native Android (Kotlin)" and a module plan made of
 web modules; no `rm -f package.json` reaching the sandbox (`[BLOCKED-DESTRUCTIVE] refused runtime-manifest
 delete` in the audit instead); no `APP_SCOPE … clone of YouTube` on assistant prompts.
+
+---
+
+## 2026-10-01 — Image Generator AI: **Paid is a page**, and **every face is Indian** (admin, two unbreakable rules)
+
+The admin sent one screenshot: PAID lit at the top, and under it a picture of an **East Asian face**
+carrying the **free provider's watermark**. Two rules came with it, both stated as unbreakable:
+
+> *"jab tak specific kaha na jaye, tab tak indian face banane chahiye … result me 100% indian human ana
+> chahiye, jab tak specialy kisi aur ki baat na ki jaye!!!!!!!! yeh un breckbale rule hai"*
+> *"paid me logo nahi hoga! na navbharatai ka na kisi aur ka!!"*
+
+Neither failure was the engine. Each had its own cause in our own code.
+
+### 🇮🇳 THE FACE — a positive sentence with no negative, on a deliberately narrow list
+
+`imagePeople.ts` has put *"Every person in the image is Indian…"* into the brief since 2026-09-30.
+**Two things were wrong with it, and either one alone is enough to produce that screenshot.**
+
+**1. There was no NEGATIVE at all.** `imagePromptCraft.ts`'s `negative` array is assembled from four
+sources — BASE, PURPOSE, PHOTO, CINEMATIC — and **not one word of the Indian rule was in it**. A lone
+positive sentence went up against a diffusion model's own face prior and lost. The admin named the
+missing half exactly: *"clear 'indian face cut' likh kar bhejo"*.
+
+**2. The rule only fired when the prompt used a word from a SHORT LIST — and that list leaves out the
+commonest words in a real Indian picture request.** `worker`, `driver`, `cook`, `seller`, `player`,
+`officer`, `artist`, `model` and a bare `portrait` are all excluded **on purpose**, because the
+EMPHATIC sentence could put a stranger into a picture of an object ("service worker", "best seller",
+"media player", "3D model"). So **"delivery worker wearing a mask" reached the engine with nothing at
+all about who the person is** — which is what the screenshot looks like.
+
+**THE FIX IS NOT A LONGER LIST.** Widening it is whack-a-mole: every new word needs its own exception
+and the next report finds the one nobody thought of. The fix removes the reason the list had to be
+narrow:
+
+- **`INDIAN_PEOPLE_CONDITIONAL`** — *"**If any person appears** in this image, they are Indian…"*. A
+  conditional constrains a person who is already there and **can never add one**, so it is safe on a
+  cat, a face-wash bottle, a dashboard and an empty logo brief alike. It therefore rides on **every**
+  brief, and the word list stops gating coverage: it now only chooses which of two wordings is used
+  (emphatic where a person is named, conditional otherwise).
+- **`INDIAN_PEOPLE_NEGATIVE`** — the missing half, kept to five items because this module's own history
+  records a suspicion that long inline negatives cost sharpness.
+- **`indianPeopleDirective()`** — one decision, one place. Returns null **only** when the user named
+  somebody else: *"a Japanese chef"*, *"a diverse team"*, Spider-Man and a robot all still win.
+- A UI screenshot and a background used to get **nothing** (there "student" names a domain). They now
+  get the conditional sentence — strictly more than before, and still unable to people a dashboard.
+
+**`depictsPeople` is untouched**, so the existing precision locks ("service worker diagram", "best
+seller badge", "cat face") still hold exactly.
+
+### 🏷️ THE WATERMARK — one page, one feed, and a chip that did not regenerate
+
+Free and Paid shared a screen **and a picture list**, and pressing the chip only changed the mode —
+**it did not regenerate anything**. So a FREE picture stayed on screen under a lit PAID label. And a
+free picture is fetched from the user's own connection with no account key, where the provider's
+`nologo` is **not honoured** (`imageGen.ts` says so in as many words). The watermark was never a paid
+picture's; it was a free picture sitting on the paid screen.
+
+- **Paid is now a separate PAGE** (admin: *"ek dam new page open ho"*): its own title, its own back
+  arrow, its own empty state naming the price and the no-watermark promise. Every visit still opens on
+  **Free** — the only default that cannot spend somebody's balance by being forgotten.
+- **`imageFeed.ts` — one rule, deliberately asymmetric.** The PAID page shows only pictures it made
+  itself; the FREE page shows everything else. An item saved before today carries no `tier` and is
+  shown on **Free**: the one screen that must take no guesses is the one with the no-logo promise on it.
+  Nothing is deleted.
+- Paging now runs on the page's own feed, so "Load more" on Paid can never reach back into a free picture.
+
+### 🔎 AND THE REPORT COULD NEVER SAY WHICH ENGINE DREW A PICTURE
+
+`diag` records only the rungs that **FAILED**, so a picture that arrived named nobody — the admin could
+not tell a Cloudflare image from a keyed free-provider one, and therefore could not tell whether the
+paid ladder was really paid. Every rung now names itself on delivery, to the server log always and to
+the response for an **ADMIN caller only** (White-Label Law: a user is never told the vendor).
+
+The paid ladder is in the admin's own order and unchanged in code:
+**Cloudflare FLUX → free provider WITH our account key → pro host → Gemini → Grok.**
+
+### 🔴 OPEN, AND SAID PLAINLY (rule 6)
+
+**Whether the provider honours `nologo=true` on the keyed endpoint is NOT verified.** The keyed request
+already sends it with the key in an `Authorization` header, and our code records (from the provider's
+docs) that the mark is stripped for a keyed request — but **no session can reach that host** (egress is
+refused) and the key lives in Cloud Run. So the guarantee today rests on the provider's promise plus the
+separated feed, not on our own bytes.
+
+**The admin was offered the hard guarantee and the measurement, and chose the measurement first:** make
+one paid picture on the new page and read the `engine` line. If a mark is there, the deterministic fix is
+ready — request `height + 64` and crop the strip off — and it needs an image library (`sharp`), which this
+project does not have. Recorded here so the next session does not have to re-derive it.
+
+### Tests
+
+`tests/thePaidPageAndTheIndianFace.test.ts` — 48 cases, built from the screenshot's own briefs
+("delivery worker wearing a mask", "auto driver", "street vendor"), **reversion-proven three ways**:
+removing the negative, never adding the conditional, and sharing one feed each fail it. One existing
+lock was deliberately replaced rather than deleted: `theImageGeneratorHasFreeAndPaid.test.ts` pinned the
+in-place chip **by name**, and the chip is the thing the admin asked to be removed — the new assertions
+keep every rule that still applies and the page's behaviour is locked in the new file. The 2026-09-30
+rename lock was **not** weakened: the header keeps `>Image Generator AI<` as one literal and the page
+marker is its own element.
+
+⚠️ **This is a CLIENT change, so the phone apps need a fresh `.aab`/`.ipa` before their users see it.**
+The server half (the Indian rule, the engine diagnostic) reaches every surface on merge.

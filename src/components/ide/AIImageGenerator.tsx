@@ -1,10 +1,11 @@
 import { draftAfterFailedSend } from '../../lib/draftAfterSend';
-import { useState, useEffect, useRef } from 'react';
-import { imageTierLine, paidCanAnswer, type ImageTier } from '../../lib/imageAllowanceLine';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { imageAllowanceLine, imageTierLine, paidCanAnswer, type ImageTier } from '../../lib/imageAllowanceLine';
 import { ComposerShell, COMPOSER_ICON_CLASS, COMPOSER_SEND_CLASS, COMPOSER_TEXTAREA_CLASS } from '../chat/ComposerShell';
 import { usePagedList } from '../../hooks/usePagedList';
+import { feedFor } from '../../lib/imageFeed';
 import { LoadMore } from '../../components/common/LoadMore';
-import { Send, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon, ImagePlus, ChevronDown, ChevronUp, Move } from 'lucide-react';
+import { Send, Wand2, Sparkles, Download, Copy, Trash2, Check, Type, Image as ImageIcon, ImagePlus, ChevronDown, ChevronUp, Move, ArrowLeft, ArrowRight } from 'lucide-react';
 import { ImageOptionSelect, type ImageOption } from './ImageOptionSelect';
 import { CustomSizeFields } from './CustomSizeFields';
 import { ImageResizeEditor } from './ImageResizeEditor';
@@ -190,7 +191,6 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
   // as what it is: a price, and the one action that clears it.
   const [balanceBlock, setBalanceBlock] = useState('');
   const [history, setHistory] = useState<GeneratedImage[]>([]);
-  const pagedHistory = usePagedList(history);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   // Pictures the user flagged with Report. Hidden on this screen at once — the person asked not to see
   // them, and waiting for an admin to agree would be the wrong way round. Session-only on purpose:
@@ -203,7 +203,18 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
   // FREE or PAID (admin 2026-09-30: "free + paid dono"). Every visit opens on Free and the choice is
   // not remembered: a remembered Paid is a charge the user did not decide on this visit (the rule
   // the old Pro toggle settled on 2026-09-22).
+  //
+  // 🔴 SINCE 2026-10-01 THIS IS WHICH PAGE YOU ARE ON, not which chip is lit (admin: "user jab paid
+  // me swich kare, to ek dam new page open ho, abhi usi page me paid aur free swich ho ja rahe
+  // hai"). The two screens have their own header, their own empty state and — through
+  // `feedFor` — their own feed. That last part is what makes the no-logo promise keepable: pressing
+  // the old chip changed the mode without regenerating anything, so a watermarked FREE picture sat
+  // on screen under a lit PAID chip, which is exactly the screenshot the rule was written from.
   const [tier, setTier] = useState<ImageTier>('free');
+  // ONE screen, ONE feed (see `imageFeed.ts`). Paging runs on the page's own pictures, so "Load
+  // more" on the paid screen can never reach back into a free picture.
+  const visibleHistory = useMemo(() => feedFor(history, tier), [history, tier]);
+  const pagedHistory = usePagedList(visibleHistory);
   // The server's code for a failure Paid mode can answer (`free_busy`, `needs_paid`), so the error
   // card can offer the switch. Empty for every other failure.
   const [errorCode, setErrorCode] = useState('');
@@ -409,6 +420,9 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
         style,
         size,
         timestamp: Date.now(),
+        // Which page made it. The paid screen shows only its own pictures, so a free picture's
+        // provider watermark can never land on the screen that promises none.
+        tier: tierNow,
       };
       // Persist to IndexedDB so it survives reloads, then reflect it in the UI (newest-first, bounded).
       setHistory((h) => pruneHistory([newItem, ...h]));
@@ -722,34 +736,57 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
 
   return (
     <div className="h-full flex flex-col text-ink overflow-hidden bg-surface">
+      {/* ── THE PAGE'S OWN HEADER ────────────────────────────────────────────────────────────
+          Admin, 2026-10-01: *"user jab paid me swich kare, to ek dam new page open ho, abhi usi page
+          me paid aur free swich ho ja rahe hai"*. So this is not a chip that lights up — the title,
+          the line under it, the icon, the feed and the empty state all belong to one page, and the
+          control on the right LEAVES for the other one. On Paid it is a plain back arrow, which is
+          what tells a user they went somewhere rather than flipped a switch. */}
       <div className="flex items-center gap-3 border-b border-line px-6 py-4 bg-card">
-        <div className="w-10 h-10 bg-violet-600/20 rounded-xl flex items-center justify-center shrink-0">
-          <Wand2 className="w-5 h-5 text-accent-text" />
-        </div>
+        {tier === 'paid' ? (
+          <button
+            type="button"
+            onClick={() => { setTier('free'); setErrorCode(''); }}
+            aria-label="Back to Free mode"
+            className="w-10 h-10 rounded-xl bg-well border border-line flex items-center justify-center shrink-0 text-muted hover:text-body transition-colors"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+        ) : (
+          <div className="w-10 h-10 bg-violet-600/20 rounded-xl flex items-center justify-center shrink-0">
+            <Wand2 className="w-5 h-5 text-accent-text" />
+          </div>
+        )}
         <div className="min-w-0">
-          <h2 className="font-semibold text-ink text-base truncate">Image Generator AI</h2>
+          {/* The NAME stays one literal string, and the page marker is its own element. The 2026-09-30
+              rename is pinned by a test that reads this file for `>Image Generator AI<`; folding the
+              name into a ternary would have broken that lock for a cosmetic reason. */}
+          <h2 className="font-semibold text-ink text-base truncate">
+            <span>Image Generator AI</span>
+            {tier === 'paid' ? <span className="text-accent-text"> · Paid</span> : null}
+          </h2>
           <p className="text-xs text-faint truncate">{imageTierLine(tier, freeLeft)}</p>
         </div>
         <div className="ml-auto flex items-center gap-2 shrink-0">
           <span className="hidden sm:inline text-[10px] bg-violet-500/20 text-accent-text px-2 py-1 rounded-full border border-violet-500/30">NavBharatAI</span>
-          {/* FREE / PAID (admin 2026-09-30). Both are always one press away, and every visit opens on
-              Free: the only default that cannot spend somebody's balance by being forgotten. */}
-          <div role="tablist" aria-label="Image mode" className="flex items-center bg-well border border-line rounded-full p-0.5">
-            {(['free', 'paid'] as const).map((t) => (
-              <button
-                key={t}
-                type="button"
-                role="tab"
-                aria-selected={tier === t}
-                onClick={() => { setTier(t); setErrorCode(''); }}
-                className={`text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full transition-colors ${
-                  tier === t ? 'bg-accent text-on-accent' : 'text-muted hover:text-body'
-                }`}
-              >
-                {t === 'free' ? 'Free' : 'Paid'}
-              </button>
-            ))}
-          </div>
+          {tier === 'free' ? (
+            <button
+              type="button"
+              onClick={() => { setTier('paid'); setErrorCode(''); }}
+              className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1.5 rounded-full bg-accent text-on-accent hover:opacity-90 transition-opacity"
+            >
+              Paid mode
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => { setTier('free'); setErrorCode(''); }}
+              className="text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1.5 rounded-full bg-well border border-line text-muted hover:text-body transition-colors"
+            >
+              Free mode
+            </button>
+          )}
         </div>
       </div>
 
@@ -789,10 +826,21 @@ export function AIImageGenerator({ onImageGenerated, onOpenModePicker, onOpenHis
                   result into an informed choice.
 
                   ⚠️ It never says "you cannot" and it never names a vendor. */}
-              <p className="text-[11px] text-faint leading-relaxed max-w-xs flex items-center justify-center gap-1.5 flex-wrap">
-                <Wand2 className="w-2.5 h-2.5 shrink-0" />
-                <span>Free images are made for your app’s artwork — logos, icons, banners, illustrations.</span>
-              </p>
+              {/* ⚠️ The sentence above is about the FREE engine and is honest only there. The paid
+                  page says what the user is actually buying — a different engine, and a picture with
+                  nothing written on it (admin 2026-10-01: "paid me logo nahi hoga! na navbharatai ka
+                  na kisi aur ka"). Neither line ever names a vendor (White-Label Law). */}
+              {tier === 'paid' ? (
+                <p className="text-[11px] text-faint leading-relaxed max-w-xs flex items-center justify-center gap-1.5 flex-wrap">
+                  <Sparkles className="w-2.5 h-2.5 shrink-0" />
+                  <span>Paid images are made on NavBharatAI’s stronger engines, and they carry no watermark of any kind. {imageAllowanceLine(freeLeft)}.</span>
+                </p>
+              ) : (
+                <p className="text-[11px] text-faint leading-relaxed max-w-xs flex items-center justify-center gap-1.5 flex-wrap">
+                  <Wand2 className="w-2.5 h-2.5 shrink-0" />
+                  <span>Free images are made for your app’s artwork — logos, icons, banners, illustrations.</span>
+                </p>
+              )}
               <div className="flex flex-wrap gap-2 justify-center">
                 {EXAMPLES.map((e) => (
                   <button

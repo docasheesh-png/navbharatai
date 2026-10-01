@@ -33,7 +33,7 @@
  * can act on beats a beautiful image with a misspelled shop name on it.
  */
 
-import { INDIAN_PEOPLE_DIRECTION, wantsIndianPeopleDefault } from './imagePeople';
+import { indianPeopleDirective } from './imagePeople';
 
 export type ImagePurpose =
   | 'icon' | 'logo' | 'banner' | 'avatar' | 'background'
@@ -406,8 +406,17 @@ export function craftImagePrompt(input: CraftInput): CraftedPrompt {
   // after the art direction, it lost to the model's own default face. A UI screenshot and a
   // background are left alone — there a word like "student" or "patient" names a DOMAIN, and the
   // sentence would invite a stranger into a dashboard. See `imagePeople.ts`.
-  const indianPeople = purpose !== 'screenshot' && purpose !== 'background' && wantsIndianPeopleDefault(base);
-  if (indianPeople) parts.push(INDIAN_PEOPLE_DIRECTION);
+  //
+  // 🔴 CORRECTED 2026-10-01 — IT REACHED ONLY THE BRIEFS THAT NAMED A PERSON IN SO MANY WORDS, AND IT
+  // CARRIED NO NEGATIVE AT ALL. `wantsIndianPeopleDefault` is a word list that leaves out `worker`,
+  // `driver`, `cook`, `seller`, `model` and a bare `portrait` on purpose, so "delivery worker in a
+  // mask" got nothing; and the `negative` array below was assembled from four other sources with not
+  // one word of this rule in it, so a positive sentence went up alone against the model's own face
+  // prior and lost. Both halves are fixed in `imagePeople.ts`: the CONDITIONAL wording cannot invent a
+  // person, so it rides on every brief, and the negative finally says what to avoid.
+  const indian = indianPeopleDirective(base, { emphaticAllowed: purpose !== 'screenshot' && purpose !== 'background' });
+  const indianPeople = !!indian?.named;
+  if (indian) parts.push(indian.direction);
 
   // 🔴 THE USER'S EXPLICIT ASK BEATS A CHIP THEY NEVER TOUCHED. This module already states that
   // principle, in `styleConflictsWithPrompt`'s own words — "the user's typed intent is the stronger
@@ -488,6 +497,10 @@ export function craftImagePrompt(input: CraftInput): CraftedPrompt {
   const negative = [
     BASE_NEGATIVE,
     purpose !== 'general' ? PURPOSE_NEGATIVE[purpose] : '',
+    // 🇮🇳 The other half of the Indian-people rule. Placed with the negatives rather than inside the
+    // direction because a diffusion model weighs the two on different axes — which is why the
+    // positive sentence alone kept losing (admin 2026-10-01).
+    indian ? indian.negative : '',
     // Realism drifts toward illustration unless it is told not to — see PHOTO_NEGATIVE.
     photoApplied ? PHOTO_NEGATIVE : '',
     photoApplied && realismChip && String(input.style) === 'cinematic' ? CINEMATIC_NEGATIVE : '',

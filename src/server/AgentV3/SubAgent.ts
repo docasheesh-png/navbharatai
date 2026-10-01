@@ -71,6 +71,8 @@ export interface SubAgentDeps {
    * every sub-agent's turns count toward the user's charge — previously they were dropped entirely.
    */
   usageSink?: import('./UsageSink').UsageSink;
+  /** The parent's admin-report recorder, so a specialist's end-of-turn notes (STYLE_RULES_RESUMED) are recorded. */
+  onNote?: (note: { code: string; message: string; detail?: string }) => void;
 
   /**
    * C2 — the project's protected paths, as a GETTER rather than a value.
@@ -360,6 +362,10 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
         try { return (deps.expectsArtifacts?.() ?? false) && roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools); }
         catch { return false; }
       })(),
+      // Q-066 (autopsy de3bb2bb): a specialist that WRITES files is handed back, once, the undefined classes
+      // and page defects in its own files before its turn ends — the same check the architect gets.
+      styleHandBack: roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools),
+      onNote: deps.onNote,
     });
     // Give the specialist the live project map (Phase 2) so it knows the codebase
     // the Architect has built so far — what files/components/routes exist and what

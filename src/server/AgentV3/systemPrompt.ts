@@ -7,6 +7,7 @@
 // AgentRegistry so the Architect always delegates by real, current capability.
 
 import { shellEarlyRule } from './earlyPreview';
+import { MAX_FILES_PER_BATCH } from './batchSize';
 import { IMAGE_IN_APP_RULE } from './inAppImageGeneration';
 import { HANDOFF_MECHANICAL_FIX_RULE } from './handoffRule';
 import { rosterBriefing } from './AgentRegistry';
@@ -962,10 +963,11 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '      Array.from). Hundreds of literal records by hand is always wrong.',
     '  A "comprehensive seed file with 1000+ records" must become generate_seed_data or a',
     '  ~10-row sample + a generator — never a hand-typed 1000-row file.',
-    '- BATCH NEW FILES: when creating multiple independent new files at once (e.g.',
-    '  Button.tsx + Card.tsx + utils.ts), use write_files_batch — pass all files in',
-    '  one call. It auto-orders by import dependencies and is 3× faster than calling',
-    '  write_file one-by-one. Only use write_files_batch for NEW files; for existing',
+    `- SMALL BATCHES OF NEW FILES: write_files_batch takes at most ${MAX_FILES_PER_BATCH} new files per call`,
+    '  (e.g. Button.tsx + Card.tsx + utils.ts). Nothing in a call reaches the live preview until',
+    '  the whole call finishes, so a call carrying a whole app keeps the user waiting minutes and',
+    '  can be cut off at the stream limit. Write the entry and shared files first, then the',
+    '  screens a few at a time. Only use write_files_batch for NEW files; for existing',
     '  files always use edit_file (surgical patch).',
     scaffoldHint,
     '- The sandbox NODE VERSION IS FIXED — you cannot change it. If a dev tool errors with a',

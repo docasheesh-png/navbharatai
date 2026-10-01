@@ -92,6 +92,8 @@ import { rootThemeHooks, deadThemeSwitchNote } from './deadThemeSwitch';
 import { pruneGeneratedListing } from './generatedListing';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, leftToTheKit, usesNonKitNbClass } from './kitRestore';
 import { findUndefinedClasses, isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, missingImportedSheetNote, collectDefinedClasses } from './CssConsistency';
+import { scopeStyleHandBack } from './stylePolishResume';
+import { batchSizeNote } from './batchSize';
 import { pageDesignWriteNote, isPageFile, analyzeDesignCoverage, type DesignDefect } from './DesignCoverage';
 import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
 import { shellWriteTargets, shellRemovalTargets } from './shellWriteTargets';
@@ -3399,7 +3401,7 @@ export class ToolDispatcher {
    * stylesheet that cannot be read returns `[]`: this answer sends a model back to work, so it must never
    * name a class as undefined because the file that defines it was not read.
    */
-  async undefinedClassesNow(): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }>; offGrid?: Array<{ file: string; values: string[] }> }> {
+  async undefinedClassesNow(opts: { onlyWritten?: boolean } = {}): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }>; offGrid?: Array<{ file: string; values: string[] }> }> {
     try {
       let listing: string[] = [];
       try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'style-resume-listing'); }
@@ -3437,6 +3439,10 @@ export class ToolDispatcher {
       // wrote, so a value in the user's own code is never handed back as ours to restyle (Q-015).
       let offGrid: Array<{ file: string; values: string[] }> = [];
       try { offGrid = offGridHandBack(project, this._writtenPaths).map(({ file, values }) => ({ file, values })); } catch { offGrid = []; }
+      // A SUB-AGENT is handed back only what ITS OWN files use (Q-066, autopsy de3bb2bb). Specialists run
+      // in parallel, so a class a sibling's screen uses is that sibling's to define; handing it here would
+      // send two agents to edit one stylesheet for the same rule.
+      if (opts.onlyWritten) return scopeStyleHandBack({ missing, sheet, pages, a11y, offGrid }, project, this._writtenPaths);
       return { missing, sheet, pages, a11y, offGrid };
     } catch {
       return { missing: [], pages: [] };
@@ -4158,7 +4164,7 @@ export class ToolDispatcher {
         // Sequential on purpose: the first call lists the sandbox once and the rest reuse it.
         let twinNotes = '';
         for (const p of written) twinNotes += await this.removeShadowTwins(p, agent);
-        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchSteeringNotes}${kitKeepNotes}${twinNotes}`;
+        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchSteeringNotes}${kitKeepNotes}${twinNotes}${batchSizeNote(dedupedByPath.size)}`;
       }
 
       case 'edit_file': {

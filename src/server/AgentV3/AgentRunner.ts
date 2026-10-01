@@ -133,6 +133,11 @@ export interface AgentRunnerOptions {
    */
   readinessGate?: boolean;
   /**
+   * Q-066 — a WRITING sub-agent (never the top-level build, which has `readinessGate`) is handed back, once,
+   * the undefined classes / page defects / unnamed controls in the files IT wrote, before its turn ends.
+   */
+  styleHandBack?: boolean;
+  /**
    * U-1 — when true, run the project's ESLint after a successful build and downgrade to ok:false if it
    * reports real ERRORS (warnings/formatting never block). Default-OFF (admin flag AGENTV3_LINT_GATE),
    * so the default build is byte-identical. Top-level builds only; never applied to sub-agents.
@@ -1062,6 +1067,26 @@ export class AgentRunner {
                 }
               }
             } catch { /* gate is best-effort — a scan error never fails a real build */ }
+          }
+
+          // 🎨 A WRITING SPECIALIST GETS THE SAME ONE-TIME STYLE HAND-BACK (Q-066, autopsy de3bb2bb). The block
+          // above is top-level-only, so a Frontend sub-agent that wrote screens on undefined classes ended its
+          // turn and a fresh-context repair fixed them at the end of the build. Scoped to the files THIS agent
+          // wrote (scopeStyleHandBack), because specialists run in parallel and a sibling's class is the
+          // sibling's. Same decision, same once-only limit, same refusal/question stand-downs.
+          if (ok && !readinessGate && this.opts.styleHandBack === true && expectsArtifacts && producingToolUses > 0
+            && styleResumes === 0 && !this.opts.signal?.aborted) {
+            try {
+              const style = await dispatcher.undefinedClassesNow({ onlyWritten: true });
+              const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, a11y: style.a11y, offGrid: style.offGrid, resumesUsed: styleResumes, producedFiles: true });
+              if (decision.resume) {
+                styleResumes++;
+                summaryBeforeStyleResume = turn.text.trim() || null;
+                try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: `${agentRole}: ${styleResumeNote(style.missing.length, style.pages.length, (style.offGrid ?? []).length)}`, detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.offGrid ?? []).map((o) => `${o.file}:off-grid(${o.values.join(',')})`)].join(' ') }); } catch { /* a note must never fail a build */ }
+                pushPlatformTurn(decision.message);
+                continue;
+              }
+            } catch { /* the style read is advisory — a specialist's turn ends exactly as before */ }
           }
 
           // U-1 — LintGate (default-OFF): after a still-successful build, block on real ESLint errors.

@@ -309,11 +309,14 @@ small, .muted { color: var(--muted); }
 }
 .nb-sidebar a:hover, .nb-nav-item:hover { background: var(--accent-soft); color: var(--fg); text-decoration: none; }
 .nb-sidebar a.active, .nb-nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nb-nav { display: flex; flex-direction: column; gap: 4px; }
+.nb-brand-icon { width: 28px; height: 28px; flex: 0 0 auto; border-radius: 8px; object-fit: contain; }
 .nb-topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); }
 .nb-main { padding: 24px 20px; min-width: 0; }
 @media (max-width: 820px) {
   .nb-shell { grid-template-columns: 1fr; }
   .nb-sidebar { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  .nb-nav { flex-direction: row; }
   .nb-main { padding: 16px; }
 }
 

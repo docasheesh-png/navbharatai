@@ -66,7 +66,7 @@ import { isOurStarterFile } from './starterFragment';
 
 /** Every template's files, built once — what "our own starter file" means for a write. */
 let starterTemplateCache: Array<Record<string, string>> | null = null;
-function starterTemplates(): Array<Record<string, string>> {
+export function starterTemplates(): Array<Record<string, string>> {
   if (starterTemplateCache) return starterTemplateCache;
   const reg = new TemplateRegistry();
   const out: Array<Record<string, string>> = [];

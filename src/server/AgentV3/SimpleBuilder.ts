@@ -356,6 +356,14 @@ export function manifestUserPrompt(prompt: string, scaffoldPaths: string[]): str
 }
 
 /** System prompt for a single-file generation call. */
+/**
+ * What a stopped fast lane says. "The files finished so far are saved" about zero files (autopsy
+ * 3d1bfe2a, stopped 8 s in) claims something that did not happen. PURE.
+ */
+export function stoppedSummary(saved: number): string {
+  return saved > 0 ? 'Stopped, as asked — the files finished so far are saved.' : 'Stopped, as asked — nothing had been written yet.';
+}
+
 export function fileSystemPrompt(framework: string): string {
   return [
     `You are an elite ${framework} engineer writing ONE file of a larger app.`,
@@ -1984,7 +1992,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       }
       return {
         ok: false, stopped: true, filesWritten: saved.length,
-        summary: 'Stopped, as asked — the files finished so far are saved.',
+        summary: stoppedSummary(saved.length),
         reason: BUILD_STOPPED_MESSAGE, outcome: 'BUILD_FAILED', salvagedPaths: saved.length ? saved : undefined,
         plannedFiles, phases: phasesNow(), plannedPaths,
       };
@@ -2248,7 +2256,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     if (deps.signal?.aborted) {
       return {
         ok: false, stopped: true, filesWritten: files.length,
-        summary: 'Stopped, as asked — the files finished so far are saved.',
+        summary: stoppedSummary(files.length),
         reason: BUILD_STOPPED_MESSAGE, outcome: classifyBuildOutcome({ filesWritten: files.length, typecheckOk: null }),
         typecheckRan: verdict.ran !== false, plannedFiles, phases: phasesNow(),
       };
@@ -2287,7 +2295,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   if (deps.signal?.aborted) {
     return {
       ok: false, stopped: true, filesWritten: files.length,
-      summary: 'Stopped, as asked — the files finished so far are saved.',
+      summary: stoppedSummary(files.length),
       reason: BUILD_STOPPED_MESSAGE, outcome: classifyBuildOutcome({ filesWritten: files.length, typecheckOk: null }),
       typecheckRan, plannedFiles, phases: phasesNow(),
     };

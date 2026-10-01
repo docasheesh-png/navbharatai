@@ -26,6 +26,7 @@ import { isModelUnavailableError } from './providerErrorClass';
 import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError } from './turnDeadline';
+import { BUILD_STOPPED_MESSAGE } from './stopSignal';
 import { typecheckEvidenceFromCommands, commandOutcomeText } from './TscGate';
 import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
@@ -1427,6 +1428,17 @@ export class BuildDiagnostics {
         message: `A model call was stopped by one of our own clocks — a budget or step deadline ran out while it was still running, so it did not fail (${rec.model ?? 'model'}).`,
         autoResolved: true,
         detail: rec.provider ? `provider=${rec.provider}` : undefined,
+      });
+    } else if (!rec.ok && rec.error === BUILD_STOPPED_MESSAGE) {
+      // 🔴 A STOP IS NOT A FAILED CALL (autopsy 3d1bfe2a). The user pressed Stop 8 s in, and the report
+      // carried `LLM_CALL_FAILED` at ERROR severity with provider "unknown" — `counts.errors = 1` on a
+      // build whose own outcome line says no failure is implied. Same treatment as a budget end.
+      this.record({
+        phase: 'provider',
+        severity: 'info',
+        code: 'LLM_CALL_STOPPED',
+        message: `A model call was cancelled because the user stopped the build — not a failure (${rec.model ?? 'model'}).`,
+        autoResolved: true,
       });
     } else if (!rec.ok || truncated) {
       // A TURN that timed out with nothing received is not "<model> failed" — no single provider

@@ -70,3 +70,26 @@ export function isOurStarterFile(
   if (typeof content !== 'string' || !content.trim()) return false;
   return templates.some((t) => typeof t[path] === 'string' && sameFile(path, content, t[path]));
 }
+
+/**
+ * Does this workspace hold ONLY our own starter — every file untouched, or not app code at all? PURE.
+ *
+ * 🔴 AUTOPSY 3d1bfe2a (2026-10-01). "Automation AI app" was stopped 8 s in, before a file was written.
+ * Thirty seconds later "An AI automation app" was read as an EDIT — "✏️ Editing your existing app (11
+ * source files)" — because the intention reader is told a project exists whenever there is an earlier
+ * request (so a small app living entirely in `src/App.tsx` is still edited). That earlier request built
+ * nothing: everything in the workspace was our starter, byte for byte. An earlier request counts only
+ * when it LEFT something.
+ *
+ * `files` maps every app-code path in the workspace to its content. `null` content (unreadable) is "not
+ * ours", so an unreadable file can never make a real app read as a starter.
+ */
+export function holdsOnlyOurStarter(
+  files: Readonly<Record<string, string | null>>,
+  templates: ReadonlyArray<Readonly<Record<string, string>>>,
+): boolean {
+  for (const [path, content] of Object.entries(files)) {
+    if (typeof content !== 'string' || !isOurStarterFile(path, content, templates)) return false;
+  }
+  return true;
+}

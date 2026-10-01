@@ -86,7 +86,7 @@ import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServ
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
-import { lintBuiltApp, a11yHandBack } from './buildQualityLint';
+import { lintBuiltApp, a11yHandBack, offGridHandBack } from './buildQualityLint';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { rootThemeHooks, deadThemeSwitchNote } from './deadThemeSwitch';
 import { pruneGeneratedListing } from './generatedListing';
@@ -3399,7 +3399,7 @@ export class ToolDispatcher {
    * stylesheet that cannot be read returns `[]`: this answer sends a model back to work, so it must never
    * name a class as undefined because the file that defines it was not read.
    */
-  async undefinedClassesNow(): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }> }> {
+  async undefinedClassesNow(): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }>; offGrid?: Array<{ file: string; values: string[] }> }> {
     try {
       let listing: string[] = [];
       try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'style-resume-listing'); }
@@ -3431,7 +3431,11 @@ export class ToolDispatcher {
       // line uses, over the same files already read here, so the two can never disagree.
       let a11y: Array<{ file: string; issues: string[] }> = [];
       try { a11y = a11yHandBack(lintBuiltApp(project)); } catch { a11y = []; }
-      return { missing, sheet, pages, a11y };
+      // Spacing off the 4px grid — the DESIGN_CONSISTENCY finding (Q-037 / Q-022) — only in files THIS agent
+      // wrote, so a value in the user's own code is never handed back as ours to restyle (Q-015).
+      let offGrid: Array<{ file: string; values: string[] }> = [];
+      try { offGrid = offGridHandBack(project, this._writtenPaths).map(({ file, values }) => ({ file, values })); } catch { offGrid = []; }
+      return { missing, sheet, pages, a11y, offGrid };
     } catch {
       return { missing: [], pages: [] };
     }

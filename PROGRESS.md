@@ -87029,6 +87029,20 @@ reversions, one per fixed file, each failed the suite.
 web modules; no `rm -f package.json` reaching the sandbox (`[BLOCKED-DESTRUCTIVE] refused runtime-manifest
 delete` in the audit instead); no `APP_SCOPE … clone of YouTube` on assistant prompts.
 
+### 2026-10-01 — the admin accepted all four remaining recommendations (e49afa97 / dfd24058 follow-up)
+
+- **Q-037 + Q-022 → option (b), built:** spacing off the 4px grid in files THIS build wrote is now handed back in
+  the end-of-turn style message (`offGridHandBack` in `buildQualityLint.ts` → `undefinedClassesNow` →
+  `decideStyleResume`). Same file selection and comment stripping as the `DESIGN_CONSISTENCY` finding, the same
+  `MAX_OFFGRID` threshold, and never a file the build did not write (the Q-015 case). It rides the existing
+  once-per-turn hand-back, so no new model pass. Test: `tests/offGridSpacingIsHandedBack.test.ts`, proven by
+  reversion (the stand-down check without `offGrid` fails two cases). **What to watch:** `DESIGN_CONSISTENCY`
+  off-grid counts on builds that wrote their own stylesheet, and `STYLE_RULES_RESUMED` details carrying
+  `:off-grid(…)`.
+- **Q-038 ✅ RESOLVED as not-a-defect** (admin agreed 2026-10-01): "No tests at all" was accurate, the app had no
+  tests of its own and `TEST_SUITE_UNVERIFIED` + the gate say exactly that. Row removed.
+- **Q-036 folded into Q-009** (admin agreed): a third instance of provider crawl, external (Z.ai), the crawl bench
+  worked. Row removed; Q-009 now lists e49afa97. Q-009 stays 🟡 external.
 ## 2026-10-01 — Autopsy de3bb2bb ("Ye yese app banao jo data COACT oar sake", Weak, ok, 12.6 min vs a 6–8 min ETA, ₹194.19)
 
 Tally: 0 shipped broken · 3 self-heals that should not have been needed (integrity repair of a non-defect, the

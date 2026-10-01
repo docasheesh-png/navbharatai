@@ -137,7 +137,81 @@ export const INDIAN_PEOPLE_DIRECTION =
   'Every person in the image is Indian — a real person from India, with authentic Indian (South Asian) '
   + 'facial features and a natural Indian skin tone.';
 
-/** Should the Indian default speak for this brief? PURE. */
+/**
+ * 🔑 THE SAME RULE, PHRASED SO IT CANNOT INVENT A PERSON (admin 2026-10-01, verbatim: *"jab tak
+ * specific kaha na jaye, tab tak indian face banane chahiye … result me 100% indian human ana
+ * chahiye … yeh un breckbale rule hai"*).
+ *
+ * THE DEFECT THIS CLOSES, and it is a RECALL defect, not a wording one. `depictsPeople` is a word
+ * list, and that list deliberately LEAVES OUT the commonest words in a real Indian picture request —
+ * `worker`, `driver`, `cook`, `seller`, `player`, `officer`, `artist`, `model`, a bare `portrait` —
+ * because each is a product or a thing as often as a person ("service worker", "media player", "best
+ * seller", "3D model"), and the EMPHATIC sentence above would then put a stranger into a picture of
+ * an object. So "delivery worker in a mask" reached the engine with nothing about who the person is,
+ * and the model filled the gap with its own default face. That is the admin's screenshot.
+ *
+ * Widening the list is whack-a-mole: every new word needs its own exception, and the next report
+ * finds the word nobody thought of. The CONDITIONAL form removes the reason the list had to be narrow
+ * at all — "IF any person appears" constrains a person who is already there and can never add one, so
+ * it is safe on a cat, a face-wash bottle, a dashboard and an empty logo brief alike. It therefore
+ * goes on EVERY brief the user has not already answered, and the word list stops being a gate on
+ * coverage: it only decides which of the two wordings is used.
+ */
+export const INDIAN_PEOPLE_CONDITIONAL =
+  'If any person appears in this image, they are Indian — a real person from India, with authentic '
+  + 'Indian (South Asian) facial features and a natural Indian skin tone, never any other ethnicity.';
+
+/**
+ * The NEGATIVE half — the one that was missing entirely (admin: *"clear 'indian face cut' likh kar
+ * bhejo"*).
+ *
+ * A positive sentence alone loses to a diffusion model's own face prior, which is exactly what the
+ * reports show: the direction was in the prompt and the face still came out East Asian. A negative is
+ * weighed on a different axis, so the two together are far stronger than either. Kept SHORT on
+ * purpose — this module's own history records a suspicion that long inline negatives cost sharpness,
+ * and these five items are the ones the failures were actually made of.
+ *
+ * ⚠️ Inert where there is no face: a negative for a concept the picture does not contain changes
+ * nothing, which is what lets it ride along with the conditional direction on every brief.
+ */
+export const INDIAN_PEOPLE_NEGATIVE =
+  'east asian face, chinese facial features, korean facial features, japanese facial features, '
+  + 'white or european face';
+
+/** Should the EMPHATIC direction speak for this brief — i.e. is a person actually named? PURE. */
 export function wantsIndianPeopleDefault(prompt: string | null | undefined): boolean {
   return depictsPeople(prompt) && !namesOtherOrigin(prompt);
+}
+
+/** What the craft layer should add for this brief, or null when the user's own words answered it. */
+export interface IndianPeopleDirective {
+  /** The sentence to put straight after the subject. */
+  direction: string;
+  /** What to add to the brief's negatives. */
+  negative: string;
+  /** A person is NAMED in the brief (the emphatic wording), rather than merely possible. */
+  named: boolean;
+}
+
+/**
+ * THE ONE DECISION. Returns null ONLY when the user named somebody else — their words always win,
+ * which is the half of this rule that has never changed.
+ *
+ * `emphaticAllowed` is false for a UI screenshot and a background, where a word like "student" or
+ * "patient" names a DOMAIN rather than a person. Those briefs still get the CONDITIONAL sentence —
+ * which is strictly more than they got before, and still cannot invite a stranger into a dashboard.
+ *
+ * PURE.
+ */
+export function indianPeopleDirective(
+  prompt: string | null | undefined,
+  opts: { emphaticAllowed?: boolean } = {},
+): IndianPeopleDirective | null {
+  if (namesOtherOrigin(prompt)) return null;
+  const named = depictsPeople(prompt) && opts.emphaticAllowed !== false;
+  return {
+    direction: named ? INDIAN_PEOPLE_DIRECTION : INDIAN_PEOPLE_CONDITIONAL,
+    negative: INDIAN_PEOPLE_NEGATIVE,
+    named,
+  };
 }

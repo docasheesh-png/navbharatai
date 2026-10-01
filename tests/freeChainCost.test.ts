@@ -195,11 +195,14 @@ describe('image generation — the paid rungs are metered by who SERVES, not by 
   // tool quota below, and its "only a paid rung burns it" rule, apply only with AI_IMAGE_PRICING=off.
   it('🔒 with pricing off, only a PAID delivery burns the old allowance', () => {
     expect(img).toContain('if (!pricing && paidRung && gate && gate.allow && gate.countsAgainstFree)');
+    // 🔁 2026-10-01: every rung now NAMES itself on delivery (a third argument), so the admin can
+    // finally tell which engine drew a picture. Which rungs are PAID is unchanged — that is the only
+    // thing this case is about, so it is asserted on the flag rather than on the whole call.
     // The free rung delivers without the paid flag; both paid rungs pass it.
-    expect(img).toContain('await deliver(pr.image); return;');
+    expect(img).toContain("await deliver(pr.image, false, 'free-provider (anonymous)'); return;");
     // Three paid deliveries now: Gemini, xAI, and the edit rung.
-    expect((img.match(/deliver\(img, true\); return;/g) || []).length).toBe(2);
-    expect(img).toContain('deliver(out.image, true); return;');
+    expect((img.match(/deliver\(img, true, /g) || []).length).toBe(2);
+    expect(img).toContain("deliver(out.image, true, 'edit'); return;");
   });
 
   it('sign-in is still required regardless of any flag — an anonymous caller can never spend', () => {

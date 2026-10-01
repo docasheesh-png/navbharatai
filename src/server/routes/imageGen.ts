@@ -290,7 +290,15 @@ export function registerImageGenRoutes(app: Express): void {
       // Deliver a generated image: only a genuinely-delivered image spends a PAID allowance (and only when
       // the paywall is active, i.e. the free provider is off — see above). A free Pollinations image never
       // counts against a quota. A failed rung never spends anything.
-      const deliver = async (img: { mimeType: string; base64: string }, paidRung = false): Promise<void> => {
+      const deliver = async (img: { mimeType: string; base64: string }, paidRung = false, engine = 'unknown'): Promise<void> => {
+        // 🔎 WHICH ENGINE DREW IT — the one fact this route could never answer (admin 2026-10-01:
+        // "paid mode me bhi pollination ai hi image bana raha hai"). `diag` records only the rungs that
+        // FAILED, so a picture that arrived named nobody: the admin could not tell a Cloudflare image
+        // from a keyed free-provider one, and so could not tell whether the paid ladder was really
+        // paid. It is logged here, for every rung, before anything else can go wrong.
+        // 🔒 WHITE-LABEL LAW: the name goes to the server log and, below, to an ADMIN caller only. A
+        // user is never told which vendor served them.
+        console.info(`[IMAGE_GEN] served by ${engine} (tier=${tier}${paidRung ? ', paid rung' : ''})`);
         // Only a PAID rung spends an allowance. A free Pollinations image never counts against a quota,
         // and a failed rung never spends anything — the burn happens on delivery, not on attempt.
         if (!pricing && paidRung && gate && gate.allow && gate.countsAgainstFree) burnToolAction(gate.uid, 'image');
@@ -323,6 +331,9 @@ export function registerImageGenRoutes(app: Express): void {
         res.json({
           image: `data:${img.mimeType};base64,${img.base64}`,
           mimeType: img.mimeType,
+          // ADMIN ONLY (White-Label Law). This is what lets one paid picture answer "which engine,
+          // and was the account key really used?" without reading a production log.
+          ...(isAgentV3FreeUser(account.uid, account.email) ? { engine } : {}),
           // An edit's notes would be art direction for a picture that is not being invented — the
           // style chip was never applied and saying it was overruled would be noise.
           ...(!editing && crafted.notes.length > 0 ? { notes: crafted.notes } : {}),
@@ -346,7 +357,7 @@ export function registerImageGenRoutes(app: Express): void {
         if (!(await allowPaidRung())) return;
         const out = await runImageEdit(rawInit, editWords, { timeoutMs: ROUTE_TIMEOUT_MS });
         if (out.blocked) { res.status(422).json({ error: POLLINATIONS_BLOCK_MESSAGE, code: 'blocked' }); return; }
-        if (out.image) { await deliver(out.image, true); return; }
+        if (out.image) { await deliver(out.image, true, 'edit'); return; }
         if (out.refusal) { res.status(422).json({ error: IMAGE_REFUSAL_MESSAGE }); return; }
         diag.push(...(out.diag || []));
         // Falls through to the honest transient failure below. Deliberately NOT to the text-to-image
@@ -418,7 +429,7 @@ export function registerImageGenRoutes(app: Express): void {
             custom: { width: req.body.width, height: req.body.height },
             anonymous: true,
           });
-          if (pr.image) { await deliver(pr.image); return; }
+          if (pr.image) { await deliver(pr.image, false, 'free-provider (anonymous)'); return; }
           if (pr.blocked) { res.status(422).json({ error: POLLINATIONS_BLOCK_MESSAGE, code: 'blocked' }); return; }
           if (pr.error) {
             noteAnonymousResult(pr.error);
@@ -450,7 +461,7 @@ export function registerImageGenRoutes(app: Express): void {
         // so it is not one of the "paid rungs" the pricing-off tool gate and platform cap were written for.
         if (cloudflareImageConfig() && cloudflareServesSize(px)) {
           const cr = await fetchCloudflareImage(prompt, { timeoutMs: 30_000 });
-          if (cr.image) { await deliver(cr.image); return; }
+          if (cr.image) { await deliver(cr.image, false, 'cloudflare-flux'); return; }
           diag.push(`cloudflare: ${cr.error ?? 'no image'}`);
           console.warn(`[IMAGE_GEN] cloudflare failed: ${cr.error ?? 'no image'} — trying the next rung.`);
         }
@@ -463,7 +474,7 @@ export function registerImageGenRoutes(app: Express): void {
             timeoutMs: ROUTE_TIMEOUT_MS,
             custom: { width: req.body.width, height: req.body.height },
           });
-          if (pr.image) { await deliver(pr.image, true); return; }
+          if (pr.image) { await deliver(pr.image, true, 'free-provider (account key)'); return; }
           if (pr.error) {
             diag.push(`pollinations (key): ${pr.error}`);
             console.warn(`[IMAGE_GEN] pollinations (key) failed: ${pr.error} — trying the next rung.`);
@@ -474,7 +485,7 @@ export function registerImageGenRoutes(app: Express): void {
         if (imageProConfigured()) {
           if (!(await allowPaidRung())) return;
           const hr = await fetchImageProHostImage(prompt, px, { timeoutMs: ROUTE_TIMEOUT_MS });
-          if (hr.image) { await deliver(hr.image, true); return; }
+          if (hr.image) { await deliver(hr.image, true, 'pro-host'); return; }
           diag.push(`pro host: ${hr.error ?? 'no image'}`);
           console.warn(`[IMAGE_GEN] pro host failed: ${hr.error ?? 'no image'} — trying the next rung.`);
         }
@@ -495,7 +506,7 @@ export function registerImageGenRoutes(app: Express): void {
               config: { responseModalities: ['IMAGE', 'TEXT'] },
             }));
             const img = parseImagePartsResponse(result);
-            if (img) { await deliver(img, true); return; }
+            if (img) { await deliver(img, true, `gemini:${model}`); return; }
             if (isImageRefusal(result)) {
               sawRefusal = true;
               console.warn(`[IMAGE_GEN] ${model} declined the prompt (content refusal): ${extractResponseText(result) || 'no reason given'}`);
@@ -531,7 +542,7 @@ export function registerImageGenRoutes(app: Express): void {
           const data: any = await r.json().catch(() => null);
           if (r.ok) {
             const img = parseGrokImageResponse(data);
-            if (img) { await deliver(img, true); return; }
+            if (img) { await deliver(img, true, `grok:${gModel}`); return; }
             diag.push(`${gModel}: no image in response`);
           } else {
             diag.push(`${gModel}: ${r.status} ${JSON.stringify(data?.error || data || '').slice(0, 140)}`);

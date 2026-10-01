@@ -190,6 +190,16 @@ export function stepEtaText(elapsedMs: number, remainingMs: number, stepsDone: n
  * person reading it — "12 of 19 files" is a claim the user can watch come true, where "~4 min to go"
  * on its own is only ever a promise.
  */
+/**
+ * The line once the build loop is over and only the platform's checks remain. No number: those checks are
+ * a few minutes at most, and a countdown there has promised "about 7 min more" 34 seconds before the end
+ * (autopsy de3bb2bb). PURE.
+ */
+export function finalChecksEtaLine(elapsedMs: number): string {
+  const inTxt = formatEta(Math.max(0, elapsedMs)).replace('~', '');
+  return `⏱️ Almost done… ${inTxt} in · your app is built — running the final checks.`;
+}
+
 export function measuredEtaText(elapsedMs: number, remainingMs: number, filesDone: number, plannedFiles: number): string {
   const inTxt = formatEta(Math.max(0, elapsedMs)).replace('~', '');
   const leftTxt = formatEta(Math.max(0, remainingMs)).replace('~', '');

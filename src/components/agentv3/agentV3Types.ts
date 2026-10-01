@@ -78,7 +78,8 @@ export type AgentV3WireEvent =
   // P0 (2026-07-12) — the ACTIVE build's unique identity, emitted at build start (and echoed on `result`),
   // so the "Build report" export can be validated to belong to THIS build (never a previous, different app).
   | { type: 'build_meta'; buildId: string; promptHash: string; workspaceId?: string; ts?: number }
-  | { type: 'narration'; agent: AgentRole; text: string; ts: number; id?: string }
+  // `file` — a spreadsheet the engine made for this reply (server spreadsheetTurn.ts); the line shows its Download buttons.
+  | { type: 'narration'; agent: AgentRole; text: string; ts: number; id?: string; file?: SheetFileRef }
   | { type: 'thinking'; agent: AgentRole; text: string; ts: number }
   | { type: 'stream_delta'; agent: AgentRole; id: string; kind: 'text' | 'thinking'; delta: string; ts: number }
   | { type: 'tool_call'; agent: AgentRole; tool: string; input: unknown; callId: string; ts: number }
@@ -177,10 +178,23 @@ export interface ActivityEntry {
   ok?: boolean;
 }
 
+/**
+ * A spreadsheet file NavBharatAI made for a chat reply (an .xlsx of every sheet, a .csv per sheet). The
+ * name and shape only — the rows stay on the server and are fetched through a signed download link.
+ */
+export interface SheetFileRef {
+  id: string;
+  title: string;
+  fileBase: string;
+  sheets: Array<{ name: string; rows: number; columns: number }>;
+}
+
 export interface NarrationLine {
   agent: AgentRole;
   text: string;
   ts: number;
+  /** The spreadsheet this reply carries, when it made one. */
+  file?: SheetFileRef;
   /** Ties a line to its streamed deltas so a final narration finalizes (not dupes) it. */
   id?: string;
   /** 'text' = visible reply, 'thinking' = dim/italic thinking summary. */

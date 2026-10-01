@@ -257,6 +257,9 @@ import { isPlatformNoticeEcho, platformNoticeEchoReply } from '../AgentV3/platfo
 import { shouldAnswerPictureRequest, PICTURE_REQUEST_STEER, pictureRequestFallback } from '../AgentV3/pictureRequest';
 import { starterCompletedNote, holdsOnlyOurStarter } from '../AgentV3/starterFragment';
 import { starterTemplates } from '../AgentV3/ToolDispatcher';
+import { shouldAnswerSpreadsheetRequest } from '../AgentV3/spreadsheetRequest';
+import { runSpreadsheetTurn, SPREADSHEET_FILE_INSTRUCTIONS, type SheetFileRef } from '../AgentV3/spreadsheetTurn';
+import { saveSpreadsheetFile, newSpreadsheetFileId } from '../lib/spreadsheetFileStore';
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
 import { summaryAdditions } from '../AgentV3/summaryAdditions';
 import { credentialGuardEnabled, credentialGuardInstruction, findBootKillingEnvGuards, bootKillingGuardSummary, bootKillerRepairInstruction } from '../AgentV3/missingCredentialGuard';
@@ -10713,7 +10716,19 @@ async function noteBuildOutcome(
     // Professional already point a picture request to Image Generator AI; Pro was the one surface that
     // did not. Answered instead — in the user's language, with the way to the studio and an offer to
     // build an image app if that was what they meant.
-    const answerPictureRequest = !echoesPlatformNotice && !answerProjectElsewhere && shouldAnswerPictureRequest({
+    // 📊 A SPREADSHEET IS A FILE, NOT AN APP (`spreadsheetRequest.ts`): "make a sample Excel file" was built
+    // as a React dashboard that showed a table — and the user still had no .xlsx. Now the engine writes the
+    // rows, our server writes a real .xlsx and .csv, and the reply carries a Download button. Checked
+    // BEFORE the picture rule, so "an Excel file with photo links" is a file, never a picture request.
+    const answerSpreadsheet = !echoesPlatformNotice && !answerProjectElsewhere && shouldAnswerSpreadsheetRequest({
+      prompt,
+      importing: zipImports.length > 0 || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== ''),
+    });
+    if (answerSpreadsheet) {
+      console.log('[AGENTV3] the prompt asks for a spreadsheet file, not an app — making the file instead of building');
+      intent = 'chat';
+    }
+    const answerPictureRequest = !echoesPlatformNotice && !answerProjectElsewhere && !answerSpreadsheet && shouldAnswerPictureRequest({
       prompt,
       userAppExists,
       importing: zipImports.length > 0 || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== ''),
@@ -10924,12 +10939,42 @@ async function noteBuildOutcome(
         // prompt-keyed cache could serve one turn's answer to the other. Excluded outright rather
         // than reasoned around: the other conditions happen to cover it today, and that is exactly
         // the kind of coincidence that stops being true after an unrelated edit.
-        const cacheable = !askUnrelated && !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !answerPictureRequest && !clarifyWhatToBuild && chatCacheEnabled();
+        const cacheable = !askUnrelated && !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !answerPictureRequest && !answerSpreadsheet && !clarifyWhatToBuild && chatCacheEnabled();
         const cacheKey = cacheable ? hashKey(['chatv1', prompt]) : '';
         let reply: string;
+        // The spreadsheet this reply carries, when it made one — rides on the narration line and the
+        // persisted turn, so the Download button is there live AND after the chat is reopened.
+        let sheetFile: SheetFileRef | null = null;
         const cachedReply = cacheable ? chatResponseCache.get(cacheKey) : undefined;
         if (echoesPlatformNotice) {
           reply = platformNoticeEchoReply(recentRequests.find((r) => !isPlatformNoticeEcho(r)) ?? null);
+        } else if (answerSpreadsheet) {
+          // A turn whose whole point is a FILE must never fall through to a build: every outcome of
+          // runSpreadsheetTurn is an honest reply (made / try again / sign in), never a throw.
+          const sheetTurn = await runSpreadsheetTurn({
+            uid: userId,
+            workspaceId: intentWorkspaceId,
+            newId: newSpreadsheetFileId,
+            save: saveSpreadsheetFile,
+            ask: async () => {
+              const routed = await raceTimeout(
+                AIRouterManager.getRouter('free').route(
+                  chatPrompt,
+                  LANGUAGE_RULE + '\n\n' + CREDENTIAL_SILENCE_RULE + '\n\n'
+                    + "You are NavBharatAI's assistant. Do not mention which model you are.\n\n"
+                    + CREATOR_IDENTITY + '\n\n' + INDIA_TERRITORIAL_INTEGRITY + '\n\n' + recencyDirective()
+                    + '\n\n' + SPREADSHEET_FILE_INSTRUCTIONS,
+                ),
+                // Longer than a chat reply's 30 s: a sheet of 100 rows is several thousand tokens.
+                90_000,
+                'spreadsheetRoute',
+              ).catch(() => null);
+              return routed?.response?.content ?? null;
+            },
+          });
+          console.log(`[AGENTV3] spreadsheet file turn: ${sheetTurn.outcome}${sheetTurn.file ? ` (${sheetTurn.file.sheets.map((m) => `${m.rows}x${m.columns}`).join(', ')})` : ''}`);
+          reply = sheetTurn.reply;
+          sheetFile = sheetTurn.file;
         } else if (cachedReply !== undefined) {
           reply = cachedReply;
         } else {
@@ -11010,7 +11055,7 @@ async function noteBuildOutcome(
         // name, no note — then close out the stream the same way a build does.
         const chatEvents = new AgentEventStream();
         chatEvents.subscribe((e) => send(e), false);
-        chatEvents.emit({ type: 'narration', agent: 'architect', text: reply, ts: Date.now() });
+        chatEvents.emit({ type: 'narration', agent: 'architect', text: reply, ts: Date.now(), ...(sheetFile ? { file: sheetFile } : {}) });
         chatEvents.emit({ type: 'done', ok: true, summary: reply, ts: Date.now() });
         // billedUsd: 0 — the cheap free router is not billed to the user as a build.
         send({ type: 'result', ok: true, summary: reply, steps: 0, billedUsd: 0, billedInr: 0 });
@@ -11029,7 +11074,7 @@ async function noteBuildOutcome(
             title: deriveTitle(prompt),
             turn: [
               { role: 'user', content: prompt },
-              { role: 'assistant', content: reply },
+              { role: 'assistant', content: reply, ...(sheetFile ? { file: sheetFile } : {}) },
             ],
             patch: { status: 'complete', updatedAt: Date.now() },
           }), 8_000, 'persistChatTurn');

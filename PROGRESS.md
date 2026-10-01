@@ -86689,3 +86689,18 @@ Q-016 OPEN journeys cannot reach state-switched forms (capability). All ✅ item
 `tests/theCommitMessageWasNotADevServer.test.ts` (41 cases), each fix reverted-and-failed in the session.
 **Live effect to watch:** `PREVIEW_REVIVAL_RECIPE` details naming a real server command; no `🧹 … port 49983`; no
 "looks complete" narration on edit turns; `[version hint]` after an ETARGET.
+
+### 2026-10-01 (follow-up to #3441, which merged before this commit reached it) — Q-016: a form on a wizard step is reached
+
+The 2b1f845e app kept its forms in `src/steps/*.tsx`, shown by pressing "2 Design" on `/`; no page reaches
+them within `formSourcesFor`'s depth, so no journey was derived and the gate stayed YELLOW. Now:
+- `reachWordFor(path)` — the word the screen's control carries (`DesignStep` → `design`). Refused when it is
+  an action (`NEVER_PRESS` / `WRITE_VERBS`: "post", "pay", "send", "add"…) or generic ("form", "modal").
+- `deriveJourneys` — after the page journeys, a form-bearing component no page reached gets a journey on `/`
+  with `reach`. A form whose submit text is an outward action gets none.
+- The runner — when the form is not visible, presses the one visible control whose name contains the word
+  (never `NEVER_PRESS`, never a creating verb, never a submit), records it as `via`, and presses the SAME
+  control again after the reload before looking for the item. No such control ⇒ `unreachable`, never failed.
+- Real-browser proof (`tests/aFormOnAWizardStepIsReached.test.ts`, 11 cases): a wizard that saves passes, one
+  that only shows the item fails "vanished on reload", one with no matching control is unreachable, and a
+  "Delete design" control is never pressed. Five reversions each failed.

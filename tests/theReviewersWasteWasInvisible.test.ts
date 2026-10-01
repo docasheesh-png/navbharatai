@@ -1,3 +1,4 @@
+import { planHandoffText } from '../src/server/AgentV3/planHandoff';
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -221,10 +222,16 @@ describe('🔴 a plan the fast lane paid for is handed over, not thrown away', (
     // The salvage block above it says "CONTINUE — DO NOT START OVER" about files that EXIST. Saying
     // that about files that do not is the confident-and-wrong instruction this codebase forbids.
     const at = route.indexOf('SIMPLE_BUILD_PLAN_HANDOFF');
-    const block = route.slice(at, at + 1400);
-    expect(block).toContain('NOT written yet');
+    const block = route.slice(at, at + 1800);
+    // The words moved into planHandoff.ts (autopsy 1219c639), which also names the planned files that
+    // DO already exist — "nothing below has been created" was false about a starter's own files.
+    expect(block).toContain('planHandoffText(');
     expect(block).not.toContain('DO NOT START OVER');
     expect(block).not.toContain('YOUR OWN prior work');
+    const text = planHandoffText(['src/App.tsx', 'src/Chart.tsx'], new Set(['src/App.tsx']));
+    expect(text).toContain('not prior work');
+    expect(text).toMatch(/Not created yet:\n- src\/Chart\.tsx/);
+    expect(text).not.toContain('DO NOT START OVER');
   });
 
   it('🔒 only when nothing was salvaged — real files are the stronger signal', () => {

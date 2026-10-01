@@ -46,7 +46,7 @@ export { resolveModel, sonnetModel, opusModel, haikuModel, fastBuildModel, opusN
 export { toPowerLevel, powerSpec, type PowerLevel, type ClaudeEffort, type PowerSpec } from './powerLevel';
 export type { ClaudeLadderTier } from './models';
 export { architectSystemPrompt, planSystemPrompt, editModePrefix, dateContextBlock, LANGUAGE_RULE, CREDENTIAL_SILENCE_RULE, CODE_LITERACY_RULE } from './systemPrompt';
-export { awaitApproval, resolveApproval, pendingApprovalCount } from './Approvals';
+export { awaitApproval, awaitApprovalOutcome, resolveApproval, pendingApprovalCount, type ApprovalOutcome } from './Approvals';
 export {
   NORMAL_MULTIPLIER,
   SONNET_MULTIPLIER,

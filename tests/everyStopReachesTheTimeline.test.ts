@@ -141,7 +141,10 @@ describe('the route wiring — the CODE of the build handler, comments stripped'
   it('the Stop BUTTON and UNSEND still reach the run only through the one funnel', () => {
     // If a future stop path stopped calling `abortBuild`, the back-fill would go blind — so this
     // pins the premise the fix rests on rather than the fix alone.
+    // Since autopsy 1219c639 both routes go through ONE helper, `stopRegisteredBuild`, which calls the
+    // funnel once — so the funnel appears once, and the helper twice (Stop and Unsend).
     expect(code).toContain("abortBuild(rb.abort, 'user-stop');");
-    expect(code.match(/abortBuild\(rb\.abort, 'user-stop'\);/g)?.length).toBe(2);
+    expect(code.match(/abortBuild\(rb\.abort, 'user-stop'\);/g)?.length).toBe(1);
+    expect(code.match(/stopRegisteredBuild\(key, rb\);/g)?.length).toBe(2);
   });
 });

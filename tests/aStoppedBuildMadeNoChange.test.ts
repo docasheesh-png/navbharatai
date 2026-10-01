@@ -96,7 +96,7 @@ describe('🔴 door 1 — "I made your change" on a turn that made none', () => 
   it('🔒 the route holds NO private copy of the rule', () => {
     // It used to be `} else if (hasSnapshot && !previewGreen) {` — two of the three questions.
     expect(route).not.toMatch(/\}\s*else if \(hasSnapshot && !previewGreen\)/);
-    expect(route).toContain('greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size })');
+    expect(route).toContain("greenGuardShouldTellUnverified({ hasSnapshot, previewGreen, filesWrittenThisTurn: writtenFiles.size, stoppedByUser: abortCauseOf(abort.signal) === 'user-stop' })"); // autopsy 1219c639: a Stop is silent too
     expect(route).toContain('filesWrittenThisTurn: writtenFiles.size,');
   });
 });

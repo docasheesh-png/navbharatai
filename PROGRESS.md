@@ -87029,6 +87029,70 @@ reversions, one per fixed file, each failed the suite.
 web modules; no `rm -f package.json` reaching the sandbox (`[BLOCKED-DESTRUCTIVE] refused runtime-manifest
 delete` in the audit instead); no `APP_SCOPE … clone of YouTube` on assistant prompts.
 
+## 2026-10-01 — Autopsy 1219c639 ("Bharat AI" chart app — Weak; build 1 stopped at 11.5 min, build 2 "continue" ok at 6.3 min, ₹110.37)
+
+**What happened.** Build 1 asked mid-build for `PERPLEXITY_API_KEY` (its `OPENAI_API_KEY` ask had been refused as a
+platform name, so its express + openai plan could never have worked). The user did not have the key and pressed Stop
+during the popup. `awaitApproval` did not listen to the build's signal, so build 1's code lived on for another 5.5
+minutes, while `/stop` had freed both locks (memory and lease) at once. The durable status was still `running`, so the
+panel offered "This build didn't finish (usually a server restart) → Continue building", and build 2 started in the
+same app beside build 1. When the popup timed out, build 1 said "👍 Skipped for now", ran the queued
+`npm install express cors dotenv openai tsx concurrently` into build 2's app (build 2's `SAVED_SOURCE_DIVERGES
+package.json` / `PREVIEW_SNAPSHOT_STALE`), logged six `INTEGRITY_UNUSED_DEP` warnings, told the user at ERROR level
+"I made your change, but I could not open your app", and its exit then released the lock key build 2 was using.
+**Second occurrence of the eed79815 class (two builds in one workspace).** #3331 fixed the cross-instance half; the
+same-instance half — a Stop that frees the app before the build has left — was never hunted.
+
+Sixth-rule ledger (every row ✅ on merge of this PR, or 🟡 in `BUILD_REPORT_QUEUE.md`):
+- **Q-069** Two builds in one app. Root: a Stop freed the slot while the stopped build's code was still inside an
+  un-abortable wait. Class: *a lock released on a request to stop, not on the stop.* Fixes: (a) `awaitApprovalOutcome`
+  takes the build signal, ends at once with `stopped`, and names `timed-out` / `denied`; all five waits go through
+  the route's one door `waitForUser` (census: no bare `awaitApproval(` in the route); (b) `AgentRunner` runs no tool
+  after the signal fires (serial and parallel); (c) `stopRegisteredBuild`: a stopped build keeps its key and lease
+  until its `finally` runs (`markBuildExited`); a new build waits ≤ 15 s (`STOP_DRAIN_WAIT_MS`), is refused with
+  `BUILD_STILL_STOPPING`, or reclaims a body stuck ≥ 3 min; cleanup releases only the key it owns
+  (`releaseBuildLock`, 8 sites) — the sibling where an exiting build deleted the NEXT build's lock.
+- **Q-070** The "server restart / Continue building" banner for a build the user stopped — consequence of Q-069 (the
+  runner writes `stopped` the moment it sees the signal, which now happens at once); a Continue pressed during the
+  drain waits for the exit instead of starting a second build.
+- **Q-071** A Stop and a timeout were both "Skipped for now" — `SecretAnswer` carries `stopped` (silent) / `timed-out`
+  (says so).
+- **Q-072** "~3 min to go" through a 10-minute popup; the futility breaker (10 quiet minutes) counted the wait; the
+  ETA verdict ("1.7× and OVER the band") and the ETA history (telemetry `durationMs`, diagnostics history) learned from
+  it. The heartbeat shows `waitingForUserLine` and skips futility while `userWait.since` is set; every ETA clock moves
+  forward by the wait; `addUserWait` / `userWaitMs` take it off `etaAccuracy` and `workingMs`.
+- **Q-073** An AI-model key asked mid-build while `APP_AI_GATEWAY=on`. `AI_MODEL_KEY_NAMES` / `isAiModelKey`: the popup
+  is never opened for one (planned OR refused), the builder gets `keylessAiNote` (generate_ai, no server, no SDK);
+  `GATEWAY_AI_RULE` says a NAMED provider is not a key to fetch. `AI_API_KEY` deliberately excluded (a server app's
+  own setting).
+- **Q-074** The queued `npm install` ran after the Stop — Q-069 (b).
+- **Q-075** `SAVED_SOURCE_DIVERGES` + `PREVIEW_SNAPSHOT_STALE` in build 2 — build 1's late install; Q-069.
+- **Q-076** "I made your change" (ERROR) after a Stop — `greenGuardShouldTellUnverified({ stoppedByUser })`.
+- **Q-077** Six unused-package warnings for packages the Stop kept from being used — one `UNUSED_DEPS_AFTER_STOP` info
+  line for packages THIS build added; a package the user had still warns.
+- **Q-078** Contract hand-off read as "came back with nothing usable", then "Building 10 file(s)" — sibling of
+  31254f9a's stop fix: `contractOutcome: 'handed-off'`, the lane ends, the plan still reaches the full builder.
+- **Q-079** The plan hand-off said "NOT written yet / Nothing below has been created" about `src/App.tsx`,
+  `package.json`, `vite.config.ts`… which existed — `planHandoffText` asks the sandbox and names both groups.
+- **Q-080** The reviewer (no shell) was told "run tsc ONCE at the end", replied "I don't have a shell", and timed out
+  — `verificationStatus({ canRunCommands })`, decided from the sub-agent's own tools.
+- ✅ already fixed by PRs merged AFTER this build ran (04:15 UTC; #3448 13:03 UTC, #3449, #3451): **Q-081**
+  `LLM_CALL_FAILED` (error) for the hand-off as build 2's root cause → `LLM_CALL_HANDED_OFF` (#3448); **Q-082** one-shot
+  after the hand-off in build 1 → `ONESHOT_SKIPPED` (#3451); **Q-083** `PROVIDER_BENCHED` "for the rest of this build"
+  after 180 s + the crawl counted toward the timeout bench (double bench) (#3448); **Q-084** stopped build's
+  `RELEASE_GATE` unresolved (#3449).
+- 🟡 **Q-085** `JOURNEY_NOT_RUN`: the chat form on the state-switched "Bharat AI" screen was not reached (the gate's
+  "login wall" guess is #3451's wording fix). Blocked on the app's files and a decision — see the queue row.
+- 🟡 Q-009 (GLM crawl ×2) and Q-022 (8 off-grid spacing values; the `index.css` note "noted and not fixed") recurred.
+- 🟡 **Q-086** argued not defects (agreement): `READY_BEFORE_END` 112 s (dev server + preview publish after "looks
+  complete" — needed work), build 2's rough ETA 1.5× (labelled a guess, replaced by a measured figure), the reviewer's
+  read of a guessed path (`src/lib/data.ts`, a glob followed), ₹9.32 for the stopped build (real cost — the admin's
+  rule), the review timeout on 29 files (Q-004, admin chose to keep it).
+Tests: `tests/aStopFreesTheAppOnlyWhenTheBuildHasLeft.test.ts` (28 cases, the report's real timestamps and prompt
+shapes); ten reversions, one per fixed file, each failed the suite.
+**Live effect to watch:** no second build starting in a workspace while a stopped one is still running
+(`AGENTV3_BUILD_STILL_STOPPING` in the audit log means a Continue arrived during the drain and was held); a key
+popup that ends with ⏳ "No answer came in 10 minutes" instead of "Skipped"; no `request_secrets` popup for an AI key.
 ## 2026-10-01 — Autopsy 73648e12 + 2f723acb (the UPSC mock-test report)
 
 "Build a mock test app for UPSC drug inspector exam 2026 based on previous papers, make it interactive", Weak

@@ -16,6 +16,7 @@
 import { describe, it, expect } from 'vitest';
 import ts from 'typescript';
 import { GOLDEN_SCAFFOLDS, goldenScaffoldFiles } from '../src/server/AgentV3/goldenScaffolds/registry';
+import { extractFacts } from '../src/server/AgentV3/WorkspaceMemory';
 
 /** Every `localStorage.x` access in `source` that no enclosing `try { … }` block covers. */
 function unguardedStorageAccesses(path: string, source: string): string[] {
@@ -77,5 +78,29 @@ describe('a blocked browser storage never blanks one of our templates', () => {
     expect(login!.appTsx).toContain('function readRemembered()');
     expect(login!.appTsx).toContain('useState(readRemembered)');
     expect(login!.appTsx).toContain('writeRemembered(remember ? email : null)');
+  });
+});
+
+// Same autopsy, a second false fact about the same template: the recap said "17 files, 1 component.
+// Components: ThemeToggle". The login page's App is declared `function App() {…}` and exported on the
+// last line with `export default App;`, and only `export function …` was read as an export.
+
+describe('a component exported by name on its own line is a component', () => {
+  it('the login template\'s App is in the graph', () => {
+    const login = GOLDEN_SCAFFOLDS.find((s) => /login/i.test(s.id))!;
+    expect(extractFacts('src/App.tsx', login.appTsx).components).toContain('App');
+  });
+
+  it('every golden scaffold\'s App.tsx yields its App component', () => {
+    const missing = GOLDEN_SCAFFOLDS.filter((s) => !extractFacts('src/App.tsx', s.appTsx).components.includes('App')).map((s) => s.id);
+    expect(missing).toEqual([]);
+  });
+
+  it('export lists count, a re-export does not, and an undeclared name is skipped', () => {
+    const f = extractFacts('src/Panel.tsx', 'const Panel = () => null;\nfunction helper() {}\nexport { Panel, helper as h };\nexport { Other } from "./Other";\nexport default Missing;\n');
+    expect(f.components).toEqual(['Panel']);
+    expect(f.symbols.map((s) => s.name).sort()).toEqual(['Panel', 'helper']);
+    // `export default function X` is still read once, by the original pattern.
+    expect(extractFacts('src/A.tsx', 'export default function Card() { return null; }\n').components).toEqual(['Card']);
   });
 });

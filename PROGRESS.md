@@ -86324,6 +86324,32 @@ two-ended erase.
 - Phone users get all of this only with a fresh `.aab`/`.ipa`. Admin instruction: build them only AFTER every open
   PR is merged.
 
+## 2026-10-01 — A pasted one-file HTML app stays one file (admin: "banao")
+
+**Decision.** After autopsy a106df77 the admin was asked two open questions. On the second, whether a pasted
+single-file HTML app should stay one file, the recommendation was to keep the format, with React as an explicit
+choice. The admin approved it ("apka prastav accha hai, banao").
+
+- **Why:** the user's v40 bill maker is a file they edit by hand, open offline and share as one file. A React
+  rebuild took that away. It also read none of their saved bills, because the storage keys changed.
+- **What ships (`src/server/AgentV3/pastedAppFormat.ts`, `AGENTV3_PASTED_KEEPS_FORMAT`, default ON):**
+  - A NEW build whose prompt is a whole pasted HTML page runs on `static`, and the client is told.
+  - The user's page is written over the untouched static starter as `index.html`, and `script.js` and
+    `style.css` are removed.
+  - Both lanes get the one-file rule: improve in place, keep its look, no kit link, keep the storage names.
+  - Fast lane, milestones and module plan stand down.
+  - The seeded page counts as not-our-work for the bill.
+  - Report code `PASTED_APP_KEPT_ONE_FILE` (process-only) powers a one-tap "Upgrade to a full app project".
+- **When React is still used:** the words around the paste (never the paste) name a framework or ask for
+  login, a database, a backend, several users or a full app. React is also used when the picker was used, or
+  when the turn is an edit of an existing app; an edit re-read after the decision gives the framework back.
+- **Locked:** `tests/aPastedOneFileAppStaysOneFile.test.ts`, which uses the report's prompt verbatim. Four
+  reversions each fail it: the words gate, storage-name reading, the route's framework switch and the offer.
+- **Still open:**
+  - The first real pasted-page build on this path has not run. Watch the report for a model that rewrites
+    the file instead of editing it.
+  - Question 1, auto-removing packages a build installed but never imported, was approved in principle. It is
+    the next PR and is not in this one.
 ## 2026-10-01 — Early preview: the user sees the app while it is being built (admin: "preview jitna jaldi ayega, user utna rukega.... banao")
 
 **Evidence (calendar report 120eb52f / b4901ce5):** nine minutes over two builds and the user never saw the app.

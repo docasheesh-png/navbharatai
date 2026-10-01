@@ -87351,3 +87351,20 @@ open PR's CI failed with it (#3462 first).
   server-deps) was run on the final state before the PR.
 - **Class:** an upstream advisory landing between a PR's green CI and its merge. The gate is doing its job; the
   honest response is the pin, not an allowlist entry, because a fixed release exists.
+
+## 2026-10-01 — Autopsy 8f797751 (maths solver, stopped at 6.4 min, 6 s after the dev server came up)
+
+- **A ✅** At 4.6 min the model said "Your Math Solver app is ready … Open the Preview tab"; the platform
+  handed the turn back to style 41 unstyled classes and told only the admin report. No preview existed,
+  and the user stopped. Both hand-backs (style, unfinished) now put "⏳ Not finished yet …" in the chat
+  (`handBackNotice.ts`).
+- **B ✅** The fast lane's planned handoff was labelled "could not produce the app" / `BUILD_FAILED` beside
+  `LLM_CALL_HANDED_OFF`; now `handedOff` and an honest outcome line. (The contract-phase handoff wording,
+  and "Building 11 file(s)" before nothing was built, were already fixed on main by #3461.)
+- **C 🟡 → Q-090** Publish a preview the first time the app compiles clean, mid-build — admin decision.
+- **Q-009** recurred (GLM crawled twice).
+- Not defects: `mathjs` imported before it was installed (the note named the fix; the model wrote the
+  files the same note listed first, then installed); a `types.ts` syntax slip and a non-existent
+  `math.solve`, both self-corrected; a duplicate declaration refused by the write guard; one-file batches
+  (model choice); a manual `tsc` after the clean note; a brand-new workspace given our starter (expected).
+Tests: `tests/readyWasSaidBeforeThePreview.test.ts`, proven by reversion.

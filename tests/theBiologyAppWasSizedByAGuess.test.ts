@@ -139,3 +139,89 @@ describe('4 · a repair the platform asked for is not a request the user made', 
     expect(src).toContain("content: this.opts.platformRequest ? asPlatformRequest(userPrompt) : userPrompt");
   });
 });
+
+// ── Second pass on the same report (2026-10-01): the siblings the first pass missed. ──
+import { analyzePage, rendersDataList } from '../src/server/AgentV3/DesignCoverage';
+import { conversationToUserMessages } from '../src/components/agentv3/agentV3History';
+
+describe('5 · the design-page half of the end-of-turn check', () => {
+  it('a page with a list and no empty state is handed back with the class list, in one message', () => {
+    const d = decideStyleResume({
+      text: 'Your app is ready.', missing: [], resumesUsed: 0, env,
+      pages: [{ file: 'src/pages/Notes.tsx', defects: ['LIST_WITHOUT_EMPTY_STATE'] }],
+    });
+    expect(d.resume).toBe(true);
+    expect(d.message).toContain('src/pages/Notes.tsx');
+    expect(d.message).toContain('.nb-empty');
+    expect(d.message).not.toContain('EMPTY old_string'); // no class half to append
+  });
+
+  it('the dispatcher reports the design findings from the same read', () => {
+    const src = readFileSync('src/server/AgentV3/ToolDispatcher.ts', 'utf8');
+    expect(src).toMatch(/undefinedClassesNow[\s\S]{0,3000}analyzeDesignCoverage\(project\)/);
+    const runner = readFileSync('src/server/AgentV3/AgentRunner.ts', 'utf8');
+    expect(runner).toContain('pages: style.pages');
+  });
+});
+
+describe('6 · a list of a hand-written record\'s own field is never empty', () => {
+  const data = "import type { Topic } from '../types';\nexport const topics: Topic[] = [\n  { id: 'cell', title: 'Cell', sections: [ { heading: 'What is a cell?', body: 'x' } ] },\n];\n";
+  const view = [
+    "import type { Topic } from '../types';",
+    'interface Props { topic: Topic; onBack: () => void }',
+    'export default function TopicView({ topic, onBack }: Props) {',
+    '  return (',
+    '    <div className="container">',
+    '      <h1 className="title">{topic.title}</h1>',
+    '      <button className="btn" onClick={onBack}>Back</button>',
+    '      <section className="list">',
+    '        {topic.sections.map((s) => (<article className="card" key={s.heading}><h2 className="h">{s.heading}</h2><p className="p">{s.body}</p></article>))}',
+    '      </section>',
+    '    </div>',
+    '  );',
+    '}',
+  ].join('\n');
+  const files = { 'src/data/topics.ts': data, 'src/components/TopicView.tsx': view };
+
+  it('the report\'s TopicView is not flagged LIST_WITHOUT_EMPTY_STATE', () => {
+    expect(rendersDataList(view, 'src/components/TopicView.tsx', files)).toBe(false);
+    expect(analyzePage('src/pages/TopicView.tsx', view, files)?.defects ?? []).not.toContain('LIST_WITHOUT_EMPTY_STATE');
+  });
+
+  it('the same field IS a data list when the app keeps a growable list of that type', () => {
+    const grow = { ...files, 'src/App.tsx': "const [topics, setTopics] = useState<Topic[]>([]);" };
+    expect(rendersDataList(view, 'src/components/TopicView.tsx', grow)).toBe(true);
+  });
+
+  it('and when no hand-written source writes that field', () => {
+    const other = { ...files, 'src/data/topics.ts': data.replace('sections:', 'chapters:') };
+    expect(rendersDataList(view, 'src/components/TopicView.tsx', other)).toBe(true);
+  });
+});
+
+describe('7 · an engine-written turn is never restored as the person\'s own words', () => {
+  it('a persisted turn marked origin:platform is skipped on reopen; the person\'s turns are kept', () => {
+    const conv = {
+      id: 'c', messages: [
+        { role: 'user', content: 'Make biology learning app', ts: 1 },
+        { role: 'user', content: 'The app is built and compiles. These pages do not match…', ts: 2, origin: 'platform' },
+        { role: 'user', content: 'make the cards blue', ts: 3 },
+      ],
+    } as unknown as Parameters<typeof conversationToUserMessages>[0];
+    expect(conversationToUserMessages(conv).map((m) => m.text)).toEqual(['Make biology learning app', 'make the cards blue']);
+  });
+
+  it('every engine-authored user turn in AgentRunner goes through the one marking helper', () => {
+    const src = readFileSync('src/server/AgentV3/AgentRunner.ts', 'utf8');
+    const rawUserPushes = src.split('\n').filter((l) => /messages\.push\(\{ role: 'user'/.test(l)).map((l) => l.trim());
+    // Allowed: the helper itself, the person's live mid-build message, and the tool-result turn (marked
+    // below when it carries a steer). Any other raw user push is an engine steer that escaped the marking.
+    expect(rawUserPushes).toHaveLength(3);
+    expect(rawUserPushes.some((l) => l === "messages.push({ role: 'user', content });")).toBe(true);
+    expect(rawUserPushes.some((l) => l.includes('liveUserMessageTurn(sm)'))).toBe(true);
+    expect(rawUserPushes.some((l) => l.includes('resultBlocks'))).toBe(true);
+    expect(src).toMatch(/if \(steer\) platformMsgIdx\.add\(messages\.length - 1\)/);
+    expect(src).toMatch(/platformMsgIdx\.has\(startIdx \+ i\)\) out = \{ \.\.\.out, origin: 'platform' \}/);
+    expect(src).toMatch(/platformMsgIdx\.has\(i\)\) out = \{ \.\.\.out, origin: 'platform' \}/);
+  });
+});

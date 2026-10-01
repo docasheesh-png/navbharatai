@@ -362,7 +362,7 @@ import { computePlanProgress } from '../AgentV3/PlanProgress';
 import { decideCancelledBuildBill, freeCancellationMessage } from '../AgentV3/cancelledBuildBilling';
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
-import { projectPlannerTimeoutMs, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
+import { projectPlannerTimeoutMs, PROJECT_PLANNER_MAX_TOKENS, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
 import { shellModuleFor, retireUnbuiltPlan, projectModeEnabled, projectModeDiagnosis, detectMegaProject, isContinuationMessage, parsePlannedModules, createProjectPlan, nextBuildableModule, planComplete, planBlockedReason, markModuleStatus, planProgressLine, projectPlanTodos, moduleBuildContext, projectPlanSystemPrompt, projectPlanUserPrompt, coordinatorDigest, MIN_PROJECT_MODULES, roadmapStandsDownForProjectMode, reconcilePlanWithWrites, type ProjectPlan, type ProjectModule } from '../AgentV3/ProjectPlan';
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
@@ -591,7 +591,7 @@ import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEt
 import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
-import { renderRescueEligible, renderRescueConfirmsSuccess } from '../AgentV3/renderRescue';
+import { renderRescueEligible, renderRescueConfirmsSuccess, summaryAfterRescue } from '../AgentV3/renderRescue';
 import { entryIsStillTheStarter, starterRenderNote } from '../AgentV3/stillTheStarterApp';
 import { readProjectElsewhere, shouldAnswerProjectElsewhere, projectElsewhereSteer, projectElsewhereFallback } from '../AgentV3/projectElsewhere';
 import { runProvenApp, verdictHeldMessage, type ProdBuildOutcome, type LateFlip } from '../AgentV3/runProvenApp';
@@ -16322,7 +16322,7 @@ async function noteBuildOutcome(
             const startedAt = Date.now();
             let ppProvider = ''; // empty until a rung ANSWERS — see plannerCallLabel
             const call = makePlanTextRunner((used) => { ppProvider = used; }).runTurn({
-              model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: 8000,
+              model: fastBuildModel(), system, messages: [{ role: 'user', content: user }], tools: [], maxTokens: PROJECT_PLANNER_MAX_TOKENS,
             });
             let ppTimer: ReturnType<typeof setTimeout> | undefined;
             const timeout = new Promise<never>((_, rej) => { ppTimer = setTimeout(() => rej(new Error(PROJECT_PLANNER_TIMED_OUT)), ppTimeoutMs); });
@@ -19813,7 +19813,8 @@ async function noteBuildOutcome(
           const e2eFiles = { ...projectFiles, ...Object.fromEntries(writtenFiles) };
           const decision = shouldAutoScaffoldE2e({
             files: e2eFiles,
-            ok: result.ok,
+            // Runs before the render proof (#3313): a rescue-eligible build is not a failed one (6461025c).
+            ok: result.ok || renderRescueEligible({ ok: result.ok, expectsArtifacts, filesWritten: writtenFiles.size }),
             isImportTurn,
             hasPreview: !!lastPreviewUrl,
           });
@@ -20190,7 +20191,10 @@ async function noteBuildOutcome(
           }
           if (renderRescueConfirmsSuccess({ rendered: verdict.rendered, consoleErrorCount: consoleErrs.length, runtimeCrashBlocker, stillTheStarter })) {
             if (shot.source === 'browser') lastCleanBrowserCheckAt = rescueCheckStartedAt;
-            result = { ...result, ok: true, summary: result.summary || 'The app builds and the live preview renders correctly.' };
+            // The runner's not-ready headline was written over the model's own words; the render has
+            // just proven that headline wrong, so the user gets the model's answer back (autopsy
+            // 6461025c: a successful, charged build ended on "This app isn't fully working yet").
+            result = { ...result, ok: true, summary: summaryAfterRescue(result.summary, result.modelAnswer) };
             renderRescued = true;
             previewGreen = true; // real browser, real render — the one thing worth protecting
             // GREEN FREEZE — the app is proven working. From here, refuse edits to its existing files

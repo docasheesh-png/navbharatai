@@ -338,7 +338,8 @@ import { anotherLaneWorthTrying, providerDegradedMessage } from '../AgentV3/lane
 import { shouldContinue, continuationPrompt, joinContinuation, resumedFilePath, unterminatedTailPath, isTruncatedStop, MAX_CONTINUATIONS } from '../AgentV3/FastLaneContinuation';
 import { fastLaneRungDecision, fastLaneReasoningGateEnabled, fastLaneSkipsGame } from '../AgentV3/fastLaneRung';
 import { devServerDeathEvidence, devServerLastWordsDetail } from '../AgentV3/devServerDeathEvidence';
-import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, type RepairStrategy } from '../AgentV3/SimpleBuilder';
+import { runSimpleBuild, repairSystemPrompt, repairUserPrompt, manifestSystemPrompt, manifestUserPrompt, parseFileManifest, contractSystemPrompt, contractUserPrompt, blueprintAdvisoryBlock, cssBraceImbalance, limitRepairToScope, pathsNamedInErrors, unwrittenEntries, type RepairStrategy } from '../AgentV3/SimpleBuilder';
+import { entryFirstHandoffLine, renderWhileBuilding } from '../AgentV3/earlyPreview';
 import { analyzeProjectIntegrity, integrityRepairInstruction, injectGlobalStylesheetImport, dedupeStylesheetImports, normalizeImportSpecifiers } from '../AgentV3/ProjectIntegrityChecks';
 import { buildNestedRepoCommand, parseNestedRepoRoots, nestedRepoNote } from '../AgentV3/nestedRepoProbe';
 // The sandbox's workspace root, from the module CLAUDE.md names as this class's one home (the
@@ -9391,7 +9392,11 @@ async function noteBuildOutcome(
       // HTML, so a cached render is a pure speed win (zero quality trade-off: any file change
       // produces a different hash → fresh render). Per-instance, bounded, TTL'd; keyed by the
       // exact file contents + the origin baked into the HTML.
-      const cacheKey = `${workspaceId}|${previewOrigin ?? ''}`;
+      // 🖥️ EARLY PREVIEW (earlyPreview.ts): while a build runs, a screen that is imported but not written
+      // yet renders as a "being built" card instead of nothing — so an entry written early shows the
+      // app's real frame at once. The render differs, so the cache keys it apart.
+      const building = renderWhileBuilding(req.body?.building, isBuildRunningFor(workspaceId));
+      const cacheKey = `${workspaceId}|${previewOrigin ?? ''}${building ? '|building' : ''}`;
       const filesHash = workspaceContentHash(files);
       // THE REAL BUILD, WHEN IT IS THIS APP. The preview pane frames the saved copy of the last green
       // build in place of the bundler's approximation — but only when that copy was built from exactly
@@ -9406,11 +9411,11 @@ async function noteBuildOutcome(
       const fresh = req.body?.fresh === true;
       const cached = fresh ? undefined : inbrowserPreviewCache.get(cacheKey);
       if (cached && cached.hash === filesHash && Date.now() - cached.ts < INBROWSER_CACHE_TTL_MS) {
-        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed, fidelityNotice: previewFidelityNotice(previewFidelityCaveats(files)), ...copyFields });
+        res.json({ html: cached.html, kind: cached.kind, count: Object.keys(files).length, cached: true, building, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed, fidelityNotice: previewFidelityNotice(previewFidelityCaveats(files)), ...copyFields });
         return;
       }
       const vfs = VirtualFileSystem.fromRecord(files);
-      const html = renderPreview(vfs, previewOrigin, workspaceId);
+      const html = renderPreview(vfs, previewOrigin, workspaceId, { building });
       // Detect the renderer used so the client can label the mode honestly.
       const kind = isReactProject(vfs) ? 'react' : isVueProject(vfs) ? 'vue' : 'static';
       inbrowserPreviewCache.set(cacheKey, { hash: filesHash, html, kind, ts: Date.now() });
@@ -9418,7 +9423,7 @@ async function noteBuildOutcome(
         const oldest = inbrowserPreviewCache.keys().next().value;
         if (oldest !== undefined) inbrowserPreviewCache.delete(oldest);
       }
-      res.json({ html, kind, count: Object.keys(files).length, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed, fidelityNotice: previewFidelityNotice(previewFidelityCaveats(files)), ...copyFields });
+      res.json({ html, kind, count: Object.keys(files).length, building, hasBackend: backend.hasBackend, backendReason: backend.reason, browserRunnable: capability.browserRunnable, browserBlockers: capability.blockers, browserBlockedReason: capability.reason, envVarsUsed, fidelityNotice: previewFidelityNotice(previewFidelityCaveats(files)), ...copyFields });
     } catch (err: any) {
       res.status(500).json({ error: toSafeClientMessage(err, 'Failed to build the in-browser preview.') });
     }
@@ -17131,6 +17136,7 @@ async function noteBuildOutcome(
           const salvageWhy = sb.reason === 'verify_failed'
             ? 'and they do not compile yet'
             : 'before running out of time';
+          const salvageEntryLine = entryFirstHandoffLine(unwrittenEntries((sb.plannedPaths ?? []).map((path) => ({ path, purpose: '' })), sb.salvagedPaths));
           const salvageErrors = sb.reason === 'verify_failed' && sb.verifyErrors
             ? `The compiler's errors on them right now:\n${sb.verifyErrors.split('\n').slice(0, 20).join('\n')}\n`
             : '';
@@ -17139,7 +17145,11 @@ async function noteBuildOutcome(
             `they are in the workspace now and they are YOUR OWN prior work (any project context below that lists fewer files was taken before they were written):\n${sb.salvagedPaths.slice(0, 40).map((p) => `- ${p}`).join('\n')}\n` +
             salvageErrors +
             `READ these files first and COMPLETE the app around them — keep their module structure, types and export names; add only what is missing; ` +
-            `fix any error in place. ${HANDOFF_NOTE_FIX_LINE} Do NOT re-plan a parallel structure (no duplicate types/ or utils/ trees), do NOT delete or rewrite them wholesale.\n\n---\n\n${buildPrompt}`;
+            `fix any error in place. ${HANDOFF_NOTE_FIX_LINE} Do NOT re-plan a parallel structure (no duplicate types/ or utils/ trees), do NOT delete or rewrite them wholesale.` +
+            // 🖥️ The calendar report's first build (earlyPreview.ts): the lane stopped before its entry and
+            // the full builder wrote five more leaves and never the entry — five minutes of a starter page.
+            (salvageEntryLine ? ` ${salvageEntryLine}` : '') +
+            `\n\n---\n\n${buildPrompt}`;
         }
         // 🔴 A PLAN IS WORK TOO — do not make the full builder buy it twice (autopsy f97eb0ec,
         // 2026-09-20). The lane can bail AFTER planning and BEFORE writing: its budget projection
@@ -17159,11 +17169,14 @@ async function noteBuildOutcome(
             message: `Fast lane planned ${sb.plannedPaths.length} file(s) before it stopped — the plan was handed to the full builder instead of being thrown away.`,
             autoResolved: true, detail: sb.plannedPaths.join(', '),
           });
+          const planEntryLine = entryFirstHandoffLine(unwrittenEntries(sb.plannedPaths.map((path) => ({ path, purpose: '' })), []));
           buildPrompt =
             `[A PLAN ALREADY EXISTS — these files are NOT written yet] A faster lane planned THIS app's file list before it ran out of time. ` +
             `Nothing below has been created; this is a starting point, not prior work:\n${sb.plannedPaths.slice(0, 40).map((p) => `- ${p}`).join('\n')}\n` +
             `Use it so you do not spend the budget re-deciding the same structure. You may add, merge or rename a file where the app genuinely needs it — ` +
-            `the plan is a head start, not a contract.\n\n---\n\n${buildPrompt}`;
+            `the plan is a head start, not a contract.` +
+            (planEntryLine ? ` ${planEntryLine}` : '') +
+            `\n\n---\n\n${buildPrompt}`;
         }
         // HONESTY (rule 5): a lane we DECIDED not to run must say so, and say why. Silence here would
         // read in the report as "the one-shot was never eligible", which is a different fact.

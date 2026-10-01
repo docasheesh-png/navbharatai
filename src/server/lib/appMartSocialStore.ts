@@ -14,6 +14,7 @@
 //                                account for 180 days, like `safety_flags`.
 //   · app_mart_blocks          — one doc per reader: the people whose comments they do not want to see.
 //   · app_mart_notifications   — one GROUPED doc per (creator, kind, app, day). Kept for 90 days.
+//   · app_mart_follows         — one doc per (follower, creator); the id IS the pair (2026-10-01).
 //
 // 🔒 COUNTS ARE COUNTED, NOT KEPT. Likes, dislikes and comments are Firestore `count()` aggregations
 // over the records themselves, cached for 30 seconds per instance. A separate tally would be a second
@@ -37,7 +38,8 @@ import {
   type SocialNotificationDoc, type SocialNotificationKind, type RemovedBy,
   ZERO_COUNTS, reactionDocId, nextReaction, safePhotoUrl, foldActor, socialNotificationDocId,
   socialInboxId, parseSocialInboxId, inboxState, socialNotificationMessage, socialPushBody,
-  applyBlock, MAX_REPORT_REASON_CHARS,
+  applyBlock, MAX_REPORT_REASON_CHARS, socialNotificationTarget, followDocId, FEED_FOLLOW_LIMIT,
+  MAX_NEW_APP_FANOUT, LIKED_FEED_LIMIT, type FollowCounts,
 } from './appMartSocialRules';
 
 export const APP_MART_REACTIONS_COLLECTION = 'app_mart_reactions';
@@ -45,6 +47,7 @@ export const APP_MART_COMMENTS_COLLECTION = 'app_mart_comments';
 export const APP_MART_COMMENT_REPORTS_COLLECTION = 'app_mart_comment_reports';
 export const APP_MART_BLOCKS_COLLECTION = 'app_mart_blocks';
 export const APP_MART_NOTIFICATIONS_COLLECTION = 'app_mart_notifications';
+export const APP_MART_FOLLOWS_COLLECTION = 'app_mart_follows';
 
 let _db: admin.firestore.Firestore | null = null;
 function getDb(): admin.firestore.Firestore | null {
@@ -415,7 +418,7 @@ export async function notifySocial(input: {
       if (changed) tx.set(ref, doc);
     });
     // A push for words people wrote to you — throttled so a busy thread is one buzz per 10 minutes.
-    if (input.kind !== 'like' && input.text) {
+    if ((input.kind === 'comment' || input.kind === 'reply') && input.text) {
       const throttleKey = `${input.recipientUid}|${input.appKey}`;
       const last = lastPush.get(throttleKey) ?? 0;
       if (now - last >= PUSH_GAP_MS) {
@@ -424,7 +427,8 @@ export async function notifySocial(input: {
         void sendPushToUser(input.recipientUid, {
           title: 'NavBharatAI App Mart',
           body: socialPushBody(input.kind, actorName, input.appName, input.text),
-          data: { type: 'app-mart', appKey: input.appKey },
+          // `appKey` stays for phone builds made before `target` existed; both name the same app.
+          data: { type: 'app-mart', appKey: input.appKey, target: input.appKey },
         });
       }
     }
@@ -459,7 +463,7 @@ export async function listSocialInbox(uid: string, limit = 30): Promise<SocialIn
         createdAt: d.updatedAt,
         read: inboxState(d).read,
         action: 'open-app-mart' as const,
-        target: d.appKey,
+        target: socialNotificationTarget(d),
       }));
   } catch {
     return [];
@@ -486,10 +490,158 @@ export async function updateSocialInbox(uid: string, ids: readonly string[], fie
   }));
 }
 
+// ─── Following ────────────────────────────────────────────────────────────────────────────────────
+
+const FOLLOW_COUNT_CACHE_MS = 30_000;
+const followCountCache = new Map<string, { counts: FollowCounts; at: number }>();
+
+/** How many people follow this account, and how many it follows. Counted from the records; omitted on failure. */
+export async function followCounts(uid: string): Promise<FollowCounts | null> {
+  const db = getDb();
+  if (!db || !uid) return null;
+  const hit = followCountCache.get(uid);
+  const now = Date.now();
+  if (hit && now - hit.at < FOLLOW_COUNT_CACHE_MS) return hit.counts;
+  try {
+    const col = db.collection(APP_MART_FOLLOWS_COLLECTION);
+    const [followers, following] = await Promise.all([
+      countOf(col.where('creatorUid', '==', uid)),
+      countOf(col.where('followerUid', '==', uid)),
+    ]);
+    const counts = { followers, following };
+    followCountCache.set(uid, { counts, at: now });
+    if (followCountCache.size > 5000) followCountCache.clear();
+    return counts;
+  } catch {
+    return null;
+  }
+}
+
+export async function isFollowing(followerUid: string | null, creatorUid: string): Promise<boolean> {
+  const db = getDb();
+  if (!db || !followerUid || followerUid === creatorUid) return false;
+  try {
+    return (await db.collection(APP_MART_FOLLOWS_COLLECTION).doc(followDocId(followerUid, creatorUid)).get()).exists;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Follow or unfollow. One document per pair, written in a transaction so two quick taps cannot leave
+ * it half-made. Returns whether this call CREATED the follow — the only change that notifies.
+ */
+export async function setFollow(followerUid: string, creatorUid: string, follow: boolean): Promise<{ following: boolean; newFollow: boolean }> {
+  const db = needDb();
+  const ref = db.collection(APP_MART_FOLLOWS_COLLECTION).doc(followDocId(followerUid, creatorUid));
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (follow && !snap.exists) {
+      tx.set(ref, { followerUid, creatorUid, at: Date.now() });
+      return { following: true, newFollow: true };
+    }
+    if (!follow && snap.exists) tx.delete(ref);
+    return { following: follow, newFollow: false };
+  });
+  followCountCache.delete(followerUid);
+  followCountCache.delete(creatorUid);
+  return result;
+}
+
+/** End a follow in both directions — what blocking does, the way every social app behaves. */
+export async function endFollowBothWays(a: string, b: string): Promise<void> {
+  const db = getDb();
+  if (!db || !a || !b) return;
+  const col = db.collection(APP_MART_FOLLOWS_COLLECTION);
+  await Promise.all([col.doc(followDocId(a, b)).delete(), col.doc(followDocId(b, a)).delete()]).catch(() => undefined);
+  followCountCache.delete(a);
+  followCountCache.delete(b);
+}
+
+/** Who follows a creator, newest first — for that creator (and an admin) only. */
+export async function followersOf(creatorUid: string, limit = 200): Promise<Array<PublicPerson & { at: number }>> {
+  const db = getDb();
+  if (!db) return [];
+  try {
+    const rows = await listEqNewestFirst<{ followerUid: string; at: number }>(
+      db.collection(APP_MART_FOLLOWS_COLLECTION), [['creatorUid', creatorUid]], 'at', limit, 1000,
+    );
+    const people = await resolvePeople(rows.map((r) => r.followerUid));
+    return rows.map((r) => ({ ...(people.get(r.followerUid) ?? { name: 'NavBharatAI user', photoUrl: '', creatorId: publicCreatorId(r.followerUid) }), at: r.at }));
+  } catch {
+    return [];
+  }
+}
+
+/** The creators one person follows, most recently followed first. Private to that person. */
+export async function followedUids(followerUid: string, limit = FEED_FOLLOW_LIMIT): Promise<string[]> {
+  const db = getDb();
+  if (!db || !followerUid) return [];
+  try {
+    const rows = await listEqNewestFirst<{ creatorUid: string; at: number }>(
+      db.collection(APP_MART_FOLLOWS_COLLECTION), [['followerUid', followerUid]], 'at', limit, 1000,
+    );
+    return rows.map((r) => r.creatorUid).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** The apps one person liked, most recently liked first: `[{ key, at }]`. Private to that person. */
+export async function likedAppKeys(uid: string, limit = LIKED_FEED_LIMIT): Promise<Array<{ key: string; at: number }>> {
+  const db = getDb();
+  if (!db || !uid) return [];
+  try {
+    const rows = await listEqNewestFirst<{ appKey: string; at: number }>(
+      db.collection(APP_MART_REACTIONS_COLLECTION), [['uid', uid], ['kind', 'like']], 'at', limit, 1000,
+    );
+    return rows.filter((r) => typeof r.appKey === 'string').map((r) => ({ key: r.appKey, at: Number(r.at) || 0 }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Tell a creator's followers that they published a new app (the moment it becomes visible on App Mart).
+ * Bell only — no push per follower — and bounded at MAX_NEW_APP_FANOUT followers. Each follower's row
+ * is CREATED, never overwritten, so an app that is re-listed the same day does not ring anyone twice.
+ * Never throws: an announcement is never worth failing the approval that caused it.
+ */
+export async function notifyFollowersOfNewApp(input: { creatorUid: string; appKey: string; appName: string }): Promise<number> {
+  const db = getDb();
+  if (!db || !input.creatorUid) return 0;
+  try {
+    const snap = await db.collection(APP_MART_FOLLOWS_COLLECTION)
+      .where('creatorUid', '==', input.creatorUid).limit(MAX_NEW_APP_FANOUT).get();
+    const followers = snap.docs.map((d) => String(d.data().followerUid ?? '')).filter((u) => u && u !== input.creatorUid);
+    if (followers.length === 0) return 0;
+    const actorName = (await resolvePeople([input.creatorUid])).get(input.creatorUid)?.name || 'A creator you follow';
+    const now = Date.now();
+    const day = indiaDay(now);
+    const writer = db.bulkWriter();
+    let queued = 0;
+    for (const recipientUid of followers) {
+      const { doc } = foldActor(null, {
+        recipientUid, kind: 'new-app', appKey: input.appKey, appName: input.appName, day,
+        actorUid: input.creatorUid, actorName, now,
+      });
+      const ref = db.collection(APP_MART_NOTIFICATIONS_COLLECTION).doc(socialNotificationDocId(recipientUid, 'new-app', input.appKey, day));
+      void writer.create(ref, doc).catch(() => { /* already told today */ });
+      queued++;
+    }
+    await writer.close();
+    return queued;
+  } catch (e) {
+    console.warn('[APP_MART_SOCIAL] new-app fan-out', e instanceof Error ? e.message : String(e));
+    return 0;
+  }
+}
+
 /** Test seam. */
 export function _resetSocialCachesForTests(): void {
   peopleCache.clear();
   countCache.clear();
+  followCountCache.clear();
   lastPush.clear();
 }
 

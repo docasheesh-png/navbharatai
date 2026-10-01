@@ -140,7 +140,7 @@ import { isExternalToolName, parseToolName } from './mcpClient';
 import { callRemoteTool } from './mcpTransport';
 import type { SafeMcpTool } from './mcpClient';
 import type { McpServerConfig } from './mcpTransport';
-import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage, wouldEraseUserSecrets, eraseUserSecretsMessage } from './CommandGovernance';
+import { classifyCommandRisk, governanceNote, destructiveSourceDeletionTarget, destructiveSourceDeletionMessage, runtimeManifestDeletionTarget, runtimeManifestDeletionMessage, isDestructiveEmptyOverwrite, emptyOverwriteMessage, singleSourceDeleteTargets, importedFileDeletionMessage, wouldEraseUserSecrets, eraseUserSecretsMessage } from './CommandGovernance';
 import { scaffoldGuard, scaffoldGuardMessage } from './ScaffoldGuard';
 import { cloneDestination, shouldRefuseClone, cloneGuardMessage } from './gitCloneGuard';
 import { dependencyMutationGuard, dependencyMutationGuardMessage } from './DependencyMutationGuard';
@@ -4286,6 +4286,15 @@ export class ToolDispatcher {
           getWorkspaceMemory(this.workspaceId).recordAudit(
             `[BLOCKED-DESTRUCTIVE] refused source-dir delete: ${command.slice(0, 200)}`,
           );
+          this.state?.appendTerminal(blockMsg);
+          return blockMsg;
+        }
+        // RUNTIME MANIFEST DELETION — BLOCKED (autopsy 042e472f): package.json / index.html / tsconfig.json
+        // removed one by one slipped past every source guard, and the project could no longer run at all.
+        const manifestTarget = runtimeManifestDeletionTarget(command);
+        if (manifestTarget) {
+          const blockMsg = runtimeManifestDeletionMessage(manifestTarget);
+          try { getWorkspaceMemory(this.workspaceId).recordAudit(`[BLOCKED-DESTRUCTIVE] refused runtime-manifest delete: ${command.slice(0, 200)}`); } catch { /* audit best-effort */ }
           this.state?.appendTerminal(blockMsg);
           return blockMsg;
         }

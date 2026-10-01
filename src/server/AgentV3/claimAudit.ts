@@ -103,9 +103,19 @@ export interface MeasuredFacts {
    * ⇒ that check never runs (silence is never an accusation).
    */
   userRequest?: string;
+  /**
+   * How many source files (code + stylesheets) the app is made of — for the `one-file` check. Omitted ⇒
+   * that check never runs. 🔴 Autopsy dfd24058 (2026-10-01): "Everything lives in one HTML file, no
+   * routing" about a sixteen-file React project — and the summary then told the user to open
+   * `dist/index.html` directly, which for a Vite build with absolute asset paths shows a blank page.
+   */
+  appSourceFiles?: number;
 }
 
-export type ClaimKind = 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed';
+/** "Everything lives in one HTML file", "a single HTML file" — never "single-page app", which is true. */
+const ONE_FILE_CLAIMED = /\b(?:in|lives\s+in|is|as|inside)\s+(?:just\s+|only\s+)?(?:one|a\s+single|single)\s+(?:html\s+|index\.html\s+)?file\b|\bsingle[\s-](?:html\s+)?file\s+app\b/i;
+
+export type ClaimKind = 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed';
 
 /**
  * "the exact versions you specified" — a PLATFORM requirement credited to the user (autopsy 33812996).
@@ -395,6 +405,14 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
       kind: 'app-delivered',
       claimed: 'that the app you asked for is built and ready',
       measured: 'not one file was created or changed on this turn, so nothing was actually built',
+    });
+  }
+
+  if (typeof facts.appSourceFiles === 'number' && facts.appSourceFiles > 1 && ONE_FILE_CLAIMED.test(text)) {
+    out.push({
+      kind: 'one-file',
+      claimed: 'that the whole app is one HTML file',
+      measured: `it is a project of ${facts.appSourceFiles} source files that builds into one page — open it through Preview or publish it, not by opening a file`,
     });
   }
 

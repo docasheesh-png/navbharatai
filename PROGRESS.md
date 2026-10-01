@@ -86704,3 +86704,62 @@ them within `formSourcesFor`'s depth, so no journey was derived and the gate sta
 - Real-browser proof (`tests/aFormOnAWizardStepIsReached.test.ts`, 11 cases): a wizard that saves passes, one
   that only shows the item fails "vanished on reload", one with no matching control is unreachable, and a
   "Delete design" control is never pressed. Five reversions each failed.
+
+### 2026-10-01 — Autopsy 042e472f + dfd24058 (the JARVIS report): a Kotlin request is built as a phone-ready web app
+
+**Build 1 (042e472f, Weak, stopped by the user, ₹21.85 real cost).** "Technology: Kotlin, Jetpack Compose … must
+compile in Android Studio." No rule named a native mobile stack, so: the project planner made 16 KOTLIN modules
+(it never saw any stack note), the builder deleted the starter's `package.json`, `vite.config.ts`, `index.html`,
+tsconfigs and `src/*` ONE FILE AT A TIME (every guard protects source code and deliberately allows a single
+delete), wrote four Gradle files nothing here can run, then refused to continue past "base configuration"; the
+user saw "Nothing has been built yet". **Build 2 (dfd24058, ok, ₹79.11)** — the same idea as a web app ending
+"apk" — was planned as "clone of YouTube" (so was build 1), restored the 16 files build 1 had deleted
+(`DATA_LOSS_EVENT`), claimed a gradle test suite from build 1's leftovers (gate YELLOW), never mentioned the APK
+it was asked for, called a 16-file project "one HTML file", shipped `uuid` (+ a moderate advisory and an
+`@types` mismatch) for message ids, and printed "⚠️ Build Review (85/100): [PASS]" — a score nobody wrote.
+
+**Fixes (all in one change):**
+- `unsupportedStack.ts`: native Android (Kotlin / Jetpack Compose / Android Studio / build.gradle), native iOS
+  (Swift / SwiftUI / Xcode), Flutter and React Native are named like PHP/Rails/ASP.NET; a `Technology:` /
+  `Tech stack:` / `Platform:` list is read too. "Swift"/"Expo" count after using/with/in only where the phrase
+  ends there (`STACK_END`: "with swift search", "an expo app for events" stay null). A MOBILE stack gets its own
+  builder note (we build mobile-first web apps; the APK comes from More → Download APK; never write Gradle/Kotlin/
+  Swift/Dart files; never delete package.json / vite.config / index.html / src) and user note (said once — the
+  APK sentence stands down when the summary already has it).
+- Route: the project planner gets the stack-noted goal (`plannerGoal`), and the plan's `goal` carries it, so every
+  module turn reads it again. `MAX_GOAL_CHARS` 4,000 → 6,000 so the note cannot cut the user's closing lines.
+- `CommandGovernance.runtimeManifestDeletionTarget`: `package.json`, root `index.html` and `tsconfig.json` are
+  never deleted (rm / unlink / git rm / a `sh -c` wrapper / an interpreter one-liner); the refusal says to write
+  over them. `vite.config.*` deliberately excluded (a .js→.ts swap is a delete, and a kept .js shadows the .ts).
+- `appScopeAnalyzer`: open / launch / play / watch / search / go to / visit before a product, and "kholo /
+  chalao" after it, are the product being USED — the fifth instance of this class (0d297b25, Study-Racer,
+  4499741f, 6a4a799f), added to the same two lists.
+- `testRunner.detectTestPlan`: Gradle and Maven need a test SOURCE (`src/test|androidTest/**.java|kt|…`), the
+  JVM half of "a config proves intent, the dependency proves a suite".
+- `devicePowers.deviceSummaryNotice`: an APK the user asked for (`phoneBuildAsked`: `apk`/`aab`/Play Store, or a
+  phone-app noun with install/download/banao) gets one "More → Download APK" line when nothing else said it.
+- `ReviewerAgent` (the invented 85/100): ALREADY FIXED on `main` by #3442 (autopsy 4d538ca3, `scoreStated`) while
+  this autopsy ran — the same class reached from two reports at once. This change took #3442's version on merge
+  and dropped its own (`scored`), so there is one fix, not two. (No sibling default score elsewhere — grepped.)
+- `claimAudit` `one-file`: "everything lives in one HTML file" about a project of >1 source files is corrected
+  (fact `appSourceFiles`, new builds only).
+- `unfixablePackages.BUILT_IN_ALTERNATIVES`: `npm install uuid` / `@types/uuid` is answered with
+  `crypto.randomUUID()`; the system prompt's rule (3) now says every id uses it.
+- AppKnowledgeBase: the phone-features entry answers "Kotlin / Flutter / Swift / Android Studio" asks.
+
+### Ledger — BUILD REPORT 042e472f + dfd24058
+J-a ✅ native stack unnamed → builder/user notes (`unsupportedStack.ts`) · J-b ✅ planner never saw the note →
+`plannerGoal` · J-c ✅ manifests deleted one by one → `runtimeManifestDeletionTarget` · J-d ✅ governance message
+read as "delete one at a time" → covered by J-c · J-e ✅ "open YouTube" = clone (both builds) · J-f ✅ gradle
+"suite" from leftovers · J-g ✅ APK ask unanswered · J-h ✅ invented 85/100 · J-i ✅ "one HTML file" claim ·
+J-j ✅ uuid for ids (install note + prompt) · J-k ✅ `DATA_LOSS_EVENT` in build 2 = build 1's deletions restored
+(self-heal; its cause is J-c) · J-l ✅ `SUMMARY_OFF_TOPIC` / "Nothing has been built" / module refusal on build 1 =
+derivatives of J-a/J-b (a Kotlin plan had no module owning `src/App.tsx`) · J-m ✅ stopped build billed at real
+cost only — the admin's own rule executed (`CANCELLED_BUILD_CHARGED`, `MARKUP_WAIVED_NO_PREVIEW`) · Q-009 🟡 GLM
+crawl ×2 (external; bench worked — noted on the row) · Q-020 🟡 off-grid spacing advisory (decision) · Q-021 🟡
+16-module decomposition size (decision). All ✅ code items locked in
+`tests/aKotlinRequestIsBuiltAsAPhoneReadyWebApp.test.ts` (19 cases, the real prompt as a fixture); nine
+reversions, one per fixed file, each failed the suite.
+**Live effect to watch:** an `UNSUPPORTED_STACK` line naming "native Android (Kotlin)" and a module plan made of
+web modules; no `rm -f package.json` reaching the sandbox (`[BLOCKED-DESTRUCTIVE] refused runtime-manifest
+delete` in the audit instead); no `APP_SCOPE … clone of YouTube` on assistant prompts.

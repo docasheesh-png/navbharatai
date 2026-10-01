@@ -16,6 +16,7 @@
 // `semver` (installed, 7.x) ships no bundled types and @types/semver isn't a dependency; the tiny
 // surface we use is declared ambiently in ./semver.d.ts so the version-conflict analyzer stays typed.
 import { validRange, intersects, minVersion, gt } from 'semver';
+import { shipsOwnTypes } from '../lib/selfTypedPackages';
 
 export type DependencySeverity = 'high' | 'medium' | 'low';
 
@@ -446,6 +447,20 @@ export function detectTypesMajorMismatch(packageJsonContent: string | null): Dep
     const runtimeRange = deps.get(runtimeName) ?? dev.get(runtimeName);
     if (!runtimeRange) continue; // no runtime package to compare against (e.g. @types/node)
     if (!isSemverRange(typesRange) || !isSemverRange(runtimeRange)) continue;
+    // A package that ships its OWN types needs no `@types/*` at all, and there is no matching major to
+    // move to: `@types/react-router-dom` stops at 5, so "set it to ^6" (the advice a106df77 printed) names
+    // a version that does not exist. Say what is true — remove it.
+    if (shipsOwnTypes(runtimeName, rangeMajor(runtimeRange))) {
+      seen.add(typesName);
+      issues.push({
+        kind: 'types-mismatch',
+        package: typesName,
+        severity: 'medium',
+        detail: `'${runtimeName}' ("${runtimeRange}") ships its own type definitions, so '${typesName}' ("${typesRange}") is an outdated copy that can contradict them`,
+        suggestion: `Remove it: npm uninstall ${typesName}.`,
+      });
+      continue;
+    }
     // Non-intersecting ranges ⇒ the types major cannot line up with the runtime major.
     if (!rangesIncompatible(runtimeRange, typesRange)) continue;
     seen.add(typesName);

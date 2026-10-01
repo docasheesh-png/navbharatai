@@ -91,7 +91,12 @@ export interface IEngineerActuator {
    * working apps in a loop. `painted: undefined` means the transport could not tell us; it must never
    * be read as `false`.
    */
-  browseUrl(workspaceId: string, url: string): Promise<{
+  /**
+   * `opts.recordConsole: false` — read the page without adding its console to the build's runtime record
+   * (the feature probe's extra screens: a repair re-checks only home, so an error recorded from another
+   * screen would read as surviving a fix it never had a chance to see).
+   */
+  browseUrl(workspaceId: string, url: string, opts?: { recordConsole?: boolean }): Promise<{
     html: string; painted?: boolean; source?: 'browser' | 'curl';
     /** What the page's styling looked like when it painted (renderStyle.ts); absent when not measured. */
     style?: { rules: number; fontRule: boolean; buttons: number; styledButtons: number; elements: number };

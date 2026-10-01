@@ -364,6 +364,16 @@ export function registerAppMartSocialRoutes(app: Express): void {
     }
   });
 
+  /** The follow button's state for one creator: their follower count, and whether the viewer follows them. */
+  app.get('/api/app-mart/social/follow-state', async (req: Request, res: Response) => {
+    const raw = req.query.creatorId;
+    const creatorUid = isCreatorIdShape(raw) ? await uidForCreatorId(raw) : null;
+    if (!creatorUid) return res.status(404).json({ error: 'That person could not be found.' });
+    const viewerUid = await verifyFirebaseToken(req).catch(() => null);
+    const [counts, following] = await Promise.all([followCounts(creatorUid), isFollowing(viewerUid, creatorUid)]);
+    res.json({ followers: counts?.followers ?? null, following, isMe: !!viewerUid && viewerUid === creatorUid });
+  });
+
   /**
    * Who follows the viewer — for the creator's own eyes only (and an admin, who may name a creator).
    * Like likes and unlike dislikes: the NUMBER is public on every profile, the PEOPLE are not.

@@ -19,6 +19,8 @@
 import * as admin from 'firebase-admin';
 import { getServerDb } from './serverDb';
 import { listEqNewestFirst } from './firestoreIndexSafe';
+import { publicCreatorId } from './storeCreator';
+import { rememberCreatorId } from './appMartCreatorIndex';
 
 const COLLECTION = 'nav_store_apps';
 
@@ -85,7 +87,16 @@ export interface StoreApp {
 export type PublicStoreApp = Pick<StoreApp,
   'id' | 'appName' | 'packageName' | 'versionName' | 'shortDescription' | 'description'
   | 'category' | 'iconDataUrl' | 'sizeBytes' | 'permissions' | 'highRisk' | 'downloads' | 'sha256'
-> & { developerName: string; publishedAt: number };
+> & {
+  developerName: string;
+  publishedAt: number;
+  /**
+   * The uploader's PUBLIC creator code (2026-10-01) — so an Android app's page can open its creator's
+   * profile and be followed, like an instant app's. A one-way digest of the account id: it cannot be
+   * turned back into the account, and the account id itself never leaves the server.
+   */
+  creatorId: string;
+};
 
 export function isStorageConfigured(): boolean {
   return !!(process.env.NAV_STORE_BUCKET || process.env.FIREBASE_STORAGE_BUCKET || '').trim();
@@ -277,5 +288,14 @@ export function toPublic(app: StoreApp): PublicStoreApp {
     sha256: app.sha256,
     developerName: app.developer.name,
     publishedAt: app.reviewedAt || app.submittedAt,
+    creatorId: creatorCodeFor(app.uid),
   };
+}
+
+/** The public code for an uploader, recorded so their profile can be opened by it. */
+function creatorCodeFor(uid: string): string {
+  if (!uid) return '';
+  const code = publicCreatorId(uid);
+  rememberCreatorId(code, uid);
+  return code;
 }

@@ -86519,3 +86519,45 @@ settings me profile edit kar sakte hai, wahi yaha bhi edit kar sake! photo bhi l
 - **Q-006 ✅** (CORS blocker had no repair) — #3427's resume change hands a readiness blocker back to the
   model after the app was written, which is the repair path; plus `CORS_RULE` upstream. Test-locked there.
 - **Q-004 🟡** moved to BLOCKED with options (an admin trade-off; the review finished on that report).
+
+## 2026-10-01 — App Mart crashed on the phone: an error body was read as the store status (admin screenshot, iOS build 105)
+
+**Report:** TestFlight build 105, App Mart → "SOMETHING WENT WRONG — undefined is not an object (evaluating
+'c.missing.join') — Retrying did not help". Admin: *"root cause dhundo aur pure app me yah error kahi bhi nahi
+ana chahiye"*.
+
+**Root cause (traced from the code, not guessed):** `NavAppStore.loadStatus` did
+`const data = await res.json().catch(() => null); if (data) setStatus(data as StoreStatus)` — ANY JSON body
+became the status. `/api/nav-store/status` itself always sends `missing: [...]`, but three guards in front of
+it answer a phone with `{ error: '…' }` instead: the adaptive bot guard (429), App Check (401), the global
+error handler (500). On such a body `acceptingUploads` is undefined, the Publish tab takes the "not accepting
+apps" branch and reads `status.missing.join` — a TypeError the error boundary caught. Retry re-fetched the
+same body, so "retrying did not help" was exactly right.
+
+**Class:** a server body trusted as the typed success shape without `res.ok` and a shape check. Siblings
+hunted across the whole client: the other four `set…(data as T)` casts (StoreBuildPanel ×2,
+PerformanceAnalyzer, WebsiteCheckup) already gate on `res.ok` or an `in data` check; App Mart's status was
+the one unguarded instance.
+
+**Fix (DNA level):**
+- `src/components/ide/appMart/storeStatus.ts` — pure: `isStoreStatus` (field by field) and
+  `readStoreStatus(res.ok, body, httpStatus)`, which keeps only a 2xx body of the real shape and turns every
+  other answer into a sentence (the server's own `error` when it has one).
+- `NavAppStore` reads through it; `StoreStatus` moved there (one definition). When the status could not be
+  read, the Publish tab shows *"The store's status could not be checked just now (<server's sentence>)"*
+  and still lets the user publish — the real trigger is now visible on the user's screen instead of in a
+  stack trace (rule 5, honesty).
+- `tests/anErrorBodyIsNotTheStoreStatus.test.ts` — reversion-proven on the crash's own shape, source-locked
+  on App Mart, and a CENSUS over every client file: a `res.json().catch(() => null)` followed within 8 lines
+  by a `set…(data as T)` cast must have `res.ok` / `res.status` / an `in data` check / a type guard between
+  them. The pre-fix App Mart line fails the rule (asserted); every other client file passes it.
+
+**Ledger (sixth rule):**
+- **Q-012 ✅** App Mart crash `c.missing.join` — root cause above · fix this PR · proof: test reverted-and-failed
+  on the old line (the §3 census names it) and on the old branch (§1 REVERSION case throws TypeError).
+- **Q-013 🟡 BLOCKED** — WHICH guard answered the phone. **What:** the 429 / 401 / 500 sentence that body carried.
+  **Why:** no session can read the production server log or the phone. **Needs:** one more open of App Mart →
+  Publish on build 105+ (the new line prints the sentence), or the admin Errors view for a 500 at
+  `/api/nav-store/status`. If it is the adaptive guard's 429, that is a second real defect (per-IP burst
+  limit on a CGNAT phone network) and gets its own fix. **Tried:** read every guard in front of the route;
+  the route and its four helpers cannot throw on their own.

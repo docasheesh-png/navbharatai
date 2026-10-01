@@ -531,6 +531,24 @@ Q-yyy 🟡 <problem> — blocked because · needs · already tried
 FINAL: ✅ COMPLETE (Remaining = 0)   or   ❌ NOT COMPLETE — remaining: Q-…, Q-…
 ```
 
+### 📵 A SERVER BODY IS NOT THE ANSWER UNTIL IT IS CHECKED — `res.ok` AND the shape, at the entry (admin screenshot, iOS build 105, 2026-10-01)
+
+App Mart on the phone showed *"SOMETHING WENT WRONG — undefined is not an object (evaluating 'c.missing.join')"*
+and retrying did not help. `/api/nav-store/status` always sends `missing: [...]`; the screen stored WHATEVER
+JSON came back (`if (data) setStatus(data as StoreStatus)`), so the first guard that answered the phone with
+`{ error }` — the adaptive bot guard's 429, App Check's 401, the global 500 — became a status with no
+`missing`, and the Publish tab crashed on it, every time.
+
+- **The rule:** a fetched body becomes typed state only after `res.ok` AND a shape check at the ONE place it
+  enters state (`readStoreStatus` in `appMart/storeStatus.ts` is the pattern: keep the real shape, turn every
+  other answer into a sentence the screen shows). Never `set…(data as T)` on a bare body.
+- **Locked by census:** `tests/anErrorBodyIsNotTheStoreStatus.test.ts` scans every client file for a
+  `res.json().catch(() => null)` followed by a `set…(data as T)` cast with no `res.ok` / `res.status` /
+  `in data` / type-guard between them. A new unchecked cast fails CI.
+- **The trigger is shown, not swallowed:** when the status cannot be read, the Publish tab prints the server's
+  own sentence. ⚠️ Which guard answered that phone is OPEN (Q-013) — a 429 there would mean the per-IP burst
+  guard is hitting a CGNAT phone network, a second real defect.
+
 ## Working alongside other live sessions (admin-confirmed 2026-09-13)
 
 **Several Claude sessions run on this repo at the same time, on purpose.** On the day this was

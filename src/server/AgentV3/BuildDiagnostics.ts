@@ -25,7 +25,7 @@ import { costAlertAdvisory, costAlertThresholdUsd } from './costAlert';
 import { isModelUnavailableError } from './providerErrorClass';
 import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
-import { isBudgetEndedError } from './turnDeadline';
+import { isBudgetEndedError, isReasoningRungHandoff } from './turnDeadline';
 import { typecheckEvidenceFromCommands, commandOutcomeText } from './TscGate';
 import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
@@ -109,6 +109,8 @@ const PROCESS_ONLY_CODES = new Set([
   'FAST_LANE_SKIPPED_IMAGE_APP',
   // …and the lane HANDING OFF because its chain fell to such a rung mid-lane (autopsy Study-Racer).
   'FAST_LANE_FELL_TO_REASONING_RUNG',
+  // …and each per-file call that handoff stopped (autopsy d382b398) — a planned handoff, not a failure.
+  'LLM_CALL_HANDED_OFF',
   // An observation about OUR checkpoint heuristic (autopsy SignBridge, 2026-09-26) — never the app.
   'CHECKPOINT_SIGNAL',
   // A suggest-only review on a green app that ran out of time — our process, never the app (same autopsy).
@@ -1410,7 +1412,22 @@ export class BuildDiagnostics {
     // timeline must still show where. It simply stops being an accusation against a provider and a
     // blocker against the app.
     const budgetEnded = !rec.ok && isBudgetEndedError(rec.error);
-    if (budgetEnded) {
+    // 🔴 A HANDOFF IS NOT A FAILED CALL (autopsy d382b398, 2026-10-01). The fast lane stops in front of a
+    // reasoning rung on purpose and hands its files to the full builder — `FAST_LANE_FELL_TO_REASONING_RUNG`
+    // already records that. Each per-file call it stopped arrived here as an unresolved ERROR
+    // ("Model call failed (unknown)", with all 51 pool keys listed) and became a SUCCESSFUL build's root
+    // cause. Recorded as INFO and resolved, never dropped.
+    const handedOff = !rec.ok && !budgetEnded && isReasoningRungHandoff(rec.error);
+    if (handedOff) {
+      this.record({
+        phase: 'provider',
+        severity: 'info',
+        code: 'LLM_CALL_HANDED_OFF',
+        message: 'A fast-lane call stopped before a slower reasoning engine and handed its work to the full builder — a planned handoff, not a failure.',
+        autoResolved: true,
+        detail: String(rec.error ?? '').slice(0, 300),
+      });
+    } else if (budgetEnded) {
       this.record({
         phase: 'provider',
         severity: 'info',

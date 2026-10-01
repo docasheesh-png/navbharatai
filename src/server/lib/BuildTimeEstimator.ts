@@ -182,7 +182,11 @@ export function liveEtaTick(elapsedMs: number, totalMs: number, baseMs: number, 
   // with a bigger integer. Say plainly that it is taking longer and that we will report when it lands.
   const text = next > ETA_MAX_PROMISES
     ? `⏱️ Still building… ${inTxt} in · this is taking longer than estimated. I'm still working on it and will tell you the moment it's done.`
-    : `⏱️ Still building… ${inTxt} in · this app is bigger than expected — about ${formatEta(step).replace('~', '')} more to go`;
+    // 🔴 NOT "THIS APP IS BIGGER THAN EXPECTED" (autopsy d382b398). The budget this overran is often the
+    // file-phase measurement, which allows one minute for everything after the last file; that build said
+    // "bigger than expected" at minute 6 of the 6–8 min it had promised, while the app was exactly the
+    // size planned and the finishing checks were running. Say what is known: it is taking longer.
+    : `⏱️ Still building… ${inTxt} in · this is taking longer than I estimated — about ${formatEta(step).replace('~', '')} more to go`;
   return { text, totalMs: elapsed + step, revised: true, revisions: next };
 }
 

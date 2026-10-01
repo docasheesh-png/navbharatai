@@ -24,7 +24,7 @@ import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
 import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports, fixTypeOnlyValueImports } from './ImportExportReconcile';
-import { parseTscErrors, endgameDeterministicPass, endgameRepairEnabled } from './EndgameRepair';
+import { parseTscErrors, endgameDeterministicPass, endgameRepairEnabled, ensureReactValueImport } from './EndgameRepair';
 import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import type { FastLanePhases } from './fastLanePhases';
 import { fileBudgetForPrompt, fileBudgetInstruction } from './fileBudget';
@@ -1755,7 +1755,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           if (!match) return null;
           filesDone += 1; // synchronous — safe even with concurrent genOne calls in flight
           deps.log?.(`✓ ${spec.path} (${filesDone}/${manifest.length})`);
-          const file = { path: spec.path, content: match.content };
+          const file = { path: spec.path, content: ensureReactValueImport(spec.path, match.content) };
           generatedSoFar.push(file); // mirror outside the closure so a timeout can salvage finished work
           return file;
         } catch {

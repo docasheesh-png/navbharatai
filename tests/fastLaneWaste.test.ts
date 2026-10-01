@@ -118,7 +118,8 @@ describe('WIRING — and the report says what we decided', () => {
     // stayed 0 — "never measured" — and this lane ran anyway, for 150 s, on the same chain that had
     // just failed three times. The file-count check alone cannot see that case.
     // A stopped lane starts no one-shot lane (autopsy 2720e553); the measurement gate is unchanged.
-    expect(route).toContain('} else if (!sb.stopped && !abort.signal.aborted && classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb) && anotherLaneWorthTrying(sb.reason)) {');
+    // …and not after the fast lane handed off at a reasoning rung on the same chain (autopsy e49afa97).
+    expect(route).toContain('} else if (!sb.stopped && !abort.signal.aborted && classifyForOneShot(analysis?.startTier) && oneShotStillViable(sb) && anotherLaneWorthTrying(sb.reason) && !fastLaneReasoningRung) {');
   });
 
   it('a skipped lane is RECORDED, not silently absent', () => {

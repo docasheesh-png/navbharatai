@@ -43,6 +43,7 @@ import {
   type StoreApp, type SubmissionStatus,
 } from '../lib/navStoreStore';
 import { notifyStoreApproval } from '../lib/storeApprovalNotify';
+import { notifyFollowersOfNewApp } from '../lib/appMartSocialStore';
 import {
   evaluateWebPublish, hashAppPassword, verifyAppPassword, toPublicWebApp, newWebAppId,
   saveWebApp, getWebApp, getWebAppFiles, listListedWebApps, listMyWebApps, listUnlistedWebApps,
@@ -620,7 +621,11 @@ export function registerNavStoreRoutes(app: Express): void {
       // Congratulate the creator AFTER the response — the same "side effects after the response"
       // discipline web/publish's bake already uses below, so a slow/unconfigured email provider can
       // never hold up the admin's review screen.
-      if (enteringApproved) void notifyStoreApproval(found.uid, found.appName, 'apk');
+      if (enteringApproved) {
+        void notifyStoreApproval(found.uid, found.appName, 'apk');
+        // The creator's followers hear about a new app the moment it is on App Mart (admin 2026-10-01).
+        void notifyFollowersOfNewApp({ creatorUid: found.uid, appKey: `apk:${found.id}`, appName: found.appName });
+      }
     } catch {
       res.status(502).json({ error: 'Could not save that decision.' });
     }
@@ -1412,7 +1417,10 @@ export function registerNavStoreRoutes(app: Express): void {
       res.json({ ok: true, id, status: decision });
       // Congratulate the creator AFTER the response — same discipline as web/publish's bake above,
       // so a slow/unconfigured email provider can never hold up the admin's review screen.
-      if (enteringListed) void notifyStoreApproval(found.uid, found.name, 'web');
+      if (enteringListed) {
+        void notifyStoreApproval(found.uid, found.name, 'web');
+        void notifyFollowersOfNewApp({ creatorUid: found.uid, appKey: `web:${found.id}`, appName: found.name });
+      }
     } catch (e) {
       logStoreError('web/admin review', e);
       res.status(502).json({ error: 'Could not save that decision.' });

@@ -169,7 +169,8 @@ describe('wiring', () => {
 
   it('both audits receive the answer', () => {
     expect(route).toContain('dispatcher.setDeclinedFeatures(declinedLabels(featureConfirmation));');
-    expect((route.match(/checkFeaturePresence\(milestoneRequest \?\? prompt, [a-zA-Z]+, declinedPresenceFeatures\(featureConfirmation\)\)/g) || []).length).toBe(3);
+    // Four since autopsy a106df77: the home probe, the probe over the app's other screens, and the two post-heal re-probes.
+    expect((route.match(/checkFeaturePresence\(milestoneRequest \?\? prompt, [^\n]+?, declinedPresenceFeatures\(featureConfirmation\)\)/g) || []).length).toBe(4);
     expect(strip(src('src/server/AgentV3/ToolDispatcher.ts'))).toContain('analyzeRequirementCoverage(requestText, mem.graph(), snap.sources, this.declinedFeatures)');
   });
 

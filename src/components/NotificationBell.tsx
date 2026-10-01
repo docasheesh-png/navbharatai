@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { X, Trash2, CheckSquare, Square, AlertTriangle } from 'lucide-react';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { authJsonHeaders } from '../lib/authHeaders';
+import { isAppMartTarget } from '../lib/appMartTarget';
 
 /**
  * The app header's own height, restated here because a `fixed` panel cannot inherit it.
@@ -80,14 +81,12 @@ interface NotificationItem {
    */
   action?: 'open-reports' | 'open-billing' | 'open-app-mart';
   /**
-   * For `open-app-mart` only: WHICH app — an App Mart key (`web:<id>` / `apk:<id>`), checked against
-   * that exact shape before it is used, so it can never be an address.
+   * For `open-app-mart` only: WHERE in App Mart — an app (`web:<id>` / `apk:<id>`), a profile, or your
+   * followers. Checked against the one grammar in src/lib/appMartTarget.ts before it is used, so it can
+   * never be an address.
    */
   target?: string;
 }
-
-/** The only App Mart target a notification tap will follow. */
-const APP_MART_TARGET = /^(web|apk):[A-Za-z0-9_-]{4,80}$/;
 
 export interface NotificationInbox {
   items: NotificationItem[];
@@ -418,7 +417,9 @@ export function NotificationPanel({ inbox, onClose, onOpenReports, pinned }: {
                 }
                 // A like, comment or reply on the user's App Mart app: open that app's comments,
                 // through the same navigation channel as every other cross-screen jump.
-                if (n.action === 'open-app-mart' && n.target && APP_MART_TARGET.test(n.target)) {
+                // The ONE grammar of where an App Mart notification may lead (appMartTarget.ts) — the same
+                // parser a tapped phone push uses, so the two can never disagree.
+                if (n.action === 'open-app-mart' && n.target && isAppMartTarget(n.target)) {
                   const target = n.target;
                   return (
                     <button

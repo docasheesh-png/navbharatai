@@ -86078,6 +86078,81 @@ Reversion-proven: (1) sending a key with an unknown provider to Pollinations fai
   says it works). If it closes, the generated app shows "The free image service is not accepting requests
   right now", and the owner's own key on the server path is the way out.
 
+## 2026-10-01 — Autopsy a106df77: the user pasted their own app, and every reader read the markup
+
+The user pasted a whole HTML file into the build box, with nothing else written. It was their own "A1 Decor
+India" bill maker, version 40. The build ran on Weak, cost ₹184.34 and took 8.4 min. It succeeded: the app
+rendered, typechecked and built for production. But the prompt was read as if it were a sentence:
+- The published `<title>`, og tags and manifest name became `<!doctype html> <html lang="en"> <head>`.
+- The summary opened with a false warning: "You asked for “width=device-width,initial-scale=1”…".
+- The feature probe looked for controls named after words in the CSS and JS.
+- The new app dropped the "Items" tab the user already had.
+
+**Tally:**
+- ✅ Self-healed (3):
+  - 14 undefined classes and one unstyled page were fixed by the design pass, which took 183 s after the answer.
+  - Two type errors were fixed in two edits.
+  - One missing import was added by the deterministic pass.
+- 🔀 Worked around (0).
+- ⏭️ Skipped (2):
+  - An unused `recharts` dependency was installed and never imported.
+  - A deprecated `@types/react-router-dom@5` was installed beside RR6, and the advice said to "set it to ^6", a version that does not exist.
+- ❌ Shipped imperfect (4):
+  - The published name and description were raw HTML.
+  - The off-topic warning was false, and it was shown above the summary.
+  - The platform's closing additions were never shown (`SUMMARY_REPLY_NOT_FOUND`).
+  - The "Items" screen from the user's app was missing.
+- 🥵 Struggle (3):
+  - The write-time "classes have no rule" note fired on five writes and was deferred every time.
+  - The page check found "no separate page routes" for an app with four.
+  - The New Bill journey ran on `/`, where the form is not.
+
+| Problem | Root cause | Class | Siblings found and fixed | Locked by |
+|---|---|---|---|---|
+| Published name/description = raw HTML | `nameFromPrompt` / `descriptionFromPrompt` read the prompt as words | A reader of the user's WORDS reads pasted code | `deriveTitle` (History title + GitHub repo name), `quotedAppName`, the feature readers via `withoutMachineText`, `rankFeatures` | `pastedSource.ts` (one detector); `withoutMachineText` reads `requestWords`; the size readers pass `keepPasted` so routing is unchanged (73, complex) |
+| False "You asked for “width=…”" warning | `quotedAppName` took the first quoted run with 2+ words: a `<meta content>` | Same | — | `readablePrompt` + a quoted run with `= < > { } ;` is never a name |
+| Feature probe asked for delete/filter | `.tabs` in the CSS and `removeItem` in the script | Same | RequirementGapAnalyzer, nativeCapabilities, enumeratedFeatures, appScopeAnalyzer (all via the choke point) | `requestWords`: the words around the paste, plus the page's visible text |
+| "Items" tab dropped | Nothing told the builder the paste WAS the spec | A pasted app read as loose inspiration | The fast lane gets the same brief | `pastedAppBrief.ts` (`PASTED_APP_BRIEF`; kill switch `AGENTV3_PASTED_APP_BRIEF=off`): name, every control, field and colour; "improve, never remove" |
+| `SUMMARY_REPLY_NOT_FOUND` | Narration strips celebration emoji while the build is running; the summary does not, so "ready. 🎉" never matched "ready." | Two views of one text, only one passed through the sanitizer | — | `summaryAdditions` compares through `sanitizeResponseEmoji(…, 'working')` |
+| "No separate page routes"; journey on `/` | Both readers dropped relative child `<Route path="new">` ("needs a parent to mean anything") | Nested React Router routes unreadable | `extractPageRoutes`, `routeFromRouter` | `routerPaths.ts` `declaredRoutes` joins parents (index routes, pathless layouts, comments skipped; an expression path is never guessed) |
+| Undefined classes deferred until a 183 s heal | Write-time notes are advisory and can be put off | The fourth report of this class (466c260a, 1389f0d5, 12c642ed, a106df77): each earlier fix added a better NOTE | — | Fixed by #3425 (`stylePolishResume.ts`, `STYLE_RULES_RESUMED`), which merged while this PR was open. This PR had built the same hand-back as `unstyledResume.ts`; that duplicate was removed in the merge and the one in `main` is kept. |
+| "Set @types/react-router-dom to ^6" | Both dependency checks compared majors and never asked whether the package ships its own types | Advice that names a version that does not exist | `DependencyAnalysis` and `ConstraintSolver` both | `lib/selfTypedPackages.ts` (one list): the advice is "remove it" |
+
+Tests: `tests/aPastedAppIsTheSpec.test.ts` (23 cases, using the report prompt verbatim in
+`tests/fixtures/autopsyA106df77.prompt.txt`). Each of seven fixes was reverted on its own, and each
+reversion fails the suite. Updated test: `theVenvWasNeverTheProject` ("a relative child path is not
+guessed"), which now expects `/app/new`. The parent is in the same file, so this is no longer a guess.
+
+**Still open (recorded, not changed):**
+- **The feature probe reads the HOME screen only.** On a multi-route app, a control that lives on another
+  route reads as absent. The sign-in case (8e124182) reads screens behind the door; a probe over
+  `extractPageRoutes` (which now finds nested routes) is the natural sibling. Not built here: it opens one
+  more browser per route, and its cost is a decision to make.
+- **Dependencies the build installed and never imported (`recharts`).** Each one adds to the install and
+  can bring advisories (2 moderate here, source not identified). An end-of-build tidy that uninstalls only
+  packages THIS build added and nothing imports would change the user's dependency set. That is put to the
+  admin, not done silently.
+- The pasted app was rebuilt as React with the kit. Whether a pasted single-file HTML app should stay a
+  single HTML file (the user's file mentions an Android WebView) is a product question. The brief now
+  keeps its features, name and colours either way.
+
+### 2026-10-01 — follow-up (admin: "han karo"): the feature probe reads the other screens
+
+This closes the first "still open" item above. When the home screen leaves a requested control unseen,
+`featureProbeScreens.ts` reads the app's own declared routes and judges all the screens together.
+- **Which routes:** `extractPageRoutes`, which now joins nested routes. At most 4 routes, within 45 s.
+- **Which screens count:** only a screen that rendered.
+- **Never behind a sign-in session:** that path already reads the screens behind the door.
+- **After a heal:** both re-probes read the same screens again.
+
+The report line names the screens that were read (`screens=/,/bills,…`).
+
+Those screens are read with `recordConsole: false`, a new option on `browseUrl`. The reason: a repair
+re-checks only home, so an error recorded from another screen would read as surviving a fix that never
+saw it. That is the trap the browser-lane census describes.
+
+Kill switch: `AGENTV3_FEATURE_PROBE_SCREENS=off`. Test-locked in
+`tests/aControlOnAnotherScreenIsNotMissing.test.ts`. The `recordConsole` guard was reversion-proven.
 ## 2026-10-01 — Autopsy 1be16985 ("Make biology  learning app", Weak, 9.7 min vs 6–8 min ETA, app working)
 
 Tally:
@@ -86121,3 +86196,41 @@ tail and the runner census.
   nobody. Locked in `tests/anImageAppMakesRealPictures.test.ts` §7, including a real strict-TS compile of the
   template's App.tsx, proven by reversion.
 
+## 2026-10-01 — App Mart social, phase 2: push tap, comment word filter, follow, Browse views
+
+Admin: *"teeno kaam karo! … user jis jis creator ko follow kare, uski apps usko app mart me alag se dikhe … browser
+me 3 button — general, follower, likes app … sabhi page me upar play instantly aur apk filter"*. Defaults chosen by
+the admin: an abusive comment is BLOCKED (not masked); the filter row sits on the three Browse views only. Built on
+the same branch as #3424 (still open at the time).
+This closes three "still open" items of the 2026-09-30 entry above (push tap, word filter, follow).
+
+**What shipped:**
+- **Push tap → the app's page.** The phone handler followed only `open_store`, so an App Mart push opened Home.
+  `src/lib/appMartTarget.ts` is now the one grammar of where an App Mart notification leads (`web:`/`apk:` app,
+  `profile:<code>`, `followers:me`); the bell, the push handler and App Mart all read it. New pushes carry `target`;
+  the first pushes' `appKey` is still followed. Reaches phones only with a fresh `.aab`/`.ipa`.
+- **Comment word filter.** `commentAbuse` (appMartSocialRules.ts) reads `scanProfanity`, the image generator's own
+  profanity list with its disguise-undoing — ONE list, two readers. Profanity only, so "a sex-education app for
+  schools" is allowed. Bare "bc"/"mc" are not words on the list ("bc" = because); "mc bc", "bkl", "bsdk" are.
+  Checked before anything is stored or anyone notified.
+- **Follow.** `app_mart_follows`, one doc per (follower, creator). Counts counted (public); who follows is
+  creator-only (`/api/app-mart/social/followers`). Follow refused across a block in either direction; blocking ends a
+  follow both ways; cap 1,000 follows. Creator notified (grouped per day); followers notified (bell only, bounded at
+  5,000, `create` so never twice a day) when an app becomes visible on EITHER approval path (APK approve, web list).
+  Erased from both ends with either account. Android apps' public shape gained `creatorId` (public code, never the
+  uid) so their page can open the creator's profile and Follow.
+- **Browse: General · Following · Liked apps**, with **All · Play instantly · APK** above all three
+  (`appMart/browseViews.ts`). The personal views come from `/api/app-mart/feed`, which applies the General view's
+  own filters (listed/approved, 18+, native shell). The filter row is hidden on iPhone; an Android shelf never shows
+  there.
+
+Tests: `tests/appMartSocialPhase2.test.ts` (24), reversion-proven for the word-filter order, the push handler and the
+two-ended erase.
+
+**Still open:**
+- New-app announcements ring the bell only, no phone push — a push per follower per publish is the fan-out that
+  would need its own throttle.
+- The Following feed reads the 300 most recently followed creators (Firestore `in` chunks of 30); someone following
+  more sees the newest 300's apps.
+- Phone users get all of this only with a fresh `.aab`/`.ipa`. Admin instruction: build them only AFTER every open
+  PR is merged.

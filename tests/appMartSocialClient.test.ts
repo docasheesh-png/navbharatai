@@ -87,8 +87,8 @@ describe('🔒 the wiring', () => {
     expect(code(ui)).not.toMatch(/\.email\b/);
   });
 
-  it('a tapped App Mart notification lands on that app, following only an App Mart key', () => {
-    expect(bell).toContain("n.action === 'open-app-mart' && n.target && APP_MART_TARGET.test(n.target)");
+  it('a tapped App Mart notification lands on that app, following only an App Mart target', () => {
+    expect(bell).toContain("n.action === 'open-app-mart' && n.target && isAppMartTarget(n.target)");
     expect(bell).toContain("detail: { view: 'appstore', storeSocialKey: target }");
     expect(read('src/App.tsx')).toContain('setStoreSocialTarget({ key: detail.storeSocialKey, nonce: Date.now() })');
     expect(read('src/components/panels/ViewPanels.tsx')).toContain('socialTarget={storeSocialTarget}');

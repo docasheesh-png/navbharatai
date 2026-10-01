@@ -256,13 +256,19 @@ describe('the admin panel button, and the tap that follows', () => {
     expect(dash).toContain('Device scan hit its cap');
   });
 
+  // ⚠️ RE-POINTED 2026-10-01: the tap DECISION moved into the pure `pushTapAction` (appMartTarget.ts) so an
+  // App Mart push can open its app as well. The invariant is unchanged and now also tested by behaviour
+  // in tests/appMartSocialPhase2.test.ts.
+  const tapRule = readFileSync(join(__dirname, '../src/lib/appMartTarget.ts'), 'utf8');
+
   it('TAPPING the notification opens the STORE, not just the app', () => {
     expect(client).toContain("addListener('notificationActionPerformed'");
-    expect(client).toContain("String(data.action ?? '') !== 'open_store'");
+    expect(client).toContain('pushTapAction(data, PLAY_STORE_URL)');
+    expect(tapRule).toContain("String(d.action ?? '') === 'open_store'");
     expect(client).toContain('Browser.open({ url })');
   });
 
   it('the tap handler refuses a non-http url', () => {
-    expect(client).toContain('/^https?:\\/\\//.test(data.storeUrl)');
+    expect(tapRule).toContain('/^https?:\\/\\//.test(d.storeUrl)');
   });
 });

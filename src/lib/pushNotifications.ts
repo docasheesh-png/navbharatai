@@ -13,6 +13,7 @@
 import { Capacitor } from '@capacitor/core';
 import { registerDeviceToken, unregisterDeviceToken } from './pushApi';
 import { PLAY_STORE_URL } from './appUpdate';
+import { pushTapAction } from './appMartTarget';
 
 /** True only inside the installed Android/iOS shell; false on plain web. Never throws. */
 function isNativeApp(): boolean {
@@ -147,13 +148,20 @@ export async function initPushNotifications(userId: string): Promise<void> {
       // TAPPING AN "UPDATE" NOTIFICATION MUST OPEN THE STORE, not merely bring the app forward.
       // Landing back on the version you already have is the same broken promise as a false banner —
       // and it is the one thing that would make this notification never get tapped again.
+      //
+      // AN APP MART PUSH (a comment, a reply) MUST OPEN THAT APP, not Home (admin 2026-10-01). It rides
+      // the same `navbharat:navigate` event the in-app bell uses, so the two can never disagree about
+      // where a notification leads. The decision itself is the pure `pushTapAction` (appMartTarget.ts).
       await FirebaseMessaging.addListener('notificationActionPerformed', (event) => {
         try {
           const data = (event?.notification?.data ?? {}) as Record<string, unknown>;
-          if (String(data.action ?? '') !== 'open_store') return;
-          const url = typeof data.storeUrl === 'string' && /^https?:\/\//.test(data.storeUrl)
-            ? data.storeUrl
-            : PLAY_STORE_URL;
+          const action = pushTapAction(data, PLAY_STORE_URL);
+          if (!action) return;
+          if (action.kind === 'open-app-mart') {
+            window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'appstore', storeSocialKey: action.target } }));
+            return;
+          }
+          const url = action.url;
           void import('@capacitor/browser')
             .then(({ Browser }) => Browser.open({ url }))
             .catch(() => { window.open(url, '_blank', 'noopener'); });

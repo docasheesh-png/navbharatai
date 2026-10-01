@@ -2494,7 +2494,11 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      intent === 'new_build' && !isImportTurn` and on the index.html being the UNTOUCHED static starter,
     //      so it never writes on an import/survey turn or over an existing app. The page it writes is the
     //      user's own paste, and it is entered in `preseededGolden` so it is not billed as our work. Considered ✓.
-    expect(count).toBe(30);
+    //   1× the UNUSED-PACKAGE PRUNE (admin 2026-10-01, unusedDepPrune.ts) — gated on `result.ok && expectsArtifacts
+    //      && !isImportTurn && !projectModuleRef && !megaRoadmapActive` and on the green latch not being set, so
+    //      it never writes on an import/survey turn. It writes package.json (and the lock) only after the app's
+    //      own production build passed without the removed packages. Considered ✓.
+    expect(count).toBe(31);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

@@ -86454,6 +86454,24 @@ after the entry. A further ~20–40 s there (painting before the stylesheet stag
 lane's CSS guards — recorded here, not attempted.
 **Open:** whether models actually follow the shell-first rule — watch when `src/App.tsx` is first written in admin reports.
 
+## 2026-10-01 — A package this build installed and never used is removed (admin approved, a106df77 open item)
+
+- **Why:** the a106df77 rebuild installed `recharts` and never imported it. `INTEGRITY_UNUSED_DEP` reported it and
+  nothing more, so it shipped in the user's `package.json`.
+- **What ships (`src/server/AgentV3/unusedDepPrune.ts`, `AGENTV3_PRUNE_UNUSED_DEPS`, default ON):**
+  - A baseline `package.json` is read before the first model call.
+  - At the integrity pass, the candidates are packages this build added that are unused and named in no other
+    file. Tooling is excluded, peers of declared packages are kept, and at most 5 are taken.
+  - The candidates are uninstalled and the app's own build is run. They stay removed only if the build passes;
+    otherwise the backup is restored and `npm install` is run.
+  - Never on import, plan-module, milestone, stopped or already-green turns.
+- **Evidence:** run for real in the session's scratchpad against npm. A wrong candidate (an imported package) made
+  the build fail and was fully restored. A genuinely unused package was removed and the build passed. A package
+  another declared package depends on was kept by the peer check.
+- **Locked:** `tests/aPackageThisBuildNeverUsedIsRemoved.test.ts` (18 cases), reversion-proven four ways (added-by-build,
+  restore on a failed build, peer check, mention check). Census of `writtenFiles.set` 30 → 31.
+- **Watch:** `UNUSED_DEPS_REMOVED` / `UNUSED_DEPS_KEPT` in admin reports. A `KEPT … the app did not build without
+  them` means the unused-detection was wrong for that package. Name it and widen the exclusions.
 ### 2026-10-01 — Autopsy 8257ca59 follow-up, and App Mart "My profile" becomes editable
 
 **Autopsy, the item the first pass left:** the green repair's `find . -maxdepth 3 …` handed the model dozens of

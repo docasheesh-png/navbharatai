@@ -52,6 +52,11 @@ export interface CostTelemetryEntry {
    * measurement that justifies (or vetoes) raising the rollout percentage.
    */
   escalationCohort?: 'in' | 'out' | 'off';
+  /**
+   * Q-008 — the strict-mode trial's label: which TypeScript mode the app compiled in, and whether it
+   * was a fresh app. `strict-new` against `loose-new` on the same days is the trial's answer.
+   */
+  strictCohort?: 'strict-new' | 'loose-new' | 'strict-existing' | 'loose-existing' | 'unknown';
   /** How many tier escalations this build actually performed (0 = the first tier delivered). */
   escalations?: number;
   /**
@@ -146,6 +151,8 @@ export interface DailyCostTelemetryDoc {
   byDeliveredVia: Record<string, TelemetryBreakdown>;
   /** T1-escalation-on — per canary cohort ('in'/'out'/'off'): the A/B split for the rollout decision. */
   byEscalationCohort?: Record<string, TelemetryBreakdown>;
+  /** Q-008 — per strict-mode trial label: `strict-new` vs `loose-new` is the trial's answer. */
+  byStrictCohort?: Record<string, TelemetryBreakdown>;
   /** T1-escalation-on — builds where the ladder actually climbed at least one tier. */
   escalatedBuilds?: number;
   /**
@@ -270,6 +277,11 @@ export function foldCostTelemetry(
   const byEscalationCohort = { ...(doc.byEscalationCohort ?? {}) };
   byEscalationCohort[cohortKey] = addToBreakdown(byEscalationCohort[cohortKey] ?? emptyBreakdown(), entry);
 
+  // Q-008 — fold the strict-mode trial label. Same `?? {}` migration pattern as the folds above.
+  const strictKey = entry.strictCohort || 'unknown';
+  const byStrictCohort = { ...(doc.byStrictCohort ?? {}) };
+  byStrictCohort[strictKey] = addToBreakdown(byStrictCohort[strictKey] ?? emptyBreakdown(), entry);
+
   // How deep this build went down its ladder. `?? {}` tolerates day docs written before this field
   // existed (same migration pattern as the two folds above), and a build whose depth could not be
   // attributed lands under 'unknown' rather than being dropped — a silently missing build would make
@@ -326,6 +338,7 @@ export function foldCostTelemetry(
     byStartTier,
     byDeliveredVia,
     byEscalationCohort,
+    byStrictCohort,
     escalatedBuilds: (doc.escalatedBuilds ?? 0) + ((entry.escalations ?? 0) > 0 ? 1 : 0),
     byLadderDepth,
     byProviderUsage,

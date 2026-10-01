@@ -5,6 +5,7 @@ import { commandFailureResult, commandLogTail } from '../../../../lib/sandboxCom
 import type { CommandHandle } from 'e2b';
 import { TemplateRegistry } from '../../AppMakerLab/generator/templates/TemplateRegistry';
 import { starterFilesToComplete, MAX_FRAGMENT_FILES } from '../../../starterFragment';
+import { applyStrictTrial } from '../../../strictTrial';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
@@ -1694,7 +1695,7 @@ export class E2BActuator implements IEngineerActuator {
     // the starter-fragment completion so the two can never seed different templates).
     // Note: this.templateRegistry keys are e.g. 'vite-react', 'nextjs', 'vue' — NOT 'react'.
     try {
-      const files = this._templateFilesFor(projectType);
+      const files = this._templateFilesFor(projectType, workspaceId);
       await withTimeout(sandbox.files.writeFiles(
         Object.entries(files).map(([p, content]) => ({ path: `${WORKSPACE_ROOT}/${safeRelPath(p)}`, data: content }))
       ), 30_000, 'files.writeFiles(template)');
@@ -1704,7 +1705,7 @@ export class E2BActuator implements IEngineerActuator {
     } catch {
       // Last-resort fallback: seed a minimal vite-react project so the workspace is never empty.
       try {
-        const fallbackFiles = this.templateRegistry.getProvider('vite-react').getFiles([]);
+        const fallbackFiles = applyStrictTrial(this.templateRegistry.getProvider('vite-react').getFiles([]), workspaceId);
         await withTimeout(sandbox.files.writeFiles(
           Object.entries(fallbackFiles).map(([p, content]) => ({ path: `${WORKSPACE_ROOT}/${safeRelPath(p)}`, data: content }))
         ), 30_000, 'files.writeFiles(fallback)');
@@ -1717,14 +1718,17 @@ export class E2BActuator implements IEngineerActuator {
     this._kickoffPlaywright(sandbox, workspaceId);
   }
 
-  /** The template files `ensureWorkspace` seeds for this project type — ONE resolution for both paths. */
-  private _templateFilesFor(projectType?: string): Record<string, string> {
+  /**
+   * The template files `ensureWorkspace` seeds for this project type — ONE resolution for both paths.
+   * A workspace in the strict-mode trial (Q-008, strictTrial.ts) gets the strict tsconfig.
+   */
+  private _templateFilesFor(projectType: string | undefined, workspaceId: string): Record<string, string> {
     const templateKey =
       projectType && projectType !== 'auto' && projectType !== 'node' && projectType !== 'python'
         ? projectType
         : (projectType === 'python' ? 'python-fastapi' : 'vite-react');
     const key = this.templateRegistry.listFrameworks().includes(templateKey) ? templateKey : 'vite-react';
-    return this.templateRegistry.getProvider(key).getFiles([]);
+    return applyStrictTrial(this.templateRegistry.getProvider(key).getFiles([]), workspaceId);
   }
 
   /**
@@ -1734,7 +1738,7 @@ export class E2BActuator implements IEngineerActuator {
    */
   private async _completeStarterFragment(sandbox: Sandbox, workspaceId: string, projectType?: string): Promise<void> {
     const template = Object.fromEntries(
-      Object.entries(this._templateFilesFor(projectType)).map(([p, c]) => [safeRelPath(p), c] as const),
+      Object.entries(this._templateFilesFor(projectType, workspaceId)).map(([p, c]) => [safeRelPath(p), c] as const),
     );
     const manifest = ['package.json', 'requirements.txt', 'pom.xml', 'go.mod'].find((m) => m in template);
     if (manifest && await withTimeout(sandbox.files.exists(`${WORKSPACE_ROOT}/${manifest}`), 15_000, 'files.exists(manifest)')) return;

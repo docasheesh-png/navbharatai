@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { holdsOnlyOurStarter } from '../src/server/AgentV3/starterFragment';
+import { strictTsconfig } from '../src/server/AgentV3/strictTrial';
 import { starterTemplates } from '../src/server/AgentV3/ToolDispatcher';
 import { BuildDiagnostics } from '../src/server/AgentV3/BuildDiagnostics';
 import { BUILD_STOPPED_MESSAGE } from '../src/server/AgentV3/stopSignal';
@@ -25,6 +26,9 @@ describe('an earlier request counts as a project only if it left one', () => {
   it('a workspace holding only our starter, byte for byte, holds no app', () => {
     expect(vite).toBeTruthy();
     expect(holdsOnlyOurStarter({ ...vite }, starterTemplates())).toBe(true);
+  });
+  it('a strict-trial workspace (Q-008, #3446) still holds only our starter', () => {
+    expect(holdsOnlyOurStarter({ ...vite, 'tsconfig.json': strictTsconfig(vite['tsconfig.json']) }, starterTemplates())).toBe(true);
   });
   it('one changed file, or one we could not read, is an app', () => {
     expect(holdsOnlyOurStarter({ ...vite, 'src/App.tsx': 'export default function App(){ return <h1>My shop</h1>; }' }, starterTemplates())).toBe(false);

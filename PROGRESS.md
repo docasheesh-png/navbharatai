@@ -86562,6 +86562,41 @@ the one unguarded instance.
   limit on a CGNAT phone network) and gets its own fix. **Tried:** read every guard in front of the route;
   the route and its four helpers cannot throw on their own.
 
+## 2026-10-01 — Queue decisions: Q-004 and Q-011 closed by the admin, Q-008 strict-mode trial built (admin: "han")
+
+**Decisions (admin accepted every recommendation, 2026-10-01):**
+- **Q-004 ✅ closed as decided:** the lean reviewer keeps reading files with tools when an app exceeds the one-call
+  bound. On 6461025c it finished inside its budget (85/100, 33 s), so this is cost and speed, not a failure.
+  Re-open only if a report shows that review timing out on a big app.
+- **Q-011 ✅ closed as decided:** no outpainting for now. Pro answers a picture request and points to Image
+  Generator AI's Paid edit (#3435). Re-open if users ask for "extend this photo" again.
+- **Q-013 stays 🟡:** the admin will open App Mart → Publish once on iOS build 105+ and send the sentence it prints.
+
+**Q-008 — a measured strict-mode trial (`src/server/AgentV3/strictTrial.ts`).**
+- `AGENTV3_STRICT_TRIAL` (default ON; `off` reverts) and `AGENTV3_STRICT_TRIAL_PCT` (default 20; `0` pauses;
+  unreadable ⇒ 0, never 100). 20% of NEW workspaces, chosen by workspace id, are seeded with
+  `"strict": true`. Seeding paths: E2B setup and starter-fragment completion (`_templateFilesFor`), the golden
+  pre-seed, and the missing-entry self-heal in `ToolDispatcher`. **An existing app's tsconfig is never
+  rewritten**; the foundation that fills in a MISSING tsconfig for an existing app stays loose on purpose.
+- The content-based "is this our starter?" readers (`platformAuthored.ts`, `starterFragment.ts`,
+  `isOurStarterFile`) know both tsconfig forms (`seededForms`, strict-form comparison).
+- The prompt line that said "THE SCAFFOLD COMPILES WITH strict false" and the matching `tscErrorCause`
+  sentence now hold in both modes; the prompt adds the strict-mode rules and "never change strict to clear errors".
+- **Measurement:** `STRICT_TRIAL` report line on every build (process-only) with `strict-new` / `loose-new` /
+  `strict-existing` / `loose-existing`, read from the app's real tsconfig, and `byStrictCohort` in the daily cost
+  telemetry (builds, ok, cost, duration). After about two weeks, compare `strict-new` with `loose-new`.
+
+**Found while building it — our own starters had never been typechecked (the class).** A census now typechecks
+the Vite-React template and all golden scaffolds with strict off AND on (`tests/aNewAppMayStartStrict.test.ts`,
+reversion-proven four ways):
+- **Panchang:** `sd.sunrise` / `sd.sunset` used inside closures after a null check (strict only). Fixed by
+  copying them into locals after the check, and carrying `dayLen` in the result.
+- **Arcade:** `<Empty title=… text=… />` against the pro shell's `Empty({ children })` — a type error in BOTH
+  modes, shipped since the scaffold was written, and at runtime an empty paragraph where the "No runs yet"
+  message should be. Now `<Empty>No runs yet. …</Empty>`.
+
+**Still open:** the trial's verdict (Q-008, waiting on data). `byStrictCohort` is in the Firestore day doc
+but has no admin card yet; read it from the usage report data until one is added.
 ## 2026-10-01 — Autopsy 39955124 (Dwarkadhish game, stopped by the user at 5.7 min)
 
 Sixth-rule ledger (every item ✅ or 🟡):

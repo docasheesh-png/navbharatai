@@ -159,13 +159,15 @@ describe('the panchang derives every muhurat rather than storing one', () => {
   const src = appSourceFor('panchang');
 
   it('Brahma Muhurat is taken from sunrise, not from a table', () => {
-    expect(src).toContain('sd.sunrise - 96');
-    expect(src).toContain('sd.sunrise - 48');
+    // \`sunrise\` is \`sd.sunrise\` copied out after its null check (strict mode, Q-008).
+    expect(src).toContain('const sunrise = sd.sunrise;');
+    expect(src).toContain('from: sunrise - 96');
+    expect(src).toContain('to: sunrise - 48');
   });
 
   it('Abhijit is the eighth of fifteen muhurtas of the day', () => {
     expect(src).toContain('dayLen / 15');
-    expect(src).toContain('sd.sunrise + 7 * muhurta');
+    expect(src).toContain('from: sunrise + 7 * muhurta');
   });
 
   it('Rahu Kaal, Gulika and Yamaganda come from the weekday tables over eighths of the day', () => {

@@ -86761,3 +86761,43 @@ them within `formSourcesFor`'s depth, so no journey was derived and the gate sta
 - Real-browser proof (`tests/aFormOnAWizardStepIsReached.test.ts`, 11 cases): a wizard that saves passes, one
   that only shows the item fails "vanished on reload", one with no matching control is unreachable, and a
   "Delete design" control is never pressed. Five reversions each failed.
+
+### 2026-10-01 — autopsy e49afa97 ("App for old person help", Weak, ok, 6.8 min, ₹108.26)
+
+The app was built, rendered, typechecked and pressed in a real browser (15 controls). What was wrong was
+the report and one line the user read.
+
+### Tally (fifth rule)
+- ✅ Self-healed 3: two undefined classes + one page without an empty state (`STYLE_RULES_RESUMED`, one turn);
+  `IN_BUILD_GREEN_RACED` retried and saved; 4 typecheck errors quoted back at write time and fixed.
+- 🔀 Workaround 2: the fast lane handed off before the reasoning rung (by design); GLM crawled, KIMI built.
+- ⏭️ Skipped 0.
+- ❌ Shipped wrong words 5: "bigger than expected" inside the promised band; a focus conflict about three
+  modal inputs; three journeys "not present" about forms two taps away, plus a gate guessing "a login wall";
+  two `LLM_CALL_FAILED` errors for a planned hand-off; a fresh reviewer told it had read a file "the second time".
+- 🥵 Struggle 2: 15 s of GLM crawl before the hand-off; the one-shot ran on the chain that had just handed off.
+
+### Root causes and fixes (this PR)
+- **ETA:** a plan-pace measurement re-anchored the budget below the band the user was shown, then stopped
+  applying. `liveEtaTick(…, promisedHighMs)`: before the first revision the countdown runs to the high end of
+  the band actually shown (`etaPromisedHighMs`, set only when a band was shown).
+- **Focus:** `findFocusOwners` counted any `autoFocus`. One inside a dialog (`<dialog>`, `role="dialog"`,
+  `aria-modal`, a modal class/component) or in a `*Modal`/`*Dialog` file is not page focus. New
+  `openTagsAt` in `jsxTags.ts` (the shared JSX reader).
+- **Journeys:** `src/screens/*.tsx` are page files, so #3443's `reach` (built for non-page screens) never
+  applied, and `routeForFile` fell back to `/`. `screenReachedByControl` gives such a screen its `reach`; the
+  runner reads text, aria-label and title, and a lone "+" opens a form. The gate's "unreachable" sentence
+  carries the runner's own reason (`journeyUnreachableWhy`) instead of a guess.
+- **One-shot after hand-off:** skipped when `fastLaneReasoningRung` is set; `laneFailure` classifies
+  "reasons before every answer" as provider-degraded.
+- **Handed files:** `noteHandedOff` marks the copy; the first read says "was given to you in full in your task".
+
+### Ledger
+Q-030 ETA band · Q-031 dialog focus · Q-032 state-switched journeys + gate reason · Q-033 one-shot after
+hand-off · Q-034 handed-file notice — IN PROGRESS (this PR) · Q-035 → #3448 (same class, d382b398: hand-off
+record, 51-key list, crawl≠timeout, bench prefix) · React-import note ✅ already fixed by #3442 (merged after this
+build ran) · Q-036 🟡 GLM crawl (Q-009, external) · Q-037 🟡 off-grid spacing (decision, recommend (b)) ·
+Q-038 🟡 "No tests at all" accurate (agreement). Locked in `tests/theOldPersonHelperAutopsy.test.ts`
+(29 cases, one real-browser), each fix reverted-and-failed in the session.
+**Live effect to watch:** no `INTEGRITY_FOCUS_CONFLICT` for modal inputs; `JOURNEY_PASSED`/`FAILED` on
+bottom-nav apps; no overrun line before the promised band's high end; `ONESHOT_SKIPPED` after a hand-off.

@@ -17,6 +17,8 @@
 
 import { splitByProject } from './nestedRepoProbe';
 import { isNonAppPath } from '../lib/nonAppPaths';
+import { openTagsAt, enclosingTag, tagName, hasAttr } from './jsxTags';
+import { stripCommentsForMarkup } from './stripCodeComments';
 
 export interface FocusOwner {
   /** The component file that grabs initial focus. */
@@ -116,6 +118,27 @@ function stylesheetKey(spec: string): string {
  */
 const isConfigFile = (path: string): boolean => /(^|\/)[\w.-]*\.config\.[cm]?[jt]s$/i.test(path);
 
+/** A component file that IS a dialog: it mounts when it opens, so its focus is not the page's. */
+const DIALOG_FILE = /(^|\/)[\w-]*(Modal|Dialog|Drawer|BottomSheet|Popover|Popup)\.(t|j)sx?$/;
+
+/** An element that is a dialog: `<dialog>`, `role="dialog"`, `aria-modal`, a modal class or component. */
+function isDialogTag(tag: string): boolean {
+  const name = tagName(tag);
+  if (name.toLowerCase() === 'dialog') return true;
+  if (/(Modal|Dialog|Drawer|BottomSheet|Popover)(\.[\w]+)?$/.test(name)) return true;
+  if (/(?<![-\w])role\s*=\s*\{?\s*["'](alert)?dialog["']/i.test(tag)) return true;
+  if (hasAttr(tag, 'aria-modal') && !/aria-modal\s*=\s*\{?\s*["']?false/i.test(tag)) return true;
+  const cls = /(?<![-\w])className\s*=\s*\{?\s*["'`]([^"'`]*)["'`]/.exec(tag)?.[1] ?? '';
+  return /(^|[\s_-])(modal|dialog|drawer|bottom-sheet)([\s_-]|$)/i.test(cls);
+}
+
+/** Is the attribute at `offset` on an element inside a dialog (or on the dialog itself)? */
+function insideDialog(raw: string, offset: number): boolean {
+  const own = enclosingTag(raw, offset);
+  if (own && isDialogTag(own)) return true;
+  return openTagsAt(raw, offset).some(isDialogTag);
+}
+
 /**
  * Find every component that grabs INITIAL focus at mount. A component is a focus owner when it either
  * renders a JSX element with a bare `autoFocus` attribute, or calls `.focus()` inside a mount effect
@@ -127,8 +150,19 @@ export function findFocusOwners(files: Record<string, string>): FocusOwner[] {
   for (const [file, raw] of Object.entries(files)) {
     if (!isSourceFile(file) || typeof raw !== 'string') continue;
     const src = stripComments(raw);
-    // (a) JSX autoFocus — `autoFocus` or `autoFocus={true}` (NOT autoFocus={false}).
-    if (/\bautoFocus\b(?!\s*=\s*\{?\s*false)/.test(src)) {
+    // A dialog component's own file mounts when the dialog opens — whatever it focuses, it focuses then.
+    if (DIALOG_FILE.test(file)) continue;
+    // (a) JSX autoFocus — `autoFocus` or `autoFocus={true}` (NOT autoFocus={false}) — that is NOT inside
+    // a dialog. One inside `{open && <div role="dialog">…}` focuses when the dialog opens (autopsy e49afa97).
+    const autoFocusRe = /\bautoFocus\b(?!\s*=\s*\{?\s*false)/g;
+    let af: RegExpExecArray | null;
+    let pageFocus = false;
+    // Length-preserving, so each match's offset still points into `raw` for the dialog lookup.
+    const marked = stripCommentsForMarkup(raw);
+    while ((af = autoFocusRe.exec(marked)) !== null) {
+      if (!insideDialog(raw, af.index)) { pageFocus = true; break; }
+    }
+    if (pageFocus) {
       owners.push({ file, mechanism: 'autoFocus' });
       continue;
     }

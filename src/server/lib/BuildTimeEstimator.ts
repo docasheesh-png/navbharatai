@@ -125,11 +125,19 @@ const ETA_MAX_PROMISES = 2;
  * expected and roughly how much longer — so the number keeps moving and never freezes on a stale claim.
  * Pure: no clock reads, no I/O — every input is passed in.
  */
-export function liveEtaTick(elapsedMs: number, totalMs: number, baseMs: number, revisions = 0): EtaTick {
+export function liveEtaTick(elapsedMs: number, totalMs: number, baseMs: number, revisions = 0, promisedHighMs = 0): EtaTick {
   const elapsed = Number.isFinite(elapsedMs) && elapsedMs > 0 ? elapsedMs : 0;
-  const total = Number.isFinite(totalMs) && totalMs > 0 ? totalMs : 0;
-  const base = Number.isFinite(baseMs) && baseMs > 0 ? baseMs : total;
   const done = Number.isFinite(revisions) && revisions > 0 ? Math.floor(revisions) : 0;
+  // A BUILD STILL INSIDE THE BAND IT WAS PROMISED HAS NOT OVERRUN (autopsy e49afa97, 2026-10-01). The user
+  // was told "~5–7 min"; a plan-pace measurement re-anchored the budget to 4 min and then stopped
+  // applying when the plan's steps ran out, so at minute 4 this said "this app is bigger than expected"
+  // about a build that finished at 6.8 min — inside the very band the user had been shown. Until the
+  // build passes the HIGH end of what it promised, the countdown runs to that promise. Only before the
+  // first revision: once a promise has been broken, the existing rules own the line.
+  const promised = done === 0 && Number.isFinite(promisedHighMs) && promisedHighMs > 0 ? promisedHighMs : 0;
+  const rawTotal = Number.isFinite(totalMs) && totalMs > 0 ? totalMs : 0;
+  const total = Math.max(rawTotal, promised);
+  const base = Number.isFinite(baseMs) && baseMs > 0 ? baseMs : total;
   const inTxt = formatEta(elapsed).replace('~', '');
   const remaining = total - elapsed;
 

@@ -7,12 +7,11 @@
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { holdsOnlyOurStarter } from '../src/server/AgentV3/starterFragment';
+import { holdsOnlyOurStarter, starterTemplates } from '../src/server/AgentV3/starterFragment';
 import { strictTsconfig } from '../src/server/AgentV3/strictTrial';
-import { starterTemplates } from '../src/server/AgentV3/ToolDispatcher';
 import { BuildDiagnostics } from '../src/server/AgentV3/BuildDiagnostics';
 import { BUILD_STOPPED_MESSAGE } from '../src/server/AgentV3/stopSignal';
-import { stoppedSummary } from '../src/server/AgentV3/SimpleBuilder';
+import { stoppedLaneSummary } from '../src/server/AgentV3/SimpleBuilder';
 import { setupRestoreText } from '../src/server/routes/agentv3';
 import { analyzeRequest } from '../src/server/AgentV3/RequestAnalyser';
 import { DESIGN_KIT_CSS } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/designKit';
@@ -39,7 +38,7 @@ describe('an earlier request counts as a project only if it left one', () => {
     const route = strip(read('src/server/routes/agentv3.ts'));
     expect(route).toContain('{ projectExists: earlierRequestLeftAnApp, recentRequests },');
     expect(route).not.toContain('{ projectExists: userAppExists || recentRequests.length > 0, recentRequests },');
-    expect(route).toContain('return !holdsOnlyOurStarter(files, starterTemplates());');
+    expect(route).toContain('return !holdsOnlyOurStarter(files);');
   });
   it('a build order read as a build is sized as an app, not as chat', () => {
     expect(analyzeRequest({ prompt: 'An AI automation app', buildIntent: 'new_build' }).taskType).toBe('app_unsized');
@@ -56,8 +55,8 @@ describe('a stop is not a failure', () => {
     expect(d.report().counts.errors).toBe(0);
   });
   it('the fast lane says what a stop saved, and is not filed as a failed hand-off', () => {
-    expect(stoppedSummary(0)).toMatch(/nothing had been written/);
-    expect(stoppedSummary(3)).toMatch(/files finished so far are saved/);
+    expect(stoppedLaneSummary(0)).toMatch(/no file had been written/);
+    expect(stoppedLaneSummary(3)).toMatch(/finished so far are saved/);
     expect(read('src/server/routes/agentv3.ts')).toContain("message: sb.stopped ? 'Fast-lane outcome: stopped by the user");
   });
 });

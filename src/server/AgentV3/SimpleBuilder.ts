@@ -33,7 +33,7 @@ import { missingViteEnvTypes } from './viteEnvTypes';
 import { generateMissingBarrels } from './BarrelGenerator';
 import { signatureContextEnabled, signatureDependencyContext } from './exportSurface';
 import { classNamesUsedBy } from './CssConsistency';
-import { BUILD_STOPPED_MESSAGE, isBuildStoppedError, throwIfStopped } from './stopSignal';
+import { BUILD_STOPPED_MESSAGE, BuildStoppedError, isBuildStoppedError, throwIfStopped } from './stopSignal';
 import { reconcileLanguageExtensions } from './LanguageCoherence';
 import { ensureHtmlEntryScript } from './HtmlEntryGuard';
 import { wireOrphanPages } from './orphanPageWiring';
@@ -41,6 +41,18 @@ import { injectGlobalStylesheetImport, dedupeStylesheetImports } from './Project
 import { frameworkShipsDesignKit } from './designKitReach';
 import { kitClasses } from './kitRestore';
 import { preambleCapMs, canFinishRemainingTiers, earlyBailReason, canFinishAfterPreamble, canAffordSharedContract, preambleBailReason } from './FastLaneBudget';
+
+
+/**
+ * What a stopped lane tells the user. PURE. "The files finished so far are saved" was said whatever the
+ * count, including when the stop came before file one (autopsy 31254f9a, beside a summary that rightly
+ * said "Nothing had been written yet").
+ */
+export function stoppedLaneSummary(filesSaved: number): string {
+  return filesSaved > 0
+    ? `Stopped, as asked — the ${filesSaved} file(s) finished so far are saved.`
+    : 'Stopped, as asked — no file had been written yet.';
+}
 
 export interface SimpleFileSpec {
   path: string;
@@ -356,14 +368,6 @@ export function manifestUserPrompt(prompt: string, scaffoldPaths: string[]): str
 }
 
 /** System prompt for a single-file generation call. */
-/**
- * What a stopped fast lane says. "The files finished so far are saved" about zero files (autopsy
- * 3d1bfe2a, stopped 8 s in) claims something that did not happen. PURE.
- */
-export function stoppedSummary(saved: number): string {
-  return saved > 0 ? 'Stopped, as asked — the files finished so far are saved.' : 'Stopped, as asked — nothing had been written yet.';
-}
-
 export function fileSystemPrompt(framework: string): string {
   return [
     `You are an elite ${framework} engineer writing ONE file of a larger app.`,
@@ -1648,6 +1652,16 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
             ),
             contractCap, 'simple-contract') || '').trim();
         } catch { contract = ''; }
+        // 🔴 A STOP DURING THE CONTRACT ENDS THE LANE HERE (autopsy 31254f9a). The call came back empty
+        // because the user pressed Stop, and the lane carried on: it recorded the contract as having "come
+        // back with nothing usable", and told the user it was "Building 9 file(s)" a few milliseconds
+        // AFTER the stop. Nothing below may run, so nothing below may be announced.
+        if (deps.signal?.aborted) {
+          clock.contractMs = Math.min(Math.max(0, Date.now() - contractStartedAt), contractCap);
+          clock.contractCapMs = contractCap;
+          clock.contractOutcome = 'stopped';
+          throw new BuildStoppedError();
+        }
         // Recorded on BOTH paths: a throw here is usually the cap firing, and that duration is the
         // measurement worth having. Capped at the cap so a stray clock cannot inflate the projection.
         contractCallMs = Math.min(Math.max(0, Date.now() - contractStartedAt), contractCap);
@@ -1992,7 +2006,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       }
       return {
         ok: false, stopped: true, filesWritten: saved.length,
-        summary: stoppedSummary(saved.length),
+        summary: stoppedLaneSummary(saved.length),
         reason: BUILD_STOPPED_MESSAGE, outcome: 'BUILD_FAILED', salvagedPaths: saved.length ? saved : undefined,
         plannedFiles, phases: phasesNow(), plannedPaths,
       };
@@ -2256,7 +2270,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     if (deps.signal?.aborted) {
       return {
         ok: false, stopped: true, filesWritten: files.length,
-        summary: stoppedSummary(files.length),
+        summary: stoppedLaneSummary(files.length),
         reason: BUILD_STOPPED_MESSAGE, outcome: classifyBuildOutcome({ filesWritten: files.length, typecheckOk: null }),
         typecheckRan: verdict.ran !== false, plannedFiles, phases: phasesNow(),
       };
@@ -2295,7 +2309,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   if (deps.signal?.aborted) {
     return {
       ok: false, stopped: true, filesWritten: files.length,
-      summary: stoppedSummary(files.length),
+      summary: stoppedLaneSummary(files.length),
       reason: BUILD_STOPPED_MESSAGE, outcome: classifyBuildOutcome({ filesWritten: files.length, typecheckOk: null }),
       typecheckRan, plannedFiles, phases: phasesNow(),
     };

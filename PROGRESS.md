@@ -86562,6 +86562,32 @@ the one unguarded instance.
   limit on a CGNAT phone network) and gets its own fix. **Tried:** read every guard in front of the route;
   the route and its four helpers cannot throw on their own.
 
+
+## 2026-10-01 — Autopsy 31254f9a (calculator chip, Weak, stopped by the user at 23 s)
+
+**Ledger (problem → root cause → class → siblings → lock):**
+- **Chip template never seeded** → the pre-seed required an empty `src/`; #3435 (same day) writes our starter
+  into every fresh workspace → *a presence check standing in for "is anybody's work here?"* → siblings: the
+  rebuild guard (a Stop leaves our starter saved, so the retry would flip to EDIT) — both fixed with
+  `holdsOnlyOurStarter` / `srcHoldsOnlyOurStarter` (starter + chip templates) → `tests/theTemplateWasNeverSeeded.test.ts` §1–2.
+- **SETUP_TIMING called an empty workspace "a piece of our starter"** → the note had no present-count; the
+  image's `WORKDIR` makes the folder exist, so empty takes the completion path → fixed (`starterPresentBefore`) → §3.
+- **Discovered: a completed fragment was saved without its pre-existing piece** (durable lost `index.html`) →
+  only the missing files were remembered → whole template now remembered → §3.
+- **A Stop recorded as unresolved ERROR `LLM_CALL_FAILED (unknown)`** → `stopSignal.ts` (2720e553) never reached
+  the LLM-call recorder → `LLM_CALL_STOPPED` (info, resolved) → §4.
+- **Stopped RELEASE_GATE left "unresolved"** → verdict stays RED (2b0a3ed5 design), record now resolved → §4.
+- **Fast lane after a Stop**: "Building 9 file(s)" announced after the stop, contract "came back with nothing
+  usable", "files finished so far are saved" with none, `SIMPLE_BUILD_OUTCOME … handed off … BUILD_FAILED` →
+  the lane did not check the signal after the contract → ends there (`contractOutcome: 'stopped'`,
+  `stoppedLaneSummary`, `SIMPLE_BUILD_STOPPED`) → §4. A 0 ms stopped contract is now named too.
+- **LADDER_DEPTH "delivered the whole build"** about a build with no files → wording describes routing → §4.
+- **~6 s unrecorded wait before the first build call** → `learnDomain` (free router, 6 s cap) awaited after
+  setup → started beside setup, skipped for a seeded chip, wait recorded as `DOMAIN_KNOWLEDGE` → §5.
+- **`requestAnalysis.startTier: "gemini"`** → already carries `startBand: "cheapest band"` (an earlier autopsy);
+  recorded in `BUILD_REPORT_QUEUE.md` pending the admin's agreement that it is not a defect.
+- **Q-010** (starter fragment) gained evidence: this report's marker was an EMPTY workspace, not a fragment.
+  Still blocked on a report from the session that first created the machine.
 ## 2026-10-01 — Queue decisions: Q-004 and Q-011 closed by the admin, Q-008 strict-mode trial built (admin: "han")
 
 **Decisions (admin accepted every recommendation, 2026-10-01):**
@@ -86869,7 +86895,10 @@ Sixth-rule ledger:
 - **B1 ✅** The stop was recorded as `LLM_CALL_FAILED` at ERROR (provider "unknown", `counts.errors = 1`).
   Now `LLM_CALL_STOPPED`, info — the same treatment a budget end already had.
 - **B2 ✅** The fast lane filed the stop as `BUILD_FAILED` "handed off", and said "the files finished so
-  far are saved" about zero files (`stoppedSummary`).
+  far are saved" about zero files. ⚠️ #3449 (autopsy 31254f9a, another session) landed the same fix first
+  (`stoppedLaneSummary`, `LLM_CALL_STOPPED`, `holdsOnlyOurStarter` for the rebuild guard); this PR keeps
+  theirs and adds only what theirs does not cover — the INTENT READER (C1), whose `edit_existing` answer
+  never reaches the rebuild guard's `intent === 'new_build'` check.
 - **C3 ✅** Build 2's setup line reprinted build 1's "completed 11 missing template files" (the count was
   never cleared) and the machine's creation-time restore ("nothing saved yet") beside `sandbox=warm`.
   Both now describe THIS setup (`setupRestoreText`).

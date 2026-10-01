@@ -11,6 +11,7 @@
 // events (a provider fallback, a sandbox-create timeout).
 
 import { startBandLabel } from './RequestAnalyser';
+import { isBuildStoppedError } from './stopSignal';
 import { toolCallDetail } from './toolCallTarget';
 import { isPlatformFixRequest, looksLikeMachineError, PLATFORM_COMPOSED_PREFIXES } from '../../lib/platformFixRequest';
 import { isProjectSummaryNarration } from './ProjectSummary';
@@ -26,7 +27,6 @@ import { isModelUnavailableError } from './providerErrorClass';
 import { isStarvedBudgetError, isUnclampedStarvation, isLaneBoundStarvation, isAskBoundStarvation } from './floorBudget';
 import { unreachedProvidersNote } from './runnerChainSummary';
 import { isBudgetEndedError, isReasoningRungHandoff } from './turnDeadline';
-import { BUILD_STOPPED_MESSAGE } from './stopSignal';
 import { typecheckEvidenceFromCommands, commandOutcomeText } from './TscGate';
 import { predictsBuildFailure, prodBuildOverrulesPredictions, overruledByRealBuildMessage } from './buildFailurePrediction';
 import { isAdvisoryCapOutcome } from './advisoryCapOutcome';
@@ -45,6 +45,8 @@ export type IssueSeverity = 'info' | 'warning' | 'error';
  * a human notices them; never a reason to hesitate before shipping the app.
  */
 const PROCESS_ONLY_CODES = new Set([
+  // Our template seeding and a user's Stop (autopsy 31254f9a): facts about the ENGINE's run, never the app.
+  'GOLDEN_SCAFFOLD_SKIPPED', 'LLM_CALL_STOPPED', 'SIMPLE_BUILD_STOPPED', 'DOMAIN_KNOWLEDGE', 'DURABLE_HOLDS_ONLY_STARTER',
   'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',
   // A repair's out-of-scope answer that OUR guard refused to write (autopsy eed79815): engine housekeeping.
   'REPAIR_OUT_OF_SCOPE',
@@ -1413,13 +1415,29 @@ export class BuildDiagnostics {
     // timeline must still show where. It simply stops being an accusation against a provider and a
     // blocker against the app.
     const budgetEnded = !rec.ok && isBudgetEndedError(rec.error);
+    // 🔴 …AND A CALL THE USER STOPPED DID NOT FAIL EITHER (autopsy 31254f9a, 2026-10-01). `stopSignal.ts`
+    // (autopsy 2720e553) made a stop one error with one meaning — "not a provider failure, not a timeout,
+    // not our budget" — and taught the provider chain, the bench and the time-wasted count to read it. This
+    // recorder was the sibling it never reached: a user who pressed Stop 23 s into a calculator build got
+    // an unresolved ERROR, "Model call failed (unknown)", on a report whose own outcome line says no failure
+    // is implied. Same shape as the budget case above, so the same treatment: recorded, resolved, info.
+    const stopped = !rec.ok && !budgetEnded && isBuildStoppedError(new Error(rec.error ?? ''));
     // 🔴 A HANDOFF IS NOT A FAILED CALL (autopsy d382b398, 2026-10-01). The fast lane stops in front of a
     // reasoning rung on purpose and hands its files to the full builder — `FAST_LANE_FELL_TO_REASONING_RUNG`
     // already records that. Each per-file call it stopped arrived here as an unresolved ERROR
     // ("Model call failed (unknown)", with all 51 pool keys listed) and became a SUCCESSFUL build's root
     // cause. Recorded as INFO and resolved, never dropped.
     const handedOff = !rec.ok && !budgetEnded && isReasoningRungHandoff(rec.error);
-    if (handedOff) {
+    if (stopped) {
+      this.record({
+        phase: 'provider',
+        severity: 'info',
+        code: 'LLM_CALL_STOPPED',
+        message: 'A model call was cancelled because the build was stopped — it did not fail, and no provider was at fault.',
+        autoResolved: true,
+        detail: rec.provider && rec.provider !== 'unknown' ? `provider=${rec.provider}` : 'no provider had answered yet',
+      });
+    } else if (handedOff) {
       this.record({
         phase: 'provider',
         severity: 'info',
@@ -1446,17 +1464,6 @@ export class BuildDiagnostics {
         message: `A model call was stopped by one of our own clocks — a budget or step deadline ran out while it was still running, so it did not fail (${rec.model ?? 'model'}).`,
         autoResolved: true,
         detail: rec.provider ? `provider=${rec.provider}` : undefined,
-      });
-    } else if (!rec.ok && rec.error === BUILD_STOPPED_MESSAGE) {
-      // 🔴 A STOP IS NOT A FAILED CALL (autopsy 3d1bfe2a). The user pressed Stop 8 s in, and the report
-      // carried `LLM_CALL_FAILED` at ERROR severity with provider "unknown" — `counts.errors = 1` on a
-      // build whose own outcome line says no failure is implied. Same treatment as a budget end.
-      this.record({
-        phase: 'provider',
-        severity: 'info',
-        code: 'LLM_CALL_STOPPED',
-        message: `A model call was cancelled because the user stopped the build — not a failure (${rec.model ?? 'model'}).`,
-        autoResolved: true,
       });
     } else if (!rec.ok || truncated) {
       // A TURN that timed out with nothing received is not "<model> failed" — no single provider

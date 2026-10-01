@@ -157,7 +157,7 @@ describe('wiring', () => {
     expect(route).toContain('sanitizeConfirmation(req.body?.confirmedFeatures, featureLists)');
     expect(route).toContain('renderRequestedFeatureContract(confirmedContractLabels(featureLists, featureConfirmation), prompt)');
     expect(route).toContain('buildRequirementGuidance(answered ? { ...gaps, likelyMissing: [] } : gaps');
-    expect(route).toContain('if (!reqGuidance && askedForAnApp && !answered && !smallScope)');
+    expect(route).toContain('if (!reqGuidance && askedForAnApp && !answered && !smallScope && !scaffoldWillSeed)');
   });
 
   it('the panel asks first, and any failure simply builds', () => {

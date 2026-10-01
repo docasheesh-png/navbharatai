@@ -101,7 +101,8 @@ describe('3 · a stray root file is not an app', () => {
     expect(ROUTE).toContain('{ projectExists: earlierRequestLeftAnApp, recentRequests }');
     expect(ROUTE).toContain('if (userAppExists || recentRequests.length === 0) return userAppExists || recentRequests.length > 0;');
     expect(ROUTE).not.toContain('{ projectExists, recentRequests }');
-    expect(ROUTE).toContain('durableSourceCount: appSourceFileCount(durableFilePaths)');
+    // One count for both guards, corrected only when the saved files are our untouched starter (autopsy 31254f9a).
+    expect(ROUTE).toContain('let durableSourceCount = appSourceFileCount(durableFilePaths);');
     expect(ROUTE).not.toContain('countEditableSourceFiles(durableFilePaths)');
     expect(ROUTE).toContain('const sourceCount = appSourceFileCount(fileTree);');
   });

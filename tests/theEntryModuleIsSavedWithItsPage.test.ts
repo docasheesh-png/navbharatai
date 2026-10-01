@@ -64,6 +64,6 @@ describe('the wiring (source guards — tsc cannot see which files a replace kee
     expect(src).toMatch(/entryModulesToCarry\(existingPaths, safe\.paths, indexHtml\)/);
   });
   it('every load passes through the heal', () => {
-    expect(src).toMatch(/return restoreDroppedEntryModules\(out, unindexed\);/);
+    expect(src).toMatch(/(?:return|const files =) restoreDroppedEntryModules\(out, unindexed\);/);
   });
 });

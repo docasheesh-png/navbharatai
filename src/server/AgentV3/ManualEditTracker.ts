@@ -44,6 +44,10 @@ function getDb(): admin.firestore.Firestore | null {
 // Same-instance cache so the common case (record + consume on one instance) never needs a read.
 const _cache = new Map<string, Set<string>>();
 const _cacheAt = new Map<string, number>();
+// Every path the user has put in or edited from Code Studio — NEVER cleared by a build (autopsy
+// 4d538ca3: a page the user added was deleted by the model two turns later, and the pending set above
+// is emptied at the start of every build, so the next one would not have known it was theirs).
+const _userFilesCache = new Map<string, Set<string>>();
 
 /** Record that the user MANUALLY edited these files in the IDE since the last build. Best-effort, never throws. */
 export async function recordManualEdits(workspaceId: string, paths: string[], at: number): Promise<void> {
@@ -54,12 +58,20 @@ export async function recordManualEdits(workspaceId: string, paths: string[], at
   for (const p of clean) { if (set.size >= MAX_PENDING_PATHS) break; set.add(p); }
   _cache.set(workspaceId, set);
   _cacheAt.set(workspaceId, at);
+  const owned = _userFilesCache.get(workspaceId) ?? new Set<string>();
+  for (const p of clean) { if (owned.size >= MAX_PENDING_PATHS) break; owned.add(p); }
+  _userFilesCache.set(workspaceId, owned);
   // Durable (cross-instance) — arrayUnion is race-safe across concurrent edits.
   const db = getDb();
   if (!db) return;
   try {
+    const slice = clean.slice(0, MAX_PENDING_PATHS);
     await db.collection(COLLECTION).doc(workspaceId).set(
-      { paths: admin.firestore.FieldValue.arrayUnion(...clean.slice(0, MAX_PENDING_PATHS)), at },
+      {
+        paths: admin.firestore.FieldValue.arrayUnion(...slice),
+        userFiles: admin.firestore.FieldValue.arrayUnion(...slice),
+        at,
+      },
       { merge: true },
     );
   } catch {
@@ -84,6 +96,26 @@ export async function peekManualEdits(workspaceId: string): Promise<PendingManua
     return { paths, count: paths.length, at: typeof data.at === 'number' ? data.at : 0 };
   } catch {
     return { paths: [], count: 0, at: 0 };
+  }
+}
+
+/**
+ * Every file the user has put in or edited from Code Studio in this workspace, across all builds — the
+ * set `userFileGuard` protects from deletion. Unlike the pending set, a build never clears it. Best-
+ * effort: on any failure it answers with what this instance has seen, never throws.
+ */
+export async function userOwnedFiles(workspaceId: string): Promise<string[]> {
+  if (!workspaceId) return [];
+  const local = _userFilesCache.get(workspaceId) ?? new Set<string>();
+  const db = getDb();
+  if (!db) return [...local];
+  try {
+    const snap = await db.collection(COLLECTION).doc(workspaceId).get();
+    const data = snap.exists ? (snap.data() || {}) : {};
+    const durable: string[] = Array.isArray(data.userFiles) ? data.userFiles.filter((p: unknown) => typeof p === 'string' && p) : [];
+    return [...new Set([...durable, ...local])];
+  } catch {
+    return [...local];
   }
 }
 
@@ -119,7 +151,8 @@ export function manualEditContext(paths: string[]): string {
     `The user manually changed ${clean.length} file${clean.length === 1 ? '' : 's'} in Code Studio after your last turn:`,
     list,
     'These edits are ALREADY SAVED and are the current source of truth. Read them before changing anything,',
-    'respect the user\'s changes, and build ON TOP of them — do NOT overwrite or revert them.',
+    'respect the user\'s changes, and build ON TOP of them — do NOT overwrite, revert or delete them.',
+    'A file here that is not part of the app (a reference page, a document) is still the user\'s: leave it in place.',
   ].join('\n');
 }
 

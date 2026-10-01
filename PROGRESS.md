@@ -86597,6 +86597,80 @@ reversion-proven four ways):
 
 **Still open:** the trial's verdict (Q-008, waiting on data). `byStrictCohort` is in the Firestore day doc
 but has no admin card yet; read it from the usage report data until one is added.
+---
+
+## 2026-10-01 — Autopsy 4d538ca3 (second build of the Bengali personal-AI-assistant report; Weak tier, ok, 8.0 min, ₹205.97)
+
+**The run:** an English "continue" turn added a Memory screen to a Bengali assistant app. It rendered at 231 s and
+passed every browser check. Then, chasing a readiness score of 0/100, **the model ran `rm` on a page the user had
+added from Code Studio** (`Rabni_Roy_AI_Studio_ALL_IN_ONE-7.html`), against a prompt that said *"do not remove any
+existing working features"*. The deletion appeared only as an admin `FILE_DELETED` line.
+
+**Tally:** ✅ 3 self-healed · 🔀 2 workarounds · ⏭️ 3 skipped · ❌ 5 shipped imperfect · 🥵 6 struggle points.
+
+**Ledger (problem → root cause → class → siblings → lock):**
+1. ❌🔀 **User's file deleted to clear a score.** `evaluate` scored 34 `unsafe-html-sink` findings that were all in a
+   page the Vite bundle never ships. Nothing protects a user's file: every delete guard covers app SOURCE only.
+   **Class:** gates judge files that are not the app, and the bash tool can remove what the user brought in.
+   **Fix:** `outsideTheApp.ts` sets aside an HTML page a bundled project does not ship (not the entry, not in
+   `public/`, named by no bundler config; unknown means judge everything) and names it in the result.
+   `userFileGuard.ts` + `shellRemovalTargets` refuse `rm`/`unlink`/`git rm` of a user-owned file unless the request
+   names it with a delete word (kill switch `AGENTV3_USER_FILE_GUARD=off`; report code `USER_FILE_KEPT`).
+   `ManualEditTracker` now keeps a durable `userFiles` set that a build never clears.
+   **Siblings:** the tech-debt register (`appSecurityFindings`); the manual-edit note now says "do not delete".
+   **Lock:** `tests/theUsersFileIsNotTheBuildsToDelete.test.ts`, reversion-proven three ways.
+2. 🥵 **`evaluate` stayed stale after the delete.** Only `assessBuildReadiness` re-read the disk; an `evaluate` the
+   model called judged the old graph. **Fix:** the seed (which also forgets deleted files) runs inside `evaluate`
+   itself. **Lock:** same file, reversion-proven.
+3. ❌🥵 **INTEGRITY_FOCUS_CONFLICT on two screens never mounted together.** The repair then removed Memory's focus
+   (4 edits, 3 type errors, 35 s). **Fix:** `conflictingFocusOwners` treats two owners as exclusive only when one
+   parent renders both behind guards on the same value with different literals (`&&`, ternary, `switch`); anything
+   less certain stays a conflict. **Lock:** `tests/twoScreensDoNotFightForFocus.test.ts`, reversion-proven.
+4. 🥵 **Five false "React is not imported" notes** over writes tsc had called clean. The #3425 rule flagged any
+   `React.`; measured with tsc, a TYPE use (`React.FC`, `React.FormEvent`) compiles through the UMD global, and only
+   a VALUE use raises TS2686. **Fix:** `reactNamespaceValueUse`. Sibling `fixReactUmdGlobal` is tsc-driven and was
+   already right. **Lock:** `PostEditReviewer.test.ts`; the old test that pinned `React.FC` as an error was wrong
+   and was corrected. Reversion-proven.
+5. ❌ **"⚠️ Build Review (85/100): [PASS]"**: the reviewer wrote no score; 85 was our inferred default, and it picked
+   the warning icon. **Fix:** `ReviewResult.scoreStated`; an inferred score is never shown, and the icon follows the
+   findings. **Lock:** `ReviewerAgent.test.ts`, reversion-proven.
+6. 🥵 **"continue" scored complex_app 63 → reasoning rung, fast lane skipped; REQUIREMENT_GAPS said SaaS.** The word
+   `subscription` came from *"Do not add any … subscription"*. `featureRequest.ts` has refused negated FEATURES
+   since 2026-07-13; the DOMAIN reader never learned it. **Fix:** `withoutDeclinedSentences` inside
+   `stripNonDomainUses`; siblings `isComplexAppPrompt` and `namesHeavyGame`. **Lock:**
+   `tests/aDeclinedWordIsNotTheApp.test.ts` (precision locks included), reversion-proven.
+7. ❌ **"No further tools needed." in the user's summary.** The model answered our own end-of-turn rule. The reply
+   streams, so the fix is the instruction (the summary is read by the user). **Lock:** `tests/theSummaryIsForTheUser.test.ts`.
+8. 🔎 **"durable read (0 file(s))" right after build 1 saved 11.** `loadWorkspaceFiles` answers `{}` for an empty
+   store AND a failed read. **Fix (honesty):** `loadWorkspaceFilesWithStatus`; the turn-start guardian prints the
+   status and records `DURABLE_READ_FAILED`. **Lock:** `tests/aFailedReadIsNotAnEmptyStore.test.ts`, reversion-proven.
+9. ⚠️ **Latent: the language line ordered English labels into a Bengali app** (an English "continue" on a Bengali
+   app got "write ALL user-facing text in the language they wrote in, in Latin letters"). **Fix:** on an edit that
+   names no language, new text matches the app's existing language; only the reply follows the message. Architect
+   and sub-agents read the same line. **Lock:** `tests/anEditKeepsTheAppsLanguage.test.ts`, reversion-proven.
+
+**Recorded, no fix:** ✅ an `edit_file` miss self-healed in 2 s; ✅ the reviewer guessed `src/lib/db.ts` (0 s, the
+tool said it does not exist); 🥵 seven piecemeal `App.tsx` edits (~60 s, model style); ⏭️ 24 off-grid spacings
+noted, not fixed (advisory); ⏭️ `JOURNEY_NOT_RUN` on a state-routed SPA (known open item); the 21.79 kB
+`dist/index.html` is the sandbox's bridged build, which publish and snapshot strip via `downloadDistFiles`.
+
+**OPEN root causes (rule 6)** — tracked in `BUILD_REPORT_QUEUE.md` as Q-017 (with Q-010), Q-018 and Q-019; the
+off-grid spacing and the state-switched journey are already Q-015 and Q-016:
+- **Why the durable store read 0 files** at the start of build 2. ⚠️ **This has come back:** autopsy e725e002
+  (2026-09-29) also found "the durable store held 0 files, the sandbox came up WARM on a resumed id". That fix
+  (shadow twins) handled what the empty store let happen and never asked why it was empty. The next report's `SETUP_TIMING` names the status.
+  `unreadable` means a read fault; `empty` means the store was emptied between builds, a data-safety defect to chase.
+- **Only Code Studio edits are remembered as the user's files.** A zip/repo import or a chat attachment saved into
+  the workspace is not in `userFiles` yet, so the guard does not cover it. Needs a decision on bulk imports
+  (protecting 500 imported files from cleanup is a product call).
+- **A file the build deletes is never told to the user.** `FILE_DELETED` is admin-only; the summary said nothing.
+  With the guard, a USER file can no longer be deleted unasked; a build's own stale file still can, silently.
+- **The user's deleted page is not restored by this fix.** It was added after build 1, so build 1's Time Machine
+  point does not hold it; the user needs their own copy.
+
+**Missing subsystem:** a **file-provenance ledger**: one record of who owns each file (user, this build, an earlier
+build, the platform) and whether it ships. Today the user-file set, the authored set, `isNonAppPath`,
+`outsideTheApp` and `modelAuthoredPaths` each answer part of that question separately.
 ## 2026-10-01 — Autopsy 2b1f845e: a commit message is not a dev server, the sandbox's agent is not an app, our badge is not input
 
 **Session:** claude/new-session-gx9294. **Report:** build `2b1f845e`, Weak tier, edit turn, 19.1 min, ₹519.10 —

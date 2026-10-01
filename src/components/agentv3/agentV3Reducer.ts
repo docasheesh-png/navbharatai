@@ -1,4 +1,5 @@
 import { plainCommand, plainFileName } from './toolLabels';
+import { isAppEntryPath } from './earlyPreviewCue';
 import type { ActivityEntry, AgentCard, AgentRole, AgentV3ClientState, AgentV3WireEvent, FileChange, NarrationLine } from './agentV3Types';
 
 // Pure reducer: folds each NDJSON wire event into the client state that drives
@@ -75,7 +76,7 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
         // The saved copy belongs to the build that produced it. A new build means the copy is of
         // the PREVIOUS app, and framing it during this one would show edits that are not there yet.
         // …and so does the running cost: a new build's figure starts from nothing, never from the last one's.
-        ...(isNewBuild ? { todos: [], agents: {}, snapshotUrl: undefined, snapshotNote: undefined, costSoFarInr: undefined } : {}),
+        ...(isNewBuild ? { todos: [], agents: {}, snapshotUrl: undefined, snapshotNote: undefined, costSoFarInr: undefined, entryWrittenAt: undefined } : {}),
       };
     }
 
@@ -217,6 +218,8 @@ export function agentV3Reducer(state: AgentV3ClientState, event: AgentV3WireEven
       return {
         ...state,
         files: applyFileChange(state.files, event.change),
+        // The app's entry was written: from here the preview shows the app (earlyPreviewCue.ts).
+        ...(state.entryWrittenAt === undefined && event.change.kind !== 'delete' && isAppEntryPath(event.change.path) ? { entryWrittenAt: event.ts } : {}),
         activity: pushActivity(state.activity, { id: `f-${event.ts}-${event.change.path}`, ts: event.ts, kind: 'file', text: `${verb} ${plainFileName(event.change.path)}`, agent: event.agent, ok: true }),
       };
     }

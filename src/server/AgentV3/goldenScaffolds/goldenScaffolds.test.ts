@@ -67,7 +67,18 @@ describe('golden scaffolds — every simple starter chip ships a hand-verified, 
       });
 
       it('is white-label and secret-free', () => {
-        const blob = Object.values(files).join('\n').toLowerCase();
+        // ONE named exception (admin 2026-10-01): the AI image template's picture engine IS the
+        // generate_image_ai recipe's own module, and the admin chose Pollinations as that engine, so its
+        // address must be in the code that calls it. Only that file, only that one name: every other
+        // vendor stays forbidden in it, and the screen itself (App.tsx) still names nobody.
+        const engine = g.id === 'ai-image' ? files['src/lib/imageAi.ts'] : undefined;
+        if (engine !== undefined) {
+          for (const vendor of ['anthropic', 'claude', 'openai', 'gemini', 'moonshot', 'kimi', 'glm-', 'z.ai', 'grok']) {
+            expect(engine.toLowerCase(), 'imageAi.ts ' + vendor).not.toContain(vendor);
+          }
+        }
+        const blob = Object.entries(files).filter(([p]) => !(engine !== undefined && p === 'src/lib/imageAi.ts'))
+          .map(([, c]) => c).join('\n').toLowerCase();
         for (const vendor of ['anthropic', 'claude', 'openai', 'gemini', 'moonshot', 'kimi', 'glm-', 'z.ai', 'grok', 'pollinations']) {
           expect(blob, vendor).not.toContain(vendor);
         }

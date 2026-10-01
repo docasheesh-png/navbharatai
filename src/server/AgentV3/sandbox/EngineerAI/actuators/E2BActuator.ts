@@ -78,6 +78,7 @@ import { injectPreviewBridge, withoutPreviewBridge, PREVIEW_BRIDGE_MARKER } from
 import { browseConsoleCaptureEnabled, CANCELLED_REQUEST_RE } from '../../../renderCheckConsole';
 import { gunzipSync } from 'zlib';
 import { LIST_PRUNE_DIRS, isListPrunedPath } from '../../../../lib/generatedDirs';
+import { NPM_INSTALL_LOCK } from '../../../tscCommand';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -777,6 +778,19 @@ export class E2BActuator implements IEngineerActuator {
    * Never throws; returns success flag + combined log for the agent to read.
    */
   private async _npmInstall(sandbox: Sandbox): Promise<{ success: boolean; log: string }> {
+    // 🔒 THE INSTALL SAYS IT IS RUNNING (autopsy 120eb52f). A typecheck that found the tree "stale" used to
+    // start its own `npm install` into the same node_modules as this one, and `typescript` came out torn.
+    // `TSC_ENSURE` waits while this marker is fresh. Best-effort both ways: a marker we could not write
+    // only means the old behaviour, and one we could not remove goes stale in minutes.
+    await sandbox.commands.run(`touch ${NPM_INSTALL_LOCK}`, { timeoutMs: 5_000 }).catch(() => {});
+    try {
+      return await this._npmInstallUnlocked(sandbox);
+    } finally {
+      await sandbox.commands.run(`rm -f ${NPM_INSTALL_LOCK}`, { timeoutMs: 5_000 }).catch(() => {});
+    }
+  }
+
+  private async _npmInstallUnlocked(sandbox: Sandbox): Promise<{ success: boolean; log: string }> {
     // Step 0 (SPEED — warm node_modules primer): the custom E2B template bakes a fully-installed
     // vite-react baseline at /home/user/.warm/vite-react (see infra/e2b/e2b.Dockerfile). When the
     // workspace has NO node_modules yet AND declares react (a vite-react-family app), copy that baked

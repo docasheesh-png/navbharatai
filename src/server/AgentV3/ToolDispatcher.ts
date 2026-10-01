@@ -84,8 +84,8 @@ import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, usesNonKitNbClass } from './kitRestore';
-import { findUndefinedClasses, isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, collectDefinedClasses } from './CssConsistency';
-import { pageDesignWriteNote, isPageFile } from './DesignCoverage';
+import { findUndefinedClasses, isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, missingImportedSheetNote, collectDefinedClasses } from './CssConsistency';
+import { pageDesignWriteNote, isPageFile, analyzeDesignCoverage, type DesignDefect } from './DesignCoverage';
 import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
 import { shellWriteTargets } from './shellWriteTargets';
 import { unfixableInstallNote } from '../lib/unfixablePackages';
@@ -345,6 +345,7 @@ import { generateCsvIntegration } from '../lib/CsvGenerator';
 import { generateAuditLogIntegration } from '../lib/AuditLogGenerator';
 import { generateSoftDeleteIntegration } from '../lib/SoftDeleteGenerator';
 import { generateImageIntegration } from '../lib/ImageGenerator';
+import { generateImageAiIntegration } from '../lib/ImageAiGenerator';
 import { generateLoggingIntegration } from '../lib/LoggingGenerator';
 import { generateRequestIdIntegration } from '../lib/RequestIdGenerator';
 import { generateFileUploadIntegration } from '../lib/FileUploadGenerator';
@@ -3268,17 +3269,17 @@ export class ToolDispatcher {
    * stylesheet that cannot be read returns `[]`: this answer sends a model back to work, so it must never
    * name a class as undefined because the file that defines it was not read.
    */
-  async undefinedClassesNow(): Promise<{ missing: string[]; sheet?: string }> {
+  async undefinedClassesNow(): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }> }> {
     try {
       let listing: string[] = [];
       try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'style-resume-listing'); }
-      catch { return { missing: [] }; }
+      catch { return { missing: [], pages: [] }; }
       const paths = listing.map((p) => String(p).replace(/^\.?\/+/, ''));
       const sheets = paths.filter((p) => isProjectStylesheet(p));
       const code = paths
         .filter((p) => /^src\/.*\.(tsx|jsx|ts|js)$/.test(p))
         .filter((p) => !/\.(test|spec)\.[jt]sx?$/.test(p) && !/\.d\.ts$/.test(p));
-      if (sheets.length === 0 || sheets.length + code.length > ToolDispatcher.STYLE_NOTE_MAX_READS) return { missing: [] };
+      if (sheets.length === 0 || sheets.length + code.length > ToolDispatcher.STYLE_NOTE_MAX_READS) return { missing: [], pages: [] };
       const project: Record<string, string> = {};
       let unreadSheet = false;
       await Promise.all([...sheets, ...code].map(async (p) => {
@@ -3288,12 +3289,16 @@ export class ToolDispatcher {
           else if (isProjectStylesheet(p)) unreadSheet = true;
         } catch { if (isProjectStylesheet(p)) unreadSheet = true; }
       }));
-      if (unreadSheet) return { missing: [] };
+      if (unreadSheet) return { missing: [], pages: [] };
       const missing = findUndefinedClasses(project).filter((c) => !c.startsWith('nb-'));
       const sheet = sheets.includes('src/index.css') ? 'src/index.css' : sheets[0];
-      return { missing, sheet };
+      // The page-design half of the same end-of-turn check — the SAME judgement the end-of-build repair
+      // runs (analyzeDesignCoverage), with the whole project in hand, so the two cannot disagree.
+      let pages: Array<{ file: string; defects: DesignDefect[] }> = [];
+      try { pages = analyzeDesignCoverage(project).findings.map((f) => ({ file: f.file, defects: f.defects })); } catch { pages = []; }
+      return { missing, sheet, pages };
     } catch {
-      return { missing: [] };
+      return { missing: [], pages: [] };
     }
   }
 
@@ -3447,11 +3452,19 @@ export class ToolDispatcher {
       if (missingBy.size === 0) return '';
       // Something is still missing: before saying so, read every stylesheet in the project — a class a
       // parent component's sheet defines is not "undefined". Paid only when there is something to say.
+      let listed: Set<string> | null = null;
       try {
         const listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'css-note-listing');
-        await readInto(listing.map((p) => String(p).replace(/^\.?\/+/, '')).filter((p) => isProjectStylesheet(p)).slice(0, 30));
+        listed = new Set(listing.map((p) => String(p).replace(/^\.?\/+/, '')));
+        await readInto([...listed].filter((p) => isProjectStylesheet(p)).slice(0, 30));
         recount();
       } catch { /* the note then speaks from what was read, as before */ }
+      // A sheet the screen itself imports that the project does not have (autopsy 120eb52f). Claimed only
+      // from a listing we really read — a file we merely failed to read is not "missing".
+      const absentImport = (screen: string): string | undefined => {
+        if (!listed) return undefined;
+        return cssImportsOf(screen, content(screen)).find((sh) => !listed!.has(sh) && project[sh] === undefined && !(sh in files));
+      };
       // Name the sheet this project really has: a static app's is style.css, not src/index.css.
       const sheet = project['src/index.css'] !== undefined ? 'src/index.css'
         : (['style.css', 'styles.css', 'css/style.css'].find((sh) => project[sh] !== undefined) ?? 'src/index.css');
@@ -3464,7 +3477,8 @@ export class ToolDispatcher {
           const here = rest.filter((c) => defined.has(c));
           if (here.length > 0) { byOrphan.push([sh, here]); rest = rest.filter((c) => !defined.has(c)); }
         }
-        out += unimportedSheetNote(p, byOrphan) + undefinedClassesWriteNote(p, rest, sheet);
+        const absent = absentImport(p);
+        out += unimportedSheetNote(p, byOrphan) + (absent ? missingImportedSheetNote(p, absent, rest) : undefinedClassesWriteNote(p, rest, sheet));
       }
       return out;
     } catch {
@@ -5797,8 +5811,16 @@ export class ToolDispatcher {
             } catch { /* diagnostics are best-effort — never break the tool */ }
             const combined = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
             const tscErrs = parseTscErrors(combined);
-            if (tscErrs.length > 0) {
-              getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${tscErrs.length} TypeScript error(s).`);
+            // 🔴 AUTOPSY 120eb52f: a compiler whose install was torn crashed with `Cannot find module
+            // '../lib/tsc.js'` — no `error TS` line — and this tool said "type-checks clean" while the
+            // app held 15 errors. Zero parsed errors is not a verdict; the ONE reader decides.
+            const verdict = tscVerdict(combined);
+            if (verdict === 'not-run' || verdict === 'unknown') {
+              tscHeader = `TYPECHECK DID NOT RUN — the TypeScript compiler could not start, so the types were NOT checked (this is not a verdict about your code). Its output:\n${combined.split('\n').slice(0, 8).join('\n')}\n\n`;
+            } else if (tscErrs.length > 0 || verdict === 'failed') {
+              // `failed` with nothing parsed is a project-level error (`error TS5023: Unknown compiler
+              // option`) that names no file — still a failure, never "clean".
+              getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${Math.max(tscErrs.length, countTscErrors(combined))} TypeScript error(s).`);
               // The same analysis the write-time note and the endgame repair carry. No `sources` here:
               // this tool holds no file content, and reading one back would put I/O in a hot path for a
               // sharper wording. The sourceless form still names both causes in order and still says not
@@ -9174,6 +9196,33 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('image processing');
         return `Wired image processing:\n${imgWritten.join('\n')}\nAdd the dependency: ${imgcfg.dependency.name}@${imgcfg.dependency.version}\n\n${imgcfg.instructions}`;
+      }
+
+      case 'generate_image_ai': {
+        // AI image generation inside the user's app (admin 2026-10-01): Pollinations AI by default (no key),
+        // or — with server: true — the app's own route, where the owner's IMAGE_PROVIDER + IMAGE_API_KEY
+        // pick the engine and the key never reaches the browser. Pure generator in ImageAiGenerator.ts.
+        const iaServer = input['server'] === true || input['server'] === 'true';
+        let iaReact = false;
+        try { iaReact = /"react"\s*:/.test(await this.actuator.readFile(this.workspaceId, 'package.json')); } catch { iaReact = false; }
+        const iacfg = generateImageAiIntegration({ server: iaServer, react: iaReact });
+        const iaWritten: string[] = [];
+        for (const [path, content] of Object.entries(iacfg.files)) {
+          if (path === '.env.example') {
+            try { await this.actuator.readFile(this.workspaceId, path); iaWritten.push(`Kept existing ${path} (add: ${iacfg.envKeys.join(', ')})`); continue; } catch { /* absent → create */ }
+          }
+          let kind: 'create' | 'modify' = 'create';
+          try { await this.actuator.readFile(this.workspaceId, path); kind = 'modify'; } catch { kind = 'create'; }
+          await this.actuator.writeFile(this.workspaceId, path, content);
+          this.state?.recordFileChange({ path, kind }, agent);
+          getWorkspaceMemory(this.workspaceId).indexFile(path, content);
+          iaWritten.push(`${kind === 'create' ? 'Created' : 'Updated'} ${path}`);
+        }
+        this.scheduleCheckpoint('ai image generation');
+        const iaHeadline = iaServer
+          ? 'Wired AI image generation through the app\'s server (Pollinations AI until the owner sets their own key)'
+          : 'Wired AI image generation with Pollinations AI (no key needed)';
+        return `${iaHeadline}:\n${iaWritten.join('\n')}\n\n${iacfg.instructions}`;
       }
 
       case 'generate_logging': {

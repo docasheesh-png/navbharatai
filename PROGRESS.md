@@ -86561,3 +86561,31 @@ the one unguarded instance.
   `/api/nav-store/status`. If it is the adaptive guard's 429, that is a second real defect (per-IP burst
   limit on a CGNAT phone network) and gets its own fix. **Tried:** read every guard in front of the route;
   the route and its four helpers cannot throw on their own.
+
+## 2026-10-01 — Autopsy 39955124 (Dwarkadhish game, stopped by the user at 5.7 min)
+
+Sixth-rule ledger (every item ✅ or 🟡):
+- **D1 ✅** A bare `about` keyword ordered an "about page" from "learn about the stories" (the model's
+  first line repeated it). `about page` / `contact page` now need the page sense — "about page / us /
+  section", "contact form / us / page", or a place in a list of site pages (`sitePageListed`).
+- **D2 ✅** A 79-line spec typed one feature per line (no markers) counted 13 fragments, under the
+  spec line. Plain short lines under a colon opener now count — for the SPEC STAND-DOWN only
+  (`plainLines`); the project gates keep their count, because a one-app spec decomposed into modules is
+  the SignBridge harm. A comma sentence with a clause longer than an item is prose (lowers counts only).
+  SignBridge's 200-line prompt now reads as a spec too; its test asserts that, and the sense-filter lock
+  moved to a short prompt.
+- **D3 ✅** RELEASE_GATE said "the typecheck did not run" beside six clean write-time typechecks:
+  `recordCommand` kept the first 500 chars, and the `TSC_ENSURE` prefix is longer than that, so every
+  platform typecheck lost its `tsc --noEmit` and no evidence reader recognised it. `clipCommand` keeps
+  both ends. Covers the `typecheck` tool and the endgame re-check as well (same command builder).
+- **D4 ✅** The architect delegated planning to a `planner` sub-agent that re-read the scaffold for 116 s.
+  Planning-only roles (requirement / planner / product) now return `PLAN_YOURSELF_NOTE` instead of a
+  sub-agent; the `task` description says so.
+- **D5 ✅** A single-player game was asked "who are the user roles?" and "how many users?" — skipped for
+  a solo game; a multiplayer / online / leaderboard game still gets them.
+- **D6 🟡 → Q-010** Warm sandbox held only part of our starter again (11 files completed) — the first
+  typecheck then paid for installing the compiler. Second occurrence recorded on Q-010.
+- **D7 🟡 → Q-014** Stopped at 5.7 min with no preview; what the screen showed is not in the report.
+- Not defects: `run_recipe` listing (0 s), COMPLEXITY 90 vs APP_SCOPE "single-purpose" (each serves its
+  own gate), the prompt itself being pasted out of order (user input).
+Tests: `tests/theDwarkaGameAutopsy.test.ts` (real prompt as fixture), each fix proven by reversion.

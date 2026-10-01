@@ -163,7 +163,9 @@ describe('5 · a kit-looking class the kit does not have is named at write time'
   const SHELL = `<nav className="nb-nav"><ul className="nb-nav-list"><li className="nb-nav-item active">x</li></ul></nav><h1 className="nb-page-title">{t}</h1><div className="card">`;
   it('🔴 the report classes are flagged; kit classes and plain app classes are not', () => {
     expect(inventedKitClasses(SHELL, 'src/components/DashboardShell.tsx', { 'src/index.css': '.card{}' }))
-      .toEqual(['nb-nav', 'nb-nav-list', 'nb-page-title']);
+      // `nb-nav` joined the kit after a SECOND report invented it for the same shell (autopsy 3d1bfe2a) —
+      // a name two builds reach for independently is the kit's job, not the model's.
+      .toEqual(['nb-nav-list', 'nb-page-title']);
     expect(usesNonKitNbClass('<div className="nb-topbar card-title">', 'src/A.tsx')).toBe(false);
   });
   it('a class the app defines itself is not flagged', () => {

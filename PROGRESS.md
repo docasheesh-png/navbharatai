@@ -87357,7 +87357,7 @@ open PR's CI failed with it (#3462 first).
 The admin decided the five 🟡 rows the de3bb2bb autopsy left open. Ledger:
 
 BUILD REPORT de3bb2bb — RESOLUTION (follow-up)
-Items: 5 · ✅ Resolved on merge of #3467: 5 · 🟡 Blocked: 0 · Remaining: 0
+Items: 5 · ✅ Resolved: 5 (Q-064 closed by #3465, folded into Q-009; Q-065–Q-068 on merge of #3467) · 🟡 Blocked: 0 · Remaining: 0
 - **Q-064 ✅ (not our defect, admin: "leave")** — GLM flashx crawled twice; provider speed is Z.ai's. The crawl bench
   (180 s, one re-probe) did what it was built to do. Third instance of Q-009.
 - **Q-065 ✅** — a 189 s KIMI call wrote 7 files in one `write_files_batch`, so nothing reached the preview for three
@@ -87382,3 +87382,34 @@ Items: 5 · ✅ Resolved on merge of #3467: 5 · 🟡 Blocked: 0 · Remaining: 0
 Proof: `tests/theDe3bb2bbFollowUp.test.ts` (17 cases), each fix reverted and its tests seen failing.
 **What to watch:** smaller `write_files_batch` calls; `STYLE_RULES_RESUMED` lines prefixed with a sub-agent role;
 `UNKNOWN_NAME_IN_REQUEST` on a real prompt with a typo in capitals.
+## 2026-10-01 — Admin decisions on Q-009, Q-014, Q-015, Q-023 (and Q-064 folded into Q-009)
+
+The admin answered "karo" to the line naming these rows. Each decision row had a recommended option, and that option
+is what was adopted. The rows leave `BUILD_REPORT_QUEUE.md`; this entry is their ledger.
+
+- **Q-014 ✅ (option a, keep).** When `.env.example` and the server's own `process.env.PORT || N` fallback disagree,
+  the env example still ranks higher in `DECLARED_PORT` (`declaredPort.test.ts` unchanged). It has no practical
+  effect, because the proven recipe port (recorded from the real launch since the 2b1f845e autopsy) outranks the
+  declared port, so the preview door reaches the port the server really listens on. **Reopen if** a report shows the
+  door on the example's port while the recipe names another.
+- **Q-015 ✅ (option a, agreed not defects).** The three 2b1f845e warnings were correct reports:
+  - `read_file .env.example`: the file really did not exist, and the model created it next.
+  - The `edit_file` miss on `tsconfig.server.json`: the tool showed the real file, and the next write landed.
+  - The 21 off-grid values: 18 of them are in a `src/index.css` written by the earlier build. `lintDesign` on the
+    kit itself scores 100.
+
+  #3458 already keeps an untouched file out of the end-of-turn hand-back.
+- **Q-023 ✅ (option a, keep).** A 9-section spec of about 40 listed parts is a project, so 16 modules is the
+  intended decomposition. The JARVIS failure was the modules being written in Kotlin, and the planner's stack note
+  fixed that. **Reopen if** a spec made mostly of one-line commands ("Open YouTube", "Open Maps") decomposes and its
+  modules fail for being too thin.
+- **Q-009 ✅ (accepted as provider weather, Q-064 folded in).**
+  - **What happened:** the GLM lead rung (`glm-4.7-flashx`) crawled in six reports: 6461025c, d382b398, e49afa97,
+    1219c639, de3bb2bb and 2f723acb. Each crawl cost 15–30 s (4–7% of the build).
+  - **Why accepted:** the crawl is on Z.ai's side, so no code here can make their model faster. Our part works: the
+    crawl bench abandons after 15 s, benches for 180 s, re-probes once, and benches for the build on a second crawl
+    (#3448 fixed the one defect on our side). Q-064 (de3bb2bb) was the same thing, the re-probe crawling as well.
+  - **Reopen if:** a single build loses more than 60 s to crawls, or crawls exceed 10% of builds' wall time over a
+    day.
+  - **The real lever then:** a ladder change (another lead rung on Weak/Normal). That is the admin's routing
+    decision, not a code fix.

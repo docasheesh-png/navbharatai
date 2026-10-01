@@ -260,17 +260,30 @@ function joinRelative(fromFile: string, spec: string): string {
  *
  * The component files (`.tsx` / `.jsx`) that no other file imports and that no framework loads by its
  * name or place. Precision first: a file is set aside only when it is PROVEN unreferenced — any import
- * whose path resolves to it, by relative path, keeps it. PURE.
+ * whose path resolves to it keeps it, and a graph with an entry missing or an import that resolves to no
+ * file we were given sets nothing aside. PURE.
  */
 export function unreferencedComponents(files: Record<string, string>): Set<string> {
   const paths = Object.keys(files ?? {}).map((p) => p.replace(/^\.?\/+/, ''));
+  const present = new Set(paths);
+  const stems = new Set(paths.map(stemOf));
   const referenced = new Set<string>();
+  let imports = 0;
   for (const [raw, src] of Object.entries(files ?? {})) {
     if (typeof src !== 'string') continue;
     const from = raw.replace(/^\.?\/+/, '');
     IMPORT_SPEC.lastIndex = 0;
-    for (let m = IMPORT_SPEC.exec(src); m; m = IMPORT_SPEC.exec(src)) referenced.add(stemOf(joinRelative(from, m[1])));
+    for (let m = IMPORT_SPEC.exec(src); m; m = IMPORT_SPEC.exec(src)) {
+      const target = joinRelative(from, m[1]);
+      // A graph with a hole proves nothing: an import of a file we were not given could be the one that
+      // shows the component, so nothing is called unreferenced.
+      if (!present.has(target) && !stems.has(stemOf(target))) return new Set();
+      referenced.add(stemOf(target));
+      imports++;
+    }
   }
+  // No entry file, or no import at all, means the graph is not observable here either.
+  if (imports === 0 || !paths.some((p) => LOADED_BY_PLACE.test(p))) return new Set();
   const out = new Set<string>();
   for (const p of paths) {
     if (!/\.(?:tsx|jsx)$/i.test(p) || LOADED_BY_PLACE.test(p)) continue;

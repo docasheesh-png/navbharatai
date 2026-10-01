@@ -86968,6 +86968,7 @@ Q-038 🟡 "No tests at all" accurate (agreement). Locked in `tests/theOldPerson
 bottom-nav apps; no overrun line before the promised band's high end; `ONESHOT_SKIPPED` after a hand-off.
 **Note (same day):** #3448 merged; verified on `main` that it covers all four Q-035 items (`LLM_CALL_HANDED_OFF`,
 no key list for a hand-off, a crawl is not a timeout strike, `${family} benched:` prefix) — Q-035 ✅, removed from the open table.
+**Note (same day):** #3451 merged (`b5f7cf16`) — Q-030 … Q-034 ✅, removed from the open table. Q-036/Q-037/Q-038 stay 🟡.
 
 ### 2026-10-01 — Autopsy 042e472f + dfd24058 (the JARVIS report): a Kotlin request is built as a phone-ready web app
 

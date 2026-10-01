@@ -86619,7 +86619,8 @@ tool said it does not exist); 🥵 seven piecemeal `App.tsx` edits (~60 s, model
 noted, not fixed (advisory); ⏭️ `JOURNEY_NOT_RUN` on a state-routed SPA (known open item); the 21.79 kB
 `dist/index.html` is the sandbox's bridged build, which publish and snapshot strip via `downloadDistFiles`.
 
-**OPEN root causes (rule 6):**
+**OPEN root causes (rule 6)** — tracked in `BUILD_REPORT_QUEUE.md` as Q-017 (with Q-010), Q-018 and Q-019; the
+off-grid spacing and the state-switched journey are already Q-015 and Q-016:
 - **Why the durable store read 0 files** at the start of build 2. ⚠️ **This has come back:** autopsy e725e002
   (2026-09-29) also found "the durable store held 0 files, the sandbox came up WARM on a resumed id". That fix
   (shadow twins) handled what the empty store let happen and never asked why it was empty. The next report's `SETUP_TIMING` names the status.

@@ -33,6 +33,10 @@ export interface StarterTemplate {
   /** Shown on the FIRST screen of the picker, before "More templates" is opened. See `pickerSections()`
    *  for why this is a flag on the data rather than "the first twelve of the array". */
   featured?: boolean;
+  /** Shown BEFORE every category on the first screen, lowest number first (admin 2026-10-01: "AI image
+   *  generator" first, then GST, then to-do). A deliberate, named exception to the category order, never
+   *  an accident of where a chip sits in the array. */
+  pinOrder?: number;
   /** The rich, specific prompt dropped into the composer. Detailed on purpose — it showcases the engine and
    *  gives the requirement-analyzer a real domain to build out fully. */
   prompt: string;
@@ -44,8 +48,14 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
   // so their FIRST build works. Kept single-page, no backend/auth-server/realtime/payments (localStorage
   // at most) — exactly the shape the weak GLM/Kimi tier ships cleanly.
   // ══════════════════════════════════════════════════════════════════════════════════════════════════
+  // FIRST on the picker for everyone (admin 2026-10-01). The picture engine is the `generate_image_ai`
+  // recipe's own tested module, pre-seeded by the golden scaffold, and it needs no key.
   {
-    id: 'todo', label: 'To-do', icon: '✅', category: 'Productivity', tier: 'simple', featured: true,
+    id: 'ai-image', label: 'AI image', icon: '🎨', category: 'Personal', tier: 'simple', featured: true, pinOrder: 1,
+    prompt: 'Build an AI image generator app: type a description, choose a shape (square, wide or portrait), press Generate and see a real AI-made picture with a clear progress state, then download it or generate another. Offer a few example ideas to tap, show friendly error messages with a Try again button, and use the free image engine that needs no API key. Mobile-first, light/dark mode.',
+  },
+  {
+    id: 'todo', label: 'To-do', icon: '✅', category: 'Productivity', tier: 'simple', featured: true, pinOrder: 3,
     prompt: 'Build a to-do list app: add, edit, complete and delete tasks, organise them by category, filter by all/active/done, and save everything in the browser so it persists on reload. Clean, mobile-friendly UI with light/dark mode.',
   },
   {
@@ -97,7 +107,7 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
   // split a shop actually has to print, and a mock test with sections and negative marking. Both are
   // one screen over plain React state, which is why the weak tier ships them whole.
   {
-    id: 'gst-bill', label: 'GST bill', icon: '🏪', category: 'Business', tier: 'simple', featured: true,
+    id: 'gst-bill', label: 'GST bill', icon: '🏪', category: 'Business', tier: 'simple', featured: true, pinOrder: 2,
     prompt: 'Build a GST billing app for a shop: keep a list of items each with a price and a GST slab (0/5/12/18/28%), add items to a bill with quantities, and show the bill with taxable value, the CGST and SGST split per slab, and the final total in rupees. Auto-increment the bill number, allow a customer name, support printing the bill, and save the item list in the browser. Mobile-first with large tappable item buttons and light/dark mode.',
   },
   {
@@ -215,7 +225,7 @@ export const STARTER_TEMPLATES: StarterTemplate[] = [
   // astronomy, so it is a pro ARCHITECTURE the paid engine extends — and it is honest about its own
   // limit rather than inventing the planets it cannot place offline.
   {
-    id: 'kundali', label: 'Kundali', icon: '✨', category: 'Personal', tier: 'pro', showcase: true, featured: true,
+    id: 'kundali', label: 'Kundali', icon: '✨', category: 'Personal', tier: 'pro', showcase: true,
     prompt: 'Build a Janam Kundali (Vedic birth chart) app in Hindi: save several birth profiles, each with a name, date of birth, time of birth and birth city chosen from a list of Indian cities or entered as a latitude and longitude. For the selected profile CALCULATE, from the standard formulae and not from a stored table, the local sidereal time, the Lagna (ascendant) with its exact degree, the twelve bhava, the Lahiri ayanamsa, and the sidereal positions of the Sun, the Moon, Rahu and Ketu with each one\'s rashi, nakshatra and pada. Draw the traditional North Indian diamond chart as a diagram with the rashi number and the placed grahas in each house. State clearly and honestly which grahas are computed and that placing Mangal through Shani needs a planetary ephemeris the offline app does not carry, so the user is never shown a position that was guessed. Hindi labels with English in brackets, rupee-free, mobile-friendly sidebar layout, light/dark mode.',
   },
   {
@@ -295,7 +305,11 @@ export interface PickerSections {
  * Pure — no React, no I/O.
  */
 export function pickerSections(list: readonly StarterTemplate[], limit = 12): PickerSections {
-  const ordered = startersByCategory(list).flatMap(({ items }) => items);
+  const byCategory = startersByCategory(list).flatMap(({ items }) => items);
+  // Pinned chips lead in their own order, ahead of every category (see `pinOrder`); the rest keep the
+  // category order.
+  const pinned = byCategory.filter((t) => typeof t.pinOrder === 'number').sort((a, b) => (a.pinOrder ?? 0) - (b.pinOrder ?? 0));
+  const ordered = [...pinned, ...byCategory.filter((t) => typeof t.pinOrder !== 'number')];
   const initial = ordered.filter((t) => t.featured === true).slice(0, Math.max(0, limit));
   // Top up from the un-featured remainder so the first screen is never sparse on a tier whose featured
   // chips are mostly locked away (a free user's featured set is only the `simple` half of the library).

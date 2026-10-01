@@ -104,3 +104,17 @@ describe('a component exported by name on its own line is a component', () => {
     expect(extractFacts('src/A.tsx', 'export default function Card() { return null; }\n').components).toEqual(['Card']);
   });
 });
+
+// Same review, the accessibility half: the login template's errors were red text a screen reader never
+// connected to its field. Every field with an error is marked invalid and points at the message.
+describe('the login template\'s errors reach a screen reader', () => {
+  it('each validated input carries aria-invalid and aria-describedby, and each message has the id', () => {
+    const login = GOLDEN_SCAFFOLDS.find((s) => /login/i.test(s.id))!.appTsx;
+    for (const f of ['email', 'password', 'confirm']) {
+      expect(login).toContain(`aria-invalid={!!errors.${f}}`);
+      expect(login).toContain(`aria-describedby={errors.${f} ? '${f}-error' : undefined}`);
+      expect(login).toContain(`id="${f}-error" role="alert"`);
+    }
+    expect(login).toContain("aria-pressed={mode === 'login'}");
+  });
+});

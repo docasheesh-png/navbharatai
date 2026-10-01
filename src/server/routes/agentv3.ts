@@ -1892,6 +1892,17 @@ function starterCompletedOf(actuator: unknown, workspaceId: string): string {
   }
 }
 
+/**
+ * The `restore=` field of THIS setup's line (autopsy 3d1bfe2a). The actuator keeps the restore of the
+ * fresh machine that it last brought up, and a warm or resumed setup used to print it as its own:
+ * "sandbox=warm · restore=nothing saved yet" about a workspace whose store held 12 files. A machine that
+ * was already up was not restored by this setup. PURE.
+ */
+export function setupRestoreText(origin: string | null, restore: string | null): string {
+  if (origin === 'warm' || origin === 'resumed') return `n/a — the machine was already up${restore ? ` (when it came up: ${restore})` : ''}`;
+  return restore ?? 'n/a (warm or resumed)';
+}
+
 function sandboxRestoreOf(actuator: unknown, workspaceId: string): string | null {
   try {
     const fn = (actuator as { sandboxRestore?: (id: string) => SandboxRestoreOutcome | null })?.sandboxRestore;
@@ -10523,6 +10534,27 @@ async function noteBuildOutcome(
       try { return getWorkspaceMemory(intentWorkspaceId).recentRequestTurns(6); } catch { return []; }
     })();
 
+    /**
+     * 🔴 AN EARLIER REQUEST COUNTS ONLY IF IT LEFT SOMETHING (autopsy 3d1bfe2a). The reader is told a
+     * project exists whenever there is an earlier request, so a small app living entirely in our
+     * scaffold paths is still edited. But a request stopped before it wrote a file left only our
+     * starter, and the next order was built as an "edit" of it. Read only when it can change the answer
+     * (no app of the user's own, an earlier request present); unreadable or slow ⇒ today's behaviour.
+     */
+    const earlierRequestLeftAnApp = await (async (): Promise<boolean> => {
+      if (userAppExists || recentRequests.length === 0) return userAppExists || recentRequests.length > 0;
+      if (!Array.isArray(projectFilePaths)) return true;
+      const codePaths = projectFilePaths.filter((p) => couldBeAppCode(p));
+      if (codePaths.length === 0) return false;
+      if (codePaths.length > 24) return true;
+      try {
+        const got = await raceTimeout(loadWorkspaceFilesByPath(intentWorkspaceId, codePaths), 3_000, 'starterCheck');
+        const files: Record<string, string | null> = {};
+        for (const p of codePaths) files[p] = typeof got[p] === 'string' ? got[p] : null;
+        return !holdsOnlyOurStarter(files);
+      } catch { return true; }
+    })();
+
     let intent = classifyIntent(prompt);
     // The reader's fourth answer: "they want something made but have not said WHAT" (report
     // d6d664e6). False unless the reader says so, so every path below is unchanged without it.
@@ -10549,7 +10581,7 @@ async function noteBuildOutcome(
           // `userAppExists` is fail-safe (an unreadable listing answers yes), and an earlier request in this
           // workspace also counts: a small app living entirely in `src/App.tsx` (a scaffold path) has no
           // file of its own, and an ambiguous "make it blue" must still be read as an edit of it.
-          { projectExists: userAppExists || recentRequests.length > 0, recentRequests },
+          { projectExists: earlierRequestLeftAnApp, recentRequests },
         ),
         6_000,
         'classifyIntentSmart',
@@ -13930,7 +13962,7 @@ async function noteBuildOutcome(
               // store (#2818), `started-by=` says what caused the machine to exist at all (#2820).
               // Reading them side by side is the whole point — "created fresh · restored 24/24 ·
               // started-by=preview-door" is a complete story that neither line tells alone.
-              + `restore=${sandboxRestoreOf(actuator, workspaceId) ?? 'n/a (warm or resumed)'}`
+              + `restore=${setupRestoreText(sandboxOriginOf(actuator, workspaceId), sandboxRestoreOf(actuator, workspaceId))}`
               + ` · started-by=${sandboxSessionOf(actuator, workspaceId)?.reason ?? 'unreported'}`
               + starterCompletedOf(actuator, workspaceId),
           });
@@ -17430,7 +17462,8 @@ async function noteBuildOutcome(
         if (sb.outcome && !sb.stopped) {
           buildDiag.record(sb.ok
             ? { phase: 'build', severity: 'info', code: `OUTCOME_${sb.outcome}`, message: `Build outcome: ${sb.outcome}`, autoResolved: true }
-            : { phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_OUTCOME', message: `Fast-lane outcome (handed off to the full builder): ${sb.outcome}`, autoResolved: true });
+            // A stop is not a BUILD_FAILED and is not handed to anyone (autopsy 3d1bfe2a).
+            : { phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_OUTCOME', message: sb.stopped ? 'Fast-lane outcome: stopped by the user — not a failure, and not handed off.' : `Fast-lane outcome (handed off to the full builder): ${sb.outcome}`, autoResolved: true });
         }
         // HANDOFF FRAMING (StudySync root cause, 2026-07-16): when the fast lane timed out but SALVAGED
         // its finished files into the workspace, the full builder must treat them as ITS OWN prior work

@@ -86897,6 +86897,36 @@ Q-024 🟡 seven items argued not defects (agreement). Locked in `tests/theElect
 moment; `LLM_CALL_HANDED_OFF` instead of `LLM_CALL_FAILED` on handoffs; the user summary after
 `STYLE_RULES_RESUMED` is the app description.
 
+## 2026-10-01 — Autopsy 3d1bfe2a ("Automation AI app": stopped at 8 s, then rebuilt as an edit)
+
+Admin answers the same day: **Q-004 = (a)** — keep the tool-reading review above the inline bound (closed);
+**Q-008 = yes** — the strict-mode trial is the next PR; **Q-020** — no answer yet, stays blocked.
+
+Sixth-rule ledger:
+- **C1 ✅** "An AI automation app" ran as an EDIT of our own starter ("✏️ Editing your existing app (11
+  source files)"), so no fast lane and no plan. The intention reader was told a project exists whenever
+  an earlier request exists; the earlier request had been stopped before writing anything. An earlier
+  request now counts only if the workspace holds something other than our starter, byte for byte
+  (`holdsOnlyOurStarter`, read only when it can change the answer; unreadable ⇒ today's behaviour).
+- **C2 ✅** That build was sized as taskType `chat` (chat ETA, 3–6 min for a 6.6 min build) — the
+  consequence of C1: as `new_build` the analyser files it `app_unsized`.
+- **B1 ✅** The stop was recorded as `LLM_CALL_FAILED` at ERROR (provider "unknown", `counts.errors = 1`).
+  Now `LLM_CALL_STOPPED`, info — the same treatment a budget end already had.
+- **B2 ✅** The fast lane filed the stop as `BUILD_FAILED` "handed off", and said "the files finished so
+  far are saved" about zero files. ⚠️ #3449 (autopsy 31254f9a, another session) landed the same fix first
+  (`stoppedLaneSummary`, `LLM_CALL_STOPPED`, `holdsOnlyOurStarter` for the rebuild guard); this PR keeps
+  theirs and adds only what theirs does not cover — the INTENT READER (C1), whose `edit_existing` answer
+  never reaches the rebuild guard's `intent === 'new_build'` check.
+- **C3 ✅** Build 2's setup line reprinted build 1's "completed 11 missing template files" (the count was
+  never cleared) and the machine's creation-time restore ("nothing saved yet") beside `sandbox=warm`.
+  Both now describe THIS setup (`setupRestoreText`).
+- **C4 ✅** The model invented `.nb-nav` and `.nb-brand-icon` for the sidebar shell — the obvious names, absent
+  from the kit — and spent four reads and four edits of `index.css` (one failed) adding them. Both are now
+  kit rules and named in the prompt's shell recipe.
+- **B3 🟡 → Q-010** (third occurrence). **C5 🟡 → Q-009** (GLM crawled twice; the bench worked).
+- Not defects: the reviewer's "second read" note (the file WAS handed to it — true), one manual `tsc`
+  after the clean note (one 2 s step), a 4px-grid advisory at grade A, "No tests" before the E2E scaffold.
+Tests: `tests/aStoppedRequestLeftNothing.test.ts`, each fix proven by reversion.
 ### 2026-10-01 — autopsy e49afa97 ("App for old person help", Weak, ok, 6.8 min, ₹108.26)
 
 The app was built, rendered, typechecked and pressed in a real browser (15 controls). What was wrong was

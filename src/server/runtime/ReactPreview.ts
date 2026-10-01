@@ -255,7 +255,7 @@ function baseStyles(vfs: VirtualFileSystem): string {
  * Build a self-contained, in-browser-bundled React preview document.
  * Returns an HTML string; if no entry module is found, falls back to a clear notice.
  */
-export function buildReactPreview(vfs: VirtualFileSystem, origin?: string, workspaceId?: string): string {
+export function buildReactPreview(vfs: VirtualFileSystem, origin?: string, workspaceId?: string, opts?: { building?: boolean }): string {
   const entry = findReactEntry(vfs);
 
   // Gather every source + css module so the in-browser loader can resolve imports.
@@ -502,6 +502,36 @@ ${REACT_CORE_LOADER_SOURCE}
     });
   }
   var missingLocal = {};   // resolved path → importer, for local files referenced but never created
+  // 🖥️ EARLY PREVIEW (src/server/AgentV3/earlyPreview.ts). While a build is running, a SCREEN that is
+  // imported but not written yet renders as a "being built" card that the next write replaces, instead
+  // of nothing plus a red "missing file" banner. An entry written early then shows the app's real frame
+  // at once. Only a capitalised name is a screen; a lowercase module (a helper, a hook) keeps the old
+  // empty stub, because rendering a card where a value was expected would be a different bug. After
+  // the build BUILDING is false and every missing file is reported exactly as before.
+  var BUILDING = ${JSON.stringify(opts?.building === true)};
+  var buildingLocal = {};  // resolved path → importer, for screens a running build has not written yet
+  function nbaiPartName(p) {
+    var parts = String(p || '').split('/');
+    var base = parts.pop() || '';
+    var dot = base.lastIndexOf('.');
+    var name = dot > 0 ? base.slice(0, dot) : base;
+    if (name === 'index' && parts.length) name = parts.pop() || name;
+    return name;
+  }
+  function nbaiIsScreenName(n) { var c = String(n || '').charAt(0); return c >= 'A' && c <= 'Z'; }
+  function nbaiBuildingPart(label) {
+    return function NbaiBuildingPart() {
+      var props = { role: 'status', 'data-nbai-building': label, style: { margin: '12px 0', padding: '16px', border: '1px dashed rgba(127,127,127,0.55)', borderRadius: '12px', background: 'rgba(127,127,127,0.08)', color: 'inherit', opacity: 0.85, font: '14px/1.4 system-ui, sans-serif', textAlign: 'center' } };
+      var text = '\\u23F3 ' + label + ' is being built\\u2026';
+      var R = bareCache['react'];
+      if (R && !R.createElement && R['default']) R = R['default'];
+      if (R && R.createElement) return R.createElement('div', props, text);
+      var J = bareCache['react/jsx-runtime'];
+      if (J && !J.jsx && J['default']) J = J['default'];
+      if (J && J.jsx) { props.children = text; return J.jsx('div', props); }
+      return null;
+    };
+  }
   var SRC_EXT = ['.jsx', '.js', '.tsx', '.ts', '.mjs'];
   // ROOT-LOCAL SPECIFIERS (CoreUI report 2026-07-07): real Vite apps import from the project ROOT
   // without a leading './' — \`import { logo } from 'src/assets/brand/logo'\`, \`from 'src/components'\`
@@ -801,7 +831,23 @@ ${previewBridgeSource('in-browser')}
           cache[resolved] = { exports: { __esModule: true, default: IMG_PLACEHOLDER } };
           return cache[resolved].exports;
         }
-        missingLocal[resolved] = path;
+        if (BUILDING && nbaiIsScreenName(nbaiPartName(resolved))) {
+          buildingLocal[resolved] = path;
+          var part = nbaiBuildingPart(nbaiPartName(resolved));
+          var partStub = new Proxy(part, {
+            get: function (_t, k) {
+              if (k === '__esModule') return true;
+              if (k === 'default') return part;
+              if (typeof k === 'string' && nbaiIsScreenName(k)) return nbaiBuildingPart(k);
+              return function () { return ''; };
+            },
+          });
+          cache[resolved] = { exports: partStub };
+          return partStub;
+        }
+        // Mid-build a missing helper is not written YET, not missing: it gets the empty stub but no red
+        // "missing file" report — that report is for a build that has finished.
+        if (BUILDING) buildingLocal[resolved] = path; else missingLocal[resolved] = path;
         var stub = new Proxy(function () { return ''; }, {
           get: function (_t, k) { if (k === '__esModule') return true; if (k === 'default') return stub; return function () { return ''; }; },
         });
@@ -1014,6 +1060,8 @@ ${previewBridgeSource('in-browser')}
       setTimeout(function () { nbaiPainted = true; hideBoot(); }, 300);
       // If any local file was missing, the app still rendered (stubbed) — show an honest, non-blocking
       // banner naming the missing files and report them to the host so the build report captures them.
+      var pending = Object.keys(buildingLocal);
+      if (pending.length) console.info('[preview] still being built: ' + pending.join(', '));
       var miss = Object.keys(missingLocal);
       if (miss.length) {
         var note = 'Missing file' + (miss.length > 1 ? 's' : '') + ' (stubbed so the preview still renders): '

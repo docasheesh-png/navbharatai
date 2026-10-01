@@ -3123,6 +3123,41 @@ the flag entries above promise.
   three sinks shipped with a warning nobody acted on. Advisory, never blocks a write, no model call.
   Same PR, no flag: an `nb-` class the design kit does not define and no stylesheet defines is named at
   write time too (`inventedKitClassNote`).
+- **🖥️ `AGENTV3_EARLY_PREVIEW` — THE USER SEES THE APP WHILE IT IS BEING BUILT (admin 2026-10-01, verbatim: *"preview
+  jitna jaldi ayega, user utna rukega.... banao"*). ⚠️ NOT set; default ON; `off` reverts all four parts.**
+  `earlyPreview.ts`. In the calendar report the builder wrote five screens and never `src/App.tsx`, so the live preview
+  showed the starter page for five minutes and the user stopped. The architect and the UI specialists now write the
+  entry right after `src/types.ts`; a fast-lane hand-off names an unwritten entry first; while a build runs the
+  in-browser preview (`ReactPreview.ts`, `building`) draws an unwritten screen as a "being built" card and reports no
+  missing file as an error (the honest banner returns after the build); and the live strip offers "watch it live" once
+  the entry is written (`earlyPreviewCue.ts`; a desktop opens the preview itself). 🔒 Only a capitalised import becomes
+  a card — a missing helper keeps the empty stub. The fast lane's tier order is deliberately unchanged. Test-locked
+  with a real-browser render in `tests/theAppIsOnScreenWhileItIsBuilt.test.ts`.
+- **🙋 `AGENTV3_ASK_UNRELATED` — A DIFFERENT APP IS ASKED ABOUT, NOT BUILT INTO THE ONE THAT IS HERE (admin
+  2026-09-30, verbatim: *"puch lo user se!"*, on autopsy 1389f0d5: a Genesis-4 PDF was built INTO a calculator).
+  ⚠️ NOT set; default ON; `off` restores the old edit-always behaviour.** `unrelatedRequest.ts`. A build order on
+  a workspace that holds an app is normally turned into an edit (`BUILD_ORDER_READ_AS_EDIT`). Now, when the order
+  names a WHOLE thing (an app, website, game, PDF, store) that shares no word-stem with the app here (its own
+  file names and earlier build requests), the turn is answered in chat with the question: reply "add it to this
+  app", or tap "New" (phone: More → New chat) and send it there. 🔒 Precision first: an edit verb, "app me/ko …",
+  "this/the/my app", "make it …", a style comparison ("like a website"), packaging (android/apk/PWA), a part of
+  an app ("game mode", "pdf download") and continue/fix all stand it down, and so does a workspace we cannot read
+  or name. A 22-message precision lock in `tests/askBeforeBuildingSomethingElseIntoThisApp.test.ts` fails CI if
+  an ordinary edit ever meets the question. The reply never falls through to a build if the chat model fails.
+- **🧩 `AGENTV3_DANGLING_CSS_GUARD` — AN IMPORT OF A STYLESHEET THAT DOES NOT EXIST IS REMOVED (autopsy 120eb52f).
+  ⚠️ NOT set; default ON; `off` leaves such imports.** Four components imported `./X.css` files nobody wrote;
+  `tsc` cannot see a stylesheet import, and Vite cannot build one. At the end of a build, a SIDE-EFFECT import of
+  a sheet the sandbox confirms absent is removed (`DANGLING_STYLESHEET_IMPORT_REMOVED`); a CSS-module import
+  (`import s from …`) is never touched. Upstream half, no flag: the write-time class note now names the missing
+  imported file as the place for the rules instead of "Add the rules to src/index.css", which is how the
+  imports were left behind.
+- **🔒 ONE INSTALL INTO `node_modules` AT A TIME (autopsy 120eb52f, no flag).** The typecheck's own `npm
+  install` raced the background boot install and tore `typescript` (its `bin/` without its `lib/`); the crash was
+  then read as a CLEAN typecheck five times. `_npmInstall` now writes `/tmp/nbai-npm-install.lock`
+  (`NPM_INSTALL_LOCK`); `TSC_ENSURE` waits up to 20 s for it, then prints "still being installed" and checks
+  nothing rather than starting a second install; a torn compiler is removed and reinstalled; and
+  `looksLikeBrokenTscInstall` makes `tscVerdict` call any such output "did not run". ⚠️ A lock older than
+  6 minutes is ignored (an install is bounded at 5).
 - **📣 `AGENTV3_SUMMARY_ADDITIONS` — THE END OF A SUCCESSFUL BUILD IS WHAT THE USER STILL HAS TO DO (admin
   2026-09-30: *"app banne ke last me clearly user ko dikhe"*). ⚠️ NOT set, and the code default is ON**; `off`
   restores the old behaviour. `summaryAdditions.ts`.
@@ -3354,6 +3389,30 @@ the flag entries above promise.
   (`BROWSER_PAGE_OPTIONS`, one definition), because the kit's game button pulses for ever and Playwright
   never presses a moving element. The explorer dispatches the click on the same element only for a
   "not stable" failure.
+- **🖼️ AN APP THAT MAKES PICTURES REALLY MAKES THEM — `generate_image_ai` (admin 2026-10-01, verbatim:
+  *"jab user apni api key dalna chahe kisi aur provider ki to bhi dal sakta ho, jab chahe change kare, agar
+  user keys na de, to default pollination ai"*).** A recipe (`src/server/lib/ImageAiGenerator.ts`, reached
+  through `run_recipe`) writes a modular engine into the USER's app: `ImageGenerationProvider` →
+  `PollinationsProvider` / `ServerImageProvider` in `src/lib/imageAi.ts`, plus `useImageGenerator()` for React.
+  - **Default (`server` left out): the page calls Pollinations directly** (`image.pollinations.ai`, `safe=true`,
+    `private=true`). No key exists, so nothing can leak, and it works the same in the preview and after publish.
+  - **`server: true`: the page posts to the app's own `/api/generate-image`**, and `server/lib/imageAi.ts` picks
+    the engine on every request from the APP's env: no `IMAGE_API_KEY` ⇒ Pollinations; otherwise `IMAGE_PROVIDER`
+    = `pollinations` | `openai` (any OpenAI-compatible images API via `IMAGE_BASE_URL`) | `stability`, with
+    `IMAGE_MODEL`, and `IMAGE_RATE_PER_MINUTE` (default 10 per visitor). The owner sets them in Settings → App
+    Settings → Secrets & API Keys; the vault reaches the app's `.env` at boot (`devSecretsBoot.ts`), so a change
+    applies on the next start with no code change. ⚠️ These are the USER's app keys, not Cloud Run keys.
+  - 🔒 **A key with an unknown `IMAGE_PROVIDER` is sent NOWHERE** (an honest 500): guessing would hand one
+    company's key to another. A provider's refusal reaches the visitor as plain words; the detail goes to the log.
+  - `IMAGE_IN_APP_RULE` (`AgentV3/inAppImageGeneration.ts`) is read by the architect and every writing
+    sub-agent. **`AGENTV3_FASTLANE_IMAGE_APPS`** (NOT set; unset ⇒ an app that makes pictures skips the fast
+    lane, which cannot run a recipe; `on` lets it back) — `appGeneratesImages(prompt)`, report code
+    `FAST_LANE_SKIPPED_IMAGE_APP` (process-only).
+  - ⚠️ **Not verified against the live provider from a session** (its hosts are refused by the session's egress
+    policy). The generated code is compiled with the real TypeScript compiler under strict Vite settings and RUN
+    against a fake network in `tests/anImageAppMakesRealPictures.test.ts`; the first real build is the first live
+    evidence. ⚠️ A published STATIC app has no server, so the own-key path needs the app's server hosted
+    (NavBharat Cloud, which is admin-only today) — the Pollinations default needs nothing.
 - **`AGENTV3_GREEN_REVIEW_LEAN`** (default ON, set `off` to disable — added 2026-09-18, autopsy b6f88a72) —
   **a suggestion costs a suggestion's price.** `reviewerShouldWrite` (Green Stop) already makes the
   post-build reviewer suggest-only on a proven-green app — no repair, nothing it says can fail the
@@ -3863,6 +3922,11 @@ the flag entries above promise.
   the END of the file too and told how to append; the post-write "no React import" note is gone (the automatic
   JSX runtime needs none; only `React.` without an import is flagged); and every repair runner is marked
   `platformRequest`, so its reply never thanks the user for "the fixes you requested" (`platformRequest.ts`).
+  **Second pass, same day:**
+  - The end-of-turn message now carries the page-design findings too (the same `analyzeDesignCoverage`).
+  - A list of a hand-written record's own field (`topic.sections`) is no longer a "data list" (`recordFieldLiteral`).
+  - Every engine-authored user turn is stamped `origin: 'platform'` on its persisted copy (`pushPlatformTurn`), so a
+    reopened chat never shows a repair instruction as the user's own message.
 - **🙋 A QUESTION IS AN ANSWER, NOT AN EMPTY BUILD — the retry overrode a correct reply and billed
   ₹196.28 for it (autopsy `e628efd4`, 2026-09-25; no flag, on by construction).** A free-tier user
   asked *"if we don't have a chat in next 2 hours can you send a message to initiate the chat

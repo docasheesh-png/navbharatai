@@ -3044,6 +3044,25 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'generate_image_ai',
+      description:
+        'Add real AI image generation (text in, picture out) to the app — an AI image generator, art / logo / ' +
+        'wallpaper / avatar maker. Default: Pollinations AI, which needs NO key and NO signup and works in the ' +
+        'preview and after publishing, called straight from the page (src/lib/imageAi.ts: generateImage, ' +
+        'downloadImage; plus useImageGenerator() for React). Handles empty prompts, timeouts, rate limits, ' +
+        'retries, network failures and cancellation. Pass server: true when the app has a server or the owner ' +
+        'wants their OWN image provider key: the page then calls the app\'s /api/generate-image route and the ' +
+        'server picks the engine from settings (no IMAGE_API_KEY ⇒ Pollinations; IMAGE_PROVIDER = pollinations | ' +
+        'openai | stability with IMAGE_API_KEY), so the key never reaches the browser and can be changed at any ' +
+        'time without a code change. Never overwrites an existing .env.example.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          server: { type: 'boolean', description: 'true: route through the app\'s server so the owner can use their own provider key. Leave out (false) for an app with no server — Pollinations AI from the page.' },
+        },
+      },
+    },
+    {
       name: 'generate_webhook',
       description:
         'Add real incoming-webhook signature verification to the app (server/lib/webhook.ts): a dependency-free ' +
@@ -3618,6 +3637,7 @@ export const CATALOG_TOOL_NAMES = [
   'generate_audit',
   'generate_soft_delete',
   'generate_image',
+  'generate_image_ai',
   'generate_mobile_export',
   'generate_desktop_export',
   'repair_ci_workflow',
@@ -3760,6 +3780,7 @@ export const RECIPE_TOOLS = [
   'generate_http_client',
   'generate_ids',
   'generate_image',
+  'generate_image_ai',
   'generate_indian_validators',
   'generate_jobs',
   'generate_logging',

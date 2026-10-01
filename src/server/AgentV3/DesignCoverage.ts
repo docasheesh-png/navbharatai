@@ -187,6 +187,38 @@ function importedLiteral(content: string, before: string, pagePath: string, file
   return false;
 }
 
+/**
+ * THE SAME FACT, ONE FIELD DEEPER (autopsy 1be16985, 2026-10-01). A biology app's topic screen mapped
+ * `topic.sections`, where `topic: Topic` is a prop and every Topic in the app is written by hand in
+ * `src/data/topics.ts` (`export const topics: Topic[] = [ … sections: [ … ] … ]`). The list is the app's
+ * own lesson text, never empty, yet it was flagged LIST_WITHOUT_EMPTY_STATE and a repair pass added an
+ * `.nb-empty` "this topic has no sections" block nobody can ever see. The third instance of one class
+ * (SignBridge: a literal in the page; a7aa447c: a literal one import away; now: a field of a record
+ * whose every instance is a literal).
+ *
+ * The rule, all four facts required: the receiver is `x.field`; the page types `x` as `T`; a project
+ * module exports `const …: T[] = [` whose body writes `field: [`; and no file keeps a growable list of
+ * `T` (`useState<T[]>`), which is how user-created records would arrive. Anything else is judged
+ * exactly as before. PURE.
+ */
+function recordFieldLiteral(content: string, before: string, files: Readonly<Record<string, string>>): boolean {
+  const m = /\b([A-Za-z_$][\w$]*)\??\.([A-Za-z_$][\w$]*)\s*$/.exec(before);
+  if (!m) return false;
+  const esc = (x: string) => x.replace(/\$/g, '\\$');
+  const owner = esc(m[1]);
+  const field = esc(m[2]);
+  const typed = new RegExp(`\\b${owner}\\??\\s*:\\s*([A-Z][\\w$]*)\\b`).exec(content);
+  if (!typed) return false;
+  const type = esc(typed[1]);
+  const sources = Object.values(files).filter((c): c is string => typeof c === 'string');
+  const literalSource = sources.some((c) =>
+    new RegExp(`\\bexport\\s+const\\s+[\\w$]+\\s*:\\s*${type}\\[\\]\\s*=\\s*\\[`).test(c)
+    && new RegExp(`\\b${field}\\s*:\\s*\\[`).test(c));
+  if (!literalSource) return false;
+  const growable = new RegExp(`useState\\s*<\\s*${type}\\s*\\[\\]`);
+  return !sources.some((c) => growable.test(c)) && !growable.test(content);
+}
+
 export function rendersDataList(content: string, pagePath = '', files: Readonly<Record<string, string>> = {}): boolean {
   const re = /\.map\s*\(/g;
   let m: RegExpExecArray | null;
@@ -198,7 +230,8 @@ export function rendersDataList(content: string, pagePath = '', files: Readonly<
       || /\]\s*$/.test(before)
       || /\bObject\.(?:keys|values|entries)\(\s*[A-Z][A-Z0-9_]{1,}\s*\)\s*$/.test(before)
       || boundToLiteral(content, before)
-      || importedLiteral(content, before, pagePath, files);
+      || importedLiteral(content, before, pagePath, files)
+      || recordFieldLiteral(content, before, files);
     const rendersOptions = /^\.map\s*\([^]*?<option\b/.test(after) && !/<(?:li|tr|article|section|div)\b/.test(after.slice(0, after.search(/<option\b/)));
     if (!staticReceiver && !rendersOptions) return true;
   }
@@ -379,7 +412,8 @@ export function analyzeDesignCoverage(files: Record<string, string>): DesignCove
   return { pagesExamined, findings, ok: findings.length === 0 };
 }
 
-const DEFECT_TEXT: Record<DesignDefect, string> = {
+/** What a defect means and how to fix it — shared by the repair pass and the end-of-turn resume. */
+export const DEFECT_TEXT: Record<DesignDefect, string> = {
   NO_STYLESHEET:
     'it has NO stylesheet attached at all — no <link rel="stylesheet">, no <style> block, no inline '
     + 'styles. It renders as raw browser-default HTML while the other pages look designed. Link the '

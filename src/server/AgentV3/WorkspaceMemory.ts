@@ -504,6 +504,23 @@ export class WorkspaceMemory {
     return out;
   }
 
+  /**
+   * Files `evaluate` last judged to be OUTSIDE the app (a reference page the bundle never ships —
+   * autopsy 4d538ca3, see outsideTheApp.ts). Recorded so every later reader of the findings asks the
+   * same question once, instead of re-deriving it or forgetting to.
+   */
+  private outsideTheApp = new Set<string>();
+  setOutsideTheApp(paths: Iterable<string>): void {
+    this.outsideTheApp = new Set([...paths].map((p) => graphKey(p)));
+  }
+
+  /** Security findings in the APP — the files `evaluate` set aside as outside it are left out. */
+  appSecurityFindings(): SecurityFinding[] {
+    const all = this.securityFindings();
+    if (this.outsideTheApp.size === 0) return all;
+    return all.filter((f) => !this.outsideTheApp.has(graphKey(f.file)));
+  }
+
   snapshot(): MemorySnapshot {
     return { graph: this.graph(), episodes: [...this.episodes] };
   }

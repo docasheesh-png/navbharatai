@@ -206,7 +206,24 @@ const GENERIC_LANGUAGE_LINE =
  * frontend specialist wrote `locales/hi.ts` because the only language it ever heard of was the one
  * the architect chose). PURE.
  */
-export function appLanguageInstruction(prompt: string): string {
+/**
+ * 🔴 AN EDIT KEEPS THE APP'S LANGUAGE (autopsy 4d538ca3, 2026-10-01). A Bengali personal-assistant app
+ * (every label Bengali: "💬 চ্যাট", "🧠 মেমরি") was continued with an ENGLISH message, and the line above
+ * told the builder to write ALL user-facing text "in the SAME language they wrote in, in Latin letters"
+ * and "never translate the app into a language they did not write in" — an order to put English labels
+ * into a Bengali app. The model happened to keep Bengali; the instruction pointed the other way. The
+ * language of one follow-up message is not the language of the app it edits. Unless the request names
+ * a language, new text matches what the app already uses, and only the REPLY follows the message.
+ */
+export const EDIT_LANGUAGE_LINE =
+  'Language: this turn changes an EXISTING app. Every new label, button, heading, placeholder and message '
+  + 'you add must be in the language and script the app ALREADY uses — read its current labels and match '
+  + 'them, even when the user wrote this message in another language. Never mix two languages in one app '
+  + 'unless the user asks for it. Reply to the user in the language they wrote this message in. Keep code '
+  + 'identifiers and comments in English.';
+
+export function appLanguageInstruction(prompt: string, opts: { editingExistingApp?: boolean } = {}): string {
+  if (opts.editingExistingApp && !requestNamesAppLanguage(prompt)) return EDIT_LANGUAGE_LINE;
   const hint = detectLanguageHint(prompt);
   if (hint) return languageInstruction({ code: hint.code, name: hint.name, evidence: hint.evidence ?? 'script' });
   if (requestNamesAppLanguage(prompt)) return GENERIC_LANGUAGE_LINE;

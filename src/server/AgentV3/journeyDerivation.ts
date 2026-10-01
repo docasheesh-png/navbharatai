@@ -30,7 +30,7 @@ import { newPageOptionsExpr, isSignInRoute } from './signInExplore';
 import { declaredRoutes } from './routerPaths';
 import { rendersDataList } from './DesignCoverage';
 import { scanMarkup, type ScannedTag } from './jsxTags';
-import { NEVER_PRESS } from './clickExplorer';
+import { NEVER_PRESS, WRITE_VERBS } from './clickExplorer';
 import { withoutAppSignature } from './appSignature';
 
 /** How a single element is addressed, in the order Playwright should be asked for it. */
@@ -64,6 +64,13 @@ export interface Journey {
    * nobody asked for, and "it was only a test item" is not a defence.
    */
   writes: boolean;
+  /**
+   * A form on a screen no URL reaches (a wizard step, a tab switched by state): the word the control
+   * that shows it carries — `design` for `src/steps/DesignStep.tsx`. The runner presses a visible
+   * control whose name contains it, and only such a control, before looking for the form, and presses
+   * it again after a reload. Absent ⇒ the form is reached by its route, as before. (Autopsy 2b1f845e.)
+   */
+  reach?: string;
 }
 
 /** How many journeys to derive. A journey is a browser session; twenty of them is a build delay. */
@@ -750,6 +757,29 @@ export interface DeriveJourneysInput {
  * Derive the journeys this app's own code supports. Pure. Returns [] freely — most apps will yield one
  * journey or none, and none is a correct answer.
  */
+/** Words that name no screen: a component called one of these says nothing about the control that shows it. */
+const GENERIC_REACH = new Set(['app', 'main', 'index', 'root', 'layout', 'shell', 'form', 'input', 'field', 'modal', 'dialog', 'popup', 'card', 'item', 'list', 'row', 'base', 'common', 'shared', 'custom', 'my', 'the']);
+
+/**
+ * The word the control that shows this screen most likely carries — or null when the file name says
+ * nothing safe. PURE.
+ *
+ * `src/steps/DesignStep.tsx` → `design`; `RevenueTab.tsx` → `revenue`. 🔒 A word that is itself an
+ * action (`PostStep` → "post", `SendScreen` → "send") is refused: pressing a control named after it
+ * could publish, pay or send, and a journey must reach a screen without doing anything on the way.
+ */
+export function reachWordFor(path: string): string | null {
+  const base = String(path ?? '').split('/').pop()?.replace(/\.(?:t|j)sx?$/i, '') ?? '';
+  const stem = base.replace(/(?:Step|Screen|Tab|Panel|View|Page|Form|Section|Card|Modal|Dialog|Wizard)$/, '');
+  const first = (/^[A-Z]?[a-z]+/.exec(stem)?.[0] ?? '').toLowerCase();
+  if (first.length < 3 || GENERIC_REACH.has(first)) return null;
+  if (NEVER_PRESS.test(first) || WRITE_VERBS.test(first)) return null;
+  return first;
+}
+
+/** Component files that are neither pages nor tests — where a state-switched screen's form lives. */
+const SCREEN_FILE = /\.(?:t|j)sx$/i;
+
 export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
   const files = appOwnFiles(input?.files ?? {});
   const routes = input?.routes ?? [];
@@ -827,6 +857,52 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
         writes: !/search|filter|query/i.test(path),
       });
     }
+  }
+
+  // 🔴 A FORM NO PAGE REACHES IS STILL THE APP'S FORM (autopsy 2b1f845e). A five-step studio kept its
+  // forms in `src/steps/*.tsx`, shown by pressing "2 Design", "3 Review"… on `/`. No page composes them
+  // within `formSourcesFor`'s depth, so no journey was derived and the release gate stayed YELLOW with
+  // "no user journey could be derived" — while the click explorer had pressed those very steps. Such a
+  // form gets a journey on `/` that first presses the one control named after its screen (`reach`).
+  // Precision first: a screen whose name gives no safe word, a form whose submit is an outward action,
+  // or a file already used by a page journey yields nothing.
+  const pages = new Set(candidates);
+  for (const [path, src] of Object.entries(files)) {
+    if (out.length >= MAX_JOURNEYS) break;
+    if (typeof src !== 'string' || !SCREEN_FILE.test(path) || pages.has(path) || usedForms.has(path)) continue;
+    if (NOT_APP_UI.test(path) || ERROR_BOUNDARY_FILE.test(path)) continue;
+    const reach = reachWordFor(path);
+    if (!reach) continue;
+    const tags = formFields(src);
+    if (tags.length === 0) continue;
+    const fields: JourneyField[] = [];
+    let addressable = true;
+    for (const { tag, labelText } of tags.slice(0, 6)) {
+      const target = targetForInput(tag) ?? (labelText ? { kind: 'label' as const, value: labelText } : null);
+      if (!target) { addressable = false; break; }
+      const value = valueForInput(tag, marker);
+      if (value) fields.push({ target, value });
+    }
+    if (!addressable || fields.length === 0) continue;
+    const submit = submitTargetIn(src);
+    if (!submit) continue;
+    if (submit.kind === 'text' && NEVER_PRESS.test(submit.value)) continue;
+    usedForms.add(path);
+    const listed = rendersList(src);
+    const markerTyped = fields.some((f) => f.value.includes(marker));
+    const feeds = formFeedsList(src, submit) !== 'no';
+    const create = listed && markerTyped && feeds && !noWrites;
+    out.push({
+      id: `${create ? 'create-persists' : 'form-submit'}:${path}`,
+      kind: create ? 'create-persists' : 'form-submit',
+      route: '/',
+      title: create
+        ? `Open the "${reach}" screen, create an item and check it survives a reload`
+        : `Open the "${reach}" screen, fill and submit its form without the app breaking`,
+      fields, submit,
+      writes: create || !/search|filter|query/i.test(path),
+      reach,
+    });
   }
   return out.slice(0, MAX_JOURNEYS);
 }
@@ -909,8 +985,8 @@ export function noJourneyReason(files: Record<string, string>): string {
     // not get there, instead of denying that the input exists.
     const where = dataEntryEvidence(files ?? {});
     if (where) {
-      return `this app takes input (${where.what} in ${where.path}), but no page reaches that form — `
-        + 'screens switched without a router are not reached by this check';
+      return `this app takes input (${where.what} in ${where.path}), but no page reaches that form and its file `
+        + 'name gives no control to open it with — screens switched without a router are reached only by pressing a control named after them';
     }
     return 'this app has no form for a journey to fill in — nothing here takes user input';
   }
@@ -1010,6 +1086,7 @@ export function journeyScript(previewUrl: string, journeys: readonly Journey[], 
     id: ${JSON.stringify(j.id)},
     kind: ${JSON.stringify(j.kind)},
     route: ${JSON.stringify(j.route)},
+    reach: ${JSON.stringify(j.reach ?? null)},
     // A sign-in form is driven signed OUT (a session would only redirect away from it); every other
     // journey runs behind the door when the app has one (signInExplore.ts).
     pageOpts: ${newPageOptionsExpr(isSignInRoute(j.route) ? null : opts.storageState)},
@@ -1047,6 +1124,32 @@ for (const j of journeys) {
     // outward control, and only then look for the form.
     out.step = 'open';
     const submitVisible = async () => { const b = j.submit(page).first(); return (await b.count()) > 0 && await b.isVisible().catch(() => false); };
+    // A screen switched by state (journey.reach, autopsy 2b1f845e): press the ONE visible control whose
+    // name carries the screen's word — never an outward or creating control — and remember it, so the
+    // same control can be pressed again after the reload.
+    const REACH_SKIP = new RegExp(${JSON.stringify(WRITE_VERBS.source)}, 'i');
+    const pressReach = async (exact) => {
+      const cands = page.locator('button, [role=tab], [role=button], a[href="#"], a:not([href])');
+      const n = Math.min(await cands.count(), 60);
+      for (let i = 0; i < n; i++) {
+        const c = cands.nth(i);
+        if (!(await c.isVisible().catch(() => false))) continue;
+        const name = String((await c.innerText().catch(() => '')) || (await c.getAttribute('aria-label').catch(() => '')) || '').replace(/\\s+/g, ' ').trim().slice(0, 60);
+        if (!name) continue;
+        if (exact ? name !== exact : !name.toLowerCase().includes(j.reach)) continue;
+        if (NEVER.test(name) || REACH_SKIP.test(name)) continue;
+        if ((await c.getAttribute('type').catch(() => '')) === 'submit') continue;
+        await c.click({ timeout: 4000 }).catch(() => {});
+        await page.waitForTimeout(400);
+        return name;
+      }
+      return null;
+    };
+    if (j.reach && !(await submitVisible())) {
+      const via = await pressReach(null);
+      if (!via) { out.note = 'no visible control named after the "' + j.reach + '" screen was found to open it'; throw new Error('no-reach'); }
+      out.via = via;
+    }
     if (!(await submitVisible())) {
       const cands = page.locator('button, [role=button], a[href="#"], a:not([href])');
       const n = Math.min(await cands.count(), 40);
@@ -1101,6 +1204,8 @@ for (const j of journeys) {
         await page.reload({ waitUntil: 'domcontentloaded', timeout: ${JOURNEY_TIMEOUT_MS} });
         await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
         await page.waitForTimeout(400);
+        // The screen the item lives on is not the one a reload lands on — open it again the same way.
+        if (out.via) await pressReach(out.via);
         const survived = await page.getByText(marker, { exact: false }).count();
         out.verdict = survived > 0 ? 'passed' : 'failed';
         out.note = survived > 0

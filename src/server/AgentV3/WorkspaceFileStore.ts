@@ -370,14 +370,29 @@ export async function purgeWorkspaceFiles(workspaceId: string): Promise<void> {
  * Never throws.
  */
 export async function loadWorkspaceFiles(workspaceId: string): Promise<Record<string, string>> {
+  return (await loadWorkspaceFilesWithStatus(workspaceId)).files;
+}
+
+/**
+ * Why the durable store answered with what it did (autopsy 4d538ca3, 2026-10-01). A second build read
+ * **0 files** from a store the first build had just saved, and the report could not say whether the
+ * store was empty or the read had failed: `loadWorkspaceFiles` returns `{}` for both, the same shape
+ * the turn-start sandbox scan was fixed to stop using ("a scan that failed is not an empty sandbox").
+ * `unreadable` is never `empty`; `no-store` is a process with no database (tests, local dev).
+ */
+export type DurableReadStatus = 'ok' | 'empty' | 'unreadable' | 'no-store';
+
+export async function loadWorkspaceFilesWithStatus(
+  workspaceId: string,
+): Promise<{ files: Record<string, string>; status: DurableReadStatus; error?: string }> {
   const db = getDb();
-  if (!db) return {};
+  if (!db) return { files: {}, status: 'no-store' };
   try {
     const root = db.collection(COLLECTION).doc(workspaceId);
     const meta = await root.get();
-    if (!meta.exists) return {};
+    if (!meta.exists) return { files: {}, status: 'empty' };
     const paths: string[] = Array.isArray(meta.data()?.paths) ? meta.data()!.paths : [];
-    if (paths.length === 0) return {};
+    if (paths.length === 0) return { files: {}, status: 'empty' };
     // HEAL ON READ, not by migration. The writers above stop NEW phantoms; every workspace that
     // already holds one (the admin's did — that is how this was found) would otherwise keep reporting
     // a duplicate entry point forever. Normalizing here fixes them all at once, with no backfill job
@@ -398,9 +413,10 @@ export async function loadWorkspaceFiles(workspaceId: string): Promise<Record<st
       // sorts later wins, exactly as before this guard existed for a single key.
       out[key] = data.content;
     }
-    return restoreDroppedEntryModules(out, unindexed);
-  } catch {
-    return {};
+    const files = restoreDroppedEntryModules(out, unindexed);
+    return { files, status: Object.keys(files).length > 0 ? 'ok' : 'empty' };
+  } catch (err) {
+    return { files: {}, status: 'unreadable', error: String((err as Error)?.message ?? err).slice(0, 200) };
   }
 }
 

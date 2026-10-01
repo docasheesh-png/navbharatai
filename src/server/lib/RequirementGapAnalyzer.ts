@@ -491,7 +491,35 @@ export function stripNonDomainUses(input: string): string {
   // keep their meaning in any context.
   const raw = String(text || '');
   if (AI_ASSISTANT_CONTEXT.test(raw) && !PEOPLE_CHAT.test(raw)) out = out.replace(/\b(?:chats?|conversations?|messages?)\b/gi, ' ');
-  return out;
+  return withoutDeclinedSentences(out);
+}
+
+/**
+ * 🔴 A SENTENCE THAT DECLINES THINGS IS NOT A LIST OF WHAT THE APP IS (autopsy 4d538ca3, 2026-10-01).
+ * *"Do not add any paid service, paid API, recharge, subscription, or unnecessary dependency."* — the
+ * word `subscription` made a "continue" turn on a personal AI assistant a SaaS app: REQUIREMENT_GAPS
+ * proposed multi-tenant isolation, team roles and an audit log, and `namesBusinessDomain` scored the
+ * turn complex_app 63, which opened it on the always-reasoning rung and skipped the fast lane.
+ * `featureRequest.ts` has refused negated FEATURES since 2026-07-13 ("No settings, no other features");
+ * the DOMAIN reader never learned the same thing.
+ *
+ * A sentence that OPENS with a refusal ("do not", "don't", "never", "no", "without", "avoid") or ENDS
+ * with a Hinglish one ("… mat karo", "… nahi chahiye") is removed from the domain evidence. Precision
+ * first: "don't forget to …" and "do not miss …" are requests and stay; removal only DELETES evidence,
+ * so it can never invent a domain. PURE.
+ */
+const DECLINING_SENTENCE_START = /^\s*(?:please\s+)?(?:do\s+not|don'?t|never|no|without|avoid)\b(?!\s+(?:forget|miss|skip\s+adding)\b)/i;
+const DECLINING_SENTENCE_END = /\b(?:mat|nahi|nahin|na)\s+(?:karo|karna|kare|karein|chahiye|chahie|dalo|daalo|lagao|banao|jodo|add\s+karo)\s*$/i;
+/** A comma/semicolon clause inside an ordinary sentence that declines one thing ("…, no multiplayer"). */
+const DECLINING_CLAUSE_START = /^\s*(?:and\s+|but\s+)?(?:no|without|not|never|except|minus|bina)\b(?!\s+(?:forget|miss)\b)/i;
+export function withoutDeclinedSentences(text: string): string {
+  return String(text || '')
+    .split(/(?<=[.!?\n])/)
+    .map((sentence) => {
+      if (DECLINING_SENTENCE_START.test(sentence) || DECLINING_SENTENCE_END.test(sentence.replace(/[.!?\s]+$/, ''))) return ' ';
+      return sentence.split(/(?<=[,;])/).map((clause) => (DECLINING_CLAUSE_START.test(clause) ? ' ' : clause)).join('');
+    })
+    .join('');
 }
 
 /** Evidence the product IS an AI assistant, so its "chat" is with the AI (autopsy d8ed307a). */

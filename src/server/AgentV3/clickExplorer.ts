@@ -127,6 +127,28 @@ export const MAX_NARROWING_PROBES = 3;
 /** Names that make an input a search box. Hindi forms included: the lookup app in that autopsy said "खोजें". */
 export const SEARCH_CONTROL = /search|filter|find|look ?up|query|खोज|ढूं?ढ|ढूँढ|khoj|dhoon?dh|dhund/i;
 
+/**
+ * 🌓 A LIGHT/DARK SWITCH IS PRESSED UNTIL THE COLOURS CHANGE (autopsy 8257ca59, 2026-10-01). A
+ * calculator's polish step replaced the template's working theme switch with a 🌓 button that toggled a
+ * `dark` class on <html>, and no stylesheet had a rule for `.dark`. The explorer pressed it, saw no error,
+ * and recorded *"it responded (nothing visibly changed)"* as a pass — its only test is the page's text,
+ * and a theme switch changes colours, not words. The reviewer happened to catch it.
+ *
+ * So a control that names itself a theme switch (its text, aria-label or title) is pressed up to three
+ * times on its fresh load — a switch may cycle Auto → Light → Dark, and in a light browser the first step
+ * changes nothing — and the computed colours of the page are compared with the mouse moved away and focus
+ * dropped, so a hover or focus style on the button itself is never mistaken for the theme changing. No
+ * colour change on any press ⇒ `unresponsive`: reported, and repaired like any broken button.
+ *
+ * 🔒 Precision first: a bare "Light" or "Day" is not enough (a lamp in a smart-home app, a date picker);
+ * a later press that could not be made leaves the first verdict standing; a read that failed is "could
+ * not tell", never a failure.
+ */
+export const THEME_CONTROL = /\btheme\b|\bdark\b|\bappearance\b|\b(?:light|night|day) ?mode\b|🌓|🌗|🌘|🌒|🌑|🌙|🌛|🌜|☀|🌞|🔆|थीम|डार्क/iu;
+
+/** Presses a theme switch is given before "it changed nothing" may be said (Auto → Light → Dark). */
+export const MAX_THEME_PRESSES = 3;
+
 /** Names or options that make a menu a sort or filter menu. Deliberately not "type", "status" or "show". */
 export const SORT_CONTROL = /sort|order by|arrange|filter|categor|\ba\s*[-–]\s*z\b|\bz\s*[-–]\s*a\b|ascending|descending|\basc\b|\bdesc\b|newest|oldest|latest|price|low to high|high to low|क्रम|छा[ँं]ट|श्रेणी/i;
 
@@ -352,7 +374,10 @@ function failureSentence(p: PressResult): string {
     case 'broken-link': return `${pressName(p)} leads to a page that does not exist.`;
     case 'unresponsive': return p.kind === 'pick'
       ? `Choosing a different option in ${pressName(p)} changed nothing on the screen.`
-      : `Typing into ${pressName(p)} changed nothing on the screen — it does not search the list.`;
+      : p.kind === 'type'
+        ? `Typing into ${pressName(p)} changed nothing on the screen — it does not search the list.`
+        // A PRESS is judged unresponsive only for a light/dark switch (THEME_CONTROL).
+        : `Pressing ${pressName(p)} never changed the app's colours — the light/dark switch does not switch the theme.`;
     default: return `${doing} ${pressName(p)} caused an error in the app.`;
   }
 }
@@ -436,6 +461,8 @@ export function clickExplorerScript(previewUrl: string, opts: { blockWrites: boo
     maxNarrow: MAX_NARROWING_PROBES,
     searchSrc: SEARCH_CONTROL.source, searchFlags: SEARCH_CONTROL.flags,
     sortSrc: SORT_CONTROL.source, sortFlags: SORT_CONTROL.flags,
+    themeSrc: THEME_CONTROL.source, themeFlags: THEME_CONTROL.flags,
+    maxThemePresses: MAX_THEME_PRESSES,
   };
   return `cat > /tmp/nbai-explore.mjs <<'NBAI_EOF'
 ${clickExplorerModule(cfg)}
@@ -493,7 +520,11 @@ function collect(a) {
     if (why) { if (skipped.length < 8) skipped.push({ label: label || '(unnamed)', why }); continue; }
     if (chosen.length < a.maxClicks) {
       el.setAttribute('data-nbai-x', String(chosen.length));
-      chosen.push({ i: chosen.length, tag, label, key });
+      // A light/dark switch is judged by the page's colours, not its words (THEME_CONTROL). The text alone
+      // may say only "Auto" or "🌓", so its aria-label and title are read too.
+      const named = [label, el.getAttribute('aria-label') || '', el.getAttribute('title') || ''].join(' ');
+      const theme = !!(a.themeSrc && new RegExp(a.themeSrc, a.themeFlags).test(named));
+      chosen.push({ i: chosen.length, tag, label, key, theme });
     }
   }
   return { found: nodes.length, chosen, skipped, keys: Array.from(seen) };
@@ -506,6 +537,35 @@ function measure() {
   const rich = !!(root && root.querySelector('img, svg, canvas, video, iframe, input, button, textarea, select'));
   const hash = (s) => { let x = 5381; for (let i = 0; i < s.length; i++) x = ((x << 5) + x + s.charCodeAt(i)) | 0; return x; };
   return { len: text.length, head: text.slice(0, 160), rich, sig: document.body ? hash(document.body.innerHTML) + ':' + hash(document.body.innerText || '') : '' };
+}
+
+// The page's COLOURS: html, body and the first 60 visible elements of the app, leaving out the pressed
+// control itself (its own hover or focus style is not the theme changing). Runs INSIDE the page.
+function look(skip) {
+  const out = [];
+  const add = (el) => { const st = getComputedStyle(el); out.push(st.backgroundColor + '|' + st.color + '|' + st.borderTopColor); };
+  add(document.documentElement);
+  if (document.body) add(document.body);
+  const own = document.querySelector('[data-nbai-x="' + skip + '"]');
+  const root = document.querySelector('#root, #app, #__next') || document.body;
+  let n = 0;
+  for (const el of Array.from(root ? root.querySelectorAll('*') : [])) {
+    if (n >= 60) break;
+    if (own && (own === el || own.contains(el))) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) continue;
+    add(el);
+    n++;
+  }
+  return out.join(';');
+}
+
+// Moves the mouse off the app and drops focus, so a hover or focus style is not read as a change.
+async function restLook(page, skip) {
+  await page.mouse.move(0, 0).catch(() => {});
+  await page.evaluate(() => { const a = document.activeElement; if (a && a.blur) a.blur(); }).catch(() => {});
+  await page.waitForTimeout(400);
+  return page.evaluate(look, skip).catch(() => null);
 }
 
 // Runs INSIDE the page, so it must be self-contained (page.evaluate sends only this function's
@@ -654,6 +714,7 @@ async function pressOne(browser, target, discoverAgainst) {
     if (!hit) { res.note = 'the control was not there on a fresh load'; await page.close().catch(() => {}); return { res, revealed }; }
     const before = await page.evaluate(measure);
     const beforeUrl = page.url();
+    const lookBefore = hit.theme ? await restLook(page, hit.i) : null;
     armed = true;
     await press(page, hit.i);
     await settle(page);
@@ -667,6 +728,21 @@ async function pressOne(browser, target, discoverAgainst) {
     else if (missingPage) { res.verdict = 'broken-link'; res.note = 'it opened a page that does not exist'; }
     else if (res.errors.length > 0) { res.verdict = 'error'; res.note = 'the app threw an error when it was pressed'; }
     else { res.verdict = 'ok'; res.note = moved ? 'it opened another page, which loaded' : 'it responded'; }
+    // A light/dark switch must change the page's colours within a full cycle of presses (THEME_CONTROL).
+    if (res.verdict === 'ok' && !moved && lookBefore !== null) {
+      let presses = 1;
+      let verdictLook = 'unknown';
+      for (;;) {
+        const now = await restLook(page, hit.i);
+        if (now === null) break;
+        if (now !== lookBefore) { verdictLook = 'changed'; break; }
+        if (presses >= cfg.maxThemePresses) { verdictLook = 'same'; break; }
+        try { await press(page, hit.i); await settle(page); presses++; } catch { break; }
+      }
+      if (res.errors.length > 0) { res.verdict = 'error'; res.note = 'the app threw an error when it was pressed again'; }
+      else if (verdictLook === 'changed') { res.changed = true; res.note = presses > 1 ? "it changed the app's colours on press " + presses : "it changed the app's colours"; }
+      else if (verdictLook === 'same') { res.verdict = 'unresponsive'; res.note = 'pressing it ' + presses + " times never changed the app's colours — a light/dark switch that does not switch"; }
+    }
     armed = false;
     // Only a press that WORKED and CHANGED the screen can open a new screen worth exploring; a broken
     // one has already been reported, and exploring past it would report its damage a second time.

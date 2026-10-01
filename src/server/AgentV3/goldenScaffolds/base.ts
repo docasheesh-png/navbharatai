@@ -41,11 +41,13 @@ export function ThemeToggle() {
     localStorage.setItem('theme', mode);
   }, [mode]);
   const next: Record<Mode, Mode> = { auto: 'light', light: 'dark', dark: 'auto' };
-  const icon = mode === 'light' ? 'Light' : mode === 'dark' ? 'Dark' : 'Auto';
+  // The icon AND the word: "Auto" alone did not read as a light/dark switch, and a builder replaced it
+  // with a hand-rolled one that styled nothing (autopsy 8257ca59).
+  const icon = mode === 'light' ? '☀️ Light' : mode === 'dark' ? '🌙 Dark' : '🌓 Auto';
   return (
     <>
       <style>{OVERRIDES}</style>
-      <button onClick={() => setMode(next[mode])} title={'Theme: ' + mode} aria-label="Toggle light/dark theme" style={{ padding: '6px 12px', fontSize: 13 }}>
+      <button onClick={() => setMode(next[mode])} title={'Theme: ' + mode + ' (tap to change)'} aria-label="Toggle light/dark theme" style={{ padding: '8px 14px', fontSize: 14, minHeight: 40 }}>
         {icon}
       </button>
     </>

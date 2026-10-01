@@ -195,7 +195,7 @@ function App() {
   const [text, setText] = useState('');
   const [query, setQuery] = useState('');
 
-  useEffect(() => { localStorage.setItem(STORE_KEY, JSON.stringify(notes)); }, [notes]);
+  useEffect(() => { try { localStorage.setItem(STORE_KEY, JSON.stringify(notes)); } catch { /* storage blocked — notes last this visit */ } }, [notes]);
 
   const add = () => {
     const t = text.trim();
@@ -348,6 +348,18 @@ import ThemeToggle from './theme';
 
 const REMEMBER_KEY = 'login-remembered-email';
 
+// Storage can be switched off (a private window, a sandboxed frame), and then every read throws — in the
+// first render that blanks the whole page. Remembering is a convenience, so it simply stops.
+function readRemembered(): string {
+  try { return localStorage.getItem(REMEMBER_KEY) || ''; } catch { return ''; }
+}
+function writeRemembered(value: string | null): void {
+  try {
+    if (value) localStorage.setItem(REMEMBER_KEY, value);
+    else localStorage.removeItem(REMEMBER_KEY);
+  } catch { /* storage blocked — nothing is remembered */ }
+}
+
 function validEmail(v: string): boolean {
   const at = v.indexOf('@');
   const dot = v.lastIndexOf('.');
@@ -356,11 +368,11 @@ function validEmail(v: string): boolean {
 
 function App() {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
-  const [email, setEmail] = useState(() => localStorage.getItem(REMEMBER_KEY) || '');
+  const [email, setEmail] = useState(readRemembered);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [showPw, setShowPw] = useState(false);
-  const [remember, setRemember] = useState(() => !!localStorage.getItem(REMEMBER_KEY));
+  const [remember, setRemember] = useState(() => !!readRemembered());
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [user, setUser] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
@@ -372,8 +384,7 @@ function App() {
     if (mode === 'signup' && confirm !== password) e.confirm = 'Passwords do not match.';
     setErrors(e);
     if (Object.keys(e).length > 0) return;
-    if (remember) localStorage.setItem(REMEMBER_KEY, email);
-    else localStorage.removeItem(REMEMBER_KEY);
+    writeRemembered(remember ? email : null);
     setUser(email);
     setNotice('');
   };
@@ -403,8 +414,8 @@ function App() {
       </div>
       <div className="card stack">
         <div className="row">
-          <button className={mode === 'login' ? 'primary' : ''} onClick={() => { setMode('login'); setErrors({}); }} style={{ flex: 1 }}>Log in</button>
-          <button className={mode === 'signup' ? 'primary' : ''} onClick={() => { setMode('signup'); setErrors({}); }} style={{ flex: 1 }}>Sign up</button>
+          <button className={mode === 'login' ? 'primary' : ''} aria-pressed={mode === 'login'} onClick={() => { setMode('login'); setErrors({}); }} style={{ flex: 1 }}>Log in</button>
+          <button className={mode === 'signup' ? 'primary' : ''} aria-pressed={mode === 'signup'} onClick={() => { setMode('signup'); setErrors({}); }} style={{ flex: 1 }}>Sign up</button>
         </div>
         <div className="field" style={{ marginBottom: 0 }}>
           <label htmlFor="email">Email</label>
@@ -415,9 +426,11 @@ function App() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@example.com"
+            aria-invalid={!!errors.email}
+            aria-describedby={errors.email ? 'email-error' : undefined}
             style={errors.email ? { borderColor: 'var(--danger)' } : undefined}
           />
-          {errors.email && <small style={{ color: 'var(--danger)' }}>{errors.email}</small>}
+          {errors.email && <small id="email-error" role="alert" style={{ color: 'var(--danger)' }}>{errors.email}</small>}
         </div>
         <div className="field" style={{ marginBottom: 0 }}>
           <label htmlFor="password">Password</label>
@@ -429,13 +442,15 @@ function App() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="At least 8 characters"
+              aria-invalid={!!errors.password}
+              aria-describedby={errors.password ? 'password-error' : undefined}
               style={{ flex: 1, ...(errors.password ? { borderColor: 'var(--danger)' } : {}) }}
             />
             <button onClick={() => setShowPw(!showPw)} aria-label={showPw ? 'Hide password' : 'Show password'}>
               {showPw ? 'Hide' : 'Show'}
             </button>
           </div>
-          {errors.password && <small style={{ color: 'var(--danger)' }}>{errors.password}</small>}
+          {errors.password && <small id="password-error" role="alert" style={{ color: 'var(--danger)' }}>{errors.password}</small>}
         </div>
         {mode === 'signup' && (
           <div className="field" style={{ marginBottom: 0 }}>
@@ -446,9 +461,11 @@ function App() {
               autoComplete="new-password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
+              aria-invalid={!!errors.confirm}
+              aria-describedby={errors.confirm ? 'confirm-error' : undefined}
               style={errors.confirm ? { borderColor: 'var(--danger)' } : undefined}
             />
-            {errors.confirm && <small style={{ color: 'var(--danger)' }}>{errors.confirm}</small>}
+            {errors.confirm && <small id="confirm-error" role="alert" style={{ color: 'var(--danger)' }}>{errors.confirm}</small>}
           </div>
         )}
         <label className="row" style={{ cursor: 'pointer' }}>

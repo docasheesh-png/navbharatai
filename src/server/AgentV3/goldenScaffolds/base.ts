@@ -31,14 +31,18 @@ const OVERRIDES = [
 type Mode = 'auto' | 'light' | 'dark';
 
 export function ThemeToggle() {
+  // Storage can be switched off (a private window, a sandboxed frame): reading it then throws, and a throw
+  // in the first render blanks the whole app. The choice just is not remembered.
   const [mode, setMode] = useState<Mode>(() => {
-    const saved = localStorage.getItem('theme');
-    return saved === 'light' || saved === 'dark' ? saved : 'auto';
+    try {
+      const saved = localStorage.getItem('theme');
+      return saved === 'light' || saved === 'dark' ? saved : 'auto';
+    } catch { return 'auto'; }
   });
   useEffect(() => {
     if (mode === 'auto') document.documentElement.removeAttribute('data-theme');
     else document.documentElement.setAttribute('data-theme', mode);
-    localStorage.setItem('theme', mode);
+    try { localStorage.setItem('theme', mode); } catch { /* storage blocked — the choice lasts this visit */ }
   }, [mode]);
   const next: Record<Mode, Mode> = { auto: 'light', light: 'dark', dark: 'auto' };
   // The icon AND the word: "Auto" alone did not read as a light/dark switch, and a builder replaced it

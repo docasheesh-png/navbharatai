@@ -203,7 +203,7 @@ import { withVitestDeclared, VITEST_RANGE } from './TestGenerationAgent';
 import { renderSeenThisBuild } from './renderProof';
 import { generateIntegrationTests } from '../lib/IntegrationTestGenerator';
 import { addDependency, removeDependency as removeOneDependency, listDependencies } from './packageEdit';
-import { planE2eScaffold, e2eScaffoldSummary } from './e2eScaffold';
+import { planE2eScaffold, e2eScaffoldSummary, isPlatformE2eScaffold } from './e2eScaffold';
 import { pickDevScript, parsePackageJson } from './devScript';
 import { generateObservability, type ObservabilityTarget } from '../AppMakerLab/generator/ObservabilityGenerator';
 import { generateBundleOptimization } from '../AppMakerLab/generator/BundleOptimizationGenerator';
@@ -2397,7 +2397,12 @@ export class ToolDispatcher {
       const graph = getWorkspaceMemory(this.workspaceId).graph();
       const files = new Set(graph.files);
       const external = new Set<string>();
+      // OUR starter e2e suite imports @playwright/test, and the user is told to install it when they run
+      // the suite (E2E_SCAFFOLDED). It is not the app's dependency: counting it took one build's
+      // confidence to 35% "Low" (autopsy de3bb2bb). DependencyAutoFix has excluded it since 7d79254b.
+      const ours = await this.platformE2eFiles([...files]);
       for (const [file, specs] of Object.entries(graph.imports)) {
+        if (ours.has(file)) continue;
         for (const spec of specs) {
           // External = not a resolvable local import. Relative specs resolve via
           // resolveLocalImport; everything else (bare/scoped/alias) is external
@@ -2444,9 +2449,24 @@ export class ToolDispatcher {
     const refs = new Set<string>();
     for (const { path, content } of sources) {
       if (!SOURCE_EXT.test(path) || SKIP.test(path)) continue;
+      // Our own playwright.config.ts reads E2E_BASE_URL for the suite WE added — not a key the app needs.
+      if (isPlatformE2eScaffold(path, content)) continue;
       for (const name of extractEnvRefs(path, content)) refs.add(name);
     }
     return [...refs];
+  }
+
+  /** The files of the starter e2e suite NavBharatAI wrote (read by marker, never by path alone). */
+  private async platformE2eFiles(paths: readonly string[]): Promise<Set<string>> {
+    const out = new Set<string>();
+    for (const p of paths) {
+      if (!/^playwright\.config\.[cm]?[jt]s$|^e2e\//i.test(p)) continue;
+      try {
+        const c = await this.actuator.readFile(this.workspaceId, p);
+        if (typeof c === 'string' && isPlatformE2eScaffold(p, c)) out.add(p);
+      } catch { /* unreadable ⇒ counted, as before */ }
+    }
+    return out;
   }
 
   private async collectEnvVarIssues(sources: EvalSourceFile[]): Promise<EnvVarIssue[]> {
@@ -2700,6 +2720,24 @@ export class ToolDispatcher {
   noteHandedOff(path: string, content: string): void {
     if (!path || typeof content !== 'string') return;
     this._ownReads.set(path, { count: 1, content, writeSeq: this._writeSeq, stalls: 0, handed: true });
+  }
+
+  /**
+   * A NEW CONVERSATION STARTS WITH NOTHING IN IT (autopsy de3bb2bb, 2026-10-01). Called by `AgentRunner.run`,
+   * whose first message is the only one the model has.
+   *
+   * The sub-agent case was fixed on 2026-09-24 by giving each child its own dispatcher. The sibling it
+   * missed: every repair pass (integrity, design, explorer, green repair, runtime auto-fix, a retry) runs a
+   * NEW conversation on the ARCHITECT's dispatcher, so it inherited the architect's "what is in my context"
+   * memory. The integrity repair's first read of `src/main.tsx` came back "you have now read src/main.tsx the
+   * second time … you already have it" — about a file it had never seen.
+   *
+   * Clears THIS agent's own reads and commands only. The shared ledger (the build report's count) is
+   * untouched, and a file handed over in the task (`noteHandedOff`, set before the run) stays in context.
+   */
+  beginConversation(): void {
+    for (const [key, r] of this._ownReads) if (!r.handed) this._ownReads.delete(key);
+    this._ownCommands.clear();
   }
 
   // ── WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068) — see writeTimeTypecheck.ts ──

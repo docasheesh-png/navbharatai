@@ -1671,6 +1671,9 @@ export class E2BActuator implements IEngineerActuator {
   }
 
   private async _ensureWorkspaceAttempt(workspaceId: string, projectType?: string, resumeSandboxId?: string): Promise<void> {
+    // Per SETUP, not per machine (autopsy 3d1bfe2a): a second build on the same machine reprinted the
+    // first build's "completed 11 missing template file(s)" although this setup put back nothing.
+    this._starterCompleted.delete(workspaceId);
     // AB-1: pass the framework so the FIRST sandbox create for this workspace can route a polyglot
     // backend (spring-boot/go) onto the fullstack E2B image. Follow-up getSandbox() calls reuse the
     // cached sandbox, so the framework only needs to be known here at creation time.

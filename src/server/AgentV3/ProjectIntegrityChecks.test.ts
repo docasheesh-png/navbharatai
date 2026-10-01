@@ -117,7 +117,9 @@ describe('analyzeProjectIntegrity + integrityRepairInstruction', () => {
     expect(integrityRepairInstruction(report)).toBe('');
   });
 
-  it('ok=false with an actionable, file-named repair instruction for both defect classes', () => {
+  // A shared stylesheet is reported (a fact) but is not a defect to repair — a bundler includes it once
+  // (autopsy de3bb2bb, measured with Vite). Only the focus conflict drives the repair here.
+  it('ok=false with an actionable, file-named repair instruction for the focus conflict; the shared sheet is a fact, not a repair', () => {
     const files = {
       'src/main.tsx': `import './global.css';\nimport App from './App';`,
       'src/App.tsx': `import './global.css';\nexport default () => <input autoFocus />;`,
@@ -127,8 +129,8 @@ describe('analyzeProjectIntegrity + integrityRepairInstruction', () => {
     expect(report.ok).toBe(false);
     const instr = integrityRepairInstruction(report);
     expect(instr).toContain('FOCUS CONFLICT');
-    expect(instr).toContain('DUPLICATE STYLESHEET');
-    expect(instr).toContain('global.css');
+    expect(instr).not.toContain('DUPLICATE STYLESHEET');
+    expect(report.duplicateStylesheets.map((d) => d.stylesheet)).toContain('./global.css');
     expect(instr).toContain('src/SearchBar.tsx');
   });
 });

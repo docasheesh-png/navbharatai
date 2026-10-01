@@ -31,7 +31,7 @@ function App() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
 
-  useEffect(() => { localStorage.setItem(STORE_KEY, JSON.stringify(todos)); }, [todos]);
+  useEffect(() => { try { localStorage.setItem(STORE_KEY, JSON.stringify(todos)); } catch { /* storage blocked — todos last this visit */ } }, [todos]);
 
   const add = () => {
     const t = text.trim();
@@ -447,7 +447,9 @@ function App() {
   const [running, setRunning] = useState(false);
   const [remainBase, setRemainBase] = useState(WORK_MS);
   const endRef = useRef(0);
-  const [sessions, setSessions] = useState(() => parseInt(localStorage.getItem(SESSIONS_KEY) || '0', 10) || 0);
+  const [sessions, setSessions] = useState(() => {
+    try { return parseInt(localStorage.getItem(SESSIONS_KEY) || '0', 10) || 0; } catch { return 0; }
+  });
   const [, force] = useState(0);
 
   useEffect(() => {
@@ -455,7 +457,7 @@ function App() {
     const id = setInterval(() => force((n) => n + 1), 250);
     return () => clearInterval(id);
   }, [running]);
-  useEffect(() => { localStorage.setItem(SESSIONS_KEY, String(sessions)); }, [sessions]);
+  useEffect(() => { try { localStorage.setItem(SESSIONS_KEY, String(sessions)); } catch { /* storage blocked */ } }, [sessions]);
 
   const total = phase === 'work' ? WORK_MS : BREAK_MS;
   const remain = running ? Math.max(0, endRef.current - Date.now()) : remainBase;

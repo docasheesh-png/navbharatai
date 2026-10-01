@@ -535,6 +535,9 @@ export class AgentRunner {
     const MAX_BUILD_NUDGES = 2;
 
     const messages: unknown[] = [{ role: 'user', content: this.opts.platformRequest ? asPlatformRequest(userPrompt) : userPrompt }];
+    // This conversation holds one message, so no file is in its context yet (autopsy de3bb2bb) — see
+    // `ToolDispatcher.beginConversation`. A repair pass on the architect's dispatcher starts fresh too.
+    if (typeof dispatcher.beginConversation === 'function') dispatcher.beginConversation();
     // Wall-clock CREATION time of each message, parallel to `messages` (which stays exactly the
     // Claude-API shape — never mutated). Persisted copies are stamped from this so a reopened
     // session interleaves prose with the timeline in the LIVE order: the assistant message is

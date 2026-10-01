@@ -114,7 +114,8 @@ describe('the build report tells the truth about an empty machine', () => {
     // with one and not the other is what left "created a fresh machine" next to a blank preview with
     // nothing to point at.
     expect(route).toContain("sandbox=${sandboxOriginOf(actuator, workspaceId) ?? 'unreported'}");
-    expect(route).toContain("restore=${sandboxRestoreOf(actuator, workspaceId) ?? 'n/a (warm or resumed)'}");
+    expect(route).toContain("restore=${setupRestoreText(sandboxOriginOf(actuator, workspaceId), sandboxRestoreOf(actuator, workspaceId))}");
+    expect(route).toContain("return restore ?? 'n/a (warm or resumed)';");
   });
 
   it('an actuator that cannot answer says so instead of guessing', () => {

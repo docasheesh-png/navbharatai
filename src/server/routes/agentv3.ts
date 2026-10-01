@@ -599,7 +599,7 @@ import {
   type VersionPreviewDeps,
 } from '../AgentV3/versionPreview';
 import { buildPromptAudit, savePromptAudit } from '../AgentV3/PromptAuditStore';
-import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote } from '../AgentV3/etaHistory';
+import { recentBuildHistoryFor, etaBasisNote, fleetHistoryFromTelemetry, fleetEtaBasisNote, etaTaskKey } from '../AgentV3/etaHistory';
 import { sandboxCost, sandboxBillableUsd, sandboxBillingNote } from '../AgentV3/sandboxCost';
 import { saveDiagnostics, loadDiagnostics, saveDiagnosticsHistory, upsertDiagnosticsHistoryProgress, listDiagnosticsHistory, listDiagnosticsHistoryResult, getDiagnosticsHistoryItem, saveLatestForUser, loadLatestForUser, compactReportForRecord, redactReportSecrets, deleteDiagnostics } from '../AgentV3/DiagnosticsStore';
 import { buildAdminReportRecord, saveAdminBuildReport, sanitizeUserNote } from '../AgentV3/AdminBuildReportStore';
@@ -1890,6 +1890,17 @@ function starterCompletedOf(actuator: unknown, workspaceId: string): string {
   } catch {
     return ''; // an observation must never be a reason a build fails
   }
+}
+
+/**
+ * The `restore=` field of THIS setup's line (autopsy 3d1bfe2a). The actuator keeps the restore of the
+ * fresh machine that it last brought up, and a warm or resumed setup used to print it as its own:
+ * "sandbox=warm · restore=nothing saved yet" about a workspace whose store held 12 files. A machine that
+ * was already up was not restored by this setup. PURE.
+ */
+export function setupRestoreText(origin: string | null, restore: string | null): string {
+  if (origin === 'warm' || origin === 'resumed') return `n/a — the machine was already up${restore ? ` (when it came up: ${restore})` : ''}`;
+  return restore ?? 'n/a (warm or resumed)';
 }
 
 function sandboxRestoreOf(actuator: unknown, workspaceId: string): string | null {
@@ -10523,6 +10534,27 @@ async function noteBuildOutcome(
       try { return getWorkspaceMemory(intentWorkspaceId).recentRequestTurns(6); } catch { return []; }
     })();
 
+    /**
+     * 🔴 AN EARLIER REQUEST COUNTS ONLY IF IT LEFT SOMETHING (autopsy 3d1bfe2a). The reader is told a
+     * project exists whenever there is an earlier request, so a small app living entirely in our
+     * scaffold paths is still edited. But a request stopped before it wrote a file left only our
+     * starter, and the next order was built as an "edit" of it. Read only when it can change the answer
+     * (no app of the user's own, an earlier request present); unreadable or slow ⇒ today's behaviour.
+     */
+    const earlierRequestLeftAnApp = await (async (): Promise<boolean> => {
+      if (userAppExists || recentRequests.length === 0) return userAppExists || recentRequests.length > 0;
+      if (!Array.isArray(projectFilePaths)) return true;
+      const codePaths = projectFilePaths.filter((p) => couldBeAppCode(p));
+      if (codePaths.length === 0) return false;
+      if (codePaths.length > 24) return true;
+      try {
+        const got = await raceTimeout(loadWorkspaceFilesByPath(intentWorkspaceId, codePaths), 3_000, 'starterCheck');
+        const files: Record<string, string | null> = {};
+        for (const p of codePaths) files[p] = typeof got[p] === 'string' ? got[p] : null;
+        return !holdsOnlyOurStarter(files);
+      } catch { return true; }
+    })();
+
     let intent = classifyIntent(prompt);
     // The reader's fourth answer: "they want something made but have not said WHAT" (report
     // d6d664e6). False unless the reader says so, so every path below is unchanged without it.
@@ -10549,7 +10581,7 @@ async function noteBuildOutcome(
           // `userAppExists` is fail-safe (an unreadable listing answers yes), and an earlier request in this
           // workspace also counts: a small app living entirely in `src/App.tsx` (a scaffold path) has no
           // file of its own, and an ambiguous "make it blue" must still be read as an edit of it.
-          { projectExists: userAppExists || recentRequests.length > 0, recentRequests },
+          { projectExists: earlierRequestLeftAnApp, recentRequests },
         ),
         6_000,
         'classifyIntentSmart',
@@ -13785,8 +13817,12 @@ async function noteBuildOutcome(
           // of THIS task type took — read from the cost telemetry every build already writes. The app's
           // own history always wins the moment it exists; a failed read is [] — today's behaviour.
           let fleet: ReturnType<typeof fleetHistoryFromTelemetry> = { history: [], builds: 0, days: 0 };
-          if (past.length === 0 && analysis?.taskType) {
-            try { fleet = fleetHistoryFromTelemetry(await withTimeout(agentV3CostTelemetry.list(7), 3_000, 'eta-fleet'), analysis.taskType, etaComplexity); } catch { /* best-effort */ }
+          // A seeded template is its own kind of build (autopsy 4a1c0157): the same `scaffoldWillSeed` that
+          // routed it to the cheap rung picks the slice, so the ETA never prices template polish as a
+          // from-scratch `complex_app`.
+          const etaFleetKey = analysis?.taskType ? etaTaskKey(analysis.taskType, scaffoldWillSeed) : null;
+          if (past.length === 0 && etaFleetKey) {
+            try { fleet = fleetHistoryFromTelemetry(await withTimeout(agentV3CostTelemetry.list(7), 3_000, 'eta-fleet'), etaFleetKey, etaComplexity); } catch { /* best-effort */ }
           }
           const est = estimateBuildTime(etaComplexity, past.length > 0 ? past : fleet.history);
           etaTotalMs = est.estimateMs; // feed the live heartbeat so it can revise the remaining time
@@ -13838,7 +13874,7 @@ async function noteBuildOutcome(
           buildDiag.record({
             phase: 'plan', severity: 'info', code: 'ETA_BASIS',
             message: `ETA ${formatEtaRange(est.lowMs, est.highMs, est.estimateMs)} (midpoint ${est.etaText}) · basis ${est.basis} · confidence ${est.confidence}`,
-            detail: `${past.length === 0 && fleet.history.length > 0 && analysis?.taskType ? fleetEtaBasisNote(analysis.taskType, fleet.builds, fleet.days) : etaBasisNote(past)} ${etaEvidenceNote(est, past.length === 0 && fleet.history.length > 0 ? 'platform' : 'workspace')} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
+            detail: `${past.length === 0 && fleet.history.length > 0 && etaFleetKey ? fleetEtaBasisNote(etaFleetKey, fleet.builds, fleet.days) : etaBasisNote(past)} ${etaEvidenceNote(est, past.length === 0 && fleet.history.length > 0 ? 'platform' : 'workspace')} Shown to the user: "${etaShown.replace(/^⏱️\s*/, '')}"`,
             autoResolved: true,
           });
           // THE POINT ESTIMATE IS NOT WHAT WE KNOW. `estimateBuildTime` returns lowMs/highMs and a
@@ -13940,7 +13976,7 @@ async function noteBuildOutcome(
               // store (#2818), `started-by=` says what caused the machine to exist at all (#2820).
               // Reading them side by side is the whole point — "created fresh · restored 24/24 ·
               // started-by=preview-door" is a complete story that neither line tells alone.
-              + `restore=${sandboxRestoreOf(actuator, workspaceId) ?? 'n/a (warm or resumed)'}`
+              + `restore=${setupRestoreText(sandboxOriginOf(actuator, workspaceId), sandboxRestoreOf(actuator, workspaceId))}`
               + ` · started-by=${sandboxSessionOf(actuator, workspaceId)?.reason ?? 'unreported'}`
               + starterCompletedOf(actuator, workspaceId),
           });
@@ -17444,7 +17480,8 @@ async function noteBuildOutcome(
         if (sb.outcome && !sb.stopped) {
           buildDiag.record(sb.ok
             ? { phase: 'build', severity: 'info', code: `OUTCOME_${sb.outcome}`, message: `Build outcome: ${sb.outcome}`, autoResolved: true }
-            : { phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_OUTCOME', message: `Fast-lane outcome (handed off to the full builder): ${sb.outcome}`, autoResolved: true });
+            // A stop is not a BUILD_FAILED and is not handed to anyone (autopsy 3d1bfe2a).
+            : { phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_OUTCOME', message: sb.stopped ? 'Fast-lane outcome: stopped by the user — not a failure, and not handed off.' : `Fast-lane outcome (handed off to the full builder): ${sb.outcome}`, autoResolved: true });
         }
         // HANDOFF FRAMING (StudySync root cause, 2026-07-16): when the fast lane timed out but SALVAGED
         // its finished files into the workspace, the full builder must treat them as ITS OWN prior work
@@ -24287,7 +24324,9 @@ async function noteBuildOutcome(
       // effort — never blocks the run. Recorded for every build, signed-in or not.
       agentV3CostTelemetry
         .record({
-          taskType: analysis?.taskType ?? 'unknown',
+          // A seeded template build is counted as its own kind, so the ETA can learn from it and the
+          // `complex_app` average is not pulled down by template polish (autopsy 4a1c0157).
+          taskType: etaTaskKey(analysis?.taskType, goldenPreseeded),
           // Record the tier the build was actually DELIVERED on (after any P3 escalation),
           // so per-tier success rates reflect what really ran, not just the start tier.
           startTier: deliveredTier,

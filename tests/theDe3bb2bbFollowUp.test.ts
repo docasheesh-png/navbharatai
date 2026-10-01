@@ -126,7 +126,7 @@ describe('Q-067 — a word we do not know is not a service to connect to', () =>
     expect(route).toContain("intent === 'new_build' && !isImportTurn && unknownNameNoteEnabled() ? unknownNamesInRequest(prompt) : []");
     expect(route).toContain('buildPrompt = `${unknownNameNote}');
     expect(route).toContain('const plannerGoalBase = unknownNameNote');
-    expect(route).toMatch(/pastedBriefSuffix \+ \(unknownNameNote \?/);
+    expect(route).toContain('pastedBriefSuffix + unknownNameSuffix, framework');
   });
 });
 

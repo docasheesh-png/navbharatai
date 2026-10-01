@@ -877,6 +877,11 @@ export interface ContractModule {
 }
 
 const CONTRACT_HEAD = /^(?:export\s+)?(?:declare\s+)?(?:const\s+)?(enum|interface|type)\s+([A-Za-z_$][\w$]*)/;
+/**
+ * `const X = { … } as const` / `const X = [ … ] as const` — an enum written as data. Kept only when the
+ * literal calls nothing (no `(`), so the contract file never depends on code it does not contain.
+ */
+const LITERAL_CONST = /^(?:export\s+)?(?:declare\s+)?const\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*[{[][^()]*[}\]]\s*as\s+const\s*;?\s*$/;
 /** A line that begins a new top-level statement — used to end a statement that has no `;`. */
 const TOP_LEVEL_START = /^(?:export|declare|import|enum|interface|type|function|const|let|var|class|abstract|namespace|module)\b/;
 
@@ -956,6 +961,23 @@ export function contractModule(contract: string | undefined): ContractModule | n
   const seen = new Set<string>();
   for (const st of topLevelStatements(text)) {
     if (/^import\b/.test(st)) { imports.push(st.endsWith(';') ? st : `${st};`); continue; }
+    // 🔴 AUTOPSY 120eb52f (2026-09-30). The contract declared an enum the modern way —
+    // `export const EventStatus = { UPCOMING: 'UPCOMING', … } as const;` beside
+    // `export type EventStatus = (typeof EventStatus)[keyof typeof EventStatus];` — and only the TYPE
+    // reached the file: a `const` is not an enum, interface or type, and it has no `: Type` for the
+    // constants' owner to pick up either, so it fell through both. The type then named a value that
+    // existed nowhere, the types file did not compile, and the full builder spent its first edits
+    // writing a second `EventStatus` into it. A literal `as const` object or array is pure data the
+    // contract wrote out in full, so it is kept here with its type.
+    const literal = LITERAL_CONST.exec(st);
+    if (literal) {
+      const name = literal[1];
+      if (seen.has(`value:${name}`)) continue;
+      seen.add(`value:${name}`);
+      kept.push(`export ${st.replace(/^(?:export\s+)?(?:declare\s+)?/, '').replace(/;?\s*$/, ';')}`);
+      if (!symbols.includes(name)) symbols.push(name);
+      continue;
+    }
     const head = CONTRACT_HEAD.exec(st);
     if (!head) continue;
     const name = head[2];
@@ -964,7 +986,8 @@ export function contractModule(contract: string | undefined): ContractModule | n
     // Normalise the head: one `export`, no `declare`, no `const enum`.
     const body = st.replace(/^(?:export\s+)?(?:declare\s+)?(?:const\s+)?/, '');
     kept.push(`export ${body}`);
-    symbols.push(name);
+    // A type may share its name with a kept `as const` value (that is the pattern) — one symbol, not two.
+    if (!symbols.includes(name)) symbols.push(name);
   }
   if (kept.length === 0) return null;
   const joined = kept.join('\n\n');

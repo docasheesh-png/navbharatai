@@ -72,6 +72,7 @@ const PROCESS_ONLY_CODES = new Set([
   // app (autopsy 53d43c18). It is recorded as a warning so it is legible in the report and so a rising
   // rate is visible, but it must never count against the app or colour the release gate.
   'HTML_ENTRY_REPAIRED',
+  'DANGLING_STYLESHEET_IMPORT_REMOVED', // our guard removed an import of a missing sheet (autopsy 120eb52f)
   // The decision to leave a turn as the ANSWER it is, rather than rebuild it on a higher rung
   // (autopsy e628efd4): a fact about OUR retry policy, never a defect in the user's app.
   'TURN_ANSWERED_A_QUESTION',
@@ -2283,7 +2284,9 @@ export class BuildDiagnostics {
       // turns was kimi-k2.5 — the admin diagnostic named a model that provably never ran. The report
       // now leads with what ACTUALLY delivered and keeps the intent under `plannedModel`, so no
       // information is lost and the headline field stops asserting something untrue.
-      model: honestModelLabel(this.meta.model, this.llmCalls),
+      // Nothing ran ⇒ the ladder's first rung, the same answer `plannedModel` gives, never the legacy
+      // Claude backstop `meta.model` holds on Weak (autopsy 120eb52f: a 9-second stopped build read Haiku).
+      model: honestModelLabel(this.plannedFirstRung ?? this.meta.model, this.llmCalls),
       // ⚠️ THE LADDER'S FIRST RUNG WHERE WE HAVE IT, not `selectBuildModel`'s answer (autopsy
       // 2b0a3ed5). That helper predates the three-ladder rewrite and still replies in the old
       // Haiku/Sonnet vocabulary, so a weak build reported its Claude BACKSTOP as the model it planned

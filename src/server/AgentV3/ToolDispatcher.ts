@@ -84,7 +84,7 @@ import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, usesNonKitNbClass } from './kitRestore';
-import { isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, collectDefinedClasses } from './CssConsistency';
+import { isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, missingImportedSheetNote, collectDefinedClasses } from './CssConsistency';
 import { pageDesignWriteNote, isPageFile } from './DesignCoverage';
 import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
 import { shellWriteTargets } from './shellWriteTargets';
@@ -3409,11 +3409,19 @@ export class ToolDispatcher {
       if (missingBy.size === 0) return '';
       // Something is still missing: before saying so, read every stylesheet in the project — a class a
       // parent component's sheet defines is not "undefined". Paid only when there is something to say.
+      let listed: Set<string> | null = null;
       try {
         const listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'css-note-listing');
-        await readInto(listing.map((p) => String(p).replace(/^\.?\/+/, '')).filter((p) => isProjectStylesheet(p)).slice(0, 30));
+        listed = new Set(listing.map((p) => String(p).replace(/^\.?\/+/, '')));
+        await readInto([...listed].filter((p) => isProjectStylesheet(p)).slice(0, 30));
         recount();
       } catch { /* the note then speaks from what was read, as before */ }
+      // A sheet the screen itself imports that the project does not have (autopsy 120eb52f). Claimed only
+      // from a listing we really read — a file we merely failed to read is not "missing".
+      const absentImport = (screen: string): string | undefined => {
+        if (!listed) return undefined;
+        return cssImportsOf(screen, content(screen)).find((sh) => !listed!.has(sh) && project[sh] === undefined && !(sh in files));
+      };
       // Name the sheet this project really has: a static app's is style.css, not src/index.css.
       const sheet = project['src/index.css'] !== undefined ? 'src/index.css'
         : (['style.css', 'styles.css', 'css/style.css'].find((sh) => project[sh] !== undefined) ?? 'src/index.css');
@@ -3426,7 +3434,8 @@ export class ToolDispatcher {
           const here = rest.filter((c) => defined.has(c));
           if (here.length > 0) { byOrphan.push([sh, here]); rest = rest.filter((c) => !defined.has(c)); }
         }
-        out += unimportedSheetNote(p, byOrphan) + undefinedClassesWriteNote(p, rest, sheet);
+        const absent = absentImport(p);
+        out += unimportedSheetNote(p, byOrphan) + (absent ? missingImportedSheetNote(p, absent, rest) : undefinedClassesWriteNote(p, rest, sheet));
       }
       return out;
     } catch {
@@ -5759,8 +5768,16 @@ export class ToolDispatcher {
             } catch { /* diagnostics are best-effort — never break the tool */ }
             const combined = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
             const tscErrs = parseTscErrors(combined);
-            if (tscErrs.length > 0) {
-              getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${tscErrs.length} TypeScript error(s).`);
+            // 🔴 AUTOPSY 120eb52f: a compiler whose install was torn crashed with `Cannot find module
+            // '../lib/tsc.js'` — no `error TS` line — and this tool said "type-checks clean" while the
+            // app held 15 errors. Zero parsed errors is not a verdict; the ONE reader decides.
+            const verdict = tscVerdict(combined);
+            if (verdict === 'not-run' || verdict === 'unknown') {
+              tscHeader = `TYPECHECK DID NOT RUN — the TypeScript compiler could not start, so the types were NOT checked (this is not a verdict about your code). Its output:\n${combined.split('\n').slice(0, 8).join('\n')}\n\n`;
+            } else if (tscErrs.length > 0 || verdict === 'failed') {
+              // `failed` with nothing parsed is a project-level error (`error TS5023: Unknown compiler
+              // option`) that names no file — still a failure, never "clean".
+              getWorkspaceMemory(this.workspaceId).recordError(`typecheck: ${Math.max(tscErrs.length, countTscErrors(combined))} TypeScript error(s).`);
               // The same analysis the write-time note and the endgame repair carry. No `sources` here:
               // this tool holds no file content, and reading one back would put I/O in a hot path for a
               // sharper wording. The sourceless form still names both causes in order and still says not

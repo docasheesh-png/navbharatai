@@ -38,7 +38,8 @@ import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange, fleetEtaLine } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
 import { decideComplexity, scaffoldedComplexityDecision } from '../AgentV3/complexityRouting';
-import { planningRequest, planningContextNote } from '../AgentV3/planningRequest';
+import { planningRequest, planningContextNote, wasBuildRequest } from '../AgentV3/planningRequest';
+import { unrelatedToExistingApp, unrelatedRequestSteer, unrelatedRequestFallback } from '../AgentV3/unrelatedRequest';
 import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite, writeQualitySummary } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary, repairLostEscapes, scriptRepairSummary } from '../AgentV3/scriptIntegrity';
 import { answeringModel } from '../AgentV3/answeringModel';
@@ -348,13 +349,13 @@ import { injectDotenvLoad, dotenvWiringMessage } from '../AgentV3/envLoading';
 import { importBlockedForPhone, IMPORT_NEEDS_PHONE_MESSAGE } from '../lib/phoneGate';
 import { getAdminAuthForPhone } from '../lib/authMiddleware';
 import { redactCredentialLogs } from '../AgentV3/credentialLogRedaction';
-import { hasTscErrors, tscNeverRan, buildScriptTypecheckVerdict } from '../AgentV3/TscGate';
+import { hasTscErrors, tscNeverRan, looksLikeBrokenTscInstall, buildScriptTypecheckVerdict } from '../AgentV3/TscGate';
 import { judgeBuild, judgeRepairPrompt, judgeActuallyRan, describeJudgeVerdict, judgeEngineLabel, type JudgeRunTurn, type JudgeVerdict } from '../AgentV3/BuildJudge';
 import { nextReviewAction, selectReviewer, cheapBounceCap } from '../AgentV3/CheapFloorReview';
 import { buildLessonFromDiagnostics } from '../AgentV3/BuildLessons';
 import { buildProjectContext, buildRunningSummary, formatPlanState, parsePlanState } from '../AgentV3/ProjectContext';
 import { computePlanProgress } from '../AgentV3/PlanProgress';
-import { decideCancelledBuildBill } from '../AgentV3/cancelledBuildBilling';
+import { decideCancelledBuildBill, freeCancellationMessage } from '../AgentV3/cancelledBuildBilling';
 import { applyBuildDiscount, buildDiscountStore, buildDiscountLine, type BuildDiscount } from '../lib/buildDiscount';
 // Software Project Mode (SPM-2) — module-decomposed mega-builds, flag-gated AGENTV3_PROJECT_MODE=on.
 import { projectPlannerTimeoutMs, PROJECT_PLANNER_TIMED_OUT, ROADMAP_PLANNER_TIMED_OUT, plannerFailureKind, projectModeFailedMessage, roadmapPlannerFailedMessage, PROJECT_MODE_FALLBACK_NARRATION, PROJECT_MODE_ONE_GO_NARRATION, unusablePlanCause, projectPlanUnusableMessage, roadmapUnparseableDetail } from '../AgentV3/projectPlannerBudget';
@@ -594,7 +595,7 @@ import { shouldAttemptPlatformPreview, platformPreviewBudgetMs, platformPreviewP
 import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
 import { readyOverrunNote } from '../AgentV3/doneSignal';
 import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
-import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, isProjectStylesheet } from '../AgentV3/CssConsistency';
+import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, isProjectStylesheet, danglingStylesheetImports, withoutStylesheetImports } from '../AgentV3/CssConsistency';
 import { kitRestorePatch, kitRestoreNote } from '../AgentV3/kitRestore';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
 import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPolicy';
@@ -10712,7 +10713,19 @@ async function noteBuildOutcome(
      * the reader guard covers the ambiguous turns it really decides, this one covers the certain
      * orders it never sees — and only together do they close the class.
      */
-    if (intent === 'new_build' && userAppExists && !wantsFreshStart(prompt) && !explicitCompleteBuild && !readerOverrulesTheNet) {
+    // 🙋 ASK BEFORE BUILDING SOMETHING UNRELATED INTO THE APP THAT IS HERE (admin 2026-09-30, "puch lo
+    // user se!", autopsy 1389f0d5): a Genesis-4 PDF was built INTO a calculator. When the order names a
+    // whole new thing that shares nothing with this app, the turn is answered with the question — add it
+    // here, or start a new app — instead of being built either way. See unrelatedRequest.ts.
+    const unrelated = intent === 'new_build' && userAppExists && !wantsFreshStart(prompt) && !explicitCompleteBuild && !readerOverrulesTheNet
+      && zipImports.length === 0 && !(typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== '')
+      ? unrelatedToExistingApp({ prompt, paths: projectFilePaths, earlierBuildRequests: recentTurns.filter(wasBuildRequest).map((t) => t.text) })
+      : null;
+    const askUnrelated = unrelated?.ask === true;
+    if (askUnrelated) {
+      console.log(`[AGENTV3] the build order is unrelated to the app in this workspace — asking add-here or new-app instead of building (${unrelated!.reason})`);
+      intent = 'chat';
+    } else if (intent === 'new_build' && userAppExists && !wantsFreshStart(prompt) && !explicitCompleteBuild && !readerOverrulesTheNet) {
       intent = 'edit_existing';
       // 🔎 SAY SO. This downgrade decides whether a plan is created, which prompt the builder gets and
       // what the user is told, and until now it left NO trace at all: report e9b25b08 shows only
@@ -10825,7 +10838,7 @@ async function noteBuildOutcome(
         // prompt-keyed cache could serve one turn's answer to the other. Excluded outright rather
         // than reasoned around: the other conditions happen to cover it today, and that is exactly
         // the kind of coincidence that stops being true after an unrelated edit.
-        const cacheable = !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !clarifyWhatToBuild && chatCacheEnabled();
+        const cacheable = !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !clarifyWhatToBuild && !askUnrelated && chatCacheEnabled();
         const cacheKey = cacheable ? hashKey(['chatv1', prompt]) : '';
         let reply: string;
         const cachedReply = cacheable ? chatResponseCache.get(cacheKey) : undefined;
@@ -10861,7 +10874,8 @@ async function noteBuildOutcome(
                     + "with GST). Be warm and brief — they are one sentence away from starting."
                   : '')
                 + (answerProjectElsewhere ? projectElsewhereSteer(projectElsewhere) : '')
-                + (ambiguousBuildAsk && !clarifyWhatToBuild && !answerProjectElsewhere
+                + (askUnrelated ? unrelatedRequestSteer(unrelated?.existingHint ?? '', rawAttachments.length > 0) : '')
+                + (ambiguousBuildAsk && !clarifyWhatToBuild && !answerProjectElsewhere && !askUnrelated
                   ? "\n\nThis message was ambiguous — it might be a request to build or change something "
                     + "in the user's app, phrased in an unusual way, OR it might just be a genuine "
                     + "question/comment. Answer it naturally, but if it plausibly could mean \"build/fix "
@@ -10872,7 +10886,8 @@ async function noteBuildOutcome(
             30_000,
             'chatRouter.route',
           ).catch((err: unknown) => {
-            if (answerProjectElsewhere) return null;
+            // A turn whose whole point is NOT building must never fall through to a build.
+            if (answerProjectElsewhere || askUnrelated) return null;
             throw err;
           });
           const response = routed?.response;
@@ -10880,7 +10895,9 @@ async function noteBuildOutcome(
             ? response.content + providerDebugTag(response.provider)
             : answerProjectElsewhere
               ? projectElsewhereFallback(projectElsewhere)
-              : (response?.content ?? '') + (response ? providerDebugTag(response.provider) : '');
+              : askUnrelated
+                ? unrelatedRequestFallback(unrelated?.existingHint ?? '')
+                : (response?.content ?? '') + (response ? providerDebugTag(response.provider) : '');
           // Cache only a real, non-empty reply (never cache an empty/failed generation).
           if (cacheable && response && response.content && response.content.trim()) {
             chatResponseCache.set(cacheKey, reply);
@@ -16949,6 +16966,10 @@ async function noteBuildOutcome(
             // ran and exited 0; no errors AND no marker now means UNVERIFIED, which fails honestly.
             const r = await actuator.runCommand(workspaceId, `${TSC_ENSURE}; if ${TSC_BIN} --noEmit > /tmp/nb_tsc.log 2>&1; then echo __TSC_CLEAN__; fi; tail -200 /tmp/nb_tsc.log 2>/dev/null || true`);
             const out = `${r.stdout || ''}\n${r.stderr || ''}`;
+            // A torn TypeScript install prints `error TS2318: Cannot find global type 'Array'` about the
+            // compiler's OWN library (autopsy 120eb52f) — never the app's errors, and never a reason to
+            // spend a repair on the app. Unverified, the same as a compiler that is not there.
+            if (looksLikeBrokenTscInstall(out)) return { ok: true, errors: '', ran: false };
             const hasErrors = /error TS\d+/.test(out);
             if (hasErrors) {
               // #1 — capture the OFFENDING files into the diagnosis bundle so the exact mismatch is
@@ -23606,7 +23627,7 @@ async function noteBuildOutcome(
         events.emit({
           type: 'narration', agent: 'architect',
           text: cancelBill?.applies
-            ? '🛡️ You stopped this build before anything was produced, so it is FREE — no charge. Your workspace is exactly as it was.'
+            ? freeCancellationMessage(cancelBill.delivery)
             : '🛡️ This build did not fully succeed, so it is FREE — no charge. Send a follow-up and I will fix it.',
           ts: Date.now(),
         });
@@ -23922,7 +23943,10 @@ async function noteBuildOutcome(
             buildBuildManifest({
               buildId,
               promptHash,
-              model: deliveredModel || String(model),
+              // No call delivered at all (a build stopped in its first seconds — autopsy 120eb52f) ⇒ say
+              // so. The fallback used to be `selectBuildModel`'s legacy answer, which on Weak is the
+              // Claude BACKSTOP: the manifest named Haiku for a build no model ever touched.
+              model: deliveredModel || (providerLedger.entries().length === 0 ? 'none (no model call was made)' : String(model)),
               deliveredVia: deliveredViaProvider,
               effort: powerSpecResolved?.effort,
               powerLevel: powerLevelReqEffective,
@@ -24043,6 +24067,45 @@ async function noteBuildOutcome(
           }
         }
       } catch { /* the entry guard is best-effort — never affects the build result */ }
+      // 🔴 A STYLESHEET IMPORT OF A FILE THAT DOES NOT EXIST (autopsy 120eb52f, 2026-09-30). Four components
+      // each had `import './X.css'` for a sheet nobody wrote; `tsc` cannot see it (the project declares
+      // `*.css` as a module) and Vite cannot build it. The model put the rules in src/index.css and left the
+      // imports behind. A side-effect import of a missing file styles nothing and breaks the build, so
+      // removing it is strictly better — and only after the sandbox confirms the file is really absent.
+      // Same shape as the two guards above; runs on a not-ok build too, since this is a reason it fails.
+      try {
+        if (expectsArtifacts && (process.env.AGENTV3_DANGLING_CSS_GUARD ?? '').trim().toLowerCase() !== 'off') {
+          const full = await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>));
+          for (const [p, c] of writtenFiles) if (typeof c === 'string') full[p] = c;
+          const dangling = danglingStylesheetImports(full);
+          const confirmed: typeof dangling = [];
+          for (const d of dangling) {
+            const exists = await actuator.readFile(workspaceId, d.sheet).then(() => true, () => false);
+            if (!exists) confirmed.push(d);
+          }
+          const byFile = new Map<string, string[]>();
+          for (const d of confirmed) byFile.set(d.file, [...(byFile.get(d.file) ?? []), d.specifier]);
+          const removed: string[] = [];
+          for (const [file, specs] of byFile) {
+            const fixed = withoutStylesheetImports(full[file], specs);
+            if (fixed === full[file]) continue;
+            try {
+              await actuator.writeFile(workspaceId, file, fixed);
+              writtenFiles.set(file, fixed);
+              try { getWorkspaceMemory(workspaceId).indexFile(file, fixed); } catch { /* index best-effort */ }
+              await saveWorkspaceFiles(workspaceId, { [file]: fixed }).catch(() => {});
+              removed.push(...specs.map((sp) => `${file} → ${sp}`));
+            } catch { /* best-effort — a write failure must never affect the build result */ }
+          }
+          if (removed.length > 0) {
+            buildDiag.record({
+              phase: 'build', severity: 'warning', code: 'DANGLING_STYLESHEET_IMPORT_REMOVED', autoResolved: true,
+              message: `${removed.length} import(s) of a stylesheet that does not exist were removed — each would have stopped the app from building: ${removed.slice(0, 6).join(', ')}${removed.length > 6 ? ', …' : ''}.`,
+            });
+            events.emit({ type: 'narration', agent: 'architect', text: `🧩 Removed ${removed.length} import(s) of a stylesheet that was never written — the app could not have built with them.`, ts: Date.now() });
+          }
+        }
+      } catch { /* the stylesheet-import guard is best-effort — never affects the build result */ }
       // ENTRY-FILE DUPLICATE-IMPORT SWEEP (build-report + IMG autopsy 2026-08-02, RECURRING): the entry file
       // (src/main.tsx) repeatedly shipped BOTH `import ErrorBoundary from './ErrorBoundary'` AND
       // `import { ErrorBoundary } from './ErrorBoundary'` → babel/Vite hard-fail "Duplicate declaration

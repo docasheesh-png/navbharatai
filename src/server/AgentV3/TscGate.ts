@@ -65,12 +65,36 @@ export function looksLikeMissingTscBinary(output: string | null | undefined): bo
 }
 
 /**
+ * True when the compiler STARTED but its own install is torn — so whatever it printed is about
+ * TypeScript, not about the app.
+ *
+ * 🔴 AUTOPSY 120eb52f (2026-09-30, "Calendar wala app bnao"). Two `npm install`s ran into one
+ * `node_modules` at once (the background boot's and the typecheck's own), and `typescript` came out
+ * with its `bin/` but without its `lib/`. The next run printed `Cannot find global type 'Array'` and
+ * `File '…/node_modules/typescript/lib/lib.dom.d.ts' not found` — counted as "11 type errors" in the
+ * app — and every run after it crashed with `Cannot find module '../lib/tsc.js'`, which has no
+ * `error TS` line and was counted as CLEAN, five times, while the app really held 15 errors. The
+ * `typecheck` tool told the model "type-checks clean (tsc --noEmit)" off the same crash.
+ *
+ * Matched only on shapes that name TypeScript's OWN files, so an app's error about its own missing
+ * module is never swallowed: a node crash resolving the compiler's script, a missing library file
+ * under `typescript/lib/`, and the global-type errors a compiler with no library prints. Pure.
+ */
+export function looksLikeBrokenTscInstall(output: string | null | undefined): boolean {
+  if (!output) return false;
+  return /Cannot find module '[^'\n]*(?:lib\/tsc(?:\.js)?|lib\/_tsc(?:\.js)?)'/.test(output)
+    || /Cannot find module '[^'\n]*'[\s\S]{0,400}?node_modules\/typescript\/bin\/tsc/.test(output)
+    || /error TS6053: File '[^'\n]*node_modules\/typescript\/lib\/[^'\n]+' not found/.test(output)
+    || /error TS2318: Cannot find global type '(?:Array|Boolean|Function|IArguments|Number|Object|RegExp|String)'/.test(output);
+}
+
+/**
  * The one question every reader of `tsc --noEmit` output must ask first: did the compiler really run?
- * The help page and a missing binary are both "no" — neither is a pass and neither is a failure.
- * Pure.
+ * The help page, a missing binary and a torn install are all "no" — none is a pass and none is a
+ * failure of the app. Pure.
  */
 export function tscNeverRan(output: string | null | undefined): boolean {
-  return looksLikeTscHelpOutput(output) || looksLikeMissingTscBinary(output);
+  return looksLikeTscHelpOutput(output) || looksLikeMissingTscBinary(output) || looksLikeBrokenTscInstall(output);
 }
 
 /**
@@ -95,6 +119,8 @@ export type TscVerdict = 'passed' | 'failed' | 'not-run' | 'unknown';
 
 export function tscVerdict(output: string | null | undefined): TscVerdict {
   const out = String(output ?? '');
+  // A torn install prints `error TS` lines about TypeScript's own library — never the app's errors.
+  if (looksLikeBrokenTscInstall(out)) return 'not-run';
   if (hasTscErrors(out)) return 'failed';
   if (tscNeverRan(out)) return 'not-run';
   if (/command not found|: not found|No such file or directory|ENOENT|Cannot find module 'typescript'|npm ERR!|npm error/i.test(out)) return 'unknown';
@@ -128,7 +154,7 @@ export function commandOutcomeText(rec: { command: string; exitCode: number | nu
     // that did not exist. A piped typecheck's code is the LAST stage's, so a 0 there says nothing about
     // tsc. The code is still shown, but never alone when the output says the compiler did not answer.
     const v = tscVerdict(out);
-    if (v === 'not-run') return `exit ${rec.exitCode}, but the compiler did not run (help page or missing binary)`;
+    if (v === 'not-run') return `exit ${rec.exitCode}, but the compiler did not run (help page, missing binary or a broken TypeScript install)`;
     if (v === 'unknown') return `exit ${rec.exitCode}, but no verdict (the compiler was stopped before it could check)`;
     if (v === 'failed' && rec.exitCode === 0) {
       const n = countTscErrors(out);
@@ -142,7 +168,7 @@ export function commandOutcomeText(rec: { command: string; exitCode: number | nu
       const n = countTscErrors(out);
       return `${n} type error${n === 1 ? '' : 's'} (read from the output; the pipe hides tsc's own exit code)`;
     }
-    case 'not-run': return 'the compiler did not run (help page or missing binary)';
+    case 'not-run': return 'the compiler did not run (help page, missing binary or a broken TypeScript install)';
     default: return 'no verdict (the compiler was stopped before it could check)';
   }
 }

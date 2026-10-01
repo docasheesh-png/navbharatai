@@ -3123,6 +3123,31 @@ the flag entries above promise.
   three sinks shipped with a warning nobody acted on. Advisory, never blocks a write, no model call.
   Same PR, no flag: an `nb-` class the design kit does not define and no stylesheet defines is named at
   write time too (`inventedKitClassNote`).
+- **🙋 `AGENTV3_ASK_UNRELATED` — A DIFFERENT APP IS ASKED ABOUT, NOT BUILT INTO THE ONE THAT IS HERE (admin
+  2026-09-30, verbatim: *"puch lo user se!"*, on autopsy 1389f0d5: a Genesis-4 PDF was built INTO a calculator).
+  ⚠️ NOT set; default ON; `off` restores the old edit-always behaviour.** `unrelatedRequest.ts`. A build order on
+  a workspace that holds an app is normally turned into an edit (`BUILD_ORDER_READ_AS_EDIT`). Now, when the order
+  names a WHOLE thing (an app, website, game, PDF, store) that shares no word-stem with the app here (its own
+  file names and earlier build requests), the turn is answered in chat with the question: reply "add it to this
+  app", or tap "New" (phone: More → New chat) and send it there. 🔒 Precision first: an edit verb, "app me/ko …",
+  "this/the/my app", "make it …", a style comparison ("like a website"), packaging (android/apk/PWA), a part of
+  an app ("game mode", "pdf download") and continue/fix all stand it down, and so does a workspace we cannot read
+  or name. A 22-message precision lock in `tests/askBeforeBuildingSomethingElseIntoThisApp.test.ts` fails CI if
+  an ordinary edit ever meets the question. The reply never falls through to a build if the chat model fails.
+- **🧩 `AGENTV3_DANGLING_CSS_GUARD` — AN IMPORT OF A STYLESHEET THAT DOES NOT EXIST IS REMOVED (autopsy 120eb52f).
+  ⚠️ NOT set; default ON; `off` leaves such imports.** Four components imported `./X.css` files nobody wrote;
+  `tsc` cannot see a stylesheet import, and Vite cannot build one. At the end of a build, a SIDE-EFFECT import of
+  a sheet the sandbox confirms absent is removed (`DANGLING_STYLESHEET_IMPORT_REMOVED`); a CSS-module import
+  (`import s from …`) is never touched. Upstream half, no flag: the write-time class note now names the missing
+  imported file as the place for the rules instead of "Add the rules to src/index.css", which is how the
+  imports were left behind.
+- **🔒 ONE INSTALL INTO `node_modules` AT A TIME (autopsy 120eb52f, no flag).** The typecheck's own `npm
+  install` raced the background boot install and tore `typescript` (its `bin/` without its `lib/`); the crash was
+  then read as a CLEAN typecheck five times. `_npmInstall` now writes `/tmp/nbai-npm-install.lock`
+  (`NPM_INSTALL_LOCK`); `TSC_ENSURE` waits up to 20 s for it, then prints "still being installed" and checks
+  nothing rather than starting a second install; a torn compiler is removed and reinstalled; and
+  `looksLikeBrokenTscInstall` makes `tscVerdict` call any such output "did not run". ⚠️ A lock older than
+  6 minutes is ignored (an install is bounded at 5).
 - **📣 `AGENTV3_SUMMARY_ADDITIONS` — THE END OF A SUCCESSFUL BUILD IS WHAT THE USER STILL HAS TO DO (admin
   2026-09-30: *"app banne ke last me clearly user ko dikhe"*). ⚠️ NOT set, and the code default is ON**; `off`
   restores the old behaviour. `summaryAdditions.ts`.

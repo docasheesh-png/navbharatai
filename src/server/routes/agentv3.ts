@@ -211,7 +211,7 @@ import { SINGLE_HTML_FILE_RULE } from '../AgentV3/systemPrompt';
 import { inlineLinkedStylesheet } from '../AgentV3/singleFileKit';
 import { wantsSingleHtmlFile } from '../../lib/frameworkDetect';
 import { StaticProvider } from '../AgentV3/sandbox/AppMakerLab/generator/templates/StaticProvider';
-import { pruneUnusedDepsEnabled, pruneCandidates, pruneBuildAddedDeps, prunedNarration, depsAddedByBuild } from '../AgentV3/unusedDepPrune';
+import { pruneUnusedDepsEnabled, pruneCandidates, pruneBuildAddedDeps, prunedNarration, depsAddedByBuild, unusedDependencyLine } from '../AgentV3/unusedDepPrune';
 import { pastedFormatDecision, pastedHtmlDocument, pastedStorageKeys, pastedOneFileRule, STATIC_SCAFFOLD_EXTRAS, PASTED_ONE_FILE_CODE } from '../AgentV3/pastedAppFormat';
 import { aiInAppRule } from '../AgentV3/systemPrompt';
 import { weakBuildDisciplineBlock } from '../AgentV3/weakBuildDiscipline';
@@ -384,7 +384,7 @@ import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from 
 import { entryShadowRepairHint } from '../AgentV3/entryShadow';
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceEvidence, featurePresenceRepairPrompt, featureHealEnabled, isSignInWall } from '../AgentV3/FeaturePresence';
 import { adoptHealResult } from '../AgentV3/healResult';
-import { signInExploreEnabled, signInScript, signInCandidates, parseSignInOutput, signInReportLine, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
+import { signInExploreEnabled, signInScript, signInCandidates, parseSignInOutput, signInReportLine, isSignInRoute, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
 import { unsupportedStackRequested, unsupportedStackBuilderNote, unsupportedStackUserNote, builtWithLabel } from '../AgentV3/unsupportedStack';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
 import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
@@ -12302,7 +12302,21 @@ async function noteBuildOutcome(
      * alone, so `mkdir src` was sized as "hi" while a 35-file shop was built. They all read this one
      * text now. `prompt` itself is unchanged everywhere else (intent, the user's own words, titles).
      */
-    const planning = planningRequest({ prompt, attachmentText: planningAttachmentText, picturesSetAside, recentTurns, userAppExists });
+    // An app that was STARTED but never assembled (its entry is still our starter — a build stopped or
+    // failed before it) is not a finished app: its earlier requests are still the spec (autopsy 2f723acb,
+    // where "Continue…" on two files of a stopped build was sized as "hi"). One bounded read of the entry
+    // file; anything unreadable leaves today's behaviour.
+    const appStillUnbuilt = await (async (): Promise<boolean> => {
+      if (!userAppExists || !Array.isArray(projectFilePaths)) return false;
+      const present = new Set(projectFilePaths.map((q) => String(q).replace(/^\.?\/+/, '')));
+      const entries = STARTER_ENTRY_PATHS.filter((p) => present.has(p));
+      if (entries.length === 0) return false;
+      try {
+        const got = await raceTimeout(loadWorkspaceFilesByPath(workspaceId, entries), 3_000, 'starterEntryRead');
+        return entries.some((p) => isUntouchedStarterEntry(got[p]));
+      } catch { return false; }
+    })();
+    const planning = planningRequest({ prompt, attachmentText: planningAttachmentText, picturesSetAside, recentTurns, userAppExists, appStillUnbuilt });
     const buildComplexity = complexityFromPrompt(planning.text);
     const buildDepth: PipelineDepth = resolvePipelineDepth(
       (buildComplexity.moduleCount || 0) + (buildComplexity.featureCount || 0),
@@ -19045,10 +19059,15 @@ async function noteBuildOutcome(
             message: `${stoppedFresh.size} package(s) this build installed are not used yet because it was stopped before writing the code that uses them: ${[...stoppedFresh].join(', ')}. The next build uses them or removes them.`,
           });
         }
+        // A build that stopped or failed before writing the files that import a package it just installed has
+        // not finished using it yet (autopsy 73648e12) — see unusedDependencyLine.
+        const buildUnfinished = abort.signal.aborted || !result.ok;
+        const addedThisBuild = new Set((() => { try { return depsAddedByBuild(packageJsonAtBuildStart, integrityFiles['package.json'] ?? null); } catch { return [] as string[]; } })());
         for (const u of unusedDeps) {
           if (prunedDeps.includes(u.name)) continue;
           if (stoppedFresh.has(u.name)) continue;
-          buildDiag.record({ phase: 'build', severity: 'warning', code: 'INTEGRITY_UNUSED_DEP', ...obs(`"${u.name}" is declared in package.json dependencies but no project file imports it. If it is used only via config, a CLI, or a runtime string-load, ignore this; otherwise removing it shrinks the install.`) });
+          const line = unusedDependencyLine(u.name, { unfinished: buildUnfinished, addedThisBuild: addedThisBuild.has(u.name) });
+          buildDiag.record({ phase: 'build', severity: line.severity, code: 'INTEGRITY_UNUSED_DEP', ...obs(line.message), ...(line.autoResolved ? { autoResolved: true } : {}) });
         }
         // A shared stylesheet imported by several modules is a FACT, never a defect (autopsy de3bb2bb): a
         // bundler includes the file once. Recorded at info level, outside `!integrity.ok`, so it is not lost.
@@ -21196,11 +21215,28 @@ async function noteBuildOutcome(
           // Explains a `pages: 'not-run'` truthfully (see RuntimeEvidence.noPageRoutes); never a verdict.
           if (pageRoutes.length === 0) gateEvidence.noPageRoutes = true;
           if (pageRoutes.length > 0) {
-            const out = await withTimeout(
+            let out = await withTimeout(
               actuator.runCommand(workspaceId, pageCheckScript(lastPreviewUrl, pageRoutes, { storageState: signedInState() })),
               20_000 + pageRoutes.length * PAGE_LOAD_TIMEOUT_MS, 'page-route-check',
             );
-            const pageResults = parsePageCheck(out.stdout);
+            let pageResults = parsePageCheck(out.stdout);
+            // ROUTES THAT REDIRECT TO THE SIGN-IN PAGE ARE BEHIND A DOOR (autopsy 2f723acb): five of six routes
+            // went to /login and only /login was counted. When no sign-in was tried yet, sign in with what the
+            // app ships and check the routes again from inside.
+            if (
+              !authSession && signInExploreEnabled() && !abort.signal.aborted
+              && pageResults.some((r) => r.verdict === 'redirected' && typeof r.redirectedTo === 'string' && isSignInRoute(r.redirectedTo))
+            ) {
+              const session = await signInBehindTheDoor(lastPreviewUrl);
+              if (session.signedIn && !abort.signal.aborted) {
+                const again = await withTimeout(
+                  actuator.runCommand(workspaceId, pageCheckScript(lastPreviewUrl, pageRoutes, { storageState: signedInState() })),
+                  20_000 + pageRoutes.length * PAGE_LOAD_TIMEOUT_MS, 'page-route-check-signed-in',
+                ).catch(() => null);
+                const againResults = again ? parsePageCheck(again.stdout) : [];
+                if (again && againResults.length > 0) { out = again; pageResults = againResults; }
+              }
+            }
             const pageSummary = summarizePageCheck(pageResults, pageRoutes.length, out.stdout);
             // KEEP this measurement. Every page here was loaded in the sandbox's own real browser with
             // `pageerror` + `console` listeners attached, so it is genuine runtime evidence — and the

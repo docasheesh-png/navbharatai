@@ -48,11 +48,10 @@ describe('reviewEdit', () => {
     expect(result.issues.some((i) => /react/i.test(i))).toBe(false);
   });
 
-  it('flags the React namespace used without importing React', () => {
+  it('flags the React namespace used as a VALUE without importing React', () => {
     const content = [
-      "import { useState } from 'react';",
-      'export const App: React.FC = () => {',
-      '  const [n] = useState(0);',
+      'export const App = () => {',
+      '  const [n] = React.useState(0);',
       '  return <div>{n}</div>;',
       '};',
     ].join('\n');
@@ -60,6 +59,25 @@ describe('reviewEdit', () => {
     expect(result.issues.some((i) => i.includes('`React.`'))).toBe(true);
     const imported = reviewEdit('src/App.tsx', `import React from 'react';\n${content}`);
     expect(imported.issues.some((i) => i.includes('`React.`'))).toBe(false);
+  });
+
+  // 🔴 Autopsy 4d538ca3: five notes over writes the typecheck had just called clean. The React namespace
+  // in a TYPE position is @types/react's UMD global, which tsc allows without an import (measured).
+  it('does NOT flag the React namespace used only in types (React.FC, React.FormEvent)', () => {
+    const content = [
+      "import { useState } from 'react';",
+      'export const App: React.FC = () => {',
+      '  const [n] = useState(0);',
+      '  const submit = (e: React.FormEvent<HTMLFormElement>) => e.preventDefault();',
+      '  return <form onSubmit={submit}>{n}</form>;',
+      '};',
+    ].join('\n');
+    expect(reviewEdit('src/App.tsx', content).issues.some((i) => i.includes('`React.`'))).toBe(false);
+  });
+
+  it('a JSX React.Fragment tag and a React.Component base are values', () => {
+    expect(reviewEdit('src/A.tsx', 'export const A = () => (\n  <React.Fragment>x</React.Fragment>\n);\n// pad\n').issues.some((i) => i.includes('`React.`'))).toBe(true);
+    expect(reviewEdit('src/B.tsx', 'export class B extends React.Component {\n  render() { return null; }\n}\n').issues.some((i) => i.includes('`React.`'))).toBe(true);
   });
 
   it('flags missing useNavigate import in a tsx file', () => {

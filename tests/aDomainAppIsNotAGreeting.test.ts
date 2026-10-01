@@ -209,7 +209,7 @@ describe('the question is actually asked, at both call sites', () => {
 
   it('it delegates to the platform\'s own domain classifier — never a second keyword list', () => {
     expect(signals).toContain('analyzeRequirementGaps(p).domain');
-    expect(signals).toContain("import { analyzeRequirementGaps } from './RequirementGapAnalyzer'");
+    expect(signals).toMatch(/import \{ analyzeRequirementGaps\b[^}]*\} from '\.\/RequirementGapAnalyzer'/);
   });
 
   it('both guards are in the predicate, not left to the callers', () => {

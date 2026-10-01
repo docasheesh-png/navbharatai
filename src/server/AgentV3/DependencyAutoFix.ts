@@ -14,7 +14,7 @@
 // judgment, a second false-positive filter). Pure, no I/O, never throws. Advisory report content only.
 
 import { NATIVE_CAPABILITIES, REGISTRY_CAPACITOR_MAJOR } from './nativeCapabilities';
-import { analyzeDependencies, type DependencyIssue } from './DependencyAnalysis';
+import { analyzeDependencies, rangeMajor, typesToRuntime, type DependencyIssue } from './DependencyAnalysis';
 import { isPlatformE2eScaffold } from './e2eScaffold';
 
 /**
@@ -506,6 +506,57 @@ export function restoreDroppedDependencies(content: string, existingContent: str
   if (devOut) obj.devDependencies = devOut;
   const trailingNl = content.endsWith('\n') ? '\n' : '';
   return { content: JSON.stringify(obj, null, 2) + trailingNl, restored };
+}
+
+/**
+ * A REWRITE THAT DOWNGRADES A PACKAGE BUT NOT ITS TYPES (autopsy 6461025c, 2026-10-01).
+ *
+ * The model ran `npm install express @types/express` (npm resolved express 5 and @types/express 5),
+ * then rewrote package.json by hand with `express: ^4` and left `@types/express: ^5`. The next install
+ * put express 4 under v5 typings — the report's "types-mismatch" warning, on a working app.
+ *
+ * A deliberate downgrade moves the typings with the package. A downgrade that leaves the typings at the
+ * major the package HAD is inconsistent by construction, so the package goes back to the range the
+ * workspace already declared — the state npm installed and the typings describe. Nothing else is
+ * touched: an upgrade, a downgrade with its typings, a package with no `@types`, all pass through.
+ * PURE.
+ */
+export function restoreInconsistentDowngrades(content: string, existingContent: string): { content: string; restored: string[] } {
+  if (!existingContent || !existingContent.trim()) return { content, restored: [] };
+  let pkg: Record<string, unknown>;
+  let prev: Record<string, unknown>;
+  try { pkg = JSON.parse(content); prev = JSON.parse(existingContent); } catch { return { content, restored: [] }; }
+  if (!pkg || typeof pkg !== 'object' || !prev || typeof prev !== 'object') return { content, restored: [] };
+  const sections = ['dependencies', 'devDependencies'] as const;
+  const read = (o: Record<string, unknown>, name: string): string | null => {
+    for (const sec of sections) {
+      const d = o[sec];
+      if (d && typeof d === 'object' && typeof (d as Record<string, unknown>)[name] === 'string') return (d as Record<string, string>)[name];
+    }
+    return null;
+  };
+  const restored: string[] = [];
+  for (const sec of sections) {
+    const d = pkg[sec];
+    if (!d || typeof d !== 'object') continue;
+    for (const [name, range] of Object.entries(d as Record<string, unknown>)) {
+      if (typeof range !== 'string' || name.startsWith('@types/')) continue;
+      const before = read(prev, name);
+      if (!before) continue;
+      const newMajor = rangeMajor(range);
+      const oldMajor = rangeMajor(before);
+      if (newMajor == null || oldMajor == null || newMajor >= oldMajor) continue;
+      const typesName = name.startsWith('@') ? `@types/${name.slice(1).replace('/', '__')}` : `@types/${name}`;
+      if (typesToRuntime(typesName) !== name) continue;
+      const types = read(pkg, typesName);
+      if (!types || rangeMajor(types) !== oldMajor) continue;
+      (d as Record<string, unknown>)[name] = before;
+      restored.push(`${name} ${range} → ${before} (its ${typesName} is ${types})`);
+    }
+  }
+  if (restored.length === 0) return { content, restored: [] };
+  const trailingNl = content.endsWith('\n') ? '\n' : '';
+  return { content: JSON.stringify(pkg, null, 2) + trailingNl, restored };
 }
 
 /** Any install sub-command whose real exit code the shell will MASK because it is piped to tail/head. */

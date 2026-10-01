@@ -140,7 +140,9 @@ describe('🔒 it is actually wired — on BOTH write return paths', () => {
     const code = codeOnly(DISPATCHER);
     expect(code).toContain('const steeringNotes = await this.writeSteeringNotes({ [path]: content })');
     const appends = code.split('\n').filter((l) => l.includes('+ steeringNotes'));
-    expect(appends.length).toBe(2);
+    // THREE since autopsy 19641ab5: replacing our own untouched starter file is its own return path
+    // (no FULL-REWRITE warning) — and it carries the notes too, which is the invariant held here.
+    expect(appends.length).toBe(3);
   });
 
   it('it sits beside the other write-time checks, inside the one shared helper', () => {

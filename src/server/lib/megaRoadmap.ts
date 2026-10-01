@@ -268,12 +268,36 @@ const SIMULATION_RE = /\b(?:simulat\w*|fake|pretend\w*)\b[^.;]{0,80}?\b(?:proces
 /** "no fake responses", "never simulate…", "without faking" — the user's own constraint, restated. */
 const NEGATED_BEFORE = /\b(?:no|not|never|don'?t|do not|without|avoid|must not|instead of)\s+(?:\w+\s+){0,2}$/i;
 
+/**
+ * 🔴 THE NEGATION REACHES ALONG A LIST (autopsy 19641ab5, 2026-10-01). The planner wrote "Do not use a
+ * placeholder or a fake loading animation; the image must be real." — the honest instruction — and the
+ * guardrail rewrote the step as one that "asked for work to be simulated", because the negator sat five
+ * words before "fake", past `NEGATED_BEFORE`'s two-word reach. A word joined by "or" / "nor" / a comma to
+ * a negated phrase is negated too, so the mention is negated when it is COORDINATED with an earlier
+ * negator in the same clause. A clause boundary (. ; : ! ?) or a turn ("but", "instead", "then") ends the
+ * negation, so "Do not call the API; simulate the progress" still counts as asking for a fake.
+ */
+const COORDINATED_TAIL = /(?:\bor|\bnor|,)\s+(?:a|an|any|the|some)?\s*$/i;
+const CLAUSE_NEGATOR = /\b(?:no|not|never|don'?t|do not|without|avoid|must not)\b/i;
+const NEGATION_ENDS = /[.;:!?]|\b(?:but|instead|then|however)\b/gi;
+
+function negatedByCoordination(text: string, at: number): boolean {
+  const window = text.slice(Math.max(0, at - 160), at);
+  if (!COORDINATED_TAIL.test(window)) return false;
+  let start = 0;
+  for (const m of window.matchAll(NEGATION_ENDS)) start = (m.index ?? 0) + m[0].length;
+  return CLAUSE_NEGATOR.test(window.slice(start));
+}
+
 /** Does this build instruction ask for work to be faked? A negated mention is the opposite. Pure. */
 export function asksForSimulation(buildPrompt: string): boolean {
   const text = String(buildPrompt ?? '');
   for (const m of text.matchAll(SIMULATION_RE)) {
-    const before = text.slice(Math.max(0, (m.index ?? 0) - 30), m.index ?? 0);
-    if (!NEGATED_BEFORE.test(before)) return true;
+    const at = m.index ?? 0;
+    const before = text.slice(Math.max(0, at - 30), at);
+    if (NEGATED_BEFORE.test(before)) continue;
+    if (negatedByCoordination(text, at)) continue;
+    return true;
   }
   return false;
 }

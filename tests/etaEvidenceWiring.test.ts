@@ -32,7 +32,8 @@ describe('the first ETA line is gated on evidence', () => {
     const at = route.indexOf("code: 'ETA_BASIS'");
     expect(at).toBeGreaterThan(-1);
     const block = route.slice(at, at + 600);
-    expect(block).toContain('etaEvidenceNote(est)');
+    // Since autopsy 19641ab5 the note also says WHOSE builds taught it (workspace vs platform).
+    expect(block).toContain('etaEvidenceNote(est, ');
     // It must still quote the line the user actually read (autopsy f04421ef) — the report is never
     // allowed to be the less honest surface.
     expect(block).toContain('Shown to the user');

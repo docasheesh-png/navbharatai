@@ -1,3 +1,4 @@
+import { isNeverAppPort } from './neverAppPorts';
 // THE PREVIEW REVIVAL RECIPE — proven when the preview FIRST works, not when it is needed
 // (admin 2026-08-21: "jab pahli bar chale, tabhi pakka ho jana chahiye jo sleep ke bad wake up hona hai").
 //
@@ -51,9 +52,17 @@ export interface RecipeCheck {
   gaps: RecipeGap[];
 }
 
-/** A port must be a real TCP port; anything else is a bug upstream, not something to persist. */
+/**
+ * A port must be a real TCP port AND one an app can be on; anything else is a bug upstream, not
+ * something to persist.
+ *
+ * 🔒 Autopsy 2b1f845e: the preview flip visits every LISTENING port, and the sandbox's own agent
+ * (49983) answers HTTP — so a recipe could be stored naming it, and the next build's supersede then
+ * tried to kill it as "a previous app". A recipe for a port that can never be the app is refused when
+ * it is formed AND when it is read back, so a recipe stored before this rule heals on the next read.
+ */
 function isUsablePort(port: unknown): port is number {
-  return typeof port === 'number' && Number.isInteger(port) && port > 0 && port < 65536;
+  return typeof port === 'number' && Number.isInteger(port) && port > 0 && port < 65536 && !isNeverAppPort(port);
 }
 
 /**

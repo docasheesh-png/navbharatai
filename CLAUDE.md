@@ -3227,6 +3227,18 @@ the flag entries above promise.
   says so, `null` means *not supplied* and never zero, and `writeTypecheckUntouched` makes the
   silence unrepresentable as a fact about the build. Test-locked and reversion-proven four ways in
   `tests/theCounterWatchedOneLaneOfTwo.test.ts`.
+- **🔧 A REPAIR THE PLATFORM CHECKS DOES NOT CHECK ITSELF, AND A REPAIR THAT CHANGED NOTHING SAYS SO (autopsy
+  6cd698cc, 2026-10-01).** The explorer repair fixed a theme button in 61 s, then ran the production build, a dev
+  server, the preview and a browser of its own (its prompt was the reviewer's `judgeRepairPrompt`, "verify the app
+  builds…") until its 150 s cap; the platform undid the working fix. Now the explorer and green functional repairs
+  get `PLATFORM_CHECKS_THE_FIX` (`repairScope.ts`), run without the preview/browser tools (`withoutPlatformCheckTools`)
+  and with `focusedRepair` (no style hand-back). ⚠️ Never hand a platform-checked repair `judgeRepairPrompt`. And a
+  platform-requested run whose last turn claims a change while it changed no file is narrated as "No change was made
+  in that step." (`repairClaim.ts`, `REPAIR_CLAIM_WITHHELD`). Two keys, NEITHER set, default ON, `off` reverts:
+  **`AGENTV3_WRITE_TYPE_IMPORT_HEAL`** (the write-time typecheck rewrites a TS1361 `import type` of a value in a file
+  this build wrote, and says so; the fast lane's timeout salvage runs the same `deterministicImportFixes` as its
+  verify) and **`AGENTV3_DETACHED_METHOD_NOTE`** (a write-time note names a method that reads `this` and is handed
+  out uncalled, e.g. `return store.set`; `detachedMethod.ts`). Test: `tests/theRepairThatWorkedWasUndone.test.ts`.
 - **`AGENTV3_WRITE_SECURITY`** (NOT set; default ON, `off` disables — added 2026-09-30, autopsy 466c260a) —
   `scanSecurity`'s medium/high findings (an XSS sink such as `dangerouslySetInnerHTML` / raw `innerHTML`, a
   hardcoded secret) are handed back with every write (`securityWriteNote`, via `writeSteeringNotes`). Before

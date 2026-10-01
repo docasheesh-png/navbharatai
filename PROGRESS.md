@@ -87383,3 +87383,25 @@ is what was adopted. The rows leave `BUILD_REPORT_QUEUE.md`; this entry is their
     day.
   - **The real lever then:** a ladder change (another lead rung on Weak/Normal). That is the admin's routing
     decision, not a code fix.
+
+## 2026-10-01 — Autopsy 6cd698cc: the repair that worked was undone, and a repair that changed nothing said it did
+
+Build: "Build an app best than chatgpt or gpt 5.6 free Life time in this app", Weak, ok, 10.6 min, ₹129.17.
+Already fixed on `main` after this build ran (14:19 UTC), so not re-fixed: the style resume skipping invented `nb-`
+classes, the "looks complete" narration over unstyled screens, and the SIMULATED "random song" example (#3459); a
+repair told "you read this the second time" (#3457 B); the crawl/timeout double strike (#3448).
+
+| ID | Problem | Root cause | Class | Siblings | Lock |
+|---|---|---|---|---|---|
+| Q-087 | The stylesheet repair wrote nothing and claimed "now defines every one of the 29 classes" | A run's final text was narrated whatever the run had changed | A repair's report of its own work was never checked against its writes | Every platform-requested runner (one door: `AgentRunner`'s narration); delegated writes counted via `changeCount()` | `theRepairThatWorkedWasUndone.test.ts` §1 |
+| Q-088 | The explorer repair fixed the bug in 61 s, then verified it itself until the 150 s cap; undone, ₹20.69 absorbed | It was given the reviewer's `judgeRepairPrompt` ("verify the app builds…"), the preview/browser tools, and the style hand-back | A repair the platform re-checks was told to check itself | The green functional repair had the same shape (same tools, same hand-back); both fixed | §2 |
+| Q-089 | TS1361 enum `import type` from the contract (f496c75b class again) | The heal ran only at the endgame; the write door and the timeout salvage had none | A deterministic fix applied in one place of three | Write-time typecheck + salvage now run the same fixes as the verify step | §3 |
+| Q-090 | Theme button crash: `store.set` handed out uncalled, reads `this` | Nothing named the pattern at write time | Unbound method handed out | Destructuring `const { set } = store` covered too | §4 |
+| Q-091 | Journey not run: icon send button named by `aria-label` | `submitTargetIn` read only inner text | Name read by text, while the browser uses the accessible name | type=submit and create-word branches both use `accessibleName` | §5 |
+| Q-092 | `SIMULATED_RESULT` on "mock API key" | `api` matched as a result noun | A credential read as a faked result | key / token / secret all excluded | §6 |
+| Q-093 | Eight items argued not defects | — | — | — | 🟡 needs the admin's agreement |
+| Q-085 | Chat-form journey | Q-091 makes the next chat journey run; in-memory chats would then FAIL the reload check | — | — | 🟡 decision (options in the queue) |
+
+Each fix was reverted in place and the suite failed, then restored. New flags (NOT set, default ON, `off` reverts):
+`AGENTV3_WRITE_TYPE_IMPORT_HEAL`, `AGENTV3_DETACHED_METHOD_NOTE`. The GLM crawls (≈30 s) are inside Q-009's accepted
+bounds. Housekeeping: rows Q-069..Q-080 (1219c639) left the open table — #3461 merged.

@@ -86053,3 +86053,21 @@ guessed"), which now expects `/app/new`. The parent is in the same file, so this
 - The pasted app was rebuilt as React with the kit. Whether a pasted single-file HTML app should stay a
   single HTML file (the user's file mentions an Android WebView) is a product question. The brief now
   keeps its features, name and colours either way.
+
+### 2026-10-01 — follow-up (admin: "han karo"): the feature probe reads the other screens
+
+This closes the first "still open" item above. When the home screen leaves a requested control unseen,
+`featureProbeScreens.ts` reads the app's own declared routes and judges all the screens together.
+- **Which routes:** `extractPageRoutes`, which now joins nested routes. At most 4 routes, within 45 s.
+- **Which screens count:** only a screen that rendered.
+- **Never behind a sign-in session:** that path already reads the screens behind the door.
+- **After a heal:** both re-probes read the same screens again.
+
+The report line names the screens that were read (`screens=/,/bills,…`).
+
+Those screens are read with `recordConsole: false`, a new option on `browseUrl`. The reason: a repair
+re-checks only home, so an error recorded from another screen would read as surviving a fix that never
+saw it. That is the trap the browser-lane census describes.
+
+Kill switch: `AGENTV3_FEATURE_PROBE_SCREENS=off`. Test-locked in
+`tests/aControlOnAnotherScreenIsNotMissing.test.ts`. The `recordConsole` guard was reversion-proven.

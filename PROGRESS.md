@@ -87383,3 +87383,29 @@ is what was adopted. The rows leave `BUILD_REPORT_QUEUE.md`; this entry is their
     day.
   - **The real lever then:** a ladder change (another lead rung on Weak/Normal). That is the admin's routing
     decision, not a code fix.
+
+## 2026-10-01 — Autopsy a4be7fa2 + 3f959fde (Kerala-lottery data question, Telugu)
+
+Two builds in one workspace. Build 1 (stopped at 93 s, ₹0): "First data table lo draws check chesi e algorithm
+suitable check cheyu" with no file attached — the data had come in an earlier turn. Build 2 (17.6 min, ₹272.26):
+"Ipudu e data ni check cheyu …" with the sheet attached; a working Kerala Lottery Analyzer was delivered.
+
+| ID | Problem | Root cause | Class | Fix / state |
+|---|---|---|---|---|
+| Q-093 | The reply opened with "Now final summary. No more tools. … Proceed." | The model wrote its own plan into the ANSWER, then a gap, then the reply; the runner showed `turn.text` whole | A model's notes to itself shown as its answer | `answerAfterPlanning.ts` in `AgentRunner` (reply turns, before narration and summary). ✅ on merge |
+| Q-094 | 88 / LARGE / ~40 features for a question | Our own attachment label read as a messaging app (every attachment build); table rows counted as features; dates passed `isItem` | A label written for a model read by a word-matcher | `planning.sizing` for every deterministic sizer, `condenseDataTables`, `isDataValue`. ✅ on merge |
+| Q-095 | "Editing your existing app" about our starter | The starter-only reading ran only for `new_build`; the reader said edit | Starter counted as the user's app (sibling of 31254f9a) | Edit of a starter-only workspace → fresh build. ✅ on merge |
+| Q-096 | Specialist built a generic analyser | The child got the bare six-word message | A child handed less than the architect reads | `userRequest: () => planning.text`. ✅ on merge |
+| Q-097 | "needs a major-version upgrade" for "No fix available"; xlsx installed anyway | The note had two branches, neither for no-fix; the steer came only after the install | Advice that cannot be true; advice after the fact | `noFix` in the audit summary; `packageChoiceRule()` in both prompts. ✅ on merge |
+| Q-098 | Journey evidence named an orphan component | `dataEntryEvidence` read every file | Unreachable code read as the app | `unreferencedComponents`. ✅ on merge |
+| Q-099 | REPEATED_READS counted a specialist's first read as waste | Shared ledger compared across agents | A lying analyzer | Own-view comparison; honest worst list. ✅ on merge |
+| Q-100 | "BUILD_FAILED" for a planned hand-off | The outcome line ignored the reasoning-rung stop | Contradicting lines in one report | `plannedHandoff`. ✅ on merge |
+| Q-101 | "User should be asked" — nobody asked | The resume pushed on; its words did not say to ask the user | A need of the user's kept by the model | Resume message names it. ✅ on merge |
+| Q-089 | A data question became a ₹272 app | Routing | — | 🟡 admin decision (recommend chat answer + offer) |
+| Q-090 | Earlier attachment unavailable | No store for attachment text across turns | — | 🟡 admin decision (privacy; recommend bounded per-workspace keep) |
+| Q-091 | Orphan components after a pivot | No end-of-turn hand-back for unimported new files | — | 🟡 blocked on #3467 (same block) |
+| Q-092 | Six argued not-defects | — | — | 🟡 admin agreement |
+
+Self-heals noted (each points to an existing class): `:)` written at the head of App.tsx and fixed by the model (the
+write-time parse note caught it); a TS2322 `null` narrowing under the strict-new trial (Q-008 data point); 12 type
+errors from consumers written before `types.ts` (the contract-first rule); invented `nb-` classes (#3459).

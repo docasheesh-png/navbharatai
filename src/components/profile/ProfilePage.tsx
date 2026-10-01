@@ -11,7 +11,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
-import { User, Wallet, Clock, CheckCircle2, Circle, AlertCircle, ChevronRight, Edit3, Save, X, CalendarDays, Zap, Activity, LogOut, AlertTriangle, Smartphone, ShieldCheck, Mail, Loader2, Gift, Copy, Globe, Share2 } from 'lucide-react';
+import { User, Wallet, Clock, CheckCircle2, Circle, AlertCircle, ChevronRight, Edit3, CalendarDays, Zap, Activity, LogOut, AlertTriangle, Smartphone, ShieldCheck, Mail, Loader2, Gift, Copy, Globe, Share2 } from 'lucide-react';
 import { Github } from '../ui/BrandIcons';
 import { TirangaLoader } from '../ui/TirangaLoader';
 import type { User as FirebaseUser } from 'firebase/auth';
@@ -28,6 +28,7 @@ import { shareReferral } from '../../lib/shareReferral';
 import { auth as firebaseAuth } from '../../lib/firebase';
 import { sendVerificationEmail, linkGithubAccount, isGithubLinked, describeLinkGithubError } from '../../lib/accountVerificationActions';
 import { consumeProfileFocus, scrollToProfileVerifications, PROFILE_FOCUS_EVENT, PROFILE_VERIFICATIONS_ID } from '../../lib/profileFocus';
+import { ProfileEditForm } from './ProfileEditForm';
 
 // ── Types mirroring server responses ──────────────────────────────────────────
 
@@ -239,11 +240,6 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
       setVerifyBusy(null);
     }
   };
-  const [editName, setEditName] = useState('');
-  const [editBio, setEditBio] = useState('');
-  const [editPhone, setEditPhone] = useState('');
-  const [editPhotoUrl, setEditPhotoUrl] = useState('');
-  const [saving, setSaving] = useState(false);
 
   // Budget
   const [editBudget, setEditBudget] = useState(false);
@@ -332,38 +328,12 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
   useEffect(() => { fetchHistory(period); }, [period, fetchHistory]);
 
   const startEdit = () => {
-    setEditName(profile?.displayName ?? user?.displayName ?? '');
-    setEditBio(profile?.bio ?? '');
-    setEditPhone(profile?.phone ?? '');
-    setEditPhotoUrl(profile?.photoUrl ?? user?.photoURL ?? '');
     setEditing(true);
     setSaveError('');
     setSaveSuccess(false);
   };
 
   const cancelEdit = () => setEditing(false);
-
-  const saveProfile = async () => {
-    const token = await idToken();
-    if (!token) return;
-    setSaving(true); setSaveError(''); setSaveSuccess(false);
-    try {
-      const res = await fetch('/api/profile', {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ displayName: editName, bio: editBio, phone: editPhone, photoUrl: editPhotoUrl }),
-      });
-      if (!res.ok) throw new Error('Save failed');
-      await fetchProfile();
-      setEditing(false);
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
-    } catch (e: any) {
-      setSaveError(e?.message ?? 'Could not save changes. Please try again.');
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const saveBudget = async () => {
     const token = await idToken();
@@ -461,65 +431,26 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
             )}
           </div>
 
-          {/* Edit Form */}
+          {/* Edit Form — the ONE profile editor, shared with the App Mart profile (ProfileEditForm.tsx). */}
           {editing && (
-            <div className="space-y-3 border-t border-line pt-4">
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-muted uppercase tracking-widest">Display Name</label>
-                <input
-                  value={editName}
-                  onChange={e => setEditName(e.target.value)}
-                  maxLength={80}
-                  placeholder="Your name"
-                  className="w-full bg-surface border border-line rounded-xl px-3 py-2.5 text-sm text-ink placeholder-faint focus:outline-none focus:border-indigo-500/50"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-muted uppercase tracking-widest">Bio</label>
-                <textarea
-                  value={editBio}
-                  onChange={e => setEditBio(e.target.value)}
-                  maxLength={300}
-                  rows={2}
-                  placeholder="A short description about yourself"
-                  className="w-full bg-surface border border-line rounded-xl px-3 py-2.5 text-sm text-ink placeholder-faint focus:outline-none focus:border-indigo-500/50 resize-none"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-muted uppercase tracking-widest">Phone</label>
-                  <input
-                    value={editPhone}
-                    onChange={e => setEditPhone(e.target.value)}
-                    maxLength={20}
-                    placeholder="+91 XXXXX XXXXX"
-                    className="w-full bg-surface border border-line rounded-xl px-3 py-2.5 text-sm text-ink placeholder-faint focus:outline-none focus:border-indigo-500/50"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-muted uppercase tracking-widest">Photo URL</label>
-                  <input
-                    value={editPhotoUrl}
-                    onChange={e => setEditPhotoUrl(e.target.value)}
-                    placeholder="https://…"
-                    className="w-full bg-surface border border-line rounded-xl px-3 py-2.5 text-sm text-ink placeholder-faint focus:outline-none focus:border-indigo-500/50"
-                  />
-                </div>
-              </div>
-              {saveError && <p className="text-xs text-danger">{saveError}</p>}
-              <div className="flex items-center gap-2 pt-1">
-                <button
-                  onClick={saveProfile}
-                  disabled={saving}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-on-accent rounded-xl text-xs font-black transition-all disabled:opacity-50"
-                >
-                  {saving ? <TirangaLoader className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
-                  Save Changes
-                </button>
-                <button onClick={cancelEdit} className="flex items-center gap-1.5 px-4 py-2 bg-raised hover:bg-raised-hover text-muted rounded-xl text-xs font-bold transition-all">
-                  <X className="w-3.5 h-3.5" /> Cancel
-                </button>
-              </div>
+            <div className="border-t border-line pt-4">
+              <ProfileEditForm
+                idPrefix="settings-profile"
+                initial={{
+                  displayName: profile?.displayName ?? user?.displayName ?? '',
+                  bio: profile?.bio ?? '',
+                  phone: profile?.phone ?? '',
+                  photoUrl: profile?.photoUrl ?? user?.photoURL ?? '',
+                }}
+                onPhotoChange={() => { void fetchProfile(); }}
+                onSaved={() => {
+                  void fetchProfile();
+                  setEditing(false);
+                  setSaveSuccess(true);
+                  setTimeout(() => setSaveSuccess(false), 3000);
+                }}
+                onCancel={cancelEdit}
+              />
             </div>
           )}
 

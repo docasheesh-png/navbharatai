@@ -109,3 +109,52 @@ export function splitByAuthorship<T extends { file?: string | null }>(
 export function preExistingCodeObservation(label: string): string {
   return `[observation about your existing code — this build did not change these files] ${label}`;
 }
+
+/**
+ * A module path without its extension or a trailing `/index`, so `./theme`, `./theme.tsx` and
+ * `./theme/index.ts` compare equal. PURE.
+ */
+export function importStem(path: string | null | undefined): string {
+  return normalizeAuthoredPath(path).replace(/\.(?:tsx?|jsx?|mjs|cjs|vue|svelte)$/, '').replace(/\/index$/, '');
+}
+
+const RELATIVE_IMPORT = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\(\s*|\bimport\s+)(['"])(\.{1,2}\/[^'"\n]+)\1/g;
+
+function relativeImportStems(fromPath: string, code: string): Set<string> {
+  const dir = normalizeAuthoredPath(fromPath).split('/').slice(0, -1);
+  const out = new Set<string>();
+  RELATIVE_IMPORT.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = RELATIVE_IMPORT.exec(String(code ?? '')))) {
+    const parts = [...dir];
+    for (const seg of m[2].split('/')) {
+      if (seg === '.' || seg === '') continue;
+      if (seg === '..') parts.pop();
+      else parts.push(seg);
+    }
+    out.add(importStem(parts.join('/')));
+  }
+  return out;
+}
+
+/**
+ * The modules a rewrite of `fromPath` STOPPED importing (relative imports only), as stems.
+ *
+ * 🔴 WHY (autopsy 8257ca59, 2026-10-01). A builder replaced the template's ThemeToggle with a hand-rolled
+ * switch and deleted `import ThemeToggle from './theme'` from App.tsx. The readiness check then listed
+ * src/theme.tsx as an orphan under *"[observation about your existing code — this build did not change
+ * these files]"* — true of theme.tsx, false of the orphaning, which this build did one file over. Told the
+ * truth ("this build removed its only import"), the builder has a reason to put the working switch back.
+ * PURE.
+ */
+export function droppedRelativeImports(fromPath: string, before: string, after: string): string[] {
+  if (!before) return [];
+  const now = relativeImportStems(fromPath, after);
+  return [...relativeImportStems(fromPath, before)].filter((s) => !now.has(s));
+}
+
+/** The wording for an orphan this build created by removing its last import. */
+export function droppedImportOrphanLabel(labels: readonly string[]): string {
+  return `this build removed the only import of ${labels.slice(0, 3).join(', ')}${labels.length > 3 ? ', …' : ''} `
+    + '— use it again where it was used, or delete the file if it is really no longer needed';
+}

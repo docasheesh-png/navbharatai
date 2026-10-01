@@ -24,7 +24,7 @@ import { stylesheetCarriesKit } from '../src/server/AgentV3/kitRestore';
 import { DESIGN_KIT_BRIEF, architectSystemPrompt } from '../src/server/AgentV3/systemPrompt';
 import { DESIGN_KIT_CSS } from '../src/server/AgentV3/sandbox/AppMakerLab/generator/templates/designKit';
 import {
-  writeTypecheckWarmupCommand, writeTypecheckCommand, WriteTypecheckQueue, WRITE_TYPECHECK_TSBUILDINFO,
+  writeTypecheckWarmupCommand, WARMUP_COMPILED_MARKER, writeTypecheckCommand, WriteTypecheckQueue, WRITE_TYPECHECK_TSBUILDINFO,
   writeTypecheckSummary, emptyWriteTypecheckStats, writeTypecheckUntouched,
 } from '../src/server/AgentV3/writeTimeTypecheck';
 import { ToolDispatcher, type ActuatorPort } from '../src/server/AgentV3/ToolDispatcher';
@@ -221,7 +221,8 @@ describe('6 · the first write-time typecheck reads a warm cache, not a cold com
       this.commands.push(cmd);
       if (cmd === writeTypecheckWarmupCommand()) {
         await new Promise<void>((r) => { this.releaseWarmup = r; });
-        return { exitCode: 0, stdout: '', stderr: '' };
+        // The marker the warm-up prints only when it really compiled (autopsy 8257ca59).
+        return { exitCode: 0, stdout: `${WARMUP_COMPILED_MARKER}\n`, stderr: '' };
       }
       return /\btsc\b/.test(cmd) ? { exitCode: 2, stdout: TSC_ERR, stderr: '' } : { exitCode: 0, stdout: '', stderr: '' };
     }

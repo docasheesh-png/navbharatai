@@ -81,9 +81,17 @@ export function writeTypecheckCommand(): string {
  * the tree as it stood BEFORE the model wrote anything is evidence of nothing, and must never reach
  * the release gate's typecheck record or project memory. Pure.
  */
+/**
+ * Printed by the warm-up only when it really compiled. 🔴 Autopsy 8257ca59 (2026-10-01): on a fresh
+ * sandbox with no `node_modules`, the warm-up's guard skipped the compile and the command still "finished"
+ * in 0 s, so the report said *"the cache was warmed at build start in 0s"* while the first write paid 15 s
+ * for the install. A finished command is not a warmed cache; the marker is.
+ */
+export const WARMUP_COMPILED_MARKER = 'NBAI_WARMUP_COMPILED';
+
 export function writeTypecheckWarmupCommand(): string {
   return `if [ -x ${TSC_BIN} ] && [ -f tsconfig.json ] && [ ! package.json -nt node_modules ]; then `
-    + `${TSC_BIN} --noEmit --incremental --tsBuildInfoFile ${WRITE_TYPECHECK_TSBUILDINFO} >/dev/null 2>&1; fi; true`;
+    + `${TSC_BIN} --noEmit --incremental --tsBuildInfoFile ${WRITE_TYPECHECK_TSBUILDINFO} >/dev/null 2>&1; echo ${WARMUP_COMPILED_MARKER}; fi; true`;
 }
 
 function normalizePath(p: string): string {
@@ -303,6 +311,8 @@ export interface WriteTypecheckStats {
    */
   warmupStarted: boolean;
   warmupMs: number | null;
+  /** The warm-up finished without compiling — no compiler was installed yet (autopsy 8257ca59). */
+  warmupSkipped?: boolean;
 }
 
 export function emptyWriteTypecheckStats(): WriteTypecheckStats {
@@ -310,7 +320,7 @@ export function emptyWriteTypecheckStats(): WriteTypecheckStats {
     runs: 0, cleanRuns: 0, notRunRuns: 0, ownErrorsSurfaced: 0, elapsedMs: 0, timeouts: 0,
     skipped: 0, skippedNotTs: 0, skippedNoTsconfig: 0, probeFailures: 0,
     compiledUnprobed: 0, projectVerdict: null, disabledReason: null, qualityNotedFiles: [],
-    warmupStarted: false, warmupMs: null,
+    warmupStarted: false, warmupMs: null, warmupSkipped: false,
   };
 }
 
@@ -472,7 +482,8 @@ export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean, 
   return `Write-time typecheck: ${s.runs} run(s), ${s.cleanRuns} clean${notRun}, ${s.ownErrorsSurfaced} error(s) quoted back in the file just written, `
     + `${Math.round(s.elapsedMs / 1000)}s total (~${avg}s each)`
     + (s.timeouts ? `, ${s.timeouts} timeout(s)` : '')
-    + (s.warmupMs !== null ? `; the cache was warmed at build start in ${Math.round(s.warmupMs / 1000)}s, before the first write` : '')
+    + (s.warmupMs !== null ? `; the cache was warmed at build start in ${Math.round(s.warmupMs / 1000)}s, before the first write`
+      : s.warmupSkipped ? '; the build-start warm-up found no compiler installed yet, so the first check also paid for installing it' : '')
     + (s.compiledUnprobed > 0
       ? `, ${s.compiledUnprobed} of them run without the tsconfig.json probe ever answering (${s.probeFailures} failed attempt(s)) — the compiler was asked instead of being switched off`
       : '')

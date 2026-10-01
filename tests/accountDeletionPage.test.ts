@@ -86,6 +86,7 @@ describe('the page and the deletion code do not drift apart', () => {
       app_mart_notifications: /your App Mart notifications/i,
       app_mart_creator_ids: /public creator code/i,
       app_mart_follows: /creators you follow and the people who follow you/i,
+      profile_avatars: /profile photo you uploaded/i,
     };
     for (const { collection } of USER_SCOPED_COLLECTIONS) {
       const phrase = described[collection];

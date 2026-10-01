@@ -20,6 +20,7 @@ import { ToolDispatcher, type ActuatorPort } from '../src/server/AgentV3/ToolDis
 import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
 import { AgentEventStream } from '../src/server/AgentV3/AgentEventStream';
 import { buildSourceAppPreview } from '../src/lib/previewUtils';
+import { reviewChangedPaths } from '../src/server/AgentV3/ReviewerAgent';
 
 const ROUTE = readFileSync('src/server/routes/agentv3.ts', 'utf8');
 const code = (src: string) => src.replace(/^\s*\/\/.*$/gm, '');
@@ -324,7 +325,9 @@ describe('the rest of the review, locked at the source', () => {
   });
 
   it('the reviewer is not sent to review our own finishing files', () => {
-    expect(src).toContain('const reviewChanged = [...writtenFiles.keys()].filter((p) => !finishingPaths.has(p));');
+    // Through one helper since autopsy 8257ca59, which also leaves out untouched pre-seeded template files.
+    expect(src).toContain('const reviewChanged = reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden);');
+    expect(reviewChangedPaths(new Map([['a.tsx', 'x'], ['public/sw.js', 'sw']]), new Set(['public/sw.js']))).toEqual(['a.tsx']);
     expect(src).toContain('changedFiles: reviewChanged,');
   });
 });

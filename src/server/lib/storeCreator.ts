@@ -71,6 +71,11 @@ export interface CreatorLookupDeps {
 const CACHE_MS = 10 * 60_000;
 const cache = new Map<string, { info: CreatorInfo; at: number }>();
 
+/** Drop one creator's cached name — after they edit their profile. */
+export function forgetCreator(uid: string): void {
+  cache.delete(uid);
+}
+
 /** Test seam. */
 export function _resetCreatorCache(): void {
   cache.clear();

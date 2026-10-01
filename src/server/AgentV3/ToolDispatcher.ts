@@ -98,6 +98,8 @@ import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
 import { lintBuiltApp, a11yHandBack } from './buildQualityLint';
 import { storeEffectLoopNote } from './storeEffectLoop';
+import { rootThemeHooks, deadThemeSwitchNote } from './deadThemeSwitch';
+import { pruneGeneratedListing } from './generatedListing';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, usesNonKitNbClass } from './kitRestore';
 import { findUndefinedClasses, isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, missingImportedSheetNote, collectDefinedClasses } from './CssConsistency';
 import { pageDesignWriteNote, isPageFile, analyzeDesignCoverage, type DesignDefect } from './DesignCoverage';
@@ -107,7 +109,7 @@ import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
 import {
-  writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckWarmupCommand, writeTypecheckNote, writeTypecheckCleanNote, WriteTypecheckQueue,
+  writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckWarmupCommand, WARMUP_COMPILED_MARKER, writeTypecheckNote, writeTypecheckCleanNote, WriteTypecheckQueue,
   shouldProbeTsconfig, probeExhausted, isMissingFileError, type TsProjectVerdict,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
@@ -182,7 +184,7 @@ import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './E
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
 import { STARTER_ENTRY_CONTENT, entryIsStillTheStarter, starterAppBlocker } from './stillTheStarterApp';
-import { authoredPathSet, splitByAuthorship, preExistingCodeObservation } from './buildAuthorship';
+import { authoredPathSet, splitByAuthorship, preExistingCodeObservation, droppedRelativeImports, droppedImportOrphanLabel, importStem } from './buildAuthorship';
 import { computeReachability, splitByReachability, unreachableCodeObservation, type ReachabilityVerdict } from './appReachability';
 import { deletionCandidates, deletionReconciledMessage } from './fileDeletion';
 import { prunableGraphPaths, pruneWasRefused, pruneRefusedMessage } from './graphReconcile';
@@ -2749,8 +2751,10 @@ export class ToolDispatcher {
       const startedAt = Date.now();
       void this._writeTypecheckQueue.run(async () => {
         try {
-          await withTimeout(this.actuator.runCommand(this.workspaceId, writeTypecheckWarmupCommand()), WRITE_TYPECHECK_TIMEOUT_MS, 'write-typecheck-warmup');
-          s.warmupMs = Date.now() - startedAt;
+          const r = await withTimeout(this.actuator.runCommand(this.workspaceId, writeTypecheckWarmupCommand()), WRITE_TYPECHECK_TIMEOUT_MS, 'write-typecheck-warmup');
+          // Only a warm-up that really compiled warmed anything (autopsy 8257ca59).
+          if (String(r?.stdout ?? '').includes(WARMUP_COMPILED_MARKER)) s.warmupMs = Date.now() - startedAt;
+          else s.warmupSkipped = true;
         } catch { /* a warm-up that did not finish is only a cold first check, as before */ }
         return null;
       }).catch(() => undefined);
@@ -3269,7 +3273,45 @@ export class ToolDispatcher {
       }
     }
     const style = await this.styleWriteNotes(files);
-    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow + touch;
+    // A light/dark switch that sets a class or attribute nothing styles (autopsy 8257ca59) — said while open.
+    const theme = await this.deadThemeSwitchNotes(files);
+    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow + theme + touch;
+  }
+
+  /**
+   * A written file that switches a class or `data-*` attribute on <html>/<body> that nothing in the project
+   * styles (deadThemeSwitch.ts). The project is read only when a written file has such a switch at all, and
+   * the note says nothing unless every stylesheet, every source file and the Tailwind config could be read —
+   * a rule in a file we did not read must never be reported as missing.
+   */
+  private async deadThemeSwitchNotes(files: Record<string, string>): Promise<string> {
+    try {
+      const suspects = Object.keys(files).filter((p) => /\.(?:[cm]?[jt]sx?|vue|svelte|html?)$/.test(p) && rootThemeHooks(files[p] ?? '').length > 0);
+      if (suspects.length === 0) return '';
+      let listing: string[] = [];
+      try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'theme-note-listing'); }
+      catch { return ''; }
+      const wanted = listing
+        .map((p) => String(p).replace(/^\.?\/+/, ''))
+        .filter((p) => !(p in files))
+        .filter((p) => !/(^|\/)(node_modules|dist|build|\.next)\//.test(p))
+        .filter((p) => isProjectStylesheet(p) || /\.(?:[cm]?[jt]sx?|vue|svelte)$/.test(p) || /(^|\/)index\.html?$/.test(p))
+        .filter((p) => !/\.(test|spec)\.[jt]sx?$/.test(p) && !/\.d\.ts$/.test(p));
+      if (wanted.length > ToolDispatcher.STYLE_NOTE_MAX_READS) return '';
+      const project: Record<string, string> = { ...files };
+      let unread = false;
+      await Promise.all(wanted.map(async (p) => {
+        try {
+          const raw = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'theme-note-read');
+          if (typeof raw === 'string') project[p] = withoutPreviewBridge(p, raw);
+          else unread = true;
+        } catch { unread = true; }
+      }));
+      if (unread) return '';
+      return suspects.map((p) => deadThemeSwitchNote(p, files[p] ?? '', project)).join('');
+    } catch {
+      return '';
+    }
   }
 
   /** Most project files one style note may read — a note must never cost more than the write it follows. */
@@ -3396,6 +3438,18 @@ export class ToolDispatcher {
    * heal. Bounded: the most recent 40 screens.
    */
   private readonly _screensWithClasses = new Map<string, string>();
+
+  /**
+   * Modules (as import stems) a write or edit of this build stopped importing — so an untouched file it
+   * orphaned is not reported as the user's existing code (autopsy 8257ca59; buildAuthorship.ts).
+   */
+  private readonly _droppedImportStems = new Set<string>();
+  private noteDroppedImports(path: string, before: string, after: string): void {
+    try {
+      if (!/\.(?:[cm]?[jt]sx?|vue|svelte)$/.test(path)) return;
+      for (const st of droppedRelativeImports(path, before, after)) this._droppedImportStems.add(st);
+    } catch { /* attribution is best-effort */ }
+  }
 
   /** Stylesheets written this build (path → content) — the candidates for "defined, but nothing imports it". */
   private readonly _sheetsWritten = new Map<string, string>();
@@ -3810,6 +3864,7 @@ export class ToolDispatcher {
         if (writeParseReject) return writeParseReject;
         await this.actuator.writeFile(this.workspaceId, path, content);
         this.onFileWrite?.(path, content);
+        if (kind === 'modify') this.noteDroppedImports(path, existingContent, content);
         this.state?.recordFileChange({ path, kind }, agent);
         // A stale copy of this module under an earlier-resolving extension would run INSTEAD of it.
         const twinNote = await this.removeShadowTwins(path, agent);
@@ -4057,6 +4112,7 @@ export class ToolDispatcher {
         if (editParseReject) return editParseReject;
         await this.actuator.writeFile(this.workspaceId, path, updated);
         this.onFileWrite?.(path, updated);
+        this.noteDroppedImports(path, existing, updated);
         this.state?.recordFileChange({ path, kind: 'modify' }, agent);
         const editMem = getWorkspaceMemory(this.workspaceId);
         editMem.indexFile(path, updated);
@@ -4528,8 +4584,10 @@ export class ToolDispatcher {
         // T1-sec-redact: a command can print a secret (`cat .env`, `printenv`, `echo $API_KEY`).
         // Command stdout/stderr is NEVER an edit_file match source, so — unlike read_file content —
         // it is safe to mask here, closing the leak into BOTH the model transcript and the terminal.
+        // A shell file listing leaves out node_modules / dist, as glob does (autopsy 8257ca59).
+        const listing = pruneGeneratedListing(command, stdout);
         let out =
-          `exit=${exitCode}\n${redactSecrets(stdout)}` + (stderr ? `\n[stderr]\n${redactSecrets(stderr)}` : '');
+          `exit=${exitCode}\n${redactSecrets(listing.stdout)}` + (stderr ? `\n[stderr]\n${redactSecrets(stderr)}` : '');
         // THE PIPE ATE THE EXIT CODE (autopsy 56ee622f, 2026-08-04). `tsc --noEmit 2>&1 | head -30`
         // exits 0 because `head` succeeds — a pipeline reports its LAST command's status. The agent
         // verified its work with exactly that, was told "exit 0", moved on, and shipped an app with ~10
@@ -5189,14 +5247,21 @@ export class ToolDispatcher {
           );
           if (split.preExisting.length > 0) {
             scoredArch = { ...archReport, orphanComponents: split.ours.map((o) => o.label) };
-            extra.push({
-              severity: 'observation',
-              label: preExistingCodeObservation(
-                `${split.preExisting.length} component(s) created but never used: `
-                + `${split.preExisting.slice(0, 3).map((o) => o.label).join(', ')}`
-                + `${split.preExisting.length > 3 ? ', …' : ''}`,
-              ),
-            });
+            // An untouched file this build ORPHANED by removing its last import elsewhere is this build's doing
+            // (autopsy 8257ca59) — said as such, at warning weight, never as "your existing code".
+            const orphanedHere = split.preExisting.filter((o) => this._droppedImportStems.has(importStem(o.file)));
+            const reallyOld = split.preExisting.filter((o) => !orphanedHere.includes(o));
+            if (orphanedHere.length > 0) extra.push({ severity: 'medium', label: droppedImportOrphanLabel(orphanedHere.map((o) => o.label)) });
+            if (reallyOld.length > 0) {
+              extra.push({
+                severity: 'observation',
+                label: preExistingCodeObservation(
+                  `${reallyOld.length} component(s) created but never used: `
+                  + `${reallyOld.slice(0, 3).map((o) => o.label).join(', ')}`
+                  + `${reallyOld.length > 3 ? ', …' : ''}`,
+                ),
+              });
+            }
           }
         } catch { /* attribution is best-effort — a failure keeps the whole-workspace score */ }
         // 🔴 A FORECAST IS NOT A VERDICT WHEN THE VERDICT IS ALREADY IN (autopsy ce115e1f). The agent ran

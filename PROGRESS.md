@@ -86324,6 +86324,31 @@ two-ended erase.
 - Phone users get all of this only with a fresh `.aab`/`.ipa`. Admin instruction: build them only AFTER every open
   PR is merged.
 
+### 2026-10-01 — Autopsy 8257ca59 (calculator, Weak tier, golden scaffold, 4.3 min, ₹30.18)
+
+The build succeeded and the app worked at the end. The bar was not met: one self-heal (a reviewer-driven
+repair on the second rung) put back a feature the polish step had broken, and the report carried four
+statements that were not true.
+
+Tally: ✅ 1 self-heal (theme switch restored by the green repair) · 🔀 0 · ⏭️ 1 (the explorer passed a dead
+switch) · ❌ 0 shipped broken · 🥵 3 (the review overran its 45 s with tools; the first write-time typecheck paid
+15 s for an install; the repair went to rung 2).
+
+| Problem | Root cause | Class | Siblings found and fixed | Locked by |
+|---|---|---|---|---|
+| Polish step replaced the working ThemeToggle with a 🌓 that toggled `.dark`, which nothing styles | Template label "Auto" did not read as a theme switch; nothing at write time checks that a switched root class or attribute is styled | A root theme hook with no rule | `deadThemeSwitch.ts` write-time note (all write doors via `writeSteeringNotes`); template label now 🌓/☀️/🌙; VERIFY & FINISH says keep template controls | test §1, §2 |
+| Explorer passed the dead switch ("nothing visibly changed") | It judges by text; a theme switch changes colours | A control judged by the wrong signal (sibling of the search/sort probe) | Theme-named controls pressed up to 3× and judged by computed colours | test §2b (real browser), reversion-proven |
+| Release gate: "whether it actually SAVES anything is untested" for a calculator that pressed 12 controls cleanly | The gate never read the explorer; why the app read as taking input is not in the report | Evidence one check holds that the verdict ignores | `explore`/`explorePresses` on the gate; a no-data app with pressed controls can be GREEN; `JOURNEY_NOT_DERIVED` names the file and line (`dataEntryEvidence`) | test §3, §4, reversion-proven |
+| Orphan `src/theme.tsx` labelled "this build did not change these files" | Authorship is per file; this build orphaned it by removing the import in App.tsx | Orphaning attributed to the wrong build | `droppedRelativeImports` recorded at write_file and edit_file | test §6 |
+| Lean review used tools, overran 45 s, opened with "I'll help you build the calculator app" | The 12 seeded template files counted as changed; the 18 KB kit stylesheet broke the inline bound | Our own seed counted as the builder's change | `reviewChangedPaths` drops untouched seeds | test §5, reversion-proven |
+| "The cache was warmed at build start in 0s" while the first write paid 15 s | The warm-up's guard skipped the compile on a fresh sandbox and the finish was read as a warm cache | A finished command read as a result | `WARMUP_COMPILED_MARKER`; a skipped warm-up is said as such | test §7 |
+
+- **Checked, no change:** "No tests at all" at step 10 was true when written and is recorded resolved; the
+  starter suite added later is ours, and `TEST_SUITE_UNVERIFIED` says so. `startTier: "gemini"` is a band label
+  (#3429 records the same).
+- **Still open:** which file made this calculator read as taking input is not proven. The template and every
+  file the platform writes pass `appHasNoDataEntry`, so it was most likely the model's own App.tsx edit; the
+  report did not carry that file. The next such report will name it in `JOURNEY_NOT_DERIVED`'s detail.
 ---
 
 ## 2026-10-01 — Autopsy 19641ab5: "Create full image" + a portrait photo was built as an app
@@ -86429,6 +86454,32 @@ after the entry. A further ~20–40 s there (painting before the stylesheet stag
 lane's CSS guards — recorded here, not attempted.
 **Open:** whether models actually follow the shell-first rule — watch when `src/App.tsx` is first written in admin reports.
 
+### 2026-10-01 — Autopsy 8257ca59 follow-up, and App Mart "My profile" becomes editable
+
+**Autopsy, the item the first pass left:** the green repair's `find . -maxdepth 3 …` handed the model dozens of
+`node_modules/` and `dist/` paths. `generatedListing.ts` takes those lines out of a shell LISTING (`find`,
+`ls -R`, `tree`, `du`) and says how many, the way `glob` already skips them; a command that names the folder is
+untouched. Test §8 in `tests/theThemeSwitchThatDidNotSwitch.test.ts`.
+
+**Admin ask:** *"app mart me 'my profile' par … naam etc dikhayi nahi de raha hai. wahi par edit button dedo! jo
+settings me profile edit kar sakte hai, wahi yaha bhi edit kar sake! photo bhi laga sake!!!"*
+
+- **Why the name was missing:** the account had no display name in its profile record or its sign-in record, so
+  App Mart showed the anonymous label "NavBharatAI creator". A photo needed a URL pasted in Settings.
+- **One editor (`ProfileEditForm.tsx`)** used by Settings → Profile and by "Edit profile" on your own App Mart
+  profile: display name, bio, phone (private), and a photo UPLOAD (cropped to a 320 px square JPEG in the
+  browser, `avatarImage.ts`). The App Mart profile now shows the bio.
+- **The photo is checked before it is public** (`profileAvatar.ts`): real bytes (JPEG/PNG/WebP, ≤300 KB), then a
+  one-word vision check (no Claude). Only a clear SAFE is saved; a check that cannot run refuses. Stored in
+  `profile_avatars/<creatorCode>`, served by `GET /api/app-mart/avatar/:creatorId` (versioned URL, long cache).
+- **Only vouched-for photos are shown to others** (`publicPhotoUrl`): our uploaded avatar or a Google/GitHub
+  sign-in picture. A URL pasted before uploads existed was never checked, so it is now shown only to its owner.
+- **Name and bio pass the comments' word list** on save; an older bio that fails it is not shown publicly.
+- **Fresh after an edit:** the profile route reads your own profile without the 10-minute cache, and a save drops
+  both caches on that server. ⚠️ Other Cloud Run instances can show the old name/photo for up to 10 minutes.
+- Erased with the account (`USER_SCOPED_COLLECTIONS`), named on the deletion page and in the Privacy Policy.
+- Tests: `tests/theProfileIsEditableWhereItIsSeen.test.ts`.
+- ⚠️ Phone users get the editor only with a fresh `.aab`/`.ipa` (bundled mode); the server half is live on deploy.
 ## 2026-10-01 — BUILD_REPORT_QUEUE worked (the sixth absolute rule's first pass)
 
 - **Q-001 ✅** `@types/express` v5 beside `express` v4. Root: a hand rewrite of package.json after

@@ -160,7 +160,9 @@ describe('4 · every browser lane opens pages with reduced motion — one defini
     expect(mod).toContain("if (!/not stable/i.test(String(e && e.message || e))) throw e;");
     expect(mod).toContain("await loc.dispatchEvent('click');");
     expect(mod).not.toContain(`first().click({ timeout: 4000 })`);
-    expect(mod.split('await press(page, ').length - 1).toBe(2);
+    // A first press, a second-level control's parent, and a light/dark switch's further presses (autopsy
+    // 8257ca59) — every one through press(), never a raw click.
+    expect(mod.split('await press(page, ').length - 1).toBe(3);
   });
   it('the generated explorer is still valid JavaScript with no raw control character', () => {
     const dir = mkdtempSync(join(tmpdir(), 'nbai-race-'));

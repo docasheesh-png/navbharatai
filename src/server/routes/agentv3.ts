@@ -174,7 +174,7 @@ import {
   a11yIssueCount, slowRouteCount,
 } from '../AgentV3/PageRouteCheck';
 import {
-  deriveJourneys, journeyScript, parseJourneyResults, summarizeJourneys, noJourneyReason, appHasNoDataEntry, appOnlyShowsWhatItHolds,
+  deriveJourneys, journeyScript, parseJourneyResults, summarizeJourneys, noJourneyReason, appHasNoDataEntry, appOnlyShowsWhatItHolds, dataEntryEvidence,
   JOURNEY_TIMEOUT_MS, writesToUserDatabase,
 } from '../AgentV3/journeyDerivation';
 import {
@@ -538,7 +538,7 @@ import { runWithEscalation, type GateVerdict } from '../AgentV3/EscalationOrches
 import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from '../AgentV3/escalationRollout';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
-import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall } from '../AgentV3/ReviewerAgent';
+import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall, reviewChangedPaths } from '../AgentV3/ReviewerAgent';
 import { refuteReviewByEvidence, missingClassClaim } from '../AgentV3/reviewEvidence';
 import { SALVAGE_HANDOFF_MARKER, HANDOFF_NOTE_FIX_LINE } from '../AgentV3/handoffRule';
 import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
@@ -16685,7 +16685,10 @@ async function noteBuildOutcome(
                   `Do NOT rewrite what already works, do NOT re-plan a parallel file structure, and NEVER add an import that already exists.\n\n---\n\n${buildPrompt}`
                 : `[VERIFY & FINISH — DO NOT START OVER] This workspace was just pre-seeded with NavBharatAI's tested, working "${golden.label}" app template. ` +
                   `It already compiles cleanly and fully implements the request below. READ src/App.tsx first. If the request matches the template (it should — the prompt is the template's own), ` +
-                  `make at most SMALL polish edits and finish quickly. Do NOT rewrite it from scratch, do NOT re-plan a parallel file structure, and NEVER add an import that already exists.\n\n---\n\n${buildPrompt}`;
+                  `make at most SMALL polish edits and finish quickly. Do NOT rewrite it from scratch, do NOT re-plan a parallel file structure, and NEVER add an import that already exists. ` +
+                  // Autopsy 8257ca59: a polish step replaced the template's working light/dark switch with a
+                  // hand-rolled one that set a class no stylesheet styles, and a repair pass had to put it back.
+                  `KEEP the template's own working controls — above all its light/dark switch (ThemeToggle in src/theme.tsx, which cycles Auto → Light → Dark through the data-theme attribute the styles use); improve one in place if you must, never replace it with a hand-rolled copy.\n\n---\n\n${buildPrompt}`;
             }
           }
         } catch { /* pre-seed is best-effort — a failure just builds from scratch */ }
@@ -20901,6 +20904,8 @@ async function noteBuildOutcome(
             buildDiag.record({
               phase: 'preview', severity: 'info', code: 'JOURNEY_NOT_DERIVED',
               message: `No user journey was run — ${noJourneyReason(journeyFiles)}.`,
+              // Which file counts as taking input, and the line — so a "data app" verdict names its cause (autopsy 8257ca59).
+              ...(() => { const why = dataEntryEvidence(journeyFiles); return why ? { detail: `Read as taking input because of ${why.what} in ${why.path}: ${why.line}` } : {}; })(),
               autoResolved: true,
             });
             // When the app has NO data-entry surface at all (a game, a dashboard, a landing page), there is
@@ -20968,6 +20973,10 @@ async function noteBuildOutcome(
           });
           const proof = exploreUserSummary(explored);
           if (proof.headline) exploreProof = proof;
+          // The release gate reads it too (autopsy 8257ca59): controls pressed in a real browser are proof of
+          // interaction, and for an app with nothing to save they are its whole journey.
+          gateEvidence.explore = explored.outcome;
+          gateEvidence.explorePresses = explored.pressed;
 
           // A BROKEN BUTTON GETS ONE VERIFIED REPAIR (admin 2026-09-28: "han dono ho jaye … world class
           // banao" — explorerRepair.ts). The explorer's evidence is the strongest this platform has: a
@@ -21049,6 +21058,7 @@ async function noteBuildOutcome(
                     // buttons that now work; clear it so the release gate is not held yellow by it.
                     if (outcome.kept && outcome.judgement && outcome.judgement.remaining.length === 0) {
                       try { buildDiag.resolveOnRecheck('EXPLORE_FAILED'); } catch { /* best-effort */ }
+                      gateEvidence.explore = 'passed';
                     }
                     if (outcome.kept) {
                       const line = explorerRepairUserLine(outcome);
@@ -22349,7 +22359,7 @@ async function noteBuildOutcome(
           else abort.signal.addEventListener('abort', stopReviewWithBuild, { once: true });
           // What THIS turn changed, and — for a suggest-only review — that code in full. Computed before
           // the spawn because whether the review may read at all depends on it (autopsy bee95692).
-          const reviewChanged = [...writtenFiles.keys()].filter((p) => !finishingPaths.has(p));
+          const reviewChanged = reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden);
           const reviewInline = reviewPlan.mode === 'suggest' ? leanReviewInline(reviewChanged, (p) => writtenFiles.get(p)) : undefined;
           const reviewOneCall = leanReviewAnswersInOneCall(reviewInline);
           const reviewSpawn = makeSubAgentSpawn({

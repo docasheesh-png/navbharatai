@@ -93,6 +93,12 @@ export interface RuntimeEvidence {
    * interaction, never of saving. Optional: omitted keeps every sentence and verdict as before.
    */
   explore?: 'passed' | 'failed' | 'nothing' | 'not-run';
+  /**
+   * Why the journey could not be reached, in the runner's own words ("none of the form fields were
+   * present on the running page"). The gate used to GUESS — "a login wall or a route needing seeded
+   * data" — about an app with neither (autopsy e49afa97). Optional: omitted keeps a cause-free sentence.
+   */
+  journeyUnreachableWhy?: string;
   explorePresses?: number;
 
   /**
@@ -194,7 +200,7 @@ export interface GateVerdict {
 // ⚠️ Every field added to RuntimeEvidence that is NOT a runtime CHECK must be excluded here, or it
 // silently becomes a row the gate tries to label and grade. tsc catches the omission, which is
 // how `stoppedByUser` was caught the moment it was added.
-export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'noPageRoutes' | 'explore' | 'explorePresses'>;
+export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'noPageRoutes' | 'explore' | 'explorePresses' | 'journeyUnreachableWhy'>;
 
 /** What a PASS means. Phrased as a completed fact, because that is what `proven` is a list of. */
 const RUNTIME_LABEL: Record<CheckKey, string> = {
@@ -332,7 +338,10 @@ export function releaseGate(
     }
     else if (outcome === 'unreachable') {
       // Reached but inconclusive. Neither a pass nor a defect, and it must be neither here too.
-      unproven.push('a user journey was derived but could not be reached (a login wall or a route needing seeded data)');
+      const why = String(ev.journeyUnreachableWhy ?? '').trim().replace(/\s+/g, ' ').slice(0, 160);
+      unproven.push(why
+        ? `a user journey was derived but could not be reached (${why})`
+        : 'a user journey was derived but could not be reached in the browser');
     }
     else if (outcome === 'none-derivable') {
       // NOT a gap: the app has no data-entry flow to drive, so there was no journey to prove. Naming it as

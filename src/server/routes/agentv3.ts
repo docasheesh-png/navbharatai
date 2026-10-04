@@ -2,7 +2,7 @@ import { toSafeClientMessage } from '../lib/httpError';
 import type { Express, Request, Response } from 'express';
 import { copyName, copyStatus } from '../AgentV3/duplicateApp';
 import { decideMarkupOnProof, markupNeedsPreview, markupWaiverSettledLine } from '../AgentV3/previewEarnsMarkup';
-import { moduleTurnEtaLine, moduleTurnEtaNote } from '../AgentV3/moduleTurnEta';
+import { moduleTurnEtaLine, moduleTurnEtaNote, skipsOpeningEta } from '../AgentV3/moduleTurnEta';
 import { isPlatformFixRequest, inBrowserPreviewFixGuidance } from '../../lib/platformFixRequest';
 import { buildRateLimiter, rateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import express from 'express';
@@ -13057,6 +13057,8 @@ async function noteBuildOutcome(
     // The HIGH end of the band the user was shown first. The live tick never calls a build "bigger than
     // expected" while it is still inside that band (autopsy e49afa97).
     let etaPromisedHighMs = 0;
+    // True when this turn continues a stored project plan, so the whole-app ETA is never shown.
+    let etaSkippedForModule = false;
     // MEASURED ETA state (2026-08-23). Everything above predicts from the PROMPT, which is how "Make an
     // VPN App" — a prompt with no page-words and no feature-words — scored the floor of the formula and
     // promised ~3 min for a build that ran 18m 42s. These two fields let the heartbeat stop predicting
@@ -14165,6 +14167,15 @@ async function noteBuildOutcome(
       // P-PME.4 — show an up-front ETA for build/edit turns so the user sees a real estimate instead
       // of an open-ended spinner. Derived from the prompt's complexity (no blueprint yet). Best-effort
       // and additive — a failure just skips the ETA; chat turns already returned above.
+      // A "continue" of a stored project plan builds ONE module; the opening ETA would describe the whole
+      // app and be withdrawn seconds later (autopsy Sur Taal). Peeked once here, before the estimate.
+      if ((intent === 'new_build' || intent === 'edit_existing') && isContinuationMessage(prompt)
+        && projectModeEnabled(process.env, { userId, email })) {
+        try {
+          const peek = await withTimeout(loadProjectPlan(workspaceId), 3_000, 'eta-plan-peek');
+          etaSkippedForModule = skipsOpeningEta(peek, true, (p) => nextBuildableModule(p) !== null);
+        } catch { /* unknown ⇒ the ordinary estimate */ }
+      }
       if (intent === 'new_build' || intent === 'edit_existing') {
         // The preview needs to know we are WRITING the app, not settling one that already runs — it is
         // the only signal that lets it stop hard-remounting a live app under the person using it. See
@@ -14258,7 +14269,15 @@ async function noteBuildOutcome(
           // midpoint as "~3 min" was the code being more honest with itself than with the user. A first
           // build also now says outright that the figure will be replaced, which is what makes the later
           // measured update read as information instead of as a broken promise.
-          events.emit({ type: 'narration', agent: 'architect', text: etaShown, ts: Date.now(), id: 'eta-live' });
+          if (etaSkippedForModule) {
+            // Not shown and not promised: the module line below says what this round builds instead.
+            etaTotalMs = 0; etaBaseMs = 0; etaRoughBand = null; etaRoughHighMs = null; etaPromisedHighMs = 0;
+            buildDiag.withdrawEtaPromise();
+            buildDiag.record({ phase: 'plan', severity: 'info', code: 'ETA_SKIPPED_MODULE_TURN', autoResolved: true,
+              message: 'Opening ETA not shown: this "continue" builds the next module of a stored project plan, and the estimate describes the whole app.' });
+          } else {
+            events.emit({ type: 'narration', agent: 'architect', text: etaShown, ts: Date.now(), id: 'eta-live' });
+          }
         } catch { /* ETA is best-effort — never affects the build */ }
       }
       const budget = maxBuildBudgetUsd();
@@ -17215,6 +17234,8 @@ async function noteBuildOutcome(
                   buildDiag.withdrawEtaPromise();
                   events.emit({ type: 'narration', agent: 'architect', text: moduleTurnEtaLine(done, pPlan.modules.length, projectModuleRef.name), ts: Date.now(), id: 'eta-live' });
                   buildDiag.record({ phase: 'plan', severity: 'info', code: 'ETA_WITHDRAWN', autoResolved: true, message: moduleTurnEtaNote(done, pPlan.modules.length, projectModuleRef.name) });
+                } else if (etaSkippedForModule) {
+                  events.emit({ type: 'narration', agent: 'architect', text: moduleTurnEtaLine(done, pPlan.modules.length, projectModuleRef.name, false), ts: Date.now(), id: 'eta-live' });
                 }
               } catch { /* the ETA is best-effort and must never touch a build */ }
               // WHO ASSEMBLES THE APP? A module that does not own the entry leaves the starter page in

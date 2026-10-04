@@ -22,7 +22,7 @@
 // never reach the build.
 
 import {
-  lintDesign, designSummary, extractSpacingPx, offGridSpacing, MAX_OFFGRID, SPACING_GRID, type DesignLintResult,
+  lintDesign, designSummary, TOKEN_MODULE_PATH, extractSpacingPx, offGridSpacing, MAX_OFFGRID, SPACING_GRID, type DesignLintResult,
 } from '../AppMakerLab/intelligence/DesignLinter';
 import { lintA11y, type A11yLintResult } from '../AppMakerLab/intelligence/A11yLinter';
 import { stripCommentsForMarkup } from './stripCodeComments';
@@ -132,8 +132,9 @@ export function lintBuiltApp(files: Record<string, string>): BuildQualityLint | 
   if (fileCount === 0) return null;
 
   const joined = parts.join('\n');
+  const tokenModuleCode = selected.filter(([p]) => TOKEN_MODULE_PATH.test(p)).map(([, c]) => c).join('\n');
   return {
-    design: lintDesign(joined),
+    design: lintDesign(joined, { tokenModuleCode }),
     a11y: lintA11y(joined),
     fileCount,
     truncated,
@@ -154,7 +155,7 @@ function attributeOffenders(selected: ReadonlyArray<readonly [string, string]>):
   for (const [path, content] of selected) {
     let found: Array<{ type: string; count: number }> = [];
     try {
-      found = [...lintDesign(content).violations, ...lintA11y(content).violations]
+      found = [...lintDesign(content, { tokenModuleCode: TOKEN_MODULE_PATH.test(path) ? content : '' }).violations, ...lintA11y(content).violations]
         .map((v) => ({ type: v.type, count: v.count }));
     } catch { continue; }
     for (const { type, count } of found) {

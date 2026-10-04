@@ -360,3 +360,44 @@ export function enumeratedFeatureItems(prompt: string, opts: { plainLines?: bool
 
   return collapseVariants([...seen]);
 }
+
+/**
+ * 🔴 A SPEC IN SECTIONS IS SIZED BY ITS SECTIONS (autopsy Sur Taal, 2026-10-04). A Hindi design note for
+ * one offline music player listed each screen's buttons as bullets — "Previous", "Play/Pause", "Next",
+ * "Song Name" — under nine numbered sections. Every bullet counted as a feature (40), the project gate
+ * fired at ≥ 14, and one app was cut into 23 modules: a "continue" and three to six minutes per module,
+ * about two hours for a music player. The same harm this file's `plainLines` note already records for
+ * SignBridge, through a second door.
+ *
+ * In a spec organised as numbered sections, each with its own bullet list, the bullets are the PARTS
+ * of a section (one screen's controls, one settings page's options), and the sections are the units of
+ * work. So the project gates count sections. Strict: at least SECTIONED_MIN numbered headings, each
+ * followed by a bullet block; anything else returns null and the bullet count stands, so a flat
+ * "Features:" list of twenty items is sized exactly as before. PURE.
+ */
+export const SECTIONED_MIN = 3;
+const NUMBERED_HEADING = /^\s*\d{1,3}[.)]\s+\S/;
+const BULLET_LINE = /^\s*[-*•]\s+\S/;
+
+export function sectionedSpecSize(prompt: string): number | null {
+  const lines = appLines(withoutMachineText(String(prompt ?? ''), { drop: true }));
+  let sections = 0;
+  let pending = false; // a numbered heading whose bullet block has not started yet
+  let bulletsUnderHeading = 0;
+  let bulletsOutside = 0;
+  let current = false;
+  for (const line of lines) {
+    if (NUMBERED_HEADING.test(line)) {
+      pending = true; current = false;
+      continue;
+    }
+    if (BULLET_LINE.test(line)) {
+      if (pending) { sections++; pending = false; current = true; }
+      if (current) bulletsUnderHeading++; else bulletsOutside++;
+    }
+  }
+  if (sections < SECTIONED_MIN) return null;
+  // Most bullets must sit under a numbered section, or the headings are decoration on a flat list.
+  if (bulletsUnderHeading < bulletsOutside) return null;
+  return sections;
+}

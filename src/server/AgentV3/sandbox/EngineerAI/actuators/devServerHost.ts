@@ -413,28 +413,24 @@ const PM_ONE_SHOT_SUBCOMMAND =
 const OTHER_INSTALLER_ONE_SHOT =
   /^\s*(?:sudo\s+)?(?:(?:python[0-9.]*\s+-m\s+)?pip[0-9.]*\s+(?:install|uninstall|download|freeze|list|show)|uv\s+(?:pip\s+\w+|add|remove|sync|lock|venv)|poetry\s+(?:add|install|remove|lock|update)|pipenv\s+(?:install|uninstall|lock|sync)|(?:conda|mamba|micromamba)\s+(?:install|create|remove)|apt(?:-get)?\s+(?:install|update|remove|upgrade)|apk\s+(?:add|del|update)|brew\s+(?:install|uninstall|upgrade)|gem\s+install|cargo\s+(?:install|add|fetch)|go\s+(?:get|mod)|composer\s+(?:install|require|update))\b/i;
 
-/**
- * Every path in a command, reduced to its last part: `/home/user/.warm/vite-react/node_modules` →
- * `node_modules`, `./node_modules/.bin/vite` → `vite`, `bash ./dev.sh` → `dev.sh`.
- *
- * 🔴 WHY (autopsy of builds 1eaa5f5a / e3b0ce25, 2026-10-04). The keyword rules below read a DIRECTORY
- * name as a program. The platform's own typecheck primer copies `/home/user/.warm/vite-react/node_modules`,
- * so `\bvite\b` read every write-time typecheck as a dev-server launch: it was sent down the managed
- * boot, prefixed `BROWSER=none` (a bash syntax error in front of `if`), the running dev server on the
- * port was killed first, the check never ran and timed out at 30 s, and the preview went down.
- * The third time this class has cost a build: `/dev/null` (2026-08-16), `--save-dev` (VPN autopsy), and
- * now `vite-react/`. A program is named by its last path part, so that is the only part judged — which
- * keeps `./node_modules/.bin/vite` and `bash ./dev.sh` the launches they are.
- */
-function lastPathParts(segment: string): string {
-  return segment.replace(/[^\s'"`;|&()<>=]*\/[^\s'"`;|&()<>]*/g, (tok) => tok.replace(/\/+$/, '').split('/').pop() ?? '');
-}
-
 /** True when a single command segment (no `;`/`&&`/`||` chaining left in it) itself starts a
  *  dev/preview server. Extracted so isLongRunningCommand can apply it PER-SEGMENT of a compound
  *  command (see below) instead of only to the whole string. */
+/**
+ * A path is read by its LAST component only (autopsy Sur Taal, 2026-10-04). #3491 put the baked tree's
+ * path `/home/user/.warm/vite-react/node_modules` into the typecheck's install primer, and the word
+ * `vite` inside that DIRECTORY name made every write-time typecheck look like a Vite dev-server launch:
+ * it was prefixed with `BROWSER=none` (a bash syntax error before `if`), redirected into the dev
+ * server's log, and health-checked twice as a server that "did not come up". A command word is what
+ * runs; a directory that happens to contain one is not. `node_modules/.bin/vite` still reads `vite`,
+ * and `2>/dev/null` reads `null`, not `dev`. PURE.
+ */
+export function pathsAsBasenames(segment: string): string {
+  return String(segment ?? '').replace(/(?:[\w.@~$-]*\/)+([\w.@-]*)/g, '$1');
+}
+
 function isDevServerInvocation(rawSegment: string): boolean {
-  const segment = lastPathParts(rawSegment);
+  const segment = pathsAsBasenames(rawSegment);
   // Installing a package called "dev" is not running one. This is checked FIRST so that every
   // keyword rule below is spared the option-flag ambiguity, and it lives HERE rather than in
   // isLongRunningCommand so a future caller inherits it.

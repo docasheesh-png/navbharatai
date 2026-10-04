@@ -11,12 +11,30 @@
 // the whole app; the elapsed-time heartbeat still runs. PURE.
 
 /** The line that replaces the opening ETA when a turn builds one module. */
-export function moduleTurnEtaLine(done: number, total: number, moduleName: string): string {
+export function moduleTurnEtaLine(done: number, total: number, moduleName: string, estimateShown = true): string {
   const n = Math.max(0, Math.floor(Number(done) || 0)) + 1;
   const of = Math.max(n, Math.floor(Number(total) || 0));
   const name = String(moduleName ?? '').trim();
-  return `⏱️ This round builds one part of your app: module ${n} of ${of}${name ? ` ("${name}")` : ''}. `
-    + 'The time estimate above was for the whole app, so it does not apply to this round.';
+  const head = `⏱️ This round builds one part of your app: module ${n} of ${of}${name ? ` ("${name}")` : ''}.`;
+  return estimateShown
+    ? `${head} The time estimate above was for the whole app, so it does not apply to this round.`
+    : head;
+}
+
+/**
+ * Is this turn a "continue" of a stored project plan that still has a module to build? Then the opening
+ * ETA is not shown at all (autopsy Sur Taal, 2026-10-04): it described the whole app and was withdrawn
+ * a few seconds later on every module turn, so the user read a promise and its retraction back to back.
+ * A first turn of a NEW plan still shows it — the plan does not exist until after the estimate. PURE.
+ */
+export function skipsOpeningEta(
+  plan: { modules: ReadonlyArray<{ status?: string }> } | null | undefined,
+  continuation: boolean,
+  hasBuildableModule: (plan: any) => boolean,
+): boolean {
+  if (!continuation || !plan || !Array.isArray(plan.modules) || plan.modules.length === 0) return false;
+  if (plan.modules.every((m) => m.status === 'done')) return false;
+  try { return hasBuildableModule(plan); } catch { return false; }
 }
 
 /** The admin line recording the withdrawal. */

@@ -88363,7 +88363,7 @@ down. Third instance of the "a word inside data read as a command" class (`/dev/
 
 | ID | Problem | Root cause → fix | Lock |
 |---|---|---|---|
-| Q-410..413 | typecheck misrouted, BROWSER=none syntax error, dev server killed, typecheck never ran | paths judged by their last part (`lastPathParts`) | `aTypecheckIsNotADevServer.test.ts` (census of platform commands), reverted-and-failed |
+| Q-410..413 | typecheck misrouted, BROWSER=none syntax error, dev server killed, typecheck never ran | paths judged by their last part — **shipped by #3506 (`pathsAsBasenames`, Q-390)**, found by both sessions the same day; this PR's own copy was withdrawn on merge and only its census was kept | `aTypecheckIsNotADevServer.test.ts` (census of every command the platform builds) |
 | Q-414 | package.json emptied twice | 🟡 writer unknown; restore + evidence in the one install path | `anEmptyManifestIsPutBack.test.ts` |
 | Q-415 | PREVIEW_SERVER_DOWN ×2 | Q-414 | — |
 | Q-416/417 | puzzle built over the PDF reader without asking; pdf.js and "PDF Reader" title left behind | "puzzle" etc. are whole things | `askBeforeBuildingSomethingElseIntoThisApp.test.ts` |
@@ -88390,3 +88390,21 @@ merging session merges #3494, not this one.
 Honest limit: only loanwords stand down, so a request using a native protective word (শনাক্ত, கண்டறி) stays
 refused. Words in the `unambiguous` lists that were guessed can only make the rule stricter, never looser.
 
+### 2026-10-04 — Autopsy "Sur Taal" (music player, builds b8c31d3d / c497c9cb) — Q-390..Q-399
+
+A music player described in eight numbered Hindi design sections became a 23-module project (one "continue" per
+module), with five false findings on the way. Ledger (problem → root cause → class → fix → lock), all locked in
+`tests/theMusicPlayerIsNotATwentyThreeModuleProject.test.ts` with the report's own prompt
+(`tests/fixtures/surTaalPrompt.txt`):
+- **Q-390** — #3491's warm-cache path (`/home/user/.warm/vite-react/…`) made the write-time typecheck and the
+  warm-up read as dev-server launches (`vite` matched inside a PATH): bash syntax error, log pollution, false
+  restarts, a 10 s typecheck timeout. **#3491's own "watch" item (typecheck well under 15 s) was defeated by its
+  own change** — the earlier fix was incomplete. Fixed by judging a command on path basenames.
+- **Q-391** — `countEnumeratedFeatures` counted every bullet under every heading (40); a sectioned spec is now
+  sized by its sections (8), so project mode does not fire.
+- **Q-392** — Devanagari words matched inside longer words (`\b` is ASCII-only) and a UI menu read as a food menu.
+- **Q-393** — phone powers matched words in labels ("Music Scanner", "Contact us", "Event location").
+- **Q-394** — the app's own palette module was counted as a colour explosion.
+- **Q-395** — a "continue" module turn showed the whole-app ETA and withdrew it seconds later; now never shown.
+- 🟡 Q-396 (no-tests warning on module turns), Q-397 (ignored theme note), Q-398 (APP_SCOPE small word as reason):
+  BLOCKED with options in the queue. Q-399 (crawl bench, Haiku planner) resolved as admin-decided behaviour.

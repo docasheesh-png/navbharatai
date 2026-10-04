@@ -7,7 +7,8 @@
  * running dev server on the port killed first, the check timed out at 30 s, and the preview went down.
  *
  * The class (a word inside DATA read as a command) has cost builds three times: `/dev/null`,
- * `--save-dev`, and now a directory name. The rule now judges each path by its last part only, and this
+ * `--save-dev`, and now a directory name. #3506 made the rule judge each path by its last part
+ * (`pathsAsBasenames`); this
  * census runs every command the PLATFORM builds itself through the classifier — a new builder that trips
  * it fails here, not on a user's preview.
  */

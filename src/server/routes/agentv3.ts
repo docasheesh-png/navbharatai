@@ -59,7 +59,7 @@ import { starterSuiteOnly, starterSuiteNote, testFilesIn } from '../AgentV3/e2eA
 import { labelFieldsFromPlaceholder } from '../AppMakerLab/intelligence/A11yLinter';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction, simulatedDataIssues, simulatedDataNotice, simulatedDataSubjectLabel, simulatedResultIssues, simulatedResultNotice } from '../AgentV3/AuthenticityAnalysis';
 import { findFakeFeatures, fakeFeatureNotice, fakeFeatureReportLine, impliedRequirementsFor, noFakeFeaturesEnabled, withHonestyBanner, type FakeFeatureFinding } from '../AgentV3/fakeFeatureScan';
-import { isUnreachable } from '../AgentV3/appReachability';
+import { loadedFindings } from '../AgentV3/appReachability';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
 import { PathWriteLock } from '../AgentV3/pathWriteLock';
@@ -20311,8 +20311,7 @@ async function noteBuildOutcome(
           // A stub in a file the app never loads is not a stub the app has (appReachability.ts,
           // autopsy e706e068: 22 model calls completed a stray hook nothing imported). The readiness
           // gate that runs before this heal already judged which files the app loads; ask it.
-          const stubs = highSeverityAuthenticityIssues(Object.fromEntries(writtenFiles))
-            .filter((s) => !isUnreachable(dispatcher.lastReachability, s.file));
+          const stubs = loadedFindings(highSeverityAuthenticityIssues(Object.fromEntries(writtenFiles)), dispatcher.lastReachability);
           const timeLeft = effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 90_000;
           if (stubs.length > 0 && timeLeft) {
             events.emit({ type: 'narration', agent: 'architect', text: `🔧 Completing ${stubs.length} unfinished piece(s) of the code so the feature actually works…`, ts: Date.now() });
@@ -20325,7 +20324,13 @@ async function noteBuildOutcome(
             });
             const healed = await completeRunner.run(authenticityRepairInstruction(stubs));
             if (healed.ok) {
-              const after = highSeverityAuthenticityIssues(Object.fromEntries(writtenFiles));
+              // 🔴 THE SAME QUESTION THE INPUT ASKED, and for two months it was not (Q-105's sibling).
+              // Unfiltered, one stub in a stray file nothing imports kept this > 0 for ever: the heal
+              // completed every stub the app HAS, `INCOMPLETE_CODE_HEALED` was never recorded, and the
+              // readiness recovery below — which lives inside this `if` — never ran, so the build stayed
+              // NOT-ready and GreenGuard restored it. That is autopsy e706e068's own harm, surviving in
+              // the half its fix never touched. One name, asked twice; see `loadedFindings`.
+              const after = loadedFindings(highSeverityAuthenticityIssues(Object.fromEntries(writtenFiles)), dispatcher.lastReachability);
               if (after.length === 0) {
                 buildDiag.record({ phase: 'build', severity: 'info', code: 'INCOMPLETE_CODE_HEALED', message: `Completed ${stubs.length} unfinished/placeholder code section(s) the first pass left behind.`, autoResolved: true });
                 // Recover to OK only if the FULL readiness gate now passes — a build with OTHER unresolved
@@ -21181,7 +21186,7 @@ async function noteBuildOutcome(
           try {
             if (noFakeFeaturesEnabled() && !isImportTurn) {
               const whole = { ...(await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>))), ...Object.fromEntries(writtenFiles) };
-              fakeFeatures = findFakeFeatures(whole, prompt).filter((f) => !isUnreachable(dispatcher.lastReachability, f.file));
+              fakeFeatures = loadedFindings(findFakeFeatures(whole, prompt), dispatcher.lastReachability);
             } else {
               fakeFeatures = [];
             }
@@ -23225,8 +23230,7 @@ async function noteBuildOutcome(
       // the real version needs a database the user has not chosen yet; saying so is the honest outcome.
       try {
         if (result.ok && expectsArtifacts && !isImportTurn && writtenFiles.size > 0) {
-          const invented = simulatedDataIssues(Object.fromEntries(writtenFiles))
-            .filter((i) => !isUnreachable(dispatcher.lastReachability, i.file));
+          const invented = loadedFindings(simulatedDataIssues(Object.fromEntries(writtenFiles)), dispatcher.lastReachability);
           if (invented.length > 0) {
             result = { ...result, summary: `${result.summary}${simulatedDataNotice(invented)}` };
             buildDiag.record({
@@ -23243,8 +23247,7 @@ async function noteBuildOutcome(
       // results written into the code. Same scope (this turn's reachable writes), same one sentence.
       try {
         if (result.ok && expectsArtifacts && !isImportTurn && writtenFiles.size > 0) {
-          const faked = simulatedResultIssues(Object.fromEntries(writtenFiles))
-            .filter((i) => !isUnreachable(dispatcher.lastReachability, i.file));
+          const faked = loadedFindings(simulatedResultIssues(Object.fromEntries(writtenFiles)), dispatcher.lastReachability);
           if (faked.length > 0) {
             result = { ...result, summary: `${result.summary}${simulatedResultNotice(faked)}` };
             buildDiag.record({

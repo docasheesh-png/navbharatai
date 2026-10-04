@@ -224,11 +224,6 @@ describe('route wiring', () => {
   it('a specialist is handed the request with what came with it', () => {
     expect(route).toContain('userRequest: () => planning.text,');
   });
-
-  it('a planned fast-lane hand-off is not reported as BUILD_FAILED', () => {
-    expect(route).toContain('const plannedHandoff = !sb.ok && !sb.stopped && fastLaneReasoningRung !== null;');
-    expect(route).toContain("'Fast-lane outcome: a planned hand-off to the full builder — not a failure.'");
-  });
 });
 
 describe('a need of the user\'s goes to the user', () => {

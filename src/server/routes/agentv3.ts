@@ -17603,11 +17603,7 @@ async function noteBuildOutcome(
           writeFiles: laneFence.open('simple-build'), startPreview: fastPreview, verify: fastVerify, repair: fastRepair, log: fastLog, onFilesReady, onPlanned: noteEtaPlannedFiles, onSettling: emitSettlingPhase, depOrder: process.env.AGENTV3_DEP_ORDER !== 'off', maxRepairs: 3,
           signal: abort.signal });
         // A STOP IS NOT A FALLBACK (autopsy 31254f9a): nothing is handed to the full builder after a Stop.
-        // A PLANNED hand-off is not "could not produce the app" (autopsy a4be7fa2, 2026-10-01): the lane stopped
-        // before a reasoning rung by design (LLM_CALL_HANDED_OFF says so), so the outcome line below must not say
-        // BUILD_FAILED about it in the same report.
-        const plannedHandoff = !sb.ok && !sb.stopped && fastLaneReasoningRung !== null;
-        buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : sb.stopped ? 'SIMPLE_BUILD_STOPPED' : 'SIMPLE_BUILD_FALLBACK', message: plannedHandoff ? `The fast lane handed its work to the full builder by design: its engine fell to ${fastLaneReasoningRung}, which reasons before every answer${sb.filesWritten > 0 ? ` (${sb.filesWritten} finished file(s) go with it)` : ''}.` : sb.summary, autoResolved: true, detail: sb.reason });
+        buildDiag.record({ phase: 'build', severity: 'info', code: sb.ok ? 'SIMPLE_BUILD_SUCCESS' : sb.stopped ? 'SIMPLE_BUILD_STOPPED' : 'SIMPLE_BUILD_FALLBACK', message: sb.summary, autoResolved: true, detail: sb.reason });
         // The lane's FILE PLAN is not the plan of record once it hands off (autopsy de3bb2bb): the full builder
         // plans its own files, so "9 of 10 files written · ~1 min to go" at minute 4 counted against a list
         // nobody was following any more. Forget it; the architect's own plan steps drive the ETA from here.
@@ -17643,7 +17639,7 @@ async function noteBuildOutcome(
           buildDiag.record(sb.ok
             ? { phase: 'build', severity: 'info', code: `OUTCOME_${sb.outcome}`, message: `Build outcome: ${sb.outcome}`, autoResolved: true }
             // A stop is not a BUILD_FAILED and is not handed to anyone (autopsy 3d1bfe2a).
-            : { phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_OUTCOME', message: sb.stopped ? 'Fast-lane outcome: stopped by the user — not a failure, and not handed off.' : plannedHandoff ? 'Fast-lane outcome: a planned hand-off to the full builder — not a failure.' : `Fast-lane outcome (handed off to the full builder): ${sb.outcome}`, autoResolved: true });
+            : { phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_OUTCOME', message: sb.stopped ? 'Fast-lane outcome: stopped by the user — not a failure, and not handed off.' : sb.handedOff ? 'Fast-lane outcome: handed its plan to the full builder before a reasoning engine — not a failure.' : `Fast-lane outcome (handed off to the full builder): ${sb.outcome}`, autoResolved: true });
         }
         // HANDOFF FRAMING (StudySync root cause, 2026-07-16): when the fast lane timed out but SALVAGED
         // its finished files into the workspace, the full builder must treat them as ITS OWN prior work

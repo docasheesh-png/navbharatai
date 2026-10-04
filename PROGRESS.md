@@ -87352,6 +87352,22 @@ open PR's CI failed with it (#3462 first).
 - **Class:** an upstream advisory landing between a PR's green CI and its merge. The gate is doing its job; the
   honest response is the pin, not an allowlist entry, because a fixed release exists.
 
+## 2026-10-01 — Autopsy 8f797751 (maths solver, stopped at 6.4 min, 6 s after the dev server came up)
+
+- **A ✅** At 4.6 min the model said "Your Math Solver app is ready … Open the Preview tab"; the platform
+  handed the turn back to style 41 unstyled classes and told only the admin report. No preview existed,
+  and the user stopped. Both hand-backs (style, unfinished) now put "⏳ Not finished yet …" in the chat
+  (`handBackNotice.ts`).
+- **B ✅** The fast lane's planned handoff was labelled "could not produce the app" / `BUILD_FAILED` beside
+  `LLM_CALL_HANDED_OFF`; now `handedOff` and an honest outcome line. (The contract-phase handoff wording,
+  and "Building 11 file(s)" before nothing was built, were already fixed on main by #3461.)
+- **C 🟡 → Q-090** Publish a preview the first time the app compiles clean, mid-build — admin decision.
+- **Q-009** recurred (GLM crawled twice).
+- Not defects: `mathjs` imported before it was installed (the note named the fix; the model wrote the
+  files the same note listed first, then installed); a `types.ts` syntax slip and a non-existent
+  `math.solve`, both self-corrected; a duplicate declaration refused by the write guard; one-file batches
+  (model choice); a manual `tsc` after the clean note; a brand-new workspace given our starter (expected).
+Tests: `tests/readyWasSaidBeforeThePreview.test.ts`, proven by reversion.
 ## 2026-10-01 — Autopsy 52471441 ("Build a calculator", Weak, stopped by the user at 38 s)
 
 **What happened.** Setup took 8 s. The fast lane's file-list call (a ~500-token prompt) crawled on GLM `glm-4.7-flashx`
@@ -87422,10 +87438,10 @@ suitable check cheyu" with no file attached — the data had come in an earlier 
 | Q-097 | "needs a major-version upgrade" for "No fix available"; xlsx installed anyway | The note had two branches, neither for no-fix; the steer came only after the install | Advice that cannot be true; advice after the fact | `noFix` in the audit summary; `packageChoiceRule()` in both prompts. ✅ on merge |
 | Q-098 | Journey evidence named an orphan component | `dataEntryEvidence` read every file | Unreachable code read as the app | `unreferencedComponents`. ✅ on merge |
 | Q-099 | REPEATED_READS counted a specialist's first read as waste | Shared ledger compared across agents | A lying analyzer | Own-view comparison; honest worst list. ✅ on merge |
-| Q-100 | "BUILD_FAILED" for a planned hand-off | The outcome line ignored the reasoning-rung stop | Contradicting lines in one report | `plannedHandoff`. ✅ on merge |
+| Q-100 | "BUILD_FAILED" for a planned hand-off | The outcome line ignored the reasoning-rung stop | Contradicting lines in one report | ✅ Fixed by #3468 (`sb.handedOff`), merged while this PR was open; this PR's duplicate was dropped at the merge |
 | Q-101 | "User should be asked" — nobody asked | The resume pushed on; its words did not say to ask the user | A need of the user's kept by the model | Resume message names it. ✅ on merge |
 | Q-089 | A data question became a ₹272 app | Routing | — | 🟡 admin decision (recommend chat answer + offer) |
-| Q-090 | Earlier attachment unavailable | No store for attachment text across turns | — | 🟡 admin decision (privacy; recommend bounded per-workspace keep) |
+| Q-102 | Earlier attachment unavailable | No store for attachment text across turns | — | 🟡 admin decision (privacy; recommend bounded per-workspace keep) |
 | Q-091 | Orphan components after a pivot | No end-of-turn hand-back for unimported new files | — | 🟡 blocked on #3467 (same block) |
 | Q-092 | Six argued not-defects | — | — | 🟡 admin agreement |
 

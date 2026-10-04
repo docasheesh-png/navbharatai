@@ -43,7 +43,10 @@ service cloud.firestore {
 
     // Users
     match /users/{userId} {
-      allow read: if isSignedIn();
+      // Q-142 (2026-10-01): owner-only. It was `isSignedIn()`, so any signed-in user could read — and LIST —
+      // every user's document, including the server-managed `role` (who is an admin). No client code reads
+      // another user's document (the server uses the Admin SDK, which these rules do not govern).
+      allow read: if isOwner(userId);
       // P-SEC.1: `role` is server-managed (admin SDK only) — clients may never set or
       // change it, else a user could self-escalate to owner/admin. (isValidUser allows
       // up to 10 arbitrary keys, so this explicit guard is required.)

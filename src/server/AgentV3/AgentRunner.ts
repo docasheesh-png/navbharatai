@@ -32,8 +32,10 @@ import { decideUnfinishedResume, unfinishedResumeStandDownNote, unfinishedResume
 import { decideStyleResume, doneStyleNote, styleResumeEnabled, styleResumeNote } from './stylePolishResume';
 import { handBackNotice } from './handBackNotice';
 import { asPlatformRequest } from './platformRequest';
+import { repairClaimWithoutChange, repairClaimNote, NO_CHANGE_LINE } from './repairClaim';
 import { streamThinkingToChat } from './thinkingStream';
 import { PROMPT_PREVIEW_SEPARATOR } from './promptPreviewShape';
+import { answerAfterPlanning } from './answerAfterPlanning';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -134,6 +136,11 @@ export interface AgentRunnerOptions {
    */
   readinessGate?: boolean;
   /**
+   * Q-066 — a WRITING sub-agent (never the top-level build, which has `readinessGate`) is handed back, once,
+   * the undefined classes / page defects / unnamed controls in the files IT wrote, before its turn ends.
+   */
+  styleHandBack?: boolean;
+  /**
    * U-1 — when true, run the project's ESLint after a successful build and downgrade to ok:false if it
    * reports real ERRORS (warnings/formatting never block). Default-OFF (admin flag AGENTV3_LINT_GATE),
    * so the default build is byte-identical. Top-level builds only; never applied to sub-agents.
@@ -178,6 +185,13 @@ export interface AgentRunnerOptions {
    * user-facing. Omitted by every caller but the top-level build.
    */
   onNote?: (note: { code: string; message: string; detail?: string }) => void;
+  /**
+   * A repair handed ONE job inside a budget sized for that job (the explorer repair, the green functional
+   * repair). The end-of-turn hand-backs that WIDEN the job — undefined classes, page-design findings — are
+   * off: they belong to the build's own turn, and inside a 150-second repair they spend the time the
+   * platform's re-check needs, after which the whole repair is undone (autopsy 6cd698cc, repairScope.ts).
+   */
+  focusedRepair?: boolean;
   /**
    * The run's instruction comes from one of the platform's own checks (a repair pass), not from the
    * user. The model is told so, so its reply — narrated into the user's chat — never thanks the user
@@ -539,6 +553,8 @@ export class AgentRunner {
     // This conversation holds one message, so no file is in its context yet (autopsy de3bb2bb) — see
     // `ToolDispatcher.beginConversation`. A repair pass on the architect's dispatcher starts fresh too.
     if (typeof dispatcher.beginConversation === 'function') dispatcher.beginConversation();
+    /** Changes the dispatcher had made before this run — so a repair pass can ask about ITSELF (repairClaim.ts). */
+    const changesAtRunStart = typeof dispatcher.changeCount === 'function' ? dispatcher.changeCount() : 0;
     // Wall-clock CREATION time of each message, parallel to `messages` (which stays exactly the
     // Claude-API shape — never mutated). Persisted copies are stamped from this so a reopened
     // session interleaves prose with the timeline in the LIVE order: the assistant message is
@@ -879,6 +895,15 @@ export class AgentRunner {
           }
         } catch { /* a meter must never be able to fail a build */ }
 
+        // A reply turn that opens with the model's notes to itself ("Now final summary. No more
+        // tools. … Proceed.") followed by a gap and the real answer shows only the answer
+        // (answerAfterPlanning.ts, autopsy 3f959fde). Applied before the narration and the summary
+        // read the text, so both see the same answer. The diagnostics above keep the raw text.
+        if (turn.toolUses.length === 0) {
+          const answer = answerAfterPlanning(turn.text);
+          if (answer !== turn.text) turn = { ...turn, text: answer };
+        }
+
         usage.inputTokens += turn.usage.inputTokens;
         usage.outputTokens += turn.usage.outputTokens;
         usage.cacheCreationInputTokens += turn.usage.cacheCreationInputTokens;
@@ -888,7 +913,15 @@ export class AgentRunner {
         this.opts.usageSink?.add({ inputTokens: turn.usage.inputTokens, outputTokens: turn.usage.outputTokens });
 
         if (turn.text.trim()) {
-          events.emit({ type: 'narration', agent: agentRole, text: turn.text, ts: Date.now(), id: turnId });
+          // A repair pass that changed nothing may not tell the user it changed something (autopsy 6cd698cc —
+          // "The stylesheet now defines every one of the 29 classes", with not one file written).
+          const changesThisRun = typeof dispatcher.changeCount === 'function' ? dispatcher.changeCount() - changesAtRunStart : 1;
+          if (repairClaimWithoutChange({ platformRequest: this.opts.platformRequest === true, finalTurn: turn.toolUses.length === 0, changesThisRun, text: turn.text })) {
+            try { this.opts.onNote?.({ code: 'REPAIR_CLAIM_WITHHELD', message: repairClaimNote(turn.text) }); } catch { /* a note must never fail a build */ }
+            events.emit({ type: 'narration', agent: agentRole, text: NO_CHANGE_LINE, ts: Date.now(), id: turnId });
+          } else {
+            events.emit({ type: 'narration', agent: agentRole, text: turn.text, ts: Date.now(), id: turnId });
+          }
         }
 
         // 🔴 THE MODEL NEVER GOT TO ANSWER — do not treat silence as a reply (autopsy ee20478d,
@@ -969,7 +1002,10 @@ export class AgentRunner {
           // WHITE-LABEL LAW: the honest sentence names OUR limit, never a vendor, a model or a ceiling
           // the user cannot act on. "The model replied without building" was false here in the one way
           // that matters — nothing replied — and it is the sentence that sent the user to buy credits.
-          let modelAnswer: string | undefined;
+          // The model's own words when the summary is about to carry ours as well (autopsy 0473628e): the
+          // nothing-built sentence below is appended AFTER the model's answer, so a reader that asks "did the
+          // model ask the user something?" of the summary reads OUR last line and never the model's question.
+          let modelAnswer: string | undefined = builtNothing && !starvedTurn && turn.text.trim() ? turn.text.trim() : undefined;
           let summary = builtNothing
             ? (starvedTurn
                 ? 'The build could not start writing files: NavBharatAI\u2019s engine ran out of room to answer before it began. '
@@ -1006,17 +1042,19 @@ export class AgentRunner {
               const readiness = await dispatcher.assessBuildReadiness();
               // Surface the verdict to the UI as a build-health card (R2 §4.6) — pass or fail.
               buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier };
-              if (readiness.ready && styleResumes === 0 && !this.opts.signal?.aborted) {
+              if (readiness.ready && styleResumes === 0 && !this.opts.focusedRepair && !this.opts.signal?.aborted) {
                 // SCREENS THAT USE CLASSES NO STYLESHEET DEFINES ARE HANDED BACK ONCE, while the model still
                 // holds them (autopsy 1be16985 — 63 undefined classes, then a 174 s fresh-context repair).
                 const style = await dispatcher.undefinedClassesNow();
-                const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, a11y: style.a11y, offGrid: style.offGrid, resumesUsed: styleResumes, producedFiles: producingToolUses > 0 });
+                const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, a11y: style.a11y, resumesUsed: styleResumes, producedFiles: producingToolUses > 0 });
                 if (decision.resume) {
                   styleResumes++;
                   summaryBeforeStyleResume = turn.text.trim() || null;
+                  // Keep main's hand-back narration (#3470); spacing is no longer handed back at all
+                  // (autopsy 536c8189 — it is snapped deterministically in `spacingSnap.ts`).
                   const styleNotice = handBackNotice('style', turn.text);
                   if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
-                  try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length, (style.offGrid ?? []).length), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.offGrid ?? []).map((o) => `${o.file}:off-grid(${o.values.join(',')})`)].join(' ') }); } catch { /* a note must never fail a build */ }
+                  try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`)].join(' ') }); } catch { /* a note must never fail a build */ }
                   pushPlatformTurn(decision.message);
                   continue;
                 }
@@ -1067,6 +1105,29 @@ export class AgentRunner {
                 }
               }
             } catch { /* gate is best-effort — a scan error never fails a real build */ }
+          }
+
+          // 🎨 A WRITING SPECIALIST GETS THE SAME ONE-TIME STYLE HAND-BACK (Q-066, autopsy de3bb2bb). The block
+          // above is top-level-only, so a Frontend sub-agent that wrote screens on undefined classes ended its
+          // turn and a fresh-context repair fixed them at the end of the build. Scoped to the files THIS agent
+          // wrote (scopeStyleHandBack), because specialists run in parallel and a sibling's class is the
+          // sibling's. Same decision, same once-only limit, same refusal/question stand-downs.
+          if (ok && !readinessGate && this.opts.styleHandBack === true && expectsArtifacts && producingToolUses > 0
+            && styleResumes === 0 && !this.opts.signal?.aborted) {
+            try {
+              const style = await dispatcher.undefinedClassesNow({ onlyWritten: true });
+              const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, a11y: style.a11y, resumesUsed: styleResumes, producedFiles: true });
+              if (decision.resume) {
+                styleResumes++;
+                summaryBeforeStyleResume = turn.text.trim() || null;
+                // A specialist's text is forwarded to the chat too (SubAgent re-emits narration).
+                const styleNotice = handBackNotice('style', turn.text);
+                if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
+                try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: `${agentRole}:${styleResumeNote(style.missing.length, style.pages.length)}`, detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`)].join(' ') }); } catch { /* a note must never fail a build */ }
+                pushPlatformTurn(decision.message);
+                continue;
+              }
+            } catch { /* the style read is advisory — a specialist's turn ends exactly as before */ }
           }
 
           // U-1 — LintGate (default-OFF): after a still-successful build, block on real ESLint errors.
@@ -1314,7 +1375,7 @@ export class AgentRunner {
                 // model is told which, in the same steer, and the user is not told the app is finished.
                 let styleNote = '';
                 try {
-                  if (styleResumeEnabled()) {
+                  if (styleResumeEnabled() && !this.opts.focusedRepair) {
                     const style = await dispatcher.undefinedClassesNow();
                     styleNote = doneStyleNote(style.missing, style.sheet);
                   }

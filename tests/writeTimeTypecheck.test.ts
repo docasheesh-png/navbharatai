@@ -168,7 +168,8 @@ describe('🔒 the dispatcher asks after EVERY write path, and the route reports
   it('the helper hands that content to the analysis — otherwise the advice can only ever hedge', () => {
     const helper = dispatcher.slice(dispatcher.indexOf('private async writeTypecheckNote('), dispatcher.indexOf('async dispatch(call: ToolUse'));
     expect(helper).toContain('private async writeTypecheckNote(sources: Record<string, string>)');
-    expect(helper).toContain('return writeTypecheckNote(errors, tsPaths, sources);');
+    // Since autopsy 6cd698cc the note may be led by what the write-time heal fixed; the sources still go in.
+    expect(helper).toContain('return healedNote + writeTypecheckNote(errors, tsPaths, sources);');
   });
 
   it('every run reaches the evidence bridge the typecheck tool uses, and a JS project is never compiled', () => {

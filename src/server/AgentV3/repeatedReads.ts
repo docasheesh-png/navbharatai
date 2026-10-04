@@ -131,11 +131,13 @@ export function repeatedReadSummary(reads: Map<string, number>, unchangedRereads
   const wastedBy = unchangedRereads ?? new Map([...reads].map(([p, n]) => [p, Math.max(0, n - 1)]));
   const wasted = [...wastedBy.values()].reduce((a, b) => a + b, 0);
   if (distinct === 0 || wasted < 5) return '';   // a couple of re-reads is ordinary work, not a finding
+  // The worst list ranks and names what the sentence is about — unchanged re-reads — beside the total, so
+  // "7× src/index.css" can no longer mean seven reads of which one repeated (autopsy 3f959fde).
   const worst = [...reads.entries()]
     .filter(([p, n]) => n > 1 && (wastedBy.get(p) ?? 0) > 0)
-    .sort((a, b) => b[1] - a[1])
+    .sort((a, b) => (wastedBy.get(b[0]) ?? 0) - (wastedBy.get(a[0]) ?? 0) || b[1] - a[1])
     .slice(0, 3)
-    .map(([p, n]) => `${n}× ${p}`)
+    .map(([p, n]) => `${p} (${wastedBy.get(p) ?? 0} unchanged of ${n} reads)`)
     .join(', ');
   const pct = Math.round((wasted / total) * 100);
   return (

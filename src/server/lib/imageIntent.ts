@@ -43,6 +43,24 @@ const DEV_RE = new RegExp(`(${DEV_IMAGE})[\\s\\S]{0,40}?(${DEV_CREATE})|(${DEV_C
 
 const HANDLING_RE = new RegExp(`\\b(${HANDLING_VERBS.map(esc).join('|')})\\b`, 'i');
 
+/**
+ * 🔴 A PROMPT IS TEXT, NOT A PICTURE (autopsy cf09c03c, 2026-10-04). "Create a image generated promt" asked
+ * for a prompt, words to paste into an image tool. It read as a picture request, so NavBharatAI Pro told
+ * the user where pictures are made, and the next turn ("write a better prompt") built an app. A message
+ * whose OBJECT is a prompt is answered with the prompt, on every surface that reads this detector.
+ *
+ * ⚠️ A prompt the user GIVES is still a picture request: "create an image with this prompt: a red fort",
+ * "generate a picture from my prompt". Only a prompt that is not handed over (`PROMPT_GIVEN`) vetoes.
+ */
+const PROMPT_NOUN = /\b(?:prompts?|promts?)\b/i;
+const PROMPT_GIVEN = /\b(?:this|the|my|following|below|above|given|niche|neeche|yeh|ye|is)\s+(?:image\s+|picture\s+)?(?:prompts?|promts?)\b|\b(?:prompts?|promts?)\s*[:=]|\b(?:using|with|from|by)\s+(?:a\s+|an\s+|the\s+|this\s+|my\s+)?(?:prompts?|promts?)\b/i;
+
+/** Does this message ask us to WRITE a prompt (text), rather than to make a picture from one? PURE. */
+export function asksForPromptText(message: string): boolean {
+  const text = String(message || '');
+  return PROMPT_NOUN.test(text) && !PROMPT_GIVEN.test(text);
+}
+
 /** Lead-in phrases stripped from the front of the prompt so the image model gets the SUBJECT, not the command. */
 const LEADIN_RE = new RegExp(
   `^\\s*(please\\s+|kindly\\s+|can you\\s+|could you\\s+|mujhe\\s+|ek\\s+|a\\s+|an\\s+|the\\s+)*` +
@@ -67,6 +85,7 @@ export function detectImageIntent(message: string): ImageIntent {
   const raw = String(message || '').trim();
   if (!raw || raw.length > 2000) return { wants: false, prompt: '' };
   const text = raw.toLowerCase();
+  if (asksForPromptText(raw)) return { wants: false, prompt: '' };
 
   const hasDraw = DRAW_VERB.test(raw);
   // A handling verb vetoes — UNLESS it's a clean "draw X" (draw is unambiguous) or an explicit "noun of X".

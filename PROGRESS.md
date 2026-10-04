@@ -88931,3 +88931,16 @@ Siblings hunted: `readAsDataURL` across the whole repo — the only generated-ap
 (the rest is NavBharatAI's own client sending images to APIs, not storing them). The `catch {}` that hid a
 failed save lived only in `proShell.ts`'s `useCollection`.
 
+### 2026-10-04 — Q-104: a Hindi request is sized like its English twin
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-104 sizer / ETA / cost estimate blind to Devanagari | every size signal (`RE`, `COMPLEX_APP_SIGNAL`, `BIG_SOFTWARE_NOUN`, `CLEARLY_SMALL`, the ETA's counters) is Latin; the script-neutral floor counts commas only | signals in one script, a request in another | one glossary, `src/server/lib/devanagariTechTerms.ts`, applied at each sizer's entry; predicates read original + an English line, counters read the gloss alone | `tests/aHindiRequestIsSizedLikeItsEnglishTwin.test.ts` — twins identical; a census fails on any new reader that skips the glossary; glossary off → 12 fail, one sibling reverted → census fails |
+
+Measured before: ecommerce with login/payment/cart/admin panel 30 vs 58; real-time chat 15 vs 58; calculator
+`app_unsized` vs `simple_app`. After: all eight twins identical. Siblings found and fixed in the same change:
+ProjectPlan's project gate (`BIG_SOFTWARE_NOUN` — "स्कूल मैनेजमेंट सिस्टम" was not big software),
+`complexityRouting.statesAScope`, `appScopeAnalyzer` (small-app hint and subject). The short-order case
+("एक टूडू ऐप बनाओ") was already rescued in the live route by the platform's `new_build` floor; only its label
+was wrong, now `simple_app`.
+

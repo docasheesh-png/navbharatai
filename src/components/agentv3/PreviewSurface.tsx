@@ -6,8 +6,8 @@
 // build never writes — so the preview looked permanently "disconnected" from the v5.0 engine.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { readPreviewAiAsk } from '../../lib/previewAiProtocol';
-import { answerPreviewAiAsk } from './previewAiRelay';
+import { readPreviewAiAsk, readPreviewAiImageAsk } from '../../lib/previewAiProtocol';
+import { answerPreviewAiAsk, answerPreviewAiImage } from './previewAiRelay';
 import { RotateCcw, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2, Terminal, Sparkles, ChevronLeft, ChevronRight, Sun, Moon } from 'lucide-react';
 import { canOfferRestart, restartStatusLine } from './previewRestart';
 import { nextDoorUrl } from './previewDoorClient';
@@ -1154,11 +1154,14 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
   useEffect(() => {
     const onAiAsk = (e: MessageEvent) => {
       const ask = readPreviewAiAsk(e.data);
-      if (!ask) return;
+      const pic = ask ? null : readPreviewAiImageAsk(e.data);
+      if (!ask && !pic) return;
       const frames = [liveIframeRef.current?.contentWindow, inBrowserIframeRef.current?.contentWindow];
       if (!e.source || !frames.includes(e.source as Window)) return;
       const reply = e.source as Window;
-      void answerPreviewAiAsk(ask, workspaceId).then((answer) => {
+      // A picture is the same relay: the owner's login asks, the page receives only the result.
+      const pending = ask ? answerPreviewAiAsk(ask, workspaceId) : answerPreviewAiImage(pic!, workspaceId);
+      void pending.then((answer) => {
         try { reply.postMessage(answer, '*'); } catch { /* the frame went away */ }
       });
     };

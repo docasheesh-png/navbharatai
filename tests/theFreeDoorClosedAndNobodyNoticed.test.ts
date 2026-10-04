@@ -103,7 +103,8 @@ describe('the account key never leaves this server', () => {
     const url = pollinationsKeyedUrl('a red camera', 'square', env);
     expect(url.startsWith('https://gen.pollinations.ai/image/')).toBe(true);
     expect(url).not.toContain('sk_secret');
-    expect(url).toContain('safe=true');
+    // On the keyed API `safe=true` is only the privacy filter; the nudity filter is named (2026-10-04).
+    expect(url).toContain('safe=privacy,secrets,sexual,violence');
   });
 
   it('the keyed link runs the same word guard as the anonymous one', () => {

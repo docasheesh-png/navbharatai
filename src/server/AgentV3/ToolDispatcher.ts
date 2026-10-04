@@ -115,6 +115,7 @@ import { WRITE_TYPECHECK_NOT_READY_MARKER,
   typeOnlyWriteHealEnabled, typeOnlyHealTargets, withoutHealedTypeOnly, healedTypeOnlyNames, typeOnlyHealNote,
 } from './writeTimeTypecheck';
 import { scanAuthenticity, authenticitySummary, fakeResultWriteNote } from './AuthenticityAnalysis';
+import { uploadStorageWriteNote } from './browserFileStore';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
 import type { AccessibilityIssue } from './AccessibilityAnalysis';
@@ -881,6 +882,8 @@ export class ToolDispatcher {
   private coverageRequest: string | null = null;
   /** The keyboard-only-game note is said once per build (touchPlayableGame.ts). */
   private _touchGameNoted = false;
+  /** Once per build: an upload read into text, with nowhere proper to keep it (Q-542 — `browserFileStore.ts`). */
+  private _uploadStorageNoted = false;
   /** The entry-first hand-back is said once per build (earlyPreview.ts, autopsy 39e982bd). */
   private _entryFirstNoted = false;
   setCoverageRequest(text: string | null): void {
@@ -3634,6 +3637,14 @@ export class ToolDispatcher {
       try { security += securityWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
       // A made-up result or made-up people (autopsy 33812996) — the builder hears it with the file open.
       try { security += fakeResultWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
+      // An uploaded file read into text, headed for a store that holds 5 MB (autopsy 68f0a486, Q-542) — once per
+      // build, with the IndexedDB file store the right fix needs, while the file is still open.
+      if (!this._uploadStorageNoted) {
+        try {
+          const n = uploadStorageWriteNote(p, files[p]);
+          if (n) { security += n; this._uploadStorageNoted = true; }
+        } catch { /* a note is best-effort */ }
+      }
     }
     // A second index.html in public/ shadows a Vite app's real entry (autopsy 876afca9) — said while open.
     let shadow = '';

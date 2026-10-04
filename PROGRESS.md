@@ -88857,3 +88857,18 @@ cancels of #3515 (19:57), #3518 (20:44) and #3523 (20:45) read "The job has exce
 of 30m0s" — `ci.yml`'s own `timeout-minutes: 30`, hit because eight or nine PR runs in flight slowed every run to
 21–30 min. The cap is now 45 (#3524 staging). Lesson, the fourth rule's first step: read the run's own last
 words before naming a cause — a cancelled run names its canceller.
+## 2026-10-04 — Admin panel audit, PR 2: the nine-tab information architecture (local branch, built on PR 1)
+
+Built on PR 1's head (a52b601) in the local branch `local/admin-pr2`; NOT pushed yet, because PR #3522 is frozen
+and is not merged. Nine sections (`src/lib/adminTabs.ts`): Home, Users (All users | Complaints), Apps (All apps |
+Publishing | Review), Builds (Reports | Phone builds | Engine health), AI Engines, Money, Safety, Messages, Settings.
+- Features moved, not rewritten; the Diagnostics tab is dissolved (`ENGINE_REPORTS_ON`, each report on one page).
+- Apps → Review opens App Mart's existing review through the existing `navbharat:navigate` event; the community
+  gallery review screen is PR 3 and the page says so. Safety says plainly that the audit-log screen and App Check
+  card are PR 3.
+- Settings holds no real setting any more (fake ones removed in PR 1); it points to Messages and Money.
+- Found during the 10-point audit: single-channel Reclaim deleted without a confirmation (Reclaim all had one) —
+  confirmation added. App Mart's own review routes (`/api/nav-store/admin/review`, `/web/admin/review`) write no
+  audit line — recorded as a PR 3 item (server change, out of PR 2's scope).
+- `tests/theAdminMenuHasNineTabs.test.ts` carries a feature census: a feature that disappears or renders on two
+  pages fails CI. Checked in a real browser (desktop 1366px and phone 390px): every tab and page opens, no page error.

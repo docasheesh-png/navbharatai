@@ -144,6 +144,7 @@ import {
   agentLifecycle,
   getWorkspaceMemory,
   warmIndexFiles,
+  WARM_INDEX_BUILD_START_MS,
   reflectOnBuild,
   reflectionNote,
   summarizeProject,
@@ -16173,7 +16174,11 @@ async function noteBuildOutcome(
             // episodes and file-list hints survive server restarts this way.
             const wsMem = getWorkspaceMemory(workspaceId);
             await restoreWorkspaceMemory(workspaceId, wsMem).catch(() => {});
-            await warmIndexFiles(wsMem, fileTree, (p) => actuator.readFile(workspaceId, p));
+            // 🔴 THE CAP WAS THE HOLLOW GRAPH'S LAST CAUSE (queue Q-116). The default 80 files left every file
+            // past the 80th as a STUB on a bigger app — exactly the projects that most need the graph (the
+            // contract card, the invariants and grounding all read it). 400 files, bounded by time so a big
+            // project never holds up the build's start; anything left is still counted by the line below.
+            await warmIndexFiles(wsMem, fileTree, (p) => actuator.readFile(workspaceId, p), { maxFiles: 400, deadlineMs: WARM_INDEX_BUILD_START_MS });
             // 🔎 MEASURE THE HOLLOW GRAPH (open root cause #2, 2026-09-17). A cold resume indexes every
             // previously-known file with `RESTORED_STUB`, which puts it in `graph.files` — and
             // `warmIndexFiles` skips files it already knows, so those keep EMPTY facts (no imports, no

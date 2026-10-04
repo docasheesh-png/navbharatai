@@ -794,9 +794,18 @@ export async function warmIndexFiles(
   mem: WorkspaceMemory,
   fileTree: readonly string[],
   read: (path: string) => Promise<string>,
-  opts: { maxFiles?: number; maxBytes?: number } = {},
+  opts: {
+    maxFiles?: number;
+    maxBytes?: number;
+    /**
+     * Stop STARTING new reads after this many ms (reads already in flight finish). Bounds the build-start
+     * wait on a big project; whatever is left stays a stub and the GRAPH_RESTORED_STUBS instrument counts it.
+     */
+    deadlineMs?: number;
+  } = {},
 ): Promise<string[]> {
   const maxFiles = opts.maxFiles ?? 80;
+  const stopAt = typeof opts.deadlineMs === 'number' && opts.deadlineMs > 0 ? Date.now() + opts.deadlineMs : Infinity;
   const maxBytes = opts.maxBytes ?? 200_000;
   // 🔴 A STUBBED FILE IS NOT A KNOWN FILE — FIXED 2026-09-18 from report 2ec15a71, and this line was
   // the whole defect. `restoreWorkspaceMemory` indexes every previously-known path with
@@ -833,7 +842,7 @@ export async function warmIndexFiles(
   const contents: Array<string | null> = new Array(targets.length).fill(null);
   let next = 0;
   const worker = async () => {
-    while (next < targets.length) {
+    while (next < targets.length && Date.now() < stopAt) {
       const i = next++;
       try {
         const content = await read(targets[i]);
@@ -850,6 +859,9 @@ export async function warmIndexFiles(
   });
   return indexed;
 }
+
+/** How long the build-start graph fill may keep starting reads (Q-116). Reads in flight still finish. */
+export const WARM_INDEX_BUILD_START_MS = 8_000;
 
 /** How many sandbox reads `warmIndexFiles` keeps in flight at once. */
 export const WARM_READ_CONCURRENCY = 8;

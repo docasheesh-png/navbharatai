@@ -78,9 +78,25 @@ export interface PruneInput {
   files: Readonly<Record<string, string>>;
 }
 
-/** The packages that may be removed: added by this build, unused, unnamed anywhere else, not tooling. PURE. */
+/** The DefinitelyTyped package for `name`: `uuid` → `@types/uuid`, `@scope/pkg` → `@types/scope__pkg`. PURE. */
+export function typesPackageFor(name: string): string {
+  const n = String(name || '');
+  return n.startsWith('@') ? `@types/${n.slice(1).replace('/', '__')}` : `@types/${n}`;
+}
+
+/**
+ * The packages that may be removed: added by this build, unused, unnamed anywhere else, not tooling. PURE.
+ *
+ * 🔴 A PACKAGE'S TYPES GO WITH IT (autopsy 70e030bb, 2026-10-04). The build added `uuid` and `@types/uuid`,
+ * used neither, and the prune removed `uuid` alone — `@types/*` is tooling, so the types were left behind
+ * for a package that was no longer there (and the readiness check had already warned they did not match).
+ * A removed package's `@types/<name>` is removed with it when THIS build added it too and no other file
+ * names it. A types package the user had, or one the app's code names, is never touched.
+ */
 export function pruneCandidates(input: PruneInput): string[] {
   const added = new Set(depsAddedByBuild(input.before, input.after));
+  const before = readDeps(input.before);
+  const after = readDeps(input.after);
   const out: string[] = [];
   for (const name of input.unused ?? []) {
     if (!added.has(name)) continue;
@@ -88,6 +104,12 @@ export function pruneCandidates(input: PruneInput): string[] {
     if (mentionedOutsideManifests(name, input.files ?? {})) continue;
     if (!out.includes(name)) out.push(name);
     if (out.length >= MAX_PRUNE) break;
+    const types = typesPackageFor(name);
+    if (before && after && after.all.has(types) && !before.all.has(types)
+      && !mentionedOutsideManifests(types, input.files ?? {}) && !out.includes(types)) {
+      out.push(types);
+      if (out.length >= MAX_PRUNE) break;
+    }
   }
   return out;
 }

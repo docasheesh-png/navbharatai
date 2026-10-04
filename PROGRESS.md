@@ -88436,3 +88436,37 @@ rest of the class: a word inside a HYPHENATED name still counted (`ls /x/vite-re
 launches. The warm-cache path had a second copy in `E2BActuator.ts`; it now reads `WARM_NODE_MODULES`. Locked by
 `tests/ourOwnCommandsAreNotDevServerLaunches.test.ts`, which fails when a new command builder is not classified.
 Queue: Q-370, Q-371 (#3497) and Q-390..Q-395, Q-399 (#3506) leave the open table on merge.
+## 2026-10-04 — RESOLUTION of autopsy 8b8743a3, and what the two merges really did
+
+**Both PRs are MERGED and their work is on `main` — verified from the merged state, not from the push.**
+`#3495` merged at 16:10:40 (`merge_commit_sha bc1a9a62`), `#3492` at 15:37:49 (`959c01eb`). On current
+`main`, `tests/aButtonNobodyCanPressIsNotAPass.test.ts`, `tests/aProblemTheUserIsShownCanBeActedOn.test.ts`
+and `tests/aCoveredControlIsNamed.test.ts` run **35 passed**, which is the only proof that mattered: both
+branches had commits pushed onto them by the forward-merge sweep after my last push, so "the push
+succeeded" said nothing about what the merge carried.
+
+- **`#3495`'s head at merge was `0b80cad9`, and I pushed `39ee701f`.** The sweep's commits sit between
+  them. The merge is correct all the same — `covered`, the lean-review single-file case and the
+  non-data-input rule are all on `main` and locked by their tests.
+- **`#3504` was closed UNMERGED at 15:40:45, three minutes after `#3492` merged — and that was right.**
+  The takeover head `077c98ca` that `#3492` merged already carried my net diff, so `#3504` was a
+  duplicate of work already on `main`. ⚠️ **It also shows the rescue was the wrong instinct, not merely
+  unnecessary:** I replayed the diff onto a clean branch because I read a takeover as a loss. A branch
+  whose head has moved is not a branch whose work is gone — the first question is "what does the merged
+  diff contain?", and only then "does it still need rescuing?". `#3504`'s renumbered Q-390/Q-391 then
+  collided with `#3506`, which is the second cost of the same wrong instinct.
+- **The one thing in `#3492` that changed between my gate and the merge:** the `FEATURE_REGRESSED` offer
+  merged as *"Restore the feature this change removed"* rather than the earlier *"Bring back what stopped
+  working"*. Same code, same prompt intent, my own comment above it; recorded so nobody reads the
+  difference as a lost edit.
+
+**Q-315 (the CI billing stop) is RESOLVED, and not by any code.** GitHub Actions began starting jobs
+again; `main` has run green since 17:22 UTC and runs are queuing normally. The row is removed. ⚠️ Nothing
+in the repository fixed it and nothing in the repository can detect it in advance — the tell is a
+check-run with **zero steps** and GitHub's own annotation about account payments. Diagnosing it as a code
+failure is the mistake to avoid next time.
+
+**Queue:** Q-310, Q-311, Q-312 ✅ (merged in `#3495`) and Q-315 ✅ removed from the open table. **Q-313
+stays OPEN** (the game-vocabulary sizing gap — a widening of `COMPLEX_APP_SIGNAL` needs a precision
+corpus first, and guessing it would drag ordinary prompts up a tier). **Q-314 stays 🟡** awaiting the
+admin's yes that its six items are correct reports rather than defects.

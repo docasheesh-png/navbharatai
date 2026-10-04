@@ -87463,3 +87463,11 @@ That fix asked only the new-build verbs and had no "prompt" in its noun list; th
 | Q-254 | Lean review read inlined App.tsx twice | Kit stylesheet over the inline bound restored the tools | One omission withdrawing one-call mode | — | §4 |
 | Q-255 | "Editing your existing app" about our starter | — | Owned by #3475 (Q-206) | — | — |
 | Q-252 / Q-256 / Q-257 / Q-258 | Hindi reply to English (needs that turn's report) · ₹6.34 refund (admin) · slow first typecheck (Q-063 class, needs the ensure log) · eight items argued not defects | — | — | — | 🟡 in the queue |
+## 2026-10-01 — Q-021 done: PROGRESS.md's open root causes moved into the queue
+
+Four parallel read-only audits covered PROGRESS.md lines 1–87,401 (~260 "open root cause" markers). Each
+item was checked against later PROGRESS entries, the current code and the queue. Most July–August items
+were found CLOSED (e.g. coupon race, dead-sandbox recreate, preview door, in-flight call cancellation,
+turnKind, fail-open judge). The 67 still open (duplicates merged) are now rows Q-101…Q-167 in
+`BUILD_REPORT_QUEUE.md` — code-actionable ones OPEN, admin/infra/vendor ones 🟡 BLOCKED with what they need.
+"Unsure" items are marked as such in their row rather than guessed. Q-021 leaves the table.

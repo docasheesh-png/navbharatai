@@ -596,6 +596,10 @@ export function readLedgerPath(key: string): string {
   return at > 0 && /^#L\d+-\d+$/.test(key.slice(at)) ? key.slice(0, at) : key;
 }
 
+/** A file this small is returned whole even when a range is asked (autopsy c70bcbb4). */
+export const SMALL_FILE_WHOLE_LINES = 300;
+export const SMALL_FILE_WHOLE_BYTES = 16_000;
+
 export class ToolDispatcher {
   /**
    * May this dispatcher publish? DENIED unless the composition root grants it — see the `deploy` case.
@@ -4131,9 +4135,15 @@ export class ToolDispatcher {
         // written nothing at all. So a ranged read is its own entry, keyed by the lines it asked for:
         // a repeat of the SAME slice is still a repeat, a new slice is new information.
         const lines = full.split('\n');
-        const from = (sl ?? 1) - 1;
-        const to = el ?? lines.length;
-        const ranged = sl !== null || el !== null;
+        // 🔴 A SMALL FILE IS NEVER SLICED (autopsy c70bcbb4, 2026-10-04). Ranges exist for BIG files (Fix 36b);
+        // the model asked for them on small ones too — `usePlayer.ts` (247 lines) in six slices, `utils.ts`
+        // (104) in three — and every slice was a model call re-sending ~50k tokens of context to fetch ~1k of
+        // file. A small file comes back whole, once, whatever range was asked.
+        const askedRange = sl !== null || el !== null;
+        const smallWhole = askedRange && lines.length <= SMALL_FILE_WHOLE_LINES && full.length <= SMALL_FILE_WHOLE_BYTES;
+        const from = smallWhole ? 0 : (sl ?? 1) - 1;
+        const to = smallWhole ? lines.length : el ?? lines.length;
+        const ranged = askedRange && !smallWhole;
         const ledgerKey = ranged ? `${reqPath}#L${from + 1}-${Math.min(to, lines.length)}` : reqPath;
         const shownPath = ranged ? `${reqPath} (lines ${from + 1}-${Math.min(to, lines.length)})` : reqPath;
         // ⚠️ THE SAME FILE, AGAIN, UNCHANGED — measured at 84% of all reads in a real build (see
@@ -4181,6 +4191,7 @@ export class ToolDispatcher {
         const notice = repeatedReadNotice(shownPath, ownCount, ownUnchanged, ownStalls, ownCount === 2 && own?.handed === true);
         if (ownStalls >= READ_LOOP_LIMIT) this._readLoopStops.n++;
 
+        if (smallWhole) return `${notice}[the whole file — ${lines.length} lines, small enough that it is never sliced]\n${full}`;
         if (!ranged) return notice ? `${notice}${full}` : full;
         const slice = lines.slice(from, to).join('\n');
         return `${notice}[lines ${from + 1}-${Math.min(to, lines.length)} of ${lines.length} — the file is complete on disk]\n${slice}`;

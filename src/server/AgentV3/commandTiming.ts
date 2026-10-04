@@ -52,3 +52,17 @@ export function commandTimingText(timing: Partial<CommandTiming> | null | undefi
   const afterMs = Math.max(0, totalMs - setupMs - sandboxMs - runMs);
   return ` — our setup ${secs(setupMs)} · sandbox ${secs(sandboxMs)} · command ${secs(runMs)} · our checks after ${secs(afterMs)}`;
 }
+
+/** The incremental-build file every typecheck NavBharatAI runs writes to (`WRITE_TYPECHECK_TSBUILDINFO`). */
+export const OUR_TSBUILDINFO = '/tmp/agentv3.tsbuildinfo';
+
+/**
+ * A readable name for a command the PLATFORM ran, or null for anyone else's (autopsy c70bcbb4). Our typecheck
+ * begins with an install-lock and warm-cache preamble, so its first line — what the report printed — read
+ * `$ if [ -f /tmp/nbai-npm-install.lock ] && [ -n "$(find …` ten times in one report. PURE.
+ */
+export function ourCommandLabel(command: string): string | null {
+  const c = String(command ?? '');
+  if (c.includes(OUR_TSBUILDINFO) && /\btsc\b[^\n]*--noEmit/.test(c)) return 'typecheck (tsc --noEmit, run by NavBharatAI)';
+  return null;
+}

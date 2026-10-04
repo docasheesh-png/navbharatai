@@ -154,7 +154,7 @@ export function styleResumeNote(missingCount: number, pageCount = 0, orphanCount
   const parts = [
     missingCount > 0 ? `${missingCount} class name(s) had no style rule` : '',
     pageCount > 0 ? `${pageCount} page(s) fell short of the design standard` : '',
-    a11yCount > 0 ? `${a11yCount} file(s) had controls a screen reader cannot name` : '',
+    a11yCount > 0 ? `${a11yCount} file(s) had controls a keyboard or screen reader cannot use` : '',
   ].filter(Boolean);
   const what = parts.length > 0 ? parts.join(', ') : `${missingCount} class name(s) had no style rule and ${pageCount} page(s) fell short of the design standard`;
   return `The model ended its turn while ${what}, `

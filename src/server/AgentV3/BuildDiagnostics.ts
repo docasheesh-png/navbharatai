@@ -35,7 +35,7 @@ import { mergeTruncation, pushBounded, boundedWindow, COMPLETE, type ChannelTrun
 import { capPromptPreview } from './promptPreviewShape';
 import { renderProvenByAnyActor, noteRenderSeen, forgetRenderSeen, RENDER_PROVEN_CODES } from './renderProof';
 import { isSelfHeal, isWorkaroundIssue, isNarrationIssue, isLeftOpen, HEAL_RULE } from '../../lib/healIssue';
-import { commandTimingText, type CommandTiming } from './commandTiming';
+import { commandTimingText, ourCommandLabel, type CommandTiming } from './commandTiming';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -1141,7 +1141,7 @@ export class BuildDiagnostics {
       // sandbox, a test's named-vs-default import) is not an APP-build failure — the app ships without
       // its test files and compiles clean. See isTestOnlyTypecheckFailure (deep-test build #4 rootCause).
       && !isTestOnlyTypecheckFailure(rec.command, rec.stdout, rec.stderr);
-    const cmdHead = rec.command.split('\n')[0].slice(0, 120);
+    const cmdHead = ourCommandLabel(rec.command) ?? rec.command.split('\n')[0].slice(0, 120);
     const durTxt = rec.durationMs != null ? ` (${Math.round(rec.durationMs / 1000)}s)` : '';
     // Q-273 — a slow command says where its time went (our setup / the machine / the command).
     const splitTxt = commandTimingText(rec.timing, rec.durationMs);

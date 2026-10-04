@@ -81,7 +81,7 @@ describe('3 · the no-tools review is not told to read files', () => {
 describe('4 · the hand-back note counts what it hands back', () => {
   it('an unlabelled field alone is named, not "0 class name(s) … 0 page(s)"', () => {
     const note = styleResumeNote(0, 0, 0, 1);
-    expect(note).toContain('1 file(s) had controls a screen reader cannot name');
+    expect(note).toContain('1 file(s) had controls a keyboard or screen reader cannot use');
     expect(note).not.toMatch(/^The model ended its turn while 0 class/);
     expect(styleResumeNote(3, 1)).toContain('3 class name(s) had no style rule, 1 page(s) fell short');
   });

@@ -68,6 +68,20 @@ export const PER_FILE_VIOLATIONS: ReadonlySet<string> = new Set([
   'html-lang',
   'positive-tabindex',
   'off-grid-spacing',
+  // A clickable <div>/<span> (autopsy c70bcbb4): added to the linter after this list was written, so the
+  // end-of-build check flagged PlayerBar and NowPlayingScreen while neither ever got a note.
+  'click-noninteractive',
+]);
+
+/**
+ * The violation types that are judgements about the WHOLE app, never about one file (see above). Every type
+ * a linter emits is in exactly one of these two sets — a census test fails on a new type in neither, which
+ * is how `click-noninteractive` was missed for five days.
+ */
+export const WHOLE_APP_VIOLATIONS: ReadonlySet<string> = new Set([
+  'color-count',
+  'font-count',
+  'hardcoded-colors',
 ]);
 
 /** Kill switch. `off` restores the pre-2026-09-20 behaviour exactly: no note, ever. */

@@ -6,6 +6,7 @@
 // (`readAdminReason`). The server still refuses on its own; this screen is not the security boundary.
 
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertTriangle, X } from 'lucide-react';
 import { readAdminReason, ADMIN_REASON_MAX, type ConfirmCopy } from '../../lib/adminActionReason';
 
@@ -37,9 +38,12 @@ export function ConfirmActionDialog({ copy, children, busy, onCancel, onConfirm 
   const canConfirm = reasonOk && !busy;
   const error = 'error' in read && (touched || typed) && (copy.reasonRequired || typed) ? read.error : null;
 
-  return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-scrim p-4" role="dialog" aria-modal="true" aria-labelledby="confirm-action-title">
-      <div className="w-full max-w-md bg-card border border-line rounded-2xl p-5 space-y-4 shadow-2xl">
+  // The sheet contract (tests/everyPopupClearsTheChrome.test.ts): the overlay clears the notch and the
+  // tab bar, and the card is capped at the room it really has. z-[200] is above the tab bar, hence
+  // `nb-sheet-over-nav`; portalled to the body so no transformed ancestor can trap `position: fixed`.
+  const sheet = (
+    <div className="nb-sheet-overlay nb-sheet-over-nav fixed inset-0 z-[200] flex items-center justify-center bg-scrim" role="presentation">
+      <div role="dialog" aria-modal="true" aria-labelledby="confirm-action-title" className="nb-sheet w-full max-w-md bg-card border border-line rounded-2xl p-5 space-y-4 shadow-2xl overflow-y-auto">
         <div className="flex items-start gap-3">
           {copy.danger && <AlertTriangle className="w-5 h-5 text-danger shrink-0 mt-0.5" />}
           <h2 id="confirm-action-title" className="text-base font-black text-ink flex-1">{copy.title}</h2>
@@ -81,6 +85,7 @@ export function ConfirmActionDialog({ copy, children, busy, onCancel, onConfirm 
       </div>
     </div>
   );
+  return typeof document === 'undefined' ? sheet : createPortal(sheet, document.body);
 }
 
 export default ConfirmActionDialog;

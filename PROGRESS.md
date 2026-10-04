@@ -88498,3 +88498,40 @@ Nothing was reworded or dropped. A line-count check confirmed every line of the 
 **New rule:** when the admin sets a Cloud Run key, its name is recorded in `docs/claude/ENV_REGISTRY.md`, not in `CLAUDE.md`. Long histories and rationales go in the matching `docs/claude/` file.
 
 Also: Q-013's queue row now says #3496 is merged.
+
+---
+
+## 2026-10-04 — Autopsy cc3ef776 (AI image generator app): an app's pictures need a key — and the owner is told which, where, and where to paste it
+
+**Report:** the admin's AI-image-generator build failed on every picture. Admin note: *"maine kaha tha, jab bhi app builder ai banawaya jaye to pollination ai, se image generatet karwayi jaye, par yeh to fail ho raha hai"*.
+
+**Root cause:** the image provider stopped answering anonymous requests (401, "key missing or invalid"), and a key may never be placed in browser code. The 2026-10-01 recipe was built on a keyless default that no longer exists. Asked how to proceed, the admin ruled: *"1. user ko saaf saaf bolo ki API keys chahiye. 2. user ko navbhatai api keys ka offer den, aur bhi api keys ke bare me bataye jaise grok.gemini,chatgpt user jo bhi select kare uski location/link bataye, user ko guide kare ki keys kaha dalni hai!!"*
+
+**What was built (PR `claude/app-image-keys`):**
+- The app's page asks NavBharatAI for every picture through `window.NavAI.image()`. In the published app this goes to `POST /api/app-ai/image` (signed app token). In the owner's preview it goes through the postMessage relay to `/api/app-ai/preview-image`. The server reads the owner's image key from the encrypted vault, so the key never reaches the page.
+- One table, `appImageKeyOptions.ts`, lists the keys:
+  - `NAVBHARATAI_API_KEY`
+  - `OPENAI_API_KEY`
+  - `GEMINI_API_KEY`
+  - `XAI_API_KEY`
+  - `POLLINATIONS_API_KEY`
+
+  Each entry has its link and the place to paste it. The builder's instruction, the recipe, the owner's error and the vault lookup all read this table.
+- Our own offer is a new Developer API permission, **Images** (`ai:images`), behind `POST /api/v1/images/generations` (standard images format, b64_json). Pricing matches the Image Generator: 5 free pictures a day, then ₹1 each, within the key's daily limit. The same key can be saved as an app's image key.
+- The owner sees the full list of options. A visitor sees only "not set up yet". A refused key is reported to the owner and never silently swapped for the NavBharatAI wallet.
+- Limits: 100 pictures a day per app, 10 per visitor, and 50 a day in the preview.
+
+**🔴 Reversal recorded:** the 2026-09-23 decision "no image door on the Developer API" was reversed on the admin's new instruction (the dated note is in `tests/theImageGeneratorHasFreeAndPaid.test.ts`).
+
+**Ledger (queue rows Q-570…Q-575):**
+
+| Row | Problem | State |
+|---|---|---|
+| Q-570 | Every picture failed (keyless 401) | Fixed in this PR |
+| Q-571 | The builder said "no key needed" | Fixed in this PR |
+| Q-572 | The phone-layout check blamed a scrolled row; the real culprit was the "Portrait" chip | Analyzer and template fixed in this PR |
+| Q-573 | `PREVIEW_SNAPSHOT_STALE` from `.env` | Fixed in this PR |
+| Q-574 | The warm primer had no `@types/react` | 🟡 Code fixed; the admin must run the `e2b-template` workflow |
+| Q-575 | `safe=true` no longer filters nudity | Fixed in this PR; filters are now named explicitly |
+
+**Not defects (with evidence in the reply):** the GLM crawl bench, ladder rung 2, and the ₹47.75 bill (the markup was earned by a preview that ran).

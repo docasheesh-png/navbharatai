@@ -3874,3 +3874,15 @@ the flag entries above promise.
 - **`AGENTV3_LINT_GATE`** — NOW SET to `on` (admin, 2026-07-11) → moved up into the configured "AgentV3
   controls" list above. It is live: a finished build fails on real ESLint **errors** (warnings/formatting
   never block). Watch the first few real builds; if a genuinely-working app gets blocked, set it `off`.
+
+---
+
+### 2026-10-04 — app pictures, the Images API permission, and the safety filter (autopsy cc3ef776)
+
+- **No new Cloud Run key.** App pictures reuse the engines already configured for the Image Generator's paid ladder: Cloudflare FLUX, keyed Pollinations (`POLLINATIONS_API_KEY`), then Grok. They run only when the OWNER saved a NavBharatAI API key with the "Images" permission. With an OpenAI, Gemini, Grok or Pollinations key of their own, NavBharatAI's keys are not touched at all.
+- **Correction: `safe=true` is NOT the nudity filter on the current Pollinations API.** It now covers only privacy and secrets. Every keyed call names its filters: `safe=privacy,secrets,sexual,violence` (`POLLINATIONS_SAFE_FILTERS` in `imageGen.ts`). The legacy anonymous link keeps `safe=true`.
+- **The app's own secrets** (saved in Keys & Secrets, never in Cloud Run) are:
+  - `NAVBHARATAI_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` (or `GOOGLE_API_KEY`), `XAI_API_KEY` (or `GROK_API_KEY`), `POLLINATIONS_API_KEY`;
+  - optional `IMAGE_PROVIDER`;
+  - optional `<PROVIDER>_IMAGE_MODEL`.
+- **Admin action:** after the PR merges, run the manual `e2b-template` workflow. The warm primer in `infra/e2b/e2b.Dockerfile` now carries `@types/react` and `@types/react-dom` (Q-574), and it reaches live sandboxes only after that rebuild.

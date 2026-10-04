@@ -223,7 +223,13 @@ curl ${base}/chat/completions \\
 curl ${base}/professionals/teacher_ai/chat \\
   -H "Authorization: Bearer nbai_YOUR_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"messages":[{"role":"user","content":"Explain photosynthesis to a class 8 student"}]}'`,
+  -d '{"messages":[{"role":"user","content":"Explain photosynthesis to a class 8 student"}]}'
+
+# Make a picture (ai:images) — 5 free a day, then charged per picture; returned as base64
+curl ${base}/images/generations \\
+  -H "Authorization: Bearer nbai_YOUR_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"prompt":"A tiger in a misty forest at sunrise","size":"1024x1024"}'`,
     node:
 `import OpenAI from "openai";
 
@@ -241,7 +247,11 @@ const teacher = await client.chat.completions.create({
   model: "navbharatai/teacher_ai",
   messages: [{ role: "user", content: "Explain photosynthesis to a class 8 student" }],
 });
-console.log(teacher.choices[0].message.content);`,
+console.log(teacher.choices[0].message.content);
+
+// Make a picture (needs the ai:images permission). It comes back as base64.
+const picture = await client.images.generate({ model: "navbharatai", prompt: "A tiger in a misty forest at sunrise", size: "1024x1024" });
+console.log(picture.data[0].b64_json.slice(0, 40));`,
     python:
 `from openai import OpenAI
 
@@ -258,7 +268,11 @@ teacher = client.chat.completions.create(
     model="navbharatai/teacher_ai",
     messages=[{"role": "user", "content": "Explain photosynthesis to a class 8 student"}],
 )
-print(teacher.choices[0].message.content)`,
+print(teacher.choices[0].message.content)
+
+# Make a picture (needs the ai:images permission). It comes back as base64.
+picture = client.images.generate(model="navbharatai", prompt="A tiger in a misty forest at sunrise", size="1024x1024")
+print(picture.data[0].b64_json[:40])`,
   }), [base]);
 
   return (

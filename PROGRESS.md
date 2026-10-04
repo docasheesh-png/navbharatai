@@ -87358,7 +87358,7 @@ Build `536c8189`, Weak tier, `kimi-k2.7-code`, `ok: true`, 7.2 min (inside its 6
 ₹152.52 billed on $0.42 real cost. The app worked. Three separate things in the report were wrong, and
 each had its own root cause. Ledger, one row per item:
 
-**Q-087 — 🥵 the off-grid hand-back is the first thing this build proves, and it proves it harmful.**
+**Q-091 — 🥵 the off-grid hand-back is the first thing this build proves, and it proves it harmful.**
 `STYLE_RULES_RESUMED` gave the model the `DESIGN_CONSISTENCY` spacing values with "change each to the
 nearest multiple of 4px" (the Q-037 hand-back, shipped by #3458 three days earlier — this is its first
 real outing). The model answered with **three ad-hoc `node -e` regex scripts** that string-sliced and
@@ -87398,7 +87398,7 @@ It moved values that were **already ON the grid OFF it**, and the build still en
   `SPACING_DECL_RE_SOURCE` / `SPACING_PX_RE_SOURCE` in `DesignLinter.ts`, read by both the lint and the
   snap, so the two cannot disagree about what a spacing declaration is.
 
-**Q-088 — ❌ the reviewer found a real bug and nothing repaired it, with no record of why.** On the
+**Q-092 — ❌ the reviewer found a real bug and nothing repaired it, with no record of why.** On the
 working app the reviewer reported: *"`matchedKeys` and `setMatchedKeys` are declared and reset, but
 `setMatchedKeys` is never called in `handleMatchClick` or elsewhere. The guard `if
 (matchedKeys.includes(key)) return;` always evaluates to `false`, so a key can be matched multiple
@@ -87426,7 +87426,7 @@ not even the `_REPAIR_SKIPPED` record, because `selectGreenRepairable` returned 
   `[BROKEN]` finding may get one automatic repair that is undone unless proven — the right incentive
   for the one tag we are asking it to be careful with.
 
-**Q-089 — ❌ `JOURNEY_NOT_DERIVED` stated a falsehood about the app.** It carried
+**Q-093 — ❌ `JOURNEY_NOT_DERIVED` stated a falsehood about the app.** It carried
 `NO_DATA_ENTRY_REASON`: *"this app has no data-entry surface at all — a game, a dashboard or a landing
 page has nothing to save and reload, so there is no such journey to prove."* The app keeps XP, gems, a
 streak and the lessons you have finished in `localStorage` (`src/hooks/useProgress.ts`) and reads them
@@ -87447,7 +87447,7 @@ back on every load. **That IS the save-and-reload journey this check exists to p
   (*"this app has no data-entry flow"*). It now repeats the derivation's sentence through
   `journeyNoneWhy`, with a still-true generic line as the fallback. One sentence, written once.
 
-**Q-090 — 🟡 five items argued NOT defects, awaiting the admin's yes:** 2× `PROVIDER_FALLBACK` (GLM
+**Q-094 — 🟡 five items argued NOT defects, awaiting the admin's yes:** 2× `PROVIDER_FALLBACK` (GLM
 crawled, 30 s = 7% of the clock, benched as designed — Q-009); the fast lane spending 15 s and handing
 off with nothing (`FAST_LANE_SKIPPED_REASONING_RUNG`, the designed stand-down on a reasoning rung);
 `WRITE_TIME_TYPECHECK`'s first run paying 13 s to install the compiler (Q-010 / Q-063);
@@ -87472,3 +87472,73 @@ reaching 100 where it used to sit at 98); `REVIEW_FUNCTIONAL_REPAIRED` / `_REFUT
 builds where the reviewer names a plain-English bug — each one is a real defect that used to ship with
 only a suggestion; and whether any reviewer actually writes `[BROKEN]` (if none does, the widened
 classifier is carrying the whole fix, which is the fallback working).
+## 2026-10-01 — Autopsy 8f797751 (maths solver, stopped at 6.4 min, 6 s after the dev server came up)
+
+- **A ✅** At 4.6 min the model said "Your Math Solver app is ready … Open the Preview tab"; the platform
+  handed the turn back to style 41 unstyled classes and told only the admin report. No preview existed,
+  and the user stopped. Both hand-backs (style, unfinished) now put "⏳ Not finished yet …" in the chat
+  (`handBackNotice.ts`).
+- **B ✅** The fast lane's planned handoff was labelled "could not produce the app" / `BUILD_FAILED` beside
+  `LLM_CALL_HANDED_OFF`; now `handedOff` and an honest outcome line. (The contract-phase handoff wording,
+  and "Building 11 file(s)" before nothing was built, were already fixed on main by #3461.)
+- **C 🟡 → Q-090** Publish a preview the first time the app compiles clean, mid-build — admin decision.
+- **Q-009** recurred (GLM crawled twice).
+- Not defects: `mathjs` imported before it was installed (the note named the fix; the model wrote the
+  files the same note listed first, then installed); a `types.ts` syntax slip and a non-existent
+  `math.solve`, both self-corrected; a duplicate declaration refused by the write guard; one-file batches
+  (model choice); a manual `tsc` after the clean note; a brand-new workspace given our starter (expected).
+Tests: `tests/readyWasSaidBeforeThePreview.test.ts`, proven by reversion.
+## 2026-10-01 — Autopsy 52471441 ("Build a calculator", Weak, stopped by the user at 38 s)
+
+**What happened.** Setup took 8 s. The fast lane's file-list call (a ~500-token prompt) crawled on GLM `glm-4.7-flashx`
+and was abandoned at 15 s, then handed off because the next rung (KIMI) reasons before every answer. The full builder
+started on KIMI and read the starter files. No file had been written when the user pressed Stop at 38 s. Bill ₹0.
+
+**Tally:** 0 self-heals · 1 workaround (fast lane → full builder after the crawl) · 0 skips · 0 shipped broken ·
+1 struggle (15 s crawl = 37% of the clock, before anything reached the screen).
+
+| Item | Root cause | State |
+|---|---|---|
+| Nothing on screen in 38 s; the tested calculator template was not used | `goldenScaffoldForPrompt` seeds a template only for the chip's exact text; "Build a calculator" is shorter | Q-087 🟡 admin decision (option a recommended: verb + template name only) |
+| GLM crawl, 15 s | Provider latency (Z.ai) | Recurrence of Q-009, which #3465 closes as accepted provider weather. This instance (15 s) is under that decision's reopen line (60 s per build) |
+| Five lines read as defects but are true | See the row | Q-088 🟡 needs the admin's yes |
+
+**Missing subsystem (Step 2):** none new. The lever is Q-087: a bare request for a thing we already have a tested
+template for should get that template, which removes the plan call, the crawl and the wait together.
+
+**Proactive (Step 6), not built:** the crawl grace (`STREAM_THROUGHPUT_GRACE_MS`, 15 s) was sized for a 26,569-token
+prompt's ingestion. The fast lane's plan call is ~500 tokens, where a healthy `glm-4.7-flashx` (thinking disabled)
+answered in 2.4 s in autopsy 876afca9. A grace scaled by prompt size would cut a dead call's cost from 15 s to a few
+seconds. It changes when the ladder moves to KIMI, so it touches the admin's routing decision on Q-009; offered, not
+built.
+## 2026-10-01 — Admin decisions on Q-009, Q-014, Q-015, Q-023 (and Q-064 folded into Q-009)
+
+The admin answered "karo" to the line naming these rows. Each decision row had a recommended option, and that option
+is what was adopted. The rows leave `BUILD_REPORT_QUEUE.md`; this entry is their ledger.
+
+- **Q-014 ✅ (option a, keep).** When `.env.example` and the server's own `process.env.PORT || N` fallback disagree,
+  the env example still ranks higher in `DECLARED_PORT` (`declaredPort.test.ts` unchanged). It has no practical
+  effect, because the proven recipe port (recorded from the real launch since the 2b1f845e autopsy) outranks the
+  declared port, so the preview door reaches the port the server really listens on. **Reopen if** a report shows the
+  door on the example's port while the recipe names another.
+- **Q-015 ✅ (option a, agreed not defects).** The three 2b1f845e warnings were correct reports:
+  - `read_file .env.example`: the file really did not exist, and the model created it next.
+  - The `edit_file` miss on `tsconfig.server.json`: the tool showed the real file, and the next write landed.
+  - The 21 off-grid values: 18 of them are in a `src/index.css` written by the earlier build. `lintDesign` on the
+    kit itself scores 100.
+
+  #3458 already keeps an untouched file out of the end-of-turn hand-back.
+- **Q-023 ✅ (option a, keep).** A 9-section spec of about 40 listed parts is a project, so 16 modules is the
+  intended decomposition. The JARVIS failure was the modules being written in Kotlin, and the planner's stack note
+  fixed that. **Reopen if** a spec made mostly of one-line commands ("Open YouTube", "Open Maps") decomposes and its
+  modules fail for being too thin.
+- **Q-009 ✅ (accepted as provider weather, Q-064 folded in).**
+  - **What happened:** the GLM lead rung (`glm-4.7-flashx`) crawled in six reports: 6461025c, d382b398, e49afa97,
+    1219c639, de3bb2bb and 2f723acb. Each crawl cost 15–30 s (4–7% of the build).
+  - **Why accepted:** the crawl is on Z.ai's side, so no code here can make their model faster. Our part works: the
+    crawl bench abandons after 15 s, benches for 180 s, re-probes once, and benches for the build on a second crawl
+    (#3448 fixed the one defect on our side). Q-064 (de3bb2bb) was the same thing, the re-probe crawling as well.
+  - **Reopen if:** a single build loses more than 60 s to crawls, or crawls exceed 10% of builds' wall time over a
+    day.
+  - **The real lever then:** a ladder change (another lead rung on Weak/Normal). That is the admin's routing
+    decision, not a code fix.

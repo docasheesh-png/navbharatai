@@ -681,6 +681,7 @@ import {
 import { adminRequestOk } from '../lib/adminAuth';
 import { previewFidelityCaveats, previewFidelityNotice } from '../AgentV3/previewFidelity';
 import { journeyUserSummary } from '../AgentV3/journeyUserSummary';
+import { platformChecksProof, browserAlreadySaid, phoneOutcomeFromCode, type PhoneOutcome } from '../AgentV3/buildProofCard';
 import { routeParam, routeParams } from '../lib/expressCompat';
 
 /**
@@ -21507,6 +21508,9 @@ async function noteBuildOutcome(
       // The user-facing proof of the checks below. One card, several checks — see mergeUserProofs.
       let journeyProof: UserProof | null = null;
       let exploreProof: UserProof | null = null;
+      // The phone-size check's own answer, kept for the user's proof card (buildProofCard.ts). It was
+      // recorded and discarded; the card could not read a verdict nothing held.
+      let phoneProof: PhoneOutcome = 'not-run';
       if (
         process.env.AGENTV3_JOURNEY_CHECK !== 'off' && result.ok && lastPreviewUrl && actuator.runCommand
         && !isImportTurn && !abort.signal.aborted
@@ -21613,6 +21617,7 @@ async function noteBuildOutcome(
           const out = await withTimeout(actuator.runCommand(workspaceId, mobileLayoutScript(lastPreviewUrl, { storageState: signedInState() })), MOBILE_CHECK_BUDGET_MS, 'mobile-layout');
           const verdict = mobileLayoutVerdict(parseMobileLayout(out.stdout));
           buildDiag.record({ phase: 'preview', severity: verdict.severity, code: verdict.code, message: verdict.message, autoResolved: verdict.autoResolved });
+          phoneProof = phoneOutcomeFromCode(verdict.code);
         } catch (err) {
           try {
             buildDiag.record({ phase: 'preview', severity: 'info', code: 'MOBILE_LAYOUT_NOT_RUN', autoResolved: true, message: `The phone-size check did not complete: ${String((err as { message?: string })?.message ?? err).slice(0, 160)}.` });
@@ -21760,10 +21765,12 @@ async function noteBuildOutcome(
           }
         } catch { /* evidence, never a gate — a failure here changes nothing about the build verdict */ }
       }
-      try {
-        const card = mergeUserProofs(journeyProof, exploreProof);
-        if (card.headline) emit({ type: 'verified', ok: card.ok, headline: card.headline, steps: card.steps, ts: Date.now() });
-      } catch { /* the proof is evidence for the user, never a gate on the build */ }
+      // 🔴 THE CARD IS EMITTED WHERE ITS EVIDENCE IS FINAL, NOT HERE (buildProofCard.ts). At this point
+      // in the route the app's own test suite has not run, the render proof has not been reconciled and
+      // the last-chance proof has not happened — so a card built here could only ever carry the journey
+      // and the explorer. It is built beside `RELEASE_GATE`, off the same `gateEvidence` the gate reads,
+      // so the card and the verdict can never tell the user two different stories. Still exactly ONE
+      // emit (the build card has one slot, and a second event would erase the first).
 
       // NO PREVIEW AT ALL IS THE LOUDEST FINDING THERE IS — and it was the one thing the report never
       // said (build f323a4db/49a7a987, admin 2026-08-06). Every post-build verification is gated on a
@@ -22320,6 +22327,32 @@ async function noteBuildOutcome(
           // made a clean Stop end with "2 unresolved" problems (autopsy 31254f9a). The verdict stays RED.
           autoResolved: gate.state === 'green' || gateEvidence.stoppedByUser === true || (gate.state === 'unknown' && !!moduleAwaitsShell),
         });
+
+        // ── THE PROOF THE USER SEES — every check that really ran, and silence for the rest ───────
+        //
+        // 🔑 This is the moat, printed. No other AI app builder opens the finished app in a real
+        // browser, reloads it to check the data came back, presses its controls, measures it at phone
+        // size, runs the app's own tests and compiles it — so none of them can show these sentences.
+        // Until now the user saw at most two of them, because the card was emitted ~400 lines earlier,
+        // before `gateEvidence.tests` and `gateEvidence.preview` had answers. It is built HERE, off the
+        // SAME object the release gate above just read, so the card and the verdict cannot disagree.
+        //
+        // ⚠️ ONE EMIT, by construction: the build card has one slot (`state.verification`) and a second
+        // `verified` event would erase the first. A source guard asserts exactly one in this file.
+        // ⚠️ EVIDENCE, NEVER A GATE: it moves no money, fails no build, and a throw here changes
+        // nothing — every sentence is a fact already recorded for the admin report.
+        try {
+          const checksProof = platformChecksProof({
+            preview: gateEvidence.preview,
+            pages: gateEvidence.pages,
+            typecheck: gateEvidence.typecheck,
+            tests: gateEvidence.tests,
+            testSuiteIsOurStarter: gateEvidence.testSuiteIsOurStarter === true,
+            phone: phoneProof,
+          }, { browserAlreadySaid: browserAlreadySaid(journeyProof, exploreProof) });
+          const card = mergeUserProofs(journeyProof, exploreProof, checksProof);
+          if (card.headline) emit({ type: 'verified', ok: card.ok, headline: card.headline, steps: card.steps, ts: Date.now() });
+        } catch { /* the proof is evidence for the user, never a gate on the build */ }
         // ── THE VERDICT MAY NO LONGER CONTRADICT THE EVIDENCE ────────────────────────────────────
         //
         // ADMIN REPORT 2026-08-12 (the dukaan stock app) — the worst failure this engine has produced,

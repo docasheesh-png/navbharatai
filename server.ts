@@ -19,7 +19,7 @@ import { registerShareRoutes } from './src/server/routes/share';
 import { audit } from './src/server/lib/audit';
 import { adaptiveGuard } from './src/server/lib/adaptiveRateLimit';
 import { appCheckGuard } from './src/server/lib/appCheck';
-import { securityHeadersConfig } from './src/server/lib/securityHeaders';
+import { securityHeadersConfig, permissionsPolicyMiddleware } from './src/server/lib/securityHeaders';
 import { responseCompression } from './src/server/lib/responseCompression';
 import { setDb as setSharedDb } from './src/server/lib/db';
 import { envFlag } from './src/server/lib/envFlag';
@@ -302,6 +302,7 @@ setInterval(() => {
   // src/server/lib/securityHeaders.ts so it can be unit-tested; see that file for why each
   // directive is shaped the way it is (Firebase Auth popups, live-preview iframes, OAuth opener).
   app.use(helmet(securityHeadersConfig));
+  app.use(permissionsPolicyMiddleware());
   app.use(traceMiddleware);
   // gzip for JSON/HTML/JS/CSS — an ALLOWLIST so it can never buffer a live stream (the v5 build's
   // text/plain NDJSON progress, chat's event-stream). See responseCompression.ts for the reasoning

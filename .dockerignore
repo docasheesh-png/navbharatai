@@ -7,3 +7,7 @@ npm-debug.log
 *.local
 *.log
 Backup
+# Local secrets never enter the build context (forensic audit 2026-10-04).
+.env
+.env.*
+!.env.example

@@ -94,6 +94,7 @@ import { pruneGeneratedListing } from './generatedListing';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, leftToTheKit, usesNonKitNbClass } from './kitRestore';
 import { findUndefinedClasses, isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, missingImportedSheetNote, collectDefinedClasses } from './CssConsistency';
 import { scopeStyleHandBack } from './stylePolishResume';
+import { orphansToHandBack } from './orphanHandBack';
 import { batchSizeNote } from './batchSize';
 import { pageDesignWriteNote, isPageFile, analyzeDesignCoverage, type DesignDefect } from './DesignCoverage';
 import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
@@ -1610,6 +1611,14 @@ export class ToolDispatcher {
    */
   private _starterExpected = false;
   setStarterExpected(on: boolean): void { this._starterExpected = on; }
+
+  /**
+   * Every path the BUILD wrote, across all lanes (the route's write set, golden pre-seed left out). This
+   * dispatcher's own `_writtenPaths` never sees a sub-agent's writes, and the screens a build abandons are
+   * usually a specialist's (Q-202, autopsy 3f959fde) — so the orphan hand-back asks the build, not the agent.
+   */
+  private _buildWrites: (() => Iterable<string>) | null = null;
+  setBuildWrites(source: () => Iterable<string>): void { this._buildWrites = source; }
 
   private async _blockIfStillTheStarterApp(report: ReadinessReport): Promise<ReadinessReport> {
     // A module that does not own the entry leaves the starter in place by design — judging the whole
@@ -3579,7 +3588,7 @@ export class ToolDispatcher {
    * stylesheet that cannot be read returns `[]`: this answer sends a model back to work, so it must never
    * name a class as undefined because the file that defines it was not read.
    */
-  async undefinedClassesNow(opts: { onlyWritten?: boolean } = {}): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }> }> {
+  async undefinedClassesNow(opts: { onlyWritten?: boolean } = {}): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }>; orphans?: string[] }> {
     try {
       let listing: string[] = [];
       try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'style-resume-listing'); }
@@ -3625,7 +3634,15 @@ export class ToolDispatcher {
       // in parallel, so a class a sibling's screen uses is that sibling's to define; handing it here would
       // send two agents to edit one stylesheet for the same rule.
       if (opts.onlyWritten) return scopeStyleHandBack({ missing, sheet, pages, a11y }, project, this._writtenPaths);
-      return { missing, sheet, pages, a11y };
+      // Screens THIS build wrote that nothing imports (Q-202) — top-level only: a specialist's screens are
+      // wired in by the architect after it returns, so naming them to the specialist would be premature.
+      let orphans: string[] = [];
+      try {
+        let buildWrites: string[] = [];
+        try { buildWrites = this._buildWrites ? [...this._buildWrites()] : []; } catch { buildWrites = []; }
+        orphans = orphansToHandBack({ project, written: [...this._writtenPaths, ...buildWrites], starterExpected: this._starterExpected });
+      } catch { orphans = []; }
+      return { missing, sheet, pages, a11y, orphans };
     } catch {
       return { missing: [], pages: [] };
     }

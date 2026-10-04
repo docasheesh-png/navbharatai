@@ -15323,6 +15323,8 @@ async function noteBuildOutcome(
       // The spawn factory above holds a thunk to this; assigned here, before any sub-agent can run,
       // so a child's write-time compiles accumulate into the object the report actually reads.
       dispatcherForSubAgents = dispatcher;
+      // The end-of-turn orphan hand-back (Q-202) asks what the BUILD wrote — every lane, our pre-seed left out.
+      dispatcher.setBuildWrites(() => modelAuthoredPaths(writtenFiles));
       // Requirement coverage grades the request the builder was given, not only the message that
       // continued it (requestForChecks.ts). A mega-roadmap milestone overrides this further down.
       if (checksRequest !== prompt) dispatcher.setCoverageRequest(checksRequest);

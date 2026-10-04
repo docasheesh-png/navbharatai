@@ -1046,7 +1046,7 @@ export class AgentRunner {
                 // SCREENS THAT USE CLASSES NO STYLESHEET DEFINES ARE HANDED BACK ONCE, while the model still
                 // holds them (autopsy 1be16985 — 63 undefined classes, then a 174 s fresh-context repair).
                 const style = await dispatcher.undefinedClassesNow();
-                const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, a11y: style.a11y, resumesUsed: styleResumes, producedFiles: producingToolUses > 0 });
+                const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, a11y: style.a11y, orphans: style.orphans, resumesUsed: styleResumes, producedFiles: producingToolUses > 0 });
                 if (decision.resume) {
                   styleResumes++;
                   summaryBeforeStyleResume = turn.text.trim() || null;
@@ -1054,7 +1054,7 @@ export class AgentRunner {
                   // (autopsy 536c8189 — it is snapped deterministically in `spacingSnap.ts`).
                   const styleNotice = handBackNotice('style', turn.text);
                   if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
-                  try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`)].join(' ') }); } catch { /* a note must never fail a build */ }
+                  try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length, style.orphans?.length ?? 0), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.orphans ?? []).map((o) => `${o}:unimported`)].join(' ') }); } catch { /* a note must never fail a build */ }
                   pushPlatformTurn(decision.message);
                   continue;
                 }

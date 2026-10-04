@@ -87842,3 +87842,17 @@ into its pattern: forex, MT4/MT5, cTrader, algo trading, F&O, trading system/str
 "scalper" is deliberately left out, because the domain now sits early in the list and a ticket-scalper app
 is not trading. `TRADING_CONTEXT` (the broker/listing strip) is unchanged. Both autopsies' tests pass on the
 merged state (`theForexPasteIsNotAnEightModuleProject`, `thePaperTradingAutopsy`).
+
+## 2026-10-04 — Q-202 closed: a screen this build wrote and nothing shows is handed back (autopsy 3f959fde)
+
+#3475 merged (admin): Q-200, Q-201, Q-204–Q-210, Q-212–Q-220 are ✅ and their queue rows are removed; Q-222 (#3474)
+and Q-223 (#3471) merged with their owners, Q-255 rode #3475. Q-202's blocker (#3467) merged, so it was taken next.
+
+| Item | Root cause | Class | Siblings | Lock |
+|---|---|---|---|---|
+| Q-202 `DataPreview.tsx` / `AlgorithmSuggestions.tsx` left imported by nothing after the build changed course | The end of a turn checked styles, design and labels but not whether the screens the build wrote are reachable; `healOrphanPages` covers routed PAGES only | A build-written artifact with no end-of-turn reachability check | The architect's own write set never sees a specialist's writes (where abandoned screens usually come from) — the dispatcher now asks the build's write set (`setBuildWrites`, pre-seed left out); a specialist and a module awaiting its shell are deliberately not handed orphans | `tests/aScreenNothingShowsIsHandedBack.test.ts` (14 cases; four reversions each failed) |
+
+`orphanHandBack.ts` (`AGENTV3_ORPHAN_HANDBACK`, default ON): only files this build wrote, only when
+`unreferencedComponents` PROVES nothing reaches them (one unresolved import ⇒ nothing named), tests/stories/`ui/`
+excluded, folded into the one-time `STYLE_RULES_RESUMED` hand-back (detail `<path>:unimported`). Watch: that detail on
+the next build that changes course, and no `:unimported` on an ordinary build.

@@ -13296,7 +13296,28 @@ async function noteBuildOutcome(
       // No provider name is surfaced to the user (kept to server telemetry only).
       const costLadderOn = process.env.AGENTV3_COST_LADDER !== 'off';
       const analysis = costLadderOn
-        ? analyzeRequest({ prompt: planning.sizing, powerMode: onlyOpus, pinnedModel: powerSpecResolved.pinnedModel, buildIntent: intent })
+        /**
+         * 📏 `fileCount` IS PASSED, AND UNTIL 2026-10-04 IT WAS NOT (autopsy 8b8743a3, Q-313).
+         * `projectFileCount` has been in scope since ~2,600 lines above this call, and the analyser's
+         * own docblock justifies excluding an EDIT from the unsized-app floor with *"an edit is not an
+         * app being ordered, **and its file count already raises the score**"* — a compensation that
+         * never ran. So every edit was sized as if the workspace were empty: measured, the reported
+         * build scored `chat/5` where `chat/11` was the honest number, and every edit of a large
+         * project scored the same as an edit of an empty one.
+         *
+         * 🔒 MEASURED BLAST RADIUS before wiring it (24 realistic prompts × both build intents ×
+         * fileCount 0/14/40): **one** prompt changes tier — *"optimise the bundle, it loads slowly in
+         * production"* on a real project, gemini → haiku, which is the right direction — and **zero**
+         * cross the 40 line that decides which rung OPENS a build. So this moves the report's number
+         * and not the money. `AGENTV3_SIZE_PROJECT=off` reverts it with no deploy.
+         */
+        ? analyzeRequest({
+            prompt: planning.sizing,
+            powerMode: onlyOpus,
+            pinnedModel: powerSpecResolved.pinnedModel,
+            buildIntent: intent,
+            ...(process.env.AGENTV3_SIZE_PROJECT === 'off' ? {} : { fileCount: projectFileCount }),
+          })
         : undefined;
       if (analysis) {
         console.log(

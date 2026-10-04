@@ -88954,3 +88954,20 @@ The tool-call half added no case. It could only disagree when a `stop_build` the
 **Fix.** The clause is removed, and the timeline is the one definition.
 
 **Test.** `tests/oneDefinitionOfStopped.test.ts` pins both invariants: record-then-abort order, and back-fill before the verdict. It also forbids `toolWasUsed('stop_build')` as a stop definition. With the old clause back, 2 tests fail. The fdd59ef8 pin was updated to the single definition. The ordering it protects is unchanged.
+
+
+### Q-132: every direct durable write is audited against the Green Freeze (2026-10-04)
+
+**Scope.** All 44 direct `saveWorkspaceFiles` / `mergeWorkspaceFiles` calls in `routes/agentv3.ts` were read one by one, plus the two callers outside it (`navStore` copying a bought app into a new workspace; the import and mobile routes).
+
+**Result: none can keep a change the freeze refused.** Each one falls into one of these groups:
+- **Saves only what landed:** `writtenFiles` is set only after a write succeeds, or the save is a sandbox scan.
+- **Follows a write in the same try:** a freeze refusal throws before the save.
+- **Gated:** saves only after `writeUnlessFrozen` returned true.
+- **Runs before the build can be green:** the reopen heal, the turn-start reconcile, the seeds, the imports.
+- **Writes a different record:** the green snapshot, the attempt copy, the route fingerprint.
+- **Is the user's own edit or revert route.**
+
+The one writer that bypasses `writeFile` is the unused-dependency prune, which goes through npm. It already stands down with `!isGreenLatched(workspaceId)`.
+
+**Lock.** `tests/everyDurableWriteRespectsGreenFreeze.test.ts` records each call site with its verdict and count. A new direct save, a second copy of a classified one, or a stale verdict fails CI. The audit therefore cannot quietly go out of date.

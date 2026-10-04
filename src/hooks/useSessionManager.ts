@@ -13,6 +13,7 @@ import { doc, getDoc, deleteDoc } from 'firebase/firestore';
 import type { User as FirebaseUser } from 'firebase/auth';
 import type { Message, ChatSession, ViewType } from '../types';
 import { authedHeaders } from '../lib/authHeaders';
+import { writeFailure } from '../lib/serverAnswer';
 import { db } from '../lib/firebase';
 import { safeLS } from '../lib/localStorageSafe';
 import { generateSmartHeuristicSummary, asMessageArray } from '../lib/chatUtils';
@@ -239,22 +240,32 @@ export function useSessionManager(deps: SessionManagerDeps) {
       return next;
     });
     if (user) {
+      // A delete the user asked for is reported when it did not happen: the row leaves this screen at
+      // once, but a saved copy the server still holds comes back on the next load, so they are told.
+      let savedCopyKept = false;
       try {
         await deleteDoc(doc(db, 'chat_sessions', id));
       } catch (err) {
         console.error('Error deleting session from Firestore:', err);
+        savedCopyKept = true;
       }
       // A v5.0 session's transcript lives in the SERVER conversation store (single source of
       // truth) — deleting only the chat_sessions metadata row would leave the real record behind,
       // still listed inside the v5.0 History menu. The server resolves the v3_ id to its stored
-      // record(s) and removes them; owner-checked server-side. Best-effort.
+      // record(s) and removes them; owner-checked server-side.
       if (id.startsWith('v3_')) {
         try {
-          await fetch(`/api/agentv3/conversations/${encodeURIComponent(id)}?userId=${encodeURIComponent(user.uid)}`, {
+          const res = await fetch(`/api/agentv3/conversations/${encodeURIComponent(id)}?userId=${encodeURIComponent(user.uid)}`, {
             method: 'DELETE',
             headers: await authedHeaders(),
           });
-        } catch { /* best-effort — metadata row is already gone */ }
+          if (await writeFailure(res, 'failed')) savedCopyKept = true;
+        } catch {
+          savedCopyKept = true;
+        }
+      }
+      if (savedCopyKept) {
+        addToast('This chat was removed here, but its saved copy could not be deleted. It may come back — please delete it again.', 'error');
       }
     }
     if (currentSessionId === id) {

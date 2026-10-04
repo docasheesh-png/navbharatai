@@ -7,3 +7,8 @@ npm-debug.log
 *.local
 *.log
 Backup
+# A live .env on the build machine must not enter the image: Vite would bake any VITE_ value from it
+# into the public bundle. Production config comes from Cloud Run env vars, never from a file.
+.env
+.env.*
+!.env.example

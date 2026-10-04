@@ -21,6 +21,7 @@ import { panelWidth, panelColumns, type DeviceMode } from '../../lib/panelWidth'
 import { isApplePlatform } from '../../lib/storePurchase';
 import { nativePlatformName } from '../../lib/mobileNative';
 import { maskPhone } from '../../lib/phoneNumber';
+import { writeFailure } from '../../lib/serverAnswer';
 import { VerifyPhoneSheet } from '../VerifyPhoneSheet';
 import { ReferralEarningsSheet } from '../ReferralEarningsSheet';
 import { useReferralProgress } from '../../hooks/useReferralProgress';
@@ -148,7 +149,6 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
   }
   const [costAlerts, setCostAlerts] = useState<CostAlertReport | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saveError, setSaveError] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   // Edit state
@@ -244,6 +244,7 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
   // Budget
   const [editBudget, setEditBudget] = useState(false);
   const [budgetInput, setBudgetInput] = useState('');
+  const [budgetError, setBudgetError] = useState('');
   const [savingBudget, setSavingBudget] = useState(false);
 
   // History
@@ -329,7 +330,6 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
 
   const startEdit = () => {
     setEditing(true);
-    setSaveError('');
     setSaveSuccess(false);
   };
 
@@ -339,17 +339,24 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
     const token = await idToken();
     if (!token) return;
     const val = parseFloat(budgetInput);
-    if (isNaN(val) || val < 0) { setSaveError('Enter a valid amount (0 to remove the limit).'); return; }
+    if (isNaN(val) || val < 0) { setBudgetError('Enter a valid amount (0 to remove the limit).'); return; }
     setSavingBudget(true);
+    setBudgetError('');
+    // The editor closes only on a save the server accepted. It used to close on any answer (and a
+    // failed one was swallowed), so a refused limit looked saved — on a guard that exists to stop spend.
     try {
-      await fetch('/api/profile/budget', {
+      const res = await fetch('/api/profile/budget', {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ budgetLimitInr: val }),
       });
+      const failure = await writeFailure(res, 'The limit could not be saved. Please try again.');
+      if (failure) { setBudgetError(failure); return; }
       await fetchProfile();
       setEditBudget(false);
-    } catch { /* best-effort */ } finally {
+    } catch {
+      setBudgetError('The limit could not be saved (no connection). Please try again.');
+    } finally {
       setSavingBudget(false);
     }
   };
@@ -711,11 +718,14 @@ export function ProfilePage({ effectiveDeviceMode, user, onNavigateToBilling, on
                       className="px-2 py-1 bg-indigo-600 text-on-accent rounded-lg text-[10px] font-bold disabled:opacity-50">
                       {savingBudget ? '…' : 'OK'}
                     </button>
-                    <button onClick={() => setEditBudget(false)}
+                    <button onClick={() => { setEditBudget(false); setBudgetError(''); }}
                       className="px-2 py-1 bg-raised text-muted rounded-lg text-[10px] font-bold">
                       Cancel
                     </button>
                   </div>
+                )}
+                {editBudget && budgetError && (
+                  <p role="alert" className="text-[10px] text-danger font-bold">{budgetError}</p>
                 )}
               </div>
             </div>

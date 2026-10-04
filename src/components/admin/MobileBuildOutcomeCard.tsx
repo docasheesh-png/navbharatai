@@ -20,7 +20,7 @@ import { adminGet, adminFailed } from '../../lib/adminFetch';
  *   • the CLASS breakdown states how many failures carry a diagnosis, because a class is recorded when
  *     the automatic failure report lands and a user who closes the tab is in the rate and in no class.
  */
-type Cure = 'repairable' | 'user-credentials' | 'unclassified';
+type Cure = 'repairable' | 'user-credentials' | 'build-machine' | 'unclassified';
 
 interface LaneRow {
   lane: string;
@@ -81,11 +81,13 @@ const LANE_LABEL: Record<string, string> = {
 const CURE_NOTE: Record<Cure, string> = {
   repairable: 'a better repair loop is the right lever',
   'user-credentials': 'no repair loop can help — show the user the button',
+  'build-machine': 'the build machine cannot build for the store — nothing in the repository helps',
   unclassified: 'the classifier is blind here — give it an eye first',
 };
 const CURE_TONE: Record<Cure, string> = {
   repairable: 'text-info',
   'user-credentials': 'text-warn',
+  'build-machine': 'text-muted',
   unclassified: 'text-muted',
 };
 
@@ -234,12 +236,12 @@ export function MobileBuildOutcomeCard({ adminToken }: { adminToken: string }): 
           {cures && (
             <div>
               <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-muted">What would cure them</p>
-              <div className="grid grid-cols-3 gap-2">
-                {(['repairable', 'user-credentials', 'unclassified'] as const).map((k) => (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {(['repairable', 'user-credentials', 'build-machine', 'unclassified'] as const).map((k) => (
                   <div key={k} className="rounded-lg bg-well px-3 py-2">
                     <p className={`text-base font-black ${CURE_TONE[k]}`}>{cures[k] ?? 0}</p>
                     <p className="mt-0.5 text-[9px] font-bold uppercase tracking-wide text-muted">
-                      {k === 'user-credentials' ? 'their key' : k === 'unclassified' ? 'unknown' : 'repairable'}
+                      {k === 'user-credentials' ? 'their key' : k === 'build-machine' ? 'build machine' : k === 'unclassified' ? 'unknown' : 'repairable'}
                     </p>
                   </div>
                 ))}

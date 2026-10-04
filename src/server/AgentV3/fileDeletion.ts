@@ -79,3 +79,30 @@ export function deletionReconciledMessage(paths: readonly string[]): string {
   return `${paths.length} file(s) deleted during this build were dropped from the project map, so the `
     + `quality gates judge the app as it actually is: ${shown}${more > 0 ? `, +${more} more` : ''}.`;
 }
+
+/**
+ * A DELETE THE DURABLE STORE WILL ALSO REMEMBER (queue Q-106).
+ *
+ * Forgetting a deleted file in the build's own maps is not the same as forgetting it in the durable
+ * store. `saveWorkspaceFiles` MERGES a drastically smaller set into the stored one (when the end-of-build
+ * sandbox scan fails, only the build's own writes are saved) and carries a root manifest forward when it
+ * is missing from the incoming set (a deleted `vite.config.js` beside a new `vite.config.ts`). Either way
+ * the deleted file stays in the index, and the next sandbox is restored with it.
+ *
+ * So after the final save, the paths this build deleted are removed from the durable store too — every
+ * one that is NOT in what was just persisted. A file the build deleted and later wrote again is in that
+ * set, and so is a file a GreenGuard restore put back: both stay. PURE.
+ */
+export function deletionsToForgetDurably(
+  deletedThisBuild: readonly string[] | null | undefined,
+  persisted: Readonly<Record<string, string>> | null | undefined,
+): string[] {
+  const kept = persisted ?? {};
+  const out: string[] = [];
+  for (const raw of deletedThisBuild ?? []) {
+    if (typeof raw !== 'string' || !raw) continue;
+    if (Object.prototype.hasOwnProperty.call(kept, raw)) continue;
+    if (!out.includes(raw)) out.push(raw);
+  }
+  return out;
+}

@@ -3365,6 +3365,21 @@ the flag entries above promise.
     its reply.
 
   Test-locked in `tests/theAskComesLast.test.ts`.
+- **🐍 `AGENTV3_PYTHON_BACKEND_BOOT` — A PYTHON BACKEND COMES BACK WITH ITS APP (Q-284, autopsy 241215d1, 2026-10-04).
+  ⚠️ NOT set; default ON; `off` reverts.** `pythonBackendBoot.ts`. Every platform start of an app (the preview wake,
+  our own preview start, both in-build restarts) used to run only `npm run dev`, so a FastAPI/Flask server came back
+  with no venv and no process. Now one plan (start command read by `pythonStart.ts`, port from the front end's proxy
+  target, else the server's own, else 8000) is used by the service graph (a `python:` backend) and by every start
+  path, which boots it first: venv, install only when the manifest changed (`timeout 240`), detached start, 30 s port
+  wait. The script is sent base64-encoded so it is never treated as a dev-server launch. 🔒 No declared server ⇒ no
+  plan ⇒ the old behaviour. A recipe recorded from the backend's launch is never replayed as the preview.
+  Report codes `PYTHON_BACKEND_UP` (process-only) / `PYTHON_BACKEND_NOT_UP`.
+- **📝 `AGENTV3_SCRIPT_REQUEST_NOTE` — A SCRIPT REQUEST IS BUILT AS A WEB APP, AND THE USER HEARS IT FIRST (Q-274,
+  admin chose "a" 2026-10-04). ⚠️ NOT set; default ON; `off` reverts.** `scriptRequest.ts`: a request for a Python
+  script, a command-line tool, a Streamlit dashboard or a notebook (precision-first: a film script, JavaScript, a
+  build script, a conversion or an explicit web-app request stand down) gets a builder note and one start-of-build
+  line. When live data was asked, sample data must be labelled "Sample data", and `claimAudit` (`live-data-claimed`)
+  corrects a summary that calls a simulated feed live. Report code `SCRIPT_REQUEST_AS_WEB_APP` (process-only).
 - **📋 A PASTED APP IS THE SPEC, AND PASTED CODE IS NOT PROSE (autopsy a106df77, 2026-10-01).** Two keys, NEITHER
   set, default ON: **`AGENTV3_PASTED_APP_BRIEF`** (`off` drops the brief). A user pasted their own HTML bill maker with no other words.
   The published title became `<!doctype html> <html lang="en"> <head>`, a `<meta content="width=…">` was shown

@@ -88848,6 +88848,58 @@ written down in plain words.
 second push creates a second run that somebody then has to cancel or wait out. Nothing is wrong with
 GitHub, nothing needs looking at in Actions settings, and the admin can ignore that request entirely.
 
+## 2026-10-04 — Q-514 and Q-517 from autopsy 39e982bd: the door the user sees, and a warning that became false
+
+Two of the five items that autopsy left OPEN, taken in order of user harm.
+
+### Q-514 — no app on earth labels a button "auth"
+
+`JOURNEY_NOT_RUN` → **RELEASE_GATE YELLOW**, *"whether it keeps what a user enters is untested"*. The
+one journey derived was the sign-in form in `src/screens/AuthScreen.tsx`, and the control the runner
+went looking for was named **`auth`** — the word the FILE carries. **Every app with a login screen is
+in that shape**, so a correct app is told its saving is untested.
+
+🔑 **THE GENERAL HALF IS NOT A SYNONYM TABLE, and it matters more than the table.** A file's word is
+CONCATENATED (`login`, `checkout`, `signup`) and a control's label is SPACED (`Log in`, `Check out`),
+and `pressReach` matched with `includes` — so **`"log in".includes("login")` is `false`**. No list of
+synonyms could ever have bridged that. The matcher now compares the LETTERS alone, which fixes
+`login`/`Log in` for every screen and needs no list.
+
+🔒 **The table is the remainder: one entry.** `auth` / `authentication` → `sign in`, `log in`, `login`
+— and deliberately only the NON-CREATING doors. "Sign up", "Register" and "Create account" are in
+`WRITE_VERBS`, so `pressReach` refuses them anyway (pressing one could create an account), and listing
+them would be noise that can never fire. A screen whose only door is "Sign up" stays unreachable,
+correctly, and a test asserts that every alias is a word `pressReach` will actually press.
+
+The failure note now names the words it looked for, so the next occurrence says which vocabulary missed.
+
+⚠️ **Said plainly: this may not have produced a journey for THAT build.** With Firebase unconfigured the
+app rendered its five tabs, and whether the sign-in form was reachable from them at all is not in the
+report. The fix is for the class — which is every login app — not for that one run.
+
+### Q-517 — "No tests at all" was false 17 seconds later
+
+The readiness gate records that warning before the E2E scaffold pass runs, so one report carried
+*"No tests at all"* at 19:30:09 and `E2E_SCAFFOLDED` writing a Playwright suite at 19:30:26, with
+`TEST_SUITE_UNVERIFIED` stating the honest end state in the same report. Two codes, one build,
+contradicting.
+
+The scaffold pass now clears that warning — **by its own sentence, never by its code.**
+`resolveOnRecheck` gained `messageIncludes`, because `READINESS_WARNING` carries many unrelated facts
+("Requested feature not found: search", …) and clearing the whole code would silence a real one in the
+same build. A precision test locks exactly that, and the existing whole-code callers (`EXPLORE_FAILED`,
+the heal table) are untouched.
+
+**Proof:** `tests/noAppLabelsAButtonAuth.test.ts` (14 cases), reversion-proven five ways — dropping the
+aliases fails 3, restoring the raw-substring match fails 1, dropping `reachAlso` from the generated
+module fails 2, dropping the message filter fails 1, dropping the call at the scaffold fails 1. The
+generated journey module is parsed with the real `node --check`, because that script has shipped broken
+twice before (a backtick inside a comment; a `\b` that reached the page as a backspace).
+
+**Still OPEN from that autopsy: Q-515, Q-516, Q-518** — the snapper-vs-scorer 21-value disagreement,
+`APP_SCOPE`'s false *"clone of Free Fire"* with the ecommerce domain, and the explorer passing
+*"View Details — nothing visibly changed"*. Each needs a cheap diagnosis or a precision corpus; none is
+guessed at.
 
 ### Correction (merging session, 2026-10-04 20:55 UTC) — half of Q-500's cancellations were the 30-minute cap
 
@@ -88874,3 +88926,25 @@ Publishing | Review), Builds (Reports | Phone builds | Engine health), AI Engine
   pages fails CI. Checked in a real browser (desktop 1366px and phone 390px): every tab and page opens, no page error.
 
 **Update (same day):** #3522 merged, so PR 2 was re-applied on `main` (fabdadf65) in the designated branch and pushed. The two commits cherry-picked cleanly, and #3521's App Mart changes left the `storeTab: 'review'` link working. The full gate ran on that state: typecheck, unused imports, native guard, server typecheck, build, bundle, boot and server deps all passed. In vitest, 34255 passed and 1 failed: `nodeModulesIsNotAFile` caught the gate worktree's own `node_modules` symlink, the exact local artifact that test exists for, not code in this change.
+### 2026-10-04 — Admin decisions on the 68f0a486 / c70bcbb4 / 241215d1 open rows
+
+- **Q-541 and Q-527 (items argued not defects): agreed by the admin ("han, band kar do").** Resolved as
+  not-a-defect; the evidence for each is in the row text recorded in #3524 and in the ledgers above.
+- **Q-275 (a request that ended mid-sentence): closed by the admin as not ours.** Measured: 2,429 characters
+  ending at a line break; nothing on our side cuts there (server limit 20,000, no composer `maxLength`, no
+  long-paste conversion, the report stores the prompt in full).
+- **Q-540: the admin chose option (b)** — "navbharatai jo bhi app banaye, uske andar jo bhi function banaye jaye,
+  woh real hone chahiye, production grade". The explorer may sign up a throwaway account only in apps whose
+  sign-in lives in the browser alone. Being built in the follow-up PR.
+
+### 2026-10-04 — Follow-up to 68f0a486: Q-540 built (option b) and Q-542 (uploads in localStorage)
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-540 screens behind a sign-in page with no demo account never checked | the explorer could only use accounts the app ships | a check with no way past a door the app itself opens to anyone | `authLivesInTheBrowser(files)` — no backend, no hosted auth/database SDK, no `NavData`, no network sign-in, no API base URL, and a password handled beside browser storage — lets the sign-in check sign up ONE throwaway account through the app's own form (in its own discarded browser profile) and sign in with it. Every other app keeps "no account is ever created" | `tests/theSchoolAppBehindItsSignInPage.test.ts` (real browser, both sign-up shapes; reverted → 4 fail) |
+| Q-542 uploads as data URLs in localStorage, summary "uploads work" | nothing said where a file goes without a database; our social starter modelled `readAsDataURL` into `useCollection`, whose quota error was swallowed | file bytes in a small key-value store (localStorage, sessionStorage, NavData) | `browserFileStore.ts` IndexedDB store shipped as `src/lib/files.ts` in every pro starter; social starter uses it; failed saves shown on every screen; prompt rule; once-per-build write-time note; claim audit `uploads-in-small-store` | `tests/anUploadIsKeptWhereFilesBelong.test.ts` (real browser 6 MB proof; census over every starter, per file; each layer reverted → fails) |
+
+Siblings hunted: `readAsDataURL` across the whole repo — the only generated-app site was the social starter
+(the rest is NavBharatAI's own client sending images to APIs, not storing them). The `catch {}` that hid a
+failed save lived only in `proShell.ts`'s `useCollection`.
+

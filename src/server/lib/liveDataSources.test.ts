@@ -244,3 +244,44 @@ describe('liveDataContext — dispatch order and the honest empty', () => {
     })).toBe('');
   });
 });
+
+describe('liveDataContext — a question that asks two things gets both (Q-127)', () => {
+  it('answers weather AND currency in one message, in dispatch order', async () => {
+    const out = await liveDataContext('kanpur me barish hogi kya aur dollar ka rate kitna hai', {
+      now: NOW,
+      env: { LIVE_WEATHER_SOURCE: 'on' } as unknown as NodeJS.ProcessEnv,
+      fetchImpl: routedFetch({
+        'geocoding-api': GEO,
+        'api.open-meteo.com/v1/forecast': {
+          current: { temperature_2m: 31.4, relative_humidity_2m: 78, precipitation: 0.2, wind_speed_10m: 12 },
+          daily: { temperature_2m_max: [33, 32], temperature_2m_min: [26, 25], precipitation_probability_max: [80, 40] },
+        },
+        'open.er-api.com/v6/latest/USD': { rates: { INR: 88.1234 }, time_last_update_utc: 'Mon, 25 Aug 2026 00:00:01 +0000' },
+      }),
+    });
+    expect(out).toContain('LIVE WEATHER DATA');
+    expect(out).toContain('LIVE CURRENCY DATA');
+    expect(out.indexOf('LIVE WEATHER DATA')).toBeLessThan(out.indexOf('LIVE CURRENCY DATA'));
+  });
+
+  it('keeps the part that answered when the other source is down', async () => {
+    const out = await liveDataContext('208001 kaha ka pin code hai aur dollar ka rate kitna hai', {
+      now: NOW,
+      env: {} as NodeJS.ProcessEnv,
+      fetchImpl: routedFetch({
+        'api.postalpincode.in/pincode/208001': [{ Status: 'Success', PostOffice: [{ Name: 'Kanpur H.O', District: 'Kanpur Nagar', State: 'Uttar Pradesh' }] }],
+      }),
+    });
+    expect(out).toContain('PIN CODE DATA');
+    expect(out).not.toContain('LIVE CURRENCY DATA');
+  });
+
+  it('touches no host for a source the question does not mention', async () => {
+    const hosts: string[] = [];
+    await liveDataContext('dollar ka rate kitna hai', {
+      env: { LIVE_WEATHER_SOURCE: 'on', TMDB_API_KEY: 'K', RAPIDAPI_KEY: 'K' } as unknown as NodeJS.ProcessEnv,
+      fetchImpl: (async (url: string) => { hosts.push(new URL(String(url)).host); return new Response('{}'); }) as unknown as typeof fetch,
+    });
+    expect(hosts).toEqual(['open.er-api.com']);
+  });
+});

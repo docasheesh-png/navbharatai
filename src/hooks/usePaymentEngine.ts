@@ -19,6 +19,7 @@ import { purchaseRail, type StoreConfig, type PurchaseOutcome } from '../lib/sto
 import { launchPlayPurchase, consumePlayPurchase, pendingPlayPurchases, playBillingAvailable, outcomeForNativeStatus } from '../lib/playBillingNative';
 import { fetchPlatformFeePct, DEFAULT_PLATFORM_FEE_PCT } from '../lib/platformFee';
 import { unlockHeaders } from '../lib/appLock';
+import { recordNonFatal } from '../lib/observability';
 
 export interface UsePaymentEngineDeps {
   /** The signed-in Firebase user (or null when anonymous). Payment actions no-op when null. */
@@ -82,7 +83,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
   const [playPluginReady, setPlayPluginReady] = useState(false);
   const [buyingProductId, setBuyingProductId] = useState<string | null>(null);
   const [storePurchaseNotice, setStorePurchaseNotice] = useState<string | null>(null);
-  const [billingLogs, setBillingLogs] = useState<any[]>([]);
   const [billingTransactions, setBillingTransactions] = useState<any[]>([]);
   const [loadingWallet, setLoadingWallet] = useState(false);
   const [monthlyAiCost, setMonthlyAiCost] = useState<{ totalBuilds: number; totalCostUsd: number; month: string } | null>(null);
@@ -142,20 +142,20 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     setLoadingWallet(true);
     try {
       const walletHeaders = await authedHeaders();
-      // Fire the wallet, logs, transactions and usage calls IN PARALLEL (was 4 sequential awaits).
+      // Fire the wallet, transactions and usage calls IN PARALLEL (was sequential awaits). The usage
+      // LOG call that used to ride here was dropped (Q-113): nothing has rendered it since its table was
+      // removed on 2026-09-14, so it cost a Firestore read on every wallet load for nobody.
       // On a native app these are cross-origin to the production API and often hit a cold instance;
       // serialising them made a cold post-login stack up round-trip after round-trip (the "app is slow
-      // to load after login on the app" symptom). allSettled keeps each independent — a failed logs/
+      // to load after login on the app" symptom). allSettled keeps each independent — a failed
       // transactions call never loses the wallet balance, exactly like the old per-call resilience.
       const usageUrl = `/api/user/usage/${encodeURIComponent(user.uid)}`;
-      const [walletR, logsR, txsR, usageR] = await Promise.allSettled([
+      const [walletR, txsR, usageR] = await Promise.allSettled([
         axios.get(`/api/wallet/${user.uid}?email=${encodeURIComponent(user.email || '')}&name=${encodeURIComponent(user.displayName || '')}`, { headers: walletHeaders }),
-        axios.get(`/api/wallet/${user.uid}/logs`, { headers: walletHeaders }),
         axios.get(`/api/wallet/${user.uid}/transactions`, { headers: walletHeaders }),
         fetch(usageUrl, { headers: walletHeaders }),
       ]);
       if (walletR.status === 'fulfilled') setWallet(walletR.value.data);
-      if (logsR.status === 'fulfilled') setBillingLogs(Array.isArray(logsR.value.data) ? logsR.value.data : []);
       if (txsR.status === 'fulfilled') setBillingTransactions(Array.isArray(txsR.value.data) ? txsR.value.data : []);
       // Monthly AI cost — best-effort, never blocks the wallet.
       if (usageR.status === 'fulfilled' && usageR.value.ok) {
@@ -591,6 +591,8 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
       }
     } catch (err: any) {
       const serverMsg = err?.response?.data?.error;
+      // The HTTP status only — never the order id, the amount or the server's text.
+      recordNonFatal('Payment verification request failed', 'payments', { http_status: Number(err?.response?.status) || 0 });
       addLog(`Error verifying payment for Order #${orderRef}: ${serverMsg || err.message}`, 'error');
       alert(`❌ ${serverMsg || `Error verifying payment: ${err.message}`} Please contact support if money was deducted.`);
     } finally {
@@ -670,7 +672,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     wallet, setWallet,
     dailyUsage, setDailyUsage, incrementDailyUsage,
     // billing data
-    billingLogs, setBillingLogs,
     billingTransactions, setBillingTransactions,
     loadingWallet, setLoadingWallet,
     monthlyAiCost, setMonthlyAiCost,

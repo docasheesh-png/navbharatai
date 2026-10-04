@@ -16,7 +16,7 @@ import type { Express, Request, Response } from 'express';
 import express from 'express';
 import { rateLimiter } from '../lib/authMiddleware';
 import {
-  GATEWAY_PATH, appAiGatewayEnabled, gatewaySecret, verifyAppAiToken, nonceAccepted,
+  GATEWAY_PATH, IMAGE_GATEWAY_PATH, appAiGatewayEnabled, gatewaySecret, verifyAppAiToken, nonceAccepted,
   readGatewayRequest, appDailyCapInr, visitorDailyCapInr,
   visitorFacingMessage, type GatewayRefusal,
 } from '../lib/appAiGateway';
@@ -25,6 +25,9 @@ import { deploymentStore, isLiveDeployment } from '../AgentV3/DeploymentStore';
 import { dayKey, visitorHash } from '../lib/siteAnalytics';
 import { hashSecret } from '../lib/siteAnalyticsStore';
 import { answerForApp } from '../lib/appAiAnswer';
+import { imageForApp, readAppImagePrompt, imageCounterId, APP_IMAGES_PER_DAY, VISITOR_IMAGES_PER_DAY } from '../lib/appAiImage';
+import { clampImagePixels } from '../lib/navbharatImageEngine';
+import { VISITOR_IMAGE_UNAVAILABLE } from '../lib/appImageKeys';
 
 /**
  * The system prompt every gateway answer is produced under.
@@ -52,6 +55,7 @@ export function registerAppAiRoutes(app: Express): void {
   };
 
   app.options(GATEWAY_PATH, (_req: Request, res: Response) => { cors(res); res.status(204).end(); });
+  app.options(IMAGE_GATEWAY_PATH, (_req: Request, res: Response) => { cors(res); res.status(204).end(); });
 
   /**
    * Per-IP, in memory. This bounds the shape of abuse a cap cannot: a thousand cheap requests that
@@ -118,5 +122,42 @@ export function registerAppAiRoutes(app: Express): void {
     res.status(200).json({ ok: true, text: answer.text });
     // Money, AFTER the answer is out (see AppAiAnswer.settle).
     answer.settle();
+  });
+
+  /**
+   * A PICTURE for a published app (admin 2026-10-04). The same cheap-first gate as a question — flag,
+   * token, registry, liveness — then ONE picture path shared with the preview (lib/appAiImage.ts): the
+   * owner's image key from the vault, or an honest "not set up yet" for a visitor. The picture comes back
+   * as a data URL, so the page needs no second request and no stored copy exists anywhere.
+   */
+  const imageLimiter = rateLimiter({ name: 'app-ai-image', authed: 60, anon: 60, noun: 'pictures', durable: false, anonGlobalPerHour: 5_000 });
+
+  app.post(IMAGE_GATEWAY_PATH, express.json({ limit: '16kb' }), imageLimiter, async (req: Request, res: Response) => {
+    cors(res);
+    const refuse = (message: string) => { res.status(200).json({ ok: false, message }); };
+    if (!appAiGatewayEnabled()) { refuse(VISITOR_IMAGE_UNAVAILABLE); return; }
+    const body = req.body as { token?: unknown; width?: unknown; height?: unknown } | undefined;
+    const verdict = verifyAppAiToken(typeof body?.token === 'string' ? body.token : '', gatewaySecret());
+    if (!verdict.ok) { refuse(visitorFacingMessage('bad-token')); return; }
+    const request = readAppImagePrompt(req.body);
+    if (!request.ok) { refuse(request.message); return; }
+    const record = await appAiRegistryStore.get(verdict.appId);
+    if (!record || !nonceAccepted(verdict.nonce, record)) { refuse(visitorFacingMessage('bad-token')); return; }
+    const deployment = await deploymentStore.get(record.workspaceId);
+    if (!isLiveDeployment(deployment)) { refuse(visitorFacingMessage('not-live')); return; }
+    const ownerId = String(deployment?.userId || record.userId || '').trim();
+    const day = dayKey(Date.now());
+    const visitor = visitorHash(req.ip || '', String(req.headers['user-agent'] || ''), day, hashSecret());
+    const answer = await imageForApp({
+      ownerId, workspaceId: record.workspaceId, prompt: request.prompt, px: clampImagePixels(body?.width, body?.height),
+      counter: { appId: imageCounterId(verdict.appId), visitor, day, appLimit: APP_IMAGES_PER_DAY, visitorLimit: VISITOR_IMAGES_PER_DAY },
+    });
+    if (!answer.ok) {
+      // The owner's setup is the owner's business: a visitor reads only that the picture maker is not ready.
+      if (answer.code === 'needs-key' || answer.code === 'key-problem') console.warn(`[APP_IMAGE] ${verdict.appId}: ${answer.owner.split('\n')[0]}`);
+      refuse(answer.visitor);
+      return;
+    }
+    res.status(200).json({ ok: true, image: `data:${answer.image.mimeType};base64,${answer.image.base64}` });
   });
 }

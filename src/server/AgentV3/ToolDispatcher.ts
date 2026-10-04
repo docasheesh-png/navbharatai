@@ -198,6 +198,7 @@ import { dedupeDuplicateImports } from './DuplicateImportGuard';
 import { isReactFamilyFramework } from './frameworkFamily';
 import { analyzeImportExports } from './ImportExportAnalysis';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports, fixTypeOnlyValueImports } from './ImportExportReconcile';
+import { installedExportsCommand, parseInstalledExports } from './installedExports';
 import { analyzeJsxComponents } from './JsxComponentAnalysis';
 import { analyzeUndefinedHooks } from './UndefinedHookAnalysis';
 import { analyzeDependencyConstraints } from '../AI/reasoning/ConstraintSolver';
@@ -2029,8 +2030,19 @@ export class ToolDispatcher {
     } catch { return null; /* never block a write on the guard's own failure */ }
   }
 
-  endgameIo(): { runTsc: () => Promise<string>; readFiles: () => Promise<Record<string, string>>; writeFile: (path: string, content: string) => Promise<void> } {
+  endgameIo(): {
+    runTsc: () => Promise<string>;
+    readFiles: () => Promise<Record<string, string>>;
+    writeFile: (path: string, content: string) => Promise<void>;
+    installedExports: (names: string[]) => Promise<Record<string, string[]>>;
+  } {
     return {
+      // Q-115: ask the installed packages themselves which of these undefined names they export, so a
+      // forgotten `import { Clock } from 'lucide-react'` can be restored on the package's own word.
+      installedExports: async (names: string[]) => {
+        const r = await this.actuator.runCommand(this.workspaceId, installedExportsCommand(names));
+        return parseInstalledExports(`${r.stdout || ''}`);
+      },
       runTsc: async () => {
         // Slice 4 — INCREMENTAL tsc: the .tsbuildinfo cache makes every peek after the first
         // ~0.3-0.8s instead of ~2s, so the 25-step trend checkpoint and the endgame re-verifies are
@@ -9898,9 +9910,9 @@ export class ToolDispatcher {
       }
 
       case 'generate_image_ai': {
-        // AI image generation inside the user's app (admin 2026-10-01): Pollinations AI by default (no key),
-        // or — with server: true — the app's own route, where the owner's IMAGE_PROVIDER + IMAGE_API_KEY
-        // pick the engine and the key never reaches the browser. Pure generator in ImageAiGenerator.ts.
+        // AI image generation inside the user's app (admin 2026-10-01; keyless default removed 2026-10-04):
+        // through NavBharatAI (window.NavAI.image) with the OWNER's saved image key, or — with server: true —
+        // the app's own route reading the same key. The key never reaches the browser. ImageAiGenerator.ts.
         const iaServer = input['server'] === true || input['server'] === 'true';
         let iaReact = false;
         try { iaReact = /"react"\s*:/.test(await this.actuator.readFile(this.workspaceId, 'package.json')); } catch { iaReact = false; }
@@ -9919,8 +9931,8 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('ai image generation');
         const iaHeadline = iaServer
-          ? 'Wired AI image generation through the app\'s server (Pollinations AI until the owner sets their own key)'
-          : 'Wired AI image generation with Pollinations AI (no key needed)';
+          ? 'Wired AI image generation through the app\'s server (it needs an image API key — see below)'
+          : 'Wired AI image generation through NavBharatAI (it needs an image API key — see below)';
         return `${iaHeadline}:\n${iaWritten.join('\n')}\n\n${iacfg.instructions}`;
       }
 

@@ -13,6 +13,7 @@ dependencies {
     implementation project(':capacitor-community-media')
     implementation project(':capacitor-firebase-app-check')
     implementation project(':capacitor-firebase-authentication')
+    implementation project(':capacitor-firebase-crashlytics')
     implementation project(':capacitor-firebase-messaging')
     implementation project(':capacitor-app')
     implementation project(':capacitor-browser')

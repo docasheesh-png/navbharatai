@@ -16,6 +16,7 @@ import { noteWebsiteVisit } from './src/server/lib/ownAudience';
 // The rate-limit keys (forensic audit 2026-10-04): an address string, or a verified uid — never a request.
 import { identityRateKey, addressRateKey } from './src/server/lib/clientAddress';
 import { registerTelemetryRoutes } from './src/server/routes/telemetry';
+import { isPrivateBuildFile } from './src/server/lib/privateBuildFiles';
 import { registerTeamRoutes } from './src/server/routes/team';
 import { registerShareRoutes } from './src/server/routes/share';
 import { audit } from './src/server/lib/audit';
@@ -32,6 +33,7 @@ import { registerAppLockRoutes } from './src/server/routes/appLock';
 import { registerPushRoutes } from './src/server/routes/push';
 import { registerSbomRoutes } from './src/server/routes/sbom';
 import { registerLegalRoutes } from './src/server/routes/legal';
+import { registerSiteIndexRoutes } from './src/server/routes/siteIndex';
 import { registerCheckoutHandoffRoute } from './src/server/routes/checkoutHandoff';
 import { registerBuildAnalyticsRoutes } from './src/server/routes/buildAnalytics';
 import { registerSupabaseIntegrationRoutes } from './src/server/routes/supabaseIntegration';
@@ -768,6 +770,8 @@ setInterval(() => {
   // both are checked by tools that may not run JS. Both paths are declared in spaFallback.ts, so the
   // SPA catch-all defers to these handlers instead of returning index.html.
   registerLegalRoutes(app);
+  // robots.txt + sitemap.xml, derived from the same legal-page list (declared in spaFallback.ts too).
+  registerSiteIndexRoutes(app);
   // PUBLIC checkout hand-off (/pay) — the ONE origin the payment gateway has approved. The native
   // Android shell opens this in the system browser because its own WebView origin (https://localhost)
   // can never be whitelisted. Declared in spaFallback.ts, or the catch-all would swallow it.

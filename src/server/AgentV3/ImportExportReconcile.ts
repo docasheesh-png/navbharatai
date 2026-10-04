@@ -267,7 +267,19 @@ function relImportSpecifier(importer: string, target: string): string {
  * declared or imported anywhere in the file. It only ADDS an import that must exist — it can only turn a
  * broken build into a working one. Pure; never throws.
  */
-export async function addMissingProjectImports(files: Record<string, string>): Promise<AddMissingResult> {
+export interface AddMissingOptions {
+  /**
+   * What the INSTALLED packages really export, read from the sandbox (bare specifier → the names asked
+   * about that it exports). Only consulted for `unresolvedNames` — see the INSTALLED INDEX block below.
+   */
+  installedExports?: Record<string, readonly string[]>;
+  /** Names the compiler itself reported as undefined (TS2304 "Cannot find name"). */
+  unresolvedNames?: readonly string[];
+}
+
+const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+
+export async function addMissingProjectImports(files: Record<string, string>, opts: AddMissingOptions = {}): Promise<AddMissingResult> {
   const unchanged: AddMissingResult = { files, added: [] };
   const mod = await loadTsMorph();
   if (!mod) return unchanged;
@@ -354,6 +366,37 @@ export async function addMissingProjectImports(files: Record<string, string>): P
     if (exportIndex.has(name)) continue;                   // ambiguous across project modules → leave it
     if (specs.size !== 1) continue;                        // two packages claim it → never guess
     candidates.set(name, { owner: [...specs][0], isPackage: true });
+  }
+
+  // INSTALLED INDEX — the half the package index above could not prove (Q-115, autopsy 424ecdab's two
+  // icons). `<Clock>` and `<IndianRupee>` were imported NOWHERE in that project, so no other file could
+  // vouch for them, and guessing lucide-react's export list is the exact mistake that once turned a
+  // broken build into one that would not parse. The answer was always in the sandbox: the installed
+  // package can be ASKED what it exports. That is a fact about this project's own node_modules, not a
+  // guess, so it meets the same standard as the two indexes above.
+  //
+  // 🔒 Three more conditions keep it exact:
+  //   • only names the COMPILER reported as undefined (TS2304). A global (`fetch`, `history`) never
+  //     reaches that list, so an installed package that happens to export the same name cannot capture it;
+  //   • exactly ONE installed package exports the name — `Link` is both a router link and an icon, and
+  //     two claimants are never decided between;
+  //   • a project module or a proven package import always wins (they are merged first).
+  const unresolved = new Set((opts.unresolvedNames ?? []).filter((n) => IDENTIFIER.test(n) && n !== 'default'));
+  if (opts.installedExports && unresolved.size > 0) {
+    const installedOwners = new Map<string, Set<string>>();
+    for (const [spec, names] of Object.entries(opts.installedExports)) {
+      if (!spec || spec.startsWith('.') || spec.startsWith('/')) continue;
+      for (const nm of names ?? []) {
+        if (!unresolved.has(nm)) continue;
+        if (!installedOwners.has(nm)) installedOwners.set(nm, new Set());
+        installedOwners.get(nm)!.add(spec);
+      }
+    }
+    for (const [name, specs] of installedOwners) {
+      if (candidates.has(name) || exportIndex.has(name) || packageIndex.has(name)) continue;
+      if (specs.size !== 1) continue;
+      candidates.set(name, { owner: [...specs][0], isPackage: true });
+    }
   }
 
   if (candidates.size === 0) return unchanged;

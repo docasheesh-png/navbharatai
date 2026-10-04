@@ -414,3 +414,48 @@ describe('addMissingProjectImports — package exports the project already uses'
     expect(res.files).toBe(files);
   });
 });
+
+describe('addMissingProjectImports — on the installed package\'s own word (Q-115, autopsy 424ecdab)', () => {
+  // The two icons from that report: used once, imported nowhere, so no other file could vouch for them.
+  const files = {
+    'src/pages/Apply.tsx': `export function Apply() {\n  return <div><Clock size={16} /><IndianRupee /></div>;\n}\n`,
+  };
+
+  it('restores the forgotten icon imports when the compiler names them and one installed package exports them', async () => {
+    const r = await addMissingProjectImports(files, {
+      unresolvedNames: ['Clock', 'IndianRupee'],
+      installedExports: { 'lucide-react': ['Clock', 'IndianRupee'] },
+    });
+    expect(r.added.map((a) => `${a.name}<-${a.from}`).sort()).toEqual(['Clock<-lucide-react', 'IndianRupee<-lucide-react']);
+    expect(r.files['src/pages/Apply.tsx']).toContain('from "lucide-react"');
+  });
+
+  it('never decides between two packages that both export the name (Link: a router link and an icon)', async () => {
+    const r = await addMissingProjectImports({ 'src/A.tsx': 'export const A = () => <Link to="/" />;\n' }, {
+      unresolvedNames: ['Link'],
+      installedExports: { 'lucide-react': ['Link'], 'react-router-dom': ['Link'] },
+    });
+    expect(r.added).toEqual([]);
+  });
+
+  it('never acts on a name the compiler did not report (a global stays a global)', async () => {
+    const r = await addMissingProjectImports({ 'src/a.ts': 'export async function go() { return fetch("/x"); }\n' }, {
+      unresolvedNames: [],
+      installedExports: { 'cross-fetch': ['fetch'] },
+    });
+    expect(r.added).toEqual([]);
+  });
+
+  it('without the installed answer, behaves exactly as before (no guess)', async () => {
+    const r = await addMissingProjectImports(files, { unresolvedNames: ['Clock', 'IndianRupee'] });
+    expect(r.added).toEqual([]);
+  });
+
+  it('a project module that exports the name still wins', async () => {
+    const r = await addMissingProjectImports({
+      ...files,
+      'src/icons/Clock.tsx': 'export function Clock() { return null; }\n',
+    }, { unresolvedNames: ['Clock'], installedExports: { 'lucide-react': ['Clock'] } });
+    expect(r.added.find((a) => a.name === 'Clock')?.from).toBe('../icons/Clock');
+  });
+});

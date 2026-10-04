@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Package, RefreshCw, Trash2, AlertTriangle, Clock, CheckCircle2, X } from 'lucide-react';
 import { PublishToNavStore } from './PublishToNavStore';
+import { writeFailure } from '../../lib/serverAnswer';
 
 export interface MyBuiltApp {
   id: string;
@@ -59,6 +60,7 @@ const fmtDate = (ms: number) => {
 export function MyBuiltApps({ ghHeaders }: { ghHeaders: (extra?: Record<string, string>) => Promise<Record<string, string>> }) {
   const [apps, setApps] = useState<MyBuiltApp[] | null>(null);
   const [listError, setListError] = useState('');
+  const [forgetError, setForgetError] = useState('');
   const [state, setState] = useState<Record<string, AppState>>({});
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -122,9 +124,12 @@ export function MyBuiltApps({ ghHeaders }: { ghHeaders: (extra?: Record<string, 
   }, [openId, state, checkApp]);
 
   const forget = useCallback(async (app: MyBuiltApp) => {
+    setForgetError('');
     try {
-      await fetch(`/api/mobile-ship/my-apps/${encodeURIComponent(app.id)}`, { method: 'DELETE', headers: await ghHeaders() });
-    } catch { /* the row simply stays; nothing is lost */ }
+      const res = await fetch(`/api/mobile-ship/my-apps/${encodeURIComponent(app.id)}`, { method: 'DELETE', headers: await ghHeaders() });
+      const failure = await writeFailure(res, 'That app could not be removed from the list.');
+      if (failure) setForgetError(failure);
+    } catch { setForgetError('That app could not be removed from the list (no connection).'); }
     void loadApps();
   }, [ghHeaders, loadApps]);
 
@@ -155,6 +160,7 @@ export function MyBuiltApps({ ghHeaders }: { ghHeaders: (extra?: Record<string, 
 
   return (
     <div className="space-y-2">
+      {forgetError && <p role="alert" className="text-xs text-danger">{forgetError}</p>}
       <div className="flex items-center justify-between">
         <h4 className="text-sm font-bold text-ink flex items-center gap-1.5"><Package size={14} /> Your apps</h4>
         <button onClick={() => void loadApps()} className="text-faint hover:text-ink p-1" aria-label="Refresh list">

@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Reads/writes user_secrets (owner-only).
 import { query, collection, where, getDocs, doc, updateDoc, getServerDb as getDb } from './serverDb';
-import { resolveScopedSecrets, isNewerRow, type VaultSecretRow } from './secretScope';
+import { resolveScopedSecrets, isNewerRow, withheldSecretNames, type VaultSecretRow } from './secretScope';
 
 /**
  * Encryption & user-secret helpers.
@@ -283,9 +283,21 @@ export async function loadUserSecretNamesFor(userId: string, workspaceId?: strin
  */
 export async function withheldVaultSecretNames(userId: string, workspaceId: string): Promise<string[]> {
   if (!userId || !workspaceId) return [];
-  const all = await loadUserVaultSecrets(userId);
-  const mine = await loadUserVaultSecrets(userId, workspaceId);
-  return Object.keys(all).filter((n) => !(n in mine)).sort();
+  // ONE read of the vault, judged by the same pure rule the build's own scoped read uses (secretScope.ts).
+  return withheldSecretNames(await loadUserVaultRows(userId), workspaceId);
+}
+
+/**
+ * The build report's sentence for the keys this app did not receive (Q-155). Names only, never values;
+ * it is admin-facing, and it answers the question least privilege raises: "I saved that key — why is it
+ * not in my app?" PURE.
+ */
+export function secretsWithheldNote(names: readonly string[]): string {
+  const shown = names.slice(0, 12).join(', ');
+  const more = names.length > 12 ? ` and ${names.length - 12} more` : '';
+  return `${names.length} saved key(s) were NOT given to this app, because each is tied to another app: ${shown}${more}. `
+    + 'Only the user\'s shared keys and the ones saved for this app are written to its .env. To use one here, '
+    + 'save it for this app or mark it "applies to all my apps" in Keys & Secrets.';
 }
 
 // `getSecretValue(userId, name)` was removed in the forensic audit of 2026-10-04. It read the server

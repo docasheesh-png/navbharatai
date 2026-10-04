@@ -13,6 +13,24 @@ export const PREVIEW_AI_TIMEOUT_MS = 60_000;
 export const PREVIEW_AI_MAX_PROMPT = 4_000;
 
 export interface PreviewAiAsk { [PREVIEW_AI_ASK]: true; id: string; prompt: string; system?: string }
+
+// PICTURES (admin 2026-10-04): the same relay, for `window.NavAI.image(prompt, { width, height })`. The page
+// gets back a data URL — never a key, a token or a link to anything it could reuse.
+export const PREVIEW_AI_IMAGE_ASK = '__nbaiAiImageAsk';
+export const PREVIEW_AI_IMAGE_ANSWER = '__nbaiAiImageAnswer';
+/** A picture can take a while; the page waits this long before it says so. */
+export const PREVIEW_AI_IMAGE_TIMEOUT_MS = 120_000;
+export interface PreviewAiImageAnswer { [PREVIEW_AI_IMAGE_ANSWER]: true; id: string; ok: boolean; image?: string; message?: string; code?: string }
+
+/** Read a picture request from a message, or null. Pure. */
+export function readPreviewAiImageAsk(data: unknown): { id: string; prompt: string; width: number; height: number } | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (d[PREVIEW_AI_IMAGE_ASK] !== true || typeof d.id !== 'string' || !d.id || d.id.length > 64) return null;
+  const prompt = typeof d.prompt === 'string' ? d.prompt.slice(0, PREVIEW_AI_MAX_PROMPT) : '';
+  const side = (v: unknown) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.round(Number(v)) : 1024);
+  return { id: d.id, prompt, width: side(d.width), height: side(d.height) };
+}
 export interface PreviewAiAnswer { [PREVIEW_AI_ANSWER]: true; id: string; ok: boolean; text?: string; message?: string }
 
 /** Read an ask from a message, or null. Pure. */
@@ -43,7 +61,31 @@ export function previewAiShimSource(): string {
     if (d.ok) w.resolve(String(d.text || ''));
     else w.reject(new Error(String(d.message || 'The assistant is not available right now.')));
   });
-  window.NavAI = { app: 'preview', available: true, preview: true, ask: function (prompt, opts) {
+  var pics = {};
+  window.addEventListener('message', function (e) {
+    if (e.source !== window.parent && e.source !== window.top) return;
+    var d = e && e.data;
+    if (!d || typeof d !== 'object' || d.${PREVIEW_AI_IMAGE_ANSWER} !== true) return;
+    var w = pics[d.id]; if (!w) return;
+    delete pics[d.id];
+    if (d.ok && typeof d.image === 'string') w.resolve(d.image);
+    else { var err = new Error(String(d.message || 'The picture maker is not available right now.')); err.code = d.code || ''; w.reject(err); }
+  });
+  function image(prompt, opts) {
+    return new Promise(function (resolve, reject) {
+      if (!hasParent()) { reject(new Error('Open this app inside NavBharatAI to make pictures before publishing.')); return; }
+      var id = 'i' + (++seq) + '_' + Date.now();
+      pics[id] = { resolve: resolve, reject: reject };
+      try {
+        (window.parent || window.top).postMessage({ ${PREVIEW_AI_IMAGE_ASK}: true, id: id, prompt: String(prompt || ''), width: opts && opts.width, height: opts && opts.height }, '*');
+      } catch (err) { delete pics[id]; reject(new Error('The picture maker is not available right now.')); return; }
+      setTimeout(function () {
+        var w = pics[id];
+        if (w) { delete pics[id]; w.reject(new Error('The picture took too long to make. Please try again.')); }
+      }, ${PREVIEW_AI_IMAGE_TIMEOUT_MS});
+    });
+  }
+  window.NavAI = { app: 'preview', available: true, preview: true, image: image, ask: function (prompt, opts) {
     return new Promise(function (resolve, reject) {
       if (!hasParent()) { reject(new Error('Open this app inside NavBharatAI to try its assistant before publishing.')); return; }
       var id = 'a' + (++seq) + '_' + Date.now();

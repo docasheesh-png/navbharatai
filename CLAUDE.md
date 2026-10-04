@@ -3620,6 +3620,12 @@ the flag entries above promise.
   (`modelAlwaysReasons`). Its single plan call is capped at 90 s, a cap sized for a rung that answers
   directly, so on `kimi-k2.7-code` it spent the whole cap thinking and handed over nothing.
   `fastLaneRungDecision` in `fastLaneRung.ts`; report code `FAST_LANE_SKIPPED_REASONING_RUNG`.
+- **`AGENTV3_HANDOFF_EARLY_SAVE`** (NOT set; default ON; `off` restores the old wait-then-save — Q-422, autopsy
+  1eaa5f5a, admin chose "wait, but show the finished files" 2026-10-04). When the fast lane decides mid-tier to hand
+  off (`stopLane`), the tier still waits for the calls in flight (67 s there, nothing on screen, the user pressed
+  Stop). The files finished at that moment are now saved and announced (`onFilesReady`) at once, and each in-flight
+  file as it lands; the catch waits for those saves before its import-fixed salvage write, so the salvage stays the
+  last word. Calls are NOT cancelled (the wait salvaged App.tsx). Test: `tests/theHandOffShowsWhatIsFinished.test.ts`.
 - **`AGENTV3_FASTLANE_GAMES`** (NOT set; unset ⇒ a GAME skips the fast lane; `on` lets games back in —
   added 2026-09-30, autopsy 0bb437b4). The lane has no tools, so it cannot run the game recipes the full
   builder's prompt requires for any game. For "Make a racing game" it planned five generic files, spent

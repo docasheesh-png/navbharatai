@@ -88427,3 +88427,66 @@ module), with five false findings on the way. Ledger (problem → root cause →
 - **Q-395** — a "continue" module turn showed the whole-app ETA and withdrew it seconds later; now never shown.
 - 🟡 Q-396 (no-tests warning on module turns), Q-397 (ignored theme note), Q-398 (APP_SCOPE small word as reason):
   BLOCKED with options in the queue. Q-399 (crawl bench, Haiku planner) resolved as admin-decided behaviour.
+
+## 2026-10-04 — Q-313: an 8-minute game edit was priced from the history of "hi" (PR #3520)
+
+The last OPEN row of autopsy `8b8743a3`. **Its own theory was wrong, and measuring before acting is what
+found that** — the fourth rule's first step, earning its place: *"if the evidence contradicts the reported
+theory, follow the evidence."*
+
+**What the row claimed:** the scorer could not read a GAME feature list, so `COMPLEX_APP_SIGNAL` needed
+widening toward game vocabulary, which needed a precision corpus first.
+
+**What measurement said:** the widening is not needed at all. A game IS recognised — `Make a racing game`
+scores `simple_app`, domain `game` — and recognising *"Road infinite both side street light with start
+restart scoring"* would have moved it from `chat` to `simple_app`: **the same tier, the same 15**. The
+risky keyword widening would have bought nothing and could only have cost precision.
+
+**Two wiring facts explain the whole observation.**
+
+1. **The turn was an EDIT, and `app_unsized` only ever covered `new_build`.** That label exists because
+   *"leaving it filed as `chat` sent its ETA to the history of a bucket named for something else"*
+   (autopsy 0473628e, quoted from the code). `etaTaskKey` returns the task type verbatim, **so the label
+   IS the fleet bucket** — an 8.0-minute build's estimate was learned from greetings, questions and
+   capability checks, and the user was promised 3–5 minutes. ⚠️ **The harm runs both ways:** the `chat`
+   bucket was simultaneously being taught that a chat turn takes eight minutes, which is the
+   bucket-pollution half of autopsies a5b661c8 and 4a1c0157 in a third place. The sibling lane was never
+   hunted — this repo's headline class, for the nth time.
+2. **`fileCount` was never passed.** `projectFileCount` has been in scope ~2,600 lines above the ONE
+   `analyzeRequest` call site, and the analyser's docblock justifies excluding an edit from the unsized
+   floor with *"an edit is not an app being ordered, **and its file count already raises the score**"* —
+   a compensation that never ran. **A guard justified by a mechanism that is not wired.** Measured:
+   `chat/5` where `chat/11` was honest, and an edit of a 200-file project scored like an edit of an
+   empty one.
+
+**The fix:** `edit_unsized` — the same label one lane over, same floor of 15 — plus the file count wired.
+Routing-neutral by MEASUREMENT rather than assertion: 17 prompts × both build intents × `fileCount`
+0/14/40, and **zero** cross the 40 line that decides which rung opens a build; one prompt moves on the
+legacy tier ladder (*"optimise the bundle, it loads slowly in production"* on a real project, gemini →
+haiku, the right direction). `AGENTV3_SIZE_EDIT_TURNS=off` and `AGENTV3_SIZE_PROJECT=off` revert each half.
+
+**Two things recorded because they surprised me while building it.**
+
+- 🔎 **The floor swallows a small project's bump, deliberately.** On an unsized edit the floor is applied
+  LAST and can only RAISE, so 5+0 and 5+6 both land on 15 — the file count contributes nothing until it
+  exceeds the floor. Making them additive would put a one-line edit of a 14-file project at 21, across the
+  ≤20 tier boundary, on nothing but a file count. The first draft of the test expected otherwise and was
+  wrong, not the code; the case is now in the suite with that reasoning.
+- ⚠️ **`add pagination to the product list` scores `complex_app` 58 on an EDIT** (the `ecommerce` domain,
+  via `namesBusinessDomain`), which buys a 150-step ceiling and the Sonnet rung for adding pagination.
+  Noticed while building the corpus, NOT chased — it is a different predicate with its own precision
+  history, and widening or narrowing it from one observation is how that file's six recorded autopsies
+  happened. If it shows up in a real report it is a row of its own.
+
+**A pinned test relaxed, and why it is not "changing a test to match broken behaviour":**
+`theSizersReadWhatTheBuilderReads` pinned `/analyzeRequest\(\{ prompt: planning\.sizing/` — the one-line
+form. The call became multi-line when `fileCount` joined it. The invariant that row guards is *"the sizer
+reads `planning.sizing`, never the bare message"*, which is unchanged; only the line break is now allowed,
+and I re-proved the relaxed regex still bites by pointing the call at `prompt` and watching it fail.
+
+**My own measurement was wrong once, and the shape is this file's own lesson.** The first probe passed a
+STRING to `analyzeRequest`, which takes `{ prompt }` — so `input?.prompt` was undefined and **every one of
+nine prompts returned `chat`/5, including `hospital management system`**, a case the code fixes and has a
+test for. A derivation that returns the same answer for every input cannot fail, and *"not invented" is a
+weaker standard than "checked"* (the `E2B_USD_PER_HOUR` entry's words). It was caught by the one result
+that contradicted a documented fix.

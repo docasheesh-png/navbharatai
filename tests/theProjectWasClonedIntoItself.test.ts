@@ -192,6 +192,7 @@ describe('the wiring itself', () => {
   it('🔒 that line is emitted only when the graph really holds files', () => {
     // Told to a from-scratch build, the sentence would simply be false.
     const block = subAgent.slice(subAgent.indexOf('const contextBlocks = ['), subAgent.indexOf('.filter(Boolean)'));
-    expect(block).toMatch(/projectMap\s*\n?\s*\?\s*'These files are ALREADY in your workspace/);
+    // …and only to an agent that can read them (autopsy 68f0a486: the no-tools lean review).
+    expect(block).toMatch(/projectMap && \(deps\.toolsOverride \?\? cfg\.tools\)\.includes\('read_file' as ToolName\)\s*\n?\s*\?\s*'These files are ALREADY in your workspace/);
   });
 });

@@ -184,7 +184,8 @@ import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
-import { STARTER_ENTRY_CONTENT, entryIsStillTheStarter, starterAppBlocker } from './stillTheStarterApp';
+import { STARTER_ENTRY_CONTENT, STARTER_ENTRY_PATHS, entryIsStillTheStarter, starterAppBlocker } from './stillTheStarterApp';
+import { isUiComponentPath, entryLateNote, MIN_SCREENS_BEFORE_NOTE, entryFirstWriteNote } from './earlyPreview';
 import { authoredPathSet, splitByAuthorship, preExistingCodeObservation, droppedRelativeImports, droppedImportOrphanLabel, importStem } from './buildAuthorship';
 import { computeReachability, splitByReachability, unreachableCodeObservation, type ReachabilityVerdict } from './appReachability';
 import { deletionCandidates, deletionReconciledMessage } from './fileDeletion';
@@ -399,6 +400,7 @@ import { summarizeBundle, bundleSummaryLine } from './BundleSize';
 import { livenessLine } from './PostDeployLiveness';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
 import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary, looksLikeBrokenErrorBoundary, isNextErrorBoundaryFile } from './ErrorBoundaryAnalysis';
+import type { CommandTiming, ActuatorCommandTiming } from './commandTiming';
 import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue } from './SecurityConfigAnalysis';
 import { analyzeSecretLeak, secretLeakSummary, gitignoreWithEnvCoverage } from './SecretLeakAnalysis';
 import { scanHardcodedUrls, hardcodedUrlSummary, type HardcodedUrlIssue } from './HardcodedUrlAnalysis';
@@ -489,7 +491,7 @@ export interface ActuatorPort {
   runCommand(
     workspaceId: string,
     command: string,
-  ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  ): Promise<{ exitCode: number; stdout: string; stderr: string; timing?: ActuatorCommandTiming }>;
   /**
    * Provision backend services (a local PostgreSQL, auth/storage scaffolds) inside the sandbox and
    * return the resulting env (e.g. DATABASE_URL). Real sandboxes only (E2BActuator installs + starts
@@ -595,6 +597,10 @@ export function readLedgerPath(key: string): string {
   return at > 0 && /^#L\d+-\d+$/.test(key.slice(at)) ? key.slice(0, at) : key;
 }
 
+/** A file this small is returned whole even when a range is asked (autopsy c70bcbb4). */
+export const SMALL_FILE_WHOLE_LINES = 300;
+export const SMALL_FILE_WHOLE_BYTES = 16_000;
+
 export class ToolDispatcher {
   /**
    * May this dispatcher publish? DENIED unless the composition root grants it — see the `deploy` case.
@@ -643,7 +649,7 @@ export class ToolDispatcher {
      * BuildDiagnostics.recordCommand so a failing npm install / tsc / vite build is captured in
      * full — the single highest-value "why won't the app run" signal. Best-effort; never blocks.
      */
-    private readonly onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number }) => void,
+    private readonly onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number; timing?: CommandTiming }) => void,
   ) {
     this._rawActuator = actuatorRaw;
     this.actuator = recordingActuator(actuatorRaw, workspaceId, (path, content) => { this._unrecorded.set(path, content); });
@@ -876,6 +882,8 @@ export class ToolDispatcher {
   private coverageRequest: string | null = null;
   /** The keyboard-only-game note is said once per build (touchPlayableGame.ts). */
   private _touchGameNoted = false;
+  /** The entry-first hand-back is said once per build (earlyPreview.ts, autopsy 39e982bd). */
+  private _entryFirstNoted = false;
   setCoverageRequest(text: string | null): void {
     this.coverageRequest = typeof text === 'string' && text.trim() ? text : null;
   }
@@ -3572,6 +3580,23 @@ export class ToolDispatcher {
     }
   }
 
+  /** Once per agent: screens are being written and the entry is still our starter (see `entryLateNote`). */
+  private _entryLateNoted = false;
+  private async entryLateNoteFor(paths: readonly string[]): Promise<string> {
+    if (this._entryLateNoted || this._starterExpected || !paths.some(isUiComponentPath)) return '';
+    try {
+      const screens = [...this._writtenPaths].filter(isUiComponentPath);
+      if (screens.length < MIN_SCREENS_BEFORE_NOTE) return '';
+      const starter = await entryIsStillTheStarter(
+        (path) => withTimeout(this.actuator.readFile(this.workspaceId, path), 5_000, 'entry-late-read'),
+      );
+      if (!starter) return '';
+      const note = entryLateNote(screens);
+      if (note) this._entryLateNoted = true;
+      return note;
+    } catch { return ''; }
+  }
+
   private async writeSteeringNotes(files: Record<string, string>): Promise<string> {
     const paths = Object.keys(files ?? {});
     if (paths.length === 0) return '';
@@ -3638,9 +3663,61 @@ export class ToolDispatcher {
       }
     }
     const style = await this.styleWriteNotes(files);
+    // Screens written while the entry is still the starter (autopsy 68f0a486) — the user sees none of them.
+    // Carried on `shadow` (the "what the preview will not show" notes) so the guarded sum keeps its shape.
+    shadow += await this.entryLateNoteFor(paths);
     // A light/dark switch that sets a class or attribute nothing styles (autopsy 8257ca59) — said while open.
     const theme = await this.deadThemeSwitchNotes(files);
+    // The app is not on the user's screen until its ENTRY is written (autopsy 39e982bd) — said once, at
+    // the first leaf write, because the prose rule in the system prompt lost to the leaves-first habit.
+    // The entry-first hand-back (autopsy 39e982bd) and `entryLateNoteFor` (autopsy 68f0a486) are ONE rule said
+    // once — whichever fires first silences the other (merged 2026-10-04, #3523 + #3524).
+    shadow += await this.entryFirstNote(files);
     return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow + theme + touch;
+  }
+
+  /**
+   * ONCE per build, at the first SOURCE write that is not the entry: the entry is still our untouched
+   * starter, so nothing written so far is on the user's screen. See `entryFirstWriteNote`.
+   *
+   * 🔒 Four narrowing conditions, each for a measured reason:
+   *   • the write must include an app source file — a `package.json`, a `.env.example` or a stylesheet
+   *     write says nothing about whether the app can render yet;
+   *   • none of the written files may BE a starter entry — a model that has just written the entry needs
+   *     no instruction about it;
+   *   • the entry on disk must still be the untouched starter, asked through `entryIsStillTheStarter`,
+   *     the same question every render proof and the readiness gate ask (so a plain-JavaScript app whose
+   *     index.html no longer mounts `src/` is never nagged about `App.tsx`);
+   *   • `_starterExpected` — a Project Mode module that does not own the entry (autopsy 6a5fb04b) — is
+   *     exempt by the same flag the readiness gate reads.
+   */
+  private async entryFirstNote(files: Record<string, string>): Promise<string> {
+    if (this._entryFirstNoted || this._starterExpected) return '';
+    try {
+      const paths = Object.keys(files ?? {});
+      if (paths.some((p) => STARTER_ENTRY_PATHS.includes(p.replace(/^\.?\/+/, '')))) {
+        // The entry itself was just written — the thing the note asks for already happened.
+        this._entryFirstNoted = true;
+        return '';
+      }
+      if (!paths.some((p) => /^src\/.*\.(?:[cm]?[jt]sx?|vue|svelte)$/.test(p.replace(/^\.?\/+/, '')))) return '';
+      const read = (path: string) => withTimeout(this.actuator.readFile(this.workspaceId, path), 5_000, 'entry-first-read');
+      if (!(await entryIsStillTheStarter(read))) {
+        // Already a real app — this build is an edit, and the note would be false.
+        this._entryFirstNoted = true;
+        return '';
+      }
+      let entryPath = '';
+      for (const p of STARTER_ENTRY_PATHS) {
+        try { if (typeof (await read(p)) === 'string') { entryPath = p; break; } } catch { /* try the next */ }
+      }
+      if (!entryPath) return '';
+      const note = entryFirstWriteNote(entryPath);
+      if (note) { this._entryFirstNoted = true; this._entryLateNoted = true; }
+      return note;
+    } catch {
+      return '';
+    }
   }
 
   /**
@@ -4113,9 +4190,15 @@ export class ToolDispatcher {
         // written nothing at all. So a ranged read is its own entry, keyed by the lines it asked for:
         // a repeat of the SAME slice is still a repeat, a new slice is new information.
         const lines = full.split('\n');
-        const from = (sl ?? 1) - 1;
-        const to = el ?? lines.length;
-        const ranged = sl !== null || el !== null;
+        // 🔴 A SMALL FILE IS NEVER SLICED (autopsy c70bcbb4, 2026-10-04). Ranges exist for BIG files (Fix 36b);
+        // the model asked for them on small ones too — `usePlayer.ts` (247 lines) in six slices, `utils.ts`
+        // (104) in three — and every slice was a model call re-sending ~50k tokens of context to fetch ~1k of
+        // file. A small file comes back whole, once, whatever range was asked.
+        const askedRange = sl !== null || el !== null;
+        const smallWhole = askedRange && lines.length <= SMALL_FILE_WHOLE_LINES && full.length <= SMALL_FILE_WHOLE_BYTES;
+        const from = smallWhole ? 0 : (sl ?? 1) - 1;
+        const to = smallWhole ? lines.length : el ?? lines.length;
+        const ranged = askedRange && !smallWhole;
         const ledgerKey = ranged ? `${reqPath}#L${from + 1}-${Math.min(to, lines.length)}` : reqPath;
         const shownPath = ranged ? `${reqPath} (lines ${from + 1}-${Math.min(to, lines.length)})` : reqPath;
         // ⚠️ THE SAME FILE, AGAIN, UNCHANGED — measured at 84% of all reads in a real build (see
@@ -4163,6 +4246,7 @@ export class ToolDispatcher {
         const notice = repeatedReadNotice(shownPath, ownCount, ownUnchanged, ownStalls, ownCount === 2 && own?.handed === true);
         if (ownStalls >= READ_LOOP_LIMIT) this._readLoopStops.n++;
 
+        if (smallWhole) return `${notice}[the whole file — ${lines.length} lines, small enough that it is never sliced]\n${full}`;
         if (!ranged) return notice ? `${notice}${full}` : full;
         const slice = lines.slice(from, to).join('\n');
         return `${notice}[lines ${from + 1}-${Math.min(to, lines.length)} of ${lines.length} — the file is complete on disk]\n${slice}`;
@@ -4774,7 +4858,13 @@ export class ToolDispatcher {
         const background = isLongRunningCommand(effectiveCommand)
           ? { command: effectiveCommand, detached: 0 }
           : detachBackgroundJobs(effectiveCommand);
-        let { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, background.command);
+        const runStartedAt = Date.now();
+        const ran = await this.actuator.runCommand(this.workspaceId, background.command);
+        let { exitCode, stdout, stderr } = ran;
+        // Q-273 — the report splits a slow command into our setup, reaching the machine and the command.
+        const timing: CommandTiming | undefined = ran.timing
+          ? { setupMs: runStartedAt - cmdStartedAt, sandboxMs: ran.timing.sandboxMs, runMs: ran.timing.runMs }
+          : undefined;
         if (background.detached > 0) {
           stdout = `${stdout ?? ''}\n[note] ${background.detached === 1 ? 'The background job was' : `${background.detached} background jobs were`} started detached so this command could finish; its output goes to ${BACKGROUND_JOB_LOG} (read it with \`tail ${BACKGROUND_JOB_LOG}\`).`;
         }
@@ -4970,7 +5060,7 @@ export class ToolDispatcher {
         }
         // #3 — hand the raw result to the diagnosis bundle (best-effort; never breaks the build).
         try {
-          this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt });
+          this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt, timing });
         } catch { /* diagnostics capture is best-effort */ }
         // 🔴 AND NOW TELL THE PROJECT MAP THE FILE IS GONE (autopsy 8b3dca5c). Everything above this
         // line already knew which source files the command would remove; nothing had ever acted on it

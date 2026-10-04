@@ -82,7 +82,7 @@ describe('2 · a message the user sends during the build is owed an answer', () 
 
   it('🔒 the runner builds that turn from the one function', () => {
     const runner = code('src/server/AgentV3/AgentRunner.ts');
-    expect(runner).toContain("messages.push({ role: 'user', content: liveUserMessageTurn(sm) });");
+    expect(runner).toContain("messages.push({ role: 'user', content: liveUserMessageTurn(sm, this.shownEta()) });");
     expect(runner).not.toContain('Fold this into the current work');
   });
 });

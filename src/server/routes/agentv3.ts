@@ -43,7 +43,7 @@ import { decideComplexity, scaffoldedComplexityDecision, workspaceSizedComplexit
 import { isPortTurn, collectPortSources, portDigest, foreignSourcePaths } from '../AgentV3/portDigest';
 import { planningRequest, planningContextNote, wasBuildRequest } from '../AgentV3/planningRequest';
 import { unrelatedToExistingApp, unrelatedRequestSteer, unrelatedRequestFallback } from '../AgentV3/unrelatedRequest';
-import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite, writeQualitySummary } from '../AgentV3/writeTimeTypecheck';
+import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite, writeQualitySummary, writeTypecheckCommand } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary, repairLostEscapes, scriptRepairSummary } from '../AgentV3/scriptIntegrity';
 import { answeringModel } from '../AgentV3/answeringModel';
 import { tierLadder, openingRung, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
@@ -13043,6 +13043,14 @@ async function noteBuildOutcome(
     // realistic total; the heartbeat below recomputes the REMAINING time every 2 min and emits it,
     // so "I'll update it as I go" is literally true (not a one-shot claim). 0 until the build starts.
     let etaTotalMs = 0;
+    // The last ETA line the user was SHOWN — handed to the model when a live message asks how long, so
+    // its answer is the platform's figure, not a number of its own (autopsy 68f0a486: "2-3 min" while the
+    // line said ~4).
+    let lastEtaShown: string | null = null;
+    // Every ETA line carries the id 'eta-live'; one listener remembers the latest, so no emit site can forget.
+    events.subscribe((e) => {
+      if (e.type === 'narration' && (e as { id?: string }).id === 'eta-live' && typeof e.text === 'string') lastEtaShown = e.text;
+    }, false);
     let etaStartMs = 0;
     let etaTick = 0;
     // The ORIGINAL up-front estimate, kept alongside etaTotalMs (which liveEtaTick EXTENDS on overrun)
@@ -16361,7 +16369,7 @@ async function noteBuildOutcome(
         // (AGENTV3_STEER_ALL_TIERS=off) cannot leave one end open and the other closed. Spread into
         // every top-level/heal runner via baseRunnerOpts, so the team keeps listening through repair.
         ...(steerAllowedForBuild(powerLevelReqEffective)
-          ? { steerPoll: () => (rb.steerQueue && rb.steerQueue.length ? rb.steerQueue.splice(0, rb.steerQueue.length) : []) }
+          ? { steerPoll: () => (rb.steerQueue && rb.steerQueue.length ? rb.steerQueue.splice(0, rb.steerQueue.length) : []), currentEta: () => lastEtaShown }
           : {}),
         agentRole: 'architect' as const,
         signal: abort.signal,
@@ -18056,9 +18064,22 @@ async function noteBuildOutcome(
             ? 'and they do not compile yet'
             : 'before running out of time';
           const salvageEntryLine = entryFirstHandoffLine(unwrittenEntries((sb.plannedPaths ?? []).map((path) => ({ path, purpose: '' })), sb.salvagedPaths));
+          // 🔴 AND WHEN THE LANE NEVER VERIFIED (autopsy c70bcbb4): a lane that timed out or handed off before a
+          // reasoning engine runs no typecheck, so the builder met 22 errors in eight salvaged files one write at
+          // a time — ten checks over four minutes. The same typecheck the write-time check runs, once, bounded;
+          // nothing is said when it cannot run (no compiler yet, a timeout), so no line is ever invented.
+          let unverifiedErrors = '';
+          if (sb.reason !== 'verify_failed' && writeTypecheckEnabled() && sb.salvagedPaths.some((p) => /\.(?:ts|tsx)$/.test(p))) {
+            try {
+              const tc = await withTimeout(actuator.runCommand(workspaceId, writeTypecheckCommand()), 20_000, 'salvage-typecheck');
+              const errs = String(tc?.stdout ?? '').split('\n').filter((l) => /error TS\d+/.test(l));
+              if (errs.length) unverifiedErrors = `They were never compiled; the compiler's errors on the project right now:\n${errs.slice(0, 20).join('\n')}\n`;
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_SALVAGE_TYPECHECK', message: errs.length ? `The salvaged files were typechecked before the hand-off: ${errs.length} error(s) handed to the full builder with them.` : 'The salvaged files were typechecked before the hand-off: no errors.', autoResolved: true });
+            } catch { /* no compiler yet or a slow check — the builder meets the errors at its first write, as before */ }
+          }
           const salvageErrors = sb.reason === 'verify_failed' && sb.verifyErrors
             ? `The compiler's errors on them right now:\n${sb.verifyErrors.split('\n').slice(0, 20).join('\n')}\n`
-            : '';
+            : unverifiedErrors;
           buildPrompt =
             `${SALVAGE_HANDOFF_MARKER} A faster build lane already generated ${sb.salvagedPaths.length} file(s) of THIS app ${salvageWhy}; ` +
             `they are in the workspace now and they are YOUR OWN prior work (any project context below that lists fewer files was taken before they were written):\n${sb.salvagedPaths.slice(0, 40).map((p) => `- ${p}`).join('\n')}\n` +
@@ -19514,7 +19535,15 @@ async function noteBuildOutcome(
         for (const u of unusedDeps) {
           if (prunedDeps.includes(u.name)) continue;
           if (stoppedFresh.has(u.name)) continue;
-          const line = unusedDependencyLine(u.name, { unfinished: buildUnfinished, addedThisBuild: addedThisBuild.has(u.name) });
+          // A SUCCESSFUL step of a planned app is in the same position for a different reason: the code
+          // that imports the package is in a later STEP. The prune above already stands down for it
+          // (`!megaRoadmapActive && !projectModuleRef`); the warning now reads the same two facts
+          // instead of telling the user to remove what the plan is keeping (autopsy 39e982bd).
+          const line = unusedDependencyLine(u.name, {
+            unfinished: buildUnfinished,
+            addedThisBuild: addedThisBuild.has(u.name),
+            moreStepsPlanned: !!megaRoadmapActive || !!projectModuleRef,
+          });
           buildDiag.record({ phase: 'build', severity: line.severity, code: 'INTEGRITY_UNUSED_DEP', ...obs(line.message), ...(line.autoResolved ? { autoResolved: true } : {}) });
         }
         // A shared stylesheet imported by several modules is a FACT, never a defect (autopsy de3bb2bb): a
@@ -21905,9 +21934,20 @@ async function noteBuildOutcome(
             const verdict = summarizeJourneys(journeyResults, journeys.length, out.stdout);
             // 'unreachable' is its own outcome, not a pass and not a failure — a login wall tells us
             // nothing about the app, and either other answer would be invented.
+            // 🔴 A SIGN-IN FORM THAT ANSWERED IS NOT THE APP HOLDING UP (autopsy 68f0a486). The only journey
+            // that passed submitted the login form; every screen behind it went unchecked, and the gate
+            // still said GREEN, "a real user journey held up end to end". It is the login wall again —
+            // `unreachable`, with the reason — unless a journey past the door passed too.
+            const appPassed = journeyResults.filter((r) => r.verdict === 'passed' && !journeys.find((j) => j.id === r.id)?.signIn);
+            const onlySignInPassed = appPassed.length === 0 && journeyResults.some((r) => r.verdict === 'passed');
             if (journeyResults.some((r) => r.verdict === 'failed')) gateEvidence.journeys = 'failed';
-            else if (journeyResults.some((r) => r.verdict === 'passed')) gateEvidence.journeys = 'passed';
-            else if (journeyResults.length > 0) {
+            else if (appPassed.length > 0) {
+              gateEvidence.journeys = 'passed';
+              gateEvidence.journeyReloaded = appPassed.some((r) => r.kind === 'create-persists');
+            } else if (onlySignInPassed) {
+              gateEvidence.journeys = 'unreachable';
+              gateEvidence.journeyUnreachableWhy = 'only the sign-in form was submitted; the screens behind it were not reached';
+            } else if (journeyResults.length > 0) {
               gateEvidence.journeys = 'unreachable';
               const why = journeyResults.find((r) => r.note)?.note;
               if (why) gateEvidence.journeyUnreachableWhy = why;

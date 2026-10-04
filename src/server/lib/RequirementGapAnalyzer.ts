@@ -66,6 +66,23 @@ const DOMAINS: DomainDef[] = [
     ],
   },
   {
+    // A STOCK-MARKET APP IS NOT A SHOP (autopsy 241215d1, 2026-10-04). A paper-trading app for NSE/BSE
+    // (market, limit and stop-loss orders, an order book, a ledger) had no domain of its own, so the word
+    // "order" made it ecommerce and the analysis said it lacked a cart, checkout and refunds. Headlines are
+    // the market's own words — never a bare "stock" (an inventory register) or "order" (a shop).
+    key: 'trading',
+    re: /\b(?:stock|share|equity|commodity|crypto|forex)\s+(?:market|trading|exchange|broker(?:age)?|portfolio)s?\b|\bpaper[\s-]?trad\w*|\btrading\s+(?:app|platform|simulator|terminal|bot|journal|engine|dashboard)\b|\b(?:nse|bse|sensex|nifty|demat|intraday)\b|\bcandlesticks?\b|\bohlc\b|\border\s?book\b|\b(?:limit|stop[\s-]?loss|market)\s+orders?\b|\bmutual\s+funds?\b|शेयर\s*बाज़?ार|शेयर\s*मार्केट/i,
+    features: [
+      { label: 'live / historical price feed', re: /real.?time|live|feed|tick|quote|historical|yfinance|websocket/i },
+      { label: 'order types (market / limit / stop-loss)', re: /market\s+orders?|limit|stop.?loss|take.?profit|order\s+types?/i },
+      { label: 'portfolio, holdings & P&L', re: /portfolio|holding|position|p\s?&\s?l|pnl|profit|equity/i },
+      { label: 'watchlist & search', re: /watch\s?list|search|symbol|ticker/i },
+      { label: 'charts (candles / OHLC)', re: /chart|candle|ohlc|graph/i },
+      { label: 'brokerage, fees & taxes', re: /brokerage|fee|commission|charges|stt|slippage|tax/i },
+      { label: 'risk metrics (drawdown / win rate)', re: /drawdown|sharpe|win\s?rate|risk|volatility/i },
+    ],
+  },
+  {
     key: 'ecommerce',
     // `shop`/`store`/`cart` are boundary-anchored (see the corpus test): unanchored they matched inside
     // "photoshop", "bookstore"/"restore" and "cartoon", turning a drawing app into an ecommerce build.

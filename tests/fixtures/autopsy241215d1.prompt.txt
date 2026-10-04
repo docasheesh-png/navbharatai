@@ -1,0 +1,26 @@
+Act as an expert quantitative developer and full-stack software engineer. Write a complete, self-contained Python script for a local Paper Trading Application that tracks Indian Stock Market (NSE & BSE) assets using real-time/historical data feeds. 
+
+The application must include the following structural components:
+1. Core Simulation Engine (The ledger, transaction math, and accounting rules)
+2. Interactive Local Control Terminal (CLI interface or light Streamlit dashboard)
+3. External Indian Market Data Adapter (Utilising free libraries like `yfinance` with '.NS'/'.BO' suffixes or `jugaad-data`)
+4. Order Execution & Active Order Book Engine
+
+Architect the application according to these strict rules:
+ INDIAN MARKET DATA INTEGRATION
+- Build a modular data handler using `yfinance` to fetch live data (e.g., RELIANCE.NS, TCS.NS, HDFCBANK.NS, SENSEX, NIFTY 50).
+- Dynamically build basic Open-High-Low-Close (OHLC) candles and simulate the current Bid/Ask spread (e.g., adding an adjustable 0.05% spread layer) based on the latest incoming market price tick.
+ FULL USER CONTROL DESIGN
+- Allow me to explicitly configure the initial starting virtual cash balance in INR (default: ₹1,00,000).
+- Implement adjustable broker transaction parameters: flat-fee per trade (e.g., Zerodha-style ₹20 flat), percentage-based commission per trade, and a slippage multiplier to simulate bad fills.
+- Allow me to pause the market data stream, manually override or cancel any active order, artificially inject custom price shocks (e.g., crash a selected ticker by 10% instantly), and reset the portfolio balance at will.
+ COMPREHENSIVE ORDER MECHANICS
+- Implement four distinct order types: Market Orders, Limit Orders, Stop-Loss Orders, and Take-Profit Orders.
+- Maintain an active 'Order Book' state that evaluates pending Limit and Stop orders against every incoming price tick from the Indian stock data feed.
+ ROBUST PORTFOLIO TRACKING & RISK METRICS
+- Track Account Balance (liquid cash), Equity (cash + current value of positions), Unrealized P&L, Realized P&L, and Total Margin used.
+- Calculate live risk metrics on every tick: Maximum Drawdown (from peak equity), Win Rate, and a Sharpe Ratio approximation.
+ MODULAR ARCHITECTURE
+- Write clean, production-grade Python code. Avoid shortcuts or placeholders. 
+- Structure it using OOP with separate classes for `Portfolio`, `Order`, `Engine`, and `NSEBSEMarketAdapter`.
+- Provide

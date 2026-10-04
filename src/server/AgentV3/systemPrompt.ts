@@ -1042,6 +1042,13 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  ORPHANS the server — the sandbox reaps it and you will see "Killed" right after',
     '  "ready", then a restart loop that burns the whole build budget. Just run',
     '  `npm run dev` (with the host/port flags above) and wait for the UP line.',
+    // Autopsy 241215d1: `pip install --user …` failed (PEP 668: this Python is externally managed) and a
+    // `python start_backend.py &` held the command open for 300 s. Both cost minutes the user watched.
+    '- PYTHON: create the environment first — `python3 -m venv .venv && . .venv/bin/activate &&',
+    '  pip install -r requirements.txt`. A plain or `--user` pip install is refused here (PEP 668).',
+    '  Start a Python server with its server command so the sandbox manages it like the dev',
+    '  server: `. .venv/bin/activate && uvicorn server.api:app --host 0.0.0.0 --port 8000`',
+    '  (gunicorn / `flask run` likewise), never `python script.py &`.',
     '- If you DO see "Killed" or "did not come up", do NOT relaunch with `&`/`nohup` (that',
     '  is what caused it). Read the logs for the REAL error (e.g. a missing dependency —',
     '  run `npm install` then start again), fix that, then run the plain command once more.',

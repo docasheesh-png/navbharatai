@@ -91,7 +91,8 @@ describe('the route — every sizer and planner reads planning.text', () => {
   it('builds the planning request once, from what the builder receives', () => {
     // Since autopsy 19641ab5 the sizers read the part of the attachment that DESCRIBES AN APP (a photo is set aside).
     // Since autopsy 2f723acb an app that was started but never assembled still has its earlier requests read.
-    expect(ROUTE).toMatch(/const planning = planningRequest\(\{ prompt, attachmentText: planningAttachmentText, picturesSetAside, recentTurns, userAppExists, appStillUnbuilt \}\)/);
+    // Since autopsy 5759ad8b a message that points at the conversation ("make this app") also reads its last answer.
+    expect(ROUTE).toMatch(/const planning = planningRequest\(\{ prompt, attachmentText: planningAttachmentText, picturesSetAside, recentTurns, conversationReply, userAppExists, appStillUnbuilt \}\)/);
   });
   it.each([
     ['wall-clock complexity', /const buildComplexity = complexityFromPrompt\(planning\.text\)/],

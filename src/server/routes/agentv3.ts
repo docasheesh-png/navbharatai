@@ -8018,7 +8018,7 @@ async function noteBuildOutcome(
       return;
     }
     const from = Number(req.query.cursor);
-    const backlog = readShell(shellId, Number.isFinite(from) ? from : 0, userId ?? undefined);
+    const backlog = readShell(shellId, Number.isFinite(from) ? from : 0, workspaceId);
     if (!backlog) {
       res.status(404).json({ error: 'This terminal is no longer open.' });
       return;
@@ -8042,7 +8042,7 @@ async function noteBuildOutcome(
     const unsubscribe = subscribeShell(
       shellId,
       (chunk, cursor) => send('output', { data: chunk, cursor }),
-      userId ?? undefined,
+      workspaceId,
     );
     if (!unsubscribe) { res.end(); return; }
 
@@ -8063,7 +8063,7 @@ async function noteBuildOutcome(
         const q = await terminalAccessFor(req).catch(() => null);
         if (q && !q.access.allowed) {
           send('quota', { message: q.access.message, code: 'TERMINAL_DAILY_LIMIT' });
-          try { closeShell(shellId, userId ?? undefined); } catch { /* already gone */ }
+          try { closeShell(shellId, workspaceId); } catch { /* already gone */ }
           cleanup();
           res.end();
         } else if (q?.access.warn) {
@@ -8076,7 +8076,7 @@ async function noteBuildOutcome(
     }, 30_000);
     // Poll for exit so the UI can show "[process exited]" instead of a shell that just stops responding.
     const watch = setInterval(() => {
-      const s = getShell(shellId, userId ?? undefined);
+      const s = getShell(shellId, workspaceId);
       if (!s || !s.alive) { send('exit', { exitCode: s?.exitCode ?? null }); cleanup(); res.end(); }
     }, 1000);
 
@@ -8115,7 +8115,7 @@ async function noteBuildOutcome(
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
-    const ok = await writeShell(shellId, data, userId ?? undefined);
+    const ok = await writeShell(shellId, data, workspaceId);
     res.json({ ok });
   });
 
@@ -8137,7 +8137,7 @@ async function noteBuildOutcome(
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
-    const ok = await resizeShell(shellId, Number(req.body?.cols), Number(req.body?.rows), userId ?? undefined);
+    const ok = await resizeShell(shellId, Number(req.body?.cols), Number(req.body?.rows), workspaceId);
     res.json({ ok });
   });
 
@@ -8159,7 +8159,7 @@ async function noteBuildOutcome(
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
-    await closeShell(shellId, userId ?? undefined);
+    await closeShell(shellId, workspaceId);
     res.json({ ok: true });
   });
 

@@ -449,7 +449,8 @@ import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMiscon
 import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
 import { estimateBuildTime, complexityFromPrompt, projectSizedComplexity, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
-import { freeBuildWindow, noteFreeBuildStart, decideFreePause, freePauseMessage } from '../AgentV3/freeBuildTimeCap';
+import { freeBuildWindow, noteFreeBuildStartDurable, decideFreePauseDurable, freePauseMessage } from '../AgentV3/freeBuildTimeCap';
+import { firestoreFreeChainStore } from '../AgentV3/freeChainStore';
 import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionReserve';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
@@ -12525,7 +12526,8 @@ async function noteBuildOutcome(
      * runner's own stop, the reserve and the reviewer's headroom all read the same shorter number.
      */
     const freeWindow = freeBuildWindow(scaleBuildSeconds(maxBuildSeconds(), buildDepth), freeTierBuildActive);
-    if (freeTierBuildActive) noteFreeBuildStart(workspaceId, prompt);
+    // Durable (Q-130): a new request clears the chain on every instance; the call never throws or blocks the build.
+    if (freeTierBuildActive) void noteFreeBuildStartDurable(workspaceId, prompt, firestoreFreeChainStore()).catch(() => {});
     const effectiveBuildSeconds = freeWindow.seconds;
     const deadlineMs = effectiveBuildSeconds * 1000;
     // P-ARCH+.3 — tokens spent by the optional up-front blueprint step (below). Declared here so the
@@ -12795,7 +12797,7 @@ async function noteBuildOutcome(
       // A FREE build's unattended chain is bounded HERE (freeBuildTimeCap.ts): once this request's free
       // windows have used their allowance, the pause is not resumable — the work is saved and one
       // "continue" from the user buys the next window. A paid build, and a finished app, are untouched.
-      const freePause = !ok && freeTierBuildActive ? decideFreePause(workspaceId, deadlineMs) : null;
+      const freePause = !ok && freeTierBuildActive ? await decideFreePauseDurable(workspaceId, deadlineMs, firestoreFreeChainStore()) : null;
       const pauseResumable = freePause ? freePause.resumable : true;
       if (freePause && !freePause.resumable) {
         try {

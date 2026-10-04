@@ -89215,6 +89215,48 @@ failed save lived only in `proShell.ts`'s `useCollection`.
 
 
 
+### Q-115: a forgotten package import is restored on the installed package's own word (2026-10-04)
+
+**The gap.** Autopsy 424ecdab ended RED on `<Clock>` and `<IndianRupee>`. Both are lucide-react icons, used once and imported nowhere. The missing-import heal could only copy an import another file had already proven. Guessing lucide's export list was refused on purpose: the heal once turned a broken build into an unparseable one by guessing. The open root cause was recorded as *"read the installed package's own declarations"*.
+
+**The fix.** The endgame repair now asks the sandbox's own `node_modules` which of the compiler's undefined names each dependency really exports (`installedExports.ts`). It uses a single bounded node command: up to 100 dependencies, 25 s, true named exports only, and names validated as identifiers before they reach the script. A forgotten import is restored only when all of these hold:
+- The compiler itself reported the name (TS2304). A global like `fetch` is never captured.
+- Exactly ONE installed package exports it. `Link`, which is both a router link and an icon, is never decided.
+- No project module or proven import already owns it.
+
+**Measured.** Against this repo's 61 dependencies, the command took 3 s. It returned `lucide-react: Clock, IndianRupee` and dropped the hostile name `bad name;rm`.
+
+**Tests.**
+- `installedExports.test.ts`: injection, a real run against the installed lucide-react, and parsing.
+- 5 heal cases.
+- 2 endgame cases. One uses the report's real shape and turns green with no model call.
+- With the heal change reverted, the two real-case tests fail.
+
+**Where it runs.** It is wired where the compiler's errors are in hand: the endgame repair, both the step-cap net and the error-trend checkpoint. The write-time and fast-lane callers are unchanged, because they do not carry the TS2304 list.
+
+
+### Q-130: the free-build unattended chain is counted across instances (2026-10-04)
+
+**Problem.** The cap on how long a free request may run unattended was counted in one Cloud Run instance's memory. An auto-continue that landed on another instance started a fresh chain, so a free request could still hold a paid-for machine for hours: one allowance per instance.
+
+**Fix.**
+- `decideFreePauseDurable` and `noteFreeBuildStartDurable` keep the chain in one Firestore record per workspace (`agentv3_free_chains`, admin SDK, `freeChainStore.ts`).
+- The count is the LARGER of the record and memory.
+- Each durable call is bounded at 2 s.
+- Every failure (no database, slow, erroring) leaves exactly the old memory-only answer. This means it can never stop a build the old code would have let run.
+
+**Tests.**
+- Cross-instance: a window spent elsewhere ends the chain here.
+- A new request clears the chain everywhere; "continue" keeps it.
+- A failing store gives the memory answer.
+- A stale record counts as no chain.
+- Store round-trip with a fake database.
+- Proof by reversion: with the change removed, 6 tests fail.
+- The two wiring pins were updated to the durable calls at the same call sites.
+
+**Siblings checked.** The other daily spend gates (`guestDailyQuota`, the professionals `passGate`, `toolGate`, and the routes that use them) already keep their counts in Firestore. The free-build chain was the only spend limit kept in instance memory.
+
+**Gate note (Q-130):** the first full run caught one failure, from `everyCollectionIsClassified`. It flagged the new `agentv3_free_chains` store as unclassified, which is exactly what that census exists to catch. The store is now classified as `retained`, with a one-day `RETENTION_POLICIES` entry on `touchedAt`. The engine already ignores a record older than six hours, so without the policy one dead document per paused workspace would have stayed forever.
 ### Two stale queue rows closed with evidence (2026-10-04)
 
 - **Q-122 ✅ (`UI_WITHOUT_BUILD` false positive when only `App.tsx` was edited)** was already fixed. After build 70115adf, `uiWithoutBuildVerdict` got a "complete view" guard: with no `package.json` in view, it refuses to judge, because what it sees is a fragment. `tests/uiWithoutBuild.test.ts` encodes exactly this case: the view `['src/App.tsx']` gives no finding. The row was never removed after that fix.

@@ -196,6 +196,12 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
    */
   { collection: 'takedown_records', ttlDays: 180, timestampField: 'removedAt', timestampKind: 'epochMs' },
   /**
+   * A free build's unattended chain (freeChainStore.ts, Q-130). The engine ignores a record untouched for
+   * six hours, so a day-old one is dead weight — one per workspace that ever paused, never read again.
+   * `touchedAt: Date.now()` ⇒ `epochMs`.
+   */
+  { collection: 'agentv3_free_chains', ttlDays: 1, timestampField: 'touchedAt', timestampKind: 'epochMs' },
+  /**
    * Flagged messages — the same 180-day story as the removal records above, and for the same reason:
    * an abuse record must outlive the account (see the exclusion note in USER_SCOPED_COLLECTIONS) and
    * must not become a permanent file. `at: Date.now()` ⇒ `epochMs`.

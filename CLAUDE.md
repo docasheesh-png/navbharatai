@@ -3227,6 +3227,18 @@ the flag entries above promise.
   says so, `null` means *not supplied* and never zero, and `writeTypecheckUntouched` makes the
   silence unrepresentable as a fact about the build. Test-locked and reversion-proven four ways in
   `tests/theCounterWatchedOneLaneOfTwo.test.ts`.
+- **🔧 A REPAIR THE PLATFORM CHECKS DOES NOT CHECK ITSELF, AND A REPAIR THAT CHANGED NOTHING SAYS SO (autopsy
+  6cd698cc, 2026-10-01).** The explorer repair fixed a theme button in 61 s, then ran the production build, a dev
+  server, the preview and a browser of its own (its prompt was the reviewer's `judgeRepairPrompt`, "verify the app
+  builds…") until its 150 s cap; the platform undid the working fix. Now the explorer and green functional repairs
+  get `PLATFORM_CHECKS_THE_FIX` (`repairScope.ts`), run without the preview/browser tools (`withoutPlatformCheckTools`)
+  and with `focusedRepair` (no style hand-back). ⚠️ Never hand a platform-checked repair `judgeRepairPrompt`. And a
+  platform-requested run whose last turn claims a change while it changed no file is narrated as "No change was made
+  in that step." (`repairClaim.ts`, `REPAIR_CLAIM_WITHHELD`). Two keys, NEITHER set, default ON, `off` reverts:
+  **`AGENTV3_WRITE_TYPE_IMPORT_HEAL`** (the write-time typecheck rewrites a TS1361 `import type` of a value in a file
+  this build wrote, and says so; the fast lane's timeout salvage runs the same `deterministicImportFixes` as its
+  verify) and **`AGENTV3_DETACHED_METHOD_NOTE`** (a write-time note names a method that reads `this` and is handed
+  out uncalled, e.g. `return store.set`; `detachedMethod.ts`). Test: `tests/theRepairThatWorkedWasUndone.test.ts`.
 - **`AGENTV3_WRITE_SECURITY`** (NOT set; default ON, `off` disables — added 2026-09-30, autopsy 466c260a) —
   `scanSecurity`'s medium/high findings (an XSS sink such as `dangerouslySetInnerHTML` / raw `innerHTML`, a
   hardcoded secret) are handed back with every write (`securityWriteNote`, via `writeSteeringNotes`). Before
@@ -4101,6 +4113,22 @@ the flag entries above promise.
   `openErrors`, one output-read door `noteCompileOutput` — the shell path had marked tsc clean on a `| head`
   exit code of 0); and when the release gate's typecheck passed, a reviewer finding claiming the project does
   not compile is dropped before the user sees it (`reviewEvidence.ts`, `REVIEW_REFUTED_BY_EVIDENCE`).
+- **🧩 FOLLOW-UP TO AUTOPSY de3bb2bb — THREE BUILDER RULES AND ONE REPORT FIX (admin decisions 2026-10-01, PR #3467).**
+  - **Small batches, no flag:** `write_files_batch` carries at most `MAX_FILES_PER_BATCH = 3` new files
+    (`batchSize.ts`, read by the prompt, the tool text and the dispatcher). One 189 s call had written 7 files, so
+    the preview showed nothing for three minutes. The old prompt line ("pass all files in one call … 3× faster")
+    was never measured; do not restore it. An oversized batch is still written in full and told to shrink.
+  - **Sub-agents get the style hand-back, no flag of its own** (rides `AGENTV3_STYLE_RESUME`): a writing
+    specialist is handed back, once, the undefined classes / page defects / unnamed controls in the files IT
+    wrote (`scopeStyleHandBack`). A sibling's class is the sibling's, because specialists run in parallel.
+  - **`AGENTV3_UNKNOWN_NAME_NOTE`** (NOT set; default ON; `off` disables), `unknownName.ts`: on a NEW build, an
+    all-caps word NavBharatAI does not know ("COACT", most likely "collect") is not built as an outside service.
+    The builder, planner and fast lane are told: no client, no API URL, no env variable for it; build
+    self-contained; say in one sentence how the word was read. Precision-first: acronyms, known services,
+    emphasis words, a word the request names as a service ("ACME API", "ACME se connect") and all-caps prompts
+    stand down. Report code `UNKNOWN_NAME_IN_REQUEST` (process-only).
+  - A readiness warning is recorded once per build (`readinessWarningsSeen` in `BuildDiagnostics`); each runner's
+    `done` had recorded "No tests at all" again.
 - **🎨 `AGENTV3_STYLE_RESUME` — A TURN THAT ENDS WITH UNSTYLED SCREENS IS HANDED THE CLASS LIST ONCE (autopsy
   1be16985, 2026-10-01). ⚠️ NOT set; default ON; `off` reverts.** `stylePolishResume.ts`, applied in
   `AgentRunner` after a READY readiness verdict. The write-time note (`undefinedClassWriteNote`, e6d46cde)
@@ -4130,6 +4158,15 @@ the flag entries above promise.
   `planningRequest.ts`); a build cut short before its ETA band is `untested`; the platform ETA prior averages
   successful builds; and setup puts back the template when a workspace holds only a piece of our own starter
   (`starterFragment.ts`). Test-locked in `tests/aPictureIsNotAnApp.test.ts`.
+- **✍️ A REQUEST TO WRITE A PROMPT IS ANSWERED, NOT BUILT (autopsy cf09c03c, 2026-10-04; no flag).** "Etake aro
+  improve korar jonno ekta valo prompt likhe dao" (write a better prompt) was locked to an EDIT by "improve" and
+  replaced our starter's App.tsx with a page showing a prompt (₹6.34). 6ae30b33's written-content rule had asked
+  only the NEW-build verbs and had no "prompt" noun. Now the edit verbs ask it too (`asksForWrittenText` → chat
+  LOW; `namesTextNotScreen` → edit LOW, so "change the caption" still reaches the reader as an edit), and
+  `asksForPromptText` in `lib/imageIntent.ts` stops a request to WRITE a prompt reading as a picture on every
+  chat surface (a prompt the user GIVES is still a picture). Same change: on an edit, "I changed N files" counts
+  what the turn authored (`reviewChangedPaths`), and an omitted stylesheet no longer gives the lean review its
+  tools back. Test: `tests/aPromptIsTextNotAnApp.test.ts`.
 - **🧪 `AGENTV3_STRICT_TRIAL` — A SHARE OF NEW APPS START WITH TYPESCRIPT STRICT MODE ON (queue Q-008, admin "han"
   2026-10-01). ⚠️ NOT set; default ON; `off` seeds every new app loose as before.** `AGENTV3_STRICT_TRIAL_PCT` (NOT set;
   default **20**; `0` pauses; unreadable ⇒ 0, never 100). `strictTrial.ts`. The Vite-React starter compiles with strict

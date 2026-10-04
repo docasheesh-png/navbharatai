@@ -485,6 +485,21 @@ export function submitTargetIn(source: string): Target | null {
   // the button's "text" (see `inputScans`).
   const buttons = buttonsIn(source);
   const plainText = (inner: string): string => inner.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  // 🔴 THE NAME A BROWSER GIVES THE BUTTON, NOT ITS INNER TEXT (autopsy 6cd698cc, 2026-10-01). The journey
+  // finds the button with getByRole('button', { name }) — an ACCESSIBLE-name match — and an `aria-label`
+  // replaces the inner text as that name. The chat app's send button was `<button type="submit"
+  // aria-label="Send message">➤</button>`; the journey asked for a button named "➤", found none, and
+  // reported "the submit control was not present on the running page" beside a send button on screen.
+  // A dynamic label or `aria-labelledby` is not a name we can read here, so it falls back to the role.
+  const accessibleName = (tag: string, inner: string): string | null => {
+    if (/\baria-labelledby\s*=/i.test(tag)) return null;
+    if (/\baria-label\s*=/i.test(tag)) {
+      const aria = ATTR(tag, 'aria-label'); // a quoted, static value — `aria-label={x}` reads as null
+      return aria && !/[{}]/.test(aria) ? aria.trim() : null;
+    }
+    const text = plainText(inner);
+    return text && !/[{}]/.test(text) ? text : null;
+  };
   for (const { tag } of buttons) {
     const testid = ATTR(tag, 'data-testid');
     if (testid && (/(submit|save|add|create)/i.test(testid) || /type\s*=\s*["']submit["']/i.test(tag))) {
@@ -493,14 +508,15 @@ export function submitTargetIn(source: string): Target | null {
   }
   for (const { tag, inner } of buttons) {
     if (/type\s*=\s*["']submit["']/i.test(tag)) {
-      const text = plainText(inner);
-      if (text && !/[{}]/.test(text)) return { kind: 'text', value: text };
+      const name = accessibleName(tag, inner);
+      if (name) return { kind: 'text', value: name };
       return { kind: 'role', value: 'submit' };
     }
   }
-  for (const { inner } of buttons) {
+  for (const { tag, inner } of buttons) {
+    const name = accessibleName(tag, inner);
     const text = plainText(inner);
-    if (text && !/[{}]/.test(text) && CREATE_WORDS.test(text)) return { kind: 'text', value: text };
+    if (name && (CREATE_WORDS.test(name) || (text && !/[{}]/.test(text) && CREATE_WORDS.test(text)))) return { kind: 'text', value: name };
   }
   // `<input type="submit" value="Add">` — older markup, still real.
   const inputSubmit = inputTags(source).find((t) => /type\s*=\s*["']submit["']/i.test(t));

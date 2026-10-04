@@ -93,6 +93,7 @@ export function isProjectSummaryNarration(text: string | null | undefined): bool
   return first === ANALYSIS_ONLY_HEADLINE
     || first === BUILT_HEADLINE
     || /^🔍 I analyzed your project\. Your source files are untouched — I only wrote /.test(first)
+    || /^🔍 I analyzed your project — none of your files were changed; NavBharatAI only added /.test(first)
     || /^✅ Done — I changed \d+ files? in your project/.test(first)
     || /^📝 No app code was written this time — I only wrote /.test(first);
 }
@@ -130,7 +131,7 @@ const ENGINE_CONFIG_PATH = /^(\.env(\..*)?|\.gitignore|\.npmrc|\.nvmrc)$/;
  */
 const NOTE_PATH = /\.(md|mdx|markdown|txt)$/i;
 
-export function summarizeProject(graph: ProjectGraph, request: string, opts?: { previewLive?: boolean; changedFiles?: number; editMode?: boolean; changedPaths?: string[] }): string {
+export function summarizeProject(graph: ProjectGraph, request: string, opts?: { previewLive?: boolean; changedFiles?: number; editMode?: boolean; changedPaths?: string[]; platformAdded?: number }): string {
   void request; // reserved for future tailoring; summary is graph-derived for now.
   if (!graph || graph.files.length === 0) return '';
   // Default TRUE (backward-compatible) — the caller passes the REAL preview state (whether a live
@@ -164,7 +165,12 @@ export function summarizeProject(graph: ProjectGraph, request: string, opts?: { 
   // that wrote documents and nothing else says exactly that, and the project's size is labelled as the
   // project's, never as this run's output.
   const onlyNotes = paths.some((p) => NOTE_PATH.test(p)) && paths.every((p) => NOTE_PATH.test(p) || ENGINE_CONFIG_PATH.test(p));
-  if (analysisOnly) {
+  // Files NavBharatAI's own finishing passes added this turn (launch basics, starter tests) — not the
+  // model's changes, so never counted as "I changed", and never hidden behind "no files were changed".
+  const platformAdded = Math.max(0, Math.floor(opts?.platformAdded ?? 0));
+  if (analysisOnly && platformAdded > 0) {
+    lines.push(`🔍 I analyzed your project — none of your files were changed; NavBharatAI only added ${platformAdded === 1 ? 'a launch file' : `${platformAdded} launch files`} of its own. Overview:`);
+  } else if (analysisOnly) {
     lines.push(ANALYSIS_ONLY_HEADLINE);
   } else if (onlyNotes) {
     lines.push(`📝 No app code was written this time — I only wrote ${paths.length === 1 ? 'a note' : `${paths.length} notes`}${named}. Overview:`);

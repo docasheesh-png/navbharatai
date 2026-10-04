@@ -87383,6 +87383,36 @@ Weak build, 6.9 min, ₹96.58, rendered at 268 s, inside its ETA band. The build
   (`LIST_WITHOUT_EMPTY_STATE` on function-returned sample lists — your choice), Q-195 (four items argued not defects).
   Recurrences recorded on Q-063 (17 s first typecheck) and Q-052 (`startTier: "gemini"`). The two GLM crawls (30 s, 7%)
   fall under Q-009, which you closed as provider weather in #3465; the crawl bench behaved as designed.
+## 2026-10-01 — Autopsy de3bb2bb follow-up: the five decisions (PR #3467)
+
+The admin decided the five 🟡 rows the de3bb2bb autopsy left open. Ledger:
+
+BUILD REPORT de3bb2bb — RESOLUTION (follow-up)
+Items: 5 · ✅ Resolved: 5 (Q-064 closed by #3465, folded into Q-009; Q-065–Q-068 on merge of #3467) · 🟡 Blocked: 0 · Remaining: 0
+- **Q-064 ✅ (not our defect, admin: "leave")** — GLM flashx crawled twice; provider speed is Z.ai's. The crawl bench
+  (180 s, one re-probe) did what it was built to do. Third instance of Q-009; closed in the queue by #3465, which folded it into Q-009.
+- **Q-065 ✅** — a 189 s KIMI call wrote 7 files in one `write_files_batch`, so nothing reached the preview for three
+  minutes. Root cause: the prompt told the builder to "pass all files in one call … 3× faster", which was never
+  measured. Class: a size limit stated nowhere, so the call's length was the size of the app. Fix:
+  `MAX_FILES_PER_BATCH = 3` in `batchSize.ts`, read by the prompt, the tool description and the dispatcher (which
+  still writes an oversized batch and tells the model to shrink the next one). Siblings: the tool description said
+  "faster" too; fixed in the same change.
+- **Q-066 ✅** — the end-of-turn style hand-back (`stylePolishResume`) ran only inside the top-level readiness gate,
+  so a Frontend sub-agent's undefined classes waited for the architect. Class: an end-of-turn check living on one
+  lane of two. Fix: `styleHandBack` for writing sub-agents, scoped to the files they wrote (`scopeStyleHandBack` —
+  parallel siblings keep their own classes); `onNote` added to `SubAgentDeps` so the note reaches the report.
+- **Q-067 ✅ (class)** — "COACT" (most likely "collect") became a chat to "the COACT backend". Class: an unknown word
+  becomes an imaginary integration. Fix: `unknownName.ts` — new builds only, precision-first (acronyms, known
+  services, emphasis words, a word the request itself names as a service, and all-caps prompts stand down); the
+  builder, the planner and the fast lane are told to build no client / API URL / env var for it and to say how
+  they read it. Kill switch `AGENTV3_UNKNOWN_NAME_NOTE=off`, report code `UNKNOWN_NAME_IN_REQUEST`. ⚠️ Whether
+  `chatApi.ts` was dead code in that one shipped app stays unverifiable (the report carries no source).
+- **Q-068 ✅** — five items agreed as correct reports (admin: "jo chahiye banao"); the real noise, "No tests at all"
+  recorded twice by two runners' `done` events, is now recorded once per build (`readinessWarningsSeen`).
+
+Proof: `tests/theDe3bb2bbFollowUp.test.ts` (17 cases), each fix reverted and its tests seen failing.
+**What to watch:** smaller `write_files_batch` calls; `STYLE_RULES_RESUMED` lines prefixed with a sub-agent role;
+`UNKNOWN_NAME_IN_REQUEST` on a real prompt with a typo in capitals.
 ## 2026-10-01 — Autopsy 8f797751 (maths solver, stopped at 6.4 min, 6 s after the dev server came up)
 
 - **A ✅** At 4.6 min the model said "Your Math Solver app is ready … Open the Preview tab"; the platform
@@ -87487,6 +87517,104 @@ Two builds, Weak tier, both on `kimi-k2.7-code` (complex routing). Build 2 shipp
   self-started work). **BLOCKED:** Q-272 (reasoning rung on complex Weak builds — routing decision), Q-273 (11 s
   trivial command, needs a second instance), Q-274 (what a "Python script" request delivers — product decision),
   Q-275 (the request was cut mid-sentence before it reached us), Q-286 (eight items argued not defects).
+## 2026-10-04 — CI audit gate went red on every PR: four advisories published after 2026-10-01 (PR #3467)
+
+> Merged note: #3476 (another session) landed the same lockfile update and allowlist entries first; #3467 kept
+> `main`'s allowlist and adds only the `nodeForgeNeverVerifies` lock described below.
+
+`main` was green on 2026-10-01; the next run failed `audit:gate` with four NEW high advisories, and
+no dependency had changed. Each was traced, not waved through:
+- **`@fastify/busboy` 3.2.0 → 3.2.2** (GHSA-xjh9-v7x6-24jw, GHSA-x8mw-p69m-v3mx, multipart DoS). It is
+  RUNTIME (via `firebase-admin`, whose own range is `^3.0.0`), so it was FIXED: a lockfile-only update.
+- **`braces` / `chokidar`** (GHSA-vfj7-8cjw-p6xm). Affected range `*`, 3.0.3 is the latest, so no fix
+  exists. Reached only through `firebase-tools` (dev-only deploy CLI). Allowlisted with that reason.
+- **`node-forge`** (GHSA-86w9-cpqp-85rv, signature-VERIFY forgery). Affected range `*`, 1.4.0 is the
+  latest. Used only by `androidKeystore.ts` to CREATE a certificate and keystore, never to verify.
+  Allowlisted, and `tests/nodeForgeNeverVerifies.test.ts` holds the fact the entry depends on: a new
+  importer or any verify call fails CI (proven by reversion both ways).
+OPEN: remove the three allowlist entries when upstream publishes fixes.
+
+## 2026-10-04 — Autopsy: iPhone build SHANKU-AI/instamony run 36792748246 — each platform knows its own keys (PR #3467)
+
+The run died in 20 s at the iOS workflow's own pre-flight: `Missing Apple signing secret(s): IOS_ASC_KEY_ID
+IOS_ASC_ISSUER_ID IOS_ASC_KEY_BASE64 IOS_TEAM_ID`. The workflow was right; everything NavBharatAI said
+about it was wrong: `STALE_WORKFLOW`, "the build stopped while installing your app's libraries", and
+`navbharatCanFixItself: true`.
+
+**Class:** every reader of "is the signing key there?" knew only the ANDROID list and the ANDROID
+sentence. This is the SAME class the classifier's own comment recorded on an earlier report (run
+34935149896: a matcher written against an invented string), fixed then for one platform only — the
+sibling workflow prints a different sentence and was never hunted.
+
+| Item | Root cause | Fix | Lock |
+|---|---|---|---|
+| Q-230 wrong code | pattern matched `Missing signing secret(s)` only | reads both sentences; platform read from the names | census over every generated workflow's sentence |
+| Q-231 false "installing" | stage fallback reached | follows from Q-230 | real-log test |
+| Q-232 "can fix itself" | same | autoFixable false | real-log test |
+| Q-233 run started unchecked | dispatch guard + status route Android-only | `IOS_SIGNING_SECRETS`; iOS guard (409, `canCreateKey:false`); `signing-status?platform=ios`; panel pre-check | source guards |
+| Q-234 Android key button on iPhone (latent) | panel raised the offer on any MISSING_SIGNING_SECRET | Android only; Apple sentence for iPhone | source guard |
+| Q-235 GitHub summary says "installing" | diagnostic step infers stage from `node_modules` | pre-flight steps carry ids; prints `preflight` | runs the real generated script |
+| Q-236 `preflight: null` | `isSigningSecretFailure` Android-only | knows both lists | test |
+| Q-237 "Xcode too old" unclassified | no class | now honest UNKNOWN; a class needs a new cure family | OPEN in the queue |
+
+All fixes reversion-proven (`tests/eachPlatformKnowsItsOwnKeys.test.ts`). The missing keys themselves are
+the user's to add; NavBharatAI now says so before a run, in plain words, and cannot create Apple keys.
+
+## 2026-10-04 — Autopsy 7da1cdca: "Ek puzzle game bnao candy wala" — four of our own defects (PR #3467)
+
+Weak tier, build succeeded, the game rendered and played (₹110.75 billed on $0.30 real cost).
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-240/241 saved copy ≠ sandbox | a shell write never reached the captured writes, and captured writes win at save | npm's read-back (2026-09-27) fixed ONE instance | bash reads back every file it plainly wrote (`sed -i`, `tee`, redirects, `cp`/`mv`, inline `node -e`/`python -c` literal writes) | dispatcher test, reverted-and-failed |
+| Q-242 false "unstyled" | CSS defined in a script string was invisible to the class check | our own recipe failing our own gate | `classesDefinedInScriptStrings` | real shell census, reverted-and-failed |
+| Q-243 `three` missing | recipes NAMED their dependency and left the install to the model | 24 sites (7 game recipes + 22 `Add the dependency:` lines) | installed at the recipe doors under the npm lock, into the right package.json; busy/failed said honestly | dispatcher tests (game shell, QR), reverted-and-failed |
+| Q-244 edits to `melody.ts` | the "fixed in ANOTHER file" note never asked whether another module exports the name | a routing claim made without the evidence that decides it | bounded grep + `exportedElsewhere` | report's error, reverted-and-failed |
+| Q-245 3D shell for a 2D game | "LAST" step of every game, 3D-only nowhere said | — | prompt + tool text | text guard; real effect needs the next 2D game |
+
+Owned elsewhere (not duplicated): spacing snap and "a game that saves is not 'nothing to save'" (#3474 Q-091/Q-093);
+GLM crawl (Q-009, admin: leave); `startTier: "gemini"` (Q-052). OPEN here: Q-246 (shell `rm` resurrected by the
+save), Q-247 (explorer could not press ⏸), Q-248 (summary contradicts itself).
+## 2026-10-01 — Autopsy 6cd698cc: the repair that worked was undone, and a repair that changed nothing said it did
+
+Build: "Build an app best than chatgpt or gpt 5.6 free Life time in this app", Weak, ok, 10.6 min, ₹129.17.
+Already fixed on `main` after this build ran (14:19 UTC), so not re-fixed: the style resume skipping invented `nb-`
+classes, the "looks complete" narration over unstyled screens, and the SIMULATED "random song" example (#3459); a
+repair told "you read this the second time" (#3457 B); the crawl/timeout double strike (#3448).
+
+| ID | Problem | Root cause | Class | Siblings | Lock |
+|---|---|---|---|---|---|
+| Q-170 | The stylesheet repair wrote nothing and claimed "now defines every one of the 29 classes" | A run's final text was narrated whatever the run had changed | A repair's report of its own work was never checked against its writes | Every platform-requested runner (one door: `AgentRunner`'s narration); delegated writes counted via `changeCount()` | `theRepairThatWorkedWasUndone.test.ts` §1 |
+| Q-171 | The explorer repair fixed the bug in 61 s, then verified it itself until the 150 s cap; undone, ₹20.69 absorbed | It was given the reviewer's `judgeRepairPrompt` ("verify the app builds…"), the preview/browser tools, and the style hand-back | A repair the platform re-checks was told to check itself | The green functional repair had the same shape (same tools, same hand-back); both fixed | §2 |
+| Q-172 | TS1361 enum `import type` from the contract (f496c75b class again) | The heal ran only at the endgame; the write door and the timeout salvage had none | A deterministic fix applied in one place of three | Write-time typecheck + salvage now run the same fixes as the verify step | §3 |
+| Q-173 | Theme button crash: `store.set` handed out uncalled, reads `this` | Nothing named the pattern at write time | Unbound method handed out | Destructuring `const { set } = store` covered too | §4 |
+| Q-174 | Journey not run: icon send button named by `aria-label` | `submitTargetIn` read only inner text | Name read by text, while the browser uses the accessible name | type=submit and create-word branches both use `accessibleName` | §5 |
+| Q-175 | `SIMULATED_RESULT` on "mock API key" | `api` matched as a result noun | A credential read as a faked result | key / token / secret all excluded | §6 |
+| Q-176 | Eight items argued not defects | — | — | — | 🟡 needs the admin's agreement |
+| Q-085 | Chat-form journey | Q-174 makes the next chat journey run; in-memory chats would then FAIL the reload check | — | — | Decided by the admin (option a, submit-only); built in #3473, not here |
+
+Each fix was reverted in place and the suite failed, then restored. New flags (NOT set, default ON, `off` reverts):
+`AGENTV3_WRITE_TYPE_IMPORT_HEAL`, `AGENTV3_DETACHED_METHOD_NOTE`. The GLM crawls (≈30 s) are inside Q-009's accepted
+bounds. Housekeeping: rows Q-069..Q-080 (1219c639) left the open table — #3461 merged.
+
+## 2026-10-04 — Autopsy cf09c03c: "write a better prompt" built an app (PR #3470)
+
+Romanised Bengali, Weak, 3.6 min, ₹6.34. "Etake aro improve korar jonno ekta valo prompt likhe dao" asked for
+TEXT. "improve" locked it to an edit at HIGH, the workspace held only our starter, and the build replaced
+`src/App.tsx` with a page that displays a prompt. The turn before ("Create a image generated promt") was read
+as a picture request.
+
+🔴 **Recurrence:** the class is autopsy 6ae30b33's ("a build verb whose object is text the reply can write").
+That fix asked only the new-build verbs and had no "prompt" in its noun list; the edit verbs were never hunted.
+
+| ID | Problem | Root cause | Class | Siblings found and fixed | Test |
+|---|---|---|---|---|---|
+| Q-250 | Prompt request built an app | Edit branch never asked the written-content question | A verb whose object is text, read as an app order | New-build branch ("ek accha prompt likh do", "make a better prompt"), every edit verb, "image prompt" as a screen part | `aPromptIsTextNotAnApp` §1 |
+| Q-251 | "…generated promt" read as a picture | `detectImageIntent` had no notion of a prompt as the object | A prompt is text, not a picture | Shared detector: Pro, free chat, Professionals, SDA | §2 |
+| Q-253 | "I changed 10 files" (model wrote 2) | Summary counted `writtenFiles`, which our finishing passes also fill | Platform writes reported as the model's | Reviewer already used `reviewChangedPaths`; the summary now does too | §3 + `agentv3.test.ts` |
+| Q-254 | Lean review read inlined App.tsx twice | Kit stylesheet over the inline bound restored the tools | One omission withdrawing one-call mode | — | §4 |
+| Q-255 | "Editing your existing app" about our starter | — | Owned by #3475 (Q-206) | — | — |
+| Q-252 / Q-256 / Q-257 / Q-258 | Hindi reply to English (needs that turn's report) · ₹6.34 refund (admin) · slow first typecheck (Q-063 class, needs the ensure log) · eight items argued not defects | — | — | — | 🟡 in the queue |
 ## 2026-10-01 — Q-021 done: PROGRESS.md's open root causes moved into the queue
 
 Four parallel read-only audits covered PROGRESS.md lines 1–87,401 (~260 "open root cause" markers). Each

@@ -3463,6 +3463,16 @@ Both scaffolds produce real, correctly wired code. The backend services (PocketB
     keywords: ['version history', 'go back', 'restore', 'undo build', 'previous version', 'revert', 'old version', 'build history', 'checkpoint', 'purana version', 'version 3 pe wapas', 'rollback', 'undo changes', 'history', 'past builds'],
   },
   {
+    id: 'app-ai-in-preview',
+    name: 'AI inside your app — works in the preview, your own key, or switch it off',
+    path: 'NavBharatAI Pro → More → Keys & Secrets → "AI in this app"',
+    description: `An app NavBharatAI builds with an AI assistant (a chatbot, a writer, a summariser) needs no API key: it answers through NavBharatAI and each answer is charged to the app owner's balance. It already works in the PREVIEW for the owner (with a small daily limit there, ₹2 by default) and, once published, for everyone (with a daily limit per app and per visitor). No key or token is ever put into the app's page. In Keys & Secrets the "AI in this app" card shows what it cost today, lets the owner switch NavBharatAI's AI off for that app at any time (it stops answering immediately, in the preview and the published app, with no republish), and explains how to use their own key instead: save OPENAI_API_KEY or ANTHROPIC_API_KEY for that app and it answers on that key, on NavBharatAI's server, with nothing charged to their balance. A red dot on More → Keys & Secrets appears once for an app that uses NavBharatAI's AI, until the owner opens that card.`,
+    howToUse: 'Build an app that uses AI and try it straight away in the Preview. To see the cost, switch it off, or use your own key: More → Keys & Secrets → "AI in this app".',
+    relatedFeatures: ['pro_chat', 'build-version-history'],
+    aiSurface: 'pro_chat',
+    keywords: ['ai in my app', 'chatbot not working in preview', 'preview me ai', 'api key', 'own api key', 'openai key', 'apni key', 'ai band karo', 'switch off ai', 'navbharatai ai charge', 'ai ka kharcha', 'red dot keys', 'keys and secrets'],
+  },
+  {
     id: 'unified-memory',
     name: 'Unified Memory — your project context carries across builds',
     path: 'NavBharatAI Pro → automatic (no user action needed)',

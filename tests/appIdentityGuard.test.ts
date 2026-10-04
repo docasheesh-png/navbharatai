@@ -162,8 +162,13 @@ describe('workspace-scoped state census — a new one must be justified', () => 
     //   publishResume.test.ts, rather than restated here.
     //   It must stay keyed on the id ALONE: on a build-finished dependency it would re-evaluate
     //   mid-build, and the marker would be consumed by a render the user never triggered. ✓
+    //
+    // 2026-10-04 (the "AI in this app" red dot) — LEADING +1, audited:
+    //   [state.workspaceId, running, aiNoticeKey] → fetchAppAiSettings → setAiNoticeUnseen. It CLEARS the
+    //   flag first (so app A's dot cannot show under app B while B's answer is in flight) and drops a late
+    //   answer through `cancelled`. ✓
     expect(sole).toBe(4);
-    expect(leading).toBe(3);
+    expect(leading).toBe(4);
   });
 
   it('🔒 the known leaks stay closed', () => {

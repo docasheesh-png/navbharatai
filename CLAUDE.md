@@ -1841,6 +1841,26 @@ the code (it is actually read somewhere) on 2026-07-11.
   override yet**, because nothing in the product can set one and a field with no screen behind it is a
   promise. Reverting is one key: unset it and new publishes stamp nothing, while apps already carrying
   a token get an honest "not available" from the endpoint.
+- **🤖 THE APP'S OWN AI WORKS IN THE PREVIEW, ON THE OWNER'S KEY IF THEY WANT, AND IT CAN BE SWITCHED OFF
+  (built 2026-10-04; admin: "preview me AI chalao ₹2/din … apni api keys … red dot … navbharatai ki api
+  delete kar de … navbharatai api browser me na jaye").** One key, NOT set, code default governs:
+  `APP_AI_PREVIEW_CAP_INR` (**₹2 a day per app**, unreadable ⇒ 2, never "no limit"). Everything rides the
+  existing `APP_AI_GATEWAY` switch. Code: `src/lib/previewAiProtocol.ts` (the relay), `lib/appAiAnswer.ts`
+  (ONE answer path for published + preview), `lib/appAiOwnKey.ts`, `lib/AppAiSettingsStore.ts`
+  (`app_ai_settings`, erased with the workspace), `routes/appAiOwner.ts`, `AppAiSettingsCard.tsx`.
+  🔒 **NO CREDENTIAL IN THE PREVIEW PAGE:** the app posts its question to its PARENT (the NavBharatAI page the
+  owner is signed in to), which asks `POST /api/app-ai/preview-ask` with the owner's own login (strict
+  `ownedByVerifiedUid`). Opened anywhere else there is no parent to answer. The saved preview copy gets the
+  same relay (`withPreviewAiRelay`) only when its bundle uses `NavAI`.
+  🔑 **OWN KEY = SERVER-SIDE:** `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` in the vault (shared or for that app)
+  makes BOTH the preview and the published app answer on that key from our server; ₹0 to the wallet; the
+  app's code does not change. A refused key is reported, **never silently replaced by our engine**.
+  🔘 **THE SWITCH** (`POST /api/app-ai/settings`) stops NavBharatAI's engine for that app immediately,
+  published and preview, no republish. 🔴 **RED DOT** on More → Keys & Secrets (`secrets.ai-notice`) until
+  the owner opens the "AI in this app" card (seen-state is per device, localStorage).
+  ⚠️ **Honest limit:** a PUBLISHED page still carries the public, signed app token — it is an identifier,
+  not a key, and the per-app (₹20) and per-visitor (₹2) caps are what bound it. Nothing callable from a
+  public page can be made secret; provider keys never leave the server.
 - **🧮 `AI_IMAGE_FREE_PAID_DAILY_CAP` — the PLATFORM-WIDE daily ceiling on images the FREE tier gets
   from a PAID engine (built 2026-09-21; the number PR #3234 left open). ⚠️ NOT set, and the code default
   is **300 a day across the whole platform**.** Read by `src/server/lib/imageFreePaidBudget.ts`; its

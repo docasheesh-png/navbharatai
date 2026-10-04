@@ -628,7 +628,7 @@ import { sweepUnusedImports, importSweepEnabled } from '../AgentV3/UnusedImportS
 import { looksLikePlatformSource, PLATFORM_SOURCE_REFUSAL } from '../AgentV3/PlatformSourceGuard';
 import { ensureViteConfig } from '../AgentV3/ViteConfigGuard';
 import { ensureHtmlEntryScript } from '../AgentV3/HtmlEntryGuard';
-import { withoutPreviewBridge, hasPreviewBridge, injectPreviewBridge } from '../AgentV3/previewBridge';
+import { withoutPreviewBridge, hasPreviewBridge, injectPreviewBridge, withPreviewAiRelay } from '../AgentV3/previewBridge';
 import { applyVisualTextEdit, applyVisualStyleEdit, applyVisualStyleEdits } from '../AgentV3/VisualEditPatcher';
 import { runCheckpointDiff } from '../AgentV3/checkpointDiff';
 import { VertexProvider } from '../AI/Router/providers/VertexProvider';
@@ -21664,7 +21664,7 @@ async function noteBuildOutcome(
                   const dist = await withTimeout(actuator.downloadDistFiles(workspaceId), 60_000, 'snapshot-dist');
                   if (dist && dist.size > 0) {
                     const url = await withTimeout(
-                      new FirebaseHostingDeployer().deployStatic(workspaceId, dist, snapshotChannelId(workspaceId)),
+                      new FirebaseHostingDeployer().deployStatic(workspaceId, withPreviewAiRelay(dist), snapshotChannelId(workspaceId)),
                       90_000, 'snapshot-deploy',
                     );
                     if (url) {

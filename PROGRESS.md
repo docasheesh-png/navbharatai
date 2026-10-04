@@ -88971,3 +88971,16 @@ The precision trap, measured before shipping: stopping at first paint photograph
 fetches (`if (!data) return null`), so the verdict alone would have accused working apps. The grace is what
 makes the verdict safe; it is bounded by the existing paint deadline so the 30 s script timeouts still hold.
 
+### 2026-10-04 — Q-156: a saved value that is not the provider's key shape is named
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-156 no format validation for injected secrets | the catalogue knew test prefixes but not what a real value looks like, so nothing could tell `doc.asheesh` from a Razorpay key id | a value the provider could never have issued, passed on as a key | `valuePrefixes` on 19 variables with a provider-fixed shape; `credentialSafety` `wrong-shape` notice (name + expected prefixes, never the value), value still injected as saved; AppKnowledgeBase vault entry updated | `tests/aKeyThatIsNotTheProvidersShape.test.ts` (the report's value; reverted → 2 fail; census that no test prefix falls outside its shapes) |
+
+Not judged on purpose: a provider whose secret has no fixed shape (`RAZORPAY_KEY_SECRET`, `SMTP_PASS`) — the report's
+phone-number-like secret cannot be told from a real one by shape, and guessing would be the precision failure
+`credentialSafety` exists to avoid. The live provider probe (`credentialProbe.ts`) is what answers those.
+
+Q-153 re-checked the same day: its upstream half is already shipped (`envLoading.ts`); the remaining runtime half
+is recorded in the queue with the breakage it must avoid (`NODE_ENV=production` reaching the agent's `npm install`).
+

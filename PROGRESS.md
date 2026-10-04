@@ -88820,3 +88820,13 @@ written down in plain words.
 **What survives, with the reason changed:** pushing ONCE per branch is still right, now simply because a
 second push creates a second run that somebody then has to cancel or wait out. Nothing is wrong with
 GitHub, nothing needs looking at in Actions settings, and the admin can ignore that request entirely.
+
+
+### Correction (merging session, 2026-10-04 20:55 UTC) — half of Q-500's cancellations were the 30-minute cap
+
+The two notes above (19:40 and #3523's) each named ONE cause for the cancelled CI runs, and each was half right.
+The run annotations settle it: the cancels on PRs the merging session had queued were its own, deliberate; the
+cancels of #3515 (19:57), #3518 (20:44) and #3523 (20:45) read "The job has exceeded the maximum execution time
+of 30m0s" — `ci.yml`'s own `timeout-minutes: 30`, hit because eight or nine PR runs in flight slowed every run to
+21–30 min. The cap is now 45 (#3524 staging). Lesson, the fourth rule's first step: read the run's own last
+words before naming a cause — a cancelled run names its canceller.

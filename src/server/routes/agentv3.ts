@@ -13038,6 +13038,14 @@ async function noteBuildOutcome(
     // realistic total; the heartbeat below recomputes the REMAINING time every 2 min and emits it,
     // so "I'll update it as I go" is literally true (not a one-shot claim). 0 until the build starts.
     let etaTotalMs = 0;
+    // The last ETA line the user was SHOWN — handed to the model when a live message asks how long, so
+    // its answer is the platform's figure, not a number of its own (autopsy 68f0a486: "2-3 min" while the
+    // line said ~4). Every ETA line goes through `emitEtaLine`.
+    let lastEtaShown: string | null = null;
+    const emitEtaLine = (text: string, ts: number): void => {
+      lastEtaShown = text;
+      events.emit({ type: 'narration', agent: 'architect', text, ts, id: 'eta-live' });
+    };
     let etaStartMs = 0;
     let etaTick = 0;
     // The ORIGINAL up-front estimate, kept alongside etaTotalMs (which liveEtaTick EXTENDS on overrun)
@@ -13158,7 +13166,7 @@ async function noteBuildOutcome(
       // the user is being asked, neither runs, and the one live line says what is actually happening.
       if (userWait.since !== null) {
         try {
-          events.emit({ type: 'narration', agent: 'architect', text: waitingForUserLine(Date.now() - userWait.since), ts: Date.now(), id: 'eta-live' });
+          emitEtaLine(waitingForUserLine(Date.now() - userWait.since), Date.now());
         } catch { /* the live line is best-effort */ }
         return;
       }
@@ -13220,7 +13228,7 @@ async function noteBuildOutcome(
           // file phase already over (a repair loop is genuinely unpredictable) — and the honest
           // re-baselining fallback below then owns the line exactly as it does today.
           if (etaFinalChecks) {
-            events.emit({ type: 'narration', agent: 'architect', text: finalChecksEtaLine(elapsedMs), ts: now, id: 'eta-live' });
+            emitEtaLine(finalChecksEtaLine(elapsedMs), now);
             return;
           }
           const measured = measuredRemainingMs({ plannedFiles: etaPlannedFiles, filesDone: writtenFiles.size, firstFileAt: etaFirstFileAt, now });
@@ -13234,7 +13242,7 @@ async function noteBuildOutcome(
             // honestly own the line again — it would be continuing from something real rather than
             // from the prompt guess it was still carrying.
             etaEvidenced = true;
-            events.emit({ type: 'narration', agent: 'architect', text: measuredEtaText(elapsedMs, measured, writtenFiles.size, etaPlannedFiles), ts: now, id: 'eta-live' });
+            emitEtaLine(measuredEtaText(elapsedMs, measured, writtenFiles.size, etaPlannedFiles), now);
             return;
           }
           // THEN THE PLAN, which is the full builder's only honest measurement (autopsy d11ad529).
@@ -13254,7 +13262,7 @@ async function noteBuildOutcome(
             // would silently suppress the countdown for the whole rest of a build we HAD measured,
             // and it would fail nothing — which is the class both PRs warned about.
             etaEvidenced = true;
-            events.emit({ type: 'narration', agent: 'architect', text: stepEtaText(elapsedMs, byStep, etaStepsDone, etaPlannedSteps), ts: now, id: 'eta-live' });
+            emitEtaLine(stepEtaText(elapsedMs, byStep, etaStepsDone, etaPlannedSteps), now);
             return;
           }
           // RE-BASELINING tick (autopsy 2026-08-02): liveEtaTick returns the line AND an extended budget
@@ -13266,7 +13274,7 @@ async function noteBuildOutcome(
           // d11ad529). Elapsed time is still reported — it has already happened, so it promises
           // nothing — and the moment a real measurement lands the branch above takes over.
           if (!etaEvidenced) {
-            events.emit({ type: 'narration', agent: 'architect', text: unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000, etaRoughBand, etaRoughHighMs), ts: now, id: 'eta-live' });
+            emitEtaLine(unevidencedEtaTickLine(elapsedMs, effectiveBuildSeconds * 1000, etaRoughBand, etaRoughHighMs), now);
             return;
           }
           const tick = liveEtaTick(elapsedMs, etaTotalMs, etaBaseMs || etaTotalMs, etaRevisions, etaPromisedHighMs);
@@ -13278,7 +13286,7 @@ async function noteBuildOutcome(
           // STABLE id so each ETA tick REPLACES the previous line (the reducer dedupes narration by id)
           // instead of stacking a new "Still building…" bubble every 2 min — and so the client can drop
           // this ONE transient line the moment the build finishes (it is live status, not chat history).
-          events.emit({ type: 'narration', agent: 'architect', text, ts: Date.now(), id: 'eta-live' });
+          emitEtaLine(text, Date.now());
         } catch { /* ETA is best-effort — never affects the build */ }
       }
     }, 60_000);
@@ -14276,7 +14284,7 @@ async function noteBuildOutcome(
             buildDiag.record({ phase: 'plan', severity: 'info', code: 'ETA_SKIPPED_MODULE_TURN', autoResolved: true,
               message: 'Opening ETA not shown: this "continue" builds the next module of a stored project plan, and the estimate describes the whole app.' });
           } else {
-            events.emit({ type: 'narration', agent: 'architect', text: etaShown, ts: Date.now(), id: 'eta-live' });
+            emitEtaLine(etaShown, Date.now());
           }
         } catch { /* ETA is best-effort — never affects the build */ }
       }
@@ -16335,7 +16343,7 @@ async function noteBuildOutcome(
         // (AGENTV3_STEER_ALL_TIERS=off) cannot leave one end open and the other closed. Spread into
         // every top-level/heal runner via baseRunnerOpts, so the team keeps listening through repair.
         ...(steerAllowedForBuild(powerLevelReqEffective)
-          ? { steerPoll: () => (rb.steerQueue && rb.steerQueue.length ? rb.steerQueue.splice(0, rb.steerQueue.length) : []) }
+          ? { steerPoll: () => (rb.steerQueue && rb.steerQueue.length ? rb.steerQueue.splice(0, rb.steerQueue.length) : []), currentEta: () => lastEtaShown }
           : {}),
         agentRole: 'architect' as const,
         signal: abort.signal,
@@ -17232,10 +17240,10 @@ async function noteBuildOutcome(
                 if (etaTotalMs > 0 || etaRoughBand) {
                   etaTotalMs = 0; etaBaseMs = 0; etaRoughBand = null; etaRoughHighMs = null; etaPromisedHighMs = 0;
                   buildDiag.withdrawEtaPromise();
-                  events.emit({ type: 'narration', agent: 'architect', text: moduleTurnEtaLine(done, pPlan.modules.length, projectModuleRef.name), ts: Date.now(), id: 'eta-live' });
+                  emitEtaLine(moduleTurnEtaLine(done, pPlan.modules.length, projectModuleRef.name), Date.now());
                   buildDiag.record({ phase: 'plan', severity: 'info', code: 'ETA_WITHDRAWN', autoResolved: true, message: moduleTurnEtaNote(done, pPlan.modules.length, projectModuleRef.name) });
                 } else if (etaSkippedForModule) {
-                  events.emit({ type: 'narration', agent: 'architect', text: moduleTurnEtaLine(done, pPlan.modules.length, projectModuleRef.name, false), ts: Date.now(), id: 'eta-live' });
+                  emitEtaLine(moduleTurnEtaLine(done, pPlan.modules.length, projectModuleRef.name, false), Date.now());
                 }
               } catch { /* the ETA is best-effort and must never touch a build */ }
               // WHO ASSEMBLES THE APP? A module that does not own the entry leaves the starter page in

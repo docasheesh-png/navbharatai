@@ -85,6 +85,8 @@ export interface AgentRunnerOptions {
    * The route wires this only for the FULL TEAM ('max') tier; omitted elsewhere (no behavior change).
    */
   steerPoll?: () => string[];
+  /** The ETA line the user was last shown, for a live message that asks how long (autopsy 68f0a486). */
+  currentEta?: () => string | null;
   /** Enable Anthropic adaptive thinking (streams a thinking summary to the UI). */
   thinking?: boolean;
   /** Optional hard budget (USD billed to the user). Stops honestly when reached. */
@@ -382,11 +384,25 @@ export function buildTimedOut(startMs: number, maxBuildMs: number | undefined, n
  * (a name, an answer, a "no"). So the turn now says what the user is owed: act on it, or say how it was
  * read — and account for it in the final reply either way.
  */
-export function liveUserMessageTurn(message: string): string {
+export function liveUserMessageTurn(message: string, etaShown?: string | null): string {
+  const eta = etaShown && asksHowLong(message)
+    ? `They are asking how long it will take. The platform's own estimate, already on their screen: "${etaShown.replace(/\s+/g, ' ').trim()}". Answer with THAT, in their language — never a number of your own. `
+    : '';
   return '[USER MESSAGE — sent live during the build.] Act on it now without discarding progress. '
     + 'If it answers a question you asked, build to that answer. If it is unclear what it asks for, '
     + 'say in one line how you read it before you continue. Your final reply must say what you did '
-    + `about it.\n${message}`;
+    + `about it. ${eta}\n${message}`;
+}
+
+/**
+ * Does a live message ask how long the build will take? (autopsy 68f0a486: "इसको बनने में कितना टाइम
+ * लगेगा" got "2-3 minutes" from the model while the platform's own line said about four.) Precision-first:
+ * a time WORD alone is not the question — "add a time table", "समय सारणी" are features. PURE.
+ */
+export function asksHowLong(message: string): boolean {
+  const m = String(message ?? '');
+  return /\bhow long\b|\bhow much (?:more )?time\b|\bwhen will (?:it|the app|this|my app) be (?:ready|done|finished)\b|\bkitn[aei] (?:time|der|samay|minute)|\bkab tak\b|\bkitni der\b/i.test(m)
+    || /कितन[ाीे]\s*(?:टाइम|समय|देर|मिनट)|कब\s*तक/.test(m);
 }
 
 export interface AgentRunResult {
@@ -456,6 +472,10 @@ export class AgentRunner {
    * file, which by definition happens on a later turn. Paths only — a bounded handful per build.
    */
   private readonly _truncationSteered = new Set<string>();
+  /** The ETA line the user was last shown, or null; never throws (see `liveUserMessageTurn`). */
+  private shownEta(): string | null {
+    try { return this.opts.currentEta?.() ?? null; } catch { return null; }
+  }
 
   constructor(private readonly opts: AgentRunnerOptions) {}
 
@@ -762,7 +782,7 @@ export class AgentRunner {
         // narration ack is the honest "picked up" signal (the route already acked "queued" instantly).
         const steered = this.opts.steerPoll?.() ?? [];
         for (const sm of steered) {
-          messages.push({ role: 'user', content: liveUserMessageTurn(sm) });
+          messages.push({ role: 'user', content: liveUserMessageTurn(sm, this.shownEta()) });
           messageTs.push(Date.now()); // the person's own words: a user turn, kept in step with its timestamp
           events.emit({ type: 'narration', agent: agentRole, text: `📨 The team picked up your message: “${sm.slice(0, 160)}${sm.length > 160 ? '…' : ''}”`, ts: Date.now() });
         }

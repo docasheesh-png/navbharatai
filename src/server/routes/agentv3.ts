@@ -16333,6 +16333,7 @@ async function noteBuildOutcome(
               requested: requestedProbeFeatures(prompt, new Set(declinedIds)),
               declined: declinedIds,
               contractLabels: confirmedContractLabels(featureLists, featureConfirmation),
+              graph: ctxMem.graph(),
             }), 5_000, 'change-engine-begin');
             changeSession = begun.session;
             if (begun.builderBlock) buildPrompt = `${begun.builderBlock}\n\n---\n\n${buildPrompt}`;

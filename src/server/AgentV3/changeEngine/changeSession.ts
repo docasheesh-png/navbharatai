@@ -28,6 +28,8 @@ import { fenceUntrusted } from '../UntrustedContent';
 import { redactSecrets, redactPII } from '../SecretRedactor';
 import { redactProvidersText } from '../../lib/providerRedaction';
 import type { BuildIssue } from '../BuildDiagnostics';
+import type { ProjectGraph } from '../WorkspaceMemory';
+import { computeImpactSet, renderImpactForBuilder } from './impactSet';
 import { requestedProbeFeatures } from '../FeaturePresence';
 
 export interface ChangeSession {
@@ -73,6 +75,8 @@ export async function beginChange(input: {
   declined?: ReadonlyArray<string>;
   /** The contract labels (confirmedContractLabels) — platform-authored feature names. */
   contractLabels?: ReadonlyArray<string>;
+  /** The app's import graph (WorkspaceMemory), for the impact set on standard/deep edits. */
+  graph?: ProjectGraph | null;
 }): Promise<BeginResult> {
   const classification = classifyChange(input.prompt);
   const mem = await loadEngineeringMemory(input.workspaceId);
@@ -85,6 +89,12 @@ export async function beginChange(input: {
   const parts: string[] = [];
   const specBlock = input.isEdit ? renderSpecForBuilder(spec, classification.depth) : '';
   if (specBlock) parts.push(specBlock);
+  // Slice 4 — where this change lands and what depends on it, from the import graph. Edits only (a new
+  // build has no prior graph worth reading), and never on a micro change (one file, no need for a map).
+  // File names are the app's own text, so the block travels fenced as data.
+  const impact = input.isEdit && classification.depth !== 'light' ? computeImpactSet(input.prompt, input.graph, classification.kinds) : { seeds: [], dependents: [] };
+  const impactBlock = renderImpactForBuilder(impact);
+  if (impactBlock) parts.push(fenceUntrusted('this app\'s file list', impactBlock));
   const issueBlock = renderIssuesForBuilder(workable);
   // Issue messages can quote the app's own text (a label, a file name), so they travel fenced as data.
   if (issueBlock) parts.push(fenceUntrusted('earlier checks of this app', issueBlock));
@@ -103,7 +113,7 @@ export async function beginChange(input: {
     priorSpec: spec,
   };
   const specLive = spec.items.filter((i) => i.status !== 'dropped').length;
-  const reportLine = `${describeChangeClassification(classification)} · ${specLive} requirement(s) on record · ${regressionTargets.length} re-probed for regression · ${workable.length} open issue(s) handed to the builder`;
+  const reportLine = `${describeChangeClassification(classification)} · ${specLive} requirement(s) on record · ${regressionTargets.length} re-probed for regression · ${workable.length} open issue(s) handed to the builder · impact ${impact.seeds.length} file(s) + ${impact.dependents.length} dependent(s)`;
   return { session, builderBlock: parts.join('\n\n'), reportLine };
 }
 

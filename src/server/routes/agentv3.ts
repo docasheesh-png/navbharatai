@@ -14880,6 +14880,8 @@ async function noteBuildOutcome(
         kitKept: () => dispatcherForSubAgents?.sharedKitKept(),
         // And its stale-module-copy guard, armed on the parent (autopsy e725e002).
         shadowTwins: () => dispatcherForSubAgents?.sharedShadowTwins(),
+        // And its shell deletions, which must leave the saved project like the parent's (queue Q-246).
+        deletionWiring: () => dispatcherForSubAgents?.deletionWiring(),
         client, actuator, workspaceId, state, events, model, onlyOpus,
         // Tier fidelity + honest billing (admin 2026-07-13): sub-agents spend most of a build's
         // tokens — they must bill at the TIER's rate (Strong → Sonnet × 3, not Opus × 2) and run
@@ -15219,6 +15221,8 @@ async function noteBuildOutcome(
       // Every file this build removed, in order — the user is told about the ones their app had
       // (deletedFilesNotice.ts, queue Q-019). The admin line below stays as it was.
       const deletedThisBuild: string[] = [];
+      // What a shell command removes is checked against these (queue Q-246, shellWriteTargets.ts).
+      dispatcher.setRecordedPaths(() => [...writtenFiles.keys()]);
       dispatcher.setFileDeletionSink((paths) => {
         for (const p of paths) {
           writtenFiles.delete(p);

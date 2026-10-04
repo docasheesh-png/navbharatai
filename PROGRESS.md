@@ -89194,3 +89194,12 @@ would have told an admin a freeze protects production when it does not. The entr
 is enforced. The enforcement itself is 🟡 BLOCKED on the admin approving a `cloudbuild.yaml` step (options and
 recommendation in the queue row).
 
+### 2026-10-04 — Q-116: a big project's graph is filled at build start (the cap was the last hollow cause)
+
+The "pre-edit knowledge gate" was recorded when the graph was hollow on every cold resume. That cause was killed
+upstream on 2026-09-18 (`warmIndexFiles` refills stubs) — prevention, which the 50/50 law prefers to a refusal.
+Re-tracing found the one cause left: the build-start call used the default `maxFiles` of 80, so on a bigger app
+every file past the 80th stayed a stub (and the other call site already used 1,500). Now 400 files with an 8 s
+start-new-reads bound (`WARM_INDEX_BUILD_START_MS`), so a big project cannot hold up the start; the instrument
+still names what is left. Lock: `tests/aBigProjectIsNotHollow.test.ts`.
+

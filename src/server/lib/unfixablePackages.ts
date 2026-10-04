@@ -10,7 +10,7 @@
  * A closed, reviewed list — never a guess about a package. PURE.
  */
 export const UNFIXABLE_NPM_PACKAGES: Readonly<Record<string, string>> = {
-  xlsx: 'no fixed release on npm (SheetJS publishes fixed builds only from cdn.sheetjs.com) — use `exceljs` for Excel files instead',
+  xlsx: 'no fixed release on npm (SheetJS publishes fixed builds only from cdn.sheetjs.com) — uninstall it (`npm uninstall xlsx`) and use `exceljs` for Excel files instead',
 };
 
 /**
@@ -55,4 +55,19 @@ export function unfixableInstallNote(command: string): string {
     ...installed.filter((p) => BUILT_IN_ALTERNATIVES[p.toLowerCase()]).map((p) => `💡 \`${p}\`: ${BUILT_IN_ALTERNATIVES[p.toLowerCase()]}.`),
   ];
   return lines.join('\n');
+}
+
+/**
+ * 🔴 THE NOTE CAME AFTER THE INSTALL, AND THE INSTALL STAYED (autopsy 3f959fde, 2026-10-01). The note above
+ * fired when `npm install xlsx` ran; the builder read it, wrote "warn about xlsx advisory? Maybe not", and
+ * shipped xlsx with its HIGH advisory. Advice about a package the project already depends on reads as a
+ * caveat. Told BEFORE the first install, it is a choice. Derived from the two lists above, so a package
+ * added to either reaches every prompt that carries this rule. PURE.
+ */
+export function packageChoiceRule(): string {
+  const lines = [
+    ...Object.entries(UNFIXABLE_NPM_PACKAGES).map(([p, why]) => `- \`${p}\`: ${why.replace(/ — uninstall it \(`[^`]*`\) and /, ' — ')}.`),
+    ...Object.entries(BUILT_IN_ALTERNATIVES).map(([p, why]) => `- \`${p}\`: ${why.replace(/; uninstall it \(`[^`]*`\) and /, '; ').replace(/ — uninstall it$/, '')}.`),
+  ];
+  return `PACKAGES NOT TO INSTALL (they ship known, unfixed advisories, or the platform already has them built in):\n${lines.join('\n')}`;
 }

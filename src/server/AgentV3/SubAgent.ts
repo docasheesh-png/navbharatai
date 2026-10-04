@@ -17,6 +17,7 @@ import { DESIGN_KIT_BRIEF } from './systemPrompt';
 import { shellEarlyRule, writesTheEntry } from './earlyPreview';
 import { NO_EVAL_RULE, NO_FAKED_RESULT_RULE } from './noEvalRule';
 import { IMAGE_IN_APP_RULE } from './inAppImageGeneration';
+import { packageChoiceRule } from '../lib/unfixablePackages';
 import { stylesheetCarriesKit } from './kitRestore';
 import type { AgentRole, ToolName } from './types';
 
@@ -420,6 +421,8 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     }
     // A writing specialist builds the image screen too, so it reads the same image-generation rule.
     if (roleExpectsArtifacts(cfg.tools)) contextBlocks.push(IMAGE_IN_APP_RULE);
+    // …and the packages not to install (autopsy 3f959fde: the Frontend specialist installed xlsx).
+    if (roleExpectsArtifacts(cfg.tools)) contextBlocks.push(packageChoiceRule());
     if (roleExpectsArtifacts(cfg.tools)) {
       try {
         const raw = await deps.actuator.readFile(deps.workspaceId, 'src/index.css');

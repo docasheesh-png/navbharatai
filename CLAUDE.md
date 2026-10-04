@@ -240,6 +240,16 @@ The rule, in `IntentClassifier.ts`:
 - An **order** ("build a notes app", "ek billing app banao") is not a question — it stays HIGH and
   instant. The common path pays nothing.
 
+🔴 **WIDENED BY THE ADMIN 2026-10-03 (Q-200, autopsy 3f959fde): "100% confirm nahi hai, to pahle text reply,
+phir app banane ke bare me puchna hai."** A data question in Telugu with a sheet attached was built as a ₹272 app
+because the reader answered "build". Now a `new_build` — or an "edit" of a chat that holds nothing of the user's —
+goes ahead only when the MESSAGE confirms it (`buildConfirmation.ts`): a certain order, a complete-app or
+start-over request, pasted source, or a non-question naming a whole product (app, website, game, tool…; a UI
+part such as "table" is not enough). **A question that names an app is now answered and offered too** — this
+replaces the bullet above that let it keep its build intent. The turn is recorded with lane `offer`; a short
+"yes / haan / bana do" within 6 hours builds the OFFERED request (`prompt` becomes it; the chat history keeps
+what was typed). Edits of an app the user really has are unchanged. `AGENTV3_CONFIRM_BUILD=off` reverts.
+
 ⚠️ **The asymmetry is the whole justification, and it must not be reversed.** Wrong toward chat costs
 one message — and the chat reply already offers to build, so "haan" starts it. Wrong toward build costs
 29 minutes, real money, and a user who asked for none of it.
@@ -4167,6 +4177,15 @@ the flag entries above promise.
   chat surface (a prompt the user GIVES is still a picture). Same change: on an edit, "I changed N files" counts
   what the turn authored (`reviewChangedPaths`), and an omitted stylesheet no longer gives the lean review its
   tools back. Test: `tests/aPromptIsTextNotAnApp.test.ts`.
+- **🙋 `AGENTV3_CONFIRM_BUILD` + 📎 `AGENTV3_ATTACHMENT_MEMORY` (admin 2026-10-03, Q-200 / Q-201). ⚠️ NEITHER is set;
+  both default ON; `off` reverts each alone.** `buildConfirmation.ts`: see "READ THE MOOD FIRST" above — an unconfirmed
+  build is answered and offered, and a "yes" builds the offered request. `lib/attachmentMemory.ts`: the latest
+  attached DOCUMENT's text (PII masked, ≤ 50 KB, 30 days) is kept per chat in `agentv3_attachment_memory/<workspaceId>`
+  and handed back only to a later message in the SAME chat that brings no file and talks about the data/file or
+  accepts an offer. The record carries the uid and a read with another uid gets nothing (admin: *"ek chat ki baat
+  dusre chat me na jaye"*). Deleted with the chat (`purgeWorkspace`) and on unsend; disclosed in Privacy Policy §6 (retention).
+  Report codes `BUILD_OFFER_ACCEPTED` / `ATTACHMENT_RECALLED` (process-only). Test-locked and reversion-proven in
+  `tests/aBuildStartsOnlyWhenAskedFor.test.ts`.
 - **🧪 `AGENTV3_STRICT_TRIAL` — A SHARE OF NEW APPS START WITH TYPESCRIPT STRICT MODE ON (queue Q-008, admin "han"
   2026-10-01). ⚠️ NOT set; default ON; `off` seeds every new app loose as before.** `AGENTV3_STRICT_TRIAL_PCT` (NOT set;
   default **20**; `0` pauses; unreadable ⇒ 0, never 100). `strictTrial.ts`. The Vite-React starter compiles with strict

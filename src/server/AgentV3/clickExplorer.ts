@@ -525,7 +525,32 @@ function collect(a) {
   for (const old of Array.from(document.querySelectorAll('[data-nbai-x]'))) old.removeAttribute('data-nbai-x');
   const never = new RegExp(a.neverSrc, a.neverFlags);
   const writes = new RegExp(a.writeSrc, a.writeFlags);
-  const nodes = Array.from(document.querySelectorAll('button, a[href], [role=button], [role=tab], [role=menuitem], [role=link], summary'));
+  const semantic = Array.from(document.querySelectorAll('button, a[href], [role=button], [role=tab], [role=menuitem], [role=link], summary'));
+  // A CONTROL WITHOUT A CONTROL'S TAG (autopsy f496c75b): a game's "Tap to Start" was a div with a click
+  // listener, and the explorer, reading only buttons and links, found nothing to press. An element is a
+  // control here when a click-type listener was added to it (recorded by the init script in freshPage),
+  // it carries an inline onclick, or React holds a press handler in its props. Never the page's own
+  // roots (a framework listens there for every click), never inside or around a real control (that
+  // control is pressed itself, and a press at the centre of a wrapper could land on a Delete inside it).
+  const tagged = window.__nbaiClickTargets;
+  const roots = new Set([document.documentElement, document.body, document.querySelector('#root, #app, #__next')]);
+  const CONTROL = 'button, a[href], input, select, textarea, label, summary, [role=button], [role=tab], [role=menuitem], [role=link], [contenteditable=""], [contenteditable=true]';
+  const reactPress = (el) => {
+    for (const k of Object.keys(el)) {
+      if (k.indexOf('__reactProps$') !== 0) continue;
+      const p = el[k];
+      return !!(p && (p.onClick || p.onPointerDown || p.onPointerUp || p.onMouseDown || p.onMouseUp || p.onTouchStart || p.onTouchEnd));
+    }
+    return false;
+  };
+  const extra = [];
+  const all = document.body ? document.body.getElementsByTagName('*') : [];
+  for (let n = 0; n < all.length && n < 4000; n++) {
+    const el = all[n];
+    if (roots.has(el) || el.closest(CONTROL) || el.querySelector(CONTROL)) continue;
+    if (el.hasAttribute('onclick') || (tagged && tagged.has(el)) || reactPress(el)) extra.push(el);
+  }
+  const nodes = semantic.concat(extra.filter((el) => !extra.some((o) => o !== el && el.contains(o))));
   const seen = new Set();
   const chosen = [];
   const skipped = [];
@@ -692,6 +717,20 @@ function pickSearchWord(items) {
 async function freshPage(browser) {
   // Reduced motion (the one definition every lane uses — signInExplore.ts), plus the saved session.
   const page = await browser.newPage(Object.assign(${JSON.stringify(BROWSER_PAGE_OPTIONS)}, cfg.storageState ? { storageState: cfg.storageState } : {}));
+  // Remember every element the app gives a click-type listener, before any of its code runs, so collect()
+  // can find a div that acts as a button. A WeakSet, not an attribute: the app's DOM is not touched.
+  await page.addInitScript(() => {
+    try {
+      const kinds = new Set(['click', 'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'touchstart', 'touchend']);
+      const marked = new WeakSet();
+      Object.defineProperty(window, '__nbaiClickTargets', { value: marked });
+      const add = EventTarget.prototype.addEventListener;
+      EventTarget.prototype.addEventListener = function (type, listener, options) {
+        try { if (kinds.has(type) && this instanceof Element) marked.add(this); } catch (e) {}
+        return add.call(this, type, listener, options);
+      };
+    } catch (e) {}
+  });
   page.on('dialog', (d) => d.dismiss().catch(() => {}));
   page.on('popup', (p) => p.close().catch(() => {}));
   return page;

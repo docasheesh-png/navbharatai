@@ -22727,7 +22727,13 @@ async function noteBuildOutcome(
           // writtenFiles counts only dispatcher writes (AI edits), NOT imported files, so a read-only
           // import+survey gets "I analyzed your project — no files were changed" instead of the false
           // "Here's what I built". An edit run says "I changed N file(s)"; a fresh build keeps "built".
-          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl, changedFiles: writtenFiles.size, editMode: isEditMode, changedPaths: [...writtenFiles.keys()] });
+          // 🔴 `writtenFiles` IS NOT "THE FILES I CHANGED" (autopsy cf09c03c). Our own finishing passes (the
+          // launch basics, the starter tests, the decision note) write into it too, so a turn whose model
+          // changed 2 files told the user "I changed 10 files in your project". On an edit the count is the
+          // files this turn authored, by the reviewer's own rule (`reviewChangedPaths`); a fresh build's
+          // headline names no count, so it keeps reading the whole map.
+          const summaryPaths = isEditMode ? reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden) : [...writtenFiles.keys()];
+          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl, changedFiles: summaryPaths.length, editMode: isEditMode, changedPaths: summaryPaths, platformAdded: isEditMode ? writtenFiles.size - summaryPaths.length : 0 });
           if (summaryText) events.emit({ type: 'narration', agent: 'architect', text: summaryText, ts: Date.now() });
         } catch { /* summary is best-effort — never affects the build */ }
       }
@@ -22837,7 +22843,7 @@ async function noteBuildOutcome(
           });
           const reviewBudget = reviewerBudgetMs(rFiles.length, reviewHeadroomMs, projectFileCount, { previewGreen: reviewPlan.mode === 'suggest' });
           if (reviewPlan.mode === 'suggest') {
-            try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_LEAN', message: `The app is proven green, so the post-build review is suggest-only and ran lean: ${reviewOneCall ? `one call, no tools, handed all ${reviewInline?.files.length ?? 0} changed file(s) in full` : `at most ${reviewPlan.maxSteps} steps`}, ${Math.round(reviewBudget / 1000)}s budget.`, autoResolved: true }); } catch { /* best-effort */ }
+            try { buildDiag.record({ phase: 'build', severity: 'info', code: 'REVIEW_LEAN', message: `The app is proven green, so the post-build review is suggest-only and ran lean: ${reviewOneCall ? `one call, no tools, handed ${reviewInline?.omitted.length ? '' : 'all '}${reviewInline?.files.length ?? 0} changed file(s) in full${reviewInline?.omitted.length ? ` (not included: ${reviewInline.omitted.join(', ')}, a stylesheet)` : ''}` : `at most ${reviewPlan.maxSteps} steps`}, ${Math.round(reviewBudget / 1000)}s budget.`, autoResolved: true }); } catch { /* best-effort */ }
           }
           let review;
           /** A verdict rebuilt from an unfinished review's own narration — see partialReview.ts. */

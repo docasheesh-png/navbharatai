@@ -87448,3 +87448,24 @@ suitable check cheyu" with no file attached — the data had come in an earlier 
 Self-heals noted (each points to an existing class): `:)` written at the head of App.tsx and fixed by the model (the
 write-time parse note caught it); a TS2322 `null` narrowing under the strict-new trial (Q-008 data point); 12 type
 errors from consumers written before `types.ts` (the contract-first rule); invented `nb-` classes (#3459).
+
+## 2026-10-04 — Autopsy 0473628e ("Music App", Weak, 6.8 min, ₹99.11)
+
+The app shipped and rendered. The struggle was the first 40 s: the model asked scope questions twice, the platform retried
+and nudged instead of reading them as the questions they were, and the style hand-back then spent 8 edits on spacing.
+
+| ID | Problem | Root cause | Class | Fix / state |
+|---|---|---|---|---|
+| Q-213 | Retry after the model asked the user | The runner appends its own sentence to the summary; the retry read the last line | A verdict asked of text the platform rewrote (e628efd4), through the runner | `modelAnswer` on the nothing-built path + `modelsOwnWords` at both readers. ✅ on merge (#3475) |
+| Q-214 | A question nudged as a stall | End-anchored closed invitation list | Closed phrase list over model prose | `REPLY_REQUEST` after a question in the closing section. ✅ on merge |
+| Q-215 | Two scope interviews for a confirmed order | No build-don't-interview rule | Upstream prompt gap | Prompt rule. ✅ on merge — watch the next bare app order |
+| Q-216 | READY_BEFORE_END about the abandoned attempt | Recorded before the retry | Measurement taken before the retry (sibling of WRITE_TIME_TYPECHECK, 2026-09-26) | Moved after the retry. ✅ on merge |
+| Q-217 | Our badge under the phone check's 32px | Sized before the check existed | Our own UI failing our own gate | 32px link and ×. ✅ on merge |
+| Q-218 | 5px sliders | Model styled the input's height | Generator guidance gap | Prompt rule. ✅ on merge — watch |
+| Q-219 | Review timeout | Kit stylesheet over the inline bound | Our template costing the review (8257ca59) | `appOwnStylesheet`. ✅ on merge |
+| Q-220 | `taskType: chat` for an app order | Purchase guard also deciding the label | One guard answering two questions | Platform build ⇒ `app_unsized`. ✅ on merge |
+| Q-221 | icon.svg divergence | Unknown — instrument named only the path | Instrument without the evidence | `describeDivergence`; 🟡 needs the next report |
+| Q-222 | Spacing hand-back struggle | Arithmetic handed to a model | — | Owned by #3474 |
+| Q-223 | Gate YELLOW on nothing-to-save | Tab/filter read as a save | — | Owned by #3471 |
+| Q-224 | Six argued not-defects | — | — | 🟡 admin agreement |
+

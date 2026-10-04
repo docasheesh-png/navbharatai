@@ -397,7 +397,20 @@ export function runtimeRecordFromPageChecks(
  * was seen rendering — while WERE THERE CONSOLE ERRORS was not. Saying so is honest; collapsing them
  * into "runtime NOT verified" is not, and neither is claiming clean.
  */
-export function runtimeUncheckedRecord(opts?: { previewRendered?: boolean }): RuntimeVerifyRecord {
+export function runtimeUncheckedRecord(opts?: { previewRendered?: boolean; awaitingShell?: string | null }): RuntimeVerifyRecord {
+  // A project module that does not own the app's entry has no app to run yet (autopsy 0311186f): the
+  // runtime check is not skipped, it is not due. Said as that, not as a coverage gap to act on.
+  if (opts?.awaitingShell && !opts.previewRendered) {
+    return {
+      phase: 'autofix',
+      severity: 'info',
+      code: 'RUNTIME_UNCHECKED',
+      message:
+        `Runtime not checked on this turn, by design: it built one project module, and the app is put together `
+        + `by "${opts.awaitingShell}". The runtime checks run on that turn.`,
+      autoResolved: true,
+    };
+  }
   if (opts?.previewRendered) {
     return {
       phase: 'autofix',

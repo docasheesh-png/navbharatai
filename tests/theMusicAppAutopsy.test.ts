@@ -86,7 +86,7 @@ describe('the lean review is handed the app\'s CSS, not our kit', () => {
     const files = new Map([['src/App.tsx', 'export default function App() { return null; }'], ['src/index.css', css]]);
     const raw = leanReviewInline([...files.keys()], (p) => files.get(p));
     expect(raw.omitted).toContain('src/index.css');
-    expect(leanReviewAnswersInOneCall(raw)).toBe(false);
+    expect(leanReviewAnswersInOneCall(raw)).toBe(true); // since #3470 an omitted stylesheet alone no longer costs one-call mode; the strip below still makes it fit inline
     const stripped = leanReviewInline([...files.keys()], (p) => (p.endsWith('.css') ? (appOwnStylesheet(files.get(p)!) ?? files.get(p)) : files.get(p)));
     expect(leanReviewAnswersInOneCall(stripped)).toBe(true);
     expect(route).toContain("return typeof c === 'string' && /\\.css$/i.test(p) ? (appOwnStylesheet(c) ?? c) : c;");

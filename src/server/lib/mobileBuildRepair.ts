@@ -21,6 +21,7 @@
 import { toolchainForMajor } from './capacitorToolchain';
 import { knownDepVersion } from '../AgentV3/DependencyAutoFix';
 import { capacitorMajorFromFiles, detectWebDir, isAssembledStaticApp, TYPESCRIPT_FOR_CONFIG } from './mobileProjectAssembler';
+import { signingPlatformOf } from '../../lib/signingReadiness';
 
 /** Every failure class NavBharatAI can name from a build log. */
 export type RepairCode =
@@ -131,18 +132,29 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
   //
   // The singular form is kept because it costs nothing and an older workflow may still be in some
   // user's repository — this module reads logs from repositories we do not control or update.
-  const secretList = log.match(/Missing signing secret\(s\)[:\s]+([A-Z0-9_\s]+?)(?:—|--|\n|$)/);
+  //
+  // 🔴 AND THE SAME CLASS CAME BACK ON THE OTHER PLATFORM (SHANKU-AI/instamony, run 36792748246). The
+  // iOS workflow prints `Missing Apple signing secret(s): …`, which the pattern above did not match, so
+  // an iPhone build with none of its four Apple keys fell through to STALE_WORKFLOW and told the user
+  // "the build stopped while installing your app's libraries — NavBharatAI can fix this itself". The
+  // census in `tests/eachPlatformKnowsItsOwnKeys.test.ts` now feeds this classifier the error sentence
+  // of EVERY workflow the ship kit generates, so a third wording cannot slip past it.
+  const secretList = log.match(/Missing (?:Apple )?signing secret\(s\)[:\s]+([A-Z0-9_\s]+?)(?:—|--|\n|$)/);
   const secretOne = log.match(/Missing required secret[:\s]+([A-Z_][A-Z0-9_]*)/);
   const missingSecrets = secretList
     ? secretList[1].trim().split(/\s+/).filter((n) => /^[A-Z_][A-Z0-9_]*$/.test(n))
     : secretOne ? [secretOne[1]] : [];
 
   if (missingSecrets.length > 0 || /keystore.*(not set|missing|empty)|ANDROID_KEYSTORE_BASE64/i.test(log)) {
+    // The platform is read from the NAMES the workflow printed, never assumed: an iPhone user told
+    // about a "Play Store signing key" is being sent to fix a platform their build never touched.
+    const platform = signingPlatformOf(missingSecrets);
+    const keyName = platform === 'ios' ? 'Your Apple signing keys are' : 'Your Play Store signing key is';
     return {
       code: 'MISSING_SIGNING_SECRET',
       summary: missingSecrets.length > 0
-        ? `Your Play Store signing key is not on the repository yet — the build needs ${missingSecrets.join(', ')}.`
-        : 'Your Play Store signing key is not on the repository yet.',
+        ? `${keyName} not on the repository yet — the build needs ${missingSecrets.join(', ')}.`
+        : `${keyName} not on the repository yet.`,
       // ⚠️ STAYS FALSE, and not by oversight. NavBharatAI CAN now create this key (2026-09-16), but
       // `autoFixable` means "repair the repository's FILES and build again unattended" — and a
       // signing key is the app's permanent identity, not a file with a mistake in it. Minting one
@@ -154,7 +166,7 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
       detail: missingSecrets.length > 0
         // `secret` is kept for callers that read one name; `missing` is the whole truth, and is what
         // raises the one-press "Create my signing key" button on the build panel.
-        ? { secret: missingSecrets[0], missing: missingSecrets }
+        ? { secret: missingSecrets[0], missing: missingSecrets, platform }
         : undefined,
     };
   }

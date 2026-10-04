@@ -222,7 +222,7 @@ describe('route wiring', () => {
   });
 
   it('a specialist is handed the request with what came with it', () => {
-    expect(route).toContain('userRequest: () => planning.text,');
+    expect(route).toContain('userRequest: () => (checksRequest === prompt ? planning.text : checksRequest),'); // merged with #3471 (a Continue turn is graded on the request it continues)
   });
 });
 

@@ -7,6 +7,7 @@
 // AgentRegistry so the Architect always delegates by real, current capability.
 
 import { shellEarlyRule } from './earlyPreview';
+import { MAX_FILES_PER_BATCH } from './batchSize';
 import { IMAGE_IN_APP_RULE } from './inAppImageGeneration';
 import { packageChoiceRule } from '../lib/unfixablePackages';
 import { HANDOFF_MECHANICAL_FIX_RULE } from './handoffRule';
@@ -823,13 +824,21 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '    5b. generate_melody       — the SOUND ITSELF. generate_game_vfx only loads sound FILES, which',
     '       the app does not have, so call this too and a game is never silent: synthesised music and',
     '       cues (coin, success, level-up) from notes, no file, no dependency, no cost.',
-    '    6. generate_game_shell    — LAST. Composes all of the above into something playable, with HUD,',
+    '    6. generate_game_shell    — LAST, and ONLY for a game drawn in 3D: it renders a three.js scene.',
+    '       Composes all of the above into something playable, with HUD,',
     '       on-screen TOUCH CONTROLS (joystick, camera drag, Attack/Jump/Use/Run, Pause — shown only on a',
     '       touch screen; choose buttons with `touchControls`, never hand-roll a joystick),',
     '       pause and restart, and handles WebGL teardown so the tab does not die after a few visits.',
     '  Then write only the GAME ITSELF — the levels, the rules, the content — passing it to the shell',
     '  through setup() and update(). Emit events for anything that should be seen or heard; never call',
     '  particles or audio from gameplay code.',
+    // 🍬 Candy report 7da1cdca (2026-10-04): a match-3 puzzle got the 3D shell, the 3D layer and its
+    // character controller — 24 files nothing used, and `three` installed for an app that draws emoji
+    // in a grid. The shell was the "LAST" step of every game because nothing said it was 3D-only.
+    '  🧩 A 2D GAME ON A BOARD OR THE PAGE — puzzle, match-3, memory cards, quiz, snake, tic-tac-toe,',
+    '  sudoku, word game — takes NEITHER generate_game_3d NOR generate_game_shell. Draw it with React',
+    '  (or one 2D canvas), keep generate_game_runtime, generate_game_vfx and generate_melody for the loop,',
+    '  the feel and the sound, and make every control a real button (or pointer events) so it plays by touch.',
     // 🏁 ADMIN 2026-08-25, from a real racing game: "baar baar kehne par gaadi ki speed kyu nahi badhayi
     // ja rahi… speed 0 sirf aur sirf tab ho, jab user bole". A vehicle that will not move is not a
     // difficulty setting — it is an unplayable game, and it is the single easiest way to ship one.
@@ -968,10 +977,11 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '      Array.from). Hundreds of literal records by hand is always wrong.',
     '  A "comprehensive seed file with 1000+ records" must become generate_seed_data or a',
     '  ~10-row sample + a generator — never a hand-typed 1000-row file.',
-    '- BATCH NEW FILES: when creating multiple independent new files at once (e.g.',
-    '  Button.tsx + Card.tsx + utils.ts), use write_files_batch — pass all files in',
-    '  one call. It auto-orders by import dependencies and is 3× faster than calling',
-    '  write_file one-by-one. Only use write_files_batch for NEW files; for existing',
+    `- SMALL BATCHES OF NEW FILES: write_files_batch takes at most ${MAX_FILES_PER_BATCH} new files per call`,
+    '  (e.g. Button.tsx + Card.tsx + utils.ts). Nothing in a call reaches the live preview until',
+    '  the whole call finishes, so a call carrying a whole app keeps the user waiting minutes and',
+    '  can be cut off at the stream limit. Write the entry and shared files first, then the',
+    '  screens a few at a time. Only use write_files_batch for NEW files; for existing',
     '  files always use edit_file (surgical patch).',
     scaffoldHint,
     '- The sandbox NODE VERSION IS FIXED — you cannot change it. If a dev tool errors with a',
@@ -1038,6 +1048,13 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  ORPHANS the server — the sandbox reaps it and you will see "Killed" right after',
     '  "ready", then a restart loop that burns the whole build budget. Just run',
     '  `npm run dev` (with the host/port flags above) and wait for the UP line.',
+    // Autopsy 241215d1: `pip install --user …` failed (PEP 668: this Python is externally managed) and a
+    // `python start_backend.py &` held the command open for 300 s. Both cost minutes the user watched.
+    '- PYTHON: create the environment first — `python3 -m venv .venv && . .venv/bin/activate &&',
+    '  pip install -r requirements.txt`. A plain or `--user` pip install is refused here (PEP 668).',
+    '  Start a Python server with its server command so the sandbox manages it like the dev',
+    '  server: `. .venv/bin/activate && uvicorn server.api:app --host 0.0.0.0 --port 8000`',
+    '  (gunicorn / `flask run` likewise), never `python script.py &`.',
     '- If you DO see "Killed" or "did not come up", do NOT relaunch with `&`/`nohup` (that',
     '  is what caused it). Read the logs for the REAL error (e.g. a missing dependency —',
     '  run `npm install` then start again), fix that, then run the plain command once more.',

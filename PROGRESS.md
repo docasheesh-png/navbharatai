@@ -87511,3 +87511,11 @@ Weak tier, build succeeded, the game rendered and played (₹110.75 billed on $0
 Owned elsewhere (not duplicated): spacing snap and "a game that saves is not 'nothing to save'" (#3474 Q-091/Q-093);
 GLM crawl (Q-009, admin: leave); `startTier: "gemini"` (Q-052). OPEN here: Q-246 (shell `rm` resurrected by the
 save), Q-247 (explorer could not press ⏸), Q-248 (summary contradicts itself).
+## 2026-10-01 — Q-021 done: PROGRESS.md's open root causes moved into the queue
+
+Four parallel read-only audits covered PROGRESS.md lines 1–87,401 (~260 "open root cause" markers). Each
+item was checked against later PROGRESS entries, the current code and the queue. Most July–August items
+were found CLOSED (e.g. coupon race, dead-sandbox recreate, preview door, in-flight call cancellation,
+turnKind, fail-open judge). The 67 still open (duplicates merged) are now rows Q-101…Q-167 in
+`BUILD_REPORT_QUEUE.md` — code-actionable ones OPEN, admin/infra/vendor ones 🟡 BLOCKED with what they need.
+"Unsure" items are marked as such in their row rather than guessed. Q-021 leaves the table.

@@ -87437,3 +87437,31 @@ were left alone: PR #3467 (another session) already carries them.
 
 **Still to watch.** Q-085: the next AI-chat report should show #3451's reach getting to a form held in a sidebar-switched component.
 **Still open.** Binary single-file uploads still stay in the browser. A binary write path from the IDE to the workspace is a separate change, and nothing asked for it yet.
+
+## 2026-10-04 — Autopsy 0311186f (ALGO forex scalper: a pasted reply became an 8-module plan; two module turns, Weak)
+
+**What happened.** The user pasted an assistant's reply about an automatic forex scalper (advice, the six questions it had asked them, example values) and added "App name ALGO, LUXURY PERIUM". The engine counted 18 features and read the paste as a mega project. It split the request into 8 modules with the "App Shell" last, so both paid turns (₹8.30 and ₹7.98) built only constants, types and mock services, and the user saw nothing. Every user-facing line then spoke as if a whole app had failed to start.
+
+**Tally:** 0 self-heals · 0 workarounds · 1 skipped (the picture was never read) · 11 shipped wrong (nine are honesty defects shown to the user or the admin) · 1 struggle (the first typecheck paid 16.5 s to install the compiler).
+
+| # | Problem | Root cause → class | Fix | Lock |
+|---|---|---|---|---|
+| 1 | Release gate, `RELEASE_GATE_UNPROVEN` and `RUNTIME_UNCHECKED` were warnings ×2 on module turns | The 6a5fb04b module fix taught three readers (starter, preview, reviewer) and four were never hunted. **Class:** a fact about a module turn has to reach every reader of "is this the whole app?" | `awaitingShell` threaded into `releaseGate`, `runtimeUncheckedRecord`, the UNPROVEN block and the RELEASE_GATE severity | `tests/aModuleTurnIsNotTheWholeApp.test.ts` |
+| 2 | The user was told "could not verify end to end … open the preview" ×2 | same | The line is skipped on a module turn; the module progress line says what this turn did | same |
+| 3 | The recap said "Here's what I built … live preview didn't start — open the Preview tab" ×2 | same | `summarizeProject({ awaitingShell })` says "Built one part of your app … nothing to open yet" | same |
+| 4 | The bill sentence said "I could not confirm your app running … send a follow-up" ×2 | same | `decideMarkupOnProof({ awaitingShell })` names the module; it was wired at both bill paths | same (census of both calls) |
+| 5 | Our own 🧾 money notice was filed as an ERROR in problems | The narration classifier read "could not" as a failure verb | 🧾 is a platform notice, like ℹ️ | same |
+| 6 | 18 "features" → mega project → 8 modules | Questions ("Timeframe scalping? (1m / 5m?)") and settings ("SL = 0.25%", "Daily stop: -2%") were counted as features. **Class:** a line that asks or sets a value names no part of the app | `notAFeatureLine` in `enumeratedFeatures.ts`; `appScopeAnalyzer`'s bullet count reads the same rule | `tests/theForexPasteIsNotAnEightModuleProject.test.ts` |
+| 7 | `REQUIREMENT_GAPS` domain = real-estate; the builder was told to add listings, a map and an EMI calculator | "broker" was real estate's only word; no trading domain existed | New `trading` domain, placed last; "broker"/"listing" are stripped in a trading context. A property broker still reads as real estate | same |
+| 8 | `SUMMARY_OFF_TOPIC`: the user was warned the summary "never mentions" “**PERFECT level**” | Any quoted 2-word phrase was taken as the app's name | A quote is a name only where the sentence calls it one ("app called X", "the X app"); markdown inside the quotes is ignored | same + `offTopicSummary.test.ts` |
+| 9 | Module turns were promised 9–10 and 7–12 min; the accuracy line said "UNDER the band, 0.2×" | The ETA is computed from the whole request before project mode picks a module | `moduleTurnEta.ts`: on a module turn the ETA, the countdown and the accuracy promise are withdrawn, and no module-sized guess replaces them | same |
+| 10 | `PLANNING_CONTEXT` said the unread picture "is a photo, not a UI design" | `picturesSetAside` counted unread pictures | Counted only when the picture was read | same (source guard) |
+| 11 | A "continue" that built module 2 said "✏️ Editing your existing app (19 source files)" | The edit narration ran before the plan was read | It stands down when a continuation advances an unfinished plan | same (source guard) |
+| 12 | The picture was not read: vision is capped at 8 s | — | 🟡 **Q-091** (admin decision: raise the cap to 20 s only when a picture is attached) | — |
+| 13 | The first write-time typecheck took 16.5 s installing the compiler | Second occurrence of Q-063 | Recorded on Q-063 | — |
+| 14 | "No tests at all" ×2; module turns billed at real cost; idle sandbox; startTier "sonnet" | argued not defects | 🟡 **Q-092** | — |
+| 15 | A pasted reply is still sized as a spec (APP_SCOPE ~20 → mega roadmap) | — | 🟡 **Q-093** (decision; recommended to leave) | — |
+
+**Missing subsystem.** "Is this turn the whole app?" has no single owner. Each reader (starter, preview, reviewer, gate, recap, bill, ETA) asked it separately, and the module fact reached three of them. This PR threads `moduleAwaitsShell` into the rest. The real fix is one `turnScope` value that every verdict reads, alongside the open `turnKind` item.
+
+**Proactive.** Project mode orders modules by dependency, so the App Shell comes last and the user sees nothing for N−1 paid turns. Building the shell early, as a thin assembled app that grows with each module, would turn every module turn into something the user can open. That is a planner change and an admin decision; it is not built here.

@@ -34,6 +34,7 @@
 // for repeatedly.
 
 import { lintBuiltApp } from './buildQualityLint';
+import { unlabelledFieldLines } from '../AppMakerLab/intelligence/A11yLinter';
 
 /**
  * A test file's JSX is a FIXTURE, not a screen — the one place this check must stay quiet.
@@ -106,7 +107,9 @@ export function qualityNote(
   try {
     for (const v of [...lint.a11y.violations, ...lint.design.violations]) {
       if (!v || !PER_FILE_VIOLATIONS.has(v.type) || !(v.count > 0)) continue;
-      lines.push(`  • ${v.message}`);
+      // Where, not only how many (autopsy 981ce4cc): the line numbers of the unlabelled fields.
+      const at = v.type === 'input-label' ? unlabelledFieldLines(content) : [];
+      lines.push(`  • ${v.message}${at.length ? ` Unlabelled field at line ${at.join(', ')}.` : ''}`);
       if (lines.length >= MAX_NOTE_LINES) break;
     }
   } catch {

@@ -15,30 +15,30 @@ export interface ApnapanProfile {
 }
 
 export const APNAPAN_GREETINGS: Array<{ key: string; patterns: RegExp }> = [
-  { key: 'राम-राम',        patterns: /\b(ram[- ]?ram|राम[- ]?राम)\b/i },
-  { key: 'राधे-राधे',      patterns: /\b(radhe[- ]?radhe|राधे[- ]?राधे)\b/i },
-  { key: 'जय श्री राम',    patterns: /\b(jai\s+shri\s+ram|जय\s+श्री\s+राम)\b/i },
-  { key: 'जय हिन्द',       patterns: /\b(jai\s+hind|जय\s+हिन्द|जय\s+हिंद)\b/i },
-  { key: 'नमस्ते',          patterns: /\b(namaste|नमस्ते)\b/i },
-  { key: 'नमस्कार',         patterns: /\b(namaskar|नमस्कार)\b/i },
-  { key: 'प्रणाम',          patterns: /\b(pranam|प्रणाम)\b/i },
-  { key: 'आदाब',            patterns: /\b(adaab|आदाब)\b/i },
-  { key: 'अस्सलामुअलैकुम', patterns: /\b(assalam|salaam|salam|अस्सलाम)\b/i },
-  { key: 'सत श्री अकाल',   patterns: /\b(sat\s+sri\s+akal|waheguru|सत\s+श्री\s+अकाल)\b/i },
-  { key: 'जय भीम',          patterns: /\b(jai\s+bhi[me]m?|जय\s+भीम)\b/i },
-  { key: 'केम छो',           patterns: /\b(kem\s+cho|केम\s+छो)\b/i },
+  { key: 'राम-राम',        patterns: /(?:^|[^\w\u0900-\u097F])(ram[- ]?ram|राम[- ]?राम)(?![\w\u0900-\u097F])/i },
+  { key: 'राधे-राधे',      patterns: /(?:^|[^\w\u0900-\u097F])(radhe[- ]?radhe|राधे[- ]?राधे)(?![\w\u0900-\u097F])/i },
+  { key: 'जय श्री राम',    patterns: /(?:^|[^\w\u0900-\u097F])(jai\s+shri\s+ram|जय\s+श्री\s+राम)(?![\w\u0900-\u097F])/i },
+  { key: 'जय हिन्द',       patterns: /(?:^|[^\w\u0900-\u097F])(jai\s+hind|जय\s+हिन्द|जय\s+हिंद)(?![\w\u0900-\u097F])/i },
+  { key: 'नमस्ते',          patterns: /(?:^|[^\w\u0900-\u097F])(namaste|नमस्ते)(?![\w\u0900-\u097F])/i },
+  { key: 'नमस्कार',         patterns: /(?:^|[^\w\u0900-\u097F])(namaskar|नमस्कार)(?![\w\u0900-\u097F])/i },
+  { key: 'प्रणाम',          patterns: /(?:^|[^\w\u0900-\u097F])(pranam|प्रणाम)(?![\w\u0900-\u097F])/i },
+  { key: 'आदाब',            patterns: /(?:^|[^\w\u0900-\u097F])(adaab|आदाब)(?![\w\u0900-\u097F])/i },
+  { key: 'अस्सलामुअलैकुम', patterns: /(?:^|[^\w\u0900-\u097F])(assalam|salaam|salam|अस्सलाम)(?![\w\u0900-\u097F])/i },
+  { key: 'सत श्री अकाल',   patterns: /(?:^|[^\w\u0900-\u097F])(sat\s+sri\s+akal|waheguru|सत\s+श्री\s+अकाल)(?![\w\u0900-\u097F])/i },
+  { key: 'जय भीम',          patterns: /(?:^|[^\w\u0900-\u097F])(jai\s+bhi[me]m?|जय\s+भीम)(?![\w\u0900-\u097F])/i },
+  { key: 'केम छो',           patterns: /(?:^|[^\w\u0900-\u097F])(kem\s+cho|केम\s+छो)(?![\w\u0900-\u097F])/i },
   { key: 'வணக்கம்',          patterns: /வணக்கம்|vanakkam/i },
   { key: 'Hello',            patterns: /^\s*(hello|hi|hey)\b/i },
   { key: 'Good Morning',     patterns: /\bgood\s+morning\b/i },
   { key: 'Good Evening',     patterns: /\bgood\s+evening\b/i },
 ];
 
-const FORMAL_MARKERS    = /\b(aap|आप|kripya|कृपया|dhanyawad|धन्यवाद|sir|madam|sahab)\b/i;
-const FRIENDLY_MARKERS  = /\b(yaar|यार|bhai|भाई|dost|दोस्त|bro)\b/i;
-const PROF_MARKERS      = /\b(doctor|dr\.|डॉक्टर|डॉ\.|professor|prof\.|advocate|eng\.)\b/i;
-const TITLE_PATTERN     = /\b(doctor\s+sahab|dr\.\s*ji|डॉक्टर\s+साहब|डॉ\.\s*जी|sir|madam|mitra|bhai\s+sahab|भाई\s+साहब)\b/i;
+const FORMAL_MARKERS    = /(?:^|[^\w\u0900-\u097F])(aap|आप|kripya|कृपया|dhanyawad|धन्यवाद|sir|madam|sahab)(?![\w\u0900-\u097F])/i;
+const FRIENDLY_MARKERS  = /(?:^|[^\w\u0900-\u097F])(yaar|यार|bhai|भाई|dost|दोस्त|bro)(?![\w\u0900-\u097F])/i;
+const PROF_MARKERS      = /(?:^|[^\w\u0900-\u097F])(doctor|dr\.|डॉक्टर|डॉ\.|professor|prof\.|advocate|eng\.)(?![\w\u0900-\u097F])/i;
+const TITLE_PATTERN     = /(?:^|[^\w\u0900-\u097F])(doctor\s+sahab|dr\.\s*ji|डॉक्टर\s+साहब|डॉ\.\s*जी|sir|madam|mitra|bhai\s+sahab|भाई\s+साहब)(?![\w\u0900-\u097F])/i;
 const PROJECT_KEYWORDS  = /\b(navbharatai|navbharat|hospital|clinic|school|startup|app|website|project)\b/i;
-const DEVANAGARI        = /[ऀ-ॿ]/;
+const DEVANAGARI        = /[\u0900-\u097F]/;
 const SOUTH_ASIAN_ALPHA = /[஀-௿ఀ-౿ಀ-೿ഀ-ൿঀ-৿਀-੿]/;
 
 export const APNAPAN_DEFAULT_PROFILE: ApnapanProfile = {

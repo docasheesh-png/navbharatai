@@ -1162,8 +1162,30 @@ export function shouldReprobeBoundPort(assumedPort: number, boundPort: number): 
  * package.json needs a reinstall + restart, which HMR can't do). On any doubt this returns false and
  * the full, proven sequence runs — today's behaviour, never worse. Pure + unit-testable.
  */
-export function shouldSkipDevServerLaunch(portAlreadyUp: boolean, depsStale: boolean): boolean {
-  return portAlreadyUp === true && depsStale !== true;
+export function shouldSkipDevServerLaunch(portAlreadyUp: boolean, depsStale: boolean, prebundleStale = false): boolean {
+  return portAlreadyUp === true && depsStale !== true && prebundleStale !== true;
+}
+
+/** Where Vite keeps the dependencies it pre-bundled when the dev server started. */
+export const VITE_PREBUNDLE_DIR = 'node_modules/.vite';
+
+/**
+ * 🔴 AUTOPSY 981ce4cc (2026-10-04). Shell test that prints `PREBUNDLE_STALE` when a package was installed
+ * AFTER the running Vite server pre-bundled its dependencies. A running Vite never looks at node_modules
+ * again: after `npm install react-pdf@9.2.1` it kept serving its bundled copy of react-pdf@11 (same
+ * `react-pdf.js?v=24816a75`, same line 32103), the app kept crashing with React 19's `use`, and the
+ * model, believing 9.2.1 was the culprit, downgraded to react-pdf@8.0.2 and pdfjs-dist@3.11.174, a
+ * version with a published "arbitrary JavaScript execution on a malicious PDF" advisory. The reuse
+ * check asked only "does node_modules need an install?" (`buildDepsStaleCheckCommand`), never "is the
+ * running server older than the last install?".
+ *
+ * npm rewrites `node_modules/.package-lock.json` on every install (with or without `--save`), and Vite
+ * writes `_metadata.json` when it pre-bundles, so the comparison is exact. No pre-bundle (Next, a Node
+ * server, a Vite that has not optimised anything yet) ⇒ silent. Ends in `true`. PURE string builder.
+ */
+export function buildPrebundleStaleCheckCommand(): string {
+  const meta = `${VITE_PREBUNDLE_DIR}/deps/_metadata.json`;
+  return `if [ -f ${meta} ] && { [ node_modules/.package-lock.json -nt ${meta} ] || [ package-lock.json -nt ${meta} ] || [ package.json -nt ${meta} ]; }; then echo PREBUNDLE_STALE; fi; true`;
 }
 
 /**

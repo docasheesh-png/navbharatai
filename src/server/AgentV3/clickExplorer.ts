@@ -72,6 +72,18 @@ export const MAX_SECOND_LEVEL_CLICKS = 8;
 /** At most this many second-level presses under any one first-level control, so one busy tab cannot spend the budget. */
 export const MAX_SECOND_LEVEL_PER_PARENT = 2;
 
+/**
+ * A press that changed nothing on a FRESH screen is tried once more after a control that DID change the
+ * screen (autopsy d798ddd3, Q-306's sibling Q-305). A calculator's "AC", "+/−" and "%" on a display of 0
+ * change nothing, correctly, so the explorer recorded "it responded (nothing visibly changed)" — and a dead
+ * clear button would have read exactly the same. Pressing "7" first gives such a control something to act
+ * on. This many retries at most, and only first-screen presses.
+ *
+ * 🔒 Still unchanged after that is reported in words, never as a failure: a "memory recall" with nothing
+ * stored legitimately does nothing, and a failing verdict would spend a repair on it.
+ */
+export const MAX_PRIMED_RETRIES = 3;
+
 /** How long one fresh page load may take before that control is given up on. */
 export const EXPLORE_LOAD_TIMEOUT_MS = 12_000;
 
@@ -240,6 +252,11 @@ export interface PressResult {
    * a first-screen press. It is a name a person can follow ("open Settings, then press Save").
    */
   via?: string;
+  /**
+   * The control pressed FIRST on a retry, because this one changed nothing on a fresh screen
+   * (`MAX_PRIMED_RETRIES`). The retry's result replaces the first one.
+   */
+  primedBy?: string;
 }
 
 /** How a press is named to a person: the control, and the screen it was found on when that is not the first. */
@@ -299,7 +316,16 @@ export function parseExploreOutput(stdout: string | null | undefined): ExploreRu
         changed: o.changed === true,
         ...(o.kind === 'type' || o.kind === 'pick' ? { kind: o.kind as PressKind } : {}),
         ...(typeof o.via === 'string' && o.via.trim() ? { via: o.via.slice(0, 60) } : {}),
+        ...(typeof o.primedBy === 'string' && o.primedBy.trim() ? { primedBy: o.primedBy.slice(0, 60) } : {}),
       });
+      // A retry after a primer REPLACES the first try of the same first-screen control (MAX_PRIMED_RETRIES).
+      const last = run.presses[run.presses.length - 1];
+      // A retry that could not be pressed adds nothing: the first try stands.
+      if (last.primedBy && last.verdict === 'skipped') run.presses.pop();
+      else if (last.primedBy) {
+        const first = run.presses.findIndex((p, i) => i < run.presses.length - 1 && p.label === last.label && !p.via && !p.kind && !p.primedBy);
+        if (first >= 0) run.presses.splice(first, 1);
+      }
     } else if (o.type === 'out-of-time') {
       run.outOfTime = true;
     }
@@ -499,6 +525,7 @@ export function clickExplorerScript(previewUrl: string, opts: { blockWrites: boo
     maxClicks: Math.max(1, Math.min(MAX_EXPLORE_CLICKS, opts.maxClicks ?? MAX_EXPLORE_CLICKS)),
     maxSecond: MAX_SECOND_LEVEL_CLICKS,
     perParent: MAX_SECOND_LEVEL_PER_PARENT,
+    maxPrimed: MAX_PRIMED_RETRIES,
     budgetMs: Math.max(10_000, opts.budgetMs ?? EXPLORE_BUDGET_MS),
     loadMs: EXPLORE_LOAD_TIMEOUT_MS,
     blockWrites: opts.blockWrites === true,
@@ -540,7 +567,32 @@ function collect(a) {
   for (const old of Array.from(document.querySelectorAll('[data-nbai-x]'))) old.removeAttribute('data-nbai-x');
   const never = new RegExp(a.neverSrc, a.neverFlags);
   const writes = new RegExp(a.writeSrc, a.writeFlags);
-  const nodes = Array.from(document.querySelectorAll('button, a[href], [role=button], [role=tab], [role=menuitem], [role=link], summary'));
+  const semantic = Array.from(document.querySelectorAll('button, a[href], [role=button], [role=tab], [role=menuitem], [role=link], summary'));
+  // A CONTROL WITHOUT A CONTROL'S TAG (autopsy f496c75b): a game's "Tap to Start" was a div with a click
+  // listener, and the explorer, reading only buttons and links, found nothing to press. An element is a
+  // control here when a click-type listener was added to it (recorded by the init script in freshPage),
+  // it carries an inline onclick, or React holds a press handler in its props. Never the page's own
+  // roots (a framework listens there for every click), never inside or around a real control (that
+  // control is pressed itself, and a press at the centre of a wrapper could land on a Delete inside it).
+  const tagged = window.__nbaiClickTargets;
+  const roots = new Set([document.documentElement, document.body, document.querySelector('#root, #app, #__next')]);
+  const CONTROL = 'button, a[href], input, select, textarea, label, summary, [role=button], [role=tab], [role=menuitem], [role=link], [contenteditable=""], [contenteditable=true]';
+  const reactPress = (el) => {
+    for (const k of Object.keys(el)) {
+      if (k.indexOf('__reactProps$') !== 0) continue;
+      const p = el[k];
+      return !!(p && (p.onClick || p.onPointerDown || p.onPointerUp || p.onMouseDown || p.onMouseUp || p.onTouchStart || p.onTouchEnd));
+    }
+    return false;
+  };
+  const extra = [];
+  const all = document.body ? document.body.getElementsByTagName('*') : [];
+  for (let n = 0; n < all.length && n < 4000; n++) {
+    const el = all[n];
+    if (roots.has(el) || el.closest(CONTROL) || el.querySelector(CONTROL)) continue;
+    if (el.hasAttribute('onclick') || (tagged && tagged.has(el)) || reactPress(el)) extra.push(el);
+  }
+  const nodes = semantic.concat(extra.filter((el) => !extra.some((o) => o !== el && el.contains(o))));
   const seen = new Set();
   const chosen = [];
   const skipped = [];
@@ -731,6 +783,20 @@ function pickSearchWord(items) {
 async function freshPage(browser) {
   // Reduced motion (the one definition every lane uses — signInExplore.ts), plus the saved session.
   const page = await browser.newPage(Object.assign(${JSON.stringify(BROWSER_PAGE_OPTIONS)}, cfg.storageState ? { storageState: cfg.storageState } : {}));
+  // Remember every element the app gives a click-type listener, before any of its code runs, so collect()
+  // can find a div that acts as a button. A WeakSet, not an attribute: the app's DOM is not touched.
+  await page.addInitScript(() => {
+    try {
+      const kinds = new Set(['click', 'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'touchstart', 'touchend']);
+      const marked = new WeakSet();
+      Object.defineProperty(window, '__nbaiClickTargets', { value: marked });
+      const add = EventTarget.prototype.addEventListener;
+      EventTarget.prototype.addEventListener = function (type, listener, options) {
+        try { if (kinds.has(type) && this instanceof Element) marked.add(this); } catch (e) {}
+        return add.call(this, type, listener, options);
+      };
+    } catch (e) {}
+  });
   page.on('dialog', (d) => d.dismiss().catch(() => {}));
   page.on('popup', (p) => p.close().catch(() => {}));
   return page;
@@ -801,7 +867,16 @@ async function pressOne(browser, target, discoverAgainst) {
       await press(page, parent.i);
       await settle(page);
     }
-    const again = await page.evaluate(collect, target.parentKey ? wide : cfg);
+    let again = await page.evaluate(collect, target.parentKey ? wide : cfg);
+    // A retry: press the control that DID change the screen first, unarmed (it was judged on its own press).
+    if (target.primerKey) {
+      const primer = again.chosen.find((c) => c.key === target.primerKey);
+      if (!primer) { res.note = 'the control it was to be tried after was not there on a fresh load'; await page.close().catch(() => {}); return { res, revealed }; }
+      await press(page, primer.i);
+      await settle(page);
+      again = await page.evaluate(collect, cfg);
+      res.primedBy = target.primerLabel;
+    }
     const hit = again.chosen.find((c) => c.key === target.key);
     if (!hit) { res.note = 'the control was not there on a fresh load'; await page.close().catch(() => {}); return { res, revealed }; }
     const before = await page.evaluate(measure);
@@ -821,6 +896,12 @@ async function pressOne(browser, target, discoverAgainst) {
     else if (missingPage) { res.verdict = 'broken-link'; res.note = 'it opened a page that does not exist'; }
     else if (res.errors.length > 0) { res.verdict = 'error'; res.note = 'the app threw an error when it was pressed'; }
     else { res.verdict = 'ok'; res.note = moved ? 'it opened another page, which loaded' : 'it responded'; }
+    res.moved = moved;
+    if (res.verdict === 'ok' && res.primedBy) {
+      res.note = res.changed
+        ? 'it responded once "' + res.primedBy + '" had been pressed first'
+        : 'it changed nothing, even after "' + res.primedBy + '" was pressed first';
+    }
     // A light/dark switch must change the page's colours within a full cycle of presses (THEME_CONTROL).
     if (res.verdict === 'ok' && !moved && lookBefore !== null) {
       let presses = 1;
@@ -955,10 +1036,12 @@ try {
     const second = [];
     const queued = new Set();
     let outOfTime = false;
+    const firstPressed = [];
     for (const target of plan.chosen) {
       if (Date.now() - started > cfg.budgetMs - 8000) { outOfTime = true; break; }
       const { res, revealed } = await pressOne(browser, target, firstScreen);
       say(res);
+      firstPressed.push({ target, res });
       let taken = 0;
       for (const c of revealed) {
         if (taken >= cfg.perParent || queued.has(c.key)) continue;
@@ -966,6 +1049,14 @@ try {
         second.push({ key: c.key, label: c.label, tag: c.tag, parentKey: target.key, via: target.label });
         taken++;
       }
+    }
+    // A press that changed nothing on a fresh screen is tried again after one that changed it (MAX_PRIMED_RETRIES).
+    const primer = firstPressed.find((p) => p.res.verdict === 'ok' && p.res.changed && !p.res.moved && !p.target.theme);
+    const quiet = primer ? firstPressed.filter((p) => p !== primer && p.res.verdict === 'ok' && !p.res.changed && !p.target.theme) : [];
+    for (const p of quiet.slice(0, Number.isFinite(cfg.maxPrimed) ? cfg.maxPrimed : 0)) {
+      if (outOfTime || Date.now() - started > cfg.budgetMs - 8000) { outOfTime = true; break; }
+      const { res } = await pressOne(browser, Object.assign({}, p.target, { primerKey: primer.target.key, primerLabel: primer.target.label }), null);
+      say(res);
     }
     // The search boxes and sort menus of the first screen, before any inner screen.
     for (const target of (plan.narrow || [])) {

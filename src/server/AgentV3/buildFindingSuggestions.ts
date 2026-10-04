@@ -133,6 +133,16 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     prompt: 'When I press some of the buttons or links in the app, it shows an error, goes blank, or opens a page that does not exist. Find each one, fix the real cause, and make sure every button and link works.',
   },
   {
+    // A feature a real browser had SEEN WORKING on an earlier build and that THIS change removed
+    // (changeEngine/appSpec.ts, FEATURE_REGRESSED — #3477). The user's app lost something it had, so
+    // the offer is to put it back as it was; where AGENTV3_FEATURE_HEAL runs, the heal has already
+    // tried once (FEATURE_REGRESSION_HEALED resolves this code). Classified while staging #3492 over #3477.
+    code: 'FEATURE_REGRESSED',
+    title: 'Restore the feature this change removed',
+    detail: 'A control that worked in your app before this change is no longer on the screen.',
+    prompt: 'A feature that worked in this app before the last change is missing now — its control is no longer anywhere in the running app. Find what the last change removed or broke, and restore that feature exactly as it was (same place, same behaviour) without redesigning it or touching anything else that works.',
+  },
+  {
     // The build itself ADMITTED a control does nothing ("Cloud Sync … is a UI-only toggle for now",
     // autopsy 51ef24ad / #3488). A dead control is the user's app and the fix is the obvious one, so
     // it gets a button rather than a warning they can only read. Classified here by the finding

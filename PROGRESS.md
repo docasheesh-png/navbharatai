@@ -87352,6 +87352,45 @@ open PR's CI failed with it (#3462 first).
 - **Class:** an upstream advisory landing between a PR's green CI and its merge. The gate is doing its job; the
   honest response is the pin, not an allowlist entry, because a fixed release exists.
 
+## 2026-10-01 — Autopsy 8f797751 (maths solver, stopped at 6.4 min, 6 s after the dev server came up)
+
+- **A ✅** At 4.6 min the model said "Your Math Solver app is ready … Open the Preview tab"; the platform
+  handed the turn back to style 41 unstyled classes and told only the admin report. No preview existed,
+  and the user stopped. Both hand-backs (style, unfinished) now put "⏳ Not finished yet …" in the chat
+  (`handBackNotice.ts`).
+- **B ✅** The fast lane's planned handoff was labelled "could not produce the app" / `BUILD_FAILED` beside
+  `LLM_CALL_HANDED_OFF`; now `handedOff` and an honest outcome line. (The contract-phase handoff wording,
+  and "Building 11 file(s)" before nothing was built, were already fixed on main by #3461.)
+- **C 🟡 → Q-090** Publish a preview the first time the app compiles clean, mid-build — admin decision.
+- **Q-009** recurred (GLM crawled twice).
+- Not defects: `mathjs` imported before it was installed (the note named the fix; the model wrote the
+  files the same note listed first, then installed); a `types.ts` syntax slip and a non-existent
+  `math.solve`, both self-corrected; a duplicate declaration refused by the write guard; one-file batches
+  (model choice); a manual `tsc` after the clean note; a brand-new workspace given our starter (expected).
+Tests: `tests/readyWasSaidBeforeThePreview.test.ts`, proven by reversion.
+## 2026-10-01 — Autopsy 52471441 ("Build a calculator", Weak, stopped by the user at 38 s)
+
+**What happened.** Setup took 8 s. The fast lane's file-list call (a ~500-token prompt) crawled on GLM `glm-4.7-flashx`
+and was abandoned at 15 s, then handed off because the next rung (KIMI) reasons before every answer. The full builder
+started on KIMI and read the starter files. No file had been written when the user pressed Stop at 38 s. Bill ₹0.
+
+**Tally:** 0 self-heals · 1 workaround (fast lane → full builder after the crawl) · 0 skips · 0 shipped broken ·
+1 struggle (15 s crawl = 37% of the clock, before anything reached the screen).
+
+| Item | Root cause | State |
+|---|---|---|
+| Nothing on screen in 38 s; the tested calculator template was not used | `goldenScaffoldForPrompt` seeds a template only for the chip's exact text; "Build a calculator" is shorter | Q-087 🟡 admin decision (option a recommended: verb + template name only) |
+| GLM crawl, 15 s | Provider latency (Z.ai) | Recurrence of Q-009, which #3465 closes as accepted provider weather. This instance (15 s) is under that decision's reopen line (60 s per build) |
+| Five lines read as defects but are true | See the row | Q-088 🟡 needs the admin's yes |
+
+**Missing subsystem (Step 2):** none new. The lever is Q-087: a bare request for a thing we already have a tested
+template for should get that template, which removes the plan call, the crawl and the wait together.
+
+**Proactive (Step 6), not built:** the crawl grace (`STREAM_THROUGHPUT_GRACE_MS`, 15 s) was sized for a 26,569-token
+prompt's ingestion. The fast lane's plan call is ~500 tokens, where a healthy `glm-4.7-flashx` (thinking disabled)
+answered in 2.4 s in autopsy 876afca9. A grace scaled by prompt size would cut a dead call's cost from 15 s to a few
+seconds. It changes when the ladder moves to KIMI, so it touches the admin's routing decision on Q-009; offered, not
+built.
 ## 2026-10-01 — Admin decisions on Q-009, Q-014, Q-015, Q-023 (and Q-064 folded into Q-009)
 
 The admin answered "karo" to the line naming these rows. Each decision row had a recommended option, and that option

@@ -87466,3 +87466,29 @@ no dependency had changed. Each was traced, not waved through:
   Allowlisted, and `tests/nodeForgeNeverVerifies.test.ts` holds the fact the entry depends on: a new
   importer or any verify call fails CI (proven by reversion both ways).
 OPEN: remove the three allowlist entries when upstream publishes fixes.
+
+## 2026-10-04 — Autopsy: iPhone build SHANKU-AI/instamony run 36792748246 — each platform knows its own keys (PR #3467)
+
+The run died in 20 s at the iOS workflow's own pre-flight: `Missing Apple signing secret(s): IOS_ASC_KEY_ID
+IOS_ASC_ISSUER_ID IOS_ASC_KEY_BASE64 IOS_TEAM_ID`. The workflow was right; everything NavBharatAI said
+about it was wrong: `STALE_WORKFLOW`, "the build stopped while installing your app's libraries", and
+`navbharatCanFixItself: true`.
+
+**Class:** every reader of "is the signing key there?" knew only the ANDROID list and the ANDROID
+sentence. This is the SAME class the classifier's own comment recorded on an earlier report (run
+34935149896: a matcher written against an invented string), fixed then for one platform only — the
+sibling workflow prints a different sentence and was never hunted.
+
+| Item | Root cause | Fix | Lock |
+|---|---|---|---|
+| Q-230 wrong code | pattern matched `Missing signing secret(s)` only | reads both sentences; platform read from the names | census over every generated workflow's sentence |
+| Q-231 false "installing" | stage fallback reached | follows from Q-230 | real-log test |
+| Q-232 "can fix itself" | same | autoFixable false | real-log test |
+| Q-233 run started unchecked | dispatch guard + status route Android-only | `IOS_SIGNING_SECRETS`; iOS guard (409, `canCreateKey:false`); `signing-status?platform=ios`; panel pre-check | source guards |
+| Q-234 Android key button on iPhone (latent) | panel raised the offer on any MISSING_SIGNING_SECRET | Android only; Apple sentence for iPhone | source guard |
+| Q-235 GitHub summary says "installing" | diagnostic step infers stage from `node_modules` | pre-flight steps carry ids; prints `preflight` | runs the real generated script |
+| Q-236 `preflight: null` | `isSigningSecretFailure` Android-only | knows both lists | test |
+| Q-237 "Xcode too old" unclassified | no class | now honest UNKNOWN; a class needs a new cure family | OPEN in the queue |
+
+All fixes reversion-proven (`tests/eachPlatformKnowsItsOwnKeys.test.ts`). The missing keys themselves are
+the user's to add; NavBharatAI now says so before a run, in plain words, and cannot create Apple keys.

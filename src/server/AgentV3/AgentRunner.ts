@@ -3,7 +3,7 @@ import type { AgentEventStream } from './AgentEventStream';
 import { isStarterBlocker, starterSummary } from './stillTheStarterApp';
 import type { WorkspaceState } from './WorkspaceState';
 import type { ClaudeToolDef, TurnRunner, TurnUsage, ToolUse, TurnResult } from './ClaudeClient';
-import type { ToolDispatcher } from './ToolDispatcher';
+import type { ToolDispatcher, ToolResult } from './ToolDispatcher';
 import type { AgentRole } from './types';
 import { startWorkingHeartbeat, workingLine } from './workingHeartbeat';
 import type { ConversationStore, ConversationStatus } from './ConversationStore';
@@ -36,6 +36,7 @@ import { repairClaimWithoutChange, repairClaimNote, NO_CHANGE_LINE } from './rep
 import { streamThinkingToChat } from './thinkingStream';
 import { PROMPT_PREVIEW_SEPARATOR } from './promptPreviewShape';
 import { answerAfterPlanning } from './answerAfterPlanning';
+import { resolveToolAlias, toolAliasNote } from './toolAlias';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -1207,7 +1208,8 @@ export class AgentRunner {
         // The `task` sub-agent tool is EXEMPT: it runs a whole nested build bounded by its OWN runner
         // watchdog/budget, so a cap here would wrongly kill a legitimate long sub-agent. On timeout the
         // tool yields an honest is_error result (never a throw) so the model can retry or route around it.
-        const dispatchWithBudget = async (tu: ToolUse) => {
+        const offeredToolNames = new Set(tools.map((t) => t.name));
+        const dispatchWithBudget = async (tu: ToolUse): Promise<ToolResult> => {
           /**
            * 🔴 THE LOOP GUARD'S "BANNED" IS ENFORCED HERE, AND THIS IS THE ONLY PLACE IT CAN BE.
            *
@@ -1232,6 +1234,12 @@ export class AgentRunner {
           }
           if (loopGuardOn && isProbeBanned(repeatProbe, tu.name, tu.input)) {
             return { tool_use_id: tu.id, content: bannedProbeMessage(tu.name), is_error: true };
+          }
+          // A MADE-UP TOOL NAME WITH A REAL TOOL'S SHAPE RUNS AS THAT TOOL (queue Q-145, toolAlias.ts).
+          const aliasTo = resolveToolAlias(tu.name, tu.input, offeredToolNames);
+          if (aliasTo) {
+            const r = await dispatchWithBudget({ ...tu, name: aliasTo });
+            return { ...r, content: `${toolAliasNote(tu.name, aliasTo)}${r.content}` };
           }
           if (toolTimeoutMs <= 0 || tu.name === 'task') return dispatcher.dispatch(tu, agentRole);
           try {

@@ -97,7 +97,7 @@ import { scopeStyleHandBack } from './stylePolishResume';
 import { batchSizeNote } from './batchSize';
 import { pageDesignWriteNote, isPageFile, analyzeDesignCoverage, type DesignDefect } from './DesignCoverage';
 import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
-import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets } from './shellWriteTargets';
+import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets, shellRemovedOperands, removedRecordedPaths } from './shellWriteTargets';
 import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames } from './tscErrorCause';
@@ -880,6 +880,29 @@ export class ToolDispatcher {
 
   setFileDeletionSink(sink: (paths: string[]) => void): void {
     if (typeof sink === 'function') this.fileDeletionSink = sink;
+  }
+
+  /**
+   * Every path the build has recorded for the saved project (queue Q-246). A shell command that removes
+   * one of them — any file kind, a folder, a glob, the source of a `mv` — is checked against the sandbox
+   * and forgotten, so the final save cannot put it back. Unset ⇒ only the delete guard's single source
+   * files are reconciled, as before.
+   */
+  private recordedPaths?: () => Iterable<string>;
+
+  setRecordedPaths(getter: () => Iterable<string>): void {
+    if (typeof getter === 'function') this.recordedPaths = getter;
+  }
+
+  /** The parent's deletion wiring, for a sub-agent's dispatcher (queue Q-246). */
+  deletionWiring(): { sink?: (paths: string[]) => void; recorded?: () => Iterable<string> } {
+    return { sink: this.fileDeletionSink, recorded: this.recordedPaths };
+  }
+
+  /** Called once at spawn: a sub-agent's shell deletions reach the parent's saved project too. */
+  shareDeletionWiring(w: { sink?: (paths: string[]) => void; recorded?: () => Iterable<string> } | undefined): void {
+    if (w?.sink) this.setFileDeletionSink(w.sink);
+    if (w?.recorded) this.setRecordedPaths(w.recorded);
   }
 
   /** Told when a delete of the user's own file is refused, so the build report says so. */
@@ -4856,8 +4879,16 @@ export class ToolDispatcher {
         // line already knew which source files the command would remove; nothing had ever acted on it
         // once the command succeeded, so a build that tidied up its own debris was then failed over the
         // debris. `fileDeletion.ts` carries the evidence and the three conditions.
-        if (deleteTargets.length > 0) {
-          try { await this.reconcileDeletions(deletionCandidates(deleteTargets, exitCode)); }
+        // …AND EVERYTHING ELSE A SHELL TOOK OUT (queue Q-246): a stylesheet, a folder, a glob, the source
+        // of a `mv`. Only recorded paths are named, and each is confirmed gone in the sandbox first.
+        let removedRecorded: string[] = [];
+        if (exitCode === 0 && this.recordedPaths) {
+          try { removedRecorded = removedRecordedPaths(shellRemovedOperands(command), this.recordedPaths()); }
+          catch { removedRecorded = []; }
+        }
+        if (deleteTargets.length > 0 || removedRecorded.length > 0) {
+          const candidates = [...new Set([...deletionCandidates(deleteTargets, exitCode), ...removedRecorded])];
+          try { await this.reconcileDeletions(candidates); }
           catch { /* reconciliation is best-effort — a failure simply keeps today's stale entry */ }
         }
         /**
@@ -10670,6 +10701,9 @@ export class ToolDispatcher {
             .catch(() => ({ exitCode: -1, stdout: '', stderr: '' }));
           removed = rm.exitCode === 0;
           if (removed) this.state?.recordFileChange({ path: from, kind: 'delete' }, agent);
+          // The old path must leave the build's own maps too, or the final save puts it back (Q-246's
+          // sibling: every other delete already reconciles; this rm did not).
+          if (removed) await this.reconcileDeletions([from]);
         }
         this.scheduleCheckpoint(`codemod move ${from} → ${to}`);
         return result.summary + (removed ? '' : `\nNOTE: could not delete the old file ${from} — remove it manually (its importers already point to ${to}).`);
@@ -10860,6 +10894,34 @@ function flexibleWhitespaceRegex(literal: string): RegExp | null {
  * message. Copy-safe: NO line-number prefixes inside the fenced block (the range is stated in the header),
  * so the model can copy the shown lines verbatim into a new old_string.
  */
+/**
+ * The CSS selectors an edit's `old_string` opens a rule for (`.btn-danger {`) that have no rule in the
+ * file. Only selector-shaped lines ending in `{` are read, so a JS/TS edit can never produce one. PURE.
+ */
+export function missingCssSelectors(existing: string, oldStr: string): string[] {
+  const out: string[] = [];
+  for (const raw of String(oldStr ?? '').split('\n')) {
+    // Linear by construction: an end check, then one class with no nesting (a nested optional group
+    // here backtracked for a full minute on an ordinary sentence — caught by the existing suite).
+    const line = raw.trim();
+    if (!line.endsWith('{') || line.length > 200) continue;
+    const sel = line.slice(0, -1).trim();
+    if (!/^[.#][\w-][\w\s.#:>+~,()-]*$/.test(sel)) continue;
+    if (!/^[.#]/.test(sel)) continue; // class/id rules only — a bare `div {` or `@media … {` is too common to judge
+    const re = new RegExp(`(^|[\\s,}])${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\s*[,{]`, 'm');
+    if (!re.test(existing) && !out.includes(sel)) out.push(sel);
+  }
+  return out.slice(0, 5);
+}
+
+/** The head-and-tail view of a long file used when an edit's anchor is nowhere in it. PURE. */
+function nearestEditRegionHeadTail(existing: string, maxChars: number): string {
+  if (existing.length <= maxChars) return `Current file content:\n\`\`\`\n${existing}\n\`\`\`\n`;
+  const tailChars = Math.floor(maxChars * 0.4);
+  return `Top of the file:\n\`\`\`\n${existing.slice(0, maxChars - tailChars)}\n…\n\`\`\`\n`
+    + `End of the file:\n\`\`\`\n…\n${existing.slice(existing.length - tailChars)}\n\`\`\`\n`;
+}
+
 export function nearestEditRegion(existing: string, oldStr: string, windowLines = 24, maxChars = 2400): string {
   const lines = existing.split('\n');
   // Distinctive anchors from the intended edit: longest trimmed lines first — a token-bearing line like
@@ -10873,6 +10935,16 @@ export function nearestEditRegion(existing: string, oldStr: string, windowLines 
   for (const a of anchors) { const i = lines.findIndex((l) => l.trim() === a); if (i >= 0) { hit = i; break; } }
   if (hit < 0) for (const a of anchors) { const i = lines.findIndex((l) => l.includes(a)); if (i >= 0) { hit = i; break; } }
   if (hit < 0) {
+    // 🔴 A RULE THAT WAS NEVER THERE (autopsy 51ef24ad, 2026-10-04). A sub-agent tried to EDIT
+    // `.btn-danger { … }` and `.nb-main { … }` in the design-kit stylesheet three times — neither rule
+    // existed. Its read had been compacted to head+tail, so it edited from memory, and the miss showed it
+    // only the top of the file, which could not tell it "that rule does not exist". Said directly now.
+    const absent = missingCssSelectors(existing, oldStr);
+    const absentNote = absent.length > 0
+      ? `The rule${absent.length === 1 ? '' : 's'} ${absent.map((x) => `\`${x}\``).join(', ')} ${absent.length === 1 ? 'does' : 'do'} not exist in this file — `
+        + 'there is nothing to edit. To add it, call edit_file with an EMPTY old_string and the full rule as new_string (it appends).\n'
+      : '';
+    if (absentNote) return absentNote + nearestEditRegionHeadTail(existing, maxChars);
     // No anchor located anywhere — the intended text may be entirely gone/hallucinated. Show the head,
     // honestly labelled as such (not the target), so the model re-reads instead of trusting a wrong region.
     if (existing.length <= maxChars) {

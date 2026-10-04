@@ -21,7 +21,8 @@ describe('which AI route a builder is told to take', () => {
     expect(r).toContain(AI_IN_APP_RULE);
     expect(GATEWAY_AI_RULE).toMatch(/run_recipe with name "generate_ai" and input \{ "provider": "navbharat" \}/);
     expect(GATEWAY_AI_RULE).toMatch(/do NOT ask for an API key/);
-    expect(GATEWAY_AI_RULE).toMatch(/after they PUBLISH, not in the preview/);
+    expect(GATEWAY_AI_RULE).toMatch(/already answers in the NavBharatAI preview/);
+    expect(GATEWAY_AI_RULE).toMatch(/for everyone once they PUBLISH/);
   });
 
   it('the recipe it names really resolves to the keyless provider', () => {

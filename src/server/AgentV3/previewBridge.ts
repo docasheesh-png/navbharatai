@@ -23,6 +23,8 @@
  * so a re-boot, a restart or a second update_preview never installs it twice (double-wrapping the
  * console would double every line the app prints).
  */
+import { previewAiShimSource } from '../../lib/previewAiProtocol';
+
 export const PREVIEW_BRIDGE_MARKER = '__nbaiPreviewBridgeInstalled';
 
 /**
@@ -367,7 +369,8 @@ export function previewBridgeSource(source: 'in-browser' | 'live'): string {
       return sendOrig.apply(this, arguments);
     };
   }
-})();`;
+})();
+${previewAiShimSource()}`;
 }
 
 /**
@@ -498,3 +501,32 @@ export function bridgeShellNote(html: string): string {
     + 'is removed from everything read_file shows you and from everything that is published, and is NOT part of this app — '
     + 'do not read, debug or edit it. Use read_file index.html to see the app\'s real file.]';
 }
+
+/**
+ * Give a saved PREVIEW COPY (the snapshot of `dist/`) the in-page assistant relay — only when the app uses
+ * the assistant at all, and never into anything published (the snapshot has its own channel; Publish goes
+ * through DeploymentStore and gets the real stamp instead).
+ *
+ * 🔒 The relay holds no credential: it posts questions to its parent page, and only the owner's signed-in
+ * NavBharatAI panel answers them. Opened on its own, the copy's assistant simply says it is not available.
+ * Returns the same Map when nothing applies. Never throws.
+ */
+export function withPreviewAiRelay(dist: Map<string, Buffer>): Map<string, Buffer> {
+  try {
+    const usesAi = [...dist.entries()].some(([p, b]) => /\.(?:m?js|html)$/i.test(p) && b.includes('NavAI'));
+    const indexPath = dist.has('index.html') ? 'index.html' : null;
+    if (!usesAi || !indexPath) return dist;
+    const html = dist.get(indexPath)!.toString('utf8');
+    if (html.includes(PREVIEW_AI_RELAY_MARKER)) return dist;
+    const tag = `<script ${PREVIEW_AI_RELAY_MARKER}>${previewAiShimSource()}</script>`;
+    const patched = /<head[^>]*>/i.test(html) ? html.replace(/(<head[^>]*>)/i, `$1${tag}`) : null;
+    if (!patched) return dist;
+    const out = new Map(dist);
+    out.set(indexPath, Buffer.from(patched, 'utf8'));
+    return out;
+  } catch {
+    return dist;
+  }
+}
+
+export const PREVIEW_AI_RELAY_MARKER = 'data-nbai-preview-ai';

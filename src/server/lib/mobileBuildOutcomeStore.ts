@@ -395,7 +395,14 @@ export function summariseBuildOutcomes(rows: readonly DailyBuildOutcomes[]): Out
  * ⚠️ DERIVED FROM `classifyBuildFailure`'s own `autoFixable`, never from a second list kept by hand —
  * `tests/theFailureCodesAreCounted.test.ts` asserts the two agree.
  */
-export type CureFamily = 'repairable' | 'user-credentials' | 'unclassified';
+export type CureFamily = 'repairable' | 'user-credentials' | 'build-machine' | 'unclassified';
+
+/**
+ * The classes that are the BUILD MACHINE's, not the app's and not the user's key (queue Q-237): the
+ * runner GitHub handed this run cannot build for the store at all. No repair to the repository helps,
+ * and no button in front of the user does either — the honest answer is "build again later".
+ */
+const BUILD_MACHINE_CODES: ReadonlySet<string> = new Set(['BUILD_MACHINE_TOO_OLD']);
 
 /**
  * The classes NO repair loop can ever fix, however good it gets.
@@ -428,12 +435,13 @@ const CREDENTIAL_CODES: ReadonlySet<string> = new Set([
 export function cureFamily(code: string): CureFamily {
   const name = String(code ?? '').trim().toUpperCase();
   if (!name || name === 'UNKNOWN') return 'unclassified';
+  if (BUILD_MACHINE_CODES.has(name)) return 'build-machine';
   return CREDENTIAL_CODES.has(name) ? 'user-credentials' : 'repairable';
 }
 
 /** The diagnosed failures split by what would actually cure them. Counts, never estimates. */
 export function cureSplit(summary: OutcomeSummary): Record<CureFamily, number> {
-  const out: Record<CureFamily, number> = { repairable: 0, 'user-credentials': 0, unclassified: 0 };
+  const out: Record<CureFamily, number> = { repairable: 0, 'user-credentials': 0, 'build-machine': 0, unclassified: 0 };
   for (const c of summary.topCodes) out[cureFamily(c.code)] += c.count;
   return out;
 }

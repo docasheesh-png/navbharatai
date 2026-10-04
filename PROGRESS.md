@@ -87617,6 +87617,20 @@ is what was adopted. The rows leave `BUILD_REPORT_QUEUE.md`; this entry is their
 - **OPEN (by design, slice 2):** a regression is reported and queued, not repaired in the same build. Wiring it into
   the feature heal waits on real reports showing the regression probe has no false positives.
 - **OPEN:** only the nine probe-able features can be verified; other requirements join in slice 3.
+
+## 2026-10-04 — Change Intelligence Engine, slices 2–7 (admin: "sara kaam karo, bas improvement chahiye")
+
+- **2:** a regressed feature joins the existing feature heal (same runner, `verifyAfterFix`, cohort gate); prompt says
+  restore, not redesign. `FEATURE_REGRESSION_HEALED`.
+- **3:** contract labels become non-probe-able requirements, `built` only after a GREEN gate.
+- **4:** impact set from the import graph for standard/deep edits (fenced).
+- **5:** deliberate removals are declined everywhere. **Root cause closed:** "remove" is the delete probe's own keyword,
+  so "remove the delete button" was graded as a missing Delete control and could be healed back.
+- **6:** high/medium security findings become owned issues; cleared only when their file was analysed.
+- **7 (user-visible):** History tab → "What your app does" card + `GET /api/agentv3/app-memory` (strict owner,
+  white-labelled) + AppKnowledgeBase `app-requirements-memory`.
+- **OPEN:** the regression probe's real false-positive rate (watch `FEATURE_REGRESSED`); `techDebt` and
+  `workspace_traceability` are not retired (other readers exist).
 ## 2026-10-01 — Autopsy a4be7fa2 + 3f959fde (Kerala-lottery data question, Telugu)
 
 Two builds in one workspace. Build 1 (stopped at 93 s, ₹0): "First data table lo draws check chesi e algorithm

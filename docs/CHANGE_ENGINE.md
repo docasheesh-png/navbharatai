@@ -1,6 +1,6 @@
 # Change Intelligence Engine — design and phased plan
 
-Status: **slices 1–2 built** (PRs #3477, slice 2 follows). Slices 3–6 are planned below.
+Status: **slices 1–7 built** (2026-10-04). Slice 1 is PR #3477; the rest are stacked PRs.
 Owner of the idea: the admin's request of 2026-10-04 to bring spec-driven editing to NavBharatAI.
 It was studied against GitHub Spec Kit (commit `ae5ade7`) and **adapted, not copied**.
 
@@ -128,15 +128,22 @@ Requirements written there would be evicted by an ordinary busy build.
 - Only the nine probe-able features (add, delete, edit, complete, filter, search, list, auth, theme) can be
   verified. Requirements outside that table are not in the ledger yet (slice 3).
 
-## 7. The plan for the remaining slices (not built)
+## 7. Slices 2–7 — all built 2026-10-04 (admin: "sara kaam karo")
 
-| Slice | What | Trigger to start |
+Each slice is its own branch and PR, stacked in order (`claude/change-engine-slice1` … `slice7`).
+
+| Slice | What was built | What it deliberately does NOT do |
 |---|---|---|
-| 2 ✅ | Feed `FEATURE_REGRESSED` into the existing feature-heal runner under `verifyAfterFix`, with no new repair engine | **Built 2026-10-04 on the admin's instruction, before the false-positive measurement** — rides the existing heal cohort gate |
-| 3 | Requirements beyond the probe table: accept `RequirementCoverage` labels and confirmed feature-card items as ledger items with status `requested`, verified by journeys (`JOURNEY_PASSED`) | After 2 |
-| 4 | Deterministic impact set from `codeGraph.impactOf` for standard/deep changes: list the files and requirements a change will touch, before implementation | After 1 has data on how often deep changes regress |
-| 5 | A consistency pass on deep changes: run the dead `PlanIntelligence.analyzePlan` against the ledger before implementation; at most ONE question on a genuinely consequential ambiguity, with a recommended default | After 4 |
-| 6 | Fold `techDebt` into the issue queue and give `workspace_traceability` its producer (REQ → file → test → evidence), then retire the duplicates | After 3 |
+| 2 | A regressed feature joins the EXISTING feature heal: same runner, same `verifyAfterFix` net, same `AGENTV3_FEATURE_HEAL` cohort gate. The prompt says *restore, do not redesign*. Codes `FEATURE_REGRESSION_HEALED` / `FEATURE_REGRESSED`. | Spend outside the heal cohort. The regression probe's false-positive rate is unmeasured; the admin chose to ship first. |
+| 3 | The contract labels (named + ticked features) join the ledger as non-probe-able requirements, marked `built` only by a build that passed its release gate GREEN. | Call one *verified* or *regressed*: no runtime check exists for them. |
+| 4 | Impact set: files the request names (by file-name words) plus the conventional files of its change kind, and every file that imports them (`codeGraph.impactOf`). Given to standard/deep edits, fenced as data. | Restrict what the builder may change. A request naming nothing yields nothing; a request matching half the app also yields nothing. |
+| 5 | A deliberate removal ("remove the delete button", "search bar hata do") is read against the request, passed as DECLINED to all four coverage probes and to the ledger, so it is dropped and never healed back. This closed a pre-existing defect: "remove" is the delete probe's own keyword. | Ask the user a question: no consequential ambiguity was found that needed one. `PlanIntelligence.analyzePlan` was not reused because it reviews a plan-mode todo list, not an edit. |
+| 6 | Security findings (high/medium) enter the issue queue, redacted. A security issue clears only if this build actually analysed its file. | Retire `techDebt` or `workspace_traceability`: they have other readers (the techDebt GET, the traceability POST), and replacing them is a separate decision. |
+| 7 | **User-visible:** the History tab's "What your app does" card shows each requirement's real status, the open problems and the change log, in plain words. Strict owner read, white-labelled by construction. AppKnowledgeBase entry added. | Expose codes, vendors or model ids. |
 
-Every slice reuses an existing system named in the audit's do-not-duplicate list, and none of them adds a
-planner or a repair engine of its own.
+## 8. What to watch after merge
+
+- `FEATURE_REGRESSED` on edit builds. A false one means a working app was flagged. Inside the heal cohort, it also means a repair pass was spent.
+- `FEATURE_REGRESSION_HEALED`: a lost feature restored.
+- `CHANGE_CLASSIFIED`: whether the light/standard/deep split matches reality.
+- The "What your app does" card on real apps: whether its statuses match what the user sees.

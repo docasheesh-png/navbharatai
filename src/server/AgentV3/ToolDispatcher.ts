@@ -3668,8 +3668,8 @@ export class ToolDispatcher {
     // the first leaf write, because the prose rule in the system prompt lost to the leaves-first habit.
     // The entry-first hand-back (autopsy 39e982bd) and `entryLateNoteFor` (autopsy 68f0a486) are ONE rule said
     // once — whichever fires first silences the other (merged 2026-10-04, #3523 + #3524).
-    const entryFirst = await this.entryFirstNote(files);
-    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + entryFirst + security + shadow + theme + touch;
+    shadow += await this.entryFirstNote(files);
+    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow + theme + touch;
   }
 
   /**

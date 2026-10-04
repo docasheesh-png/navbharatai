@@ -277,6 +277,31 @@ export function packageOfSpecifier(specifier: string): string {
 const VOID_RESULT_RE = /Property '([^']+)' does not exist on type '((?:Promise<)?void>?)'/;
 const WEB_SPEECH_RECOGNITION_RE = /(?:Cannot find name|Property) '(?:webkit)?(?:SpeechRecognition|SpeechRecognitionEvent|SpeechRecognitionErrorEvent|SpeechGrammarList)'/;
 
+/**
+ * JSX IN A `.ts` FILE (autopsy `51ef24ad`, 2026-10-04). `src/hooks/useAppState.ts` was written with a
+ * `<AppStateContext.Provider>` inside it, and tsc answered with what it always answers for JSX outside a
+ * `.tsx` file: `'>' expected`, `Unterminated regular expression literal`, `Expression expected`. Each
+ * points at a perfectly good line, so the model edited the JSX five times before it renamed the file.
+ * The code is fine — the EXTENSION is wrong — which is this module's class: the remedy is not in the
+ * code the error names. Detected only from the parse-error codes TypeScript emits for it, on a `.ts`
+ * path, and (when the source is in hand) only if that source really contains a JSX element.
+ */
+const JSX_IN_TS_CODES = new Set(['TS1005', 'TS1109', 'TS1128', 'TS1161', 'TS17008', 'TS1003', 'TS2304']);
+
+/** A JSX element in source text: a paired open/close tag, a self-closing component, or a fragment. PURE. */
+export function sourceHasJsx(code: string): boolean {
+  if (typeof code !== 'string' || !code) return false;
+  const s = code
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
+    .replace(/`(?:\\.|[^`\\])*`/g, '``')
+    .replace(/'(?:\\.|[^'\\\n])*'/g, "''")
+    .replace(/"(?:\\.|[^"\\\n])*"/g, '""');
+  return /<([A-Za-z][\w.]*)(?:\s[^<>]*)?>[\s\S]*?<\/\1\s*>/.test(s)
+    || /<[A-Z][\w.]*(?:\s[^<>]*)?\/>/.test(s)
+    || /<>[\s\S]*?<\/>/.test(s);
+}
+
 export function tscErrorCauses(
   errors: readonly TscError[] | null | undefined,
   sources: Readonly<Record<string, string>> = {},
@@ -299,6 +324,24 @@ export function tscErrorCauses(
   for (const e of errors || []) {
     if (out.length >= MAX_CAUSES) break;
     const message = String(e?.message ?? '');
+
+    // JSX in a `.ts` file — see JSX_IN_TS_CODES. With the source: only when it really holds JSX. Without
+    // it: only for the two messages that are JSX's own signature, and said as a check, not a verdict.
+    const tsFile = String(e?.file ?? '').replace(/\\/g, '/');
+    if (/\.(?:ts|mts|cts)$/.test(tsFile) && !/\.d\.ts$/.test(tsFile) && JSX_IN_TS_CODES.has(String(e?.code ?? ''))) {
+      const src = sourceFor(tsFile);
+      const tsxName = tsFile.replace(/\.[mc]?ts$/, '.tsx');
+      if (src ? sourceHasJsx(src) : /^'>' expected|^Unterminated regular expression literal/.test(message)) {
+        add('jsx-in-ts',
+          src
+            ? `\`${tsFile}\` contains JSX, and a \`.ts\` file cannot hold JSX — these parse errors are the extension, not your markup. `
+              + `Do NOT edit the JSX. Move the file to \`${tsxName}\` (use the move/rename tool so imports follow; extension-less `
+              + 'imports need no change), then re-run the typecheck.'
+            : `If \`${tsFile}\` contains JSX, these parse errors are its extension, not its code: a \`.ts\` file cannot hold JSX. `
+              + `Move it to \`${tsxName}\` instead of editing the markup.`);
+        continue;
+      }
+    }
 
     // 🔴 THE RESULT OF A FUNCTION THAT RETURNS NOTHING (autopsy 2b1f845e, 2026-10-01). PostStep.tsx did
     // `const { campaign, results } = await postCampaign(...)` against a store action declared to return

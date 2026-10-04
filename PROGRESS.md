@@ -87471,3 +87471,9 @@ were found CLOSED (e.g. coupon race, dead-sandbox recreate, preview door, in-fli
 turnKind, fail-open judge). The 67 still open (duplicates merged) are now rows Q-101…Q-167 in
 `BUILD_REPORT_QUEUE.md` — code-actionable ones OPEN, admin/infra/vendor ones 🟡 BLOCKED with what they need.
 "Unsure" items are marked as such in their row rather than guessed. Q-021 leaves the table.
+
+## 2026-10-04 — Autopsy 51ef24ad (Target-AS, "Build app in this format")
+- **JSX in `.ts`** (useAppState.ts edited ~5× before a rename): `tscErrorCause` gains `jsx-in-ts` — the write-time note and the repair loops now say "move it to `.tsx`, do not edit the JSX". The system prompt also says a JSX file is `.tsx` from its first write.
+- **Dead control shipped** ("Cloud Sync … is a UI-only toggle for now" + a "Sync All Data Now" button that did nothing): system-prompt rule NO CONTROL THAT DOES NOTHING; the build's own admission is recorded as the app finding `UI_ONLY_CONTROL` (`admittedInertControls`, claimAudit.ts).
+- **A 54-file port scored "simple" 15**: `workspaceSizedComplexity` — a build order over ≥20 of the user's own files opens as complex (source `workspace`).
+- **OPEN:** the frontend sub-agent hit its 40-step cap after spending steps reading Kotlin sources (REPEATED_READS 78/34). The real fix is a source digest handed to sub-agents on a port, which is not built yet. The ETA ("app_unsized", 8 min vs 19 actual) does not yet read the workspace size either.

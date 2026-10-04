@@ -87422,3 +87422,17 @@ is what was adopted. The rows leave `BUILD_REPORT_QUEUE.md`; this entry is their
     day.
   - **The real lever then:** a ladder change (another lead rung on Weak/Normal). That is the admin's routing
     decision, not a code fix.
+
+## 2026-10-04 — Change Intelligence Engine, slice 1 (admin request: spec-driven editing)
+
+- **Studied first:** GitHub Spec Kit (`ae5ade7`) — templates, converge, bug triad, analyze — and three audits of
+  our own edit pipeline and per-app storage. Design and phased plan: `docs/CHANGE_ENGINE.md`.
+- **Root cause addressed:** every "what was asked?" check reads only the current prompt, so an edit that removed a
+  working feature was never caught. Now each app has a server-side requirement ledger (`REQ-nnn`, verified only by a
+  real control in the running app), a regression re-probe on every edit (`FEATURE_REGRESSED`), an issue queue moved
+  only by evidence (`ISS-nnn`, DETECTED → TRIAGED → ASSIGNED → FIXED → VERIFIED), and a `CHG-nnnn` record per build.
+- **Flag:** `AGENTV3_CHANGE_ENGINE` (default ON, `off` reverts). Tests: `tests/changeEngine.test.ts` (the ten admin
+  scenarios), two guards reversion-proven.
+- **OPEN (by design, slice 2):** a regression is reported and queued, not repaired in the same build. Wiring it into
+  the feature heal waits on real reports showing the regression probe has no false positives.
+- **OPEN:** only the nine probe-able features can be verified; other requirements join in slice 3.

@@ -81,7 +81,8 @@ import { injectPreviewBridge, withoutPreviewBridge, PREVIEW_BRIDGE_MARKER } from
 import { browseConsoleCaptureEnabled, CANCELLED_REQUEST_RE } from '../../../renderCheckConsole';
 import { gunzipSync } from 'zlib';
 import { LIST_PRUNE_DIRS, isListPrunedPath } from '../../../../lib/generatedDirs';
-import { NPM_INSTALL_LOCK, PRIME_NODE_MODULES } from '../../../tscCommand';
+import type { ActuatorCommandTiming } from '../../../commandTiming';
+import { NPM_INSTALL_LOCK, PRIME_NODE_MODULES, WARM_NODE_MODULES } from '../../../tscCommand';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -842,7 +843,7 @@ export class E2BActuator implements IEngineerActuator {
     // reconcile any version drift. Fully guarded: if the warm dir isn't present (i.e. the template
     // hasn't been rebuilt yet) this is a no-op and behaviour is byte-identical to today.
     try {
-      const warmDir = '/home/user/.warm/vite-react/node_modules';
+      const warmDir = WARM_NODE_MODULES;
       const [warmExists, hasModules] = await Promise.all([
         sandbox.files.exists(warmDir).catch(() => false),
         sandbox.files.exists(`${WORKSPACE_ROOT}/node_modules`).catch(() => false),
@@ -2077,13 +2078,13 @@ export class E2BActuator implements IEngineerActuator {
     return this.sandboxes.has(workspaceId);
   }
 
-  async runCommand(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  async runCommand(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string; timing?: ActuatorCommandTiming }> {
     const release = this._holdSandboxOp(workspaceId);
     try {
       if (isLongRunningCommand(command)) {
         const inFlight = this._devLaunches.get(workspaceId);
         if (inFlight) return await inFlight;
-        const tracked: Promise<{ exitCode: number; stdout: string; stderr: string }> = this._runCommandInner(workspaceId, command)
+        const tracked: Promise<{ exitCode: number; stdout: string; stderr: string; timing?: ActuatorCommandTiming }> = this._runCommandInner(workspaceId, command)
           .finally(() => { if (this._devLaunches.get(workspaceId) === tracked) this._devLaunches.delete(workspaceId); });
         this._devLaunches.set(workspaceId, tracked);
         return await tracked;
@@ -2094,8 +2095,12 @@ export class E2BActuator implements IEngineerActuator {
     }
   }
 
-  private async _runCommandInner(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  private async _runCommandInner(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string; timing?: ActuatorCommandTiming }> {
+    // Q-273: reaching the machine (a reconnect, or resuming a paused sandbox) is timed apart from the
+    // command, so a slow line in the report says which of the two it was (see commandTiming.ts).
+    const reachStartedAt = Date.now();
     const sandbox = await this.getSandbox(workspaceId);
+    let sandboxMs = Date.now() - reachStartedAt;
     usageTracker.record(workspaceId, 'command');
 
     // Long-running commands (dev servers, watchers) never exit — run in background,
@@ -2558,6 +2563,7 @@ export class E2BActuator implements IEngineerActuator {
     // timeout (the detector is deliberately narrow and never shortens a legit build/install/dev command).
     const cmdTimeoutMs = backgroundedServerSmokeCheckMs(command) ?? COMMAND_TIMEOUT_MS;
     let sb = sandbox;
+    let priorRunMs = 0;
     for (let attempt = 0; attempt < 2; attempt++) {
       const t0 = Date.now();
       try {
@@ -2577,7 +2583,7 @@ export class E2BActuator implements IEngineerActuator {
           this._dropSandbox(workspaceId);
           this._latency = newSandboxLatencyState(); // the fresh sandbox starts with a clean record
         }
-        return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+        return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, timing: { sandboxMs, runMs: priorRunMs + Date.now() - t0 } };
       } catch (err: any) {
         // A non-zero exit REJECTS here (E2B CommandExitError) — recover the REAL exit code so a genuine
         // command failure (tsc exit 2) is reported honestly, not flattened to the -1 dead-sandbox sentinel.
@@ -2585,14 +2591,16 @@ export class E2BActuator implements IEngineerActuator {
         const dead = isDeadSandboxSignal({ exitCode: realExit, durationMs: Date.now() - t0, stdout: err?.stdout, stderr: err?.stderr, errorMessage: err?.message });
         if (attempt === 0 && dead && this.sandboxes.get(workspaceId) === sb) {
           this._dropSandbox(workspaceId); // drop the reaped sandbox reference and its derived state
-          try { sb = await this.getSandbox(workspaceId); continue; } // recreate (replays source) + retry once
+          priorRunMs += Date.now() - t0; // the attempt that died is still command time, not ours
+          const recreateStartedAt = Date.now();
+          try { sb = await this.getSandbox(workspaceId); sandboxMs += Date.now() - recreateStartedAt; continue; } // recreate (replays source) + retry once
           catch { /* recreate itself failed (E2B down) → fall through to an honest error */ }
         }
         // Each channel keeps its OWN real content — `err.stderr || err.message` used to replace an
         // empty stderr with "exit status 2" even when the real diagnostics sat in stdout (tsc prints
         // type errors to STDOUT), which is how Publish showed a bare exit-status for five days.
         const thrown = thrownCommandOutput(err);
-        return { exitCode: realExit, stdout: thrown.stdout, stderr: thrown.stderr };
+        return { exitCode: realExit, stdout: thrown.stdout, stderr: thrown.stderr, timing: { sandboxMs, runMs: priorRunMs + Date.now() - t0 } };
       }
     }
     return { exitCode: -1, stdout: '', stderr: 'sandbox unavailable after recreate attempt' };

@@ -30,8 +30,6 @@ const LAUNCH_TTL_MS = 60 * 60 * 1000;
 
 const launches = new Map<string, DevServerLaunch>();
 
-/** A segment that starts a server. */
-const SERVER_SEGMENT = /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(dev|start|serve|preview)\b|\b(npx\s+)?(vite(?!\s+build)|next\s+(dev|start)|serve|http-server|nodemon|tsx|ts-node)\b|\bpython3?\s+(-m\s+http\.server|manage\.py\s+runserver)|\bnode\s+\S+/;
 /** A segment that sets up the environment the server needs, so it must be replayed with it. */
 const SETUP_SEGMENT = /^(cd\s|export\s|source\s|\.\s|set\s+-a)/;
 /** A pipe into a reader that EXITS (head/tail/grep/…) — it can kill a long-running server by SIGPIPE. */
@@ -57,10 +55,20 @@ export function serverLaunchCommand(command: string): string {
   // A one-shot segment is never the server, whatever words it carries — `(git commit -q -m "edit
   // vite.config.ts" || true)` names Vite in its MESSAGE (autopsy 2b1f845e). Same predicate the
   // launcher uses, so the two cannot disagree about which segment started the app.
-  const serverAt = segments.findIndex((seg) => !isOneShotSegment(seg) && SERVER_SEGMENT.test(seg.replace(TRUNCATING_PIPE, '')));
+  //
+  // 🔴 And the segment is found by the launcher's own classifier, never a second regex (autopsy
+  // 68f0a486): a private `\bvite` pattern here matched the PATH in `[ -d /home/user/.warm/vite-react/
+  // node_modules ]`, so a command that began with the warm-cache primer was cut down to that test —
+  // and `cd /work/vite-app && npm run dev` to its `cd` — after the launcher had already been fixed
+  // (#3506) to read the same path correctly.
+  const serverAt = segments.findIndex((seg) => !isOneShotSegment(seg) && isLongRunningCommand(seg.replace(TRUNCATING_PIPE, '')));
   if (serverAt < 0) return cmd;
   const setup = segments.slice(0, serverAt).filter((seg) => SETUP_SEGMENT.test(seg));
-  const server = segments[serverAt].replace(TRUNCATING_PIPE, '').replace(/\s*2>&1\s*$/, '').trim();
+  // A trailing `2>&1` is dropped when it only fed a pipe or the terminal (`npm run dev 2>&1 | head -40`);
+  // a server writing to its own log (`npm run server > /tmp/server.log 2>&1`) keeps both streams there.
+  const unpiped = segments[serverAt].replace(TRUNCATING_PIPE, '');
+  const withoutErr = unpiped.replace(/\s*2>&1\s*$/, '');
+  const server = (/(?:^|\s)(?:1?>|>>)\s*[^&\s]/.test(withoutErr) ? unpiped : withoutErr).trim();
   return [...setup, server].join(' && ');
 }
 

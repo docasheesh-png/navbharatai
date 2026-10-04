@@ -1375,7 +1375,11 @@ export function registerNavStoreRoutes(app: Express): void {
     const me = await verifyFirebaseIdentity(req);
     if (!isStoreAdmin(me?.email ?? null)) return res.status(403).json({ error: 'Not allowed.' });
     try {
-      res.json({ apps: await listUnlistedWebApps() });
+      // `?status=listed` returns the apps ON the store, so an app the admin just listed stays on the review
+      // screen saying so, with a Remove button — the APK lane has done this since 2026-08-21, and the web
+      // lane was its unhunted sibling: listing an app emptied the review page (admin 2026-10-04).
+      const listed = String(req.query.status || '') === 'listed';
+      res.json({ apps: listed ? await listListedWebApps(200) : await listUnlistedWebApps() });
     } catch (e) {
       logStoreError('web/admin queue', e);
       res.status(502).json({ error: 'Could not load the queue.' });

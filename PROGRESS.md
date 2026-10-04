@@ -88438,3 +88438,21 @@ module), with five false findings on the way. Ledger (problem → root cause →
 | Q-367, Q-224, Q-464 | agree the argued "not a defect" items | Resolved as not-a-defect with the evidence already in their rows. | — |
 
 Still open from these reports (missing information): Q-364, Q-365, Q-366, Q-221, Q-462, Q-463.
+## 2026-10-04 — CLAUDE.md shrunk from 563 KB to 71 KB (admin: "han")
+
+`CLAUDE.md` is loaded into every message of every session. At 563 KB (about 140,000 tokens) it was the largest single cost of the admin's Claude usage. Six sections were moved **verbatim** into `docs/claude/`:
+
+| File | What | Size |
+|---|---|---|
+| `ENV_REGISTRY.md` | the Cloud Run key registry, the money audit, the Cloud Run audit | 375 KB |
+| `ROUTING_AND_BILLING.md` | model routing, three tiers, billing, one wallet, White-Label Law | 68 KB |
+| `PRODUCT_POLICY_PRECEDENTS.md` | porn ban, read the mood, zero files, provider facts, server-body rule | 19 KB |
+| `THEME_RULES.md` | colour tokens and the theme rules | 16 KB |
+| `RELEASE.md` | Play Store and App Store releases | 13 KB |
+| `SCALE_PLAN.md` | the do-not-build-now scale plan | 9 KB |
+
+Nothing was reworded or dropped. A line-count check confirmed every line of the old file is in the new `CLAUDE.md` or one of these files. `CLAUDE.md` keeps every absolute rule, the safeguards, the session-concurrency rules and the merge rule in full. It also has a short binding summary in place of each moved section, and a "before you touch X, read Y" table under **Where things live**.
+
+**New rule:** when the admin sets a Cloud Run key, its name is recorded in `docs/claude/ENV_REGISTRY.md`, not in `CLAUDE.md`. Long histories and rationales go in the matching `docs/claude/` file.
+
+Also: Q-013's queue row now says #3496 is merged.

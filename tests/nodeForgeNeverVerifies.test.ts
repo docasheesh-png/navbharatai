@@ -53,6 +53,6 @@ describe('node-forge is never used to verify a signature', () => {
   it('the allowlist still names the reason it depends on', () => {
     const allow = JSON.parse(readFileSync(join(ROOT, '.audit-allowlist.json'), 'utf8')) as { allow: { package: string; reason: string }[] };
     const entry = allow.allow.find((e) => e.package === 'node-forge');
-    expect(entry?.reason).toMatch(/never calls a verify function/);
+    expect(entry?.reason).toMatch(/signature verification/i);
   });
 });

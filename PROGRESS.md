@@ -87455,6 +87455,9 @@ is what was adopted. The rows leave `BUILD_REPORT_QUEUE.md`; this entry is their
 
 ## 2026-10-04 — CI audit gate went red on every PR: four advisories published after 2026-10-01 (PR #3467)
 
+> Merged note: #3476 (another session) landed the same lockfile update and allowlist entries first; #3467 kept
+> `main`'s allowlist and adds only the `nodeForgeNeverVerifies` lock described below.
+
 `main` was green on 2026-10-01; the next run failed `audit:gate` with four NEW high advisories, and
 no dependency had changed. Each was traced, not waved through:
 - **`@fastify/busboy` 3.2.0 → 3.2.2** (GHSA-xjh9-v7x6-24jw, GHSA-x8mw-p69m-v3mx, multipart DoS). It is

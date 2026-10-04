@@ -88872,3 +88872,5 @@ Publishing | Review), Builds (Reports | Phone builds | Engine health), AI Engine
   audit line — recorded as a PR 3 item (server change, out of PR 2's scope).
 - `tests/theAdminMenuHasNineTabs.test.ts` carries a feature census: a feature that disappears or renders on two
   pages fails CI. Checked in a real browser (desktop 1366px and phone 390px): every tab and page opens, no page error.
+
+**Update (same day):** #3522 merged, so PR 2 was re-applied on `main` (fabdadf65) in the designated branch and pushed. The two commits cherry-picked cleanly, and #3521's App Mart changes left the `storeTab: 'review'` link working. The full gate ran on that state: typecheck, unused imports, native guard, server typecheck, build, bundle, boot and server deps all passed. In vitest, 34255 passed and 1 failed: `nodeModulesIsNotAFile` caught the gate worktree's own `node_modules` symlink, the exact local artifact that test exists for, not code in this change.

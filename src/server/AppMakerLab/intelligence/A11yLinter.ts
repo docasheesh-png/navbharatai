@@ -13,7 +13,7 @@
 import { scanMarkup, hasAttr, type ScannedTag } from '../../AgentV3/jsxTags';
 import { stripCommentsForMarkup } from '../../AgentV3/stripCodeComments';
 
-export type A11yViolationType = 'img-alt' | 'input-label' | 'control-name' | 'html-lang' | 'positive-tabindex';
+export type A11yViolationType = 'img-alt' | 'input-label' | 'control-name' | 'html-lang' | 'positive-tabindex' | 'click-noninteractive';
 
 export interface A11yViolation {
   type: A11yViolationType;
@@ -32,6 +32,7 @@ const A11Y_FIX: Record<A11yViolationType, string> = {
   'control-name': 'Give every button and link an accessible name — visible text or an aria-label — especially icon-only buttons.',
   'html-lang': 'Add a lang attribute to the <html> element of this app (e.g. lang="en" or lang="hi").',
   'positive-tabindex': 'Remove positive tabindex values in this app; use tabindex="0" and natural DOM order so keyboard focus order stays logical.',
+  'click-noninteractive': 'Make every clickable div, span or other plain element in this app a real <button> (or give it role="button", tabIndex={0} and a key handler) so keyboard and screen-reader users can press it.',
 };
 
 export interface A11yLintResult {
@@ -185,6 +186,54 @@ export function htmlMissingLang(code: string): boolean {
   return !hasAttr(m[0], 'lang');
 }
 
+/** Plain elements that are not controls, so a click handler on one is a control nobody can tab to. */
+const NON_INTERACTIVE = new Set(['div', 'span', 'li', 'p', 'td', 'tr', 'img', 'section', 'article', 'header', 'footer', 'main', 'nav', 'i', 'svg', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
+
+/**
+ * Plain elements carrying a click handler (`onClick` in JSX, `onclick` in HTML) with no `role` and no
+ * `tabindex` — a control a keyboard or screen-reader user cannot reach (WCAG 2.1.1 / 4.1.2).
+ *
+ * Autopsy f496c75b: a game's "Tap to Start" was a clickable div, the explorer pressed nothing, and this
+ * linter scored the app 100. `AccessibilityAnalysis.ts` already had the rule (`click-on-noninteractive`)
+ * for JSX only; the analyzer that writes the build report's ACCESSIBILITY line did not have it at all.
+ * A handler added with `addEventListener` cannot be seen here; the click explorer finds those at run time.
+ * Pure.
+ */
+export function clickableNonInteractiveCount(code: string): number {
+  let n = 0;
+  for (const t of scanMarkup(code)) {
+    if (!t.isElement || !NON_INTERACTIVE.has(t.name)) continue;
+    if (!hasAttr(t.tag, 'onclick')) continue;
+    if (hasAttr(t.tag, 'role') || hasAttr(t.tag, 'tabindex')) continue;
+    if (NOT_A_CONTROL_HANDLER.test(clickHandlerText(t.tag))) continue;
+    n++;
+  }
+  return n;
+}
+
+/**
+ * A handler that is not a control of its own (found on our own templates the day the rule was added): a
+ * modal BACKDROP that closes on an outside click — its keyboard path is the dialog's Close button and
+ * Escape — and a panel that only stops the click reaching that backdrop. Flagging either would report a
+ * barrier that is not there.
+ */
+const NOT_A_CONTROL_HANDLER = /^\s*(?:\(?\s*\w*\s*\)?\s*=>\s*)?\{?\s*\w+\.stopPropagation\(\)\s*;?\s*\}?\s*$|\b(?:on)?(?:close|dismiss|hide)\w*\b|set\w*(?:open|show|visible)\w*\(\s*false\s*\)/i;
+
+/** The handler expression of an `onClick={…}` / `onclick="…"` attribute ('' when it cannot be read). PURE. */
+function clickHandlerText(tag: string): string {
+  const m = /\bonclick\s*=\s*(?:\{([\s\S]*)\}|"([^"]*)"|'([^']*)')/i.exec(tag);
+  if (!m) return '';
+  if (m[2] !== undefined || m[3] !== undefined) return m[2] ?? m[3] ?? '';
+  // JSX: read up to the brace that closes the attribute's own expression.
+  const body = m[1] ?? '';
+  let depth = 0;
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] === '{') depth++;
+    else if (body[i] === '}') { if (depth === 0) return body.slice(0, i); depth--; }
+  }
+  return body;
+}
+
 /** Count of positive `tabindex` values, an anti-pattern that breaks focus order (WCAG 2.4.3). Pure. */
 export function positiveTabindexCount(code: string): number {
   const matches = code.match(/tabindex\s*=\s*["']?([1-9][0-9]*)/gi) || [];
@@ -211,6 +260,7 @@ export function lintA11y(code: string): A11yLintResult {
   const [controls, controlsNoName] = controlsMissingName(src);
   const noLang = htmlMissingLang(src);
   const posTab = positiveTabindexCount(src);
+  const clickables = clickableNonInteractiveCount(src);
 
   const violations: A11yViolation[] = [];
   let penalty = 0;
@@ -234,6 +284,11 @@ export function lintA11y(code: string): A11yLintResult {
   if (posTab > 0) {
     penalty += Math.min(10, posTab * 3);
     violations.push({ type: 'positive-tabindex', severity: 'info', wcag: '2.4.3', count: posTab, message: `${posTab} positive tabindex value(s) — prefer \`tabindex="0"\`/DOM order so focus order stays logical.`, fix: A11Y_FIX['positive-tabindex'] });
+  }
+
+  if (clickables > 0) {
+    penalty += Math.min(15, clickables * 5);
+    violations.push({ type: 'click-noninteractive', severity: 'warn', wcag: '2.1.1', count: clickables, message: `${clickables} clickable div/span with no role or tabindex — keyboard and screen-reader users cannot press it; use a \`<button>\`.`, fix: A11Y_FIX['click-noninteractive'] });
   }
 
   const score = Math.max(0, Math.min(100, Math.round(100 - penalty)));

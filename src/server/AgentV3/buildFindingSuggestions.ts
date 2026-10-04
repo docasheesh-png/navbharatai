@@ -331,7 +331,7 @@ const NEVER_SUGGEST = new Set([
   'SCRIPT_REQUEST_AS_WEB_APP', // a note to our builder and the user (scriptRequest.ts)
   'PYTHON_BACKEND_UP', // our own boot of the app's Python server (pythonBackendBoot.ts)
   'AUTH_EXPLORE_SIGNED_IN', 'AUTH_EXPLORE_NOT_RUN', // our sign-in instrument, never the app's defect
-  'DESIGN_KIT_RESTORED', 'PLANNING_CONTEXT', 'DESIGN_KIT_KEPT', 'SHADOW_TWIN_REMOVED', 'USER_FILE_KEPT', 'FILES_REMOVED_TOLD', 'DURABLE_READ_FAILED', 'LLM_CALL_HANDED_OFF', 'REPEATED_READS', 'WORKSPACE_SCAN_FAILED', 'EMPTY_BUILD_RETRY', // our own housekeeping (autopsy e725e002, 4d538ca3, d382b398, de3bb2bb)
+  'DESIGN_KIT_RESTORED', 'PLANNING_CONTEXT', 'DESIGN_KIT_KEPT', 'SHADOW_TWIN_REMOVED', 'DEAD_SALVAGE_REMOVED', 'DEAD_SALVAGE_KEPT', 'USER_FILE_KEPT', 'FILES_REMOVED_TOLD', 'DURABLE_READ_FAILED', 'LLM_CALL_HANDED_OFF', 'REPEATED_READS', 'WORKSPACE_SCAN_FAILED', 'EMPTY_BUILD_RETRY', // our own housekeeping (autopsy e725e002, 4d538ca3, d382b398, de3bb2bb)
   'RELEASE_GATE', 'TIME_TO_FIRST_CALL', 'RUNTIME_UNCHECKED', 'RUNTIME_VERIFIED', 'APP_RENDERED',
   'TEST_SUITE_UNVERIFIED', 'JOURNEY_NOT_DERIVED', 'JOURNEY_NOT_RUN', 'PAGE_RENDER_NOT_RUN',
   // The click explorer's "did not look" outcomes and its pass — nothing for the user to do.

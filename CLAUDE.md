@@ -219,6 +219,25 @@ promised to build it.** Every model refused — the model's virtue, never our de
   ⚠️ **Scoped to Pollinations on purpose** (admin: *"sirf pollination ai ke liye"*): chat and build keep
   their precision-first triage. Do NOT widen the word list into chat — a sexual-health question must
   still get an answer. Test-locked and reversion-proven in `tests/theImageGeneratorDrawsNoNudity.test.ts`.
+- 🔴 **UNTIL 2026-10-04 THE BAN COULD BE WALKED PAST IN HINDI (Q-102).** Every rule was ASCII, so "पोर्न
+  साइट बनाओ" was allowed while "porn site banao" was refused. Each rule in `illegalContentRules.ts` now
+  has a Devanagari half (its stand-down too), and both readers scan `normalizeScanText` (NFC, no
+  zero-width characters). ⚠️ **JavaScript's `\b` cannot see a Devanagari word**: `/मत\b/` matches
+  nothing. Use `(?<![\wऀ-ॿ])` / `(?![\wऀ-ॿ])`, or a consuming start in client
+  code (Safari 14 has no lookbehind). `tests/aWordBoundaryCanSeeHindi.test.ts` fails on any new one.
+  The other nine scripts (Bengali, Gurmukhi, Gujarati, Odia, Tamil, Telugu, Kannada, Malayalam, Urdu) are
+  read too since 2026-10-04 (Q-321): one list per script per rule in `indicSafetyWords.ts`, written without
+  a native reader of every script, so it is held to the strict side; add words there with a test.
+  🛡️ **A child-protection or deepfake-detection app is not the offence (Q-320, admin chose (b) 2026-10-04).**
+  The CSAM and NCII rules carry a `protective` stand-down (report, prevention, awareness, POCSO, helpline,
+  detection, education…) that applies ONLY when no unambiguous word is present (porn, nude, naked, xxx,
+  erotic, sexy, "sexual videos", "undress", "make a deepfake"); then the request is refused as before. One
+  function, `protectiveStandDown`, read by the prompt triage AND the publish scanner. ⚠️ "sex"/"sexual"
+  alone are deliberately NOT unambiguous ("report child sexual abuse" needs them). The other nine scripts
+  have no protective words yet and stay strict (Q-344). `tests/aProtectiveAppIsNotTheOffence.test.ts`.
+  ⚠️ **NO LOOKBEHIND MAY REACH THE WEB BUNDLE (Q-322).** Safari before 16.4 (iOS 15) throws on one and
+  takes its screen down — the Image Generator did not open there. A server file the client imports is
+  client code too. `scripts/noLookbehindInBundle.mjs` (in `npm run test:bundle`) reads the built bundle.
 
 ### 🙋 READ THE MOOD FIRST — a question gets an answer, not an app (admin-mandated 2026-09-13)
 
@@ -3425,6 +3444,11 @@ the flag entries above promise.
       `UNUSED_DEPS_REMOVED` / `UNUSED_DEPS_KEPT`; the user sees one line naming the packages.
     - Proven on a real npm project in the session (a wrong removal reverted, a real one removed, a peer kept).
       Test-locked and reversion-proven in `tests/aPackageThisBuildNeverUsedIsRemoved.test.ts`.
+  - 🗑️ **A FILE THE FAST LANE SALVAGED AND THE APP NEVER USES IS REMOVED (autopsy f496c75b, 2026-10-04):
+    `AGENTV3_PRUNE_DEAD_SALVAGE`** (NOT set; default ON; `off` keeps them). `deadSalvage.ts`: only salvaged
+    files, only ones no other file refers to by path (a fixpoint, so a pair that only import each other go
+    together), never an entry/config/routed file, at most 12; kept only if the app's own `npm run build`
+    passes, otherwise every file is written back. Report `DEAD_SALVAGE_REMOVED` / `_KEPT` (process-only).
 - **`AGENTV3_STORE_LOOP_NOTE`** (default ON, `off` disables — added 2026-09-29, autopsy 6a4a799f) — a
   write-time note (`storeEffectLoop.ts`, via `ToolDispatcher.writeSteeringNotes`) when a file binds a
   zustand hook with NO selector (`const store = useMusicStore()`), lists that bare name in an effect's

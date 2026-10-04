@@ -88107,6 +88107,37 @@ All on PR #3488, each locked by a test proven by reversion.
 
 ⚠️ Q-112 reaches phone users only with a fresh `.aab`/`.ipa` (bundled mode).
 
+## 2026-10-04 — Q-102 and Q-103: the safety triage and every word boundary read Hindi (admin: "Q-102 shuru karo")
+
+On PR #3494, opened after #3488 merged (it carried Q-106, Q-145, Q-112, Q-237, Q-246 and Q-247, whose rows leave the open table here). Each item is test-locked and reversion-proven.
+
+| Item | Problem | Root cause | Class | Fix | Test |
+|---|---|---|---|---|---|
+| Q-102 | "पोर्न साइट बनाओ" and "बच्चों की अश्लील वीडियो वेबसाइट" were allowed; "porn site banao" was refused | Every illegal-content pattern was ASCII | The triage reads one script | Each rule has a Devanagari half (subject, context, intent, ADULT stand-down); both readers scan NFC with zero-width characters removed | `theBanReadsHindi` (16 fail on the old rules, 3 without the prompt normalization) |
+| Q-102 sibling | "app to block porn for parents" was shown the ban | The ADULT stand-down named `parental`/`blocker` only | A stand-down that stops at one word form | Inflected stems of the same words | same test |
+| Q-103 (class) | `/मत\b/` never read "don't"; "ट्रेन 12951" never reached live status; a Hindi "console is clean" claim was never audited; Hindi greetings unread | `\b` is ASCII and cannot see a Devanagari word | 28 boundaries in five files | Devanagari-aware lookarounds (consuming start in client code) | `aWordBoundaryCanSeeHindi`: a census over every shipped regex literal, 6 fail when reverted |
+
+Precision measured, not assumed: no Devanagari file in this repo (Gita template, AppKnowledgeBase) changed class, and the Hindi half of every rule mirrors its English twin.
+
+New rows, found while working: **Q-320** (🟡 admin decision: the CSAM and NCII rules block child-protection and deepfake-detection apps in English today; recommendation (b), a narrow stand-down that never applies when an unambiguously sexual word is present), **Q-321** (other Indian scripts still unread), **Q-322** (two client regexes use lookbehind, which iOS before 16.4 cannot parse).
+
+## 2026-10-04 — Every pending item of this session (admin: "apka sare pending kaam niptao, bas PR ko merge nahi karna")
+
+On PR #3494, beside Q-102/Q-103. Nothing merged.
+
+| ID | Problem | Root cause | Class | Siblings found and fixed | Locked by |
+|---|---|---|---|---|---|
+| Q-322 | The Image Generator did not open on iOS 15–16.3; a chat reply holding an email threw | Six regexes with a lookbehind reached the web bundle (Vite turns them into a `RegExp()` call that throws on Safari < 16.4) | "client code" includes the server modules the client imports, and libraries | 6 (imagePeople ×2, imageTextFromPrompt ×2, DarkModeGenerator, remark-gfm's email autolink — patched at build time) | `scripts/noLookbehindInBundle.mjs` over the BUILT bundle in `test:bundle`, reverted-and-failed; `anOldIphoneCanOpenEveryScreen` |
+| Q-321 | A porn/CSAM/drug/weapon request in Bengali, Tamil, Telugu, Gujarati, Gurmukhi, Kannada, Malayalam, Odia or Urdu was read by nobody | Rules read Latin + Devanagari only | the triage reads one script at a time | every field of all 5 rules × 9 scripts (`indicSafetyWords.ts`) | `theBanReadsEveryIndianScript` (census per field per script), reverted-and-failed (21); 40 tracked files in those scripts unchanged |
+| Q-323 | The explorer pressed 0 controls on a game; A11y scored 100 | Explorer read only button/link/role elements; the report's linter had no clickable-div rule | a control without a control's tag is invisible | A11yLinter `click-noninteractive` | `aDivThatActsAsAButtonIsPressed` (real browser), reverted-and-failed |
+| Q-324 | "This file will not compile" in a second sentence survived a green tsc | only the first sentence was checked | evidence checks one sentence of a finding | — | `aLaterCompileClaimIsCheckedToo` |
+| Q-325 | Salvaged fast-lane files shipped as dead code; a types ↔ MathUtils cycle | nothing removed salvage the builder did not use; the contract kept relative value imports | the platform's own leftovers ship | contract imports made type-only | `aSalvagedFileNobodyUsesIsRemoved` |
+| Q-326 | Three post-latch writers had no pass name | writes outside `runInPass` | an unknown writer to the freeze | 5 writers named; the import dedupe saved a refused write durably — fixed | `everyLatePassHasAName` |
+| Q-327 | SETUP_TIMING "warm" vs SANDBOX_SESSION "created-fresh" | two points of view, neither naming the other | — | — | `theTwoSandboxLinesTellOneStory` |
+| Q-328 | ETA 2.4× under | heavy game sized as a snippet (fixed in #3402) | — | "health bars" read as HEALTHCARE, defeating the heavy-game check | `aGamesHealthBarIsNotHealthcare` |
+| Q-329 | Step limit 80 reached | its three causes were fixed in #3402; the cap auto-extends once | — | — | 🟡 admin agreement |
+
+Still the admin's: **Q-320** (child-protection apps blocked; recommendation b) and **Q-329**.
 ## 2026-10-04 — Autopsy 981ce4cc ("Edit pdf"): a file noun is not an app edit; a stale dev-server pre-bundle; peer-blind npm hints (PR #3493)
 
 A scanned experience letter attached with "Edit pdf", in a chat holding only our starter. The engine built a PDF
@@ -88170,6 +88201,20 @@ every fix reverted and seen to fail):
 
 Still BLOCKED on evidence (unchanged): Q-193 (a skipped press's cause line, added by Q-192), Q-273 (an 11 s trivial
 command — needs a second instance), Q-275 (the request was cut mid-sentence before it reached us).
+
+## 2026-10-04 — Q-320 and Q-329: the admin's two decisions, built (PR #3494)
+
+The admin answered both open questions ("aapki dono suggestion banao"):
+
+| Item | Decision | What was built | Lock |
+|---|---|---|---|
+| Q-320 child-protection and deepfake-detection apps refused as CSAM / NCII | option (b) | `protective` on `IllegalRule` + `protectiveStandDown`, read by `triagePrompt` AND `classifyPublishedText` (a protective app that was allowed to build would otherwise have been refused at publish). Stands down only when no unambiguous word (porn, nude, naked, xxx, erotic, sexy, "sexual videos", "undress", "make a deepfake") is present. | `tests/aProtectiveAppIsNotTheOffence.test.ts` — stand-down removed → 7 fail |
+| Q-329 step limit 80 | "haan" — closed by its causes (#3402) | nothing to build; evidence in the queue row | — |
+
+Honest limits: "parental filter to protect children from porn" stays blocked (it carries "porn" — the admin's rule).
+At publish the scanner reads the whole bundle, where "report" is common (a footer); the unambiguous words are what keep
+an offending page refused there. The other nine scripts have no protective words yet → new row Q-344 (🟡 BLOCKED on a
+native reader's word list).
 
 ## 2026-10-04 — Queue pruned after #3491 merged (admin merged it 13:52 UTC)
 

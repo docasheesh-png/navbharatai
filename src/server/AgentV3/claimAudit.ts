@@ -174,9 +174,9 @@ const CONSOLE_CLEAN = new RegExp([
   /\bconsole\s+is\s+clean\b/,
   /\bno errors? in the (browser )?console\b/,
   // Hinglish: "console me koi error nahi", "koi console error nahi hai", "console bilkul saaf hai"
-  /\b(?:console|कंसोल)\b[^.!\n]{0,30}?\b(?:koi\s+)?(?:error|errors|गलती)\b[^.!\n]{0,15}?\b(?:nahi|nahin|नहीं)\b/,
+  /(?<![\w\u0900-\u097F])(?:console|कंसोल)(?![\w\u0900-\u097F])[^.!\n]{0,30}?(?<![\w\u0900-\u097F])(?:koi\s+)?(?:error|errors|गलती)(?![\w\u0900-\u097F])[^.!\n]{0,15}?(?<![\w\u0900-\u097F])(?:nahi|nahin|नहीं)(?![\w\u0900-\u097F])/,
   /\bkoi\s+(?:console\s+)?error\s+nahi\b/,
-  /\b(?:console|कंसोल)\b[^.!\n]{0,20}?\b(?:saaf|साफ)\b/,
+  /(?<![\w\u0900-\u097F])(?:console|कंसोल)(?![\w\u0900-\u097F])[^.!\n]{0,20}?(?<![\w\u0900-\u097F])(?:saaf|साफ)(?![\w\u0900-\u097F])/,
 ].map((r) => r.source).join('|'), 'i');
 
 /**
@@ -200,7 +200,7 @@ const TYPECHECK_CLEAN = new RegExp([
 const SCREENSHOT_SEEN = new RegExp([
   /\b(screenshot|screen shot)\b[^.]{0,40}\b(shows?|confirms?|verif|proves?)\b/,
   /\bverified[^.]{0,30}\bscreenshot\b/,
-  /\bस्क्रीनशॉट\b/,
+  /(?<![\w\u0900-\u097F])स्क्रीनशॉट(?![\w\u0900-\u097F])/,
   // Hinglish: "screenshot dekha", "screenshot me dikh raha hai", "screenshot se confirm hua"
   /\bscreenshot\b[^.!\n]{0,30}?\b(?:dekh[aiy]|dikh\s*rah[aiy]|dikha|confirm)\b/,
 ].map((r) => r.source).join('|'), 'i');
@@ -232,9 +232,9 @@ const PREVIEW_RENDERS = new RegExp([
   /\b(preview|app)\s+(is\s+)?(now\s+)?(live|working|renders?|rendering)\b/,
   /\blive preview (is )?(working|up)\b/,
   // Hinglish: "app chal rahi hai", "preview chal raha hai", "app sahi chal raha hai"
-  /\b(?:preview|app|ऐप)\b[^.!\n]{0,30}?\b(?:chal rah[aiy]|chal gay[ai]|chalu ho gay[ai]|चल रह[ाी] है)\b/,
+  /(?<![\w\u0900-\u097F])(?:preview|app|ऐप)(?![\w\u0900-\u097F])[^.!\n]{0,30}?(?<![\w\u0900-\u097F])(?:chal rah[aiy]|chal gay[ai]|chalu ho gay[ai]|चल रह[ाी] है)(?![\w\u0900-\u097F])/,
   // Hinglish: "preview kaam kar raha hai", "sab kaam kar raha hai"
-  /\b(?:kaam kar rah[aiy]|काम कर रह[ाी] है)\b/,
+  /(?<![\w\u0900-\u097F])(?:kaam kar rah[aiy]|काम कर रह[ाी] है)(?![\w\u0900-\u097F])/,
   // Hinglish: "app live ho gaya", "preview live hai" — the shape the admin's own report carried.
   //
   // ADJACENT ON PURPOSE, not a 20-character window. The loose version matched three sentences that
@@ -245,7 +245,7 @@ const PREVIEW_RENDERS = new RegExp([
   // Requiring `live` to sit directly on its verb kills the first two (a negation or a verb always
   // comes between), and the lookahead kills the third. Same discipline as APP_DELIVERED's note that
   // an intention is never a claim.
-  /\b(?:live|लाइव)\s+(?:ho\s+gay[ai]|hai|है)\b(?!\s*[?？])/,
+  /(?<![\w\u0900-\u097F])(?:live|लाइव)\s+(?:ho\s+gay[ai]|hai|है)(?![\w\u0900-\u097F])(?!\s*[?？])/,
 ].map((r) => r.source).join('|'), 'i');
 
 /**
@@ -269,7 +269,7 @@ const APP_DELIVERED = new RegExp([
   /\b(?:all (?:the )?(?:requested )?features?|everything (?:you )?(?:asked|requested)[^.!\n]{0,20})\b[^.!\n]{0,40}?\b(?:implemented|delivered|built|working|present|done)\b/,
   /\bfeatures?\s+delivered\b/,
   // Hindi/Hinglish: "app ban gaya", "taiyar hai", "पूरा हो गया"
-  /\b(?:app|ऐप)\b[^.!\n]{0,30}?\b(?:ban gaya|ban gayi|taiyar|तैयार|बन गया|पूरा हो गया)\b/,
+  /(?<![\w\u0900-\u097F])(?:app|ऐप)(?![\w\u0900-\u097F])[^.!\n]{0,30}?(?<![\w\u0900-\u097F])(?:ban gaya|ban gayi|taiyar|तैयार|बन गया|पूरा हो गया)(?![\w\u0900-\u097F])/,
 ].map((r) => r.source).join('|'), 'i');
 
 /**
@@ -303,7 +303,7 @@ export function describedUiLabels(summary: string): string[] {
  * codebase already applies to an ungraded page and an unrun check.
  */
 function labelInSource(label: string, source: string): 'present' | 'absent' | 'unknown' {
-  const cleaned = label.replace(/[^A-Za-z0-9ऀ-ॿ ]+/g, ' ').trim();
+  const cleaned = label.replace(/[^A-Za-z0-9\u0900-\u097F ]+/g, ' ').trim();
   if (!cleaned) return 'unknown'; // pure punctuation/emoji — nothing to check, never accuse
   const words = cleaned.split(/\s+/).filter((w) => w.length >= 3);
   if (words.length === 0) return 'unknown'; // too short to mean anything either way
@@ -359,7 +359,7 @@ const DESIGN_CLAIMED = new RegExp([
   /\b(beautiful(ly)?|polished|sleek|elegant|stunning|gorgeous)\b[^.!\n]{0,40}\b(design|designed|ui|interface|look|looking|styled?|styling|theme|layout)\b/,
   /\b(professional(ly)?|modern|premium)[- ](designed|design|ui|interface|look|styling)\b/,
   /\b(fully|nicely|carefully|well)[- ]styled\b/,
-  /\b(sundar|khubsurat|खूबसूरत|सुंदर)\b/,
+  /(?<![\w\u0900-\u097F])(sundar|khubsurat|खूबसूरत|सुंदर)(?![\w\u0900-\u097F])/,
 ].map((r) => r.source).join('|'), 'i');
 
 export function auditSummaryClaims(summary: string, facts: MeasuredFacts): ClaimContradiction[] {

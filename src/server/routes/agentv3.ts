@@ -214,7 +214,8 @@ import { SINGLE_HTML_FILE_RULE } from '../AgentV3/systemPrompt';
 import { inlineLinkedStylesheet } from '../AgentV3/singleFileKit';
 import { wantsSingleHtmlFile } from '../../lib/frameworkDetect';
 import { StaticProvider } from '../AgentV3/sandbox/AppMakerLab/generator/templates/StaticProvider';
-import { pruneUnusedDepsEnabled, pruneCandidates, pruneBuildAddedDeps, prunedNarration, depsAddedByBuild, unusedDependencyLine } from '../AgentV3/unusedDepPrune';
+import { pruneUnusedDepsEnabled, pruneCandidates, pruneBuildAddedDeps, prunedNarration, depsAddedByBuild, unusedDependencyLine, hasBuildScript } from '../AgentV3/unusedDepPrune';
+import { pruneDeadSalvageEnabled, deadSalvagedFiles, removeDeadSalvage } from '../AgentV3/deadSalvage';
 import { pastedFormatDecision, pastedHtmlDocument, pastedStorageKeys, pastedOneFileRule, STATIC_SCAFFOLD_EXTRAS, PASTED_ONE_FILE_CODE } from '../AgentV3/pastedAppFormat';
 import { aiInAppRule } from '../AgentV3/systemPrompt';
 import { weakBuildDisciplineBlock } from '../AgentV3/weakBuildDiscipline';
@@ -1926,6 +1927,22 @@ function starterCompletedOf(actuator: unknown, workspaceId: string): string {
  * "sandbox=warm · restore=nothing saved yet" about a workspace whose store held 12 files. A machine that
  * was already up was not restored by this setup. PURE.
  */
+/**
+ * The `sandbox=` field of THIS setup's line (autopsy f496c75b). `SETUP_TIMING` said "warm" while
+ * `SANDBOX_SESSION` said the machine "came up created-fresh" — both true, from two points of view: the
+ * origin is how THIS build found the machine, the session is how the machine itself came up, possibly
+ * minutes earlier for another caller (the Files tab, the preview door). A warm or resumed setup now says
+ * how and when the machine it found came up, so the two lines read as one story. PURE.
+ */
+export function setupOriginText(origin: string | null, session: { origin?: string; reason?: string; startedAt?: number } | null, now: number): string {
+  const base = origin ?? 'unreported';
+  if ((origin !== 'warm' && origin !== 'resumed') || !session?.origin || session.origin === origin) return base;
+  const ago = typeof session.startedAt === 'number' && Number.isFinite(session.startedAt)
+    ? ` ${Math.max(0, Math.round((now - session.startedAt) / 1000))}s earlier`
+    : '';
+  return `${base} (the machine came up ${session.origin}${ago}${session.reason ? `, started by ${session.reason}` : ''})`;
+}
+
 export function setupRestoreText(origin: string | null, restore: string | null): string {
   if (origin === 'warm' || origin === 'resumed') return `n/a — the machine was already up${restore ? ` (when it came up: ${restore})` : ''}`;
   return restore ?? 'n/a (warm or resumed)';
@@ -14322,7 +14339,7 @@ async function noteBuildOutcome(
             // alongside it, because "had an id and still came up cold" is the interesting case.
             detail: `resume-id lookup ${resumeLookupMs}ms · sandbox create/connect + scaffold + install `
               + `${ensureWorkspaceMs}ms · had-resume-id=${resumeSandboxId ? 'yes' : 'no'} · `
-              + `sandbox=${sandboxOriginOf(actuator, workspaceId) ?? 'unreported'} · `
+              + `sandbox=${setupOriginText(sandboxOriginOf(actuator, workspaceId), sandboxSessionOf(actuator, workspaceId), Date.now())} · `
               // Both halves of the same line, added by two sessions on the same day and kept together
               // deliberately: `restore=` says whether a fresh machine was refilled from the durable
               // store (#2818), `started-by=` says what caused the machine to exist at all (#2820).
@@ -15442,6 +15459,8 @@ async function noteBuildOutcome(
       // Every file this build removed, in order — the user is told about the ones their app had
       // (deletedFilesNotice.ts, queue Q-019). The admin line below stays as it was.
       const deletedThisBuild: string[] = [];
+      // Files the fast lane salvaged into the workspace for the full builder (deadSalvage.ts).
+      const salvagedThisBuild: string[] = [];
       // What a shell command removes is checked against these (queue Q-246, shellWriteTargets.ts).
       dispatcher.setRecordedPaths(() => [...writtenFiles.keys()]);
       dispatcher.setFileDeletionSink((paths) => {
@@ -17955,6 +17974,7 @@ async function noteBuildOutcome(
         // → 4 broken imports → a dead app. The note travels in buildPrompt so EVERY fallback runner
         // (start-tier, escalation, default) sees it.
         if (!sb.ok && !sb.stopped && sb.salvagedPaths?.length) {
+          salvagedThisBuild.push(...sb.salvagedPaths);
           buildDiag.record({ phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_SALVAGE', message: `Fast lane salvaged ${sb.salvagedPaths.length} finished file(s) into the workspace for the full builder to continue from.`, autoResolved: true, detail: sb.salvagedPaths.join(', ') });
           // Why the lane stopped decides the first sentence: out of time, or finished but not compiling —
           // and in the second case the compiler's own words come with it, so the builder starts from the
@@ -19147,7 +19167,7 @@ async function noteBuildOutcome(
           for (const r of deduped.removed) {
             const next = deduped.files[r.from];
             if (typeof next !== 'string') continue;
-            if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, r.from, next))) {
+            if (await writeUnlessFrozen(() => runInPass('stylesheet-dedupe', () => actuator.writeFile(workspaceId, r.from, next)))) {
               integrityFiles[r.from] = next;
               writtenFiles.set(r.from, next);
               buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_CSS_DEDUPED', message: `"${r.stylesheet}" was imported by the entry AND by ${r.from} — removed the second import (a global stylesheet applies once, whoever imports it).`, autoResolved: true });
@@ -19373,6 +19393,31 @@ async function noteBuildOutcome(
               });
             }
           } catch { /* removing an unused package is housekeeping — it must never affect a build */ }
+        }
+        // 🗑️ A FILE THE FAST LANE SALVAGED AND THE APP NEVER USED IS TAKEN OUT AGAIN (autopsy f496c75b,
+        // deadSalvage.ts): only salvaged files, only ones no other file refers to, and only if the app's own
+        // production build passes without them — otherwise every file is written back. Same turn guards as above.
+        if (pruneDeadSalvageEnabled() && salvagedThisBuild.length > 0 && result.ok && expectsArtifacts && !isImportTurn && !projectModuleRef && !megaRoadmapActive && !abort.signal.aborted && !isGreenLatched(workspaceId)) {
+          try {
+            const dead = deadSalvagedFiles(salvagedThisBuild, integrityFiles);
+            if (dead.length > 0) {
+              const outcome = await removeDeadSalvage(dead, integrityFiles, hasBuildScript(integrityFiles['package.json'] ?? null), {
+                run: (cmd) => actuator.runCommand(workspaceId, cmd),
+                write: (path, content) => actuator.writeFile(workspaceId, path, content),
+              });
+              if (outcome.status === 'removed') {
+                for (const p of outcome.removed) { writtenFiles.delete(p); delete integrityFiles[p]; }
+                deletedThisBuild.push(...outcome.removed);
+              }
+              buildDiag.record({
+                phase: 'build', severity: 'info', autoResolved: true,
+                code: outcome.status === 'removed' ? 'DEAD_SALVAGE_REMOVED' : 'DEAD_SALVAGE_KEPT',
+                message: outcome.status === 'removed'
+                  ? `Removed ${outcome.removed.length} file(s) the fast lane wrote that the finished app never uses: ${outcome.removed.join(', ')}. The production build passed without them.`
+                  : `Kept ${dead.length} salvaged file(s) nothing refers to (${dead.join(', ')}): ${outcome.reason}.`,
+              });
+            }
+          } catch { /* removing an unused file is housekeeping — it must never affect a build */ }
         }
         // 🔴 A STOPPED BUILD'S FRESH PACKAGES ARE NOT "UNUSED" — THEIR CODE WAS NEVER WRITTEN (autopsy 1219c639).
         // The build installed express, cors, dotenv, openai, tsx and concurrently as its last step, the user
@@ -19975,9 +20020,11 @@ async function noteBuildOutcome(
             if (typeof c !== 'string' || !/\.(mjs|cjs|jsx?|tsx?)$/i.test(p) || /\.d\.ts$/i.test(p)) continue;
             const { content: deduped, removed } = dedupeDuplicateImports(c);
             if (removed.length > 0 && deduped !== c) {
+              // The saved copy follows the live file, never leads it: a write the freeze refused used to be
+              // saved anyway, so the next session restored a change the working app never had (f496c75b).
+              if (!(await writeUnlessFrozen(() => runInPass('duplicate-import-dedupe', () => actuator.writeFile(workspaceId, p, deduped))))) continue;
               writtenFiles.set(p, deduped);
               dedupedFiles++;
-              try { await actuator.writeFile(workspaceId, p, deduped); } catch { /* best-effort live write */ }
               try { getWorkspaceMemory(workspaceId).indexFile(p, deduped); } catch { /* index best-effort */ }
               await saveWorkspaceFiles(workspaceId, { [p]: deduped }).catch(() => {});
               buildDiag.record({ phase: 'build', severity: 'info', code: 'DUPLICATE_IMPORT_DEDUPED', message: `Removed ${removed.length} fully-redundant duplicate import(s) from ${p} before the compile check: ${removed.join('; ')}`.slice(0, 400), autoResolved: true });
@@ -23477,13 +23524,14 @@ async function noteBuildOutcome(
               } catch { stylesheets = undefined; /* could not look ⇒ the findings stand */ }
             }
             const checked = refuteReviewByEvidence(review, { typecheck: gateEvidence.typecheck, stylesheets });
-            if (checked.refuted.length > 0) {
+            if (checked.refuted.length > 0 || checked.amended.length > 0) {
               review = checked.review;
               try {
                 buildDiag.record({
                   phase: 'build', severity: 'info', code: 'REVIEW_REFUTED_BY_EVIDENCE', autoResolved: true,
-                  message: `${checked.refuted.length} reviewer finding(s) were contradicted by the platform's own evidence (a passing typecheck, or the stylesheets that define the classes named) — dropped rather than shown to the user or repaired.`,
-                  detail: checked.refuted.map((i) => i.message.slice(0, 200)).join(' | '),
+                  message: `${checked.refuted.length} reviewer finding(s) were contradicted by the platform's own evidence (a passing typecheck, or the stylesheets that define the classes named) — dropped rather than shown to the user or repaired.`
+                    + (checked.amended.length > 0 ? ` ${checked.amended.length} more kept their other points with the refuted "will not compile" sentence removed.` : ''),
+                  detail: [...checked.refuted, ...checked.amended].map((i) => i.message.slice(0, 200)).join(' | '),
                 });
               } catch { /* best-effort */ }
             }
@@ -25277,7 +25325,8 @@ async function noteBuildOutcome(
           const cfg = ensureViteConfig(full);
           if (cfg && full[cfg.path] === undefined) {
             try {
-              await actuator.writeFile(workspaceId, cfg.path, cfg.content);
+              // Named, so the freeze attributes a refusal to this guard (autopsy f496c75b: three writers here had no name).
+              await runInPass('vite-config-guard', () => actuator.writeFile(workspaceId, cfg.path, cfg.content));
               writtenFiles.set(cfg.path, cfg.content);
               try { getWorkspaceMemory(workspaceId).indexFile(cfg.path, cfg.content); } catch { /* index best-effort */ }
               await saveWorkspaceFiles(workspaceId, { [cfg.path]: cfg.content }).catch(() => {});
@@ -25315,7 +25364,7 @@ async function noteBuildOutcome(
             if (guarded.injected && guarded.files[htmlKey] !== full[htmlKey]) {
               const fixed = guarded.files[htmlKey];
               try {
-                await actuator.writeFile(workspaceId, htmlKey, fixed);
+                await runInPass('html-entry-guard', () => actuator.writeFile(workspaceId, htmlKey, fixed));
                 writtenFiles.set(htmlKey, fixed);
                 try { getWorkspaceMemory(workspaceId).indexFile(htmlKey, fixed); } catch { /* index best-effort */ }
                 await saveWorkspaceFiles(workspaceId, { [htmlKey]: fixed }).catch(() => {});
@@ -25352,7 +25401,7 @@ async function noteBuildOutcome(
             const fixed = withoutStylesheetImports(full[file], specs);
             if (fixed === full[file]) continue;
             try {
-              await actuator.writeFile(workspaceId, file, fixed);
+              await runInPass('dangling-css-guard', () => actuator.writeFile(workspaceId, file, fixed));
               writtenFiles.set(file, fixed);
               try { getWorkspaceMemory(workspaceId).indexFile(file, fixed); } catch { /* index best-effort */ }
               await saveWorkspaceFiles(workspaceId, { [file]: fixed }).catch(() => {});

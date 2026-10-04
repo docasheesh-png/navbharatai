@@ -30,6 +30,8 @@
 //
 // PURE + deterministic + bounded. No model call, so a clean publish costs nothing.
 
+import { INDIC_RULE_WORDS, indicAlternatives, type ScriptWords } from './indicSafetyWords';
+
 /** What a finding says about the app as a whole. */
 export type PublishContentClass = 'general' | 'adult' | 'illegal';
 
@@ -68,7 +70,136 @@ export interface IllegalRule {
    * harassment-reporting tool. A rule whose refusal is harsh must be able to stand down.
    */
   exempt?: RegExp;
+  /**
+   * A PROTECTIVE purpose that stands an ILLEGAL rule down — but only while no unambiguously sexual
+   * word is present (queue Q-320, admin chose option (b) on 2026-10-04).
+   *
+   * 🔴 WHY: the CSAM and NCII rules had no stand-down, so "build an app to report child sexual abuse",
+   * "POCSO awareness app", "sex education app for kids" and "an app that detects deepfake photos" were
+   * refused with the AUP message and logged as the offence itself. `exempt` could not be reused: on
+   * these rules "child sexual abuse" IS the name of the offence, so a plain stand-down on "report" or
+   * "prevention" would open a hole a single word wide.
+   *
+   * 🔒 THE CONDITION THAT CLOSES THE HOLE: `unambiguous` names the words a protective app has no reason
+   * to use (porn, nude, naked, xxx, erotic, sexy, "sexual videos", "undress", "make a deepfake") and the
+   * stand-down never applies when one is present. A request that carries such a word is refused exactly
+   * as before, however protective it sounds.
+   *
+   * ⚠️ The other nine Indian scripts have no protective words yet (they need a native reader), so their
+   * own words for the rule are listed in `unambiguous`: a request written in them stays on the strict side.
+   */
+  protective?: { purpose: RegExp; unambiguous: RegExp };
 }
+
+/** Does this rule's protective purpose stand it down for `body` (already normalised)? PURE. */
+export function protectiveStandDown(rule: IllegalRule, body: string): boolean {
+  if (!rule.protective) return false;
+  return rule.protective.purpose.test(body) && !rule.protective.unambiguous.test(body);
+}
+
+/**
+ * DEVANAGARI — the same rules, read in the script half the country types in (queue Q-102, 2026-10-04).
+ *
+ * 🔴 WHY THIS EXISTS: every pattern below was ASCII, so "पोर्न साइट बनाओ" was ALLOWED while
+ * "porn site banao" was refused. Measured, not assumed. The ban the admin wrote in Hindi could be
+ * walked past by asking in Hindi.
+ *
+ * 🔒 WHY THE LATIN `\b` CANNOT SIMPLY BE REUSED: JavaScript's `\b` is an ASCII boundary, and every
+ * Devanagari letter is a "non-word" character to it, so `\bपोर्न\b` never matches anything. A
+ * Devanagari word starts where the previous character is neither a Devanagari letter nor a word
+ * character; that is `DEVA_START`. There is no right boundary by default, because Hindi inflects by
+ * adding vowel signs (पोर्न → पोर्नोग्राफी, बच्चा → बच्चों): a stem must match its forms. A stem that
+ * is also the start of an innocent word carries its own `END` (मेथ is the drug, मेथी is fenugreek).
+ *
+ * 🔒 THE SAME PAIRING, THE SAME PRECISION. Each list mirrors its English twin. Nothing here is a
+ * bare bad-word list, and the stand-down words for ADULT_CONTENT are mirrored too, so a Hindi
+ * sexual-health clinic or a harassment-reporting tool is never shown the ban.
+ *
+ * Every other Indian script (and Urdu) is read too, from `indicSafetyWords.ts` (Q-321): the same
+ * fields, the same pairing, one list per script. A word there starts where the previous character is
+ * not a letter of ANY of those scripts (`INDIC_START`).
+ */
+const DEVA_START = '(?<![\\w\\u0900-\\u097F])';
+const END = '(?![\\u0900-\\u097F])';
+/** An optional nukta. After NFC a nukta letter (फ़, ड़, ज़) is always the base letter plus U+093C. */
+const NUKTA = '\\u093C?';
+
+const INDIC_START = '(?<![\\w\\u0600-\\u06FF\\u0750-\\u077F\\u0900-\\u0DFF])';
+
+function withDevanagari(latin: RegExp, devanagari: readonly string[], other?: ScriptWords): RegExp {
+  const indic = other ? `|${INDIC_START}(?:${indicAlternatives(other).join('|')})` : '';
+  return new RegExp(`(?:${latin.source})|${DEVA_START}(?:${devanagari.join('|')})${indic}`, 'i');
+}
+
+const W = INDIC_RULE_WORDS;
+
+/**
+ * The form both consumers scan. NFC, so a nukta written as one code point (फ़ U+095E) and as two
+ * (फ + ़) read the same; and zero-width characters removed, so "p​orn" or a ZWJ inside a
+ * Devanagari word cannot split a word in two and walk past every pattern. Pure.
+ */
+export function normalizeScanText(text: string): string {
+  return text.normalize('NFC').replace(/[​-‍⁠﻿]/g, '');
+}
+
+/**
+ * Q-320 — the words of the protective stand-down (see `protective` on IllegalRule).
+ *
+ * `SEXUAL_UNAMBIGUOUS` is what a child-protection or detection app has no reason to say. "sex" and
+ * "sexual" alone are NOT in it — "report child sexual abuse" and "sex education" need both — but
+ * "sexual videos", "sex chat" and the like are. Other scripts: the rule's own words, so a request in
+ * them stays strict (no protective words there yet).
+ */
+const SEXUAL_UNAMBIGUOUS_LATIN =
+  'porn\\w*|nud(?:e|es|ity)|naked|xxx|erotic\\w*|sexy|hardcore|sexting|'
+  + '(?:explicit|sexual|sex)\\s+(?:photos?|pictures?|pics?|images?|videos?|clips?|content|stories|story|chats?|roleplay|role[-\\s]play|acts?|material)';
+const SEXUAL_UNAMBIGUOUS_DEVA = [
+  'पोर्न', 'पॉर्न', 'नग्न', 'नंगी', 'नंगा' + END, 'एक्सएक्सएक्स', 'कामुक', 'अश्लील',
+  'सेक्स\\s*(?:वीडियो|फ' + NUKTA + 'ोटो|तस्वीर|चैट|कहानी)',
+];
+function unionWords(...lists: ScriptWords[]): ScriptWords {
+  const out = {} as Record<keyof ScriptWords, string[]>;
+  for (const list of lists) {
+    for (const [script, words] of Object.entries(list) as Array<[keyof ScriptWords, readonly string[]]>) {
+      out[script] = [...(out[script] ?? []), ...words];
+    }
+  }
+  return out;
+}
+
+const CSAM_PROTECTIVE = {
+  purpose: withDevanagari(
+    /\b(report\w*|prevent\w*|awareness|aware|pocso|helplines?|protect\w*|safety|safeguard\w*|detect\w*|educat\w*|ngos?|police|complaints?|moderat\w*|filter\w*|block(?:s|er|ers|ing|ed)?|counsel\w*)\b/i,
+    ['रिपोर्ट', 'शिकायत', 'रोकथाम', 'रोकन', 'रोकने', 'जागरूक', 'पॉक्सो', 'पोक्सो', 'हेल्पलाइन', 'सुरक्षा', 'सुरक्षित', 'बचाव', 'बचान', 'बचाने', 'डिटेक्ट', 'पहचान', 'शिक्षा', 'शैक्षिक', 'पुलिस', 'एनजीओ', 'फ' + NUKTA + 'िल्टर', 'ब्लॉक', 'परामर्श', 'काउंसलिंग'],
+  ),
+  unambiguous: withDevanagari(
+    new RegExp(`\\b(?:${SEXUAL_UNAMBIGUOUS_LATIN})\\b`, 'i'),
+    SEXUAL_UNAMBIGUOUS_DEVA,
+    unionWords(W.CSAM_SIGNAL.subject, W.CSAM_SIGNAL.context),
+  ),
+};
+
+const NCII_PROTECTIVE = {
+  purpose: withDevanagari(
+    /\b(detect\w*|report\w*|awareness|verif\w*|fact[-\s]?check\w*|identif\w*|spot(?:s|ting)?|authentic\w*|take[-\s]?downs?|complaints?|protect\w*|prevent\w*|educat\w*|police|helplines?)\b/i,
+    ['पहचान', 'डिटेक्ट', 'रिपोर्ट', 'शिकायत', 'जागरूक', 'सत्यापन', 'जाँच', 'जांच', 'फ' + NUKTA + 'ैक्ट\\s*चेक', 'बचाव', 'सुरक्षा', 'रोकथाम', 'पुलिस', 'हेल्पलाइन', 'शिक्षा'],
+  ),
+  // The sexual words, the undressing subjects, and any request to MAKE a fake (a detector never says so).
+  unambiguous: withDevanagari(
+    new RegExp(
+      `\\b(?:${SEXUAL_UNAMBIGUOUS_LATIN}|nudif\\w*|undress\\w*|upskirt|hidden[-\\s]?cams?|`
+      + '(?:remove|take\\s+off)\\s+(?:her\\s+|his\\s+|their\\s+|the\\s+)?clothes|'
+      + '(?:make|making|create|creating|generate|generating)\\s+(?:a\\s+|an\\s+)?(?:deep[-\\s]?fakes?|face[-\\s]?swaps?)|'
+      + '(?:deep[-\\s]?fakes?|face[-\\s]?swaps?)\\s+(?:generator|maker|creator|editor)s?)\\b',
+      'i',
+    ),
+    [
+      ...SEXUAL_UNAMBIGUOUS_DEVA, 'न्यूडिफ', 'कपड' + NUKTA + 'े\\s+उता', 'हिडन\\s+कैम', 'छिप' + '[ाे]' + '\\s+कैमर',
+      'डीप\\s*फ' + NUKTA + 'े' + 'क\\s+(?:बना|जनरेटर)', 'फ' + NUKTA + 'े' + 'स\\s*स्वैप\\s+(?:बना|जनरेटर)',
+    ],
+    unionWords(W.CSAM_SIGNAL.context, W.NON_CONSENSUAL_IMAGERY.subject),
+  ),
+};
 
 /**
  * The rules.
@@ -85,8 +216,17 @@ export const ILLEGAL_RULES: readonly IllegalRule[] = [
       'pairs words describing a child with explicitly sexual words. This is the one category we act on without waiting.',
     // Deliberately plain, ordinary English on both sides. A slang dictionary would be a lookup table
     // for offenders; the STRUCTURE is what an offending page cannot avoid having.
-    subject: /\b(child|children|kid|kids|minor|minors|underage|under[-\s]?18|preteen|pre[-\s]?teen|toddler|infant|schoolgirl|schoolboy)\b/i,
-    context: /\b(porn|pornography|nude|nudes|naked|sex|sexual|sexy|erotic|xxx|hardcore|explicit)\b/i,
+    subject: withDevanagari(
+      /\b(child|children|kid|kids|minor|minors|underage|under[-\s]?18|preteen|pre[-\s]?teen|toddler|infant|schoolgirl|schoolboy)\b/i,
+      ['बच्च', 'नाबालिग', 'बालक', 'बालिका', 'शिशु', 'छोटी\\s+बच्च', '18\\s*साल\\s*से\\s*कम'], W.CSAM_SIGNAL.subject,
+    ),
+    // नंगे is deliberately absent: "नंगे पैर" means barefoot, and "बच्चे नंगे पैर स्कूल जाते हैं" is a
+    // sentence about poverty, not an offence.
+    context: withDevanagari(
+      /\b(porn|pornography|nude|nudes|naked|sex|sexual|sexy|erotic|xxx|hardcore|explicit)\b/i,
+      ['पोर्न', 'पॉर्न', 'सेक्स', 'यौन', 'अश्लील', 'नग्न', 'नंगी', 'नंगा' + '(?![\\u0900-\\u097F])', 'एक्सएक्सएक्स', 'कामुक'], W.CSAM_SIGNAL.context,
+    ),
+    protective: CSAM_PROTECTIVE,
   },
   {
     id: 'NON_CONSENSUAL_IMAGERY',
@@ -95,10 +235,20 @@ export const ILLEGAL_RULES: readonly IllegalRule[] = [
       'offers to undress or sexualise a real person from their photograph, or to publish intimate images without consent.',
     // `nudif\w*` rather than `nudify`: the first version missed "nudifies"/"nudified" — a word-boundary
     // rule that stops at the stem is a rule an ordinary sentence walks past.
-    subject: /\b(nudif\w*|undress\w*|deep[-\s]?fakes?|face[-\s]?swaps?|revenge[-\s]?porn|upskirt|hidden[-\s]?cam)\b/i,
-    context: /\b(photo|photos|picture|pictures|image|images|video|videos|selfie|her|girlfriend|wife|ex)\b/i,
+    subject: withDevanagari(
+      /\b(nudif\w*|undress\w*|deep[-\s]?fakes?|face[-\s]?swaps?|revenge[-\s]?porn|upskirt|hidden[-\s]?cam)\b/i,
+      ['डीप\\s*फ' + NUKTA + 'े' + 'क', 'फ' + NUKTA + 'े' + 'स\\s*स्वैप', 'न्यूडिफ', 'कपड' + NUKTA + 'े\\s+उता', 'रिवेंज\\s+पोर्न', 'हिडन\\s+कैम', 'छिप' + '[ाे]' + '\\s+कैमर'], W.NON_CONSENSUAL_IMAGERY.subject,
+    ),
+    context: withDevanagari(
+      /\b(photo|photos|picture|pictures|image|images|video|videos|selfie|her|girlfriend|wife|ex)\b/i,
+      ['फ' + NUKTA + 'ोटो', 'तस्वीर', 'इमेज', 'वीडियो', 'सेल्फी', 'गर्लफ्रेंड', 'पत्नी', 'बीवी'], W.NON_CONSENSUAL_IMAGERY.context,
+    ),
     // Asking to build one IS the illicit purpose — there is no benign "undress any photo" tool.
-    intent: /\b(app|tool|site|website|bot|service|generator)\b/i,
+    intent: withDevanagari(
+      /\b(app|tool|site|website|bot|service|generator)\b/i,
+      ['ऐप', 'एप' + END, 'टूल', 'साइट', 'वेबसाइट', 'बॉट', 'सर्विस', 'जनरेटर'], W.NON_CONSENSUAL_IMAGERY.intent,
+    ),
+    protective: NCII_PROTECTIVE,
   },
   {
     id: 'WEAPON_MANUFACTURE',
@@ -106,19 +256,33 @@ export const ILLEGAL_RULES: readonly IllegalRule[] = [
     description:
       'gives instructions for making a weapon or an explosive device, rather than merely mentioning one.',
     // Plurals matter: `ghost gun` alone missed "ghost guns", which is how the phrase is usually written.
-    subject: /\b(pipe[-\s]?bombs?|ieds?|improvised[-\s]?explosives?|pressure[-\s]?cooker[-\s]?bombs?|detonators?|blasting[-\s]?caps?|ghost[-\s]?guns?|untraceable[-\s]?(guns?|firearms?)|silencers?|suppressors?)\b/i,
+    // `desi katta` / `tamancha` are India's country-made pistols — the ghost gun of this market.
+    subject: withDevanagari(
+      /\b(pipe[-\s]?bombs?|ieds?|improvised[-\s]?explosives?|pressure[-\s]?cooker[-\s]?bombs?|detonators?|blasting[-\s]?caps?|ghost[-\s]?guns?|untraceable[-\s]?(guns?|firearms?)|silencers?|suppressors?|desi[-\s]?katt[ae]s?|tamanch[ae]s?)\b/i,
+      ['पाइप\\s*बम', 'प्रेशर\\s*कुकर\\s*बम', 'आईईडी', 'डेटोनेटर', 'देसी\\s*कट्ट', 'देशी\\s*कट्ट', 'तमंच', 'देसी\\s*बम', 'देशी\\s*बम'], W.WEAPON_MANUFACTURE.subject,
+    ),
     // The instructional half — a news report about a bomb has the subject and never this.
-    context: /\b(how[-\s]to[-\s]make|step[-\s]by[-\s]step|instructions|tutorial|recipe|assemble|build[-\s]your[-\s]own|materials[-\s]needed|ingredients)\b/i,
+    context: withDevanagari(
+      /\b(how[-\s]to[-\s]make|step[-\s]by[-\s]step|instructions|tutorial|recipe|assemble|build[-\s]your[-\s]own|materials[-\s]needed|ingredients)\b/i,
+      ['बनाने\\s+का\\s+तरीक', 'बनाने\\s+की\\s+विधि', 'कैसे\\s+बना', 'घर\\s+पर\\s+बना', 'स्टेप\\s+बाय\\s+स्टेप', 'निर्देश', 'ट्यूटोरियल', 'जरूरी\\s+सामान', 'ज' + NUKTA + 'रूरी\\s+सामान'], W.WEAPON_MANUFACTURE.context,
+    ),
     // NOT "write me a …": a chemistry lesson explaining a detonator is a legitimate request. Only
     // evasion or trade makes it illicit.
-    intent: /\b(untraceable|undetectable|evade|bypass[-\s]detection|black[-\s]?market|dark[-\s]?web|without[-\s]a[-\s]licen[cs]e|no[-\s]licen[cs]e|sell|selling|dealer)\b/i,
+    intent: withDevanagari(
+      /\b(untraceable|undetectable|evade|bypass[-\s]detection|black[-\s]?market|dark[-\s]?web|without[-\s]a[-\s]licen[cs]e|no[-\s]licen[cs]e|sell|selling|dealer)\b/i,
+      ['बेच', 'ब्लैक\\s*मार्केट', 'डार्क\\s*वेब', 'बिना\\s+लाइसेंस', 'अवैध', 'गैरकानूनी', 'डीलर'], W.WEAPON_MANUFACTURE.intent,
+    ),
   },
   {
     id: 'DRUG_MARKETPLACE',
     contentClass: 'illegal',
     description:
       'sells or ships controlled drugs — a storefront, not a pharmacy listing or a harm-reduction page.',
-    subject: /\b(cocaine|heroin|mdma|methamphetamine|crystal[-\s]?meth|lsd|ketamine|mephedrone|brown[-\s]?sugar|charas|ganja[-\s]?stock)\b/i,
+    // मेथ carries an END: मेथी is fenugreek, which a grocery app sells by the kilo.
+    subject: withDevanagari(
+      /\b(cocaine|heroin|mdma|methamphetamine|crystal[-\s]?meth|lsd|ketamine|mephedrone|brown[-\s]?sugar|charas|ganja[-\s]?stock)\b/i,
+      ['कोकीन', 'हेरोइन', 'हिरोइन', 'एमडीएमए', 'मेथ' + END, 'क्रिस्टल\\s*मेथ', 'मेथाम्फेटामाइन', 'एलएसडी', 'केटामाइन', 'मेफेड्रोन', 'ब्राउन\\s*शुगर', 'चरस', 'स्मैक', 'गांजा\\s*स्टॉक', 'गाँजा\\s*स्टॉक'], W.DRUG_MARKETPLACE.subject,
+    ),
     /**
      * CONCEALMENT, not commerce — and this narrowing came from a failing test, which is the point of
      * having written the test as a real app first.
@@ -129,10 +293,16 @@ export const ILLEGAL_RULES: readonly IllegalRule[] = [
      * they carry no signal at all; what a lawful seller never has is discreet packaging, escrow,
      * crypto-only payment or "no prescription needed".
      */
-    context: /\b(discreet[-\s]?(shipping|delivery|packaging)|stealth[-\s]?(shipping|delivery)|escrow|crypto[-\s]?only|bitcoin[-\s]?only|no[-\s]?prescription|without[-\s]a[-\s]prescription)\b/i,
+    context: withDevanagari(
+      /\b(discreet[-\s]?(shipping|delivery|packaging)|stealth[-\s]?(shipping|delivery)|escrow|crypto[-\s]?only|bitcoin[-\s]?only|no[-\s]?prescription|without[-\s]a[-\s]prescription)\b/i,
+      ['बिना\\s+पर्च', 'बिना\\s+प्रिस्क्रिप्शन', 'बिना\\s+डॉक्टर\\s+की\\s+पर्च', 'गुप्त\\s+डिलीवरी', 'चुपके\\s+से\\s+डिलीवरी', 'सीक्रेट\\s+डिलीवरी', 'डिस्क्रीट', 'क्रिप्टो\\s+में\\s+ही', 'सिर्फ\\s+क्रिप्टो', 'सिर्फ\\s+बिटकॉइन', 'एस्क्रो'], W.DRUG_MARKETPLACE.context,
+    ),
     // Trade, not treatment. A de-addiction helpline and a pharmacy listing both name the drug; only
     // a market names the market.
-    intent: /\b(marketplace|market[-\s]?place|dark[-\s]?web|black[-\s]?market|dealer|dealers|street[-\s]?price|anonymous[-\s]?(buy|sale|order)|untraceable)\b/i,
+    intent: withDevanagari(
+      /\b(marketplace|market[-\s]?place|dark[-\s]?web|black[-\s]?market|dealer|dealers|street[-\s]?price|anonymous[-\s]?(buy|sale|order)|untraceable)\b/i,
+      ['मार्केटप्लेस', 'डार्क\\s*वेब', 'ब्लैक\\s*मार्केट', 'डीलर', 'गुमनाम\\s+(?:खरीद|बिक्री|ऑर्डर)'], W.DRUG_MARKETPLACE.intent,
+    ),
   },
   {
     id: 'ADULT_CONTENT',
@@ -157,9 +327,18 @@ export const ILLEGAL_RULES: readonly IllegalRule[] = [
       'asks for pornographic or sexually explicit content. Banned on NavBharatAI — refused at the prompt.',
     // Widened the same day: the original subject missed every brand and every Hinglish spelling a real
     // user types, so "onlyfans clone with premium subscribe" was ALLOWED outright (verified, not assumed).
-    subject: /\b(porn|porno|pornography|pornographic|pornhub|xvideos|xnxx|xhamster|redtube|youporn|brazzers|onlyfans|hentai|rule34|camgirl|cam[-\s]?girl|camwhore|sex[-\s]?cam|nudify|deepnude|xxx|hardcore|erotica|nsfw|adult[-\s]?(video|content|film)s?|blue[-\s]?film|chudai|chodai|randi|nang[ai][-\s]?video|sexy[-\s]?video|sex[-\s]?videos?)\b/i,
-    context: /\b(watch|stream|streaming|live|upload|uploads|gallery|video|videos|clip|clips|category|categories|subscribe|subscription|premium|paywall|webcam|chat|site|website|app|platform|tube|18\+|adults?[-\s]only|banao|bana)\b/i,
-    intent: /\b(site|website|app|platform|streaming|gallery|tube)\b/i,
+    subject: withDevanagari(
+      /\b(porn|porno|pornography|pornographic|pornhub|xvideos|xnxx|xhamster|redtube|youporn|brazzers|onlyfans|hentai|rule34|camgirl|cam[-\s]?girl|camwhore|sex[-\s]?cam|nudify|deepnude|xxx|hardcore|erotica|nsfw|adult[-\s]?(video|content|film)s?|blue[-\s]?film|chudai|chodai|randi|nang[ai][-\s]?video|sexy[-\s]?video|sex[-\s]?videos?)\b/i,
+      ['पोर्न', 'पॉर्न', 'ब्लू\\s*फ' + NUKTA + 'िल्म', 'अश्लील\\s+(?:वीडियो|फ' + NUKTA + 'िल्म|फ' + NUKTA + 'ोटो|तस्वीर|कंटेंट|सामग्री|क्लिप|चैट)', 'सेक्स\\s*(?:वीडियो|कैम|चैट|फ' + NUKTA + 'िल्म)', 'सेक्सी\\s*(?:वीडियो|फ' + NUKTA + 'ोटो|फ' + NUKTA + 'िल्म)', 'नंग[ीा]\\s*(?:वीडियो|फ' + NUKTA + 'ोटो|तस्वीर)', 'चुदाई', 'चोदा', 'रंडी', 'एक्सएक्सएक्स', 'हेंताई', 'ओनलीफ' + NUKTA + 'ैंस', 'न्यूडिफ'], W.ADULT_CONTENT.subject,
+    ),
+    context: withDevanagari(
+      /\b(watch|stream|streaming|live|upload|uploads|gallery|video|videos|clip|clips|category|categories|subscribe|subscription|premium|paywall|webcam|chat|site|website|app|platform|tube|18\+|adults?[-\s]only|banao|bana)\b/i,
+      ['देख', 'स्ट्रीम', 'लाइव', 'अपलोड', 'गैलरी', 'वीडियो', 'क्लिप', 'कैटेगरी', 'सब्सक्राइब', 'सब्सक्रिप्शन', 'प्रीमियम', 'चैट', 'साइट', 'वेबसाइट', 'ऐप', 'एप' + END, 'प्लेटफ' + NUKTA + '[ॉो]र्म', 'प्लेटफार्म', 'बना'], W.ADULT_CONTENT.context,
+    ),
+    intent: withDevanagari(
+      /\b(site|website|app|platform|streaming|gallery|tube)\b/i,
+      ['साइट', 'वेबसाइट', 'ऐप', 'एप' + END, 'प्लेटफ' + NUKTA + '[ॉो]र्म', 'प्लेटफार्म', 'स्ट्रीमिंग', 'गैलरी'], W.ADULT_CONTENT.intent,
+    ),
     /**
      * 🔒 THE STAND-DOWN. Any of these anywhere in the text cancels the rule, because each names an app
      * NavBharatAI should WANT: a sexual-health clinic, a school safety curriculum, a harassment or
@@ -167,7 +346,16 @@ export const ILLEGAL_RULES: readonly IllegalRule[] = [
      * All of them legitimately contain both halves of the pair. Missing a cleverly-worded porn request
      * costs one model refusal, which already works; insulting a doctor costs a user forever.
      */
-    exempt: /\b(education|educational|educate|awareness|health|healthcare|clinic|doctor|medical|hospital|patient|therapy|therapist|counsel(?:l?ing)?|consent|hygiene|reproductive|fertility|pregnan(?:cy|t)|maternity|harassment|assault|traffick(?:ing)?|exploitation|prevent(?:ion)?|protect(?:ion)?|parental|moderation|moderate|filter|blocker|detect(?:ion)?|report(?:ing)?|complaint|helpline|ngo|police|legal|compliance|policy|banned|restrict|age[-\s]verification|safeguard(?:ing)?)\b/i,
+    /**
+     * 🔴 THE ENGLISH HALF NOW MATCHES INFLECTIONS (2026-10-04). It named `parental` and `blocker` and
+     * so missed "an app to block porn for parents", which was shown the ban: measured, not assumed.
+     * The same lesson as `nudif\w*` above: a stand-down that stops at one word form is a stand-down
+     * an ordinary sentence walks past. Only forms of the words already here were added; no new idea.
+     */
+    exempt: withDevanagari(
+      /\b(educat\w*|awareness|health|healthcare|clinic\w*|doctors?|medical|hospitals?|patients?|therap\w*|counsel\w*|consent|hygiene|reproductive|fertility|pregnan(?:cy|t)|maternity|harass\w*|assault\w*|traffick\w*|exploitation|prevent\w*|protect\w*|parent\w*|moderat\w*|filter\w*|block(?:s|er|ers|ing|ed)?|detect\w*|report\w*|complaints?|helplines?|ngos?|police|legal|compliance|polic(?:y|ies)|banned|restrict\w*|age[-\s]verification|safeguard\w*)\b/i,
+      ['शिक्षा', 'शैक्षिक', 'जागरूक', 'स्वास्थ्य', 'क्लिनिक', 'डॉक्टर', 'चिकित्सा', 'अस्पताल', 'मरीज', 'थेरेपी', 'परामर्श', 'काउंसलिंग', 'सहमति', 'स्वच्छता', 'प्रजनन', 'गर्भ', 'मातृत्व', 'उत्पीड' + NUKTA + 'न', 'शोषण', 'तस्करी', 'रोकथाम', 'रोकन', 'रोकने', 'बचाव', 'बचान', 'बचाने', 'सुरक्षा', 'सुरक्षित', 'अभिभावक', 'माता-पिता', 'पेरेंट', 'मॉडरेशन', 'फ' + NUKTA + 'िल्टर', 'ब्लॉक', 'डिटेक्ट', 'रिपोर्ट', 'शिकायत', 'हेल्पलाइन', 'एनजीओ', 'पुलिस', 'क' + NUKTA + 'ानून', 'नीति', 'प्रतिबंध', 'आयु\\s+सत्यापन', 'उम्र\\s+सत्यापन'], W.ADULT_CONTENT.exempt,
+    ),
   },
 ];
 
@@ -196,13 +384,14 @@ export const SCAN_TEXT_CAP = 2_000_000;
  * description say enough to act; the app itself is there to be opened by anyone who needs more.
  */
 export function classifyPublishedText(text: string | null | undefined): IllegalScanResult {
-  const body = String(text ?? '').slice(0, SCAN_TEXT_CAP);
+  const body = normalizeScanText(String(text ?? '').slice(0, SCAN_TEXT_CAP));
   const findings: IllegalFinding[] = [];
   if (!body) return { findings, contentClass: 'general' };
 
   for (const rule of ILLEGAL_RULES) {
     // BOTH halves, in the same app. Either alone is an innocent mention.
-    if (rule.subject.test(body) && rule.context.test(body)) {
+    // A protective app (Q-320) is not the offence it protects against.
+    if (rule.subject.test(body) && rule.context.test(body) && !protectiveStandDown(rule, body)) {
       findings.push({ id: rule.id, contentClass: rule.contentClass, description: rule.description });
     }
   }

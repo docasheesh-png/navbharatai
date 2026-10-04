@@ -31,7 +31,7 @@ const ASK = [
   /\b(?:live|publish|deploy|host|online|upload)\s+k(?:ar|r)/i,
   /\bkar\s+do\b.{0,12}\b(?:live|publish|deploy)\b/i,
   // Devanagari
-  /प्रकाशित/, /लाइव\s*कर/, /डिप्लॉय/,
+  /प्रकाशित/, /लाइव\s*कर/, /डिप्लॉय/, /पब्लिश\s*कर/, /होस्ट\s*कर/,
 ];
 
 /**
@@ -42,7 +42,10 @@ const ASK = [
 const REFUSE = [
   /\b(?:do\s*n[o']?t|don't|dont|never|no\s+need\s+to|not\s+yet|without)\b/i,
   /\bmat\b/i, /\bnahi\b/i, /\bnahin\b/i, /\bmt\b/i,
-  /मत\b/, /नहीं/,
+  // `\b` is an ASCII boundary and cannot see a Devanagari word: `/मत\b/` matched nothing, so
+  // "पब्लिश करो, पर अभी मत" published. Bounded on both sides, so मतलब (meaning) and मतदान (voting)
+  // are not "मत" (do not). Census-locked in tests/aWordBoundaryCanSeeHindi.test.ts.
+  /(?<![\w\u0900-\u097F])मत(?![\w\u0900-\u097F])/, /नहीं/,
   /\blater\b/i, /\bbaad\s+me[in]?\b/i, /\babhi\s+(?:nahi|mat|na)\b/i,
 ];
 

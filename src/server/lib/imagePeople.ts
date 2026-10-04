@@ -86,7 +86,7 @@ const OTHER_ORIGIN_WORDS: readonly string[] = [
   'ukrainian', 'polish', 'greek', 'australian', 'caucasian', 'jewish', 'israeli', 'hawaiian', 'native\\s+american',
   'maori', 'aboriginal', 'inuit', 'scandinavian', 'nordic', 'slavic', 'westerner', 'westerners', 'foreigner',
   'foreigners', 'videshi', 'angrez', 'angrezi\\s+(?:aadmi|ladki|ladka|aurat)', 'gora', 'gori', 'firangi',
-  '(?<!south\\s)(?<!south-)asian', 'east\\s+asian', 'oriental',
+  'asian', 'east\\s+asian', 'oriental',
   'diverse', 'diversity', 'multicultural', 'multi-?ethnic', 'multiracial', 'mixed[-\\s]race',
   '(?:different|various|all)\\s+(?:races|ethnicities|nationalities|countries)', 'international\\s+(?:team|people|group)',
   '(?:white|black)\\s+(?:man|men|woman|women|person|people|guy|guys|girl|girls|boy|boys|lady|ladies|kid|kids|child|children|skin|skinned|family|couple)',
@@ -103,29 +103,49 @@ const NOT_A_REAL_PERSON: readonly string[] = [
   'superman', 'batman', 'hulk', 'mickey', 'minion', 'minions', 'smurf',
 ];
 
+/**
+ * ⚠️ NO LOOKBEHIND ANYWHERE IN THIS FILE (Q-322). It is bundled into the Image Generator screen, and
+ * Safari before 16.4 (iOS 15 – 16.3) throws on a lookbehind when the regex is built — at module load,
+ * so the whole screen failed to open. The word start is a CONSUMING non-letter instead; every regex
+ * here is only ever asked `.test()`, so what the start consumes is never read.
+ */
 function bounded(terms: readonly string[]): RegExp {
-  return new RegExp(`(?<![\\p{L}\\p{N}])(?:${terms.join('|')})(?![\\p{L}\\p{N}])`, 'iu');
+  return new RegExp(`(?:^|[^\\p{L}\\p{N}])(?:${terms.join('|')})(?![\\p{L}\\p{N}])`, 'iu');
 }
 
 const PEOPLE_RE = bounded(PEOPLE_WORDS.filter((w) => w !== 'face'));
-const FACE_RE = new RegExp(
-  `(?<![\\p{L}\\p{N}])(?<!(?:${NON_HUMAN_BEFORE_FACE})['’]?s?\\s)face(?![\\p{L}\\p{N}])(?!\\s+(?:${PRODUCT_AFTER_FACE})(?![\\p{L}\\p{N}]))`,
-  'iu',
+/** "face" as a word, not followed by a product noun ("face wash", "face mask"). */
+const FACE_WORD_RE = new RegExp(
+  `(?:^|[^\\p{L}\\p{N}])face(?![\\p{L}\\p{N}])(?!\\s+(?:${PRODUCT_AFTER_FACE})(?![\\p{L}\\p{N}]))`,
+  'giu',
 );
+/** The text just before a "face" that makes it a cat's face or a clock's face, not a person's. */
+const NON_HUMAN_OWNER_RE = new RegExp(`(?:${NON_HUMAN_BEFORE_FACE})['’]?s?\\s$`, 'iu');
+/** "south asian" is Indian-compatible: it is removed before the origin words are read. */
+const SOUTH_ASIAN_RE = /south[\s-]asian/giu;
 const OTHER_ORIGIN_RE = bounded(OTHER_ORIGIN_WORDS);
 const NOT_A_REAL_PERSON_RE = bounded(NOT_A_REAL_PERSON);
+
+/** A person's "face": the word itself, and not a cat's, a clock's or a face-wash bottle's. */
+function namesAPersonsFace(p: string): boolean {
+  for (const m of p.matchAll(FACE_WORD_RE)) {
+    const faceAt = (m.index ?? 0) + m[0].length - 'face'.length;
+    if (!NON_HUMAN_OWNER_RE.test(p.slice(0, faceAt))) return true;
+  }
+  return false;
+}
 
 /** Does this brief put a PERSON in the picture? PURE. */
 export function depictsPeople(prompt: string | null | undefined): boolean {
   const p = String(prompt ?? '').normalize('NFKC');
   if (!p.trim()) return false;
-  if (PEOPLE_RE.test(p) || FACE_RE.test(p)) return true;
+  if (PEOPLE_RE.test(p) || namesAPersonsFace(p)) return true;
   return PEOPLE_SUBSTRINGS.some((w) => p.includes(w));
 }
 
 /** Did the user name an origin, a mix, or a character whose look is not ours to choose? PURE. */
 export function namesOtherOrigin(prompt: string | null | undefined): boolean {
-  const p = String(prompt ?? '').normalize('NFKC');
+  const p = String(prompt ?? '').normalize('NFKC').replace(SOUTH_ASIAN_RE, ' ');
   return OTHER_ORIGIN_RE.test(p) || NOT_A_REAL_PERSON_RE.test(p);
 }
 

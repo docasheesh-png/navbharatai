@@ -52,13 +52,14 @@ describe('🔒 the wiring — an API with no screen is not a feature', () => {
   const card = readFileSync(join(process.cwd(), 'src/components/admin/BuildCostCard.tsx'), 'utf8');
   const admin = readFileSync(join(process.cwd(), 'src/server/routes/admin.ts'), 'utf8');
 
-  it('the card is mounted on the admin REPORTS tab, beside the all-builds list', () => {
+  it('the card is mounted on the admin MONEY page (moved from Build Reports, admin 2026-10-04, D2)', () => {
     expect(dash).toContain("import { BuildCostCard } from './admin/BuildCostCard'");
-    const at = dash.indexOf("{activeTab === 'reports' && (");
+    const at = dash.indexOf("{activeTab === 'revenue' && (");
     expect(at).toBeGreaterThan(-1);
     const mount = dash.indexOf('<BuildCostCard adminToken={adminToken} />');
     expect(mount).toBeGreaterThan(at);
-    expect(mount).toBeLessThan(dash.indexOf('All builds — every user, no submit needed'));
+    // Inside the Money block: before the next page's block opens.
+    expect(mount).toBeLessThan(dash.indexOf("{activeTab === 'userreports' && ("));
   });
   it('it reads the real route with the admin token', () => {
     expect(card).toContain("fetch('/api/admin/build-costs?limit=30'");

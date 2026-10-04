@@ -115,10 +115,13 @@ describe('🔒 the wiring — the half that rots', () => {
     expect(app.indexOf('{adminStrip ? (')).toBeLessThan(app.indexOf("activeView === 'nbi_pro_chat' && v3FooterApi ? ("));
   });
 
-  it('the console publishes its REAL state — one setActiveTab, not a second copy', () => {
-    expect(dash).toContain('items: adminFooterItems(TABS, tabBadges)');
-    expect(dash).toContain('activeId: activeTab');
-    expect(dash).toContain('select: (id: string) => setActiveTab(id as TabId)');
+  it('the console publishes its REAL state — the tab is derived from the one page state, not a copy', () => {
+    // Since the nine-tab menu (admin 2026-10-04, D2) the footer carries TABS and the open page's tab
+    // is DERIVED (`tabOfPage(activeTab)`), so the footer and the header still read one piece of state.
+    expect(dash).toContain('items: adminFooterItems(TABS, tabBarBadges(tabBadges))');
+    expect(dash).toContain('const openTabId = tabOfPage(activeTab);');
+    expect(dash).toContain('activeId: openTabId');
+    expect(dash).toContain('select: (id: string) => openTab(id as AdminTabId)');
   });
 
   it('⚠️ and publishes NULL on unmount, so logging out restores the ordinary bar', () => {

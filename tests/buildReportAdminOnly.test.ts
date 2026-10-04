@@ -130,7 +130,8 @@ describe('Server — report-to-admin + admin-only retrieval', () => {
 
 describe('Admin UI — Build Reports tab', () => {
   it('AdminDashboard has a reports tab that reads the admin endpoint', () => {
-    expect(dash).toContain("id: 'reports'");
+    // The page id lives in the nine-tab table since 2026-10-04 (D2); the heading stays on the page.
+    expect(readFileSync(join(process.cwd(), 'src/lib/adminTabs.ts'), 'utf8')).toContain("id: 'reports'");
     expect(dash).toContain('Build Reports');
     expect(dash).toContain("'/api/admin/build-reports'");
     expect(dash).toContain('downloadSelectedReport');

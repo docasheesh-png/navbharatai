@@ -13,6 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { ENGINE_REPORTS_ON } from '../src/lib/adminTabs';
 import { UNUSED_CARDS, reasonLabel, unusedCard } from '../src/components/admin/unusedCards';
 
 const read = (p: string) => readFileSync(resolve(__dirname, '..', p), 'utf8');
@@ -54,10 +55,21 @@ describe('every report that had no screen now has one', () => {
     }
   });
 
-  it('the panel is reachable — the dashboard renders it behind its own tab', () => {
-    expect(DASHBOARD).toContain('<EngineReportsPanel');
-    expect(DASHBOARD).toMatch(/id: 'diagnostics'/);
-    expect(DASHBOARD).toMatch(/activeTab === 'diagnostics'/);
+  it('the panel is reachable — every report sits on exactly one page (admin panel audit PR 2)', () => {
+    // The old "Diagnostics" tab was dissolved: each report moved beside the cards it belongs with.
+    // A report placed on NO page would be the very defect that tab was created to fix.
+    const keys = [...PANEL.matchAll(/^  (\w+): '\/api\/admin\//gm)].map((m) => m[1]);
+    expect(keys.length).toBe(THE_THIRTEEN.length);
+    const placed = Object.values(ENGINE_REPORTS_ON).flat() as string[];
+    for (const k of keys) expect(placed.filter((p) => p === k), `report ${k}`).toHaveLength(1);
+    expect(placed.length).toBe(keys.length);
+    for (const page of Object.keys(ENGINE_REPORTS_ON)) {
+      const open = DASHBOARD.indexOf(`{activeTab === '${page}' && (`);
+      expect(open, `page ${page} has a block`).toBeGreaterThan(-1);
+      const close = DASHBOARD.indexOf('\n          )}', open);
+      expect(DASHBOARD.slice(open, close)).toContain(`only={ENGINE_REPORTS_ON.${page}}`);
+    }
+    expect(DASHBOARD).not.toMatch(/activeTab === 'diagnostics'/);
   });
 
   it('every card can be exported — a number that cannot leave the screen is half a report', () => {

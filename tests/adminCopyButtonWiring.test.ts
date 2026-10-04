@@ -39,7 +39,8 @@ describe('the button is mounted on every admin page', () => {
   });
 
   it('names the page it is copying from the tab the admin is actually on', () => {
-    expect(dashboard).toMatch(/<AdminCopyButton\s+pageLabel=\{TABS\.find\(\(t\) => t\.id === activeTab\)\?\.label/);
+    // `pageTitle` names the open PAGE, not only its tab — "Builds · Phone builds" (admin 2026-10-04, D2).
+    expect(dashboard).toMatch(/<AdminCopyButton\s+pageLabel=\{pageTitle\(activeTab\)\}/);
   });
 });
 

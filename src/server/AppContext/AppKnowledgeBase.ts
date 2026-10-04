@@ -2961,7 +2961,7 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
   {
     id: 'admin-revenue-purchases',
     name: 'Admin Revenue — purchases by user',
-    path: 'Admin panel → Revenue → "Purchases — who paid, for what" (admin only)',
+    path: 'Admin panel → Money → "Purchases — who paid, for what" (admin only)',
     description: `Admin-only view of every purchase behind the revenue total:
 • One row per payment record: date & time, user (name, email, id), product (wallet recharge, token pack, Professional Pass, coupon, gift), amount paid in ₹, tokens credited, ₹ credited, status (paid / pending / failed / free credit), payment method (Cashfree web, Google Play, App Store, coupon), transaction id and gateway reference
 • Revenue counts only successful payments with money received — coupons, welcome gifts and referral steps are shown but never counted
@@ -2976,7 +2976,7 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
   {
     id: 'admin-diagnostics',
     name: 'Diagnostics (admin) — the engine reports that had no screen',
-    path: 'Admin Dashboard \u2192 Diagnostics',
+    path: 'Admin Dashboard \u2192 each report on the page that owns it: Builds \u2192 Engine health, Money, AI Engines, Safety, Apps \u2192 Publishing, Messages (the Diagnostics tab was split by owner)',
     description: `Admin-only page carrying the thirteen report endpoints that the server had always computed and never shown anywhere:
 \u2022 BUILDER SCORECARD \u2014 build success rate, how often the builder had to repair its OWN output (heal pressure), whether edits to an existing app survive, median build time and median cost. Every rate states the sample it rests on, and an unmeasured value shows an em dash rather than 0
 \u2022 ABSORBED LOSSES \u2014 builds that were not charged under "working app or free", and what their provider cost us
@@ -2994,7 +2994,7 @@ Ask the AI to deploy (e.g. "Deploy this to Vercel using my token") and it will u
   {
     id: 'admin-monitor',
     name: 'Live Monitor (admin home)',
-    path: 'Admin Dashboard → Monitor (the page that opens on login)',
+    path: 'Admin Dashboard → Home (the page that opens on login)',
     description: `The admin panel's observability home — a live, time-ranged view of what the platform is doing right now, in the spirit of a Grafana dashboard but built inside NavBharatAI (no extra server, no monthly bill, and Cloud Run's own infrastructure graphs stay free in Google Cloud Monitoring).
 • TIME RANGE — 1 hour / 6 hours / 24 hours / 7 days, with 30-second auto-refresh that can be switched off
 • LIVE TILES — builds in the window, success rate, how often the preview really rendered, average build time, and AI cost in ₹
@@ -3019,19 +3019,20 @@ Backend: GET /api/admin/monitor (one composed call) over the 5-minute time-serie
     name: 'Admin panel navigation (where the tabs are)',
     path: 'Admin Dashboard \u2014 on a phone the tabs are the BOTTOM bar; on a computer they are the row under the title',
     description: `Where the admin console's nine pages live, which is different on a phone and on a computer (admin 2026-09-20).
-\u2022 ON A PHONE \u2014 the pages are the BOTTOM bar: Monitor, Users, AI Engines, Revenue, Build Reports, User Reports, APK Reports, Security, Settings. Nine do not fit a phone's width, so the bar SWIPES left and right, and the page you are on scrolls itself back into view whenever you switch. The app's ordinary bottom bar (Home / AI / Preview / Studio / More) is replaced while the admin panel is open and comes straight back when you leave it or log out.
+\u2022 THE NINE TABS (admin panel audit PR 2, 2026-10-04): Home, Users (All users | Complaints), Apps (All apps | Publishing | Review), Builds (Reports | Phone builds | Engine health), AI Engines, Money, Safety, Messages, Settings. A tab with several pages shows a second row of page buttons under the tabs, on a phone and on a computer.
+\u2022 ON A PHONE \u2014 the nine tabs are the BOTTOM bar. Nine do not fit a phone's width, so the bar SWIPES left and right, and the page you are on scrolls itself back into view whenever you switch. The app's ordinary bottom bar (Home / AI / Preview / Studio / More) is replaced while the admin panel is open and comes straight back when you leave it or log out.
 \u2022 WHY \u2014 the bottom row is the one a thumb can always reach, and inside the admin console the pages of the console are what you want there, not five buttons that lead out of it.
 \u2022 EACH PAGE CARRIES ITS OWN COUNTER when there is a real number behind it (for example active users over total, or unread reports), and a page whose number could not be measured shows NO counter rather than a zero \u2014 a 0 would read as "I looked, there is nothing", which is a different claim.
 \u2022 ON A COMPUTER \u2014 nothing changed: the tabs stay in the row under the title and there is no bottom bar.
-Every other admin entry's path (for example "Admin Dashboard \u2192 Revenue") still describes the same page \u2014 only where you tap to reach it differs by device.`,
-    howToUse: 'Admin login required. On a phone: open the Admin Dashboard and use the bottom bar \u2014 swipe it sideways to reach Revenue, Build Reports, Security and the rest. On a computer: use the tab row under the NAVBHARATAI ADMIN title.',
+Every other admin entry's path (for example "Admin Dashboard \u2192 Money") still describes the same page \u2014 only where you tap to reach it differs by device.`,
+    howToUse: 'Admin login required. On a phone: open the Admin Dashboard and use the bottom bar \u2014 swipe it sideways to reach Money, Builds, Safety and the rest, then use the page row under the tabs. On a computer: use the tab row under the NAVBHARATAI ADMIN title.',
     relatedFeatures: ['admin-monitor', 'admin-metrics', 'admin-revenue-purchases'],
     keywords: ['admin tabs', 'admin navigation', 'admin footer', 'admin panel footer', 'bottom bar', 'admin bottom bar', 'swipe tabs', 'monitor users revenue tab', 'admin panel me tab kaha hai', 'footer', 'tab kaise badle', 'admin menu'],
   },
   {
     id: 'admin-ai-insights',
     name: 'AI Insights & NL Telemetry Query',
-    path: 'Admin Dashboard → Monitor → Insights card (admin only)',
+    path: 'Admin Dashboard → Home → Insights card (admin only)',
     description: `Admin-only "AI Insights" card that turns the live metrics into readable, ACTIONABLE observations — build success rate, preview rate, average build time, repair burden, top-spend provider + share, and the per-request cost spread between providers. Every insight is DETERMINISTICALLY derived from real recorded metrics (no hallucination, no projections) and severity-tagged (good/info/warning/critical). Includes a natural-language query box: ask "what is my cost?", "how many builds failed?", "which provider is cheapest?", "why are builds slow?" and get an exact answer from the real snapshot; an unrecognized question honestly lists what CAN be answered instead of guessing. Also generates a plain-text ops report. Backend: GET /api/admin/insights and POST /api/admin/insights/query. Shows an honest "no telemetry yet" state until data exists.`,
     howToUse: 'Admin login required. Open the Admin Dashboard → Monitor tab (the home page) → the "Insights" card appears with the current insights. Type a question in the box (cost, success rate, speed, providers, preview, volume) and press Ask.',
     relatedFeatures: ['admin-metrics', 'build-performance-analytics', 'build-reliability-metrics'],
@@ -3040,7 +3041,7 @@ Every other admin entry's path (for example "Admin Dashboard \u2192 Revenue") st
   {
     id: 'admin-apple-signin-check',
     name: 'Apple Sign-In Check (is it our side?)',
-    path: 'Admin Dashboard → Build Reports tab → "Apple sign-in" button (admin only)',
+    path: 'Admin Dashboard → Builds → Engine health → "Apple sign-in" button (admin only)',
     description: `Admin-only one-click check that answers "why is Sign in with Apple failing?" with evidence instead of guesswork. The server fetches its OWN public domain-verification file at the exact address Apple fetches, and compares it with what it believes it is serving. That single comparison separates causes a browser shows identically (a sheet that just closes): NOT CONFIGURED (we do not have the file), INTERCEPTED (something in front of us answers that path, or returns a web page instead), STALE (a different/older copy is being served), UNVERIFIABLE (we could not ask — reported as its own state, never as a failure), or OURS-IS-CORRECT (nothing on our side is blocking it). Next to the button is an OPTIONAL code box: paste the error code from the sign-in message (e.g. auth/invalid-credential) and the answer gets sharper — that particular code is only reachable AFTER Apple has already accepted the sign-in, so the report then points at Firebase Console → Authentication → Sign-in method → Apple and its four values (Services ID, Apple Team ID, Key ID, .p8 key) instead of sending you back to Apple's portal. The code can only sharpen the final "our side is correct" answer; it can never hide a real fault on our side. The card shows the verdict, the one thing to do next, and lengths/status only — never the file's contents. Backend: GET /api/admin/apple-signin (optionally ?code=).`,
     howToUse: 'Admin login required. Open the Admin Dashboard → Build Reports tab → press "Apple sign-in" (top right, next to Server necessity and Sandbox handover). If you have the error code from the failed sign-in message, type it in the small box first — the answer becomes exact. Read the "Do this next" line.',
     relatedFeatures: ['admin-metrics', 'admin-ai-insights'],
@@ -3085,7 +3086,7 @@ Every other admin entry's path (for example "Admin Dashboard \u2192 Revenue") st
   {
     id: 'admin-mfa',
     name: 'Admin Two-Factor Authentication (2FA / TOTP)',
-    path: 'Admin Dashboard → Security tab → Two-Factor Authentication (admin only)',
+    path: 'Admin Dashboard → Safety → Two-Factor Authentication (admin only)',
     description: `App-based second factor (TOTP, RFC 6238) for admin-panel access — protection against password leaks and SIM-swap attacks on SMS OTP:
 • Enable 2FA: generates a secret, shows it as an authenticator key + an otpauth:// URI to add to Google Authenticator / Authy / 1Password / Microsoft Authenticator
 • Confirm with a 6-digit code to activate; once enabled, admin login requires the code IN ADDITION to the password
@@ -3099,7 +3100,7 @@ Every other admin entry's path (for example "Admin Dashboard \u2192 Revenue") st
   {
     id: 'admin-built-apps',
     name: 'Built apps — every user\'s app, with a preview, unpublish and ban (admin only)',
-    path: 'Admin Dashboard → Security tab → Built apps (admin only)',
+    path: 'Admin Dashboard → Apps → All apps (admin only)',
     description: `The moderation list of EVERY app any user has built with NavBharatAI Pro — published or not — newest first, 12 at a time:
 • Lists all users' built apps from the durable file store (an app that was built and never published is listed too), with its publish state: Live, Offline, Banned, Held, Paused or Not published
 • Every row shows WHAT the app is (the name the owner chose, else the title of their first prompt) and WHO built it (name and email); the owner opens their account, and the app id sits underneath
@@ -3116,7 +3117,7 @@ Every other admin entry's path (for example "Admin Dashboard \u2192 Revenue") st
   {
     id: 'admin-audience',
     name: 'Who came to NavBharatAI (website visits + app opens, admin only)',
-    path: 'Admin Dashboard → Monitor tab → "Who came to NavBharatAI" (admin only)',
+    path: 'Admin Dashboard → Home → "Who came to NavBharatAI" (admin only)',
     description: `How many people are actually using NavBharatAI — measured by NavBharatAI's own server, not by anyone else's script:
 • WEBSITE (navbharatai.com): page views today, over the last 30 days, and since counting began, plus how many separate people visited each day
 • APP: how many times the mobile app was OPENED — today, over the last 30 days, and since counting began
@@ -3149,7 +3150,7 @@ WHAT IT DELIBERATELY CANNOT TELL YOU, and says so on the card:
   {
     id: 'build-discount',
     name: 'Build discount',
-    path: 'Admin: Admin Dashboard → Build Reports tab → "Build discount" card. Users: shown under every discounted build result in NavBharatAI Pro, in green',
+    path: 'Admin: Admin Dashboard → Money → "Build discount" card. Users: shown under every discounted build result in NavBharatAI Pro, in green',
     description: 'A percentage the admin sets (0–50%) that is taken off every charged NavBharatAI Pro build. At 0% (the default) every bill is exactly what it was before. With a discount set, a charged build shows one green line under its result, e.g. "Build price ₹150.00 · Discount 20% (−₹30.00) · You pay ₹120.00", the same line is added to the build\'s closing message, and the "Why this cost?" breakdown lists the price and the discount. Only the lower amount is taken from the wallet. RULES: the discount never takes a bill below what the build really cost NavBharatAI, so a build already charged at cost (for example one whose preview could not be confirmed) gets no discount, and one close to cost gets a smaller one — the percentage shown to the user is always the one they actually received, never the one configured. A failed or free build stays free. The discount covers app builds only; chat, Professionals, Doctor AI and the AI tools are not discounted. A change reaches every server within a minute.',
     howToUse: 'Admin: open the Admin Dashboard → Build Reports tab, find the "Build discount" card, type a whole number from 0 to 50 and press Save; the card shows an example of what a ₹100 build would cost. Set it back to 0 to end the offer. IF A USER ASKS why their discount was smaller than advertised, or why a build had none: explain plainly that the discount never takes a bill below what the build cost to run, so a build that was already charged at cost gets no discount, and the percentage shown is the one they actually received.',
     relatedFeatures: ['billing', 'admin', 'wallet_statement'],
@@ -3158,7 +3159,7 @@ WHAT IT DELIBERATELY CANNOT TELL YOU, and says so on the card:
   {
     id: 'admin-cost-ladder',
     name: 'Build Cost-Ladder Dashboard',
-    path: 'Admin Dashboard → Revenue tab → "Build Cost-Ladder (last 30 days)" (admin only)',
+    path: 'Admin Dashboard → Money → "Build Cost-Ladder (last 30 days)" (admin only)',
     description: `Admin-only panel showing how NavBharatAI Pro routes builds across model tiers to control cost, with REAL telemetry (never faked):
 • Total NavBharatAI Pro builds and overall success rate over the last 30 days
 • CHEAP-TIER SHARE — what % of builds ran on the cheapest 'gemini' start tier (the cost-ladder's whole point: simple apps build on Gemini Flash, not Pro)

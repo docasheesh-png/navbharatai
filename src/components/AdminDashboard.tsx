@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, ArrowUp, ArrowDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink, ChevronDown, ChevronRight, Wrench} from 'lucide-react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, ArrowUp, ArrowDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink, ChevronDown, ChevronRight} from 'lucide-react';
 import { effectiveDirection } from '../lib/adminUserSort';
 import { TirangaLoader } from './ui/TirangaLoader';
 import { usePagedList } from '../hooks/usePagedList';
@@ -11,6 +11,10 @@ import { adultOptInSummary } from '../lib/adultContent';
 import { confirmCopy } from '../lib/adminAppModeration';
 import { BuiltAppsPanel } from './admin/BuiltAppsPanel';
 import { ConfirmActionDialog } from './admin/ConfirmActionDialog';
+import {
+  ADMIN_TABS, ENGINE_REPORTS_ON, tabOfPage, tabDef, firstPageOf, pageTitle, pageBadge, pageHint,
+  tabBarBadges, tabHint, type AdminTabId, type AdminPageId,
+} from '../lib/adminTabs';
 import { banCopy, tokenAdjustCopy, broadcastCopy, readTokenDelta, ALL_USERS_SCOPE } from '../lib/adminActionReason';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
@@ -45,7 +49,7 @@ import { submittedRowFacts, allBuildRowFacts, personLabel } from '../lib/reportR
 import { rowMatches, statusCountsFor, EMPTY_FILTERS, type ListFilterState } from '../lib/reportListFilter';
 import { describeOverflow } from '../lib/reportDiagnostics';
 import {
-  badgesFromPayload, formatBadge, badgeNeedsAttention, BADGE_HINTS,
+  badgesFromPayload, formatBadge, badgeNeedsAttention,
   type AdminTabBadges,
 } from '../lib/adminTabBadges';
 import { adminFooterItems, type AdminFooterApi } from './admin/adminFooterApi';
@@ -65,37 +69,29 @@ interface AdminDashboardProps {
   onFooterApi?: (api: AdminFooterApi | null) => void;
 }
 
-type TabId = 'monitor' | 'users' | 'engines' | 'revenue' | 'reports' | 'userreports' | 'apkreports' | 'diagnostics' | 'security' | 'settings';
+/**
+ * The open PAGE (admin panel audit PR 2, 2026-10-04). The top bar shows the nine approved TABS
+ * (`ADMIN_TABS` in `lib/adminTabs.ts`); a tab with several pages shows a second row. Page ids are the old
+ * tab ids wherever a page survived, so `activeTab === 'reports'` still means the build-report inbox. The
+ * tab is DERIVED (`tabOfPage`) — never a second piece of state.
+ */
+type TabId = AdminPageId;
 
-const TABS: { id: TabId; label: string; icon: React.ComponentType<any> }[] = [
-  // HOME = the live Monitor (2026-08-23). The old Overview content was not removed — it is rendered
-  // BELOW the live charts on this same page, so every number the admin already relied on is still
-  // here, one screen earlier. Moved rather than copied: two copies of these panels would drift.
-  { id: 'monitor',   label: 'Monitor',      icon: Activity },
-  { id: 'users',     label: 'Users',        icon: Users },
-  { id: 'engines',   label: 'AI Engines',   icon: Cpu },
-  { id: 'revenue',   label: 'Revenue',      icon: IndianRupee },
-  { id: 'reports',   label: 'Build Reports', icon: FileText },
-  // USER REPORTS — a SEPARATE page from Build Reports on purpose (admin 2026-08-21). One is the
-  // engine telling us about a build; this is a person telling us about the product or about another
-  // person. Mixing them would bury the complaints that need a human.
-  { id: 'userreports', label: 'User Reports', icon: Flag },
-  // APK REPORTS — a THIRD, separate page (admin 2026-09-14). "Build Reports" above is the in-house
-  // AgentV3 engine's own report, sent only when a user presses "Report"; this one is the Android/iOS
-  // store-build pipeline (a user's app compiled on their OWN GitHub via GitHub Actions), and it is
-  // written AUTOMATICALLY the moment such a build fails — no button, no user action. Different
-  // pipeline, different failure shape (Gradle/Xcode/npm, not an AI build turn), so it gets its own page
-  // rather than being squeezed into either existing inbox's fields.
-  { id: 'apkreports', label: 'APK Reports', icon: Smartphone },
-  // DIAGNOSTICS (admin 2026-09-21): *"13 endpoints par asli diagnostic data ban raha hai jo kisi
-  // screen par dikhta hi nahi. pahle yahi banao!"* — the audit found thirteen report routes that
-  // compute a real answer on every call and had no client at all. They get their own page rather
-  // than being scattered: what they have in common is that they answer "is the ENGINE getting
-  // better", which is a different question from any existing tab's.
-  { id: 'diagnostics', label: 'Diagnostics', icon: Wrench },
-  { id: 'security',  label: 'Security',     icon: Shield },
-  { id: 'settings',  label: 'Settings',     icon: Settings },
-];
+const TAB_ICONS: Record<AdminTabId, React.ComponentType<any>> = {
+  home: Activity,
+  users: Users,
+  apps: Globe,
+  builds: FileText,
+  engines: Cpu,
+  money: IndianRupee,
+  safety: Shield,
+  messages: Megaphone,
+  settings: Settings,
+};
+
+/** The nine tabs as the header strip and the phone's bottom bar draw them. */
+const TABS: { id: AdminTabId; label: string; icon: React.ComponentType<any> }[] =
+  ADMIN_TABS.map((t) => ({ id: t.id, label: t.label, icon: TAB_ICONS[t.id] }));
 
 type ReportTier = 'paid' | 'free' | 'admin' | 'unknown';
 
@@ -173,6 +169,13 @@ const statCard = (label: string, value: string | number, sub: string, color: str
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLogout, mobileFooter, onFooterApi }) => {
   const [activeTab, setActiveTab] = useState<TabId>('monitor');
+  /** The page last open in each tab, so returning to a tab returns to where the admin was. */
+  const lastPageRef = useRef<Partial<Record<AdminTabId, AdminPageId>>>({});
+  useEffect(() => { lastPageRef.current[tabOfPage(activeTab)] = activeTab; }, [activeTab]);
+  const openTab = useCallback((tab: AdminTabId) => {
+    setActiveTab(lastPageRef.current[tab] ?? firstPageOf(tab));
+  }, []);
+  const openTabId = tabOfPage(activeTab);
   // ── User reports (admin 2026-08-21) ──────────────────────────────────────
   const [userReports, setUserReports] = useState<any[]>([]);
   /** The admin's half of a report conversation — see the reply box in the report modal. */
@@ -889,6 +892,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
 
   const reclaimChannel = useCallback(async (channelId: string) => {
+    // A confirmation, like Reclaim all has (admin panel audit PR 2): this DELETES a hosting channel. The
+    // server still re-checks that the channel is waste and refuses anything live.
+    if (!window.confirm(`Delete hosting channel ${channelId}?\n\nOnly channels the server judges to be waste can be deleted. This cannot be undone.`)) return;
     setReclaiming(channelId);
     try {
       const r = await fetch(`/api/admin/hosting/channels/${encodeURIComponent(channelId)}/reclaim`, { method: 'POST', headers });
@@ -1425,6 +1431,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   // `fetchHealthScore` went with the Platform Health Score card — the Monitor no longer asks for a
   // score nothing renders. The number itself is still shown, from /api/admin/monitor.
   useEffect(() => { if (activeTab === 'monitor') { fetchInsights(); fetchChannels(); } }, [activeTab, fetchInsights, fetchChannels]);
+  // The publish ceiling moved to Apps → Publishing (PR 2); it reads the same channel list as Home's tile.
+  useEffect(() => { if (activeTab === 'publishing') fetchChannels(); }, [activeTab, fetchChannels]);
   const PURCHASE_PAGE = 25;
   const fetchPurchases = useCallback(async (q: typeof purchaseQuery) => {
     setPurchasesLoading(true);
@@ -1460,8 +1468,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   }, [adminToken]);
 
   useEffect(() => { if (activeTab === 'users') { fetchUsers(); void fetchFeatureSpend(); } }, [activeTab, fetchUsers, fetchFeatureSpend]);
-  useEffect(() => { if (activeTab === 'settings') { fetchPromos(); fetchUpdateCohort(); } }, [activeTab, fetchPromos, fetchUpdateCohort]);
-  useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); } }, [activeTab, fetchCostTelemetry, fetchFinOps]);
+  // Promo codes moved to Money and the update notification to Messages (PR 2); each loads where it is shown.
+  useEffect(() => { if (activeTab === 'messages') fetchUpdateCohort(); }, [activeTab, fetchUpdateCohort]);
+  useEffect(() => { if (activeTab === 'revenue') { fetchCostTelemetry(); fetchFinOps(); fetchPromos(); } }, [activeTab, fetchCostTelemetry, fetchFinOps, fetchPromos]);
   useEffect(() => { if (activeTab === 'revenue') { void fetchPurchases(purchaseQuery); } }, [activeTab, purchaseQuery, fetchPurchases]);
   useEffect(() => { if (activeTab === 'reports') { fetchBuildReports(); fetchFirstPass(); } }, [activeTab, fetchBuildReports, fetchFirstPass]);
   // 🔴 THE BUG THIS FIXES (admin screenshot 2026-09-13: "Failed" selected, worked builds still
@@ -1689,11 +1698,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   useEffect(() => {
     if (!onFooterApi) return;
     onFooterApi({
-      items: adminFooterItems(TABS, tabBadges),
-      activeId: activeTab,
-      select: (id: string) => setActiveTab(id as TabId),
+      items: adminFooterItems(TABS, tabBarBadges(tabBadges)),
+      activeId: openTabId,
+      select: (id: string) => openTab(id as AdminTabId),
     });
-  }, [onFooterApi, tabBadges, activeTab]);
+  }, [onFooterApi, tabBadges, openTabId, openTab]);
   useEffect(() => () => { onFooterApi?.(null); }, [onFooterApi]);
 
   const providerColors: Record<string, string> = { gemini: 'bg-blue-500 text-on-accent', anthropic: 'bg-orange-500 text-on-accent', grok: 'bg-purple-500 text-on-accent', vertex: 'bg-green-500 text-on-accent', openai: 'bg-emerald-500 text-on-accent' };
@@ -1702,7 +1711,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     <div className="w-full max-w-7xl mx-auto space-y-6 py-4 text-left">
       {/* The floating page-copy button — every admin tab, draggable, closable (admin 2026-09-14). */}
       <AdminCopyButton
-        pageLabel={TABS.find((t) => t.id === activeTab)?.label || 'Admin'}
+        pageLabel={pageTitle(activeTab)}
         jsonPayload={copyJsonPayload}
       />
 
@@ -1841,18 +1850,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         {TABS.map(tab => {
           // THE COUNTER BESIDE THE NAME. `formatBadge` returns null for anything unmeasured, and a
           // null renders NOTHING — never a zero, which on this bar would read as "I looked, there is
-          // no work here". Security and Settings carry no badge: neither has a number that means
-          // pending work, and inventing one would dilute the ones that do.
-          const badge = tabBadges ? (tabBadges as any)[tab.id] : null;
+          // no work here". A tab that groups two inboxes shows their sum only when both were
+          // measured (`tabBarBadges`); tabs with no number that means pending work carry none.
+          const badge = tabBarBadges(tabBadges)[tab.id];
           const text = formatBadge(badge);
           const hot = badgeNeedsAttention(badge);
-          const hint = (BADGE_HINTS as any)[tab.id] as string | undefined;
+          const hint = tabHint(tab.id, tabBadges);
+          const on = openTabId === tab.id;
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => openTab(tab.id)}
               title={text && hint ? `${tab.label} — ${hint}` : tab.label}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-wider whitespace-nowrap transition-all ${activeTab === tab.id ? 'bg-indigo-600 text-on-accent shadow-lg' : 'text-muted hover:text-ink hover:bg-raised'}`}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-wider whitespace-nowrap transition-all ${on ? 'bg-indigo-600 text-on-accent shadow-lg' : 'text-muted hover:text-ink hover:bg-raised'}`}
             >
               <tab.icon className="w-3.5 h-3.5" />
               {tab.label}
@@ -1861,7 +1871,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   className={`px-1.5 py-0.5 rounded-md text-[9px] font-black font-mono tabular-nums border ${
                     hot
                       ? 'bg-red-500/15 border-red-500/40 text-danger'
-                      : activeTab === tab.id
+                      : on
                         ? 'bg-well border-line text-body'
                         : 'bg-raised border-line text-muted'
                   }`}
@@ -1874,6 +1884,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         })}
       </div>
 
+      {/* THE OPEN TAB'S PAGES (PR 2). Shown on every screen size — on a phone the bottom bar carries the
+          nine tabs and this row is how a page inside one is reached. Each page keeps its own badge, so
+          Complaints and Phone builds never hide behind the tab's single number. */}
+      {tabDef(openTabId).pages.length > 1 && (
+        <div className="flex gap-1 overflow-x-auto" role="tablist" aria-label={`${tabDef(openTabId).label} pages`}>
+          {tabDef(openTabId).pages.map((page) => {
+            const badge = pageBadge(page.id, tabBadges);
+            const text = formatBadge(badge);
+            const hot = badgeNeedsAttention(badge);
+            const hint = pageHint(page.id);
+            const on = activeTab === page.id;
+            return (
+              <button
+                key={page.id}
+                role="tab"
+                aria-selected={on}
+                onClick={() => setActiveTab(page.id)}
+                title={text && hint ? `${page.label} — ${hint}` : page.label}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[11px] font-bold whitespace-nowrap border transition-all ${on ? 'bg-raised border-line text-ink' : 'border-transparent text-muted hover:text-ink hover:bg-raised'}`}
+              >
+                {page.label}
+                {text && (
+                  <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-black font-mono tabular-nums border ${hot ? 'bg-red-500/15 border-red-500/40 text-danger' : 'bg-well border-line text-muted'}`}>
+                    {text}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {loading && !analytics ? (
         <div className="py-24 text-center">
           <TirangaLoader className="w-10 h-10 mx-auto mb-4" />
@@ -1881,7 +1923,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         </div>
       ) : (
         <>
-          {/* ── OVERVIEW TAB ── */}
+          {/* ── HOME ── */}
           {activeTab === 'monitor' && (
             <div className="space-y-6">
               {/* THE LOAD BOARD, FIRST ON THE HOME PAGE. The admin asked for exactly this — "admin
@@ -1910,6 +1952,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 {statCard('Registered Users', analytics?.totalUsers || 0, `+${analytics?.newUsersToday || 0} today`, 'bg-indigo-500 text-on-accent', Users)}
                 {statCard('Website Hits Today', (analytics?.websiteHitsToday || 0).toLocaleString(), analytics?.hitsSinceBoot ? `${(analytics?.websiteHitsTotal || 0).toLocaleString()} since this server started` : `${(analytics?.websiteHitsTotal || 0).toLocaleString()} total`, 'bg-sky-500 text-on-accent', Globe)}
                 {statCard('Active (24h)', analytics?.activeUsers24h || 0, 'Unique users with AI requests', 'bg-violet-500 text-on-accent', Activity)}
+              </div>
+
+              {/* Traffic totals, moved from the old Security tab (admin panel audit PR 2). The
+                  "today" figure repeats the card above; the duplicate is cleaned up in PR 4. */}
+              <div className="grid grid-cols-2 gap-4">
+                {statCard('Website Hits', (analytics?.websiteHitsTotal || 0).toLocaleString(), analytics?.hitsSinceBoot ? 'Since this server started — resets on deploy' : 'All time requests', 'bg-sky-500 text-on-accent', Globe)}
+                {statCard('Today Hits', (analytics?.websiteHitsToday || 0).toLocaleString(), `vs ${analytics?.websiteHitsYesterday || 0} yesterday`, 'bg-indigo-500 text-on-accent', Eye)}
               </div>
 
               {/* Row 2: 4 more metrics */}
@@ -1955,112 +2004,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   Globe,
                 )}
               </div>
-
-              {/* ── THE PUBLISH CEILING (ROADMAP §10) ────────────────────────────────────────
-                  Every published app holds one Firebase Hosting channel, and the pool is capped per
-                  site. Past the cap, publishing stops for EVERY user at once. This is the only place
-                  that number is visible — and the only place a channel orphaned by a deleted chat
-                  can be found at all, since its id is a one-way hash with no record left to trace. */}
-              {(channels || channelsError) && (
-                <div className={`rounded-[1.5rem] p-6 border ${
-                  channelsError ? 'bg-card border-line'
-                  : channels?.verdict.level === 'critical' ? 'bg-red-500/5 border-red-500/30'
-                  : channels?.verdict.level === 'warn' ? 'bg-amber-500/5 border-amber-500/30'
-                  : 'bg-card border-line'}`}>
-                  <div className="flex items-center justify-between gap-3 mb-3">
-                    <button
-                      type="button"
-                      onClick={togglePublishCard}
-                      aria-expanded={publishCardOpen}
-                      aria-controls="publish-capacity-body"
-                      className="flex items-center gap-2 min-w-0 text-left group"
-                    >
-                      {publishCardOpen
-                        ? <ChevronDown className="w-4 h-4 shrink-0 text-muted group-hover:text-ink" />
-                        : <ChevronRight className="w-4 h-4 shrink-0 text-muted group-hover:text-ink" />}
-                      <h3 className="text-sm font-black text-ink uppercase tracking-tight">Publish Capacity</h3>
-                      <span className="sr-only">{publishCardOpen ? 'Hide the details' : 'Show the details'}</span>
-                    </button>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {/* Folded, the numbers still show: a collapsed card must not conceal the ceiling. */}
-                      {!publishCardOpen && channels && (
-                        <span className="text-[10px] font-bold text-muted tabular-nums">
-                          {channels.verdict.used} / {channels.verdict.cap} channels
-                          {channels.verdict.reclaimable > 0 ? ` · ${channels.verdict.reclaimable} reclaimable` : ''}
-                        </span>
-                      )}
-                      {!publishCardOpen && channelsError && (
-                        <span className="text-[10px] font-bold text-muted">could not be read</span>
-                      )}
-                      <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${
-                        channelsError ? 'bg-raised border-line text-muted'
-                        : channels?.verdict.level === 'critical' ? 'bg-red-500/10 border-red-500/30 text-danger'
-                        : channels?.verdict.level === 'warn' ? 'bg-amber-500/10 border-amber-500/30 text-warn'
-                        : 'bg-emerald-500/10 border-emerald-500/30 text-success'}`}>
-                        {channelsError ? 'unknown' : channels?.verdict.level}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div id="publish-capacity-body">
-                  {!publishCardOpen ? null : channelsError ? (
-                    <p className="text-xs text-muted leading-relaxed">{channelsError}</p>
-                  ) : channels && (
-                    <>
-                      <p className="text-xs text-body leading-relaxed">{channels.verdict.message}</p>
-                      <p className="text-[11px] text-muted mt-1.5 leading-relaxed">
-                        {channels.verdict.remaining} more app{channels.verdict.remaining === 1 ? '' : 's'} can be published before
-                        the limit. The cap of {channels.verdict.cap} is a working figure — Google does not publish this number —
-                        so treat it as approximate until a real &quot;quota reached&quot; confirms it.
-                      </p>
-
-                      {channels.channels.some((c) => c.reclaimable) && (
-                        <div className="mt-4 space-y-2">
-                          <div className="flex items-center justify-between gap-3 flex-wrap">
-                            <p className="text-[10px] font-black uppercase tracking-wider text-muted">
-                              Reclaimable channels — no live app is using these
-                            </p>
-                            <button
-                              onClick={() => void reclaimAllChannels()}
-                              disabled={!!reclaimingAll || !!reclaiming}
-                              className="shrink-0 px-3 py-1.5 rounded-lg bg-raised hover:bg-red-600/20 border border-line text-[10px] font-black uppercase tracking-wider text-body hover:text-danger disabled:opacity-40"
-                            >
-                              {reclaimingAll ? `Reclaiming ${reclaimingAll.done}/${reclaimingAll.total}…` : 'Reclaim all'}
-                            </button>
-                          </div>
-                          {channels.channels.filter((c) => c.reclaimable).map((c) => (
-                            <div key={c.channelId} className="flex items-center justify-between gap-3 rounded-xl bg-well border border-line px-3 py-2">
-                              <div className="min-w-0">
-                                <p className="text-[11px] font-mono text-body truncate">{c.channelId}</p>
-                                <p className="text-[10px] text-muted truncate">
-                                  {c.state === 'snapshot'
-                                    /* A build copy, not an app. It never had a record, by design — and
-                                       the next green build writes it again, so clearing it is safe. */
-                                    ? 'A saved copy of a build, not a published app. It returns on the next build.'
-                                    : c.state === 'unknown'
-                                    /* No record anywhere — a purge deleted it and left the app serving. */
-                                    ? 'Its chat and record are gone, but the app is still live'
-                                    /* Both unpublish and takedown delete the channel BEFORE the registry,
-                                       so this state means one of those deletes failed and said success. */
-                                    : `Marked not-live, but the channel still exists${c.workspaceId ? ` · ${c.workspaceId}` : ''}`}
-                                </p>
-                              </div>
-                              <button
-                                onClick={() => void reclaimChannel(c.channelId)}
-                                disabled={reclaiming === c.channelId}
-                                className="shrink-0 px-3 py-1.5 rounded-lg bg-raised hover:bg-red-600/20 text-[10px] font-black uppercase tracking-wider text-body hover:text-danger disabled:opacity-40"
-                              >
-                                {reclaiming === c.channelId ? 'Reclaiming…' : 'Reclaim'}
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  )}
-                  </div>
-                </div>
-              )}
 
               {/* PLATFORM HEALTH SCORE — DELETED 2026-09-21 (admin: *"DUPLICATE - kam information wali
                   ko delete karo"*). The live "Platform health" panel higher up this same page shows the
@@ -2125,101 +2068,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 </div>
               )}
 
-              {/* Provider Usage Ranking */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
-                  <div>
-                    <h3 className="text-sm font-black text-ink uppercase tracking-tight">API Usage Ranking</h3>
-                    <p className="text-[10px] text-muted font-bold uppercase tracking-widest mt-1">{analytics?.scope === 'chat' ? 'Most to least used chat providers' : 'Most to least used providers'}</p>
-                  </div>
-                  <div className="space-y-3">
-                    {(analytics?.providerRanking || []).length === 0 && (
-                      <p className="text-[10px] text-muted uppercase font-bold">No data yet</p>
-                    )}
-                    {(analytics?.providerRanking || []).map((p: any, i: number) => {
-                      const total = (analytics?.providerRanking || []).reduce((s: number, x: any) => s + x.requests, 0);
-                      const pct = total > 0 ? Math.round((p.requests / total) * 100) : 0;
-                      const col = providerColors[p.name?.toLowerCase()] || 'bg-indigo-500 text-on-accent';
-                      return (
-                        <div key={p.name}>
-                          <div className="flex justify-between text-xs font-bold text-ink mb-1">
-                            <span className="uppercase font-mono">#{i + 1} {p.name}</span>
-                            <span className="text-muted">{p.requests} req · {p.avgLatencyMs == null ? 'latency not recorded' : `${p.avgLatencyMs}ms avg`}</span>
-                          </div>
-                          <div className="w-full bg-well h-2 rounded-full overflow-hidden">
-                            <div className={`${col} h-full transition-all duration-700`} style={{ width: `${pct}%` }} />
-                          </div>
-                          <div className="text-[9px] text-muted mt-0.5">{pct}% of requests · {typeof p.measuredCalls === 'number' && p.measuredCalls === 0 ? 'tokens not measured' : `${(p.tokensUsed || 0).toLocaleString()} tokens`}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Provider Burn Split */}
-                <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
-                  <div>
-                    <h3 className="text-sm font-black text-ink uppercase tracking-tight">Provider Token Burn</h3>
-                    <UnusedCardMark id="provider-token-burn-duplicate" />
-                    <p className="text-[10px] text-muted font-bold uppercase tracking-widest mt-1">{analytics?.scope === 'chat' ? 'Chat token consumption by provider' : 'Token consumption by provider'}</p>
-                  </div>
-                  <div className="space-y-3">
-                    {Object.entries(analytics?.providerWise || {}).map(([name, tokens]: any) => {
-                      const pct = analytics?.totalTokensUsed > 0 ? Math.round((tokens / analytics.totalTokensUsed) * 100) : 0;
-                      const col = providerColors[name?.toLowerCase()] || 'bg-indigo-500 text-on-accent';
-                      return (
-                        <div key={name}>
-                          <div className="flex justify-between text-xs font-bold text-ink mb-1">
-                            <span className="uppercase font-mono">{name}</span>
-                            <span className="text-muted font-mono">{tokens.toLocaleString()} tokens</span>
-                          </div>
-                          <div className="w-full bg-well h-2 rounded-full overflow-hidden">
-                            <div className={`${col} h-full transition-all duration-700`} style={{ width: `${pct}%` }} />
-                          </div>
-                        </div>
-                      );
-                    })}
-                    {Object.keys(analytics?.providerWise || {}).length === 0 && (
-                      <p className="text-[10px] text-muted uppercase font-bold">No data yet</p>
-                    )}
-                  </div>
-                  <div className="bg-well rounded-xl p-3 space-y-1 font-mono text-xs border border-line">
-                    <div className="flex justify-between">
-                      <span className="text-muted">
-                        {analytics?.providerCostComplete === false ? 'Provider Cost (at least)' : 'Total Provider Cost'}
-                      </span>
-                      <span className="text-warn font-black">₹{(analytics?.totalProviderCost || 0).toFixed(4)}</span>
-                    </div>
-                    <div className="flex justify-between"><span className="text-muted">Cashfree Gateway</span><span className="text-success">{analytics?.cashfreeStatus?.clientId || '–'}</span></div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Recent Purchases */}
-              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
-                <h3 className="text-sm font-black text-ink uppercase tracking-tight">Recent Token Purchases</h3>
-                    <UnusedCardMark id="recent-token-purchases-superseded" />
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead><tr className="border-b border-line text-muted font-black uppercase tracking-widest text-[9px]">
-                      <th className="py-2 text-left">User</th><th className="py-2 text-left">Amount</th><th className="py-2 text-left">Tokens</th><th className="py-2 text-left">Date</th>
-                    </tr></thead>
-                    <tbody className="divide-y divide-line">
-                      {(analytics?.recentPurchases || []).map((p: any, i: number) => (
-                        <tr key={i} className="hover:bg-raised">
-                          <td className="py-2 text-muted font-mono text-[10px]">{(p.userId || '').slice(0, 12)}…</td>
-                          <td className="py-2 text-success font-black">₹{p.amount}</td>
-                          <td className="py-2 text-warn font-mono">{(p.tokens || 0).toLocaleString()}</td>
-                          <td className="py-2 text-muted text-[9px]">{new Date(p.date || 0).toLocaleDateString('en-IN')}</td>
-                        </tr>
-                      ))}
-                      {(!analytics?.recentPurchases || analytics.recentPurchases.length === 0) && (
-                        <tr><td colSpan={4} className="py-6 text-center text-muted text-[10px] font-bold uppercase">No purchases yet</td></tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
             </div>
           )}
 
@@ -2713,10 +2561,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   </>
                 )}
               </div>
+
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
+                <div>
+                  <h3 className="text-sm font-black text-ink uppercase tracking-tight">API Usage Ranking</h3>
+                  <p className="text-[10px] text-muted font-bold uppercase tracking-widest mt-1">{analytics?.scope === 'chat' ? 'Most to least used chat providers' : 'Most to least used providers'}</p>
+                </div>
+                <div className="space-y-3">
+                  {(analytics?.providerRanking || []).length === 0 && (
+                    <p className="text-[10px] text-muted uppercase font-bold">No data yet</p>
+                  )}
+                  {(analytics?.providerRanking || []).map((p: any, i: number) => {
+                    const total = (analytics?.providerRanking || []).reduce((s: number, x: any) => s + x.requests, 0);
+                    const pct = total > 0 ? Math.round((p.requests / total) * 100) : 0;
+                    const col = providerColors[p.name?.toLowerCase()] || 'bg-indigo-500 text-on-accent';
+                    return (
+                      <div key={p.name}>
+                        <div className="flex justify-between text-xs font-bold text-ink mb-1">
+                          <span className="uppercase font-mono">#{i + 1} {p.name}</span>
+                          <span className="text-muted">{p.requests} req · {p.avgLatencyMs == null ? 'latency not recorded' : `${p.avgLatencyMs}ms avg`}</span>
+                        </div>
+                        <div className="w-full bg-well h-2 rounded-full overflow-hidden">
+                          <div className={`${col} h-full transition-all duration-700`} style={{ width: `${pct}%` }} />
+                        </div>
+                        <div className="text-[9px] text-muted mt-0.5">{pct}% of requests · {typeof p.measuredCalls === 'number' && p.measuredCalls === 0 ? 'tokens not measured' : `${(p.tokensUsed || 0).toLocaleString()} tokens`}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Rate-limited providers */}
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight">Rate Limited Providers</h3>
+                <div className="space-y-2">
+                  {Object.entries(analytics?.liveProviderStats || {})
+                    .filter(([, s]: any) => s.cooldownUntil > Date.now())
+                    .map(([name, s]: any) => (
+                      <div key={name} className="flex justify-between items-center bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2.5">
+                        <span className="text-danger font-black uppercase font-mono text-[11px]">{name}</span>
+                        <span className="text-[10px] text-danger">Cooldown: {Math.ceil((s.cooldownUntil - Date.now()) / 1000)}s remaining</span>
+                      </div>
+                    ))}
+                  {Object.entries(analytics?.liveProviderStats || {}).filter(([, s]: any) => s.cooldownUntil > Date.now()).length === 0 && (
+                    <p className="text-success font-bold text-[11px] flex items-center gap-2"><CheckCircle2 className="w-4 h-4" />All providers healthy — no rate limits active</p>
+                  )}
+                </div>
+              </div>
+
+              <EngineReportsPanel adminToken={adminToken} onStatus={toast} only={ENGINE_REPORTS_ON.engines} heading="Provider status" />
             </div>
           )}
 
-          {/* ── REVENUE TAB ── */}
+          {/* ── MONEY (the old Revenue tab; admin panel audit PR 2) ── */}
           {activeTab === 'revenue' && (
             <div className="space-y-6">
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -3054,6 +2951,135 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   </div>
                 )}
               </div>
+
+              {/* BUILD COSTS (admin 2026-09-14): real cost vs bill per tier × app size, measured from
+                  the same durable records the list below reads. Admin-only by construction. */}
+              <BuildCostCard adminToken={adminToken} />
+              {/* BUILD DISCOUNT (admin 2026-09-25): the one % taken off every charged build. */}
+              <BuildDiscountCard adminToken={adminToken} />
+              <ReferralCostCard adminToken={adminToken} />
+
+              {/* Provider Burn Split */}
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
+                <div>
+                  <h3 className="text-sm font-black text-ink uppercase tracking-tight">Provider Token Burn</h3>
+                  <UnusedCardMark id="provider-token-burn-duplicate" />
+                  <p className="text-[10px] text-muted font-bold uppercase tracking-widest mt-1">{analytics?.scope === 'chat' ? 'Chat token consumption by provider' : 'Token consumption by provider'}</p>
+                </div>
+                <div className="space-y-3">
+                  {Object.entries(analytics?.providerWise || {}).map(([name, tokens]: any) => {
+                    const pct = analytics?.totalTokensUsed > 0 ? Math.round((tokens / analytics.totalTokensUsed) * 100) : 0;
+                    const col = providerColors[name?.toLowerCase()] || 'bg-indigo-500 text-on-accent';
+                    return (
+                      <div key={name}>
+                        <div className="flex justify-between text-xs font-bold text-ink mb-1">
+                          <span className="uppercase font-mono">{name}</span>
+                          <span className="text-muted font-mono">{tokens.toLocaleString()} tokens</span>
+                        </div>
+                        <div className="w-full bg-well h-2 rounded-full overflow-hidden">
+                          <div className={`${col} h-full transition-all duration-700`} style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {Object.keys(analytics?.providerWise || {}).length === 0 && (
+                    <p className="text-[10px] text-muted uppercase font-bold">No data yet</p>
+                  )}
+                </div>
+                <div className="bg-well rounded-xl p-3 space-y-1 font-mono text-xs border border-line">
+                  <div className="flex justify-between">
+                    <span className="text-muted">
+                      {analytics?.providerCostComplete === false ? 'Provider Cost (at least)' : 'Total Provider Cost'}
+                    </span>
+                    <span className="text-warn font-black">₹{(analytics?.totalProviderCost || 0).toFixed(4)}</span>
+                  </div>
+                  <div className="flex justify-between"><span className="text-muted">Cashfree Gateway</span><span className="text-success">{analytics?.cashfreeStatus?.clientId || '–'}</span></div>
+                </div>
+              </div>
+
+              {/* Recent Purchases */}
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight">Recent Token Purchases</h3>
+                    <UnusedCardMark id="recent-token-purchases-superseded" />
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead><tr className="border-b border-line text-muted font-black uppercase tracking-widest text-[9px]">
+                      <th className="py-2 text-left">User</th><th className="py-2 text-left">Amount</th><th className="py-2 text-left">Tokens</th><th className="py-2 text-left">Date</th>
+                    </tr></thead>
+                    <tbody className="divide-y divide-line">
+                      {(analytics?.recentPurchases || []).map((p: any, i: number) => (
+                        <tr key={i} className="hover:bg-raised">
+                          <td className="py-2 text-muted font-mono text-[10px]">{(p.userId || '').slice(0, 12)}…</td>
+                          <td className="py-2 text-success font-black">₹{p.amount}</td>
+                          <td className="py-2 text-warn font-mono">{(p.tokens || 0).toLocaleString()}</td>
+                          <td className="py-2 text-muted text-[9px]">{new Date(p.date || 0).toLocaleDateString('en-IN')}</td>
+                        </tr>
+                      ))}
+                      {(!analytics?.recentPurchases || analytics.recentPurchases.length === 0) && (
+                        <tr><td colSpan={4} className="py-6 text-center text-muted text-[10px] font-bold uppercase">No purchases yet</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Promo Codes */}
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight flex items-center gap-2">
+                  <Tag className="w-4 h-4 text-accent-text" /> Promo Code Generator
+                </h3>
+                <p className="text-[11px] text-muted">
+                  A user types the code in Wallet &amp; Billing → Promocode and the tokens go straight into their wallet (100 tokens = ₹1). Each person can use a code once; Max uses is the total for everyone.
+                </p>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-[10px] text-accent-text font-black uppercase tracking-widest block mb-2">Code</label>
+                    <input value={promoCode} onChange={e => setPromoCode(e.target.value.toUpperCase())} placeholder="SAVE50" className="w-full bg-well border border-line rounded-xl px-3 py-2.5 text-ink font-mono outline-none focus:border-indigo-500 uppercase" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-accent-text font-black uppercase tracking-widest block mb-2">Free Tokens</label>
+                    <input type="number" min={1} step={1} value={promoTokens} onChange={e => setPromoTokens(e.target.value)} placeholder="500" className="w-full bg-well border border-line rounded-xl px-3 py-2.5 text-ink font-mono outline-none focus:border-indigo-500" />
+                    <span className="text-[10px] text-muted block mt-1">{Number(promoTokens) > 0 ? `= ₹${(Number(promoTokens) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })} of credit` : '100 tokens = ₹1'}</span>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-accent-text font-black uppercase tracking-widest block mb-2">Max Uses</label>
+                    <input type="number" value={promoMaxUses} onChange={e => setPromoMaxUses(e.target.value)} placeholder="1" className="w-full bg-well border border-line rounded-xl px-3 py-2.5 text-ink font-mono outline-none focus:border-indigo-500" />
+                  </div>
+                </div>
+                <button onClick={handlePromoCreate} className="px-5 py-2.5 bg-pink-600 hover:bg-pink-700 rounded-xl text-[11px] font-black uppercase tracking-wider text-on-accent transition-all active:scale-95 flex items-center gap-2">
+                  <Plus className="w-4 h-4" /> Create Promo Code
+                </button>
+
+                {promos.length > 0 && (
+                  <div className="overflow-x-auto mt-2">
+                    <table className="w-full text-xs">
+                      <thead><tr className="border-b border-line text-muted font-black uppercase tracking-widest text-[9px]">
+                        <th className="py-2 text-left">Code</th><th className="py-2 text-left">Tokens</th><th className="py-2 text-left">Used</th><th className="py-2 text-left">Status</th><th className="py-2 text-right"><span className="sr-only">Delete</span></th>
+                      </tr></thead>
+                      <tbody className="divide-y divide-line">
+                        {pagedPromos.visible.map((p: any) => (
+                          <tr key={p.id} className="hover:bg-raised">
+                            <td className="py-2 text-accent-text font-black font-mono">{p.code}</td>
+                            <td className="py-2 text-warn font-mono">{p.freeTokens || 0} <span className="text-muted">(₹{((Number(p.freeTokens) || 0) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })})</span></td>
+                            <td className="py-2 text-ink font-mono">{p.usedCount || 0}/{p.maxUses || 1}</td>
+                            <td className="py-2"><span className={`text-[9px] font-black uppercase ${p.status === 'Active' ? 'text-success' : 'text-danger'}`}>{p.status || 'Unknown'}</span></td>
+                            <td className="py-2 text-right">
+                              <button onClick={() => deletePromo(p.code || p.id)} title={`Delete ${p.code || p.id}`} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-line text-danger hover:bg-raised text-[10px] font-black uppercase tracking-wider">
+                                <Trash2 className="w-3.5 h-3.5" /> Delete
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                        <LoadMore list={pagedPromos} label="codes" colSpan={5} />
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Absorbed losses, engine usage and margin, assistant spend — from the old Diagnostics tab
+                  (admin panel audit PR 2): they answer money questions. */}
+              <EngineReportsPanel adminToken={adminToken} onStatus={toast} only={ENGINE_REPORTS_ON.revenue} heading="Cost reports" />
             </div>
           )}
 
@@ -3858,6 +3884,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   </div>
                 </div>
               )}
+
+              {/* Beside it deliberately: one card is the APP build (does the generated app compile?),
+                  this one is the PHONE build (does the .apk / .aab / .ipa come out?). Two pipelines,
+                  two questions — reading either as the other is exactly what an impression like
+                  "80% fail" is made of. */}
+              <MobileBuildOutcomeCard adminToken={adminToken} />
             </div>
           )}
 
@@ -3879,43 +3911,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                   <p className="text-[11px] text-muted font-bold mt-0.5">Reports submitted by users via the “Report” button — admin-only. Download marks a report sent; “Mark fixed” is yours to set once the work is merged.</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {/* SERVER NECESSITY (admin 2026-08-12) — see fetchNecessity. Behind a button because it
-                      reads up to 500 build documents; nobody should pay that on every tab visit. */}
-                  <button
-                    onClick={fetchNecessity}
-                    disabled={necessityLoading}
-                    title="How many past apps were given a server they never needed? Every one of those could have skipped the sandbox."
-                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-amber-500/40 text-warn hover:text-ink hover:bg-amber-600/20 disabled:opacity-40"
-                  >
-                    <Server className={`w-3.5 h-3.5 ${necessityLoading ? 'animate-pulse' : ''}`} /> Server necessity
-                  </button>
-                  {/* SANDBOX HANDOVER (Phase 0 of the in-browser preview plan) — see fetchHandover. */}
-                  <button
-                    onClick={fetchHandover}
-                    disabled={handoverLoading}
-                    title="After a build finished, how much longer did its sandbox stay billable — and how much of that could the browser have served?"
-                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-violet-500/40 text-accent-text hover:text-ink hover:bg-violet-600/20 disabled:opacity-40"
-                  >
-                    <Clock className={`w-3.5 h-3.5 ${handoverLoading ? 'animate-pulse' : ''}`} /> Sandbox handover
-                  </button>
-                  {/* APPLE SIGN-IN (admin 2026-08-22) — see fetchAppleDiag. The endpoint shipped a day
-                      earlier with no UI at all, which for a non-terminal admin is the same as unbuilt.
-                      The code box is optional and only ever SHARPENS the final answer. */}
-                  <input
-                    value={appleObservedCode}
-                    onChange={(e) => setAppleObservedCode(e.target.value)}
-                    placeholder="auth/… (optional)"
-                    title="The error code shown in the sign-in message, if you have one. It makes the answer more exact; leave it empty to just check our side."
-                    className="text-[11px] font-bold px-2.5 py-2 rounded-xl bg-surface border border-line text-ink placeholder:text-faint w-[9.5rem] focus:outline-none focus:border-sky-500/50"
-                  />
-                  <button
-                    onClick={fetchAppleDiag}
-                    disabled={appleDiagLoading}
-                    title="Is anything on OUR side stopping Sign in with Apple? Fetches our own public verification file exactly as Apple does."
-                    className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-sky-500/40 text-info hover:text-ink hover:bg-sky-600/20 disabled:opacity-40"
-                  >
-                    <Shield className={`w-3.5 h-3.5 ${appleDiagLoading ? 'animate-pulse' : ''}`} /> Apple sign-in
-                  </button>
                   <button
                     onClick={fetchBuildReports}
                     className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-line text-muted hover:text-ink hover:bg-raised"
@@ -3935,269 +3930,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 </div>
               </div>
 
-              {/* APPLE SIGN-IN RESULT (admin 2026-08-22). Colour carries the verdict, because the whole
-                  value of this check is separating "our fault" from "not our fault" at a glance — and
-                  `unverifiable` is deliberately its own colour, since being unable to ASK is not the
-                  same as a bad answer, and painting it red is how someone ends up fixing the wrong
-                  thing. The next step is the line to act on, so it is the loudest thing on the card. */}
-              {appleDiag && (() => {
-                const ok = appleDiag.verdict === 'ours-is-correct';
-                const unknown = appleDiag.verdict === 'unverifiable';
-                // FULL CLASS NAMES, never a class built by interpolating a colour name into it.
-                // Tailwind scans source text and cannot see a composed class, so it is simply never
-                // generated — the element ends up unstyled while the code looks correct.
-                const icon = ok ? 'text-success' : unknown ? 'text-warn' : 'text-danger';
-                const ring = ok ? 'border-emerald-500/25' : unknown ? 'border-amber-500/25' : 'border-red-500/25';
-                const text = ok ? 'text-success' : unknown ? 'text-warn' : 'text-danger';
-                return (
-                  <div className={`bg-card border ${ring} rounded-[1.25rem] p-4 space-y-3`}>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Shield className={`w-4 h-4 ${icon}`} />
-                      <h4 className="text-sm font-black text-ink tracking-tight">Sign in with Apple — is it us?</h4>
-                      <span className="ml-auto">
-                        <ReportExportButtons label="Sign in with Apple — is it us?" data={appleDiag} tab="Build Reports" source="/api/admin/apple-signin" onStatus={toast} />
-                      </span>
-                      <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${ring} ${text}`}>
-                        {appleDiag.verdict.replace(/-/g, ' ')}
-                      </span>
-                      {appleDiag.observedCode && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-line text-muted">
-                          code: {appleDiag.observedCode}
-                        </span>
-                      )}
-                    </div>
-                    <p className={`text-[12px] ${text} font-bold leading-relaxed`}>{appleDiag.message}</p>
-                    {appleDiag.nextStep && (
-                      <div className="bg-surface border border-line rounded-xl p-3">
-                        <p className="text-[10px] font-black uppercase tracking-wider text-muted mb-1">Do this next</p>
-                        <p className="text-[12px] text-ink font-bold leading-relaxed">{appleDiag.nextStep}</p>
-                      </div>
-                    )}
-                    {/* Lengths and status, never the file's contents — enough to spot a truncated paste
-                        or a stray wrapper without printing a long token nobody will read. */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                      {([
-                        ['File configured', appleDiag.configured ? `yes (${appleDiag.source || '—'})` : 'no'],
-                        ['Public URL status', appleDiag.fetchedStatus == null ? '—' : String(appleDiag.fetchedStatus)],
-                        ['Length here / there', `${appleDiag.servedLength ?? 0} / ${appleDiag.fetchedLength ?? '—'}`],
-                        ['Services ID', appleDiag.serviceId || '—'],
-                      ] as Array<[string, string]>).map(([label, value]) => (
-                        <div key={label} className="bg-surface border border-line rounded-xl p-2.5">
-                          <p className="text-[10px] font-black uppercase tracking-wider text-faint">{label}</p>
-                          <p className="text-[12px] text-ink font-bold break-all">{value}</p>
-                        </div>
-                      ))}
-                    </div>
-                    {appleDiag.fetchError && (
-                      <p className="text-[11px] text-warn font-bold break-all">Check failed with: {appleDiag.fetchError}</p>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {/* SERVER NECESSITY RESULT (admin 2026-08-12). The number that decides whether the
-                  browser-native plan proceeds. Shown with its CAVEAT and a spot-check sample, never as a
-                  bare percentage — this drives a large decision, and a number without its limits is how
-                  a large change gets approved on a misunderstanding. */}
-              {necessity && (
-                <div className="bg-card border border-amber-500/25 rounded-[1.25rem] p-4 space-y-3">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Server className="w-4 h-4 text-warn" />
-                    <h4 className="text-sm font-black text-ink tracking-tight">Did these apps need a server?</h4>
-                      <span className="ml-auto">
-                        <ReportExportButtons label="Did these apps need a server?" data={necessity} tab="Build Reports" source="/api/admin/server-necessity" onStatus={toast} />
-                      </span>
-                  </div>
-                  <p className="text-[12px] text-warn font-bold leading-relaxed">{necessity.headline}</p>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                    {([
-                      ['Server built, NOT needed', necessity.tally.builtButNotNeeded, 'text-warn', 'could have skipped the sandbox'],
-                      ['Neither needed nor built', necessity.tally.neitherNeededNorBuilt, 'text-success', 'already browser-native'],
-                      ['Genuinely needed one', necessity.tally.neededAndBuilt, 'text-info', 'E2B is required here'],
-                      ['Needed, but missing', necessity.tally.neededButMissing, 'text-danger', 'a correctness gap, not a cost one'],
-                    ] as const).map(([label, n, cls, hint]) => (
-                      <div key={label} className="bg-surface border border-line rounded-xl p-3">
-                        <div className={`text-2xl font-black tabular-nums ${cls}`}>{n}</div>
-                        <div className="text-[10px] font-black uppercase tracking-wider text-muted mt-1">{label}</div>
-                        <div className="text-[10px] text-faint mt-0.5 leading-snug">{hint}</div>
-                      </div>
-                    ))}
-                  </div>
-                  {Object.keys(necessity.tally.reasonCounts).length > 0 && (
-                    <div>
-                      <div className="text-[10px] font-black uppercase tracking-wider text-muted mb-1.5">Why a server was genuinely needed</div>
-                      <div className="space-y-1">
-                        {Object.entries(necessity.tally.reasonCounts).sort((a, b) => b[1] - a[1]).map(([reason, n]) => (
-                          <div key={reason} className="flex items-start gap-2 text-[11px] text-body">
-                            <span className="tabular-nums font-black text-info shrink-0 w-6">{n}×</span>
-                            <span className="leading-snug">{reason}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {/* SPOT-CHECK. A percentage produced by a classifier nobody has read is not evidence —
-                      these are real builds the admin can recognise and disagree with. */}
-                  <details className="text-[11px]">
-                    <summary className="cursor-pointer text-muted font-bold hover:text-ink">Check it against {necessity.sample.length} real builds</summary>
-                    <div className="mt-2 space-y-1.5">
-                      {necessity.sample.map((s) => (
-                        <div key={s.workspaceId} className="bg-surface border border-line rounded-lg px-2.5 py-2">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border ${s.neededServer ? 'border-sky-500/40 text-info' : 'border-emerald-500/40 text-success'}`}>
-                              {s.neededServer ? 'needed' : 'not needed'}
-                            </span>
-                            {s.builtServer && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-amber-500/40 text-warn">built one</span>}
-                          </div>
-                          <div className="text-[11px] text-body mt-1 leading-snug">{s.prompt || <span className="text-faint">(no prompt recorded)</span>}</div>
-                          {s.reasons.length > 0 && <div className="text-[10px] text-muted mt-0.5">{s.reasons.join(' · ')}</div>}
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                </div>
-              )}
-
-              {/* SANDBOX HANDOVER RESULT (Phase 0 of IN_BROWSER_PREVIEW_PLAN.md). The measured split
-                  between real build work and post-build holding. The excluded builds are shown as
-                  loudly as the measured ones: an unmeasurable hold is not a zero-length hold, and
-                  quietly treating it as one is how a measurement turns into a flattering estimate. */}
-              {handover && (
-                <div className="bg-card border border-violet-500/25 rounded-[1.25rem] p-4 space-y-3">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Clock className="w-4 h-4 text-accent-text" />
-                    <h4 className="text-sm font-black text-ink tracking-tight">Where does a sandbox's billed time go?</h4>
-                      <span className="ml-auto">
-                        <ReportExportButtons label="Where does a sandbox's billed time go?" data={handover} tab="Build Reports" source="/api/admin/sandbox-handover" onStatus={toast} />
-                      </span>
-                  </div>
-                  <p className="text-[12px] text-accent-text font-bold leading-relaxed">{handover.headline}</p>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                    {([
-                      ['Real build work', `${handover.tally.buildHours}h`, 'text-info', 'a browser can never absorb this'],
-                      ['Held after the build', `${handover.tally.heldAfterHours}h`, 'text-warn', 'the only window Phase 3 targets'],
-                      ['Reclaimable', `${handover.tally.recoverableHours}h`, 'text-success', `frontend-only — ${handover.tally.frontendOnlyCount} builds`],
-                      ['Could not measure', `${handover.tally.examined - handover.tally.measured}`, 'text-muted', 'excluded, never counted as zero'],
-                    ] as const).map(([label, n, cls, hint]) => (
-                      <div key={label} className="bg-surface border border-line rounded-xl p-3">
-                        <div className={`text-2xl font-black tabular-nums ${cls}`}>{n}</div>
-                        <div className="text-[10px] font-black uppercase tracking-wider text-muted mt-1">{label}</div>
-                        <div className="text-[10px] text-faint mt-0.5 leading-snug">{hint}</div>
-                      </div>
-                    ))}
-                  </div>
-                  {handover.minutes && handover.minutes.sessions > 0 && (
-                    // WHERE DO THE MINUTES GO. The bill said ~29 min a session; a build is ~5-7 of work.
-                    // "Idle" is the machine up with none of our operations running — a sweep/window
-                    // problem. "Running" is our commands — a machine or workload problem. Different fixes.
-                    <p className="text-[11px] text-muted leading-relaxed">
-                      <span className="font-black text-ink">Where the minutes go</span> (last {handover.minutes.sessions} ended sessions):{' '}
-                      up <span className="tabular-nums font-black text-ink">{handover.minutes.avgWallMin} min</span> ·{' '}
-                      running our operations <span className="tabular-nums font-black text-info">{handover.minutes.avgBusyMin} min</span> ·{' '}
-                      idle <span className="tabular-nums font-black text-warn">{handover.minutes.avgIdleMin} min</span>{' '}
-                      <span className="text-faint">({Math.round(handover.minutes.idleShare * 100)}% of billed time was nobody's work)</span>
-                    </p>
-                  )}
-                  {handover.starts && handover.starts.total > 0 && (
-                    // WHY MACHINES START. 1,110 starts a month for one tester was the mystery; this is
-                    // the table that ends it. A large "preview-door" share means the live frame is
-                    // resuming paused machines; a large "files" share means reads are.
-                    <p className="text-[11px] text-muted leading-relaxed">
-                      <span className="font-black text-ink">Why machines started</span> (last {handover.starts.days} days, {handover.starts.total} starts):{' '}
-                      {Object.entries(handover.starts.byReason).sort((a, b) => b[1] - a[1]).map(([reason, n], i) => (
-                        <span key={reason}>{i > 0 ? ' · ' : ''}{reason} <span className="tabular-nums font-black text-ink">{n}</span></span>
-                      ))}
-                    </p>
-                  )}
-                  {handover.pauseCauses && handover.pauseCauses.total > 0 && (
-                    // WHO STOPS THE MACHINES. Before the lifetime heartbeat, most sandboxes were expected to
-                    // fall to the 20-minute orphan sweep — that expectation was arithmetic, not evidence.
-                    // This row is the evidence. "Provider / unknown" is a machine we never stamped: E2B's
-                    // own timer, a kill, or one still running — reported as unknown rather than guessed.
-                    <p className="text-[11px] text-muted leading-relaxed">
-                      <span className="font-black text-ink">Who stopped them:</span>{' '}
-                      idle sweep <span className="tabular-nums font-black text-info">{handover.pauseCauses.idleSweep}</span> ·{' '}
-                      orphan sweep <span className="tabular-nums font-black text-warn">{handover.pauseCauses.orphanSweep}</span> ·{' '}
-                      sweep (cause not recorded) <span className="tabular-nums font-black text-body">{handover.pauseCauses.sweepUnattributed}</span> ·{' '}
-                      provider / unknown <span className="tabular-nums font-black text-accent-text">{handover.pauseCauses.providerOrUnknown}</span>{' '}
-                      <span className="text-faint">of {handover.pauseCauses.total} recent sandboxes. A rising "provider" share after 2026-09-11 is the six-minute lifetime doing the reaping.</span>
-                    </p>
-                  )}
-                  {/* The extrapolation is kept visually APART from the measured numbers above, and says
-                      what it is. The two must never be read as one row of equally solid figures. */}
-                  {handover.projection.monthlyUsdEstimate > 0 && (
-                    <div className="bg-surface border border-line rounded-xl p-3">
-                      <div className="text-[10px] font-black uppercase tracking-wider text-muted">Extrapolation, not a bill</div>
-                      <div className="text-[12px] text-body mt-1 leading-snug">
-                        Over the sample's <span className="tabular-nums font-black text-ink">{handover.projection.spanDays}</span> days that is{' '}
-                        <span className="tabular-nums font-black text-success">{handover.projection.recoverableHoursPerDay}h/day</span> reclaimable ≈{' '}
-                        <span className="tabular-nums font-black text-success">${handover.projection.monthlyUsdEstimate}/month</span>. Scaled from this
-                        window at the measured sandbox rate — the real bill moves with usage.
-                      </div>
-                    </div>
-                  )}
-                  {Object.entries(handover.tally.unknown).some(([, n]) => n > 0) && (
-                    <div>
-                      <div className="text-[10px] font-black uppercase tracking-wider text-muted mb-1.5">Why builds were excluded</div>
-                      <div className="space-y-1">
-                        {Object.entries(handover.tally.unknown).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).map(([why, n]) => (
-                          <div key={why} className="flex items-start gap-2 text-[11px] text-body">
-                            <span className="tabular-nums font-black text-muted shrink-0 w-6">{n}×</span>
-                            <span className="leading-snug">{({
-                              'no-build-window': 'the report never recorded a start and end (unsettled or legacy build)',
-                              'no-sandbox-record': 'no durable sandbox record for that workspace',
-                              'never-paused': 'nothing ever stamped a pause — the hold is real but unmeasurable',
-                              'stale-pairing': 'the pause predates the build, so the record is about an earlier sandbox',
-                            } as Record<string, string>)[why] ?? why}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <details className="text-[11px]">
-                    <summary className="cursor-pointer text-muted font-bold hover:text-ink">Check it against {handover.sample.length} real builds</summary>
-                    <div className="mt-2 space-y-1.5">
-                      {handover.sample.map((s) => (
-                        <div key={s.workspaceId} className="bg-surface border border-line rounded-lg px-2.5 py-2">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            {s.known ? (
-                              <>
-                                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-sky-500/40 text-info">{s.buildMinutes}m build</span>
-                                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-amber-500/40 text-warn">{s.heldAfterMinutes}m held</span>
-                                {s.frontendOnly && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-emerald-500/40 text-success">reclaimable</span>}
-                              </>
-                            ) : (
-                              <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-line text-muted">not measurable · {s.why}</span>
-                            )}
-                          </div>
-                          <div className="text-[11px] text-body mt-1 leading-snug">{s.prompt || <span className="text-faint">(no prompt recorded)</span>}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                </div>
-              )}
-
-              {/* BUILD COSTS (admin 2026-09-14): real cost vs bill per tier × app size, measured from
-                  the same durable records the list below reads. Admin-only by construction. */}
-              <BuildCostCard adminToken={adminToken} />
-              {/* BUILD DISCOUNT (admin 2026-09-25): the one % taken off every charged build. */}
-              <BuildDiscountCard adminToken={adminToken} />
-              <ReferralCostCard adminToken={adminToken} />
-              {/* MOBILE OTP HEALTH (admin 2026-09-26): where a failed OTP's real reason can be read. */}
-              <OtpHealthCard adminToken={adminToken} />
-              {/* NOTIFICATIONS (admin 2026-09-20): the loud half of a feature that fails silently
-                  at every link — which one is broken, and a real test send to prove the chain. */}
-              <PushHealthCard adminToken={adminToken} />
               {/* FAILURE CATEGORY (admin 2026-09-16): which app TYPE fails most, and WHY — grouped from
                   the same durable per-workspace records the All Builds list below reads. */}
               <FailureCategoryCard adminToken={adminToken} />
-              {/* Beside it deliberately: one card is the APP build (does the generated app compile?),
-                  this one is the PHONE build (does the .apk / .aab / .ipa come out?). Two pipelines,
-                  two questions — reading either as the other is exactly what an impression like
-                  "80% fail" is made of. */}
-              <MobileBuildOutcomeCard adminToken={adminToken} />
-
               {/* ALL BUILDS (admin 2026-08-06): every user's every build — 0→100% report downloadable
                   WITHOUT the user pressing Report. The engine already records every build durably;
                   this is the admin's global window over that record. */}
@@ -4763,26 +4498,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
             </div>
           )}
 
-          {/* ── DIAGNOSTICS TAB (admin 2026-09-21) ── */}
-          {activeTab === 'diagnostics' && (
-            <EngineReportsPanel adminToken={adminToken} onStatus={toast} />
-          )}
-
-          {/* ── SECURITY TAB ── */}
+          {/* ── SAFETY (the old Security tab; admin panel audit PR 2) ── */}
           {activeTab === 'security' && (
             <div className="space-y-6">
-              {/* ── BUILT APPS — every user's, twelve at a time, each with a preview (admin 2026-09-18) ──
-                  *"sabhi users ki build app dikhni chahiye … 12-12 ke set me … sabhi ka preview chalna chahiye."*
-                  The list, its paging and its previews are `admin/BuiltAppsPanel.tsx`; the Unpublish / Ban
-                  confirmation stays in this file (see `moderating` above) and the panel only asks for it. */}
-              <BuiltAppsPanel
-                headers={headers}
-                openAccount={(uid) => void openAccount(uid)}
-                toast={toast}
-                onModerate={(workspaceId, action) => { setModerating({ workspaceId, action }); setModerateReason(''); }}
-                moderated={moderated}
-              />
-
               {/* ── THE SAFETY QUEUE ───────────────────────────────────────────────────────────
                   🔒 NOT a chat browser, and the difference is structural: a clean message writes no
                   document at all, so there is nothing else here to browse. Each row is something the
@@ -5002,8 +4720,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {statCard('Failed Logins', analytics?.failedRequests || 0, 'Admin login failures', 'bg-red-500 text-on-accent', Shield)}
-                {statCard('Website Hits', (analytics?.websiteHitsTotal || 0).toLocaleString(), analytics?.hitsSinceBoot ? 'Since this server started — resets on deploy' : 'All time requests', 'bg-sky-500 text-on-accent', Globe)}
-                {statCard('Today Hits', (analytics?.websiteHitsToday || 0).toLocaleString(), `vs ${analytics?.websiteHitsYesterday || 0} yesterday`, 'bg-indigo-500 text-on-accent', Eye)}
               </div>
 
               <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
@@ -5025,22 +4741,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 </div>
               </div>
 
-              {/* Rate-limited providers */}
-              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
-                <h3 className="text-sm font-black text-ink uppercase tracking-tight">Rate Limited Providers</h3>
-                <div className="space-y-2">
-                  {Object.entries(analytics?.liveProviderStats || {})
-                    .filter(([, s]: any) => s.cooldownUntil > Date.now())
-                    .map(([name, s]: any) => (
-                      <div key={name} className="flex justify-between items-center bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2.5">
-                        <span className="text-danger font-black uppercase font-mono text-[11px]">{name}</span>
-                        <span className="text-[10px] text-danger">Cooldown: {Math.ceil((s.cooldownUntil - Date.now()) / 1000)}s remaining</span>
-                      </div>
-                    ))}
-                  {Object.entries(analytics?.liveProviderStats || {}).filter(([, s]: any) => s.cooldownUntil > Date.now()).length === 0 && (
-                    <p className="text-success font-bold text-[11px] flex items-center gap-2"><CheckCircle2 className="w-4 h-4" />All providers healthy — no rate limits active</p>
-                  )}
-                </div>
+              <EngineReportsPanel adminToken={adminToken} onStatus={toast} only={ENGINE_REPORTS_ON.security} heading="Release and keys" />
+
+              {/* NOT BUILT YET, SAID PLAINLY (admin panel audit PR 2): the audit log screen and the App Check
+                  card are PR 3. The events themselves are already recorded on the server. */}
+              <div className="bg-card border border-dashed border-line rounded-[1.5rem] p-5">
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight">Admin audit log · App Check</h3>
+                <p className="text-[11px] text-muted mt-1">Not available on this screen yet. Admin actions are already recorded with who, what and why; the screen to browse them, and the App Check counters, arrive in the next update.</p>
               </div>
             </div>
           )}
@@ -5048,6 +4755,504 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
           {/* ── SETTINGS TAB ── */}
           {activeTab === 'settings' && (
             <div className="space-y-6">
+              {/* MAINTENANCE MODE, FEATURE FLAGS AND PRICING CONFIGURATION WERE REMOVED (admin panel audit, PR 1,
+                  2026-10-04, decision D1). Each saved a value that nothing enforced: Maintenance only turned
+                  /api/health "degraded" and blocked no user; the Doctor AI / Pro / App Builder flags were
+                  stored and read by no route; "Coins per ₹1" and "Referral Bonus %" were read by nothing —
+                  the real rate and the referral amounts live in code and env. A control that does nothing
+                  is a promise the panel cannot keep. If a real kill switch is wanted, it is built as its own
+                  system with server enforcement, an audit trail and rollback. */}
+
+              {/* WHERE THE OLD SETTINGS WENT (admin panel audit PR 2). Settings holds only global configuration
+                  that is real and enforced, and today there is none left here: the three fake controls were
+                  removed in PR 1, and the real tools that sat here moved to the page that owns them. */}
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-3">
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight">Settings</h3>
+                <p className="text-[11px] text-muted">No global setting lives here right now. What used to be on this page:</p>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => setActiveTab('messages')} className="px-3 py-2 rounded-xl bg-raised border border-line text-[11px] font-bold text-ink hover:bg-raised-hover">Message users and app update notification → Messages</button>
+                  <button type="button" onClick={() => setActiveTab('revenue')} className="px-3 py-2 rounded-xl bg-raised border border-line text-[11px] font-bold text-ink hover:bg-raised-hover">Promo codes → Money</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── APPS · ALL APPS (admin panel audit PR 2) — every user's built app, preview, unpublish, ban; moved from Security ── */}
+          {activeTab === 'apps' && (
+            <div className="space-y-6">
+              {/* ── BUILT APPS — every user's, twelve at a time, each with a preview (admin 2026-09-18) ──
+                  *"sabhi users ki build app dikhni chahiye … 12-12 ke set me … sabhi ka preview chalna chahiye."*
+                  The list, its paging and its previews are `admin/BuiltAppsPanel.tsx`; the Unpublish / Ban
+                  confirmation stays in this file (see `moderating` above) and the panel only asks for it. */}
+              <BuiltAppsPanel
+                headers={headers}
+                openAccount={(uid) => void openAccount(uid)}
+                toast={toast}
+                onModerate={(workspaceId, action) => { setModerating({ workspaceId, action }); setModerateReason(''); }}
+                moderated={moderated}
+              />
+
+              {/* Restoring a removed app is built in PR 3 (the server route exists; this screen does not offer it yet). */}
+            </div>
+          )}
+
+          {/* ── APPS · PUBLISHING (admin panel audit PR 2) — the publish ceiling and reclaim, the registry, the removal record ── */}
+          {activeTab === 'publishing' && (
+            <div className="space-y-6">
+              {/* ── THE PUBLISH CEILING (ROADMAP §10) ────────────────────────────────────────
+                  Every published app holds one Firebase Hosting channel, and the pool is capped per
+                  site. Past the cap, publishing stops for EVERY user at once. This is the only place
+                  that number is visible — and the only place a channel orphaned by a deleted chat
+                  can be found at all, since its id is a one-way hash with no record left to trace. */}
+              {(channels || channelsError) && (
+                <div className={`rounded-[1.5rem] p-6 border ${
+                  channelsError ? 'bg-card border-line'
+                  : channels?.verdict.level === 'critical' ? 'bg-red-500/5 border-red-500/30'
+                  : channels?.verdict.level === 'warn' ? 'bg-amber-500/5 border-amber-500/30'
+                  : 'bg-card border-line'}`}>
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <button
+                      type="button"
+                      onClick={togglePublishCard}
+                      aria-expanded={publishCardOpen}
+                      aria-controls="publish-capacity-body"
+                      className="flex items-center gap-2 min-w-0 text-left group"
+                    >
+                      {publishCardOpen
+                        ? <ChevronDown className="w-4 h-4 shrink-0 text-muted group-hover:text-ink" />
+                        : <ChevronRight className="w-4 h-4 shrink-0 text-muted group-hover:text-ink" />}
+                      <h3 className="text-sm font-black text-ink uppercase tracking-tight">Publish Capacity</h3>
+                      <span className="sr-only">{publishCardOpen ? 'Hide the details' : 'Show the details'}</span>
+                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {/* Folded, the numbers still show: a collapsed card must not conceal the ceiling. */}
+                      {!publishCardOpen && channels && (
+                        <span className="text-[10px] font-bold text-muted tabular-nums">
+                          {channels.verdict.used} / {channels.verdict.cap} channels
+                          {channels.verdict.reclaimable > 0 ? ` · ${channels.verdict.reclaimable} reclaimable` : ''}
+                        </span>
+                      )}
+                      {!publishCardOpen && channelsError && (
+                        <span className="text-[10px] font-bold text-muted">could not be read</span>
+                      )}
+                      <span className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-full border ${
+                        channelsError ? 'bg-raised border-line text-muted'
+                        : channels?.verdict.level === 'critical' ? 'bg-red-500/10 border-red-500/30 text-danger'
+                        : channels?.verdict.level === 'warn' ? 'bg-amber-500/10 border-amber-500/30 text-warn'
+                        : 'bg-emerald-500/10 border-emerald-500/30 text-success'}`}>
+                        {channelsError ? 'unknown' : channels?.verdict.level}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div id="publish-capacity-body">
+                  {!publishCardOpen ? null : channelsError ? (
+                    <p className="text-xs text-muted leading-relaxed">{channelsError}</p>
+                  ) : channels && (
+                    <>
+                      <p className="text-xs text-body leading-relaxed">{channels.verdict.message}</p>
+                      <p className="text-[11px] text-muted mt-1.5 leading-relaxed">
+                        {channels.verdict.remaining} more app{channels.verdict.remaining === 1 ? '' : 's'} can be published before
+                        the limit. The cap of {channels.verdict.cap} is a working figure — Google does not publish this number —
+                        so treat it as approximate until a real &quot;quota reached&quot; confirms it.
+                      </p>
+
+                      {channels.channels.some((c) => c.reclaimable) && (
+                        <div className="mt-4 space-y-2">
+                          <div className="flex items-center justify-between gap-3 flex-wrap">
+                            <p className="text-[10px] font-black uppercase tracking-wider text-muted">
+                              Reclaimable channels — no live app is using these
+                            </p>
+                            <button
+                              onClick={() => void reclaimAllChannels()}
+                              disabled={!!reclaimingAll || !!reclaiming}
+                              className="shrink-0 px-3 py-1.5 rounded-lg bg-raised hover:bg-red-600/20 border border-line text-[10px] font-black uppercase tracking-wider text-body hover:text-danger disabled:opacity-40"
+                            >
+                              {reclaimingAll ? `Reclaiming ${reclaimingAll.done}/${reclaimingAll.total}…` : 'Reclaim all'}
+                            </button>
+                          </div>
+                          {channels.channels.filter((c) => c.reclaimable).map((c) => (
+                            <div key={c.channelId} className="flex items-center justify-between gap-3 rounded-xl bg-well border border-line px-3 py-2">
+                              <div className="min-w-0">
+                                <p className="text-[11px] font-mono text-body truncate">{c.channelId}</p>
+                                <p className="text-[10px] text-muted truncate">
+                                  {c.state === 'snapshot'
+                                    /* A build copy, not an app. It never had a record, by design — and
+                                       the next green build writes it again, so clearing it is safe. */
+                                    ? 'A saved copy of a build, not a published app. It returns on the next build.'
+                                    : c.state === 'unknown'
+                                    /* No record anywhere — a purge deleted it and left the app serving. */
+                                    ? 'Its chat and record are gone, but the app is still live'
+                                    /* Both unpublish and takedown delete the channel BEFORE the registry,
+                                       so this state means one of those deletes failed and said success. */
+                                    : `Marked not-live, but the channel still exists${c.workspaceId ? ` · ${c.workspaceId}` : ''}`}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => void reclaimChannel(c.channelId)}
+                                disabled={reclaiming === c.channelId}
+                                className="shrink-0 px-3 py-1.5 rounded-lg bg-raised hover:bg-red-600/20 text-[10px] font-black uppercase tracking-wider text-body hover:text-danger disabled:opacity-40"
+                              >
+                                {reclaiming === c.channelId ? 'Reclaiming…' : 'Reclaim'}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                  </div>
+                </div>
+              )}
+
+              <EngineReportsPanel adminToken={adminToken} onStatus={toast} only={ENGINE_REPORTS_ON.publishing} heading="Published apps" />
+            </div>
+          )}
+
+          {/* ── APPS · REVIEW (admin panel audit PR 2) — where apps are approved before the public sees them ── */}
+          {activeTab === 'review' && (
+            <div className="space-y-6">
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-3">
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight">App Mart review</h3>
+                <p className="text-[11px] text-muted">Android apps, instant web apps waiting for a store listing, and reported comments are reviewed inside App Mart. It opens as the signed-in store admin account, not with this panel's login.</p>
+                <button
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent('navbharat:navigate', { detail: { view: 'appstore', storeTab: 'review' } }))}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-[11px] font-black uppercase tracking-wider text-on-accent"
+                >
+                  Open App Mart review
+                </button>
+              </div>
+              <div className="bg-card border border-dashed border-line rounded-[1.5rem] p-5">
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight">Community gallery review</h3>
+                <p className="text-[11px] text-muted mt-1">Not available yet. Apps published to the community gallery wait as pending and stay private; the screen to approve or reject them arrives in the next update.</p>
+              </div>
+            </div>
+          )}
+
+          {/* ── BUILDS · ENGINE HEALTH (admin panel audit PR 2) — from Build Reports and the old Diagnostics tab ── */}
+          {activeTab === 'health' && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-lg font-black text-ink tracking-tight mr-auto">Engine health</h3>
+                {/* SERVER NECESSITY (admin 2026-08-12) — see fetchNecessity. Behind a button because it
+                    reads up to 500 build documents; nobody should pay that on every tab visit. */}
+                <button
+                  onClick={fetchNecessity}
+                  disabled={necessityLoading}
+                  title="How many past apps were given a server they never needed? Every one of those could have skipped the sandbox."
+                  className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-amber-500/40 text-warn hover:text-ink hover:bg-amber-600/20 disabled:opacity-40"
+                >
+                  <Server className={`w-3.5 h-3.5 ${necessityLoading ? 'animate-pulse' : ''}`} /> Server necessity
+                </button>
+                {/* SANDBOX HANDOVER (Phase 0 of the in-browser preview plan) — see fetchHandover. */}
+                <button
+                  onClick={fetchHandover}
+                  disabled={handoverLoading}
+                  title="After a build finished, how much longer did its sandbox stay billable — and how much of that could the browser have served?"
+                  className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-violet-500/40 text-accent-text hover:text-ink hover:bg-violet-600/20 disabled:opacity-40"
+                >
+                  <Clock className={`w-3.5 h-3.5 ${handoverLoading ? 'animate-pulse' : ''}`} /> Sandbox handover
+                </button>
+                {/* APPLE SIGN-IN (admin 2026-08-22) — see fetchAppleDiag. The endpoint shipped a day
+                    earlier with no UI at all, which for a non-terminal admin is the same as unbuilt.
+                    The code box is optional and only ever SHARPENS the final answer. */}
+                <input
+                  value={appleObservedCode}
+                  onChange={(e) => setAppleObservedCode(e.target.value)}
+                  placeholder="auth/… (optional)"
+                  title="The error code shown in the sign-in message, if you have one. It makes the answer more exact; leave it empty to just check our side."
+                  className="text-[11px] font-bold px-2.5 py-2 rounded-xl bg-surface border border-line text-ink placeholder:text-faint w-[9.5rem] focus:outline-none focus:border-sky-500/50"
+                />
+                <button
+                  onClick={fetchAppleDiag}
+                  disabled={appleDiagLoading}
+                  title="Is anything on OUR side stopping Sign in with Apple? Fetches our own public verification file exactly as Apple does."
+                  className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider px-3 py-2 rounded-xl border border-sky-500/40 text-info hover:text-ink hover:bg-sky-600/20 disabled:opacity-40"
+                >
+                  <Shield className={`w-3.5 h-3.5 ${appleDiagLoading ? 'animate-pulse' : ''}`} /> Apple sign-in
+                </button>
+              </div>
+
+              {/* APPLE SIGN-IN RESULT (admin 2026-08-22). Colour carries the verdict, because the whole
+                  value of this check is separating "our fault" from "not our fault" at a glance — and
+                  `unverifiable` is deliberately its own colour, since being unable to ASK is not the
+                  same as a bad answer, and painting it red is how someone ends up fixing the wrong
+                  thing. The next step is the line to act on, so it is the loudest thing on the card. */}
+              {appleDiag && (() => {
+                const ok = appleDiag.verdict === 'ours-is-correct';
+                const unknown = appleDiag.verdict === 'unverifiable';
+                // FULL CLASS NAMES, never a class built by interpolating a colour name into it.
+                // Tailwind scans source text and cannot see a composed class, so it is simply never
+                // generated — the element ends up unstyled while the code looks correct.
+                const icon = ok ? 'text-success' : unknown ? 'text-warn' : 'text-danger';
+                const ring = ok ? 'border-emerald-500/25' : unknown ? 'border-amber-500/25' : 'border-red-500/25';
+                const text = ok ? 'text-success' : unknown ? 'text-warn' : 'text-danger';
+                return (
+                  <div className={`bg-card border ${ring} rounded-[1.25rem] p-4 space-y-3`}>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Shield className={`w-4 h-4 ${icon}`} />
+                      <h4 className="text-sm font-black text-ink tracking-tight">Sign in with Apple — is it us?</h4>
+                      <span className="ml-auto">
+                        <ReportExportButtons label="Sign in with Apple — is it us?" data={appleDiag} tab="Build Reports" source="/api/admin/apple-signin" onStatus={toast} />
+                      </span>
+                      <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${ring} ${text}`}>
+                        {appleDiag.verdict.replace(/-/g, ' ')}
+                      </span>
+                      {appleDiag.observedCode && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-line text-muted">
+                          code: {appleDiag.observedCode}
+                        </span>
+                      )}
+                    </div>
+                    <p className={`text-[12px] ${text} font-bold leading-relaxed`}>{appleDiag.message}</p>
+                    {appleDiag.nextStep && (
+                      <div className="bg-surface border border-line rounded-xl p-3">
+                        <p className="text-[10px] font-black uppercase tracking-wider text-muted mb-1">Do this next</p>
+                        <p className="text-[12px] text-ink font-bold leading-relaxed">{appleDiag.nextStep}</p>
+                      </div>
+                    )}
+                    {/* Lengths and status, never the file's contents — enough to spot a truncated paste
+                        or a stray wrapper without printing a long token nobody will read. */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      {([
+                        ['File configured', appleDiag.configured ? `yes (${appleDiag.source || '—'})` : 'no'],
+                        ['Public URL status', appleDiag.fetchedStatus == null ? '—' : String(appleDiag.fetchedStatus)],
+                        ['Length here / there', `${appleDiag.servedLength ?? 0} / ${appleDiag.fetchedLength ?? '—'}`],
+                        ['Services ID', appleDiag.serviceId || '—'],
+                      ] as Array<[string, string]>).map(([label, value]) => (
+                        <div key={label} className="bg-surface border border-line rounded-xl p-2.5">
+                          <p className="text-[10px] font-black uppercase tracking-wider text-faint">{label}</p>
+                          <p className="text-[12px] text-ink font-bold break-all">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {appleDiag.fetchError && (
+                      <p className="text-[11px] text-warn font-bold break-all">Check failed with: {appleDiag.fetchError}</p>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* SERVER NECESSITY RESULT (admin 2026-08-12). The number that decides whether the
+                  browser-native plan proceeds. Shown with its CAVEAT and a spot-check sample, never as a
+                  bare percentage — this drives a large decision, and a number without its limits is how
+                  a large change gets approved on a misunderstanding. */}
+              {necessity && (
+                <div className="bg-card border border-amber-500/25 rounded-[1.25rem] p-4 space-y-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Server className="w-4 h-4 text-warn" />
+                    <h4 className="text-sm font-black text-ink tracking-tight">Did these apps need a server?</h4>
+                      <span className="ml-auto">
+                        <ReportExportButtons label="Did these apps need a server?" data={necessity} tab="Build Reports" source="/api/admin/server-necessity" onStatus={toast} />
+                      </span>
+                  </div>
+                  <p className="text-[12px] text-warn font-bold leading-relaxed">{necessity.headline}</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {([
+                      ['Server built, NOT needed', necessity.tally.builtButNotNeeded, 'text-warn', 'could have skipped the sandbox'],
+                      ['Neither needed nor built', necessity.tally.neitherNeededNorBuilt, 'text-success', 'already browser-native'],
+                      ['Genuinely needed one', necessity.tally.neededAndBuilt, 'text-info', 'E2B is required here'],
+                      ['Needed, but missing', necessity.tally.neededButMissing, 'text-danger', 'a correctness gap, not a cost one'],
+                    ] as const).map(([label, n, cls, hint]) => (
+                      <div key={label} className="bg-surface border border-line rounded-xl p-3">
+                        <div className={`text-2xl font-black tabular-nums ${cls}`}>{n}</div>
+                        <div className="text-[10px] font-black uppercase tracking-wider text-muted mt-1">{label}</div>
+                        <div className="text-[10px] text-faint mt-0.5 leading-snug">{hint}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {Object.keys(necessity.tally.reasonCounts).length > 0 && (
+                    <div>
+                      <div className="text-[10px] font-black uppercase tracking-wider text-muted mb-1.5">Why a server was genuinely needed</div>
+                      <div className="space-y-1">
+                        {Object.entries(necessity.tally.reasonCounts).sort((a, b) => b[1] - a[1]).map(([reason, n]) => (
+                          <div key={reason} className="flex items-start gap-2 text-[11px] text-body">
+                            <span className="tabular-nums font-black text-info shrink-0 w-6">{n}×</span>
+                            <span className="leading-snug">{reason}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* SPOT-CHECK. A percentage produced by a classifier nobody has read is not evidence —
+                      these are real builds the admin can recognise and disagree with. */}
+                  <details className="text-[11px]">
+                    <summary className="cursor-pointer text-muted font-bold hover:text-ink">Check it against {necessity.sample.length} real builds</summary>
+                    <div className="mt-2 space-y-1.5">
+                      {necessity.sample.map((s) => (
+                        <div key={s.workspaceId} className="bg-surface border border-line rounded-lg px-2.5 py-2">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border ${s.neededServer ? 'border-sky-500/40 text-info' : 'border-emerald-500/40 text-success'}`}>
+                              {s.neededServer ? 'needed' : 'not needed'}
+                            </span>
+                            {s.builtServer && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-amber-500/40 text-warn">built one</span>}
+                          </div>
+                          <div className="text-[11px] text-body mt-1 leading-snug">{s.prompt || <span className="text-faint">(no prompt recorded)</span>}</div>
+                          {s.reasons.length > 0 && <div className="text-[10px] text-muted mt-0.5">{s.reasons.join(' · ')}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                </div>
+              )}
+
+              {/* SANDBOX HANDOVER RESULT (Phase 0 of IN_BROWSER_PREVIEW_PLAN.md). The measured split
+                  between real build work and post-build holding. The excluded builds are shown as
+                  loudly as the measured ones: an unmeasurable hold is not a zero-length hold, and
+                  quietly treating it as one is how a measurement turns into a flattering estimate. */}
+              {handover && (
+                <div className="bg-card border border-violet-500/25 rounded-[1.25rem] p-4 space-y-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Clock className="w-4 h-4 text-accent-text" />
+                    <h4 className="text-sm font-black text-ink tracking-tight">Where does a sandbox's billed time go?</h4>
+                      <span className="ml-auto">
+                        <ReportExportButtons label="Where does a sandbox's billed time go?" data={handover} tab="Build Reports" source="/api/admin/sandbox-handover" onStatus={toast} />
+                      </span>
+                  </div>
+                  <p className="text-[12px] text-accent-text font-bold leading-relaxed">{handover.headline}</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {([
+                      ['Real build work', `${handover.tally.buildHours}h`, 'text-info', 'a browser can never absorb this'],
+                      ['Held after the build', `${handover.tally.heldAfterHours}h`, 'text-warn', 'the only window Phase 3 targets'],
+                      ['Reclaimable', `${handover.tally.recoverableHours}h`, 'text-success', `frontend-only — ${handover.tally.frontendOnlyCount} builds`],
+                      ['Could not measure', `${handover.tally.examined - handover.tally.measured}`, 'text-muted', 'excluded, never counted as zero'],
+                    ] as const).map(([label, n, cls, hint]) => (
+                      <div key={label} className="bg-surface border border-line rounded-xl p-3">
+                        <div className={`text-2xl font-black tabular-nums ${cls}`}>{n}</div>
+                        <div className="text-[10px] font-black uppercase tracking-wider text-muted mt-1">{label}</div>
+                        <div className="text-[10px] text-faint mt-0.5 leading-snug">{hint}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {handover.minutes && handover.minutes.sessions > 0 && (
+                    // WHERE DO THE MINUTES GO. The bill said ~29 min a session; a build is ~5-7 of work.
+                    // "Idle" is the machine up with none of our operations running — a sweep/window
+                    // problem. "Running" is our commands — a machine or workload problem. Different fixes.
+                    <p className="text-[11px] text-muted leading-relaxed">
+                      <span className="font-black text-ink">Where the minutes go</span> (last {handover.minutes.sessions} ended sessions):{' '}
+                      up <span className="tabular-nums font-black text-ink">{handover.minutes.avgWallMin} min</span> ·{' '}
+                      running our operations <span className="tabular-nums font-black text-info">{handover.minutes.avgBusyMin} min</span> ·{' '}
+                      idle <span className="tabular-nums font-black text-warn">{handover.minutes.avgIdleMin} min</span>{' '}
+                      <span className="text-faint">({Math.round(handover.minutes.idleShare * 100)}% of billed time was nobody's work)</span>
+                    </p>
+                  )}
+                  {handover.starts && handover.starts.total > 0 && (
+                    // WHY MACHINES START. 1,110 starts a month for one tester was the mystery; this is
+                    // the table that ends it. A large "preview-door" share means the live frame is
+                    // resuming paused machines; a large "files" share means reads are.
+                    <p className="text-[11px] text-muted leading-relaxed">
+                      <span className="font-black text-ink">Why machines started</span> (last {handover.starts.days} days, {handover.starts.total} starts):{' '}
+                      {Object.entries(handover.starts.byReason).sort((a, b) => b[1] - a[1]).map(([reason, n], i) => (
+                        <span key={reason}>{i > 0 ? ' · ' : ''}{reason} <span className="tabular-nums font-black text-ink">{n}</span></span>
+                      ))}
+                    </p>
+                  )}
+                  {handover.pauseCauses && handover.pauseCauses.total > 0 && (
+                    // WHO STOPS THE MACHINES. Before the lifetime heartbeat, most sandboxes were expected to
+                    // fall to the 20-minute orphan sweep — that expectation was arithmetic, not evidence.
+                    // This row is the evidence. "Provider / unknown" is a machine we never stamped: E2B's
+                    // own timer, a kill, or one still running — reported as unknown rather than guessed.
+                    <p className="text-[11px] text-muted leading-relaxed">
+                      <span className="font-black text-ink">Who stopped them:</span>{' '}
+                      idle sweep <span className="tabular-nums font-black text-info">{handover.pauseCauses.idleSweep}</span> ·{' '}
+                      orphan sweep <span className="tabular-nums font-black text-warn">{handover.pauseCauses.orphanSweep}</span> ·{' '}
+                      sweep (cause not recorded) <span className="tabular-nums font-black text-body">{handover.pauseCauses.sweepUnattributed}</span> ·{' '}
+                      provider / unknown <span className="tabular-nums font-black text-accent-text">{handover.pauseCauses.providerOrUnknown}</span>{' '}
+                      <span className="text-faint">of {handover.pauseCauses.total} recent sandboxes. A rising "provider" share after 2026-09-11 is the six-minute lifetime doing the reaping.</span>
+                    </p>
+                  )}
+                  {/* The extrapolation is kept visually APART from the measured numbers above, and says
+                      what it is. The two must never be read as one row of equally solid figures. */}
+                  {handover.projection.monthlyUsdEstimate > 0 && (
+                    <div className="bg-surface border border-line rounded-xl p-3">
+                      <div className="text-[10px] font-black uppercase tracking-wider text-muted">Extrapolation, not a bill</div>
+                      <div className="text-[12px] text-body mt-1 leading-snug">
+                        Over the sample's <span className="tabular-nums font-black text-ink">{handover.projection.spanDays}</span> days that is{' '}
+                        <span className="tabular-nums font-black text-success">{handover.projection.recoverableHoursPerDay}h/day</span> reclaimable ≈{' '}
+                        <span className="tabular-nums font-black text-success">${handover.projection.monthlyUsdEstimate}/month</span>. Scaled from this
+                        window at the measured sandbox rate — the real bill moves with usage.
+                      </div>
+                    </div>
+                  )}
+                  {Object.entries(handover.tally.unknown).some(([, n]) => n > 0) && (
+                    <div>
+                      <div className="text-[10px] font-black uppercase tracking-wider text-muted mb-1.5">Why builds were excluded</div>
+                      <div className="space-y-1">
+                        {Object.entries(handover.tally.unknown).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).map(([why, n]) => (
+                          <div key={why} className="flex items-start gap-2 text-[11px] text-body">
+                            <span className="tabular-nums font-black text-muted shrink-0 w-6">{n}×</span>
+                            <span className="leading-snug">{({
+                              'no-build-window': 'the report never recorded a start and end (unsettled or legacy build)',
+                              'no-sandbox-record': 'no durable sandbox record for that workspace',
+                              'never-paused': 'nothing ever stamped a pause — the hold is real but unmeasurable',
+                              'stale-pairing': 'the pause predates the build, so the record is about an earlier sandbox',
+                            } as Record<string, string>)[why] ?? why}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <details className="text-[11px]">
+                    <summary className="cursor-pointer text-muted font-bold hover:text-ink">Check it against {handover.sample.length} real builds</summary>
+                    <div className="mt-2 space-y-1.5">
+                      {handover.sample.map((s) => (
+                        <div key={s.workspaceId} className="bg-surface border border-line rounded-lg px-2.5 py-2">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {s.known ? (
+                              <>
+                                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-sky-500/40 text-info">{s.buildMinutes}m build</span>
+                                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-amber-500/40 text-warn">{s.heldAfterMinutes}m held</span>
+                                {s.frontendOnly && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-emerald-500/40 text-success">reclaimable</span>}
+                              </>
+                            ) : (
+                              <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border border-line text-muted">not measurable · {s.why}</span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-body mt-1 leading-snug">{s.prompt || <span className="text-faint">(no prompt recorded)</span>}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                </div>
+              )}
+
+              <EngineReportsPanel adminToken={adminToken} onStatus={toast} only={ENGINE_REPORTS_ON.health} heading="Engine reports" />
+            </div>
+          )}
+
+          {/* ── MESSAGES (admin panel audit PR 2) — everything that reaches users ── */}
+          {activeTab === 'messages' && (
+            <div className="space-y-6">
+              {/* Send a message to users (admin 2026-07-30): delivers a real notification to ALL users
+                  or to ONE specific user (by email). Users see it via the notification bell in the app. */}
+              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
+                <h3 className="text-sm font-black text-ink uppercase tracking-tight flex items-center gap-2">
+                  <Megaphone className="w-4 h-4 text-warn" /> Message Users
+                </h3>
+                <textarea value={annMsg} onChange={e => setAnnMsg(e.target.value)} placeholder="Type your message to users..." rows={3}
+                  className="w-full bg-well border border-line rounded-xl px-4 py-3 text-ink text-sm placeholder:text-muted outline-none focus:border-indigo-500 resize-none" />
+                <div className="flex flex-wrap items-center gap-3">
+                  <select value={annTarget} onChange={e => setAnnTarget(e.target.value)} className="bg-well border border-line rounded-xl px-4 py-2.5 text-ink text-sm outline-none focus:border-indigo-500">
+                    <option value="all">All Users</option>
+                    <option value="user">A Specific User</option>
+                  </select>
+                  {annTarget === 'user' && (
+                    <input
+                      type="email"
+                      value={annEmail}
+                      onChange={e => setAnnEmail(e.target.value)}
+                      placeholder="user@example.com"
+                      className="flex-1 min-w-[200px] bg-well border border-line rounded-xl px-4 py-2.5 text-ink text-sm placeholder:text-muted outline-none focus:border-indigo-500"
+                    />
+                  )}
+                  <button onClick={handleAnnouncement} className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 rounded-xl text-[11px] font-black uppercase tracking-wider text-black transition-all active:scale-95">
+                    Preview message
+                  </button>
+                </div>
+                <p className="text-[10px] text-muted leading-relaxed">Delivered in-app via the notification bell. “All Users” reaches everyone; “A Specific User” reaches only that email.</p>
+              </div>
+
               {/* App update broadcast — reaches the user who has NOT opened the app, which the in-app
                   banner by definition cannot. Targets only devices on an older build. */}
               <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
@@ -5094,96 +5299,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 )}
               </div>
 
-              {/* MAINTENANCE MODE, FEATURE FLAGS AND PRICING CONFIGURATION WERE REMOVED (admin panel audit, PR 1,
-                  2026-10-04, decision D1). Each saved a value that nothing enforced: Maintenance only turned
-                  /api/health "degraded" and blocked no user; the Doctor AI / Pro / App Builder flags were
-                  stored and read by no route; "Coins per ₹1" and "Referral Bonus %" were read by nothing —
-                  the real rate and the referral amounts live in code and env. A control that does nothing
-                  is a promise the panel cannot keep. If a real kill switch is wanted, it is built as its own
-                  system with server enforcement, an audit trail and rollback. */}
+              {/* MOBILE OTP HEALTH (admin 2026-09-26): where a failed OTP's real reason can be read. */}
+              <OtpHealthCard adminToken={adminToken} />
+              {/* NOTIFICATIONS (admin 2026-09-20): the loud half of a feature that fails silently
+                  at every link — which one is broken, and a real test send to prove the chain. */}
+              <PushHealthCard adminToken={adminToken} />
 
-              {/* Send a message to users (admin 2026-07-30): delivers a real notification to ALL users
-                  or to ONE specific user (by email). Users see it via the notification bell in the app. */}
-              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
-                <h3 className="text-sm font-black text-ink uppercase tracking-tight flex items-center gap-2">
-                  <Megaphone className="w-4 h-4 text-warn" /> Message Users
-                </h3>
-                <textarea value={annMsg} onChange={e => setAnnMsg(e.target.value)} placeholder="Type your message to users..." rows={3}
-                  className="w-full bg-well border border-line rounded-xl px-4 py-3 text-ink text-sm placeholder:text-muted outline-none focus:border-indigo-500 resize-none" />
-                <div className="flex flex-wrap items-center gap-3">
-                  <select value={annTarget} onChange={e => setAnnTarget(e.target.value)} className="bg-well border border-line rounded-xl px-4 py-2.5 text-ink text-sm outline-none focus:border-indigo-500">
-                    <option value="all">All Users</option>
-                    <option value="user">A Specific User</option>
-                  </select>
-                  {annTarget === 'user' && (
-                    <input
-                      type="email"
-                      value={annEmail}
-                      onChange={e => setAnnEmail(e.target.value)}
-                      placeholder="user@example.com"
-                      className="flex-1 min-w-[200px] bg-well border border-line rounded-xl px-4 py-2.5 text-ink text-sm placeholder:text-muted outline-none focus:border-indigo-500"
-                    />
-                  )}
-                  <button onClick={handleAnnouncement} className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 rounded-xl text-[11px] font-black uppercase tracking-wider text-black transition-all active:scale-95">
-                    Preview message
-                  </button>
-                </div>
-                <p className="text-[10px] text-muted leading-relaxed">Delivered in-app via the notification bell. “All Users” reaches everyone; “A Specific User” reaches only that email.</p>
-              </div>
-
-              {/* Promo Codes */}
-              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
-                <h3 className="text-sm font-black text-ink uppercase tracking-tight flex items-center gap-2">
-                  <Tag className="w-4 h-4 text-accent-text" /> Promo Code Generator
-                </h3>
-                <p className="text-[11px] text-muted">
-                  A user types the code in Wallet &amp; Billing → Promocode and the tokens go straight into their wallet (100 tokens = ₹1). Each person can use a code once; Max uses is the total for everyone.
-                </p>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  <div>
-                    <label className="text-[10px] text-accent-text font-black uppercase tracking-widest block mb-2">Code</label>
-                    <input value={promoCode} onChange={e => setPromoCode(e.target.value.toUpperCase())} placeholder="SAVE50" className="w-full bg-well border border-line rounded-xl px-3 py-2.5 text-ink font-mono outline-none focus:border-indigo-500 uppercase" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-accent-text font-black uppercase tracking-widest block mb-2">Free Tokens</label>
-                    <input type="number" min={1} step={1} value={promoTokens} onChange={e => setPromoTokens(e.target.value)} placeholder="500" className="w-full bg-well border border-line rounded-xl px-3 py-2.5 text-ink font-mono outline-none focus:border-indigo-500" />
-                    <span className="text-[10px] text-muted block mt-1">{Number(promoTokens) > 0 ? `= ₹${(Number(promoTokens) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })} of credit` : '100 tokens = ₹1'}</span>
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-accent-text font-black uppercase tracking-widest block mb-2">Max Uses</label>
-                    <input type="number" value={promoMaxUses} onChange={e => setPromoMaxUses(e.target.value)} placeholder="1" className="w-full bg-well border border-line rounded-xl px-3 py-2.5 text-ink font-mono outline-none focus:border-indigo-500" />
-                  </div>
-                </div>
-                <button onClick={handlePromoCreate} className="px-5 py-2.5 bg-pink-600 hover:bg-pink-700 rounded-xl text-[11px] font-black uppercase tracking-wider text-on-accent transition-all active:scale-95 flex items-center gap-2">
-                  <Plus className="w-4 h-4" /> Create Promo Code
-                </button>
-
-                {promos.length > 0 && (
-                  <div className="overflow-x-auto mt-2">
-                    <table className="w-full text-xs">
-                      <thead><tr className="border-b border-line text-muted font-black uppercase tracking-widest text-[9px]">
-                        <th className="py-2 text-left">Code</th><th className="py-2 text-left">Tokens</th><th className="py-2 text-left">Used</th><th className="py-2 text-left">Status</th><th className="py-2 text-right"><span className="sr-only">Delete</span></th>
-                      </tr></thead>
-                      <tbody className="divide-y divide-line">
-                        {pagedPromos.visible.map((p: any) => (
-                          <tr key={p.id} className="hover:bg-raised">
-                            <td className="py-2 text-accent-text font-black font-mono">{p.code}</td>
-                            <td className="py-2 text-warn font-mono">{p.freeTokens || 0} <span className="text-muted">(₹{((Number(p.freeTokens) || 0) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })})</span></td>
-                            <td className="py-2 text-ink font-mono">{p.usedCount || 0}/{p.maxUses || 1}</td>
-                            <td className="py-2"><span className={`text-[9px] font-black uppercase ${p.status === 'Active' ? 'text-success' : 'text-danger'}`}>{p.status || 'Unknown'}</span></td>
-                            <td className="py-2 text-right">
-                              <button onClick={() => deletePromo(p.code || p.id)} title={`Delete ${p.code || p.id}`} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-line text-danger hover:bg-raised text-[10px] font-black uppercase tracking-wider">
-                                <Trash2 className="w-3.5 h-3.5" /> Delete
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                        <LoadMore list={pagedPromos} label="codes" colSpan={5} />
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+              <EngineReportsPanel adminToken={adminToken} onStatus={toast} only={ENGINE_REPORTS_ON.messages} heading="Announcements" />
             </div>
           )}
         </>

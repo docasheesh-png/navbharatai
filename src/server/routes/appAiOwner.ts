@@ -65,7 +65,7 @@ async function ownerOf(req: Request, workspaceId: unknown): Promise<string | nul
 export function registerAppAiOwnerRoutes(app: Express): void {
   const limiter = rateLimiter({ name: 'app-ai-owner', authed: 120, anon: 0, noun: 'questions', durable: false });
 
-  app.post(PREVIEW_ASK_PATH, express.json({ limit: '16kb' }), limiter, async (req: Request, res: Response) => {
+  app.post('/api/app-ai/preview-ask', express.json({ limit: '16kb' }), limiter, async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     const ownerId = await ownerOf(req, workspaceId);
     if (!ownerId) { res.status(403).json({ ok: false, message: 'Sign in as this app’s owner to use its assistant in the preview.' }); return; }
@@ -86,7 +86,7 @@ export function registerAppAiOwnerRoutes(app: Express): void {
     answer.settle(); // money after the answer, as everywhere
   });
 
-  app.get(SETTINGS_PATH, limiter, async (req: Request, res: Response) => {
+  app.get('/api/app-ai/settings', limiter, async (req: Request, res: Response) => {
     const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
     const ownerId = await ownerOf(req, workspaceId);
     if (!ownerId) { res.status(403).json({ error: 'Forbidden' }); return; }
@@ -110,7 +110,7 @@ export function registerAppAiOwnerRoutes(app: Express): void {
     });
   });
 
-  app.post(SETTINGS_PATH, express.json({ limit: '4kb' }), limiter, async (req: Request, res: Response) => {
+  app.post('/api/app-ai/settings', express.json({ limit: '4kb' }), limiter, async (req: Request, res: Response) => {
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     const ownerId = await ownerOf(req, workspaceId);
     if (!ownerId) { res.status(403).json({ error: 'Forbidden' }); return; }

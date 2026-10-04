@@ -3227,6 +3227,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   const aiNoticeKey = state.workspaceId ? `nbai.aiNoticeSeen.${state.workspaceId}` : '';
   const [aiNoticeUnseen, setAiNoticeUnseen] = useState<boolean | undefined>(undefined);
   useEffect(() => {
+    // Cleared first, so app A's dot can never show under app B while B's answer is on its way.
+    setAiNoticeUnseen(undefined);
     if (!state.workspaceId || running) return;
     let cancelled = false;
     void fetchAppAiSettings(state.workspaceId).then((v) => {

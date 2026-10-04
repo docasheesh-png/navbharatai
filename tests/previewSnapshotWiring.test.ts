@@ -41,7 +41,7 @@ describe('1. the copy is taken only from a build that PROVED it packages', () =>
 
 describe('2. it can never overwrite what somebody deliberately published', () => {
   it('deploys to the SNAPSHOT channel, explicitly', () => {
-    expect(route).toContain('deployStatic(workspaceId, dist, snapshotChannelId(workspaceId))');
+    expect(route).toContain('deployStatic(workspaceId, withPreviewAiRelay(dist), snapshotChannelId(workspaceId))');
   });
 
   it('and the two channels genuinely differ', () => {

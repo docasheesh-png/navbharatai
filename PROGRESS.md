@@ -89052,6 +89052,28 @@ of 30m0s" — `ci.yml`'s own `timeout-minutes: 30`, hit because eight or nine PR
 21–30 min. The cap is now 45 (#3524 staging). Lesson, the fourth rule's first step: read the run's own last
 words before naming a cause — a cancelled run names its canceller.
 
+---
+
+## 2026-10-04 — Q-515, Q-516, Q-518: the three items autopsy 39e982bd left OPEN (branch `claude/q515-q516-q518`)
+
+Q-501 was removed from the queue because its PR (#3521, App Mart) is merged.
+
+| Row | Problem | Root cause | Class | Siblings | Locked by |
+|---|---|---|---|---|---|
+| **Q-515** | "6 snapped" next to "27 off the grid" was read as 21 left behind | Reproduced on the report's shape: 27 off the grid before, **0 after**, and the note said "6". `changes` is de-duplicated for display and the note summed it. WRITE_TIME_QUALITY ("noted and not fixed") is measured before the snap and was never restated. | A report count taken from a de-duplicated display list. | 🔁 **This had come back:** e3b0ce25's "4 off / 2 snapped" was this undercount, but that autopsy fixed only the staleness. The kit-restore note counts classes, which are distinct by nature, so it is clean. | `tests/theSnapCountedEveryValue.test.ts` (reverted and failed) |
+| **Q-516** | `APP_SCOPE` said "clone of Free Fire" for a tournament app *for* Free Fire players; the requirement analysis asked an esports app about "inventory tracking" | No audience/event shape in `namesAsProduct`, and no tournament domain, so money words read as ecommerce. | A product used as the audience is not a clone; an event app needs its own domain. | Measured over 52,779 test strings: no scope decision changed, and only the four 39e982bd lines changed domain. "like / jaisa / clone" still wins. "Make a game like Free Fire" stays in `game`, and a CSS "scrim" is not esports. | `tests/aTournamentForAGameIsNotAClone.test.ts` (both halves reverted and failed) |
+| **Q-518** | The explorer passed "View Details — nothing visibly changed" | A quiet press was never judged by what its name promised. | `PROMISES_VIEW`: such a press fails only if the whole-page hash, the address and every scroll position are identical and no tab, file picker or download opened. It gets the primed retry first. | The repair text for every unresponsive PRESS was the search box's ("filters that list"), so a dead light/dark switch got the wrong fix. Each kind now has its own repair. | Real Chromium in `tests/aViewButtonMustShowSomething.test.ts`: the dead button fails; a dialog, a scroll, a new tab, a file picker, Copy and Show more all pass. Reverted both ways. |
+
+**What to watch on the next real build:**
+- Q-518: a "View …" control that opens nothing is now reported and repaired.
+- Q-516: a tournament app's requirement questions are about brackets, rooms and payouts.
+
+**Same branch, two migrated queue rows:**
+
+| Row | Problem | Root cause | Fix | Locked by |
+|---|---|---|---|---|
+| **Q-150** (77bd487b) | Error logs were flagged as credential leaks because of their label text | `lineLogsCredential` matched the sensitive word anywhere on the line. | A leak now needs either a sensitive name logged as a value, or a label beside a value that is not an error. "password:" next to `pw` is still a leak. The redaction heal reads the same definition. | `tests/aLabelIsNotALeak.test.ts`, using the report's own lines (reverted and failed) |
+| **Q-155** | `withheldSecretNames` existed but was never called, so a correctly withheld key was never explained | No call site. | The build now records `SECRETS_WITHHELD` (names only) right after the app's keys are set. One vault read. | `tests/aWithheldKeyIsNamed.test.ts` (reverted and failed) |
 
 ### Launch checklist ("vibe-coded app" 20 points), 2026-10-04, branch `local/security-checklist` (not pushed)
 

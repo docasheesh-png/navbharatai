@@ -5,7 +5,6 @@ import helmet from 'helmet';
 import crypto from 'crypto';
 import net from 'net';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
-import { LEGACY_EMBEDDED_API_KEY } from './src/server/lib/aiClients';
 import { corsMiddleware } from './src/server/lib/cors';
 import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
 import { spaFallbackShouldDefer } from './src/server/lib/spaFallback';
@@ -193,7 +192,16 @@ auditEnv();
 
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
-// Fallback: load .env file first, then .env.example (skip placeholder values)
+// Fallback: load a local .env file (skip placeholder values).
+//
+// 🔒 FORENSIC AUDIT 2026-10-04 — two things were removed from this block, on purpose:
+//  • `.env.example` is no longer loaded. It is a TEMPLATE committed to git; loading it turned any
+//    non-placeholder line in it into live configuration (it carried one, a redirect URI nothing reads).
+//    An example file is documentation, never config.
+//  • The boot-time "debug dump" is gone. It wrote an environment dump file on EVERY boot, including
+//    production, listing every environment variable with its length and its first six characters — a
+//    prefix of every secret the server holds, on disk, for anything that can read the working directory.
+//    Nothing read the file. `tests/noEnvValueMaterialInLogsOrFiles.test.ts` keeps the class out.
 const isEnvPlaceholder = (v: string) =>
   v.startsWith('your_') || v.endsWith('_here') || v === '' || v === 'undefined';
 
@@ -219,29 +227,6 @@ const loadEnvFile = (filePath: string) => {
 };
 
 loadEnvFile(path.join(process.cwd(), '.env'));
-loadEnvFile(path.join(process.cwd(), '.env.example'));
-
-// Generate the debug dump
-try {
-  const envSummary: Record<string, any> = {
-    _timestamp: new Date().toISOString(),
-    _all_keys: Object.keys(process.env)
-  };
-  Object.keys(process.env).forEach(k => {
-    const val = process.env[k];
-    envSummary[k] = {
-      exists: !!val,
-      length: val ? val.length : 0,
-      isPlaceholder: val === LEGACY_EMBEDDED_API_KEY,
-      prefix: val ? val.substring(0, Math.min(6, val.length)) : ''
-    };
-  });
-  fs.writeFileSync(path.join(process.cwd(), 'test_environment_debug.json'), JSON.stringify(envSummary, null, 2));
-} catch (dumpErr: any) {
-  try {
-    fs.writeFileSync(path.join(process.cwd(), 'test_environment_debug.json'), JSON.stringify({ error: dumpErr?.message || String(dumpErr) }, null, 2));
-  } catch (fErr) {}
-}
 
 // Initialize Firebase SDK for Node process (Backend Database Sync)
 let firebaseApp: any;

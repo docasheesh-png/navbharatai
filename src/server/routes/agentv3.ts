@@ -691,7 +691,7 @@ import {
   workspaceIdFor,
   safeWorkspaceUid,
 } from '../lib/workspaceIdentity';
-import { adminRequestOk } from '../lib/adminAuth';
+import { adminRequestOk, requireAdmin } from '../lib/adminAuth';
 import { previewFidelityCaveats, previewFidelityNotice } from '../AgentV3/previewFidelity';
 import { journeyUserSummary } from '../AgentV3/journeyUserSummary';
 import { platformChecksProof, browserAlreadySaid, phoneOutcomeFromCode, type PhoneOutcome } from '../AgentV3/buildProofCard';
@@ -4038,9 +4038,6 @@ async function probeFreeProviders(): Promise<Array<{ name: string; ok: boolean; 
   return results;
 }
 
-/** Throttle the public live-probe so it can't be abused for cost (one per 30s). */
-let lastDiagProbeTs = 0;
-
 /**
  * The workspaces that already run a SERVER for this owner, for `serverAppLimit`.
  *
@@ -4497,32 +4494,20 @@ export function registerAgentV3Routes(app: Express): void {
     }
   });
 
-  // Provider diagnosis — confirms whether a real Anthropic key is configured.
-  // Returns no secrets (only the public "sk-ant-" scheme prefix + lengths), so a
-  // wrong/leftover key is visible without exposing it. Optional ?test=1 makes one
-  // tiny real Claude call and reports the exact outcome (success or the precise
-  // error), gated by the admin password so it can't be abused for cost.
-  app.get('/api/agentv3/diag', async (req: Request, res: Response) => {
+  // Provider diagnosis — confirms whether a real Anthropic key is configured, and with ?test=1 makes
+  // one tiny real Claude call and reports the exact outcome.
+  //
+  // 🔒 ADMIN-ONLY (forensic audit 2026-10-04). This route used to answer ANYONE: the provider and model
+  // names (the White-Label Law says a user never sees them), the key's prefix and length, the sandbox
+  // configuration, and — with ?test=1 — a real paid call on NavBharatAI's account once every 30 seconds,
+  // for any caller on the internet, with the provider's raw error text. Nothing in the app calls it; it is
+  // the admin's own tool, so it is gated like every other admin tool (the `x-admin-token` header).
+  app.get('/api/agentv3/diag', requireAdmin, async (req: Request, res: Response) => {
     const diag = { ...agentV3KeyDiag(), sandbox: sandboxDiag() };
-    const wantsTest = req.query.test === '1';
-    // Audit finding #3: this used to compare the admin PASSWORD against `?admin=` in the URL, which
-    // wrote that password into every access log. It now takes the same expiring, constant-time admin
-    // token the panel uses. Losing the query path only costs the admin the THROTTLE bypass — the
-    // diagnosis itself is still served, and a throttled probe returns an honest message.
-    const adminOk = adminRequestOk(req);
-    // The live probe makes ONE tiny real Claude call. Admins can run it anytime;
-    // otherwise it's throttled to one every 30s globally so it can't be abused.
-    const now = Date.now();
-    const throttled = now - lastDiagProbeTs < 30_000;
-    if (!wantsTest) {
+    if (req.query.test !== '1') {
       res.json(diag);
       return;
     }
-    if (!adminOk && throttled) {
-      res.json({ ...diag, live: { ok: false, error: 'Live probe is throttled — try again in ~30s.' } });
-      return;
-    }
-    lastDiagProbeTs = now;
     // Live probe: one minimal, real Claude call to surface the exact error.
     let live: { ok: boolean; model?: string; error?: string; status?: number };
     try {
@@ -4538,9 +4523,9 @@ export function registerAgentV3Routes(app: Express): void {
       const e = err as { status?: number; message?: string };
       live = { ok: false, status: e?.status, error: e?.message ? String(e.message).slice(0, 300) : String(err).slice(0, 300) };
     }
-    // Admin-only: also probe the FREE-router providers (Vertex / Gemini / Grok) with
-    // one tiny real call each, so the admin sees which of them actually WORK on live.
-    const freeProviders = adminOk ? await probeFreeProviders() : undefined;
+    // Also probe the FREE-router providers (Vertex / Gemini / Grok) with one tiny real call each, so
+    // the admin sees which of them actually WORK on live.
+    const freeProviders = await probeFreeProviders();
     res.json({ ...diag, live, freeProviders });
   });
 

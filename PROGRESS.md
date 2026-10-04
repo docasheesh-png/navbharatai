@@ -88925,3 +88925,10 @@ Q-501 was removed from the queue because its PR (#3521, App Mart) is merged.
 **What to watch on the next real build:**
 - Q-518: a "View …" control that opens nothing is now reported and repaired.
 - Q-516: a tournament app's requirement questions are about brackets, rooms and payouts.
+
+**Same branch, two migrated queue rows:**
+
+| Row | Problem | Root cause | Fix | Locked by |
+|---|---|---|---|---|
+| **Q-150** (77bd487b) | Error logs were flagged as credential leaks because of their label text | `lineLogsCredential` matched the sensitive word anywhere on the line. | A leak now needs either a sensitive name logged as a value, or a label beside a value that is not an error. "password:" next to `pw` is still a leak. The redaction heal reads the same definition. | `tests/aLabelIsNotALeak.test.ts`, using the report's own lines (reverted and failed) |
+| **Q-155** | `withheldSecretNames` existed but was never called, so a correctly withheld key was never explained | No call site. | The build now records `SECRETS_WITHHELD` (names only) right after the app's keys are set. One vault read. | `tests/aWithheldKeyIsNamed.test.ts` (reverted and failed) |

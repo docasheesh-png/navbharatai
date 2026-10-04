@@ -84,6 +84,7 @@ import { ChatToolbar } from '../chat/ChatToolbar';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { filterMessages, enterShouldSend, readSendOnEnter } from '../../lib/chatToolbar';
 import { ActionGroupRow } from './ActivityTimelineRow';
+import { AppMemoryCard } from './AppMemoryCard';
 import { trackEvent } from '../../lib/analytics';
 import { normalizeUid } from '../../lib/agentv3Workspace';
 import { deliverTextFile } from '../../lib/downloadFile';
@@ -6012,6 +6013,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               )}
               {tab === 'history' && (
                 <div className="space-y-2">
+                  {/* What the app does, what is open, what each change did (Change Engine memory). */}
+                  {state.workspaceId && <AppMemoryCard workspaceId={state.workspaceId} userId={userId ?? undefined} email={email ?? undefined} refreshKey={running} />}
                   {/* Restore the WHOLE project at once — a real restore (files written back into the
                       workspace), available even when there are no in-session checkpoints (e.g. after a reload). */}
                   {state.workspaceId && (

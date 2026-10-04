@@ -382,7 +382,8 @@ import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { beginChange, observeProbes, regressionsSoFar, settleChange, type ChangeSession } from '../AgentV3/changeEngine/changeSession';
 import type { SpecItem } from '../AgentV3/changeEngine/appSpec';
 import { removedProbeFeatures } from '../AgentV3/changeEngine/requestConsistency';
-import { changeEngineEnabled } from '../AgentV3/changeEngine/engineeringMemoryStore';
+import { changeEngineEnabled, loadEngineeringMemory } from '../AgentV3/changeEngine/engineeringMemoryStore';
+import { publicAppMemory } from '../AgentV3/changeEngine/publicView';
 import { createLaneWriteFence } from '../AgentV3/laneWriteFence';
 import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
 import { entryShadowRepairHint } from '../AgentV3/entryShadow';
@@ -7398,6 +7399,24 @@ async function noteBuildOutcome(
   // v5.0 builds make real git commits; this surfaces the persisted timeline so the IDE shows the full
   // history even across sessions / devices / sandbox recycles (not just the current session's RAM).
   // Ownership-checked; empty list when the workspace has no checkpoints yet.
+  // CHANGE ENGINE slice 7 — the user's view of their app's memory: what it does (requirements and whether
+  // each was seen working), what is still open, and what changed (changeEngine/publicView.ts). STRICT
+  // owner read (verified uid or the anon capability), and white-labelled by construction.
+  app.get('/api/agentv3/app-memory', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: ENGINE_DISABLED }); return; }
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    if (!changeEngineEnabled()) { res.json({ available: false }); return; }
+    try {
+      res.json({ available: true, ...publicAppMemory(await loadEngineeringMemory(workspaceId)) });
+    } catch {
+      res.json({ available: false });
+    }
+  });
+
   app.get('/api/agentv3/checkpoints', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;

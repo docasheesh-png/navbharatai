@@ -29,7 +29,7 @@ import { browserScriptRunLine, parseScriptDiagnostic, browserScriptFailureNote, 
 import { newPageOptionsExpr, isSignInRoute } from './signInExplore';
 import { declaredRoutes } from './routerPaths';
 import { rendersDataList } from './DesignCoverage';
-import { scanMarkup, type ScannedTag } from './jsxTags';
+import { scanMarkup, enclosingTag, isHtmlElement, tagName, type ScannedTag } from './jsxTags';
 import { NEVER_PRESS, WRITE_VERBS } from './clickExplorer';
 import { withoutAppSignature } from './appSignature';
 
@@ -211,6 +211,32 @@ const DATA_ENTRY_SIGNS: ReadonlyArray<readonly [RegExp, string]> = [
 ];
 
 /**
+ * 🔴 A SPEED SLIDER IS NOT DATA THE USER WANTS SAVED (autopsy 8b8743a3, 2026-10-04). A 3D driving game
+ * — a road, street lights, a start button and a score — was read as a data app because its one
+ * `<input type="range">` speed control matched "a form element" (and its `onChange` matched "a
+ * change/submit handler"). So the journey could not be derived from a form that does not exist, and the
+ * release gate told the user *"whether it actually SAVES anything is untested"* about an app with
+ * nothing to save.
+ *
+ * These `type` values cannot hold data a person would expect to find again after a reload: `range` is a
+ * setting, and `button` / `submit` / `reset` / `image` are buttons, `hidden` is not user input at all.
+ *
+ * ⚠️ DELIBERATELY NARROW, BECAUSE THE ASYMMETRY RUNS THE OTHER WAY HERE. Reading a data app as having
+ * no data entry skips the save-and-reload journey AND says there is nothing to prove — which can let a
+ * real data app reach GREEN on presses alone. So only an `input` whose literal `type` is one of these
+ * stands down: a text box, a checkbox, a `<select>`, a `<textarea>`, a UI-library `<Slider>` or
+ * `<Switch>` (whose contract we cannot know) and `type={expr}` all still count exactly as before.
+ */
+const NON_DATA_INPUT_TYPE = /(?<![-\w])type\s*=\s*["']\s*(?:range|button|submit|reset|hidden|image)\s*["']/i;
+
+/** Is the markup at `offset` inside an `<input>` that cannot hold saveable data? PURE. */
+function insideNonDataControl(src: string, offset: number): boolean {
+  const tag = enclosingTag(src, offset);
+  if (!tag || !isHtmlElement(tag) || tagName(tag).toLowerCase() !== 'input') return false;
+  return NON_DATA_INPUT_TYPE.test(tag);
+}
+
+/**
  * WHICH file made `appHasNoDataEntry` answer false, and why — or null when nothing did.
  *
  * 🔴 WHY (autopsy 8257ca59, 2026-10-01). A calculator built from our own template was reported as a data
@@ -223,11 +249,14 @@ export function dataEntryEvidence(files: Record<string, string>): { path: string
   for (const [path, src] of Object.entries(appOwnFiles(files))) {
     if (!src || unused.has(path.replace(/^\.?\/+/, ''))) continue;
     for (const [re, what] of DATA_ENTRY_SIGNS) {
-      const m = re.exec(src);
-      if (!m) continue;
-      const start = src.lastIndexOf('\n', m.index) + 1;
-      const end = src.indexOf('\n', m.index);
-      return { path, what, line: src.slice(start, end < 0 ? undefined : end).trim().slice(0, 140) };
+      // EVERY occurrence, not the first: one slider's `onChange` must not hide a real text box below it.
+      const all = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
+      for (let m = all.exec(src); m; m = all.exec(src)) {
+        if (insideNonDataControl(src, m.index + 1)) continue;
+        const start = src.lastIndexOf('\n', m.index) + 1;
+        const end = src.indexOf('\n', m.index);
+        return { path, what, line: src.slice(start, end < 0 ? undefined : end).trim().slice(0, 140) };
+      }
     }
   }
   return null;

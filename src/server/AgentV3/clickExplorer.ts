@@ -203,7 +203,21 @@ export function pressDecision(input: {
   return { press: true };
 }
 
-export type PressVerdict = 'ok' | 'crashed' | 'blank' | 'broken-link' | 'error' | 'unresponsive' | 'skipped';
+/**
+ * 🔴 `covered` EXISTS BECAUSE "our instrument could not press it" WAS HIDING AN UNPLAYABLE APP
+ * (autopsy 8b8743a3, 2026-10-04). A 3D driving game's three controls — "City Road", "Forest Road" and
+ * "Start Race" — each failed with `locator.click: Timeout 4000ms exceeded`, every one was recorded as
+ * `skipped`, `summarizeExplore` drops every skipped press, so the verdict was
+ * `EXPLORE_NOTHING_TO_PRESS` ("nothing was proven about them") — an info line with no offer and no
+ * repair. The app shipped GREEN and the reply told the user to *press Start Race*. The suspect is the
+ * full-viewport `<canvas>` the game mounts over its own menu, which is the app's defect, not ours.
+ *
+ * ⚠️ IT IS DECIDED POSITIVELY, NEVER FROM THE TIMEOUT. A press can fail to complete for reasons that
+ * really are ours (a detached node, a slow machine, our own clock). So `covered` is recorded only when
+ * the PAGE ITSELF says something else is on top of the control (`document.elementFromPoint` at its
+ * centre), or Playwright names an interceptor in as many words. Everything else stays `skipped`.
+ */
+export type PressVerdict = 'ok' | 'crashed' | 'blank' | 'broken-link' | 'error' | 'unresponsive' | 'covered' | 'skipped';
 
 /** How a control was tried: pressed, typed into (a search box) or picked from (a sort/filter menu). */
 export type PressKind = 'press' | 'type' | 'pick';
@@ -254,7 +268,7 @@ export interface ExploreRun {
   diagnostic: string | null;
 }
 
-const VERDICTS: ReadonlySet<string> = new Set(['ok', 'crashed', 'blank', 'broken-link', 'error', 'unresponsive', 'skipped']);
+const VERDICTS: ReadonlySet<string> = new Set(['ok', 'crashed', 'blank', 'broken-link', 'error', 'unresponsive', 'covered', 'skipped']);
 
 /** Parse the runner's output. Malformed lines are dropped, never guessed at. PURE; never throws. */
 export function parseExploreOutput(stdout: string | null | undefined): ExploreRun {
@@ -298,7 +312,7 @@ export function parseExploreOutput(stdout: string | null | undefined): ExploreRu
  * (`explorerRepair.ts`), which used to keep its own copy — a new failure kind added to one would have
  * been reported and never repaired, or repaired and never reported.
  */
-export const FAILING_VERDICTS: ReadonlySet<PressVerdict> = new Set<PressVerdict>(['crashed', 'blank', 'broken-link', 'error', 'unresponsive']);
+export const FAILING_VERDICTS: ReadonlySet<PressVerdict> = new Set<PressVerdict>(['crashed', 'blank', 'broken-link', 'error', 'unresponsive', 'covered']);
 const FAILING = FAILING_VERDICTS;
 
 /** "Pressed 3 control(s)", "Tried 2 search or sort control(s)", or both. PURE. */
@@ -378,6 +392,7 @@ function failureSentence(p: PressResult): string {
     case 'crashed': return `${doing} ${pressName(p)} crashed the app into an error screen.`;
     case 'blank': return `${doing} ${pressName(p)} left the screen blank.`;
     case 'broken-link': return `${pressName(p)} leads to a page that does not exist.`;
+    case 'covered': return `${pressName(p)} cannot be ${p.kind === 'type' || p.kind === 'pick' ? 'used' : 'pressed'} at all — something else on the screen is on top of it.`;
     case 'unresponsive': return p.kind === 'pick'
       ? `Choosing a different option in ${pressName(p)} changed nothing on the screen.`
       : p.kind === 'type'
@@ -597,6 +612,30 @@ function look(skip) {
   return out.join(';');
 }
 
+// WHAT IS ON TOP OF A CONTROL WE COULD NOT PRESS. Runs INSIDE the page, so it is self-contained.
+// Returns null for every case that is NOT coverage — no such element, nothing to cover (zero area),
+// scrolled out of view, or the control itself answering the point. A name is returned only when a
+// DIFFERENT element owns the control's own centre, which is the page stating the defect itself.
+function coveredBy(a) {
+  const el = document.querySelector('[' + a.attr + '="' + a.i + '"]');
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  if (r.width < 1 || r.height < 1) return null;
+  const vw = document.documentElement.clientWidth || window.innerWidth;
+  const vh = document.documentElement.clientHeight || window.innerHeight;
+  // Off-screen is a different problem (and elementFromPoint would answer null anyway).
+  if (r.bottom <= 0 || r.right <= 0 || r.top >= vh || r.left >= vw) return null;
+  const x = Math.min(Math.max(r.left + r.width / 2, 1), vw - 1);
+  const y = Math.min(Math.max(r.top + r.height / 2, 1), vh - 1);
+  const top = document.elementFromPoint(x, y);
+  if (!top || top === el || el.contains(top) || top.contains(el)) return null;
+  const t = top.getBoundingClientRect();
+  const cls = typeof top.className === 'string' ? top.className.trim().split(/\\s+/)[0] : '';
+  const name = top.tagName.toLowerCase()
+    + (top.id ? '#' + String(top.id).slice(0, 24) : cls ? '.' + cls.slice(0, 24) : '');
+  return { name: name, full: t.width >= vw * 0.9 && t.height >= vh * 0.9 };
+}
+
 // Moves the mouse off the app and drops focus, so a hover or focus style is not read as a change.
 async function restLook(page, skip) {
   await page.mouse.move(0, 0).catch(() => {});
@@ -709,6 +748,20 @@ const wide = Object.assign({}, cfg, { maxClicks: 40 });
 // honour reduced motion) fails Playwright's stability wait however long it waits; for THAT failure
 // alone the click is dispatched on the element itself — the same element, no coordinates, so nothing
 // covering it can receive the press instead. Every other failure still means "could not be pressed".
+// A press that did not complete: OURS, unless the app is covering its own control. Writes the verdict.
+// "marked" is -1 whenever the failure happened before the control itself was tried, so the probe is not
+// even attempted there — a load that failed or a parent that could not be opened stays ours.
+async function judgeFailedPress(page, res, attr, marked, message, prefix) {
+  res.verdict = 'skipped';
+  res.note = pressFailureNote(prefix, message, cfg.causeSrc, cfg.causeFlags);
+  const intercepts = /intercepts pointer events/i.test(String(message || ''));
+  const over = marked >= 0 ? await page.evaluate(coveredBy, { attr: attr, i: marked }).catch(() => null) : null;
+  if (!over && !intercepts) return;
+  res.verdict = 'covered';
+  const what = over ? (over.full ? 'something covering the whole screen (' + over.name + ')' : over.name) : 'something else on the screen';
+  res.note = 'it cannot be ' + (prefix.indexOf('used') >= 0 ? 'used' : 'pressed') + ': ' + what + ' is on top of it';
+}
+
 async function press(page, i) {
   const loc = page.locator('[data-nbai-x="' + i + '"]').first();
   try {
@@ -734,6 +787,7 @@ async function pressOne(browser, target, discoverAgainst) {
   let armed = false;
   let navStatus = 0;
   let revealed = [];
+  let marked = -1;
   page.on('pageerror', (e) => { if (armed && res.errors.length < 3) res.errors.push(String(e && e.message || e).slice(0, 200)); });
   page.on('console', (m) => { if (armed && m.type() === 'error') { const t = String(m.text()); if (!noise.test(t) && res.errors.length < 3) res.errors.push(t.slice(0, 200)); } });
   page.on('response', (r) => { try { if (armed && r.request().isNavigationRequest() && r.frame() === page.mainFrame()) navStatus = r.status(); } catch {} });
@@ -753,6 +807,7 @@ async function pressOne(browser, target, discoverAgainst) {
     const beforeUrl = page.url();
     const lookBefore = hit.theme ? await restLook(page, hit.i) : null;
     armed = true;
+    marked = hit.i;
     await press(page, hit.i);
     await settle(page);
     const overlay = await page.locator('vite-error-overlay, #nextjs-portal, .react-error-overlay').count().catch(() => 0);
@@ -788,10 +843,9 @@ async function pressOne(browser, target, discoverAgainst) {
       if (next) revealed = next.chosen.filter((c) => !discoverAgainst.has(c.key));
     }
   } catch (e) {
-    // The press itself could not complete (covered, detached, timed out). That is our instrument,
-    // not the app — reported as skipped, never as a failure.
-    res.verdict = 'skipped';
-    res.note = pressFailureNote('could not be pressed: ', String(e && e.message || e), cfg.causeSrc, cfg.causeFlags);
+    // The press itself could not complete. That is our instrument (detached, our own clock) and stays
+    // skipped — UNLESS the page says something is on top of the control, which is the app's own defect.
+    await judgeFailedPress(page, res, 'data-nbai-x', marked, String(e && e.message || e), 'could not be pressed: ');
   }
   armed = false;
   await page.close().catch(() => {});
@@ -805,6 +859,7 @@ async function narrowOne(browser, target) {
   const res = { type: 'press', kind, label: target.label, tag: target.tag, verdict: 'skipped', note: '', errors: [], changed: false };
   const page = await freshPage(browser);
   let armed = false;
+  let marked = -1;
   page.on('pageerror', (e) => { if (armed && res.errors.length < 3) res.errors.push(String(e && e.message || e).slice(0, 200)); });
   page.on('console', (m) => { if (armed && m.type() === 'error') { const t = String(m.text()); if (!noise.test(t) && res.errors.length < 3) res.errors.push(t.slice(0, 200)); } });
   try {
@@ -833,6 +888,7 @@ async function narrowOne(browser, target) {
       tried = pickSearchWord(items);
       if (!tried) { res.note = 'every item on the list shares the same words, so no search could narrow it'; await page.close().catch(() => {}); return res; }
       armed = true;
+      marked = hit.i;
       await loc.fill(tried, { timeout: 4000 });
       changed = await waitChange(2500);
       if (!changed) { await loc.press('Enter', { timeout: 2000 }).catch(() => {}); changed = await waitChange(1500); }
@@ -840,6 +896,7 @@ async function narrowOne(browser, target) {
       const choices = await loc.evaluate((s) => Array.from(s.options).filter((o) => !o.disabled && o.value !== s.value).map((o) => ({ v: o.value, t: (o.text || '').trim() })));
       if (!choices.length) { res.note = 'it has no other option to choose'; await page.close().catch(() => {}); return res; }
       armed = true;
+      marked = hit.i;
       for (const c of choices.slice(0, 2)) {
         tried = c.t || c.v;
         await loc.selectOption(c.v, { timeout: 4000 });
@@ -864,8 +921,7 @@ async function narrowOne(browser, target) {
       else { res.verdict = 'unresponsive'; res.note = (kind === 'type' ? 'typing "' : 'choosing "') + tried + '" changed nothing on the screen'; }
     }
   } catch (e) {
-    res.verdict = 'skipped';
-    res.note = pressFailureNote('could not be used: ', String(e && e.message || e), cfg.causeSrc, cfg.causeFlags);
+    await judgeFailedPress(page, res, 'data-nbai-n', marked, String(e && e.message || e), 'could not be used: ');
   }
   armed = false;
   await page.close().catch(() => {});

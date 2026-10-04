@@ -87847,3 +87847,93 @@ into its pattern: forex, MT4/MT5, cTrader, algo trading, F&O, trading system/str
 "scalper" is deliberately left out, because the domain now sits early in the list and a ticket-scalper app
 is not trading. `TRADING_CONTEXT` (the broker/listing strip) is unchanged. Both autopsies' tests pass on the
 merged state (`theForexPasteIsNotAnEightModuleProject`, `thePaperTradingAutopsy`).
+
+## 2026-10-04 — AUTOPSY 8b8743a3: a button nobody can press is not a pass (branch `claude/a-button-nobody-can-press`)
+
+Report `8b8743a3` — *"Road infinite both side street light with start restart scoring"*, a 3D driving
+game, weak tier, free user, `kimi-k2.7-code`, 8.0 min, `ok: true`, billed ₹122.59 (real cost $0.345),
+release gate YELLOW. Mid-build the user sent *"3d run control speed city road or forest road"*.
+
+**THE FIVE-BUCKET LEDGER (14 items).**
+
+- ✅ **Self-healed (1):** one `TOOL_ERROR` — an `edit_file` whose `old_string` was not unique — corrected
+  by the model on its very next call.
+- 🔀 **Worked around (2):** two GLM crawl abandons, ~30 s (6% of the clock), benched and re-probed
+  exactly as `crawlBench.ts` is designed to; `startTier: "gemini"` recorded on a Weak build (Q-052's
+  known labelling class, which the admin agreed to close).
+- ⏭️ **Skipped (3):** `TEST_SUITE_UNVERIFIED` (the app ships no suite — Q-038's class);
+  `READY_BEFORE_END` not measured on an edit turn (by design); `DESIGN_CONSISTENCY` 14 colours at grade
+  A 96/100, recorded and unresolved — which now carries a one-tap offer from the finding-classification
+  work (#3492), so it stops being a line nobody can act on.
+- ❌ **Shipped broken (3) — all three fixed here.**
+- 🥵 **Struggle (5):** the lean review's 12 reads and LOOP GUARD; the first write-time typecheck paying
+  ~12 s to install the compiler (Q-063's class); the ETA band 3–5 min against 8.0 min actual (2.0×);
+  the request sized as `taskType: "chat"` with a complexity score of 5; three unreachable controls.
+
+**THE THREE ROOT CAUSES, FIXED AT THE CLASS.**
+
+**1 · A control nobody can press was reported as our own shortcoming.** "City Road", "Forest Road" and
+"Start Race" each failed with `locator.click: Timeout 4000ms exceeded`. `pressOne`'s catch asserts, in a
+comment, that a press which did not complete *"is our instrument, not the app — reported as skipped,
+never as a failure"*, and `summarizeExplore` drops every `skipped` press — so the verdict was
+`EXPLORE_NOTHING_TO_PRESS`, an info line with no offer and no repair, on a game whose own full-viewport
+canvas is the likeliest thing sitting over its menu. **The app shipped with a GREEN render and the
+closing reply told the user to press Start Race.**
+
+The fix is a `covered` verdict decided **positively by the page** — `document.elementFromPoint` at the
+control's own centre, or Playwright naming an interceptor in as many words — and never inferred from a
+timeout, because a press can genuinely fail for reasons that are ours. It is in `FAILING_VERDICTS`, so
+it reaches `EXPLORE_FAILED`, the user's one-tap offer and `explorerRepair` with no new wiring at all
+(that module imports the set rather than copying it, which is what made this a four-line change instead
+of four). **Sibling hunted:** the search-box/sort-menu lane had the identical catch, so both now route
+through ONE judge (`judgeFailedPress`), and `marked` is `-1` whenever the failure happened before the
+control itself was tried — a load that failed or a parent that could not be reopened stays ours.
+
+**2 · The lean review was handed nothing and read one file twelve times.** The build changed exactly one
+source file, a 22,306-byte `src/App.tsx`. It was over `LEAN_REVIEW_FILE_CHARS` (16 KB) and so omitted,
+leaving nothing inline, so `leanReviewAnswersInOneCall` was false, the review kept its tools, and it
+spent all 12 of its steps paginating that single file (the LOOP GUARD fired at the ninth read) and
+reported nothing. The per-file cap exists for one reason, stated where it is declared: so one large file
+cannot take the whole budget from the others. **When everything that is a candidate fits the 60 KB total
+anyway, there are no others to protect** — so the cap does not apply. A set that genuinely does not fit
+keeps today's behaviour to the byte.
+
+**3 · A speed slider made a game a data app.** Its one `<input type="range">` matched
+`DATA_ENTRY_SIGNS`' "a form element" (and its `onChange` the handler sign), so the save-and-reload
+journey could not be derived from a form that does not exist and the release gate told the user *"whether
+it actually SAVES anything is untested"* about an app with nothing to save. An `input` whose literal
+`type` cannot hold saveable data (`range`/`button`/`submit`/`reset`/`hidden`/`image`) is no longer data
+entry, and a handler inside such a tag does not make it one. **Deliberately narrow, because here the
+asymmetry runs the other way:** reading a real data app as having no data entry would skip its journey
+AND say there is nothing to prove, which can let it reach GREEN on presses alone. A text box, a
+checkbox, a `<select>`, a `<textarea>`, a UI-library `<Slider>`/`<Switch>` (whose contract we cannot
+know) and `type={expr}` all still count. **Every occurrence is now read** rather than the first, so a
+slider cannot hide a real text box below it — and the tag is read whole with `enclosingTag`, the
+JSX-multiline reader this repo has already paid for three times.
+
+**THE 50/50 HALF — why each could exist at all.**
+- A verdict set that had no name for "the app is in the way" could only record our own failure, so the
+  honest branch did not exist to be taken. The probe is the branch.
+- A per-file bound was applied without asking whether the condition it protects against was present.
+- A predicate named `appHasNoDataEntry` answered "is there a form?" — the same instance/sentence gap
+  autopsy 536c8189 fixed one layer up (`savedStateEvidence`), in a third tense.
+
+**Locked by `tests/aButtonNobodyCanPressIsNotAPass.test.ts` (20 cases), reversion-proven three ways** —
+`covered` removed from `FAILING_VERDICTS` (4 fail), the per-file cap restored unconditionally (1 fails),
+the non-data skip deleted (4 fail) — **including a REAL BROWSER pair**: a canvas over the menu reads as
+covered and fails the check, and the same app with the stacking fixed passes. Source guards hold the
+order of the judge (skipped first, then an early return), because `tsc` and `vitest` cannot see a probe
+replaced by a guess. Three pinned tests were updated honestly: two encoded the old per-file bound (their
+fixtures were made genuinely too big, and the guarantee each existed for is now asserted directly), and
+one encoded the single-lane call site.
+
+**Recorded rather than smoothed over: a backtick in a comment silently broke the whole module.** The
+explorer's runner is a template literal, so `` `marked` `` inside a comment terminated the string. `tsc`
+passed; vite's parser did not, and the error pointed at a comment nine lines away. CI would have caught
+it — but the lesson is the one this repo keeps relearning about generated code: **a comment inside a
+generated module is code.**
+
+**OPEN root cause (Q-313):** the request was sized `taskType: "chat"`, complexity 5, for a prompt naming
+five things to build. The scorer recognised nothing in a GAME feature list written without software
+words. Widening `COMPLEX_APP_SIGNAL` toward game vocabulary needs a precision corpus first, or it drags
+ordinary prompts up a tier — so it is recorded, not guessed at.

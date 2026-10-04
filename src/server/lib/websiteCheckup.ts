@@ -25,7 +25,7 @@
 // PURE above `fetchForCheckup`. Every analyzer is a pure function of a fetched response, so the exact
 // findings a user is shown are unit-tested and can never drift onto a live network call.
 
-import { assertPublicHttpUrl } from './ssrfGuard';
+import { assertPublicHttpUrl, publicOnlyInit } from './ssrfGuard';
 import { isLiveDeployment, type DeploymentRecord } from '../AgentV3/DeploymentStore';
 
 /** How a single finding reads to the user. */
@@ -508,7 +508,7 @@ export async function fetchForCheckup(rawUrl: string): Promise<CheckupFetch> {
       }
       let res: Response;
       try {
-        res = await fetch(current, {
+        res = await fetch(current, publicOnlyInit({
           method: 'GET',
           redirect: 'manual',
           signal: controller.signal,
@@ -516,7 +516,7 @@ export async function fetchForCheckup(rawUrl: string): Promise<CheckupFetch> {
             'user-agent': 'NavBharatAI-Checkup/1.0 (+https://navbharatai.com)',
             accept: 'text/html,application/xhtml+xml,*/*;q=0.8',
           },
-        });
+        }));
       } catch (e) {
         const aborted = (e as { name?: string })?.name === 'AbortError';
         return { ...base, ok: false, finalUrl: current, error: aborted ? 'The site took too long to respond.' : 'The site could not be reached.' };

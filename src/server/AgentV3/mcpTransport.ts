@@ -27,7 +27,7 @@
  * a timeout, a response-size cap, and returns a result object rather than throwing. A build must
  * never hang or die because somebody's Notion server had a bad afternoon.
  */
-import { assertPublicHttpUrl } from '../lib/ssrfGuard';
+import { assertPublicHttpUrl, publicOnlyInit } from '../lib/ssrfGuard';
 import { toSafeTools, formatToolResult, type SafeMcpTool } from './mcpClient';
 
 /** How long any single call to a connected server may take. */
@@ -66,7 +66,7 @@ async function rpc(cfg: McpServerConfig, method: string, params: unknown): Promi
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), MCP_TIMEOUT_MS);
   try {
-    const resp = await fetch(cfg.url, {
+    const resp = await fetch(cfg.url, publicOnlyInit({
       method: 'POST',
       // A redirect would be followed WITH the user's headers to a target nobody checked (forensic audit
       // 2026-10-04): the address guard above vets only the first hop. A service that redirects is refused.
@@ -80,7 +80,7 @@ async function rpc(cfg: McpServerConfig, method: string, params: unknown): Promi
         ...(cfg.headers ?? {}),
       },
       body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method, params }),
-    });
+    }));
     if (!resp.ok) return { ok: false, error: `That service replied with an error (${resp.status}).` };
 
     // Read with a hard cap rather than resp.json(): a hostile or broken server can otherwise stream

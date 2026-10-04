@@ -21,7 +21,7 @@
 // which resolves EVERY A/AAAA record and refuses any private/loopback/link-local answer. Never bypass
 // it for "it's their own verified domain" — verification proves ownership, not that the target is safe.
 
-import { assertPublicHttpUrl } from './ssrfGuard';
+import { assertPublicHttpUrl, publicOnlyInit } from './ssrfGuard';
 
 export type ServingState =
   /** The domain answered with a real page — the app is genuinely being served. */
@@ -129,7 +129,7 @@ export async function checkDomainServing(
   const guard = await guardFn(url).catch(() => ({ ok: false, reason: 'check failed' }));
   if (!guard.ok) return { state: 'unknown', status: 0, note: '' };
 
-  const doFetch: Fetcher = fetcher ?? ((u, init) => fetch(u, init) as unknown as ReturnType<Fetcher>);
+  const doFetch: Fetcher = fetcher ?? ((u, init) => fetch(u, publicOnlyInit(init)) as unknown as ReturnType<Fetcher>); // every hop vetted at connect time — this one FOLLOWS redirects (Q-617)
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {

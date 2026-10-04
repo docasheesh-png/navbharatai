@@ -5,6 +5,7 @@ import { otpSendDecision, phoneOwnerUid, phoneForLog, type OtpPurpose } from '..
 import { consumeDurableRate } from '../lib/DurableRateLimit';
 import { normalizePhoneForGift } from '../lib/giftIdentity';
 import { parseOtpOutcome, recordOtpOutcome } from '../lib/otpOutcomes';
+import { clientAddress } from '../lib/clientAddress';
 
 /**
  * Authentication routes extracted from the server.ts monolith (Phase 1).
@@ -79,7 +80,7 @@ export function registerAuthRoutes(app: Express): void {
   // per address, answers 204 whatever happens, and stores nothing that names anyone.
   app.post('/api/auth/otp-outcome', (req: Request, res: Response) => {
     try {
-      const ip = (req.headers['x-forwarded-for'] as string || req.socket?.remoteAddress || 'unknown-ip').split(',')[0].trim();
+      const ip = clientAddress(req);
       const input = parseOtpOutcome(req.body);
       if (input && otpReportAllowed(ip, Date.now())) void recordOtpOutcome(input).catch(() => {});
     } catch { /* a report must never fail the caller */ }
@@ -90,7 +91,7 @@ export function registerAuthRoutes(app: Express): void {
   // confirmed the number without an SMS; every other phone sign-in never calls it. Bounded per address.
   app.post('/api/auth/phone-exchange', async (req: Request, res: Response) => {
     try {
-      const ip = (req.headers['x-forwarded-for'] as string || req.socket?.remoteAddress || 'unknown-ip').split(',')[0].trim();
+      const ip = clientAddress(req);
       const now = Date.now();
       const rate = await consumeDurableRate('phone_exchange_ip', ip, 20, 3_600_000, now);
       if (!rate.allowed) return res.status(429).json({ ok: false, code: 'rate-limited', message: 'Too many attempts. Please wait a while.' });
@@ -118,7 +119,7 @@ export function registerAuthRoutes(app: Express): void {
        * on exactly today's behaviour.
        */
       const purpose: OtpPurpose = req.body?.purpose === 'verify' ? 'verify' : 'login';
-      const ip = (req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || 'unknown-ip').split(',')[0].trim();
+      const ip = clientAddress(req);
 
       // Validate TYPE, not just truthiness: a non-string phone (number/object/array) used to reach
       // `phone.replace(...)` below and throw → a 500 on malformed input. Reject it cleanly as a 400.

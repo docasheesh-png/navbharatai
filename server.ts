@@ -4,8 +4,9 @@ import { normalizeMissingBody } from './src/server/lib/expressCompat';
 import helmet from 'helmet';
 import crypto from 'crypto';
 import net from 'net';
-import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import rateLimit from 'express-rate-limit';
 import { corsMiddleware } from './src/server/lib/cors';
+import { trustedProxyHops, identityRateKey, addressRateKey } from './src/server/lib/clientAddress';
 import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
 import { spaFallbackShouldDefer } from './src/server/lib/spaFallback';
 import { noteWebsiteVisit } from './src/server/lib/ownAudience';
@@ -317,21 +318,42 @@ setInterval(() => {
   app.use(corsMiddleware());
 
   // ── Rate Limiters (4.3) ──────────────────────────────────────────────────
+  // 🔴 FORENSIC AUDIT 2026-10-04 — until this change NONE of these limited anything. Each was keyed
+  // `ipKeyGenerator(req as any)`: that function takes an address string, returns a non-string argument
+  // unchanged, and so every request carried a key nobody had seen before. And under `trust proxy: true`
+  // the address itself was the caller's own X-Forwarded-For. Both are fixed in clientAddress.ts; the
+  // census in tests/aCallerCannotChooseItsOwnAddress.test.ts keeps a request out of the address slot.
+  //
+  // Because these limits now really apply for the first time, each is sized to the traffic that already
+  // goes through it, so no real user meets a limit that was never there before:
+  //  • signed-in traffic is keyed on the VERIFIED account, not the address — an Indian mobile carrier puts
+  //    many phones behind one address, and they must not share one budget;
+  //  • a forged or missing token falls back to the real address, so it cannot mint fresh buckets;
+  //  • the live preview gets its own, wider limit: it re-bundles 500 ms after every file change, so a
+  //    build writing files is many bundles a minute, and it spends server CPU, not AI money.
+  const identityKey = (req: any) => identityRateKey(req, verifyFirebaseTokenForIntegrations);
   const chatLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 20,   // 20 req/min per IP — generous for normal chat, tight for abuse
-    // Key on IP only. The client-supplied x-user-id header is spoofable — rotating it let an
-    // attacker bypass the limit entirely and burn NavBharatAI's own AI budget.
-    keyGenerator: (req) => ipKeyGenerator(req as any),
+    max: 20,   // 20 req/min per account (per address for a guest) — generous for chat, tight for abuse
+    keyGenerator: identityKey,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests. Please wait a moment before sending again.' },
   });
 
+  const previewLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 240,  // the preview re-bundles on every file change; this bounds abuse, never a build in flight
+    keyGenerator: identityKey,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many preview refreshes. Please wait a moment.' },
+  });
+
   const paymentLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 5,
-    keyGenerator: (req) => ipKeyGenerator(req as any),
+    max: 10,   // one payment is create-order + verify + a reconcile or two; ten leaves room for a retry
+    keyGenerator: identityKey,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many payment requests. Please slow down.' },
@@ -339,8 +361,8 @@ setInterval(() => {
 
   const adminLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 5,
-    keyGenerator: (req) => ipKeyGenerator(req as any),
+    max: 5,    // admin LOGIN — the caller has no account token yet, so the real address is the key
+    keyGenerator: (req: any) => addressRateKey(req),
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many admin requests.' },
@@ -388,8 +410,11 @@ setInterval(() => {
   const PORT = Number(process.env.PORT || 8080);
   // aiRouter — shared singleton from src/server/lib/aiRouter.ts (Phase 1, AI-core).
 
-  // Trust proxy for correct req.protocol and req.get('host') behind reverse proxies
-  app.set('trust proxy', true);
+  // Trust proxy for correct req.protocol, req.get('host') and req.ip behind Cloud Run's front end.
+  // 🔒 A HOP COUNT, NEVER `true` (forensic audit 2026-10-04): `true` made `req.ip` the leftmost
+  // X-Forwarded-For entry — the one the CALLER writes — so every per-IP rate limit below was bypassed by
+  // sending a different header on each request. See clientAddress.ts.
+  app.set('trust proxy', trustedProxyHops());
 
     app.use(express.json({
       limit: '30mb',  // room for vision attachments (images/PDFs as base64)
@@ -774,7 +799,7 @@ setInterval(() => {
   // Chunked zip import — the only path a project larger than one HTTP request can take (see zipUpload.ts).
   registerZipUploadRoutes(app);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).
-  registerPreviewRoutes(app, chatLimiter);
+  registerPreviewRoutes(app, previewLimiter);
   // Same-origin npm mirror for the in-browser preview — immutable-cached, host-pinned to esm.sh.
   // Deliberately NOT rate-limited: one preview legitimately requests dozens of modules in a burst,
   // and a 429 here would blank it; the LRU + entry caps are the resource bound.

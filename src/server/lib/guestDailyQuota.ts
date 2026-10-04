@@ -31,6 +31,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { createHash } from 'crypto';
 import { doc, getServerDb, runTransaction } from './serverDb';
 import { verifyFirebaseIdentity } from './authMiddleware';
+import { clientAddress } from './clientAddress';
 
 /** The header the app sends with its anonymous device id. */
 export const GUEST_ID_HEADER = 'x-nb-guest';
@@ -73,13 +74,12 @@ export function readGuestId(value: unknown): string | null {
 }
 
 /**
- * The address this request came from, for the backstop only. Cloud Run's front end APPENDS the address
- * it saw to X-Forwarded-For, so the LAST entry is the one a caller cannot write; the first entry, which
- * `req.ip` returns under `trust proxy`, is whatever the caller claimed.
+ * The address this request came from, for the backstop only — the server's ONE reading of it
+ * (`clientAddress.ts`): Cloud Run's front end APPENDS the address it saw to X-Forwarded-For, so the LAST
+ * entry is the one a caller cannot write.
  */
 export function requestAddress(req: Pick<Request, 'headers' | 'socket'>): string {
-  const fwd = String(req.headers['x-forwarded-for'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  return fwd[fwd.length - 1] || req.socket?.remoteAddress || 'unknown';
+  return clientAddress(req);
 }
 
 /** A stored key that is not the raw id or address. */

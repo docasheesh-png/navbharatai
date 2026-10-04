@@ -19942,6 +19942,18 @@ async function noteBuildOutcome(
                 if (after && buildDiag.resolveOnRecheck('DESIGN_CONSISTENCY') > 0 && after.design.violations.length > 0) {
                   buildDiag.record({ phase: 'build', severity: 'warning', code: 'DESIGN_CONSISTENCY', ...obs(`After the spacing snap: ${designLintSummary(after)}`) });
                 }
+                // Q-515 (autopsy 39e982bd): WRITE_TIME_QUALITY is measured before the snap too, so it said
+                // src/theme.css "had been noted and not fixed" while the snap then fixed every value in it,
+                // and the autopsy read that as 21 values left. It stays true about the MODEL; this line says
+                // what is true about the APP now.
+                if (after) {
+                  const stillFlagged = [...new Set(Object.values(after.offenders ?? {}).flat().map((o) => o.path))];
+                  const nowClear = landed.map((p) => p.path).filter((path) => !stillFlagged.includes(path));
+                  if (nowClear.length > 0) {
+                    buildDiag.record({ phase: 'build', severity: 'info', code: 'WRITE_TIME_QUALITY', autoResolved: true,
+                      message: `After the spacing snap: ${nowClear.join(', ')} ${nowClear.length === 1 ? 'is' : 'are'} no longer flagged — any "noted and not fixed" above describes the model's turn, not the app as shipped.` });
+                  }
+                }
               } catch { /* the earlier finding stands */ }
             } catch { /* deterministic and best-effort — it can never affect a build */ }
           };

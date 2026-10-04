@@ -503,7 +503,7 @@ import '../AgentV3/NetlifyProvider';
 import '../AgentV3/CloudflareProvider';
 import { describeVisionAttachments } from '../lib/visionDescribe';
 import { isVisionAttachment } from '../lib/attachmentText';
-import { visionFate, unreadImagesBlock, attachmentsReadNote, type VisionFate } from '../lib/attachmentReadOutcome';
+import { visionFate, unreadImagesBlock, attachmentsReadNote, visionReadCapMs, type VisionFate } from '../lib/attachmentReadOutcome';
 import {
   parseDesignContract,
   stripContractBlock,
@@ -10535,12 +10535,13 @@ async function noteBuildOutcome(
       try {
         const docs = await buildDocumentContext(docAttachments);
         rememberableDocs = docs ? redactPII(docs) : '';
-        // Bounded (8s) — a stalled vision provider must not hang the request before the deadline
-        // timer is armed; on timeout we proceed without the image description.
+        // Bounded — a stalled vision provider must not hang the request before the deadline timer is armed;
+        // on timeout we proceed without the image description. 20 s when a picture is attached, 8 s otherwise
+        // (Q-091: the 8 s race abandoned the user's picture on 0311186f).
         const images = docAttachments.filter((a) => isVisionAttachment(a.type, a.name));
         const visStart = Date.now();
         let visError: unknown = null;
-        const visRaw = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: powerSpecResolved.powerMode /* Strong: Claude-first (Haiku describe tier); Weak/Normal: Gemini → Grok */, noClaude: noClaudeBuild, designContract: true }), 8_000, 'describeVisionAttachments')
+        const visRaw = await raceTimeout(describeVisionAttachments(docAttachments, { useClaude: powerSpecResolved.powerMode /* Strong: Claude-first (Haiku describe tier); Weak/Normal: Gemini → Grok */, noClaude: noClaudeBuild, designContract: true }), visionReadCapMs(images.length), 'describeVisionAttachments')
           .catch((e) => { visError = e; return ''; });
         // A picture nobody could read is still a picture the user sent: the builder is told so, instead of
         // the attachment vanishing without a word (autopsy 1389f0d5).

@@ -66,7 +66,7 @@ describe('WorkspaceLauncher.installDependencies', () => {
   it('returns [packageManager, ["install"]]', () => {
     const [cmd, args] = launcher.installDependencies('/any/path', 'npm');
     expect(cmd).toBe('npm');
-    expect(args).toEqual(['install']);
+    expect(args).toEqual(['install', '--ignore-scripts']);
   });
 
   it('works with pnpm as package manager', () => {

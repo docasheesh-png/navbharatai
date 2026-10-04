@@ -82,6 +82,68 @@ function collectBarePackages(files: Record<string, string>): Set<string> {
   return found;
 }
 
+/** Is `p` the directory `root` or inside it? */
+function insideDir(p: string, root: string): boolean {
+  const rel = path.relative(root, p);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+function insideAny(p: string, roots: readonly string[]): boolean {
+  return roots.some((r) => insideDir(p, r));
+}
+
+function outsideProjectMessage(spec: string): string {
+  return `Import "${spec}" points outside the project. Imports must stay inside the app's own files.`;
+}
+
+const CONFINED = 'nbConfined';
+
+/**
+ * 🔴 FORENSIC AUDIT 2026-10-04 — the preview bundler could read ANY file on this server.
+ *
+ * `POST /api/preview-bundle` is unauthenticated and runs esbuild ON THE HOST over the caller's files.
+ * `safePath` cleaned the file NAMES it wrote, but nothing cleaned the IMPORTS inside them, and esbuild
+ * resolves an import wherever it points: `import s from '/proc/self/environ' with { type: 'text' }`
+ * (every secret this server holds), `../../../app/...`, a `tsconfig.json` "paths" entry aimed at
+ * `/etc`, or `@/../../..` through the alias below. The bytes were inlined into the bundle and handed
+ * back in the response.
+ *
+ * This plugin runs FIRST for every import and checks where it actually RESOLVED — after tsconfig
+ * paths, aliases and extension probing — so the rule is about the destination, not about spelling.
+ * Allowed: the caller's own temp dir and the pinned node_modules. An absolute import ("/src/x") means
+ * the project root, as it does in Vite. Remote URLs stay the browser's business.
+ * `tests/previewBundleStaysInsideTheProject.test.ts` holds it.
+ */
+function confineToWorkspace(allowedRoots: string[]) {
+  return {
+    name: 'confine-to-workspace',
+    setup(b: any) {
+      b.onResolve({ filter: /.*/ }, async (args: any) => {
+        if (args.pluginData?.[CONFINED] || args.kind === 'entry-point') return undefined;
+        const spec: string = args.path;
+        if (/^(?:https?|data):/i.test(spec)) return undefined;
+        if (/^[a-z][a-z0-9+.-]*:/i.test(spec) && !/^[a-z]:[\\/]/i.test(spec)) {
+          return { errors: [{ text: outsideProjectMessage(spec) }] };
+        }
+        if (spec.startsWith('@/')) return undefined; // the alias plugin below confines its own target
+        let target = spec;
+        let resolveDir: string = args.resolveDir;
+        if (spec.startsWith('/') || spec.startsWith('\\')) {
+          // Project-root absolute, as in Vite: "/src/App.tsx" is <project>/src/App.tsx.
+          target = './' + spec.replace(/^[\\/]+/, '');
+          resolveDir = allowedRoots[0];
+        }
+        const r = await b.resolve(target, { kind: args.kind, resolveDir, importer: args.importer, pluginData: { [CONFINED]: true } });
+        if (r.errors && r.errors.length > 0) return { errors: r.errors };
+        if (r.external) return { path: r.path, external: true };
+        if (r.namespace && r.namespace !== 'file') return { path: r.path, namespace: r.namespace };
+        if (!r.path || !insideAny(r.path, allowedRoots)) return { errors: [{ text: outsideProjectMessage(spec) }] };
+        return { path: r.path, sideEffects: r.sideEffects, suffix: r.suffix, pluginData: r.pluginData };
+      });
+    },
+  };
+}
+
 export async function bundleForPreview(files: Record<string, string>): Promise<string> {
   const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'nb-preview-'));
   try {
@@ -119,6 +181,15 @@ export async function bundleForPreview(files: Record<string, string>): Promise<s
     const barePackages = [...collectBarePackages(files)];
     const external = barePackages.flatMap(p => [p, `${p}/*`]);
 
+    // The only places a preview bundle may read from: the caller's own files and the pinned
+    // node_modules. Real paths too, so a symlinked tmpdir (macOS /var → /private/var) still matches.
+    const nodeModulesDir = path.join(process.cwd(), 'node_modules');
+    const allowedRoots = [tmpDir, nodeModulesDir];
+    for (const r of [tmpDir, nodeModulesDir]) {
+      const real = await fsp.realpath(r).catch(() => r);
+      if (!allowedRoots.includes(real)) allowedRoots.push(real);
+    }
+
     let result;
     try {
       result = await esbuild({
@@ -137,11 +208,12 @@ export async function bundleForPreview(files: Record<string, string>): Promise<s
         '.gif': 'dataurl', '.webp': 'dataurl',
       },
       nodePaths: [path.join(process.cwd(), 'node_modules')],
-      plugins: [{
+      plugins: [confineToWorkspace(allowedRoots), {
         name: 'at-alias',
         setup(b) {
           b.onResolve({ filter: /^@\// }, async (args) => {
             const base = path.join(tmpDir, 'src', args.path.slice(2));
+            if (!insideAny(base, allowedRoots)) return { errors: [{ text: outsideProjectMessage(args.path) }] };
             // Try with and without common extensions so `@/components/Foo` resolves to Foo.tsx
             const exts = ['', '.tsx', '.ts', '.jsx', '.js', '/index.tsx', '/index.ts', '/index.jsx', '/index.js'];
             for (const ext of exts) {

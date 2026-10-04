@@ -1,6 +1,7 @@
 import { dedupeToolsByName, type ClaudeToolDef } from './ClaudeClient';
 import { appAiGatewayEnabled } from '../lib/appAiGateway';
 import type { ToolName } from './types';
+import { MAX_FILES_PER_BATCH } from './batchSize';
 import { WORKER_ROLES } from './AgentRegistry';
 
 /**
@@ -252,8 +253,9 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'write_files_batch',
       description:
-        'Write multiple NEW files to the workspace in one operation — faster than ' +
-        'calling write_file one-by-one when creating several independent files. ' +
+        `Write up to ${MAX_FILES_PER_BATCH} NEW files to the workspace in one operation. ` +
+        'Nothing in a call reaches the live preview until the whole call finishes, so keep ' +
+        'batches small and write the entry and shared files first. ' +
         'Files are automatically ordered by import dependencies (dependencies written ' +
         'first), so this is safe when files import each other in one direction. ' +
         'Use this ONLY for creating new files. For editing existing files use edit_file.',
@@ -2261,7 +2263,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'generate_game_shell',
       description:
-        'COMPOSE a runnable game from the other game layers. Call generate_game_runtime, '
+        'COMPOSE a runnable 3D game from the other game layers — it renders a three.js scene, so a 2D '
+        + 'board or page game (puzzle, match-3, cards, quiz) never calls it. Call generate_game_runtime, '
         + 'generate_game_3d, generate_game_controller and generate_game_vfx first — this wires them '
         + 'together and is what turns four toolkits into a game you can actually play. Emits '
         + 'src/game/Game.ts (the composition root), src/game/GameCanvas.tsx (React mount) and '

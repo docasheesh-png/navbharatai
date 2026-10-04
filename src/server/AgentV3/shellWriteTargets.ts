@@ -114,8 +114,30 @@ export function shellWriteTargets(command: string): string[] {
       files.forEach(add);
     } else if (name === 'cp' || name === 'mv' || name === 'install') add(operands[operands.length - 1]);
     else if (name === 'rm' || name === 'truncate' || name === 'touch') operands.forEach(add);
+    else if (/^(?:node|nodejs|python3?|perl)$/.test(name)) scriptWriteTargets(rest).forEach(add);
   }
   return [...found];
+}
+
+/**
+ * Files an inline script writes by a LITERAL path — `node -e "fs.writeFileSync('src/a.css', …)"`,
+ * `python3 -c "open('src/a.py','w')…"`. A model rewrites a stylesheet this way as readily as with
+ * `sed -i` (autopsy 536c8189 used three `node -e` scripts on `src/index.css`), and such a write reached
+ * neither the Green Freeze nor the saved project. Only a quoted literal counts — a path built at run time
+ * is not knowable from the text, so it is left out rather than guessed (precision over recall).
+ */
+function scriptWriteTargets(args: readonly string[]): string[] {
+  const i = args.findIndex((a) => a === '-e' || a === '-c' || a === '--eval' || /^-[a-zA-Z]*[ec]$/.test(a));
+  const script = i >= 0 ? args[i + 1] : undefined;
+  if (!script) return [];
+  const out: string[] = [];
+  const patterns = [
+    /\b(?:writeFileSync|writeFile|appendFileSync|appendFile)\(\s*(['"`])([^'"`$]+?)\1/g,
+    /\bopen\(\s*(['"])([^'"]+?)\1\s*,\s*['"][wax]/g,
+    /\bPath\(\s*(['"])([^'"]+?)\1\s*\)\s*\.\s*write_(?:text|bytes)\(/g,
+  ];
+  for (const re of patterns) for (const m of script.matchAll(re)) out.push(m[2]);
+  return out;
 }
 
 /**
@@ -149,4 +171,22 @@ export function shellRemovalTargets(command: string): { paths: string[]; globs: 
     }
   }
   return { paths: [...paths], globs: [...globs] };
+}
+
+/** Folders a build generates or installs into — never the project's own source. */
+const NOT_SOURCE = /^(?:node_modules|dist|build|\.git|\.next|\.vite|coverage)\//;
+
+/** At most this many files are read back after one command (a glob-free command rarely names more). */
+export const MAX_READ_BACK = 20;
+
+/**
+ * The files to read back from the sandbox after a shell command, so a shell write reaches the saved
+ * project (ToolDispatcher.recordShellWrites). Removal-only commands are left out, generated folders are
+ * never source, and `skip` is a path already read back elsewhere. PURE.
+ */
+export function shellReadBackTargets(command: string, skip: string | null = null): string[] {
+  const removedOnly = new Set(shellRemovalTargets(command).paths);
+  return shellWriteTargets(command)
+    .filter((p) => p !== skip && !removedOnly.has(p) && !NOT_SOURCE.test(p))
+    .slice(0, MAX_READ_BACK);
 }

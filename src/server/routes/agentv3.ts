@@ -387,6 +387,7 @@ import { checkFeaturePresence, featurePresenceSummary, featurePresenceEvidence, 
 import { adoptHealResult } from '../AgentV3/healResult';
 import { signInExploreEnabled, signInScript, signInCandidates, parseSignInOutput, signInReportLine, isSignInRoute, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
 import { unsupportedStackRequested, unsupportedStackBuilderNote, unsupportedStackUserNote, builtWithLabel } from '../AgentV3/unsupportedStack';
+import { unknownNameNoteEnabled, unknownNamesInRequest, unknownNameBuilderNote, unknownNameReportNote } from '../AgentV3/unknownName';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
 import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
 import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel } from '../AgentV3/pricing';
@@ -14904,6 +14905,10 @@ async function noteBuildOutcome(
         onLlmCall: (c: Parameters<NonNullable<typeof buildDiag.recordLlmCall>>[0]) => {
           try { buildDiag.recordLlmCall(c); } catch { /* diagnostics are best-effort */ }
         },
+        // A specialist's end-of-turn notes (Q-066: its style hand-back) reach the same report as the architect's.
+        onNote: (note: { code: string; message: string; detail?: string }) => {
+          try { buildDiag.record({ phase: 'build', severity: 'info', code: note.code, message: note.message, detail: note.detail, autoResolved: true }); } catch { /* a note must never fail a build */ }
+        },
         signal: abort.signal,
         // The time THIS BUILD has left, asked at spawn — never the build's total (see remainingBuildMs).
         // `0` means the operator disabled the wall clock, and that must stay "no deadline", not "none left".
@@ -15938,6 +15943,10 @@ async function noteBuildOutcome(
       const expectsArtifacts = (intent === 'new_build' || intent === 'edit_existing') && !isImportTurn;
       // Only a NEW build is told about the named stack: an edit of an existing app already has one.
       const unsupportedStackAsked = intent === 'new_build' && !isImportTurn ? unsupportedStackRequested(prompt) : null;
+      // A word we do not know is not a service to connect to (Q-067, autopsy de3bb2bb: "COACT" became a
+      // chat to "the COACT backend"). New builds only, like the stack note above — see unknownName.ts.
+      const unknownNamesAsked = intent === 'new_build' && !isImportTurn && unknownNameNoteEnabled() ? unknownNamesInRequest(prompt) : [];
+      const unknownNameNote = unknownNameBuilderNote(unknownNamesAsked);
       // The deadline finalizer prices the same build and must use the same fact — see billingCtx.
       billingCtx.expectsArtifacts = expectsArtifacts;
       // The mandatory readiness gate audits code v5.0 BUILT — it must NOT judge a freshly-imported
@@ -16122,6 +16131,10 @@ async function noteBuildOutcome(
       // THE USER NAMED A STACK WE DO NOT BUILD (autopsy 8e124182: "using PHP MVC architecture" was built
       // in React with a types file claiming a "PHP MVC backend"). Told to the builder here, to the user
       // in the ready message — see unsupportedStack.ts.
+      if (unknownNameNote) {
+        buildPrompt = `${unknownNameNote}\n\n---\n\n${buildPrompt}`;
+        buildDiag.record({ phase: 'plan', severity: 'info', code: 'UNKNOWN_NAME_IN_REQUEST', message: unknownNameReportNote(unknownNamesAsked), autoResolved: true });
+      }
       if (unsupportedStackAsked) {
         buildPrompt = `${unsupportedStackBuilderNote(unsupportedStackAsked, framework)}\n\n---\n\n${buildPrompt}`;
         buildDiag.record({
@@ -16594,6 +16607,7 @@ async function noteBuildOutcome(
       if (singleHtmlFileRule) buildPrompt = `${singleHtmlFileRule}\n\n${buildPrompt}`;
       const singleHtmlFileSuffix = singleHtmlFileRule ? `\n\n${singleHtmlFileRule}` : ''; // the fast lane's copy of the same rule
       const pastedBriefSuffix = pastedBrief ? `\n\n${pastedBrief}` : ''; // the fast lane reads the pasted app's checklist too
+      const unknownNameSuffix = unknownNameNote ? `\n\n${unknownNameNote}` : ''; // and the unknown-word note (Q-067)
 
       // Universal Language (Layer 73): build in the user's language. If the
       // request is written in a distinctive non-Latin script we name the
@@ -16796,7 +16810,8 @@ async function noteBuildOutcome(
             // The planner decides every module's files before a builder sees the stack note, so it gets the
             // note too — or a Kotlin request is planned as Gradle modules the builder may not write (autopsy
             // 042e472f, 2026-10-01). The plan's goal carries it, so every module turn reads it again.
-            const plannerGoal = unsupportedStackAsked ? `${unsupportedStackBuilderNote(unsupportedStackAsked, framework)}\n\n---\n\n${prompt}` : prompt;
+            const plannerGoalBase = unknownNameNote ? `${unknownNameNote}\n\n---\n\n${prompt}` : prompt;
+            const plannerGoal = unsupportedStackAsked ? `${unsupportedStackBuilderNote(unsupportedStackAsked, framework)}\n\n---\n\n${plannerGoalBase}` : plannerGoalBase;
             const modules = parsePlannedModules(await ppGenerate(projectPlanSystemPrompt(framework), projectPlanUserPrompt(plannerGoal, ppScaffold)));
             if (modules.length >= MIN_PROJECT_MODULES) {
               pPlan = createProjectPlan(plannerGoal, framework, modules, Date.now());
@@ -17578,7 +17593,7 @@ async function noteBuildOutcome(
           const c = await actuator.readFile(workspaceId, p).catch(() => null);
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
-        const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix + pastedBriefSuffix, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
+        const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
           stopLane: () => (fastLaneReasoningRung
             ? `the lane's engine fell to ${fastLaneReasoningRung}, which reasons before every answer; the lane's per-file budget cannot carry that, so the files finished so far go to the full builder now`
             : null),

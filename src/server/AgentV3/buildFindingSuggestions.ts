@@ -154,6 +154,7 @@ const NEVER_SUGGEST = new Set([
   'STYLE_RULES_RESUMED', // our end-of-turn steer (stylePolishResume.ts), never a finding
   'REPAIR_CLAIM_WITHHELD', // our repair pass claimed a change it never made (repairClaim.ts)
   'UNSUPPORTED_STACK', // the user is told in the ready message already (unsupportedStack.ts)
+  'UNKNOWN_NAME_IN_REQUEST', // a note to our builder (unknownName.ts), never a finding
   'AUTH_EXPLORE_SIGNED_IN', 'AUTH_EXPLORE_NOT_RUN', // our sign-in instrument, never the app's defect
   'DESIGN_KIT_RESTORED', 'PLANNING_CONTEXT', 'DESIGN_KIT_KEPT', 'SHADOW_TWIN_REMOVED', 'USER_FILE_KEPT', 'FILES_REMOVED_TOLD', 'DURABLE_READ_FAILED', 'LLM_CALL_HANDED_OFF', 'REPEATED_READS', 'WORKSPACE_SCAN_FAILED', 'EMPTY_BUILD_RETRY', // our own housekeeping (autopsy e725e002, 4d538ca3, d382b398, de3bb2bb)
   'RELEASE_GATE', 'TIME_TO_FIRST_CALL', 'RUNTIME_UNCHECKED', 'RUNTIME_VERIFIED', 'APP_RENDERED',

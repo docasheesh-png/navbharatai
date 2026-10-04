@@ -316,3 +316,18 @@ export function featureAreaForView(view: string): FeatureArea {
   if (view.endsWith('_ai') || view.endsWith('_chat') || view === 'chat' || view === 'professionals' || view === 'imagegen') return 'ai';
   return 'app';
 }
+
+/**
+ * What a crash report from the phone apps contains, in the words the Privacy Policy (§3.4) uses.
+ * `tests/privacyPolicyTruth.test.ts` fails if any phrase here is missing from the policy, so this
+ * list and the published disclosure cannot drift apart.
+ */
+export const CRASH_REPORT_POLICY_PHRASES = [
+  'Firebase Crashlytics',
+  'the error and where in our code it happened',
+  'app version and build number',
+  'device model and operating-system version',
+  'which screen of the app you were on',
+  'a one-way scrambled form of your account ID',
+  'never your chats, prompts, files, email address, phone number, payment details or passwords',
+] as const;

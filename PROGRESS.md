@@ -88637,3 +88637,29 @@ RESOLVED as not-a-defect; the class fix is the "queued; do not push; interim CI 
 merging session now posts on each PR at the moment it cancels. Re-running a cancelled run on such a PR
 spends minutes for a result the merge gate never reads. The author's workaround ("push once per branch")
 is still good advice for a different reason: every push is a billed run.
+
+## 2026-10-04 — Firebase Crashlytics, built after a three-part audit (admin: "Ask the council")
+
+**What existed before:**
+- No crash reporter in either phone app.
+- JS errors went to `/api/logs/error` from three separate places: two in `main.tsx` and one in `ErrorBoundary`. None had dedup or a rate limit, and nothing was redacted on either side.
+- The offline queue had no size bound.
+
+**Found by the audit and fixed here:**
+- **P1, source disclosure.** `dist/server.cjs.map`, 27 MB of server source, sat in the folder `express.static` serves. `privateBuildFiles.ts` now refuses it and every other `*.map`, and `firebase.json` ignores them. This could not be confirmed against production from the session (egress refused), so the exposure was inferred from the code.
+- **P2.** The client error intake logged raw messages, URLs (with query strings) and the caller's IP. It is now sanitized, field-capped and rate-limited, and the IP is no longer logged.
+
+**Built:**
+- `src/lib/observability/`: one reporter, one sanitizer, and the Crashlytics sink.
+- Native wiring: Android Gradle and manifest (collection in release builds only); iOS SwiftPM option plus a dSYM upload step in fastlane.
+- A `crash_test` build that both store workflows refuse to upload.
+- Privacy Policy §3.4 and §7, guarded by `privacyPolicyTruth.test.ts`.
+- `docs/CRASHLYTICS.md`.
+- Tests: `tests/crashReportsCarryNoSecrets.test.ts` (56 cases). Reversion-proven three ways (Bearer redaction, dedup, the re-entrancy guard).
+
+**OPEN (rule 6):**
+1. **Not verified on a device or a native build.** The session cannot build Android or iOS: Google's Maven host and macOS are unreachable. The Gradle plugin version `3.0.6` and the fastlane `upload-symbols` path are unverified until `android-app.yml` and an `ios-ipa.yml` dry run go green.
+2. iOS `CFBundleShortVersionString` is never set, so iOS reports are told apart only by build number. The fix (setting it per build) changes App Store version trains and is the admin's call.
+3. JS stacks from the minified bundle are not de-minified in Crashlytics. Crashlytics has no JS source-map support.
+4. `vite.config.ts` still defines `process.env.GEMINI_API_KEY` into the client. Verified harmless today: no build sets it, and no client code reads it. It is a latent footgun, recorded rather than changed here.
+5. The admin must enable Crashlytics in Firebase Console and update both store privacy declarations BEFORE the first build ships.

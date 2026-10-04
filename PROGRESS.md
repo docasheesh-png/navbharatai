@@ -88476,3 +88476,25 @@ the starter page).
 
 Earlier fixes this missed: #3491 tested the primer only where it ran, not every command that carries it (#3506
 found the launch reading). This report found what #3506 also missed: data already stored by the bug.
+
+### 2026-10-04 — Autopsy c70bcbb4 ("Mujhe esa hi music player bnakar do", Weak, 9.2 min, YELLOW) — Q-520..Q-527
+
+Tally: ✅ 3 self-healed (missing zustand dependency, unused imports, the builder fixing 22 salvage errors) ·
+🔀 1 (the platform started the preview the builder never published) · ⏭️ 2 (the "like this" pointer, clickable divs
+never noted) · ❌ 3 (sized as chat, false YELLOW from a search box, unreadable report label) · 🥵 2 (small files
+read in slices, ~9 extra calls; 22 salvage errors met one write at a time).
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-520 sized as `chat` | greeting rule matched Hindi "hi" mid-sentence | a word that means two things in two languages | "hi"/"hey" only where a message opens; a greeting in an app order is not chat | `tests/theMusicPlayerLikeThisOne.test.ts` (reverted → fails) |
+| Q-521 "esa hi" not followed | pointer list had no "like this" forms | 5759ad8b's vocabulary, a sibling | added aisa/waisa/isi tarah/is jaisa/like this/ऐसा ही | same |
+| Q-522 clickable divs unnoted | type added to the linter after the lists | a list that does not hear about new types | both lists + census of every type | same |
+| Q-523 search box = data entry | any `<input>` counted | 8b8743a3's sibling | a self-named search input is not data entry | same |
+| Q-524 small files sliced | ranges allowed on any file | a big-file tool used on small files | ≤ 300 lines comes back whole | same (behavioural) |
+| Q-525 report label | first line of our wrapper printed | — | `ourCommandLabel` | same |
+| Q-526 salvage errors found late | errors handed over only on verify failure | a9f8d186's sibling | bounded typecheck at every hand-off | same |
+| Q-527 seven items argued not defects | — | — | 🟡 admin agreement | — |
+
+Checked for recurrence: Q-523 is the second instance of the slider class (8b8743a3, the same day) — that fix named
+only `type` values, so a text input used as a search was never covered. Q-526 is the hand-off branch a9f8d186 did
+not reach.

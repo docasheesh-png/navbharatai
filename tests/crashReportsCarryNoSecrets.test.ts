@@ -20,7 +20,8 @@ import {
   __resetObservability, RATE_LIMIT, DEDUP_WINDOW_MS, type CrashlyticsSink, type ObservabilityDeps,
 } from '../src/lib/observability';
 import { clientErrorRecord } from '../src/server/routes/telemetry';
-import { isPrivateBuildFile } from '../src/server/lib/privateBuildFiles';
+// The one private-file check: #3529's isPrivateBuildFile was merged into it (forensic audit 2026-10-04).
+import { isServerOnlyArtifactPath as isPrivateBuildFile } from '../src/server/lib/serverOnlyArtifacts';
 import { firstComponent } from '../src/components/ErrorBoundary';
 
 const ROOT = join(__dirname, '..');

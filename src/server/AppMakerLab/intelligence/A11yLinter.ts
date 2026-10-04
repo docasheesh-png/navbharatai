@@ -74,6 +74,22 @@ export function inputsMissingLabel(code: string): [number, number] {
   return [total, missing];
 }
 
+/**
+ * The 1-based source lines of the fields `inputsMissingLabel` counts as unlabelled, in order, at most `max`.
+ * A count alone sent a model through ten edits of buttons that were already labelled before it found the one
+ * `<input>` (autopsy 981ce4cc); the line is what makes the note actionable. Same verdict, so the count and
+ * the lines can never disagree. Pure.
+ */
+export function unlabelledFieldLines(code: string, max = 5): number[] {
+  const out: number[] = [];
+  for (const t of scanMarkup(typeof code === 'string' ? code : '')) {
+    if (controlLabelVerdict(t) !== 'unlabelled') continue;
+    out.push(t.line + 1);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
 const LABELLABLE_CONTROLS = new Set(['input', 'textarea', 'select']);
 
 /**

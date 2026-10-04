@@ -592,7 +592,7 @@ import { createMeterRegistry, attachStream, accrueFor, detachStream } from '../A
 import { terminalUsageStore } from '../AgentV3/TerminalUsageStore';
 import { lintBuiltApp, designLintSummary, a11yLintSummary, a11yRepairAddendum } from '../AgentV3/buildQualityLint';
 import { abortBuild, abortCauseOf, interruptedBeforeAnyVerdict } from '../AgentV3/buildAbortCause';
-import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount, couldBeAppCode } from '../AgentV3/userProjectFiles';
+import { workspaceHoldsUserApp, userOwnedFileCount, appSourceFileCount, couldBeAppCode, editBannerText } from '../AgentV3/userProjectFiles';
 import { zeroBillReasonFor } from '../AgentV3/zeroBillReason';
 import { saveWorkspaceAssets, materializeAssets, restoreWorkspaceAssets, listWorkspaceAssetPaths } from '../AgentV3/WorkspaceAssetStore';
 import { persistBuildAssets, buildAssetsNote, MARK_ASSET_BASELINE_COMMAND, type BuildAssetSource } from '../AgentV3/buildAssets';
@@ -622,6 +622,7 @@ import { runProvenApp, verdictHeldMessage, type ProdBuildOutcome, type LateFlip 
 import { shouldAttemptPlatformPreview, platformPreviewBudgetMs, platformPreviewPort } from '../AgentV3/deliveryProof';
 import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
 import { readyOverrunNote } from '../AgentV3/doneSignal';
+import { attachedBytesNote } from '../AgentV3/attachedFileBytes';
 import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, isProjectStylesheet, danglingStylesheetImports, withoutStylesheetImports } from '../AgentV3/CssConsistency';
 import { kitRestorePatch, kitRestoreNote, appOwnStylesheet } from '../AgentV3/kitRestore';
@@ -10568,6 +10569,10 @@ async function noteBuildOutcome(
         // to read the requirements as data it must not act on — the exact opposite of the point.
         const contractBlock = contractToPromptBlock(designContract);
         if (contractBlock) attachmentContext = `${attachmentContext}\n\n${contractBlock}`;
+        // The bytes of a PDF, picture or office file are not in the project (autopsy 981ce4cc: a made-up PDF
+        // and "your attached letter is loaded"). Ours, so outside the untrusted fence. See attachedFileBytes.ts.
+        const bytesNote = attachedBytesNote(docAttachments);
+        if (bytesNote) attachmentContext = `${attachmentContext}\n\n${bytesNote}`;
         // A picture is part of the spec only when it is a UI design (the describer returned a contract).
         // A photo of a person or a scene says what the picture shows, not what to build.
         const pictureIsSpec = designContract !== null;
@@ -15949,10 +15954,12 @@ async function noteBuildOutcome(
               continuesPlan = !!plan && !planComplete(plan);
             } catch { /* unknown ⇒ the ordinary edit line */ }
           }
+          // A chat that holds only our own starter has no app of the user's to edit (autopsy 981ce4cc: "✏️
+          // Editing your existing app (11 source files)" about the 11 files setup had just written).
           if (!continuesPlan) events.emit({
             type: 'narration',
             agent: 'architect',
-            text: `✏️ Editing your existing app (${sourceCount} source file${sourceCount === 1 ? '' : 's'}) — I'll make targeted changes, not rebuild it.`,
+            text: editBannerText(sourceCount, earlierRequestLeftAnApp),
             ts: Date.now(),
           });
           if (buildOrderReadAsEdit) {

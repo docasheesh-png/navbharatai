@@ -12,6 +12,8 @@ import { narrationText, type NarrationId, type NarrationParams } from './narrati
 import { noteHeal } from './HealLedger';
 import { decideSupersede } from './previewSupersede';
 import { missingRanges, latestVersionsCommand, versionHint } from './npmVersionHint';
+import { cdnPdfWorkerNote } from './pdfWorkerSource';
+import { peerConflicts, peerDataCommand, peerConflictHint, etargetRecommendation, etargetHintLine, forcesPeers } from './peerCompatHint';
 import { declaredRoutes, paramOnlyMatch, type DeclaredRoute } from './routerPaths';
 import { DECLARED_PORT_FILES } from './declaredPort';
 import { appPortsFrom, isSecondaryAppPort, type AppPortMap } from './appPorts';
@@ -662,6 +664,43 @@ export class ToolDispatcher {
    * `skip` is a path another read-back already recorded. Best-effort: the sandbox scan at the final
    * save remains the net for a write the command's text did not show.
    */
+  /**
+   * The note an npm install's result carries (autopsy 981ce4cc): a range that does not exist gets the newest
+   * version that EXISTS and that this project's peers support; a peer conflict (ERESOLVE) names the newest
+   * version that fits; and an install forced past the peer check that left an unsupported package says so.
+   * Two read-only commands at most. Null when there is nothing to say.
+   */
+  private async npmInstallHint(command: string, exitCode: number | null, output: string): Promise<string | null> {
+    const run = async (cmd: string): Promise<string> =>
+      (await withTimeout(this.actuator.runCommand(this.workspaceId, cmd), 15_000, 'npm-version-hint')).stdout ?? '';
+    if (exitCode !== 0) {
+      const missing = missingRanges(output);
+      const conflicts = peerConflicts(output);
+      if (missing.length === 0 && conflicts.length === 0) return null;
+      const dataCmd = peerDataCommand([...missing.map((m) => m.name), ...conflicts.map((c) => c.pkg)]);
+      const data = dataCmd ? await run(dataCmd) : '';
+      const notes: string[] = [];
+      const lines = missing
+        .map((m) => { const rec = etargetRecommendation(m.name, data); return rec ? etargetHintLine(m.name, m.range, rec) : null; })
+        .filter((l): l is string => !!l);
+      if (lines.length > 0) notes.push(`[version hint] ${lines.join(' · ')}. Re-run the install with these ranges.`);
+      else if (missing.length > 0) {
+        // npm could not list peers: fall back to the plain latest version (npmVersionHint.ts).
+        const viewCmd = latestVersionsCommand(missing);
+        const plain = viewCmd ? versionHint(missing, await run(viewCmd)) : null;
+        if (plain) notes.push(plain);
+      }
+      const peerNote = conflicts.length > 0 ? peerConflictHint(conflicts, data, false) : null;
+      if (peerNote) notes.push(peerNote);
+      return notes.length > 0 ? notes.join('\n\n') : null;
+    }
+    if (!forcesPeers(command)) return null;
+    const conflicts = peerConflicts(await run('npm ls --depth=0 2>&1 | head -60'));
+    if (conflicts.length === 0) return null;
+    const dataCmd = peerDataCommand(conflicts.map((c) => c.pkg));
+    return peerConflictHint(conflicts, dataCmd ? await run(dataCmd) : '', true);
+  }
+
   private async recordShellWrites(command: string, skip: string | null): Promise<void> {
     let targets: string[];
     try { targets = shellReadBackTargets(command, skip); } catch { return; }
@@ -3544,6 +3583,8 @@ export class ToolDispatcher {
     let shadow = '';
     for (const p of paths) {
       try { shadow += entryShadowNote(p, this.framework ?? 'vite-react'); } catch { /* a note is best-effort */ }
+      // A pdf.js worker loaded from a CDN path built from the version (autopsy 981ce4cc) — said while open.
+      try { shadow += cdnPdfWorkerNote(p, files[p]); } catch { /* a note is best-effort */ }
     }
     // At a STYLESHEET write, every screen's classes still without a rule; and a page's own design defects
     // (autopsy e6d46cde) — both used to wait for a 100-second repair pass after the app was done. A SCREEN
@@ -4975,16 +5016,13 @@ export class ToolDispatcher {
           } catch { /* a note is best-effort — the command's own output stands */ }
         }
         // A guessed range that does not exist gets the real version in the same result (npmVersionHint.ts).
-        if (exitCode !== 0 && process.env.AGENTV3_NPM_VERSION_HINT !== 'off') {
+        // A version this project's React cannot run is named before it is installed, and after a forced
+        // install that left one (peerCompatHint.ts, autopsy 981ce4cc).
+        if (process.env.AGENTV3_NPM_VERSION_HINT !== 'off') {
           try {
-            const missing = missingRanges(`${stdout}\n${stderr}`);
-            const viewCmd = latestVersionsCommand(missing);
-            if (viewCmd) {
-              const view = await withTimeout(this.actuator.runCommand(this.workspaceId, viewCmd), 15_000, 'npm-version-hint');
-              const hint = versionHint(missing, view.stdout);
-              if (hint) out = `${out}\n\n${hint}`;
-            }
-          } catch { /* a hint is best-effort — npm's own error is still reported */ }
+            const hint = await this.npmInstallHint(command, exitCode, `${stdout}\n${stderr}`);
+            if (hint) out = `${out}\n\n${hint}`;
+          } catch { /* a hint is best-effort — npm's own answer is still reported */ }
         }
         if ((process.env.AGENTV3_PIPED_GATE_CHECK ?? '').trim().toLowerCase() !== 'off') {
           const lie = pipedGateExitCodeWarning(command, exitCode, `${stdout}\n${stderr}`);
@@ -11034,7 +11072,11 @@ export function ambiguousEditRegions(existing: string, offsets: Iterable<number>
   }
   if (shown.length === 0) return '';
   const more = total > shown.length ? `\n(and ${total - shown.length} more)` : '';
-  return `\n${shown.join('\n')}${more}\nAdd a neighbouring line from the match you mean to old_string so it is unique.`;
+  // Most ambiguous anchors in a stylesheet are an attempt to ADD rules after a common block (autopsy 981ce4cc:
+  // `@media (prefers-reduced-motion: reduce) {` twice in src/index.css, two failed edits and a read). The
+  // not-found error already says how to append; this one did not.
+  return `\n${shown.join('\n')}${more}\nAdd a neighbouring line from the match you mean to old_string so it is unique. `
+    + 'To ADD content at the end of the file instead, call edit_file with an EMPTY old_string — it appends, no anchor needed.';
 }
 
 export function applyEdit(existing: string, oldStr: string, newStr: string, path = 'file'): EditResult {

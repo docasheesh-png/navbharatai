@@ -9,7 +9,7 @@ import { applyStrictTrial } from '../../../strictTrial';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure, buildStillStartingWaitCommand, shouldWaitOnStartingServer, STILL_STARTING_EXTRA_SECONDS } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure, buildStillStartingWaitCommand, shouldWaitOnStartingServer, STILL_STARTING_EXTRA_SECONDS, buildPrebundleStaleCheckCommand, VITE_PREBUNDLE_DIR } from './devServerHost';
 import { buildPortSweepCommand, parsePortSweep, portCandidates, shouldSweep, sweepFoundSummary } from './portSweep';
 import { appPortsFrom } from '../../../appPorts';
 import type { DevFramework } from './devServerHost';
@@ -2143,7 +2143,15 @@ export class E2BActuator implements IEngineerActuator {
         if (alreadyUp) {
           const stale = await sandbox.commands.run(buildDepsStaleCheckCommand(), { cwd: WORKSPACE_ROOT, timeoutMs: 8000 })
             .then((r) => r.stdout.includes('STALE')).catch(() => false);
-          if (shouldSkipDevServerLaunch(alreadyUp, stale)) {
+          // A package installed after the running server pre-bundled its dependencies (autopsy 981ce4cc):
+          // the server keeps serving the OLD copy, so it is relaunched with its cache cleared.
+          const prebundleStale = await sandbox.commands.run(buildPrebundleStaleCheckCommand(), { cwd: WORKSPACE_ROOT, timeoutMs: 8000 })
+            .then((r) => r.stdout.includes('PREBUNDLE_STALE')).catch(() => false);
+          if (prebundleStale) {
+            await sandbox.commands.run(`rm -rf ${VITE_PREBUNDLE_DIR}`, { cwd: WORKSPACE_ROOT, timeoutMs: 15_000 }).catch(() => null);
+            console.log('[E2B] a dependency changed after the dev server pre-bundled its packages — relaunching it');
+          }
+          if (shouldSkipDevServerLaunch(alreadyUp, stale, prebundleStale)) {
             const boundPort = port;
             // A server we ADOPTED needs the keepalive exactly as much as one we started — arguably
             // more, since nobody in this process has been watching it so far.

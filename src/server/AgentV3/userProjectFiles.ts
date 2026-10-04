@@ -142,3 +142,13 @@ export function workspaceHoldsUserApp(paths: readonly string[] | null | undefine
   if (paths === null || paths === undefined) return true;
   return userOwnedFileCount(paths) > 0;
 }
+
+/**
+ * The line that opens an edit turn. When the chat holds nothing of the user's (only the starter setup
+ * wrote), it must not call those files "your existing app" (autopsy 981ce4cc: "✏️ Editing your existing
+ * app (11 source files)" about our 11-file starter). PURE.
+ */
+export function editBannerText(sourceCount: number, userHasApp: boolean): string {
+  if (!userHasApp) return '✏️ Starting from the starter project — I\'ll change it into what you asked for.';
+  return `✏️ Editing your existing app (${sourceCount} source file${sourceCount === 1 ? '' : 's'}) — I'll make targeted changes, not rebuild it.`;
+}

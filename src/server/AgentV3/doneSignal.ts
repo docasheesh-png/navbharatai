@@ -168,7 +168,7 @@ export interface ReadyMark {
 export function readyOverrunNote(mark: ReadyMark | null | undefined, endStep: number, endMs: number, opts: { editingExistingApp?: boolean } = {}): string {
   // An edit is not judged at all (see `shouldCheckDone`), and "never judged finished" would read as
   // a finding about an app that was working before the turn began.
-  if (!mark && opts.editingExistingApp) return 'Not measured: this turn edited an app that already existed, so the project score cannot say when the request was done.';
+  if (!mark && opts.editingExistingApp) return 'Not measured: this turn ran as an edit of the files already in the project, so the project score cannot say when the request was done.';
   if (!mark) return 'The app was never judged finished during the build.';
   const steps = Math.max(0, endStep - mark.step);
   const secs = Math.max(0, Math.round((endMs - mark.elapsedMs) / 1000));

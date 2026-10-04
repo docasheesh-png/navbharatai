@@ -89090,3 +89090,13 @@ billing/payment tests green.
 ⚠️ For whoever reads the Monitor next: request counts step UP at this deploy — that is the measurement becoming
 true, not a change in traffic. Token and cost totals are unchanged.
 
+### 2026-10-04 — Q-127: a two-part question gets every live answer
+
+`liveDataContext` returned at the first source that answered; since a live answer skips the web search in
+`liveSearchContext`, the second half of "kanpur me barish hogi kya, aur dollar ka rate kitna hai" was dropped.
+Every source now runs side by side (each still checks its own shape first and fetches nothing when it does not
+match) and every non-empty block is joined in a fixed order. Lock: `tests/aTwoPartQuestionGetsBothAnswers.test.ts`
+(both answers; one-part unchanged with only the matching host fetched; one source failing keeps the other).
+Recorded rather than guessed: a live part plus a NON-live part ("mausam aur gold rate") still skips search for
+the second — the queue row keeps that narrower half.
+

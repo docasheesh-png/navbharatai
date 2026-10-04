@@ -164,8 +164,10 @@ describe('🖥️ the entry-first rule is handed back, not merely written in the
     expect(at).toBeGreaterThan(-1);
     // The ONE line every door's result is built from: the note must be a term of it, not merely defined.
     const ret = src.slice(at).match(/\n    return hooks \+[^;]*;/)?.[0] ?? '';
-    expect(ret).toContain('entryFirst');
-    expect(src.slice(at)).toContain('await this.entryFirstNote(files)');
+    // Since the merge with #3524 the note rides `shadow` (the "what the preview will not show" notes), so the
+    // ONE return line keeps its shape for every other source guard and still carries this note by construction.
+    expect(ret).toContain('shadow');
+    expect(src.slice(at)).toContain('shadow += await this.entryFirstNote(files);');
   });
 });
 

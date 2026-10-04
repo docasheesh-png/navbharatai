@@ -88428,6 +88428,76 @@ module), with five false findings on the way. Ledger (problem → root cause →
 - 🟡 Q-396 (no-tests warning on module turns), Q-397 (ignored theme note), Q-398 (APP_SCOPE small word as reason):
   BLOCKED with options in the queue. Q-399 (crawl bench, Haiku planner) resolved as admin-decided behaviour.
 
+### 2026-10-04 — Q-273 / Q-275 follow-up (autopsy 241215d1)
+
+- **Q-273 → fix in PR.** Problem: `python3 --version && which python3 → exit 0 (11s)`, while `head -50` took 1 s a
+  minute earlier.
+  - Root cause of the blindness: the bash tool's timer covers four things — our steps before the command (vault
+    `.env` and key checks, Postgres preflight, pin read), `getSandbox` (reconnect or resume), the command, and our
+    steps after it — and the report printed only their sum.
+  - Class: a duration nobody can attribute.
+  - Fix: `commandTiming.ts`. The actuator times reaching the machine apart from the run, including a recreate after
+    a dead sandbox. The dispatcher adds its own setup time. A `SANDBOX_CMD` line of 5 s or more now ends with
+    `— our setup · sandbox · command · our checks after`.
+  - Lock: `tests/aSlowCommandSaysWhereItsTimeWent.test.ts` (fails with the split removed).
+  - Honest limit: the one 11 s instance left no evidence; the next one will name its own cause.
+- **Q-275 stays 🟡 BLOCKED, with more ruled out.**
+  - Measured: the real prompt is 2,429 characters and ends at a line break. The server limit is 20,000.
+  - The composer has no `maxLength`, its paste handler only takes images, nothing turns a long paste into a file,
+    and the report stores the prompt in full. Nothing of ours cuts there.
+  - Needs: the user's original text, or the admin's decision on asking the user when a request visibly ends
+    mid-sentence.
+
+### 2026-10-04 — Autopsy 68f0a486 ("Gyan Spark Academy", school app, Weak, 8.4 min, GREEN) — Q-530..Q-541
+
+The build ran at 16:06 UTC, **before #3506 (Q-390) was deployed at 16:27**. So two of its problems are my #3491's
+warm-cache primer being read as a dev-server launch. #3506 fixed the classification. Recipes saved during that window
+were still stored and still trusted, and that was not fixed until this change.
+
+Tally: ✅ 2 self-healed (invented classes; unused imports) · 🔀 0 · ⏭️ 1 (screens behind the sign-in page never
+checked) · ❌ 7 (bad revival recipe, false publish consent, empty review, mislabelled hand-back, ±3% ETA band,
+invented ETA answer, GREEN from a sign-in form) · 🥵 2 (two 30 s typecheck timeouts; entry written last, 375 s of
+the starter page).
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-530 recipe `[ -d …/vite-react/node_modules ]` | typecheck read as a launch before #3506; `serverLaunchCommand` had its own `\bvite` regex | a second "is this a launch?" answer, and stored data never re-checked | `isUsableRecipe` asks the launcher's classifier on save AND read; one classifier in `serverLaunchCommand` | `tests/theSchoolAppAutopsy.test.ts` (reverted → fails) |
+| Q-531 typecheck >30 s ×2, never ran | same as Q-530 | — | #3506 (merged), verified on main: all four typecheck/primer commands read "not a launch" | same test |
+| Q-532 deploy tool on for "upload karne ke liye" | `upload\s+kar` pattern | a publish word naming an app feature | occurrence read in its sentence | same test (report prompt) |
+| Q-533 review "I will read the files" | no-tools review told to read with tools | an instruction for tools the agent lacks | line only for agents with `read_file` (user half: #3509) | same test |
+| Q-534 hand-back note "0 … 0" | note counted two of four kinds | a report line about part of what happened | counts a11y too | same test |
+| Q-535 entry written last | prompt rule skipped | a rule with nothing behind it | write-time note at the second screen | same test |
+| Q-536 ETA band ±3% | band from confidence only | precision claimed without a measured spread | weighted SD floor; telemetry sum of squares | same test |
+| Q-537 model's own "2-3 min" | the model had no ETA | an answer the platform owns, invented by the model | shown ETA line handed to the model | same test (report message) |
+| Q-538 GREEN from the sign-in form | any passed journey counted | a door mistaken for the house | sign-in-only ⇒ unreachable; "reloaded" only when it was | same test |
+| Q-539 `.text-muted`/`.btn-success` invented | kit has half a family | self-heal of an upstream invitation | kit completes the family | same test |
+| Q-540 screens behind sign-in unchecked | explorer never creates an account | — | 🟡 admin decision (options in queue) | — |
+| Q-541 six items argued not defects | — | — | 🟡 admin agreement | — |
+
+Earlier fixes this missed: #3491 tested the primer only where it ran, not every command that carries it (#3506
+found the launch reading). This report found what #3506 also missed: data already stored by the bug.
+
+### 2026-10-04 — Autopsy c70bcbb4 ("Mujhe esa hi music player bnakar do", Weak, 9.2 min, YELLOW) — Q-520..Q-527
+
+Tally: ✅ 3 self-healed (missing zustand dependency, unused imports, the builder fixing 22 salvage errors) ·
+🔀 1 (the platform started the preview the builder never published) · ⏭️ 2 (the "like this" pointer, clickable divs
+never noted) · ❌ 3 (sized as chat, false YELLOW from a search box, unreadable report label) · 🥵 2 (small files
+read in slices, ~9 extra calls; 22 salvage errors met one write at a time).
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-520 sized as `chat` | greeting rule matched Hindi "hi" mid-sentence | a word that means two things in two languages | "hi"/"hey" only where a message opens; a greeting in an app order is not chat | `tests/theMusicPlayerLikeThisOne.test.ts` (reverted → fails) |
+| Q-521 "esa hi" not followed | pointer list had no "like this" forms | 5759ad8b's vocabulary, a sibling | added aisa/waisa/isi tarah/is jaisa/like this/ऐसा ही | same |
+| Q-522 clickable divs unnoted | type added to the linter after the lists | a list that does not hear about new types | both lists + census of every type | same |
+| Q-523 search box = data entry | any `<input>` counted | 8b8743a3's sibling | a self-named search input is not data entry | same |
+| Q-524 small files sliced | ranges allowed on any file | a big-file tool used on small files | ≤ 300 lines comes back whole | same (behavioural) |
+| Q-525 report label | first line of our wrapper printed | — | `ourCommandLabel` | same |
+| Q-526 salvage errors found late | errors handed over only on verify failure | a9f8d186's sibling | bounded typecheck at every hand-off | same |
+| Q-527 seven items argued not defects | — | — | 🟡 admin agreement | — |
+
+Checked for recurrence: Q-523 is the second instance of the slider class (8b8743a3, the same day) — that fix named
+only `type` values, so a text input used as a search was never covered. Q-526 is the hand-off branch a9f8d186 did
+not reach.
 ## 2026-10-04 — Q-313: an 8-minute game edit was priced from the history of "hi" (PR #3520)
 
 The last OPEN row of autopsy `8b8743a3`. **Its own theory was wrong, and measuring before acting is what
@@ -88750,3 +88820,13 @@ written down in plain words.
 **What survives, with the reason changed:** pushing ONCE per branch is still right, now simply because a
 second push creates a second run that somebody then has to cancel or wait out. Nothing is wrong with
 GitHub, nothing needs looking at in Actions settings, and the admin can ignore that request entirely.
+
+
+### Correction (merging session, 2026-10-04 20:55 UTC) — half of Q-500's cancellations were the 30-minute cap
+
+The two notes above (19:40 and #3523's) each named ONE cause for the cancelled CI runs, and each was half right.
+The run annotations settle it: the cancels on PRs the merging session had queued were its own, deliberate; the
+cancels of #3515 (19:57), #3518 (20:44) and #3523 (20:45) read "The job has exceeded the maximum execution time
+of 30m0s" — `ci.yml`'s own `timeout-minutes: 30`, hit because eight or nine PR runs in flight slowed every run to
+21–30 min. The cap is now 45 (#3524 staging). Lesson, the fourth rule's first step: read the run's own last
+words before naming a cause — a cancelled run names its canceller.

@@ -23,6 +23,7 @@ import { geetaAppTsx, quranAppTsx } from './indiaFaith';
 import { gitaChapterFiles } from './gitaText';
 import { panchangAppTsx, kundaliAppTsx } from './indiaPanchang';
 import { proUiTsx, proStoreTs } from './proShell';
+import { BROWSER_FILE_STORE_TS } from '../browserFileStore';
 import { saasDashboardAppTsx, crmAppTsx, storeAppTsx } from './proApps';
 import { restaurantAppTsx, socialFeedAppTsx } from './proAppsB';
 import { invoicingAppTsx, bookingsAppTsx, kanbanAppTsx } from './proAppsC';
@@ -59,6 +60,9 @@ export interface GoldenScaffold {
 const PRO_SHARED_FILES: Record<string, string> = {
   'src/lib/ui.tsx': proUiTsx,
   'src/lib/store.ts': proStoreTs,
+  // Where an uploaded file goes when no database is connected (Q-542): IndexedDB, as the file itself —
+  // never a data URL in the 5 MB localStorage that `store.ts` keeps lists in.
+  'src/lib/files.ts': BROWSER_FILE_STORE_TS,
 };
 
 export const GOLDEN_SCAFFOLDS: readonly GoldenScaffold[] = [

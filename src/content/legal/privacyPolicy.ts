@@ -31,7 +31,7 @@
 // ⚠️ NOT LEGAL ADVICE: drafted to be reviewed by a lawyer before being relied on in a dispute.
 
 export const PRIVACY_POLICY_TITLE = 'Privacy Policy';
-export const PRIVACY_POLICY_UPDATED = '1 October 2026';
+export const PRIVACY_POLICY_UPDATED = '4 October 2026';
 
 export const PRIVACY_POLICY = `# Privacy Policy
 
@@ -127,6 +127,14 @@ When you use the NavBharatAI **website**, a few actions that cost us real money 
 
 **What this is NOT:** it is not advertising, it is not shared with Meta or any advertising platform, and we do not use it to build a profile of you. In our apps it works differently: the **Android app** asks **Google's Play Integrity service**, and the **iOS app** asks **Apple's App Attest service**, to confirm the app is genuine and unmodified. That check is about the app and the device, not about you — it sends no chats, files or contact details, and our server again receives only the resulting token and whether it is valid.
 
+### 3.4 Crash reporting in our apps (Google Firebase Crashlytics)
+
+When the NavBharatAI **Android or iOS app** crashes or hits an error, the app sends a crash report to **Google Firebase Crashlytics** so we can find and fix the cause. A report contains: the error and where in our code it happened; the app version and build number; the device model and operating-system version, with technical state such as free memory and disk space; the time; which screen of the app you were on; whether you were signed in; and, if you were, a one-way scrambled form of your account ID, so that repeated crashes for one person can be grouped without revealing who they are. Firebase also assigns the installation a random identifier.
+
+**What a crash report never contains:** never your chats, prompts, files, email address, phone number, payment details or passwords. Every report is passed through a filter on your device that removes tokens, keys, card numbers, UPI addresses, email addresses, phone numbers and web-address parameters before it is sent. Google processes crash reports under its own [Privacy Policy](https://policies.google.com/privacy) and keeps them for 90 days.
+
+**Why:** an app that crashes for some people and not others cannot be fixed without knowing where it crashed. *(Basis: our legitimate interest in keeping the apps working.)* On the **website**, the same filtered error details are sent only to our own servers, as part of the technical logs in Section 2.2.
+
 ### 3.1 Advertising measurement (Meta / Facebook and Instagram)
 
 We advertise NavBharatAI on Facebook and Instagram so people can find it. To know which of those ads actually bring people — rather than guessing and wasting money — we share a **small, fixed set of events** with Meta.
@@ -202,6 +210,7 @@ We share personal data only with the parties below, and only for the purposes de
 - **AI infrastructure providers** — process prompts/context to generate output, as described in Section 4, with no training rights.
 - **GitHub** — only if you connect it, and only with the access you granted.
 - **Bot protection: Google reCAPTCHA Enterprise, Google Play Integrity and Apple App Attest (via Firebase App Check)** — for the actions listed in Section 3.3.
+- **Crash reporting: Google Firebase Crashlytics** — the filtered crash reports described in Section 3.4, from our Android and iOS apps only.
 - **Malware scanning** — files uploaded to the Nav App Store are submitted to an anti-malware scanning service before any listing can be approved.
 - **Meta (Facebook / Instagram)** — the advertising-measurement events listed in Section 3.1, and only with your consent. Never your chats, files, clinical data or built apps.
 - **Authorities** — if required by a valid legal order. We check every demand and share the minimum required.

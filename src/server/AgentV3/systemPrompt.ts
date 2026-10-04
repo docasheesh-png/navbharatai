@@ -18,7 +18,7 @@ import { EMOJI_RULE } from '../lib/responseEmoji';
 import { DEVICE_POWERS_RULE } from './devicePowers';
 import { LISTENING_PORTS_COMMAND } from './PortDiscovery';
 import { appAiGatewayEnabled } from '../lib/appAiGateway';
-import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE } from './noEvalRule';
+import { NO_EVAL_RULE, BUILD_WHAT_WAS_ASKED_RULE, NO_FAKED_RESULT_RULE, STABLE_SNAPSHOT_RULE, NO_FAKE_RESULTS_RULE, CORS_RULE, SEED_PASSWORD_RULE, NO_FAKE_FEATURE_RULE } from './noEvalRule';
 
 /**
  * The #1 conversation rule — mirror the user's language, never default to Hindi. The platform's
@@ -598,6 +598,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     STABLE_SNAPSHOT_RULE,
     CORS_RULE,
     SEED_PASSWORD_RULE,
+    NO_FAKE_FEATURE_RULE,
     '',
     'Conversation:',
     '- Reply to anything the user says. If they greet you (e.g. "hello") or ask a',
@@ -1360,6 +1361,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '      (A payment is PAID only when a SERVER verified the gateway signature — never from the browser',
     '       checkout\'s success callback. An app with no server records orders as "payment pending".)',
     '      uploads → generate_storage · realtime → generate_realtime · full-text search → generate_search',
+    '      (No database connected? A saved upload goes into IndexedDB as the file itself — src/lib/files.ts,',
+    '       saveFile/useFileUrl — never a data URL in localStorage/NavData: 5 MB for the whole app. Say files stay on this device.)',
     '    • phone OTP → generate_otp · SMS → generate_sms · newsletter signup → generate_newsletter · team',
     '      alerts → generate_notify (Slack/Discord) · your own DB → generate_db_config',
     '    • analytics → generate_analytics · error tracking → generate_error_tracking · feature flags →',

@@ -123,12 +123,35 @@ platform :ios do
       export_method: "app-store",
       output_directory: ENV.fetch("RUNNER_TEMP"),
       output_name: "NavBharatAI",
+      # Pinned so the Crashlytics `upload-symbols` tool SwiftPM checked out can be found below.
+      derived_data_path: File.join(ENV.fetch("RUNNER_TEMP"), "DerivedData"),
       export_options: {
         provisioningProfiles: {
           APP_IDENTIFIER => lane_context[SharedValues::SIGH_NAME],
         },
       },
     )
+
+    # CRASHLYTICS SYMBOLS (2026-10-04). A crash report from this build names functions only if this exact
+    # build's dSYM reaches Firebase. Upload it with the `upload-symbols` tool that SwiftPM fetched with the
+    # Firebase SDK. A failure here is LOUD in the log but never fails the release: a build that cannot
+    # upload symbols is still a working app, and its crashes are still recorded (just unsymbolicated).
+    begin
+      dsym = lane_context[SharedValues::DSYM_OUTPUT_PATH]
+      tool = Dir.glob(File.join(ENV.fetch("RUNNER_TEMP"), "DerivedData", "SourcePackages", "checkouts", "firebase-ios-sdk", "Crashlytics", "upload-symbols")).first
+      if dsym && tool && File.exist?(dsym)
+        upload_symbols_to_crashlytics(
+          dsym_path: dsym,
+          gsp_path: "ios/App/App/GoogleService-Info.plist",
+          binary_path: tool,
+        )
+        UI.success("Crashlytics: dSYM uploaded")
+      else
+        UI.important("Crashlytics: dSYM NOT uploaded (dsym=#{dsym.inspect}, upload-symbols=#{tool.inspect}). Crash reports from this build will be unsymbolicated.")
+      end
+    rescue StandardError => e
+      UI.important("Crashlytics: dSYM upload failed (#{e.class}). Crash reports from this build will be unsymbolicated.")
+    end
 
     if ENV["DO_UPLOAD"] == "true"
       # WAIT for Apple to finish processing so a green run means the build is GENUINELY available in

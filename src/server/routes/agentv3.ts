@@ -385,6 +385,7 @@ import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { beginChange, observeProbes, regressionsSoFar, settleChange, type ChangeSession } from '../AgentV3/changeEngine/changeSession';
+import type { SpecItem } from '../AgentV3/changeEngine/appSpec';
 import { changeEngineEnabled } from '../AgentV3/changeEngine/engineeringMemoryStore';
 import { createLaneWriteFence } from '../AgentV3/laneWriteFence';
 import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
@@ -21267,16 +21268,39 @@ async function noteBuildOutcome(
                   if (wider.probes.length > 0) coverage = wider;
                 }
               }
+              // CHANGE ENGINE (slice 2) — before deciding on a heal, RE-PROBE what this app was seen to do
+              // before (changeEngine/appSpec.ts). A working feature this edit removed joins the SAME bounded
+              // feature heal as a missing requested one — one pass, one verify-after-fix net, no new engine.
+              let regressedBeforeHeal: SpecItem[] = [];
+              let regressionScreens = false;
+              const reprobeRegressions = async (html0: string, screens: ProbedScreen[]): Promise<void> => {
+                if (!changeSession) return;
+                const targets = changeSession.regressionTargets.filter((f) => !coverage.probes.some((p) => p.feature === f));
+                if (targets.length === 0) return;
+                let reg = probeFeatures(changeSession.regressionTargets, combineScreens(html0, screens));
+                // A control on another screen is not gone — read the app's other screens before saying so.
+                if (reg.missing.length > 0 && screens.length === 0 && !readBehindSignIn && !abort.signal.aborted) {
+                  const more = await readOtherScreens();
+                  if (more.length > 0) { regressionScreens = true; reg = probeFeatures(changeSession.regressionTargets, combineScreens(html0, more)); }
+                }
+                observeProbes(changeSession, reg.probes.filter((p) => targets.includes(p.feature)));
+              };
+              if (changeSession && !abort.signal.aborted) {
+                observeProbes(changeSession, coverage.probes);
+                await reprobeRegressions(probeHtml, probedScreens);
+                regressedBeforeHeal = regressionsSoFar(changeSession);
+              }
+              const regressedLabels = regressedBeforeHeal.map((r) => r.label);
               // APP HEALTH CULTURE slice 2 (Phase 1b, opt-in AGENTV3_FEATURE_HEAL=on): the app renders
               // but a REQUESTED control is missing → run ONE bounded heal pass that adds the missing UI,
               // then re-open the running app and re-probe (only a control now in the live DOM counts).
               // Budget-gated + abortable; if the control still isn't there, the honest FEATURE_COVERAGE
               // warning below still stands. Never blocks or fails a build.
               if (
-                coverage.missing.length > 0 && featureHealEnabled(workspaceId) && !abort.signal.aborted
+                (coverage.missing.length > 0 || regressedLabels.length > 0) && featureHealEnabled(workspaceId) && !abort.signal.aborted
                 && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)
               ) {
-                events.emit({ type: 'narration', agent: 'architect', text: `🧪 The app runs, but I don't see a control for: ${coverage.missing.join(', ')}. Adding it now…`, ts: Date.now() });
+                events.emit({ type: 'narration', agent: 'architect', text: `🧪 The app runs, but I don't see a control for: ${[...coverage.missing, ...regressedLabels].join(', ')}. ${regressedLabels.length > 0 && coverage.missing.length === 0 ? 'It worked before this change — restoring it now…' : 'Adding it now…'}`, ts: Date.now() });
                 try {
                   const featureRunner = new AgentRunner({
                     ...baseRunnerOpts,
@@ -21285,7 +21309,7 @@ async function noteBuildOutcome(
                     model: resolveModel(powerLevelReqEffective),
                     persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                   });
-                  const applyHeal = () => runInPass('feature-presence-heal', () => featureRunner.run(featurePresenceRepairPrompt(coverage)));
+                  const applyHeal = () => runInPass('feature-presence-heal', () => featureRunner.run(featurePresenceRepairPrompt(coverage, regressedLabels)));
                   // VERIFY AFTER FIX (admin 2026-08-12) — the feature-presence heal is ALSO an allowed
                   // post-green write, so it must PROVE the app still renders afterwards, exactly like the
                   // runtime-error auto-fix below. Same snapshot→apply→re-render→keep-or-revert net: a heal
@@ -21317,6 +21341,7 @@ async function noteBuildOutcome(
                         const afterScreens = probedScreens.length > 0 ? await readOtherScreens() : [];
                         const afterCoverage = checkFeaturePresence(milestoneRequest ?? checksRequest, combineScreens(afterHtml, afterScreens), declinedPresenceFeatures(featureConfirmation));
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
+                        if (regressedBeforeHeal.length > 0) await reprobeRegressions(afterHtml, afterScreens.length > 0 ? afterScreens : regressionScreens ? await readOtherScreens() : []);
                       }
                     }
                   } else {
@@ -21328,6 +21353,7 @@ async function noteBuildOutcome(
                         const afterScreens = probedScreens.length > 0 ? await readOtherScreens() : [];
                         const afterCoverage = checkFeaturePresence(milestoneRequest ?? checksRequest, combineScreens(after, afterScreens), declinedPresenceFeatures(featureConfirmation));
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
+                        if (regressedBeforeHeal.length > 0) await reprobeRegressions(after, afterScreens.length > 0 ? afterScreens : regressionScreens ? await readOtherScreens() : []);
                       } catch { /* re-open best-effort — keep the pre-heal coverage */ }
                     }
                   }
@@ -21349,26 +21375,24 @@ async function noteBuildOutcome(
                   autoResolved: coverage.missing.length === 0,
                 });
               }
-              // CHANGE ENGINE — the requirement ledger (changeEngine/appSpec.ts). Record what the browser
-              // saw, then RE-PROBE what this app was seen to do before, so an edit that silently removes a
-              // working feature is caught instead of graded against the one sentence that started it.
+              // CHANGE ENGINE — what the browser saw, AFTER any heal, decides the ledger (a later observation
+              // of a feature wins). A regression the heal could not restore is reported honestly.
               if (changeSession) {
                 observeProbes(changeSession, coverage.probes);
-                const targets = changeSession.regressionTargets.filter((f) => !coverage.probes.some((p) => p.feature === f));
-                if (targets.length > 0 && !abort.signal.aborted) {
-                  let reg = probeFeatures(changeSession.regressionTargets, combineScreens(probeHtml, probedScreens));
-                  // A control on another screen is not gone — read the app's other screens before saying so.
-                  if (reg.missing.length > 0 && probedScreens.length === 0 && !readBehindSignIn) {
-                    const more = await readOtherScreens();
-                    if (more.length > 0) reg = probeFeatures(changeSession.regressionTargets, combineScreens(probeHtml, more));
-                  }
-                  observeProbes(changeSession, reg.probes.filter((p) => targets.includes(p.feature)));
+                const stillRegressed = regressionsSoFar(changeSession);
+                // The restore is recorded FIRST: a heal code resolves what is already open when it is
+                // recorded (HEAL_RESOLVES), so a regression that is STILL missing must come after it.
+                const restoredNow = regressedBeforeHeal.filter((r) => !stillRegressed.some((x) => x.id === r.id));
+                if (restoredNow.length > 0) {
+                  buildDiag.record({
+                    phase: 'readiness', severity: 'info', code: 'FEATURE_REGRESSION_HEALED', autoResolved: true,
+                    message: `Restored after this change removed them: ${restoredNow.map((r) => `${r.id} ${r.label}`).join(', ')}`,
+                  });
                 }
-                const regressed = regressionsSoFar(changeSession);
-                if (regressed.length > 0) {
+                if (stillRegressed.length > 0) {
                   buildDiag.record({
                     phase: 'readiness', severity: 'warning', code: 'FEATURE_REGRESSED', autoResolved: false,
-                    message: `Was working before this change and is missing now: ${regressed.map((r) => `${r.id} ${r.label}`).join(', ')}`,
+                    message: `Was working before this change and is missing now: ${stillRegressed.map((r) => `${r.id} ${r.label}`).join(', ')}`,
                     detail: 'Re-probed from the app\'s requirement ledger — each of these had a real control seen in the running app on an earlier build.',
                   });
                 }

@@ -3853,8 +3853,13 @@ the flag entries above promise.
   `.navbharat/` folder in the app (GitHub push, Green Freeze, forgeable by an imported repo, served on the
   preview URL). Stored text is platform-authored except a redacted 160-char request digest; issue text
   reaches the builder **fenced**, in the per-turn message, never the cached prefix.
-  ⚠️ **Slice 1 REPORTS a regression; it does not repair it** — feeding it to the feature heal is slice 2,
-  gated on real reports showing no false positives. **What to watch:** `FEATURE_REGRESSED` on edit builds.
+  🔁 **SLICE 2 (same day, admin: "sara kaam karo"): a regression joins the EXISTING feature heal** — same
+  runner, same `verifyAfterFix` net, same `AGENTV3_FEATURE_HEAL` cohort gate (so it spends a repair pass
+  only for the 20% cohort today; widening `_PCT` widens this too). The prompt says RESTORE, never
+  redesign. A restore is recorded as `FEATURE_REGRESSION_HEALED`; what the heal could not restore stays
+  `FEATURE_REGRESSED`. ⚠️ The regression probe's false-positive rate on real builds is UNMEASURED — the
+  admin chose to ship the repair before that measurement. **What to watch:** `FEATURE_REGRESSED` and
+  `FEATURE_REGRESSION_HEALED` on edit builds, and any heal on an app the user says was fine.
 - **`AGENTV3_CONTRACT_FILE`** (default ON, set `off` to disable — added 2026-09-17, autopsy 57875eb3) —
   the fast lane's SHARED CONTRACT (the enums / interfaces / types every per-file call is handed) is now
   written as a REAL file, `src/types.ts` (or `types.ts` when the app has no `src/`), BEFORE any other file,

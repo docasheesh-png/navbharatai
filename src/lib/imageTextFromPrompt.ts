@@ -34,10 +34,12 @@ export interface ExtractedText {
  * rather than `\b`, because `\b` sits happily in the middle of a longer digit run and would pull ten
  * digits out of a twelve-digit order number.
  */
-const PHONE_RE = /(?<![\d])(?:(?:\+?91[\s-]?)|0)?([6-9]\d{4})[\s-]?(\d{5})(?![\d])/g;
+// ⚠️ No lookbehind (Q-322): Safari before 16.4 cannot parse one, and this file ships to iOS 15. The
+// start is a CONSUMING non-digit, so the number itself is the named group `num`, not `m[0]`.
+const PHONE_RE = /(?:^|[^\d])(?<num>(?:(?:\+?91[\s-]?)|0)?(?<head>[6-9]\d{4})[\s-]?(?<tail>\d{5}))(?![\d])/g;
 
 /** A six-digit Indian PIN code — the one part of an address that is unambiguous. */
-const PIN_RE = /(?<![\d])[1-9]\d{5}(?![\d])/;
+const PIN_RE = /(?:^|[^\d])[1-9]\d{5}(?![\d])/;
 
 /**
  * Words that mark a piece of an Indian address.
@@ -78,8 +80,9 @@ function unique(items: ExtractedText[]): ExtractedText[] {
 export function findPhones(prompt: string): string[] {
   const out: string[] = [];
   for (const m of String(prompt ?? '').matchAll(PHONE_RE)) {
-    const asWritten = m[0].trim();
-    if (!normalizePhone(`${m[1]}${m[2]}`)) continue;
+    const { num, head, tail } = m.groups ?? {};
+    const asWritten = String(num ?? '').trim();
+    if (!asWritten || !normalizePhone(`${head}${tail}`)) continue;
     out.push(asWritten);
   }
   return out;

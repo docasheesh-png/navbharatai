@@ -18,9 +18,10 @@
 // scheduling, progress/todo projection, and the per-module build context. No I/O, no SDKs —
 // fully unit-testable. Durable persistence lives in ProjectPlanStore.ts.
 
+import { isPlatformContinuePrompt } from '../../lib/continueBuildPrompts';
 import type { TodoItem, TodoStatus } from './types';
 import { parseEnvFlag } from '../lib/envFlag';
-import { countEnumeratedFeatures, BIG_SOFTWARE_NOUN, SPEC_FEATURE_COUNT } from './enumeratedFeatures';
+import { countEnumeratedFeatures, sectionedSpecSize, BIG_SOFTWARE_NOUN, SPEC_FEATURE_COUNT } from './enumeratedFeatures';
 import { STARTER_ENTRY_PATHS } from './stillTheStarterApp';
 
 export type ModuleStatus = 'pending' | 'in_progress' | 'done' | 'failed';
@@ -146,6 +147,8 @@ export interface MegaProjectSignals {
   bigNoun: boolean;
   /** The verdict — exactly what `detectMegaProject` returns. */
   fires: boolean;
+  /** Numbered sections when the spec is organised in them (`sectionedSpecSize`), else null. */
+  sections?: number | null;
 }
 
 /**
@@ -169,12 +172,15 @@ export function megaProjectSignals(prompt: string): MegaProjectSignals {
   const text = (prompt || '').toLowerCase();
   const scaleMatch = text.match(/(\d{2,6})\s*\+?\s*(?:files?|pages?|screens?|modules?)/);
   const scale = scaleMatch ? Number(scaleMatch[1]) : 0;
-  const features = countEnumeratedFeatures(prompt || '');
+  // A spec in numbered sections is sized by its sections, not by each section's bullets (autopsy Sur
+  // Taal, 2026-10-04: a music player's buttons counted as 40 features and became 23 modules).
+  const sections = sectionedSpecSize(prompt || '');
+  const features = sections ?? countEnumeratedFeatures(prompt || '');
   const bigNoun = BIG_SOFTWARE_NOUN.test(text);
   const fires = scale >= MEGA_SCALE_MIN
     || (bigNoun && features >= MEGA_BULLETS_WITH_NOUN)
     || features >= MEGA_BULLETS_ALONE;
-  return { scale, features, bigNoun, fires };
+  return { scale, features, bigNoun, fires, sections };
 }
 
 /** See `megaProjectSignals` — this is its `fires` field, kept as the call sites' short name. PURE. */
@@ -321,7 +327,9 @@ export function projectModeDiagnosis(args: {
   }
 
   const sig = megaProjectSignals(args.prompt ?? '');
-  const signals = `Signals: ${sig.features} enumerated feature ${sig.features === 1 ? 'part' : 'parts'}, `
+  const signals = (sig.sections != null
+    ? `Signals: a spec in ${sig.sections} numbered section(s), sized by its sections (their bullets are each section's parts), `
+    : `Signals: ${sig.features} enumerated feature ${sig.features === 1 ? 'part' : 'parts'}, `)
     + `big-software noun: ${sig.bigNoun ? 'yes' : 'no'}, `
     + `largest stated scale: ${sig.scale > 0 ? sig.scale : 'none'}. `
     + `It fires at >= ${MEGA_BULLETS_WITH_NOUN} lines WITH such a noun, >= ${MEGA_BULLETS_ALONE} without, `
@@ -351,9 +359,13 @@ export function projectModeDiagnosis(args: {
  * prompt ('continue') plus common English + Hinglish phrasings. PURE.
  */
 export function isContinuationMessage(prompt: string): boolean {
+  // Our own buttons' sentences (autopsy Sur Taal, 2026-10-04): "Continue the build from where it left off
+  // and finish the remaining steps." is what the "Continue building" card sends, and it did not match the
+  // pattern below, so a paused plan never resumed from the very button made to resume it.
+  if (isPlatformContinuePrompt(prompt)) return true;
   const t = (prompt || '').trim().toLowerCase();
   if (!t || t.length > 80) return false;
-  return /^(?:please\s+|ok(?:ay)?[,\s]+|haan?[,\s]+)*(?:continue|resume|proceed|carry on|keep going|go on|next(?: module| step)?|finish(?: it)?|complete(?: it)?|aage(?: barh| badh)(?:o|ao|iye)?|jari rakho|chalu rakho|continue karo|next banao|aage chalo)(?:\s+(?:building|the build|the project|karo|karo!|it))?[\s!.।]*$/i.test(t);
+  return /^(?:please\s+|ok(?:ay)?[,\s]+|haan?[,\s]+)*(?:continue|resume|proceed|carry on|keep going|go on|next(?: module| step)?|finish(?: it)?|complete(?: it)?|aage(?: barh| badh)(?:o|ao|iye)?|jari rakho|chalu rakho|continue karo|next banao|aage chalo)(?:\s+(?:building|the build|the project|the app|karo|karo!|it))?(?:\s+from where (?:it|you|we) (?:left off|stopped))?(?:\s*(?:,|and)\s*(?:finish|complete)(?:\s+(?:it|the rest|the remaining steps|the app|the build))?)?[\s!.।]*$/i.test(t);
 }
 
 // ── Parsing the planner's output ──────────────────────────────────────────────────────────────

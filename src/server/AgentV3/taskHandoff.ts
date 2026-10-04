@@ -23,11 +23,15 @@ export const HANDOFF_MAX_TOTAL_CHARS = 36_000;
  * Project paths named in an instruction, in first-mention order. Only paths that LOOK like project
  * files: a directory-qualified source path, or one of a few well-known root files. URLs are skipped.
  */
+//
+// ⚠️ A port names its ORIGINAL sources too (autopsy 51ef24ad): `.kt`, `.java`, `.swift` and `.dart` are
+// recognised, or a task saying "port app/src/main/java/…/HomeScreen.kt" attaches nothing and the
+// specialist spends its steps reading what the architect already held.
 export function filesNamedIn(instruction: string): string[] {
   const text = String(instruction ?? '');
   const out: string[] = [];
   const seen = new Set<string>();
-  const re = /(^|[\s`'"(\[,:])((?:\.\/)?(?:[\w@-]+\/)+[\w.@-]+\.(?:tsx?|jsx?|mjs|cjs|css|scss|json|html?|vue|svelte|prisma|sql)|index\.html|package\.json|vite\.config\.[jt]s|tsconfig\.json)(?![\w/])/g;
+  const re = /(^|[\s`'"(\[,:])((?:\.\/)?(?:[\w@-]+\/)+[\w.@-]+\.(?:tsx?|jsx?|mjs|cjs|css|scss|json|html?|vue|svelte|prisma|sql|kt|java|swift|dart)|index\.html|package\.json|vite\.config\.[jt]s|tsconfig\.json)(?![\w/])/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const before = text.slice(Math.max(0, m.index - 8), m.index + m[1].length);

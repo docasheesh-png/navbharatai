@@ -34,6 +34,7 @@
 // for repeatedly.
 
 import { lintBuiltApp } from './buildQualityLint';
+import { unlabelledFieldLines } from '../AppMakerLab/intelligence/A11yLinter';
 
 /**
  * A test file's JSX is a FIXTURE, not a screen — the one place this check must stay quiet.
@@ -67,6 +68,20 @@ export const PER_FILE_VIOLATIONS: ReadonlySet<string> = new Set([
   'html-lang',
   'positive-tabindex',
   'off-grid-spacing',
+  // A clickable <div>/<span> (autopsy c70bcbb4): added to the linter after this list was written, so the
+  // end-of-build check flagged PlayerBar and NowPlayingScreen while neither ever got a note.
+  'click-noninteractive',
+]);
+
+/**
+ * The violation types that are judgements about the WHOLE app, never about one file (see above). Every type
+ * a linter emits is in exactly one of these two sets — a census test fails on a new type in neither, which
+ * is how `click-noninteractive` was missed for five days.
+ */
+export const WHOLE_APP_VIOLATIONS: ReadonlySet<string> = new Set([
+  'color-count',
+  'font-count',
+  'hardcoded-colors',
 ]);
 
 /** Kill switch. `off` restores the pre-2026-09-20 behaviour exactly: no note, ever. */
@@ -106,7 +121,9 @@ export function qualityNote(
   try {
     for (const v of [...lint.a11y.violations, ...lint.design.violations]) {
       if (!v || !PER_FILE_VIOLATIONS.has(v.type) || !(v.count > 0)) continue;
-      lines.push(`  • ${v.message}`);
+      // Where, not only how many (autopsy 981ce4cc): the line numbers of the unlabelled fields.
+      const at = v.type === 'input-label' ? unlabelledFieldLines(content) : [];
+      lines.push(`  • ${v.message}${at.length ? ` Unlabelled field at line ${at.join(', ')}.` : ''}`);
       if (lines.length >= MAX_NOTE_LINES) break;
     }
   } catch {

@@ -54,6 +54,13 @@ export function toolCallTarget(input: unknown): string {
     return clip(`${JSON.stringify(o.pattern.trim())} in ${o.path.trim()}`);
   }
 
+  // A DELEGATION IS ITS ROLE (autopsy Sur Taal, 2026-10-04): four `▶ task` lines with no detail hid that
+  // all four went to `frontend` at once. The instruction is free-form model prose, so only its size is
+  // shown — the same whitelist rule as a command line.
+  if (typeof o.role === 'string' && o.role.trim() && typeof o.instruction === 'string') {
+    return clip(`${o.role.trim()} (${o.instruction.length} chars)`);
+  }
+
   for (const key of TARGET_FIELDS) {
     const v = o[key];
     if (typeof v === 'string' && v.trim()) return clip(v.trim());

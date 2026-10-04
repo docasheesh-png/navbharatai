@@ -100,6 +100,12 @@ export interface RuntimeEvidence {
    */
   journeyUnreachableWhy?: string;
   /**
+   * Did a PASSED journey reload the page and find what it saved? `false` when every journey that passed was
+   * a plain submit (autopsy 68f0a486: the gate said "filled a form, submitted, reloaded" about a sign-in
+   * form that was submitted and never reloaded). Only the wording reads it; omitted keeps the old sentence.
+   */
+  journeyReloaded?: boolean;
+  /**
    * Why there was no journey to drive at all, in the derivation's own words (`noJourneyReason`). The gate
    * used to assert "this app has no data-entry flow" here, which was false of every app whose controls
    * are buttons and whose state lives in storage (autopsy 536c8189). Optional: omitted keeps a generic,
@@ -162,6 +168,8 @@ export interface StaticFindings {
   highSeverity: number;
   /** Everything else worth mentioning. */
   warnings: number;
+  /** What those warnings ARE, in a few words each (`shippingIssueLabels`) — named in the headline. */
+  warningLabels?: string[];
 }
 
 /**
@@ -213,7 +221,7 @@ export interface GateVerdict {
 // ⚠️ Every field added to RuntimeEvidence that is NOT a runtime CHECK must be excluded here, or it
 // silently becomes a row the gate tries to label and grade. tsc catches the omission, which is
 // how `stoppedByUser` was caught the moment it was added.
-export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'awaitingShell' | 'noPageRoutes' | 'explore' | 'explorePresses' | 'journeyUnreachableWhy' | 'journeyNoneWhy'>;
+export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'awaitingShell' | 'noPageRoutes' | 'explore' | 'explorePresses' | 'journeyUnreachableWhy' | 'journeyNoneWhy' | 'journeyReloaded'>;
 
 /** What a PASS means. Phrased as a completed fact, because that is what `proven` is a list of. */
 const RUNTIME_LABEL: Record<CheckKey, string> = {
@@ -343,7 +351,11 @@ export function releaseGate(
 
   for (const key of Object.keys(RUNTIME_LABEL) as Array<keyof typeof RUNTIME_LABEL>) {
     const outcome = ev[key];
-    if (outcome === 'passed') proven.push(RUNTIME_LABEL[key]);
+    if (outcome === 'passed') {
+      proven.push(key === 'journeys' && ev.journeyReloaded === false
+        ? 'a real user journey held up (filled a form and submitted it; nothing was saved and reloaded)'
+        : RUNTIME_LABEL[key]);
+    }
     else if (outcome === 'failed') {
       if (RED_ON_FAILURE.includes(key)) failures.push(FAILURE_LABEL[key]);
       // Named in the caveats instead — prominently, but it cannot condemn a running app.
@@ -440,7 +452,7 @@ export function releaseGate(
     // Loudest first: a failed typecheck or test suite is the most serious thing that can be true of an
     // app that still runs, so it leads the caveats rather than trailing the count of "things".
     ...softFailures,
-    f.warnings > 0 ? `${f.warnings} thing(s) worth a look` : '',
+    f.warnings > 0 ? `${f.warnings} thing(s) worth a look${namedWarnings(f)}` : '',
     ...qualityCaveats,
   ].filter(Boolean).join(', ');
   // The honest not-proven headline. For an app with no data-entry flow at all, "whether it SAVES anything
@@ -461,6 +473,14 @@ export function releaseGate(
       : notProvenHeadline,
     proven, unproven, failures,
   };
+}
+
+/** " (design consistency 96/100)" — the warnings the count above stands for, when they were given. PURE. */
+function namedWarnings(f: StaticFindings): string {
+  const labels = (f.warningLabels ?? []).filter((l) => typeof l === 'string' && l.trim());
+  if (labels.length === 0) return '';
+  const more = f.warnings > labels.length ? `, +${f.warnings - labels.length} more` : '';
+  return ` (${labels.join('; ')}${more})`;
 }
 
 const STATE_WORD: Record<GateState, string> = {

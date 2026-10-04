@@ -12,9 +12,10 @@ import { billedAmountUsd } from './pricing';
 import type { UsageSink } from './UsageSink';
 import { withTimeout } from './asyncUtils';
 import { weakCheckpointConfig, shouldRunWeakCheckpoint, weakCheckpointSteer } from './weakBuildCheckpoint';
-import { doneSignalConfig, shouldCheckDone, appIsDone, doneSteer, type ReadyMark } from './doneSignal';
+import { doneSignalConfig, shouldCheckDone, appIsDone, doneSteer, endOfTurnReadyMark, type ReadyMark } from './doneSignal';
 import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTriggerMidBuildRepair, parseTscErrors, stepResumeBudget } from './EndgameRepair';
 import { PARALLEL_WRITER_ROLES } from './parallelBuild';
+import { writerTaskSiblings, SIBLING_TASKS_INPUT_KEY } from './parallelSiblings';
 import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
@@ -84,6 +85,8 @@ export interface AgentRunnerOptions {
    * The route wires this only for the FULL TEAM ('max') tier; omitted elsewhere (no behavior change).
    */
   steerPoll?: () => string[];
+  /** The ETA line the user was last shown, for a live message that asks how long (autopsy 68f0a486). */
+  currentEta?: () => string | null;
   /** Enable Anthropic adaptive thinking (streams a thinking summary to the UI). */
   thinking?: boolean;
   /** Optional hard budget (USD billed to the user). Stops honestly when reached. */
@@ -381,11 +384,25 @@ export function buildTimedOut(startMs: number, maxBuildMs: number | undefined, n
  * (a name, an answer, a "no"). So the turn now says what the user is owed: act on it, or say how it was
  * read — and account for it in the final reply either way.
  */
-export function liveUserMessageTurn(message: string): string {
+export function liveUserMessageTurn(message: string, etaShown?: string | null): string {
+  const eta = etaShown && asksHowLong(message)
+    ? `They are asking how long it will take. The platform's own estimate, already on their screen: "${etaShown.replace(/\s+/g, ' ').trim()}". Answer with THAT, in their language — never a number of your own. `
+    : '';
   return '[USER MESSAGE — sent live during the build.] Act on it now without discarding progress. '
     + 'If it answers a question you asked, build to that answer. If it is unclear what it asks for, '
     + 'say in one line how you read it before you continue. Your final reply must say what you did '
-    + `about it.\n${message}`;
+    + `about it. ${eta}\n${message}`;
+}
+
+/**
+ * Does a live message ask how long the build will take? (autopsy 68f0a486: "इसको बनने में कितना टाइम
+ * लगेगा" got "2-3 minutes" from the model while the platform's own line said about four.) Precision-first:
+ * a time WORD alone is not the question — "add a time table", "समय सारणी" are features. PURE.
+ */
+export function asksHowLong(message: string): boolean {
+  const m = String(message ?? '');
+  return /\bhow long\b|\bhow much (?:more )?time\b|\bwhen will (?:it|the app|this|my app) be (?:ready|done|finished)\b|\bkitn[aei] (?:time|der|samay|minute)|\bkab tak\b|\bkitni der\b/i.test(m)
+    || /कितन[ाीे]\s*(?:टाइम|समय|देर|मिनट)|कब\s*तक/.test(m);
 }
 
 export interface AgentRunResult {
@@ -455,6 +472,10 @@ export class AgentRunner {
    * file, which by definition happens on a later turn. Paths only — a bounded handful per build.
    */
   private readonly _truncationSteered = new Set<string>();
+  /** The ETA line the user was last shown, or null; never throws (see `liveUserMessageTurn`). */
+  private shownEta(): string | null {
+    try { return this.opts.currentEta?.() ?? null; } catch { return null; }
+  }
 
   constructor(private readonly opts: AgentRunnerOptions) {}
 
@@ -761,7 +782,7 @@ export class AgentRunner {
         // narration ack is the honest "picked up" signal (the route already acked "queued" instantly).
         const steered = this.opts.steerPoll?.() ?? [];
         for (const sm of steered) {
-          messages.push({ role: 'user', content: liveUserMessageTurn(sm) });
+          messages.push({ role: 'user', content: liveUserMessageTurn(sm, this.shownEta()) });
           messageTs.push(Date.now()); // the person's own words: a user turn, kept in step with its timestamp
           events.emit({ type: 'narration', agent: agentRole, text: `📨 The team picked up your message: “${sm.slice(0, 160)}${sm.length > 160 ? '…' : ''}”`, ts: Date.now() });
         }
@@ -1043,11 +1064,20 @@ export class AgentRunner {
               const readiness = await dispatcher.assessBuildReadiness();
               // Surface the verdict to the UI as a build-health card (R2 §4.6) — pass or fail.
               buildHealth = { score: readiness.score, ready: readiness.ready, blockers: readiness.blockers, warnings: readiness.warnings, tier: readiness.tier };
+              // The end-of-turn gate judged the app, so it records when it was first finished (Q-310).
+              try {
+                readyMark = endOfTurnReadyMark({
+                  existing: readyMark, readiness,
+                  typeErrors: typeof dispatcher.lastKnownTypeErrors === 'function' ? dispatcher.lastKnownTypeErrors() : null,
+                  editingExistingApp: this.opts.editingExistingApp === true, wroteThisRun: dispatcher.wroteAnything(),
+                  step: steps, elapsedMs: Date.now() - buildStartMs,
+                });
+              } catch { /* a measurement must never touch a build */ }
               if (readiness.ready && styleResumes === 0 && !this.opts.focusedRepair && !this.opts.signal?.aborted) {
                 // SCREENS THAT USE CLASSES NO STYLESHEET DEFINES ARE HANDED BACK ONCE, while the model still
                 // holds them (autopsy 1be16985 — 63 undefined classes, then a 174 s fresh-context repair).
                 const style = await dispatcher.undefinedClassesNow();
-                const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, a11y: style.a11y, resumesUsed: styleResumes, producedFiles: producingToolUses > 0 });
+                const decision = decideStyleResume({ text: turn.text, missing: style.missing, sheet: style.sheet, pages: style.pages, a11y: style.a11y, orphans: style.orphans, resumesUsed: styleResumes, producedFiles: producingToolUses > 0 });
                 if (decision.resume) {
                   styleResumes++;
                   summaryBeforeStyleResume = turn.text.trim() || null;
@@ -1055,7 +1085,7 @@ export class AgentRunner {
                   // (autopsy 536c8189 — it is snapped deterministically in `spacingSnap.ts`).
                   const styleNotice = handBackNotice('style', turn.text);
                   if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
-                  try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`)].join(' ') }); } catch { /* a note must never fail a build */ }
+                  try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length, style.orphans?.length ?? 0, style.a11y?.length ?? 0), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.orphans ?? []).map((o) => `${o}:unimported`)].join(' ') }); } catch { /* a note must never fail a build */ }
                   pushPlatformTurn(decision.message);
                   continue;
                 }
@@ -1124,7 +1154,7 @@ export class AgentRunner {
                 // A specialist's text is forwarded to the chat too (SubAgent re-emits narration).
                 const styleNotice = handBackNotice('style', turn.text);
                 if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
-                try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: `${agentRole}:${styleResumeNote(style.missing.length, style.pages.length)}`, detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`)].join(' ') }); } catch { /* a note must never fail a build */ }
+                try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: `${agentRole}:${styleResumeNote(style.missing.length, style.pages.length, 0, style.a11y?.length ?? 0)}`, detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`)].join(' ') }); } catch { /* a note must never fail a build */ }
                 pushPlatformTurn(decision.message);
                 continue;
               }
@@ -1265,8 +1295,13 @@ export class AgentRunner {
         }
         if (parallelIdx.length > 0) {
           const dupes = duplicateReadsInTurn(turn.toolUses, parallelIdx);
+          // Writers running side by side are told each other's tasks (autopsy Sur Taal — four frontend
+          // children each built the whole app). See parallelSiblings.ts.
+          const siblings = writerTaskSiblings(turn.toolUses, parallelIdx, (r) => PARALLEL_WRITER_ROLES.has(r));
           await mapWithConcurrency(parallelIdx.filter((i) => !dupes.has(i)), toolConcurrency, async (i) => {
-            resultBlocks[i] = toBlock(await dispatchWithBudget(turn.toolUses[i]));
+            const sib = siblings.get(i);
+            const tu = sib ? { ...turn.toolUses[i], input: { ...turn.toolUses[i].input, [SIBLING_TASKS_INPUT_KEY]: sib } } : turn.toolUses[i];
+            resultBlocks[i] = toBlock(await dispatchWithBudget(tu));
           });
           for (const [i, first] of dupes) {
             resultBlocks[i] = toBlock({

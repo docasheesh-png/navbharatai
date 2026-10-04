@@ -33,6 +33,7 @@ import {
   ADMIN_WELCOME_GIFT_TOKENS, ADMIN_WELCOME_GIFT_RUPEES, BULK_WELCOME_GIFT_MAX, NEW_USER_MAX_DAYS,
 } from '../lib/adminWelcomeGift';
 import { audit } from '../lib/audit';
+import { readAdminReason, readTokenDelta, broadcastScopeConfirmed } from '../../lib/adminActionReason';
 import { buildDiscountStore, BUILD_DISCOUNT_MAX_PCT, BUILD_DISCOUNT_CACHE_MS } from '../lib/buildDiscount';
 import { TOKENS_PER_RUPEE } from '../lib/payments';
 import { mergeWallets } from '../lib/accountMerge';
@@ -160,6 +161,7 @@ const GROWING_COLLECTIONS: readonly string[] = [
   'referral_claim_people',
   'workspace_files_v3', 'workspace_assets_v3', 'workspace_checkpoints_v3', 'workspace_embeddings_v3',
   'workspace_memory_v3', 'workspace_diagnostics_v3', 'workspace_manual_edits_v3', 'project_plans_v3',
+  'app_engineering_memory_v1',
 ];
 import { adminLockoutEnabled, checkAdminLock, recordAdminFail, recordAdminSuccess } from '../lib/adminLoginGuard';
 import { routeParam, routeParams } from '../lib/expressCompat';
@@ -362,8 +364,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       }, { merge: true });
     } catch (err) {
       console.error('[ADMIN_MFA] enrol write failed:', err);
+      audit('ADMIN_MFA_ENROLL_STARTED', { admin: adminUsername(), result: 'failed', ip: _req.ip });
       return res.status(500).json({ error: 'Failed to start MFA enrolment.' });
     }
+    // Never the secret itself — only that a new one was issued.
+    audit('ADMIN_MFA_ENROLL_STARTED', { admin: adminUsername(), result: 'ok', ip: _req.ip });
     res.json({ secret, otpauthUri: totpAuthUri(secret, label, 'NavBharatAI') });
   });
 
@@ -609,7 +614,13 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   });
   app.post('/api/admin/release-gate', verifyAdminToken, async (req: Request, res: Response) => {
     const config = normalizeGateConfig({ ...(req.body ?? {}), updatedAtMs: Date.now(), updatedBy: 'admin' });
+    // Before/after in the audit log (PR 1): freezing releases is a privileged change. A read that fails
+    // is recorded as unknown, never as a blank "before".
+    const before = await releaseGateStore.get().catch(() => null);
     const ok = await releaseGateStore.set(config);
+    audit('ADMIN_RELEASE_GATE_CHANGED', {
+      admin: adminUsername(), before: before ?? 'unknown', after: config, result: ok ? 'ok' : 'not-saved', ip: req.ip,
+    });
     if (!ok) return res.status(503).json({ error: 'Could not persist the release gate (storage unavailable).' });
     res.json({ ok: true, config });
   });
@@ -1013,7 +1024,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         lastBroadcastAt: lastUpdateBroadcast?.at ?? null,
         now: Date.now(),
       });
-      if (!gate.allowed) { res.status(409).json({ sent: 0, blocked: true, reason: gate.reason }); return; }
+      if (!gate.allowed) {
+        audit('ADMIN_UPDATE_BROADCAST', { admin: adminUsername(), versionCode: latestVersionCode, confirmCount, result: 'blocked', reason: gate.reason, ip: req.ip });
+        res.status(409).json({ sent: 0, blocked: true, reason: gate.reason });
+        return;
+      }
 
       const payload = updateBroadcastPayload((process.env.ANDROID_LATEST_VERSION_NAME || '').trim() || null);
       // Grouped by user because sendPushToUser owns the dead-token pruning for that user's tokens.
@@ -1025,8 +1040,12 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         sentUsers += 1;
       }
       lastUpdateBroadcast = { versionCode: latestVersionCode, at: Date.now(), devices: cohort.targets.length };
+      audit('ADMIN_UPDATE_BROADCAST', {
+        admin: adminUsername(), versionCode: latestVersionCode, devices: cohort.targets.length, users: sentUsers, result: 'ok', ip: req.ip,
+      });
       res.json({ sent: cohort.targets.length, users: sentUsers, versionCode: latestVersionCode });
     } catch (err: any) {
+      audit('ADMIN_UPDATE_BROADCAST', { admin: adminUsername(), result: 'failed', error: err?.message, ip: req.ip });
       res.status(500).json({ error: err?.message || 'Could not send the update broadcast.' });
     }
   });
@@ -1349,7 +1368,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   // workspace diagnostics — different collection, different purpose.
   app.delete('/api/admin/build-reports/:id', verifyAdminToken, async (req: Request, res: Response) => {
     try {
-      const ok = await deleteAdminBuildReport(String(routeParam(req.params.id)));
+      const id = String(routeParam(req.params.id));
+      const ok = await deleteAdminBuildReport(id);
+      audit('ADMIN_BUILD_REPORT_DELETED', { admin: adminUsername(), id, result: ok ? 'ok' : 'not-found', ip: req.ip });
       if (!ok) { res.status(404).json({ error: 'Build report not found (or it could not be deleted).' }); return; }
       res.json({ ok: true });
     } catch (err: any) {
@@ -1366,6 +1387,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         return;
       }
       const deleted = await deleteAllAdminBuildReports();
+      audit('ADMIN_BUILD_REPORTS_CLEARED', { admin: adminUsername(), deleted, result: 'ok', ip: req.ip });
       res.json({ ok: true, deleted });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to clear the build reports.' });
@@ -1413,7 +1435,9 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
 
   app.delete('/api/admin/apk-reports/:id', verifyAdminToken, async (req: Request, res: Response) => {
     try {
-      const ok = await deleteApkReport(String(routeParam(req.params.id)));
+      const id = String(routeParam(req.params.id));
+      const ok = await deleteApkReport(id);
+      audit('ADMIN_APK_REPORT_DELETED', { admin: adminUsername(), id, result: ok ? 'ok' : 'not-found', ip: req.ip });
       if (!ok) { res.status(404).json({ error: 'APK build report not found (or it could not be deleted).' }); return; }
       res.json({ ok: true });
     } catch (err: any) {
@@ -1428,6 +1452,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         return;
       }
       const deleted = await deleteAllApkReports();
+      audit('ADMIN_APK_REPORTS_CLEARED', { admin: adminUsername(), deleted, result: 'ok', ip: req.ip });
       res.json({ ok: true, deleted });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Failed to clear the APK build reports.' });
@@ -2242,8 +2267,15 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   app.post('/api/admin/users/:userId/tokens', verifyAdminToken, async (req: Request, res: Response) => {
     const db = getDb() as any;
     const { userId } = routeParams(req.params);
-    const { delta, reason } = req.body;
-    if (!delta || typeof delta !== 'number') return res.status(400).json({ error: 'delta (number) required' });
+    // PR 1 (admin panel audit, 2026-10-04): the reason is the ADMIN's, and it is required. The server
+    // used to fill in "Admin adjustment" when the box was left empty, so the audit trail recorded a
+    // sentence nobody wrote. `readAdminReason` is the same rule the screen applies.
+    const deltaRead = readTokenDelta((req.body ?? {}).delta);
+    if (!deltaRead.ok) return res.status(400).json({ error: deltaRead.error });
+    const reasonRead = readAdminReason((req.body ?? {}).reason);
+    if (!reasonRead.ok) return res.status(400).json({ error: reasonRead.error });
+    const delta = deltaRead.delta;
+    const reason = reasonRead.reason;
     try {
       const walletRef = doc(db, 'user_token_wallets', userId);
       // 🔴 MONEY AUDIT 2026-09-12 — TWO BUGS FIXED HERE, AND THE SECOND WAS INVISIBLE.
@@ -2261,10 +2293,11 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
       //     "+1 token" adjustment on such an account would have wiped that ₹ the user had really paid.
       //     In the other direction (a wallet credited in ₹ only, as the coupon path used to do) the same
       //     line MINTED balance. `mirroredCreditPatch` moves both views by the same money, never assigns.
-      const newBalance = await runTransaction(db, async (tx: any) => {
+      const outcome = await runTransaction(db, async (tx: any) => {
         const fresh = await tx.get(walletRef);
         if (!fresh.exists()) return null;
         const w = fresh.data();
+        const previousBalance = Number(w.tokenBalance || 0);
         const patch = mirroredCreditPatch(w, delta, 'gift');
         tx.update(walletRef, {
           ...patch,
@@ -2272,18 +2305,29 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
           ...ledgerPatch(w, {
             type: 'admin_adjustment',
             amountCoinsOrTokens: delta,
-            description: reason || 'Admin adjustment',
-            reason: reason || 'Admin adjustment',
+            description: reason,
+            reason,
             timestamp: new Date().toISOString(),
           }),
           updatedAt: new Date().toISOString(),
         });
-        return patch.tokenBalance;
+        return { previousBalance, newBalance: patch.tokenBalance };
       });
-      if (newBalance === null) return res.status(404).json({ error: 'User not found' });
-      audit('ADMIN_TOKEN_ADJUST', { userId, delta, reason, ip: req.ip });
-      res.json({ ok: true, newBalance });
-    } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
+      if (outcome === null) {
+        audit('ADMIN_TOKEN_ADJUST', { admin: adminUsername(), userId, delta, reason, result: 'user-not-found', ip: req.ip });
+        return res.status(404).json({ error: 'User not found' });
+      }
+      audit('ADMIN_TOKEN_ADJUST', {
+        admin: adminUsername(), userId, delta, reason,
+        previousBalance: outcome.previousBalance, newBalance: outcome.newBalance,
+        result: 'ok', ip: req.ip,
+      });
+      res.json({ ok: true, previousBalance: outcome.previousBalance, newBalance: outcome.newBalance });
+    } catch (e: any) {
+      console.error('[ADMIN] Internal error:', e?.message);
+      audit('ADMIN_TOKEN_ADJUST', { admin: adminUsername(), userId, delta, reason, result: 'failed', error: e?.message, ip: req.ip });
+      res.status(500).json({ error: 'Internal server error.' });
+    }
   });
 
   /**
@@ -2454,13 +2498,23 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
   app.post('/api/admin/users/:userId/ban', verifyAdminToken, async (req: Request, res: Response) => {
     const db = getDb() as any;
     const { userId } = routeParams(req.params);
-    const { banned, reason } = req.body;
+    const banned = !!(req.body ?? {}).banned;
+    // PR 1 (admin panel audit, 2026-10-04): a BAN needs the admin's own reason — the screen used to send
+    // the hard-coded "Admin action". Lifting a ban takes an optional one (it restores, it does not take).
+    const reasonRead = readAdminReason((req.body ?? {}).reason);
+    if (banned && !reasonRead.ok) return res.status(400).json({ error: reasonRead.error });
+    const reason = reasonRead.ok ? reasonRead.reason : '';
+    const event = banned ? 'ADMIN_USER_BANNED' : 'ADMIN_USER_UNBANNED';
     try {
       const walletRef = doc(db, 'user_token_wallets', userId);
-      await setDoc(walletRef, { banned: !!banned, banReason: reason || '', bannedAt: new Date().toISOString() }, { merge: true });
-      audit(banned ? 'ADMIN_USER_BANNED' : 'ADMIN_USER_UNBANNED', { userId, reason, ip: req.ip });
-      res.json({ ok: true, banned: !!banned });
-    } catch (e: any) { console.error('[ADMIN] Internal error:', e?.message); res.status(500).json({ error: 'Internal server error.' }); }
+      await setDoc(walletRef, { banned, banReason: reason, bannedAt: new Date().toISOString() }, { merge: true });
+      audit(event, { admin: adminUsername(), userId, reason, before: { banned: !banned }, after: { banned }, result: 'ok', ip: req.ip });
+      res.json({ ok: true, banned });
+    } catch (e: any) {
+      console.error('[ADMIN] Internal error:', e?.message);
+      audit(event, { admin: adminUsername(), userId, reason, result: 'failed', error: e?.message, ip: req.ip });
+      res.status(500).json({ error: 'Internal server error.' });
+    }
   });
 
   // ── Hosting registry + takedown (Phase 0 abuse guard) ─────────────────────
@@ -2936,6 +2990,7 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
         body: 'Notifications are working on this device.',
         data: { kind: 'setup_test' },
       });
+      audit('ADMIN_PUSH_TEST', { admin: adminUsername(), recipient: email, sent: result.sent, result: result.reason || 'ok', ip: req.ip });
       // An honest verdict: reaching FCM is not the same as a phone lighting up, and only the person
       // holding the phone can confirm the second half.
       res.json({
@@ -3398,13 +3453,22 @@ export function registerAdminRoutes(app: Express, adminLimiter: RateLimitRequest
     if (normalizedTarget.type === 'user' && !normalizedTarget.userId && !normalizedTarget.email) {
       return res.status(400).json({ error: 'For a single-user message, provide the user’s email (or user id).' });
     }
+    // PR 1 (admin panel audit, 2026-10-04): a message to EVERY user must carry the explicit scope the
+    // confirmation screen sends, so a stray, replayed or old-client request cannot broadcast.
+    if (!broadcastScopeConfirmed(normalizedTarget.type, (req.body ?? {}).confirmScope)) {
+      return res.status(400).json({ error: 'A message to all users must be confirmed on the preview screen. Nothing was sent.' });
+    }
     // Durable, user-delivered notification.
     const note = await saveNotification({ message: String(message), target: normalizedTarget, createdBy: 'admin' });
     // In-memory admin recent-list (unchanged behaviour for the admin's own view).
     const ann = { id: note?.id ?? Date.now().toString(), message, createdAt: new Date().toISOString(), target: target || 'all' };
     serverStats.announcements.push(ann);
     if (serverStats.announcements.length > 50) serverStats.announcements.shift();
-    audit('ADMIN_ANNOUNCEMENT', { message, target: normalizedTarget.type, ip: req.ip });
+    audit('ADMIN_ANNOUNCEMENT', {
+      admin: adminUsername(), message, target: normalizedTarget.type,
+      recipient: normalizedTarget.type === 'user' ? (normalizedTarget.email || normalizedTarget.userId || null) : 'all users',
+      result: note ? 'ok' : 'not-saved', ip: req.ip,
+    });
     res.json({ ok: true, announcement: ann, delivered: normalizedTarget.type });
   });
 

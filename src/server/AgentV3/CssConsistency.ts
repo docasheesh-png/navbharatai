@@ -41,7 +41,10 @@ const MISMATCH_THRESHOLD = 3;
 export function collectUsedClasses(files: Record<string, string>): Set<string> {
   const used = new Set<string>();
   // className="..."  |  className='...'  |  className={"..."}  |  className={'...'}  |  className={`...`}
-  const reactRe = /className\s*=\s*(?:\{\s*)?["'`]([^"'`]+)["'`]/g;
+  // Each quote is closed by ITS OWN kind: a template literal may hold quotes inside `${ … }`, and the
+  // old one-class-for-all `[^"'`]+` stopped at the first of them — so `${cell !== null ? ' filled' : ''}`
+  // was read as the classes `!==` and `null` (autopsy e3b0ce25: three model calls spent on `.null`).
+  const reactRe = CLASS_ATTRIBUTE_RE;
   // class="..." | class='...' — `\bclass\s*=` never matches `className=` (an N follows "class").
   const htmlRe = /\bclass\s*=\s*(?:\\?["'])([^"'`<>]+?)(?:\\?["'])/g;
   for (const [path, content] of Object.entries(files)) {
@@ -50,7 +53,8 @@ export function collectUsedClasses(files: Record<string, string>): Set<string> {
       re.lastIndex = 0;
       let m: RegExpExecArray | null;
       while ((m = re.exec(content))) {
-        for (const tok of m[1].replace(/\$\{[^}]*\}/g, ' ').split(/\s+/)) {
+        const body = m[1] ?? m[2] ?? m[3] ?? '';
+        for (const tok of withoutInterpolations(body).split(/\s+/)) {
           const c = tok.trim();
           if (c && CLASS_NAME.test(c)) used.add(c);
         }
@@ -58,6 +62,51 @@ export function collectUsedClasses(files: Record<string, string>): Set<string> {
     }
   }
   return used;
+}
+
+/**
+ * `className="…"`, `className='…'`, `className={"…"}`, `className={'…'}`, `className={`…`}` — each
+ * literal closed by its own quote kind (group 1, 2 or 3). The ONE reader of a className literal: the
+ * design check and the dialog check read through `classAttributeValues` rather than a copy.
+ */
+export const CLASS_ATTRIBUTE_RE = /(?<![-\w])className\s*=\s*(?:\{\s*)?(?:"([^"]*)"|'([^']*)'|`((?:\\.|[^`\\])*)`)/g;
+
+/** Every className literal's static text in `text`, with template interpolations removed. PURE. */
+export function classAttributeValues(text: string): string[] {
+  const out: string[] = [];
+  for (const m of String(text ?? '').matchAll(CLASS_ATTRIBUTE_RE)) out.push(withoutInterpolations(m[1] ?? m[2] ?? m[3] ?? ''));
+  return out;
+}
+
+/**
+ * A template literal's text with every `${ … }` replaced by a space, braces and quotes inside it
+ * balanced — so an expression's own words and strings never read as class names. PURE.
+ */
+export function withoutInterpolations(body: string): string {
+  let out = '';
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] === '$' && body[i + 1] === '{') {
+      let depth = 0;
+      let quote: string | null = null;
+      let j = i + 1;
+      for (; j < body.length; j++) {
+        const ch = body[j];
+        if (quote) {
+          if (ch === '\\') j++;
+          else if (ch === quote) quote = null;
+          continue;
+        }
+        if (ch === '"' || ch === "'" || ch === '`') quote = ch;
+        else if (ch === '{') depth++;
+        else if (ch === '}' && --depth === 0) break;
+      }
+      out += ' ';
+      i = j; // an unclosed `${` drops the rest: it is expression, never class text
+      continue;
+    }
+    out += body[i];
+  }
+  return out;
 }
 
 /** Collect class selectors defined across the project's CSS files (.foo, .foo-bar). */
@@ -442,7 +491,7 @@ export function classNamesUsedBy(files: Record<string, string>): string[] {
       const body = lit[2];
       if (lit[1] === '`') {
         for (const part of body.matchAll(/\$\{([^}]*)\}/g)) scanExpression(part[1], depth + 1);
-        addTokens(body.replace(/\$\{[^}]*\}/g, ' '));
+        addTokens(withoutInterpolations(body));
       } else {
         addTokens(body);
       }

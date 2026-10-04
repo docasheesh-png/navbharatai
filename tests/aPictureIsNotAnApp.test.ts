@@ -81,7 +81,7 @@ describe('§2 a photo is not a feature list (planningRequest.ts)', () => {
     expect(analyzeAppScope(after.text).decision).toBe('direct');
     expect(after.text).toBe('Create full image');
     expect(after.picturesSetAside).toBe(1);
-    expect(planningContextNote(after, 17)).toMatch(/1 attached picture\(s\) were not read as part of the request/);
+    expect(planningContextNote(after, 17)).toMatch(/1 attached picture\(s\) or scanned PDF\(s\) were not read as part of the request/);
   });
 
   it('WIRING: the sizers read only what describes an app — a picture counts only with a design contract', () => {

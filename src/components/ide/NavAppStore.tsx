@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
 import PullToRefresh from '../PullToRefresh';
@@ -15,14 +15,14 @@ import { resolveApiHref } from '../../lib/apiBase';
 import { isNativeApp, nativePlatformName } from '../../lib/mobileNative';
 import { androidInstallsHidden, visibleAndroidApps } from '../../lib/appStoreCompliance';
 import { adultBadge } from '../../lib/adultContent';
-import { mergeReviewQueue, pendingReviewCount, reviewStatusLabel, reviewActionsFor } from './storeReviewQueue';
+import { mergeReviewQueue, pendingReviewCount, reviewStatusLabel, reviewActionsFor, isLiveOnStore } from './storeReviewQueue';
 import { publishableApps, publishBlockedReason, type PublishableApp } from './publishablePicker';
 import { readStoreIcon, readStoreIconFromClipboard, type IconCheck } from '../../lib/appIcon';
 import { creatorLine } from './storeCreatorLine';
 import { SocialBar, CommentsSection, LikersSheet, ProfileSheet, CommentReportsAdmin, FollowButton, FollowersSheet } from './appMart/AppMartSocial';
 import { useSocialStats, useSignedIn, webKey, apkKey, fetchFeed, askToSignIn } from './appMart/appMartSocialApi';
 import { BROWSE_VIEWS, kindFilterOptions, shelvesFor, emptyViewMessage, viewNeedsSignIn, type BrowseView, type KindFilter } from './appMart/browseViews';
-import { readStoreStatus, type StoreStatus } from './appMart/storeStatus';
+import { readStoreStatus, storeStatusReport, type StoreStatus } from './appMart/storeStatus';
 import { parseAppMartTarget } from '../../lib/appMartTarget';
 
 // Nav App Store — publish your Android app, and install other people's.
@@ -68,6 +68,31 @@ interface QueueApp extends PublicApp {
   scanVerdict: string; scanMalicious: number; scanEnginesTotal: number;
   scanFlaggedBy: string[]; scanReportUrl?: string; inspectionWarnings: string[];
   submittedAt: number;
+}
+
+/**
+ * ADMIN ONLY — take this app off App Mart from its own page (admin 2026-10-04). Rendered only when the
+ * server's status says the viewer is a store admin; the server checks again (`isStoreAdmin`) on the
+ * request itself, so the button is a convenience, never the lock.
+ */
+function AdminStoreRemove({ busy, error, onRemove }: { busy: boolean; error: string; onRemove: () => void }) {
+  return (
+    <div className="mt-4 p-3 rounded-xl border border-rose-500/30 bg-rose-500/5">
+      <p className="text-[11px] font-bold uppercase tracking-wider text-danger mb-1 flex items-center gap-1.5">
+        <ShieldAlert size={11} /> Admin
+      </p>
+      <p className="text-[11px] text-muted mb-2 leading-relaxed">Remove this app from App Mart for everyone. Its files are deleted and the takedown is recorded.</p>
+      <button
+        type="button"
+        onClick={onRemove}
+        disabled={busy}
+        className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-xs font-bold text-on-accent"
+      >
+        {busy ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />} Remove from App Mart
+      </button>
+      {error && <p role="alert" className="mt-2 text-[11px] text-danger">{error}</p>}
+    </div>
+  );
 }
 
 function fmtSize(b: number): string {
@@ -271,6 +296,11 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   /** What viewers actually reported. Written since the store shipped; until now, read by nobody. */
   const [reports, setReports] = useState<Array<{ appId: string; appName: string; appStatus: string; reporterUid: string; reason: string; at: number }>>([]);
   const pagedReports = usePagedList(reports);
+  // Waiting requests first (flagged ones at the top of those), then the apps already on the store.
+  const sortedWebQueue = useMemo(() => [...webQueue].sort((x, y) =>
+    Number(isLiveOnStore(x.status)) - Number(isLiveOnStore(y.status))
+    || (y.safetyFindings?.length ?? 0) - (x.safetyFindings?.length ?? 0)), [webQueue]);
+  const pagedWebQueue = usePagedList(sortedWebQueue);
   /**
    * APPS YOU OWN (admin 2026-08-16: "purchase ho jaye to us par kharidne wale ka naam likh jaye, fir
    * jitni baar chahe code copy kare — par bas wahi ek app").
@@ -294,7 +324,10 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   const [webBusy, setWebBusy] = useState('');
 
   const [reviewing, setReviewing] = useState('');
+  // The last review decision the server refused or could not save — shown, never swallowed.
+  const [reviewError, setReviewError] = useState('');
   const liveRef = useRef(true);
+  const statusReportedRef = useRef(false);
   useEffect(() => () => { liveRef.current = false; }, []);
 
   const loadStatus = useCallback(async () => {
@@ -304,6 +337,16 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
       // Only the real status may become the status. An `{ error }` body from a guard (429 / 401 / 500)
       // used to be stored as if it were one, and `.missing.join` then crashed the whole screen.
       const read = readStoreStatus(res.ok, data, res.status);
+      // Q-013: the same facts go to the admin Errors view, once per screen, so which guard answered
+      // is known without a screenshot.
+      if (read.problem && !statusReportedRef.current) {
+        statusReportedRef.current = true;
+        fetch('/api/logs/error', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...storeStatusReport(res.status, read.problem, nativePlatformName()), url: window.location.href, ts: Date.now() }),
+        }).catch(() => { /* reporting must never change what the screen shows */ });
+      }
       if (!liveRef.current) return;
       setStatus(read.status);
       setStatusProblem(read.problem);
@@ -498,9 +541,19 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
     try {
       // FLAGGED FIRST. A reviewer working top-down must meet the apps the scanner is worried about
       // before the ordinary ones, or the queue's order decides what actually gets looked at.
-      const res = await fetch('/api/nav-store/web/admin/queue', { headers: await authedHeaders() });
-      const data = await res.json().catch(() => null);
-      if (liveRef.current) setWebQueue(Array.isArray(data?.apps) ? data.apps : []);
+      // Listing requests AND the apps already on the store (admin 2026-10-04): listing an app used to
+      // remove it from the only screen that showed it, so the review page went empty and there was no
+      // way back to the app to take it down. Same rule as the APK list (mergeReviewQueue).
+      const [reqRes, liveRes] = await Promise.all([
+        fetch('/api/nav-store/web/admin/queue', { headers: await authedHeaders() }),
+        fetch('/api/nav-store/web/admin/queue?status=listed', { headers: await authedHeaders() }),
+      ]);
+      const requests = reqRes.ok ? await reqRes.json().catch(() => null) : null;
+      const live = liveRes.ok ? await liveRes.json().catch(() => null) : null;
+      if (liveRef.current) setWebQueue(mergeReviewQueue<WebApp>(
+        Array.isArray(requests?.apps) ? requests.apps : [],
+        Array.isArray(live?.apps) ? live.apps : [],
+      ));
     } catch { /* shown as an empty queue */ }
   }, []);
 
@@ -528,21 +581,32 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
     }
   }, [loadWebMine, loadWebApps]);
 
-  const decideWeb = useCallback(async (id: string, decision: 'listed' | 'removed') => {
+  /** Returns whether the server SAVED the decision — a refused or failed one is said, never silent. */
+  const decideWeb = useCallback(async (id: string, decision: 'listed' | 'removed', note?: string): Promise<boolean> => {
     setWebBusy(id);
+    setReviewError('');
     try {
-      await fetch('/api/nav-store/web/admin/review', {
+      const res = await fetch('/api/nav-store/web/admin/review', {
         method: 'POST',
         headers: await authedHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ id, decision }),
+        body: JSON.stringify({ id, decision, ...(note ? { note } : {}) }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        if (liveRef.current) setReviewError(typeof data?.error === 'string' ? data.error : 'That decision was not saved. Please try again.');
+        return false;
+      }
+      return true;
+    } catch {
+      if (liveRef.current) setReviewError('That decision was not saved — check your connection and try again.');
+      return false;
+    } finally {
+      if (liveRef.current) setWebBusy('');
       void loadWebQueue();
       void loadReports();
       void loadWebApps();
-    } finally {
-      if (liveRef.current) setWebBusy('');
     }
-  }, [loadWebQueue, loadWebApps]);
+  }, [loadWebQueue, loadReports, loadWebApps]);
 
   useEffect(() => { void loadStatus(); void loadApps(); void loadWebApps(); }, [loadStatus, loadApps, loadWebApps]);
   // Loaded when the Publish tab is actually opened, not on mount: most people arriving at App Mart
@@ -553,20 +617,47 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
     if (tab === 'review') { void loadQueue(); void loadWebQueue(); void loadReports(); }
   }, [tab, loadMine, loadQueue, loadWebMine, loadWebQueue, loadOwned]);
 
-  const decide = useCallback(async (id: string, decision: 'approved' | 'rejected' | 'removed') => {
+  /** Returns whether the server SAVED the decision — a refused or failed one is said, never silent. */
+  const decide = useCallback(async (id: string, decision: 'approved' | 'rejected' | 'removed', note?: string): Promise<boolean> => {
     setReviewing(id);
+    setReviewError('');
     try {
-      await fetch('/api/nav-store/admin/review', {
+      const res = await fetch('/api/nav-store/admin/review', {
         method: 'POST',
         headers: await authedHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ id, decision }),
+        body: JSON.stringify({ id, decision, ...(note ? { note } : {}) }),
       });
-      void loadQueue();
-      void loadApps();
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        if (liveRef.current) setReviewError(typeof data?.error === 'string' ? data.error : 'That decision was not saved. Please try again.');
+        return false;
+      }
+      return true;
+    } catch {
+      if (liveRef.current) setReviewError('That decision was not saved — check your connection and try again.');
+      return false;
     } finally {
       if (liveRef.current) setReviewing('');
+      void loadQueue();
+      void loadApps();
     }
   }, [loadQueue, loadApps]);
+
+  /**
+   * ADMIN: take ANY app off App Mart, from its own page (admin 2026-10-04: "admin kabhi bhi kisi bhi app
+   * ko app mart se hata sake"). The same server decision as the review screen's Remove — the takedown is
+   * recorded and the app's files are deleted — so it is confirmed first and the sheet closes only on a
+   * saved decision.
+   */
+  const adminRemoveFromStore = useCallback(async (kind: 'web' | 'apk', id: string, name: string) => {
+    if (!window.confirm(`Remove "${name}" from App Mart?\n\nIt disappears for everyone, its link stops working, and its files are deleted. This cannot be undone.`)) return;
+    const note = 'Removed by an admin from the app page';
+    const ok = kind === 'web' ? await decideWeb(id, 'removed', note) : await decide(id, 'removed', note);
+    if (!ok || !liveRef.current) return;
+    if (kind === 'web') setDetailApp(null); else setOpenApp(null);
+    void loadApps();
+    void loadWebApps();
+  }, [decide, decideWeb, loadApps, loadWebApps]);
   /**
    * Ask the server for a download ticket (that call CAN carry the auth header), then navigate.
    *
@@ -1313,6 +1404,9 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
             "Report sent — a person will look at it" was a promise the code could not keep. This is
             the person. Newest first, with the app it is about and a way to open or remove it. */}
         {/* Reported App Mart COMMENTS — the moderation queue Play's and Apple's user-content rules require. */}
+        {tab === 'review' && status?.isAdmin && reviewError && (
+          <p role="alert" className="mb-4 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-danger">{reviewError}</p>
+        )}
         {tab === 'review' && status?.isAdmin && <CommentReportsAdmin onOpenProfile={setProfileId} />}
 
         {tab === 'review' && status?.isAdmin && reports.length > 0 && (
@@ -1342,7 +1436,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                         className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-raised hover:bg-raised-hover text-[11px] text-body transition-colors"
                       ><Play size={11} /> See it</button>
                       <button
-                        onClick={() => void decideWeb(r.appId, 'removed')}
+                        onClick={() => void adminRemoveFromStore('web', r.appId, r.appName)}
                         disabled={webBusy === r.appId}
                         className="px-3 py-1.5 rounded-lg bg-rose-600/80 hover:bg-rose-500 disabled:opacity-40 text-[11px] text-on-accent font-semibold transition-colors"
                       >Remove this app</button>
@@ -1359,14 +1453,20 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
         {tab === 'review' && status?.isAdmin && webQueue.length > 0 && (
           <div className="mb-5">
             <p className="text-xs font-bold uppercase tracking-wider text-faint mb-2 flex items-center gap-1.5">
-              <Globe size={12} /> Instant apps — listing requests
+              <Globe size={12} /> Instant apps — listing requests and apps on the store
             </p>
             <div className="space-y-3">
-              {[...webQueue]
-                .sort((x, y) => (y.safetyFindings?.length ?? 0) - (x.safetyFindings?.length ?? 0))
-                .map((a) => (
+              {pagedWebQueue.visible.map((a) => (
                 <div key={a.id} className={`p-3 rounded-xl bg-card border ${(a.safetyFindings?.length ?? 0) > 0 ? 'border-amber-500/40' : 'border-line'}`}>
-                  <p className="text-sm font-semibold">{a.name}</p>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-semibold">{a.name}</p>
+                    {/* A listed app stays on this screen SAYING so — listing it used to empty the page. */}
+                    <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${
+                      isLiveOnStore(a.status) ? 'bg-emerald-500/15 text-success' : 'bg-amber-500/15 text-warn'
+                    }`}>
+                      {reviewStatusLabel(a.status)}
+                    </span>
+                  </div>
                   <p className="text-xs text-muted mt-0.5">{a.description || '—'}</p>
                   {/* WHAT THE SCAN SAW — shown BEFORE the List button, deliberately. A reviewer who
                       has already decided is not going to scroll back for a warning. The matched text
@@ -1389,19 +1489,22 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                       onClick={() => setPlayingId(a.id)}
                       className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-raised hover:bg-raised-hover text-[11px] text-body transition-colors"
                     ><Play size={11} /> Try it</button>
+                    {reviewActionsFor(a.status) === 'decide' && (
+                      <button
+                        onClick={() => void decideWeb(a.id, 'listed')}
+                        disabled={webBusy === a.id}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-[11px] text-on-accent font-semibold transition-colors"
+                      >List on the store</button>
+                    )}
                     <button
-                      onClick={() => void decideWeb(a.id, 'listed')}
-                      disabled={webBusy === a.id}
-                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-[11px] text-on-accent font-semibold transition-colors"
-                    >List on the store</button>
-                    <button
-                      onClick={() => void decideWeb(a.id, 'removed')}
+                      onClick={() => void adminRemoveFromStore('web', a.id, a.name)}
                       disabled={webBusy === a.id}
                       className="px-3 py-1.5 rounded-lg bg-rose-600/80 hover:bg-rose-500 disabled:opacity-40 text-[11px] text-on-accent font-semibold transition-colors"
-                    >Remove</button>
+                    >{isLiveOnStore(a.status) ? 'Remove from store' : 'Remove'}</button>
                   </div>
                 </div>
               ))}
+              <LoadMore list={pagedWebQueue} label="apps" />
             </div>
           </div>
         )}
@@ -1456,7 +1559,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                   <div className="flex gap-2 mt-3">
                     {reviewActionsFor(a.status) === 'remove' ? (
                       <button
-                        onClick={() => void decide(a.id, 'removed')}
+                        onClick={() => void adminRemoveFromStore('apk', a.id, a.appName)}
                         disabled={reviewing === a.id}
                         className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-raised hover:bg-rose-600/20 text-xs font-semibold text-body hover:text-danger disabled:opacity-40"
                       >
@@ -1558,6 +1661,13 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
                 onOpenLikers={() => setLikersFor({ key: webKey(detailApp.id), name: detailApp.name })}
               />
             </div>
+            {status?.isAdmin && (
+              <AdminStoreRemove
+                busy={webBusy === detailApp.id}
+                error={webBusy === '' ? reviewError : ''}
+                onRemove={() => void adminRemoveFromStore('web', detailApp.id, detailApp.name)}
+              />
+            )}
             <button onClick={() => setDetailApp(null)} className="w-full mt-2 py-2 rounded-lg text-xs text-muted hover:text-body">Close</button>
           </div>
         </div>
@@ -1648,6 +1758,13 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
               />
             </div>
 
+            {status?.isAdmin && (
+              <AdminStoreRemove
+                busy={reviewing === openApp.id}
+                error={reviewing === '' ? reviewError : ''}
+                onRemove={() => void adminRemoveFromStore('apk', openApp.id, openApp.appName)}
+              />
+            )}
             <button onClick={() => setOpenApp(null)} className="w-full mt-3 py-2 rounded-lg text-xs text-muted hover:text-body">
               Close
             </button>

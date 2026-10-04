@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { offerWatchLive } from './earlyPreviewCue';
 import { platformFixRequestPrompt, fixErrorAndContinuePrompt, errorCanBeFixedByEditingTheApp } from '../../lib/platformFixRequest';
+import { CONTINUE_INTERRUPTED_BUILD_PROMPT, CONTINUE_PAST_BUDGET_PROMPT, CONTINUE_AND_FIX_BUILD_PROMPT } from '../../lib/continueBuildPrompts';
 import { appRanDespiteFailedVerdict, fixRemainingIssuePrompt, appRunningNoticeText } from './failedButRunning';
 import { publicTierLabel } from '../../lib/engineLabels';
 import { sessionIsPro } from '../../lib/sessionRouting';
@@ -84,6 +85,7 @@ import { ChatToolbar } from '../chat/ChatToolbar';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { filterMessages, enterShouldSend, readSendOnEnter } from '../../lib/chatToolbar';
 import { ActionGroupRow } from './ActivityTimelineRow';
+import { AppMemoryCard } from './AppMemoryCard';
 import { AppAiSettingsCard, fetchAppAiSettings } from './AppAiSettingsCard';
 import { trackEvent } from '../../lib/analytics';
 import { normalizeUid } from '../../lib/agentv3Workspace';
@@ -4758,7 +4760,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     <div className="mt-2 flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => { void send({ text: 'Continue the build from where it left off and finish the remaining steps.', importUrl: '' }); }}
+                        onClick={() => { void send({ text: CONTINUE_INTERRUPTED_BUILD_PROMPT, importUrl: '' }); }}
                         className="px-2.5 py-1 rounded-md bg-amber-500 text-zinc-950 text-xs font-medium hover:bg-amber-400 transition-colors"
                       >
                         Continue building
@@ -4939,7 +4941,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 </div>
                 {!running && (
                   <button
-                    onClick={() => fixWithAI('Continue building from where you left off and finish the app — I understand this uses more of my budget.')}
+                    onClick={() => fixWithAI(CONTINUE_PAST_BUDGET_PROMPT)}
                     className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-on-accent bg-sky-600 hover:bg-sky-500 rounded px-2.5 py-1"
                   >
                     <Sparkles className="w-3.5 h-3.5" /> Continue building
@@ -4983,7 +4985,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   </div>
                   {!running && (
                     <button
-                      onClick={() => fixWithAI('Continue from where you left off and finish/fix the build so the app works end-to-end.')}
+                      onClick={() => fixWithAI(CONTINUE_AND_FIX_BUILD_PROMPT)}
                       className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-on-accent bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1"
                     >
                       <Sparkles className="w-3.5 h-3.5" /> Fix with AI
@@ -5057,15 +5059,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 <div className="mt-1 ml-1 flex flex-col gap-0.5 border-l border-line pl-2">
                   <span>Input: {state.costBreakdown.inputTokens.toLocaleString()} tokens · Output: {state.costBreakdown.outputTokens.toLocaleString()} tokens</span>
                   <span>Engine: {state.costBreakdown.engine} · {state.costBreakdown.tier} tier</span>
-                  {/* LIVE PREVIEW (admin 2026-08-22) — shown only when it was actually charged, and named
-                      in NavBharatAI's own words. The free alternative is named beside it on purpose:
-                      telling the user how to spend less is what makes the total worth reading. */}
+                  {/* BUILD MACHINE TIME (admin 2026-08-22; renamed 2026-10-04, Q-306) — shown only when it was
+                      actually charged. It is the time the BUILD held our machine, capped at the build's own
+                      duration, never a live preview the user opened — so it is not called one, and no
+                      "free alternative" is offered for a choice the user never made. */}
                   {typeof state.costBreakdown.livePreviewInr === 'number' && state.costBreakdown.livePreviewInr > 0 && (
                     <span>
-                      Live preview: {(state.costBreakdown.livePreviewSeconds ?? 0) >= 60
+                      Build machine: {(state.costBreakdown.livePreviewSeconds ?? 0) >= 60
                         ? `${Math.round((state.costBreakdown.livePreviewSeconds ?? 0) / 60)} min`
                         : `${state.costBreakdown.livePreviewSeconds ?? 0} sec`} · ₹{state.costBreakdown.livePreviewInr.toFixed(2)}
-                      <span className="text-faint"> · in-browser preview is free</span>
                     </span>
                   )}
                   {(state.costBreakdown.discountInr ?? 0) > 0 && (state.costBreakdown.discountPct ?? 0) > 0 && (
@@ -6036,6 +6038,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               )}
               {tab === 'history' && (
                 <div className="space-y-2">
+                  {/* What the app does, what is open, what each change did (Change Engine memory). */}
+                  {state.workspaceId && <AppMemoryCard workspaceId={state.workspaceId} userId={userId ?? undefined} email={email ?? undefined} refreshKey={running} />}
                   {/* Restore the WHOLE project at once — a real restore (files written back into the
                       workspace), available even when there are no in-session checkpoints (e.g. after a reload). */}
                   {state.workspaceId && (

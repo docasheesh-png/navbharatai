@@ -12,6 +12,11 @@ import { narrationText, type NarrationId, type NarrationParams } from './narrati
 import { noteHeal } from './HealLedger';
 import { decideSupersede } from './previewSupersede';
 import { missingRanges, latestVersionsCommand, versionHint } from './npmVersionHint';
+import { cdnPdfWorkerNote } from './pdfWorkerSource';
+import { parallelSiblingBrief, readSiblingTasks } from './parallelSiblings';
+import { caseOnlyTwins, caseTwinCheckable, caseTwinNote } from './caseTwin';
+import { mixedScriptWriteNote } from './scriptIntegrity';
+import { peerConflicts, peerDataCommand, peerConflictHint, etargetRecommendation, etargetHintLine, forcesPeers, installedPackageNames, deprecationCommand, deprecationHint } from './peerCompatHint';
 import { declaredRoutes, paramOnlyMatch, type DeclaredRoute } from './routerPaths';
 import { DECLARED_PORT_FILES } from './declaredPort';
 import { appPortsFrom, isSecondaryAppPort, type AppPortMap } from './appPorts';
@@ -94,6 +99,7 @@ import { pruneGeneratedListing } from './generatedListing';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, leftToTheKit, usesNonKitNbClass } from './kitRestore';
 import { findUndefinedClasses, isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, missingImportedSheetNote, collectDefinedClasses } from './CssConsistency';
 import { scopeStyleHandBack } from './stylePolishResume';
+import { orphansToHandBack } from './orphanHandBack';
 import { batchSizeNote } from './batchSize';
 import { pageDesignWriteNote, isPageFile, analyzeDesignCoverage, type DesignDefect } from './DesignCoverage';
 import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
@@ -101,7 +107,7 @@ import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets, shellRemo
 import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames } from './tscErrorCause';
-import {
+import { WRITE_TYPECHECK_NOT_READY_MARKER,
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckWarmupCommand, WARMUP_COMPILED_MARKER, writeTypecheckNote, writeTypecheckCleanNote, WriteTypecheckQueue,
   shouldProbeTsconfig, probeExhausted, isMissingFileError, type TsProjectVerdict,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
@@ -177,7 +183,8 @@ import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
-import { STARTER_ENTRY_CONTENT, entryIsStillTheStarter, starterAppBlocker } from './stillTheStarterApp';
+import { STARTER_ENTRY_CONTENT, STARTER_ENTRY_PATHS, entryIsStillTheStarter, starterAppBlocker } from './stillTheStarterApp';
+import { isUiComponentPath, entryLateNote, MIN_SCREENS_BEFORE_NOTE, entryFirstWriteNote } from './earlyPreview';
 import { authoredPathSet, splitByAuthorship, preExistingCodeObservation, droppedRelativeImports, droppedImportOrphanLabel, importStem } from './buildAuthorship';
 import { computeReachability, splitByReachability, unreachableCodeObservation, type ReachabilityVerdict } from './appReachability';
 import { deletionCandidates, deletionReconciledMessage } from './fileDeletion';
@@ -392,6 +399,7 @@ import { summarizeBundle, bundleSummaryLine } from './BundleSize';
 import { livenessLine } from './PostDeployLiveness';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
 import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary, looksLikeBrokenErrorBoundary, isNextErrorBoundaryFile } from './ErrorBoundaryAnalysis';
+import type { CommandTiming, ActuatorCommandTiming } from './commandTiming';
 import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue } from './SecurityConfigAnalysis';
 import { analyzeSecretLeak, secretLeakSummary, gitignoreWithEnvCoverage } from './SecretLeakAnalysis';
 import { scanHardcodedUrls, hardcodedUrlSummary, type HardcodedUrlIssue } from './HardcodedUrlAnalysis';
@@ -482,7 +490,7 @@ export interface ActuatorPort {
   runCommand(
     workspaceId: string,
     command: string,
-  ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  ): Promise<{ exitCode: number; stdout: string; stderr: string; timing?: ActuatorCommandTiming }>;
   /**
    * Provision backend services (a local PostgreSQL, auth/storage scaffolds) inside the sandbox and
    * return the resulting env (e.g. DATABASE_URL). Real sandboxes only (E2BActuator installs + starts
@@ -588,6 +596,10 @@ export function readLedgerPath(key: string): string {
   return at > 0 && /^#L\d+-\d+$/.test(key.slice(at)) ? key.slice(0, at) : key;
 }
 
+/** A file this small is returned whole even when a range is asked (autopsy c70bcbb4). */
+export const SMALL_FILE_WHOLE_LINES = 300;
+export const SMALL_FILE_WHOLE_BYTES = 16_000;
+
 export class ToolDispatcher {
   /**
    * May this dispatcher publish? DENIED unless the composition root grants it — see the `deploy` case.
@@ -636,7 +648,7 @@ export class ToolDispatcher {
      * BuildDiagnostics.recordCommand so a failing npm install / tsc / vite build is captured in
      * full — the single highest-value "why won't the app run" signal. Best-effort; never blocks.
      */
-    private readonly onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number }) => void,
+    private readonly onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number; timing?: CommandTiming }) => void,
   ) {
     this._rawActuator = actuatorRaw;
     this.actuator = recordingActuator(actuatorRaw, workspaceId, (path, content) => { this._unrecorded.set(path, content); });
@@ -661,6 +673,47 @@ export class ToolDispatcher {
    * `skip` is a path another read-back already recorded. Best-effort: the sandbox scan at the final
    * save remains the net for a write the command's text did not show.
    */
+  /**
+   * The note an npm install's result carries (autopsy 981ce4cc): a range that does not exist gets the newest
+   * version that EXISTS and that this project's peers support; a peer conflict (ERESOLVE) names the newest
+   * version that fits; and an install forced past the peer check that left an unsupported package says so.
+   * Two read-only commands at most. Null when there is nothing to say.
+   */
+  private async npmInstallHint(command: string, exitCode: number | null, output: string): Promise<string | null> {
+    const run = async (cmd: string): Promise<string> =>
+      (await withTimeout(this.actuator.runCommand(this.workspaceId, cmd), 15_000, 'npm-version-hint')).stdout ?? '';
+    if (exitCode !== 0) {
+      const missing = missingRanges(output);
+      const conflicts = peerConflicts(output);
+      if (missing.length === 0 && conflicts.length === 0) return null;
+      const dataCmd = peerDataCommand([...missing.map((m) => m.name), ...conflicts.map((c) => c.pkg)]);
+      const data = dataCmd ? await run(dataCmd) : '';
+      const notes: string[] = [];
+      const lines = missing
+        .map((m) => { const rec = etargetRecommendation(m.name, data); return rec ? etargetHintLine(m.name, m.range, rec) : null; })
+        .filter((l): l is string => !!l);
+      if (lines.length > 0) notes.push(`[version hint] ${lines.join(' · ')}. Re-run the install with these ranges.`);
+      else if (missing.length > 0) {
+        // npm could not list peers: fall back to the plain latest version (npmVersionHint.ts).
+        const viewCmd = latestVersionsCommand(missing);
+        const plain = viewCmd ? versionHint(missing, await run(viewCmd)) : null;
+        if (plain) notes.push(plain);
+      }
+      const peerNote = conflicts.length > 0 ? peerConflictHint(conflicts, data, false) : null;
+      if (peerNote) notes.push(peerNote);
+      return notes.length > 0 ? notes.join('\n\n') : null;
+    }
+    // A successful install of a package npm calls deprecated (autopsy Sur Taal: music-metadata-browser).
+    const depCmd = deprecationCommand(installedPackageNames(command));
+    const deprecated = depCmd ? deprecationHint(await run(depCmd).catch(() => '')) : null;
+    if (!forcesPeers(command)) return deprecated;
+    const conflicts = peerConflicts(await run('npm ls --depth=0 2>&1 | head -60'));
+    if (conflicts.length === 0) return deprecated;
+    const dataCmd = peerDataCommand(conflicts.map((c) => c.pkg));
+    const forced = peerConflictHint(conflicts, dataCmd ? await run(dataCmd) : '', true);
+    return [forced, deprecated].filter(Boolean).join('\n\n') || null;
+  }
+
   private async recordShellWrites(command: string, skip: string | null): Promise<void> {
     let targets: string[];
     try { targets = shellReadBackTargets(command, skip); } catch { return; }
@@ -828,6 +881,8 @@ export class ToolDispatcher {
   private coverageRequest: string | null = null;
   /** The keyboard-only-game note is said once per build (touchPlayableGame.ts). */
   private _touchGameNoted = false;
+  /** The entry-first hand-back is said once per build (earlyPreview.ts, autopsy 39e982bd). */
+  private _entryFirstNoted = false;
   setCoverageRequest(text: string | null): void {
     this.coverageRequest = typeof text === 'string' && text.trim() ? text : null;
   }
@@ -1633,6 +1688,14 @@ export class ToolDispatcher {
    */
   private _starterExpected = false;
   setStarterExpected(on: boolean): void { this._starterExpected = on; }
+
+  /**
+   * Every path the BUILD wrote, across all lanes (the route's write set, golden pre-seed left out). This
+   * dispatcher's own `_writtenPaths` never sees a sub-agent's writes, and the screens a build abandons are
+   * usually a specialist's (Q-202, autopsy 3f959fde) — so the orphan hand-back asks the build, not the agent.
+   */
+  private _buildWrites: (() => Iterable<string>) | null = null;
+  setBuildWrites(source: () => Iterable<string>): void { this._buildWrites = source; }
 
   private async _blockIfStillTheStarterApp(report: ReadinessReport): Promise<ReadinessReport> {
     // A module that does not own the entry leaves the starter in place by design — judging the whole
@@ -3150,6 +3213,7 @@ export class ToolDispatcher {
       if (unprobed) s.compiledUnprobed += 1;
       let silentRun = false; // tsc printed nothing at all — the only output that means "clean"
       let neverRan = false; // the compiler did not look at the project — neither clean nor failed
+      let notReady = false; // the compiler was not ready (an install running) — the check stood down at once
       let errors = await this._writeTypecheckQueue.run(async () => {
         const command = writeTypecheckCommand();
         const startedAt = Date.now();
@@ -3167,6 +3231,7 @@ export class ToolDispatcher {
           return null;
         }
         const durationMs = Date.now() - startedAt;
+        if (String(r.stdout ?? '').includes(WRITE_TYPECHECK_NOT_READY_MARKER)) { notReady = true; return null; }
         s.runs += 1;
         s.elapsedMs += durationMs;
         s.timeouts = 0; // a run that finished resets the consecutive-timeout count
@@ -3184,7 +3249,10 @@ export class ToolDispatcher {
         // errors too, which is why a clean run here is evidence only through the bridge above, never on its own.
         return parseTscErrors(combined);
       });
-      if (errors === null) return '';
+      if (errors === null) {
+        if (notReady) { s.skipped += tsPaths.length; s.skippedNotReady = (s.skippedNotReady ?? 0) + tsPaths.length; }
+        return '';
+      }
       if (neverRan) {
         s.notRunRuns += 1;
         return '';
@@ -3492,6 +3560,42 @@ export class ToolDispatcher {
    * Order is the one `write_file` always used (hooks → imports → typecheck → quality). Each part is
    * best-effort on its own and can only append a sentence — never block, fail or change a write.
    */
+  /**
+   * A file in the same directory whose name differs only in letter case (autopsy Sur Taal). The directory
+   * is listed fresh each time: parallel specialists each have their own dispatcher, and the twin is the
+   * file a SIBLING wrote a moment ago, which no cached listing has seen. Never throws.
+   */
+  private async caseTwinNoteFor(path: string): Promise<string> {
+    try {
+      if (!caseTwinCheckable(path)) return '';
+      const slash = path.lastIndexOf('/');
+      const dir = slash < 0 ? '.' : path.slice(0, slash);
+      if (!/^[\w@./-]+$/.test(dir)) return '';
+      const listed = await withTimeout(this.actuator.runCommand(this.workspaceId, `ls -1 '${dir}' 2>/dev/null`), 5_000, 'case-twin-ls');
+      const twins = caseOnlyTwins(path, String(listed?.stdout ?? '').split('\n'));
+      return caseTwinNote(path, twins);
+    } catch {
+      return '';
+    }
+  }
+
+  /** Once per agent: screens are being written and the entry is still our starter (see `entryLateNote`). */
+  private _entryLateNoted = false;
+  private async entryLateNoteFor(paths: readonly string[]): Promise<string> {
+    if (this._entryLateNoted || this._starterExpected || !paths.some(isUiComponentPath)) return '';
+    try {
+      const screens = [...this._writtenPaths].filter(isUiComponentPath);
+      if (screens.length < MIN_SCREENS_BEFORE_NOTE) return '';
+      const starter = await entryIsStillTheStarter(
+        (path) => withTimeout(this.actuator.readFile(this.workspaceId, path), 5_000, 'entry-late-read'),
+      );
+      if (!starter) return '';
+      const note = entryLateNote(screens);
+      if (note) this._entryLateNoted = true;
+      return note;
+    } catch { return ''; }
+  }
+
   private async writeSteeringNotes(files: Record<string, string>): Promise<string> {
     const paths = Object.keys(files ?? {});
     if (paths.length === 0) return '';
@@ -3535,6 +3639,12 @@ export class ToolDispatcher {
     let shadow = '';
     for (const p of paths) {
       try { shadow += entryShadowNote(p, this.framework ?? 'vite-react'); } catch { /* a note is best-effort */ }
+      // A pdf.js worker loaded from a CDN path built from the version (autopsy 981ce4cc) — said while open.
+      try { shadow += cdnPdfWorkerNote(p, files[p]); } catch { /* a note is best-effort */ }
+      // `icons.tsx` beside `Icons.tsx` (autopsy Sur Taal) — said while the file is open.
+      shadow += await this.caseTwinNoteFor(p);
+      // A word that mixes two scripts ("अरijit", same autopsy) — said while the file is open.
+      try { shadow += mixedScriptWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
     }
     // At a STYLESHEET write, every screen's classes still without a rule; and a page's own design defects
     // (autopsy e6d46cde) — both used to wait for a 100-second repair pass after the app was done. A SCREEN
@@ -3549,9 +3659,61 @@ export class ToolDispatcher {
       }
     }
     const style = await this.styleWriteNotes(files);
+    // Screens written while the entry is still the starter (autopsy 68f0a486) — the user sees none of them.
+    // Carried on `shadow` (the "what the preview will not show" notes) so the guarded sum keeps its shape.
+    shadow += await this.entryLateNoteFor(paths);
     // A light/dark switch that sets a class or attribute nothing styles (autopsy 8257ca59) — said while open.
     const theme = await this.deadThemeSwitchNotes(files);
+    // The app is not on the user's screen until its ENTRY is written (autopsy 39e982bd) — said once, at
+    // the first leaf write, because the prose rule in the system prompt lost to the leaves-first habit.
+    // The entry-first hand-back (autopsy 39e982bd) and `entryLateNoteFor` (autopsy 68f0a486) are ONE rule said
+    // once — whichever fires first silences the other (merged 2026-10-04, #3523 + #3524).
+    shadow += await this.entryFirstNote(files);
     return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow + theme + touch;
+  }
+
+  /**
+   * ONCE per build, at the first SOURCE write that is not the entry: the entry is still our untouched
+   * starter, so nothing written so far is on the user's screen. See `entryFirstWriteNote`.
+   *
+   * 🔒 Four narrowing conditions, each for a measured reason:
+   *   • the write must include an app source file — a `package.json`, a `.env.example` or a stylesheet
+   *     write says nothing about whether the app can render yet;
+   *   • none of the written files may BE a starter entry — a model that has just written the entry needs
+   *     no instruction about it;
+   *   • the entry on disk must still be the untouched starter, asked through `entryIsStillTheStarter`,
+   *     the same question every render proof and the readiness gate ask (so a plain-JavaScript app whose
+   *     index.html no longer mounts `src/` is never nagged about `App.tsx`);
+   *   • `_starterExpected` — a Project Mode module that does not own the entry (autopsy 6a5fb04b) — is
+   *     exempt by the same flag the readiness gate reads.
+   */
+  private async entryFirstNote(files: Record<string, string>): Promise<string> {
+    if (this._entryFirstNoted || this._starterExpected) return '';
+    try {
+      const paths = Object.keys(files ?? {});
+      if (paths.some((p) => STARTER_ENTRY_PATHS.includes(p.replace(/^\.?\/+/, '')))) {
+        // The entry itself was just written — the thing the note asks for already happened.
+        this._entryFirstNoted = true;
+        return '';
+      }
+      if (!paths.some((p) => /^src\/.*\.(?:[cm]?[jt]sx?|vue|svelte)$/.test(p.replace(/^\.?\/+/, '')))) return '';
+      const read = (path: string) => withTimeout(this.actuator.readFile(this.workspaceId, path), 5_000, 'entry-first-read');
+      if (!(await entryIsStillTheStarter(read))) {
+        // Already a real app — this build is an edit, and the note would be false.
+        this._entryFirstNoted = true;
+        return '';
+      }
+      let entryPath = '';
+      for (const p of STARTER_ENTRY_PATHS) {
+        try { if (typeof (await read(p)) === 'string') { entryPath = p; break; } } catch { /* try the next */ }
+      }
+      if (!entryPath) return '';
+      const note = entryFirstWriteNote(entryPath);
+      if (note) { this._entryFirstNoted = true; this._entryLateNoted = true; }
+      return note;
+    } catch {
+      return '';
+    }
   }
 
   /**
@@ -3602,7 +3764,7 @@ export class ToolDispatcher {
    * stylesheet that cannot be read returns `[]`: this answer sends a model back to work, so it must never
    * name a class as undefined because the file that defines it was not read.
    */
-  async undefinedClassesNow(opts: { onlyWritten?: boolean } = {}): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }> }> {
+  async undefinedClassesNow(opts: { onlyWritten?: boolean } = {}): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }>; orphans?: string[] }> {
     try {
       let listing: string[] = [];
       try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'style-resume-listing'); }
@@ -3648,7 +3810,15 @@ export class ToolDispatcher {
       // in parallel, so a class a sibling's screen uses is that sibling's to define; handing it here would
       // send two agents to edit one stylesheet for the same rule.
       if (opts.onlyWritten) return scopeStyleHandBack({ missing, sheet, pages, a11y }, project, this._writtenPaths);
-      return { missing, sheet, pages, a11y };
+      // Screens THIS build wrote that nothing imports (Q-202) — top-level only: a specialist's screens are
+      // wired in by the architect after it returns, so naming them to the specialist would be premature.
+      let orphans: string[] = [];
+      try {
+        let buildWrites: string[] = [];
+        try { buildWrites = this._buildWrites ? [...this._buildWrites()] : []; } catch { buildWrites = []; }
+        orphans = orphansToHandBack({ project, written: [...this._writtenPaths, ...buildWrites], starterExpected: this._starterExpected });
+      } catch { orphans = []; }
+      return { missing, sheet, pages, a11y, orphans };
     } catch {
       return { missing: [], pages: [] };
     }
@@ -4016,9 +4186,15 @@ export class ToolDispatcher {
         // written nothing at all. So a ranged read is its own entry, keyed by the lines it asked for:
         // a repeat of the SAME slice is still a repeat, a new slice is new information.
         const lines = full.split('\n');
-        const from = (sl ?? 1) - 1;
-        const to = el ?? lines.length;
-        const ranged = sl !== null || el !== null;
+        // 🔴 A SMALL FILE IS NEVER SLICED (autopsy c70bcbb4, 2026-10-04). Ranges exist for BIG files (Fix 36b);
+        // the model asked for them on small ones too — `usePlayer.ts` (247 lines) in six slices, `utils.ts`
+        // (104) in three — and every slice was a model call re-sending ~50k tokens of context to fetch ~1k of
+        // file. A small file comes back whole, once, whatever range was asked.
+        const askedRange = sl !== null || el !== null;
+        const smallWhole = askedRange && lines.length <= SMALL_FILE_WHOLE_LINES && full.length <= SMALL_FILE_WHOLE_BYTES;
+        const from = smallWhole ? 0 : (sl ?? 1) - 1;
+        const to = smallWhole ? lines.length : el ?? lines.length;
+        const ranged = askedRange && !smallWhole;
         const ledgerKey = ranged ? `${reqPath}#L${from + 1}-${Math.min(to, lines.length)}` : reqPath;
         const shownPath = ranged ? `${reqPath} (lines ${from + 1}-${Math.min(to, lines.length)})` : reqPath;
         // ⚠️ THE SAME FILE, AGAIN, UNCHANGED — measured at 84% of all reads in a real build (see
@@ -4066,6 +4242,7 @@ export class ToolDispatcher {
         const notice = repeatedReadNotice(shownPath, ownCount, ownUnchanged, ownStalls, ownCount === 2 && own?.handed === true);
         if (ownStalls >= READ_LOOP_LIMIT) this._readLoopStops.n++;
 
+        if (smallWhole) return `${notice}[the whole file — ${lines.length} lines, small enough that it is never sliced]\n${full}`;
         if (!ranged) return notice ? `${notice}${full}` : full;
         const slice = lines.slice(from, to).join('\n');
         return `${notice}[lines ${from + 1}-${Math.min(to, lines.length)} of ${lines.length} — the file is complete on disk]\n${slice}`;
@@ -4677,7 +4854,13 @@ export class ToolDispatcher {
         const background = isLongRunningCommand(effectiveCommand)
           ? { command: effectiveCommand, detached: 0 }
           : detachBackgroundJobs(effectiveCommand);
-        let { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, background.command);
+        const runStartedAt = Date.now();
+        const ran = await this.actuator.runCommand(this.workspaceId, background.command);
+        let { exitCode, stdout, stderr } = ran;
+        // Q-273 — the report splits a slow command into our setup, reaching the machine and the command.
+        const timing: CommandTiming | undefined = ran.timing
+          ? { setupMs: runStartedAt - cmdStartedAt, sandboxMs: ran.timing.sandboxMs, runMs: ran.timing.runMs }
+          : undefined;
         if (background.detached > 0) {
           stdout = `${stdout ?? ''}\n[note] ${background.detached === 1 ? 'The background job was' : `${background.detached} background jobs were`} started detached so this command could finish; its output goes to ${BACKGROUND_JOB_LOG} (read it with \`tail ${BACKGROUND_JOB_LOG}\`).`;
         }
@@ -4873,7 +5056,7 @@ export class ToolDispatcher {
         }
         // #3 — hand the raw result to the diagnosis bundle (best-effort; never breaks the build).
         try {
-          this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt });
+          this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt, timing });
         } catch { /* diagnostics capture is best-effort */ }
         // 🔴 AND NOW TELL THE PROJECT MAP THE FILE IS GONE (autopsy 8b3dca5c). Everything above this
         // line already knew which source files the command would remove; nothing had ever acted on it
@@ -4958,16 +5141,13 @@ export class ToolDispatcher {
           } catch { /* a note is best-effort — the command's own output stands */ }
         }
         // A guessed range that does not exist gets the real version in the same result (npmVersionHint.ts).
-        if (exitCode !== 0 && process.env.AGENTV3_NPM_VERSION_HINT !== 'off') {
+        // A version this project's React cannot run is named before it is installed, and after a forced
+        // install that left one (peerCompatHint.ts, autopsy 981ce4cc).
+        if (process.env.AGENTV3_NPM_VERSION_HINT !== 'off') {
           try {
-            const missing = missingRanges(`${stdout}\n${stderr}`);
-            const viewCmd = latestVersionsCommand(missing);
-            if (viewCmd) {
-              const view = await withTimeout(this.actuator.runCommand(this.workspaceId, viewCmd), 15_000, 'npm-version-hint');
-              const hint = versionHint(missing, view.stdout);
-              if (hint) out = `${out}\n\n${hint}`;
-            }
-          } catch { /* a hint is best-effort — npm's own error is still reported */ }
+            const hint = await this.npmInstallHint(command, exitCode, `${stdout}\n${stderr}`);
+            if (hint) out = `${out}\n\n${hint}`;
+          } catch { /* a hint is best-effort — npm's own answer is still reported */ }
         }
         if ((process.env.AGENTV3_PIPED_GATE_CHECK ?? '').trim().toLowerCase() !== 'off') {
           const lie = pipedGateExitCodeWarning(command, exitCode, `${stdout}\n${stderr}`);
@@ -5385,7 +5565,10 @@ export class ToolDispatcher {
             ? `${errorBoundary.brokenBoundaries[0]} is named like an error boundary but implements none — fix that file, do NOT add another`
             : 'React app has no error boundary' });
         }
-        if (testCoverage.findings.some((f) => f.level === 'high')) extra.push({ severity: 'medium', label: 'No tests at all' });
+        // A Project Mode module that does not assemble the app is judged on its own files (Q-396, Sur Taal):
+        // "No tests at all" is true of the unfinished app and was repeated on every module turn. It returns on
+        // the shell module's turn, where the whole app is judged.
+        if (!this._starterExpected && testCoverage.findings.some((f) => f.level === 'high')) extra.push({ severity: 'medium', label: 'No tests at all' });
         // Best-effort design-consistency pass (P-PIPE.C stage 32 — advisory, NEVER a readiness
         // blocker, exactly like SEO): lint the generated style-bearing code for palette/typography/
         // spacing/token consistency so a build reports its visual polish, not just its correctness.
@@ -10350,7 +10533,7 @@ export class ToolDispatcher {
         }
         if (isPlanningOnlyRole(role)) return PLAN_YOURSELF_NOTE;
         this.events?.emit({ type: 'agent_spawned', agent: role, task: instruction, ts: Date.now() });
-        const result = await this.spawnSubAgent(role, instruction + await this.stylesheetBriefFor(role));
+        const result = await this.spawnSubAgent(role, instruction + parallelSiblingBrief(readSiblingTasks(input)) + await this.stylesheetBriefFor(role));
         if (!Array.isArray(result.written) || result.written.length > 0) { this._delegateWrote = true; this._delegateWrites += 1; }
         return taskResultWithWrites(role, result);
       }
@@ -11017,7 +11200,11 @@ export function ambiguousEditRegions(existing: string, offsets: Iterable<number>
   }
   if (shown.length === 0) return '';
   const more = total > shown.length ? `\n(and ${total - shown.length} more)` : '';
-  return `\n${shown.join('\n')}${more}\nAdd a neighbouring line from the match you mean to old_string so it is unique.`;
+  // Most ambiguous anchors in a stylesheet are an attempt to ADD rules after a common block (autopsy 981ce4cc:
+  // `@media (prefers-reduced-motion: reduce) {` twice in src/index.css, two failed edits and a read). The
+  // not-found error already says how to append; this one did not.
+  return `\n${shown.join('\n')}${more}\nAdd a neighbouring line from the match you mean to old_string so it is unique. `
+    + 'To ADD content at the end of the file instead, call edit_file with an EMPTY old_string — it appends, no anchor needed.';
 }
 
 export function applyEdit(existing: string, oldStr: string, newStr: string, path = 'file'): EditResult {

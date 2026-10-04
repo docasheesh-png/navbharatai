@@ -113,7 +113,9 @@ describe('the build report tells the truth about an empty machine', () => {
     // The origin says the machine came up empty; only this says whether the app got put back. A report
     // with one and not the other is what left "created a fresh machine" next to a blank preview with
     // nothing to point at.
-    expect(route).toContain("sandbox=${sandboxOriginOf(actuator, workspaceId) ?? 'unreported'}");
+    // The origin, through setupOriginText, which says 'unreported' when it is absent (f496c75b).
+    expect(route).toContain("sandbox=${setupOriginText(sandboxOriginOf(actuator, workspaceId), sandboxSessionOf(actuator, workspaceId), Date.now())}");
+    expect(route).toContain("const base = origin ?? 'unreported';");
     expect(route).toContain("restore=${setupRestoreText(sandboxOriginOf(actuator, workspaceId), sandboxRestoreOf(actuator, workspaceId))}");
     expect(route).toContain("return restore ?? 'n/a (warm or resumed)';");
   });

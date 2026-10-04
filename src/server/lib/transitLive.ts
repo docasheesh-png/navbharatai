@@ -47,12 +47,12 @@ export function detectTransitQuery(message: string): TransitQuery | null {
   const m = String(message ?? '');
   const pnr = m.match(/\bpnr\D{0,12}(\d{10})\b/i) ?? m.match(/\b(\d{10})\b\D{0,12}pnr/i);
   if (pnr) return { kind: 'pnr', pnr: pnr[1] };
-  if (/\b(train|rail|irctc|gadi|gaadi|ट्रेन|रेल)\b/i.test(m)) {
+  if (/(?<![\w\u0900-\u097F])(train|rail|irctc|gadi|gaadi|ट्रेन|रेल)(?![\w\u0900-\u097F])/i.test(m)) {
     const no = m.match(/\b(\d{5})\b/);
     if (no) return { kind: 'train', trainNo: no[1] };
   }
   const flight = m.match(new RegExp(`\\b(${AIRLINE_PREFIX.source})[ -]?(\\d{2,4})\\b`, 'i'));
-  if (flight && (/\b(flight|udaan|फ्लाइट|उड़ान|airport|plane)\b/i.test(m) || new RegExp(`^${AIRLINE_PREFIX.source}$`).test(flight[1].toUpperCase()))) {
+  if (flight && (/(?<![\w\u0900-\u097F])(flight|udaan|फ्लाइट|उड़ान|airport|plane)(?![\w\u0900-\u097F])/i.test(m) || new RegExp(`^${AIRLINE_PREFIX.source}$`).test(flight[1].toUpperCase()))) {
     return { kind: 'flight', flightNo: `${flight[1].toUpperCase()}${flight[2]}` };
   }
   return null;

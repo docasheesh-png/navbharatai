@@ -254,7 +254,7 @@ export function planAutoTests(
  * the same Vite major the app template ships (vitest 5 supports vite ^6 || ^7 || ^8); a test asserts the
  * two stay equal, so the pin cannot drift from a version we actually run.
  */
-export const VITEST_RANGE = '^5.0.1';
+export const VITEST_RANGE = '^5.0.3';
 
 /**
  * THE MODEL ASKED FOR TESTS, SO THE TESTS MUST BE ABLE TO RUN (autopsy a7aa447c, 2026-09-29).

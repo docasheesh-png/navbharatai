@@ -416,17 +416,34 @@ const OTHER_INSTALLER_ONE_SHOT =
 /** True when a single command segment (no `;`/`&&`/`||` chaining left in it) itself starts a
  *  dev/preview server. Extracted so isLongRunningCommand can apply it PER-SEGMENT of a compound
  *  command (see below) instead of only to the whole string. */
-function isDevServerInvocation(segment: string): boolean {
+/**
+ * A path is read by its LAST component only (autopsy Sur Taal, 2026-10-04). #3491 put the baked tree's
+ * path `/home/user/.warm/vite-react/node_modules` into the typecheck's install primer, and the word
+ * `vite` inside that DIRECTORY name made every write-time typecheck look like a Vite dev-server launch:
+ * it was prefixed with `BROWSER=none` (a bash syntax error before `if`), redirected into the dev
+ * server's log, and health-checked twice as a server that "did not come up". A command word is what
+ * runs; a directory that happens to contain one is not. `node_modules/.bin/vite` still reads `vite`,
+ * and `2>/dev/null` reads `null`, not `dev`. PURE.
+ */
+export function pathsAsBasenames(segment: string): string {
+  return String(segment ?? '').replace(/(?:[\w.@~$-]*\/)+([\w.@-]*)/g, '$1');
+}
+
+function isDevServerInvocation(rawSegment: string): boolean {
+  const segment = pathsAsBasenames(rawSegment);
   // Installing a package called "dev" is not running one. This is checked FIRST so that every
   // keyword rule below is spared the option-flag ambiguity, and it lives HERE rather than in
   // isLongRunningCommand so a future caller inherits it.
   if (PM_ONE_SHOT_SUBCOMMAND.test(segment)) return false;
   if (OTHER_INSTALLER_ONE_SHOT.test(segment)) return false;
   // Any Vite invocation is a dev/preview server EXCEPT `vite build` (compiles then exits).
-  const isVite = /\bvite(?:\.js)?\b/i.test(segment) && !/\bvite(?:\.js)?\b[^\n]*\bbuild\b/i.test(segment);
+  // A word inside a HYPHENATED name is not that command (the Sur Taal census): `vite-react`, `my-vite-app`
+  // and `my-dev-app` are folders, not Vite or a dev script. A flag (`--watch`) is still a word.
+  const isVite = /(?<![\w-])vite(?:\.js)?(?![\w-])/i.test(segment) && !/\bvite(?:\.js)?\b[^\n]*\bbuild\b/i.test(segment);
   return (
     isVite ||
-    /\b(?:dev|serve|watch|livereload)\b/i.test(segment) ||
+    /(?<!\w)(?<!\w-)(?:dev|serve|watch|livereload)(?![\w-])/i.test(segment) ||
+    /\bwebpack-dev-server\b|\bvue-cli-service\s+serve\b/i.test(segment) ||
     // `npm run preview` (and pnpm/yarn) runs `vite preview` — a long-running static server that serves
     // the built dist. Missing `preview` here made it run in the FOREGROUND and block for the full 5-min
     // command timeout (deadline_exceeded), wasting ~10 min per build when the agent tried it and the
@@ -1162,8 +1179,30 @@ export function shouldReprobeBoundPort(assumedPort: number, boundPort: number): 
  * package.json needs a reinstall + restart, which HMR can't do). On any doubt this returns false and
  * the full, proven sequence runs — today's behaviour, never worse. Pure + unit-testable.
  */
-export function shouldSkipDevServerLaunch(portAlreadyUp: boolean, depsStale: boolean): boolean {
-  return portAlreadyUp === true && depsStale !== true;
+export function shouldSkipDevServerLaunch(portAlreadyUp: boolean, depsStale: boolean, prebundleStale = false): boolean {
+  return portAlreadyUp === true && depsStale !== true && prebundleStale !== true;
+}
+
+/** Where Vite keeps the dependencies it pre-bundled when the dev server started. */
+export const VITE_PREBUNDLE_DIR = 'node_modules/.vite';
+
+/**
+ * 🔴 AUTOPSY 981ce4cc (2026-10-04). Shell test that prints `PREBUNDLE_STALE` when a package was installed
+ * AFTER the running Vite server pre-bundled its dependencies. A running Vite never looks at node_modules
+ * again: after `npm install react-pdf@9.2.1` it kept serving its bundled copy of react-pdf@11 (same
+ * `react-pdf.js?v=24816a75`, same line 32103), the app kept crashing with React 19's `use`, and the
+ * model, believing 9.2.1 was the culprit, downgraded to react-pdf@8.0.2 and pdfjs-dist@3.11.174, a
+ * version with a published "arbitrary JavaScript execution on a malicious PDF" advisory. The reuse
+ * check asked only "does node_modules need an install?" (`buildDepsStaleCheckCommand`), never "is the
+ * running server older than the last install?".
+ *
+ * npm rewrites `node_modules/.package-lock.json` on every install (with or without `--save`), and Vite
+ * writes `_metadata.json` when it pre-bundles, so the comparison is exact. No pre-bundle (Next, a Node
+ * server, a Vite that has not optimised anything yet) ⇒ silent. Ends in `true`. PURE string builder.
+ */
+export function buildPrebundleStaleCheckCommand(): string {
+  const meta = `${VITE_PREBUNDLE_DIR}/deps/_metadata.json`;
+  return `if [ -f ${meta} ] && { [ node_modules/.package-lock.json -nt ${meta} ] || [ package-lock.json -nt ${meta} ] || [ package.json -nt ${meta} ]; }; then echo PREBUNDLE_STALE; fi; true`;
 }
 
 /**

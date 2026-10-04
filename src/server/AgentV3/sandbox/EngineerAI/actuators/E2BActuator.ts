@@ -9,7 +9,7 @@ import { applyStrictTrial } from '../../../strictTrial';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure, buildStillStartingWaitCommand, shouldWaitOnStartingServer, STILL_STARTING_EXTRA_SECONDS } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure, buildStillStartingWaitCommand, shouldWaitOnStartingServer, STILL_STARTING_EXTRA_SECONDS, buildPrebundleStaleCheckCommand, VITE_PREBUNDLE_DIR } from './devServerHost';
 import { buildPortSweepCommand, parsePortSweep, portCandidates, shouldSweep, sweepFoundSummary } from './portSweep';
 import { appPortsFrom } from '../../../appPorts';
 import type { DevFramework } from './devServerHost';
@@ -68,6 +68,7 @@ import {
 import { STYLE_EVIDENCE_JS, STYLE_MARKER, splitStyleMarker, type RenderStyleEvidence } from '../../../renderStyle';
 import { assertWriteAllowed, runInPass } from '../../../greenFreeze';
 import { loadWorkspaceFiles } from '../../../WorkspaceFileStore';
+import { isEmptyManifest, pickManifestRestore, EMPTY_MANIFEST_EVIDENCE_COMMAND, emptyManifestNote } from '../../../emptyManifest';
 import { writeWorkspaceFiles } from '../../../WorkspaceFiles';
 import { restoreWorkspaceAssets } from '../../../WorkspaceAssetStore';
 import {
@@ -80,7 +81,8 @@ import { injectPreviewBridge, withoutPreviewBridge, PREVIEW_BRIDGE_MARKER } from
 import { browseConsoleCaptureEnabled, CANCELLED_REQUEST_RE } from '../../../renderCheckConsole';
 import { gunzipSync } from 'zlib';
 import { LIST_PRUNE_DIRS, isListPrunedPath } from '../../../../lib/generatedDirs';
-import { NPM_INSTALL_LOCK } from '../../../tscCommand';
+import type { ActuatorCommandTiming } from '../../../commandTiming';
+import { NPM_INSTALL_LOCK, PRIME_NODE_MODULES, WARM_NODE_MODULES } from '../../../tscCommand';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -783,7 +785,43 @@ export class E2BActuator implements IEngineerActuator {
    *   3. npm install --legacy-peer-deps  — only when ERESOLVE is detected
    * Never throws; returns success flag + combined log for the agent to read.
    */
-  private async _npmInstall(sandbox: Sandbox): Promise<{ success: boolean; log: string }> {
+  private async _npmInstall(sandbox: Sandbox, workspaceId?: string): Promise<{ success: boolean; log: string; manifestNote?: string }> {
+    // An EMPTY package.json is put back before npm reads it (emptyManifest.ts). Every install path
+    // funnels through here, so no path can install over — or fail on — an emptied manifest unseen.
+    const manifestNote = workspaceId ? await this._restoreEmptyManifest(sandbox, workspaceId) : null;
+    const result = await this._npmInstallLocked(sandbox);
+    return manifestNote ? { ...result, log: `${manifestNote}\n${result.log}`, manifestNote } : result;
+  }
+
+  /**
+   * When the sandbox's package.json holds nothing, record what the machine was doing and write back the
+   * last valid copy: this session's own last write first, then the saved project. Null when the file is
+   * not empty (the ordinary case: one read). Never throws.
+   */
+  private async _restoreEmptyManifest(sandbox: Sandbox, workspaceId: string): Promise<string | null> {
+    try {
+      const raw = await sandbox.files.read(`${WORKSPACE_ROOT}/package.json`).catch(() => null);
+      if (!isEmptyManifest(typeof raw === 'string' ? raw : null)) return null;
+      const evidence = await sandbox.commands
+        .run(EMPTY_MANIFEST_EVIDENCE_COMMAND, { cwd: WORKSPACE_ROOT, timeoutMs: 10_000 })
+        .then((r) => `${r.stdout}${r.stderr}`)
+        .catch(() => '');
+      let restore = pickManifestRestore(this._fileCache.get(workspaceId)?.get('package.json'));
+      if (!restore) {
+        const saved = await withTimeout(loadWorkspaceFiles(workspaceId), DURABLE_RESTORE_LOAD_MS, 'loadWorkspaceFiles(manifest)')
+          .catch(() => null);
+        restore = pickManifestRestore(saved?.['package.json']);
+      }
+      if (restore) await sandbox.files.write(`${WORKSPACE_ROOT}/package.json`, restore);
+      const note = emptyManifestNote(Boolean(restore), evidence);
+      console.warn(`[E2BActuator] ${workspaceId}: ${note.split('\n')[0]}`);
+      return note;
+    } catch {
+      return null;
+    }
+  }
+
+  private async _npmInstallLocked(sandbox: Sandbox): Promise<{ success: boolean; log: string }> {
     // 🔒 THE INSTALL SAYS IT IS RUNNING (autopsy 120eb52f). A typecheck that found the tree "stale" used to
     // start its own `npm install` into the same node_modules as this one, and `typescript` came out torn.
     // `TSC_ENSURE` waits while this marker is fresh. Best-effort both ways: a marker we could not write
@@ -805,7 +843,7 @@ export class E2BActuator implements IEngineerActuator {
     // reconcile any version drift. Fully guarded: if the warm dir isn't present (i.e. the template
     // hasn't been rebuilt yet) this is a no-op and behaviour is byte-identical to today.
     try {
-      const warmDir = '/home/user/.warm/vite-react/node_modules';
+      const warmDir = WARM_NODE_MODULES;
       const [warmExists, hasModules] = await Promise.all([
         sandbox.files.exists(warmDir).catch(() => false),
         sandbox.files.exists(`${WORKSPACE_ROOT}/node_modules`).catch(() => false),
@@ -815,7 +853,9 @@ export class E2BActuator implements IEngineerActuator {
         const pkg = typeof pkgRaw === 'string' ? pkgRaw : (pkgRaw ? new TextDecoder().decode(pkgRaw as Uint8Array) : '');
         // Only prime for React-family apps — a Vue/Next/Python workspace must NOT get a React tree.
         if (/["']react["']\s*:/.test(pkg)) {
-          await sandbox.commands.run(`cp -a ${warmDir} ${WORKSPACE_ROOT}/node_modules`, {
+          // Staged and RENAMED into place (Q-304): the typecheck's own primer does the same, and a
+          // plain `cp -a` racing it would copy into an existing node_modules (node_modules/node_modules).
+          await sandbox.commands.run(PRIME_NODE_MODULES, {
             cwd: WORKSPACE_ROOT, timeoutMs: 60_000,
           }).catch(() => { /* copy is best-effort — a failure just falls through to a full install */ });
         }
@@ -1972,7 +2012,7 @@ export class E2BActuator implements IEngineerActuator {
         .then((r) => r.stdout.includes('STALE'))
         .catch(() => false);
       if (!hasModules || depsStale) {
-        const installResult = await this._npmInstall(sandbox);
+        const installResult = await this._npmInstall(sandbox, workspaceId);
         installLog = installResult.log;
         if (!installResult.success) {
           return { success: false, logs: installLog };
@@ -2012,7 +2052,7 @@ export class E2BActuator implements IEngineerActuator {
         .then((r) => r.stdout.includes('STALE'))
         .catch(() => false);
       if (hasModules && !stale) return { ok: true, ran: false, log: '(dependencies already installed)' };
-      const res = await this._npmInstall(sandbox);
+      const res = await this._npmInstall(sandbox, workspaceId);
       return { ok: res.success, ran: true, log: res.log };
     } catch (err: any) {
       return { ok: false, ran: false, log: err?.message ? String(err.message) : String(err) };
@@ -2038,13 +2078,13 @@ export class E2BActuator implements IEngineerActuator {
     return this.sandboxes.has(workspaceId);
   }
 
-  async runCommand(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  async runCommand(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string; timing?: ActuatorCommandTiming }> {
     const release = this._holdSandboxOp(workspaceId);
     try {
       if (isLongRunningCommand(command)) {
         const inFlight = this._devLaunches.get(workspaceId);
         if (inFlight) return await inFlight;
-        const tracked: Promise<{ exitCode: number; stdout: string; stderr: string }> = this._runCommandInner(workspaceId, command)
+        const tracked: Promise<{ exitCode: number; stdout: string; stderr: string; timing?: ActuatorCommandTiming }> = this._runCommandInner(workspaceId, command)
           .finally(() => { if (this._devLaunches.get(workspaceId) === tracked) this._devLaunches.delete(workspaceId); });
         this._devLaunches.set(workspaceId, tracked);
         return await tracked;
@@ -2055,8 +2095,12 @@ export class E2BActuator implements IEngineerActuator {
     }
   }
 
-  private async _runCommandInner(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  private async _runCommandInner(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string; timing?: ActuatorCommandTiming }> {
+    // Q-273: reaching the machine (a reconnect, or resuming a paused sandbox) is timed apart from the
+    // command, so a slow line in the report says which of the two it was (see commandTiming.ts).
+    const reachStartedAt = Date.now();
     const sandbox = await this.getSandbox(workspaceId);
+    let sandboxMs = Date.now() - reachStartedAt;
     usageTracker.record(workspaceId, 'command');
 
     // Long-running commands (dev servers, watchers) never exit — run in background,
@@ -2143,7 +2187,15 @@ export class E2BActuator implements IEngineerActuator {
         if (alreadyUp) {
           const stale = await sandbox.commands.run(buildDepsStaleCheckCommand(), { cwd: WORKSPACE_ROOT, timeoutMs: 8000 })
             .then((r) => r.stdout.includes('STALE')).catch(() => false);
-          if (shouldSkipDevServerLaunch(alreadyUp, stale)) {
+          // A package installed after the running server pre-bundled its dependencies (autopsy 981ce4cc):
+          // the server keeps serving the OLD copy, so it is relaunched with its cache cleared.
+          const prebundleStale = await sandbox.commands.run(buildPrebundleStaleCheckCommand(), { cwd: WORKSPACE_ROOT, timeoutMs: 8000 })
+            .then((r) => r.stdout.includes('PREBUNDLE_STALE')).catch(() => false);
+          if (prebundleStale) {
+            await sandbox.commands.run(`rm -rf ${VITE_PREBUNDLE_DIR}`, { cwd: WORKSPACE_ROOT, timeoutMs: 15_000 }).catch(() => null);
+            console.log('[E2B] a dependency changed after the dev server pre-bundled its packages — relaunching it');
+          }
+          if (shouldSkipDevServerLaunch(alreadyUp, stale, prebundleStale)) {
             const boundPort = port;
             // A server we ADOPTED needs the keepalive exactly as much as one we started — arguably
             // more, since nobody in this process has been watching it so far.
@@ -2261,7 +2313,8 @@ export class E2BActuator implements IEngineerActuator {
         .catch(() => false);
       if (depsStale) {
         stdout += '\n[health-check] installing dependencies (package.json changed)…';
-        const dep = await this._npmInstall(sandbox).catch(() => ({ success: false, log: '' }));
+        const dep: { success: boolean; log: string; manifestNote?: string } = await this._npmInstall(sandbox, workspaceId).catch(() => ({ success: false, log: '' }));
+        if (dep.manifestNote) stdout += `\n${dep.manifestNote}\n`;
         if (dep.success) {
           stdout += ' done.';
         } else {
@@ -2367,7 +2420,8 @@ export class E2BActuator implements IEngineerActuator {
               .catch(() => { /* best-effort — the reinstall below still runs */ });
             stdout += ` (removed the incomplete "${diag.corruptPackage}" so it reinstalls cleanly)`;
           }
-          const dep = await this._npmInstall(sandbox).catch(() => ({ success: false, log: '' }));
+          const dep: { success: boolean; log: string; manifestNote?: string } = await this._npmInstall(sandbox, workspaceId).catch(() => ({ success: false, log: '' }));
+          if (dep.manifestNote) stdout += `\n${dep.manifestNote}\n`;
           stdout += dep.success ? ' (dependencies reinstalled).' : ' (reinstall reported errors — retrying anyway).';
         }
         // DB reaped/never-started (EstateNest autopsy 2026-07-20): a from-scratch Prisma+Postgres app can
@@ -2509,6 +2563,7 @@ export class E2BActuator implements IEngineerActuator {
     // timeout (the detector is deliberately narrow and never shortens a legit build/install/dev command).
     const cmdTimeoutMs = backgroundedServerSmokeCheckMs(command) ?? COMMAND_TIMEOUT_MS;
     let sb = sandbox;
+    let priorRunMs = 0;
     for (let attempt = 0; attempt < 2; attempt++) {
       const t0 = Date.now();
       try {
@@ -2528,7 +2583,7 @@ export class E2BActuator implements IEngineerActuator {
           this._dropSandbox(workspaceId);
           this._latency = newSandboxLatencyState(); // the fresh sandbox starts with a clean record
         }
-        return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+        return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, timing: { sandboxMs, runMs: priorRunMs + Date.now() - t0 } };
       } catch (err: any) {
         // A non-zero exit REJECTS here (E2B CommandExitError) — recover the REAL exit code so a genuine
         // command failure (tsc exit 2) is reported honestly, not flattened to the -1 dead-sandbox sentinel.
@@ -2536,14 +2591,16 @@ export class E2BActuator implements IEngineerActuator {
         const dead = isDeadSandboxSignal({ exitCode: realExit, durationMs: Date.now() - t0, stdout: err?.stdout, stderr: err?.stderr, errorMessage: err?.message });
         if (attempt === 0 && dead && this.sandboxes.get(workspaceId) === sb) {
           this._dropSandbox(workspaceId); // drop the reaped sandbox reference and its derived state
-          try { sb = await this.getSandbox(workspaceId); continue; } // recreate (replays source) + retry once
+          priorRunMs += Date.now() - t0; // the attempt that died is still command time, not ours
+          const recreateStartedAt = Date.now();
+          try { sb = await this.getSandbox(workspaceId); sandboxMs += Date.now() - recreateStartedAt; continue; } // recreate (replays source) + retry once
           catch { /* recreate itself failed (E2B down) → fall through to an honest error */ }
         }
         // Each channel keeps its OWN real content — `err.stderr || err.message` used to replace an
         // empty stderr with "exit status 2" even when the real diagnostics sat in stdout (tsc prints
         // type errors to STDOUT), which is how Publish showed a bare exit-status for five days.
         const thrown = thrownCommandOutput(err);
-        return { exitCode: realExit, stdout: thrown.stdout, stderr: thrown.stderr };
+        return { exitCode: realExit, stdout: thrown.stdout, stderr: thrown.stderr, timing: { sandboxMs, runMs: priorRunMs + Date.now() - t0 } };
       }
     }
     return { exitCode: -1, stdout: '', stderr: 'sandbox unavailable after recreate attempt' };

@@ -22,7 +22,7 @@
 // never reach the build.
 
 import {
-  lintDesign, designSummary, extractSpacingPx, offGridSpacing, MAX_OFFGRID, SPACING_GRID, type DesignLintResult,
+  lintDesign, designSummary, TOKEN_MODULE_PATH, extractSpacingPx, offGridSpacing, MAX_OFFGRID, SPACING_GRID, type DesignLintResult,
 } from '../AppMakerLab/intelligence/DesignLinter';
 import { lintA11y, type A11yLintResult } from '../AppMakerLab/intelligence/A11yLinter';
 import { stripCommentsForMarkup } from './stripCodeComments';
@@ -132,8 +132,9 @@ export function lintBuiltApp(files: Record<string, string>): BuildQualityLint | 
   if (fileCount === 0) return null;
 
   const joined = parts.join('\n');
+  const tokenModuleCode = selected.filter(([p]) => TOKEN_MODULE_PATH.test(p)).map(([, c]) => c).join('\n');
   return {
-    design: lintDesign(joined),
+    design: lintDesign(joined, { tokenModuleCode }),
     a11y: lintA11y(joined),
     fileCount,
     truncated,
@@ -154,7 +155,7 @@ function attributeOffenders(selected: ReadonlyArray<readonly [string, string]>):
   for (const [path, content] of selected) {
     let found: Array<{ type: string; count: number }> = [];
     try {
-      found = [...lintDesign(content).violations, ...lintA11y(content).violations]
+      found = [...lintDesign(content, { tokenModuleCode: TOKEN_MODULE_PATH.test(path) ? content : '' }).violations, ...lintA11y(content).violations]
         .map((v) => ({ type: v.type, count: v.count }));
     } catch { continue; }
     for (const { type, count } of found) {
@@ -183,7 +184,11 @@ export function offenderNote(r: BuildQualityLint, type: string): string {
 /** One line for the build report — the score plus the count, never a bare grade with no evidence. */
 export function designLintSummary(r: BuildQualityLint): string {
   const v = r.design.violations.length;
-  return `Design consistency ${r.design.score}/100 (${r.design.grade}) across ${r.fileCount} file(s)${r.truncated ? ', partially scanned' : ''}. ${designSummary(r.design)}${v ? ` ${r.design.violations.map((x) => `${x.message}${offenderNote(r, x.type)}`).join(' ')}` : ''}`.trim();
+  // Each finding once (autopsy e3b0ce25: the line read "grade A (98/100), 1 issue(s): ⚠ 4 spacing values
+  // are off … 4 spacing values are off …" — `designSummary` already carries the score and every message).
+  const head = `Design consistency ${r.design.score}/100 (${r.design.grade}) across ${r.fileCount} file(s)${r.truncated ? ', partially scanned' : ''}.`;
+  if (!v) return `${head} ${designSummary(r.design)}`.trim();
+  return `${head} ${r.design.violations.map((x) => `${x.message}${offenderNote(r, x.type)}`).join(' ')}`.trim();
 }
 
 /** One line for the build report, listing the real WCAG criteria rather than a score alone. */
@@ -215,6 +220,8 @@ const HAND_BACK_A11Y: Record<string, string> = {
   'control-name': 'button/link with no accessible name (add visible text or an aria-label)',
   'input-label': 'form field with no label (a <label htmlFor> or an aria-label)',
   'img-alt': 'image with no alt text',
+  // A clickable <div>/<span> (autopsy c70bcbb4) — keyboard and screen-reader users cannot press it.
+  'click-noninteractive': 'clickable div/span a keyboard cannot press (make it a <button>, or add role="button", tabIndex={0} and a key handler)',
 };
 
 /**

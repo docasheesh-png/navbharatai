@@ -126,7 +126,7 @@ export function etaBasisNote(history: readonly HistoricalBuild[]): string {
 /** The per-day, per-task-type slice of the platform's own cost telemetry the fleet prior reads. */
 export interface FleetTelemetryDayLike {
   date?: string;
-  byTaskType?: Record<string, { builds?: number; durationMs?: number; okBuilds?: number; okDurationMs?: number } | undefined>;
+  byTaskType?: Record<string, { builds?: number; durationMs?: number; okBuilds?: number; okDurationMs?: number; okDurationSqSec?: number } | undefined>;
 }
 
 /** Fewer builds of a kind on one day than this, and that day's mean is noise, not a measurement. */
@@ -171,7 +171,14 @@ export function fleetHistoryFromTelemetry(
     if (!Number.isFinite(n) || !Number.isFinite(ms) || n < FLEET_MIN_BUILDS_PER_DAY || ms <= 0) continue;
     const mean = ms / n;
     if (!(mean >= MIN_SANE_BUILD_MS && mean <= MAX_SANE_BUILD_MS)) continue;
-    history.push({ complexity: currentComplexity, durationMs: Math.round(mean) });
+    // How far that day's builds were from its mean, when the day recorded it (`okDurationSqSec`) — so the
+    // band reflects one build's spread, not only the spread of daily averages (autopsy 68f0a486).
+    const sq = Number(slice?.okDurationSqSec);
+    const meanSec = mean / 1000;
+    const daySd = hasOk && n >= 2 && Number.isFinite(sq) && sq > 0
+      ? Math.sqrt(Math.max(0, sq / n - meanSec * meanSec)) * 1000
+      : 0;
+    history.push({ complexity: currentComplexity, durationMs: Math.round(mean), ...(daySd > 0 ? { sdMs: Math.round(daySd) } : {}) });
     builds += n;
   }
   return { history, builds, days: history.length };
@@ -189,9 +196,14 @@ export function fleetHistoryFromTelemetry(
  * agree on one answer: a seeded build is its own kind. PURE.
  */
 export const SCAFFOLD_TASK_KEY = 'scaffold';
-export function etaTaskKey(taskType: string | null | undefined, scaffolded: boolean): string {
+export function etaTaskKey(taskType: string | null | undefined, scaffolded: boolean, routedComplex = false): string {
   if (scaffolded) return SCAFFOLD_TASK_KEY;
-  return String(taskType ?? '').trim() || 'unknown';
+  const t = String(taskType ?? '').trim() || 'unknown';
+  // The scorer cannot read every script (autopsy Sur Taal: a Hindi design note scored `simple_app`), and the
+  // complexity router then asked a second opinion and opened the build as COMPLEX. The ETA must price the
+  // build the router decided on, not the scorer's unread guess — so a routed-complex build is a complex_app.
+  if (routedComplex && (t === 'simple_app' || t === 'unknown')) return 'complex_app';
+  return t;
 }
 
 /** The admin line for an estimate taught by the platform's recent builds of this kind. PURE. */

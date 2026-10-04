@@ -40,7 +40,13 @@ const POINTERS: readonly RegExp[] = [
   // "isko banao", "ise bana do", "yahi banao", "wahi bana dijiye"
   /\b(?:isko|isse|ise|isi\s*ko|yahi|wahi|vahi|usko|use|ye|yeh)\s+(?:bana|banao|bana\s*do|banado|bana\s*dijiye|banaiye|bnao|bna\s*do)\b/i,
   /\bjo\s+(?:aapne|apne|tumne|upar)\b/i,
+  // "LIKE THIS ONE" (autopsy c70bcbb4: "Mujhe esa hi music player bnakar do" — "make me a music player just
+  // like this"). The object is named, but its look and features live in the conversation.
+  /\b(?:aisa|aise|aisi|esa|ese|esi|aesa|aisaa|waisa|waise|waisi|vaisa|vaise|vaisi)\s+hi\b/i,
+  /\b(?:isi|usi)\s+tarah\s+(?:ka|ki|ke)\b|\b(?:is|iss|iske|uske|us)\s+(?:jais[aie]|jaisa\s+hi)\b/i,
+  /\b(?:app|player|website|site|game|design|one|ui|screen|page)\s+(?:just\s+)?like\s+(?:this|that|the\s+one\s+(?:above|you\s+showed))\b|\b(?:similar\s+to|same\s+as)\s+(?:this|that)\b/i,
   // Devanagari
+  /(?:ऐसा|ऐसी|ऐसे|वैसा|वैसी|वैसे)\s*ही|इसी\s*तरह|इसके\s*जैस/,
   /(?:यह|ये|इस|इसी|वही|यही)\s*(?:ऐप|एप|एप्लिकेशन|वेबसाइट|गेम|app)/,
   /(?:इसे|इसको|इसी\s*को|यही|वही)\s*बना/,
 ];

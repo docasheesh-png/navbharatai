@@ -92,12 +92,38 @@ export function builtWithLabel(framework: string | null | undefined): string {
   return frameworkRunsInBrowser(f) ? f : serverFrameworkLabel(f);
 }
 
+/**
+ * 🔴 THE LINE THAT STOPS THE BUILDER EXPLAINING INSTEAD OF BUILDING (autopsy 39e982bd, 2026-10-04).
+ *
+ * A request for a native Android app got this brief, read it correctly, and then spent its first
+ * substantive turn writing the user **1,975 characters** about what the sandbox cannot do — *"I'd love
+ * to help with PrimeClash eSports, but I need to be upfront… I cannot create a true
+ * com.primeclash.esports Android Studio project"* — and ended the turn with **no tool call**. Before
+ * 2026-09-26 the build would have ended there as FAILED with 23 of its 25 minutes unspent;
+ * `UNFINISHED_BUILD_RESUMED` caught it, handed back the blocker, and the model's next words were *"I
+ * hear you — I paused when I should have shipped."* The rescue worked. It cost ~70 s, one 871-token
+ * call, and a user-visible *"⏳ Not finished yet"* on a build that had produced nothing.
+ *
+ * 🔑 THE BRIEF SAID WHAT NOT TO DO AND NEVER SAID WHO TELLS THE USER. The platform appends
+ * `unsupportedStackUserNote` to the ready message on every such build, and
+ * `buildFindingSuggestions.ts` records in as many words that `UNSUPPORTED_STACK` needs no offer
+ * because *"the user is told in the ready message already"*. Every part of the platform knew except
+ * the one actor that could waste a turn on it. The 50/50 half of this fix: the resume is the last line
+ * of defence, and a model that is told the message is already sent has no reason to write it.
+ */
+const ALREADY_TOLD_LINE =
+  '- The USER IS ALREADY TOLD this, in plain words, in the message NavBharatAI shows when the build '
+  + 'finishes — do NOT spend a turn explaining the limitation, apologising for it, or asking whether to '
+  + 'proceed. Build the app now, in this project\'s language. One short sentence inside your final '
+  + 'summary is welcome; a turn that only explains is a turn the user waits through for nothing.';
+
 /** The builder's instruction, prepended to the build prompt. PURE. */
 export function unsupportedStackBuilderNote(stack: string, framework: string | null | undefined): string {
   const label = builtWithLabel(framework);
   if (isMobileStack(stack)) {
     return [
       `STACK NOTE — the user named ${stack}. NavBharatAI cannot build, compile or preview ${stack} projects. It builds WEB apps that install on a phone: the user makes the Android app (APK) from ${APK_BUILDER_PATH}, which packages this project. This project is ${label}; build the whole app in it, mobile-first.`,
+      ALREADY_TOLD_LINE,
       `- Never write ${stack} files (no Gradle, Kotlin, Swift, Dart, Xcode or AndroidManifest files) and never claim the app is ${stack} — not in the UI, the README or a code comment.`,
       '- Never delete, empty or replace package.json, vite.config.*, index.html, tsconfig*.json or src/ — they ARE the app: without them nothing runs, previews or packages.',
       '- Phone features (microphone, speech, reminders, opening other apps, calls, SMS, battery) use the browser APIs and the phone plugins named elsewhere in this brief; where a phone only allows it with the user\'s confirmation, ask for it in the UI.',
@@ -106,6 +132,7 @@ export function unsupportedStackBuilderNote(stack: string, framework: string | n
   }
   return [
     `STACK NOTE — the user named ${stack}, which NavBharatAI cannot build or run. This project is ${label}; build the whole app in it.`,
+    ALREADY_TOLD_LINE,
     `- Never write ${stack} files and never claim the app is ${stack} or has a ${stack} backend — not in the UI, the README, or a code comment.`,
     ...(frameworkRunsInBrowser(String(framework ?? 'vite-react'))
       ? ['- There is no server here. Where the request asks for something only a server does (server-side validation, CSRF tokens, server sessions), build the real in-browser equivalent and name it honestly as client-side in the code.']

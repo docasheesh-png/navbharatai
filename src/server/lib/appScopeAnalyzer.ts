@@ -16,8 +16,9 @@
 // PURE: no I/O, no clock, no model. Never throws. The exact thresholds are meant to be reviewed against
 // real prompts (the admin will eye-ball the classifications) and tuned here.
 
-import { countEnumeratedFeatures, notAFeatureLine, BIG_SOFTWARE_NOUN } from '../AgentV3/enumeratedFeatures';
+import { countEnumeratedFeatures, notAFeatureLine, BIG_SOFTWARE_NOUN, sectionedSpecSize } from '../AgentV3/enumeratedFeatures';
 import { withoutMachineText } from './machineText';
+import { MEDIA_PLAYER_APP } from './RequirementGapAnalyzer';
 
 export type AppSize = 'small' | 'large';
 
@@ -31,6 +32,8 @@ export interface AppScope {
   signals: string[];
   /** The prompt names a single-purpose, one-shot-buildable thing (CLEARLY_SMALL). Read by `scopeDispute`. */
   smallHint: boolean;
+  /** The app ITSELF is that small thing — the small word is in the request's subject, not a feature (Q-398). */
+  smallSubject: boolean;
 }
 
 /**
@@ -171,6 +174,27 @@ const HEAVY_INFRA: Array<{ label: string; re: RegExp }> = [
 const CLEARLY_SMALL = /\b(?:calculator|to-?do|todo|task list|timer|stopwatch|counter|quiz(?:zes)?|flash ?card|converter|unit convert|weather|clock|notepad|notes app|landing page|portfolio|resume|cv|one-?page|business card|invoice|form|survey|poll|tracker|habit|budget|expense|dictionar(?:y|ies)|recipe|menu card|qr code|password|pomodoro)s?\b/i;
 
 /**
+ * WHAT THE APP IS, not every word in the request (Q-398, autopsy Sur Taal; admin accepted). The hint
+ * matched a small word ANYWHERE, so a nine-screen music player was "single-purpose" because one of its
+ * features is a Sleep Timer — and a social network with a countdown timer would be too. The subject is
+ * the first line of the request, cut at the first word that starts the feature list ("with", "—", ":",
+ * "jisme", "के साथ"…). A small word there names the app; a small word after it names a feature. PURE.
+ */
+const FEATURE_LIST_START = /\s(?:with|having|including|featuring|that|which|where|jisme|jismein|jisme?n|jinme|wala|wali)\s|\s*[—–:;(]\s*|\s-\s|,|\s(?:के\s+साथ|जिसमें|जिसमे|जहाँ|जहां)\s/i;
+export function requestSubject(raw: string): string {
+  const text = withoutMachineText(String(raw ?? ''), { drop: true });
+  const first = text.split('\n').map((l) => l.trim()).find((l) => /[\p{L}\p{N}]/u.test(l)) ?? '';
+  const cut = first.search(FEATURE_LIST_START);
+  return (cut > 0 ? first.slice(0, cut) : first).trim();
+}
+
+/** Is the app ITSELF small and single-purpose? Read from the subject only. PURE. */
+export function namesASmallApp(raw: string): boolean {
+  const subject = requestSubject(raw);
+  return (CLEARLY_SMALL.test(subject) || MEDIA_PLAYER_APP.test(subject)) && !BIG_SOFTWARE_NOUN.test(String(raw ?? ''));
+}
+
+/**
  * Count roughly how many DISTINCT features a prompt asks for — a huge multi-feature spec (often an
  * AI-written PRD) is a mega app dressed as a detailed prompt. Counts numbered/bulleted list items and
  * "and"/comma-joined feature verbs, capped. LENGTH alone is deliberately NOT used (a detailed prompt for a
@@ -192,13 +216,17 @@ function featureCount(raw: string): number {
   // A pasted link is not a feature (autopsy 33812996). The famous-app check above still reads the
   // whole text on purpose: "a clone of https://zomato.com" names its product in the link.
   const text = withoutMachineText(raw, { drop: true });
+  // A spec written as numbered sections is sized by its sections, as `megaProjectSignals` is (Q-391, Sur
+  // Taal: 8 sections read as "~85 distinct features" here). Only ever a SMALLER count — never more eager.
+  const sections = sectionedSpecSize(text);
   // A question or a setting on a bullet is not a feature either (autopsy 0311186f) — the same rule the
   // shared counter applies, so the two counts cannot disagree about one line.
   const numbered = (text.match(/^\s*(?:\d+[.)]|[-*•])\s+\S.*$/gm) || []).filter((l) => !notAFeatureLine(l)).length;
   const verbs = (text.match(/\b(add|build|create|include|with|support|allow|enable|manage|integrate)\b/gi) || []).length;
   // Numbered lists are the strongest signal; verbs are a softer one (halved).
   const legacy = numbered + Math.floor(verbs / 2);
-  return Math.max(legacy, countEnumeratedFeatures(text));
+  const counted = Math.max(legacy, countEnumeratedFeatures(text));
+  return sections !== null ? Math.min(sections, counted) : counted;
 }
 
 const FEATURE_COUNT_MEGA = 8; // a spec asking for ~8+ distinct features is treated as large
@@ -211,7 +239,10 @@ export function analyzeAppScope(prompt: string): AppScope {
   const famous = FAMOUS_APPS.find((f) => namesAsProduct(text, f.re));
   const heavy = HEAVY_INFRA.filter((h) => h.re.test(text));
   const feats = featureCount(text);
+  // The DECISION still reads any small word (unchanged: narrowing it would send 8 of 7,403 test prompts to
+  // the roadmap planner — a behaviour change nobody decided). Only the REASON is read from the subject.
   const smallHint = CLEARLY_SMALL.test(text) && !BIG_SOFTWARE_NOUN.test(text);
+  const smallSubject = namesASmallApp(text);
 
   if (famous) signals.push(`asks to clone ${famous.name}`);
   for (const h of heavy) signals.push(`needs ${h.label}`);
@@ -222,9 +253,13 @@ export function analyzeAppScope(prompt: string): AppScope {
   const strongMega = !!famous || heavy.length > 0 || (feats >= FEATURE_COUNT_MEGA && !smallHint);
 
   if (strongMega) {
-    return { decision: 'analyze', size: 'large', famousApp: famous?.name ?? null, signals, smallHint };
+    return { decision: 'analyze', size: 'large', famousApp: famous?.name ?? null, signals, smallHint, smallSubject };
   }
-  if (smallHint) signals.push('single-purpose app — buildable in one shot');
-  else signals.push('no mega-signal — treated as an ordinary one-shot app (today\'s behaviour)');
-  return { decision: 'direct', size: 'small', famousApp: null, signals, smallHint };
+  if (smallSubject) signals.push('single-purpose app — buildable in one shot');
+  else if (smallHint) {
+    const word = (text.match(CLEARLY_SMALL)?.[0] ?? '').trim();
+    const subject = requestSubject(text).slice(0, 60);
+    signals.push(`mentions a small feature ("${word}") but the app itself is "${subject || 'not named'}" — kept as one build (today's behaviour)`);
+  } else signals.push('no mega-signal — treated as an ordinary one-shot app (today\'s behaviour)');
+  return { decision: 'direct', size: 'small', famousApp: null, signals, smallHint, smallSubject };
 }

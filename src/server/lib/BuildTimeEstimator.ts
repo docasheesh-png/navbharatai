@@ -23,6 +23,11 @@ export interface Complexity {
 export interface HistoricalBuild {
   complexity: Complexity;
   durationMs: number;
+  /**
+   * When this entry is itself an AVERAGE (a day of the platform's builds), how far that day's builds were
+   * from it. Absent for a single build. Feeds the band, never the estimate (autopsy 68f0a486).
+   */
+  sdMs?: number;
 }
 
 export interface BuildEstimate {
@@ -194,7 +199,7 @@ export function liveEtaTick(elapsedMs: number, totalMs: number, baseMs: number, 
  * Historical estimate: weighted average of past builds, weighting closer complexity scores more
  * heavily (inverse-distance). Returns null when there is no usable history.
  */
-function historicalEstimateMs(history: HistoricalBuild[], targetScore: number): { ms: number; weight: number; n: number } | null {
+function historicalEstimateMs(history: HistoricalBuild[], targetScore: number): { ms: number; weight: number; n: number; sdMs: number } | null {
   const valid = history.filter((h) => Number.isFinite(h.durationMs) && h.durationMs > 0);
   if (valid.length === 0) return null;
   let wSum = 0;
@@ -206,8 +211,27 @@ function historicalEstimateMs(history: HistoricalBuild[], targetScore: number): 
     wMs += w * h.durationMs;
   }
   if (wSum === 0) return null;
-  return { ms: wMs / wSum, weight: wSum, n: valid.length };
+  const ms = wMs / wSum;
+  // How far apart those builds really were — the same weights, so a close build counts more here too.
+  let wVar = 0;
+  for (const h of valid) {
+    const w = 1 / (1 + Math.abs(complexityScore(h.complexity) - targetScore));
+    // Between the entries, plus inside each entry that is itself an average (the law of total variance).
+    const inner = Number.isFinite(h.sdMs) && (h.sdMs as number) > 0 ? (h.sdMs as number) : 0;
+    wVar += w * ((h.durationMs - ms) ** 2 + inner ** 2);
+  }
+  return { ms, weight: wSum, n: valid.length, sdMs: Math.sqrt(wVar / wSum) };
 }
+
+/**
+ * 🔴 THE BAND CANNOT BE NARROWER THAN THE BUILDS IT CAME FROM (autopsy 68f0a486, 2026-10-04). The band was
+ * set by confidence alone — "how much history" — so 28 builds of every size averaged to 8 min and promised
+ * 7.8–8.3 min (±3%); the build took 8.4 and was recorded as missing its band. How much history there is
+ * says how sure we are of the AVERAGE, not how far one build lands from it. With enough builds to measure
+ * a spread (`MIN_BUILDS_FOR_SPREAD`), the band reaches at least one weighted standard deviation either
+ * side, never below half the estimate.
+ */
+export const MIN_BUILDS_FOR_SPREAD = 5;
 
 /** Estimate build duration from complexity + optional history. Pure. */
 export function estimateBuildTime(complexity: Complexity, history: HistoricalBuild[] = []): BuildEstimate {
@@ -236,12 +260,19 @@ export function estimateBuildTime(complexity: Complexity, history: HistoricalBui
     historyWeight = histTrust;
   }
 
-  // Range widens as confidence drops.
+  // Range widens as confidence drops…
   const spread = 1 - confidence; // 0.05 … 0.6
+  let lowMs = Math.round(estimateMs * (1 - spread * 0.5));
+  let highMs = Math.round(estimateMs * (1 + spread * 0.8));
+  // …and is never narrower than what the past builds really did (see MIN_BUILDS_FOR_SPREAD).
+  if (hist && hist.n >= MIN_BUILDS_FOR_SPREAD && Number.isFinite(hist.sdMs) && hist.sdMs > 0) {
+    lowMs = Math.min(lowMs, Math.max(Math.round(estimateMs * 0.5), Math.round(estimateMs - hist.sdMs)));
+    highMs = Math.max(highMs, Math.round(estimateMs + hist.sdMs));
+  }
   return {
     estimateMs,
-    lowMs: Math.round(estimateMs * (1 - spread * 0.5)),
-    highMs: Math.round(estimateMs * (1 + spread * 0.8)),
+    lowMs,
+    highMs,
     confidence: Math.round(confidence * 100) / 100,
     historyWeight: Math.round(historyWeight * 100) / 100,
     basis,
@@ -286,4 +317,29 @@ export function complexityFromPrompt(prompt: string): Complexity {
     featureCount = clamp(Math.max(featureCount, 6), 1, 30);
   }
   return { moduleCount, featureCount };
+}
+
+/**
+ * A BUILD ORDER OVER A BIG PROJECT IS ESTIMATED BY THE PROJECT (autopsy 51ef24ad, 2026-10-04).
+ * "Build app in this format" over a nine-screen Android app was told ~8 min and ran 19: the estimate
+ * read five words and found one module. The router already sizes such a turn by the project
+ * (`workspaceSizedComplexity`, source `workspace`); this gives the ETA the same evidence — the
+ * project's own screen files — floored at the complex-app counts `complexityFromPrompt` already uses.
+ * Only raises the estimate, never lowers it. PURE.
+ */
+export function projectSizedComplexity(base: Complexity, projectPaths: readonly string[] | null | undefined): Complexity {
+  const screens = new Set(
+    (projectPaths ?? [])
+      .map((p) => String(p).replace(/\\/g, '/'))
+      .filter((p) => !/(^|\/)(node_modules|build|dist|\.gradle|test|tests|androidTest)\//i.test(p))
+      .filter((p) => /(Screen|Page|View|Activity|Fragment)\.(kt|java|swift|dart|tsx?|jsx?|vue|svelte)$/.test(p) && !/ViewModel\./.test(p))
+      // The entry host (an Android `MainActivity` hosting Compose screens) is not itself a screen.
+      .filter((p) => !/(^|\/)Main(Activity|View)\.\w+$/.test(p))
+      .map((p) => p.split('/').pop()),
+  ).size;
+  return {
+    ...base,
+    moduleCount: clamp(Math.max(base.moduleCount, screens, 6), 1, 20),
+    featureCount: clamp(Math.max(base.featureCount, 6), 1, 30),
+  };
 }

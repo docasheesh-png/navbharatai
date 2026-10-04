@@ -24,6 +24,7 @@
 import { turnAskedTheUser, turnDeclined } from './nudgeToBuild';
 import { DEFECT_TEXT, type DesignDefect } from './DesignCoverage';
 import { undefinedClassesInFile } from './CssConsistency';
+import { orphanInstruction } from './orphanHandBack';
 
 export const MAX_STYLE_RESUMES = 1;
 
@@ -56,6 +57,8 @@ export interface StyleResumeInput {
   producedFiles?: boolean;
   /** Screens with controls a screen reader cannot use (Q-002) — handed back in the same message. */
   a11y?: ReadonlyArray<{ file: string; issues: ReadonlyArray<string> }>;
+  /** Component files this build wrote that nothing imports (Q-202, `orphanHandBack.ts`) — handed back in the same message. */
+  orphans?: ReadonlyArray<string>;
   /**
    * 🔴 SPACING IS NOT HANDED BACK HERE (autopsy 536c8189, 2026-10-01). It was, from #3458 until that date:
    * `offGrid` carried the `DESIGN_CONSISTENCY` values and the message said "change each to the nearest
@@ -82,7 +85,8 @@ export function decideStyleResume(input: StyleResumeInput): StyleResumeDecision 
   const missing = [...new Set((input.missing ?? []).map((c) => String(c ?? '').trim().replace(/^\./, '')).filter(Boolean))];
   const pages = (input.pages ?? []).filter((p) => p && p.file && p.defects?.length).slice(0, MAX_PAGES_LISTED);
   const a11y = (input.a11y ?? []).filter((a) => a && a.file && a.issues?.length);
-  if (missing.length === 0 && pages.length === 0 && a11y.length === 0) return { resume: false, message: '', standDown: 'nothing-missing' };
+  const orphans = [...new Set((input.orphans ?? []).map((p) => String(p ?? '').trim()).filter(Boolean))];
+  if (missing.length === 0 && pages.length === 0 && a11y.length === 0 && orphans.length === 0) return { resume: false, message: '', standDown: 'nothing-missing' };
   if (input.resumesUsed >= MAX_STYLE_RESUMES) return { resume: false, message: '', standDown: 'limit' };
   if (turnDeclined(input.text)) return { resume: false, message: '', standDown: 'declined' };
   if (!input.producedFiles && turnAskedTheUser(input.text)) return { resume: false, message: '', standDown: 'asked-the-user' };
@@ -103,6 +107,7 @@ export function decideStyleResume(input: StyleResumeInput): StyleResumeDecision 
       + '\nGive each one a real, specific name that says what it does (not "button" or "icon").',
     );
   }
+  if (orphans.length) parts.push(orphanInstruction(orphans));
   return {
     resume: true,
     message:
@@ -143,11 +148,22 @@ export function doneStyleNote(missing: readonly string[], sheet: string | undefi
 }
 
 /** One sentence for the admin report — never user-facing, so it may name the mechanism. */
-export function styleResumeNote(missingCount: number, pageCount = 0): string {
-  return `The model ended its turn while ${missingCount} class name(s) had no style rule and ${pageCount} page(s) fell `
-    + 'short of the design standard, so it was handed them and told to fix them before finishing (once). Before '
+export function styleResumeNote(missingCount: number, pageCount = 0, orphanCount = 0, a11yCount = 0): string {
+  // 🔴 The count of what was handed back, never a sentence about two of its four parts (autopsy 68f0a486:
+  // "0 class name(s) … 0 page(s)" headed a hand-back whose only item was an unlabelled upload field).
+  const parts = [
+    missingCount > 0 ? `${missingCount} class name(s) had no style rule` : '',
+    pageCount > 0 ? `${pageCount} page(s) fell short of the design standard` : '',
+    a11yCount > 0 ? `${a11yCount} file(s) had controls a keyboard or screen reader cannot use` : '',
+  ].filter(Boolean);
+  const what = parts.length > 0 ? parts.join(', ') : `${missingCount} class name(s) had no style rule and ${pageCount} page(s) fell short of the design standard`;
+  return `The model ended its turn while ${what}, `
+    + 'so it was handed them and told to fix them before finishing (once). Before '
     + '2026-10-01 the turn ended here and a separate end-of-build repair pass, in a fresh context, fixed them. '
-    + 'Spacing off the 4px grid is NOT handed back (autopsy 536c8189) — it is snapped deterministically instead.';
+    + 'Spacing off the 4px grid is NOT handed back (autopsy 536c8189) — it is snapped deterministically instead.'
+    + (orphanCount > 0
+      ? ` ${orphanCount} component file(s) this build wrote and nothing imports were handed back in the same message (Q-202).`
+      : '');
 }
 
 /** What `undefinedClassesNow` returns, as this module reads it. */
@@ -156,6 +172,8 @@ export interface StyleHandBack {
   sheet?: string;
   pages: Array<{ file: string; defects: DesignDefect[] }>;
   a11y?: Array<{ file: string; issues: string[] }>;
+  /** Component files this build wrote that nothing imports (top-level turn only; `orphanHandBack.ts`). */
+  orphans?: string[];
 }
 
 /**

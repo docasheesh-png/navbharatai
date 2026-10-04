@@ -223,6 +223,12 @@ export interface SubAgentDeps {
    * derived from never was. Absent ⇒ nothing is added.
    */
   userRequest?: () => string;
+  /**
+   * The digest of the project being PORTED (`portDigest.ts`, autopsy 51ef24ad). A specialist started
+   * empty and spent its step budget reading the original Kotlin sources the architect had been given.
+   * A thunk: the route reads the sources after the spawn closure is built. Absent or '' ⇒ nothing added.
+   */
+  portDigest?: () => string;
 }
 
 /** How much of the user's request a child is handed — a request, not an attachment dump. */
@@ -390,7 +396,10 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       // `git clone <the same repo> workspace/mitrify` and put a second copy of the user's app inside
       // their app. One line closes the gap, and it is true by construction: it is emitted only when
       // the project graph actually holds files, so a from-scratch build never sees it.
-      projectMap
+      // 🔴 ONLY TO AN AGENT THAT CAN READ (autopsy 68f0a486, 2026-10-04). The lean review runs with NO tools
+      // and the changed files in its message; told to "read them with read_file", it answered "I will read
+      // the files and review" and ended — a review of nothing, in its one call.
+      projectMap && (deps.toolsOverride ?? cfg.tools).includes('read_file' as ToolName)
         ? 'These files are ALREADY in your workspace, at the workspace root — read them with '
           + '`read_file`, `glob` and `grep`. Never `git clone` this project: every command runs from '
           + 'the workspace root, so a clone puts a second copy of the app inside the app.'
@@ -404,6 +413,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       // tried to read in an app with no AI at all (autopsy d382b398, a failed read_file).
       (() => { try { return roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools) ? (deps.aiRule?.() ?? '') : ''; } catch { return ''; } })(),
       (() => { try { return userRequestBlock(deps.userRequest?.(), roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools)); } catch { return ''; } })(),
+      (() => { try { return deps.portDigest?.() ?? ''; } catch { return ''; } })(),
     ].filter(Boolean);
     // 🎨 THE KIT, AS THE ARCHITECT WAS TOLD IT (autopsy ee0e6de5, 2026-09-30). A specialist that writes
     // files was never told the design kit's classes, so the Frontend sub-agent read `src/index.css` six

@@ -96,8 +96,11 @@ describe('the route — every sizer reads planning.sizing, every model reads pla
   });
   it.each([
     ['wall-clock complexity', /const buildComplexity = complexityFromPrompt\(planning\.sizing\)/],
-    ['ETA complexity', /const etaComplexity = complexityFromPrompt\(planning\.sizing\)/],
-    ['request analysis', /analyzeRequest\(\{ prompt: planning\.sizing/],
+    ['ETA complexity', /const etaComplexity = etaByProject[\s\S]{0,120}complexityFromPrompt\(planning\.sizing\)[\s\S]{0,40}: complexityFromPrompt\(planning\.sizing\);/],
+    // Whitespace-tolerant since 2026-10-04: the call became multi-line when `fileCount` joined it
+    // (autopsy 8b8743a3 / Q-313). The invariant this row guards — the sizer reads `planning.sizing`,
+    // never the bare message — is unchanged and still fully enforced; only the line break is allowed.
+    ['request analysis', /analyzeRequest\(\{\s*prompt: planning\.sizing/],
     ['complexity routing', /\{ prompt: planning\.sizing, score: analysis\?\.complexityScore/],
     ['project-mode detection', /detectMegaProject\(planning\.sizing\)/],
     ['fast lane', /runSimpleBuild\(\{ prompt: planning\.text/],

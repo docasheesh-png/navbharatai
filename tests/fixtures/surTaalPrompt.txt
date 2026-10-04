@@ -1,0 +1,146 @@
+🎵 म्यूजिक प्लेयर ऐप — पूरा डिज़ाइन नोट
+
+एक छोटा, तेज़ और सुंदर ऑफलाइन म्यूजिक प्लेयर ऐप बनाना है। ऐप का इंटरफेस आधुनिक, साफ-सुथरा और प्रीमियम दिखना चाहिए। मुख्य थीम Dark हो और Purple/Blue Neon Accent का इस्तेमाल किया जाए।
+
+1. होम स्क्रीन
+
+- ऐप का लोगो और नाम ऊपर
+- Search बटन
+- More/Menu बटन
+- Home, Songs, Albums, Artists, Playlists के टैब
+- Local Music
+- Albums
+- Artists
+- Playlists
+- Recently Played
+- Favourite Songs
+- सभी Songs की सूची
+- नीचे छोटा Mini Player हमेशा दिखाई दे
+
+2. Now Playing स्क्रीन
+
+- बड़े आकार में Album Art
+- Song Name
+- Artist Name
+- Progress Bar
+- Current Time और Total Duration
+- Previous
+- Play/Pause
+- Next
+- Shuffle
+- Repeat
+- Lyrics
+- Queue
+- Favourite बटन
+- Volume Control
+
+3. Settings स्क्रीन
+
+Settings को अलग-अलग Sections में रखें:
+
+Appearance
+
+- Dark Mode
+- Light Mode
+- System Theme
+- Accent Color बदलने का विकल्प
+
+Player Settings
+
+- Audio & Equalizer
+- Playback Speed
+- Gapless Playback
+- Crossfade
+- Sleep Timer
+
+Notifications
+
+- Notification Player On/Off
+
+Language
+
+- भाषा बदलने का विकल्प
+
+Backup & Restore
+
+- Playlist और Settings Backup/Restore
+
+About
+
+- App Version
+- Privacy Policy
+- About App
+
+4. Audio & Equalizer
+
+एक सुंदर Equalizer स्क्रीन बनाएं।
+
+- Equalizer On/Off
+- Presets: Normal, Rock, Pop, Classical, Bass
+- 5 या 10 Band Equalizer
+- Bass Boost
+- Virtualizer
+- Loudness
+- Volume Normalization
+- Gapless Playback
+- Crossfade
+- Audio Output
+
+5. Mini Player
+
+हर मुख्य स्क्रीन के नीचे Mini Player हो:
+
+- छोटा Album Art
+- Song Name
+- Previous
+- Play/Pause
+- Next
+
+Mini Player पर क्लिक करने से Now Playing स्क्रीन खुले।
+
+6. Playlists
+
+यूज़र अपनी Playlist बना सके:
+
+- New Playlist
+- Playlist Name
+- Songs Add/Remove
+- Rename
+- Delete
+- Playlist में Songs की संख्या दिखे
+
+7. Music Library
+
+फोन में मौजूद Audio Files को अपने आप Scan करे।
+
+समर्थित सामान्य Audio Formats:
+
+- MP3
+- WAV
+- AAC
+- FLAC
+- OGG
+
+Song की जानकारी जैसे Title, Artist, Album और Duration दिखे।
+
+8. डिजाइन
+
+डिजाइन:
+
+- Modern Android UI
+- Rounded Cards
+- Smooth Animations
+- Dark Background
+- Purple/Blue Accent
+- साफ और बड़े Icons
+- ज्यादा भीड़ वाला इंटरफेस नहीं
+- तेज़ और हल्का ऐप
+- छोटे फोन पर भी सही दिखाई दे
+
+9. जरूरी बात
+
+ऐप का मुख्य उद्देश्य ऑफलाइन लोकल म्यूजिक चलाना होना चाहिए। इंटरनेट या ऑनलाइन अकाउंट अनिवार्य न हो।
+
+पहले UI और सभी Screens का डिजाइन तैयार करें। उसके बाद Music Scanner, Player, Playlist, Equalizer और Settings की functionality जोड़ें।
+
+ऐप का नाम अस्थायी रूप से Sur Taal Music रखा जा सकता है।

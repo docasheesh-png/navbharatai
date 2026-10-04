@@ -68,7 +68,7 @@ describe('a seeded template is its own kind of build', () => {
 describe('the route asks one question in both places', () => {
   it('the ETA reads the slice routing chose, before the estimate is made', () => {
     const decided = route.indexOf('const scaffoldWillSeed =');
-    const asked = route.indexOf('etaTaskKey(analysis.taskType, scaffoldWillSeed)');
+    const asked = route.indexOf('etaTaskKey(analysis.taskType, scaffoldWillSeed, buildIsComplex)');
     expect(decided).toBeGreaterThan(0);
     expect(asked).toBeGreaterThan(decided);
     expect(route).toContain('fleetHistoryFromTelemetry(await withTimeout(agentV3CostTelemetry.list(7), 3_000, \'eta-fleet\'), etaFleetKey, etaComplexity)');

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { CONTINUE_AND_FIX_BUILD_PROMPT } from '../src/lib/continueBuildPrompts';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
@@ -125,6 +126,8 @@ describe('the wiring — none of which fails anything if dropped', () => {
   it('🔒 the ORIGINAL failure card and its prompt still exist for a genuinely broken app', () => {
     // This change must narrow what the old card claims, never delete the card. An app that really is
     // broken still needs the blunt version.
-    expect(panel).toContain("fixWithAI('Continue from where you left off and finish/fix the build so the app works end-to-end.')");
+    // The sentence moved to a shared constant the server recognises (autopsy Sur Taal); the card still sends it.
+    expect(panel).toContain('fixWithAI(CONTINUE_AND_FIX_BUILD_PROMPT)');
+    expect(CONTINUE_AND_FIX_BUILD_PROMPT).toBe('Continue from where you left off and finish/fix the build so the app works end-to-end.');
   });
 });

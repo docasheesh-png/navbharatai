@@ -2,11 +2,31 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig, loadEnv} from 'vite';
+import {isAutolinkLiteralModule, patchAutolinkEmail} from './src/lib/autolinkEmailPatch';
+
+/**
+ * Q-322: the chat markdown library's email regex uses a lookbehind, which iOS 15 – 16.3 cannot run.
+ * Swapped for the same pattern without it; see `src/lib/autolinkEmailPatch.ts`. A library upgrade
+ * that moves the pattern fails the build here rather than shipping it.
+ */
+function noLookbehindAutolink() {
+  return {
+    name: 'nbai-no-lookbehind-autolink',
+    transform(this: { error(message: string): never }, code: string, id: string) {
+      if (!isAutolinkLiteralModule(id)) return null;
+      const patched = patchAutolinkEmail(code);
+      if (patched === null) {
+        this.error('mdast-util-gfm-autolink-literal changed its email regex: re-check it for a lookbehind (Q-322).');
+      }
+      return { code: patched, map: null };
+    },
+  };
+}
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), noLookbehindAutolink()],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       // Build-time stamp so a deployed version is verifiable at a glance (shown in

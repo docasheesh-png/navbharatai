@@ -22,3 +22,7 @@ test_environment_debug.json
 public/monaco/
 .emitted-test-modules/
 scripts/ideShortcutAudit/dist/
+
+# Scratch projects the strict-trial and image-app tests build inside tests/ (they need the repo node_modules).
+# A run stopped mid-test leaves one behind; it must never be committed (it was, once, in #3490).
+tests/.tmp-*/

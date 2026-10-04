@@ -87993,3 +87993,17 @@ transparent pad fixed over a pause button is a real defect whoever wrote it** �
 cannot be paused — so it is now `covered`, and that test's own point is kept because the note still NAMES
 the element (`div.tc-pad`). Its case is now a second, independent proof of the probe: a small transparent
 div rather than a full-screen canvas, so it also exercises the not-full-screen wording.
+
+**⛔ CI IS BLOCKED ACROSS THE WHOLE REPOSITORY — GitHub ACTIONS BILLING, not code (2026-10-04, 11:37 UTC
+onward; queue row Q-315).** Every run since then is refused before it starts, with GitHub's own words in
+the check-run annotation: *"The job was not started because recent account payments have failed or your
+spending limit needs to be increased."* The failing job has **zero steps**, which is how a billing stop is
+distinguished from a code failure — nothing ran. Five branches from different live sessions fail
+identically (`a-problem-the-user-can-act-on`, `new-session-gx9294`, `a-button-nobody-can-press`,
+`charming-bell-htxb9u`, `new-session-5z26qp`); the last green run was `main` `8c982e5e` at 11:36:45.
+**It needs GitHub → Settings → Billing & plans, which no session can reach**, so it is recorded rather
+than worked around. ⚠️ **Do NOT re-push to "fix" it** — a new commit only queues another refused run; once
+billing is clear, re-running the latest run on each PR is enough. The code in both open PRs was gated
+locally on its FINAL merged state (#3495 `Tests 33488 passed | 1 skipped`, #3492 `33478 passed`, zero
+FAIL, build/bundle/boot/deps green), and #3495 was genuinely CI-green at `4305f4fd` — the commit carrying
+every fix — before the stop began.

@@ -82,15 +82,27 @@ try {
     };
     const name = (el) => String(el.getAttribute('aria-label') || el.innerText || el.getAttribute('placeholder') || el.getAttribute('title') || el.tagName)
       .trim().replace(/\\s+/g, ' ').slice(0, 40);
+    // Content inside a box that clips or scrolls sideways (a chip row, a carousel) cannot widen the
+    // page, so it is never named as the cause (autopsy cc3ef776: a chip inside its own scroll row was
+    // blamed while the real overflow was a row of buttons that did not wrap).
+    const clipped = (el) => {
+      for (let a = el.parentElement; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+        if (getComputedStyle(a).overflowX !== 'visible') return true;
+      }
+      return false;
+    };
     const wide = [];
     if (overflow > 0) {
       for (const el of document.body.querySelectorAll('*')) {
         const b = shown(el);
-        if (!b || b.right <= vw + 2 || b.width < vw * 0.25) continue;
+        if (!b || b.right <= vw + 2) continue;
+        if (clipped(el)) continue;
         if (wide.some((w) => w.el.contains(el))) continue;
-        wide.push({ el, tag: el.tagName.toLowerCase(), cls: String(el.getAttribute('class') || '').slice(0, 40), width: Math.round(b.width) });
+        wide.push({ el, tag: el.tagName.toLowerCase(), cls: String(el.getAttribute('class') || '').slice(0, 40), width: Math.round(b.width), right: Math.round(b.right), name: name(el) });
         if (wide.length >= 4) break;
       }
+      // The element that reaches furthest is the one sticking out — name it first.
+      wide.sort((a, c) => c.right - a.right);
     }
     const small = [];
     let smallCount = 0;
@@ -104,7 +116,7 @@ try {
         if (small.length < 5) small.push({ name: name(el), w: Math.round(b.width), h: Math.round(b.height) });
       }
     }
-    return { vw, overflow, painted, wide: wide.map((w) => ({ tag: w.tag, cls: w.cls, width: w.width })), smallCount, small };
+    return { vw, overflow, painted, wide: wide.map((w) => ({ tag: w.tag, cls: w.cls, width: w.width, right: w.right, name: w.name })), smallCount, small };
   }, cfg.minTap);
   say({ ok: true, ...r });
 } catch (e) {
@@ -121,7 +133,7 @@ export interface MobileLayoutRun {
   vw?: number;
   overflow?: number;
   painted?: boolean;
-  wide?: Array<{ tag: string; cls: string; width: number }>;
+  wide?: Array<{ tag: string; cls: string; width: number; right?: number; name?: string }>;
   smallCount?: number;
   small?: Array<{ name: string; w: number; h: number }>;
   /** What the script said instead, when it produced no result. */
@@ -159,7 +171,9 @@ export function mobileLayoutVerdict(run: MobileLayoutRun): MobileLayoutVerdict {
   const overflow = run.overflow ?? 0;
   if (overflow > OVERFLOW_TOLERANCE_PX) {
     const w = (run.wide ?? [])[0];
-    const culprit = w ? ` — widest: <${w.tag}${w.cls ? ` class="${w.cls}"` : ''}> at ${w.width}px` : '';
+    const label = w && w.name && w.name.toLowerCase() !== w.tag ? ` "${w.name}"` : '';
+    const reach = w && typeof w.right === 'number' ? `, reaching ${w.right}px` : '';
+    const culprit = w ? ` — sticking out: <${w.tag}${w.cls ? ` class="${w.cls}"` : ''}>${label} (${w.width}px wide${reach})` : '';
     parts.push(`the page scrolls SIDEWAYS by ${overflow}px on a ${run.vw ?? MOBILE_VIEWPORT.width}px screen${culprit}`);
   }
   const small = run.smallCount ?? 0;

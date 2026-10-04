@@ -568,7 +568,8 @@ setInterval(() => {
       console.log(`[PRODUCTION] Serving static files from: ${distPath}`);
       // The build's ready-made brotli-11 / gzip-9 copies of JS/CSS (written by scripts/precompress.mjs in
       // the Dockerfile). Falls through to express.static below whenever there is no copy.
-      // The server's own bundle and its sourcemap live in dist/ too — never served (serverOnlyArtifacts.ts).
+      // The server's own bundle, its sourcemap and every other source map live in dist/ too — never served.
+      // ONE check (serverOnlyArtifacts.ts, on the DECODED name); #3529's isPrivateBuildFile is the same function.
       app.use(denyServerOnlyArtifacts());
       app.use(precompressedStatic(distPath));
       // 12.7 — CDN-friendly Cache-Control headers for static assets

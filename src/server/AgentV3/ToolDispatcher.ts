@@ -9898,9 +9898,9 @@ export class ToolDispatcher {
       }
 
       case 'generate_image_ai': {
-        // AI image generation inside the user's app (admin 2026-10-01): Pollinations AI by default (no key),
-        // or — with server: true — the app's own route, where the owner's IMAGE_PROVIDER + IMAGE_API_KEY
-        // pick the engine and the key never reaches the browser. Pure generator in ImageAiGenerator.ts.
+        // AI image generation inside the user's app (admin 2026-10-01; keyless default removed 2026-10-04):
+        // through NavBharatAI (window.NavAI.image) with the OWNER's saved image key, or — with server: true —
+        // the app's own route reading the same key. The key never reaches the browser. ImageAiGenerator.ts.
         const iaServer = input['server'] === true || input['server'] === 'true';
         let iaReact = false;
         try { iaReact = /"react"\s*:/.test(await this.actuator.readFile(this.workspaceId, 'package.json')); } catch { iaReact = false; }
@@ -9919,8 +9919,8 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('ai image generation');
         const iaHeadline = iaServer
-          ? 'Wired AI image generation through the app\'s server (Pollinations AI until the owner sets their own key)'
-          : 'Wired AI image generation with Pollinations AI (no key needed)';
+          ? 'Wired AI image generation through the app\'s server (it needs an image API key — see below)'
+          : 'Wired AI image generation through NavBharatAI (it needs an image API key — see below)';
         return `${iaHeadline}:\n${iaWritten.join('\n')}\n\n${iacfg.instructions}`;
       }
 

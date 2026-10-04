@@ -23,8 +23,11 @@ import { dayKey } from '../lib/siteAnalytics';
 import { loadWorkspaceFilesByPath } from '../AgentV3/WorkspaceFileStore';
 import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
 import { BASE_SYSTEM } from './appAi';
+import { imageForApp, readAppImagePrompt, imageCounterId, PREVIEW_IMAGES_PER_DAY } from '../lib/appAiImage';
+import { clampImagePixels } from '../lib/navbharatImageEngine';
 
 export const PREVIEW_ASK_PATH = '/api/app-ai/preview-ask';
+export const PREVIEW_IMAGE_PATH = '/api/app-ai/preview-image';
 export const SETTINGS_PATH = '/api/app-ai/settings';
 
 /** The preview's daily ceiling per app, in ₹. Unreadable ⇒ the default, never "no limit". */
@@ -84,6 +87,26 @@ export function registerAppAiOwnerRoutes(app: Express): void {
     if (!answer.ok) { res.json({ ok: false, message: previewRefusalMessage(answer.reason, answer.provider) }); return; }
     res.json({ ok: true, text: answer.text });
     answer.settle(); // money after the answer, as everywhere
+  });
+
+  /**
+   * A PICTURE for the app in the owner's PREVIEW (admin 2026-10-04). The owner's own login, the owner's
+   * image key, and — unlike the published route — the owner's full message: which keys work, where each
+   * is made, and where to paste it, because the owner is exactly the person who can act on it.
+   */
+  const imageLimiter = rateLimiter({ name: 'app-ai-owner-image', authed: 60, anon: 0, noun: 'pictures', durable: false });
+  app.post(PREVIEW_IMAGE_PATH, express.json({ limit: '16kb' }), imageLimiter, async (req: Request, res: Response) => {
+    const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
+    const ownerId = await ownerOf(req, workspaceId);
+    if (!ownerId) { res.status(403).json({ ok: false, message: 'Sign in as this app’s owner to make pictures in the preview.' }); return; }
+    const request = readAppImagePrompt(req.body);
+    if (!request.ok) { res.json({ ok: false, message: request.message }); return; }
+    const answer = await imageForApp({
+      ownerId, workspaceId, prompt: request.prompt, px: clampImagePixels(req.body?.width, req.body?.height),
+      counter: { appId: imageCounterId(previewCounterId(workspaceId)), visitor: '', day: dayKey(Date.now()), appLimit: PREVIEW_IMAGES_PER_DAY, visitorLimit: PREVIEW_IMAGES_PER_DAY },
+    });
+    if (!answer.ok) { res.json({ ok: false, code: answer.code, message: answer.owner }); return; }
+    res.json({ ok: true, image: `data:${answer.image.mimeType};base64,${answer.image.base64}` });
   });
 
   app.get('/api/app-ai/settings', limiter, async (req: Request, res: Response) => {

@@ -19,7 +19,7 @@ const base = () => `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
 beforeAll(() => {
   dir = mkdtempSync(join(os.tmpdir(), 'nb-dist-'));
-  for (const f of ['server.cjs', 'server.cjs.map', 'server.cjs.map.gz', 'index.js.map', 'index.html', 'build_status.json']) writeFileSync(join(dir, f), `content of ${f}`);
+  for (const f of ['server.cjs', 'server.js', 'server.cjs.map', 'server.cjs.map.gz', 'index.js.map', 'index.html', 'build_status.json']) writeFileSync(join(dir, f), `content of ${f}`);
   const app = express();
   app.use(denyServerOnlyArtifacts());
   app.use(express.static(dir));
@@ -28,7 +28,7 @@ beforeAll(() => {
 afterAll(() => { server.close(); rmSync(dir, { recursive: true, force: true }); });
 
 describe('the server artifacts answer 404, every spelling', () => {
-  for (const p of ['/server.cjs', '/server.cjs.map', '/server.cjs.map.gz', '/SERVER.CJS.MAP', '/%73erver.cjs.map', '/./server.cjs', '/assets/../server.cjs.map', '/server.cjs.m%61p', '/index.js.map', '/index.js.m%61p']) {
+  for (const p of ['/server.cjs', '/server.cjs.map', '/server.cjs.map.gz', '/SERVER.CJS.MAP', '/%73erver.cjs.map', '/./server.cjs', '/assets/../server.cjs.map', '/server.cjs.m%61p', '/index.js.map', '/index.js.m%61p', '/server.js']) {
     it(p, async () => { expect((await fetch(`${base()}${p}`)).status).toBe(404); });
   }
 });

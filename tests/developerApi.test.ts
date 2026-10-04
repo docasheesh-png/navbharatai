@@ -57,7 +57,7 @@ describe('🔴 every scope a user can tick opens a real endpoint', () => {
     // is keyed by the SPECIFIC scopes and `all` is proven a different way, two cases below. The
     // original guarantee is unchanged: no scope on this screen may be a label.
     expect([...API_SCOPES]).toEqual([
-      'all', 'read:profile', 'read:usage', 'read:builds', 'ai:chat', 'ai:professionals',
+      'all', 'read:profile', 'read:usage', 'read:builds', 'ai:chat', 'ai:professionals', 'ai:images',
     ]);
     expect(API_SCOPES[0]).toBe(FULL_ACCESS_SCOPE);
     expect([...SPECIFIC_API_SCOPES]).toEqual(API_SCOPES.filter((s) => s !== FULL_ACCESS_SCOPE));

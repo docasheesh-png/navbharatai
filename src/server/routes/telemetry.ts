@@ -1,8 +1,36 @@
 import type { Express, Request, Response } from 'express';
 import { errorTracker } from '../observability/ErrorTracker';
-import { clientAddress } from '../lib/clientAddress';
 import { recordAnalyticsEvent, getFunnel } from '../lib/AnalyticsPipeline';
 import { sendSafeError } from '../lib/httpError';
+import rateLimit from 'express-rate-limit';
+import { sanitizeText, sanitizeUrl } from '../../lib/observability/sanitize';
+
+/** One client error, reduced to short, sanitized fields. PURE — the route's only view of the body. */
+export function clientErrorRecord(body: unknown): {
+  message: string; stack: string; url: string; source: string; type: string; line: number | null; col: number | null; ts: number | null;
+} {
+  const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  return {
+    message: sanitizeText(b.message, 500),
+    stack: sanitizeText(b.stack, 4000),
+    url: sanitizeUrl(b.url),
+    source: sanitizeText(b.source, 200),
+    type: sanitizeText(b.type, 40),
+    line: num(b.line),
+    col: num(b.col),
+    ts: num(b.ts),
+  };
+}
+
+/** 30 reports a minute per address: far above a real app, far below a flood. Over it: a quiet 204. */
+const clientErrorLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: false,
+  legacyHeaders: false,
+  handler: (_req, res) => { res.status(204).end(); },
+});
 
 /**
  * Registers self-contained telemetry/analysis routes extracted from the
@@ -52,15 +80,20 @@ export function registerTelemetryRoutes(app: Express): void {
 
   // Frontend error ingestion endpoint. P2.2 — also routed through the ErrorTracker so
   // client-side errors reach Cloud Error Reporting (grouped/alertable) + the admin view.
-  app.post('/api/logs/error', (req: Request, res: Response) => {
+  //
+  // 🔒 Anything a browser sends here is UNTRUSTED and may carry a token, an email, a URL with a
+  // sign-in code in its query string, or a 30 MB body. So the payload is reduced to a fixed set of
+  // short fields and every one passes the SAME sanitizer the client uses (`clientErrorRecord`) before it
+  // reaches the console or Cloud Error Reporting. The caller's IP is not logged with it. A burst from one
+  // address is cut off by `clientErrorLimiter`, and the answer is always an empty 204.
+  app.post('/api/logs/error', clientErrorLimiter, (req: Request, res: Response) => {
     try {
-      const { message, source, line, col, stack, url, ts, type } = req.body || {};
-      const ip = clientAddress(req);
-      console.error('[CLIENT_ERROR]', JSON.stringify({ message, source, line, col, stack, url, ts, type, ip }));
+      const rec = clientErrorRecord(req.body);
+      console.error('[CLIENT_ERROR]', JSON.stringify(rec));
       // Reconstruct an Error so the stack groups correctly in Cloud Error Reporting.
-      const err = new Error(String(message || type || 'client error'));
-      if (typeof stack === 'string' && stack) err.stack = stack;
-      errorTracker.capture(err, { source: 'client', httpUrl: typeof url === 'string' ? url : undefined, meta: { line, col, source, type } });
+      const err = new Error(rec.message || rec.type || 'client error');
+      if (rec.stack) err.stack = rec.stack;
+      errorTracker.capture(err, { source: 'client', httpUrl: rec.url || undefined, meta: { line: rec.line, col: rec.col, source: rec.source, type: rec.type } });
       res.status(204).end();
     } catch {
       res.status(204).end();

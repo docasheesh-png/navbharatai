@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, ToggleLeft, ToggleRight, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, ArrowUp, ArrowDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink, ChevronDown, ChevronRight, Wrench} from 'lucide-react';
+import { RefreshCw, Users, Zap, IndianRupee, Activity, Shield, Settings, Server, Plus, Search, AlertTriangle, CheckCircle2, Megaphone, Tag, Cpu, TrendingUp, Eye, UserCheck, Globe, Database, FileText, Download, ArrowUpDown, ArrowUp, ArrowDown, Target, Bell, Clock, Trash2, Flag, ShieldAlert, Image as PictureIcon, Smartphone, ExternalLink, ChevronDown, ChevronRight, Wrench} from 'lucide-react';
 import { effectiveDirection } from '../lib/adminUserSort';
 import { TirangaLoader } from './ui/TirangaLoader';
 import { usePagedList } from '../hooks/usePagedList';
@@ -10,6 +10,8 @@ import { publishedAppRows, liveAppCount } from '../lib/publishedAppsView';
 import { adultOptInSummary } from '../lib/adultContent';
 import { confirmCopy } from '../lib/adminAppModeration';
 import { BuiltAppsPanel } from './admin/BuiltAppsPanel';
+import { ConfirmActionDialog } from './admin/ConfirmActionDialog';
+import { banCopy, tokenAdjustCopy, broadcastCopy, readTokenDelta, ALL_USERS_SCOPE } from '../lib/adminActionReason';
 // @ts-ignore -- XSquare is a valid export in installed lucide-react 0.546.0
 import { XSquare as BanIcon } from 'lucide-react';
 import { summarizeCostTelemetry, type CostLadderSummary } from '../lib/agentV3CostSummary';
@@ -255,10 +257,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
   const [giftDays, setGiftDays] = useState(7);
 
   // Settings state
-  const [maintenanceMode, setMaintenanceModeState] = useState(false);
-  const [featureFlags, setFeatureFlagsState] = useState<any>({});
-  const [pricingConfig, setPricingConfigState] = useState<any>({});
-  const [providerEnabled, setProviderEnabledState] = useState<any>({});
 
   // Promo form
   const [promoCode, setPromoCode] = useState('');
@@ -272,8 +270,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
   // Token adjust
   const [tokenDelta, setTokenDelta] = useState('');
-  const [tokenReason, setTokenReason] = useState('');
   const [selectedUserId, setSelectedUserId] = useState('');
+
+  /**
+   * THE ACTION WAITING FOR ITS CONFIRMATION (admin panel audit, PR 1, 2026-10-04). Ban, token adjustment
+   * and messaging users no longer fire on a single press: the button opens `ConfirmActionDialog`, which
+   * shows what will happen (and what will be sent), and asks for the admin's own reason.
+   */
+  type PendingAdminAction =
+    | { kind: 'ban'; userId: string; who: string; banned: boolean; after?: () => void }
+    | { kind: 'tokens'; userId: string; who: string; delta: number; balance: number | null }
+    | { kind: 'message'; target: 'all' | 'user'; email: string; message: string };
+  const [pendingAction, setPendingAction] = useState<PendingAdminAction | null>(null);
+  const [pendingBusy, setPendingBusy] = useState(false);
 
   // AgentV3 cost-ladder telemetry (revenue tab) — real per-tier cost & success rate.
   const [costSummary, setCostSummary] = useState<CostLadderSummary | null>(null);
@@ -1238,10 +1247,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
       const r = await fetch('/api/admin/analytics', { headers });
       const d = await r.json();
       setAnalytics(d);
-      setMaintenanceModeState(d.maintenanceMode ?? false);
-      setFeatureFlagsState(d.featureFlags ?? {});
-      setPricingConfigState(d.pricingConfig ?? {});
-      setProviderEnabledState(d.providerEnabled ?? {});
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   }, [adminToken]);
@@ -1541,23 +1546,49 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     return r.json();
   };
 
-  const handleTokenAdjust = async (userId: string) => {
-    if (!tokenDelta) return;
-    setActionLoading(userId);
-    try {
-      const r = await adminPost(`/api/admin/users/${userId}/tokens`, { delta: parseInt(tokenDelta), reason: tokenReason });
-      if (r.ok) { toast(`Tokens adjusted! New balance: ${r.newBalance}`); fetchUsers(); setTokenDelta(''); setTokenReason(''); setSelectedUserId(''); }
-      else toast('Error: ' + r.error);
-    } finally { setActionLoading(null); }
+  /** Opens the confirmation for a token change; nothing is sent until the admin confirms with a reason. */
+  const handleTokenAdjust = (userId: string, who: string, balance: number | null) => {
+    const d = readTokenDelta(tokenDelta);
+    if (!('delta' in d)) { toast(d.error); return; }
+    setPendingAction({ kind: 'tokens', userId, who, delta: d.delta, balance });
   };
 
-  const handleBan = async (userId: string, banned: boolean) => {
-    setActionLoading(userId + '_ban');
+  /** Opens the confirmation for a ban (reason required) or for lifting one (reason optional). */
+  const handleBan = (userId: string, banned: boolean, who: string, after?: () => void) => {
+    setPendingAction({ kind: 'ban', userId, who, banned, after });
+  };
+
+  /** Runs the confirmed action. The server applies the same reason rule and refuses on its own. */
+  const runPendingAction = async (reason: string) => {
+    const a = pendingAction;
+    if (!a) return;
+    setPendingBusy(true);
     try {
-      const r = await adminPost(`/api/admin/users/${userId}/ban`, { banned, reason: 'Admin action' });
-      if (r.ok) { toast(banned ? 'User banned' : 'User unbanned'); fetchUsers(); }
-      else toast('Error: ' + r.error);
-    } finally { setActionLoading(null); }
+      if (a.kind === 'ban') {
+        setActionLoading(a.userId + '_ban');
+        const r = await adminPost(`/api/admin/users/${a.userId}/ban`, { banned: a.banned, reason });
+        if (r.ok) { toast(a.banned ? 'User banned' : 'Ban lifted'); fetchUsers(); a.after?.(); setPendingAction(null); }
+        else toast('Not done: ' + (r.error || 'unknown error'));
+      } else if (a.kind === 'tokens') {
+        setActionLoading(a.userId);
+        const r = await adminPost(`/api/admin/users/${a.userId}/tokens`, { delta: a.delta, reason });
+        if (r.ok) {
+          toast(`Tokens adjusted: ${Number(r.previousBalance ?? 0).toLocaleString('en-IN')} → ${Number(r.newBalance ?? 0).toLocaleString('en-IN')}`);
+          fetchUsers(); setTokenDelta(''); setSelectedUserId(''); setPendingAction(null);
+        } else toast('Not done: ' + (r.error || 'unknown error'));
+      } else {
+        const r = await adminPost('/api/admin/announcement', {
+          message: a.message,
+          target: a.target,
+          email: a.target === 'user' ? a.email : undefined,
+          confirmScope: a.target === 'all' ? ALL_USERS_SCOPE : undefined,
+        });
+        if (r.ok) {
+          toast(a.target === 'user' ? `Message sent to ${a.email}` : 'Message sent to all users');
+          setAnnMsg(''); setAnnEmail(''); setPendingAction(null);
+        } else toast('Not sent: ' + (r.error || 'unknown error'));
+      }
+    } finally { setPendingBusy(false); setActionLoading(null); }
   };
 
   // ₹150 TO NEW USERS IN ONE PRESS (admin 2026-09-27). The server applies the three rules — joined
@@ -1612,18 +1643,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     } finally { setActionLoading(null); }
   };
 
-  const handleSettingsSave = async () => {
-    const r = await adminPost('/api/admin/settings', { maintenanceMode, featureFlags, pricingConfig, providerEnabled });
-    if (r.ok) toast('Settings saved!');
-    else toast('Error saving settings');
-  };
-
-  const handleAnnouncement = async () => {
-    if (!annMsg.trim()) return;
+  /** Opens the preview: recipients and the exact message. Nothing is sent until it is confirmed there. */
+  const handleAnnouncement = () => {
+    if (!annMsg.trim()) { toast('Type the message first.'); return; }
     if (annTarget === 'user' && !annEmail.trim()) { toast('Enter the user’s email to message one user.'); return; }
-    const r = await adminPost('/api/admin/announcement', { message: annMsg, target: annTarget, email: annTarget === 'user' ? annEmail.trim() : undefined });
-    if (r.ok) { toast(annTarget === 'user' ? `Message sent to ${annEmail.trim()}` : 'Message sent to all users!'); setAnnMsg(''); setAnnEmail(''); }
-    else toast('Error: ' + r.error);
+    setPendingAction({ kind: 'message', target: annTarget === 'user' ? 'user' : 'all', email: annEmail.trim(), message: annMsg });
   };
 
   const handlePromoCreate = async () => {
@@ -1681,6 +1705,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
         pageLabel={TABS.find((t) => t.id === activeTab)?.label || 'Admin'}
         jsonPayload={copyJsonPayload}
       />
+
+      {/* THE CONFIRMATION (PR 1): ban, token adjustment and messaging users all pass through it. */}
+      {pendingAction && (
+        <ConfirmActionDialog
+          copy={pendingAction.kind === 'ban'
+            ? banCopy(pendingAction.who, pendingAction.banned)
+            : pendingAction.kind === 'tokens'
+              ? tokenAdjustCopy(pendingAction.who, pendingAction.delta, pendingAction.balance)
+              : broadcastCopy(pendingAction.target, pendingAction.email)}
+          busy={pendingBusy}
+          onCancel={() => { if (!pendingBusy) setPendingAction(null); }}
+          onConfirm={(reason) => void runPendingAction(reason)}
+        >
+          {pendingAction.kind === 'message' && (
+            <div className="space-y-2">
+              <p className="text-[11px] font-bold text-muted">
+                Recipients: <span className="text-ink">{pendingAction.target === 'all' ? 'ALL USERS' : pendingAction.email}</span>
+              </p>
+              <p className="text-[11px] font-bold text-muted">Message, exactly as it will be delivered:</p>
+              <div className="bg-well border border-line rounded-xl px-3 py-2 text-sm text-ink whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
+                {pendingAction.message}
+              </div>
+            </div>
+          )}
+        </ConfirmActionDialog>
+      )}
 
       {/* Toast */}
       {toastMsg && (
@@ -1772,9 +1822,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
             <button onClick={fetchAnalytics} disabled={loading} className="flex items-center gap-2 px-4 py-2 bg-raised border border-line hover:border-indigo-500 rounded-xl text-[10px] font-black uppercase tracking-widest text-ink transition-all active:scale-95">
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
             </button>
-            {analytics?.maintenanceMode && (
-              <span className="px-3 py-2 bg-red-500/20 border border-red-500/30 rounded-xl text-[10px] font-black text-danger uppercase tracking-widest">Maintenance ON</span>
-            )}
           </div>
         </div>
         {/* Logout — always top-right, never wraps off screen */}
@@ -2387,8 +2434,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                               {selectedUserId === u.userId ? (
                                 <div className="flex gap-1 items-center">
                                   <input type="number" placeholder="tokens" value={tokenDelta} onChange={e => setTokenDelta(e.target.value)} className="w-20 bg-well border border-line rounded-lg px-2 py-1 text-[10px] text-ink outline-none" />
-                                  <input placeholder="reason" value={tokenReason} onChange={e => setTokenReason(e.target.value)} className="w-20 bg-well border border-line rounded-lg px-2 py-1 text-[10px] text-ink outline-none" />
-                                  <button onClick={() => handleTokenAdjust(u.userId)} disabled={actionLoading === u.userId} className="px-2 py-1 bg-indigo-600 rounded-lg text-[9px] font-black text-on-accent uppercase">
+                                  <button onClick={() => handleTokenAdjust(u.userId, u.email || u.name || u.userId, typeof u.tokenBalance === 'number' ? u.tokenBalance : null)} disabled={actionLoading === u.userId} className="px-2 py-1 bg-indigo-600 rounded-lg text-[9px] font-black text-on-accent uppercase">
                                     {actionLoading === u.userId ? '...' : 'OK'}
                                   </button>
                                   <button onClick={() => setSelectedUserId('')} className="px-2 py-1 bg-raised rounded-lg text-[9px] text-ink uppercase">X</button>
@@ -2399,10 +2445,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                                       hata do"). The account sheet opens by clicking the user's NAME —
                                       one way in, not two that do the same thing. The name carries the
                                       hover underline and a tooltip so it still reads as clickable. */}
-                                  <button onClick={() => { setSelectedUserId(u.userId); setTokenDelta(''); setTokenReason(''); }} className="px-2 py-1 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[9px] font-black text-warn uppercase hover:bg-amber-500/20 transition-all">
+                                  <button onClick={() => { setSelectedUserId(u.userId); setTokenDelta(''); }} className="px-2 py-1 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[9px] font-black text-warn uppercase hover:bg-amber-500/20 transition-all">
                                     Tokens
                                   </button>
-                                  <button onClick={() => handleBan(u.userId, !u.banned)} disabled={actionLoading === u.userId + '_ban'} className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-all border ${u.banned ? 'bg-emerald-500/10 border-emerald-500/20 text-success hover:bg-emerald-500/20' : 'bg-red-500/10 border-red-500/20 text-danger hover:bg-red-500/20'}`}>
+                                  <button onClick={() => handleBan(u.userId, !u.banned, u.email || u.name || u.userId)} disabled={actionLoading === u.userId + '_ban'} className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-all border ${u.banned ? 'bg-emerald-500/10 border-emerald-500/20 text-success hover:bg-emerald-500/20' : 'bg-red-500/10 border-red-500/20 text-danger hover:bg-red-500/20'}`}>
                                     {actionLoading === u.userId + '_ban' ? '...' : u.banned ? 'Unban' : 'Ban'}
                                   </button>
                                   <button onClick={() => handleMerge(u.userId)} disabled={actionLoading === u.userId + '_merge'} title="Merge a duplicate account's wallet INTO this user" className="px-2 py-1 bg-purple-500/10 border border-purple-500/20 rounded-lg text-[9px] font-black text-accent-text uppercase hover:bg-purple-500/20 transition-all">
@@ -3355,7 +3401,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
                 <div className="flex flex-wrap gap-2 mt-5 pt-4 border-t border-line">
                   <button
-                    onClick={() => { void handleBan(account.uid, !account.wallet?.banned); setAccount(null); }}
+                    onClick={() => handleBan(account.uid, !account.wallet?.banned, account.identity?.email || account.identity?.name || account.uid, () => setAccount(null))}
                     className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-on-accent ${account.wallet?.banned ? 'bg-emerald-600 hover:bg-emerald-500 text-on-accent' : 'bg-rose-600 hover:bg-rose-500 text-on-accent'}`}
                   >
                     <Shield size={13} /> {account.wallet?.banned ? 'Lift the suspension' : 'Suspend this account'}
@@ -3626,7 +3672,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                           <button onClick={() => void markUserReport(openReport.report.id, 'dismissed')} className="px-3 py-2 rounded-lg bg-raised hover:bg-raised-hover text-xs text-muted">Dismiss</button>
                           {openReport.report?.target?.ownerUid && (
                             <button
-                              onClick={() => { void handleBan(openReport.report.target.ownerUid, true); void markUserReport(openReport.report.id, 'actioned'); }}
+                              onClick={() => handleBan(openReport.report.target.ownerUid, true, `account ${openReport.report.target.ownerUid}`, () => { void markUserReport(openReport.report.id, 'actioned'); })}
                               className="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-xs font-bold text-on-accent"
                             ><Shield size={13} /> Suspend this account</button>
                           )}
@@ -5048,63 +5094,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                 )}
               </div>
 
-              {/* Maintenance Mode */}
-              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
-                <h3 className="text-sm font-black text-ink uppercase tracking-tight flex items-center gap-2">
-                  <Server className="w-4 h-4 text-danger" /> Maintenance Mode
-                </h3>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-ink font-bold">Site Maintenance</p>
-                    <p className="text-[10px] text-muted">When enabled, users see a maintenance message</p>
-                  </div>
-                  <button onClick={() => { setMaintenanceModeState(!maintenanceMode); adminPost('/api/admin/settings', { maintenanceMode: !maintenanceMode }).then(() => toast('Maintenance mode updated!')); }}
-                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border font-black text-[11px] uppercase transition-all ${maintenanceMode ? 'bg-red-500/20 border-red-500/30 text-danger' : 'bg-emerald-500/10 border-emerald-500/20 text-success'}`}>
-                    {maintenanceMode ? <><ToggleRight className="w-4 h-4" /> ON — Disable</> : <><ToggleLeft className="w-4 h-4" /> OFF — Enable</>}
-                  </button>
-                </div>
-              </div>
-
-              {/* Feature Flags */}
-              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
-                <h3 className="text-sm font-black text-ink uppercase tracking-tight">Feature Flags</h3>
-                <div className="space-y-3">
-                  {Object.entries(featureFlags).map(([key, val]: any) => (
-                    <div key={key} className="flex items-center justify-between bg-well rounded-xl px-4 py-3 border border-line">
-                      <div>
-                        <p className="text-sm text-ink font-bold capitalize">{key.replace(/([A-Z])/g, ' $1')}</p>
-                        <p className="text-[9px] text-muted uppercase font-bold">{val ? 'Enabled' : 'Disabled'}</p>
-                      </div>
-                      <button onClick={() => { const nf = { ...featureFlags, [key]: !val }; setFeatureFlagsState(nf); adminPost('/api/admin/settings', { featureFlags: nf }).then(() => toast(`${key} ${!val ? 'enabled' : 'disabled'}`)); }}
-                        className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase border transition-all ${val ? 'bg-emerald-500/10 border-emerald-500/20 text-success' : 'bg-raised border-line text-muted'}`}>
-                        {val ? 'Enabled' : 'Disabled'}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Pricing Config */}
-              <div className="bg-card border border-line rounded-[1.5rem] p-6 space-y-4">
-                <h3 className="text-sm font-black text-ink uppercase tracking-tight flex items-center gap-2">
-                  <IndianRupee className="w-4 h-4 text-success" /> Pricing Configuration
-                </h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] text-accent-text font-black uppercase tracking-widest block mb-2">Coins per Rs.1</label>
-                    <input type="number" value={pricingConfig.coinsPerRupee || 100} onChange={e => setPricingConfigState((p: any) => ({ ...p, coinsPerRupee: parseInt(e.target.value) }))}
-                      className="w-full bg-well border border-line rounded-xl px-4 py-2.5 text-ink font-mono outline-none focus:border-indigo-500" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-accent-text font-black uppercase tracking-widest block mb-2">Referral Bonus %</label>
-                    <input type="number" value={pricingConfig.referralBonusPct || 10} onChange={e => setPricingConfigState((p: any) => ({ ...p, referralBonusPct: parseInt(e.target.value) }))}
-                      className="w-full bg-well border border-line rounded-xl px-4 py-2.5 text-ink font-mono outline-none focus:border-indigo-500" />
-                  </div>
-                </div>
-                <button onClick={handleSettingsSave} className="px-5 py-2.5 bg-indigo-600 rounded-xl text-[11px] font-black uppercase tracking-wider text-on-accent hover:bg-indigo-700 transition-all active:scale-95">
-                  Save Pricing
-                </button>
-              </div>
+              {/* MAINTENANCE MODE, FEATURE FLAGS AND PRICING CONFIGURATION WERE REMOVED (admin panel audit, PR 1,
+                  2026-10-04, decision D1). Each saved a value that nothing enforced: Maintenance only turned
+                  /api/health "degraded" and blocked no user; the Doctor AI / Pro / App Builder flags were
+                  stored and read by no route; "Coins per ₹1" and "Referral Bonus %" were read by nothing —
+                  the real rate and the referral amounts live in code and env. A control that does nothing
+                  is a promise the panel cannot keep. If a real kill switch is wanted, it is built as its own
+                  system with server enforcement, an audit trail and rollback. */}
 
               {/* Send a message to users (admin 2026-07-30): delivers a real notification to ALL users
                   or to ONE specific user (by email). Users see it via the notification bell in the app. */}
@@ -5129,7 +5125,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
                     />
                   )}
                   <button onClick={handleAnnouncement} className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 rounded-xl text-[11px] font-black uppercase tracking-wider text-black transition-all active:scale-95">
-                    Send Message
+                    Preview message
                   </button>
                 </div>
                 <p className="text-[10px] text-muted leading-relaxed">Delivered in-app via the notification bell. “All Users” reaches everyone; “A Specific User” reaches only that email.</p>

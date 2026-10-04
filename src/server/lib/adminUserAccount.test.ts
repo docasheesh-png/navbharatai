@@ -151,6 +151,9 @@ describe('the account sheet is reachable from both places a decision starts', ()
   });
 
   it('can suspend and un-suspend from there, through the ban path that already exists', () => {
-    expect(panel).toContain('handleBan(account.uid, !account.wallet?.banned)');
+    // Through the confirmation since PR 1 of the admin panel audit (2026-10-04): the sheet closes only
+    // after the ban (with its reason) really went through.
+    expect(panel).toContain('handleBan(account.uid, !account.wallet?.banned, ');
+    expect(panel).toContain('() => setAccount(null))');
   });
 });

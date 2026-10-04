@@ -87439,7 +87439,7 @@ repair told "you read this the second time" (#3457 B); the crawl/timeout double 
 | Q-174 | Journey not run: icon send button named by `aria-label` | `submitTargetIn` read only inner text | Name read by text, while the browser uses the accessible name | type=submit and create-word branches both use `accessibleName` | §5 |
 | Q-175 | `SIMULATED_RESULT` on "mock API key" | `api` matched as a result noun | A credential read as a faked result | key / token / secret all excluded | §6 |
 | Q-176 | Eight items argued not defects | — | — | — | 🟡 needs the admin's agreement |
-| Q-085 | Chat-form journey | Q-174 makes the next chat journey run; in-memory chats would then FAIL the reload check | — | — | 🟡 decision (options in the queue) |
+| Q-085 | Chat-form journey | Q-174 makes the next chat journey run; in-memory chats would then FAIL the reload check | — | — | Decided by the admin (option a, submit-only); built in #3473, not here |
 
 Each fix was reverted in place and the suite failed, then restored. New flags (NOT set, default ON, `off` reverts):
 `AGENTV3_WRITE_TYPE_IMPORT_HEAL`, `AGENTV3_DETACHED_METHOD_NOTE`. The GLM crawls (≈30 s) are inside Q-009's accepted

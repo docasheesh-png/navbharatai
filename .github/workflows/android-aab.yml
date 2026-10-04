@@ -49,12 +49,28 @@ on:
         description: 'Google flips this requirement with the app review state, and BOTH values fail loudly when wrong. Leave OFF normally. Tick it ONLY if the upload fails with "Changes cannot be sent for review automatically. Please set the query parameter changesNotSentForReview to true" — which happens while the app is under an enforcement or its last release was rejected. If it instead fails with "Changes are sent for review automatically. The query parameter changesNotSentForReview must not be set", untick it.'
         type: boolean
         default: false
+      crash_test:
+        description: 'TEST ONLY: include the controlled Crashlytics test tools (window.__nbaiCrashTest). Refused together with upload_to_play — install the artifact on a test device.'
+        type: boolean
+        default: false
 
 jobs:
   build-aab:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+
+      # CRASH-TEST BUILD (2026-10-04): a build carrying the controlled crash tools must NEVER reach a store.
+      - name: Pre-flight — a crash-test build is never uploaded
+        if: ${{ inputs.crash_test }}
+        env:
+          UPLOAD: ${{ inputs.upload_to_play }}
+        run: |
+          if [ "$UPLOAD" = "true" ]; then
+            echo "::error::crash_test builds contain controlled crash tools and cannot be uploaded to Google Play. Untick upload_to_play."
+            exit 1
+          fi
+          echo "::warning::CRASH-TEST BUILD — for verifying Crashlytics on a test device only. Do not distribute."
 
       # Fail EARLY and honestly if the signing secrets are not set — a Play Store .aab MUST be signed,
       # so we never hand back an unsigned bundle that would be rejected on upload.
@@ -106,6 +122,8 @@ jobs:
         run: npm ci
 
       - name: Build the web bundle
+        env:
+          VITE_CRASH_TEST: ${{ inputs.crash_test && '1' || '' }}
         run: npm run build
 
       - name: Sync Capacitor Android

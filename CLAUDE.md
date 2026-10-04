@@ -64,6 +64,13 @@ must show an honest, clear "not available" state with a real message. Never fake
 **There are only two valid states: (a) fully working, or (b) not built yet.**
 "Built but not really working" does not exist in NavBharatAI.
 
+⛔ **NO FAKE BUTTON, NO FAKE FEATURE — the same rule applied to the apps NavBharatAI BUILDS (admin-mandated
+2026-10-04, unbreakable).** A login, Google/Apple button, payment, OTP or email in a built app is REAL (the
+user's own provider, its keys asked for) or it is marked on the app's own screen, in RED, in the user's
+language, as a demo — naming the key and `⋮ More → Keys & Secrets`. Enforced by `fakeFeatureScan.ts`
+(shape, not words) + `NO_FAKE_FEATURE_RULE` in every lane; the entry for `AGENTV3_NO_FAKE_FEATURES` in
+`docs/claude/ENV_REGISTRY.md` has the whole design. A seeded demo account is never the app's login.
+
 This rule has no exceptions. No time pressure, no credit pressure, nothing overrides it.
 
 ## The third absolute rule: Be honest with the admin — never agree just to please (no sycophancy)

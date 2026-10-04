@@ -205,3 +205,19 @@ describe('Privacy Policy — it discloses the visitor analytics on published app
     expect(html).not.toContain('location.search');
   });
 });
+
+// CRASH REPORTING (2026-10-04). The phone apps send crash reports to Firebase Crashlytics. The fields a
+// report carries are listed ONCE, in code (CRASH_REPORT_POLICY_PHRASES), and every one must appear in the
+// published policy — so adding a field to the reporter without disclosing it fails here.
+import { CRASH_REPORT_POLICY_PHRASES } from '../src/lib/observability';
+
+describe('Privacy Policy — it discloses the crash reporting we actually built', () => {
+  it.each([...CRASH_REPORT_POLICY_PHRASES])('discloses: %s', (phrase) => {
+    expect(PRIVACY_POLICY).toContain(phrase);
+  });
+
+  it('names Crashlytics among the parties we share with', () => {
+    const sharing = PRIVACY_POLICY.slice(PRIVACY_POLICY.indexOf('## 7. Who we share data with'));
+    expect(sharing).toContain('Crash reporting: Google Firebase Crashlytics');
+  });
+});

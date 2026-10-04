@@ -41,6 +41,7 @@
     "@capacitor-community/media": "^9.1.0",
     "@capacitor-firebase/app-check": "~8.3.0",
     "@capacitor-firebase/authentication": "^8.3.0",
+    "@capacitor-firebase/crashlytics": "~8.3.0",
     "@capacitor-firebase/messaging": "^8.5.2",
     "@capacitor/app": "^8.1.1",
     "@capacitor/browser": "^8.0.4",
@@ -94,7 +95,7 @@
     "xterm": "^5.3.0",
     "xterm-addon-fit": "^0.8.0",
     "yauzl": "^2.10.0",
-    "zip-stream": "^6.0.1"
+    "zip-stream": "^7.0.5"
   },
   "devDependencies": {
     "@capacitor/android": "^8.5.0",

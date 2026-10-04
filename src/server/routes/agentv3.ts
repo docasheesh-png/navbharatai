@@ -397,7 +397,7 @@ import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from 
 import { entryShadowRepairHint } from '../AgentV3/entryShadow';
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceEvidence, featurePresenceRepairPrompt, featureHealEnabled, isSignInWall, probeFeatures, requestedProbeFeatures } from '../AgentV3/FeaturePresence';
 import { adoptHealResult } from '../AgentV3/healResult';
-import { signInExploreEnabled, signInScript, signInCandidates, parseSignInOutput, signInReportLine, isSignInRoute, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
+import { signInExploreEnabled, signInScript, signInCandidates, authLivesInTheBrowser, parseSignInOutput, signInReportLine, isSignInRoute, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
 import { unsupportedStackRequested, unsupportedStackBuilderNote, unsupportedStackUserNote, builtWithLabel } from '../AgentV3/unsupportedStack';
 import { unknownNameNoteEnabled, unknownNamesInRequest, unknownNameBuilderNote, unknownNameReportNote } from '../AgentV3/unknownName';
 import { requestScopeNote } from '../AgentV3/requestScope';
@@ -20620,7 +20620,7 @@ async function noteBuildOutcome(
         let run: SignInRun = { ran: false, signedIn: false, note: 'the sign-in check did not run', screens: [] };
         try {
           if (actuator.runCommand) {
-            const out = await withTimeout(actuator.runCommand(workspaceId, signInScript(previewUrl, signInCandidates(files))), SIGN_IN_BUDGET_MS + 15_000, 'sign-in-explore');
+            const out = await withTimeout(actuator.runCommand(workspaceId, signInScript(previewUrl, signInCandidates(files), { mayCreateAccount: authLivesInTheBrowser(files) })), SIGN_IN_BUDGET_MS + 15_000, 'sign-in-explore');
             run = parseSignInOutput(out.stdout);
           }
         } catch { /* our instrument, never the app's verdict */ }

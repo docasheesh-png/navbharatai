@@ -88351,3 +88351,29 @@ Q-194, Q-195, Q-272, Q-286 resolved as not defects). All sixteen rows are now �
 in `BUILD_REPORT_QUEUE.md`; their ledgers stay in the two entries above. **Watch on the next real builds:**
 `PYTHON_BACKEND_UP` / `_NOT_UP` on a Python-backed app, the `SCRIPT_REQUEST_AS_WEB_APP` start line, and the first
 write-time typecheck on a fresh starter dropping well under 15 s. Still BLOCKED on evidence: Q-193, Q-273, Q-275.
+
+## 2026-10-04 — Autopsy 1eaa5f5a ("Make one PDF reader") + e3b0ce25 ("Build one block fitting puzzle")
+
+**The headline: since #3491 (13:52 UTC) every write-time typecheck was run as a dev-server launch.** The primer
+copies `/home/user/.warm/vite-react/node_modules`; `isDevServerInvocation` read "vite" in that PATH as a program.
+Each typecheck was then prefixed `BROWSER=none` (a syntax error in front of `if`), the dev server on 5173 was
+killed first, the check timed out at 30 s, and the health check ran installs and restarts. In the same build the
+sandbox's `package.json` was found empty twice, every npm command failed with EJSONPARSE, and the preview went
+down. Third instance of the "a word inside data read as a command" class (`/dev/null` 2026-08-16, `--save-dev`).
+
+| ID | Problem | Root cause → fix | Lock |
+|---|---|---|---|
+| Q-410..413 | typecheck misrouted, BROWSER=none syntax error, dev server killed, typecheck never ran | paths judged by their last part (`lastPathParts`) | `aTypecheckIsNotADevServer.test.ts` (census of platform commands), reverted-and-failed |
+| Q-414 | package.json emptied twice | 🟡 writer unknown; restore + evidence in the one install path | `anEmptyManifestIsPutBack.test.ts` |
+| Q-415 | PREVIEW_SERVER_DOWN ×2 | Q-414 | — |
+| Q-416/417 | puzzle built over the PDF reader without asking; pdf.js and "PDF Reader" title left behind | "puzzle" etc. are whole things | `askBeforeBuildingSomethingElseIntoThisApp.test.ts` |
+| Q-418 | `.null` false class finding | per-quote literal reader, one shared function | `anExpressionIsNotAClassName.test.ts` |
+| Q-419/420 | fake tool call shown as ✅ review; review told files were cut | a review needs a verdict; no samples of inlined files | `aReviewWithoutAVerdictIsNotAReview.test.ts` |
+| Q-421 | ₹0 bill on a build whose app rendered | 🟡 admin decision (recommend keep ₹0: our bug took the preview down) | — |
+| Q-422 | fast lane waited 67 s after deciding to hand off | 🟡 admin decision | — |
+| Q-423 | design line duplicated and stale after the snap | print once; re-lint after the snap | `theDesignLineSaysWhatIsTrueNow.test.ts` |
+
+Not defects (recorded so nobody re-opens them): `requestAnalysis.startTier: "gemini"` is the complexity band's
+historical key, with `startBand` printed beside it (2026-09-17); the GLM crawl bench was the designed resilience.
+**Watch:** no `BROWSER=none` and no `Killed` in launch logs; `WRITE_TIME_TYPECHECK` compiling again; any
+`package.json was EMPTY` line (it names the writer — Q-414).

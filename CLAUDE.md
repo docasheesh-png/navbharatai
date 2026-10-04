@@ -3276,6 +3276,14 @@ the flag entries above promise.
   says so, `null` means *not supplied* and never zero, and `writeTypecheckUntouched` makes the
   silence unrepresentable as a fact about the build. Test-locked and reversion-proven four ways in
   `tests/theCounterWatchedOneLaneOfTwo.test.ts`.
+- **🧭 A PATH IS NOT A PROGRAM (autopsy e3b0ce25, 2026-10-04; no flag).** `isDevServerInvocation` judges each
+  path by its LAST part (`lastPathParts`): the typecheck primer copies `/home/user/.warm/vite-react/node_modules`,
+  and "vite" in that directory name made every write-time typecheck a dev-server launch for a day (BROWSER=none
+  syntax error, the running server killed, a 30 s timeout). `./node_modules/.bin/vite` and `bash ./dev.sh` stay
+  launches. ⚠️ **Any new command the platform builds for itself goes into the census in
+  `tests/aTypecheckIsNotADevServer.test.ts`.** Same autopsy: an EMPTY sandbox `package.json` is restored in
+  `_npmInstall` (the one install path) with the machine's state recorded (`emptyManifest.ts`) — which process
+  emptied it is OPEN (Q-414).
 - **🔧 A REPAIR THE PLATFORM CHECKS DOES NOT CHECK ITSELF, AND A REPAIR THAT CHANGED NOTHING SAYS SO (autopsy
   6cd698cc, 2026-10-01).** The explorer repair fixed a theme button in 61 s, then ran the production build, a dev
   server, the preview and a browser of its own (its prompt was the reviewer's `judgeRepairPrompt`, "verify the app

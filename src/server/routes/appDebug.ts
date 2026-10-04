@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from 'express';
+import { onClientGone } from '../lib/clientDisconnect';
 import { inAiSpendZone } from '../lib/aiSpendZone';
 import { callProfessionalAI } from '../lib/professionalRouting';
 import { workspaceRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity } from '../lib/authMiddleware';
@@ -134,7 +135,7 @@ export function registerAppDebugRoutes(app: Express): void {
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('X-Accel-Buffering', 'no');
     let closed = false;
-    req.on('close', () => { closed = true; });
+    onClientGone(res, () => { closed = true; }); // `res`: a POST's `req` 'close' never reports a disconnect (Q-621)
     const send = (evt: Record<string, unknown>): void => {
       if (!closed) { try { res.write(JSON.stringify(evt) + '\n'); } catch { /* client gone */ } }
     };

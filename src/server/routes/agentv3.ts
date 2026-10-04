@@ -1,4 +1,5 @@
 import { toSafeClientMessage } from '../lib/httpError';
+import { onStreamClosed } from '../lib/clientDisconnect';
 import type { Express, Request, Response } from 'express';
 import { copyName, copyStatus } from '../AgentV3/duplicateApp';
 import { decideMarkupOnProof, markupNeedsPreview, markupWaiverSettledLine } from '../AgentV3/previewEarnsMarkup';
@@ -7198,7 +7199,7 @@ async function noteBuildOutcome(
       if (!res.writableEnded) res.write(JSON.stringify({ type: 'ping' }) + '\n');
       else clearInterval(heartbeatTimer);
     }, 15_000);
-    req.on('close', () => { clearInterval(heartbeatTimer); rb.subscribers.delete(sub); });
+    onStreamClosed(res, () => { clearInterval(heartbeatTimer); rb.subscribers.delete(sub); }); // `res`: see clientDisconnect.ts
   });
 
   // CROSS-DEVICE LIVE SYNC (poll): a SECOND device watching the same account's build polls this for
@@ -8106,8 +8107,7 @@ async function noteBuildOutcome(
       if (quotaUid) void chargeTerminalSeconds(quotaUid, detachStream(terminalMeters, quotaUid, shellId, Date.now()));
       unsubscribe();
     };
-    req.on('close', cleanup);
-    res.on('close', cleanup);
+    onStreamClosed(res, cleanup);
   });
 
   /** Keystrokes → the TTY. Ctrl+C is just the real \x03 byte arriving here; there is no special case. */
@@ -11383,7 +11383,7 @@ async function noteBuildOutcome(
     rb.subscribers.add(primary);
     runningBuilds.set(buildKey, rb);
     buildLeaseRb = rb;
-    req.on('close', () => { rb.subscribers.delete(primary); });
+    onStreamClosed(res, () => { rb.subscribers.delete(primary); }); // `res`: a POST's `req` 'close' never reports a disconnect
     // ETERNAL SESSIONS: tap every outgoing build event into a compact durable timeline (tool
     // calls, file changes, diffs, preview, terminal facts). Persisted once in the finally below
     // and replayed on reopen, so a restored session shows the SAME Claude-style action rows,

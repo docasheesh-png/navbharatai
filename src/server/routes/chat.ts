@@ -1,4 +1,5 @@
 import type { Express } from 'express';
+import { onClientGone, onStreamClosed } from '../lib/clientDisconnect';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Writes ai_usage_logs (server-only).
 import { collection, addDoc, getServerDb as getDb } from '../lib/serverDb';
@@ -620,11 +621,10 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
           if (!res.writableEnded) res.write(': ping\n\n');
         }, 20000);
 
-        // Cancel upstream AI call when client disconnects (saves quota)
-        req.on('close', () => {
-          controller.abort();
-          clearInterval(heartbeat);
-        });
+        // Cancel upstream AI call when client disconnects (saves quota). On `res`, not `req`: a POST's
+        // `req` 'close' has already fired once its body was read, so it never reported a disconnect (Q-621).
+        onStreamClosed(res, () => clearInterval(heartbeat));
+        onClientGone(res, () => controller.abort());
 
         // MEASURED, NOT ASSUMED. Every statement about chat speed in this repo so far has been read
         // off the code — including the eight-and-a-half-second figure above, which is a BUDGET and not

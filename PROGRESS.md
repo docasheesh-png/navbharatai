@@ -88909,3 +88909,19 @@ cancels of #3515 (19:57), #3518 (20:44) and #3523 (20:45) read "The job has exce
 of 30m0s" — `ci.yml`'s own `timeout-minutes: 30`, hit because eight or nine PR runs in flight slowed every run to
 21–30 min. The cap is now 45 (#3524 staging). Lesson, the fourth rule's first step: read the run's own last
 words before naming a cause — a cancelled run names its canceller.
+
+
+### Q-127: a live-data question that asks two things gets both (2026-10-04)
+
+**Problem.** `liveDataContext` returned the first source that answered. So "delhi ka mausam aur AQI" got only the weather. And because a live block skips the web search, nothing else answered the second half either.
+
+**Fix.** Every source now runs side by side, and every block that answered is returned, in dispatch order. The transit source joined the same list. Each source still gates on its own regex before touching the network, so a source the question never mentions costs nothing. A test proves this by host: a currency question calls only the currency host.
+
+**Tests.** `liveDataSources.test.ts` gains three cases:
+- weather + currency in one message
+- one source down, the other kept
+- no host touched for an unmentioned source
+
+**Proof by reversion:** with the old loop back, the two-part test fails.
+
+**Sibling, recorded as Q-601.** `liveSearchContext` skips the web search whenever any live block exists. So "delhi ka mausam aur aaj gold rate" gets the weather and nothing for gold, which has no live source. Fixing it needs a rule for "the question also asks something no live source covers". A guessed word list would over-search or under-search, so it is written down with that need rather than shipped as a guess.

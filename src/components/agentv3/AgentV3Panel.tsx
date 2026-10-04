@@ -84,6 +84,7 @@ import { ChatToolbar } from '../chat/ChatToolbar';
 import { ProfessionalVoiceButton } from '../sonic/ProfessionalVoiceButton';
 import { filterMessages, enterShouldSend, readSendOnEnter } from '../../lib/chatToolbar';
 import { ActionGroupRow } from './ActivityTimelineRow';
+import { AppAiSettingsCard, fetchAppAiSettings } from './AppAiSettingsCard';
 import { trackEvent } from '../../lib/analytics';
 import { normalizeUid } from '../../lib/agentv3Workspace';
 import { deliverTextFile } from '../../lib/downloadFile';
@@ -3220,6 +3221,28 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
   // `missingRequiredKeys` have no signal here today, so those dots simply never light — which is the
   // navigator's third law working as designed, not an omission to paper over. They start working the
   // day something really answers them, with no change to this file's shape.
+  // "AI in this app" notice (admin 2026-10-04): a red dot on Keys & Secrets until the owner has SEEN that
+  // their app's assistant runs on NavBharatAI and is charged to their balance. Remembered per app on this
+  // device only — a convenience, never the source of truth for anything about money.
+  const aiNoticeKey = state.workspaceId ? `nbai.aiNoticeSeen.${state.workspaceId}` : '';
+  const [aiNoticeUnseen, setAiNoticeUnseen] = useState<boolean | undefined>(undefined);
+  useEffect(() => {
+    // Cleared first, so app A's dot can never show under app B while B's answer is on its way.
+    setAiNoticeUnseen(undefined);
+    if (!state.workspaceId || running) return;
+    let cancelled = false;
+    void fetchAppAiSettings(state.workspaceId).then((v) => {
+      if (cancelled) return;
+      let seen = false;
+      try { seen = !!aiNoticeKey && localStorage.getItem(aiNoticeKey) === '1'; } catch { /* storage blocked */ }
+      setAiNoticeUnseen(!!v && v.available && v.usesAi && !v.ownKey && !seen);
+    });
+    return () => { cancelled = true; };
+  }, [state.workspaceId, running, aiNoticeKey]);
+  const markAiNoticeSeen = useCallback(() => {
+    try { if (aiNoticeKey) localStorage.setItem(aiNoticeKey, '1'); } catch { /* storage blocked */ }
+    setAiNoticeUnseen(false);
+  }, [aiNoticeKey]);
   const previewDwellMs = usePreviewDwell(showWorkspace && tab === 'preview' && !!state.previewUrl);
   const navActions = useMemo(() => pendingActions({
     building: running,
@@ -3231,7 +3254,8 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
     // the same two conditions HostingChooser already gates that card on.
     customDomainOffered: customDomainsEnabled && !!state.workspaceId,
     reportsSentForThisBuild: reportCount,
-  }), [running, state.done, state.ok, previewDwellMs, publishState?.freshness, customDomainsEnabled, state.workspaceId, reportCount]);
+    appAiNoticeUnseen: aiNoticeUnseen,
+  }), [running, state.done, state.ok, previewDwellMs, publishState?.freshness, customDomainsEnabled, state.workspaceId, reportCount, aiNoticeUnseen]);
 
   // The old single-purpose dot, now derived from the navigator so this screen and the Publish sheet
   // can never disagree. `needsPublishDot`'s verdict is unchanged — it is the same 'changed' case,
@@ -6219,6 +6243,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
               // user who never opens this door never downloads it.
               userId
                 ? <Suspense fallback={<div className="px-4 py-6 text-xs text-faint">Loading your keys…</div>}>
+                    {state.workspaceId && <AppAiSettingsCard workspaceId={state.workspaceId} onSeen={markAiNoticeSeen} />}
                     <VaultManager
                       userId={userId}
                       embedded
@@ -6271,6 +6296,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   {savedKeyCount !== null && savedKeyCount > 0 && (
                     <span className="text-xs text-faint">{savedKeyCount} saved</span>
                   )}
+                  <ActionDot tone={badgeAt(navActions, ['more', 'secrets'])} label={badgeLabelAt(navActions, ['more', 'secrets'])} />
                 </button>
                 {/* CONNECTED SERVICES — the user's own tools (MCP). Same in-place pattern as the vault
                     above: this is a build-time capability, so leaving the build to configure it would

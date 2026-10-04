@@ -133,6 +133,7 @@
     "js-yaml": "^4.3.2",
     "nanoid": "^3.3.17",
     "tar": "^7.5.22",
-    "basic-ftp": "6.2.1"
+    "basic-ftp": "6.2.1",
+    "@fastify/busboy": "^3.2.2"
   }
 }

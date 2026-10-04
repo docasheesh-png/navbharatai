@@ -8,6 +8,7 @@ import { conversationToEvents, conversationToUserMessages, isUnfinishedBuild, ty
 import { shouldSurfaceStreamError, reconnectOutcome, type ReconnectOutcome } from './agentV3StreamError';
 import { nextLivePollDelayMs, resumeSinceSeq, LIVE_POLL_FAST_MS } from './livePollPolicy';
 import { auth } from '../lib/firebase';
+import { writeFailure } from '../lib/serverAnswer';
 // FILE-REVEAL PACING (admin 2026-07-23 — "one by one user ko dikhe … har 2 file ke bich ~5–10 sec"):
 // reveal generated files ONE BY ONE with a ~6s gap so the user watches files land while the backend keeps
 // building, instead of a burst-then-stall. HONEST (rule 2): only real events, in real order — the terminal
@@ -406,6 +407,7 @@ export function useAgentV3Build(): UseAgentV3Build {
 
   const stop = useCallback(() => {
     generationRef.current += 1; // invalidate any in-flight resume()/subscribeLive() from this point on
+    const stopGeneration = generationRef.current;
     abortRef.current?.abort();
     abortRef.current = null;
     setRunning(false);
@@ -418,14 +420,28 @@ export function useAgentV3Build(): UseAgentV3Build {
     // running and block the next build. Send `workspaceId` so that under per-workspace locking (FIX #3)
     // Stop targets THIS app's build, and the Bearer token so the server's identity matches the one the
     // build was registered under (the dead-Stop fix pairs this with server-side candidate keys).
+    //
+    // A Stop the server never received leaves the build running (and spending) while this screen says it
+    // stopped. So a failed Stop puts the real Stop button back with the reason — the same state a 409
+    // "build still running" answer produces — unless the user has already moved on to something newer.
+    // 404 is the engine being off for this account: there is no server build to stop.
     void (async () => {
+      let failure: string | null = null;
       try {
-        await fetch('/api/agentv3/stop', {
+        const res = await fetch('/api/agentv3/stop', {
           method: 'POST',
           headers: await authJsonHeaders(),
           body: JSON.stringify({ userId: userIdRef.current, email: emailRef.current, workspaceId: workspaceIdRef.current }),
         });
-      } catch { /* best-effort */ }
+        if (res.status !== 404) failure = await writeFailure(res, 'Stop did not reach the server.');
+      } catch {
+        failure = 'Stop did not reach the server (no connection).';
+      }
+      if (failure && generationRef.current === stopGeneration) {
+        setServerBuildRunning(true);
+        setErrorBeforeBuildStarted(true);
+        setError(`${failure} Your build may still be running — press ⏹ Stop again.`);
+      }
     })();
   }, []);
 
@@ -1123,15 +1139,26 @@ export function useAgentV3Build(): UseAgentV3Build {
     // Clear the gate immediately so the UI is responsive; the build resumes. BOTH interactive gates
     // are cleared here: a secrets popup answers through this same route, and leaving it mounted after
     // the answer would show the user a form for keys they have already saved.
-    setState((prev) => ({ ...prev, pendingPermission: undefined, pendingSecrets: undefined }));
+    let answered: Pick<AgentV3ClientState, 'pendingPermission' | 'pendingSecrets'> = { pendingPermission: undefined, pendingSecrets: undefined };
+    setState((prev) => {
+      answered = { pendingPermission: prev.pendingPermission, pendingSecrets: prev.pendingSecrets };
+      return { ...prev, pendingPermission: undefined, pendingSecrets: undefined };
+    });
+    // An answer that never reached the server would leave the build waiting until it auto-denies — the
+    // user said yes and gets a no. So when the request did not land, the same question is put back on
+    // screen to answer again (unless a newer one has already replaced it). A 200 with ok:false means the
+    // question had already closed on the server; the build reports that outcome itself.
+    let landed = false;
     try {
-      await fetch('/api/agentv3/respond', {
+      const res = await fetch('/api/agentv3/respond', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ requestId, approved }),
       });
-    } catch {
-      /* best-effort; the build will time out and auto-deny if this never lands */
+      landed = res.ok;
+    } catch { /* not landed */ }
+    if (!landed) {
+      setState((prev) => (prev.pendingPermission || prev.pendingSecrets ? prev : { ...prev, ...answered }));
     }
   }, []);
 

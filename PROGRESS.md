@@ -88910,3 +88910,29 @@ The admin sent a 20-point launch checklist for apps built with AI tools. Each po
 - Privacy and terms pages for generated apps that collect data.
 - A spam guard (honeypot plus rate limit) for public forms in generated apps.
 - A page-speed and image-size check in the build verdict.
+
+
+### A client write reads the server's answer (2026-10-04, same branch): Q-113 plus a security sibling sweep
+
+**Why I started.** Working queue row Q-113 (the dead `billingLogs` chain) led to a larger class.
+
+**Q-113.** The wallet load fetched `/api/wallet/:uid/logs` on every load, and nothing has rendered it since 2026-09-14. The fetch, the state, the `App.tsx` threading and the `BillingPanel` prop are removed. The server route stays, so already-installed phone bundles keep working.
+
+**The class.** `fetch` resolves for a 401, 403 or 500 alike. A client write followed by a success message therefore told the user something happened whether or not it did. A census found 28 client writes whose Response was thrown away. The real defects:
+- **Team:** remove member, change role and revoke invite always said they succeeded. A refused remove left the member with access. This one is security.
+- **Share for review:** revoke cleared the link from the screen while the link stayed live.
+- **Profile budget:** the editor closed over a refused save. `saveError` was set but never rendered, so the "invalid amount" message was invisible too.
+- **Admin:** APK report delete, clear and mark, and the complaint status change, dropped rows the server still held.
+- **Stop:** a Stop that never reached the server left the build running under a screen that said it had stopped. Now the real Stop button comes back with the reason.
+- **Permission answer:** an answer that never landed was auto-denied after the timeout. Now the question is put back on screen.
+- **Chat delete and IDE file delete:** a failed server delete was silent, and the item came back on the next load. Now the user is told.
+- **App Mart owner settings, including unpublish; built-app forget; webhook delete; review comments:** failures were silent. Now the user is told.
+
+**The fix.** `src/lib/serverAnswer.ts` `writeFailure(res, fallback)` is the one reader: it returns null on 2xx, else the server's `error` text.
+
+**The lock.** `tests/aClientWriteReadsTheServerAnswer.test.ts` is a census of every client write whose answer is discarded.
+- The 10 remaining ones are each argued safe: read-marks, terminal close/resize, a self-healing queue item, upload abort, a failure count, and two code-sample strings.
+- A new discarded write fails CI, and so does a stale allowlist entry.
+- Reverting TeamCollaboration and usePaymentEngine made 3 tests fail; with the fixes back, they pass.
+
+**Found and recorded, not done here (Q-600).** `tsc --noUnusedLocals` lists 93 client locals nothing reads. They sit mostly in `App.tsx` and `AgentV3Panel.tsx`, which several live sessions edit, so sweeping them now would collide. The class lock that fits is a per-file ratchet in CI, like `themeTokensOnly`.

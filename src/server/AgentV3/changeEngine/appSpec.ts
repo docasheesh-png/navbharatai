@@ -216,6 +216,15 @@ export function markLabelsBuilt(spec: AppSpec, keys: ReadonlyArray<string>, chan
   return { spec: { items, nextReq: spec.nextReq }, built };
 }
 
+/** Mark ledger items DROPPED on purpose (the user asked to remove them). Ids are kept. Pure. */
+export function dropItems(spec: AppSpec, ids: ReadonlyArray<string>, changeId: string): AppSpec {
+  const want = new Set(ids);
+  return {
+    nextReq: spec.nextReq,
+    items: spec.items.map((i) => (want.has(i.id) && i.status !== 'dropped' ? { ...i, status: 'dropped' as const, lastChange: changeId } : i)),
+  };
+}
+
 /**
  * The features to re-probe on THIS build even though this request did not name them: everything the
  * app was seen to do before. This is what makes an edit answerable for the whole app, not only for the

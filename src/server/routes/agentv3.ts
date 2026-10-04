@@ -381,6 +381,7 @@ import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
 import { beginChange, observeProbes, regressionsSoFar, settleChange, type ChangeSession } from '../AgentV3/changeEngine/changeSession';
 import type { SpecItem } from '../AgentV3/changeEngine/appSpec';
+import { removedProbeFeatures } from '../AgentV3/changeEngine/requestConsistency';
 import { changeEngineEnabled } from '../AgentV3/changeEngine/engineeringMemoryStore';
 import { createLaneWriteFence } from '../AgentV3/laneWriteFence';
 import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
@@ -16327,7 +16328,7 @@ async function noteBuildOutcome(
         // message, never the cached system prefix. Best-effort: a failure leaves the build unchanged.
         if (changeEngineEnabled() && (intent === 'new_build' || intent === 'edit_existing') && !isImportTurn) {
           try {
-            const declinedIds = [...(declinedPresenceFeatures(featureConfirmation) ?? [])];
+            const declinedIds = [...new Set([...(declinedPresenceFeatures(featureConfirmation) ?? []), ...removedProbeFeatures(prompt)])];
             const begun = await withTimeout(beginChange({
               workspaceId, prompt, isEdit: intent === 'edit_existing',
               requested: requestedProbeFeatures(prompt, new Set(declinedIds)),
@@ -20926,7 +20927,10 @@ async function noteBuildOutcome(
                 const session = await signInBehindTheDoor(lastPreviewUrl);
                 if (session.signedIn && session.screens.length > 0) { probeHtml = session.screens.map((sc) => sc.html).join('\n'); readBehindSignIn = true; }
               }
-              let coverage = checkFeaturePresence(milestoneRequest ?? prompt, probeHtml, declinedPresenceFeatures(featureConfirmation));
+              // What the user unticked on the feature card, plus what THIS request deliberately removes
+              // ("remove the delete button") — neither is a missing feature, and neither may be healed back.
+              const presenceDeclined = new Set<string>([...(declinedPresenceFeatures(featureConfirmation) ?? []), ...removedProbeFeatures(milestoneRequest ?? prompt)]);
+              let coverage = checkFeaturePresence(milestoneRequest ?? prompt, probeHtml, presenceDeclined);
               // A CONTROL ON ANOTHER SCREEN IS NOT MISSING (featureProbeScreens.ts, autopsy a106df77): when the
               // home screen leaves a requested control unseen, read the app's own routes and judge them together.
               // Paid only when something would otherwise be called missing; bounded in count and time. The
@@ -20953,7 +20957,7 @@ async function noteBuildOutcome(
               if (coverage.missing.length > 0 && !readBehindSignIn && !abort.signal.aborted) {
                 probedScreens = await readOtherScreens();
                 if (probedScreens.length > 0) {
-                  const wider = checkFeaturePresence(milestoneRequest ?? prompt, combineScreens(probeHtml, probedScreens), declinedPresenceFeatures(featureConfirmation));
+                  const wider = checkFeaturePresence(milestoneRequest ?? prompt, combineScreens(probeHtml, probedScreens), presenceDeclined);
                   if (wider.probes.length > 0) coverage = wider;
                 }
               }
@@ -21028,7 +21032,7 @@ async function noteBuildOutcome(
                       result = adoptHealResult(result, healResult as typeof result);
                       if (afterHtml) {
                         const afterScreens = probedScreens.length > 0 ? await readOtherScreens() : [];
-                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? prompt, combineScreens(afterHtml, afterScreens), declinedPresenceFeatures(featureConfirmation));
+                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? prompt, combineScreens(afterHtml, afterScreens), presenceDeclined);
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
                         if (regressedBeforeHeal.length > 0) await reprobeRegressions(afterHtml, afterScreens.length > 0 ? afterScreens : regressionScreens ? await readOtherScreens() : []);
                       }
@@ -21040,7 +21044,7 @@ async function noteBuildOutcome(
                       try {
                         const after = (await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl')).html;
                         const afterScreens = probedScreens.length > 0 ? await readOtherScreens() : [];
-                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? prompt, combineScreens(after, afterScreens), declinedPresenceFeatures(featureConfirmation));
+                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? prompt, combineScreens(after, afterScreens), presenceDeclined);
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
                         if (regressedBeforeHeal.length > 0) await reprobeRegressions(after, afterScreens.length > 0 ? afterScreens : regressionScreens ? await readOtherScreens() : []);
                       } catch { /* re-open best-effort — keep the pre-heal coverage */ }

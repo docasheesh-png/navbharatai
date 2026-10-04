@@ -44,9 +44,12 @@ describe('🔒 link 1 — the server hands back the FULL problem', () => {
     const code = codeOnly(server);
     const giveUps = (code.match(/fixed:\s*false/g) || []).length;
     const reported = (code.match(/report: failureReport\(\)/g) || []).length;
-    // The signing-key branch is deliberately excluded: that one is genuinely the user's to resolve and
-    // v5 must never be asked to invent a key.
-    expect(reported).toBeGreaterThanOrEqual(giveUps - 2);
+    // The credential and build-machine branches are deliberately excluded, BY NAME: a missing key is the
+    // user's to resolve (v5 must never be asked to invent one), and a build machine without the Xcode
+    // Apple requires leaves nothing in the app to fix (queue Q-237). Offering "fix the app" there lies.
+    const excluded = (code.match(/cureFamily\(diag\.code\) === '(?:user-credentials|build-machine)'/g) || []).length;
+    expect(excluded).toBe(2);
+    expect(reported).toBeGreaterThanOrEqual(giveUps - excluded - 1);
   });
 
   it('asks for a code fix and bounds the log it sends', () => {

@@ -88951,3 +88951,25 @@ failed save lived only in `proShell.ts`'s `useCollection`.
 - With the heal change reverted, the two real-case tests fail.
 
 **Where it runs.** It is wired where the compiler's errors are in hand: the endgame repair, both the step-cap net and the error-trend checkpoint. The write-time and fast-lane callers are unchanged, because they do not carry the TS2304 list.
+
+
+### Q-130: the free-build unattended chain is counted across instances (2026-10-04)
+
+**Problem.** The cap on how long a free request may run unattended was counted in one Cloud Run instance's memory. An auto-continue that landed on another instance started a fresh chain, so a free request could still hold a paid-for machine for hours: one allowance per instance.
+
+**Fix.**
+- `decideFreePauseDurable` and `noteFreeBuildStartDurable` keep the chain in one Firestore record per workspace (`agentv3_free_chains`, admin SDK, `freeChainStore.ts`).
+- The count is the LARGER of the record and memory.
+- Each durable call is bounded at 2 s.
+- Every failure (no database, slow, erroring) leaves exactly the old memory-only answer. This means it can never stop a build the old code would have let run.
+
+**Tests.**
+- Cross-instance: a window spent elsewhere ends the chain here.
+- A new request clears the chain everywhere; "continue" keeps it.
+- A failing store gives the memory answer.
+- A stale record counts as no chain.
+- Store round-trip with a fake database.
+- Proof by reversion: with the change removed, 6 tests fail.
+- The two wiring pins were updated to the durable calls at the same call sites.
+
+**Siblings checked.** The other daily spend gates (`guestDailyQuota`, the professionals `passGate`, `toolGate`, and the routes that use them) already keep their counts in Firestore. The free-build chain was the only spend limit kept in instance memory.

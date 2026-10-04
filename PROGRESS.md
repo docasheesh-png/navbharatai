@@ -88196,6 +88196,17 @@ All on PR #3488, each locked by a test proven by reversion.
 
 ⚠️ Q-112 reaches phone users only with a fresh `.aab`/`.ipa` (bundled mode).
 
+## 2026-10-04 — Pending items closed out: Q-091 leaves the queue, Q-013 now records its own evidence
+
+Admin: *"apka sare pending kaam niptao! bas pr ko merge nahi karna"*.
+
+| ID | State | What was done |
+|---|---|---|
+| Q-091 | ✅ RESOLVED | #3489 merged (20 s vision read when a picture is attached). Row removed from `BUILD_REPORT_QUEUE.md`. **Watch:** `ATTACHMENTS_READ` reads "Read in N s" on the next build with a picture. |
+| Q-013 | 🟡 BLOCKED (now waiting on one occurrence, not on a screenshot) | Traced every guard in front of `GET /api/nav-store/status`: the route and its helpers cannot throw, and App Check guards only POST money routes. That leaves two candidates: the adaptive guard's 429 and the global 500 handler. The 500 handler already reports to the error tracker; the adaptive guard's blocks were silent. Now `adaptiveGuard` records the START of every hard block (`blockReport`: reason, request, User-Agent; never the IP) in the admin Errors view, and App Mart sends the sentence it could not read to `/api/logs/error` as `store-status-unreadable`, once per screen. The server half is live on deploy. The App Mart half reaches phones only with the next `.ipa`/`.aab` (bundled mode). |
+| Q-008 | 🟡 BLOCKED (unchanged) | Waiting on about two weeks of strict-trial data, then the admin decides 100% or off. Nothing to do before then. |
+
+Test: `tests/theGuardThatAnsweredNamesItself.test.ts` (7 cases). Reversion-proven both ways: removing the guard's `errorTracker.capture` fails §1, and pointing App Mart's report away from `/api/logs/error` fails §2.
 **⚠️ TWO SESSIONS MET ON THIS CLASS THE SAME DAY, and the merge is recorded rather than quietly
 resolved.** PR #3488 (merged while this branch was in the gate) carries `tests/aCoveredControlIsNamed.test.ts`
 for queue item Q-247 — the candy report's "⏸" that *"could not be pressed and could not say why"*. Its fix

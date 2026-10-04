@@ -24,10 +24,11 @@
 // BUNDLED, so a client change would reach them only through a new store build. The server decides
 // whether a pause is resumable; every client already obeys that.
 //
-// ⚠️ THE CHAIN IS COUNTED IN THIS INSTANCE'S MEMORY. When an auto-continue lands on another Cloud Run
-// instance, that instance has no record and treats it as a new chain, which is exactly the behaviour
-// before this change. So it can only ever fail toward the old, more generous behaviour, never toward
-// stopping a build it should not. A durable counter is the complete fix; it is recorded in PROGRESS.md.
+// ✅ THE CHAIN IS SHARED ACROSS INSTANCES (queue Q-130, 2026-10-04). It used to live only in this
+// instance's memory, so an auto-continue that landed on another Cloud Run instance started a fresh
+// allowance. `noteFreeBuildStartShared` / `decideFreePauseShared` now read and write a durable copy
+// (`FreeBuildChainStore.ts`) and take the LARGER of the two counts. A store that cannot be read falls back
+// to the memory count — the old, more generous behaviour — so a failure can never stop a build early.
 //
 // Pure except for the chain map, which is plain module state with injected time.
 
@@ -89,8 +90,17 @@ export function freeBuildWindow(paidSeconds: number, isFreeBuild: boolean, env: 
 
 // ── The unattended chain ─────────────────────────────────────────────────────────────────────────
 
-interface Chain { spentMs: number; touchedAt: number }
+/** One workspace's unattended free time since the user's last real request. */
+export interface FreeChain { spentMs: number; touchedAt: number }
+type Chain = FreeChain;
 const chains = new Map<string, Chain>();
+
+/** Where the chain is kept so every instance sees it. Every method fails open (see FreeBuildChainStore). */
+export interface FreeChainStore {
+  load(workspaceId: string): Promise<FreeChain | null>;
+  save(workspaceId: string, chain: FreeChain): Promise<void>;
+  clear(workspaceId: string): Promise<void>;
+}
 /** A record nobody has touched for this long is dropped, so the map cannot grow for ever. */
 const CHAIN_FORGET_MS = 6 * 60 * 60 * 1000;
 
@@ -129,6 +139,47 @@ export function decideFreePause(workspaceId: string, windowMs: number, env: Env 
   const spentSeconds = Math.round(spentMs / 1000);
   if (allowance === null) return { resumable: true, spentSeconds, allowanceSeconds: null };
   return { resumable: spentMs < allowance * 1000, spentSeconds, allowanceSeconds: allowance };
+}
+
+/**
+ * `noteFreeBuildStart`, shared across instances: a real request also clears the durable chain, so the next
+ * window — on whichever instance — starts from zero. Best-effort; never throws.
+ */
+export async function noteFreeBuildStartShared(workspaceId: string, prompt: string, store: FreeChainStore, now: number = Date.now()): Promise<void> {
+  noteFreeBuildStart(workspaceId, prompt, now);
+  if (!isContinuationMessage(prompt)) await bounded(store.clear(workspaceId), undefined);
+}
+
+/** How long a store call may take before the shared functions carry on without it. */
+export const FREE_CHAIN_STORE_TIMEOUT_MS = 2_500;
+
+/** Resolve to the work's value, or `fallback` when it fails or takes longer than the store timeout. */
+function bounded<T>(work: Promise<T>, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((resolve) => { timer = setTimeout(() => resolve(fallback), FREE_CHAIN_STORE_TIMEOUT_MS); });
+  return Promise.race([work.catch(() => fallback), late]).finally(() => { if (timer) clearTimeout(timer); });
+}
+
+/**
+ * `decideFreePause`, shared across instances: the chain so far is the LARGER of this instance's count and
+ * the durable one (a continuation may have run anywhere), the window is added, and the result is written
+ * back before the pause is announced — so the client's auto-continue, wherever it lands, reads it.
+ */
+export async function decideFreePauseShared(
+  workspaceId: string, windowMs: number, store: FreeChainStore, env: Env = process.env, now: number = Date.now(),
+): Promise<FreePauseDecision> {
+  prune(now);
+  // Each store call is bounded HERE, and the window is added exactly once below whatever the store does —
+  // so a slow or failing store can never count a window twice (which would stop a build early).
+  const durable = await bounded(store.load(workspaceId), null);
+  if (durable && now - durable.touchedAt <= CHAIN_FORGET_MS) {
+    const mine = chains.get(workspaceId);
+    if (!mine || durable.spentMs > mine.spentMs) chains.set(workspaceId, { spentMs: durable.spentMs, touchedAt: now });
+  }
+  const decision = decideFreePause(workspaceId, windowMs, env, now);
+  const chain = chains.get(workspaceId);
+  if (chain) await bounded(store.save(workspaceId, { ...chain }), undefined);
+  return decision;
 }
 
 /** The words for a free pause that waits for the user. Branded, no vendor, no upsell. */

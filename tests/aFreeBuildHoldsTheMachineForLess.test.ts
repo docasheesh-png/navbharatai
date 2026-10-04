@@ -112,11 +112,12 @@ describe('the wiring (source guards)', () => {
   it('the free window is applied to effectiveBuildSeconds, the one number every budget reads', () => {
     expect(route).toContain('const freeWindow = freeBuildWindow(scaleBuildSeconds(maxBuildSeconds(), buildDepth), freeTierBuildActive);');
     expect(route).toContain('const effectiveBuildSeconds = freeWindow.seconds;');
-    expect(route).toContain('if (freeTierBuildActive) noteFreeBuildStart(workspaceId, prompt);');
+    // Shared across instances since Q-130 (tests/aFreeChainIsCountedOnEveryInstance).
+    expect(route).toContain('if (freeTierBuildActive) await noteFreeBuildStartShared(workspaceId, prompt, freeChainStore);');
   });
 
   it('the watchdog pause is resumable only while the chain allows it, and only a free unfinished build is asked', () => {
-    expect(route).toContain('const freePause = !ok && freeTierBuildActive ? decideFreePause(workspaceId, deadlineMs) : null;');
+    expect(route).toContain('const freePause = !ok && freeTierBuildActive ? await decideFreePauseShared(workspaceId, deadlineMs, freeChainStore) : null;');
     expect(route).toContain("emit({ type: 'result', ok: false, resumable: pauseResumable,");
     expect(route).not.toContain("emit({ type: 'result', ok: false, resumable: true, summary: pauseMsg.summary");
   });

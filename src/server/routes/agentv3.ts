@@ -448,7 +448,8 @@ import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMiscon
 import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
 import { estimateBuildTime, complexityFromPrompt, projectSizedComplexity, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
-import { freeBuildWindow, noteFreeBuildStart, decideFreePause, freePauseMessage } from '../AgentV3/freeBuildTimeCap';
+import { freeBuildWindow, noteFreeBuildStartShared, decideFreePauseShared, freePauseMessage } from '../AgentV3/freeBuildTimeCap';
+import { freeChainStore } from '../AgentV3/FreeBuildChainStore';
 import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionReserve';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
@@ -12525,7 +12526,9 @@ async function noteBuildOutcome(
      * runner's own stop, the reserve and the reviewer's headroom all read the same shorter number.
      */
     const freeWindow = freeBuildWindow(scaleBuildSeconds(maxBuildSeconds(), buildDepth), freeTierBuildActive);
-    if (freeTierBuildActive) noteFreeBuildStart(workspaceId, prompt);
+    // Shared across instances (Q-130): bounded so a slow store can never delay the build's start.
+    // Shared across instances (Q-130); every store call is bounded inside, so the start is never held up.
+    if (freeTierBuildActive) await noteFreeBuildStartShared(workspaceId, prompt, freeChainStore);
     const effectiveBuildSeconds = freeWindow.seconds;
     const deadlineMs = effectiveBuildSeconds * 1000;
     // P-ARCH+.3 — tokens spent by the optional up-front blueprint step (below). Declared here so the
@@ -12795,7 +12798,9 @@ async function noteBuildOutcome(
       // A FREE build's unattended chain is bounded HERE (freeBuildTimeCap.ts): once this request's free
       // windows have used their allowance, the pause is not resumable — the work is saved and one
       // "continue" from the user buys the next window. A paid build, and a finished app, are untouched.
-      const freePause = !ok && freeTierBuildActive ? decideFreePause(workspaceId, deadlineMs) : null;
+      // Shared across instances (Q-130). Each store call is bounded inside, and a store that does not answer
+      // leaves this instance's count — the window is added exactly once either way.
+      const freePause = !ok && freeTierBuildActive ? await decideFreePauseShared(workspaceId, deadlineMs, freeChainStore) : null;
       const pauseResumable = freePause ? freePause.resumable : true;
       if (freePause && !freePause.resumable) {
         try {

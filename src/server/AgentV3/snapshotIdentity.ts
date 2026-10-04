@@ -47,9 +47,23 @@ export function identitySource(files: Record<string, string> | null | undefined)
   const out: Record<string, string> = {};
   if (!files) return out;
   for (const [path, content] of Object.entries(files)) {
+    if (isSecretEnvFile(path)) continue;
     out[path] = typeof content === 'string' ? withoutPreviewBridge(path, content) : content;
   }
   return out;
+}
+
+/**
+ * 🔴 A SECRETS FILE IS NEVER PART OF THE APP'S COPY (autopsy cc3ef776, 2026-10-04). The copy's source is
+ * read by a scan that leaves `.env` out, while the saved side carries it whenever a key from Keys &
+ * Secrets was loaded into the app — so every app with a key had its free preview copy called STALE
+ * ("1 saved that the copy never held (.env)") and the user was sent to the paid live machine. A secrets
+ * file is not built, not shipped and not shown, so it is left out of the identity on BOTH sides.
+ * `.env.example` holds names, not secrets, and stays. PURE.
+ */
+export function isSecretEnvFile(path: string): boolean {
+  const base = String(path ?? '').replace(/\\/g, '/').split('/').pop() ?? '';
+  return /^\.env(?:\..+)?$/i.test(base) && !/^\.env\.(?:example|sample|template)$/i.test(base);
 }
 
 export function workspaceContentHash(files: Record<string, string> | null | undefined): string {

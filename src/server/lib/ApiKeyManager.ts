@@ -27,7 +27,7 @@ import crypto from 'crypto';
  *   ai:professionals  → POST /api/v1/professionals/:id/chat — the ~80 expert AIs, by id
  */
 export const API_SCOPES = [
-  'all', 'read:profile', 'read:usage', 'read:builds', 'ai:chat', 'ai:professionals',
+  'all', 'read:profile', 'read:usage', 'read:builds', 'ai:chat', 'ai:professionals', 'ai:images',
 ] as const;
 export type ApiScope = (typeof API_SCOPES)[number];
 
@@ -69,6 +69,7 @@ export const API_SCOPE_DESCRIPTIONS: Readonly<Record<ApiScope, { title: string; 
   'read:builds': { title: 'Your apps', detail: 'The list of apps you have built, with their live links.' },
   'ai:chat': { title: "NavBharatAI's AI", detail: 'Ask NavBharatAI questions from your own program or app. Costs come from your wallet, up to the daily limit you set on the key.' },
   'ai:professionals': { title: 'Expert AIs', detail: 'Ask any NavBharatAI expert by name — Teacher, Lawyer, Doctor-side health helpers, Kisan, Accountant and the rest. Same wallet, same daily limit.' },
+  'ai:images': { title: 'Images', detail: 'Make AI pictures from a description — from your own program, or as the image key of an app you built here. 5 free pictures a day, then ₹1 each from your wallet, up to the daily limit you set on the key.' },
 };
 
 export const KEY_PREFIX = 'nbai_';

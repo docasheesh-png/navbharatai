@@ -8,6 +8,7 @@ import React, { useState } from 'react';
 import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
 import { authHeader } from '../../lib/authHeaders';
+import { writeFailure } from '../../lib/serverAnswer';
 
 interface Feedback { rating: 'approve' | 'changes' | 'reject'; comment: string; name: string; timestamp: number }
 
@@ -76,7 +77,17 @@ export function ShareForReview({ generatedCode }: ShareForReviewProps) {
 
   const revoke = async () => {
     if (!token) return;
-    try { await fetch(`/api/share/${encodeURIComponent(token)}/revoke`, { method: 'POST', headers: await authHeader() }); } catch { /* ignore */ }
+    // The link leaves the screen only once the server has really stopped it — clearing it on a refused
+    // or failed revoke told the owner it was gone while anyone holding it could still open it.
+    let failure: string | null;
+    try {
+      const res = await fetch(`/api/share/${encodeURIComponent(token)}/revoke`, { method: 'POST', headers: await authHeader() });
+      failure = await writeFailure(res, 'The link could not be revoked, so it still works.');
+    } catch {
+      failure = 'The link could not be revoked (no connection), so it still works.';
+    }
+    if (failure) { setError(failure); return; }
+    setError('');
     setReviewUrl(''); setToken(''); setFeedback([]);
   };
 

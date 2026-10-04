@@ -260,7 +260,9 @@ export function planAppDefaults(
     { test: /name=["']description["']/i, tag: `<meta name="description" content="${safeDescription}" />`, label: 'meta description' },
     { test: /property=["']og:title["']/i, tag: `<meta property="og:title" content="${safeName}" />`, label: 'og:title' },
     { test: /property=["']og:description["']/i, tag: `<meta property="og:description" content="${safeDescription}" />`, label: 'og:description' },
-    { test: /name=["']twitter:card["']/i, tag: '<meta name="twitter:card" content="summary_large_image" />', label: 'twitter:card' },
+    // `summary_large_image` promises a large picture; with no og:image to show, X/Twitter renders an
+    // empty frame. So the large card is claimed only when the page really has an image to put in it.
+    { test: /name=["']twitter:card["']/i, tag: `<meta name="twitter:card" content="${/property=["']og:image["']/i.test(html) ? 'summary_large_image' : 'summary'}" />`, label: 'twitter:card' },
     { test: /name=["']theme-color["']/i, tag: '<meta name="theme-color" content="#0f172a" />', label: 'theme-color' },
     { test: /rel=["']manifest["']/i, tag: `<link rel="manifest" href="${MANIFEST_HREF}" />`, label: 'manifest link' },
     { test: /rel=["']icon["']/i, tag: `<link rel="icon" href="${ICON_HREF}" type="image/svg+xml" />`, label: 'icon link' },

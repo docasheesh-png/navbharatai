@@ -26,3 +26,10 @@ scripts/ideShortcutAudit/dist/
 # Scratch projects the strict-trial and image-app tests build inside tests/ (they need the repo node_modules).
 # A run stopped mid-test leaves one behind; it must never be committed (it was, once, in #3490).
 tests/.tmp-*/
+
+# Live environment files hold real credentials — never committed. Only the committed template
+# (.env.example, placeholders only) is tracked. Security checklist 2026-10-04; locked by
+# tests/thePlatformKeepsItsSecretsOutOfGit.test.ts.
+.env
+.env.*
+!.env.example

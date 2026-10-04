@@ -14,6 +14,7 @@ import { Capacitor } from '@capacitor/core';
 import { registerDeviceToken, unregisterDeviceToken } from './pushApi';
 import { PLAY_STORE_URL } from './appUpdate';
 import { pushTapAction } from './appMartTarget';
+import { recordNonFatal } from './observability';
 
 /** True only inside the installed Android/iOS shell; false on plain web. Never throws. */
 function isNativeApp(): boolean {
@@ -175,8 +176,9 @@ export async function initPushNotifications(userId: string): Promise<void> {
         }
       });
     }
-  } catch {
+  } catch (err) {
     /* best-effort — never block sign-in or crash the app over a push registration failure */
+    recordNonFatal('Push registration failed', 'notifications', { reason: err instanceof Error ? err.name : 'unknown' });
   }
 }
 

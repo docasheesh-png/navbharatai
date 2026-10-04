@@ -241,6 +241,8 @@ export function readGatewayRequest(body: unknown): RequestVerdict {
 
 /** Where a published app sends its question. One constant, so the page and the route cannot drift. */
 export const GATEWAY_PATH = '/api/app-ai/ask';
+/** Where a published app asks for a PICTURE (admin 2026-10-04) — same token, same checks, the owner's image key. */
+export const IMAGE_GATEWAY_PATH = '/api/app-ai/image';
 
 /** Marks the injected snippet, so a re-publish replaces rather than stacks. Mirrors the beacon's. */
 export const APP_AI_MARKER = 'data-nbai-ai';
@@ -283,15 +285,23 @@ export function rotateNonce(existing: AppNoncePair | null | undefined, fresh: st
  * visitors).
  */
 export function gatewayScriptHtml(appId: string, token: string, origin: string): string {
-  const url = `${String(origin ?? '').replace(/\/+$/, '')}${GATEWAY_PATH}`;
+  const base = String(origin ?? '').replace(/\/+$/, '');
+  const url = `${base}${GATEWAY_PATH}`;
+  const imageUrl = `${base}${IMAGE_GATEWAY_PATH}`;
   const fallback = visitorFacingMessage('disabled');
+  const imageFallback = 'The picture maker in this app is not available right now. Please try again later.';
   return `<script ${APP_AI_MARKER}="1">(function(){try{
-var U=${JSON.stringify(url)},T=${JSON.stringify(token)},F=${JSON.stringify(fallback)};
+var U=${JSON.stringify(url)},I=${JSON.stringify(imageUrl)},T=${JSON.stringify(token)},F=${JSON.stringify(fallback)},G=${JSON.stringify(imageFallback)};
 window.NavAI={app:${JSON.stringify(appId)},available:true,ask:function(p,o){
 return fetch(U,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:T,prompt:String(p==null?"":p),system:(o&&o.system)||""})})
 .then(function(r){return r.json().catch(function(){return{ok:false,message:F};});})
 .catch(function(){return{ok:false,message:F};})
 .then(function(d){if(d&&d.ok&&typeof d.text==="string")return d.text;throw new Error((d&&d.message)||F);});
+},image:function(p,o){
+return fetch(I,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:T,prompt:String(p==null?"":p),width:o&&o.width,height:o&&o.height})})
+.then(function(r){return r.json().catch(function(){return{ok:false,message:G};});})
+.catch(function(){return{ok:false,message:G};})
+.then(function(d){if(d&&d.ok&&typeof d.image==="string")return d.image;throw new Error((d&&d.message)||G);});
 }};
 }catch(e){}})();</script>`;
 }

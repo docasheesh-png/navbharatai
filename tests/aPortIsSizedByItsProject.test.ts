@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { tscErrorCauses, sourceHasJsx } from '../src/server/AgentV3/tscErrorCause';
 import { admittedInertControls } from '../src/server/AgentV3/claimAudit';
+import { nearestEditRegion, missingCssSelectors } from '../src/server/AgentV3/ToolDispatcher';
 import { workspaceSizedComplexity, PORT_OWN_FILES_LINE, type ComplexityDecision } from '../src/server/AgentV3/complexityRouting';
 
 const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
@@ -99,5 +100,28 @@ describe('a build order over a big project is sized by the project', () => {
     const i = route.indexOf('const complexityDecision = workspaceSizedComplexity(promptComplexityDecision, buildOrderReadAsEdit);');
     expect(i).toBeGreaterThan(0);
     expect(i).toBeLessThan(route.indexOf("const buildIsComplex = complexityDecision.verdict === 'complex';"));
+  });
+});
+
+describe('an edit to a CSS rule that does not exist says so', () => {
+  const kit = ':root {\n  --accent: #4f46e5;\n}\n.nb-btn {\n  padding: 8px;\n}\n.nb-card, .nb-panel {\n  border: 1px solid;\n}\n' + '/* filler */\n'.repeat(300);
+
+  it("the report's two misses — `.btn-danger` and `.nb-main` — are named as absent, with the append route", () => {
+    expect(missingCssSelectors(kit, '.btn-danger {\n  background: red;\n}')).toEqual(['.btn-danger']);
+    const msg = nearestEditRegion(kit, '.nb-main {\n  margin: 0 auto;\n}');
+    expect(msg).toMatch(/^The rule `\.nb-main` does not exist in this file/);
+    expect(msg).toMatch(/EMPTY old_string/);
+  });
+
+  it('a rule that IS there (alone or in a group) is never called absent', () => {
+    expect(missingCssSelectors(kit, '.nb-btn {\n  padding: 4px;\n}')).toEqual([]);
+    expect(missingCssSelectors(kit, '.nb-panel {')).toEqual([]);
+  });
+
+  it('never fires on code, a bare element rule or an at-rule', () => {
+    expect(missingCssSelectors(kit, 'const style = {\n  a: 1,\n};')).toEqual([]);
+    expect(missingCssSelectors(kit, 'div {\n  margin: 0;\n}')).toEqual([]);
+    expect(missingCssSelectors(kit, '@media (max-width: 600px) {')).toEqual([]);
+    expect(nearestEditRegion('const a = 1;\n', 'const totallyMissing = 2;')).not.toMatch(/does not exist in this file/);
   });
 });

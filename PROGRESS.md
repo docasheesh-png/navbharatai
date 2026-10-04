@@ -88955,3 +88955,9 @@ heal (`credentialLogRedaction.ts`) "fixed" it by emptying the call — `console.
 err)` became `console.error()`, deleting a working error log. Recall went up too: `'API key:', key` and
 `` `token=${t}` `` were missed before and are caught now.
 
+### 2026-10-04 — Q-155: the build report names the saved keys an app did not get
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-155 `withheldSecretNames` never shown | written and tested with the scoping change (2026-08-17), never called | an explanation built and never shown | `loadUserVaultScope` (one vault read → injected keys + withheld names); the build records `SECRETS_WITHHELD` with names only and the Settings path | `tests/aWithheldKeyIsNamed.test.ts` — names, no values, list capped; source guards on the one read; census: every `secretScope` export is used by live code |
+

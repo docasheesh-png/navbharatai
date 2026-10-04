@@ -126,6 +126,12 @@ export interface TelemetryBreakdown {
    * Absent on documents written before it existed; read as "not measured", never as zero.
    */
   okDurationMs?: number;
+  /**
+   * Sum of the SQUARES of those successful builds' durations, in seconds² (autopsy 68f0a486, 2026-10-04).
+   * With `okBuilds` and `okDurationMs` it gives how far one build lands from the day's mean — what the
+   * ETA band needs and a sum alone cannot say. Absent on older documents: "not measured", never zero.
+   */
+  okDurationSqSec?: number;
 }
 
 /** Billing Phase 3 — rolled-up per-provider usage for the admin usage-report. */
@@ -242,6 +248,7 @@ function addToBreakdown(slot: TelemetryBreakdown, entry: CostTelemetryEntry): Te
     outputTokens: slot.outputTokens + entry.outputTokens,
     durationMs: slot.durationMs + entry.durationMs,
     okDurationMs: (slot.okDurationMs ?? 0) + (entry.ok ? entry.durationMs : 0),
+    okDurationSqSec: round6((slot.okDurationSqSec ?? 0) + (entry.ok ? (entry.durationMs / 1000) ** 2 : 0)),
   };
 }
 

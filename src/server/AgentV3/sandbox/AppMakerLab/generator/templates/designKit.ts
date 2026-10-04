@@ -141,6 +141,12 @@ a:hover { text-decoration: underline; }
   color: var(--danger-ink);
 }
 
+.btn-success {
+  background: color-mix(in srgb, var(--success) 12%, var(--card));
+  color: var(--success-ink);
+}
+.btn-success:hover { background: color-mix(in srgb, var(--success) 20%, var(--card)); text-decoration: none; }
+
 :where(button[type="submit"]), .btn-primary, .primary, :where(button.primary) {
   background: linear-gradient(135deg, var(--accent-strong), var(--accent-deep));
   border-color: transparent;
@@ -155,7 +161,7 @@ a:hover { text-decoration: underline; }
   box-shadow: 0 12px 24px -8px color-mix(in srgb, var(--accent-strong) 75%, transparent);
 }
 
-:where(button:disabled), .btn:disabled, .btn-primary:disabled, .btn-secondary:disabled, .btn-danger:disabled {
+:where(button:disabled), .btn:disabled, .btn-primary:disabled, .btn-secondary:disabled, .btn-danger:disabled, .btn-success:disabled {
   opacity: 0.55;
   cursor: not-allowed;
   transform: none;
@@ -215,7 +221,11 @@ h2 { font-size: 1.5rem;  line-height: 1.25; font-weight: 700; letter-spacing: -0
 h3 { font-size: 1.25rem; line-height: 1.3;  font-weight: 700; margin: 0 0 0.4em; }
 h4 { font-size: 1.05rem; line-height: 1.35; font-weight: 600; margin: 0 0 0.4em; }
 p  { margin: 0 0 1em; }
-small, .muted { color: var(--muted); }
+small, .muted, .text-muted { color: var(--muted); }
+/* The family the kit's own names invite (autopsy 68f0a486): with .btn-danger, .badge-success and .muted in
+   the kit, models reach for .btn-success, .text-muted and .text-center — undefined, the elements rendered
+   unstyled until a write-time note made the model add them. A half-family is an invitation; complete it. */
+.text-center { text-align: center; }
 
 /* Ghost button — a third, quieter action next to the primary/secondary. */
 .btn-ghost {

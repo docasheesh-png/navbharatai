@@ -89032,3 +89032,5 @@ failed save lived only in `proShell.ts`'s `useCollection`.
 - The two wiring pins were updated to the durable calls at the same call sites.
 
 **Siblings checked.** The other daily spend gates (`guestDailyQuota`, the professionals `passGate`, `toolGate`, and the routes that use them) already keep their counts in Firestore. The free-build chain was the only spend limit kept in instance memory.
+
+**Gate note (Q-130):** the first full run caught one failure, from `everyCollectionIsClassified`. It flagged the new `agentv3_free_chains` store as unclassified, which is exactly what that census exists to catch. The store is now classified as `retained`, with a one-day `RETENTION_POLICIES` entry on `touchedAt`. The engine already ignores a record older than six hours, so without the policy one dead document per paused workspace would have stayed forever.

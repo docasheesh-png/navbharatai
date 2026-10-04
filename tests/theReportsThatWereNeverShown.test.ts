@@ -22,7 +22,12 @@ const DASHBOARD = read('src/components/AdminDashboard.tsx');
 const MONITOR = read('src/components/admin/MonitorPanels.tsx');
 const ADMIN_ROUTES = read('src/server/routes/admin.ts');
 
-/** Every endpoint the audit found with real diagnostic data and no client at all. */
+/**
+ * Every endpoint the audit found with real diagnostic data and no client at all — less one.
+ * `/api/admin/feature-flags` was dropped from the panel on 2026-10-04 (admin panel audit, PR 1, D1):
+ * the flags it lists are read by no route, so its card described switches that switch nothing. The
+ * route itself stays on the server.
+ */
 const THE_THIRTEEN = [
   '/api/admin/builder-scorecard',
   '/api/admin/agentv3/losses',
@@ -31,7 +36,6 @@ const THE_THIRTEEN = [
   '/api/admin/assistant-spend',
   '/api/admin/provider-status',
   '/api/admin/release-gate',
-  '/api/admin/feature-flags',
   '/api/admin/key-version',
   '/api/admin/events',
   '/api/admin/deployments',
@@ -221,12 +225,9 @@ describe('🔴 A FIELD NAME THE SERVER DOES NOT SEND IS A CARD THAT SHOWS NOTHIN
     }
   });
 
-  it('the feature-flag card reads the fields the flag config really declares', () => {
-    const FLAGS = read('src/server/FeatureFlagManager.ts');
-    for (const field of ['flags', 'rollout', 'overrides']) {
-      expect(FLAGS, `the flag config no longer declares ${field}`).toContain(field);
-      expect(PANEL_CODE, `the panel stopped reading ${field}`).toContain(field);
-    }
+  it('the "Persisted feature flags" card is gone with the controls it described (D1, 2026-10-04)', () => {
+    expect(PANEL_CODE).not.toContain('Persisted feature flags');
+    expect(PANEL_CODE).not.toContain('/api/admin/feature-flags');
   });
 
   it('provider status reads what getProviderStats really returns, circuit state included', () => {

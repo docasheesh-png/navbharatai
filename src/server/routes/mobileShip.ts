@@ -26,6 +26,7 @@ import {
 } from '../../lib/shipWorkflows';
 import {
   missingSigningSecrets, signingVerdict, ANDROID_SIGNING_SECRETS, signingNotReadyMessage,
+  IOS_SIGNING_SECRETS, appleSigningNotReadyMessage, signingSecretsFor,
   signingLookupReason, signingLookupIsDurable, signingLookupNote, isSigningSecretFailure,
 } from '../../lib/signingReadiness';
 import { shouldRefuseUnsignedDispatch, ensureUploadKeystore } from '../lib/androidSigningSetup';
@@ -144,15 +145,18 @@ export function registerMobileShipRoutes(app: Express): void {
   app.get('/api/mobile-ship/signing-status', async (req: Request, res: Response) => {
     const token = githubToken(req);
     if (!token) return res.status(401).json({ error: 'Connect GitHub first — no access token was sent.' });
-    const { owner, repo } = req.query as Record<string, string>;
+    const { owner, repo, platform } = req.query as Record<string, string>;
     if (!isValidRepoRef(owner, repo)) return res.status(400).json({ error: 'A valid GitHub owner and repository name are required.' });
+    // `platform=ios` asks about the Apple keys. Absent means Android, which is what every client built
+    // before 2026-10-04 meant by this question, so their answers do not change.
+    const required = signingSecretsFor(platform === 'ios' ? 'ios' : 'android');
     try {
       const r = await axios.get(
         `https://api.github.com/repos/${owner}/${repo}/actions/secrets?per_page=100`,
         { headers: githubApiHeaders(token) },
       );
       const names = (r.data?.secrets || []).map((s: { name?: unknown }) => String(s?.name ?? ''));
-      return res.json({ verdict: signingVerdict(names), missing: missingSigningSecrets(names) });
+      return res.json({ verdict: signingVerdict(names, required), missing: missingSigningSecrets(names, required) });
     } catch (err) {
       // Includes the ordinary case of a token that may not read secrets — honestly unknown, not missing.
       //
@@ -667,6 +671,28 @@ export function registerMobileShipRoutes(app: Express): void {
         });
       }
     }
+    // THE SAME GUARD FOR AN iPHONE BUILD, against the APPLE list (report SHANKU-AI/instamony run
+    // 36792748246). Until 2026-10-04 an iOS build with none of its four Apple keys was dispatched
+    // anyway and died at the workflow's own pre-flight 20 seconds later — the run the Android guard
+    // exists to save. Same rule: only a real verdict refuses, our failed lookup never does. No key is
+    // offered: Apple issues these only inside the user's own Apple Developer account.
+    if (workflow === SHIP_WORKFLOWS.iosIpa) {
+      let appleNames: string[] | null = null;
+      try {
+        appleNames = await listRepoSecretNames(githubApiHeaders(token), String(owner), String(repo));
+      } catch { /* unknown — never refuse a build on our own failed lookup */ }
+      if (appleNames != null) {
+        const missing = missingSigningSecrets(appleNames, IOS_SIGNING_SECRETS);
+        if (missing.length > 0) {
+          return res.status(409).json({
+            error: appleSigningNotReadyMessage(missing),
+            code: 'SIGNING_NOT_READY',
+            missing,
+            canCreateKey: false,
+          });
+        }
+      }
+    }
 
     try {
       await axios.post(
@@ -839,6 +865,11 @@ export function registerMobileShipRoutes(app: Express): void {
     // AI pass, which spent a round to conclude the obvious and then the client spent a five-minute run
     // on the same certainty. The family is `cureFamily`'s, the ONE list the admin's card also reads.
     if (cureFamily(diag.code) === 'user-credentials') {
+      return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail, failureLine });
+    }
+    // The same for a build machine that cannot build for the store (queue Q-237): no change to the
+    // repository helps, so neither a model nor an attempt is spent. The summary says to build again later.
+    if (cureFamily(diag.code) === 'build-machine') {
       return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail, failureLine });
     }
     // The same failure is back and NOTHING was changed after it last time — so nothing will change

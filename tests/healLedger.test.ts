@@ -135,9 +135,10 @@ describe('wiring — every deterministic heal reports, and the route turns it in
     // notes the heal only when the write LANDED — a refused write used to be recorded, saved and announced.
     // So the ledger call lives once, inside that helper, and the heals are counted at its call sites: the
     // four file heals above plus the package.json dependency sync — and, since autopsy f496c75b
-    // (2026-09-30), the type-only VALUE import heal (an enum imported with `import type`).
+    // (2026-09-30), the type-only VALUE import heal (an enum imported with `import type`) — and, since
+    // autopsy 6cd698cc (2026-10-01), the same heal at the write door, run by the write-time typecheck.
     expect((dispatcher.match(/noteHeal\(this\.workspaceId,/g) || []).length).toBe(1);
-    expect((dispatcher.match(/await this\.landHealWrite\(/g) || []).length).toBe(6);
+    expect((dispatcher.match(/await this\.landHealWrite\(/g) || []).length).toBe(7);
   });
 
   it('every heal hands over the content it READ, not just what it wrote', () => {
@@ -148,7 +149,7 @@ describe('wiring — every deterministic heal reports, and the route turns it in
     expect(note[0].split(',').length).toBeGreaterThanOrEqual(4);
     // …and every call site hands the helper what it READ as its third argument.
     const calls = dispatcher.match(/await this\.landHealWrite\([^)]*\)/g) || [];
-    expect(calls).toHaveLength(6);
+    expect(calls).toHaveLength(7);
     for (const call of calls) expect(call.split(',').length).toBe(3);
   });
 

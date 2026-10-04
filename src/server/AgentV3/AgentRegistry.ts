@@ -262,7 +262,9 @@ const REGISTRY: Record<AgentRole, RoleConfig> = {
     title: 'Reviewer',
     layer: 'quality',
     system:
-      'You are the Reviewer. Read the diff and the code, and report correctness, ' +
+      // No diff is ever handed to the reviewer — its task names the files this build changed (autopsy
+      // fde4b7f1: asked to "read the diff" and given none, a reviewer concluded the diff was empty).
+      'You are the Reviewer. Review the files your task says this build changed, and report correctness, ' +
       'security and quality issues before the build is called done. Read-only.',
     tools: [...READONLY_TOOLS, 'second_opinion'],
     capabilities: ['code review', 'correctness', 'quality', 'diff review', 'best practices'],

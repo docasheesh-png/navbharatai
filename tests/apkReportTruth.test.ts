@@ -169,7 +169,9 @@ describe('the stale sentence is gone from the build panel', () => {
 
   it('a signing failure raises the one-press offer, so the message and the button agree', () => {
     const code = panel();
-    expect(code).toContain('if (signingFailure) setSigningGap(missingSecrets)');
+    // Android only since 2026-10-04: the button makes an ANDROID keystore, so an iPhone build's missing
+    // Apple keys get their own sentence instead (tests/eachPlatformKnowsItsOwnKeys.test.ts).
+    expect(code).toContain('if (signingFailure && !appleKeys) setSigningGap(missingSecrets)');
     expect(code).toContain('Create my signing key');
   });
 });

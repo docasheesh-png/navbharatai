@@ -76,8 +76,11 @@ export interface Episode {
   lane?: RequestLane;
 }
 
-/** The lane that answered a user's request. */
-export type RequestLane = 'chat' | 'build';
+/**
+ * The lane that answered a user's request. `offer`: answered in chat because a build was NOT confirmed,
+ * with an offer to build it (`buildConfirmation.ts`). A "yes" to that offer builds the recorded text.
+ */
+export type RequestLane = 'chat' | 'build' | 'offer';
 
 /**
  * Is this recorded error one a clean, whole-project compile makes stale? The texts are the ones this
@@ -119,6 +122,15 @@ interface FileFacts {
 }
 
 const MAX_EPISODES = 500;
+/**
+ * How much of the user's own request is remembered. 🔴 It was 2,000, the cap for every episode, while the
+ * planner reads up to 4,000 of an earlier request (`PLANNING_EARLIER_REQUEST_MAX`). Autopsy 241215d1: a
+ * 2,420-character request was continued with "Continue from where you left off…", and the continue turn
+ * received its first 2,000 characters — the risk-metric and architecture rules at the end were gone
+ * before any planner, check or builder could read them. Two limits for one thing; this one now matches.
+ * Other episode kinds keep 2,000 (the persisted document is capped, see FirestoreWorkspaceMemoryStore).
+ */
+export const REQUEST_EPISODE_MAX = 4_000;
 const isCode = (f: string): boolean => /\.(t|j)sx?$/.test(f);
 // A React component name is PascalCase: starts uppercase AND has a lowercase
 // letter (so ALL_CAPS constants like PRIMARY are not mistaken for components).
@@ -467,10 +479,10 @@ export class WorkspaceMemory {
   // instead of re-stamping it to now() — otherwise recency ranking in recall() treats every restored
   // episode as brand-new, inflating old errors/lessons and corrupting cross-session confidence.
   private episode(kind: EpisodeKind, text: string, file?: string, ts?: number, resolvedAt?: number, lane?: RequestLane): void {
-    const ep: Episode = { ts: typeof ts === 'number' && ts > 0 ? ts : Date.now(), kind, text: text.slice(0, 2000), file };
+    const ep: Episode = { ts: typeof ts === 'number' && ts > 0 ? ts : Date.now(), kind, text: text.slice(0, kind === 'request' ? REQUEST_EPISODE_MAX : 2000), file };
     // Set only when real: an `undefined` field is a value Firestore refuses to store.
     if (typeof resolvedAt === 'number' && resolvedAt > 0) ep.resolvedAt = resolvedAt;
-    if (lane === 'chat' || lane === 'build') ep.lane = lane;
+    if (lane === 'chat' || lane === 'build' || lane === 'offer') ep.lane = lane;
     this.episodes.push(ep);
     if (this.episodes.length > MAX_EPISODES) this.episodes.splice(0, this.episodes.length - MAX_EPISODES);
   }
@@ -502,6 +514,14 @@ export class WorkspaceMemory {
       .filter((e) => e.kind === 'request')
       .slice(-Math.max(1, limit))
       .map((e) => (e.lane ? { text: e.text, lane: e.lane } : { text: e.text }));
+  }
+  /** The most recent request with its lane and time, or null. For "was the last turn an offer, and when?" */
+  lastRequestTurn(): { text: string; lane?: RequestLane; ts: number } | null {
+    for (let i = this.episodes.length - 1; i >= 0; i--) {
+      const e = this.episodes[i];
+      if (e.kind === 'request') return e.lane ? { text: e.text, lane: e.lane, ts: e.ts } : { text: e.text, ts: e.ts };
+    }
+    return null;
   }
   recordError(text: string, file?: string, ts?: number, resolvedAt?: number): void { this.episode('error', text, file, ts, resolvedAt); }
   recordFix(text: string, file?: string, ts?: number): void { this.episode('fix', text, file, ts); }

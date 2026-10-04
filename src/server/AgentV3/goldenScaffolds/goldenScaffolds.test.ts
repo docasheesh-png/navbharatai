@@ -103,7 +103,9 @@ describe('goldenScaffoldForPrompt — exact chip prompts match, edited prompts b
 
   it('an EDITED prompt gets a normal from-scratch build (null) — never a surprise template', () => {
     expect(goldenScaffoldForPrompt(SIMPLE[0].prompt + ' but with cloud sync')).toBeNull();
-    expect(goldenScaffoldForPrompt('build me a todo app')).toBeNull();
+    // "build me a todo app" alone now gets the to-do template (Q-087, tests/aBareRequestGetsItsTemplate);
+    // one more word of spec still builds from scratch.
+    expect(goldenScaffoldForPrompt('build me a todo app with reminders')).toBeNull();
     expect(goldenScaffoldForPrompt('')).toBeNull();
   });
 

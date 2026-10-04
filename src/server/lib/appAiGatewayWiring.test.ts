@@ -40,6 +40,12 @@ describe('the gateway route', () => {
    */
   const handlerStart = file.indexOf('app.post(GATEWAY_PATH');
   const route = file.slice(handlerStart);
+  /**
+   * Since 2026-10-04 the decision after liveness lives in ONE shared answer path (lib/appAiAnswer.ts),
+   * used by the published route and the owner's preview alike. Its body is pinned here with the route.
+   */
+  const answerFile = codeOf(read('src/server/lib/appAiAnswer.ts'));
+  const answer = answerFile.slice(answerFile.indexOf('export async function answerForApp'));
 
   it('is one handler, anchored where this suite thinks it is', () => {
     expect(handlerStart).toBeGreaterThan(0);
@@ -53,13 +59,18 @@ describe('the gateway route', () => {
     const token = route.indexOf('verifyAppAiToken');
     const registry = route.indexOf('appAiRegistryStore.get');
     const live = route.indexOf('isLiveDeployment');
-    const caps = route.indexOf('gatewayDecision');
-    const model = route.indexOf('callProfessionalAIWithUsage');
-    for (const i of [flag, token, registry, live, caps, model]) expect(i).toBeGreaterThan(-1);
+    const handoff = route.indexOf('answerForApp(');
+    for (const i of [flag, token, registry, live, handoff]) expect(i).toBeGreaterThan(-1);
     expect(flag).toBeLessThan(token);
     expect(token).toBeLessThan(registry);
     expect(registry).toBeLessThan(live);
-    expect(live).toBeLessThan(caps);
+    expect(live).toBeLessThan(handoff);
+    // …and inside the shared answer path: the owner's switch and the caps before any NavBharatAI model.
+    const off = answer.indexOf('getAppAiSettings(');
+    const caps = answer.indexOf('gatewayDecision(');
+    const model = answer.indexOf('callProfessionalAIWithUsage');
+    for (const i of [off, caps, model]) expect(i).toBeGreaterThan(-1);
+    expect(off).toBeLessThan(caps);
     expect(caps).toBeLessThan(model);
   });
 
@@ -67,31 +78,36 @@ describe('the gateway route', () => {
     // A route that read the app id from the body and used the token as a yes/no would let any app's
     // token spend any other app's budget — the exact hole the scoping exists to close.
     expect(route).toContain('appAiRegistryStore.get(verdict.appId)');
-    expect(route).toContain('appAiUsageStore.spentToday(verdict.appId');
+    expect(route).toMatch(/counter: \{ appId: verdict\.appId,/);
+    expect(answer).toContain('appAiUsageStore.spentToday(ask.counter.appId');
     expect(route).not.toMatch(/appId\s*[:=]\s*(req\.body|body)/);
   });
 
   it('🔒 the visitor gets their answer BEFORE any money moves', () => {
     // A money-path failure must never cost a visitor their reply, and charging first would risk
     // billing a turn that then failed.
+    // The answer path returns the money as a `settle` callback; the route runs it after sending.
     const answered = route.indexOf('ok: true, text:');
     expect(answered).toBeGreaterThan(-1);
-    expect(route.indexOf('chargeForAiTurns')).toBeGreaterThan(answered);
-    expect(route.indexOf('appAiUsageStore.record')).toBeGreaterThan(answered);
+    expect(route.indexOf('answer.settle()')).toBeGreaterThan(answered);
+    const settleAt = answer.indexOf('const settle = () =>');
+    expect(settleAt).toBeGreaterThan(-1);
+    expect(answer.indexOf('chargeForAiTurns')).toBeGreaterThan(settleAt);
+    expect(answer.lastIndexOf('appAiUsageStore.record')).toBeGreaterThan(settleAt);
   });
 
   it('🔒 the CAP counter moves on what the turn COST, not on what was debited', () => {
     // They differ whenever the wallet is switched off or the owner is free-listed — and the cap has
     // to keep biting in exactly those cases, or a flag about who pays would silently remove the only
     // ceiling a public endpoint has.
-    expect(route).toMatch(/appAiUsageStore\.record\([^)]*cost\.billedInr/s);
+    expect(answer).toMatch(/appAiUsageStore\.record\([^)]*cost\.billedInr/s);
   });
 
   it('🔒 a Professional Pass does not make an app’s public traffic free', () => {
     // The Pass pays for the HOLDER's own assistant use. Treating it as a licence for an unlimited
     // number of strangers would quietly resize a product that was already sold.
-    expect(route).not.toContain('hasActivePass:');
-    expect(route).not.toContain('isFreeListed:');
+    expect(route + answer).not.toContain('hasActivePass:');
+    expect(route + answer).not.toContain('isFreeListed:');
   });
 
   it('🔒 a refusal never tells a visitor whose balance ran out', () => {

@@ -15,6 +15,7 @@
 // INJECTED, so the parsing/classification/prompt logic is fully unit-testable without a sandbox.
 
 import { ensureReactValueImport } from './EndgameRepair';
+import { NO_FAKE_FEATURE_RULE, NO_FAKED_RESULT_RULE, NO_FAKE_RESULTS_RULE } from './noEvalRule';
 import type { StartTier } from './RequestAnalyser';
 // ONE timeout helper for the whole build pipeline. This module used to carry its own private copy,
 // and that duplication is the direct reason the July zombie-write fix landed in `SimpleBuilder` and
@@ -218,6 +219,10 @@ export function oneShotSystemPrompt(framework: string): string {
     '- Edit/replace the scaffolded entry files (e.g. src/App.tsx or index.html) — do not nest a subfolder.',
     '- Keep the dev server config intact (host:true / 0.0.0.0) so the preview works.',
     '- Only include files you actually need; do not touch node_modules or lockfiles.',
+    // The honesty rules every other lane carries (this lane had none until 2026-10-04).
+    NO_FAKE_FEATURE_RULE,
+    NO_FAKED_RESULT_RULE,
+    NO_FAKE_RESULTS_RULE,
   ].join('\n');
 }
 

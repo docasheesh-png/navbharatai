@@ -346,6 +346,14 @@ export default App;
 export const loginPageAppTsx = `import { useState } from 'react';
 import ThemeToggle from './theme';
 
+// REAL SIGN-IN, NOT A DEMO (NavBharatAI's no-fake-button rule, 2026-10-04). With the two keys below saved
+// (NavBharatAI → ⋮ More → Keys & Secrets), every button talks to Supabase Auth: email + password log in and
+// sign up, and Google / GitHub / Apple go through the provider's own page. Without them nothing pretends:
+// the form says in red that sign-in is not connected yet, and no one is ever shown as signed in.
+const SUPABASE_URL = ((import.meta.env.VITE_SUPABASE_URL as string | undefined) || '').replace(/\\/+$/, '');
+const SUPABASE_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || '';
+const CONNECTED = SUPABASE_URL !== '' && SUPABASE_KEY !== '';
+
 const REMEMBER_KEY = 'login-remembered-email';
 
 // Storage can be switched off (a private window, a sandboxed frame), and then every read throws — in the
@@ -366,6 +374,30 @@ function validEmail(v: string): boolean {
   return at > 0 && dot > at + 1 && dot < v.length - 1 && !v.includes(' ');
 }
 
+interface AuthAnswer { email?: string; confirm?: boolean; error?: string }
+
+/** One call to Supabase Auth. Its own error words are shown; a network failure says so plainly. */
+async function authCall(path: string, body: Record<string, string>): Promise<AuthAnswer> {
+  try {
+    const res = await fetch(SUPABASE_URL + '/auth/v1/' + path, {
+      method: 'POST',
+      headers: { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({} as Record<string, unknown>));
+    if (!res.ok) {
+      const msg = String(data.error_description || data.msg || data.message || 'Sign-in failed (' + res.status + ').');
+      return { error: msg };
+    }
+    const user = (data.user || data) as { email?: string };
+    // A sign-up on a project that confirms emails returns a user and no session yet.
+    if (path === 'signup' && !data.access_token) return { confirm: true, email: user.email };
+    return { email: user.email || body.email };
+  } catch {
+    return { error: 'Could not reach the sign-in service. Check your connection and try again.' };
+  }
+}
+
 function App() {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState(readRemembered);
@@ -376,21 +408,35 @@ function App() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [user, setUser] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
 
-  const submit = () => {
+  const submit = async () => {
     const e: Record<string, string> = {};
     if (!validEmail(email)) e.email = 'Enter a valid email address.';
     if (password.length < 8) e.password = 'Password must be at least 8 characters.';
     if (mode === 'signup' && confirm !== password) e.confirm = 'Passwords do not match.';
     setErrors(e);
     if (Object.keys(e).length > 0) return;
-    writeRemembered(remember ? email : null);
-    setUser(email);
+    if (!CONNECTED) {
+      setNotice('Sign-in is not connected yet, so no account was checked. Add the keys shown above to make it real.');
+      return;
+    }
+    setBusy(true);
     setNotice('');
+    const answer = await authCall(mode === 'login' ? 'token?grant_type=password' : 'signup', { email, password });
+    setBusy(false);
+    if (answer.error) { setErrors({ form: answer.error }); return; }
+    writeRemembered(remember ? email : null);
+    if (answer.confirm) { setNotice('Account created. Open the link we emailed to ' + email + ', then log in.'); setMode('login'); return; }
+    setUser(answer.email || email);
   };
 
-  const social = (provider: string) => {
-    setNotice(provider + ' sign-in is a UI demo here - connect your auth provider to enable it.');
+  const social = (provider: 'google' | 'github' | 'apple') => {
+    if (!CONNECTED) {
+      setNotice('Sign-in is not connected yet. Add the keys shown above, then switch this provider on in Supabase → Authentication → Providers.');
+      return;
+    }
+    window.location.href = SUPABASE_URL + '/auth/v1/authorize?provider=' + provider + '&redirect_to=' + encodeURIComponent(window.location.origin);
   };
 
   if (user) {
@@ -412,6 +458,11 @@ function App() {
         <h1 style={{ margin: 0 }}>{mode === 'login' ? 'Welcome back' : 'Create account'}</h1>
         <ThemeToggle />
       </div>
+      {!CONNECTED && (
+        <div role="alert" className="alert" style={{ marginBottom: 16, background: '#b91c1c', color: '#ffffff', fontWeight: 600 }}>
+          Sign-in is not connected yet — this form cannot log anyone in. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in NavBharatAI → ⋮ More → Keys &amp; Secrets to make it real.
+        </div>
+      )}
       <div className="card stack">
         <div className="row">
           <button className={mode === 'login' ? 'primary' : ''} aria-pressed={mode === 'login'} onClick={() => { setMode('login'); setErrors({}); }} style={{ flex: 1 }}>Log in</button>
@@ -471,8 +522,9 @@ function App() {
         <label className="row" style={{ cursor: 'pointer' }}>
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Remember me on this device
         </label>
-        <button type="submit" className="primary" onClick={submit} style={{ padding: '12px 0', fontSize: 16 }}>
-          {mode === 'login' ? 'Log in' : 'Create account'}
+        {errors.form && <small role="alert" style={{ color: 'var(--danger)' }}>{errors.form}</small>}
+        <button type="submit" className="primary" onClick={submit} disabled={busy} style={{ padding: '12px 0', fontSize: 16 }}>
+          {busy ? 'Please wait…' : mode === 'login' ? 'Log in' : 'Create account'}
         </button>
         <div className="row" style={{ gap: 8 }}>
           <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
@@ -480,8 +532,9 @@ function App() {
           <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
         </div>
         <div className="row">
-          <button onClick={() => social('Google')} style={{ flex: 1 }}>Google</button>
-          <button onClick={() => social('GitHub')} style={{ flex: 1 }}>GitHub</button>
+          <button onClick={() => social('google')} style={{ flex: 1 }}>Google</button>
+          <button onClick={() => social('github')} style={{ flex: 1 }}>GitHub</button>
+          <button onClick={() => social('apple')} style={{ flex: 1 }}>Apple</button>
         </div>
         {notice && <div className="alert alert-warning" style={{ fontSize: 13 }}>{notice}</div>}
       </div>

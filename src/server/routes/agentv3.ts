@@ -39,7 +39,7 @@ import { deriveInvariants, renderInvariants, checkInvariants, invariantSummary }
 import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange, fleetEtaLine, finalChecksEtaLine } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
-import { decideComplexity, scaffoldedComplexityDecision } from '../AgentV3/complexityRouting';
+import { decideComplexity, scaffoldedComplexityDecision, workspaceSizedComplexity } from '../AgentV3/complexityRouting';
 import { planningRequest, planningContextNote, wasBuildRequest } from '../AgentV3/planningRequest';
 import { unrelatedToExistingApp, unrelatedRequestSteer, unrelatedRequestFallback } from '../AgentV3/unrelatedRequest';
 import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite, writeQualitySummary } from '../AgentV3/writeTimeTypecheck';
@@ -192,7 +192,7 @@ import { withoutPlatformCheckTools } from '../AgentV3/repairScope';
 import { explorerRepairBudget } from '../lib/explorerRepairBudget';
 import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS } from '../AgentV3/liveBuildCost';
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
-import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
+import { auditSummaryClaims, claimCorrection, claimAuditSummary, admittedInertControls } from '../AgentV3/claimAudit';
 import { judgeRenderStyle, renderStyleNote, unstyledRenderUserNote, type RenderStyleVerdict, type RenderStyleEvidence } from '../AgentV3/renderStyle';
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths, greenRepairPrompt, readRepairVerdicts, type RepairVerdicts } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
@@ -13233,12 +13233,15 @@ async function noteBuildOutcome(
           && req.body?.confirmedFeatures == null && userAskedForAnAppToBeBuilt(prompt) && !userAskedForSmallScope(prompt)
           ? learnDomain(prompt)
           : null;
-      const complexityDecision = scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(
+      const promptComplexityDecision = scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(
         { prompt: planning.sizing, score: analysis?.complexityScore ?? 0 },
         (p) => AIRouterManager.getRouter('free')
           .route(p, 'You are a classifier. Reply with one word only.')
           .then((r) => r.response.content),
       );
+      // A build order over a big existing project is sized by that project, not by its five words
+      // (autopsy 51ef24ad). See workspaceSizedComplexity.
+      const complexityDecision = workspaceSizedComplexity(promptComplexityDecision, buildOrderReadAsEdit);
       const buildIsComplex = complexityDecision.verdict === 'complex';
       console.log(`[AGENTV3] complexity: ${complexityDecision.reason} → ${complexityDecision.verdict} (${complexityDecision.source})`);
       // LARGE-PROJECT ROUTING (admin 2026-07-05: "badi apps direct Sonnet"): list the existing
@@ -22771,6 +22774,20 @@ async function noteBuildOutcome(
           });
         }
       } catch { /* the audit reports on the summary; it must never break the build */ }
+
+      // A CONTROL THE MODEL ADMITS DOES NOTHING (autopsy 51ef24ad: "Cloud Sync … is a UI-only toggle for
+      // now"). Recorded as an APP finding, so the user's health card and the release gate see a dead
+      // control instead of a green build that quietly carries one.
+      try {
+        const inert = expectsArtifacts && !isImportTurn ? admittedInertControls(result.summary) : [];
+        if (inert.length > 0) {
+          buildDiag.record({
+            phase: 'readiness', severity: 'warning', code: 'UI_ONLY_CONTROL',
+            message: `The build says ${inert.length} control(s) do nothing yet: ${inert.map((s) => `"${s.slice(0, 160)}"`).join(' · ')}`,
+            autoResolved: false,
+          });
+        }
+      } catch { /* a finding about the summary must never break the build */ }
 
       // THE USER IS TOLD, IN THE REPLY, WHEN THEIR APP RENDERED AS RAW HTML (renderStyle.ts, admin
       // 2026-09-28: "user ko aise farzi app na mile"). Strong verdict only — not one CSS rule reached the

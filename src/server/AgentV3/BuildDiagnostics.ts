@@ -99,7 +99,7 @@ const PROCESS_ONLY_CODES = new Set([
   'LABELS_REPAIRED',
   // Our own deterministic design-kit restore (kitRestore.ts, autopsy e725e002) and the note that the
   // sizers read the whole request (planningRequest.ts) — engine housekeeping, never app findings.
-  'DESIGN_KIT_RESTORED', 'PLANNING_CONTEXT', 'DESIGN_KIT_KEPT', 'SHADOW_TWIN_REMOVED', 'USER_FILE_KEPT', 'FILES_REMOVED_TOLD', 'DURABLE_READ_FAILED',
+  'DESIGN_KIT_RESTORED', 'PLANNING_CONTEXT', 'DESIGN_KIT_KEPT', 'SHADOW_TWIN_REMOVED', 'DEAD_SALVAGE_REMOVED', 'DEAD_SALVAGE_KEPT', 'USER_FILE_KEPT', 'FILES_REMOVED_TOLD', 'DURABLE_READ_FAILED',
   // Our own deterministic 4px-grid snap (spacingSnap.ts, autopsy 536c8189) — housekeeping, and the thing
   // it replaced was a model hand-back that cost three calls and made the stylesheet worse.
   'SPACING_SNAPPED',

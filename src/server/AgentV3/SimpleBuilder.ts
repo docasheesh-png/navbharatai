@@ -1017,6 +1017,30 @@ export function topLevelStatements(text: string): string[] {
  * contract that uses the `React.` namespace without importing it gets a type-only import added, since
  * `@types/react`'s UMD global is not reachable from a module. Pure.
  */
+/**
+ * One import line of the contract, as the types module may carry it. PURE.
+ *
+ * 🔴 AUTOPSY f496c75b: the contract imported a helper from `./MathUtils` while `MathUtils.ts` imported its
+ * types from the contract — a circular VALUE import between two app files, the kind that is undefined on
+ * import at run time. The types module is meant to be a leaf: everything it shares it declares itself,
+ * and helpers live in their own owner (`utilOwnerFor`). So an import from another APP file is made
+ * type-only (erased, so no cycle exists when the app runs; `typeof helper` still type-checks), and a
+ * bare side-effect import of an app file is dropped. A package import (`react`) is kept as written.
+ */
+export function contractImport(statement: string): string | null {
+  const st = statement.trim().replace(/;?\s*$/, ';');
+  const spec = /\bfrom\s*['"]([^'"]+)['"]|^import\s*['"]([^'"]+)['"]/.exec(st);
+  const target = spec ? (spec[1] ?? spec[2]) : '';
+  if (!target.startsWith('.')) return st;
+  if (/^import\s*['"]/.test(st)) return null; // a side-effect import of an app file
+  if (/^import\s+type\b/.test(st)) return st;
+  const bare = st.replace(/\{\s*type\s+/g, '{ ').replace(/,\s*type\s+/g, ', ');
+  // `import type Foo, { a }` is not allowed — a type-only import names a default OR bindings — so split it.
+  const both = /^import\s+([A-Za-z_$][\w$]*)\s*,\s*(\{[^}]*\}|\*\s+as\s+[A-Za-z_$][\w$]*)\s+from\s+(['"][^'"]+['"]);$/.exec(bare);
+  if (both) return `import type ${both[1]} from ${both[3]};\nimport type ${both[2]} from ${both[3]};`;
+  return bare.replace(/^import\s+/, 'import type ');
+}
+
 export function contractModule(contract: string | undefined): ContractModule | null {
   let text = String(contract ?? '').replace(/\r\n?/g, '\n');
   text = text.replace(/^[ \t]*```[a-zA-Z]*[ \t]*$/gm, ''); // fences the prompt asked it not to add
@@ -1025,7 +1049,11 @@ export function contractModule(contract: string | undefined): ContractModule | n
   const symbols: string[] = [];
   const seen = new Set<string>();
   for (const st of topLevelStatements(text)) {
-    if (/^import\b/.test(st)) { imports.push(st.endsWith(';') ? st : `${st};`); continue; }
+    if (/^import\b/.test(st)) {
+      const line = contractImport(st);
+      if (line) imports.push(line);
+      continue;
+    }
     // 🔴 AUTOPSY 120eb52f (2026-09-30). The contract declared an enum the modern way —
     // `export const EventStatus = { UPCOMING: 'UPCOMING', … } as const;` beside
     // `export type EventStatus = (typeof EventStatus)[keyof typeof EventStatus];` — and only the TYPE

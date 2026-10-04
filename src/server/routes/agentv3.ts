@@ -214,7 +214,8 @@ import { SINGLE_HTML_FILE_RULE } from '../AgentV3/systemPrompt';
 import { inlineLinkedStylesheet } from '../AgentV3/singleFileKit';
 import { wantsSingleHtmlFile } from '../../lib/frameworkDetect';
 import { StaticProvider } from '../AgentV3/sandbox/AppMakerLab/generator/templates/StaticProvider';
-import { pruneUnusedDepsEnabled, pruneCandidates, pruneBuildAddedDeps, prunedNarration, depsAddedByBuild, unusedDependencyLine } from '../AgentV3/unusedDepPrune';
+import { pruneUnusedDepsEnabled, pruneCandidates, pruneBuildAddedDeps, prunedNarration, depsAddedByBuild, unusedDependencyLine, hasBuildScript } from '../AgentV3/unusedDepPrune';
+import { pruneDeadSalvageEnabled, deadSalvagedFiles, removeDeadSalvage } from '../AgentV3/deadSalvage';
 import { pastedFormatDecision, pastedHtmlDocument, pastedStorageKeys, pastedOneFileRule, STATIC_SCAFFOLD_EXTRAS, PASTED_ONE_FILE_CODE } from '../AgentV3/pastedAppFormat';
 import { aiInAppRule } from '../AgentV3/systemPrompt';
 import { weakBuildDisciplineBlock } from '../AgentV3/weakBuildDiscipline';
@@ -15363,6 +15364,8 @@ async function noteBuildOutcome(
       // Every file this build removed, in order — the user is told about the ones their app had
       // (deletedFilesNotice.ts, queue Q-019). The admin line below stays as it was.
       const deletedThisBuild: string[] = [];
+      // Files the fast lane salvaged into the workspace for the full builder (deadSalvage.ts).
+      const salvagedThisBuild: string[] = [];
       // What a shell command removes is checked against these (queue Q-246, shellWriteTargets.ts).
       dispatcher.setRecordedPaths(() => [...writtenFiles.keys()]);
       dispatcher.setFileDeletionSink((paths) => {
@@ -17826,6 +17829,7 @@ async function noteBuildOutcome(
         // → 4 broken imports → a dead app. The note travels in buildPrompt so EVERY fallback runner
         // (start-tier, escalation, default) sees it.
         if (!sb.ok && !sb.stopped && sb.salvagedPaths?.length) {
+          salvagedThisBuild.push(...sb.salvagedPaths);
           buildDiag.record({ phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_SALVAGE', message: `Fast lane salvaged ${sb.salvagedPaths.length} finished file(s) into the workspace for the full builder to continue from.`, autoResolved: true, detail: sb.salvagedPaths.join(', ') });
           // Why the lane stopped decides the first sentence: out of time, or finished but not compiling —
           // and in the second case the compiler's own words come with it, so the builder starts from the
@@ -19244,6 +19248,31 @@ async function noteBuildOutcome(
               });
             }
           } catch { /* removing an unused package is housekeeping — it must never affect a build */ }
+        }
+        // 🗑️ A FILE THE FAST LANE SALVAGED AND THE APP NEVER USED IS TAKEN OUT AGAIN (autopsy f496c75b,
+        // deadSalvage.ts): only salvaged files, only ones no other file refers to, and only if the app's own
+        // production build passes without them — otherwise every file is written back. Same turn guards as above.
+        if (pruneDeadSalvageEnabled() && salvagedThisBuild.length > 0 && result.ok && expectsArtifacts && !isImportTurn && !projectModuleRef && !megaRoadmapActive && !abort.signal.aborted && !isGreenLatched(workspaceId)) {
+          try {
+            const dead = deadSalvagedFiles(salvagedThisBuild, integrityFiles);
+            if (dead.length > 0) {
+              const outcome = await removeDeadSalvage(dead, integrityFiles, hasBuildScript(integrityFiles['package.json'] ?? null), {
+                run: (cmd) => actuator.runCommand(workspaceId, cmd),
+                write: (path, content) => actuator.writeFile(workspaceId, path, content),
+              });
+              if (outcome.status === 'removed') {
+                for (const p of outcome.removed) { writtenFiles.delete(p); delete integrityFiles[p]; }
+                deletedThisBuild.push(...outcome.removed);
+              }
+              buildDiag.record({
+                phase: 'build', severity: 'info', autoResolved: true,
+                code: outcome.status === 'removed' ? 'DEAD_SALVAGE_REMOVED' : 'DEAD_SALVAGE_KEPT',
+                message: outcome.status === 'removed'
+                  ? `Removed ${outcome.removed.length} file(s) the fast lane wrote that the finished app never uses: ${outcome.removed.join(', ')}. The production build passed without them.`
+                  : `Kept ${dead.length} salvaged file(s) nothing refers to (${dead.join(', ')}): ${outcome.reason}.`,
+              });
+            }
+          } catch { /* removing an unused file is housekeeping — it must never affect a build */ }
         }
         // 🔴 A STOPPED BUILD'S FRESH PACKAGES ARE NOT "UNUSED" — THEIR CODE WAS NEVER WRITTEN (autopsy 1219c639).
         // The build installed express, cors, dotenv, openai, tsx and concurrently as its last step, the user

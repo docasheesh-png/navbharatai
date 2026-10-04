@@ -87604,6 +87604,33 @@ is what was adopted. The rows leave `BUILD_REPORT_QUEUE.md`; this entry is their
   - **The real lever then:** a ladder change (another lead rung on Weak/Normal). That is the admin's routing
     decision, not a code fix.
 
+## 2026-10-04 — Change Intelligence Engine, slice 1 (admin request: spec-driven editing)
+
+- **Studied first:** GitHub Spec Kit (`ae5ade7`) — templates, converge, bug triad, analyze — and three audits of
+  our own edit pipeline and per-app storage. Design and phased plan: `docs/CHANGE_ENGINE.md`.
+- **Root cause addressed:** every "what was asked?" check reads only the current prompt, so an edit that removed a
+  working feature was never caught. Now each app has a server-side requirement ledger (`REQ-nnn`, verified only by a
+  real control in the running app), a regression re-probe on every edit (`FEATURE_REGRESSED`), an issue queue moved
+  only by evidence (`ISS-nnn`, DETECTED → TRIAGED → ASSIGNED → FIXED → VERIFIED), and a `CHG-nnnn` record per build.
+- **Flag:** `AGENTV3_CHANGE_ENGINE` (default ON, `off` reverts). Tests: `tests/changeEngine.test.ts` (the ten admin
+  scenarios), two guards reversion-proven.
+- **OPEN (by design, slice 2):** a regression is reported and queued, not repaired in the same build. Wiring it into
+  the feature heal waits on real reports showing the regression probe has no false positives.
+- **OPEN:** only the nine probe-able features can be verified; other requirements join in slice 3.
+
+## 2026-10-04 — Change Intelligence Engine, slices 2–7 (admin: "sara kaam karo, bas improvement chahiye")
+
+- **2:** a regressed feature joins the existing feature heal (same runner, `verifyAfterFix`, cohort gate); prompt says
+  restore, not redesign. `FEATURE_REGRESSION_HEALED`.
+- **3:** contract labels become non-probe-able requirements, `built` only after a GREEN gate.
+- **4:** impact set from the import graph for standard/deep edits (fenced).
+- **5:** deliberate removals are declined everywhere. **Root cause closed:** "remove" is the delete probe's own keyword,
+  so "remove the delete button" was graded as a missing Delete control and could be healed back.
+- **6:** high/medium security findings become owned issues; cleared only when their file was analysed.
+- **7 (user-visible):** History tab → "What your app does" card + `GET /api/agentv3/app-memory` (strict owner,
+  white-labelled) + AppKnowledgeBase `app-requirements-memory`.
+- **OPEN:** the regression probe's real false-positive rate (watch `FEATURE_REGRESSED`); `techDebt` and
+  `workspace_traceability` are not retired (other readers exist).
 ## 2026-10-01 — Autopsy a4be7fa2 + 3f959fde (Kerala-lottery data question, Telugu)
 
 Two builds in one workspace. Build 1 (stopped at 93 s, ₹0): "First data table lo draws check chesi e algorithm
@@ -87886,6 +87913,123 @@ change before it saw #3491. That copy was discarded unpushed, because it edited 
 | Q-345: READY_BEFORE_END said "The app was never judged finished during the build" about a calculator the end-of-turn gate had judged ready (9 steps, 3.7 min) | Only the mid-build done check wrote `readyMark`, and on a short build it never came due | A measurement written by one of two places that make the same judgement | The end-of-turn gate is the only other `assessBuildReadiness` judgement in the runner. It now records the mark through `endOfTurnReadyMark` under the mid-build check's own rules (not on an edit, not before a write, not over a failed compile, never over an earlier mark) | `tests/theEndOfTurnGateJudgedItFinished.test.ts` (three reversions each failed) |
 
 Watch: READY_BEFORE_END on a short build reads "judged finished at step N".
+---
+
+## 2026-10-04 — A PROBLEM WE SHOW THE USER IS EITHER OURS TO OWN OR THEIRS TO PRESS (census; PR #3490)
+
+Self-chosen work under the admin's standing "haan" for anything that genuinely puts NavBharatAI ahead of
+the other AI app builders (2026-10-04). The queue held no actionable unowned row at the time (every open
+row was 🟡 BLOCKED), so the sixth rule's point 4 was satisfied before starting.
+
+### What was wrong, measured rather than suspected
+
+Two hand-maintained lists decide what a build finding MEANS to the person who pressed the button:
+`PROCESS_ONLY_CODES` (`BuildDiagnostics.ts`) says "this is our own run, never a mark against the app", and
+`FINDING_SUGGESTIONS` (`buildFindingSuggestions.ts`) says "this is the app's defect, and here is the
+one-tap fix". Every autopsy added a name to one of them — always AFTER the defect had reached a user.
+
+Counting the codes showed how far that had drifted: **56 codes recorded at warning or error severity were
+in neither list** (82 before this change, measured against the pre-change registries). For each, `isAppFinding` answered YES, so it landed in the
+user's build-health card as a problem with THEIR app, took 6 points off their app's health score
+(`buildHealthCard.ts`), and had no button. Both directions were real:
+
+- **Ours, charged to them.** `COST_CEILING_REACHED` ("Build stopped at its cost ceiling") is called
+  admin-only in CLAUDE.md. `HEAL_NOT_DURABLE`'s own comment at its recording site reads *"ADMIN-ONLY: the
+  user never sees our repair passes"*. Both were user-facing anyway, beside our loop breaker
+  (`FUTILITY_BREAKER`), our typecheck that could not execute (`VERIFY_DID_NOT_RUN`), our green guard that
+  could not look (`GREEN_GUARD_UNVERIFIED`), our summary's own wording (`SUMMARY_OFF_TOPIC`), our setup
+  time (`TIME_TO_FIRST_CALL`) and a database we OFFERED to create for them (`DATABASE_OFFER_AT_START`).
+- **Theirs, with nothing to press.** `DATABASE_RLS` — tables with no row-level security, which for a
+  published app means anyone who opens it can read and write every row, since the anon key ships inside
+  the page by construction — was recorded at **ERROR** severity with no offer at all. Beside it: an app
+  that never came up, an app that opened blank, a page that worked before the change and not after, a
+  chat whose replies are hardcoded text, a crash on odd input, undefined style classes, scattered colours
+  and fonts, a frontend with no build, and an imported project that would not boot.
+
+### What changed
+
+- **8 engine codes → `PROCESS_ONLY_CODES`.** All WARNING severity, so `shippingIssueCount('error')` — the
+  one count that can flip a build to free — cannot change: **this moves no money.** What changes is the
+  gate's CAVEAT count, which is exactly what `shippingIssueCount`'s own docblock asks for ("letting them
+  demote a green build to yellow would make the gate's most important state unreachable in practice").
+- **13 app defects → a one-tap fix**, each written for the person who pressed the button, no vendor, no
+  tool, no file path. `DATABASE_RLS` is ranked above everything about the app's looks because it is a data
+  leak; the two "your app never ran" offers are ranked first of all.
+- **`APP_FINDINGS_WITHOUT_AN_OFFER`** — the third home, for the five ERROR-severity findings that are real
+  app findings and deliberately get no button, with the reason each.
+- **The class lock: `tests/aProblemTheUserIsShownCanBeActedOn.test.ts`.** It reads the REAL registries out
+  of the REAL modules (never a copy — a copy is the drift), brace-balances the server source to find every
+  recorded finding, and fails when a problem-severity code has no home. It is a **ratchet** on this repo's
+  own `themeColourBaseline.json` pattern: the 56 still unclassified are a baseline that may only SHRINK,
+  so a NEW code fails CI and a code since classified fails until the fixture is regenerated smaller
+  (`UPDATE_FINDING_BASELINE=1`). The scanner lives in the test and nowhere else, so the regeneration path
+  IS the asserted code.
+
+### Three reversion proofs (each run, each failed as intended, each restored)
+
+1. Dropped `TOOL_ERROR` from the baseline → the ratchet reported it as a NEW unclassified code.
+2. Added a code nobody records to the baseline → the shrink-only test demanded regeneration.
+3. Removed `COST_CEILING_REACHED` from `PROCESS_ONLY_CODES` → the census reported it, and the named
+   engine-codes test failed.
+
+### Two things found while writing it, both recorded rather than smoothed over
+
+- **The obvious invariant "a process finding must never be offered" is WRONG**, and the test found the
+  reason: `PASTED_APP_KEPT_ONE_FILE` is in both on purpose — keeping a pasted one-file app as one file is
+  not the app's defect, AND "upgrade to a full app project" is a real next move. **An offer is not always
+  a FIX; it can be an opportunity.** `PROCESS_ONLY ∩ OFFERED` is therefore allowed, deliberately, and the
+  two genuine contradictions are asserted instead.
+- **A hand count is not a census, and the derived number was wrong too.** By eye the backlog looked like 26; the brace-balanced
+  scan measured 82, because it also sees findings written over six lines and the ones whose severity is an
+  expression (`DATABASE_RLS` is one of those, and it is the most serious item in the whole list). A later
+  derivation of "77 before the change" was wrong as well, from forgetting that the five DECLARED codes also
+  count as classified; 82 − 26 = 56 was then measured against the pre-change registries rather than reasoned.
+
+### OPEN root causes (rule 6)
+
+- **Q-380** — four ERROR-severity codes (`BUILD_ERROR`, `BUILD_EXCEPTION`, `OUTCOME_EMPTY_BUILD`,
+  `OUTCOME_TYPECHECK_FAILED`) still count as the app's blocker even when our own engine is what failed.
+  Moving them is a BILLING decision (it could make a build that is free today a billed one), so it is the
+  admin's, and the recommendation is to leave them — the safe direction is the one where we absorb it.
+- **Q-381** — the 56-code backlog. Ratcheted so it cannot grow; several need a judgement call about what a
+  user should be told (`TOOL_ERROR`, `STUCK_TOOL`, the `OUTCOME_*` roll-ups, `FEATURE_COVERAGE`,
+  `SIMULATED_DATA_SHIPPED`), and the next autopsy that touches one should classify it.
+
+### Queue rows closed in this change (the admin's explicit yes, 2026-10-04)
+
+Q-068, Q-090 and Q-293 — the "items argued NOT defects" bundles and the withdrawn mid-build live-preview
+proposal — were approved and removed from the open table. Q-290/291/292 left it because merged #3474
+resolved them. Q-024, Q-052, Q-086 and Q-088 had already been removed by other sessions.
+## 2026-10-04 — Autopsy dcce5d26: "convert one existing website into an online APK"
+
+Weak, fresh workspace, user stopped at 20 s, ₹0. Ledger (✅ 0 self-heal · 🔀 0 workaround · ⏭️ 0 skip · ❌ 1 wrong
+route · 🥵 0 struggle, plus 3 defects found while working it):
+
+| ID | Problem | Root cause → class | Siblings | Lock |
+|---|---|---|---|---|
+| Q-330 | A website-to-APK request was built | `projectElsewhere` knew two ways of saying "elsewhere" (host, no-rebuild); a conversion of the user's own site into a phone app is a third, and "one existing" missed the determiner list | the reply gained the live-link limit + private .apk line; `apk_builder` KB entry says the same | §1–§2, reverted-and-failed |
+| Q-331 | Per-call `model: "glm"`, top-level `model: "glm"` | the f152c1ab `answeringModel` fix never reached the fast lane's own helper `fastLaneCallIdentity` | top-level model is derived from the same record (one fix) | §3, reverted-and-failed |
+| Q-332 | The lane's post-call reasoning-rung check was dead | it asked `modelAlwaysReasons` of a family label | woken by Q-331 | §3 |
+| Q-333 | The fast-lane plan rewrote the starter's tsconfig ×3, package.json, vite.config blind | per-file and one-shot calls never saw the working file → the cause behind `ViteConfigGuard` / HTML entry heals, and a silent loss of the strict-trial tsconfig | one-shot lane fixed in the same change (`existingConfig.ts`) | §4, reverted-and-failed |
+| Q-334 | Six items argued not defects | — | — | 🟡 BLOCKED on the admin's yes |
+
+## 2026-10-04 — Autopsy 70e030bb: "An app which takes notes from online classes"
+
+Weak, fresh workspace, app rendered, RELEASE_GATE RED on a false journey. Ledger (✅ 1 self-heal · 🔀 0 workaround ·
+⏭️ 1 skip · ❌ 3 shipped wrong · 🥵 1 struggle, plus 1 sibling found while working it):
+
+| ID | Problem | Root cause → class | Siblings | Lock |
+|---|---|---|---|---|
+| Q-335 | 🥵 Fast-lane verify TS6305 on every file; the full builder's first minutes undid it | the plan rewrote the starter's compiler files (tsconfig ×3, vite-env.d.ts) blind → a plan rewrites a starter file with no app content | one-shot lane filtered too; Q-333 (#3490) had only shown such a file its content | `theNotesAppAutopsy` §A |
+| Q-336 | ❌ "Stack: Vue" for a React app | a `.d.ts`'s ambient import counted as a dependency; Vue/Svelte outranked React without their own files | Svelte branch fixed together | §B |
+| Q-337 | ❌ JOURNEY_FAILED + RED on a working app | a password form read as an add-an-item form, and driven signed in | both journey loops (route forms, screen forms) | §C |
+| Q-338 | ⏭️ AUTH_EXPLORE_NOT_RUN although the app shipped a demo account | the seed pattern wanted a literal `password:` value; `passwordHash: hashPassword("demo123")` was invisible | — | §D |
+| Q-339 | ✅ prune removed `uuid`, left `@types/uuid` | `@types/*` is tooling, never removed with its package | — | §E |
+| Q-340 | ❌ unrequested login gate; "Clear Completed" deleted every note | nothing told a builder not to add sign-in or actions the request never named | architect, fast lane, one-shot all read `requestScope.ts`; the one-shot lane never got the unknown-name note either (fixed) | §F |
+| Q-341 | Four items argued not defects | — | — | 🟡 BLOCKED on the admin's yes |
+
+New key `AGENTV3_REQUEST_SCOPE` (default ON, `off` reverts). The #3490 test that expected `tsconfig.json` to be shown
+its content was updated: since this change the plan does not list it at all.
 ## 2026-10-04 — Autopsy d798ddd3 ("Calculator app", Weak, ok, ₹43.75, 3.7 min)
 
 The app rendered, typechecked, built for production, and 12 of its controls were pressed without a break.
@@ -87993,6 +88137,19 @@ user their letter was loaded.
 Open: Q-359 (writing attachments into the project — a privacy/publish decision), Q-362 (an app's own error banner
 is unseen by every check — design decision), Q-364/365/366 (missing information), Q-367 (agreement). The user's
 published app still carries the broken worker and the vulnerable versions until it is edited again.
+**THE FINDING RATCHET CAUGHT ITS FIRST ONE, before this PR even merged (2026-10-04).** Merging `main`
+in brought PR #3488's new `UI_ONLY_CONTROL` finding — *"the build says N control(s) do nothing yet"*,
+from autopsy 51ef24ad's "Cloud Sync … is a UI-only toggle for now" — and it arrived in no registry at
+all, so it would have reached the user's build-health card as a problem with their app with nothing to
+press. That is exactly the class this PR exists to close, and it took 87 seconds to find rather than a
+build report. Classified where it belongs: a dead control IS the user's app and the fix is the obvious
+one, so it gets an offer ("Make the control actually work") rather than a warning they can only read.
+## 2026-10-04 — Queue IDs collided across four open PRs (found while keeping #3490 green)
+
+| ID | Problem | Root cause | Fix | Test |
+|---|---|---|---|---|
+| Q-342 | #3490, #3491, #3493 and #3495 each claimed Q-300..Q-315 for different problems | a session picks "the next free ID" from the copy of `BUILD_REPORT_QUEUE.md` it can read; rows in open PRs are invisible to it | #3490's rows renumbered to Q-330..Q-341 (its two ledgers above); the queue header says to look at open PRs' diffs too | `tests/theQueueIdsAreUnique.test.ts` fails a merged state with a duplicate row ID — reverted (a duplicated Q-091) and failed |
+| Q-343 | Claude turns' cache reads mostly unpriced, cache writes never priced (found re-checking Q-125, whose "over-stated" premise is wrong) | Anthropic's `input_tokens` excludes both cache shares; the ledger and `usageCostUsd` assume the OpenAI-style "input includes cache" meaning | — (a money decision) | 🟡 BLOCKED — options and recommendation in the queue row |
 - **Q-305 (unblocked by #3488's merge):** the explorer now tries a first-screen press that changed nothing once
   more, after a control that DID change the screen (`MAX_PRIMED_RETRIES` = 3 in `clickExplorer.ts`). In a real
   browser, a keypad's "AC" and "+/−" are now proven to respond after "7", and a dead "%" is named in words

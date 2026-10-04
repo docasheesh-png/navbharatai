@@ -191,7 +191,7 @@ import {
 import { withoutPlatformCheckTools } from '../AgentV3/repairScope';
 import { explorerRepairBudget } from '../lib/explorerRepairBudget';
 import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS } from '../AgentV3/liveBuildCost';
-import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
+import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals, type GateState } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary, admittedInertControls } from '../AgentV3/claimAudit';
 import { judgeRenderStyle, renderStyleNote, unstyledRenderUserNote, type RenderStyleVerdict, type RenderStyleEvidence } from '../AgentV3/renderStyle';
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths, greenRepairPrompt, readRepairVerdicts, type RepairVerdicts } from '../AgentV3/greenReviewPolicy';
@@ -384,14 +384,20 @@ import { shellModuleFor, retireUnbuiltPlan, projectModeEnabled, projectModeDiagn
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
+import { beginChange, observeProbes, regressionsSoFar, settleChange, type ChangeSession } from '../AgentV3/changeEngine/changeSession';
+import type { SpecItem } from '../AgentV3/changeEngine/appSpec';
+import { removedProbeFeatures } from '../AgentV3/changeEngine/requestConsistency';
+import { changeEngineEnabled, loadEngineeringMemory } from '../AgentV3/changeEngine/engineeringMemoryStore';
+import { publicAppMemory } from '../AgentV3/changeEngine/publicView';
 import { createLaneWriteFence } from '../AgentV3/laneWriteFence';
 import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
 import { entryShadowRepairHint } from '../AgentV3/entryShadow';
-import { checkFeaturePresence, featurePresenceSummary, featurePresenceEvidence, featurePresenceRepairPrompt, featureHealEnabled, isSignInWall } from '../AgentV3/FeaturePresence';
+import { checkFeaturePresence, featurePresenceSummary, featurePresenceEvidence, featurePresenceRepairPrompt, featureHealEnabled, isSignInWall, probeFeatures, requestedProbeFeatures } from '../AgentV3/FeaturePresence';
 import { adoptHealResult } from '../AgentV3/healResult';
 import { signInExploreEnabled, signInScript, signInCandidates, parseSignInOutput, signInReportLine, isSignInRoute, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
 import { unsupportedStackRequested, unsupportedStackBuilderNote, unsupportedStackUserNote, builtWithLabel } from '../AgentV3/unsupportedStack';
 import { unknownNameNoteEnabled, unknownNamesInRequest, unknownNameBuilderNote, unknownNameReportNote } from '../AgentV3/unknownName';
+import { requestScopeNote } from '../AgentV3/requestScope';
 import { bootPythonBackendFirst, backendBootReport, isPythonServerCommand, PYTHON_BOOT_BUDGET_MS } from '../AgentV3/pythonBackendBoot';
 import { scriptRequestNoteEnabled, scriptDeliverableRequested, liveDataRequested, scriptRequestBuilderNote, scriptRequestStartLine, scriptRequestReportNote } from '../AgentV3/scriptRequest';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
@@ -3448,12 +3454,18 @@ export function fastLaneCallIdentity(
   reported: boolean,
   usedProvider: string | undefined,
   claudeTierModel: string,
+  answered?: string | null,
 ): { provider: string; model: string } {
   // No provider ever reported in — we do not know who would have served it, and we must not guess.
   // 'unknown' is the same word `usageLedger`'s providerKey uses, so one vocabulary covers both.
   if (!reported) return { provider: 'unknown', model: 'unknown' };
   const provider = fastLaneProviderLabel(usedProvider);
-  return { provider, model: provider === 'anthropic' ? claudeTierModel : String(usedProvider || '').toLowerCase() };
+  // 🔴 THE MODEL THAT ANSWERED, NOT THE VENDOR'S NAME (autopsy dcce5d26, 2026-10-04). This returned
+  // `usedProvider.toLowerCase()` — "glm" — for every cheap-floor call, so the fast lane's per-call log
+  // (and the report's top-level `model`, derived from it) named a vendor where a model belongs. It is
+  // the expression `answeringModel.ts` replaced at five aux call sites (autopsy f152c1ab); this lane
+  // records through its own helper, so that fix never reached it. `answered` is `TurnResult.model`.
+  return { provider, model: answeringModel({ answered, planned: provider === 'anthropic' ? claudeTierModel : null, family: String(usedProvider || '').toLowerCase() }) };
 }
 
 /**
@@ -7424,6 +7436,24 @@ async function noteBuildOutcome(
   // v5.0 builds make real git commits; this surfaces the persisted timeline so the IDE shows the full
   // history even across sessions / devices / sandbox recycles (not just the current session's RAM).
   // Ownership-checked; empty list when the workspace has no checkpoints yet.
+  // CHANGE ENGINE slice 7 — the user's view of their app's memory: what it does (requirements and whether
+  // each was seen working), what is still open, and what changed (changeEngine/publicView.ts). STRICT
+  // owner read (verified uid or the anon capability), and white-labelled by construction.
+  app.get('/api/agentv3/app-memory', workspaceRateLimiter(), async (req: Request, res: Response) => {
+    const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
+    const email = typeof req.query.email === 'string' ? req.query.email : null;
+    if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: ENGINE_DISABLED }); return; }
+    const workspaceId = typeof req.query.workspaceId === 'string' ? req.query.workspaceId : '';
+    if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    if (!changeEngineEnabled()) { res.json({ available: false }); return; }
+    try {
+      res.json({ available: true, ...publicAppMemory(await loadEngineeringMemory(workspaceId)) });
+    } catch {
+      res.json({ available: false });
+    }
+  });
+
   app.get('/api/agentv3/checkpoints', workspaceRateLimiter(), async (req: Request, res: Response) => {
     const userId = typeof req.query.userId === 'string' ? req.query.userId : null;
     const email = typeof req.query.email === 'string' ? req.query.email : null;
@@ -12905,6 +12935,10 @@ async function noteBuildOutcome(
     // of every file the agent writes (reliable — straight from the write op, not a later listFiles that
     // can come back empty). See the "DURABLE FILE SAVE" block for the normal-completion path.
     const writtenFiles = new Map<string, string>();
+    /** The change being made to this app (changeEngine/changeSession.ts) — null for chat turns or when off. */
+    let changeSession: ChangeSession | null = null;
+    /** The release gate's verdict, once this build reached it — the evidence that its checks ran. */
+    let changeGateState: GateState | undefined;
     // 🐍 Q-284: every platform start of this app brings its Python backend up first (pythonBackendBoot.ts).
     // The project is the durable files plus this build's writes — a backend written in an earlier turn
     // and untouched by this one is the normal case, and a turn-scoped view would never see it.
@@ -16151,6 +16185,11 @@ async function noteBuildOutcome(
       // chat to "the COACT backend"). New builds only, like the stack note above — see unknownName.ts.
       const unknownNamesAsked = intent === 'new_build' && !isImportTurn && unknownNameNoteEnabled() ? unknownNamesInRequest(prompt) : [];
       const unknownNameNote = unknownNameBuilderNote(unknownNamesAsked);
+      // A login nobody asked for is a wall in front of the app (autopsy 70e030bb, see requestScope.ts).
+      let requestScopeText = '';
+      try {
+        requestScopeText = requestScopeNote({ request: planning.text, newBuild: intent === 'new_build' && !isImportTurn, domain: analyzeRequirementGaps(planning.text).domain });
+      } catch { requestScopeText = ''; }
       // A script, a CLI, a Streamlit dashboard or a notebook is built as a web app, and the user hears that
       // BEFORE the build (Q-274, autopsy 241215d1 — a "self-contained Python script" became FastAPI + React
       // with a simulated feed, said nowhere). New builds only, like the two notes above — see scriptRequest.ts.
@@ -16341,6 +16380,10 @@ async function noteBuildOutcome(
       // THE USER NAMED A STACK WE DO NOT BUILD (autopsy 8e124182: "using PHP MVC architecture" was built
       // in React with a types file claiming a "PHP MVC backend"). Told to the builder here, to the user
       // in the ready message — see unsupportedStack.ts.
+      if (requestScopeText) {
+        buildPrompt = `${requestScopeText}\n\n---\n\n${buildPrompt}`;
+        buildDiag.record({ phase: 'plan', severity: 'info', code: 'REQUEST_SCOPE_NOTE', message: 'The request asks for no sign-in, so the builder was told to add no login or accounts and no control for a state the data does not have.', autoResolved: true });
+      }
       if (unknownNameNote) {
         buildPrompt = `${unknownNameNote}\n\n---\n\n${buildPrompt}`;
         buildDiag.record({ phase: 'plan', severity: 'info', code: 'UNKNOWN_NAME_IN_REQUEST', message: unknownNameReportNote(unknownNamesAsked), autoResolved: true });
@@ -16544,6 +16587,24 @@ async function noteBuildOutcome(
           ?.text.replace(/^PLAN_STATE\n?/, '');
         const projectCtx = buildProjectContext({ files: tree, projectMap: ctxMem.projectMap(), recentRequests, lastPlan });
         if (projectCtx) buildPrompt = `${projectCtx}\n\n---\n\n${buildPrompt}`;
+        // CHANGE ENGINE — classify this change, load the app's requirement ledger and open issues, and
+        // hand the builder what it must keep working (changeEngine/changeSession.ts). Inside the per-turn
+        // message, never the cached system prefix. Best-effort: a failure leaves the build unchanged.
+        if (changeEngineEnabled() && (intent === 'new_build' || intent === 'edit_existing') && !isImportTurn) {
+          try {
+            const declinedIds = [...new Set([...(declinedPresenceFeatures(featureConfirmation) ?? []), ...removedProbeFeatures(prompt)])];
+            const begun = await withTimeout(beginChange({
+              workspaceId, prompt, isEdit: intent === 'edit_existing',
+              requested: requestedProbeFeatures(prompt, new Set(declinedIds)),
+              declined: declinedIds,
+              contractLabels: confirmedContractLabels(featureLists, featureConfirmation),
+              graph: ctxMem.graph(),
+            }), 5_000, 'change-engine-begin');
+            changeSession = begun.session;
+            if (begun.builderBlock) buildPrompt = `${begun.builderBlock}\n\n---\n\n${buildPrompt}`;
+            buildDiag.record({ phase: 'build', severity: 'info', code: 'CHANGE_CLASSIFIED', autoResolved: true, message: begun.reportLine });
+          } catch { /* the change engine is advisory — a build never waits on it */ }
+        }
         // FULLSTACK LAYOUT (admin 2026-08-15): if this app keeps its frontend under client/src (or
         // frontend/src, apps/web/src, …) instead of a top-level src/, say so up front — the builder was
         // guessing `src/App.tsx` on such apps and wasting steps on wrong-path errors. Deterministic,
@@ -16824,6 +16885,7 @@ async function noteBuildOutcome(
       const pastedBriefSuffix = pastedBrief ? `\n\n${pastedBrief}` : ''; // the fast lane reads the pasted app's checklist too
       const unknownNameSuffix = (unknownNameNote ? `\n\n${unknownNameNote}` : '') // and the unknown-word note (Q-067)
         + (scriptRequestNote ? `\n\n${scriptRequestNote}` : ''); // and the script-request note (Q-274)
+      const requestScopeSuffix = requestScopeText ? `\n\n${requestScopeText}` : ''; // and the request-scope rule (autopsy 70e030bb)
 
       // Universal Language (Layer 73): build in the user's language. If the
       // request is written in a distinctive non-Latin script we name the
@@ -17357,6 +17419,11 @@ async function noteBuildOutcome(
         // survived was chance — autopsy 2720e553). Prompts that show it cap it themselves (60).
         const scaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
           .filter((p) => !/^(node_modules|\.git)\//.test(p));
+        // What both fast lanes read before rewriting a config file the project already has (existingConfig.ts).
+        const readExistingProjectFile = async (p: string): Promise<string | null> => {
+          const raw = await actuator.readFile(workspaceId, p).catch(() => null);
+          return raw == null ? null : withoutPreviewBridge(p, raw);
+        };
         // Shared side-effects for both fast lanes (Simple Builder + OneShot).
         // ONE fast-lane model round trip. Returns the provider's stop reason alongside the text so the
         // continuation wrapper below can tell "the model finished" from "the model ran out of budget"
@@ -17433,7 +17500,7 @@ async function noteBuildOutcome(
             try { buildDiag.recordLlmCall({ model: failedAs.model, provider: failedAs.provider, promptPreview, promptChars: promptPreview.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) }); } catch { /* diagnostics best-effort */ }
             throw err;
           }
-          const servedBy = fastLaneCallIdentity(providerReported, usedProvider, fbModel);
+          const servedBy = fastLaneCallIdentity(providerReported, usedProvider, fbModel, t.model);
           try { buildDiag.recordLlmCall({ model: servedBy.model, provider: servedBy.provider, promptPreview, promptChars: promptPreview.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true }); } catch { /* diagnostics best-effort */ }
           if (!fastLaneReasoningRung && fastLaneReasoningGateEnabled() && modelAlwaysReasons(servedBy.model)) {
             fastLaneReasoningRung = servedBy.model;
@@ -17834,7 +17901,9 @@ async function noteBuildOutcome(
           const c = await actuator.readFile(workspaceId, p).catch(() => null);
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
-        const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
+        const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
+          // A planned config file the starter already has is edited, never rewritten blind (isProjectConfigPath).
+          readExisting: readExistingProjectFile,
           stopLane: () => (fastLaneReasoningRung
             ? `the lane's engine fell to ${fastLaneReasoningRung}, which reasons before every answer; the lane's per-file budget cannot carry that, so the files finished so far go to the full builder now`
             : null),
@@ -17970,7 +18039,7 @@ async function noteBuildOutcome(
           //    …and gated on what the lane above just MEASURED. See oneShotStillViable: in the dukaan
           //    report the manifest had planned 8 files, so "the manifest skips it" was already false,
           //    and this lane still ran for 150 seconds to fail at something a single call cannot do.
-          const os = await runOneShot({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog });
+          const os = await runOneShot({ prompt: prompt + unknownNameSuffix + requestScopeSuffix, framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog });
           buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
           if (os.ok) {
             // VERIFY GATE for the one-shot lane too (autopsy 2026-07-07: a NowPlaying.tsx TRUNCATED
@@ -21199,7 +21268,10 @@ async function noteBuildOutcome(
                 const session = await signInBehindTheDoor(lastPreviewUrl);
                 if (session.signedIn && session.screens.length > 0) { probeHtml = session.screens.map((sc) => sc.html).join('\n'); readBehindSignIn = true; }
               }
-              let coverage = checkFeaturePresence(milestoneRequest ?? checksRequest, probeHtml, declinedPresenceFeatures(featureConfirmation));
+              // What the user unticked on the feature card, plus what THIS request deliberately removes
+              // ("remove the delete button") — neither is a missing feature, and neither may be healed back.
+              const presenceDeclined = new Set<string>([...(declinedPresenceFeatures(featureConfirmation) ?? []), ...removedProbeFeatures(milestoneRequest ?? checksRequest)]);
+              let coverage = checkFeaturePresence(milestoneRequest ?? checksRequest, probeHtml, presenceDeclined);
               // A CONTROL ON ANOTHER SCREEN IS NOT MISSING (featureProbeScreens.ts, autopsy a106df77): when the
               // home screen leaves a requested control unseen, read the app's own routes and judge them together.
               // Paid only when something would otherwise be called missing; bounded in count and time. The
@@ -21226,20 +21298,43 @@ async function noteBuildOutcome(
               if (coverage.missing.length > 0 && !readBehindSignIn && !abort.signal.aborted) {
                 probedScreens = await readOtherScreens();
                 if (probedScreens.length > 0) {
-                  const wider = checkFeaturePresence(milestoneRequest ?? checksRequest, combineScreens(probeHtml, probedScreens), declinedPresenceFeatures(featureConfirmation));
+                  const wider = checkFeaturePresence(milestoneRequest ?? checksRequest, combineScreens(probeHtml, probedScreens), presenceDeclined);
                   if (wider.probes.length > 0) coverage = wider;
                 }
               }
+              // CHANGE ENGINE (slice 2) — before deciding on a heal, RE-PROBE what this app was seen to do
+              // before (changeEngine/appSpec.ts). A working feature this edit removed joins the SAME bounded
+              // feature heal as a missing requested one — one pass, one verify-after-fix net, no new engine.
+              let regressedBeforeHeal: SpecItem[] = [];
+              let regressionScreens = false;
+              const reprobeRegressions = async (html0: string, screens: ProbedScreen[]): Promise<void> => {
+                if (!changeSession) return;
+                const targets = changeSession.regressionTargets.filter((f) => !coverage.probes.some((p) => p.feature === f));
+                if (targets.length === 0) return;
+                let reg = probeFeatures(changeSession.regressionTargets, combineScreens(html0, screens));
+                // A control on another screen is not gone — read the app's other screens before saying so.
+                if (reg.missing.length > 0 && screens.length === 0 && !readBehindSignIn && !abort.signal.aborted) {
+                  const more = await readOtherScreens();
+                  if (more.length > 0) { regressionScreens = true; reg = probeFeatures(changeSession.regressionTargets, combineScreens(html0, more)); }
+                }
+                observeProbes(changeSession, reg.probes.filter((p) => targets.includes(p.feature)));
+              };
+              if (changeSession && !abort.signal.aborted) {
+                observeProbes(changeSession, coverage.probes);
+                await reprobeRegressions(probeHtml, probedScreens);
+                regressedBeforeHeal = regressionsSoFar(changeSession);
+              }
+              const regressedLabels = regressedBeforeHeal.map((r) => r.label);
               // APP HEALTH CULTURE slice 2 (Phase 1b, opt-in AGENTV3_FEATURE_HEAL=on): the app renders
               // but a REQUESTED control is missing → run ONE bounded heal pass that adds the missing UI,
               // then re-open the running app and re-probe (only a control now in the live DOM counts).
               // Budget-gated + abortable; if the control still isn't there, the honest FEATURE_COVERAGE
               // warning below still stands. Never blocks or fails a build.
               if (
-                coverage.missing.length > 0 && featureHealEnabled(workspaceId) && !abort.signal.aborted
+                (coverage.missing.length > 0 || regressedLabels.length > 0) && featureHealEnabled(workspaceId) && !abort.signal.aborted
                 && (effectiveBuildSeconds === 0 || Date.now() - buildStartedAt < effectiveBuildSeconds * 1000 - 60_000)
               ) {
-                events.emit({ type: 'narration', agent: 'architect', text: `🧪 The app runs, but I don't see a control for: ${coverage.missing.join(', ')}. Adding it now…`, ts: Date.now() });
+                events.emit({ type: 'narration', agent: 'architect', text: `🧪 The app runs, but I don't see a control for: ${[...coverage.missing, ...regressedLabels].join(', ')}. ${regressedLabels.length > 0 && coverage.missing.length === 0 ? 'It worked before this change — restoring it now…' : 'Adding it now…'}`, ts: Date.now() });
                 try {
                   const featureRunner = new AgentRunner({
                     ...baseRunnerOpts,
@@ -21248,7 +21343,7 @@ async function noteBuildOutcome(
                     model: resolveModel(powerLevelReqEffective),
                     persistence: { store: getConversationStore(), conversationId: mainConversationId, userId: userId ?? 'anon', workspaceId, title: deriveTitle(prompt) },
                   });
-                  const applyHeal = () => runInPass('feature-presence-heal', () => featureRunner.run(featurePresenceRepairPrompt(coverage)));
+                  const applyHeal = () => runInPass('feature-presence-heal', () => featureRunner.run(featurePresenceRepairPrompt(coverage, regressedLabels)));
                   // VERIFY AFTER FIX (admin 2026-08-12) — the feature-presence heal is ALSO an allowed
                   // post-green write, so it must PROVE the app still renders afterwards, exactly like the
                   // runtime-error auto-fix below. Same snapshot→apply→re-render→keep-or-revert net: a heal
@@ -21278,8 +21373,9 @@ async function noteBuildOutcome(
                       result = adoptHealResult(result, healResult as typeof result);
                       if (afterHtml) {
                         const afterScreens = probedScreens.length > 0 ? await readOtherScreens() : [];
-                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? checksRequest, combineScreens(afterHtml, afterScreens), declinedPresenceFeatures(featureConfirmation));
+                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? checksRequest, combineScreens(afterHtml, afterScreens), presenceDeclined);
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
+                        if (regressedBeforeHeal.length > 0) await reprobeRegressions(afterHtml, afterScreens.length > 0 ? afterScreens : regressionScreens ? await readOtherScreens() : []);
                       }
                     }
                   } else {
@@ -21289,8 +21385,9 @@ async function noteBuildOutcome(
                       try {
                         const after = (await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl')).html;
                         const afterScreens = probedScreens.length > 0 ? await readOtherScreens() : [];
-                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? checksRequest, combineScreens(after, afterScreens), declinedPresenceFeatures(featureConfirmation));
+                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? checksRequest, combineScreens(after, afterScreens), presenceDeclined);
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
+                        if (regressedBeforeHeal.length > 0) await reprobeRegressions(after, afterScreens.length > 0 ? afterScreens : regressionScreens ? await readOtherScreens() : []);
                       } catch { /* re-open best-effort — keep the pre-heal coverage */ }
                     }
                   }
@@ -21311,6 +21408,28 @@ async function noteBuildOutcome(
                   detail: `${featurePresenceEvidence(coverage)} · ${screensReadNote(probedScreens)} · capture: source=${shot.source ?? 'unknown'} painted=${shot.painted ?? 'unknown'} html=${html.length}B inputs=${(html.match(/<input\b/gi) || []).length} buttons=${(html.match(/<button\b/gi) || []).length}`,
                   autoResolved: coverage.missing.length === 0,
                 });
+              }
+              // CHANGE ENGINE — what the browser saw, AFTER any heal, decides the ledger (a later observation
+              // of a feature wins). A regression the heal could not restore is reported honestly.
+              if (changeSession) {
+                observeProbes(changeSession, coverage.probes);
+                const stillRegressed = regressionsSoFar(changeSession);
+                // The restore is recorded FIRST: a heal code resolves what is already open when it is
+                // recorded (HEAL_RESOLVES), so a regression that is STILL missing must come after it.
+                const restoredNow = regressedBeforeHeal.filter((r) => !stillRegressed.some((x) => x.id === r.id));
+                if (restoredNow.length > 0) {
+                  buildDiag.record({
+                    phase: 'readiness', severity: 'info', code: 'FEATURE_REGRESSION_HEALED', autoResolved: true,
+                    message: `Restored after this change removed them: ${restoredNow.map((r) => `${r.id} ${r.label}`).join(', ')}`,
+                  });
+                }
+                if (stillRegressed.length > 0) {
+                  buildDiag.record({
+                    phase: 'readiness', severity: 'warning', code: 'FEATURE_REGRESSED', autoResolved: false,
+                    message: `Was working before this change and is missing now: ${stillRegressed.map((r) => `${r.id} ${r.label}`).join(', ')}`,
+                    detail: 'Re-probed from the app\'s requirement ledger — each of these had a real control seen in the running app on an earlier build.',
+                  });
+                }
               }
             } catch { /* feature-presence is best-effort — never blocks a verified build */ }
             markAppRendered(shot.source, 'preview verify loop');
@@ -22409,6 +22528,7 @@ async function noteBuildOutcome(
           // made a clean Stop end with "2 unresolved" problems (autopsy 31254f9a). The verdict stays RED.
           autoResolved: gate.state === 'green' || gateEvidence.stoppedByUser === true || (gate.state === 'unknown' && !!moduleAwaitsShell),
         });
+        changeGateState = gate.state;
 
         // ── THE PROOF THE USER SEES — every check that really ran, and silence for the rest ───────
         //
@@ -24810,6 +24930,26 @@ async function noteBuildOutcome(
         try {
           const debtFindings = findingsToDebt({ security: getWorkspaceMemory(workspaceId).appSecurityFindings() });
           if (debtFindings.length) void recordDebt(userId, workspaceId, debtFindings, new Date().toISOString());
+        } catch { /* best-effort — never block the result */ }
+      }
+      // CHANGE ENGINE — fold this change into the app's memory: requirement ledger, issue queue, and a
+      // change record (changeEngine/changeSession.ts). One transaction, awaited only up to 4 s so the
+      // admin report carries the record; it can never delay or alter the user's result beyond that.
+      if (changeSession) {
+        try {
+          const settleIssues = buildDiag.report().issues;
+          const settled = await withTimeout(settleChange(changeSession, {
+            ok: result.ok === true,
+            stopped: abort.signal.aborted || buildWasStopped(settleIssues),
+            files: [...writtenFiles.keys()],
+            gate: changeGateState,
+            issues: settleIssues,
+            security: (() => { try { return getWorkspaceMemory(workspaceId).appSecurityFindings(); } catch { return []; } })(),
+            securityScanned: (() => { try { return getWorkspaceMemory(workspaceId).graph().files; } catch { return []; } })(),
+          }), 4_000, 'change-engine-settle').catch(() => null);
+          if (settled) {
+            for (const line of settled.reportLines) buildDiag.record({ phase: 'build', severity: 'info', code: 'CHANGE_RECORDED', autoResolved: true, message: line });
+          }
         } catch { /* best-effort — never block the result */ }
       }
       if (userId && effectiveBilledUsd > 0 && billingActive) {

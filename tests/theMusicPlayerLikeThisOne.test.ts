@@ -142,3 +142,12 @@ describe('6 · a small file is never sliced', () => {
     expect(d).toContain('const ranged = askedRange && !smallWhole;');
   });
 });
+
+describe('7 · salvaged files that were never compiled are compiled once before the hand-off', () => {
+  it('a timed-out or handed-off lane gets the typecheck the failed-verify lane already had', () => {
+    const route = read('src/server/routes/agentv3.ts');
+    expect(route).toMatch(/if \(sb\.reason !== 'verify_failed' && writeTypecheckEnabled\(\) && sb\.salvagedPaths\.some/);
+    expect(route).toContain("withTimeout(actuator.runCommand(workspaceId, writeTypecheckCommand()), 20_000, 'salvage-typecheck')");
+    expect(route).toMatch(/: unverifiedErrors;/);
+  });
+});

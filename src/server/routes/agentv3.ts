@@ -43,7 +43,7 @@ import { decideComplexity, scaffoldedComplexityDecision, workspaceSizedComplexit
 import { isPortTurn, collectPortSources, portDigest, foreignSourcePaths } from '../AgentV3/portDigest';
 import { planningRequest, planningContextNote, wasBuildRequest } from '../AgentV3/planningRequest';
 import { unrelatedToExistingApp, unrelatedRequestSteer, unrelatedRequestFallback } from '../AgentV3/unrelatedRequest';
-import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite, writeQualitySummary } from '../AgentV3/writeTimeTypecheck';
+import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite, writeQualitySummary, writeTypecheckCommand } from '../AgentV3/writeTimeTypecheck';
 import { findMixedScriptText, scriptIntegritySummary, repairLostEscapes, scriptRepairSummary } from '../AgentV3/scriptIntegrity';
 import { answeringModel } from '../AgentV3/answeringModel';
 import { tierLadder, openingRung, healLadder, retryLeadsHigher, ladderAfterLeadRung, withoutCheapFlashLead, ladderFrom, escalationPathForTier, tierEngineAvailable, describeLadder, tierDisplayName, keyEnvFor, planLadder, type LadderProvider, type LadderRung } from '../AgentV3/tierLadder';
@@ -18038,9 +18038,22 @@ async function noteBuildOutcome(
             ? 'and they do not compile yet'
             : 'before running out of time';
           const salvageEntryLine = entryFirstHandoffLine(unwrittenEntries((sb.plannedPaths ?? []).map((path) => ({ path, purpose: '' })), sb.salvagedPaths));
+          // 🔴 AND WHEN THE LANE NEVER VERIFIED (autopsy c70bcbb4): a lane that timed out or handed off before a
+          // reasoning engine runs no typecheck, so the builder met 22 errors in eight salvaged files one write at
+          // a time — ten checks over four minutes. The same typecheck the write-time check runs, once, bounded;
+          // nothing is said when it cannot run (no compiler yet, a timeout), so no line is ever invented.
+          let unverifiedErrors = '';
+          if (sb.reason !== 'verify_failed' && writeTypecheckEnabled() && sb.salvagedPaths.some((p) => /\.(?:ts|tsx)$/.test(p))) {
+            try {
+              const tc = await withTimeout(actuator.runCommand(workspaceId, writeTypecheckCommand()), 20_000, 'salvage-typecheck');
+              const errs = String(tc?.stdout ?? '').split('\n').filter((l) => /error TS\d+/.test(l));
+              if (errs.length) unverifiedErrors = `They were never compiled; the compiler's errors on the project right now:\n${errs.slice(0, 20).join('\n')}\n`;
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_SALVAGE_TYPECHECK', message: errs.length ? `The salvaged files were typechecked before the hand-off: ${errs.length} error(s) handed to the full builder with them.` : 'The salvaged files were typechecked before the hand-off: no errors.', autoResolved: true });
+            } catch { /* no compiler yet or a slow check — the builder meets the errors at its first write, as before */ }
+          }
           const salvageErrors = sb.reason === 'verify_failed' && sb.verifyErrors
             ? `The compiler's errors on them right now:\n${sb.verifyErrors.split('\n').slice(0, 20).join('\n')}\n`
-            : '';
+            : unverifiedErrors;
           buildPrompt =
             `${SALVAGE_HANDOFF_MARKER} A faster build lane already generated ${sb.salvagedPaths.length} file(s) of THIS app ${salvageWhy}; ` +
             `they are in the workspace now and they are YOUR OWN prior work (any project context below that lists fewer files was taken before they were written):\n${sb.salvagedPaths.slice(0, 40).map((p) => `- ${p}`).join('\n')}\n` +

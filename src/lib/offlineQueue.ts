@@ -18,6 +18,9 @@ export const REPLAYABLE_WRITE_PATHS = [
 ] as const;
 
 /** Pure (unit-tested): is this URL safe to queue + replay offline? */
+/** The most writes the offline queue will hold. */
+export const MAX_QUEUED_WRITES = 50;
+
 export function isReplayable(url: string): boolean {
   let path = url;
   try { path = new URL(url, 'http://x').pathname; } catch { /* already a path */ }
@@ -103,7 +106,13 @@ export class OfflineQueue {
       return { sent: true, queued: false };
     } catch {
       if (isReplayable(url)) {
-        try { await this.store.add({ id: newId(), url, body, ts: Date.now() }); return { sent: false, queued: true }; }
+        try {
+          // Bounded: an error loop while offline must not grow the device's storage without limit.
+          // Past the cap the newest report is dropped; the oldest ones are what the next flush sends.
+          if ((await this.store.getAll()).length >= MAX_QUEUED_WRITES) return { sent: false, queued: false };
+          await this.store.add({ id: newId(), url, body, ts: Date.now() });
+          return { sent: false, queued: true };
+        }
         catch { return { sent: false, queued: false }; }
       }
       return { sent: false, queued: false };

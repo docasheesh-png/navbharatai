@@ -3941,6 +3941,13 @@ the flag entries above promise.
   controls" list above. It is live: a finished build fails on real ESLint **errors** (warnings/formatting
   never block). Watch the first few real builds; if a genuinely-working app gets blocked, set it `off`.
 
+- **🧯 CRASH REPORTING — Firebase Crashlytics in the phone apps (built 2026-10-04). No Cloud Run key.** One
+  build-time value, set only by the store workflows: **`VITE_CRASH_TEST`**. `1` adds the controlled crash
+  tools (`window.__nbaiCrashTest`). Both `android-aab.yml` and `ios-ipa.yml` take a `crash_test` input that
+  sets it, and both REFUSE it together with an upload. Collection is decided natively: on for Android
+  release builds (`manifestPlaceholders`), off for debug. The full design is in `docs/CRASHLYTICS.md`.
+  ⚠️ **Before the first `.aab` / `.ipa` with it ships:** enable Crashlytics in Firebase Console, and declare
+  crash and diagnostic data in Play Data safety and App Store App Privacy (`MOBILE_PUBLISHING.md`).
 ---
 
 ### 2026-10-04 — app pictures, the Images API permission, and the safety filter (autopsy cc3ef776)

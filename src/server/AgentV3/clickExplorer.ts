@@ -72,6 +72,18 @@ export const MAX_SECOND_LEVEL_CLICKS = 8;
 /** At most this many second-level presses under any one first-level control, so one busy tab cannot spend the budget. */
 export const MAX_SECOND_LEVEL_PER_PARENT = 2;
 
+/**
+ * A press that changed nothing on a FRESH screen is tried once more after a control that DID change the
+ * screen (autopsy d798ddd3, Q-306's sibling Q-305). A calculator's "AC", "+/−" and "%" on a display of 0
+ * change nothing, correctly, so the explorer recorded "it responded (nothing visibly changed)" — and a dead
+ * clear button would have read exactly the same. Pressing "7" first gives such a control something to act
+ * on. This many retries at most, and only first-screen presses.
+ *
+ * 🔒 Still unchanged after that is reported in words, never as a failure: a "memory recall" with nothing
+ * stored legitimately does nothing, and a failing verdict would spend a repair on it.
+ */
+export const MAX_PRIMED_RETRIES = 3;
+
 /** How long one fresh page load may take before that control is given up on. */
 export const EXPLORE_LOAD_TIMEOUT_MS = 12_000;
 
@@ -203,7 +215,21 @@ export function pressDecision(input: {
   return { press: true };
 }
 
-export type PressVerdict = 'ok' | 'crashed' | 'blank' | 'broken-link' | 'error' | 'unresponsive' | 'skipped';
+/**
+ * 🔴 `covered` EXISTS BECAUSE "our instrument could not press it" WAS HIDING AN UNPLAYABLE APP
+ * (autopsy 8b8743a3, 2026-10-04). A 3D driving game's three controls — "City Road", "Forest Road" and
+ * "Start Race" — each failed with `locator.click: Timeout 4000ms exceeded`, every one was recorded as
+ * `skipped`, `summarizeExplore` drops every skipped press, so the verdict was
+ * `EXPLORE_NOTHING_TO_PRESS` ("nothing was proven about them") — an info line with no offer and no
+ * repair. The app shipped GREEN and the reply told the user to *press Start Race*. The suspect is the
+ * full-viewport `<canvas>` the game mounts over its own menu, which is the app's defect, not ours.
+ *
+ * ⚠️ IT IS DECIDED POSITIVELY, NEVER FROM THE TIMEOUT. A press can fail to complete for reasons that
+ * really are ours (a detached node, a slow machine, our own clock). So `covered` is recorded only when
+ * the PAGE ITSELF says something else is on top of the control (`document.elementFromPoint` at its
+ * centre), or Playwright names an interceptor in as many words. Everything else stays `skipped`.
+ */
+export type PressVerdict = 'ok' | 'crashed' | 'blank' | 'broken-link' | 'error' | 'unresponsive' | 'covered' | 'skipped';
 
 /** How a control was tried: pressed, typed into (a search box) or picked from (a sort/filter menu). */
 export type PressKind = 'press' | 'type' | 'pick';
@@ -226,6 +252,11 @@ export interface PressResult {
    * a first-screen press. It is a name a person can follow ("open Settings, then press Save").
    */
   via?: string;
+  /**
+   * The control pressed FIRST on a retry, because this one changed nothing on a fresh screen
+   * (`MAX_PRIMED_RETRIES`). The retry's result replaces the first one.
+   */
+  primedBy?: string;
 }
 
 /** How a press is named to a person: the control, and the screen it was found on when that is not the first. */
@@ -254,7 +285,7 @@ export interface ExploreRun {
   diagnostic: string | null;
 }
 
-const VERDICTS: ReadonlySet<string> = new Set(['ok', 'crashed', 'blank', 'broken-link', 'error', 'unresponsive', 'skipped']);
+const VERDICTS: ReadonlySet<string> = new Set(['ok', 'crashed', 'blank', 'broken-link', 'error', 'unresponsive', 'covered', 'skipped']);
 
 /** Parse the runner's output. Malformed lines are dropped, never guessed at. PURE; never throws. */
 export function parseExploreOutput(stdout: string | null | undefined): ExploreRun {
@@ -285,7 +316,16 @@ export function parseExploreOutput(stdout: string | null | undefined): ExploreRu
         changed: o.changed === true,
         ...(o.kind === 'type' || o.kind === 'pick' ? { kind: o.kind as PressKind } : {}),
         ...(typeof o.via === 'string' && o.via.trim() ? { via: o.via.slice(0, 60) } : {}),
+        ...(typeof o.primedBy === 'string' && o.primedBy.trim() ? { primedBy: o.primedBy.slice(0, 60) } : {}),
       });
+      // A retry after a primer REPLACES the first try of the same first-screen control (MAX_PRIMED_RETRIES).
+      const last = run.presses[run.presses.length - 1];
+      // A retry that could not be pressed adds nothing: the first try stands.
+      if (last.primedBy && last.verdict === 'skipped') run.presses.pop();
+      else if (last.primedBy) {
+        const first = run.presses.findIndex((p, i) => i < run.presses.length - 1 && p.label === last.label && !p.via && !p.kind && !p.primedBy);
+        if (first >= 0) run.presses.splice(first, 1);
+      }
     } else if (o.type === 'out-of-time') {
       run.outOfTime = true;
     }
@@ -298,7 +338,7 @@ export function parseExploreOutput(stdout: string | null | undefined): ExploreRu
  * (`explorerRepair.ts`), which used to keep its own copy — a new failure kind added to one would have
  * been reported and never repaired, or repaired and never reported.
  */
-export const FAILING_VERDICTS: ReadonlySet<PressVerdict> = new Set<PressVerdict>(['crashed', 'blank', 'broken-link', 'error', 'unresponsive']);
+export const FAILING_VERDICTS: ReadonlySet<PressVerdict> = new Set<PressVerdict>(['crashed', 'blank', 'broken-link', 'error', 'unresponsive', 'covered']);
 const FAILING = FAILING_VERDICTS;
 
 /** "Pressed 3 control(s)", "Tried 2 search or sort control(s)", or both. PURE. */
@@ -378,6 +418,7 @@ function failureSentence(p: PressResult): string {
     case 'crashed': return `${doing} ${pressName(p)} crashed the app into an error screen.`;
     case 'blank': return `${doing} ${pressName(p)} left the screen blank.`;
     case 'broken-link': return `${pressName(p)} leads to a page that does not exist.`;
+    case 'covered': return `${pressName(p)} cannot be ${p.kind === 'type' || p.kind === 'pick' ? 'used' : 'pressed'} at all — something else on the screen is on top of it.`;
     case 'unresponsive': return p.kind === 'pick'
       ? `Choosing a different option in ${pressName(p)} changed nothing on the screen.`
       : p.kind === 'type'
@@ -484,6 +525,7 @@ export function clickExplorerScript(previewUrl: string, opts: { blockWrites: boo
     maxClicks: Math.max(1, Math.min(MAX_EXPLORE_CLICKS, opts.maxClicks ?? MAX_EXPLORE_CLICKS)),
     maxSecond: MAX_SECOND_LEVEL_CLICKS,
     perParent: MAX_SECOND_LEVEL_PER_PARENT,
+    maxPrimed: MAX_PRIMED_RETRIES,
     budgetMs: Math.max(10_000, opts.budgetMs ?? EXPLORE_BUDGET_MS),
     loadMs: EXPLORE_LOAD_TIMEOUT_MS,
     blockWrites: opts.blockWrites === true,
@@ -525,7 +567,32 @@ function collect(a) {
   for (const old of Array.from(document.querySelectorAll('[data-nbai-x]'))) old.removeAttribute('data-nbai-x');
   const never = new RegExp(a.neverSrc, a.neverFlags);
   const writes = new RegExp(a.writeSrc, a.writeFlags);
-  const nodes = Array.from(document.querySelectorAll('button, a[href], [role=button], [role=tab], [role=menuitem], [role=link], summary'));
+  const semantic = Array.from(document.querySelectorAll('button, a[href], [role=button], [role=tab], [role=menuitem], [role=link], summary'));
+  // A CONTROL WITHOUT A CONTROL'S TAG (autopsy f496c75b): a game's "Tap to Start" was a div with a click
+  // listener, and the explorer, reading only buttons and links, found nothing to press. An element is a
+  // control here when a click-type listener was added to it (recorded by the init script in freshPage),
+  // it carries an inline onclick, or React holds a press handler in its props. Never the page's own
+  // roots (a framework listens there for every click), never inside or around a real control (that
+  // control is pressed itself, and a press at the centre of a wrapper could land on a Delete inside it).
+  const tagged = window.__nbaiClickTargets;
+  const roots = new Set([document.documentElement, document.body, document.querySelector('#root, #app, #__next')]);
+  const CONTROL = 'button, a[href], input, select, textarea, label, summary, [role=button], [role=tab], [role=menuitem], [role=link], [contenteditable=""], [contenteditable=true]';
+  const reactPress = (el) => {
+    for (const k of Object.keys(el)) {
+      if (k.indexOf('__reactProps$') !== 0) continue;
+      const p = el[k];
+      return !!(p && (p.onClick || p.onPointerDown || p.onPointerUp || p.onMouseDown || p.onMouseUp || p.onTouchStart || p.onTouchEnd));
+    }
+    return false;
+  };
+  const extra = [];
+  const all = document.body ? document.body.getElementsByTagName('*') : [];
+  for (let n = 0; n < all.length && n < 4000; n++) {
+    const el = all[n];
+    if (roots.has(el) || el.closest(CONTROL) || el.querySelector(CONTROL)) continue;
+    if (el.hasAttribute('onclick') || (tagged && tagged.has(el)) || reactPress(el)) extra.push(el);
+  }
+  const nodes = semantic.concat(extra.filter((el) => !extra.some((o) => o !== el && el.contains(o))));
   const seen = new Set();
   const chosen = [];
   const skipped = [];
@@ -596,6 +663,30 @@ function look(skip) {
     n++;
   }
   return out.join(';');
+}
+
+// WHAT IS ON TOP OF A CONTROL WE COULD NOT PRESS. Runs INSIDE the page, so it is self-contained.
+// Returns null for every case that is NOT coverage — no such element, nothing to cover (zero area),
+// scrolled out of view, or the control itself answering the point. A name is returned only when a
+// DIFFERENT element owns the control's own centre, which is the page stating the defect itself.
+function coveredBy(a) {
+  const el = document.querySelector('[' + a.attr + '="' + a.i + '"]');
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  if (r.width < 1 || r.height < 1) return null;
+  const vw = document.documentElement.clientWidth || window.innerWidth;
+  const vh = document.documentElement.clientHeight || window.innerHeight;
+  // Off-screen is a different problem (and elementFromPoint would answer null anyway).
+  if (r.bottom <= 0 || r.right <= 0 || r.top >= vh || r.left >= vw) return null;
+  const x = Math.min(Math.max(r.left + r.width / 2, 1), vw - 1);
+  const y = Math.min(Math.max(r.top + r.height / 2, 1), vh - 1);
+  const top = document.elementFromPoint(x, y);
+  if (!top || top === el || el.contains(top) || top.contains(el)) return null;
+  const t = top.getBoundingClientRect();
+  const cls = typeof top.className === 'string' ? top.className.trim().split(/\\s+/)[0] : '';
+  const name = top.tagName.toLowerCase()
+    + (top.id ? '#' + String(top.id).slice(0, 24) : cls ? '.' + cls.slice(0, 24) : '');
+  return { name: name, full: t.width >= vw * 0.9 && t.height >= vh * 0.9 };
 }
 
 // Moves the mouse off the app and drops focus, so a hover or focus style is not read as a change.
@@ -692,6 +783,20 @@ function pickSearchWord(items) {
 async function freshPage(browser) {
   // Reduced motion (the one definition every lane uses — signInExplore.ts), plus the saved session.
   const page = await browser.newPage(Object.assign(${JSON.stringify(BROWSER_PAGE_OPTIONS)}, cfg.storageState ? { storageState: cfg.storageState } : {}));
+  // Remember every element the app gives a click-type listener, before any of its code runs, so collect()
+  // can find a div that acts as a button. A WeakSet, not an attribute: the app's DOM is not touched.
+  await page.addInitScript(() => {
+    try {
+      const kinds = new Set(['click', 'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'touchstart', 'touchend']);
+      const marked = new WeakSet();
+      Object.defineProperty(window, '__nbaiClickTargets', { value: marked });
+      const add = EventTarget.prototype.addEventListener;
+      EventTarget.prototype.addEventListener = function (type, listener, options) {
+        try { if (kinds.has(type) && this instanceof Element) marked.add(this); } catch (e) {}
+        return add.call(this, type, listener, options);
+      };
+    } catch (e) {}
+  });
   page.on('dialog', (d) => d.dismiss().catch(() => {}));
   page.on('popup', (p) => p.close().catch(() => {}));
   return page;
@@ -710,6 +815,20 @@ const wide = Object.assign({}, cfg, { maxClicks: 40 });
 // honour reduced motion) fails Playwright's stability wait however long it waits; for THAT failure
 // alone the click is dispatched on the element itself — the same element, no coordinates, so nothing
 // covering it can receive the press instead. Every other failure still means "could not be pressed".
+// A press that did not complete: OURS, unless the app is covering its own control. Writes the verdict.
+// "marked" is -1 whenever the failure happened before the control itself was tried, so the probe is not
+// even attempted there — a load that failed or a parent that could not be opened stays ours.
+async function judgeFailedPress(page, res, attr, marked, message, prefix) {
+  res.verdict = 'skipped';
+  res.note = pressFailureNote(prefix, message, cfg.causeSrc, cfg.causeFlags);
+  const intercepts = /intercepts pointer events/i.test(String(message || ''));
+  const over = marked >= 0 ? await page.evaluate(coveredBy, { attr: attr, i: marked }).catch(() => null) : null;
+  if (!over && !intercepts) return;
+  res.verdict = 'covered';
+  const what = over ? (over.full ? 'something covering the whole screen (' + over.name + ')' : over.name) : 'something else on the screen';
+  res.note = 'it cannot be ' + (prefix.indexOf('used') >= 0 ? 'used' : 'pressed') + ': ' + what + ' is on top of it';
+}
+
 async function press(page, i) {
   const loc = page.locator('[data-nbai-x="' + i + '"]').first();
   try {
@@ -735,6 +854,7 @@ async function pressOne(browser, target, discoverAgainst) {
   let armed = false;
   let navStatus = 0;
   let revealed = [];
+  let marked = -1;
   page.on('pageerror', (e) => { if (armed && res.errors.length < 3) res.errors.push(String(e && e.message || e).slice(0, 200)); });
   page.on('console', (m) => { if (armed && m.type() === 'error') { const t = String(m.text()); if (!noise.test(t) && res.errors.length < 3) res.errors.push(t.slice(0, 200)); } });
   page.on('response', (r) => { try { if (armed && r.request().isNavigationRequest() && r.frame() === page.mainFrame()) navStatus = r.status(); } catch {} });
@@ -747,13 +867,23 @@ async function pressOne(browser, target, discoverAgainst) {
       await press(page, parent.i);
       await settle(page);
     }
-    const again = await page.evaluate(collect, target.parentKey ? wide : cfg);
+    let again = await page.evaluate(collect, target.parentKey ? wide : cfg);
+    // A retry: press the control that DID change the screen first, unarmed (it was judged on its own press).
+    if (target.primerKey) {
+      const primer = again.chosen.find((c) => c.key === target.primerKey);
+      if (!primer) { res.note = 'the control it was to be tried after was not there on a fresh load'; await page.close().catch(() => {}); return { res, revealed }; }
+      await press(page, primer.i);
+      await settle(page);
+      again = await page.evaluate(collect, cfg);
+      res.primedBy = target.primerLabel;
+    }
     const hit = again.chosen.find((c) => c.key === target.key);
     if (!hit) { res.note = 'the control was not there on a fresh load'; await page.close().catch(() => {}); return { res, revealed }; }
     const before = await page.evaluate(measure);
     const beforeUrl = page.url();
     const lookBefore = hit.theme ? await restLook(page, hit.i) : null;
     armed = true;
+    marked = hit.i;
     await press(page, hit.i);
     await settle(page);
     const overlay = await page.locator('vite-error-overlay, #nextjs-portal, .react-error-overlay').count().catch(() => 0);
@@ -766,6 +896,12 @@ async function pressOne(browser, target, discoverAgainst) {
     else if (missingPage) { res.verdict = 'broken-link'; res.note = 'it opened a page that does not exist'; }
     else if (res.errors.length > 0) { res.verdict = 'error'; res.note = 'the app threw an error when it was pressed'; }
     else { res.verdict = 'ok'; res.note = moved ? 'it opened another page, which loaded' : 'it responded'; }
+    res.moved = moved;
+    if (res.verdict === 'ok' && res.primedBy) {
+      res.note = res.changed
+        ? 'it responded once "' + res.primedBy + '" had been pressed first'
+        : 'it changed nothing, even after "' + res.primedBy + '" was pressed first';
+    }
     // A light/dark switch must change the page's colours within a full cycle of presses (THEME_CONTROL).
     if (res.verdict === 'ok' && !moved && lookBefore !== null) {
       let presses = 1;
@@ -789,10 +925,9 @@ async function pressOne(browser, target, discoverAgainst) {
       if (next) revealed = next.chosen.filter((c) => !discoverAgainst.has(c.key));
     }
   } catch (e) {
-    // The press itself could not complete (covered, detached, timed out). That is our instrument,
-    // not the app — reported as skipped, never as a failure.
-    res.verdict = 'skipped';
-    res.note = pressFailureNote('could not be pressed: ', String(e && e.message || e), cfg.causeSrc, cfg.causeFlags);
+    // The press itself could not complete. That is our instrument (detached, our own clock) and stays
+    // skipped — UNLESS the page says something is on top of the control, which is the app's own defect.
+    await judgeFailedPress(page, res, 'data-nbai-x', marked, String(e && e.message || e), 'could not be pressed: ');
   }
   armed = false;
   await page.close().catch(() => {});
@@ -806,6 +941,7 @@ async function narrowOne(browser, target) {
   const res = { type: 'press', kind, label: target.label, tag: target.tag, verdict: 'skipped', note: '', errors: [], changed: false };
   const page = await freshPage(browser);
   let armed = false;
+  let marked = -1;
   page.on('pageerror', (e) => { if (armed && res.errors.length < 3) res.errors.push(String(e && e.message || e).slice(0, 200)); });
   page.on('console', (m) => { if (armed && m.type() === 'error') { const t = String(m.text()); if (!noise.test(t) && res.errors.length < 3) res.errors.push(t.slice(0, 200)); } });
   try {
@@ -834,6 +970,7 @@ async function narrowOne(browser, target) {
       tried = pickSearchWord(items);
       if (!tried) { res.note = 'every item on the list shares the same words, so no search could narrow it'; await page.close().catch(() => {}); return res; }
       armed = true;
+      marked = hit.i;
       await loc.fill(tried, { timeout: 4000 });
       changed = await waitChange(2500);
       if (!changed) { await loc.press('Enter', { timeout: 2000 }).catch(() => {}); changed = await waitChange(1500); }
@@ -841,6 +978,7 @@ async function narrowOne(browser, target) {
       const choices = await loc.evaluate((s) => Array.from(s.options).filter((o) => !o.disabled && o.value !== s.value).map((o) => ({ v: o.value, t: (o.text || '').trim() })));
       if (!choices.length) { res.note = 'it has no other option to choose'; await page.close().catch(() => {}); return res; }
       armed = true;
+      marked = hit.i;
       for (const c of choices.slice(0, 2)) {
         tried = c.t || c.v;
         await loc.selectOption(c.v, { timeout: 4000 });
@@ -865,8 +1003,7 @@ async function narrowOne(browser, target) {
       else { res.verdict = 'unresponsive'; res.note = (kind === 'type' ? 'typing "' : 'choosing "') + tried + '" changed nothing on the screen'; }
     }
   } catch (e) {
-    res.verdict = 'skipped';
-    res.note = pressFailureNote('could not be used: ', String(e && e.message || e), cfg.causeSrc, cfg.causeFlags);
+    await judgeFailedPress(page, res, 'data-nbai-n', marked, String(e && e.message || e), 'could not be used: ');
   }
   armed = false;
   await page.close().catch(() => {});
@@ -899,10 +1036,12 @@ try {
     const second = [];
     const queued = new Set();
     let outOfTime = false;
+    const firstPressed = [];
     for (const target of plan.chosen) {
       if (Date.now() - started > cfg.budgetMs - 8000) { outOfTime = true; break; }
       const { res, revealed } = await pressOne(browser, target, firstScreen);
       say(res);
+      firstPressed.push({ target, res });
       let taken = 0;
       for (const c of revealed) {
         if (taken >= cfg.perParent || queued.has(c.key)) continue;
@@ -910,6 +1049,14 @@ try {
         second.push({ key: c.key, label: c.label, tag: c.tag, parentKey: target.key, via: target.label });
         taken++;
       }
+    }
+    // A press that changed nothing on a fresh screen is tried again after one that changed it (MAX_PRIMED_RETRIES).
+    const primer = firstPressed.find((p) => p.res.verdict === 'ok' && p.res.changed && !p.res.moved && !p.target.theme);
+    const quiet = primer ? firstPressed.filter((p) => p !== primer && p.res.verdict === 'ok' && !p.res.changed && !p.target.theme) : [];
+    for (const p of quiet.slice(0, Number.isFinite(cfg.maxPrimed) ? cfg.maxPrimed : 0)) {
+      if (outOfTime || Date.now() - started > cfg.budgetMs - 8000) { outOfTime = true; break; }
+      const { res } = await pressOne(browser, Object.assign({}, p.target, { primerKey: primer.target.key, primerLabel: primer.target.label }), null);
+      say(res);
     }
     // The search boxes and sort menus of the first screen, before any inner screen.
     for (const target of (plan.narrow || [])) {

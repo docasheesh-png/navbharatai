@@ -53,7 +53,9 @@ describe('the setup line reports the outcome, not the intent', () => {
     // Both halves matter: "had an id and STILL came up cold" is the interesting case, and it is only
     // visible when the two are reported separately rather than conflated into one word.
     expect(route).toContain('had-resume-id=${resumeSandboxId ? ');
-    expect(route).toContain("sandbox=${sandboxOriginOf(actuator, workspaceId) ?? 'unreported'}");
+    // Through setupOriginText, which also names how the machine it found came up (autopsy f496c75b).
+    expect(route).toContain("sandbox=${setupOriginText(sandboxOriginOf(actuator, workspaceId), sandboxSessionOf(actuator, workspaceId), Date.now())}");
+    expect(route).toContain("const base = origin ?? 'unreported';");
   });
 
   it('an actuator that cannot answer says "unreported" rather than guessing', () => {

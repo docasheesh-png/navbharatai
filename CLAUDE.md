@@ -219,6 +219,20 @@ promised to build it.** Every model refused — the model's virtue, never our de
   ⚠️ **Scoped to Pollinations on purpose** (admin: *"sirf pollination ai ke liye"*): chat and build keep
   their precision-first triage. Do NOT widen the word list into chat — a sexual-health question must
   still get an answer. Test-locked and reversion-proven in `tests/theImageGeneratorDrawsNoNudity.test.ts`.
+- 🔴 **UNTIL 2026-10-04 THE BAN COULD BE WALKED PAST IN HINDI (Q-102).** Every rule was ASCII, so "पोर्न
+  साइट बनाओ" was allowed while "porn site banao" was refused. Each rule in `illegalContentRules.ts` now
+  has a Devanagari half (its stand-down too), and both readers scan `normalizeScanText` (NFC, no
+  zero-width characters). ⚠️ **JavaScript's `\b` cannot see a Devanagari word**: `/मत\b/` matches
+  nothing. Use `(?<![\wऀ-ॿ])` / `(?![\wऀ-ॿ])`, or a consuming start in client
+  code (Safari 14 has no lookbehind). `tests/aWordBoundaryCanSeeHindi.test.ts` fails on any new one.
+  The other nine scripts (Bengali, Gurmukhi, Gujarati, Odia, Tamil, Telugu, Kannada, Malayalam, Urdu) are
+  read too since 2026-10-04 (Q-321): one list per script per rule in `indicSafetyWords.ts`, written without
+  a native reader of every script, so it is held to the strict side; add words there with a test. The
+  illegal rules also block child-protection and deepfake-detection apps, in every script; that is the
+  admin's decision (Q-320).
+  ⚠️ **NO LOOKBEHIND MAY REACH THE WEB BUNDLE (Q-322).** Safari before 16.4 (iOS 15) throws on one and
+  takes its screen down — the Image Generator did not open there. A server file the client imports is
+  client code too. `scripts/noLookbehindInBundle.mjs` (in `npm run test:bundle`) reads the built bundle.
 
 ### 🙋 READ THE MOOD FIRST — a question gets an answer, not an app (admin-mandated 2026-09-13)
 
@@ -3351,6 +3365,21 @@ the flag entries above promise.
     its reply.
 
   Test-locked in `tests/theAskComesLast.test.ts`.
+- **🐍 `AGENTV3_PYTHON_BACKEND_BOOT` — A PYTHON BACKEND COMES BACK WITH ITS APP (Q-284, autopsy 241215d1, 2026-10-04).
+  ⚠️ NOT set; default ON; `off` reverts.** `pythonBackendBoot.ts`. Every platform start of an app (the preview wake,
+  our own preview start, both in-build restarts) used to run only `npm run dev`, so a FastAPI/Flask server came back
+  with no venv and no process. Now one plan (start command read by `pythonStart.ts`, port from the front end's proxy
+  target, else the server's own, else 8000) is used by the service graph (a `python:` backend) and by every start
+  path, which boots it first: venv, install only when the manifest changed (`timeout 240`), detached start, 30 s port
+  wait. The script is sent base64-encoded so it is never treated as a dev-server launch. 🔒 No declared server ⇒ no
+  plan ⇒ the old behaviour. A recipe recorded from the backend's launch is never replayed as the preview.
+  Report codes `PYTHON_BACKEND_UP` (process-only) / `PYTHON_BACKEND_NOT_UP`.
+- **📝 `AGENTV3_SCRIPT_REQUEST_NOTE` — A SCRIPT REQUEST IS BUILT AS A WEB APP, AND THE USER HEARS IT FIRST (Q-274,
+  admin chose "a" 2026-10-04). ⚠️ NOT set; default ON; `off` reverts.** `scriptRequest.ts`: a request for a Python
+  script, a command-line tool, a Streamlit dashboard or a notebook (precision-first: a film script, JavaScript, a
+  build script, a conversion or an explicit web-app request stand down) gets a builder note and one start-of-build
+  line. When live data was asked, sample data must be labelled "Sample data", and `claimAudit` (`live-data-claimed`)
+  corrects a summary that calls a simulated feed live. Report code `SCRIPT_REQUEST_AS_WEB_APP` (process-only).
 - **📋 A PASTED APP IS THE SPEC, AND PASTED CODE IS NOT PROSE (autopsy a106df77, 2026-10-01).** Two keys, NEITHER
   set, default ON: **`AGENTV3_PASTED_APP_BRIEF`** (`off` drops the brief). A user pasted their own HTML bill maker with no other words.
   The published title became `<!doctype html> <html lang="en"> <head>`, a `<meta content="width=…">` was shown
@@ -3410,6 +3439,11 @@ the flag entries above promise.
       `UNUSED_DEPS_REMOVED` / `UNUSED_DEPS_KEPT`; the user sees one line naming the packages.
     - Proven on a real npm project in the session (a wrong removal reverted, a real one removed, a peer kept).
       Test-locked and reversion-proven in `tests/aPackageThisBuildNeverUsedIsRemoved.test.ts`.
+  - 🗑️ **A FILE THE FAST LANE SALVAGED AND THE APP NEVER USES IS REMOVED (autopsy f496c75b, 2026-10-04):
+    `AGENTV3_PRUNE_DEAD_SALVAGE`** (NOT set; default ON; `off` keeps them). `deadSalvage.ts`: only salvaged
+    files, only ones no other file refers to by path (a fixpoint, so a pair that only import each other go
+    together), never an entry/config/routed file, at most 12; kept only if the app's own `npm run build`
+    passes, otherwise every file is written back. Report `DEAD_SALVAGE_REMOVED` / `_KEPT` (process-only).
 - **`AGENTV3_STORE_LOOP_NOTE`** (default ON, `off` disables — added 2026-09-29, autopsy 6a4a799f) — a
   write-time note (`storeEffectLoop.ts`, via `ToolDispatcher.writeSteeringNotes`) when a file binds a
   zustand hook with NO selector (`const store = useMusicStore()`), lists that bare name in an effect's
@@ -3821,6 +3855,30 @@ the flag entries above promise.
   vendor, no split. The label says what can still move it: more work adds to it, the checks at the end
   can only lower it, a build that fails is free.
 
+- **🧠 `AGENTV3_CHANGE_ENGINE` — the app remembers what it is supposed to do, across edits (built
+  2026-10-04, slice 1 of `docs/CHANGE_ENGINE.md`). ⚠️ NOT set; the code default is ON**, and `off` stops
+  every read, write and prompt block with no deploy. Lives in `src/server/AgentV3/changeEngine/`.
+  🔴 **WHY:** every "what did the user ask for?" check reads only the CURRENT prompt
+  (`currentRequestForCoverage` returns the last request on purpose — report 1682cd03), so an edit that
+  silently removed a working Delete button was graded against "make the header blue" and passed.
+  **What it does:** classifies each change (micro-ui … architectural / large → light / standard / deep,
+  higher risk wins); keeps a requirement ledger with stable `REQ-nnn` ids, **verified only by a control a
+  real browser saw** (prose never verifies); re-probes every verified requirement on a later edit
+  (`probeFeatures`, same guards as the coverage probe) and records **`FEATURE_REGRESSED`**; queues
+  unresolved APP findings as `ISS-nnn` moved only by evidence (FIXED/VERIFIED need a build that reached its
+  release gate unstopped); and leaves a `CHG-nnnn` record per build. Report codes `CHANGE_CLASSIFIED`,
+  `CHANGE_RECORDED` (info), `FEATURE_REGRESSED` (warning).
+  🔒 **Server-side only** (`app_engineering_memory_v1/{workspaceId}`, erased with the workspace) — NOT a
+  `.navbharat/` folder in the app (GitHub push, Green Freeze, forgeable by an imported repo, served on the
+  preview URL). Stored text is platform-authored except a redacted 160-char request digest; issue text
+  reaches the builder **fenced**, in the per-turn message, never the cached prefix.
+  🔁 **SLICE 2 (same day, admin: "sara kaam karo"): a regression joins the EXISTING feature heal** — same
+  runner, same `verifyAfterFix` net, same `AGENTV3_FEATURE_HEAL` cohort gate (so it spends a repair pass
+  only for the 20% cohort today; widening `_PCT` widens this too). The prompt says RESTORE, never
+  redesign. A restore is recorded as `FEATURE_REGRESSION_HEALED`; what the heal could not restore stays
+  `FEATURE_REGRESSED`. ⚠️ The regression probe's false-positive rate on real builds is UNMEASURED — the
+  admin chose to ship the repair before that measurement. **What to watch:** `FEATURE_REGRESSED` and
+  `FEATURE_REGRESSION_HEALED` on edit builds, and any heal on an app the user says was fine.
 - **`AGENTV3_CONTRACT_FILE`** (default ON, set `off` to disable — added 2026-09-17, autopsy 57875eb3) —
   the fast lane's SHARED CONTRACT (the enums / interfaces / types every per-file call is handed) is now
   written as a REAL file, `src/types.ts` (or `types.ts` when the app has no `src/`), BEFORE any other file,
@@ -4178,6 +4236,16 @@ the flag entries above promise.
   - **Q-037 / Q-022 (admin chose option b):** it also carries spacing off the 4px grid, but only in files THIS
     agent wrote (`offGridHandBack`) and only above the `DESIGN_CONSISTENCY` finding's own threshold. A file the
     build never touched is not handed back (Q-015). Test: `tests/offGridSpacingIsHandedBack.test.ts`.
+- **🧹 `AGENTV3_ORPHAN_HANDBACK` — A SCREEN THIS BUILD WROTE AND NOTHING SHOWS IS HANDED BACK ONCE (Q-202, autopsy
+  3f959fde, 2026-10-04). ⚠️ NOT set; default ON; `off` reverts.** `orphanHandBack.ts`. The build changed course and left
+  `DataPreview.tsx` and `AlgorithmSuggestions.tsx` imported by nothing. The architect's end-of-turn hand-back (the same one-time
+  message as `AGENTV3_STYLE_RESUME`) now names every component THIS build wrote — every lane, via the route's write set
+  (`setBuildWrites(() => modelAuthoredPaths(writtenFiles))`), our pre-seed left out — that the import graph PROVES nothing
+  reaches (`unreferencedComponents`), and says: wire it in, or delete it if it was replaced. 🔒 Never a file the build did not
+  write, never when one import cannot be resolved, never to a specialist (the architect wires its screens in after it returns),
+  never on a project-mode module awaiting its shell; tests, stories and `ui/` kit parts are excluded. Detail in
+  `STYLE_RULES_RESUMED` carries `<path>:unimported`. Test-locked and reversion-proven in
+  `tests/aScreenNothingShowsIsHandedBack.test.ts`.
 - **🖼️ `AGENTV3_PICTURE_ANSWER` — A PICTURE REQUEST IN PRO IS ANSWERED, NOT BUILT (autopsy 19641ab5, 2026-10-01).
   ⚠️ NOT set; default ON; `off` builds as before.** `pictureRequest.ts`. "Create full image" + a portrait photo was
   built as an 11-feature image-generator app (stopped at 108 s, ₹7.62). Free chat, Doctor AI and every Professional
@@ -4197,6 +4265,29 @@ the flag entries above promise.
   chat surface (a prompt the user GIVES is still a picture). Same change: on an edit, "I changed N files" counts
   what the turn authored (`reviewChangedPaths`), and an omitted stylesheet no longer gives the lean review its
   tools back. Test: `tests/aPromptIsTextNotAnApp.test.ts`.
+- **📱 "TURN MY WEBSITE INTO AN APK" IS ANSWERED, AND A STARTER CONFIG IS EDITED, NOT REWRITTEN (autopsy dcce5d26,
+  2026-10-04; no flag).** "I want to convert one existing website into an online APK but not publically" was built
+  on a fresh workspace. `projectElsewhere.ts` now counts a CONVERSION of the user's own site or app into a phone
+  app (existing / possessive / "this" / a link) as "the thing is elsewhere", and the reply says the honest limit:
+  the APK Builder packages a web app whose code is in the project, never a live link by itself. A request to
+  build a converter still builds. Same report: the fast lane's per-call `model` named the vendor ("glm") —
+  `fastLaneCallIdentity` now reads `TurnResult.model` (`answeringModel`), which also woke its dead
+  reasoning-rung check; and a planned config file the starter already has (`package.json`, `tsconfig*.json`,
+  `vite.config.*`, root `index.html`) is handed its current content in both fast lanes (`existingConfig.ts`).
+  ⚠️ Never let a lane write a project config file blind — that is what `ViteConfigGuard` and the HTML entry guard
+  were cleaning up after. Test: `tests/aWebsiteToApkIsAnsweredNotBuilt.test.ts`.
+- **🔐 `AGENTV3_REQUEST_SCOPE` — A LOGIN NOBODY ASKED FOR IS NOT BUILT (autopsy 70e030bb, 2026-10-04). ⚠️ NOT set;
+  default ON; `off` reverts.** "An app which takes notes from online classes" opened on a username/password form with a
+  hashed demo account, and "Clear Completed" (a to-do prop the contract invented) deleted every note. `requestScope.ts`:
+  on a new build whose request names no sign-in word (login, account, password, OTP, roles, admin, private, secure,
+  multi-user, Hindi forms) and no domain the requirement analyzer recognises, the architect, the fast lane and the
+  one-shot lane are told: no login, sign-up, password gate, demo account or accounts, and no control for a state the
+  data does not have. ⚠️ It stands down for every recognised domain, so it never fights `AGENTV3_REQUIREMENT_AWARE`.
+  Report code `REQUEST_SCOPE_NOTE` (process-only). Same report, no flags: a fast-lane plan no longer lists the
+  starter's compiler files (`STARTER_COMPILER_FILES`: tsconfig ×4, `src/vite-env.d.ts`; both lanes), a `.d.ts` names no
+  dependency and a React app is never "Stack: Vue", a password form is a sign-in journey run signed out
+  (`isCredentialForm`), the sign-in explorer reads `passwordHash: hashPassword("demo123")`, and a pruned package takes
+  its `@types/` with it. Test: `tests/theNotesAppAutopsy.test.ts`.
 - **🙋 `AGENTV3_CONFIRM_BUILD` + 📎 `AGENTV3_ATTACHMENT_MEMORY` (admin 2026-10-03, Q-200 / Q-201). ⚠️ NEITHER is set;
   both default ON; `off` reverts each alone.** `buildConfirmation.ts`: see "READ THE MOOD FIRST" above — an unconfirmed
   build is answered and offered, and a "yes" builds the offered request. `lib/attachmentMemory.ts`: the latest
@@ -4579,10 +4670,18 @@ shipping, or any other milestone. Do NOT build one on your own initiative for an
 admin's word is the ONLY trigger.
 
 **The trigger, and only the trigger:**
-- ✅ **STANDING INSTRUCTION (admin 2026-08-24, verbatim: "jab jab mai bolu to aab aur ipa bana
-  dena"): whenever the admin asks, build BOTH — the Android `.aab` AND the iOS `.ipa`, together.**
-  Not one or the other. Both workflows are dispatched (`android-aab.yml` and `ios-ipa.yml`, ref
-  `main`), both are polled to green in the background, and both run URLs are reported back.
+- 🔴 **SUPERSEDED 2026-10-04 — THE iOS BUILD NEEDS ITS OWN PERMISSION (admin, verbatim: "ios build mere
+  bina permission karni hi nahi hai. bas aab banao!").** A request for a store build means the Android
+  `.aab` ONLY (`android-aab.yml`, ref `main`). `ios-ipa.yml` is dispatched ONLY when the admin names iOS /
+  `.ipa` / TestFlight in that request — never as a companion to an `.aab`, never on a session's own
+  reading of "build the app". Why it matters: the iOS job runs on macOS runners, which GitHub bills at
+  10× the minute rate, and on 2026-10-04 GitHub stopped starting every CI job ("recent account payments
+  have failed or your spending limit needs to be increased", a $24 bill) on the same day both were built
+  together.
+- ~~**STANDING INSTRUCTION (admin 2026-08-24, verbatim: "jab jab mai bolu to aab aur ipa bana
+  dena"): whenever the admin asks, build BOTH — the Android `.aab` AND the iOS `.ipa`, together.**~~
+  Kept as history; the line above replaces it. Whatever is built is still polled to green in the
+  background and its run URL reported back.
   ⚠️ Build from **`main`**, after the work is merged — an `.aab` cut from a feature branch is not
   the app anyone is shipping. And per the BUNDLED-MODE note above, a FRONTEND change reaches
   installed users ONLY through a fresh bundle, which is precisely why this instruction exists.

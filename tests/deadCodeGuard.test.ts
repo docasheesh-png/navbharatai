@@ -53,6 +53,11 @@ function entryPoints(): string[] {
     const p = `scripts/${f}`;
     if (EXTS.includes(extname(p)) && statSync(join(ROOT, p)).isFile()) entries.push(p);
   }
+  // Class 1, same reasoning: a root build config (vite.config.ts) is run by the build, and what it
+  // imports ships in every bundle (Q-322: the autolink patch the web build applies).
+  for (const f of readdirSync(ROOT)) {
+    if (/\.config\.(?:ts|mts|js|mjs)$/.test(f) && statSync(join(ROOT, f)).isFile()) entries.push(f);
+  }
   return entries;
 }
 

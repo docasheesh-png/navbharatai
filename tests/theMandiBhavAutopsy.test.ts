@@ -191,8 +191,11 @@ describe('3 · a press that could not complete says why', () => {
   it('🔒 the runner embeds this function by value and uses it for both kinds of skip', () => {
     const mod = clickExplorerModule({ causeSrc: PRESS_FAILURE_CAUSE.source, causeFlags: PRESS_FAILURE_CAUSE.flags }, 'const chromium = null;');
     expect(mod).toMatch(/const pressFailureNote = function pressFailureNote\(/);
-    expect(mod).toContain("pressFailureNote('could not be pressed: ', String(e && e.message || e), cfg.causeSrc, cfg.causeFlags)");
-    expect(mod).toContain("pressFailureNote('could not be used: ', String(e && e.message || e), cfg.causeSrc, cfg.causeFlags)");
+    // Since autopsy 8b8743a3 both lanes route their failure through ONE judge, which writes the note —
+    // so the cause line still reaches both, and the coverage probe cannot reach only one of them.
+    expect(mod).toContain("res.note = pressFailureNote(prefix, message, cfg.causeSrc, cfg.causeFlags)");
+    expect(mod).toContain("judgeFailedPress(page, res, 'data-nbai-x', marked, String(e && e.message || e), 'could not be pressed: ')");
+    expect(mod).toContain("judgeFailedPress(page, res, 'data-nbai-n', marked, String(e && e.message || e), 'could not be used: ')");
     expect(mod).not.toMatch(/'could not be pressed: ' \+ String/);
   });
 });

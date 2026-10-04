@@ -9,7 +9,7 @@ import { applyStrictTrial } from '../../../strictTrial';
 import { IEngineerActuator, BackendProvisionResult } from './IEngineerActuator';
 import { BackendProvisioner } from '../BackendProvisioner';
 import { usageTracker } from '../UsageTracker';
-import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure, buildStillStartingWaitCommand, shouldWaitOnStartingServer, STILL_STARTING_EXTRA_SECONDS } from './devServerHost';
+import { ensureHostBinding, buildPreKillPortCommand, buildPortWaitCommand, pinDevServerPort, detectDevPort, shouldReprobeBoundPort, shouldSkipDevServerLaunch, stripDevServerBackgrounding, dropProbesAfterDevServer, buildDepsStaleCheckCommand, isLongRunningCommand, disableDevServerAutoOpen, redirectDevServerOutput, resolvePmScript, detectDevFramework, isNodeServerCommand, buildHttpLivenessCommand, backgroundedServerSmokeCheckMs, DEV_SERVER_LOG_PATH, devServerWatchdogCommand, isTransientNpmFsFailure, buildStillStartingWaitCommand, shouldWaitOnStartingServer, STILL_STARTING_EXTRA_SECONDS, buildPrebundleStaleCheckCommand, VITE_PREBUNDLE_DIR } from './devServerHost';
 import { buildPortSweepCommand, parsePortSweep, portCandidates, shouldSweep, sweepFoundSummary } from './portSweep';
 import { appPortsFrom } from '../../../appPorts';
 import type { DevFramework } from './devServerHost';
@@ -80,7 +80,7 @@ import { injectPreviewBridge, withoutPreviewBridge, PREVIEW_BRIDGE_MARKER } from
 import { browseConsoleCaptureEnabled, CANCELLED_REQUEST_RE } from '../../../renderCheckConsole';
 import { gunzipSync } from 'zlib';
 import { LIST_PRUNE_DIRS, isListPrunedPath } from '../../../../lib/generatedDirs';
-import { NPM_INSTALL_LOCK } from '../../../tscCommand';
+import { NPM_INSTALL_LOCK, PRIME_NODE_MODULES } from '../../../tscCommand';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -815,7 +815,9 @@ export class E2BActuator implements IEngineerActuator {
         const pkg = typeof pkgRaw === 'string' ? pkgRaw : (pkgRaw ? new TextDecoder().decode(pkgRaw as Uint8Array) : '');
         // Only prime for React-family apps — a Vue/Next/Python workspace must NOT get a React tree.
         if (/["']react["']\s*:/.test(pkg)) {
-          await sandbox.commands.run(`cp -a ${warmDir} ${WORKSPACE_ROOT}/node_modules`, {
+          // Staged and RENAMED into place (Q-304): the typecheck's own primer does the same, and a
+          // plain `cp -a` racing it would copy into an existing node_modules (node_modules/node_modules).
+          await sandbox.commands.run(PRIME_NODE_MODULES, {
             cwd: WORKSPACE_ROOT, timeoutMs: 60_000,
           }).catch(() => { /* copy is best-effort — a failure just falls through to a full install */ });
         }
@@ -2143,7 +2145,15 @@ export class E2BActuator implements IEngineerActuator {
         if (alreadyUp) {
           const stale = await sandbox.commands.run(buildDepsStaleCheckCommand(), { cwd: WORKSPACE_ROOT, timeoutMs: 8000 })
             .then((r) => r.stdout.includes('STALE')).catch(() => false);
-          if (shouldSkipDevServerLaunch(alreadyUp, stale)) {
+          // A package installed after the running server pre-bundled its dependencies (autopsy 981ce4cc):
+          // the server keeps serving the OLD copy, so it is relaunched with its cache cleared.
+          const prebundleStale = await sandbox.commands.run(buildPrebundleStaleCheckCommand(), { cwd: WORKSPACE_ROOT, timeoutMs: 8000 })
+            .then((r) => r.stdout.includes('PREBUNDLE_STALE')).catch(() => false);
+          if (prebundleStale) {
+            await sandbox.commands.run(`rm -rf ${VITE_PREBUNDLE_DIR}`, { cwd: WORKSPACE_ROOT, timeoutMs: 15_000 }).catch(() => null);
+            console.log('[E2B] a dependency changed after the dev server pre-bundled its packages — relaunching it');
+          }
+          if (shouldSkipDevServerLaunch(alreadyUp, stale, prebundleStale)) {
             const boundPort = port;
             // A server we ADOPTED needs the keepalive exactly as much as one we started — arguably
             // more, since nobody in this process has been watching it so far.

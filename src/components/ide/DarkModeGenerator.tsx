@@ -105,7 +105,8 @@ function toDarkColor(hex: string, theme: PresetTheme = DEFAULT_THEME): string {
 function detectColors(html: string, theme: PresetTheme = DEFAULT_THEME): ColorMapping[] {
   const hexRegex = /#([0-9a-fA-F]{3,6})\b/g;
   const bgRegex = /background(?:-color)?\s*:\s*([^;}"'\n]+)/gi;
-  const textRegex = /(?<![a-z-])color\s*:\s*([^;}"'\n]+)/gi;
+  // A consuming start, not a lookbehind (Q-322: Safari before 16.4 cannot parse one). Only m[1] is read.
+  const textRegex = /(?:^|[^a-z-])color\s*:\s*([^;}"'\n]+)/gi;
 
   const colorUsage = new Map<string, string>();
 

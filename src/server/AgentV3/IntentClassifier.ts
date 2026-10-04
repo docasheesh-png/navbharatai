@@ -238,8 +238,23 @@ export function asksForWrittenText(lower: string): boolean {
  * lock: the reader decides with the conversation and the project in view. PURE.
  */
 export function namesTextNotScreen(lower: string): boolean {
-  return CONTENT_NOUN.test(lower) && !mentionsBuildNoun(lower) && !SCREEN_PART.test(lower);
+  return (CONTENT_NOUN.test(lower) || FILE_NOUN.test(lower)) && !mentionsBuildNoun(lower) && !SCREEN_PART.test(lower);
 }
+
+/**
+ * 🔴 AUTOPSY 981ce4cc (2026-10-04). "Edit pdf", with a scanned letter attached, was read as `edit_existing`
+ * at HIGH because "edit" is an edit verb. HIGH counts as the message confirming a build, so the chat (which
+ * held only our starter) ran 98 model calls building a PDF annotation app the user never asked for, and
+ * published it broken. The user's object was their FILE, not an app.
+ *
+ * The same class as `CONTENT_NOUN` above (an edit verb whose object is not a screen), one noun family
+ * further: a document, a picture or a sheet the user has. It only costs the lock: the intention reader
+ * still decides with the project in view, and in a chat with no app of the user's the build is offered,
+ * not started (`buildConfirmation.ts`). "image" is deliberately absent: it is a SCREEN_PART ("change the
+ * hero image"). PURE.
+ */
+const FILE_NOUN =
+  /\b(?:pdfs?|docx?|word (?:file|doc|document)|documents?|xlsx|xls|csv|excel(?: file| sheet)?|spreadsheets?|photos?|pics?|pictures?|scans?|scanned (?:copy|file|page|letter)|certificates?|marksheets?|attachments?|attached file|file i (?:sent|attached|uploaded))\b/;
 
 export function firstNewBuildOrder(lower: string): string | undefined {
   const listed = firstSignalWord(lower, NEW_BUILD_SIGNALS);

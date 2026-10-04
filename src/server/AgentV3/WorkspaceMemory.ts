@@ -119,6 +119,15 @@ interface FileFacts {
 }
 
 const MAX_EPISODES = 500;
+/**
+ * How much of the user's own request is remembered. 🔴 It was 2,000, the cap for every episode, while the
+ * planner reads up to 4,000 of an earlier request (`PLANNING_EARLIER_REQUEST_MAX`). Autopsy 241215d1: a
+ * 2,420-character request was continued with "Continue from where you left off…", and the continue turn
+ * received its first 2,000 characters — the risk-metric and architecture rules at the end were gone
+ * before any planner, check or builder could read them. Two limits for one thing; this one now matches.
+ * Other episode kinds keep 2,000 (the persisted document is capped, see FirestoreWorkspaceMemoryStore).
+ */
+export const REQUEST_EPISODE_MAX = 4_000;
 const isCode = (f: string): boolean => /\.(t|j)sx?$/.test(f);
 // A React component name is PascalCase: starts uppercase AND has a lowercase
 // letter (so ALL_CAPS constants like PRIMARY are not mistaken for components).
@@ -467,7 +476,7 @@ export class WorkspaceMemory {
   // instead of re-stamping it to now() — otherwise recency ranking in recall() treats every restored
   // episode as brand-new, inflating old errors/lessons and corrupting cross-session confidence.
   private episode(kind: EpisodeKind, text: string, file?: string, ts?: number, resolvedAt?: number, lane?: RequestLane): void {
-    const ep: Episode = { ts: typeof ts === 'number' && ts > 0 ? ts : Date.now(), kind, text: text.slice(0, 2000), file };
+    const ep: Episode = { ts: typeof ts === 'number' && ts > 0 ? ts : Date.now(), kind, text: text.slice(0, kind === 'request' ? REQUEST_EPISODE_MAX : 2000), file };
     // Set only when real: an `undefined` field is a value Firestore refuses to store.
     if (typeof resolvedAt === 'number' && resolvedAt > 0) ep.resolvedAt = resolvedAt;
     if (lane === 'chat' || lane === 'build') ep.lane = lane;

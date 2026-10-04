@@ -68,6 +68,10 @@ on:
         description: 'Include native "Sign in with Apple" (default ON — it is a shipped capability; untick only to intentionally build without it)'
         type: boolean
         default: true
+      crash_test:
+        description: 'TEST ONLY: include the controlled Crashlytics test tools (window.__nbaiCrashTest). Refused together with upload — install the artifact on a test device.'
+        type: boolean
+        default: false
       changelog:
         description: 'TestFlight "What to Test" note for this build (optional — defaults to the build number)'
         type: string
@@ -154,7 +158,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Pre-flight — a crash-test build is never uploaded
+        if: ${{ inputs.crash_test }}
+        env:
+          UPLOAD: ${{ inputs.upload }}
+        run: |
+          if [ "$UPLOAD" = "true" ]; then
+            echo "::error::crash_test builds contain controlled crash tools and cannot be uploaded to TestFlight. Untick upload."
+            exit 1
+          fi
+          echo "::warning::CRASH-TEST BUILD — for verifying Crashlytics on a test device only. Do not distribute."
+
       - name: Build the web bundle
+        env:
+          VITE_CRASH_TEST: ${{ inputs.crash_test && '1' || '' }}
         run: npm run build
 
       # The ios/ native project is NOT committed (it is generated per-machine). Generate it fresh here.

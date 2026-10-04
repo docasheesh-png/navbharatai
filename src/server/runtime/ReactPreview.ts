@@ -16,6 +16,7 @@
  * Pure + dependency-free (string in → string out) → unit-testable.
  */
 import { jsxDevRuntimeUrl } from '../../lib/jsxDevRuntimeFacade';
+import { extractHonestyBanner } from '../../lib/honestyBanner';
 import { NON_RUNTIME_FILE_SOURCE } from '../../lib/previewNonRuntimeFiles';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -386,6 +387,10 @@ export function buildReactPreview(vfs: VirtualFileSystem, origin?: string, works
   const twFlavour = detectTailwindFlavour(twProbe);
   const usesTailwind = twFlavour != null;
   const tailwindCdn = tailwindHeadTags(twFlavour);
+  // The red "DEMO — not real" block the platform put into the app's index.html (fakeFeatureScan.ts): this
+  // shell builds its own <body>, so it has to carry the block, or the in-browser preview — the screen the
+  // user looks at most — would show a demo login with no line on it. '' when the app has none.
+  const honestyBanner = extractHonestyBanner(vfs.readText('index.html'));
   const twCss = tailwindStyleBody(twFlavour, css);
   const styleTag = usesTailwind
     ? `<style id="__nbai-tw" type="text/tailwindcss">\n${twCss}\n</style>`
@@ -1086,6 +1091,7 @@ ${previewBridgeSource('in-browser')}
 })();
 </script>
 ${VISUAL_EDITOR_SCRIPT}
+${honestyBanner}
 </body>
 </html>`;
 }

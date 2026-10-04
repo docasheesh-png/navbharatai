@@ -78,7 +78,7 @@ function App() {
             </button>
           ))}
         </div>
-        <div className="row">
+        <div className="row" style={{ flexWrap: 'wrap' }}>
           <span className="muted">Shape</span>
           {SHAPES.map((s) => (
             <button
@@ -111,7 +111,7 @@ function App() {
 
       {error && !isGenerating && (
         <div className="alert alert-danger stack" role="alert" style={{ marginTop: 16 }}>
-          <span>{error}</span>
+          <span style={{ whiteSpace: 'pre-line' }}>{error}</span>
           <button type="button" onClick={retry}>Try again</button>
         </div>
       )}

@@ -61,7 +61,32 @@ export const CORS_RULE =
   'When CORS is genuinely needed, `origin` is an explicit allow-list (read from an env var), never `true` or "*" together with `credentials: true`.';
 export const SEED_PASSWORD_RULE =
   '- Seed/demo users: compute each password hash at startup with the app\'s own hash function (e.g. `passwordHash: hashPassword(\'demo123\')`) — ' +
-  'never paste a hash string as a literal, and state the demo login in your reply.';
+  'never paste a hash string as a literal, and state the demo login in your reply. A seeded account is never the app\'s LOGIN: it may ' +
+  'exist only behind the red on-screen demo label the rule below requires.';
+
+/**
+ * 🔴 NO FAKE BUTTON, NO FAKE FEATURE — UNBREAKABLE (admin-mandated 2026-10-04, verbatim: "koi bhi function
+ * fake nahi hona chahiye! … 'login' button bane to fake login na bane, real login button ho, google login,
+ * apple login, user se real api secret mange jaye! … agar koi button/feature fake banaya hai, ya dummy/demo
+ * banaya hai, to user ko clearly bataya jaye ki yeh button fake hai, aur kyu — jaise api keys chahiye …
+ * red colour me saf saf likho user ki language me ki iske bina kaam fake/dummy/demo hoga").
+ *
+ * The rules above each forbid ONE fake (a result, a person, a mind); this one names the CLASS the admin saw:
+ * a feature whose real version needs the user's own credential, built locally so that nothing ever asked
+ * for the credential. Shared by every lane. The platform enforces it after the build too (fakeFeatureScan.ts
+ * — the red line, the chat notice, the key ask), so a build that ignores it is caught, but the first version
+ * should be the honest one.
+ */
+export const NO_FAKE_FEATURE_RULE =
+  '- ⛔ NO FAKE BUTTON, NO FAKE FEATURE (unbreakable). Login, sign-up, OTP, payment, email/SMS sending, uploads, maps and AI are ' +
+  'REAL — wired to the user\'s own provider — or clearly labelled on screen as a demo. A real login is the user\'s auth provider ' +
+  '(Supabase Auth / Firebase Auth / Clerk: real email, Google and Apple sign-in) through its keys — never a password or a user ' +
+  'list written into the app, never a "Continue with Google" button with nothing behind it. A real payment is a gateway ' +
+  '(generate_payment) or a UPI link, with a server-verified result — never a timer or a state change that marks an order paid. ' +
+  'A real OTP or email is sent by a provider — never generated or shown by the page. When the key is missing: ask for it with ' +
+  'request_secrets if you have that tool, and until it is saved render a clearly visible RED line in the user\'s own language on ' +
+  'that screen — "<Feature> is a demo, not real. Add <KEY NAMES> in NavBharatAI → ⋮ More → Keys & Secrets to make it real." — ' +
+  'and say the same in your final message. Never present a demo as working.';
 
 /**
  * NEVER FAKE A FEATURE'S RESULT (autopsy 33812996, 2026-09-30). Asked for a Circle to Search app with

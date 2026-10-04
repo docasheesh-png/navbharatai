@@ -88637,3 +88637,26 @@ RESOLVED as not-a-defect; the class fix is the "queued; do not push; interim CI 
 merging session now posts on each PR at the moment it cancels. Re-running a cancelled run on such a PR
 spends minutes for a result the merge gate never reads. The author's workaround ("push once per branch")
 is still good advice for a different reason: every push is a billed run.
+
+## 2026-10-04 — Security checklist (21 points) applied to NavBharatAI itself
+
+The admin forwarded a 21-point "don't ship until you check this" list (external text, adapted). Audited against
+the code; five real gaps fixed as classes (local branch `local/security-checklist`, locked by
+`tests/thePlatformKeepsItsSecretsOutOfGit.test.ts`, every fix reversion-proven):
+- `.gitignore` / `.dockerignore` did not ignore a live `.env` → both now do (`.env`, `.env.*`, `!.env.example`).
+- No secret scan of THIS repo (the engine scanned users' apps only) → CI census with `scanSecurity` + a reasoned
+  allowlist (Firebase web keys, PEM header text, templates). Local history (7,372 commits, shallow clone) scanned:
+  only test fakes.
+- `trust proxy true` made `req.ip` the caller-written first X-Forwarded-For entry → admin login lockout, OTP send
+  limit, bot guard, auth rate limits bypassable with one header. Now one hop (`TRUSTED_PROXY_HOPS`) +
+  `clientAddress()` (last entry); OTP / phone-exchange / client-error routes use it. navbharatai.com → 216.239.38.21
+  (Google Cloud Run front end), so one hop is the real topology; `guestDailyQuota` has relied on it since 09-27.
+- Phone build pushed a workspace `.env` whole (static apps: packaged into the APK at `www/.env`) → static drops it,
+  others keep only client-public lines (`publicEnvOnly.ts`).
+- GitHub push excluded only a root `.env` → one definition `src/lib/envFile.ts`, any depth.
+- Census: every `/api/admin` route guarded server-side.
+OPEN (admin's, BLOCKED — console access): (1) confirm the LIVE Firestore rules of database `navbharat-prod` match
+`firestore.rules` — no pipeline deploys them, and `.firebaserc` points at the hosting project; (2) set Firebase
+Storage rules to deny client access on the project's buckets (the client never uses Storage; the web config is
+public); (3) turn on GitHub secret scanning / push protection if the plan allows; (4) decision: the documented
+`verifiedUid ?? claimedUid` fallback on v5.0 workspace routes (private reads already verified-only).

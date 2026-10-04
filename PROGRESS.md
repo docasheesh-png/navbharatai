@@ -88466,3 +88466,10 @@ Nothing was reworded or dropped. A line-count check confirmed every line of the 
 **New rule:** when the admin sets a Cloud Run key, its name is recorded in `docs/claude/ENV_REGISTRY.md`, not in `CLAUDE.md`. Long histories and rationales go in the matching `docs/claude/` file.
 
 Also: Q-013's queue row now says #3496 is merged.
+- **PR 2 acceptance requirement (admin, 2026-10-04):** for every moved feature verify category, natural place, primary
+  action, separate/appropriate destructive actions, label = behaviour, no duplicate left elsewhere, same backend/API
+  correctly called, authorization intact, confirmation on destructive actions, audit on important actions. Where two
+  locations are both reasonable, decide from the feature's purpose and the admin's workflow and write the reason.
+  PR 2 is NOT complete without a "FEATURE LOCATION AUDIT" table (Feature | Old Location | New Location | Why |
+  Action Type | Permission | Audit Required). Anything unclear, duplicated or misplaced is named, not hidden.
+  D3 (the three duplicate cards) moves to PR 4.

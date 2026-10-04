@@ -4589,10 +4589,18 @@ shipping, or any other milestone. Do NOT build one on your own initiative for an
 admin's word is the ONLY trigger.
 
 **The trigger, and only the trigger:**
-- ✅ **STANDING INSTRUCTION (admin 2026-08-24, verbatim: "jab jab mai bolu to aab aur ipa bana
-  dena"): whenever the admin asks, build BOTH — the Android `.aab` AND the iOS `.ipa`, together.**
-  Not one or the other. Both workflows are dispatched (`android-aab.yml` and `ios-ipa.yml`, ref
-  `main`), both are polled to green in the background, and both run URLs are reported back.
+- 🔴 **SUPERSEDED 2026-10-04 — THE iOS BUILD NEEDS ITS OWN PERMISSION (admin, verbatim: "ios build mere
+  bina permission karni hi nahi hai. bas aab banao!").** A request for a store build means the Android
+  `.aab` ONLY (`android-aab.yml`, ref `main`). `ios-ipa.yml` is dispatched ONLY when the admin names iOS /
+  `.ipa` / TestFlight in that request — never as a companion to an `.aab`, never on a session's own
+  reading of "build the app". Why it matters: the iOS job runs on macOS runners, which GitHub bills at
+  10× the minute rate, and on 2026-10-04 GitHub stopped starting every CI job ("recent account payments
+  have failed or your spending limit needs to be increased", a $24 bill) on the same day both were built
+  together.
+- ~~**STANDING INSTRUCTION (admin 2026-08-24, verbatim: "jab jab mai bolu to aab aur ipa bana
+  dena"): whenever the admin asks, build BOTH — the Android `.aab` AND the iOS `.ipa`, together.**~~
+  Kept as history; the line above replaces it. Whatever is built is still polled to green in the
+  background and its run URL reported back.
   ⚠️ Build from **`main`**, after the work is merged — an `.aab` cut from a feature branch is not
   the app anyone is shipping. And per the BUNDLED-MODE note above, a FRONTEND change reaches
   installed users ONLY through a fresh bundle, which is precisely why this instruction exists.

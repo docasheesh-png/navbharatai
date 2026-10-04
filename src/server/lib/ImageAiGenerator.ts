@@ -369,7 +369,8 @@ export function downloadImage(image: GeneratedImage, name?: string): void {
   if (image.blob) {
     link.download = base + '.' + ext;
   } else {
-    link.rel = 'noopener noreferrer'; link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.target = '_blank';
   }
   document.body.appendChild(link);
   link.click();

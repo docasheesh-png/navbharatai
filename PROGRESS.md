@@ -88789,3 +88789,34 @@ RESOLVED as not-a-defect; the class fix is the "queued; do not push; interim CI 
 merging session now posts on each PR at the moment it cancels. Re-running a cancelled run on such a PR
 spends minutes for a result the merge gate never reads. The author's workaround ("push once per branch")
 is still good advice for a different reason: every push is a billed run.
+
+## 2026-10-04 — CORRECTION to the Q-500 note above: the cancelled CI runs were another session's own cancels
+
+**The 19:xx note titled *"CI cancels the head's run when a branch is pushed twice"* reached the wrong
+conclusion, and I sent the admin on an errand because of it.** It said the cause was *"outside this
+repository"* and asked them to read GitHub's Actions settings and the account's Actions spending limit,
+and to consider GitHub support if neither explained it.
+
+**The real cause, from the merging session's own merge commit (`12f4c57f4`, recorded in Q-500):** that
+session was cancelling the runs **itself**, with `POST actions/runs/<id>/cancel`, deliberately — one
+Actions run per PR, on heads it had already reviewed and queued for a staging push, after the admin's
+*"kam se kam $ kharch karna"* and the Actions billing being restored. Each cancelled run was for a head
+about to be superseded by a staging commit whose own run is the one the merge gate reads.
+
+🔑 **WHAT I GOT WRONG, AND IT IS NOT THE ARITHMETIC.** The measurement was sound — 16 success / 5
+cancelled, the same-branch sibling correlation, concurrency ruled out by runs that succeeded with seven
+overlapping. **What I never considered is that another ACTOR on this repo could be the cause.** With
+several sessions live, "nothing in this repository explains it" is not the same as "nothing here is
+doing it": a session is not in the repository. Every candidate I enumerated was a GitHub mechanism,
+because the question I asked myself was "which setting does this?" rather than "who did this?".
+
+⚠️ **The cost of that is the thing to remember: an instruction to the admin that cannot help.** The same
+class `CLAUDE.md` records for `DATA_GOV_IN_API_KEY` — *"do NOT put it back on their queue… re-issuing
+the instruction is the same wasted-instruction class"*. A 🟡 BLOCKED row sends the admin to a console;
+before writing one, the question is whether a LIVE SESSION could be the cause, and the cheapest way to
+find out is to read the other branches' recent commit messages — where, in this case, the answer was
+written down in plain words.
+
+**What survives, with the reason changed:** pushing ONCE per branch is still right, now simply because a
+second push creates a second run that somebody then has to cancel or wait out. Nothing is wrong with
+GitHub, nothing needs looking at in Actions settings, and the admin can ignore that request entirely.

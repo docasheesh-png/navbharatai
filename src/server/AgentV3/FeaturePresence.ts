@@ -544,12 +544,14 @@ export function featureHealEnabled(rolloutKey?: string): boolean {
 }
 
 /** An agent-facing repair instruction for the missing features (used only when a heal pass runs). */
-export function featurePresenceRepairPrompt(r: FeaturePresenceResult): string {
-  if (r.missing.length === 0) return '';
+export function featurePresenceRepairPrompt(r: FeaturePresenceResult, regressed: ReadonlyArray<string> = []): string {
+  const lost = regressed.filter((l) => !r.missing.includes(l));
+  if (r.missing.length === 0 && lost.length === 0) return '';
   return [
-    'The app rendered, but these REQUESTED features have no visible control in the running UI:',
-    ...r.missing.map((m) => `  - ${m}`),
-    '',
+    ...(r.missing.length > 0 ? ['The app rendered, but these REQUESTED features have no visible control in the running UI:', ...r.missing.map((m) => `  - ${m}`), ''] : []),
+    // Change Engine slice 2: a feature the app HAD on an earlier build and lost in this change. Restore,
+    // never redesign — the user did not ask for it to change at all.
+    ...(lost.length > 0 ? ['These features WORKED in this app before the current change and are now missing — restore them exactly as they were (same place, same behaviour); do not redesign them:', ...lost.map((m) => `  - ${m}`), ''] : []),
     'Add the missing UI + wiring so each of these features is actually usable in the app. Read the',
     'relevant components first, make the minimum targeted edits, and keep the existing working features',
     'intact. Do not add anything the user did not ask for.',

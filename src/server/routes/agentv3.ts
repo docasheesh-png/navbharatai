@@ -24485,6 +24485,8 @@ async function noteBuildOutcome(
             files: [...writtenFiles.keys()],
             gate: changeGateState,
             issues: settleIssues,
+            security: (() => { try { return getWorkspaceMemory(workspaceId).appSecurityFindings(); } catch { return []; } })(),
+            securityScanned: (() => { try { return getWorkspaceMemory(workspaceId).graph().files; } catch { return []; } })(),
           }), 4_000, 'change-engine-settle').catch(() => null);
           if (settled) {
             for (const line of settled.reportLines) buildDiag.record({ phase: 'build', severity: 'info', code: 'CHANGE_RECORDED', autoResolved: true, message: line });

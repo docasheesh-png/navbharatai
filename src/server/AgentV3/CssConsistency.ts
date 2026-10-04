@@ -74,13 +74,35 @@ export function collectDefinedClasses(files: Record<string, string>): { defined:
       const blocks = [...content.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((b) => b[1]);
       if (blocks.length === 0) continue;
       text = blocks.join('\n');
-    } else continue;
+    } else {
+      // A script that injects its own stylesheet (`style.textContent = '.knob{left:50%}'`) defines
+      // those classes too. Our own game shell does exactly this for its touch controls, and before
+      // 2026-10-04 this check reported all eight of them as unstyled: the model was handed them, spent
+      // a turn and appended a second copy of every rule (candy report 7da1cdca). Not counted as a
+      // stylesheet, so a project with no CSS file stays as silent as before.
+      if (MARKUP_RE.test(path)) for (const c of classesDefinedInScriptStrings(content)) defined.add(c);
+      continue;
+    }
     cssFiles++;
     let m: RegExpExecArray | null;
     re.lastIndex = 0;
     while ((m = re.exec(text))) defined.add(m[1]);
   }
   return { defined, cssFiles };
+}
+
+/**
+ * Class selectors a script defines in CSS written as string literals: a `.name` followed, with no
+ * `(`, `)`, `=` or quote in between, by a `{` that opens a `property:` declaration. The exclusions
+ * keep JavaScript out — `api.get({ a: 1 })`, `if (x.y) { a: 1 }` and `o.k = { a: 1 }` all contain one.
+ * PURE.
+ */
+export function classesDefinedInScriptStrings(source: string): string[] {
+  const out = new Set<string>();
+  const re = /\.(-?[A-Za-z_][\w-]*)(?=[^{}()='"`;\n]*\{\s*-?[a-z][a-z-]*\s*:)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source))) out.add(m[1]);
+  return [...out];
 }
 
 /**

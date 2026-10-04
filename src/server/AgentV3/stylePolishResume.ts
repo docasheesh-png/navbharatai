@@ -23,6 +23,7 @@
  */
 import { turnAskedTheUser, turnDeclined } from './nudgeToBuild';
 import { DEFECT_TEXT, type DesignDefect } from './DesignCoverage';
+import { undefinedClassesInFile } from './CssConsistency';
 
 export const MAX_STYLE_RESUMES = 1;
 
@@ -150,4 +151,46 @@ export function styleResumeNote(missingCount: number, pageCount = 0, offGridFile
     + `short of the design standard and ${offGridFiles} file(s) it wrote had spacing off the 4px grid, so it was handed them`
     + ' and told to fix them before finishing (once). Before '
     + '2026-10-01 the turn ended here and a separate end-of-build repair pass, in a fresh context, fixed them.';
+}
+
+/** What `undefinedClassesNow` returns, as this module reads it. */
+export interface StyleHandBack {
+  missing: string[];
+  sheet?: string;
+  pages: Array<{ file: string; defects: DesignDefect[] }>;
+  a11y?: Array<{ file: string; issues: string[] }>;
+  offGrid?: Array<{ file: string; values: string[] }>;
+}
+
+/**
+ * 🔴 A SPECIALIST IS HANDED BACK ONLY ITS OWN WORK (Q-066, autopsy de3bb2bb, 2026-10-01). Before this the
+ * hand-back ran only for the architect: the readiness gate that holds it is top-level-only, so a Frontend
+ * sub-agent that wrote five screens with undefined classes ended its turn and the end-of-build repair
+ * fixed them in a fresh context. A sub-agent now gets the same one-time hand-back, but scoped: sub-agents
+ * run in parallel, so a class that only a SIBLING's file uses is the sibling's, and naming it here would
+ * send two agents to edit one stylesheet for the same rule. Every list is cut to the files `written`
+ * names; a missing class is kept only when one of those files uses it. PURE.
+ */
+export function scopeStyleHandBack(
+  all: StyleHandBack,
+  project: Readonly<Record<string, string>>,
+  written: ReadonlySet<string> | readonly string[],
+): StyleHandBack {
+  const mine = new Set([...written].map((p) => String(p).replace(/^\.?\/+/, '')));
+  const known = new Set(all.missing);
+  const used = new Set<string>();
+  for (const path of mine) {
+    const content = project[path];
+    if (typeof content !== 'string') continue;
+    try {
+      for (const c of undefinedClassesInFile(path, content, project as Record<string, string>)) if (known.has(c)) used.add(c);
+    } catch { /* one unreadable file never hides the rest */ }
+  }
+  return {
+    missing: all.missing.filter((c) => used.has(c)),
+    sheet: all.sheet,
+    pages: all.pages.filter((p) => mine.has(p.file)),
+    a11y: (all.a11y ?? []).filter((a) => mine.has(a.file)),
+    offGrid: (all.offGrid ?? []).filter((o) => mine.has(o.file)),
+  };
 }

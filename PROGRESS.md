@@ -87352,6 +87352,36 @@ open PR's CI failed with it (#3462 first).
 - **Class:** an upstream advisory landing between a PR's green CI and its merge. The gate is doing its job; the
   honest response is the pin, not an allowlist entry, because a fixed release exists.
 
+## 2026-10-01 — Autopsy de3bb2bb follow-up: the five decisions (PR #3467)
+
+The admin decided the five 🟡 rows the de3bb2bb autopsy left open. Ledger:
+
+BUILD REPORT de3bb2bb — RESOLUTION (follow-up)
+Items: 5 · ✅ Resolved: 5 (Q-064 closed by #3465, folded into Q-009; Q-065–Q-068 on merge of #3467) · 🟡 Blocked: 0 · Remaining: 0
+- **Q-064 ✅ (not our defect, admin: "leave")** — GLM flashx crawled twice; provider speed is Z.ai's. The crawl bench
+  (180 s, one re-probe) did what it was built to do. Third instance of Q-009; closed in the queue by #3465, which folded it into Q-009.
+- **Q-065 ✅** — a 189 s KIMI call wrote 7 files in one `write_files_batch`, so nothing reached the preview for three
+  minutes. Root cause: the prompt told the builder to "pass all files in one call … 3× faster", which was never
+  measured. Class: a size limit stated nowhere, so the call's length was the size of the app. Fix:
+  `MAX_FILES_PER_BATCH = 3` in `batchSize.ts`, read by the prompt, the tool description and the dispatcher (which
+  still writes an oversized batch and tells the model to shrink the next one). Siblings: the tool description said
+  "faster" too; fixed in the same change.
+- **Q-066 ✅** — the end-of-turn style hand-back (`stylePolishResume`) ran only inside the top-level readiness gate,
+  so a Frontend sub-agent's undefined classes waited for the architect. Class: an end-of-turn check living on one
+  lane of two. Fix: `styleHandBack` for writing sub-agents, scoped to the files they wrote (`scopeStyleHandBack` —
+  parallel siblings keep their own classes); `onNote` added to `SubAgentDeps` so the note reaches the report.
+- **Q-067 ✅ (class)** — "COACT" (most likely "collect") became a chat to "the COACT backend". Class: an unknown word
+  becomes an imaginary integration. Fix: `unknownName.ts` — new builds only, precision-first (acronyms, known
+  services, emphasis words, a word the request itself names as a service, and all-caps prompts stand down); the
+  builder, the planner and the fast lane are told to build no client / API URL / env var for it and to say how
+  they read it. Kill switch `AGENTV3_UNKNOWN_NAME_NOTE=off`, report code `UNKNOWN_NAME_IN_REQUEST`. ⚠️ Whether
+  `chatApi.ts` was dead code in that one shipped app stays unverifiable (the report carries no source).
+- **Q-068 ✅** — five items agreed as correct reports (admin: "jo chahiye banao"); the real noise, "No tests at all"
+  recorded twice by two runners' `done` events, is now recorded once per build (`readinessWarningsSeen`).
+
+Proof: `tests/theDe3bb2bbFollowUp.test.ts` (17 cases), each fix reverted and its tests seen failing.
+**What to watch:** smaller `write_files_batch` calls; `STYLE_RULES_RESUMED` lines prefixed with a sub-agent role;
+`UNKNOWN_NAME_IN_REQUEST` on a real prompt with a typo in capitals.
 ## 2026-10-01 — Autopsy 8f797751 (maths solver, stopped at 6.4 min, 6 s after the dev server came up)
 
 - **A ✅** At 4.6 min the model said "Your Math Solver app is ready … Open the Preview tab"; the platform
@@ -87465,6 +87495,64 @@ were left alone: PR #3467 (another session) already carries them.
 **Missing subsystem.** "Is this turn the whole app?" has no single owner. Each reader (starter, preview, reviewer, gate, recap, bill, ETA) asked it separately, and the module fact reached three of them. This PR threads `moduleAwaitsShell` into the rest. The real fix is one `turnScope` value that every verdict reads, alongside the open `turnKind` item.
 
 **Proactive.** Project mode orders modules by dependency, so the App Shell comes last and the user sees nothing for N−1 paid turns. Building the shell early, as a thin assembled app that grows with each module, would turn every module turn into something the user can open. That is a planner change and an admin decision; it is not built here.
+## 2026-10-04 — CI audit gate went red on every PR: four advisories published after 2026-10-01 (PR #3467)
+
+> Merged note: #3476 (another session) landed the same lockfile update and allowlist entries first; #3467 kept
+> `main`'s allowlist and adds only the `nodeForgeNeverVerifies` lock described below.
+
+`main` was green on 2026-10-01; the next run failed `audit:gate` with four NEW high advisories, and
+no dependency had changed. Each was traced, not waved through:
+- **`@fastify/busboy` 3.2.0 → 3.2.2** (GHSA-xjh9-v7x6-24jw, GHSA-x8mw-p69m-v3mx, multipart DoS). It is
+  RUNTIME (via `firebase-admin`, whose own range is `^3.0.0`), so it was FIXED: a lockfile-only update.
+- **`braces` / `chokidar`** (GHSA-vfj7-8cjw-p6xm). Affected range `*`, 3.0.3 is the latest, so no fix
+  exists. Reached only through `firebase-tools` (dev-only deploy CLI). Allowlisted with that reason.
+- **`node-forge`** (GHSA-86w9-cpqp-85rv, signature-VERIFY forgery). Affected range `*`, 1.4.0 is the
+  latest. Used only by `androidKeystore.ts` to CREATE a certificate and keystore, never to verify.
+  Allowlisted, and `tests/nodeForgeNeverVerifies.test.ts` holds the fact the entry depends on: a new
+  importer or any verify call fails CI (proven by reversion both ways).
+OPEN: remove the three allowlist entries when upstream publishes fixes.
+
+## 2026-10-04 — Autopsy: iPhone build SHANKU-AI/instamony run 36792748246 — each platform knows its own keys (PR #3467)
+
+The run died in 20 s at the iOS workflow's own pre-flight: `Missing Apple signing secret(s): IOS_ASC_KEY_ID
+IOS_ASC_ISSUER_ID IOS_ASC_KEY_BASE64 IOS_TEAM_ID`. The workflow was right; everything NavBharatAI said
+about it was wrong: `STALE_WORKFLOW`, "the build stopped while installing your app's libraries", and
+`navbharatCanFixItself: true`.
+
+**Class:** every reader of "is the signing key there?" knew only the ANDROID list and the ANDROID
+sentence. This is the SAME class the classifier's own comment recorded on an earlier report (run
+34935149896: a matcher written against an invented string), fixed then for one platform only — the
+sibling workflow prints a different sentence and was never hunted.
+
+| Item | Root cause | Fix | Lock |
+|---|---|---|---|
+| Q-230 wrong code | pattern matched `Missing signing secret(s)` only | reads both sentences; platform read from the names | census over every generated workflow's sentence |
+| Q-231 false "installing" | stage fallback reached | follows from Q-230 | real-log test |
+| Q-232 "can fix itself" | same | autoFixable false | real-log test |
+| Q-233 run started unchecked | dispatch guard + status route Android-only | `IOS_SIGNING_SECRETS`; iOS guard (409, `canCreateKey:false`); `signing-status?platform=ios`; panel pre-check | source guards |
+| Q-234 Android key button on iPhone (latent) | panel raised the offer on any MISSING_SIGNING_SECRET | Android only; Apple sentence for iPhone | source guard |
+| Q-235 GitHub summary says "installing" | diagnostic step infers stage from `node_modules` | pre-flight steps carry ids; prints `preflight` | runs the real generated script |
+| Q-236 `preflight: null` | `isSigningSecretFailure` Android-only | knows both lists | test |
+| Q-237 "Xcode too old" unclassified | no class | now honest UNKNOWN; a class needs a new cure family | OPEN in the queue |
+
+All fixes reversion-proven (`tests/eachPlatformKnowsItsOwnKeys.test.ts`). The missing keys themselves are
+the user's to add; NavBharatAI now says so before a run, in plain words, and cannot create Apple keys.
+
+## 2026-10-04 — Autopsy 7da1cdca: "Ek puzzle game bnao candy wala" — four of our own defects (PR #3467)
+
+Weak tier, build succeeded, the game rendered and played (₹110.75 billed on $0.30 real cost).
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-240/241 saved copy ≠ sandbox | a shell write never reached the captured writes, and captured writes win at save | npm's read-back (2026-09-27) fixed ONE instance | bash reads back every file it plainly wrote (`sed -i`, `tee`, redirects, `cp`/`mv`, inline `node -e`/`python -c` literal writes) | dispatcher test, reverted-and-failed |
+| Q-242 false "unstyled" | CSS defined in a script string was invisible to the class check | our own recipe failing our own gate | `classesDefinedInScriptStrings` | real shell census, reverted-and-failed |
+| Q-243 `three` missing | recipes NAMED their dependency and left the install to the model | 24 sites (7 game recipes + 22 `Add the dependency:` lines) | installed at the recipe doors under the npm lock, into the right package.json; busy/failed said honestly | dispatcher tests (game shell, QR), reverted-and-failed |
+| Q-244 edits to `melody.ts` | the "fixed in ANOTHER file" note never asked whether another module exports the name | a routing claim made without the evidence that decides it | bounded grep + `exportedElsewhere` | report's error, reverted-and-failed |
+| Q-245 3D shell for a 2D game | "LAST" step of every game, 3D-only nowhere said | — | prompt + tool text | text guard; real effect needs the next 2D game |
+
+Owned elsewhere (not duplicated): spacing snap and "a game that saves is not 'nothing to save'" (#3474 Q-091/Q-093);
+GLM crawl (Q-009, admin: leave); `startTier: "gemini"` (Q-052). OPEN here: Q-246 (shell `rm` resurrected by the
+save), Q-247 (explorer could not press ⏸), Q-248 (summary contradicts itself).
 ## 2026-10-01 — Autopsy 6cd698cc: the repair that worked was undone, and a repair that changed nothing said it did
 
 Build: "Build an app best than chatgpt or gpt 5.6 free Life time in this app", Weak, ok, 10.6 min, ₹129.17.

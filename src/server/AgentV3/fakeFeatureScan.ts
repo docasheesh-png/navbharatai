@@ -35,7 +35,7 @@
 // local login is left alone. A false positive costs a user one red line on a working screen; a false
 // negative is the fake button the admin saw. Both halves are tested. PURE — no I/O.
 
-import { signInCandidates } from './signInExplore';
+import { signInCandidates, authLivesInTheBrowser } from './signInExplore';
 import { impliedRequirement, type AppRequirement } from './AppRequirements';
 import { recipeFor, preferredOption, requiredVarNames } from '../../lib/credentialRecipes';
 import { HONESTY_BANNER_OPEN, HONESTY_BANNER_CLOSE, stripHonestyBanner, hasHonestyBanner } from '../../lib/honestyBanner';
@@ -87,9 +87,12 @@ const EMAIL_SENT_RE = /\be-?mail\s+(?:has\s+been\s+|was\s+|successfully\s+|is\s+
 const SMS_SENT_RE = /\bsms\s+(?:has\s+been\s+|was\s+|successfully\s+)?sent\b|\bsent\s+(?:an?\s+|the\s+)?sms\b|\bsent\s+to\s+your\s+(?:phone|mobile|number)\b/i;
 /** "Uploaded to the cloud/server" — a claim about a place the file never reached. A local gallery that says "upload complete" is left alone. */
 const UPLOAD_CLAIM_RE = /\b(?:uploaded|saved|synced|backed\s+up)\s+to\s+(?:the\s+|our\s+)?(?:cloud|server)\b/i;
-/** A sign-up that keeps its accounts in the browser: `localStorage.setItem('users', …)` beside a register form. */
+/** A sign-up form — read with the shared browser-only judgement below, never on its own. */
 const SIGNUP_SURFACE_RE = /\b(?:sign\s*up|register|create\s+(?:an?\s+)?account)\b/i;
-const LOCAL_ACCOUNTS_RE = /localStorage\.setItem\(\s*['"`][^'"`]*(?:users?|accounts?|members|registered|credentials)[^'"`]*['"`]/i;
+/** Where a browser-only account store is written — the evidence line for the whole-project judgement below. */
+const BROWSER_STORE_WRITE_RE = /(?:local|session)Storage\.setItem\(|indexedDB\.open\(|\bset\(\s*['"`][^'"`]*(?:users?|accounts?)/i;
+/** A request about a password MANAGER keeps passwords in the browser on purpose; that is the app, not a login. */
+const PASSWORD_MANAGER_RE = /\bpassword\s+(?:manager|vault|keeper|saver|generator)\b|\bvault\s+app\b/i;
 
 // ── Requests that ASKED for the local thing (the prompt, not the code) ────────────────────────────────
 const ASKED_LOCAL_LOGIN_RE = /\b(?:demo|dummy|offline|local(?:-only)?|hard-?coded|no[\s-]backend|without\s+(?:a\s+)?(?:backend|server|database))\b[^.\n]{0,40}\b(?:login|password|auth|sign[\s-]?in)\b|\b(?:login|password|auth|sign[\s-]?in)\b[^.\n]{0,40}\b(?:demo|dummy|offline|local(?:-only)?|hard-?coded)\b|\bpin\s*(?:lock|code)\b|\bpassword\s+gate\b|बिना\s+(?:backend|server|database)/i;
@@ -142,7 +145,7 @@ export function findFakeFeatures(files: Readonly<Record<string, string>>, prompt
   const sms = has(SMS_RE);
   const mail = has(MAIL_RE);
   const storage = has(STORAGE_RE);
-  const localLoginAsked = ASKED_LOCAL_LOGIN_RE.test(req);
+  const localLoginAsked = ASKED_LOCAL_LOGIN_RE.test(req) || PASSWORD_MANAGER_RE.test(req);
   const noPaymentAsked = ASKED_NO_PAYMENT_RE.test(req);
 
   const out: FakeFeatureFinding[] = [];
@@ -161,8 +164,6 @@ export function findFakeFeatures(files: Readonly<Record<string, string>>, prompt
       const hit = firstHit(content, CRED_COMPARE_RE) ?? (demo ? firstHit(content, /\b(?:password|pass(?:word)?(?:Hash|Digest)?)\s*:/i) : null);
       if (hit) add('login', file, hit);
     }
-    // SIGN-UP whose accounts live in the browser — the same fake from the other door.
-    if (!authProvider && !localLoginAsked && SIGNUP_SURFACE_RE.test(content)) add('login', file, firstHit(content, LOCAL_ACCOUNTS_RE));
     // OAUTH BUTTON: "Continue with Google" with no SDK or route that could do it.
     if (!oauth && !localLoginAsked) add('oauth-button', file, firstHit(content, OAUTH_BUTTON_RE));
     // PAYMENT: a pay action that marks itself paid, with no gateway or UPI link anywhere.
@@ -175,6 +176,21 @@ export function findFakeFeatures(files: Readonly<Record<string, string>>, prompt
     if (!sms) add('sms', file, firstHit(content, SMS_SENT_RE));
     // UPLOAD: "uploaded to the cloud" with no storage transport anywhere.
     if (!storage) add('upload', file, firstHit(content, UPLOAD_CLAIM_RE));
+  }
+  // ONE JUDGEMENT WITH THE SIGN-IN EXPLORER (Q-540, #3526). `authLivesInTheBrowser` decides that an app's
+  // accounts live in the browser alone — the explorer signs a throwaway account up there because the app has
+  // no server to keep one. That is the very fake this module exists to disclose, so the two must never
+  // disagree: on the real school app the sign-up wrote to `localStorage.setItem(USERS_KEY, …)`, which the
+  // shape above did not read, and the explorer knew what the user was never told. A sign-in surface is still
+  // required (a page that only stores a password is not a login), and every stand-down above still holds.
+  if (!out.some((f) => f.kind === 'login') && !authProvider && !localLoginAsked && out.length < MAX_FINDINGS) {
+    let browserOnly = false;
+    try { browserOnly = authLivesInTheBrowser(files); } catch { browserOnly = false; }
+    if (browserOnly && sources.some(([, c]) => SIGNIN_SURFACE_RE.test(c) || SIGNUP_SURFACE_RE.test(c))) {
+      const store = sources.find(([, c]) => /password/i.test(c) && BROWSER_STORE_WRITE_RE.test(c))
+        ?? sources.find(([, c]) => BROWSER_STORE_WRITE_RE.test(c));
+      if (store) add('login', store[0], firstHit(store[1], BROWSER_STORE_WRITE_RE));
+    }
   }
   return out;
 }

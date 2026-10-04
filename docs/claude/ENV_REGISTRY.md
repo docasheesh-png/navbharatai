@@ -2558,6 +2558,16 @@ the flag entries above promise.
   `feature-claimed-but-demo`, fed from the same findings; (e) four more shapes: a sign-up that keeps its
   accounts in `localStorage`, "reset / verification link sent", "SMS sent to your mobile" (→ `sms`), and
   "uploaded / synced to the cloud" with no storage (→ `storage`). `FAKE_FEATURE_SHIPPED` stays the one code.
+  🤝 **ONE JUDGEMENT WITH THE SIGN-IN EXPLORER, AND OUR OWN TEMPLATE WAS THE FIRST CATCH (same day).** #3526
+  (Q-540) added `authLivesInTheBrowser` — the explorer's decision that an app's accounts live in the browser
+  alone — which is the very fake this scanner discloses. They disagreed on the school app Q-540 was built for
+  (`localStorage.setItem(USERS_KEY, …)` behind a constant), so the explorer knew what the user was never told.
+  The scanner now asks that same function (plus a sign-in surface; a password-manager request stands down),
+  and its own separate sign-up shape is gone so the two cannot drift. The first thing the shared judgement
+  caught was **our own "Login page" template**: any valid email + 8 characters showed "Signed in". It is now a
+  REAL sign-in — Supabase Auth's REST API (no new dependency) with `VITE_SUPABASE_URL` /
+  `VITE_SUPABASE_ANON_KEY`: email log in / sign up, Google / GitHub / Apple through the provider's page — and
+  until those keys are saved a red line says sign-in is not connected and nobody is ever shown as signed in.
 - **`AGENTV3_WRITE_SECURITY`** (NOT set; default ON, `off` disables — added 2026-09-30, autopsy 466c260a) —
   `scanSecurity`'s medium/high findings (an XSS sink such as `dangerouslySetInnerHTML` / raw `innerHTML`, a
   hardcoded secret) are handed back with every write (`securityWriteNote`, via `writeSteeringNotes`). Before

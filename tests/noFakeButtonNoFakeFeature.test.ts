@@ -22,6 +22,8 @@ import { GOLDEN_SCAFFOLDS, goldenScaffoldFiles } from '../src/server/AgentV3/gol
 import { extractHonestyBanner, stripHonestyBanner } from '../src/lib/honestyBanner';
 import { buildReactPreview } from '../src/server/runtime/ReactPreview';
 import { buildSourceAppPreview } from '../src/lib/previewUtils';
+import { authLivesInTheBrowser } from '../src/server/AgentV3/signInExplore';
+import { loginPageAppTsx } from '../src/server/AgentV3/goldenScaffolds/appsB';
 import { VirtualFileSystem } from '../src/server/project/ProjectModel';
 import { auditSummaryClaims, claimCorrection } from '../src/server/AgentV3/claimAudit';
 import { featurePresenceRepairPrompt } from '../src/server/AgentV3/FeaturePresence';
@@ -385,3 +387,78 @@ describe('🧬 siblings: the same fake from every other door', () => {
     expect(readFileSync('src/server/routes/agentv3.ts', 'utf8')).toContain('fakeFeatures: fakeFeatures.map((f) => f.kind)');
   });
 });
+
+// ── ONE JUDGEMENT WITH THE SIGN-IN EXPLORER (Q-540, #3526) ───────────────────────────────────────────
+// The explorer signs a throwaway account up when an app's accounts live in the browser alone; this scanner
+// tells the user that login is a demo. Two readers of one fact must not disagree — and they did, on the very
+// school app Q-540 was built for (`localStorage.setItem(USERS_KEY, …)` behind a constant).
+describe('🤝 the scanner and the sign-in explorer agree on a browser-only login', () => {
+  // The school app from autopsy Q-540, as theSchoolAppBehindItsSignInPage.test.ts carries it.
+  const SCHOOL: Record<string, string> = {
+    'package.json': JSON.stringify({ dependencies: { react: '^18.3.1', 'react-dom': '^18.3.1', 'react-router-dom': '^6.26.0' } }),
+    'src/context/AuthContext.tsx': `const USERS_KEY = 'gyan_users';
+export function register(name: string, email: string, password: string) {
+  const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+  users.push({ name, email, password });
+  localStorage.setItem(USERS_KEY, JSON.stringify(users));
+}`,
+    'src/pages/Login.tsx': 'export default function Login(){ return <form><input type="email" /><input type="password" /><button type="submit">Sign in</button></form>; }',
+    'src/api/students.ts': "export const list = () => JSON.parse(localStorage.getItem('students') || '[]');",
+  };
+
+  it('🔴 the school app is a demo login — the explorer already knew its accounts live in the browser', () => {
+    expect(authLivesInTheBrowser(SCHOOL)).toBe(true);
+    const hits = findFakeFeatures(SCHOOL);
+    expect(hits.map((h) => `${h.kind}@${h.file}`)).toEqual(['login@src/context/AuthContext.tsx']);
+    expect(impliedRequirementsFor(hits).map((r) => r.id)).toEqual(['login']);
+  });
+
+  it('every app the explorer judges NOT browser-only is not called a demo login either', () => {
+    const with_ = (path: string, content: string) => ({ ...SCHOOL, [path]: content });
+    const real: Array<[string, Record<string, string>]> = [
+      ['supabase', with_('src/lib/supabase.ts', "import { createClient } from '@supabase/supabase-js';")],
+      ['clerk', with_('src/main.tsx', "import { ClerkProvider } from '@clerk/clerk-react';")],
+      ['a sign-in request', with_('src/lib/auth.ts', "await fetch('/api/login', { method: 'POST' });")],
+      ['a server directory', with_('server/index.js', 'module.exports = {}')],
+      ['an express server', with_('package.json', JSON.stringify({ dependencies: { react: '1', express: '^4' } }))],
+    ];
+    for (const [name, files] of real) {
+      expect(authLivesInTheBrowser(files), name).toBe(false);
+      expect(findFakeFeatures(files).filter((h) => h.kind === 'login'), name).toEqual([]);
+    }
+  });
+
+  it('a password manager keeps passwords in the browser on purpose — that is the app, not a fake login', () => {
+    expect(findFakeFeatures(SCHOOL, 'make a password manager app').filter((h) => h.kind === 'login')).toEqual([]);
+    expect(findFakeFeatures(SCHOOL, 'a school app with a simple offline login').filter((h) => h.kind === 'login')).toEqual([]);
+  });
+});
+
+// ── OUR OWN LOGIN TEMPLATE WAS A FAKE LOGIN (found by the shared judgement above, 2026-10-04) ─────────
+// "Login page" signed ANY valid email + 8-character password in and showed "Signed in"; its Google button
+// only showed a notice. The old shape-reader missed it (it compared nothing), the explorer's judgement
+// caught it — and under the admin's rule it was exactly the fake button the rule forbids, shipped by us.
+describe('🔑 the "Login page" template is a real sign-in, or says in red that it is not connected', () => {
+  it('signs in through Supabase Auth with the user\'s own keys, and never fakes "Signed in"', () => {
+    expect(loginPageAppTsx).toContain("import.meta.env.VITE_SUPABASE_URL");
+    expect(loginPageAppTsx).toContain("import.meta.env.VITE_SUPABASE_ANON_KEY");
+    expect(loginPageAppTsx).toContain("'/auth/v1/'");
+    expect(loginPageAppTsx).toContain("'token?grant_type=password'");
+    expect(loginPageAppTsx).toContain('/auth/v1/authorize?provider=');
+    // Not connected: the red line names both keys and the phone path, and submit returns before any user is set.
+    expect(loginPageAppTsx).toMatch(/!CONNECTED && \(\s*<div role="alert"[^>]*#b91c1c/);
+    expect(loginPageAppTsx).toContain('Keys &amp; Secrets');
+    const submitBody = loginPageAppTsx.slice(loginPageAppTsx.indexOf('const submit = async'), loginPageAppTsx.indexOf('const social ='));
+    expect(submitBody.indexOf('if (!CONNECTED)')).toBeGreaterThan(-1);
+    expect(submitBody.indexOf('if (!CONNECTED)')).toBeLessThan(submitBody.indexOf('setUser('));
+  });
+
+  it('the scanner calls it real, and the key checklist asks for its two keys', () => {
+    const files = { 'src/App.tsx': loginPageAppTsx };
+    expect(findFakeFeatures(files)).toEqual([]);
+    const missing = unconfiguredRequirements(detectAppRequirements({ files }), {});
+    expect(missing.map((r) => r.id)).toEqual(['database_hosted']);
+    expect(appRequirementsNotice(missing, 'hi')).toContain('VITE_SUPABASE_URL');
+  });
+});
+

@@ -87422,3 +87422,12 @@ is what was adopted. The rows leave `BUILD_REPORT_QUEUE.md`; this entry is their
     day.
   - **The real lever then:** a ladder change (another lead rung on Weak/Normal). That is the admin's routing
     decision, not a code fix.
+
+## 2026-10-01 — Q-021 done: PROGRESS.md's open root causes moved into the queue
+
+Four parallel read-only audits covered PROGRESS.md lines 1–87,401 (~260 "open root cause" markers). Each
+item was checked against later PROGRESS entries, the current code and the queue. Most July–August items
+were found CLOSED (e.g. coupon race, dead-sandbox recreate, preview door, in-flight call cancellation,
+turnKind, fail-open judge). The 67 still open (duplicates merged) are now rows Q-101…Q-167 in
+`BUILD_REPORT_QUEUE.md` — code-actionable ones OPEN, admin/infra/vendor ones 🟡 BLOCKED with what they need.
+"Unsure" items are marked as such in their row rather than guessed. Q-021 leaves the table.

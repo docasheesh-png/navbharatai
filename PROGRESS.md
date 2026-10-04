@@ -89100,3 +89100,10 @@ match) and every non-empty block is joined in a fixed order. Lock: `tests/aTwoPa
 Recorded rather than guessed: a live part plus a NON-live part ("mausam aur gold rate") still skips search for
 the second — the queue row keeps that narrower half.
 
+### 2026-10-04 — Q-135: a pipe whose first program never ran is not a success
+
+`pipedGateExitCodeWarning` covered only gate tools (tsc, eslint, test runners, builds). Now, for any other piped
+command that exited 0, `pipedMissingCommandWarning` reads the SHELL's own not-found line and fires only when it
+names the program the pipe started with — so `prisma migrate deploy | tail` with no prisma is reported, while
+`grep -r "command not found" app.log | head` is not. Lock: `tests/aPipeThatNeverRanIsNotASuccess.test.ts`.
+

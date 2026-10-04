@@ -45,6 +45,7 @@ export type IssueSeverity = 'info' | 'warning' | 'error';
  * a human notices them; never a reason to hesitate before shipping the app.
  */
 const PROCESS_ONLY_CODES = new Set([
+  'BUILD_OFFER_ACCEPTED', 'ATTACHMENT_RECALLED',
   // Our template seeding and a user's Stop (autopsy 31254f9a): facts about the ENGINE's run, never the app.
   'GOLDEN_SCAFFOLD_SKIPPED', 'LLM_CALL_STOPPED', 'SIMPLE_BUILD_STOPPED', 'DOMAIN_KNOWLEDGE', 'DURABLE_HOLDS_ONLY_STARTER',
   'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',
@@ -99,6 +100,9 @@ const PROCESS_ONLY_CODES = new Set([
   // Our own deterministic design-kit restore (kitRestore.ts, autopsy e725e002) and the note that the
   // sizers read the whole request (planningRequest.ts) — engine housekeeping, never app findings.
   'DESIGN_KIT_RESTORED', 'PLANNING_CONTEXT', 'DESIGN_KIT_KEPT', 'SHADOW_TWIN_REMOVED', 'USER_FILE_KEPT', 'FILES_REMOVED_TOLD', 'DURABLE_READ_FAILED',
+  // Our own deterministic 4px-grid snap (spacingSnap.ts, autopsy 536c8189) — housekeeping, and the thing
+  // it replaced was a model hand-back that cost three calls and made the stylesheet worse.
+  'SPACING_SNAPPED',
   // A measurement of our own write-time notes — never a finding against the app.
   'WRITE_TIME_QUALITY',
   // Same rule, same reason (autopsy 21b431e1): a dropped backslash that OUR deterministic pass put

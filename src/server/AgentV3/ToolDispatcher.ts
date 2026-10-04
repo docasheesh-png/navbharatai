@@ -86,7 +86,7 @@ import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServ
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
-import { lintBuiltApp, a11yHandBack, offGridHandBack } from './buildQualityLint';
+import { lintBuiltApp, a11yHandBack } from './buildQualityLint';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { detachedMethodNote } from './detachedMethod';
 import { rootThemeHooks, deadThemeSwitchNote } from './deadThemeSwitch';
@@ -3579,7 +3579,7 @@ export class ToolDispatcher {
    * stylesheet that cannot be read returns `[]`: this answer sends a model back to work, so it must never
    * name a class as undefined because the file that defines it was not read.
    */
-  async undefinedClassesNow(opts: { onlyWritten?: boolean } = {}): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }>; offGrid?: Array<{ file: string; values: string[] }> }> {
+  async undefinedClassesNow(opts: { onlyWritten?: boolean } = {}): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }> }> {
     try {
       let listing: string[] = [];
       try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'style-resume-listing'); }
@@ -3613,15 +3613,19 @@ export class ToolDispatcher {
       // line uses, over the same files already read here, so the two can never disagree.
       let a11y: Array<{ file: string; issues: string[] }> = [];
       try { a11y = a11yHandBack(lintBuiltApp(project)); } catch { a11y = []; }
-      // Spacing off the 4px grid — the DESIGN_CONSISTENCY finding (Q-037 / Q-022) — only in files THIS agent
-      // wrote, so a value in the user's own code is never handed back as ours to restyle (Q-015).
-      let offGrid: Array<{ file: string; values: string[] }> = [];
-      try { offGrid = offGridHandBack(project, this._writtenPaths).map(({ file, values }) => ({ file, values })); } catch { offGrid = []; }
+      // 🔴 SPACING IS NO LONGER HANDED BACK TO THE MODEL (autopsy 536c8189, 2026-10-01). It was, from
+      // #3458 until this date — `offGridHandBack` fed the `DESIGN_CONSISTENCY` values into the end-of-turn
+      // message with "change each to the nearest multiple of 4px". The first real build to meet it answered
+      // with three `node -e` regex scripts over a 634-line stylesheet, one failed `edit_file`, three model
+      // calls, ~45 s — and moved `padding: 4px 8px` to `2px 6px`, i.e. ON-grid values OFF the grid.
+      // `round(v / 4) * 4` has exactly one right answer, so it is now done by construction, for free, in
+      // `spacingSnap.ts`. The hand-back keeps the findings only a model can judge: a class with no rule, a
+      // page with no empty state, a control with no name. `offGridHandBack` is deleted with it.
       // A SUB-AGENT is handed back only what ITS OWN files use (Q-066, autopsy de3bb2bb). Specialists run
       // in parallel, so a class a sibling's screen uses is that sibling's to define; handing it here would
       // send two agents to edit one stylesheet for the same rule.
-      if (opts.onlyWritten) return scopeStyleHandBack({ missing, sheet, pages, a11y, offGrid }, project, this._writtenPaths);
-      return { missing, sheet, pages, a11y, offGrid };
+      if (opts.onlyWritten) return scopeStyleHandBack({ missing, sheet, pages, a11y }, project, this._writtenPaths);
+      return { missing, sheet, pages, a11y };
     } catch {
       return { missing: [], pages: [] };
     }
@@ -4022,11 +4026,16 @@ export class ToolDispatcher {
         const unchanged = prior !== undefined && prior.content === full;
         const nothingWritten = prior !== undefined && prior.writeSeq === this._writeSeq;
         const stalls = unchanged && nothingWritten ? (prior?.stalls ?? 0) + 1 : 0;
-        const unchangedRereads = (prior?.unchangedRereads ?? 0) + (unchanged ? 1 : 0);
-        this._readLedger.set(ledgerKey, { count: readCount, content: full, writeSeq: this._writeSeq, stalls, unchangedRereads });
         const own = this._ownReads.get(ledgerKey);
         const ownCount = (own?.count ?? 0) + 1;
         const ownUnchanged = own !== undefined && own.content === full;
+        // 🔴 A SPECIALIST'S FIRST READ IS NOT A WASTED RE-READ (autopsy 3f959fde, 2026-10-01). The report
+        // counted a file "re-read unchanged" whenever ANY agent had read it before — so the Frontend
+        // specialist's first look at `src/App.tsx`, which it needed because a child starts with an empty
+        // context, was billed in REPEATED_READS as a step that "buys nothing". Waste is THIS agent reading
+        // what it already holds; the shared ledger keeps counting every read for the totals.
+        const unchangedRereads = (prior?.unchangedRereads ?? 0) + (ownUnchanged && !(ownCount === 2 && own?.handed === true) ? 1 : 0);
+        this._readLedger.set(ledgerKey, { count: readCount, content: full, writeSeq: this._writeSeq, stalls, unchangedRereads });
         const ownStalls = ownUnchanged && own.writeSeq === this._writeSeq ? own.stalls + 1 : 0;
         this._ownReads.set(ledgerKey, { count: ownCount, content: full, writeSeq: this._writeSeq, stalls: ownStalls });
         // A file handed over in the task, read for the first time, is a copy the agent HOLDS — but it did

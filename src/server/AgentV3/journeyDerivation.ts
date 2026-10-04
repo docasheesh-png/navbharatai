@@ -219,8 +219,9 @@ const DATA_ENTRY_SIGNS: ReadonlyArray<readonly [RegExp, string]> = [
  * JOURNEY_NOT_DERIVED, so the next such report names its cause instead of leaving it to be guessed. PURE.
  */
 export function dataEntryEvidence(files: Record<string, string>): { path: string; what: string; line: string } | null {
+  const unused = unreferencedComponents(files);
   for (const [path, src] of Object.entries(appOwnFiles(files))) {
-    if (!src) continue;
+    if (!src || unused.has(path.replace(/^\.?\/+/, ''))) continue;
     for (const [re, what] of DATA_ENTRY_SIGNS) {
       const m = re.exec(src);
       if (!m) continue;
@@ -230,6 +231,65 @@ export function dataEntryEvidence(files: Record<string, string>): { path: string
     }
   }
   return null;
+}
+
+/** A file the app starts from, or one a framework loads by its place (Next `app/`, `pages/`). */
+const LOADED_BY_PLACE = /(?:^|\/)(?:main|index|App|_app|_document|layout|page)\.(?:tsx|jsx|ts|js)$|(?:^|\/)(?:app|pages|routes)\//;
+const IMPORT_SPEC = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'](\.{1,2}\/[^"']+)["']/g;
+
+function stemOf(path: string): string {
+  return path.replace(/^\.?\/+/, '').replace(/\.(?:tsx|jsx|ts|js|mjs)$/i, '').replace(/\/index$/, '');
+}
+
+function joinRelative(fromFile: string, spec: string): string {
+  const parts = fromFile.replace(/^\.?\/+/, '').split('/');
+  parts.pop();
+  for (const seg of spec.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') parts.pop();
+    else parts.push(seg);
+  }
+  return parts.join('/');
+}
+
+/**
+ * 🔴 A SCREEN NOTHING SHOWS IS NOT THE APP (autopsy 3f959fde, 2026-10-01). The build pivoted from a
+ * generic data analyser to a lottery analyser and left `DataPreview.tsx` and `AlgorithmSuggestions.tsx`
+ * behind, imported by nothing. `JOURNEY_NOT_DERIVED` then named DataPreview's `<select` as the reason the
+ * app "takes input": a fact about code no user can reach.
+ *
+ * The component files (`.tsx` / `.jsx`) that no other file imports and that no framework loads by its
+ * name or place. Precision first: a file is set aside only when it is PROVEN unreferenced — any import
+ * whose path resolves to it keeps it, and a graph with an entry missing or an import that resolves to no
+ * file we were given sets nothing aside. PURE.
+ */
+export function unreferencedComponents(files: Record<string, string>): Set<string> {
+  const paths = Object.keys(files ?? {}).map((p) => p.replace(/^\.?\/+/, ''));
+  const present = new Set(paths);
+  const stems = new Set(paths.map(stemOf));
+  const referenced = new Set<string>();
+  let imports = 0;
+  for (const [raw, src] of Object.entries(files ?? {})) {
+    if (typeof src !== 'string') continue;
+    const from = raw.replace(/^\.?\/+/, '');
+    IMPORT_SPEC.lastIndex = 0;
+    for (let m = IMPORT_SPEC.exec(src); m; m = IMPORT_SPEC.exec(src)) {
+      const target = joinRelative(from, m[1]);
+      // A graph with a hole proves nothing: an import of a file we were not given could be the one that
+      // shows the component, so nothing is called unreferenced.
+      if (!present.has(target) && !stems.has(stemOf(target))) return new Set();
+      referenced.add(stemOf(target));
+      imports++;
+    }
+  }
+  // No entry file, or no import at all, means the graph is not observable here either.
+  if (imports === 0 || !paths.some((p) => LOADED_BY_PLACE.test(p))) return new Set();
+  const out = new Set<string>();
+  for (const p of paths) {
+    if (!/\.(?:tsx|jsx)$/i.test(p) || LOADED_BY_PLACE.test(p)) continue;
+    if (!referenced.has(stemOf(p))) out.add(p);
+  }
+  return out;
 }
 
 /**
@@ -265,6 +325,65 @@ const SAVE_ACTION: readonly RegExp[] = [
   /\.(?:insert|upsert|update|delete|post|put|patch)\s*\(/,
   /\b(?:addDoc|setDoc|updateDoc|deleteDoc)\b/,
 ];
+
+/**
+ * 🔴 "NOTHING TO SAVE AND RELOAD" WAS SAID ABOUT AN APP THAT SAVES AND RELOADS (autopsy 536c8189,
+ * 2026-10-01). A Duolingo-style app shipped green and `JOURNEY_NOT_DERIVED` carried `NO_DATA_ENTRY_REASON`
+ * — *"this app has no data-entry surface at all … nothing to save and reload"*. It keeps XP, gems, a
+ * streak and the lessons you have finished in `localStorage`, read back on every load, in
+ * `src/hooks/useProgress.ts`. That IS the save-and-reload journey this check exists to prove.
+ *
+ * 🔑 THE CLASS: `appHasNoDataEntry` asks "IS THERE A FORM?" and its sentence answers "IS THERE ANYTHING
+ * TO SAVE?" — two different questions. They coincide for a landing page and part ways for every app
+ * whose controls are buttons: a game, a counter, a tracker, a quiz. And this repo already knew storage is
+ * a save signal — `SAVE_ACTION`, one screen down in this same file, lists `localStorage` — so the
+ * knowledge existed in one predicate and not in its sibling. The drifted-copy class, in two sentences.
+ *
+ * 🔒 THE THEME IS NOT THE APP'S DATA. Every app from our own starter writes a theme (and a font scale,
+ * and a consent flag) to `localStorage`, so a bare storage match would say "this app saves" about a
+ * landing page. A write whose key is one of ours, or plainly a display preference, is not evidence —
+ * the direction of the doubt is deliberate: a missed save keeps today's wording, a false one would
+ * promise a journey that does not exist.
+ */
+const PERSIST_WRITE: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\b(?:localStorage|sessionStorage)\s*(?:\.\s*setItem\s*\(|\[)/, 'browser storage'],
+  [/\b(?:localStorage|sessionStorage)\.\w+\s*=/, 'browser storage'],
+  [/\b(?:indexedDB|IDBDatabase)\b/, 'a browser database'],
+  [/\b(?:addDoc|setDoc|updateDoc|deleteDoc)\s*\(/, 'a database write'],
+  [/\.(?:insert|upsert|update|delete)\s*\(/, 'a database write'],
+  [/method\s*:\s*["'](?:POST|PUT|PATCH|DELETE)/i, 'a write to its server'],
+];
+
+/** Storage keys that are a display preference or ours, never the user's records. */
+const NOT_APP_DATA_KEY = /\b(?:theme|colou?r[-_]?scheme|dark[-_]?mode|font[-_]?scale|locale|language|consent|cookie|nbai|nb-)\b/i;
+
+/**
+ * WHERE this app saves state, or null when nothing does — the fact `appHasNoDataEntry` cannot see.
+ * Only app UI files (the same selection `appOnlyShowsWhatItHolds` uses). PURE.
+ */
+export function savedStateEvidence(files: Record<string, string>): { path: string; what: string } | null {
+  for (const [path, src] of Object.entries(appOwnFiles(files))) {
+    if (!src || !APP_SOURCE_FILE.test(path) || NOT_APP_UI.test(path) || ERROR_BOUNDARY_FILE.test(path)) continue;
+    for (const [re, what] of PERSIST_WRITE) {
+      const m = re.exec(src);
+      if (!m) continue;
+      // The line itself decides: a theme write is not the app's data.
+      const start = src.lastIndexOf('\n', m.index) + 1;
+      const end = src.indexOf('\n', m.index);
+      const line = src.slice(start, end < 0 ? undefined : end);
+      if (NOT_APP_DATA_KEY.test(line)) continue;
+      return { path, what };
+    }
+  }
+  return null;
+}
+
+/** The honest sentence for an app that saves state but has no form to fill in. PURE. */
+export function savedWithoutFormReason(where: { path: string; what: string }): string {
+  return `this app does save state (${where.what} in ${where.path}) and reads it back, but it has no form to fill in — `
+    + 'its controls are buttons, so there is no form-and-reload journey to drive here. The click explorer '
+    + 'presses those controls instead';
+}
 
 /**
  * True when every input the app has only narrows what it shows — a search box over a fixed list, a
@@ -1128,8 +1247,13 @@ export function noJourneyReason(files: Record<string, string>): string {
     // REQUIRES POSITIVE EVIDENCE OF A UI — see hasRenderSurface. An absence of data entry is equally
     // true of a canvas game, an empty file map and a project we are holding one utility file for, and
     // only the first of those is "there is nothing here to prove".
+    // 🔒 AND THE SECOND QUESTION, IN BOTH BRANCHES (autopsy 536c8189). This module's own docblock on
+    // `NO_DATA_ENTRY_REASON` says "TWO branches now reach it"; only the other one was fixed when the
+    // Duolingo app was told it had nothing to save, and a sibling left behind is this repo's headline
+    // class. `savedStateEvidence` is asked here too, so the two branches cannot say different things.
     if (hasRenderSurface(files ?? {}) && appHasNoDataEntry(files ?? {})) {
-      return NO_DATA_ENTRY_REASON;
+      const saved = savedStateEvidence(files ?? {});
+      return saved ? savedWithoutFormReason(saved) : NO_DATA_ENTRY_REASON;
     }
     return 'no page components were found to derive a user journey from';
   }
@@ -1152,7 +1276,13 @@ export function noJourneyReason(files: Record<string, string>): string {
     // components, change/submit handlers and contentEditable, so an app whose form merely sits deeper
     // than `formSourcesFor` looks (the real defect this sentence is for) still gets the form wording.
     // Only an app with a render surface and no data entry anywhere reads as a game.
-    if (hasRenderSurface(files ?? {}) && appHasNoDataEntry(files ?? {})) return NO_DATA_ENTRY_REASON;
+    // 🔒 …AND "NO FORM" IS NOT "NOTHING TO SAVE" (autopsy 536c8189 — see `savedStateEvidence`). Ask the
+    // second question before saying the second sentence: an app whose controls are buttons and which keeps
+    // its state in storage DOES save and reload, and telling the user it has nothing to save is false.
+    if (hasRenderSurface(files ?? {}) && appHasNoDataEntry(files ?? {})) {
+      const saved = savedStateEvidence(files ?? {});
+      return saved ? savedWithoutFormReason(saved) : NO_DATA_ENTRY_REASON;
+    }
     if (appOnlyShowsWhatItHolds(files ?? {})) return LOOKUP_ONLY_REASON;
     // 🔴 "NOTHING HERE TAKES USER INPUT" WAS SAID ABOUT AN APP WHOSE FORMS SIT ON SCREENS NO PAGE REACHES
     // (autopsy 2b1f845e: a five-step wizard in src/steps/, switched by state, no router). The data-entry

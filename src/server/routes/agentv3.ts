@@ -19861,6 +19861,16 @@ async function noteBuildOutcome(
               }
               if (landed.length === 0) return;
               buildDiag.record({ phase: 'build', severity: 'info', code: 'SPACING_SNAPPED', message: spacingSnapNote(landed), autoResolved: true });
+              // 🔴 THE FINDING DESCRIBED THE APP BEFORE THE SNAP (autopsy e3b0ce25). DESIGN_CONSISTENCY is
+              // recorded before this runs, so the report read "4 spacing values are off the grid" beside
+              // "2 snapped" with no way to tell what remained. The same check runs again over the snapped
+              // files and the old line is replaced by what is true now.
+              try {
+                const after = lintBuiltApp(integrityFiles);
+                if (after && buildDiag.resolveOnRecheck('DESIGN_CONSISTENCY') > 0 && after.design.violations.length > 0) {
+                  buildDiag.record({ phase: 'build', severity: 'warning', code: 'DESIGN_CONSISTENCY', ...obs(`After the spacing snap: ${designLintSummary(after)}`) });
+                }
+              } catch { /* the earlier finding stands */ }
             } catch { /* deterministic and best-effort — it can never affect a build */ }
           };
           const restoreKitRules = async (files: Record<string, string>, when: 'before-repair' | 'after-repair'): Promise<void> => {

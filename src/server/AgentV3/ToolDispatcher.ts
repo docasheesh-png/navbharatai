@@ -23,6 +23,7 @@ import { appPortsFrom, isSecondaryAppPort, type AppPortMap } from './appPorts';
 import { sandboxStore } from './SandboxStore';
 import { buildPreKillPortCommand, detachBackgroundJobs, isLongRunningCommand, BACKGROUND_JOB_LOG } from './sandbox/EngineerAI/actuators/devServerHost';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
+import { browserCodeInNodeHint } from './browserCodeInNode';
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
 import { inspectCredentials } from './credentialSafety';
 import { probeCredentials, realProbeFetch, credentialProbeEnabled, relevantToApp, type ProbeVerdict } from './credentialProbe';
@@ -5164,6 +5165,11 @@ export class ToolDispatcher {
           const lie = pipedGateExitCodeWarning(command, exitCode, `${stdout}\n${stderr}`);
           if (lie) out = `${out}\n\n${lie}`;
         }
+        // Browser code run under node (Q-146 — browserCodeInNode.ts): said once, with where the code belongs.
+        try {
+          const browserOnly = browserCodeInNodeHint(command, `${stdout}\n${stderr}`);
+          if (browserOnly) out = `${out}\n\n${browserOnly}`;
+        } catch { /* a hint is best-effort */ }
         // PRISMA SCHEMA REPAIR HINT (widen the relation self-heal beyond the `prisma format` class):
         // when a prisma command STILL fails with a schema-validation error that `prisma format` cannot
         // mechanically fix (ambiguous relation, missing @id/@unique, missing fields/references, SQLite

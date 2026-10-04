@@ -471,3 +471,28 @@ export function claimAuditSummary(contradictions: readonly ClaimContradiction[])
   return `The build summary made ${contradictions.length} claim(s) the platform's own measurements contradict: `
     + contradictions.map((c) => `${c.kind} (${c.measured})`).join('; ');
 }
+
+/**
+ * A CONTROL THE MODEL ITSELF SAYS DOES NOTHING (autopsy `51ef24ad`, 2026-10-04). That build's summary
+ * read "Cloud Sync on the Settings page is a UI-only toggle for now" — and shipped a "Sync All Data Now"
+ * button beside it. Honest wording, dishonest app: the user taps a button that does nothing. This is not
+ * a contradiction (the audit above finds none), it is an ADMISSION, and it is the most precise signal
+ * the engine will ever get that a dead control shipped. Narrow on purpose: each phrase states that a
+ * control is inert, never that a feature is merely simple. PURE; returns the admitted sentences.
+ */
+const INERT_CONTROL_ADMISSION = new RegExp([
+  /\bui[- ]only\b/,
+  /\b(?:visual|cosmetic|display)[- ]only\b[^.!\n]{0,40}\b(?:toggle|button|switch|control|option|setting)s?\b/,
+  /\b(?:toggle|button|switch|control)s?\b[^.!\n]{0,60}\b(?:does(?:n't| not) (?:do anything|work yet|actually)|has no effect|is not (?:yet )?wired|isn't (?:yet )?wired|not (?:yet )?connected to (?:a|any) (?:real )?(?:backend|server|api))\b/,
+  /\bplaceholder (?:toggle|button|switch|control)s?\b/,
+].map((r) => r.source).join('|'), 'i');
+
+export function admittedInertControls(summary: string): string[] {
+  const text = String(summary ?? '');
+  if (!text.trim()) return [];
+  return text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((s) => s.replace(/^[\s*•-]+/, '').trim())
+    .filter((s) => s && INERT_CONTROL_ADMISSION.test(s))
+    .slice(0, 5);
+}

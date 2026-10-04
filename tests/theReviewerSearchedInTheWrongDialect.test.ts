@@ -142,7 +142,7 @@ describe('🧩 a tested template opens on the first rung', () => {
   });
   it('the route asks the same questions the seeding asks, and buys no model call for it', () => {
     expect(route).toContain("const scaffoldWillSeed = process.env.AGENTV3_GOLDEN_SCAFFOLD !== 'off' && intent === 'new_build' && !isImportTurn && !!goldenScaffoldForPrompt(prompt);");
-    expect(route).toContain('const complexityDecision = scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(');
+    expect(route).toContain('const promptComplexityDecision = scaffoldWillSeed ? scaffoldedComplexityDecision(analysis?.complexityScore ?? 0) : await decideComplexity(');
   });
 });
 

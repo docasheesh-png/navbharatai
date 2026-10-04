@@ -89009,3 +89009,14 @@ see" above. The exact case is locked by `tests/uiWithoutBuild.test.ts` (`paths: 
 |---|---|---|---|---|
 | Q-129 Gemini runner cannot cancel on Stop | `GeminiToolRunner.runTurn` never read `params.signal`; its only bound was the 120 s per-call timeout | a waiting path that does not hear Stop | `throwIfStopped` before the call, `config.abortSignal` to the SDK, `raceStop` on the wait | `tests/stopReachesEveryProvider.test.ts` (a stalled call ends within 2 s of Stop; reverted → 3 fail; census over every `implements TurnRunner`) |
 
+### 2026-10-04 — Q-131 closed: argued not a defect, and its one real gap already fixed (evidence)
+
+Q-131 ("two definitions of 'was the build stopped?'") was migrated on 2026-10-01 from the first note, but the
+correction recorded right after it (search: "CORRECTION FIRST — the premise I recorded above was false") settles
+it: a model's own `stop_build` DOES raise the abort signal through `setStopBuild` → `abortBuild(…, 'user-stop')`,
+so the two readers ask two different questions correctly — "did the run end early at all?" (the abort signal,
+retry and run proof) and "was an engine's capability ever judged?" (the upsell). Unifying them would make one
+wrong. The one real gap — our own interruptions reaching the upsell — is closed by `interruptedBeforeAnyVerdict`
+(`buildAbortCause.ts`, exhaustive over `AbortCause`), wired at both upsell sites and locked by
+`tests/ourOwnInterruptionIsNotAnEngineLimit.test.ts`. Row removed.
+

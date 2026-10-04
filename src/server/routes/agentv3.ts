@@ -21852,9 +21852,20 @@ async function noteBuildOutcome(
             const verdict = summarizeJourneys(journeyResults, journeys.length, out.stdout);
             // 'unreachable' is its own outcome, not a pass and not a failure — a login wall tells us
             // nothing about the app, and either other answer would be invented.
+            // 🔴 A SIGN-IN FORM THAT ANSWERED IS NOT THE APP HOLDING UP (autopsy 68f0a486). The only journey
+            // that passed submitted the login form; every screen behind it went unchecked, and the gate
+            // still said GREEN, "a real user journey held up end to end". It is the login wall again —
+            // `unreachable`, with the reason — unless a journey past the door passed too.
+            const appPassed = journeyResults.filter((r) => r.verdict === 'passed' && !journeys.find((j) => j.id === r.id)?.signIn);
+            const onlySignInPassed = appPassed.length === 0 && journeyResults.some((r) => r.verdict === 'passed');
             if (journeyResults.some((r) => r.verdict === 'failed')) gateEvidence.journeys = 'failed';
-            else if (journeyResults.some((r) => r.verdict === 'passed')) gateEvidence.journeys = 'passed';
-            else if (journeyResults.length > 0) {
+            else if (appPassed.length > 0) {
+              gateEvidence.journeys = 'passed';
+              gateEvidence.journeyReloaded = appPassed.some((r) => r.kind === 'create-persists');
+            } else if (onlySignInPassed) {
+              gateEvidence.journeys = 'unreachable';
+              gateEvidence.journeyUnreachableWhy = 'only the sign-in form was submitted; the screens behind it were not reached';
+            } else if (journeyResults.length > 0) {
               gateEvidence.journeys = 'unreachable';
               const why = journeyResults.find((r) => r.note)?.note;
               if (why) gateEvidence.journeyUnreachableWhy = why;

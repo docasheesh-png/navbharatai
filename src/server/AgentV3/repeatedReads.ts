@@ -78,9 +78,12 @@ export function repeatedReadNotice(
   // The first copy came in the agent's own task, not from a read (autopsy e49afa97). Same advice, true words.
   if (handedInTask && stalledReads < READ_LOOP_LIMIT) {
     return (
-      `[NOTE — ${path} was given to you in full in your task, and it has NOT changed since. The full `
-      + 'content follows again, but you already have it — work from the copy in your task, and read the '
-      + 'file only after you change it.]\n'
+      // 🔴 NOT "has not changed" (autopsy fde4b7f1): to a REVIEWER that reads as "this build changed
+      // nothing", and one answered "[PASS] the diff is empty" for a build that wrote 19 files. Say what is
+      // true — this copy is the same one you were handed — without the word a reviewer hears as a verdict.
+      `[NOTE — ${path} was given to you in full in your task, and this copy is identical to that one. `
+      + 'The full content follows again, but you already have it — work from the copy in your task, and '
+      + 'read the file only after you edit it yourself.]\n'
     );
   }
   const times = count === 2 ? 'the second time' : `the ${count}${ordinalSuffix(count)} time`;

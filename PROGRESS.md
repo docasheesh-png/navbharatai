@@ -88427,3 +88427,13 @@ module), with five false findings on the way. Ledger (problem → root cause →
 - **Q-395** — a "continue" module turn showed the whole-app ETA and withdrew it seconds later; now never shown.
 - 🟡 Q-396 (no-tests warning on module turns), Q-397 (ignored theme note), Q-398 (APP_SCOPE small word as reason):
   BLOCKED with options in the queue. Q-399 (crawl bench, Haiku planner) resolved as admin-decided behaviour.
+
+### 2026-10-04 — Q-396 and Q-398 (admin accepted both recommendations)
+
+- **Q-396:** a Project Mode module whose shell comes later is no longer told "No tests at all" — the warning reads
+  the same `_starterExpected` flag as the starter blocker. The shell turn and ordinary builds are unchanged.
+- **Q-398:** APP_SCOPE's reason now comes from the request's SUBJECT (first line, cut where the feature list
+  starts): a Sleep Timer in a music player is a feature, not what the app is. **The decision was deliberately left
+  unchanged:** narrowing it was measured to send 8 of 7,403 test prompts to the roadmap planner, which CLAUDE.md's
+  "never more eager" rule for that gate forbids without a decision. Sibling: appScope's feature count sizes a
+  sectioned spec by its sections (only ever smaller).

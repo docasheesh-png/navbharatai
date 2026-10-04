@@ -18,7 +18,8 @@ describe('previewing an older version must not hand out a billable address', () 
 
   it('the panel hands the url to the preview surface instead of to the browser', () => {
     expect(panel).toContain('versionUrl={versionView?.url}');
-    expect(panel).toContain('onExitVersion={() => setVersionView(null)}');
+    // Leaving clears the view (and, since Q-162, also stops the version's server — see everyRouteHasACaller).
+    expect(panel.split('\n').find((l) => l.includes('onExitVersion={')) ?? '').toContain('setVersionView(null)');
   });
 
   it('the old version takes over the WHOLE surface, above both mode branches', () => {

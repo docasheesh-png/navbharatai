@@ -19022,7 +19022,7 @@ async function noteBuildOutcome(
           for (const r of deduped.removed) {
             const next = deduped.files[r.from];
             if (typeof next !== 'string') continue;
-            if (await writeUnlessFrozen(() => actuator.writeFile(workspaceId, r.from, next))) {
+            if (await writeUnlessFrozen(() => runInPass('stylesheet-dedupe', () => actuator.writeFile(workspaceId, r.from, next)))) {
               integrityFiles[r.from] = next;
               writtenFiles.set(r.from, next);
               buildDiag.record({ phase: 'build', severity: 'info', code: 'INTEGRITY_CSS_DEDUPED', message: `"${r.stylesheet}" was imported by the entry AND by ${r.from} — removed the second import (a global stylesheet applies once, whoever imports it).`, autoResolved: true });
@@ -19872,9 +19872,11 @@ async function noteBuildOutcome(
             if (typeof c !== 'string' || !/\.(mjs|cjs|jsx?|tsx?)$/i.test(p) || /\.d\.ts$/i.test(p)) continue;
             const { content: deduped, removed } = dedupeDuplicateImports(c);
             if (removed.length > 0 && deduped !== c) {
+              // The saved copy follows the live file, never leads it: a write the freeze refused used to be
+              // saved anyway, so the next session restored a change the working app never had (f496c75b).
+              if (!(await writeUnlessFrozen(() => runInPass('duplicate-import-dedupe', () => actuator.writeFile(workspaceId, p, deduped))))) continue;
               writtenFiles.set(p, deduped);
               dedupedFiles++;
-              try { await actuator.writeFile(workspaceId, p, deduped); } catch { /* best-effort live write */ }
               try { getWorkspaceMemory(workspaceId).indexFile(p, deduped); } catch { /* index best-effort */ }
               await saveWorkspaceFiles(workspaceId, { [p]: deduped }).catch(() => {});
               buildDiag.record({ phase: 'build', severity: 'info', code: 'DUPLICATE_IMPORT_DEDUPED', message: `Removed ${removed.length} fully-redundant duplicate import(s) from ${p} before the compile check: ${removed.join('; ')}`.slice(0, 400), autoResolved: true });
@@ -25085,7 +25087,8 @@ async function noteBuildOutcome(
           const cfg = ensureViteConfig(full);
           if (cfg && full[cfg.path] === undefined) {
             try {
-              await actuator.writeFile(workspaceId, cfg.path, cfg.content);
+              // Named, so the freeze attributes a refusal to this guard (autopsy f496c75b: three writers here had no name).
+              await runInPass('vite-config-guard', () => actuator.writeFile(workspaceId, cfg.path, cfg.content));
               writtenFiles.set(cfg.path, cfg.content);
               try { getWorkspaceMemory(workspaceId).indexFile(cfg.path, cfg.content); } catch { /* index best-effort */ }
               await saveWorkspaceFiles(workspaceId, { [cfg.path]: cfg.content }).catch(() => {});
@@ -25123,7 +25126,7 @@ async function noteBuildOutcome(
             if (guarded.injected && guarded.files[htmlKey] !== full[htmlKey]) {
               const fixed = guarded.files[htmlKey];
               try {
-                await actuator.writeFile(workspaceId, htmlKey, fixed);
+                await runInPass('html-entry-guard', () => actuator.writeFile(workspaceId, htmlKey, fixed));
                 writtenFiles.set(htmlKey, fixed);
                 try { getWorkspaceMemory(workspaceId).indexFile(htmlKey, fixed); } catch { /* index best-effort */ }
                 await saveWorkspaceFiles(workspaceId, { [htmlKey]: fixed }).catch(() => {});
@@ -25160,7 +25163,7 @@ async function noteBuildOutcome(
             const fixed = withoutStylesheetImports(full[file], specs);
             if (fixed === full[file]) continue;
             try {
-              await actuator.writeFile(workspaceId, file, fixed);
+              await runInPass('dangling-css-guard', () => actuator.writeFile(workspaceId, file, fixed));
               writtenFiles.set(file, fixed);
               try { getWorkspaceMemory(workspaceId).indexFile(file, fixed); } catch { /* index best-effort */ }
               await saveWorkspaceFiles(workspaceId, { [file]: fixed }).catch(() => {});

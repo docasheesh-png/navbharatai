@@ -159,6 +159,15 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     prompt: 'One of the pages does not load properly. Find out why and fix it, then check that every page opens.',
   },
   {
+    // The app rendered, and its own screen says something failed (visibleAppError.ts, Q-362, autopsy
+    // 981ce4cc: a PDF app was published while it showed "Failed to load PDF file"). The error text is the
+    // app's, so fixing what it reports is the app's job and the user gets the button.
+    code: 'APP_SHOWS_ERROR',
+    title: 'Fix the error your app shows',
+    detail: 'When the app was opened in a browser, its own screen showed an error message.',
+    prompt: 'When the app opens in the browser, its own screen shows an error message (for example "Failed to load …" or "Something went wrong"). Find what the message is reporting — a file or library that does not load, a request that fails, a value that is missing — and fix the cause so the feature works and the message no longer appears on a normal start. Do not hide the message without fixing what it reports.',
+  },
+  {
     // The app rendered as raw HTML — its own stylesheet never reached the page (renderStyle.ts, admin
     // 2026-09-28: "sundar aur real cheez bane, fake/farzi nahi"). The commonest cause is a global
     // stylesheet that is empty or never imported, which is exactly what the prompt asks to be fixed.

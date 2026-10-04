@@ -189,9 +189,33 @@ export function clickableNonInteractiveCount(code: string): number {
     if (!t.isElement || !NON_INTERACTIVE.has(t.name)) continue;
     if (!hasAttr(t.tag, 'onclick')) continue;
     if (hasAttr(t.tag, 'role') || hasAttr(t.tag, 'tabindex')) continue;
+    if (NOT_A_CONTROL_HANDLER.test(clickHandlerText(t.tag))) continue;
     n++;
   }
   return n;
+}
+
+/**
+ * A handler that is not a control of its own (found on our own templates the day the rule was added): a
+ * modal BACKDROP that closes on an outside click — its keyboard path is the dialog's Close button and
+ * Escape — and a panel that only stops the click reaching that backdrop. Flagging either would report a
+ * barrier that is not there.
+ */
+const NOT_A_CONTROL_HANDLER = /^\s*(?:\(?\s*\w*\s*\)?\s*=>\s*)?\{?\s*\w+\.stopPropagation\(\)\s*;?\s*\}?\s*$|\b(?:on)?(?:close|dismiss|hide)\w*\b|set\w*(?:open|show|visible)\w*\(\s*false\s*\)/i;
+
+/** The handler expression of an `onClick={…}` / `onclick="…"` attribute ('' when it cannot be read). PURE. */
+function clickHandlerText(tag: string): string {
+  const m = /\bonclick\s*=\s*(?:\{([\s\S]*)\}|"([^"]*)"|'([^']*)')/i.exec(tag);
+  if (!m) return '';
+  if (m[2] !== undefined || m[3] !== undefined) return m[2] ?? m[3] ?? '';
+  // JSX: read up to the brace that closes the attribute's own expression.
+  const body = m[1] ?? '';
+  let depth = 0;
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] === '{') depth++;
+    else if (body[i] === '}') { if (depth === 0) return body.slice(0, i); depth--; }
+  }
+  return body;
 }
 
 /** Count of positive `tabindex` values, an anti-pattern that breaks focus order (WCAG 2.4.3). Pure. */

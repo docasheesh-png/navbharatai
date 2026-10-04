@@ -1,7 +1,7 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig, loadEnv, type Plugin} from 'vite';
+import {defineConfig, loadEnv} from 'vite';
 import {isAutolinkLiteralModule, patchAutolinkEmail} from './src/lib/autolinkEmailPatch';
 
 /**
@@ -9,11 +9,10 @@ import {isAutolinkLiteralModule, patchAutolinkEmail} from './src/lib/autolinkEma
  * Swapped for the same pattern without it; see `src/lib/autolinkEmailPatch.ts`. A library upgrade
  * that moves the pattern fails the build here rather than shipping it.
  */
-function noLookbehindAutolink(): Plugin {
+function noLookbehindAutolink() {
   return {
     name: 'nbai-no-lookbehind-autolink',
-    enforce: 'pre',
-    transform(code, id) {
+    transform(this: { error(message: string): never }, code: string, id: string) {
       if (!isAutolinkLiteralModule(id)) return null;
       const patched = patchAutolinkEmail(code);
       if (patched === null) {

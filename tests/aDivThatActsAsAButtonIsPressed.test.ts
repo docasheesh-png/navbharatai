@@ -36,6 +36,13 @@ describe('the accessibility linter sees a clickable div', () => {
     expect(clickableNonInteractiveCount('<Card onClick={go}>x</Card>')).toBe(0);
     expect(clickableNonInteractiveCount('<div data-onclick="x">y</div>')).toBe(0);
   });
+
+  it("a modal's backdrop and its click-stopping panel are not controls (our own templates have both)", () => {
+    expect(clickableNonInteractiveCount('<div onClick={props.onClose} style={{ position: "fixed" }}>')).toBe(0);
+    expect(clickableNonInteractiveCount('<div onClick={(e) => e.stopPropagation()} style={{ a: 1 }}>')).toBe(0);
+    expect(clickableNonInteractiveCount('<div onClick={() => setOpen(false)}>x</div>')).toBe(0);
+    expect(clickableNonInteractiveCount('<div onClick={() => { start(); setScore(0); }}>Play</div>')).toBe(1);
+  });
 });
 
 // A REAL BROWSER, where one exists (the session container). CI has none; the string tests above hold there.

@@ -88994,3 +88994,12 @@ HTML is deliberately not judged — a browser renders a truncated document, and 
 page from a valid one, so a rule there would be a guess. Every consumer of the gate now sees JSON/CSS too: the
 write guard, the final readiness count, the heal before/after comparison and the store preflight.
 
+### 2026-10-04 — Q-122 closed: it was already fixed (evidence)
+
+Q-122 ("`UI_WITHOUT_BUILD` false positive when only `App.tsx` was edited") was migrated into the queue on 2026-10-01
+from the 70115adf note, but the fix had already landed: `uiWithoutBuild.ts` rule 0 — "CAN WE EVEN SEE THE WHOLE
+PROJECT?" — returns no verdict when the view holds no `package.json` (a scaffold-less fragment is proof of a
+partial view, never of a missing builder), recorded at "FIXED — `UI_WITHOUT_BUILD` judged a project it could not
+see" above. The exact case is locked by `tests/uiWithoutBuild.test.ts` (`paths: ['src/App.tsx'], packageJsonFiles:
+[]` → not stranded). Row removed; nothing to build.
+

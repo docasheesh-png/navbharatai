@@ -987,6 +987,14 @@ export function verifiedWorkspaceReadOk(verifiedUid: string | null, workspaceId:
   return sharedVerifiedWorkspaceReadOk(verifiedUid, workspaceId); // see lib/workspaceIdentity
 }
 
+/**
+ * ⚠️ NON-STRICT: falls back to the CLAIMED body/query userId when there is no token. Kept ONLY for the
+ * automatic build-loop surfaces (preview error/health reports, the build queue) where a token blip must
+ * not hard-break a running build. Anything that READS a user's source, deploys it, restores it, or
+ * pushes it uses `assertVerifiedWorkspaceOwner` (forensic audit 2026-10-04, P1: a token-less request
+ * naming `agentv3-<victimUid>-<sid>` with `userId: <victimUid>` read the victim's whole source tree and
+ * could deploy it with the victim's own keys). `tests/aClaimedUidReadsNoOnesSource.test.ts` holds the line.
+ */
 async function assertWorkspaceOwner(req: Request, workspaceId: string): Promise<boolean> {
   const verifiedUid = await verifyFirebaseToken(req);
   // Claimed id may come from the JSON body (POST) or the query string (GET).
@@ -5122,7 +5130,7 @@ async function noteBuildOutcome(
     const githubConnectedHint = req.body?.githubConnected === true;
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     // Only Render is a wired backend host today; others still use the config-inject + GitHub-connect path.
     if (platform !== 'render') { res.status(400).json({ error: `Backend one-click deploy isn't wired for "${platform}" yet — push to GitHub and connect it on your host (the config was already added).` }); return; }
     // THE USER'S OWN RENDER KEY, NOT OURS (root-caused 2026-08-07). The gate used to ask only
@@ -5642,7 +5650,7 @@ async function noteBuildOutcome(
     if (!serviceId) { res.status(400).json({ error: 'serviceId is required.' }); return; }
     // The same ownership check the deploy itself makes — a status is about someone's own service, and
     // reading one with a borrowed workspace id would leak which services exist.
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     const vault = userId ? await loadUserVaultSecrets(userId, workspaceId).catch(() => null) : null;
     const key = resolveRenderKey(vault);
     if (!key) { res.status(503).json({ error: renderRequirement(process.env, vault) }); return; }
@@ -5677,7 +5685,7 @@ async function noteBuildOutcome(
     const githubToken = typeof req.body?.githubToken === 'string' ? req.body.githubToken.trim() : '';
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     if (!githubToken) { res.status(401).json({ error: 'Connect GitHub first — we need your permission to create the repository in your account.' }); return; }
     try {
       const actuator = buildActuator();
@@ -7291,7 +7299,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId and sha are required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -7319,7 +7327,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -7353,7 +7361,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId and sha are required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -7396,7 +7404,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId and a valid sha are required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -7427,7 +7435,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -7483,7 +7491,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -7540,7 +7548,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -8178,7 +8186,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -9372,7 +9380,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -9420,7 +9428,7 @@ async function noteBuildOutcome(
     }
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -9497,7 +9505,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }
@@ -9844,7 +9852,7 @@ async function noteBuildOutcome(
       res.status(400).json({ error: 'workspaceId is required.' });
       return;
     }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) {
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) {
       res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' });
       return;
     }

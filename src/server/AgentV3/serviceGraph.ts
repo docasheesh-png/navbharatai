@@ -33,6 +33,7 @@
 // PURE + dependency-free → fully unit-testable without a sandbox.
 
 import { delegatesTo, portsInCommand, walkScript } from './npmScripts';
+import { pythonBackendPlan } from './pythonBackendBoot';
 
 export type ServiceKind = 'frontend' | 'backend' | 'worker' | 'cron';
 
@@ -217,6 +218,28 @@ export function buildServiceGraph(opts: {
         dependsOn: [],
       });
     }
+  }
+
+  // A PYTHON SERVER IS A SERVICE TOO (Q-284, autopsy 241215d1). A FastAPI app in `backend/` beside a
+  // Vite front end was reported as "Single service", because only package.json scripts were read, and
+  // nothing started it after a sandbox restart. The plan is the SAME one every start path uses
+  // (`pythonBackendBoot.ts`), so the graph and the boot can never disagree about what runs, or where.
+  const py = pythonBackendPlan(contents);
+  if (py && !found.some((s) => s.kind === 'backend' && s.port === py.port)) {
+    // The boot starts it on exactly this port, so the graph never steps it aside the way it does a
+    // defaulted npm service — a different number here would be a second answer to one question.
+    const port = py.port;
+    taken.add(port);
+    found.push({
+      id: `python:${py.dir || 'root'}`,
+      name: `Python server (${py.dir || 'project root'})`,
+      kind: 'backend',
+      dir: py.dir,
+      // Not a package.json script: the project's own start command, with the port it is started on.
+      script: py.startCommand.replace(/\$PORT\b/g, String(port)),
+      port,
+      dependsOn: [],
+    });
   }
 
   // A frontend depends on every backend in the project: bring the API up first, or the web app's

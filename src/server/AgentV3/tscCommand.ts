@@ -53,6 +53,30 @@ export const INSTALL_LOCK_STALE_MINUTES = 6;
 // tests) goes to our own log, never to the output a verdict is read from — and never to /dev/null.
 export const NPM_INSTALL_LOCK_FRESH = `[ -f ${NPM_INSTALL_LOCK} ] && [ -n "$(find ${NPM_INSTALL_LOCK} -mmin -${INSTALL_LOCK_STALE_MINUTES} 2>>${TSC_ENSURE_LOG})" ]`;
 
+/**
+ * The vite-react `node_modules` the sandbox image bakes (infra/e2b/e2b.Dockerfile; `_npmInstall` Step 0).
+ * Absent from an image that predates it — then the primer below does nothing.
+ */
+export const WARM_NODE_MODULES = '/home/user/.warm/vite-react/node_modules';
+
+/**
+ * 🔴 A FRESH STARTER PAID A FULL INSTALL ON ITS FIRST TYPECHECK (queue Q-304 / Q-257 / Q-063 class,
+ * autopsies 4a1c0157, 0311186f, cf09c03c, d798ddd3 — four reports, 15–18 s each). Our starter is written
+ * into an EMPTY workspace, so there is no `node_modules`; the build-start warm-up finds no compiler and
+ * stands down, and the first write's check runs a cold `npm install`. The image already bakes a
+ * vite-react tree for exactly this, but only `_npmInstall` used it — the typecheck's own install did not.
+ *
+ * Now both do, through this ONE primer: when there is no `node_modules` and the app declares React, the
+ * baked tree is copied to a stage beside the workspace and RENAMED into place. The rename is atomic, so
+ * two primers (the warm-up and the dev-server install) can never copy into each other: one wins, the
+ * other's rename fails and its stage is removed. The install that follows is then a small delta (the
+ * starter's own type packages) instead of a cold one. PURE string.
+ */
+export const PRIME_NODE_MODULES =
+  `if [ ! -e node_modules ] && [ -d ${WARM_NODE_MODULES} ] && grep -qE '"react"[[:space:]]*:' package.json 2>>${TSC_ENSURE_LOG}; then ` +
+  `_nbs=$(mktemp -u /home/user/.nbai-nm-stage.XXXXXXXX); ` +
+  `cp -a ${WARM_NODE_MODULES} $_nbs 2>>${TSC_ENSURE_LOG} && mv -T $_nbs node_modules 2>>${TSC_ENSURE_LOG}; rm -rf $_nbs; fi; `;
+
 export const TSC_ENSURE =
   // Wait (bounded) for an install already filling node_modules. Still busy ⇒ say so and stop: never run
   // a second install into the same tree, and never read a half-filled one (`exit` ends this command
@@ -61,6 +85,7 @@ export const TSC_ENSURE =
   `_nbw=0; while ${NPM_INSTALL_LOCK_FRESH} && [ $_nbw -lt ${INSTALL_WAIT_SECONDS} ]; do sleep 1; _nbw=$((_nbw+1)); done; ` +
   `if ${NPM_INSTALL_LOCK_FRESH}; then echo "${TSC_UNAVAILABLE_MARKER}: the app's dependencies are still being installed, so nothing was checked yet."; exit 0; fi; ` +
   `: >${TSC_ENSURE_LOG}; ` +
+  PRIME_NODE_MODULES +
   // `&& touch node_modules`: an "up to date" install leaves the directory's mtime alone, so without the
   // stamp a rewritten package.json kept this re-running `npm install` before every typecheck.
   `if [ ! -d node_modules ] || [ package.json -nt node_modules ]; then ${INSTALL('')} && touch node_modules; fi; ` +

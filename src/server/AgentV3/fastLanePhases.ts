@@ -33,7 +33,7 @@ export interface FastLanePhases {
    * nothing usable; `skipped` = never started (no share left, or not affordable). Optional so an older
    * caller's ledger still prints.
    */
-  contractOutcome?: 'written' | 'cut' | 'failed' | 'skipped' | 'stopped' | 'handed-off';
+  contractOutcome?: 'written' | 'cut' | 'failed' | 'skipped' | 'stopped' | 'handed-off' | 'not-needed';
   contractCapMs?: number;
 }
 
@@ -70,7 +70,7 @@ export function fastLanePhaseSummary(p: FastLanePhases | undefined): string {
   const other = Math.max(0, p.totalMs - measured);
   const parts = [
     `plan ${sec(p.planMs)}${share(p.planMs, p.totalMs)}`,
-    p.contractMs > 0 || p.contractOutcome === 'stopped' || p.contractOutcome === 'handed-off' ? `contract ${sec(p.contractMs)}${share(p.contractMs, p.totalMs)}${contractNote(p)}` : (p.contractOutcome === 'skipped' ? 'contract skipped — no time left for it, so files were written without a shared contract' : ''),
+    p.contractMs > 0 || p.contractOutcome === 'stopped' || p.contractOutcome === 'handed-off' ? `contract ${sec(p.contractMs)}${share(p.contractMs, p.totalMs)}${contractNote(p)}` : (p.contractOutcome === 'skipped' ? 'contract skipped — no time left for it, so files were written without a shared contract' : p.contractOutcome === 'not-needed' ? 'contract not needed — one component, nothing to share' : ''),
     `generate ${sec(p.generateMs)}${share(p.generateMs, p.totalMs)}`,
     `verify ${sec(p.verifyMs)}${share(p.verifyMs, p.totalMs)} over ${p.verifyRuns} run(s)`,
     `repair ${sec(p.repairMs)}${share(p.repairMs, p.totalMs)} over ${p.repairRuns} round(s)`,

@@ -39,8 +39,11 @@ function detectStack(graph: ProjectGraph): string {
   if (has('nuxt')) return 'Nuxt';
   if (has('@remix-run/react') || has('@remix-run/node')) return 'Remix';
   if (has('@angular/core')) return 'Angular';
-  if (has('svelte') || has('@sveltejs/kit')) return 'Svelte';
-  if (has('vue')) return 'Vue';
+  // A React app that merely names vue/svelte somewhere is still a React app: those two need their own
+  // component files to be the stack (autopsy 70e030bb told a React user "Stack: Vue").
+  const reactWithoutOwnFiles = (ext: string): boolean => has('react') && !hasExt(graph.files, [ext]);
+  if ((has('svelte') || has('@sveltejs/kit')) && !reactWithoutOwnFiles('.svelte')) return 'Svelte';
+  if (has('vue') && !reactWithoutOwnFiles('.vue')) return 'Vue';
   if (has('react')) return has('vite') ? 'React + Vite' : 'React';
   if (has('express') || has('fastify') || has('koa')) return 'Node/Express';
   if (pyFiles && (has('fastapi') || has('flask') || has('django'))) return 'Python';

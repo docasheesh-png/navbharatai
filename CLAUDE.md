@@ -3351,6 +3351,21 @@ the flag entries above promise.
     its reply.
 
   Test-locked in `tests/theAskComesLast.test.ts`.
+- **🐍 `AGENTV3_PYTHON_BACKEND_BOOT` — A PYTHON BACKEND COMES BACK WITH ITS APP (Q-284, autopsy 241215d1, 2026-10-04).
+  ⚠️ NOT set; default ON; `off` reverts.** `pythonBackendBoot.ts`. Every platform start of an app (the preview wake,
+  our own preview start, both in-build restarts) used to run only `npm run dev`, so a FastAPI/Flask server came back
+  with no venv and no process. Now one plan (start command read by `pythonStart.ts`, port from the front end's proxy
+  target, else the server's own, else 8000) is used by the service graph (a `python:` backend) and by every start
+  path, which boots it first: venv, install only when the manifest changed (`timeout 240`), detached start, 30 s port
+  wait. The script is sent base64-encoded so it is never treated as a dev-server launch. 🔒 No declared server ⇒ no
+  plan ⇒ the old behaviour. A recipe recorded from the backend's launch is never replayed as the preview.
+  Report codes `PYTHON_BACKEND_UP` (process-only) / `PYTHON_BACKEND_NOT_UP`.
+- **📝 `AGENTV3_SCRIPT_REQUEST_NOTE` — A SCRIPT REQUEST IS BUILT AS A WEB APP, AND THE USER HEARS IT FIRST (Q-274,
+  admin chose "a" 2026-10-04). ⚠️ NOT set; default ON; `off` reverts.** `scriptRequest.ts`: a request for a Python
+  script, a command-line tool, a Streamlit dashboard or a notebook (precision-first: a film script, JavaScript, a
+  build script, a conversion or an explicit web-app request stand down) gets a builder note and one start-of-build
+  line. When live data was asked, sample data must be labelled "Sample data", and `claimAudit` (`live-data-claimed`)
+  corrects a summary that calls a simulated feed live. Report code `SCRIPT_REQUEST_AS_WEB_APP` (process-only).
 - **📋 A PASTED APP IS THE SPEC, AND PASTED CODE IS NOT PROSE (autopsy a106df77, 2026-10-01).** Two keys, NEITHER
   set, default ON: **`AGENTV3_PASTED_APP_BRIEF`** (`off` drops the brief). A user pasted their own HTML bill maker with no other words.
   The published title became `<!doctype html> <html lang="en"> <head>`, a `<meta content="width=…">` was shown
@@ -3821,6 +3836,25 @@ the flag entries above promise.
   vendor, no split. The label says what can still move it: more work adds to it, the checks at the end
   can only lower it, a build that fails is free.
 
+- **🧠 `AGENTV3_CHANGE_ENGINE` — the app remembers what it is supposed to do, across edits (built
+  2026-10-04, slice 1 of `docs/CHANGE_ENGINE.md`). ⚠️ NOT set; the code default is ON**, and `off` stops
+  every read, write and prompt block with no deploy. Lives in `src/server/AgentV3/changeEngine/`.
+  🔴 **WHY:** every "what did the user ask for?" check reads only the CURRENT prompt
+  (`currentRequestForCoverage` returns the last request on purpose — report 1682cd03), so an edit that
+  silently removed a working Delete button was graded against "make the header blue" and passed.
+  **What it does:** classifies each change (micro-ui … architectural / large → light / standard / deep,
+  higher risk wins); keeps a requirement ledger with stable `REQ-nnn` ids, **verified only by a control a
+  real browser saw** (prose never verifies); re-probes every verified requirement on a later edit
+  (`probeFeatures`, same guards as the coverage probe) and records **`FEATURE_REGRESSED`**; queues
+  unresolved APP findings as `ISS-nnn` moved only by evidence (FIXED/VERIFIED need a build that reached its
+  release gate unstopped); and leaves a `CHG-nnnn` record per build. Report codes `CHANGE_CLASSIFIED`,
+  `CHANGE_RECORDED` (info), `FEATURE_REGRESSED` (warning).
+  🔒 **Server-side only** (`app_engineering_memory_v1/{workspaceId}`, erased with the workspace) — NOT a
+  `.navbharat/` folder in the app (GitHub push, Green Freeze, forgeable by an imported repo, served on the
+  preview URL). Stored text is platform-authored except a redacted 160-char request digest; issue text
+  reaches the builder **fenced**, in the per-turn message, never the cached prefix.
+  ⚠️ **Slice 1 REPORTS a regression; it does not repair it** — feeding it to the feature heal is slice 2,
+  gated on real reports showing no false positives. **What to watch:** `FEATURE_REGRESSED` on edit builds.
 - **`AGENTV3_CONTRACT_FILE`** (default ON, set `off` to disable — added 2026-09-17, autopsy 57875eb3) —
   the fast lane's SHARED CONTRACT (the enums / interfaces / types every per-file call is handed) is now
   written as a REAL file, `src/types.ts` (or `types.ts` when the app has no `src/`), BEFORE any other file,
@@ -4197,6 +4231,29 @@ the flag entries above promise.
   chat surface (a prompt the user GIVES is still a picture). Same change: on an edit, "I changed N files" counts
   what the turn authored (`reviewChangedPaths`), and an omitted stylesheet no longer gives the lean review its
   tools back. Test: `tests/aPromptIsTextNotAnApp.test.ts`.
+- **📱 "TURN MY WEBSITE INTO AN APK" IS ANSWERED, AND A STARTER CONFIG IS EDITED, NOT REWRITTEN (autopsy dcce5d26,
+  2026-10-04; no flag).** "I want to convert one existing website into an online APK but not publically" was built
+  on a fresh workspace. `projectElsewhere.ts` now counts a CONVERSION of the user's own site or app into a phone
+  app (existing / possessive / "this" / a link) as "the thing is elsewhere", and the reply says the honest limit:
+  the APK Builder packages a web app whose code is in the project, never a live link by itself. A request to
+  build a converter still builds. Same report: the fast lane's per-call `model` named the vendor ("glm") —
+  `fastLaneCallIdentity` now reads `TurnResult.model` (`answeringModel`), which also woke its dead
+  reasoning-rung check; and a planned config file the starter already has (`package.json`, `tsconfig*.json`,
+  `vite.config.*`, root `index.html`) is handed its current content in both fast lanes (`existingConfig.ts`).
+  ⚠️ Never let a lane write a project config file blind — that is what `ViteConfigGuard` and the HTML entry guard
+  were cleaning up after. Test: `tests/aWebsiteToApkIsAnsweredNotBuilt.test.ts`.
+- **🔐 `AGENTV3_REQUEST_SCOPE` — A LOGIN NOBODY ASKED FOR IS NOT BUILT (autopsy 70e030bb, 2026-10-04). ⚠️ NOT set;
+  default ON; `off` reverts.** "An app which takes notes from online classes" opened on a username/password form with a
+  hashed demo account, and "Clear Completed" (a to-do prop the contract invented) deleted every note. `requestScope.ts`:
+  on a new build whose request names no sign-in word (login, account, password, OTP, roles, admin, private, secure,
+  multi-user, Hindi forms) and no domain the requirement analyzer recognises, the architect, the fast lane and the
+  one-shot lane are told: no login, sign-up, password gate, demo account or accounts, and no control for a state the
+  data does not have. ⚠️ It stands down for every recognised domain, so it never fights `AGENTV3_REQUIREMENT_AWARE`.
+  Report code `REQUEST_SCOPE_NOTE` (process-only). Same report, no flags: a fast-lane plan no longer lists the
+  starter's compiler files (`STARTER_COMPILER_FILES`: tsconfig ×4, `src/vite-env.d.ts`; both lanes), a `.d.ts` names no
+  dependency and a React app is never "Stack: Vue", a password form is a sign-in journey run signed out
+  (`isCredentialForm`), the sign-in explorer reads `passwordHash: hashPassword("demo123")`, and a pruned package takes
+  its `@types/` with it. Test: `tests/theNotesAppAutopsy.test.ts`.
 - **🙋 `AGENTV3_CONFIRM_BUILD` + 📎 `AGENTV3_ATTACHMENT_MEMORY` (admin 2026-10-03, Q-200 / Q-201). ⚠️ NEITHER is set;
   both default ON; `off` reverts each alone.** `buildConfirmation.ts`: see "READ THE MOOD FIRST" above — an unconfirmed
   build is answered and offered, and a "yes" builds the offered request. `lib/attachmentMemory.ts`: the latest

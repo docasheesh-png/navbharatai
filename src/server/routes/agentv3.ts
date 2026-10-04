@@ -58,6 +58,7 @@ import { nativeCapabilityBrief, requestedCapabilities } from '../AgentV3/nativeC
 import { starterSuiteOnly, starterSuiteNote, testFilesIn } from '../AgentV3/e2eAutoScaffold';
 import { labelFieldsFromPlaceholder } from '../AppMakerLab/intelligence/A11yLinter';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction, simulatedDataIssues, simulatedDataNotice, simulatedDataSubjectLabel, simulatedResultIssues, simulatedResultNotice } from '../AgentV3/AuthenticityAnalysis';
+import { findFakeFeatures, fakeFeatureNotice, fakeFeatureReportLine, impliedRequirementsFor, noFakeFeaturesEnabled, withHonestyBanner, type FakeFeatureFinding } from '../AgentV3/fakeFeatureScan';
 import { isUnreachable } from '../AgentV3/appReachability';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
@@ -12955,6 +12956,9 @@ async function noteBuildOutcome(
     // of every file the agent writes (reliable — straight from the write op, not a later listFiles that
     // can come back empty). See the "DURABLE FILE SAVE" block for the normal-completion path.
     const writtenFiles = new Map<string, string>();
+    // Fake login / payment / OTP / email found in the WHOLE project (fakeFeatureScan.ts) — computed once at
+    // the production-defaults pass (the red on-screen line), read again by the disclosure and the key ask.
+    let fakeFeatures: FakeFeatureFinding[] = [];
     /** The change being made to this app (changeEngine/changeSession.ts) — null for chat turns or when off. */
     let changeSession: ChangeSession | null = null;
     /** The release gate's verdict, once this build reached it — the evidence that its checks ran. */
@@ -21090,6 +21094,22 @@ async function noteBuildOutcome(
           const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt, appSource });
           const appName = display.name;
           const defaults = planAppDefaults(indexHtml, appName, { description: display.description, shortName: display.shortName });
+          // ⛔ NO FAKE BUTTON, NO FAKE FEATURE (admin 2026-10-04). The WHOLE project is read — an edit turn's
+          // writes are a diff, and the provider that makes a login real may live in a file this turn never
+          // touched — and every login / payment / OTP / email that only pretends gets a RED line on the app's
+          // own screen, in the user's language, naming the key and where to paste it. Idempotent: a fake made
+          // real loses its line on the next build. Never on an import (the user's own code is not our fake),
+          // never a failed build. Kill switch AGENTV3_NO_FAKE_FEATURES=off (which also removes an old line).
+          const fakeLang = detectLanguageHint(prompt)?.code ?? null;
+          try {
+            if (noFakeFeaturesEnabled() && !isImportTurn) {
+              const whole = { ...(await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>))), ...Object.fromEntries(writtenFiles) };
+              fakeFeatures = findFakeFeatures(whole, prompt).filter((f) => !isUnreachable(dispatcher.lastReachability, f.file));
+            } else {
+              fakeFeatures = [];
+            }
+          } catch { fakeFeatures = []; }
+          const honestIndex = withHonestyBanner(defaults.indexHtml ?? indexHtml, fakeFeatures, fakeLang);
           const savedDefaults: Record<string, string> = {};
           // Did the index.html patch actually LAND? `defaults.added` lists the TAGS the generator
           // intended, and the files are a separate set — so the two must be reported separately.
@@ -21140,7 +21160,7 @@ async function noteBuildOutcome(
           // "The script has an unsupported MIME type ('text/html')" as a broken app. The reference now
           // lands only after the files it names.
           // Patch index.html only when the generator actually changed it.
-          if (defaults.indexHtml != null && indexHtml != null && defaults.indexHtml !== indexHtml) {
+          if (honestIndex != null && indexHtml != null && honestIndex !== indexHtml) {
             try {
               // The SANDBOX copy keeps the preview bridge it was served with (the live console and the
               // Visual Edit picker); the dev server injects it only when it starts, and nothing re-adds
@@ -21148,12 +21168,12 @@ async function noteBuildOutcome(
               const sandboxIndex = await actuator.readFile(workspaceId, idxPath).catch(() => '');
               await actuator.writeFile(
                 workspaceId, idxPath,
-                hasPreviewBridge(sandboxIndex) ? injectPreviewBridge(defaults.indexHtml, 'live') : defaults.indexHtml,
+                hasPreviewBridge(sandboxIndex) ? injectPreviewBridge(honestIndex, 'live') : honestIndex,
               );
-              writtenFiles.set(idxPath, defaults.indexHtml);
+              writtenFiles.set(idxPath, honestIndex);
               noteFinishingWrite(idxPath);
-              try { getWorkspaceMemory(workspaceId).indexFile(idxPath, defaults.indexHtml); } catch { /* index best-effort */ }
-              savedDefaults[idxPath] = defaults.indexHtml;
+              try { getWorkspaceMemory(workspaceId).indexFile(idxPath, honestIndex); } catch { /* index best-effort */ }
+              savedDefaults[idxPath] = honestIndex;
               indexPatched = true;
             } catch { /* one write failing must not block the rest */ }
           }
@@ -23139,6 +23159,21 @@ async function noteBuildOutcome(
               detail: faked.slice(0, 5).map((i) => `${i.file}:${i.line} ${i.snippet}`).join(' · '),
             });
           }
+        }
+      } catch { /* the disclosure is best-effort — it must never break the build */ }
+
+      // ⛔ A LOGIN / PAYMENT / OTP / EMAIL THAT ONLY PRETENDS IS SAID SO, IN RED (admin 2026-10-04: "no fake
+      // button"). The findings were computed at the production-defaults pass over the whole project (and the
+      // red line put on the app's own screen there); this is the chat half — one line per fake, in the user's
+      // language, naming the files, the exact key names and both paths — and the admin finding. The closing
+      // ask card asks for those keys (APP_REQUIREMENTS below reads `fakeFeatures` too). Never a failed build.
+      try {
+        if (result.ok && expectsArtifacts && !isImportTurn && fakeFeatures.length > 0) {
+          result = { ...result, summary: `${result.summary}${fakeFeatureNotice(fakeFeatures, detectLanguageHint(prompt)?.code ?? null)}` };
+          buildDiag.record({
+            phase: 'readiness', severity: 'warning', code: 'FAKE_FEATURE_SHIPPED', autoResolved: false,
+            message: `${fakeFeatureReportLine(fakeFeatures)} — disclosed to the user in the summary and as a red line on the app's own screen.`.slice(0, 900),
+          });
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }
 
@@ -25661,7 +25696,12 @@ async function noteBuildOutcome(
       // the detector is pure static analysis. Kill switch AGENTV3_APP_REQUIREMENTS=off.
       if (result.ok && expectsArtifacts && (process.env.AGENTV3_APP_REQUIREMENTS ?? '').trim().toLowerCase() !== 'off') {
         try {
-          const missing = unconfiguredRequirements(detectAppRequirements({ files: writtenFiles, prompt }), vaultSecrets);
+          // A fake login / payment / OTP / email IMPLIES the service it stands in for (fakeFeatureScan.ts): the
+          // app names no key — that is what makes it a fake — so the detector above would never ask. A service
+          // the code also names keeps the detected entry (its own matched names win).
+          const detected = detectAppRequirements({ files: writtenFiles, prompt });
+          const implied = impliedRequirementsFor(fakeFeatures).filter((r) => !detected.some((d) => d.id === r.id));
+          const missing = unconfiguredRequirements([...detected, ...implied], vaultSecrets);
           const notice = appRequirementsNotice(missing, detectLanguageHint(prompt)?.code ?? null);
           if (notice) {
             result = { ...result, summary: `${result.summary ? `${result.summary}\n\n` : ''}${notice}` };

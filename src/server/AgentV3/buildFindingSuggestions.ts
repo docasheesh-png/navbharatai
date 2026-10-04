@@ -107,6 +107,15 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     prompt: 'The chat in this app answers with fixed text written into the code — it makes no AI call at all. Make it a real assistant: send what the person types to NavBharatAI\'s own AI through the app and show the real reply, with a loading state while it waits and an honest message if the answer cannot be fetched. Do not leave any canned replies behind.',
   },
   {
+    // The app SHIPPED a login / payment / OTP / email that only pretends (fakeFeatureScan.ts, admin
+    // 2026-10-04: "no fake button"). The user is told in the summary and on the app's own screen; the
+    // closing ask card asks for the exact key; this is the one-tap way to have it wired in once a key exists.
+    code: 'FAKE_FEATURE_SHIPPED',
+    title: 'Make the demo feature real',
+    detail: 'A login, payment, OTP or email in your app only pretends to work — it is not connected to a real service yet.',
+    prompt: 'Some features in this app are demos: a login that checks a password written into the app, a "Continue with Google" button with nothing behind it, a payment that marks itself paid, or an OTP or email the page produces itself. Make each one real with a real provider using the keys I have saved (ask me with request_secrets for any key that is still missing), keep a clearly visible red demo notice on any screen whose key is still missing, and never fake the result.',
+  },
+  {
     code: 'FUZZ_ROBUSTNESS',
     title: 'Stop the app crashing on odd input',
     detail: 'Typing unusual values into your app\'s own forms made it break.',

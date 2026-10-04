@@ -89053,3 +89053,23 @@ instance assembles. It is active wherever a bucket is set — `NAV_STORE_BUCKET`
 is one instance (local dev, CI). Locked by `src/server/lib/zipUploadStore.test.ts` and
 `src/server/routes/zipUpload.test.ts`. Row removed.
 
+### 2026-10-04 — Queue audit of the rows migrated on 2026-10-01 (evidence for each change)
+
+A read-only audit of 21 migrated rows against today's code. Changes made from it:
+
+- **Q-105 closed (already fixed):** `src/server/AgentV3/appReachability.ts` walks the app from `index.html`;
+  used by the readiness / fake-code scan, the incomplete-code heal and the simulated-data scan; locked by
+  `tests/appReachability.test.ts` and `tests/readinessJudgesOurOwnCode.test.ts` (fix note "The missing subsystem,
+  built", 2026-09-17).
+- **Q-118 split:** the TS-error→missing-package half is done (`tscErrorCause.ts`, `tests/tscErrorCause.test.ts`);
+  the destructive-delete half stays OPEN as recorded.
+- **Q-125 closed as superseded:** its premise was corrected by Q-343 (Claude turns are under-stated, not
+  over-stated), which is BLOCKED on the admin's money decision; one row per fact.
+- **Q-158 closed and now LOCKED:** the only client import of `AppKnowledgeBase` went with Offline AI on 2026-09-14,
+  but nothing stopped a new one. `tests/theKnowledgeBaseStaysOnTheServer.test.ts` fails on any client import
+  (proven by injecting one).
+- **Q-159 → 🟡 BLOCKED** with the four fields: guaranteed scheduled jobs need Cloud Scheduler (console) or
+  `--min-instances 1` (cost) — the admin's choice; recommendation Cloud Scheduler.
+- Still OPEN after the audit, unchanged: Q-111, Q-113, Q-115, Q-116, Q-126, Q-127, Q-133, Q-134, Q-135, Q-136,
+  Q-143, Q-144, Q-146, Q-148, Q-163, Q-164; Q-162 needs a fresh repo-wide count before it can be judged.
+

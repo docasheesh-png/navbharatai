@@ -87559,3 +87559,16 @@ were found CLOSED (e.g. coupon race, dead-sandbox recreate, preview door, in-fli
 turnKind, fail-open judge). The 67 still open (duplicates merged) are now rows Q-101…Q-167 in
 `BUILD_REPORT_QUEUE.md` — code-actionable ones OPEN, admin/infra/vendor ones 🟡 BLOCKED with what they need.
 "Unsure" items are marked as such in their row rather than guessed. Q-021 leaves the table.
+
+## 2026-10-04 — Queue sweep after #3467: Q-246, Q-237, Q-247 fixed; Q-249 and Q-248 recorded
+
+#3467 merged at 06:12Z; its 17 rows left the open table. The four rows it left OPEN were taken next
+(sixth rule, point 4):
+
+| Row | Problem | Root cause · class | Fix | Proof |
+|---|---|---|---|---|
+| Q-246 | A file the build wrote and later removed with the shell came back in the saved project | The final save lets captured writes win; only the delete guard's single SOURCE files were ever reconciled. Class: "the save keeps what the build recorded, whatever the shell did to it since" | `shellRemovedOperands` + `removedRecordedPaths` (shellWriteTargets.ts): any recorded file a command removed — stylesheet, non-source folder, glob, `mv` source — is confirmed gone in the sandbox, then forgotten. Sibling: a sub-agent's dispatcher had no deletion sink; it now shares the parent's (`deletionWiring`) | `aShellDeleteLeavesTheSavedProject`, reverted-and-failed (4 tests) |
+| Q-237 | "Xcode N is too old" read as UNKNOWN | No class for "the build machine, not the app, not the user's key" | `BUILD_MACHINE_TOO_OLD`, matched only on printed lines (never the echoed script); new `build-machine` cure family; autofix stops before a model; admin card column | `theBuildMachineIsNotTheApp` (census over the generated step), reverted-and-failed |
+| Q-247 | The explorer could not press "⏸" and could not say why | The skip note kept Playwright's first line ("Timeout 4000ms") and dropped the call log | `pressFailureNote`: names the element that intercepts the click, or the state waited for; the narrowing probes use it too | `aCoveredControlIsNamed`, real browser, reverted-and-failed |
+| Q-249 | WHAT covered "⏸" in 7da1cdca | 🟡 BLOCKED on the next report (the note now names it) | — | — |
+| Q-248 | Summary contradicts itself / claims unmeasured 44×44 | 🟡 BLOCKED — admin decision; recommendation: check size claims against the phone-layout measurement only | — | — |

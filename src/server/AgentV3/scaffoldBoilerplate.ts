@@ -34,6 +34,39 @@ export const SCAFFOLD_BOILERPLATE: Readonly<Record<string, string>> = Object.fre
   'src/ErrorBoundary.tsx': errorBoundaryTsx,
 });
 
+/**
+ * 🔴 THE STARTER'S COMPILER FILES ARE CORRECT AS SHIPPED — a plan never rewrites them (autopsy 70e030bb, 2026-10-04).
+ *
+ * A notes app's fast-lane plan listed `tsconfig.json`, `tsconfig.build.json`, `tsconfig.node.json` and
+ * `src/vite-env.d.ts`, and each was written in full from the app's description alone. The starter's
+ * tsconfig carries the `baseUrl`/`@/` import convention, its build config excludes tests, and a strict-
+ * trial workspace's tsconfig is the measurement itself; the rewrite dropped all of that, added a
+ * `references` entry to a non-composite project (TS6305/TS6306 on every file), and declared `*.vue` modules
+ * in a React app. The fast lane failed its compile, the full builder spent its first minutes undoing it,
+ * and the summary told the user "Stack: Vue".
+ *
+ * These files have no app-specific content, so — like the error boundary — the planner is told they are
+ * provided and the plan drops them. Unlike the error boundary they are NOT restored on a compile error
+ * (a repair may still edit them): this list governs what a plan WRITES, nothing else. Only files the
+ * workspace actually lists are named; an empty listing ("we could not look") names none of them.
+ */
+export const STARTER_COMPILER_FILES: readonly string[] = Object.freeze([
+  'tsconfig.json', 'tsconfig.build.json', 'tsconfig.node.json', 'tsconfig.app.json', 'src/vite-env.d.ts',
+]);
+
+/**
+ * The files a fast-lane plan must not list or write: the restorable boilerplate (every known path when the
+ * listing is empty, as before) plus the starter's compiler files the workspace actually holds. Pure.
+ */
+export function planProvidedFiles(scaffoldPaths: readonly string[] = []): string[] {
+  const boilerplate = Object.keys(SCAFFOLD_BOILERPLATE);
+  if (!scaffoldPaths.length) return boilerplate;
+  return [
+    ...boilerplate.filter((p) => scaffoldPaths.includes(p)),
+    ...STARTER_COMPILER_FILES.filter((p) => scaffoldPaths.includes(p)),
+  ];
+}
+
 /** Is `path` a scaffold boilerplate file we can restore? Pure. */
 export function isScaffoldBoilerplate(path: string): boolean {
   return typeof path === 'string' && path in SCAFFOLD_BOILERPLATE;

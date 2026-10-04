@@ -35,7 +35,9 @@
 const CLAIMS_EXISTING: readonly RegExp[] = [
   /\balready\s+(?:been\s+)?(?:fully\s+)?(?:developed|built|created|made|coded|written|live|deployed)\b/i,
   /\b(?:is|was|has\s+been)\s+(?:already\s+)?(?:fully\s+)?(?:developed|built|coded)\s+(?:in|on|with|using)\b/i,
-  /\b(?:my|our|the|this)\s+existing\s+(?:[a-z-]+\s+){0,2}(?:app|application|project|codebase|code|website|site|repo|repository)\b/i,
+  // "one existing website" / "an existing app" / "meri existing site" are the same claim as "my existing
+  // app" (autopsy dcce5d26: "convert one existing website into an online APK" slipped past `my|our|the|this`).
+  /\b(?:my|our|the|this|one|an?|mera|meri|mere|apni|apna|apne|hamari|hamara|hamare)\s+existing\s+(?:[a-z-]+\s+){0,2}(?:app|application|project|codebase|code|website|site|repo|repository)\b/i,
   /\b(?:pehle|pahle)\s*se\s+(?:hi\s+)?(?:ban[aie]|bani|bana|develop)/i,
   /\b(?:bani|bana|banayi|banaya)\s+hu[ia]\b/i,
 ];
@@ -80,6 +82,36 @@ const NATIVE_STACKS: ReadonlyArray<{ name: string; re: RegExp }> = [
   { name: 'native iOS (Swift)', re: /\bswift(?:ui)?\b|\bxcode\b/i },
 ];
 
+/**
+ * 🔴 TURNING SOMETHING THE USER ALREADY HAS INTO A PHONE APP (autopsy dcce5d26, 2026-10-04).
+ *
+ * *"I want to convert one existing website into an online APK but not publically."* names no host and
+ * forbids no rebuild, so the two qualifiers above did not fire, and the turn became a build: the fast
+ * lane planned a generic wrapper for a website nobody had named, and the user stopped it at 20 s.
+ * A CONVERSION is the third way of saying "the thing to work on is elsewhere": nothing is to be made,
+ * the user's own site is to be packaged. It counts only when the thing converted is THEIRS (existing,
+ * possessive, "this", or a link/domain), and never when the message asks for a converter to be built.
+ */
+const PHONE_TARGET = '(?:apk|aab|ipa|android\\s+app|mobile\\s+app|phone\\s+app|app)';
+const WEB_OBJECT = '(?:website|web\\s?site|site|web\\s?app|webapp|web\\s?page|url|link|portal|blog|app|application|[a-z0-9-]+\\.(?:com|in|org|net|io|app|co|dev|site|xyz|online|store|shop|info|biz))';
+const CONVERTS_TO_PHONE_APP: readonly RegExp[] = [
+  // convert / turn / wrap / package … website … into (an online) APK
+  new RegExp(`\\b(?:convert|turn|wrap|package|transform|change)\\w*\\b[^.?!\\n]{0,60}?\\b${WEB_OBJECT}\\b[^.?!\\n]{0,40}?\\b(?:into|to|in|as)\\s+(?:an?\\s+|the\\s+)?(?:[a-z-]+\\s+){0,2}${PHONE_TARGET}\\b(?!\\s*store)`, 'i'),
+  // (make) an APK of / from my website
+  /\b(?:apk|aab|ipa)\s+(?:of|from|for)\s+(?:[a-z-]+\s+){0,3}(?:website|web\s?site|site|web\s?app|webapp|url|link|portal|blog)\b/i,
+  /\b(?:android|mobile|phone)\s+app\s+(?:of|from)\s+(?:[a-z-]+\s+){0,3}(?:website|web\s?site|site|web\s?app|webapp|url|link|portal|blog)\b/i,
+  // Hinglish: website ka APK / site ko app me (convert)
+  new RegExp(`\\b(?:website|web\\s?site|site|web\\s?app|webapp|url|link)\\s+(?:ka|ki|ke|ko)\\s+(?:[a-z]+\\s+){0,2}${PHONE_TARGET}\\b(?!\\s*store)(?!\\s+(?:jaisa|jaisi|jaise|like|style|wala|wali))`, 'i'),
+];
+/** The thing being converted is the user's own: theirs, existing, "this", or a link to it. */
+const OWNED_OBJECT = /\b(?:my|our|mera|meri|mere|apni|apna|apne|hamari|hamara|hamare|this|yeh|ye|existing|own)\b|\bis\s+(?:website|site|app|link)\b|\bhttps?:\/\/\S+|\b[a-z0-9-]+\.(?:com|in|org|net|io|app|co|dev|site|xyz|online|store|shop|info|biz)\b/i;
+/** A request to BUILD a converter is software to make, not a site to package. */
+const BUILDS_A_CONVERTER = /\b(?:converter|convertor|generator|maker|builder|tool|platform|service|software|saas)\b|\b(?:that|which|jo)\s+(?:converts?|turns?|wraps?)\b/i;
+/** The thing being converted is a WEBSITE (a live link), not an app project. */
+const WEBSITE_OBJECT = /\b(?:website|web\s?site|site|web\s?page|url|link|portal|blog)\b|\bhttps?:\/\/\S+|\b[a-z0-9-]+\.(?:com|in|org|net|io|co|dev|site|xyz|online|store|shop|info|biz)\b/i;
+/** "not publicly" / private / without the Play Store — the user wants an installable file, not a listing. */
+const WANTS_PRIVATE = /\bnot\s+public(?:al)?ly\b|\bnon[-\s]?public\b|\bprivate(?:ly)?\b|\bwithout\s+(?:the\s+)?play\s*store\b|\bnot\s+on\s+(?:the\s+)?play\s*store\b|\bpersonal\s+use\b|\bsirf\s+(?:mere|apne)\s+liye\b/i;
+
 /** Did the message ask for an app file (APK/AAB/IPA) — so the reply should point at the phone build? */
 const WANTS_PHONE_BUILD = /\b(?:apk|aab|ipa|play\s*store|app\s*store|testflight|android\s+app|phone\s+app|mobile\s+app|install(?:able)?\s+on\s+(?:a\s+)?(?:physical\s+)?(?:android\s+)?phone)\b/i;
 
@@ -94,7 +126,16 @@ export interface ProjectElsewhere {
   nativeStack: string | null;
   /** The message asks for an APK/AAB/IPA or a phone app. */
   wantsPhoneBuild: boolean;
-  /** Claims + (elsewhere or forbids rebuild) — the message is about an app that lives somewhere else. */
+  /** The message asks to turn the user's OWN site or app into a phone app (APK / AAB / IPA). */
+  convertsToPhoneApp: boolean;
+  /** The thing named is a website or a link, not an app project — its code may not be in hand. */
+  website: boolean;
+  /** "not publicly" / private / without the Play Store. */
+  wantsPrivate: boolean;
+  /**
+   * Claims + (elsewhere or forbids rebuild), OR a conversion of the user's own site into a phone app —
+   * the message is about something that lives somewhere else.
+   */
   refersToAppElsewhere: boolean;
 }
 
@@ -106,13 +147,19 @@ export function readProjectElsewhere(prompt: string): ProjectElsewhere {
   const forbidsRebuild = FORBIDS_REBUILD.some((re) => re.test(text));
   const nativeStack = NATIVE_STACKS.find((s) => s.re.test(text))?.name ?? null;
   const wantsPhoneBuild = WANTS_PHONE_BUILD.test(text);
+  const convertsToPhoneApp = CONVERTS_TO_PHONE_APP.some((re) => re.test(text))
+    && (claimsExisting || OWNED_OBJECT.test(text))
+    && !BUILDS_A_CONVERTER.test(text);
   return {
     claimsExisting,
     host,
     forbidsRebuild,
     nativeStack,
     wantsPhoneBuild,
-    refersToAppElsewhere: claimsExisting && (host !== null || forbidsRebuild),
+    convertsToPhoneApp,
+    website: WEBSITE_OBJECT.test(text),
+    wantsPrivate: WANTS_PRIVATE.test(text),
+    refersToAppElsewhere: (claimsExisting && (host !== null || forbidsRebuild)) || convertsToPhoneApp,
   };
 }
 
@@ -161,6 +208,18 @@ export function projectElsewhereSteer(v: ProjectElsewhere): string {
   if (v.wantsPhoneBuild) {
     lines.push(`3. Once it is here, the installable Android app is made from ${PHONE_BUILD_PATH}; it builds the APK for them — no Android Studio needed.`);
   }
+  if (v.convertsToPhoneApp && v.website) {
+    lines.push(
+      '- Be honest about one limit: NavBharatAI cannot turn a live website LINK into an app by itself today. '
+        + 'It packages a web app whose CODE is in this project. If they have the website\'s code, bring it in as '
+        + 'above. If they only have the link, offer to build the same website here (they can describe it, or '
+        + 'send screenshots), which the APK Builder can then package. Do not ask for the link as if pasting it '
+        + 'would be enough.',
+    );
+  }
+  if (v.wantsPrivate) {
+    lines.push('- They want it private: the APK Builder gives them an .apk file to install directly on a phone. It is not published on the Play Store or anywhere else unless they upload it themselves.');
+  }
   if (v.nativeStack) {
     lines.push(
       `${v.wantsPhoneBuild ? '4' : '3'}. Be honest about one limit: their app is ${v.nativeStack}. NavBharatAI builds WEB apps and turns `
@@ -185,6 +244,10 @@ export function projectElsewhereFallback(v: ProjectElsewhere): string {
     `To bring it in: ${IMPORT_PATHS}`,
   ];
   if (v.wantsPhoneBuild) parts.push(`Once it is here, the installable app is made from ${PHONE_BUILD_PATH}.`);
+  if (v.convertsToPhoneApp && v.website) {
+    parts.push('NavBharatAI cannot turn a live website link into an app by itself yet — it packages a web app whose code is in this project. If you only have the link, I can build the same website here for you, and then make the APK from it.');
+  }
+  if (v.wantsPrivate) parts.push('The APK is a file you install directly on a phone. It is not published on the Play Store or anywhere else unless you upload it yourself.');
   if (v.nativeStack) {
     parts.push(`One honest limit: NavBharatAI builds web apps and turns them into phone apps, so a ${v.nativeStack} project cannot be packaged here as it is — I can build a web version of it for you instead.`);
   }

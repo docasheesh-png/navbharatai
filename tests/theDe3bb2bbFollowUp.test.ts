@@ -131,7 +131,7 @@ describe('Q-067 — a word we do not know is not a service to connect to', () =>
     // The planner's goal carries it (since Q-274 beside the script-request note, in one list).
     expect(route).toContain('const plannerGoalNotes = [unknownNameNote, scriptRequestNote].filter(Boolean)');
     expect(route).toContain('const plannerGoalBase = plannerGoalNotes ?');
-    expect(route).toContain('pastedBriefSuffix + unknownNameSuffix, framework');
+    expect(route).toContain('pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix, framework');
   });
 });
 

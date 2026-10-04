@@ -3853,8 +3853,13 @@ the flag entries above promise.
   `.navbharat/` folder in the app (GitHub push, Green Freeze, forgeable by an imported repo, served on the
   preview URL). Stored text is platform-authored except a redacted 160-char request digest; issue text
   reaches the builder **fenced**, in the per-turn message, never the cached prefix.
-  ⚠️ **Slice 1 REPORTS a regression; it does not repair it** — feeding it to the feature heal is slice 2,
-  gated on real reports showing no false positives. **What to watch:** `FEATURE_REGRESSED` on edit builds.
+  🔁 **SLICE 2 (same day, admin: "sara kaam karo"): a regression joins the EXISTING feature heal** — same
+  runner, same `verifyAfterFix` net, same `AGENTV3_FEATURE_HEAL` cohort gate (so it spends a repair pass
+  only for the 20% cohort today; widening `_PCT` widens this too). The prompt says RESTORE, never
+  redesign. A restore is recorded as `FEATURE_REGRESSION_HEALED`; what the heal could not restore stays
+  `FEATURE_REGRESSED`. ⚠️ The regression probe's false-positive rate on real builds is UNMEASURED — the
+  admin chose to ship the repair before that measurement. **What to watch:** `FEATURE_REGRESSED` and
+  `FEATURE_REGRESSION_HEALED` on edit builds, and any heal on an app the user says was fine.
 - **`AGENTV3_CONTRACT_FILE`** (default ON, set `off` to disable — added 2026-09-17, autopsy 57875eb3) —
   the fast lane's SHARED CONTRACT (the enums / interfaces / types every per-file call is handed) is now
   written as a REAL file, `src/types.ts` (or `types.ts` when the app has no `src/`), BEFORE any other file,
@@ -4231,6 +4236,29 @@ the flag entries above promise.
   chat surface (a prompt the user GIVES is still a picture). Same change: on an edit, "I changed N files" counts
   what the turn authored (`reviewChangedPaths`), and an omitted stylesheet no longer gives the lean review its
   tools back. Test: `tests/aPromptIsTextNotAnApp.test.ts`.
+- **📱 "TURN MY WEBSITE INTO AN APK" IS ANSWERED, AND A STARTER CONFIG IS EDITED, NOT REWRITTEN (autopsy dcce5d26,
+  2026-10-04; no flag).** "I want to convert one existing website into an online APK but not publically" was built
+  on a fresh workspace. `projectElsewhere.ts` now counts a CONVERSION of the user's own site or app into a phone
+  app (existing / possessive / "this" / a link) as "the thing is elsewhere", and the reply says the honest limit:
+  the APK Builder packages a web app whose code is in the project, never a live link by itself. A request to
+  build a converter still builds. Same report: the fast lane's per-call `model` named the vendor ("glm") —
+  `fastLaneCallIdentity` now reads `TurnResult.model` (`answeringModel`), which also woke its dead
+  reasoning-rung check; and a planned config file the starter already has (`package.json`, `tsconfig*.json`,
+  `vite.config.*`, root `index.html`) is handed its current content in both fast lanes (`existingConfig.ts`).
+  ⚠️ Never let a lane write a project config file blind — that is what `ViteConfigGuard` and the HTML entry guard
+  were cleaning up after. Test: `tests/aWebsiteToApkIsAnsweredNotBuilt.test.ts`.
+- **🔐 `AGENTV3_REQUEST_SCOPE` — A LOGIN NOBODY ASKED FOR IS NOT BUILT (autopsy 70e030bb, 2026-10-04). ⚠️ NOT set;
+  default ON; `off` reverts.** "An app which takes notes from online classes" opened on a username/password form with a
+  hashed demo account, and "Clear Completed" (a to-do prop the contract invented) deleted every note. `requestScope.ts`:
+  on a new build whose request names no sign-in word (login, account, password, OTP, roles, admin, private, secure,
+  multi-user, Hindi forms) and no domain the requirement analyzer recognises, the architect, the fast lane and the
+  one-shot lane are told: no login, sign-up, password gate, demo account or accounts, and no control for a state the
+  data does not have. ⚠️ It stands down for every recognised domain, so it never fights `AGENTV3_REQUIREMENT_AWARE`.
+  Report code `REQUEST_SCOPE_NOTE` (process-only). Same report, no flags: a fast-lane plan no longer lists the
+  starter's compiler files (`STARTER_COMPILER_FILES`: tsconfig ×4, `src/vite-env.d.ts`; both lanes), a `.d.ts` names no
+  dependency and a React app is never "Stack: Vue", a password form is a sign-in journey run signed out
+  (`isCredentialForm`), the sign-in explorer reads `passwordHash: hashPassword("demo123")`, and a pruned package takes
+  its `@types/` with it. Test: `tests/theNotesAppAutopsy.test.ts`.
 - **🙋 `AGENTV3_CONFIRM_BUILD` + 📎 `AGENTV3_ATTACHMENT_MEMORY` (admin 2026-10-03, Q-200 / Q-201). ⚠️ NEITHER is set;
   both default ON; `off` reverts each alone.** `buildConfirmation.ts`: see "READ THE MOOD FIRST" above — an unconfirmed
   build is answered and offered, and a "yes" builds the offered request. `lib/attachmentMemory.ts`: the latest

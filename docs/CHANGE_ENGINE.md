@@ -1,6 +1,6 @@
 # Change Intelligence Engine — design and phased plan
 
-Status: **slice 1 shipped** (this PR). Slices 2–6 are planned below and not built yet.
+Status: **slices 1–2 built** (PRs #3477, slice 2 follows). Slices 3–6 are planned below.
 Owner of the idea: the admin's request of 2026-10-04 to bring spec-driven editing to NavBharatAI.
 It was studied against GitHub Spec Kit (commit `ae5ade7`) and **adapted, not copied**.
 
@@ -132,7 +132,7 @@ Requirements written there would be evicted by an ordinary busy build.
 
 | Slice | What | Trigger to start |
 |---|---|---|
-| 2 | Feed `FEATURE_REGRESSED` into the existing feature-heal runner under `verifyAfterFix`, with no new repair engine | Slice 1 has run on real builds and FEATURE_REGRESSED has shown no false positives |
+| 2 ✅ | Feed `FEATURE_REGRESSED` into the existing feature-heal runner under `verifyAfterFix`, with no new repair engine | **Built 2026-10-04 on the admin's instruction, before the false-positive measurement** — rides the existing heal cohort gate |
 | 3 | Requirements beyond the probe table: accept `RequirementCoverage` labels and confirmed feature-card items as ledger items with status `requested`, verified by journeys (`JOURNEY_PASSED`) | After 2 |
 | 4 | Deterministic impact set from `codeGraph.impactOf` for standard/deep changes: list the files and requirements a change will touch, before implementation | After 1 has data on how often deep changes regress |
 | 5 | A consistency pass on deep changes: run the dead `PlanIntelligence.analyzePlan` against the ledger before implementation; at most ONE question on a genuinely consequential ambiguity, with a recommended default | After 4 |

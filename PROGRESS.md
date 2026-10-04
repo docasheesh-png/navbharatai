@@ -89003,3 +89003,9 @@ partial view, never of a missing builder), recorded at "FIXED — `UI_WITHOUT_BU
 see" above. The exact case is locked by `tests/uiWithoutBuild.test.ts` (`paths: ['src/App.tsx'], packageJsonFiles:
 []` → not stranded). Row removed; nothing to build.
 
+### 2026-10-04 — Q-129: Stop reaches the Gemini/Vertex runner
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-129 Gemini runner cannot cancel on Stop | `GeminiToolRunner.runTurn` never read `params.signal`; its only bound was the 120 s per-call timeout | a waiting path that does not hear Stop | `throwIfStopped` before the call, `config.abortSignal` to the SDK, `raceStop` on the wait | `tests/stopReachesEveryProvider.test.ts` (a stalled call ends within 2 s of Stop; reverted → 3 fail; census over every `implements TurnRunner`) |
+

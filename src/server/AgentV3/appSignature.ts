@@ -61,13 +61,13 @@ export function appSignatureHtml(): string {
     `${scope}>input:focus-visible{outline:2px solid #6366f1;outline-offset:2px}` +
     `</style>` +
     `<input type="checkbox" autocomplete="off" aria-label="${APP_SIGNATURE_CLOSE_LABEL}" title="${APP_SIGNATURE_CLOSE_LABEL}" ` +
-    `style="order:2;appearance:none;-webkit-appearance:none;margin:0;width:24px;height:24px;flex:none;` +
+    `style="order:2;appearance:none;-webkit-appearance:none;margin:0;width:32px;height:32px;flex:none;` +
     `display:grid;place-items:center;cursor:pointer;border-radius:9999px;background:#161b22;` +
     `border:1px solid rgba(255,255,255,.14);box-shadow:0 2px 10px rgba(0,0,0,.28)">` +
     `<a href="${APP_SIGNATURE_URL}" target="_blank" rel="noopener noreferrer" ` +
     `aria-label="${APP_SIGNATURE_LABEL} — open navbharatai.com" ` +
-    `style="order:1;display:inline-flex;align-items:center;` +
-    `gap:6px;padding:6px 11px;background:#161b22;color:#ffffff;` +
+    `style="order:1;display:inline-flex;align-items:center;box-sizing:border-box;min-height:32px;` +
+    `gap:6px;padding:8px 12px;background:#161b22;color:#ffffff;` +
     `font:600 12px/1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;text-decoration:none;` +
     `border-radius:9999px;box-shadow:0 2px 10px rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.14)">` +
     `<span style="display:inline-block;width:7px;height:7px;border-radius:9999px;background:#6366f1"></span>` +

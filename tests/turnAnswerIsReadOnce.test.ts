@@ -96,12 +96,12 @@ describe('🔒 WIRING — one reading, taken before the platform writes a word',
   const route = code('src/server/routes/agentv3.ts');
 
   it('the reading is taken exactly once', () => {
-    expect(route.match(/const modelAnswer = readTurnAnswer\(result\.summary, prompt\);/g) ?? []).toHaveLength(1);
+    expect(route.match(/const modelAnswer = readTurnAnswer\(modelsOwnWords\(result\), prompt\);/g) ?? []).toHaveLength(1);
   });
 
   it('it is taken AFTER the last model run and BEFORE the platform rewrites the summary', () => {
     const retry = route.indexOf('result = retry;');
-    const capture = route.indexOf('const modelAnswer = readTurnAnswer(result.summary, prompt);');
+    const capture = route.indexOf('const modelAnswer = readTurnAnswer(modelsOwnWords(result), prompt);');
     const verified = route.indexOf('result = { ...result, summary: verifiedNoChange };');
     const flip = route.indexOf('result = { ...result, ok: false, summary: emptyFail };');
     const proof = route.indexOf('const runProof = () => runProvenApp({');

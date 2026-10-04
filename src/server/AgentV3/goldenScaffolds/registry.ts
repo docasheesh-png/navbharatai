@@ -124,9 +124,68 @@ function norm(s: string): string {
 }
 
 /**
- * The golden scaffold for a build prompt, or null. Matches ONLY when the prompt is (modulo whitespace
- * and trailing punctuation) EXACTLY a simple starter-template chip prompt — a user who edited the
- * prompt has asked for something else, so they get a normal from-scratch build (no surprise template).
+ * 🧩 THE TEMPLATE'S OWN NAME (admin-approved 2026-10-01, queue Q-087, autopsy 52471441). "Build a
+ * calculator" got no template, because only the chip's full text seeded one; the user saw nothing for
+ * 38 s and pressed Stop. A request that is ONLY a build verb plus one template's own name asks for
+ * exactly what that template is, so it gets it. Any other word ("scientific calculator", "calculator
+ * with graphs", "calculator for kids") is a spec the template does not carry, and builds from scratch
+ * exactly as before — no request is ever narrowed to a template.
+ *
+ * SIMPLE tier only: a simple scaffold IS the finished app, while a pro scaffold is an architecture the
+ * chip's long prompt tells the builder how to extend. A name that two templates could answer ("notes",
+ * "timer") is on neither list. Every name is lowercase and its own whole request.
+ */
+export const BARE_TEMPLATE_NAMES: Readonly<Record<string, readonly string[]>> = {
+  'ai-image': ['ai image generator', 'ai image maker'],
+  todo: ['to-do list', 'to do list', 'todo list', 'todo', 'to-do', 'to do'],
+  calculator: ['calculator'],
+  stopwatch: ['stopwatch', 'stopwatch and timer', 'stopwatch and countdown timer'],
+  pomodoro: ['pomodoro timer', 'pomodoro'],
+  'tip-split': ['tip calculator', 'bill splitter', 'bill split', 'tip and bill split'],
+  'unit-converter': ['unit converter'],
+  'qr-generator': ['qr code generator', 'qr code maker', 'qr generator', 'qr maker'],
+  'quick-notes': ['quick notes'],
+  'password-gen': ['password generator'],
+  'login-page': ['login page', 'login screen', 'login and signup page'],
+  memory: ['memory game', 'memory match game', 'memory match', 'memory card game'],
+  puzzle: ['merge puzzle', '2048 game', '2048'],
+  'gst-bill': ['gst bill maker', 'gst bill generator', 'gst billing', 'gst bill'],
+  'exam-prep': ['mock test', 'exam mock test'],
+  panchang: ['panchang'],
+  geeta: ['bhagavad gita reader', 'bhagavad gita', 'gita reader', 'gita', 'geeta'],
+  quran: ['quran reader', 'quran'],
+  'wedding-rsvp': ['wedding rsvp manager', 'wedding rsvp', 'shaadi rsvp'],
+};
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** An English order that opens the request ("build me a calculator"). */
+const LEADING_VERB = '(?:please\\s+)?(?:build|make|create|generate)\\s+(?:me\\s+)?(?:(?:a|an|one|the|ek)\\s+)?';
+/** A Hinglish order that closes it ("ek calculator banao", "calculator app bana do"). */
+const TRAILING_VERB = '\\s+(?:banao|bana\\s+do|banado|bana\\s+de|bana\\s+dijiye|banaiye|banana\\s+hai|chahiye)';
+const HINGLISH_OPENER = '(?:(?:mujhe|mere\\s+liye)\\s+)?(?:ek\\s+)?';
+const APP_WORD = '(?:\\s+(?:app|application))?';
+
+/** The scaffold a request names by its bare name, or null. Pure. */
+export function bareTemplateRequestFor(prompt: string): GoldenScaffold | null {
+  const p = norm(prompt).replace(/[,!]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!p) return null;
+  for (const [id, names] of Object.entries(BARE_TEMPLATE_NAMES)) {
+    const scaffold = GOLDEN_SCAFFOLDS.find((g) => g.id === id);
+    if (!scaffold || scaffold.tier !== 'simple') continue;
+    const name = `(?:${names.map(escapeRe).join('|')})`;
+    const english = new RegExp(`^${LEADING_VERB}${name}${APP_WORD}(?:\\s+please)?$`);
+    const hinglish = new RegExp(`^${HINGLISH_OPENER}${name}${APP_WORD}${TRAILING_VERB}(?:\\s+please)?$`);
+    if (english.test(p) || hinglish.test(p)) return scaffold;
+  }
+  return null;
+}
+
+/**
+ * The golden scaffold for a build prompt, or null. Matches when the prompt is (modulo whitespace
+ * and trailing punctuation) EXACTLY a starter-template chip prompt, or a build verb plus one simple
+ * template's own name and nothing else (`bareTemplateRequestFor`). A user who wrote anything more has
+ * asked for something else, so they get a normal from-scratch build (no surprise template).
  * Pure.
  */
 export function goldenScaffoldForPrompt(prompt: string): GoldenScaffold | null {
@@ -139,5 +198,5 @@ export function goldenScaffoldForPrompt(prompt: string): GoldenScaffold | null {
       return GOLDEN_SCAFFOLDS.find((g) => g.id === t.id) ?? null;
     }
   }
-  return null;
+  return bareTemplateRequestFor(prompt);
 }

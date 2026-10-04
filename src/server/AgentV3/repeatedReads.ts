@@ -78,9 +78,12 @@ export function repeatedReadNotice(
   // The first copy came in the agent's own task, not from a read (autopsy e49afa97). Same advice, true words.
   if (handedInTask && stalledReads < READ_LOOP_LIMIT) {
     return (
-      `[NOTE — ${path} was given to you in full in your task, and it has NOT changed since. The full `
-      + 'content follows again, but you already have it — work from the copy in your task, and read the '
-      + 'file only after you change it.]\n'
+      // 🔴 NOT "has not changed" (autopsy fde4b7f1): to a REVIEWER that reads as "this build changed
+      // nothing", and one answered "[PASS] the diff is empty" for a build that wrote 19 files. Say what is
+      // true — this copy is the same one you were handed — without the word a reviewer hears as a verdict.
+      `[NOTE — ${path} was given to you in full in your task, and this copy is identical to that one. `
+      + 'The full content follows again, but you already have it — work from the copy in your task, and '
+      + 'read the file only after you edit it yourself.]\n'
     );
   }
   const times = count === 2 ? 'the second time' : `the ${count}${ordinalSuffix(count)} time`;
@@ -131,11 +134,13 @@ export function repeatedReadSummary(reads: Map<string, number>, unchangedRereads
   const wastedBy = unchangedRereads ?? new Map([...reads].map(([p, n]) => [p, Math.max(0, n - 1)]));
   const wasted = [...wastedBy.values()].reduce((a, b) => a + b, 0);
   if (distinct === 0 || wasted < 5) return '';   // a couple of re-reads is ordinary work, not a finding
+  // The worst list ranks and names what the sentence is about — unchanged re-reads — beside the total, so
+  // "7× src/index.css" can no longer mean seven reads of which one repeated (autopsy 3f959fde).
   const worst = [...reads.entries()]
     .filter(([p, n]) => n > 1 && (wastedBy.get(p) ?? 0) > 0)
-    .sort((a, b) => b[1] - a[1])
+    .sort((a, b) => (wastedBy.get(b[0]) ?? 0) - (wastedBy.get(a[0]) ?? 0) || b[1] - a[1])
     .slice(0, 3)
-    .map(([p, n]) => `${n}× ${p}`)
+    .map(([p, n]) => `${p} (${wastedBy.get(p) ?? 0} unchanged of ${n} reads)`)
     .join(', ');
   const pct = Math.round((wasted / total) * 100);
   return (

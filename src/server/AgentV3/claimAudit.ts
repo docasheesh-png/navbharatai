@@ -110,12 +110,18 @@ export interface MeasuredFacts {
    * `dist/index.html` directly, which for a Vite build with absolute asset paths shows a blank page.
    */
   appSourceFiles?: number;
+  /**
+   * Did the user's request ask for LIVE data (`scriptRequest.ts` → `liveDataRequested`)? Read only by the
+   * `live-data-claimed` check; omitted ⇒ that check never runs. 🔴 Autopsy 241215d1 (Q-274): a paper-trading
+   * app asked for live `yfinance` prices, shipped a simulated feed, and was described as working end to end.
+   */
+  liveDataRequested?: boolean;
 }
 
 /** "Everything lives in one HTML file", "a single HTML file" — never "single-page app", which is true. */
 const ONE_FILE_CLAIMED = /\b(?:in|lives\s+in|is|as|inside)\s+(?:just\s+|only\s+)?(?:one|a\s+single|single)\s+(?:html\s+|index\.html\s+)?file\b|\bsingle[\s-](?:html\s+)?file\s+app\b/i;
 
-export type ClaimKind = 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed';
+export type ClaimKind = 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed';
 
 /**
  * "the exact versions you specified" — a PLATFORM requirement credited to the user (autopsy 33812996).
@@ -329,6 +335,20 @@ const INDIC_SCRIPT = /[\u0900-\u0DFF]/;
  */
 export const MIN_LABELS_FOR_FABRICATION = 4;
 
+/** A sentence claiming live data. "live prices (simulated)" is honest, so a sentence that says so is not a claim. */
+const LIVE_DATA_CLAIMED = /\b(?:live|real[\s-]?time)\s+(?:nse\s+|bse\s+|stock\s+|market\s+)*(?:data|prices?|quotes?|feeds?|ticks?|market\s+data|updates?)\b/i;
+const SAYS_SIMULATED = /\b(?:simulat\w*|sample|mock\w*|demo|dummy|fake|synthetic|random(?:ly)?)\b/i;
+function liveDataClaim(summary: string): string | null {
+  for (const sentence of summary.split(/(?<=[.!?])\s+|\n+/)) {
+    if (LIVE_DATA_CLAIMED.test(sentence) && !SAYS_SIMULATED.test(sentence)) return sentence.trim();
+  }
+  return null;
+}
+/** Code that generates a price/data feed itself. */
+const SIMULATED_FEED = /\bsimulat\w*|\bmock_?(?:price|feed|data|tick|quote)\w*|random[_\s-]?walk|random\.gauss\(|np\.random\.normal\(|random\.uniform\(/i;
+/** Code that reaches a real market-data source. */
+const REAL_FEED = /\byfinance\b|\bjugaad\b|\bnsepy\b|alphavantage|alpha_vantage|finnhub|polygon\.io|twelvedata|query[12]\.finance\.yahoo|nseindia\.com|kiteconnect|upstox/i;
+
 /** Check the model's summary against what the platform actually measured. Pure. */
 /**
  * Phrases that assert the app LOOKS designed. Narrow on purpose: "responsive" or "clean code" is not a
@@ -416,6 +436,20 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
     });
   }
 
+  // "Live NSE prices" from an app whose source only simulates them (Q-274, autopsy 241215d1). Needs all
+  // four: live data was asked for, the summary claims live data in a sentence that does not itself say
+  // the data is simulated, the app's source simulates a feed, and the source names no real data source.
+  if (facts.liveDataRequested === true && facts.sourceIsWholeApp !== false && facts.sourceText) {
+    const claim = liveDataClaim(text);
+    if (claim && SIMULATED_FEED.test(facts.sourceText) && !REAL_FEED.test(facts.sourceText)) {
+      out.push({
+        kind: 'live-data-claimed',
+        claimed: 'that the app shows live data',
+        measured: 'its code generates simulated prices and connects to no live data source, so the numbers on screen are sample data',
+      });
+    }
+  }
+
   // "the exact versions you specified" when the user wrote no version at all (autopsy 33812996).
   if (typeof facts.userRequest === 'string' && VERSIONS_ATTRIBUTED_TO_USER.test(text) && !A_VERSION_NUMBER.test(facts.userRequest)) {
     out.push({
@@ -470,4 +504,29 @@ export function claimCorrection(contradictions: readonly ClaimContradiction[]): 
 export function claimAuditSummary(contradictions: readonly ClaimContradiction[]): string {
   return `The build summary made ${contradictions.length} claim(s) the platform's own measurements contradict: `
     + contradictions.map((c) => `${c.kind} (${c.measured})`).join('; ');
+}
+
+/**
+ * A CONTROL THE MODEL ITSELF SAYS DOES NOTHING (autopsy `51ef24ad`, 2026-10-04). That build's summary
+ * read "Cloud Sync on the Settings page is a UI-only toggle for now" — and shipped a "Sync All Data Now"
+ * button beside it. Honest wording, dishonest app: the user taps a button that does nothing. This is not
+ * a contradiction (the audit above finds none), it is an ADMISSION, and it is the most precise signal
+ * the engine will ever get that a dead control shipped. Narrow on purpose: each phrase states that a
+ * control is inert, never that a feature is merely simple. PURE; returns the admitted sentences.
+ */
+const INERT_CONTROL_ADMISSION = new RegExp([
+  /\bui[- ]only\b/,
+  /\b(?:visual|cosmetic|display)[- ]only\b[^.!\n]{0,40}\b(?:toggle|button|switch|control|option|setting)s?\b/,
+  /\b(?:toggle|button|switch|control)s?\b[^.!\n]{0,60}\b(?:does(?:n't| not) (?:do anything|work yet|actually)|has no effect|is not (?:yet )?wired|isn't (?:yet )?wired|not (?:yet )?connected to (?:a|any) (?:real )?(?:backend|server|api))\b/,
+  /\bplaceholder (?:toggle|button|switch|control)s?\b/,
+].map((r) => r.source).join('|'), 'i');
+
+export function admittedInertControls(summary: string): string[] {
+  const text = String(summary ?? '');
+  if (!text.trim()) return [];
+  return text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((s) => s.replace(/^[\s*•-]+/, '').trim())
+    .filter((s) => s && INERT_CONTROL_ADMISSION.test(s))
+    .slice(0, 5);
 }

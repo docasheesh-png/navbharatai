@@ -230,8 +230,11 @@ describe('the builder can really call this', () => {
   it('the dispatcher handles it, writes the files AND names the dependency', () => {
     expect(dispatcher).toContain("case 'generate_game_3d': {");
     expect(dispatcher).toContain('generateGame3D(g3Include)');
-    // A 3D layer whose `three` install is never mentioned produces an app that will not build.
-    expect(dispatcher).toContain('g3Deps');
+    // A 3D layer whose `three` is never installed produces an app that will not build. Since 2026-10-04
+    // the dispatcher INSTALLS it (candy report 7da1cdca) — every game recipe reaches the installer
+    // through addMissingRecipeLayers, the 3D one included.
+    expect(dispatcher).toContain('const g3Layers = await this.addMissingRecipeLayers(g3.files, agent);');
+    expect(dispatcher).toContain('return layersNote + await this.installRecipeDependencies(all);');
   });
 
   it('the description points the model at the runtime first', () => {

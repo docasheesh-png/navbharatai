@@ -40,7 +40,7 @@ import { getProfessional, listProfessionals } from '../professionals/registry';
 import { runProfessionalChatWithUsage } from '../professionals/engine';
 import { routeParam } from '../lib/expressCompat';
 import { emailForUid } from '../lib/uidEmail';
-import { imageForApiKey, IMAGES_SCOPE } from '../lib/apiKeyImage';
+import { imageForApiKey } from '../lib/apiKeyImage';
 import { readImageGenerationRequest } from '../lib/developerApi';
 import { apiKeyUsageStore } from '../lib/ApiKeyUsageStore';
 import { userCostStore } from '../lib/UserCostStore';
@@ -333,7 +333,7 @@ export function registerDeveloperApiRoutes(app: Express): void {
   // base URL. One picture per call, returned as `b64_json` (a stored URL would be a public copy of the
   // picture we would then have to keep). Every check, the engines and the charge are `imageForApiKey`'s,
   // shared with an app whose owner saved this key as its image key — one door, priced one way.
-  app.post('/api/images/generations', ipLimiter, apiKeyAuth, requireScope(IMAGES_SCOPE), async (req: Request, res: Response) => {
+  app.post('/api/images/generations', ipLimiter, apiKeyAuth, requireScope('ai:images'), async (req: Request, res: Response) => {
     const auth = apiAuthOf(req);
     const now = Date.now();
     if (!keyAllowedNow(auth.keyId, now)) {

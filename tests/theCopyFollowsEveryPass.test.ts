@@ -31,7 +31,7 @@ describe('the end-of-build refresh', () => {
   });
 
   it('the explorer repair runs BEFORE the copy is taken, so it cannot leave it stale', () => {
-    expect(route.indexOf('await runExplorerRepair(')).toBeLessThan(route.indexOf("new FirebaseHostingDeployer().deployStatic(workspaceId, dist, snapshotChannelId(workspaceId))"));
+    expect(route.indexOf('await runExplorerRepair(')).toBeLessThan(route.indexOf("new FirebaseHostingDeployer().deployStatic(workspaceId, withPreviewAiRelay(dist), snapshotChannelId(workspaceId))"));
   });
 
   it('fires only when the copy no longer matches what is about to be persisted', () => {

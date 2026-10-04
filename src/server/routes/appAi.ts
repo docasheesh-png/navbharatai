@@ -17,21 +17,14 @@ import express from 'express';
 import { rateLimiter } from '../lib/authMiddleware';
 import {
   GATEWAY_PATH, appAiGatewayEnabled, gatewaySecret, verifyAppAiToken, nonceAccepted,
-  readGatewayRequest, gatewayDecision, appDailyCapInr, visitorDailyCapInr,
+  readGatewayRequest, appDailyCapInr, visitorDailyCapInr,
   visitorFacingMessage, type GatewayRefusal,
 } from '../lib/appAiGateway';
 import { appAiRegistryStore } from '../lib/AppAiRegistryStore';
-import { appAiUsageStore } from '../lib/AppAiUsageStore';
 import { deploymentStore, isLiveDeployment } from '../AgentV3/DeploymentStore';
 import { dayKey, visitorHash } from '../lib/siteAnalytics';
 import { hashSecret } from '../lib/siteAnalyticsStore';
-import { callProfessionalAIWithUsage } from '../lib/professionalRouting';
-import { collectAiSpend } from '../lib/aiSpendZone';
-import { chargeForAiTurns } from '../lib/aiTurnCharge';
-import { chatTurnCost, sumChatTurnCosts } from '../lib/chatSpend';
-import { usdInrRate } from '../lib/UsdInrRate';
-import { getServerDb } from '../lib/serverDb';
-import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBalance';
+import { answerForApp } from '../lib/appAiAnswer';
 
 /**
  * The system prompt every gateway answer is produced under.
@@ -41,7 +34,7 @@ import { readWalletBalanceInr, firestoreWalletReader } from '../AgentV3/WalletBa
  * appended. The author's text comes second on purpose: it shapes the assistant's job, it does not get
  * to rename the engine.
  */
-const BASE_SYSTEM =
+export const BASE_SYSTEM =
   'You are the assistant built into this app, powered by NavBharatAI. ' +
   'Never name, hint at, or speculate about which AI model, company or provider is answering — ' +
   'if asked, say you are the app’s assistant, powered by NavBharatAI. ' +
@@ -107,60 +100,23 @@ export function registerAppAiRoutes(app: Express): void {
     const ownerId = String(deployment?.userId || record.userId || '').trim();
     const day = dayKey(Date.now());
     const visitor = visitorHash(req.ip || '', String(req.headers['user-agent'] || ''), day, hashSecret());
-
-    const [spent, balanceInr] = await Promise.all([
-      appAiUsageStore.spentToday(verdict.appId, visitor, day),
-      ownerId
-        ? readWalletBalanceInr(firestoreWalletReader(getServerDb() as any), ownerId).catch(() => null)
-        : Promise.resolve(null),
-    ]);
-
-    const appCapInr = appDailyCapInr();
-    const decision = gatewayDecision(
-      { appSpentInr: spent.appSpentInr, visitorSpentInr: spent.visitorSpentInr, ownerBalanceInr: balanceInr },
-      { appCapInr, visitorCapInr: visitorDailyCapInr() },
-    );
-    if (!decision.allow) { refuse(decision.reason); return; }
-    if (!spent.known) {
-      // Allowed, and said out loud. See AppAiUsageStore.spentToday: unreadable is not zero, and the
-      // one thing that must not happen is a cap that quietly stopped being enforced.
-      console.warn(`[APPAI] ${verdict.appId}: spend counters unreadable — this call was allowed without a cap check.`);
-    }
-
     const system = request.system ? `${BASE_SYSTEM}\n\n${request.system}` : BASE_SYSTEM;
-    const run = await collectAiSpend(() => callProfessionalAIWithUsage(system, request.prompt, 'free'));
-    if (!run.ok) {
-      // Every provider failed. The visitor gets branded wording; the reason stays on our side.
-      console.error(`[APPAI] ${verdict.appId}: the assistant chain failed:`, run.error);
-      refuse('disabled');
+
+    // ONE answer path for the published app and the owner's preview (lib/appAiAnswer.ts): the owner's
+    // own key if they saved one (server-side, never in the page), else NavBharatAI's engine inside the
+    // caps — unless the owner switched it off for this app, which takes effect here with no republish.
+    const answer = await answerForApp({
+      ownerId, workspaceId: record.workspaceId, system, prompt: request.prompt,
+      counter: { appId: verdict.appId, visitor, day, appCapInr: appDailyCapInr(), visitorCapInr: visitorDailyCapInr() },
+    });
+    if (!answer.ok) {
+      // A visitor learns only that the assistant is unavailable — never the owner's balance, their
+      // switch, or that they bring their own key (and certainly not which provider).
+      refuse(answer.reason === 'visitor-cap' || answer.reason === 'bad-token' || answer.reason === 'not-live' ? answer.reason : 'disabled');
       return;
     }
-
-    res.status(200).json({ ok: true, text: run.result.content });
-
-    // ── Money, AFTER the answer is out ──────────────────────────────────────────────────────────
-    // A charge that fails must never cost a visitor their reply; charging first would risk billing a
-    // turn that then failed. Same ordering, and the same reasoning, as every other assistant.
-    const usdInr = usdInrRate();
-    const cost = sumChatTurnCosts(run.spend.map((u) => chatTurnCost(u, usdInr)), usdInr);
-    // The COUNTER moves on what the turn cost, not on what was debited. The two differ whenever the
-    // wallet is switched off or the owner is free-listed — and the cap has to keep biting in exactly
-    // those cases, or a flag meant to change who pays would silently remove the only ceiling a public
-    // endpoint has.
-    void appAiUsageStore.record(verdict.appId, visitor, day, cost.billedInr);
-    void chargeForAiTurns(
-      getServerDb() as any,
-      // 🔒 NEITHER `isFreeListed` NOR `hasActivePass` IS PASSED, and both omissions are decisions.
-      // A Professional Pass pays for the HOLDER's own assistant use; it is not a licence for an
-      // unlimited number of strangers to use their app's assistant free, and treating it as one would
-      // quietly resize a product that was already sold. The free list is an ACCOUNT courtesy for
-      // testing NavBharatAI itself — this spend is a published app's public traffic, which is the one
-      // place the courtesy would be unbounded. Both would also need a lookup the deployment record
-      // cannot answer, so inventing either would mean guessing about somebody's billing.
-      { userId: ownerId || null, feature: 'app-assistant' },
-      run.spend,
-      usdInr,
-      Date.now(),
-    );
+    res.status(200).json({ ok: true, text: answer.text });
+    // Money, AFTER the answer is out (see AppAiAnswer.settle).
+    answer.settle();
   });
 }

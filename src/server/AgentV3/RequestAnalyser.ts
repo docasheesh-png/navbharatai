@@ -175,7 +175,9 @@ const NORMAL_LADDER: StartTier[] = ['gemini', 'haiku', 'sonnet'];
 
 // ── Keyword signals (lowercased, word-ish boundaries kept loose for Hinglish) ──────
 const RE = {
-  greeting: /\b(hi|hello|hey|namaste|namaskar|kaise ho|how are you|thanks|thank you|dhanyaiwad|shukriya|good morning|good evening)\b/i,
+  // "hi" and "hey" greet only where a message OPENS: mid-sentence, "hi" is the Hindi particle "just / indeed"
+  // ("esa hi" = just like this, "aaj hi", "mujhe yahi chahiye") — autopsy c70bcbb4.
+  greeting: /^\W*(?:hi+|hey+)\b|\b(hello|namaste|namaskar|kaise ho|how are you|thanks|thank you|dhanyaiwad|shukriya|good morning|good evening)\b/i,
   /**
    * 🔴 "in hindi" IS NOT AN ORDER TO TRANSLATE (autopsy b6f88a72, 2026-09-18). The prompt
    * *"Build a Bhagavad Gita reader in Hindi"* was recorded as `taskType: 'translate'`, score 15,
@@ -201,7 +203,7 @@ const RE = {
  * A build verb whose object is a thing to build — an app, a site, a tool, a game. When it is present, a
  * feature noun elsewhere in the sentence ("translation", "summary") describes that thing, not the task.
  */
-const ORDERS_A_BUILD = /\b(?:create|build|make|develop|design|generate|code|banao|bana\s*do|banado|banaiye)\b[^.?!\n]{0,60}?\b(?:app|apps|application|website|web\s*app|site|tool|platform|extension|game|dashboard|portal)\b/i;
+const ORDERS_A_BUILD = /\b(?:create|build|make|develop|design|generate|code|banao|bana\s*do|banado|banaiye|bnao|bna\s*do|ban(?:a|aa)\s*kar|bnakar|bana\s*ke|bnake)\b[^.?!\n]{0,60}?\b(?:app|apps|application|website|web\s*app|site|tool|platform|extension|game|dashboard|portal)\b/i;
 
 function classify(raw: string): { type: TaskType; matched: boolean } {
   // A link is not words: `translate.google.com` is not an order to translate (a9f8d186 / 33812996). Two sessions
@@ -236,7 +238,11 @@ function classify(raw: string): { type: TaskType; matched: boolean } {
   // snippet — see `namesHeavyGame` (autopsy f496c75b).
   if (namesHeavyGame(p)) return { type: 'complex_app', matched: true };
   if (RE.coding.test(p)) return { type: 'coding', matched: true };
-  if (RE.greeting.test(p)) return { type: 'chat', matched: true };
+  // 🔴 A GREETING WORD INSIDE AN APP ORDER IS NOT A GREETING (autopsy c70bcbb4, 2026-10-04). "Mujhe esa hi
+  // music player bnakar do" — "esa hi" is Hindi for "just like this" — was filed `chat`, score 5, and the
+  // ETA was taken from chat turns (4–6 min for a 9-minute build). "hi, build me a todo app" is the same: the
+  // order is the task. Only a message that orders nothing is a greeting.
+  if (RE.greeting.test(p) && !ordersAnApp) return { type: 'chat', matched: true };
   /**
    * 🔴 LAST RESORT, AND THE ONLY PLACE THIS MODULE KNOWS NOTHING — so a prompt that names a real
    * business domain stops scoring 5, the same as "hi" (admin's failure table, 2026-09-18).

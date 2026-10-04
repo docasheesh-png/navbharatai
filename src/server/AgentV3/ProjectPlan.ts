@@ -18,6 +18,7 @@
 // scheduling, progress/todo projection, and the per-module build context. No I/O, no SDKs —
 // fully unit-testable. Durable persistence lives in ProjectPlanStore.ts.
 
+import { isPlatformContinuePrompt } from '../../lib/continueBuildPrompts';
 import type { TodoItem, TodoStatus } from './types';
 import { parseEnvFlag } from '../lib/envFlag';
 import { countEnumeratedFeatures, sectionedSpecSize, BIG_SOFTWARE_NOUN, SPEC_FEATURE_COUNT } from './enumeratedFeatures';
@@ -358,9 +359,13 @@ export function projectModeDiagnosis(args: {
  * prompt ('continue') plus common English + Hinglish phrasings. PURE.
  */
 export function isContinuationMessage(prompt: string): boolean {
+  // Our own buttons' sentences (autopsy Sur Taal, 2026-10-04): "Continue the build from where it left off
+  // and finish the remaining steps." is what the "Continue building" card sends, and it did not match the
+  // pattern below, so a paused plan never resumed from the very button made to resume it.
+  if (isPlatformContinuePrompt(prompt)) return true;
   const t = (prompt || '').trim().toLowerCase();
   if (!t || t.length > 80) return false;
-  return /^(?:please\s+|ok(?:ay)?[,\s]+|haan?[,\s]+)*(?:continue|resume|proceed|carry on|keep going|go on|next(?: module| step)?|finish(?: it)?|complete(?: it)?|aage(?: barh| badh)(?:o|ao|iye)?|jari rakho|chalu rakho|continue karo|next banao|aage chalo)(?:\s+(?:building|the build|the project|karo|karo!|it))?[\s!.।]*$/i.test(t);
+  return /^(?:please\s+|ok(?:ay)?[,\s]+|haan?[,\s]+)*(?:continue|resume|proceed|carry on|keep going|go on|next(?: module| step)?|finish(?: it)?|complete(?: it)?|aage(?: barh| badh)(?:o|ao|iye)?|jari rakho|chalu rakho|continue karo|next banao|aage chalo)(?:\s+(?:building|the build|the project|the app|karo|karo!|it))?(?:\s+from where (?:it|you|we) (?:left off|stopped))?(?:\s*(?:,|and)\s*(?:finish|complete)(?:\s+(?:it|the rest|the remaining steps|the app|the build))?)?[\s!.।]*$/i.test(t);
 }
 
 // ── Parsing the planner's output ──────────────────────────────────────────────────────────────

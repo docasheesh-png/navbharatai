@@ -76,7 +76,10 @@ describe('🔴 the guard written for THIS EXACT SENTENCE finally fires on it', (
     for (const m of [REPORTED, 'fix the build', 'build a notes app', 'please continue']) {
       expect(classifyIntent(m)).toBe(classifyIntent(m)); // stable
     }
-    expect(classifyIntent(REPORTED)).toBe('new_build');   // unchanged from before this fix
+    // Autopsy Sur Taal (2026-10-04): this sentence is our own "Fix with AI" text and now routes as the
+    // continuation it is. On a workspace with files it was already turned into an edit (BUILD_ORDER_READ_AS_EDIT),
+    // so the lane that runs is the same; only a paused project plan now resumes on it too.
+    expect(classifyIntent(REPORTED)).toBe('edit_existing');
     expect(classifyIntent('please continue')).toBe('edit_existing');
   });
 });

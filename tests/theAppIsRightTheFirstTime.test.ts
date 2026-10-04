@@ -91,7 +91,7 @@ describe('3 · a UI sub-agent is handed the classes instead of reading the style
 
   it('only the roles that write screens get it (source guard)', () => {
     const d = read('src/server/AgentV3/ToolDispatcher.ts');
-    expect(d).toContain('const result = await this.spawnSubAgent(role, instruction + await this.stylesheetBriefFor(role));');
+    expect(d).toContain('const result = await this.spawnSubAgent(role, instruction + parallelSiblingBrief(readSiblingTasks(input)) + await this.stylesheetBriefFor(role));');
     expect(d).toContain("if (role !== 'frontend' && role !== 'designer') return '';");
   });
 });

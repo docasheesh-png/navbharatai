@@ -36,7 +36,7 @@
  * summary read that silence as "no TypeScript source was written this build". See
  * `writeTypecheckUntouched` and `writeTypecheckSummary`'s third argument.
  */
-import { robustTscCommand, TSC_BIN, PRIME_NODE_MODULES } from './tscCommand';
+import { robustTscCommand, TSC_BIN, PRIME_NODE_MODULES, NPM_INSTALL_LOCK_FRESH } from './tscCommand';
 import { suggestedPropertyRenames, type TscError } from './EndgameRepair';
 import { tscErrorCauses, tscCauseNote, remedyFileFor } from './tscErrorCause';
 
@@ -63,8 +63,22 @@ export function shouldTypecheckWrite(path: string): boolean {
 }
 
 /** The command — the robust local binary, incremental, on the shared cache. Pure. */
+/**
+ * Printed when the write-time check stood down because the compiler was not ready: dependencies are being
+ * installed, the compiler is not installed yet, or `package.json` is newer than `node_modules`.
+ *
+ * 🔴 WHY (autopsy Sur Taal, 2026-10-04). On a fresh starter the first `write_file` took 33 s — the check's
+ * `TSC_ENSURE` waited on the background install's lock, then hit the 30 s timeout — and the report said
+ * "never ran — the writes it saw were not TypeScript" about a `.ts` file. In the third build three such waits
+ * (90 s of a free build's clock) switched the check off for the rest of the build. A check at write time is
+ * worth seconds; one that waits for an install is a stall the model sits through holding a file. It never
+ * installs and never waits now: the end-of-build typecheck (`robustTscCommand`) still does both.
+ */
+export const WRITE_TYPECHECK_NOT_READY_MARKER = 'NBAI_WRITE_TSC_NOT_READY';
+
 export function writeTypecheckCommand(): string {
-  return robustTscCommand(`--noEmit --incremental --tsBuildInfoFile ${WRITE_TYPECHECK_TSBUILDINFO}`, '2>&1 | head -120');
+  return `if ${NPM_INSTALL_LOCK_FRESH} || [ ! -x ${TSC_BIN} ] || [ package.json -nt node_modules ]; then echo ${WRITE_TYPECHECK_NOT_READY_MARKER}; else `
+    + `${robustTscCommand(`--noEmit --incremental --tsBuildInfoFile ${WRITE_TYPECHECK_TSBUILDINFO}`, '2>&1 | head -120')}; fi`;
 }
 
 /**
@@ -272,6 +286,8 @@ export interface WriteTypecheckStats {
   skippedNotTs: number;
   /** Writes of REAL TypeScript that were skipped because the project was judged non-TypeScript. */
   skippedNoTsconfig: number;
+  /** Writes skipped because the compiler was not ready (an install running, or none yet) — see the marker. */
+  skippedNotReady?: number;
   /**
    * How many times the `tsconfig.json` probe THREW rather than answering.
    *
@@ -441,8 +457,13 @@ export function writeTypecheckUntouched(s: WriteTypecheckStats): boolean {
  */
 export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean, tsFilesWritten: number | null = null): string {
   if (!enabled) return 'Write-time typecheck: OFF (AGENTV3_WRITE_TYPECHECK=off) — the first compile is whenever the model asks for one.';
+  const notReady = s.skippedNotReady ?? 0;
+  const notReadyNote = notReady > 0 ? `${notReady} TypeScript write(s) skipped because dependencies were still being installed (the check never waits for an install)` : '';
   if (s.runs === 0) {
     if (s.disabledReason) return `Write-time typecheck: never ran — ${s.disabledReason}.`;
+    if (notReadyNote) return `Write-time typecheck: never ran — ${notReadyNote}.`;
+    // A compile that timed out is not "no TypeScript was written" (autopsy Sur Taal).
+    if (s.timeouts > 0) return `Write-time typecheck: never finished — ${s.timeouts} compile(s) timed out after ${Math.round(WRITE_TYPECHECK_TIMEOUT_MS / 1000)}s.`;
     // A lane that does not write through the build's tools is the commonest reason this check sees
     // nothing, and it is the one the old wording asserted the opposite of.
     const elsewhere = typeof tsFilesWritten === 'number' && tsFilesWritten > 0
@@ -489,6 +510,7 @@ export function writeTypecheckSummary(s: WriteTypecheckStats, enabled: boolean, 
     + (s.compiledUnprobed > 0
       ? `, ${s.compiledUnprobed} of them run without the tsconfig.json probe ever answering (${s.probeFailures} failed attempt(s)) — the compiler was asked instead of being switched off`
       : '')
+    + (notReadyNote ? `; ${notReadyNote}` : '')
     + (s.disabledReason ? ` — then stood down: ${s.disabledReason}` : '')
     + '.';
 }

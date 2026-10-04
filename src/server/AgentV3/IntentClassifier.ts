@@ -29,6 +29,7 @@
  */
 // The ONE dependency this otherwise self-contained classifier takes: a pure, I/O-free constants
 // module shared with the client, so the platform's own generated prompt has a single definition.
+import { isPlatformContinuePrompt } from '../../lib/continueBuildPrompts';
 import { isPlatformFixRequest, looksLikeMachineError } from '../../lib/platformFixRequest';
 
 export type BuildIntent = 'chat' | 'new_build' | 'edit_existing';
@@ -255,6 +256,17 @@ export function namesTextNotScreen(lower: string): boolean {
  */
 const FILE_NOUN =
   /\b(?:pdfs?|docx?|word (?:file|doc|document)|documents?|xlsx|xls|csv|excel(?: file| sheet)?|spreadsheets?|photos?|pics?|pictures?|scans?|scanned (?:copy|file|page|letter)|certificates?|marksheets?|attachments?|attached file|file i (?:sent|attached|uploaded))\b/;
+
+/**
+ * Does this message ask to carry on with a build already started — the platform's own continue sentences
+ * (`continueBuildPrompts.ts`), or "continue / resume / finish the build" typed by hand? A message that
+ * names a NEW thing ("continue the build of a new todo app", "another") is not. PURE.
+ */
+export function continuesTheBuild(text: string, lower: string = String(text ?? '').toLowerCase()): boolean {
+  if (isPlatformContinuePrompt(text)) return true;
+  if (/\b(?:new|another|second|naya|nayi|dusra|dusri)\b/.test(lower)) return false;
+  return /^(?:please\s+|ok(?:ay)?[,\s]+|haan?[,\s]+)*(?:continue|resume|finish|complete|carry on with|keep going with|go on with)\s+(?:the|my|this|your)\s+build\b/.test(lower.trim());
+}
 
 export function firstNewBuildOrder(lower: string): string | undefined {
   const listed = firstSignalWord(lower, NEW_BUILD_SIGNALS);
@@ -995,6 +1007,12 @@ function classifyIntentWithConfidenceCore(message: string): IntentWithConfidence
   // unmistakable; the cc8c9075 question was nine words. Length says nothing about clarity, and an
   // object-less order ("app banana") is already answered downstream by a clarifying question (#3039).
   const doubt = question || hasNegation(lower);
+  // 🔴 "CONTINUE THE BUILD" NAMES THE BUILD, IT DOES NOT ORDER ONE (autopsy Sur Taal, 2026-10-04). Our own
+  // "Continue building" card sends "Continue the build from where it left off and finish the remaining
+  // steps.", and the NOUN "build" matched the order ladder below at HIGH — so a paused project plan was
+  // read as a new app and handed to one 25-minute edit. The same noun as "fix the build" (697b38ee), one
+  // stage earlier: there it cost a retry, here it cost the plan. Checked before the ladder.
+  if (continuesTheBuild(text, lower)) return { intent: 'edit_existing', confidence: 'high', signal: 'continuation' };
   const nbSignal = firstNewBuildOrder(lower);
   // An order for WRITTEN CONTENT ("make questions", "nibandh likho") is answered in the reply (autopsy
   // 6ae30b33). LOW, so the intention reader still decides with the project in view: "make 10 more

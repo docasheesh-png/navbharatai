@@ -189,9 +189,14 @@ export function fleetHistoryFromTelemetry(
  * agree on one answer: a seeded build is its own kind. PURE.
  */
 export const SCAFFOLD_TASK_KEY = 'scaffold';
-export function etaTaskKey(taskType: string | null | undefined, scaffolded: boolean): string {
+export function etaTaskKey(taskType: string | null | undefined, scaffolded: boolean, routedComplex = false): string {
   if (scaffolded) return SCAFFOLD_TASK_KEY;
-  return String(taskType ?? '').trim() || 'unknown';
+  const t = String(taskType ?? '').trim() || 'unknown';
+  // The scorer cannot read every script (autopsy Sur Taal: a Hindi design note scored `simple_app`), and the
+  // complexity router then asked a second opinion and opened the build as COMPLEX. The ETA must price the
+  // build the router decided on, not the scorer's unread guess — so a routed-complex build is a complex_app.
+  if (routedComplex && (t === 'simple_app' || t === 'unknown')) return 'complex_app';
+  return t;
 }
 
 /** The admin line for an estimate taught by the platform's recent builds of this kind. PURE. */

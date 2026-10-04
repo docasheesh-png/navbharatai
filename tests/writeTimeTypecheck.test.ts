@@ -181,7 +181,7 @@ describe('🔒 the dispatcher asks after EVERY write path, and the route reports
     // latched as a 'no'. See aFailedProbeIsNotAnAnswer.test.ts for why that distinction exists.
     expect(helper).toContain("this._tsProject !== 'yes'");
     // A check that could not run says nothing.
-    expect(helper).toContain('if (errors === null) return \'\';');
+    expect(helper).toContain('if (errors === null) {');
   });
 
   it('the route records WRITE_TIME_TYPECHECK beside REPEATED_READS', () => {

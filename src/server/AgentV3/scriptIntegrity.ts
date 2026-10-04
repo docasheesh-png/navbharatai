@@ -296,3 +296,16 @@ export function scriptRepairSummary(repairs: readonly ScriptRepair[]): string {
     + `"n"/"t"/"r" against Indic text is a backslash the generator lost, and it was shown to the user `
     + `as a letter: ${parts.join('; ')}${more}.`;
 }
+
+/**
+ * The same check at WRITE time (autopsy Sur Taal, 2026-10-04). `src/data/demo.ts` shipped the artist name
+ * "अरijit" — half Devanagari, half Latin — and SCRIPT_INTEGRITY found it only after the 25-minute window had
+ * closed, where nothing repairs. Said while the file is open it is a one-word fix. '' when clean. PURE.
+ */
+export function mixedScriptWriteNote(path: string, content: string): string {
+  const found = findMixedScriptText({ [path]: content }, { maxFiles: 1, maxTokens: 3 });
+  if (found.length === 0) return '';
+  const words = found[0].tokens.map((t) => `"${t}"`).join(', ');
+  return `\n\n[mixed script] \`${path}\` has ${found[0].tokens.length === 1 ? 'a word' : 'words'} that mix two scripts: ${words}. `
+    + 'It is shown to the user exactly as written — write each word in ONE script (all Latin or all Devanagari).';
+}

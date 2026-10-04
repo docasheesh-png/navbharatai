@@ -179,3 +179,45 @@ export function etargetHintLine(name: string, range: string, rec: { version: str
     : '';
   return `${name}@${range} does not exist — the newest ${name} that works with this project is ${rec.version}${why}; use ${name}@^${rec.version}`;
 }
+
+// ── A package npm itself calls deprecated ─────────────────────────────────────────────────────────
+//
+// 🔴 WHY (autopsy Sur Taal, 2026-10-04). The builder installed `music-metadata-browser`, which its author
+// deprecated in favour of `music-metadata`. It installed fine, so no hint ran — and it pulled in Node
+// polyfills, a `vite-plugin-node-polyfills` install to make it load in a browser, and the two high-severity
+// advisories the build ended with. npm's own registry says the package is deprecated and names the
+// replacement; that sentence is now handed back at install time, while switching costs one command.
+
+/** The package names an `npm install a b@1 -D c` command installs (flags and versions dropped). PURE. */
+export function installedPackageNames(command: string): string[] {
+  const m = /\bnpm\s+(?:i|install|add)\s+([^|;&]*)/.exec(String(command ?? ''));
+  if (!m) return [];
+  const out: string[] = [];
+  for (const tok of m[1].trim().split(/\s+/)) {
+    if (!tok || tok.startsWith('-') || /^\d/.test(tok)) continue;
+    const name = tok.startsWith('@') ? tok.replace(/^(@[^/@]+\/[^@]+).*$/, '$1') : tok.replace(/@.*$/, '');
+    if (safeName(name) && !out.includes(name)) out.push(name);
+  }
+  return out.slice(0, 5);
+}
+
+/** One read-only command printing each package's deprecation message, if any. PURE string builder. */
+export function deprecationCommand(packages: readonly string[]): string | null {
+  const names = [...new Set(packages)].filter(safeName).slice(0, 5);
+  if (names.length === 0) return null;
+  return names.map((p) => `printf 'NBAI_DEPRECATED ${p} '; npm view "${p}" deprecated 2>/dev/null | head -c 300 | tr '\\n' ' '; echo`).join('; ');
+}
+
+/** The note for packages npm calls deprecated, or null. PURE. */
+export function deprecationHint(stdout: string): string | null {
+  const lines: string[] = [];
+  for (const line of String(stdout ?? '').split('\n')) {
+    const m = /^NBAI_DEPRECATED ((?:@[\w.-]+\/)?[\w.-]+) (.*)$/.exec(line);
+    if (!m) continue;
+    const msg = m[2].trim().replace(/^['"]|['"]$/g, '');
+    if (!msg || msg === 'undefined' || msg === 'false') continue;
+    lines.push(`${m[1]} is deprecated — npm says: "${msg.slice(0, 240)}"`);
+  }
+  if (lines.length === 0) return null;
+  return `[deprecated package] ${lines.join(' · ')}. Use the replacement it names instead (uninstall this one), unless nothing else does the job.`;
+}

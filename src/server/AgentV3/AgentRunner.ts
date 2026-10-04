@@ -15,6 +15,7 @@ import { weakCheckpointConfig, shouldRunWeakCheckpoint, weakCheckpointSteer } fr
 import { doneSignalConfig, shouldCheckDone, appIsDone, doneSteer, endOfTurnReadyMark, type ReadyMark } from './doneSignal';
 import { endgameRepairEnabled, runEndgameRepair, errorTrendConfig, shouldTriggerMidBuildRepair, parseTscErrors, stepResumeBudget } from './EndgameRepair';
 import { PARALLEL_WRITER_ROLES } from './parallelBuild';
+import { writerTaskSiblings, SIBLING_TASKS_INPUT_KEY } from './parallelSiblings';
 import { repairSystemPrompt, repairUserPrompt } from './SimpleBuilder';
 import { parseFileBlocks } from './OneShotBuilder';
 import { findSyntaxErrors } from './SyntaxCheck';
@@ -1274,8 +1275,13 @@ export class AgentRunner {
         }
         if (parallelIdx.length > 0) {
           const dupes = duplicateReadsInTurn(turn.toolUses, parallelIdx);
+          // Writers running side by side are told each other's tasks (autopsy Sur Taal — four frontend
+          // children each built the whole app). See parallelSiblings.ts.
+          const siblings = writerTaskSiblings(turn.toolUses, parallelIdx, (r) => PARALLEL_WRITER_ROLES.has(r));
           await mapWithConcurrency(parallelIdx.filter((i) => !dupes.has(i)), toolConcurrency, async (i) => {
-            resultBlocks[i] = toBlock(await dispatchWithBudget(turn.toolUses[i]));
+            const sib = siblings.get(i);
+            const tu = sib ? { ...turn.toolUses[i], input: { ...turn.toolUses[i].input, [SIBLING_TASKS_INPUT_KEY]: sib } } : turn.toolUses[i];
+            resultBlocks[i] = toBlock(await dispatchWithBudget(tu));
           });
           for (const [i, first] of dupes) {
             resultBlocks[i] = toBlock({

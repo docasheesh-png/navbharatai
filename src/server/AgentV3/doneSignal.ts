@@ -165,7 +165,10 @@ export interface ReadyMark {
  * This is the number the stop-the-loop decision needs and nobody has. A build that was never judged
  * ready says so plainly — "we did not look" and "it never got there" must not read as zero overrun.
  */
-export function readyOverrunNote(mark: ReadyMark | null | undefined, endStep: number, endMs: number, opts: { editingExistingApp?: boolean } = {}): string {
+export function readyOverrunNote(mark: ReadyMark | null | undefined, endStep: number, endMs: number, opts: { editingExistingApp?: boolean; projectModule?: string | null } = {}): string {
+  // A project-mode turn builds ONE module of an app another module assembles (autopsy Sur Taal: "never
+  // judged finished" about the "Shared Types" module, which is not an app and is never judged as one).
+  if (!mark && opts.projectModule) return `Not measured: this turn built one project module ("${opts.projectModule}"), not the whole app, so the project score cannot say when it was done.`;
   // An edit is not judged at all (see `shouldCheckDone`), and "never judged finished" would read as
   // a finding about an app that was working before the turn began.
   if (!mark && opts.editingExistingApp) return 'Not measured: this turn ran as an edit of the files already in the project, so the project score cannot say when the request was done.';

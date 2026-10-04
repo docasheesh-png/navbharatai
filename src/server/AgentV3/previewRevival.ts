@@ -1,4 +1,5 @@
 import { isNeverAppPort } from './neverAppPorts';
+import { startsAServer } from './devServerLaunchLog';
 // THE PREVIEW REVIVAL RECIPE — proven when the preview FIRST works, not when it is needed
 // (admin 2026-08-21: "jab pahli bar chale, tabhi pakka ho jana chahiye jo sleep ke bad wake up hona hai").
 //
@@ -105,7 +106,14 @@ export function buildRecipe(input: {
 export function isUsableRecipe(recipe: unknown): recipe is PreviewRecipe {
   if (!recipe || typeof recipe !== 'object') return false;
   const r = recipe as Partial<PreviewRecipe>;
-  return typeof r.devCommand === 'string' && r.devCommand.trim().length > 0 && isUsablePort(r.port);
+  return typeof r.devCommand === 'string' && r.devCommand.trim().length > 0 && isUsablePort(r.port)
+    // 🔴 A recipe whose command starts nothing is no recipe (autopsy 68f0a486, 2026-10-04). For about
+    // three hours a write-time typecheck that began with the warm-cache primer was read as a launch,
+    // and the recipe `[ -d /home/user/.warm/vite-react/node_modules ]` was stored and READ BACK as
+    // proven — replaying it on a wake starts nothing. Asked of the launcher's own classifier on every
+    // save AND every read, so a recipe stored by a bug that is since fixed falls back to rediscovery
+    // instead of being replayed for the life of the app.
+    && startsAServer(r.devCommand);
 }
 
 /** What the user is told once the guarantee is genuinely in place. Short, and it does not overclaim. */

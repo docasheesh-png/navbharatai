@@ -16,7 +16,7 @@
 
 import { classifyChange, describeChangeClassification, type ChangeClassification } from './changeClassifier';
 import {
-  foldRequestedFeatures, foldProbeResults, regressionProbeFeatures, renderSpecForBuilder,
+  foldRequestedFeatures, foldProbeResults, regressionProbeFeatures, renderSpecForBuilder, foldRequestedLabels, markLabelsBuilt, labelKey,
   type ProbeOutcome, type SpecItem, type AppSpec,
 } from './appSpec';
 import {
@@ -28,6 +28,7 @@ import { fenceUntrusted } from '../UntrustedContent';
 import { redactSecrets, redactPII } from '../SecretRedactor';
 import { redactProvidersText } from '../../lib/providerRedaction';
 import type { BuildIssue } from '../BuildDiagnostics';
+import { requestedProbeFeatures } from '../FeaturePresence';
 
 export interface ChangeSession {
   workspaceId: string;
@@ -38,6 +39,8 @@ export interface ChangeSession {
   /** Features this request asked for (from the platform's own probe table). */
   requested: Array<{ feature: string; label: string }>;
   declined: string[];
+  /** Feature LABELS the builder was handed as the contract (slice 3) — non-probe-able requirements. */
+  requestedLabels: string[];
   /** Features the app was SEEN to have before this change — re-probed for regression. */
   regressionTargets: string[];
   /** Issue ids handed to the builder in this build's context. */
@@ -68,6 +71,8 @@ export async function beginChange(input: {
   isEdit: boolean;
   requested: Array<{ feature: string; label: string }>;
   declined?: ReadonlyArray<string>;
+  /** The contract labels (confirmedContractLabels) — platform-authored feature names. */
+  contractLabels?: ReadonlyArray<string>;
 }): Promise<BeginResult> {
   const classification = classifyChange(input.prompt);
   const mem = await loadEngineeringMemory(input.workspaceId);
@@ -91,6 +96,7 @@ export async function beginChange(input: {
     summary: requestDigest(input.prompt),
     requested: input.requested.slice(0, 40),
     declined: [...(input.declined ?? [])],
+    requestedLabels: (input.contractLabels ?? []).map((l) => redactSecrets(String(l))).slice(0, 40),
     regressionTargets,
     assignedIssueIds: workable.map((i) => i.id),
     probes: new Map(),
@@ -149,8 +155,20 @@ export function foldSettle(mem: EngineeringMemory, session: ChangeSession, input
     spec = { nextReq: spec.nextReq, items: spec.items.map((i) => (i.status === 'dropped' ? i : { ...i, status: 'dropped' as const, lastChange: changeId })) };
   }
   spec = foldRequestedFeatures(spec, session.requested, changeId, new Set(session.declined));
+  const probedFeatures = new Set(session.requested.map((r) => r.feature));
+  spec = foldRequestedLabels(spec, session.requestedLabels ?? [], changeId, (label) => {
+    const ids = requestedProbeFeatures(label);
+    return ids.length > 0 && ids.every((f) => probedFeatures.has(f.feature));
+  });
   const probeFold = foldProbeResults(spec, [...session.probes.values()], changeId, now);
   spec = probeFold.spec;
+  // A non-probe-able requirement is BUILT only by a build that passed its release gate — never by a claim.
+  let builtNow: SpecItem[] = [];
+  if (input.ok && !input.stopped && input.gate === 'green') {
+    const m = markLabelsBuilt(spec, (session.requestedLabels ?? []).map((l) => labelKey(l)), changeId);
+    spec = m.spec;
+    builtNow = m.built;
+  }
 
   let queue = markAssigned(mem.queue, session.assignedIssueIds, changeId);
   const findings = queueableFindings(input.issues).map((f) => ({ ...f, message: redactProvidersText(redactSecrets(f.message)) }));
@@ -162,7 +180,8 @@ export function foldSettle(mem: EngineeringMemory, session: ChangeSession, input
 
   const reqIds = new Set<string>();
   for (const r of session.requested) { const it = spec.items.find((i) => i.feature === r.feature); if (it) reqIds.add(it.id); }
-  for (const it of [...probeFold.verified, ...probeFold.regressed, ...probeFold.restored]) reqIds.add(it.id);
+  for (const it of [...probeFold.verified, ...probeFold.regressed, ...probeFold.restored, ...builtNow]) reqIds.add(it.id);
+  for (const l of session.requestedLabels ?? []) { const it = spec.items.find((i) => i.feature === labelKey(l)); if (it) reqIds.add(it.id); }
   const issueIds = [...qFold.opened, ...qFold.reopened, ...qFold.fixed, ...qFold.verified].map((i) => i.id);
 
   const record: ChangeRecord = {

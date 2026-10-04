@@ -16332,6 +16332,7 @@ async function noteBuildOutcome(
               workspaceId, prompt, isEdit: intent === 'edit_existing',
               requested: requestedProbeFeatures(prompt, new Set(declinedIds)),
               declined: declinedIds,
+              contractLabels: confirmedContractLabels(featureLists, featureConfirmation),
             }), 5_000, 'change-engine-begin');
             changeSession = begun.session;
             if (begun.builderBlock) buildPrompt = `${begun.builderBlock}\n\n---\n\n${buildPrompt}`;

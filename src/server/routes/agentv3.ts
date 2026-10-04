@@ -532,7 +532,8 @@ import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain, internalPreviewUrl } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
-import { loadUserVaultSecrets } from '../lib/secrets';
+import { loadUserVaultSecrets, loadUserVaultScope } from '../lib/secrets';
+import { secretsWithheldLine } from '../lib/secretScope';
 import { secretRequestPrompt, postBuildKeyAsks, postBuildKeyPrompt } from '../AgentV3/secretRequest';
 import { connectActions } from '../AgentV3/connectActions';
 import { saveUserActions } from '../AgentV3/UserActionStore';
@@ -15607,7 +15608,15 @@ async function noteBuildOutcome(
       let mcpTools: SafeMcpTool[] = [];
       try {
         if (userId) {
-          vaultSecrets = await loadUserVaultSecrets(userId, workspaceId);
+          const vaultScope = await loadUserVaultScope(userId, workspaceId);
+          vaultSecrets = vaultScope.secrets;
+          // The keys the user saved for OTHER apps, named in the report (Q-155) — names only, never values.
+          // Without this, a key they definitely saved is simply absent from this app, with nothing to say why.
+          if (vaultScope.withheld.length > 0) {
+            try {
+              buildDiag.record({ phase: 'plan', severity: 'info', code: 'SECRETS_WITHHELD', message: secretsWithheldLine(vaultScope.withheld), autoResolved: true });
+            } catch { /* a report line must never affect a build */ }
+          }
           // THE DATABASE, OFFERED BEFORE THE BUILDER DECIDES WHERE DATA LIVES (sharedDataNeed.ts). An app
           // whose request needs shared data (bookings, orders, admissions, accounts) used to be built with
           // that data in the visitor's own browser, and every file-based check then said "no database

@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 // ADMIN-SDK binding (bypasses security rules) — see serverDb.ts. Reads/writes user_secrets (owner-only).
 import { query, collection, where, getDocs, doc, updateDoc, getServerDb as getDb } from './serverDb';
-import { resolveScopedSecrets, isNewerRow, type VaultSecretRow } from './secretScope';
+import { resolveScopedSecrets, withheldSecretNames, isNewerRow, type VaultSecretRow } from './secretScope';
 
 /**
  * Encryption & user-secret helpers.
@@ -258,6 +258,20 @@ export async function loadUserVaultSecrets(
 ): Promise<Record<string, string>> {
   // The NEWEST row wins among equally-scoped duplicates; an app-specific key beats a shared one.
   return resolveScopedSecrets(await loadUserVaultRows(userId), workspaceId);
+}
+
+/**
+ * The keys this app receives AND the names of the user's keys it does not (queue Q-155). One read of the
+ * vault, so the two can never describe different rows. `withheld` is NAMES only — never a value — for the
+ * build report: least privilege's failure mode is a user wondering why a key they definitely saved is not
+ * in their app, and naming what was withheld turns that into a sentence instead of a mystery.
+ */
+export async function loadUserVaultScope(
+  userId: string,
+  workspaceId: string,
+): Promise<{ secrets: Record<string, string>; withheld: string[] }> {
+  const rows = await loadUserVaultRows(userId);
+  return { secrets: resolveScopedSecrets(rows, workspaceId), withheld: withheldSecretNames(rows, workspaceId) };
 }
 
 /**

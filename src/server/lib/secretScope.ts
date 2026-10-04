@@ -188,6 +188,20 @@ export function withheldSecretNames(
   return Array.from(out).sort();
 }
 
+/** Shown at most this many names; the rest are counted. */
+export const MAX_WITHHELD_NAMED = 8;
+
+/**
+ * The build report's line for `withheldSecretNames` (Q-155). Names only, never values, and it says where
+ * the user changes it. PURE.
+ */
+export function secretsWithheldLine(names: readonly string[]): string {
+  const list = names.slice(0, MAX_WITHHELD_NAMED).join(', ');
+  const more = names.length > MAX_WITHHELD_NAMED ? ` and ${names.length - MAX_WITHHELD_NAMED} more` : '';
+  return `${names.length} saved key(s) were not given to this app because they belong to other apps: ${list}${more}. `
+    + 'To use one here, tick "Apply to all my apps" on it in Settings → App Settings → Secrets & API Keys, or add it for this app.';
+}
+
 /**
  * What a "this key applies to all my apps" toggle must do to the rows already stored under that name.
  *

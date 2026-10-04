@@ -2547,6 +2547,17 @@ the flag entries above promise.
   user is told to reply "make it real" (or press the offer), which is the honest sequence. Test-locked and
   reversion-proven (20 of 27 cases fail with the reader disabled) in `tests/noFakeButtonNoFakeFeature.test.ts`,
   which also runs the reader over every golden scaffold.
+  🧬 **SIBLINGS KILLED IN THE SAME CHANGE (admin: "sath kill the siblings"):** (a) every writing SPECIALIST
+  carries the rule (`SubAgent.ts` — until then only the architect's prompt did, and specialists write the
+  login screen as often); (b) the two heals most likely to WRITE a fake — the feature-presence heal ("add
+  the missing login") and the completion heal ("implement the stub for real") — carry it in their own
+  instruction; (c) the server-built in-browser preview (`runtime/ReactPreview.ts`) builds its own `<body>`
+  and now carries the red block from `index.html` (`src/lib/honestyBanner.ts`, ONE definition of the
+  markers; the client renderer reuses the app's body, so it rides along by construction — tested both);
+  (d) the claim audit contradicts a summary that SELLS the demo ("✅ Login with Google is implemented") with
+  `feature-claimed-but-demo`, fed from the same findings; (e) four more shapes: a sign-up that keeps its
+  accounts in `localStorage`, "reset / verification link sent", "SMS sent to your mobile" (→ `sms`), and
+  "uploaded / synced to the cloud" with no storage (→ `storage`). `FAKE_FEATURE_SHIPPED` stays the one code.
 - **`AGENTV3_WRITE_SECURITY`** (NOT set; default ON, `off` disables — added 2026-09-30, autopsy 466c260a) —
   `scanSecurity`'s medium/high findings (an XSS sink such as `dangerouslySetInnerHTML` / raw `innerHTML`, a
   hardcoded secret) are handed back with every write (`securityWriteNote`, via `writeSteeringNotes`). Before

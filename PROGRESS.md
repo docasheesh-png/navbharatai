@@ -88662,6 +88662,14 @@ the write-time note; the on-screen line needs an `index.html` (a Next.js app get
 adding a key does not rewrite the fake code — the user is told to reply "make it real" or press the offer.
 **Watch on real builds:** `FAKE_FEATURE_SHIPPED` frequency and any red line on a screen the user says was real.
 
+**Siblings killed the same evening (admin: "isko wapas se polish karo aur rocksolid banao! sath kill the siblings"):**
+writing specialists carry the rule (`SubAgent.ts`); the feature-presence heal and the completion heal carry it in their
+own instruction (the two passes most likely to WRITE a fake login); the server-built in-browser preview carries the red
+block (`src/lib/honestyBanner.ts`, one definition of the markers, both renderers tested); the claim audit contradicts a
+summary that sells the demo (`feature-claimed-but-demo`); four more shapes (sign-up to localStorage, "reset link sent",
+"SMS sent", "uploaded to the cloud" with no storage → `storage`). Three other PRs' source guards were updated for the
+renamed `honestIndex` / the three-rule push. Test file now 33 cases.
+
 ### 2026-10-04 — App Mart admin: the review page keeps what it approved; Remove from any app's page (Q-501)
 
 Admin report: listing a user's app emptied the App Mart review page, and there was no way to take an app down

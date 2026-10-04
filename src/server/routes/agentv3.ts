@@ -23099,6 +23099,8 @@ async function noteBuildOutcome(
           // that made `browseUrl` record its console is what makes this fact real.
           consoleErrorsFound: runtimeErrorsRemaining,
           screenshotTaken: buildDiag.toolWasUsed('screenshot'),
+          // "✅ Login with Google" about a login whose password is written into the app (fakeFeatureScan.ts).
+          fakeFeatures: fakeFeatures.map((f) => f.kind),
           // THE LEDGER, not this pass's local memory (2026-09-21). Three lines of this same function
           // already asked `renderProvenNow()`; asking a narrower source here let the platform accuse
           // the model of claiming a working preview in a report that itself proves one rendered.

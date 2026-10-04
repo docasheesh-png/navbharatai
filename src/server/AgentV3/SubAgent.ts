@@ -15,7 +15,7 @@ import { agentLifecycle } from './AgentLifecycle';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { DESIGN_KIT_BRIEF } from './systemPrompt';
 import { shellEarlyRule, writesTheEntry } from './earlyPreview';
-import { NO_EVAL_RULE, NO_FAKED_RESULT_RULE } from './noEvalRule';
+import { NO_EVAL_RULE, NO_FAKED_RESULT_RULE, NO_FAKE_FEATURE_RULE } from './noEvalRule';
 import { IMAGE_IN_APP_RULE } from './inAppImageGeneration';
 import { packageChoiceRule } from '../lib/unfixablePackages';
 import { stylesheetCarriesKit } from './kitRestore';
@@ -418,7 +418,9 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     // the kit, so a project without it is never told about classes that do not exist.
     // The two coding rules both prompts carry (noEvalRule.ts) — a writing specialist writes the same
     // feature code the architect would, so it gets them too (autopsy a9f8d186: a faked recogniser).
-    if (roleExpectsArtifacts(cfg.tools)) contextBlocks.push(`${NO_EVAL_RULE}\n${NO_FAKED_RESULT_RULE}`);
+    // NO FAKE BUTTON (admin 2026-10-04): a writing specialist builds the login/payment screens as often
+    // as the architect does, and until this line only the architect's prompt carried the rule.
+    if (roleExpectsArtifacts(cfg.tools)) contextBlocks.push(`${NO_EVAL_RULE}\n${NO_FAKED_RESULT_RULE}\n${NO_FAKE_FEATURE_RULE}`);
     // 🖥️ THE ENTRY FIRST (earlyPreview.ts): a specialist that writes the UI is the one that writes the
     // entry, so it is told the same order the architect is — the user's live preview has nothing to
     // show until the entry renders.

@@ -16,8 +16,16 @@ import {
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../src/server/AgentV3/AppRequirements';
 import { postBuildKeyAsks } from '../src/server/AgentV3/secretRequest';
 import { scanAuthenticity } from '../src/server/AgentV3/AuthenticityAnalysis';
+const HONESTY_MARK = 'nbai-honesty';
 import { NO_FAKE_FEATURE_RULE, SEED_PASSWORD_RULE } from '../src/server/AgentV3/noEvalRule';
 import { GOLDEN_SCAFFOLDS, goldenScaffoldFiles } from '../src/server/AgentV3/goldenScaffolds/registry';
+import { extractHonestyBanner, stripHonestyBanner } from '../src/lib/honestyBanner';
+import { buildReactPreview } from '../src/server/runtime/ReactPreview';
+import { buildSourceAppPreview } from '../src/lib/previewUtils';
+import { VirtualFileSystem } from '../src/server/project/ProjectModel';
+import { auditSummaryClaims, claimCorrection } from '../src/server/AgentV3/claimAudit';
+import { featurePresenceRepairPrompt } from '../src/server/AgentV3/FeaturePresence';
+import { authenticityRepairInstruction } from '../src/server/AgentV3/AuthenticityAnalysis';
 
 const DEMO_LOGIN = `import { useState } from 'react';
 const DEMO_USER = { email: 'demo@shop.in', password: 'demo123' };
@@ -311,5 +319,69 @@ describe('✍️ the builder hears it with the file open, and every lane carries
     expect(noFakeFeaturesEnabled({})).toBe(true);
     expect(noFakeFeaturesEnabled({ AGENTV3_NO_FAKE_FEATURES: ' OFF ' })).toBe(false);
     expect(noFakeFeaturesEnabled({ AGENTV3_NO_FAKE_FEATURES: 'on' })).toBe(true);
+  });
+});
+
+// ── THE SIBLINGS (admin: "sath kill the siblings") ──────────────────────────────────────────────────
+describe('🧬 siblings: the same fake from every other door', () => {
+  it('a sign-up that keeps its accounts in the browser is the fake login from the other door', () => {
+    const signup = `export function Register() { const submit = () => { const users = JSON.parse(localStorage.getItem('users') || '[]'); users.push({ email, password }); localStorage.setItem('users', JSON.stringify(users)); };
+      return <form onSubmit={submit}><h2>Create account</h2><input type="password" /><button>Sign up</button></form>; }`;
+    const hits = findFakeFeatures({ 'src/Register.tsx': signup });
+    expect(hits.map((h) => h.kind)).toEqual(['login']);
+    expect(kinds({ 'src/Register.tsx': signup, 'src/lib/auth.ts': "import { getAuth } from 'firebase/auth';" })).toEqual([]);
+  });
+
+  it('"reset link sent", "SMS sent" and "uploaded to the cloud" with nothing behind them are fakes; local saves are not', () => {
+    expect(kinds({ 'src/Forgot.tsx': "export const Forgot = () => <button onClick={() => setMsg('Reset link sent to your email')}>Send</button>;" })).toEqual(['email']);
+    const sms = findFakeFeatures({ 'src/Notify.tsx': "export const Notify = () => <button onClick={() => toast('SMS sent to your mobile')}>Send</button>;" });
+    expect(sms.map((h) => `${h.kind}:${h.requirementId}`)).toEqual(['sms:sms']);
+    const up = findFakeFeatures({ 'src/Photos.tsx': "export const Photos = () => <button onClick={() => { setPhotos([...photos, file]); toast('Uploaded to the cloud'); }}>Upload</button>;" });
+    expect(up.map((h) => `${h.kind}:${h.requirementId}`)).toEqual(['upload:storage']);
+    expect(impliedRequirementsFor(up).map((r) => r.id)).toEqual(['storage']);
+    // Real transports stand it down; a local gallery's "upload complete" is not a cloud claim.
+    expect(kinds({ 'src/Photos.tsx': "const fd = new FormData(); fd.append('f', file); await fetch('/api/upload', { method: 'POST', body: fd }); toast('Uploaded to the cloud');" })).toEqual([]);
+    expect(kinds({ 'src/Photos.tsx': "export const Photos = () => <button onClick={() => { save(file); toast('Upload complete'); }}>Upload</button>;" })).toEqual([]);
+    expect(kinds({ 'src/Notify.tsx': "toast('SMS sent to your mobile')", 'server/sms.ts': TWILIO_SERVER })).toEqual([]);
+  });
+
+  it('the server-built in-browser preview carries the red line (its shell does not reuse the app\'s <body>)', () => {
+    const hits = findFakeFeatures({ 'src/pages/LoginPage.tsx': DEMO_LOGIN });
+    const index = withHonestyBanner('<!doctype html><html><head></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>', hits, 'hi')!;
+    const app = {
+      'index.html': index,
+      'package.json': JSON.stringify({ dependencies: { react: '^18.2.0', 'react-dom': '^18.2.0' } }),
+      'src/main.tsx': "import { createRoot } from 'react-dom/client'; import App from './App'; createRoot(document.getElementById('root')!).render(<App />);",
+      'src/App.tsx': "export default function App(){ return <p>hi</p>; }",
+    };
+    const server = buildReactPreview(VirtualFileSystem.fromRecord(app));
+    expect(server).toContain('nbai-honesty');
+    expect(server).toContain('#b91c1c');
+    // The client renderer reuses the app's <body>, so the block rides along by construction — asserted anyway.
+    const client = buildSourceAppPreview(app as never);
+    expect(client).toContain('nbai-honesty');
+    // A clean app gets nothing from either.
+    const clean = { ...app, 'index.html': stripHonestyBanner(index) };
+    expect(buildReactPreview(VirtualFileSystem.fromRecord(clean))).not.toContain('nbai-honesty');
+    expect(extractHonestyBanner(index)).toContain(HONESTY_MARK);
+    expect(extractHonestyBanner('<html></html>')).toBe('');
+  });
+
+  it('a summary that sells the demo as working is corrected; one that admits the demo is not', () => {
+    const facts = { consoleCaptured: false, screenshotTaken: false, previewVerified: false } as const;
+    const sold = auditSummaryClaims('✅ Login with Google is implemented\nPayments are integrated with checkout.', { ...facts, fakeFeatures: ['oauth-button', 'payment'] });
+    expect(sold.map((c) => c.kind)).toEqual(['feature-claimed-but-demo', 'feature-claimed-but-demo']);
+    expect(claimCorrection(sold)).toContain('demo until the real provider');
+    expect(auditSummaryClaims('Login is a demo until you add a key.', { ...facts, fakeFeatures: ['login'] })).toEqual([]);
+    expect(auditSummaryClaims('✅ Login with Google is implemented', { ...facts })).toEqual([]);
+    expect(auditSummaryClaims('✅ Login with Google is implemented', { ...facts, fakeFeatures: ['payment'] })).toEqual([]);
+  });
+
+  it('the feature-presence heal and the completion heal carry the rule, and so does every writing specialist', () => {
+    const heal = featurePresenceRepairPrompt({ probes: [], missing: ['Login / authentication'], present: [] });
+    expect(heal).toContain('NO FAKE BUTTON');
+    expect(authenticityRepairInstruction([{ file: 'src/a.tsx', line: 1, kind: 'coming-soon', severity: 'high', snippet: 'Login coming soon' }])).toContain('RED line');
+    expect(readFileSync('src/server/AgentV3/SubAgent.ts', 'utf8')).toMatch(/NO_FAKED_RESULT_RULE\}\\n\$\{NO_FAKE_FEATURE_RULE\}/);
+    expect(readFileSync('src/server/routes/agentv3.ts', 'utf8')).toContain('fakeFeatures: fakeFeatures.map((f) => f.kind)');
   });
 });

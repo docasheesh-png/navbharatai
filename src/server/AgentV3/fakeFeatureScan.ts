@@ -38,11 +38,14 @@
 import { signInCandidates } from './signInExplore';
 import { impliedRequirement, type AppRequirement } from './AppRequirements';
 import { recipeFor, preferredOption, requiredVarNames } from '../../lib/credentialRecipes';
+import { HONESTY_BANNER_OPEN, HONESTY_BANNER_CLOSE, stripHonestyBanner, hasHonestyBanner } from '../../lib/honestyBanner';
 
-export type FakeFeatureKind = 'login' | 'oauth-button' | 'payment' | 'otp' | 'email';
+export { hasHonestyBanner };
+
+export type FakeFeatureKind = 'login' | 'oauth-button' | 'payment' | 'otp' | 'email' | 'sms' | 'upload';
 
 /** The AppRequirements service the REAL version of each fake needs. */
-export type ImpliedServiceId = 'login' | 'payments_razorpay' | 'sms' | 'email_api';
+export type ImpliedServiceId = 'login' | 'payments_razorpay' | 'sms' | 'email_api' | 'storage';
 
 export interface FakeFeatureFinding {
   kind: FakeFeatureKind;
@@ -68,6 +71,7 @@ const AUTH_PROVIDER_RE = /@supabase\/supabase-js|supabase\.auth\b|firebase\/auth
 const OAUTH_RE = /signInWith(?:Popup|Redirect|OAuth)\b|GoogleAuthProvider|OAuthProvider|@react-oauth\/google|google\.accounts\.id|AppleID\.auth|['"`]\/(?:api\/)?(?:auth|oauth)\/(?:google|apple|facebook|github|microsoft)\b|next-auth|@clerk\/|@auth0\/|\bpassport\b|supabase\.auth\.signIn|provider\s*:\s*['"](?:google|apple|github|facebook|azure|microsoft)['"]/i;
 const GATEWAY_RE = /\brazorpay\b|\bcashfree\b|\bstripe\b|\bpaytm\b|\bphonepe\b|\bpayu\b|\binstamojo\b|\bpaypal\b|upi:\/\/|pay\?pa=|@cashfreepayments|checkout\.razorpay|['"`]\/(?:api\/)?(?:payments?|pay|checkout|orders?\/create|create-order|verify-payment)\b/i;
 const SMS_RE = /\btwilio\b|\bmsg91\b|\btextlocal\b|\bfast2sms\b|\b2factor\b|firebase\/auth|signInWithPhoneNumber|signInWithOtp|verifyOtp\s*\(\s*\{|supabase\.auth\b|['"`]\/(?:api\/)?(?:otp|send-otp|verify-otp|sms)\b/i;
+const STORAGE_RE = /supabase\.storage\b|firebase\/storage|\bgetStorage\s*\(|\bcloudinary\b|@aws-sdk\/client-s3|S3Client|\bmulter\b|uploadthing|@uploadcare|\bimagekit\b|['"`]\/(?:api\/)?(?:upload|files|media|images|assets)\b|new\s+FormData\s*\(/i;
 const MAIL_RE = /\bnodemailer\b|['"]resend['"]|\bResend\b|\bsendgrid\b|\bmailgun\b|client-ses\b|SESClient|\bemailjs\b|\bpostmark\b|\bbrevo\b|sendinblue|mailto:|formspree|getform\.io|web3forms|data-netlify|['"`]\/(?:api\/)?(?:email|mail|send-email|send-mail|contact|subscribe|newsletter)\b/i;
 
 // ── The fake shapes (checked per file) ────────────────────────────────────────────────────────────────
@@ -78,7 +82,14 @@ const OAUTH_BUTTON_RE = /(?:continue|sign\s*in|log\s*in|login|sign\s*up|register
 const PAY_ACTION_RE = /\bpay\s*now\b|\bproceed\s+to\s+pay(?:ment)?\b|\bmake\s+(?:a\s+)?payment\b|\bbuy\s+now\b|\bcomplete\s+(?:purchase|payment)\b|\bpay\s*(?:₹|\$|rs\.?\s?\d)|\bhandle(?:Pay|Payment|Checkout)\w*\b|\bprocess(?:Payment|Checkout)\w*\b|\b(?:start|initiate|begin)Payment\w*\b|\bcheckout\b/i;
 const PAID_STATE_RE = /\bset(?:Is)?(?:Paid|PaymentDone|PaymentSuccess|PaymentStatus|PaymentComplete|OrderPaid)\w*\s*\(|\b(?:is)?[pP]aid\s*:\s*true\b|\bpayment(?:Status|State|Result)?\s*[:=]\s*['"`](?:success|succeeded|paid|done|completed?|captured)['"`]|\bstatus\s*[:=]\s*['"`](?:paid|payment[\s_-]?(?:success|done|completed?))['"`]/i;
 const OTP_FAKE_RE = /\b\w*otp\w*\s*[!=]==?\s*['"`]\d{4,8}['"`]|\b(?:const|let|var)\s+\w*otp\w*\s*=\s*(?:String\s*\(|`\$\{)?\s*Math\.(?:floor|random)|\b(?:your|demo|test)\s+otp\s*(?:is|:)/i;
-const EMAIL_SENT_RE = /\be-?mail\s+(?:has\s+been\s+|was\s+|successfully\s+|is\s+)?sent\b|\bsent\s+(?:an?\s+|the\s+)?e-?mail\b|\bsetEmailSent\s*\(\s*true|\bemailSent\s*:\s*true\b/i;
+const EMAIL_SENT_RE = /\be-?mail\s+(?:has\s+been\s+|was\s+|successfully\s+|is\s+)?sent\b|\bsent\s+(?:an?\s+|the\s+)?e-?mail\b|\bsetEmailSent\s*\(\s*true|\bemailSent\s*:\s*true\b|\b(?:reset|verification|confirmation|magic|activation)\s+(?:link|e-?mail|code)\s+(?:has\s+been\s+|was\s+)?sent\b/i;
+/** "SMS sent", "sent to your mobile" — with nothing in the project that could send one. */
+const SMS_SENT_RE = /\bsms\s+(?:has\s+been\s+|was\s+|successfully\s+)?sent\b|\bsent\s+(?:an?\s+|the\s+)?sms\b|\bsent\s+to\s+your\s+(?:phone|mobile|number)\b/i;
+/** "Uploaded to the cloud/server" — a claim about a place the file never reached. A local gallery that says "upload complete" is left alone. */
+const UPLOAD_CLAIM_RE = /\b(?:uploaded|saved|synced|backed\s+up)\s+to\s+(?:the\s+|our\s+)?(?:cloud|server)\b/i;
+/** A sign-up that keeps its accounts in the browser: `localStorage.setItem('users', …)` beside a register form. */
+const SIGNUP_SURFACE_RE = /\b(?:sign\s*up|register|create\s+(?:an?\s+)?account)\b/i;
+const LOCAL_ACCOUNTS_RE = /localStorage\.setItem\(\s*['"`][^'"`]*(?:users?|accounts?|members|registered|credentials)[^'"`]*['"`]/i;
 
 // ── Requests that ASKED for the local thing (the prompt, not the code) ────────────────────────────────
 const ASKED_LOCAL_LOGIN_RE = /\b(?:demo|dummy|offline|local(?:-only)?|hard-?coded|no[\s-]backend|without\s+(?:a\s+)?(?:backend|server|database))\b[^.\n]{0,40}\b(?:login|password|auth|sign[\s-]?in)\b|\b(?:login|password|auth|sign[\s-]?in)\b[^.\n]{0,40}\b(?:demo|dummy|offline|local(?:-only)?|hard-?coded)\b|\bpin\s*(?:lock|code)\b|\bpassword\s+gate\b|बिना\s+(?:backend|server|database)/i;
@@ -111,7 +122,7 @@ function appSources(files: Readonly<Record<string, string>>): Array<[string, str
 }
 
 const REQUIREMENT_OF: Record<FakeFeatureKind, ImpliedServiceId> = {
-  login: 'login', 'oauth-button': 'login', payment: 'payments_razorpay', otp: 'sms', email: 'email_api',
+  login: 'login', 'oauth-button': 'login', payment: 'payments_razorpay', otp: 'sms', email: 'email_api', sms: 'sms', upload: 'storage',
 };
 
 /**
@@ -130,6 +141,7 @@ export function findFakeFeatures(files: Readonly<Record<string, string>>, prompt
   const gateway = has(GATEWAY_RE);
   const sms = has(SMS_RE);
   const mail = has(MAIL_RE);
+  const storage = has(STORAGE_RE);
   const localLoginAsked = ASKED_LOCAL_LOGIN_RE.test(req);
   const noPaymentAsked = ASKED_NO_PAYMENT_RE.test(req);
 
@@ -149,6 +161,8 @@ export function findFakeFeatures(files: Readonly<Record<string, string>>, prompt
       const hit = firstHit(content, CRED_COMPARE_RE) ?? (demo ? firstHit(content, /\b(?:password|pass(?:word)?(?:Hash|Digest)?)\s*:/i) : null);
       if (hit) add('login', file, hit);
     }
+    // SIGN-UP whose accounts live in the browser — the same fake from the other door.
+    if (!authProvider && !localLoginAsked && SIGNUP_SURFACE_RE.test(content)) add('login', file, firstHit(content, LOCAL_ACCOUNTS_RE));
     // OAUTH BUTTON: "Continue with Google" with no SDK or route that could do it.
     if (!oauth && !localLoginAsked) add('oauth-button', file, firstHit(content, OAUTH_BUTTON_RE));
     // PAYMENT: a pay action that marks itself paid, with no gateway or UPI link anywhere.
@@ -157,6 +171,10 @@ export function findFakeFeatures(files: Readonly<Record<string, string>>, prompt
     if (!sms) add('otp', file, firstHit(content, OTP_FAKE_RE));
     // EMAIL: "sent" with no transport anywhere.
     if (!mail) add('email', file, firstHit(content, EMAIL_SENT_RE));
+    // SMS: "sent to your mobile" with nothing that could send one.
+    if (!sms) add('sms', file, firstHit(content, SMS_SENT_RE));
+    // UPLOAD: "uploaded to the cloud" with no storage transport anywhere.
+    if (!storage) add('upload', file, firstHit(content, UPLOAD_CLAIM_RE));
   }
   return out;
 }
@@ -201,7 +219,7 @@ interface Strings {
 }
 
 const ENGLISH: Strings = {
-  feature: { login: 'Login', 'oauth-button': 'Google / Apple sign-in', payment: 'Payment', otp: 'OTP', email: 'Email sending' },
+  feature: { login: 'Login', 'oauth-button': 'Google / Apple sign-in', payment: 'Payment', otp: 'OTP', email: 'Email sending', sms: 'SMS sending', upload: 'Cloud upload' },
   line: (feature, files, keys, where) => `🔴 ${feature} in this app is a DEMO — it is not real (${files}). Without a key it only pretends to work. To make it real, add ${keys} in ${where}.`,
   tail: 'Once the key is saved, reply "make it real" and I will wire it in. Until then that part of the app is clearly marked as a demo on screen.',
   banner: 'DEMO — not real',
@@ -209,61 +227,61 @@ const ENGLISH: Strings = {
 
 const STRINGS: Record<string, Strings> = {
   hi: {
-    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email भेजना' },
+    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email भेजना', sms: 'SMS', upload: 'Cloud upload' },
     line: (feature, files, keys, where) => `🔴 इस ऐप में ${feature} असली नहीं है — यह DEMO है (${files})। बिना key के यह सिर्फ़ दिखावा है। असली बनाने के लिए ${keys} यहाँ डालें: ${where}।`,
     tail: 'Key डालने के बाद मुझे “असली बनाओ” लिखें, मैं जोड़ दूँगा। तब तक ऐप की स्क्रीन पर साफ़ लिखा रहेगा कि यह demo है।',
     banner: 'DEMO — असली नहीं',
   },
   bn: {
-    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email পাঠানো' },
+    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email পাঠানো', sms: 'SMS', upload: 'Cloud upload' },
     line: (feature, files, keys, where) => `🔴 এই অ্যাপে ${feature} আসল নয় — এটি DEMO (${files})। key ছাড়া এটি শুধু দেখানোর জন্য। আসল করতে ${keys} এখানে দিন: ${where}।`,
     tail: 'Key দেওয়ার পর আমাকে “আসল করো” লিখুন, আমি যুক্ত করে দেব। ততক্ষণ অ্যাপের স্ক্রিনে স্পষ্ট লেখা থাকবে যে এটি demo।',
     banner: 'DEMO — আসল নয়',
   },
   pa: {
-    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email ਭੇਜਣਾ' },
+    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email ਭੇਜਣਾ', sms: 'SMS', upload: 'Cloud upload' },
     line: (feature, files, keys, where) => `🔴 ਇਸ ਐਪ ਵਿੱਚ ${feature} ਅਸਲੀ ਨਹੀਂ ਹੈ — ਇਹ DEMO ਹੈ (${files})। key ਤੋਂ ਬਿਨਾਂ ਇਹ ਸਿਰਫ਼ ਦਿਖਾਵਾ ਹੈ। ਅਸਲੀ ਬਣਾਉਣ ਲਈ ${keys} ਇੱਥੇ ਪਾਓ: ${where}।`,
     tail: 'Key ਪਾਉਣ ਤੋਂ ਬਾਅਦ ਮੈਨੂੰ “ਅਸਲੀ ਬਣਾਓ” ਲਿਖੋ, ਮੈਂ ਜੋੜ ਦਿਆਂਗਾ। ਉਦੋਂ ਤੱਕ ਐਪ ਦੀ ਸਕ੍ਰੀਨ ’ਤੇ ਸਾਫ਼ ਲਿਖਿਆ ਰਹੇਗਾ ਕਿ ਇਹ demo ਹੈ।',
     banner: 'DEMO — ਅਸਲੀ ਨਹੀਂ',
   },
   gu: {
-    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email મોકલવું' },
+    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email મોકલવું', sms: 'SMS', upload: 'Cloud upload' },
     line: (feature, files, keys, where) => `🔴 આ ઍપમાં ${feature} અસલી નથી — આ DEMO છે (${files})। key વગર તે માત્ર દેખાવ છે. અસલી બનાવવા ${keys} અહીં મૂકો: ${where}.`,
     tail: 'Key મૂક્યા પછી મને “અસલી બનાવો” લખો, હું જોડી દઈશ. ત્યાં સુધી ઍપની સ્ક્રીન પર સ્પષ્ટ લખેલું રહેશે કે આ demo છે.',
     banner: 'DEMO — અસલી નથી',
   },
   or: {
-    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email ପଠାଇବା' },
+    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email ପଠାଇବା', sms: 'SMS', upload: 'Cloud upload' },
     line: (feature, files, keys, where) => `🔴 ଏହି ଆପ୍‌ରେ ${feature} ଅସଲ ନୁହେଁ — ଏହା DEMO (${files})। key ବିନା ଏହା କେବଳ ଦେଖାଣିଆ। ଅସଲ କରିବାକୁ ${keys} ଏଠାରେ ଦିଅନ୍ତୁ: ${where}।`,
     tail: 'Key ଦେବା ପରେ ମୋତେ “ଅସଲ କର” ଲେଖନ୍ତୁ, ମୁଁ ଯୋଡ଼ିଦେବି। ସେ ପର୍ଯ୍ୟନ୍ତ ଆପ୍ ସ୍କ୍ରିନ୍‌ରେ ସ୍ପଷ୍ଟ ଲେଖା ରହିବ ଯେ ଏହା demo।',
     banner: 'DEMO — ଅସଲ ନୁହେଁ',
   },
   ta: {
-    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email அனுப்புதல்' },
+    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email அனுப்புதல்', sms: 'SMS', upload: 'Cloud upload' },
     line: (feature, files, keys, where) => `🔴 இந்த ஆப்பில் ${feature} உண்மையானது அல்ல — இது DEMO (${files}). key இல்லாமல் இது வெறும் காட்சிக்கே. உண்மையாக்க ${keys} இங்கே சேர்க்கவும்: ${where}.`,
     tail: 'Key சேர்த்த பிறகு “உண்மையாக்கு” என்று எழுதுங்கள், நான் இணைத்து விடுகிறேன். அதுவரை ஆப் திரையில் இது demo என்று தெளிவாக இருக்கும்.',
     banner: 'DEMO — உண்மையல்ல',
   },
   te: {
-    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email పంపడం' },
+    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email పంపడం', sms: 'SMS', upload: 'Cloud upload' },
     line: (feature, files, keys, where) => `🔴 ఈ యాప్‌లో ${feature} నిజమైనది కాదు — ఇది DEMO (${files}). key లేకుండా ఇది కేవలం చూపించడానికే. నిజం చేయడానికి ${keys} ఇక్కడ పెట్టండి: ${where}.`,
     tail: 'Key పెట్టాక నాకు “నిజం చేయి” అని రాయండి, నేను కలుపుతాను. అప్పటి వరకు యాప్ స్క్రీన్‌పై ఇది demo అని స్పష్టంగా ఉంటుంది.',
     banner: 'DEMO — నిజం కాదు',
   },
   kn: {
-    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email ಕಳುಹಿಸುವುದು' },
+    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email ಕಳುಹಿಸುವುದು', sms: 'SMS', upload: 'Cloud upload' },
     line: (feature, files, keys, where) => `🔴 ಈ ಆ್ಯಪ್‌ನಲ್ಲಿ ${feature} ನಿಜವಲ್ಲ — ಇದು DEMO (${files}). key ಇಲ್ಲದೆ ಇದು ಬರೀ ತೋರಿಕೆ. ನಿಜ ಮಾಡಲು ${keys} ಇಲ್ಲಿ ಹಾಕಿ: ${where}.`,
     tail: 'Key ಹಾಕಿದ ಮೇಲೆ ನನಗೆ “ನಿಜ ಮಾಡು” ಎಂದು ಬರೆಯಿರಿ, ನಾನು ಸೇರಿಸುತ್ತೇನೆ. ಅಲ್ಲಿಯವರೆಗೆ ಆ್ಯಪ್ ಪರದೆಯಲ್ಲಿ ಇದು demo ಎಂದು ಸ್ಪಷ್ಟವಾಗಿ ಇರುತ್ತದೆ.',
     banner: 'DEMO — ನಿಜವಲ್ಲ',
   },
   ml: {
-    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email അയയ്ക്കൽ' },
+    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email അയയ്ക്കൽ', sms: 'SMS', upload: 'Cloud upload' },
     line: (feature, files, keys, where) => `🔴 ഈ ആപ്പിൽ ${feature} യഥാർത്ഥമല്ല — ഇത് DEMO ആണ് (${files}). key ഇല്ലാതെ ഇത് വെറും കാഴ്ചയ്ക്ക് മാത്രം. യഥാർത്ഥമാക്കാൻ ${keys} ഇവിടെ ചേർക്കുക: ${where}.`,
     tail: 'Key ചേർത്ത ശേഷം “യഥാർത്ഥമാക്കൂ” എന്ന് എഴുതൂ, ഞാൻ ചേർക്കാം. അതുവരെ ആപ്പ് സ്ക്രീനിൽ ഇത് demo ആണെന്ന് വ്യക്തമായി കാണാം.',
     banner: 'DEMO — യഥാർത്ഥമല്ല',
   },
   ar: {
-    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email بھیجنا' },
+    feature: { login: 'Login', 'oauth-button': 'Google / Apple login', payment: 'Payment', otp: 'OTP', email: 'Email بھیجنا', sms: 'SMS', upload: 'Cloud upload' },
     line: (feature, files, keys, where) => `🔴 اِس ایپ میں ${feature} اصلی نہیں ہے — یہ DEMO ہے (${files})۔ key کے بغیر یہ صرف دکھاوا ہے۔ اصلی بنانے کے لیے ${keys} یہاں ڈالیں: ${where}۔`,
     tail: 'Key ڈالنے کے بعد مجھے “اصلی بناؤ” لکھیں، میں جوڑ دوں گا۔ تب تک ایپ کی اسکرین پر صاف لکھا رہے گا کہ یہ demo ہے۔',
     banner: 'DEMO — اصلی نہیں',
@@ -305,9 +323,8 @@ export function fakeFeatureReportLine(findings: readonly FakeFeatureFinding[]): 
 }
 
 // ── The RED line on the app's own screen ──────────────────────────────────────────────────────────────
-const BANNER_OPEN = '<!-- nbai-honesty -->';
-const BANNER_CLOSE = '<!-- /nbai-honesty -->';
-const BANNER_BLOCK_RE = /\s*<!-- nbai-honesty -->[\s\S]*?<!-- \/nbai-honesty -->/g;
+const BANNER_OPEN = HONESTY_BANNER_OPEN;
+const BANNER_CLOSE = HONESTY_BANNER_CLOSE;
 
 /** Text for the banner — the same words as the chat line, minus the file names (a visitor has no files). */
 export function honestyBannerLines(findings: readonly FakeFeatureFinding[], langCode?: string | null): string[] {
@@ -324,7 +341,7 @@ export function honestyBannerLines(findings: readonly FakeFeatureFinding[], lang
  */
 export function withHonestyBanner(html: string | null | undefined, findings: readonly FakeFeatureFinding[], langCode?: string | null): string | null {
   if (html == null) return null;
-  const stripped = html.replace(BANNER_BLOCK_RE, '');
+  const stripped = stripHonestyBanner(html);
   if (!findings || findings.length === 0) return stripped;
   const lines = honestyBannerLines(findings, langCode);
   const lang = langCode && STRINGS[langCode] ? langCode : 'en';
@@ -355,11 +372,6 @@ export function withHonestyBanner(html: string | null | undefined, findings: rea
   return `${stripped}\n${script}\n`;
 }
 
-/** Does this index.html carry our notice block? PURE. */
-export function hasHonestyBanner(html: string | null | undefined): boolean {
-  return typeof html === 'string' && html.includes(BANNER_OPEN);
-}
-
 // ── Said to the builder while the file is still open ──────────────────────────────────────────────────
 const WRITE_NOTE_FIX: Record<FakeFeatureKind, string> = {
   login: 'A login whose password is written into the app is a demo, not a login. Wire the user\'s own auth provider (Supabase / Firebase / Clerk — real email, Google and Apple sign-in; ask for its keys with request_secrets when you have that tool)',
@@ -367,6 +379,8 @@ const WRITE_NOTE_FIX: Record<FakeFeatureKind, string> = {
   payment: 'A payment that marks itself paid is a fake payment. Use generate_payment (Razorpay / Cashfree, server-verified) or a UPI link that opens a real UPI app; ask for the gateway keys with request_secrets when you have that tool',
   otp: 'An OTP the page generates or compares against a literal is a fake OTP. Send it through a provider (Firebase / Supabase phone sign-in, MSG91, Twilio) and verify it there; ask for the keys with request_secrets when you have that tool',
   email: '"Email sent" with no transport is a fake email. Send it through a provider (generate_email — Resend / SendGrid / SMTP) or open a mailto: link; ask for the keys with request_secrets when you have that tool',
+  sms: '"SMS sent" with nothing that sends one is a fake SMS. Send it through a provider (MSG91, Twilio, Firebase phone sign-in); ask for the keys with request_secrets when you have that tool',
+  upload: '"Uploaded to the cloud" with no storage is a fake upload. Use the user\'s storage (Supabase Storage, Firebase Storage, Cloudinary, S3 — Settings → App Settings → Storage) or say the file stays on this device',
 };
 
 /**

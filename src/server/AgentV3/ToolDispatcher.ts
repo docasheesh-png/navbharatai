@@ -184,6 +184,7 @@ import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './E
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
 import { STARTER_ENTRY_CONTENT, entryIsStillTheStarter, starterAppBlocker } from './stillTheStarterApp';
+import { isUiComponentPath, entryLateNote, MIN_SCREENS_BEFORE_NOTE } from './earlyPreview';
 import { authoredPathSet, splitByAuthorship, preExistingCodeObservation, droppedRelativeImports, droppedImportOrphanLabel, importStem } from './buildAuthorship';
 import { computeReachability, splitByReachability, unreachableCodeObservation, type ReachabilityVerdict } from './appReachability';
 import { deletionCandidates, deletionReconciledMessage } from './fileDeletion';
@@ -3572,6 +3573,23 @@ export class ToolDispatcher {
     }
   }
 
+  /** Once per agent: screens are being written and the entry is still our starter (see `entryLateNote`). */
+  private _entryLateNoted = false;
+  private async entryLateNoteFor(paths: readonly string[]): Promise<string> {
+    if (this._entryLateNoted || this._starterExpected || !paths.some(isUiComponentPath)) return '';
+    try {
+      const screens = [...this._writtenPaths].filter(isUiComponentPath);
+      if (screens.length < MIN_SCREENS_BEFORE_NOTE) return '';
+      const starter = await entryIsStillTheStarter(
+        (path) => withTimeout(this.actuator.readFile(this.workspaceId, path), 5_000, 'entry-late-read'),
+      );
+      if (!starter) return '';
+      const note = entryLateNote(screens);
+      if (note) this._entryLateNoted = true;
+      return note;
+    } catch { return ''; }
+  }
+
   private async writeSteeringNotes(files: Record<string, string>): Promise<string> {
     const paths = Object.keys(files ?? {});
     if (paths.length === 0) return '';
@@ -3635,9 +3653,11 @@ export class ToolDispatcher {
       }
     }
     const style = await this.styleWriteNotes(files);
+    // Screens written while the entry is still the starter (autopsy 68f0a486) — the user sees none of them.
+    const entryLate = await this.entryLateNoteFor(paths);
     // A light/dark switch that sets a class or attribute nothing styles (autopsy 8257ca59) — said while open.
     const theme = await this.deadThemeSwitchNotes(files);
-    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow + theme + touch;
+    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow + theme + touch + entryLate;
   }
 
   /**

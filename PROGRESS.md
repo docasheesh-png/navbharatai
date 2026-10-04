@@ -88830,3 +88830,13 @@ cancels of #3515 (19:57), #3518 (20:44) and #3523 (20:45) read "The job has exce
 of 30m0s" — `ci.yml`'s own `timeout-minutes: 30`, hit because eight or nine PR runs in flight slowed every run to
 21–30 min. The cap is now 45 (#3524 staging). Lesson, the fourth rule's first step: read the run's own last
 words before naming a cause — a cancelled run names its canceller.
+### 2026-10-04 — Admin decisions on the 68f0a486 / c70bcbb4 / 241215d1 open rows
+
+- **Q-541 and Q-527 (items argued not defects): agreed by the admin ("han, band kar do").** Resolved as
+  not-a-defect; the evidence for each is in the row text recorded in #3524 and in the ledgers above.
+- **Q-275 (a request that ended mid-sentence): closed by the admin as not ours.** Measured: 2,429 characters
+  ending at a line break; nothing on our side cuts there (server limit 20,000, no composer `maxLength`, no
+  long-paste conversion, the report stores the prompt in full).
+- **Q-540: the admin chose option (b)** — "navbharatai jo bhi app banaye, uske andar jo bhi function banaye jaye,
+  woh real hone chahiye, production grade". The explorer may sign up a throwaway account only in apps whose
+  sign-in lives in the browser alone. Being built in the follow-up PR.

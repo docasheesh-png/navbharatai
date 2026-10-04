@@ -20958,6 +20958,12 @@ async function noteBuildOutcome(
                   + (auth ? ` The sign-in test reads its selectors from ${auth.file}, so they keep working as long as that form does.` : ''),
                 autoResolved: true,
               });
+              // 🔴 "No tests at all" IS NOW FALSE (autopsy 39e982bd / Q-517). The readiness gate records
+              // that warning before this pass runs, so report 39e982bd carried it at 19:30:09 and a
+              // Playwright suite 17 seconds later — two codes in one build contradicting, with
+              // TEST_SUITE_UNVERIFIED stating the honest end state in the same report. Cleared by its own
+              // sentence, never by its code: READINESS_WARNING carries many unrelated facts.
+              buildDiag.resolveOnRecheck('READINESS_WARNING', { messageIncludes: 'No tests at all' });
             }
           } else if (decision.reason) {
             // Recorded even when nothing was written: a silent skip cannot be told from a broken skip.

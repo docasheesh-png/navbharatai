@@ -8,7 +8,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { doc, getDoc, setDoc, updateDoc, runTransaction, collection, query, where, limit, getDocs, getServerDb as getDb } from '../lib/serverDb';
 import { mirroredCreditPatch, rupeesToTokens } from '../lib/walletMirror';
 import { ordersToReconcile, reconcileMessage, type PendingOrderRecord } from '../lib/pendingOrders';
-import { getSecretValue } from '../lib/secrets';
+import { platformCashfreeCredentials, platformCashfreeWebhookSecret } from '../lib/cashfreeCredentials';
 import { sendSafeError } from '../lib/httpError';
 import { verifyPaymentInternal, computeCreditedWallet, TOKENS_PER_RUPEE } from '../lib/payments';
 import { DAY_ONE_STEPS } from '../lib/referralRewards';
@@ -211,34 +211,9 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         createdAt: new Date().toISOString()
       });
 
-      // Dynamic key resolution from database fallback
-      const dbClientId = await getSecretValue(userId, 'CASHFREE_CLIENT_ID') || await getSecretValue(userId, 'CASHFREE_APP_ID');
-      const dbClientSecret = await getSecretValue(userId, 'CASHFREE_CLIENT_SECRET') || await getSecretValue(userId, 'CASHFREE_SECRET_KEY');
-
-      const clientId = (dbClientId || process.env.CASHFREE_CLIENT_ID || process.env.CASHFREE_APP_ID)?.trim();
-      const clientSecret = (dbClientSecret || process.env.CASHFREE_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY)?.trim();
-
-      // Robust detection: default to production unless the secret explicitly indicates 'test' or 'sandbox'
-      const isTestSecret = clientSecret && (
-        clientSecret.toLowerCase().includes('test') ||
-        clientSecret.toLowerCase().includes('sandbox') ||
-        clientSecret.toLowerCase().includes('sim_') ||
-        clientSecret.toUpperCase().startsWith('TEST')
-      );
-      const isTestClient = clientId && (
-        clientId.toLowerCase().includes('test') ||
-        clientId.toLowerCase().includes('sandbox') ||
-        clientId.toUpperCase().startsWith('TEST')
-      );
-
-      const env = process.env.CASHFREE_ENV || (isTestSecret || isTestClient ? 'sandbox' : 'production');
-
-      // Detect if credentials are empty or standard placeholder values
-      const isPlaceholder = !clientId || !clientSecret ||
-        clientId.toLowerCase().includes('placeholder') ||
-        clientSecret.toLowerCase().includes('placeholder') ||
-        clientId.trim() === '' ||
-        clientSecret.trim() === '';
+      // The merchant credentials are NavBharatAI's own and come only from the server environment —
+      // never from the caller's secret vault (cashfreeCredentials.ts, forensic audit 2026-10-04).
+      const { clientId, clientSecret, mode: env, placeholder: isPlaceholder } = platformCashfreeCredentials();
 
       console.log(`[CASHFREE] Creating order ${orderId} | Env: ${env} | Client: ${clientId?.substring(0, 8)}... | IsPlaceholder: ${isPlaceholder}`);
 
@@ -475,28 +450,13 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       console.log(`[CASHFREE WEBHOOK] Received webhook event for order: ${orderId}`);
 
       // Resolve the secret dynamically
-      let secret = process.env.CASHFREE_WEBHOOK_SECRET;
-
-      if (db) {
-        try {
-          const txRef = doc(db, 'payment_transactions', orderId);
-          const txSnap = await getDoc(txRef);
-          if (txSnap.exists()) {
-            const txData = txSnap.data();
-            const dbSecret = await getSecretValue(txData.userId, 'CASHFREE_WEBHOOK_SECRET');
-            if (dbSecret) {
-              secret = dbSecret;
-              console.log(`[CASHFREE WEBHOOK] Loaded db-saved webhook secret for user: ${txData.userId}`);
-            }
-          }
-        } catch (err: any) {
-          console.error('[CASHFREE WEBHOOK] Error looking up transaction user secret:', err.message);
-        }
-      }
+      // The signing secret is the platform's, from the server environment only — a value in the order
+      // owner's vault must never decide whether a webhook is genuine (cashfreeCredentials.ts).
+      const secret = platformCashfreeWebhookSecret();
 
       if (!secret) {
-        console.error('[CASHFREE WEBHOOK] Webhook signature verification rejected: CASHFREE_WEBHOOK_SECRET is not configured globally or in the user database.');
-        return res.status(400).json({ error: 'Webhook secret not configured. Please enter it in the Secret Management panel first.' });
+        console.error('[CASHFREE WEBHOOK] Webhook signature verification rejected: CASHFREE_WEBHOOK_SECRET is not configured on the server.');
+        return res.status(400).json({ error: 'Webhook secret not configured.' });
       }
 
       const signature = (req.headers['x-cf-signature'] || req.headers['cf-signature'] || '') as string;

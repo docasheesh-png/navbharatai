@@ -201,7 +201,7 @@ export function secretCreatedAtMs(raw: unknown): number | null {
  * into the environment of the app THEY build (admin 2026-07-17: NavBharatAI Pro v5 guides the user to
  * store an app's required keys here — never in chat — and the build reads them from the vault).
  *
- * SECURITY — CRITICAL: unlike getSecretValue(), this NEVER falls back to process.env. process.env holds
+ * SECURITY — CRITICAL: this NEVER falls back to process.env. process.env holds
  * NavBharatAI's OWN platform keys (GEMINI_API_KEY, ANTHROPIC_API_KEY, E2B_API_KEY, …); a name collision
  * (a user naming a secret `GEMINI_API_KEY`) must NOT leak the platform's key into the user's app. Only
  * the user's real `user_secrets` documents are returned. Invalid env-var names and undecryptable/empty
@@ -288,36 +288,9 @@ export async function withheldVaultSecretNames(userId: string, workspaceId: stri
   return Object.keys(all).filter((n) => !(n in mine)).sort();
 }
 
-export async function getSecretValue(userId: string, secretName: string): Promise<string | null> {
-  // First check process.env:
-  if (process.env[secretName]) {
-    return process.env[secretName] as string;
-  }
-  const db = getDb() as any;
-  if (!db) return null;
-  try {
-    const q = query(
-      collection(db, 'user_secrets'),
-      where('user_id', '==', userId),
-      where('secret_name', '==', secretName)
-    );
-    const snap = await getDocs(q);
-    // NEWEST, not first. `find` returned whichever document id happened to sort earliest, so a user who
-    // had ever saved this name twice got a coin flip between their old value and their new one.
-    let docData: any = null;
-    for (const d of snap.docs as any[]) {
-      if (d.data()?.deleted) continue;
-      if (!docData || isNewerRow(
-        { createdAt: secretCreatedAtMs(d.data()?.created_at) },
-        { createdAt: secretCreatedAtMs(docData.data()?.created_at) },
-      )) docData = d;
-    }
-    if (docData) {
-      const encryptedValue = docData.data().encrypted_secret_value;
-      return decrypt(encryptedValue);
-    }
-  } catch (err) {
-    console.error(`Error loading secret ${secretName}:`, err);
-  }
-  return null;
-}
+// `getSecretValue(userId, name)` was removed in the forensic audit of 2026-10-04. It read the server
+// environment and then fell back to the CALLER'S OWN vault, so a platform secret that production happened
+// not to set under that exact name (CASHFREE_CLIENT_ID) was silently supplied by the user — the money path
+// ran on the user's merchant account. Platform secrets come from the environment only
+// (`cashfreeCredentials.ts`); a user's secrets come from `loadUserVaultSecrets`, which never reads the
+// environment. One helper that did both directions was the defect.

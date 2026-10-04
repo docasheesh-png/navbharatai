@@ -4,7 +4,7 @@ import { appendLedgerEntry, LEDGER_OPENING_FIELD, LEDGER_DROPPED_FIELD } from '.
 // ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. Credits user_token_wallets /
 // payment_transactions / promo_redemptions, all server-only under navbharat-prod's rules.
 import { doc, getDoc, updateDoc, runTransaction, getServerDb as getDb } from './serverDb';
-import { getSecretValue } from './secrets';
+import { platformCashfreeCredentials } from './cashfreeCredentials';
 import { mintCodeForOrder } from './giftCodeStore';
 import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
@@ -249,18 +249,9 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
     }
 
     const userId = txData.userId;
-    const dbClientId = await getSecretValue(userId, 'CASHFREE_CLIENT_ID') || await getSecretValue(userId, 'CASHFREE_APP_ID');
-    const dbClientSecret = await getSecretValue(userId, 'CASHFREE_CLIENT_SECRET') || await getSecretValue(userId, 'CASHFREE_SECRET_KEY');
-
-    const clientId = (dbClientId || process.env.CASHFREE_CLIENT_ID || process.env.CASHFREE_APP_ID)?.trim();
-    const clientSecret = (dbClientSecret || process.env.CASHFREE_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY)?.trim();
-    const env = process.env.CASHFREE_ENV || (clientSecret && (clientSecret.toLowerCase().includes('test') || clientSecret.toLowerCase().includes('sandbox')) ? 'sandbox' : 'production');
-
-    const isPlaceholder = !clientId || !clientSecret ||
-      clientId.toLowerCase().includes('placeholder') ||
-      clientSecret.toLowerCase().includes('placeholder') ||
-      clientId.trim() === '' ||
-      clientSecret.trim() === '';
+    // The merchant credentials are NavBharatAI's own and come only from the server environment —
+    // never from the order owner's secret vault (cashfreeCredentials.ts, forensic audit 2026-10-04).
+    const { clientId, clientSecret, mode: env, placeholder: isPlaceholder } = platformCashfreeCredentials();
 
     let isPaid = false;
     let cfOrderIdRef = 'cf_' + orderId;

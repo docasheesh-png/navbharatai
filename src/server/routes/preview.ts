@@ -3,7 +3,7 @@ import type { Express, Request, Response, RequestHandler } from 'express';
 
 /** No-op middleware used when no rate limiter is injected (e.g. unit tests). */
 const previewPassthrough: RequestHandler = (_req, _res, next) => next();
-import { build as esbuild } from 'esbuild';
+import { build as esbuild, type Plugin as EsbuildPlugin } from 'esbuild';
 import { esbuildMessagesToProblems } from '../../lib/previewProblems';
 import path from 'path';
 import os from 'os';
@@ -116,12 +116,12 @@ const CONFINED = 'nbConfined';
  * the project root, as it does in Vite. Remote URLs stay the browser's business.
  * `tests/previewBundleStaysInsideTheProject.test.ts` holds it.
  */
-function confineToWorkspace(allowedRoots: string[]) {
+function confineToWorkspace(allowedRoots: string[]): EsbuildPlugin {
   return {
     name: 'confine-to-workspace',
-    setup(b: any) {
-      b.onResolve({ filter: /.*/ }, async (args: any) => {
-        if (args.pluginData?.[CONFINED] || args.kind === 'entry-point') return undefined;
+    setup(b) {
+      b.onResolve({ filter: /.*/ }, async (args) => {
+        if ((args.pluginData as Record<string, unknown> | undefined)?.[CONFINED] || args.kind === 'entry-point') return undefined;
         const spec: string = args.path;
         if (/^(?:https?|data):/i.test(spec)) return undefined;
         if (/^[a-z][a-z0-9+.-]*:/i.test(spec) && !/^[a-z]:[\\/]/i.test(spec)) {

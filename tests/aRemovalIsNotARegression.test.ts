@@ -79,9 +79,9 @@ describe('the engine stands down for a removal', () => {
 
   it('the route passes removals as declined to every coverage probe and to the ledger', () => {
     const src = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    expect(src).toMatch(/\.\.\.removedProbeFeatures\(milestoneRequest \?\? prompt\)\]\)/);
+    expect(src).toMatch(/\.\.\.removedProbeFeatures\(milestoneRequest \?\? checksRequest\)\]\)/);
     expect(src).not.toMatch(/checkFeaturePresence\([^;]*declinedPresenceFeatures\(featureConfirmation\)\)/);
-    expect(src.match(/checkFeaturePresence\(milestoneRequest \?\? prompt, [^;]*presenceDeclined\)/g)).toHaveLength(4);
+    expect(src.match(/checkFeaturePresence\(milestoneRequest \?\? checksRequest, [^;]*presenceDeclined\)/g)).toHaveLength(4);
     expect(src).toMatch(/\.\.\.removedProbeFeatures\(prompt\)\]\)\]/);
   });
 });

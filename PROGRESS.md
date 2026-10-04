@@ -88427,3 +88427,23 @@ module), with five false findings on the way. Ledger (problem → root cause →
 - **Q-395** — a "continue" module turn showed the whole-app ETA and withdrew it seconds later; now never shown.
 - 🟡 Q-396 (no-tests warning on module turns), Q-397 (ignored theme note), Q-398 (APP_SCOPE small word as reason):
   BLOCKED with options in the queue. Q-399 (crawl bench, Haiku planner) resolved as admin-decided behaviour.
+
+### 2026-10-04 — Q-273 / Q-275 follow-up (autopsy 241215d1)
+
+- **Q-273 → fix in PR.** Problem: `python3 --version && which python3 → exit 0 (11s)`, while `head -50` took 1 s a
+  minute earlier.
+  - Root cause of the blindness: the bash tool's timer covers four things — our steps before the command (vault
+    `.env` and key checks, Postgres preflight, pin read), `getSandbox` (reconnect or resume), the command, and our
+    steps after it — and the report printed only their sum.
+  - Class: a duration nobody can attribute.
+  - Fix: `commandTiming.ts`. The actuator times reaching the machine apart from the run, including a recreate after
+    a dead sandbox. The dispatcher adds its own setup time. A `SANDBOX_CMD` line of 5 s or more now ends with
+    `— our setup · sandbox · command · our checks after`.
+  - Lock: `tests/aSlowCommandSaysWhereItsTimeWent.test.ts` (fails with the split removed).
+  - Honest limit: the one 11 s instance left no evidence; the next one will name its own cause.
+- **Q-275 stays 🟡 BLOCKED, with more ruled out.**
+  - Measured: the real prompt is 2,429 characters and ends at a line break. The server limit is 20,000.
+  - The composer has no `maxLength`, its paste handler only takes images, nothing turns a long paste into a file,
+    and the report stores the prompt in full. Nothing of ours cuts there.
+  - Needs: the user's original text, or the admin's decision on asking the user when a request visibly ends
+    mid-sentence.

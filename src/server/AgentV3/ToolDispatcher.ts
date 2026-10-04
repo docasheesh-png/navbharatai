@@ -398,6 +398,7 @@ import { summarizeBundle, bundleSummaryLine } from './BundleSize';
 import { livenessLine } from './PostDeployLiveness';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
 import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary, looksLikeBrokenErrorBoundary, isNextErrorBoundaryFile } from './ErrorBoundaryAnalysis';
+import type { CommandTiming } from './commandTiming';
 import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue } from './SecurityConfigAnalysis';
 import { analyzeSecretLeak, secretLeakSummary, gitignoreWithEnvCoverage } from './SecretLeakAnalysis';
 import { scanHardcodedUrls, hardcodedUrlSummary, type HardcodedUrlIssue } from './HardcodedUrlAnalysis';
@@ -642,7 +643,7 @@ export class ToolDispatcher {
      * BuildDiagnostics.recordCommand so a failing npm install / tsc / vite build is captured in
      * full — the single highest-value "why won't the app run" signal. Best-effort; never blocks.
      */
-    private readonly onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number }) => void,
+    private readonly onCommand?: (result: { command: string; exitCode: number | null; stdout: string; stderr: string; durationMs: number; timing?: CommandTiming }) => void,
   ) {
     this._rawActuator = actuatorRaw;
     this.actuator = recordingActuator(actuatorRaw, workspaceId, (path, content) => { this._unrecorded.set(path, content); });
@@ -4770,7 +4771,13 @@ export class ToolDispatcher {
         const background = isLongRunningCommand(effectiveCommand)
           ? { command: effectiveCommand, detached: 0 }
           : detachBackgroundJobs(effectiveCommand);
-        let { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, background.command);
+        const runStartedAt = Date.now();
+        const ran = await this.actuator.runCommand(this.workspaceId, background.command);
+        let { exitCode, stdout, stderr } = ran;
+        // Q-273 — the report splits a slow command into our setup, reaching the machine and the command.
+        const timing: CommandTiming | undefined = ran.timing
+          ? { setupMs: runStartedAt - cmdStartedAt, sandboxMs: ran.timing.sandboxMs, runMs: ran.timing.runMs }
+          : undefined;
         if (background.detached > 0) {
           stdout = `${stdout ?? ''}\n[note] ${background.detached === 1 ? 'The background job was' : `${background.detached} background jobs were`} started detached so this command could finish; its output goes to ${BACKGROUND_JOB_LOG} (read it with \`tail ${BACKGROUND_JOB_LOG}\`).`;
         }
@@ -4966,7 +4973,7 @@ export class ToolDispatcher {
         }
         // #3 — hand the raw result to the diagnosis bundle (best-effort; never breaks the build).
         try {
-          this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt });
+          this.onCommand?.({ command, exitCode, stdout, stderr, durationMs: Date.now() - cmdStartedAt, timing });
         } catch { /* diagnostics capture is best-effort */ }
         // 🔴 AND NOW TELL THE PROJECT MAP THE FILE IS GONE (autopsy 8b3dca5c). Everything above this
         // line already knew which source files the command would remove; nothing had ever acted on it

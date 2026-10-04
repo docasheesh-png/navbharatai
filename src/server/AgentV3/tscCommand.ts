@@ -51,15 +51,15 @@ export const INSTALL_LOCK_STALE_MINUTES = 6;
 
 // `-f` first, so `find` is only asked about a file that exists; its stderr (a lock removed between the two
 // tests) goes to our own log, never to the output a verdict is read from — and never to /dev/null.
-const LOCK_FRESH = `[ -f ${NPM_INSTALL_LOCK} ] && [ -n "$(find ${NPM_INSTALL_LOCK} -mmin -${INSTALL_LOCK_STALE_MINUTES} 2>>${TSC_ENSURE_LOG})" ]`;
+export const NPM_INSTALL_LOCK_FRESH = `[ -f ${NPM_INSTALL_LOCK} ] && [ -n "$(find ${NPM_INSTALL_LOCK} -mmin -${INSTALL_LOCK_STALE_MINUTES} 2>>${TSC_ENSURE_LOG})" ]`;
 
 export const TSC_ENSURE =
   // Wait (bounded) for an install already filling node_modules. Still busy ⇒ say so and stop: never run
   // a second install into the same tree, and never read a half-filled one (`exit` ends this command
   // only, so the tsc that would follow is skipped too). The wait stays under the 30 s a write-time
   // check is allowed.
-  `_nbw=0; while ${LOCK_FRESH} && [ $_nbw -lt ${INSTALL_WAIT_SECONDS} ]; do sleep 1; _nbw=$((_nbw+1)); done; ` +
-  `if ${LOCK_FRESH}; then echo "${TSC_UNAVAILABLE_MARKER}: the app's dependencies are still being installed, so nothing was checked yet."; exit 0; fi; ` +
+  `_nbw=0; while ${NPM_INSTALL_LOCK_FRESH} && [ $_nbw -lt ${INSTALL_WAIT_SECONDS} ]; do sleep 1; _nbw=$((_nbw+1)); done; ` +
+  `if ${NPM_INSTALL_LOCK_FRESH}; then echo "${TSC_UNAVAILABLE_MARKER}: the app's dependencies are still being installed, so nothing was checked yet."; exit 0; fi; ` +
   `: >${TSC_ENSURE_LOG}; ` +
   // `&& touch node_modules`: an "up to date" install leaves the directory's mtime alone, so without the
   // stamp a rewritten package.json kept this re-running `npm install` before every typecheck.
@@ -94,4 +94,27 @@ export const TSC_BIN = 'node_modules/.bin/tsc';
 export function robustTscCommand(args: string = '--noEmit', pipe: string = ''): string {
   const run = `${TSC_BIN} ${args}`.trim();
   return pipe ? `${TSC_ENSURE}; ${run} ${pipe}` : `${TSC_ENSURE}; ${run}`;
+}
+
+/** Printed when a recipe-dependency install found another install still running and stood down. */
+export const RECIPE_DEPS_BUSY_MARKER = 'NBAI_RECIPE_DEPS_BUSY';
+
+/**
+ * Install packages a recipe's code needs, under the same lock the background install holds — waiting for
+ * it (bounded), standing down when it is still busy, and never running two installs into one
+ * `node_modules` (autopsy 120eb52f). Names and versions come from recipe declarations only. PURE.
+ */
+export function recipeInstallCommand(deps: ReadonlyArray<{ name: string; version: string; dev: boolean }>): string {
+  const spec = (d: { name: string; version: string }) => `${d.name}@${d.version}`;
+  const safe = deps.filter((d) => /^(@[a-z0-9-]+\/)?[a-z0-9][a-z0-9._-]*$/.test(d.name) && /^[\^~]?[0-9][0-9A-Za-z.\-]*$/.test(d.version));
+  const prod = safe.filter((d) => !d.dev).map(spec);
+  const dev = safe.filter((d) => d.dev).map(spec);
+  if (prod.length === 0 && dev.length === 0) return '';
+  const installs = [
+    prod.length ? `npm install --no-audit --no-fund ${prod.join(' ')}` : '',
+    dev.length ? `npm install --no-audit --no-fund -D ${dev.join(' ')}` : '',
+  ].filter(Boolean).join(' && ');
+  return `_nbw=0; while ${NPM_INSTALL_LOCK_FRESH} && [ $_nbw -lt ${INSTALL_WAIT_SECONDS} ]; do sleep 1; _nbw=$((_nbw+1)); done; `
+    + `if ${NPM_INSTALL_LOCK_FRESH}; then echo ${RECIPE_DEPS_BUSY_MARKER}; exit 0; fi; `
+    + `touch ${NPM_INSTALL_LOCK}; ${installs}; _nbs=$?; rm -f ${NPM_INSTALL_LOCK}; exit $_nbs`;
 }

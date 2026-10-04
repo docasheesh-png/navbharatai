@@ -240,6 +240,16 @@ The rule, in `IntentClassifier.ts`:
 - An **order** ("build a notes app", "ek billing app banao") is not a question — it stays HIGH and
   instant. The common path pays nothing.
 
+🔴 **WIDENED BY THE ADMIN 2026-10-03 (Q-200, autopsy 3f959fde): "100% confirm nahi hai, to pahle text reply,
+phir app banane ke bare me puchna hai."** A data question in Telugu with a sheet attached was built as a ₹272 app
+because the reader answered "build". Now a `new_build` — or an "edit" of a chat that holds nothing of the user's —
+goes ahead only when the MESSAGE confirms it (`buildConfirmation.ts`): a certain order, a complete-app or
+start-over request, pasted source, or a non-question naming a whole product (app, website, game, tool…; a UI
+part such as "table" is not enough). **A question that names an app is now answered and offered too** — this
+replaces the bullet above that let it keep its build intent. The turn is recorded with lane `offer`; a short
+"yes / haan / bana do" within 6 hours builds the OFFERED request (`prompt` becomes it; the chat history keeps
+what was typed). Edits of an app the user really has are unchanged. `AGENTV3_CONFIRM_BUILD=off` reverts.
+
 ⚠️ **The asymmetry is the whole justification, and it must not be reversed.** Wrong toward chat costs
 one message — and the chat reply already offers to build, so "haan" starts it. Wrong toward build costs
 29 minutes, real money, and a user who asked for none of it.
@@ -4074,6 +4084,11 @@ the flag entries above promise.
   app) all read the four words. `planningRequest.ts` is ONE request (message + capped attachment + the last 3
   earlier requests ONLY while no app exists) that every sizer and planner reads; intent and the golden
   scaffold still read the message. Admin line `PLANNING_CONTEXT`.
+  🔁 **A message that POINTS at the conversation reads the conversation (autopsy 5759ad8b, 2026-10-01).** "Can you
+  make this app" meant an app described in CHAT, which this block drops by design (6ae30b33); the fast lane planned a
+  counter. A short message (≤ 14 words) whose subject is a pointer ("this app", "yeh app", "isko banao", "यह ऐप") on a
+  workspace with no finished app now adds its chat turns and the conversation's last answer (one bounded read,
+  `conversationReference.ts`, `lastAssistantText`). Every other message is unchanged.
   `kitRestore.ts`: the design repair is told the kit is "already in the project" — it was not, the architect
   had rewritten `src/index.css` — so four empty states shipped on undefined `.nb-empty*`. A kit class with no
   rule has exactly one right rule, the kit's, so it is appended deterministically (with its media rules,
@@ -4128,6 +4143,22 @@ the flag entries above promise.
   `openErrors`, one output-read door `noteCompileOutput` — the shell path had marked tsc clean on a `| head`
   exit code of 0); and when the release gate's typecheck passed, a reviewer finding claiming the project does
   not compile is dropped before the user sees it (`reviewEvidence.ts`, `REVIEW_REFUTED_BY_EVIDENCE`).
+- **🧩 FOLLOW-UP TO AUTOPSY de3bb2bb — THREE BUILDER RULES AND ONE REPORT FIX (admin decisions 2026-10-01, PR #3467).**
+  - **Small batches, no flag:** `write_files_batch` carries at most `MAX_FILES_PER_BATCH = 3` new files
+    (`batchSize.ts`, read by the prompt, the tool text and the dispatcher). One 189 s call had written 7 files, so
+    the preview showed nothing for three minutes. The old prompt line ("pass all files in one call … 3× faster")
+    was never measured; do not restore it. An oversized batch is still written in full and told to shrink.
+  - **Sub-agents get the style hand-back, no flag of its own** (rides `AGENTV3_STYLE_RESUME`): a writing
+    specialist is handed back, once, the undefined classes / page defects / unnamed controls in the files IT
+    wrote (`scopeStyleHandBack`). A sibling's class is the sibling's, because specialists run in parallel.
+  - **`AGENTV3_UNKNOWN_NAME_NOTE`** (NOT set; default ON; `off` disables), `unknownName.ts`: on a NEW build, an
+    all-caps word NavBharatAI does not know ("COACT", most likely "collect") is not built as an outside service.
+    The builder, planner and fast lane are told: no client, no API URL, no env variable for it; build
+    self-contained; say in one sentence how the word was read. Precision-first: acronyms, known services,
+    emphasis words, a word the request names as a service ("ACME API", "ACME se connect") and all-caps prompts
+    stand down. Report code `UNKNOWN_NAME_IN_REQUEST` (process-only).
+  - A readiness warning is recorded once per build (`readinessWarningsSeen` in `BuildDiagnostics`); each runner's
+    `done` had recorded "No tests at all" again.
 - **🎨 `AGENTV3_STYLE_RESUME` — A TURN THAT ENDS WITH UNSTYLED SCREENS IS HANDED THE CLASS LIST ONCE (autopsy
   1be16985, 2026-10-01). ⚠️ NOT set; default ON; `off` reverts.** `stylePolishResume.ts`, applied in
   `AgentRunner` after a READY readiness verdict. The write-time note (`undefinedClassWriteNote`, e6d46cde)
@@ -4166,6 +4197,15 @@ the flag entries above promise.
   chat surface (a prompt the user GIVES is still a picture). Same change: on an edit, "I changed N files" counts
   what the turn authored (`reviewChangedPaths`), and an omitted stylesheet no longer gives the lean review its
   tools back. Test: `tests/aPromptIsTextNotAnApp.test.ts`.
+- **🙋 `AGENTV3_CONFIRM_BUILD` + 📎 `AGENTV3_ATTACHMENT_MEMORY` (admin 2026-10-03, Q-200 / Q-201). ⚠️ NEITHER is set;
+  both default ON; `off` reverts each alone.** `buildConfirmation.ts`: see "READ THE MOOD FIRST" above — an unconfirmed
+  build is answered and offered, and a "yes" builds the offered request. `lib/attachmentMemory.ts`: the latest
+  attached DOCUMENT's text (PII masked, ≤ 50 KB, 30 days) is kept per chat in `agentv3_attachment_memory/<workspaceId>`
+  and handed back only to a later message in the SAME chat that brings no file and talks about the data/file or
+  accepts an offer. The record carries the uid and a read with another uid gets nothing (admin: *"ek chat ki baat
+  dusre chat me na jaye"*). Deleted with the chat (`purgeWorkspace`) and on unsend; disclosed in Privacy Policy §6 (retention).
+  Report codes `BUILD_OFFER_ACCEPTED` / `ATTACHMENT_RECALLED` (process-only). Test-locked and reversion-proven in
+  `tests/aBuildStartsOnlyWhenAskedFor.test.ts`.
 - **🧪 `AGENTV3_STRICT_TRIAL` — A SHARE OF NEW APPS START WITH TYPESCRIPT STRICT MODE ON (queue Q-008, admin "han"
   2026-10-01). ⚠️ NOT set; default ON; `off` seeds every new app loose as before.** `AGENTV3_STRICT_TRIAL_PCT` (NOT set;
   default **20**; `0` pauses; unreadable ⇒ 0, never 100). `strictTrial.ts`. The Vite-React starter compiles with strict

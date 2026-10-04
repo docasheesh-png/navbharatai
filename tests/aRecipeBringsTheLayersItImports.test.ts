@@ -61,7 +61,7 @@ describe('a recipe brings the layers it imports', () => {
     const note = missingLayersNote(missingLayerFiles(shell, new Set(Object.keys(shell))));
     expect(note).toContain('generate_game_3d (not run yet)');
     expect(note).toContain('src/game/three/renderer.ts');
-    expect(note).toMatch(/add the dependency: three@/);
+    expect(note).toMatch(/needs three@/); // installed by the dispatcher since 2026-10-04 (installRecipeDependencies)
     expect(note).toContain('do NOT write your own versions');
   });
 });

@@ -117,7 +117,9 @@ describe('2 · a lookup app has no save to prove', () => {
 
   it('🔒 the route marks a lookup app none-derivable, and derives page routes from the whole project', () => {
     const src = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    expect(src).toMatch(/appHasNoDataEntry\(journeyFiles\) \|\| appOnlyShowsWhatItHolds\(journeyFiles\)\) gateEvidence\.journeys = 'none-derivable'/);
+    // The window allows the block this became when the gate was also given the derivation's own
+    // sentence (autopsy 536c8189) — the pin is on the DECISION, not on it being one line.
+    expect(src).toMatch(/appHasNoDataEntry\(journeyFiles\) \|\| appOnlyShowsWhatItHolds\(journeyFiles\)\)[\s\S]{0,120}gateEvidence\.journeys = 'none-derivable'/);
     expect(src).toMatch(/const pageRoutes = extractPageRoutes\(\{ \.\.\.\(projectFilesAtTurnStart \?\? \{\}\), \.\.\.Object\.fromEntries\(writtenFiles\) \}\)/);
     expect(src).not.toMatch(/extractPageRoutes\(Object\.fromEntries\(writtenFiles\)\)/);
     expect(src).toMatch(/if \(pageRoutes\.length === 0\) gateEvidence\.noPageRoutes = true;/);

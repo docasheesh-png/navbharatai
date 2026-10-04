@@ -18,11 +18,11 @@ const surface = readFileSync(join(process.cwd(), 'src/components/agentv3/Preview
 
 describe('1. the copy is taken only from a build that PROVED it packages', () => {
   it('rides the production build gate’s success, reusing the dist it just produced', () => {
-    expect(route).toContain('if (verdict.ok && previewSnapshotEnabled() && snapshotSuitable(pkgRaw)');
+    expect(route).toContain('if (verdict.ok && previewSnapshotEnabled() && snapshotSuitable(pkgRaw, {');
   });
 
   it('is bounded at both steps — a copy must never eat the advisory window', () => {
-    const i = route.indexOf('previewSnapshotEnabled() && snapshotSuitable(pkgRaw)');
+    const i = route.indexOf('previewSnapshotEnabled() && snapshotSuitable(pkgRaw, {');
     const block = route.slice(i, i + 1800);
     expect(block).toContain("'snapshot-dist'");
     expect(block).toContain("'snapshot-deploy'");
@@ -31,7 +31,7 @@ describe('1. the copy is taken only from a build that PROVED it packages', () =>
   it('every failure inside it is swallowed', () => {
     // Bounded by the NEXT block (the vaccine), not by a character count: a character window drifts
     // the first time a line is added inside the block — which is exactly what happened on 2026-09-11.
-    const i = route.indexOf('previewSnapshotEnabled() && snapshotSuitable(pkgRaw)');
+    const i = route.indexOf('previewSnapshotEnabled() && snapshotSuitable(pkgRaw, {');
     const end = route.indexOf('vaccineEnabled(workspaceId)', i);
     expect(i).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(i);

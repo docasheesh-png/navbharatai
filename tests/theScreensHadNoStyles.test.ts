@@ -128,7 +128,8 @@ describe('6 · the wiring (source guards — tsc cannot see which lane runs a ch
     expect(route).toMatch(/CSS_CLASSES_HEALED/);
   });
   it('the fast lane reads the project\'s stylesheets, not only this turn\'s writes', () => {
-    expect(route).toMatch(/filter\(isProjectStylesheet\)[\s\S]{0,700}let project = \{ \.\.\.sheets, \.\.\.written \};[\s\S]{0,900}cssConsistencyError\(project\)/);
+    // The second window grew when the deterministic 4px snap joined this lane (autopsy 536c8189).
+    expect(route).toMatch(/filter\(isProjectStylesheet\)[\s\S]{0,700}let project = \{ \.\.\.sheets, \.\.\.written \};[\s\S]{0,1800}cssConsistencyError\(project\)/);
   });
 });
 

@@ -89,7 +89,7 @@ describe('2 · "Continue" on a started-but-unbuilt app is sized from the request
   it('the route reads the entry file and passes the reading in', () => {
     const route = read('src/server/routes/agentv3.ts');
     expect(route).toMatch(/const appStillUnbuilt = await[\s\S]{0,900}isUntouchedStarterEntry\(got\[p\]\)/);
-    expect(route).toContain('planningRequest({ prompt, attachmentText: planningAttachmentText, picturesSetAside, recentTurns, userAppExists, appStillUnbuilt })');
+    expect(route).toContain('planningRequest({ prompt, attachmentText: planningAttachmentText, picturesSetAside, recentTurns, conversationReply, userAppExists, appStillUnbuilt })');
   });
 });
 

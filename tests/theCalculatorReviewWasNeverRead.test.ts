@@ -11,7 +11,7 @@
  *
  * Every fixture below is taken from that report.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   parseReviewOutput, readLabelledFinding, selectGreenRepairable, reviewHasUnreadFindings, formatReview,
@@ -22,6 +22,15 @@ import { salvageReview } from '../src/server/AgentV3/partialReview';
 import { fastLanePhaseSummary } from '../src/server/AgentV3/fastLanePhases';
 import { releaseGate, type RuntimeEvidence } from '../src/server/AgentV3/releaseGate';
 import { BuildDiagnostics, findingLabel } from '../src/server/AgentV3/BuildDiagnostics';
+import {
+  clickExplorerModule, parseExploreOutput, EXPLORE_RESULT_MARKER, MAX_SECOND_LEVEL_CLICKS, MAX_SECOND_LEVEL_PER_PARENT,
+  MAX_PRIMED_RETRIES, NEVER_PRESS, WRITE_VERBS, CONSOLE_NOISE, THEME_CONTROL, MAX_THEME_PRESSES,
+} from '../src/server/AgentV3/clickExplorer';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 const read = (p: string) => readFileSync(p, 'utf8');
 
@@ -220,4 +229,71 @@ describe('6 · the release gate names what it counted', () => {
     expect(d.shippingIssueLabels('warning')).toEqual(['design consistency 96/100']);
     expect(read('src/server/routes/agentv3.ts')).toContain("warningLabels: buildDiag.shippingIssueLabels('warning'),");
   });
+});
+
+describe('7 · a button that changes nothing on a fresh screen is tried again after one that does (Q-305)', () => {
+  const line = (o: object) => EXPLORE_RESULT_MARKER + JSON.stringify(o);
+
+  it('the retry replaces the first try; a retry that could not be pressed leaves the first try standing', () => {
+    const run = parseExploreOutput([
+      line({ type: 'summary', loaded: true, note: '', found: 3, chosen: 3, skipped: [] }),
+      line({ type: 'press', label: 'AC', tag: 'button', verdict: 'ok', note: 'it responded', errors: [], changed: false }),
+      line({ type: 'press', label: '%', tag: 'button', verdict: 'ok', note: 'it responded', errors: [], changed: false }),
+      line({ type: 'press', label: '7', tag: 'button', verdict: 'ok', note: 'it responded', errors: [], changed: true }),
+      line({ type: 'press', label: 'AC', tag: 'button', verdict: 'ok', note: 'it responded once "7" had been pressed first', errors: [], changed: true, primedBy: '7' }),
+      line({ type: 'press', label: '%', tag: 'button', verdict: 'skipped', note: 'could not be pressed', errors: [], changed: false, primedBy: '7' }),
+    ].join('\n'));
+    expect(run.presses.map((p) => `${p.label}:${p.changed}:${p.primedBy ?? ''}`)).toEqual(['%:false:', '7:true:', 'AC:true:7']);
+  });
+
+  it('the runner is told how many retries it may spend', () => {
+    expect(MAX_PRIMED_RETRIES).toBe(3);
+    expect(read('src/server/AgentV3/clickExplorer.ts')).toContain('maxPrimed: MAX_PRIMED_RETRIES,');
+  });
+});
+
+// A REAL BROWSER, where one exists (the same harness as theThemeSwitchThatDidNotSwitch.test.ts).
+const PW = '/opt/node22/lib/node_modules/playwright/index.js';
+const BROWSERS = '/opt/pw-browsers';
+describe.skipIf(!(existsSync(PW) && existsSync(BROWSERS)))('7b · the report\'s keypad in a real browser', () => {
+  let server: http.Server;
+  let base = '';
+  const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>calc</title></head><body><div id="root">
+<p id="d">0</p>
+<button onclick="ac()">AC</button>
+<button onclick="sign()">+/−</button>
+<button onclick="void 0">%</button>
+<button onclick="seven()">7</button>
+</div><script>
+var d = document.getElementById('d');
+function ac() { d.textContent = '0'; }
+function sign() { if (d.textContent !== '0') d.textContent = d.textContent.charAt(0) === '-' ? d.textContent.slice(1) : '-' + d.textContent; }
+function seven() { d.textContent = d.textContent === '0' ? '7' : d.textContent + '7'; }
+</script></body></html>`;
+  beforeAll(async () => {
+    server = http.createServer((_q, r) => { r.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); r.end(page); });
+    await new Promise<void>((res) => server.listen(0, '127.0.0.1', () => res()));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+  });
+  afterAll(() => new Promise<void>((res) => server.close(() => res())));
+
+  it('AC and +/− are proven to respond after "7"; the dead % is named, not failed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'nbai-primed-'));
+    const file = join(dir, 'run.mjs');
+    writeFileSync(file, clickExplorerModule({
+      base, marker: EXPLORE_RESULT_MARKER, maxClicks: 12, maxSecond: MAX_SECOND_LEVEL_CLICKS, perParent: MAX_SECOND_LEVEL_PER_PARENT,
+      maxPrimed: MAX_PRIMED_RETRIES, budgetMs: 60_000, loadMs: 10_000, blockWrites: false,
+      neverSrc: NEVER_PRESS.source, neverFlags: NEVER_PRESS.flags, writeSrc: WRITE_VERBS.source, writeFlags: WRITE_VERBS.flags,
+      noiseSrc: CONSOLE_NOISE.source, noiseFlags: CONSOLE_NOISE.flags,
+      themeSrc: THEME_CONTROL.source, themeFlags: THEME_CONTROL.flags, maxThemePresses: MAX_THEME_PRESSES,
+    }, `import playwright from '${PW}';\nconst { chromium } = playwright;`));
+    const { execFile } = await import('node:child_process');
+    const stdout = await new Promise<string>((res, rej) => execFile(process.execPath, [file], { env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: BROWSERS }, timeout: 90_000 }, (e, out) => (e ? rej(e) : res(out))));
+    const by = Object.fromEntries(parseExploreOutput(stdout).presses.map((p) => [p.label, p]));
+    expect(by.AC).toMatchObject({ verdict: 'ok', changed: true, primedBy: '7' });
+    expect(by['+/−']).toMatchObject({ verdict: 'ok', changed: true, primedBy: '7' });
+    expect(by['%']).toMatchObject({ verdict: 'ok', changed: false, primedBy: '7' });
+    expect(by['%'].note).toBe('it changed nothing, even after "7" was pressed first');
+    expect(by['7']).toMatchObject({ verdict: 'ok', changed: true });
+  }, 120_000);
 });

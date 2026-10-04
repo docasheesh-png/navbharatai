@@ -87915,3 +87915,8 @@ All on PR #3488, each locked by a test proven by reversion.
 | Q-112 | New-tab links opened inside the phone app's own WebView | Fixed one link at a time; the next link written was bare again. (Measured: every JSX new-tab link already carried `rel`.) | One delegated listener in the native shell (`installExternalLinkHandler`) sends them to the system browser; our own origin, downloads and modified clicks are left alone | `aNewTabLinkOpensTheRealBrowser` |
 
 ⚠️ Q-112 reaches phone users only with a fresh `.aab`/`.ipa` (bundled mode).
+- **Q-305 (unblocked by #3488's merge):** the explorer now tries a first-screen press that changed nothing once
+  more, after a control that DID change the screen (`MAX_PRIMED_RETRIES` = 3 in `clickExplorer.ts`). In a real
+  browser, a keypad's "AC" and "+/−" are now proven to respond after "7", and a dead "%" is named in words
+  ("it changed nothing, even after "7" was pressed first"). It is deliberately NOT a failing verdict: a control
+  that legitimately does nothing (memory recall with nothing stored) would otherwise spend a repair.

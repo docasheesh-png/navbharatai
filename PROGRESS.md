@@ -87854,3 +87854,16 @@ into its pattern: forex, MT4/MT5, cTrader, algo trading, F&O, trading system/str
 "scalper" is deliberately left out, because the domain now sits early in the list and a ticket-scalper app
 is not trading. `TRADING_CONTEXT` (the broker/listing strip) is unchanged. Both autopsies' tests pass on the
 merged state (`theForexPasteIsNotAnEightModuleProject`, `thePaperTradingAutopsy`).
+
+## 2026-10-04 — Queue items Q-106, Q-145, Q-112 and a Q-246 sibling (admin: "ek ek kar ke sabhi karo")
+
+All on PR #3488, each locked by a test proven by reversion.
+
+| Item | Problem | Root cause | Fix | Test |
+|---|---|---|---|---|
+| Q-106 | A file the build deleted could come back on the next restore | The durable store merges a partial save and carries root manifests forward; only the in-memory maps knew about the delete | After the final save, every path this build deleted that it did not persist is removed from the store (`deletionsToForgetDurably`) | `aDeleteIsDurable` |
+| Q-246 sibling | `codemod_move_file`'s old path was saved again | Its own `rm` never called `reconcileDeletions` | It does now | `aShellDeleteLeavesTheSavedProject` |
+| Q-145 | `execute` / `write` were refused as unknown tools | No alias; intent was unambiguous from the input's shape | `toolAlias.ts`: a fixed table, renamed only with the real tool's required fields and only to a tool this agent was offered | `aMadeUpToolNameRunsAsTheRealOne` |
+| Q-112 | New-tab links opened inside the phone app's own WebView | Fixed one link at a time; the next link written was bare again. (Measured: every JSX new-tab link already carried `rel`.) | One delegated listener in the native shell (`installExternalLinkHandler`) sends them to the system browser; our own origin, downloads and modified clicks are left alone | `aNewTabLinkOpensTheRealBrowser` |
+
+⚠️ Q-112 reaches phone users only with a fresh `.aab`/`.ipa` (bundled mode).

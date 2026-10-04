@@ -69,6 +69,7 @@ import { registerMobileSetupRoutes } from './src/server/routes/mobileSetup';
 import { registerNavStoreRoutes } from './src/server/routes/navStore';
 import { registerAppMartSocialRoutes } from './src/server/routes/appMartSocial';
 import { registerAppAiRoutes } from './src/server/routes/appAi';
+import { registerAppAiOwnerRoutes } from './src/server/routes/appAiOwner';
 import { registerReportRoutes } from './src/server/routes/reports';
 import { registerCloudsyncRoutes } from './src/server/routes/cloudsync';
 // RETIRED — AppMaker telemetry routes (old engine). Unregistered in the v3.0 cutover; no frontend uses them.
@@ -678,6 +679,7 @@ setInterval(() => {
   // The AI gateway a PUBLISHED app calls — no key to paste, the owner's own wallet pays. Public and
   // cross-origin by design; every defence it has is in routes/appAi.ts. Off unless APP_AI_GATEWAY=on.
   registerAppAiRoutes(app);
+  registerAppAiOwnerRoutes(app);
 
   // Security scan + website audit routes — extracted to src/server/routes/audit.ts (Phase 1, AI-core step e).
   registerAuditRoutes(app);

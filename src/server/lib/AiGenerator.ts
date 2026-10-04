@@ -42,9 +42,10 @@ const ENV_EXAMPLE = '.env.example';
 // rather than throwing something the app author would have to decode.
 const NAVBHARAT_CLIENT = `// AI text generation through NavBharatAI — no API key, no backend, nothing to sign up for.
 //
-// The assistant is wired into this app when you PUBLISH it: publishing stamps this app's own
-// assistant into the page. Before that, isAiReady() is false and the helpers say so instead of
-// failing silently. Cost is charged to the NavBharatAI balance of whoever owns this app.
+// The assistant answers inside the NavBharatAI preview (for you, the owner) and, once you PUBLISH,
+// for everyone. Opened anywhere else, isAiReady() is false and the helpers say so instead of failing
+// silently. Cost is charged to the NavBharatAI balance of whoever owns this app — or to your own
+// AI provider key if you add one in Keys & Secrets. No key ever goes into this page.
 
 interface NavAiBridge { app: string; available: boolean; ask(prompt: string, opts?: { system?: string }): Promise<string>; }
 
@@ -58,7 +59,7 @@ export function isAiReady(): boolean {
   return bridge() !== null;
 }
 
-const NOT_READY = 'The assistant becomes available once this app is published.';
+const NOT_READY = 'The assistant is not available here. It answers inside the NavBharatAI preview and once this app is published.';
 
 /** One-shot: send a prompt, get the text back. The optional system text sets the assistant's role. */
 export async function generateText(prompt: string, system?: string): Promise<string> {
@@ -86,10 +87,12 @@ export async function chat(messages: ChatMessage[], system?: string): Promise<st
 const NAVBHARAT_INSTRUCTIONS =
   'AI text generation wired through NavBharatAI — no API key and no backend needed. Import ' +
   'generateText(prompt) or chat(messages) from src/lib/ai.ts and call them straight from the browser. ' +
-  'The assistant goes live when you PUBLISH the app (isAiReady() is false until then, and the helpers ' +
-  'say so rather than failing quietly), and each answer is charged to the app owner\'s NavBharatAI ' +
-  'balance. Each app has a daily limit, so a busy day can never drain the balance. To use your own OpenAI or Anthropic key instead, ask for provider = "openai" or ' +
-  '"anthropic".';
+  'The assistant answers in the NavBharatAI preview for the app owner (small daily limit there) and, once ' +
+  'the app is PUBLISHED, for everyone; opened anywhere else isAiReady() is false and the helpers say so ' +
+  'rather than failing quietly. Each answer is charged to the app owner\'s NavBharatAI balance, and each ' +
+  'app has a daily limit, so a busy day can never drain the balance. The owner can switch it off, or put ' +
+  'their own OpenAI/Anthropic key in Keys & Secrets — it then answers on their key, server-side, with no ' +
+  'change to this code and no key in the page.';
 
 // ── OpenAI (Chat Completions) ────────────────────────────────────────────────────────────────────────────
 const OPENAI_SERVER = `import OpenAI from 'openai';

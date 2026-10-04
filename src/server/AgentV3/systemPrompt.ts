@@ -89,15 +89,19 @@ export const AI_IN_APP_RULE =
  * with nothing pasted anywhere — so an app WITHOUT a server of its own takes that route (`generate_ai`,
  * provider left empty). An app that has or needs a server keeps AI_IN_APP_RULE exactly: the gateway is a
  * browser path, and a server should not route through a page. The honest cost of the keyless route is
- * said to the user: the assistant answers once the app is PUBLISHED, not in the preview.
+ * said to the user. ⚠️ UPDATED 2026-10-04: the assistant now ALSO answers in the NavBharatAI preview (owner
+ * only, via the parent page — src/lib/previewAiProtocol.ts), so the old "not in the preview" sentence became
+ * false and was replaced.
  */
 export const GATEWAY_AI_RULE =
   'AI INSIDE THE APP — NO KEY NEEDED: if the app itself needs an AI model AND it has no server of its ' +
   'own (a plain React/Vite or HTML app), do NOT write your own API calls and do NOT ask for an API key. ' +
   'Call run_recipe with name "generate_ai" and input { "provider": "navbharat" }: it writes src/lib/ai.ts, which answers ' +
   'through NavBharatAI with no key. Use generateText()/chat() from it, and show isAiReady() === false as ' +
-  'a clear "the assistant starts working once you publish this app" state, never canned answers. In your ' +
-  'final message tell the user plainly: the AI answers after they PUBLISH, not in the preview. ' +
+  'a clear "the assistant is not available here" state, never canned answers. In your final message tell ' +
+  'the user plainly: the AI already answers in the NavBharatAI preview (charged to their balance, with a ' +
+  'small daily limit there), and for everyone once they PUBLISH; they can switch it off or use their own ' +
+  'OpenAI/Anthropic key any time in Keys & Secrets. ' +
   'A provider the user NAMES (ChatGPT, Perplexity, Gemini, Claude…) describes what the assistant should do, ' +
   'not a key to fetch: still use this keyless route, never add a server just to reach that provider, and ' +
   'never stop the build to ask for an AI key — say in your final message that they can add their own ' +

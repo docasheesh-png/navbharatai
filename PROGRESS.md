@@ -89107,3 +89107,11 @@ command that exited 0, `pipedMissingCommandWarning` reads the SHELL's own not-fo
 names the program the pipe started with — so `prisma migrate deploy | tail` with no prisma is reported, while
 `grep -r "command not found" app.log | head` is not. Lock: `tests/aPipeThatNeverRanIsNotASuccess.test.ts`.
 
+### 2026-10-04 — Q-146: browser code run under node is named once
+
+`browserCodeInNodeHint` (pure) is appended to the bash tool's result when a server-side JS run (node, tsx,
+ts-node, bun, deno, `npx tsx`, an `npm run …seed…`) fails with a browser global's ReferenceError. It says the code
+can never run there, that a polyfill would only fake the result (data written to a fake localStorage never
+reaches the app), and that sample data belongs in the app's first load. Guidance only. Lock:
+`tests/browserCodeIsNotRunUnderNode.test.ts` (pure cases + the real dispatcher bash path).
+

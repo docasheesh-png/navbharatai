@@ -88351,3 +88351,60 @@ Q-194, Q-195, Q-272, Q-286 resolved as not defects). All sixteen rows are now �
 in `BUILD_REPORT_QUEUE.md`; their ledgers stay in the two entries above. **Watch on the next real builds:**
 `PYTHON_BACKEND_UP` / `_NOT_UP` on a Python-backed app, the `SCRIPT_REQUEST_AS_WEB_APP` start line, and the first
 write-time typecheck on a fresh starter dropping well under 15 s. Still BLOCKED on evidence: Q-193, Q-273, Q-275.
+
+## 2026-10-04 — Autopsy 1eaa5f5a ("Make one PDF reader") + e3b0ce25 ("Build one block fitting puzzle")
+
+**The headline: since #3491 (13:52 UTC) every write-time typecheck was run as a dev-server launch.** The primer
+copies `/home/user/.warm/vite-react/node_modules`; `isDevServerInvocation` read "vite" in that PATH as a program.
+Each typecheck was then prefixed `BROWSER=none` (a syntax error in front of `if`), the dev server on 5173 was
+killed first, the check timed out at 30 s, and the health check ran installs and restarts. In the same build the
+sandbox's `package.json` was found empty twice, every npm command failed with EJSONPARSE, and the preview went
+down. Third instance of the "a word inside data read as a command" class (`/dev/null` 2026-08-16, `--save-dev`).
+
+| ID | Problem | Root cause → fix | Lock |
+|---|---|---|---|
+| Q-410..413 | typecheck misrouted, BROWSER=none syntax error, dev server killed, typecheck never ran | paths judged by their last part — **shipped by #3506 (`pathsAsBasenames`, Q-390)**, found by both sessions the same day; this PR's own copy was withdrawn on merge and only its census was kept | `aTypecheckIsNotADevServer.test.ts` (census of every command the platform builds) |
+| Q-414 | package.json emptied twice | 🟡 writer unknown; restore + evidence in the one install path | `anEmptyManifestIsPutBack.test.ts` |
+| Q-415 | PREVIEW_SERVER_DOWN ×2 | Q-414 | — |
+| Q-416/417 | puzzle built over the PDF reader without asking; pdf.js and "PDF Reader" title left behind | "puzzle" etc. are whole things | `askBeforeBuildingSomethingElseIntoThisApp.test.ts` |
+| Q-418 | `.null` false class finding | per-quote literal reader, one shared function | `anExpressionIsNotAClassName.test.ts` |
+| Q-419/420 | fake tool call shown as ✅ review; review told files were cut | a review needs a verdict; no samples of inlined files | `aReviewWithoutAVerdictIsNotAReview.test.ts` |
+| Q-421 | ₹0 bill on a build whose app rendered | 🟡 admin decision (recommend keep ₹0: our bug took the preview down) | — |
+| Q-422 | fast lane waited 67 s after deciding to hand off | 🟡 admin decision | — |
+| Q-423 | design line duplicated and stale after the snap | print once; re-lint after the snap | `theDesignLineSaysWhatIsTrueNow.test.ts` |
+
+Not defects (recorded so nobody re-opens them): `requestAnalysis.startTier: "gemini"` is the complexity band's
+historical key, with `startBand` printed beside it (2026-09-17); the GLM crawl bench was the designed resilience.
+**Watch:** no `BROWSER=none` and no `Killed` in launch logs; `WRITE_TIME_TYPECHECK` compiling again; any
+`package.json was EMPTY` line (it names the writer — Q-414).
+## 2026-10-04 — Q-344: the other nine scripts stand down on transliterated loanwords (next PR after #3494)
+
+The admin approved transliterated English loanwords as the protective words ("ok, go ahead"), and decided the
+merging session merges #3494, not this one.
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-344 child-protection / deepfake-detection apps refused in Bengali, Tamil, Telugu, Urdu… | Q-320's stand-down had protective words only in English and Hindi | a safety word list in one script and not its siblings | `indicSafetyWords.ts` gains `protective` (report, helpline, POCSO, detect, awareness per script) and `unambiguous` (porn, obscene, naked, "sex"/"sexual" beside a medium, undress, deepfake + make/generator) for CSAM and NCII; `illegalContentRules.ts` reads them | `tests/aProtectiveAppIsNotTheOffence.test.ts` — fix removed → 8 fail |
+| Sibling found: "शिशुओं की यौन सामग्री रिपोर्ट" (sexual content) passed the Hindi stand-down | the Devanagari unambiguous list paired only "सेक्स" with a medium | same | "(सेक्स|यौन)" beside video/photo/chat/story/content | same test |
+
+Honest limit: only loanwords stand down, so a request using a native protective word (শনাক্ত, கண்டறி) stays
+refused. Words in the `unambiguous` lists that were guessed can only make the rule stricter, never looser.
+
+### 2026-10-04 — Autopsy "Sur Taal" (music player, builds b8c31d3d / c497c9cb) — Q-390..Q-399
+
+A music player described in eight numbered Hindi design sections became a 23-module project (one "continue" per
+module), with five false findings on the way. Ledger (problem → root cause → class → fix → lock), all locked in
+`tests/theMusicPlayerIsNotATwentyThreeModuleProject.test.ts` with the report's own prompt
+(`tests/fixtures/surTaalPrompt.txt`):
+- **Q-390** — #3491's warm-cache path (`/home/user/.warm/vite-react/…`) made the write-time typecheck and the
+  warm-up read as dev-server launches (`vite` matched inside a PATH): bash syntax error, log pollution, false
+  restarts, a 10 s typecheck timeout. **#3491's own "watch" item (typecheck well under 15 s) was defeated by its
+  own change** — the earlier fix was incomplete. Fixed by judging a command on path basenames.
+- **Q-391** — `countEnumeratedFeatures` counted every bullet under every heading (40); a sectioned spec is now
+  sized by its sections (8), so project mode does not fire.
+- **Q-392** — Devanagari words matched inside longer words (`\b` is ASCII-only) and a UI menu read as a food menu.
+- **Q-393** — phone powers matched words in labels ("Music Scanner", "Contact us", "Event location").
+- **Q-394** — the app's own palette module was counted as a colour explosion.
+- **Q-395** — a "continue" module turn showed the whole-app ETA and withdrew it seconds later; now never shown.
+- 🟡 Q-396 (no-tests warning on module turns), Q-397 (ignored theme note), Q-398 (APP_SCOPE small word as reason):
+  BLOCKED with options in the queue. Q-399 (crawl bench, Haiku planner) resolved as admin-decided behaviour.

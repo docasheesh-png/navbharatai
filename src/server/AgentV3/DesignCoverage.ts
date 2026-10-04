@@ -35,6 +35,7 @@
 //
 // Pure + dependency-free → fully unit-testable.
 
+import { classAttributeValues } from './CssConsistency';
 export type DesignDefect =
   | 'BARE_MARKUP' | 'NO_HEADING' | 'RAW_TABLE' | 'LIST_WITHOUT_EMPTY_STATE' | 'NO_STYLESHEET';
 
@@ -111,7 +112,7 @@ export function hasStylingSignal(content: string): boolean {
   if (ALTERNATIVE_STYLING_RE.some((re) => re.test(content))) return true;
   if (/\bstyle\s*=\s*\{\{/.test(content)) return true;
   if (/className\s*=\s*\{\s*(styles|classes|cx|clsx|css)\b/.test(content)) return true;
-  const classValues = [...content.matchAll(/className\s*=\s*(?:\{\s*)?["'`]([^"'`]*)["'`]/g)].map((m) => m[1]).join(' ');
+  const classValues = classAttributeValues(content).join(' ');
   if (!classValues.trim()) return false;
   return KIT_CLASS_RE.test(classValues) || TAILWIND_UTILITY_RE.test(classValues);
 }

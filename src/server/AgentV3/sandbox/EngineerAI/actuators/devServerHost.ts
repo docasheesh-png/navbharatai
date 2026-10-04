@@ -416,7 +416,21 @@ const OTHER_INSTALLER_ONE_SHOT =
 /** True when a single command segment (no `;`/`&&`/`||` chaining left in it) itself starts a
  *  dev/preview server. Extracted so isLongRunningCommand can apply it PER-SEGMENT of a compound
  *  command (see below) instead of only to the whole string. */
-function isDevServerInvocation(segment: string): boolean {
+/**
+ * A path is read by its LAST component only (autopsy Sur Taal, 2026-10-04). #3491 put the baked tree's
+ * path `/home/user/.warm/vite-react/node_modules` into the typecheck's install primer, and the word
+ * `vite` inside that DIRECTORY name made every write-time typecheck look like a Vite dev-server launch:
+ * it was prefixed with `BROWSER=none` (a bash syntax error before `if`), redirected into the dev
+ * server's log, and health-checked twice as a server that "did not come up". A command word is what
+ * runs; a directory that happens to contain one is not. `node_modules/.bin/vite` still reads `vite`,
+ * and `2>/dev/null` reads `null`, not `dev`. PURE.
+ */
+export function pathsAsBasenames(segment: string): string {
+  return String(segment ?? '').replace(/(?:[\w.@~$-]*\/)+([\w.@-]*)/g, '$1');
+}
+
+function isDevServerInvocation(rawSegment: string): boolean {
+  const segment = pathsAsBasenames(rawSegment);
   // Installing a package called "dev" is not running one. This is checked FIRST so that every
   // keyword rule below is spared the option-flag ambiguity, and it lives HERE rather than in
   // isLongRunningCommand so a future caller inherits it.

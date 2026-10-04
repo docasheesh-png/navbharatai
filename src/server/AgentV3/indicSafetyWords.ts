@@ -76,6 +76,63 @@ const DARK_WEB: ScriptWords = {
   ur: ['ڈارک\\s*ویب', 'بلیک\\s*مارکیٹ'],
 };
 
+/**
+ * QUEUE Q-344 (admin 2026-10-04: "ok, go ahead" to transliterated loanwords). The protective stand-down of
+ * the CSAM and NCII rules (Q-320) in the other nine scripts. ONLY the English loanwords people actually type
+ * — report, helpline, POCSO, detect/detection, awareness — spelled in each script, because the native words
+ * would need a native reader to vet. A native-only request ("শনাক্ত", "கண்டறி") stays on the strict side.
+ */
+const PROTECTIVE_LOANWORDS: ScriptWords = {
+  bn: ['রিপোর্ট', 'হেল্পলাইন', 'পকসো', 'পক্সো', 'ডিটেক্ট', 'ডিটেকশন', 'অ্যাওয়ারনেস'],
+  pa: ['ਰਿਪੋਰਟ', 'ਹੈਲਪਲਾਈਨ', 'ਪੋਕਸੋ', 'ਡਿਟੈਕਟ', 'ਡਿਟੈਕਸ਼ਨ', 'ਅਵੇਅਰਨੈੱਸ', 'ਅਵੇਅਰਨੈਸ'],
+  gu: ['રિપોર્ટ', 'હેલ્પલાઇન', 'પોક્સો', 'ડિટેક્ટ', 'ડિટેક્શન', 'અવેરનેસ'],
+  or: ['ରିପୋର୍ଟ', 'ହେଲ୍ପଲାଇନ', 'ପକ୍ସୋ', 'ପୋକ୍ସୋ', 'ଡିଟେକ୍ଟ', 'ଡିଟେକସନ', 'ଆୱାରନେସ'],
+  ta: ['ரிப்போர்ட்', 'ஹெல்ப்லைன்', 'போக்ஸோ', 'போக்சோ', 'டிடெக்ட்', 'டிடெக்ஷன்', 'அவேர்னஸ்'],
+  te: ['రిపోర్ట్', 'హెల్ప్లైన్', 'పోక్సో', 'డిటెక్ట్', 'డిటెక్షన్', 'అవేర్నెస్'],
+  kn: ['ರಿಪೋರ್ಟ್', 'ಹೆಲ್ಪ್ಲೈನ್', 'ಪೋಕ್ಸೋ', 'ಪೋಕ್ಸೊ', 'ಡಿಟೆಕ್ಟ್', 'ಡಿಟೆಕ್ಷನ್', 'ಅವೇರ್ನೆಸ್'],
+  ml: ['റിപ്പോർട്ട്', 'ഹെൽപ്ലൈൻ', 'പോക്സോ', 'ഡിറ്റക്ട്', 'ഡിറ്റക്ഷൻ', 'അവയർനെസ്'],
+  ur: ['رپورٹ', 'ہیلپ\\s*لائن', 'پوکسو', 'پاکسو', 'ڈیٹیکٹ', 'ڈیٹیکشن', 'اویئرنس'],
+};
+/** "sex" and "sexual" — NOT unambiguous alone ("report child sexual abuse" needs them); only beside a medium. */
+const SEX_WORD: ScriptWords = {
+  bn: ['সেক্স', 'যৌন'], pa: ['ਸੈਕਸ', 'ਜਿਨਸੀ'], gu: ['સેક્સ', 'જાતીય'], or: ['ସେକ୍ସ', 'ଯୌନ'], ta: ['செக்ஸ்', 'பாலியல்'],
+  te: ['సెక్స్', 'లైంగిక'], kn: ['ಸೆಕ್ಸ್', 'ಲೈಂಗಿಕ'], ml: ['സെക്സ്', 'ലൈംഗിക'], ur: ['سیکس', 'جنسی'],
+};
+const CHAT_CONTENT: ScriptWords = {
+  bn: ['চ্যাট', 'কনটেন্ট', 'কন্টেন্ট'], pa: ['ਚੈਟ', 'ਕੰਟੈਂਟ'], gu: ['ચેટ', 'કન્ટેન્ટ'], or: ['ଚାଟ', 'କଣ୍ଟେଣ୍ଟ'],
+  ta: ['சாட்', 'கண்டென்ட்'], te: ['చాట్', 'కంటెంట్'], kn: ['ಚಾಟ್', 'ಕಂಟೆಂಟ್'], ml: ['ചാറ്റ്', 'കണ്ടന്റ്'], ur: ['چیٹ', 'مواد'],
+};
+/** The words a protective app has no reason to use: porn, obscene, nude/naked, and "sex" beside a medium. */
+const SEXUAL_UNAMBIGUOUS: ScriptWords = join(
+  {
+    bn: ['পর্ন', 'অশ্লীল', 'নগ্ন', 'উলঙ্গ'], pa: ['ਪੋਰਨ', 'ਪੌਰਨ', 'ਅਸ਼ਲੀਲ', 'ਨੰਗੀ', 'ਨੰਗਾ' + E], gu: ['પોર્ન', 'પૉર્ન', 'અશ્લીલ', 'નગ્ન'],
+    or: ['ପର୍ନ', 'ପର୍ଣ୍ଣ', 'ଅଶ୍ଳୀଳ', 'ନଗ୍ନ', 'ଉଲଗ୍ନ'], ta: ['போர்ன்', 'போர்னோ', 'ஆபாச', 'நிர்வாண'], te: ['పోర్న్', 'పోర్నో', 'అశ్లీల', 'నగ్న'],
+    kn: ['ಪೋರ್ನ್', 'ಪೋರ್ನೋ', 'ಅಶ್ಲೀಲ', 'ನಗ್ನ', 'ಬೆತ್ತಲೆ'], ml: ['പോൺ', 'പോർണ്', 'അശ്ലീല', 'നഗ്ന'], ur: ['پورن', 'فحش', 'ننگی', 'ننگا' + E],
+  },
+  after(SEX_WORD, join(VIDEO, PICTURE, CHAT_CONTENT)),
+);
+/** The deepfake / face-swap half of the NCII subject, and the undressing half. */
+const NCII_DEEPFAKE: ScriptWords = {
+  bn: ['ডিপ\\s*ফেক', 'ফেস\\s*সোয়াপ'], pa: ['ਡੀਪ\\s*ਫੇਕ', 'ਡੀਪ\\s*ਫ਼ੇਕ', 'ਫੇਸ\\s*ਸਵੈਪ'], gu: ['ડીપ\\s*ફેક', 'ફેસ\\s*સ્વેપ'],
+  or: ['ଡିପ\\s*ଫେକ', 'ଡିପ୍\\s*ଫେକ', 'ଫେସ\\s*ସ୍ୱାପ'], ta: ['டீப்\\s*ஃபேக்', 'டீப்\\s*பேக்', 'ஃபேஸ்\\s*ஸ்வாப்'],
+  te: ['డీప్\\s*ఫేక్', 'ఫేస్\\s*స్వాప్'], kn: ['ಡೀಪ್\\s*ಫೇಕ್', 'ಫೇಸ್\\s*ಸ್ವಾಪ್'], ml: ['ഡീപ്\\s*ഫേക്ക്', 'ഫേസ്\\s*സ്വാപ്പ്'],
+  ur: ['ڈیپ\\s*فیک', 'فیس\\s*سویپ'],
+};
+const NCII_UNDRESS: ScriptWords = {
+  bn: ['জামাকাপড়\\s*খুল', 'কাপড়\\s*খুল'], pa: ['ਕੱਪੜੇ\\s*ਉਤਾਰ'], gu: ['કપડાં\\s*ઉતાર', 'કપડા\\s*ઉતાર'], or: ['ଲୁଗା\\s*କାଢ'],
+  ta: ['ஆடைகளை\\s*அகற்ற', 'ஆடையை\\s*அகற்ற'], te: ['బట్టలు\\s*తీస', 'బట్టలు\\s*విప్ప'], kn: ['ಬಟ್ಟೆ\\s*ತೆಗೆ', 'ಬಟ್ಟೆ\\s*ಬಿಚ್ಚ'],
+  ml: ['വസ്ത്രം\\s*അഴിക്ക', 'വസ്ത്രങ്ങൾ\\s*നീക്ക'], ur: ['کپڑے\\s*اتار'],
+};
+/** "make" right after "deepfake" — a detector never says it. Guessed words here can only make the rule stricter. */
+const MAKE_VERB: ScriptWords = {
+  bn: ['বানা', 'তৈরি'], pa: ['ਬਣਾ'], gu: ['બનાવ'], or: ['ତିଆରି', 'ବନା'], ta: ['உருவாக்க', 'தயாரி', 'செய்'],
+  te: ['తయారు', 'సృష్టి', 'చేయ'], kn: ['ತಯಾರಿಸ', 'ರಚಿಸ', 'ಮಾಡ'], ml: ['ഉണ്ടാക്ക', 'നിർമ്മിക്ക'], ur: ['بنا', 'تیار'],
+};
+const GENERATOR: ScriptWords = {
+  bn: ['জেনারেটর'], pa: ['ਜਨਰੇਟਰ'], gu: ['જનરેટર'], or: ['ଜେନେରେଟର'], ta: ['ஜெனரேட்டர்'], te: ['జనరేటర్'],
+  kn: ['ಜನರೇಟರ್'], ml: ['ജനറേറ്റർ'], ur: ['جنریٹر'],
+};
+
 /** Per rule, per field: the words of each script. Mirrors the English and Devanagari halves. */
 export const INDIC_RULE_WORDS = {
   CSAM_SIGNAL: {
@@ -101,19 +158,13 @@ export const INDIC_RULE_WORDS = {
       ml: ['പോൺ', 'സെക്സ്', 'ലൈംഗിക', 'അശ്ലീല', 'നഗ്ന'],
       ur: ['پورن', 'سیکس', 'جنسی', 'فحش', 'ننگی', 'ننگا' + E],
     },
+    protective: PROTECTIVE_LOANWORDS,
+    unambiguous: SEXUAL_UNAMBIGUOUS,
   },
   NON_CONSENSUAL_IMAGERY: {
-    subject: {
-      bn: ['ডিপ\\s*ফেক', 'ফেস\\s*সোয়াপ', 'জামাকাপড়\\s*খুল', 'কাপড়\\s*খুল'],
-      pa: ['ਡੀਪ\\s*ਫੇਕ', 'ਡੀਪ\\s*ਫ਼ੇਕ', 'ਫੇਸ\\s*ਸਵੈਪ', 'ਕੱਪੜੇ\\s*ਉਤਾਰ'],
-      gu: ['ડીપ\\s*ફેક', 'ફેસ\\s*સ્વેપ', 'કપડાં\\s*ઉતાર', 'કપડા\\s*ઉતાર'],
-      or: ['ଡିପ\\s*ଫେକ', 'ଡିପ୍\\s*ଫେକ', 'ଫେସ\\s*ସ୍ୱାପ', 'ଲୁଗା\\s*କାଢ'],
-      ta: ['டீப்\\s*ஃபேக்', 'டீப்\\s*பேக்', 'ஃபேஸ்\\s*ஸ்வாப்', 'ஆடைகளை\\s*அகற்ற', 'ஆடையை\\s*அகற்ற'],
-      te: ['డీప్\\s*ఫేక్', 'ఫేస్\\s*స్వాప్', 'బట్టలు\\s*తీస', 'బట్టలు\\s*విప్ప'],
-      kn: ['ಡೀಪ್\\s*ಫೇಕ್', 'ಫೇಸ್\\s*ಸ್ವಾಪ್', 'ಬಟ್ಟೆ\\s*ತೆಗೆ', 'ಬಟ್ಟೆ\\s*ಬಿಚ್ಚ'],
-      ml: ['ഡീപ്\\s*ഫേക്ക്', 'ഫേസ്\\s*സ്വാപ്പ്', 'വസ്ത്രം\\s*അഴിക്ക', 'വസ്ത്രങ്ങൾ\\s*നീക്ക'],
-      ur: ['ڈیپ\\s*فیک', 'فیس\\s*سویپ', 'کپڑے\\s*اتار'],
-    },
+    subject: join(NCII_DEEPFAKE, NCII_UNDRESS),
+    protective: PROTECTIVE_LOANWORDS,
+    unambiguous: join(SEXUAL_UNAMBIGUOUS, NCII_UNDRESS, after(NCII_DEEPFAKE, join(MAKE_VERB, GENERATOR))),
     context: join(PICTURE, VIDEO, {
       bn: ['সেলফি', 'গার্লফ্রেন্ড', 'স্ত্রী', 'বউ'], pa: ['ਸੈਲਫੀ', 'ਗਰਲਫ੍ਰੈਂਡ', 'ਪਤਨੀ'],
       gu: ['સેલ્ફી', 'ગર્લફ્રેન્ડ', 'પત્ની'], or: ['ସେଲ୍ଫି', 'ପତ୍ନୀ'], ta: ['செல்ஃபி', 'காதலி', 'மனைவி'],
@@ -231,7 +282,7 @@ export const INDIC_RULE_WORDS = {
       ur: ['تعلیم', 'صحت', 'کلینک', 'ڈاکٹر', 'آگاہی', 'شکایت', 'رپورٹ', 'بلاک', 'فلٹر', 'والدین', 'حفاظت', 'تحفظ', 'پولیس', 'قانون', 'ہیلپ\\s*لائن'],
     },
   },
-} as const satisfies Record<string, Partial<Record<'subject' | 'context' | 'intent' | 'exempt', ScriptWords>>>;
+} as const satisfies Record<string, Partial<Record<'subject' | 'context' | 'intent' | 'exempt' | 'protective' | 'unambiguous', ScriptWords>>>;
 
 /** Malayalam chillu letters and the two-character spelling each also has. */
 const CHILLU: Readonly<Record<string, string>> = {

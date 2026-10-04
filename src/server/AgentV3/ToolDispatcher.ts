@@ -398,7 +398,7 @@ import { summarizeBundle, bundleSummaryLine } from './BundleSize';
 import { livenessLine } from './PostDeployLiveness';
 import { analyzeProjectHygiene, projectHygieneSummary } from './ProjectHygieneAnalysis';
 import { hasErrorBoundarySignal, analyzeErrorBoundary, errorBoundarySummary, looksLikeBrokenErrorBoundary, isNextErrorBoundaryFile } from './ErrorBoundaryAnalysis';
-import type { CommandTiming } from './commandTiming';
+import type { CommandTiming, ActuatorCommandTiming } from './commandTiming';
 import { scanSecurityConfig, securityConfigSummary, type SecConfigIssue } from './SecurityConfigAnalysis';
 import { analyzeSecretLeak, secretLeakSummary, gitignoreWithEnvCoverage } from './SecretLeakAnalysis';
 import { scanHardcodedUrls, hardcodedUrlSummary, type HardcodedUrlIssue } from './HardcodedUrlAnalysis';
@@ -489,7 +489,7 @@ export interface ActuatorPort {
   runCommand(
     workspaceId: string,
     command: string,
-  ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  ): Promise<{ exitCode: number; stdout: string; stderr: string; timing?: ActuatorCommandTiming }>;
   /**
    * Provision backend services (a local PostgreSQL, auth/storage scaffolds) inside the sandbox and
    * return the resulting env (e.g. DATABASE_URL). Real sandboxes only (E2BActuator installs + starts

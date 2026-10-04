@@ -88196,6 +88196,10 @@ All on PR #3488, each locked by a test proven by reversion.
 
 ⚠️ Q-112 reaches phone users only with a fresh `.aab`/`.ipa` (bundled mode).
 
+## 2026-10-04 — Autopsy 51ef24ad, part 2: a port is handed its source project; its ETA is sized by it (Q-370, Q-371)
+- **Q-370:** `portDigest.ts` — on a build ORDER over a project with ≥3 non-web sources (Kotlin/Java/Swift/Dart), the original sources are read once and a bounded digest (screens, view-models, data files with their declarations; data models whole) is prepended to the architect's prompt and handed to every specialist (`SubAgentDeps.portDigest`). Report line `PORT_DIGEST` (process-only). `taskHandoff.filesNamedIn` now attaches `.kt/.java/.swift/.dart` paths a task names. Kill switch `AGENTV3_PORT_DIGEST=off`.
+- **Q-371:** the ETA of a turn the router sized by its project (`complexityDecision.source === 'workspace'`, #3487) counts the project's own screen files (`projectSizedComplexity`) and reads the `complex_app` fleet history.
+- Correction to part 1's note: the specialist's 40 steps were not mostly Kotlin reads — about 17 went to `index.css` edits against rules that did not exist (fixed in #3487, `missingCssSelectors`). Both halves were real.
 ## 2026-10-04 — Pending items closed out: Q-091 leaves the queue, Q-013 now records its own evidence
 
 Admin: *"apka sare pending kaam niptao! bas pr ko merge nahi karna"*.

@@ -150,7 +150,8 @@ describe('WIRING — the live build path finally gets history', () => {
     // Two different complexities would make the estimator compare incomparable things and return a
     // confident number that means nothing.
     // Sized from the whole request the builder reads (autopsy e725e002), not the bare message.
-    expect(route).toContain('const etaComplexity = complexityFromPrompt(planning.sizing);');
+    // A port is sized by its project (autopsy 51ef24ad) — still from planning.sizing, still ONE object.
+    expect(route).toMatch(/const etaComplexity = etaByProject\s*\n?\s*\? projectSizedComplexity\(complexityFromPrompt\(planning\.sizing\), projectFilePaths\)\s*\n?\s*: complexityFromPrompt\(planning\.sizing\);/);
     expect(route).toMatch(/recentBuildHistoryFor\(\s*\n?\s*workspaceId, etaComplexity,/);
   });
 

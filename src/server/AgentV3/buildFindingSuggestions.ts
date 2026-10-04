@@ -340,7 +340,7 @@ const NEVER_SUGGEST = new Set([
   'CHEAP_REVIEW_NOT_RUN',
   // The clean half of the styling measurement (renderStyle.ts) — the app IS styled; nothing to offer.
   'RENDER_STYLE',
-  'BUILD_ORDER_READ_AS_EDIT', 'CLAIM_UNSUPPORTED', 'PREVIEW_UNVERIFIED',
+  'BUILD_ORDER_READ_AS_EDIT', 'PORT_DIGEST', 'CLAIM_UNSUPPORTED', 'PREVIEW_UNVERIFIED',
   // A dropped backslash our own pass already put back — nothing left for the user to do.
   'SCRIPT_INTEGRITY_REPAIRED',
   // We left a turn as the answer the model gave — our own retry policy working, never a next move

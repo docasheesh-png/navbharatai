@@ -287,3 +287,28 @@ export function complexityFromPrompt(prompt: string): Complexity {
   }
   return { moduleCount, featureCount };
 }
+
+/**
+ * A BUILD ORDER OVER A BIG PROJECT IS ESTIMATED BY THE PROJECT (autopsy 51ef24ad, 2026-10-04).
+ * "Build app in this format" over a nine-screen Android app was told ~8 min and ran 19: the estimate
+ * read five words and found one module. The router already sizes such a turn by the project
+ * (`workspaceSizedComplexity`, source `workspace`); this gives the ETA the same evidence — the
+ * project's own screen files — floored at the complex-app counts `complexityFromPrompt` already uses.
+ * Only raises the estimate, never lowers it. PURE.
+ */
+export function projectSizedComplexity(base: Complexity, projectPaths: readonly string[] | null | undefined): Complexity {
+  const screens = new Set(
+    (projectPaths ?? [])
+      .map((p) => String(p).replace(/\\/g, '/'))
+      .filter((p) => !/(^|\/)(node_modules|build|dist|\.gradle|test|tests|androidTest)\//i.test(p))
+      .filter((p) => /(Screen|Page|View|Activity|Fragment)\.(kt|java|swift|dart|tsx?|jsx?|vue|svelte)$/.test(p) && !/ViewModel\./.test(p))
+      // The entry host (an Android `MainActivity` hosting Compose screens) is not itself a screen.
+      .filter((p) => !/(^|\/)Main(Activity|View)\.\w+$/.test(p))
+      .map((p) => p.split('/').pop()),
+  ).size;
+  return {
+    ...base,
+    moduleCount: clamp(Math.max(base.moduleCount, screens, 6), 1, 20),
+    featureCount: clamp(Math.max(base.featureCount, 6), 1, 30),
+  };
+}

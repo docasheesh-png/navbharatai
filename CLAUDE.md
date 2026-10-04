@@ -4302,6 +4302,13 @@ the flag entries above promise.
   dusre chat me na jaye"*). Deleted with the chat (`purgeWorkspace`) and on unsend; disclosed in Privacy Policy §6 (retention).
   Report codes `BUILD_OFFER_ACCEPTED` / `ATTACHMENT_RECALLED` (process-only). Test-locked and reversion-proven in
   `tests/aBuildStartsOnlyWhenAskedFor.test.ts`.
+- **📦 `AGENTV3_PORT_DIGEST` — A PORT IS HANDED ITS SOURCE PROJECT ONCE (autopsy 51ef24ad, 2026-10-04). ⚠️ NOT set;
+  default ON; `off` reverts.** `portDigest.ts`. On a build ORDER over a project holding ≥3 Kotlin/Java/Swift/Dart app
+  sources (`buildOrderReadAsEdit`), the originals are read once (≤40 files) and a ≤16 KB digest — screens, view-models
+  and data files with their declarations, data models whole — is prepended to the architect's prompt and handed to
+  every specialist (`SubAgentDeps.portDigest`). A specialist used to start empty and spend its step cap re-reading the
+  Kotlin. `taskHandoff.filesNamedIn` also attaches those extensions now. Report line `PORT_DIGEST` (process-only).
+  The same autopsy sizes such a turn's ETA by the project's own screen files (`projectSizedComplexity`).
 - **🧪 `AGENTV3_STRICT_TRIAL` — A SHARE OF NEW APPS START WITH TYPESCRIPT STRICT MODE ON (queue Q-008, admin "han"
   2026-10-01). ⚠️ NOT set; default ON; `off` seeds every new app loose as before.** `AGENTV3_STRICT_TRIAL_PCT` (NOT set;
   default **20**; `0` pauses; unreadable ⇒ 0, never 100). `strictTrial.ts`. The Vite-React starter compiles with strict

@@ -223,6 +223,12 @@ export interface SubAgentDeps {
    * derived from never was. Absent ⇒ nothing is added.
    */
   userRequest?: () => string;
+  /**
+   * The digest of the project being PORTED (`portDigest.ts`, autopsy 51ef24ad). A specialist started
+   * empty and spent its step budget reading the original Kotlin sources the architect had been given.
+   * A thunk: the route reads the sources after the spawn closure is built. Absent or '' ⇒ nothing added.
+   */
+  portDigest?: () => string;
 }
 
 /** How much of the user's request a child is handed — a request, not an attachment dump. */
@@ -404,6 +410,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       // tried to read in an app with no AI at all (autopsy d382b398, a failed read_file).
       (() => { try { return roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools) ? (deps.aiRule?.() ?? '') : ''; } catch { return ''; } })(),
       (() => { try { return userRequestBlock(deps.userRequest?.(), roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools)); } catch { return ''; } })(),
+      (() => { try { return deps.portDigest?.() ?? ''; } catch { return ''; } })(),
     ].filter(Boolean);
     // 🎨 THE KIT, AS THE ARCHITECT WAS TOLD IT (autopsy ee0e6de5, 2026-09-30). A specialist that writes
     // files was never told the design kit's classes, so the Frontend sub-agent read `src/index.css` six

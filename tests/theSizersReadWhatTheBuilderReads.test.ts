@@ -96,7 +96,7 @@ describe('the route — every sizer reads planning.sizing, every model reads pla
   });
   it.each([
     ['wall-clock complexity', /const buildComplexity = complexityFromPrompt\(planning\.sizing\)/],
-    ['ETA complexity', /const etaComplexity = complexityFromPrompt\(planning\.sizing\)/],
+    ['ETA complexity', /const etaComplexity = etaByProject[\s\S]{0,120}complexityFromPrompt\(planning\.sizing\)[\s\S]{0,40}: complexityFromPrompt\(planning\.sizing\);/],
     ['request analysis', /analyzeRequest\(\{ prompt: planning\.sizing/],
     ['complexity routing', /\{ prompt: planning\.sizing, score: analysis\?\.complexityScore/],
     ['project-mode detection', /detectMegaProject\(planning\.sizing\)/],

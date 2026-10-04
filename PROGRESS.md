@@ -87665,3 +87665,14 @@ were found CLOSED (e.g. coupon race, dead-sandbox recreate, preview door, in-fli
 turnKind, fail-open judge). The 67 still open (duplicates merged) are now rows Q-101…Q-167 in
 `BUILD_REPORT_QUEUE.md` — code-actionable ones OPEN, admin/infra/vendor ones 🟡 BLOCKED with what they need.
 "Unsure" items are marked as such in their row rather than guessed. Q-021 leaves the table.
+
+## 2026-10-04 — Correction to the 0311186f entry: one trading domain, not two
+
+The 0311186f ledger says a new `trading` domain was added "placed last". While this branch was open, #3471
+(autopsy 241215d1, a paper-trading app read as ecommerce) merged its OWN `trading` domain, placed early.
+Two entries with one key are the drifted-copy class, so the merge kept #3471's entry (it carries the order
+words: limit / stop-loss orders, order book, paper trading) and folded this branch's forex-scalper words
+into its pattern: forex, MT4/MT5, cTrader, algo trading, F&O, trading system/strategy/signals. A bare
+"scalper" is deliberately left out, because the domain now sits early in the list and a ticket-scalper app
+is not trading. `TRADING_CONTEXT` (the broker/listing strip) is unchanged. Both autopsies' tests pass on the
+merged state (`theForexPasteIsNotAnEightModuleProject`, `thePaperTradingAutopsy`).

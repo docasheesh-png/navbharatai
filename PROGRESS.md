@@ -87934,11 +87934,11 @@ user's build-health card as a problem with THEIR app, took 6 points off their ap
 
 ### OPEN root causes (rule 6)
 
-- **Q-360** — four ERROR-severity codes (`BUILD_ERROR`, `BUILD_EXCEPTION`, `OUTCOME_EMPTY_BUILD`,
+- **Q-380** — four ERROR-severity codes (`BUILD_ERROR`, `BUILD_EXCEPTION`, `OUTCOME_EMPTY_BUILD`,
   `OUTCOME_TYPECHECK_FAILED`) still count as the app's blocker even when our own engine is what failed.
   Moving them is a BILLING decision (it could make a build that is free today a billed one), so it is the
   admin's, and the recommendation is to leave them — the safe direction is the one where we absorb it.
-- **Q-361** — the 56-code backlog. Ratcheted so it cannot grow; several need a judgement call about what a
+- **Q-381** — the 56-code backlog. Ratcheted so it cannot grow; several need a judgement call about what a
   user should be told (`TOOL_ERROR`, `STUCK_TOOL`, the `OUTCOME_*` roll-ups, `FEATURE_COVERAGE`,
   `SIMULATED_DATA_SHIPPED`), and the next autopsy that touches one should classify it.
 

@@ -106,14 +106,20 @@ describe('🔒 the route — POST /api/agentv3/host-app', () => {
 
   it('exists, and checks ownership before it touches anything', () => {
     expect(handler).not.toBe('');
-    expect(handler).toContain('assertWorkspaceOwner(req, workspaceId)');
-    const ownAt = handler.indexOf('assertWorkspaceOwner');
+    // The VERIFIED owner gate since the forensic audit of 2026-10-04 (a claimed uid owned nothing here).
+    expect(handler).toContain('assertVerifiedWorkspaceOwner(req, workspaceId)');
+    const ownAt = handler.indexOf('assertVerifiedWorkspaceOwner');
     expect(handler.indexOf('hostingAvailability')).toBeGreaterThan(ownAt);
     expect(handler.indexOf('hostAppOnNavBharatCloud')).toBeGreaterThan(ownAt);
   });
 
   it('🔒 admin access is decided by the VERIFIED identity, never a body-supplied email', () => {
-    expect(handler).toContain('await resolveReadIdentity(req)');
+    // 🔴 This used to pin `await resolveReadIdentity(req)` — which falls back to the BODY's email without a
+    // token, i.e. the exact hole this test's name forbids (forensic audit 2026-10-04, P0). Pinned now: the
+    // Tier-1 verified identity, and the email the admin check reads comes from it.
+    expect(handler).toContain('await requireVerifiedForMoney(req)');
+    expect(handler).not.toContain('resolveReadIdentity(req)');
+    expect(handler).toContain('const email = verified.email;');
     expect(handler).toContain('isAdmin: isReportAdmin(email)');
     expect(handler).not.toMatch(/isReportAdmin\(req\.body/);
   });

@@ -113,6 +113,32 @@ function messagesToTurns(messages: unknown[]): Turn[] {
   return turns;
 }
 
+/**
+ * The text of the LAST assistant message in a stored conversation, unclipped up to `max` — '' when there
+ * is none. `messagesToTurns` cuts every turn to 280 characters for the recap; a sizer reading what "this
+ * app" refers to needs the answer itself (autopsy 5759ad8b). Tool calls and results are left out. PURE.
+ */
+export function lastAssistantText(messages: unknown[], max = 4_000): string {
+  const list = Array.isArray(messages) ? messages : [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i];
+    if (!m || typeof m !== 'object') continue;
+    if ((m as { role?: unknown }).role === 'user') continue;
+    const content = (m as { content?: unknown }).content;
+    let text = '';
+    if (typeof content === 'string') text = content;
+    else if (Array.isArray(content)) {
+      text = content
+        .filter((b): b is { type: string; text: string } => !!b && typeof b === 'object' && (b as { type?: unknown }).type === 'text' && typeof (b as { text?: unknown }).text === 'string')
+        .map((b) => b.text)
+        .join('\n');
+    }
+    text = text.trim();
+    if (text) return text.length > max ? text.slice(0, max) : text;
+  }
+  return '';
+}
+
 const renderTurns = (turns: Turn[]): string =>
   turns.map((t) => `${t.role === 'user' ? 'User' : 'You'}: ${t.text}`).join('\n');
 

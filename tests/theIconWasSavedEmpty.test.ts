@@ -171,8 +171,8 @@ describe('a milestone is judged on what it was asked to build', () => {
     expect(route).toMatch(/milestoneRequest = step1\.buildPrompt;\s*dispatcher\.setCoverageRequest\(step1\.buildPrompt\);/);
     expect(route).not.toContain('checkFeaturePresence(prompt,');
     // Four since autopsy a106df77 (the probe over the app's other screens was added).
-    expect(route.match(/checkFeaturePresence\(milestoneRequest \?\? prompt,/g)?.length).toBe(4);
-    expect(route).toContain('userRequest: milestoneRequest ?? prompt,');
+    expect(route.match(/checkFeaturePresence\(milestoneRequest \?\? checksRequest,/g)?.length).toBe(4);
+    expect(route).toContain('userRequest: milestoneRequest ?? checksRequest,');
     expect(read('src/server/AgentV3/ToolDispatcher.ts')).toContain('const requestText = this.coverageRequest ?? currentRequestForCoverage(requestEpisodes);');
   });
 });
@@ -209,7 +209,7 @@ describe('a lean review is handed the code it judges', () => {
 
   it('the route hands it the changed files only in suggest mode', () => {
     const route = read('src/server/routes/agentv3.ts');
-    expect(route).toContain("const reviewInline = reviewPlan.mode === 'suggest' ? leanReviewInline(reviewChanged, (p) => writtenFiles.get(p)) : undefined;");
+    expect(route).toContain("const reviewInline = reviewPlan.mode === 'suggest'\n            ? leanReviewInline(reviewChanged, (p) => {\n              const c = writtenFiles.get(p);");
     expect(route).toContain('...(reviewInline ? { inlineFiles: reviewInline } : {}),');
   });
 });

@@ -124,6 +124,27 @@ export function savedDivergesFromSandbox(
   return Object.keys(saved).filter((p) => p in sandbox && sandbox[p] !== saved[p]).sort();
 }
 
+/**
+ * HOW a saved file differs from the sandbox copy, in one bounded line: both sizes, the first line where they
+ * part, and both versions of that line. PURE.
+ *
+ * 🔴 WHY (autopsy 0473628e). `SAVED_SOURCE_DIVERGES` named `public/icon.svg` and nothing else. The only
+ * writer of that file in this repo writes the same string to the sandbox and to the record, so the cause
+ * could not be read from the code, and the report held nothing that could tell it. An instrument that says
+ * "these differ" without saying how sends the next autopsy to guess.
+ */
+export function describeDivergence(path: string, sandbox: string, saved: string): string {
+  const a = String(sandbox ?? '');
+  const b = String(saved ?? '');
+  const la = a.split('\n');
+  const lb = b.split('\n');
+  let i = 0;
+  while (i < la.length && i < lb.length && la[i] === lb[i]) i++;
+  const clip = (t: string | undefined) => (t === undefined ? '(no line)' : JSON.stringify(t.length > 100 ? `${t.slice(0, 100)}…` : t));
+  return `${path}: sandbox ${Buffer.byteLength(a, 'utf8')} B / ${la.length} line(s), saved ${Buffer.byteLength(b, 'utf8')} B / ${lb.length} line(s); `
+    + `first difference at line ${i + 1} — sandbox ${clip(la[i])}, saved ${clip(lb[i])}`;
+}
+
 export type SnapshotConfirmation =
   | { action: 'restamp'; reason: string }
   | { action: 'stale'; reason: string }

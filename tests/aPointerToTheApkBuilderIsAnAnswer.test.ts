@@ -63,8 +63,8 @@ describe('wired where the answer is read', () => {
     expect(runner).toContain('request: userPrompt,');
   });
   it('the route reads both answers with the request, and the retry and the empty flip honour it', () => {
-    expect(route).toContain('const firstAttempt = readTurnAnswer(result.summary, prompt);');
-    expect(route).toContain('const modelAnswer = readTurnAnswer(result.summary, prompt);');
+    expect(route).toContain('const firstAttempt = readTurnAnswer(modelsOwnWords(result), prompt);');
+    expect(route).toContain('const modelAnswer = readTurnAnswer(modelsOwnWords(result), prompt);');
     expect(route).toContain('modelAskedTheUser: firstAttemptAskedTheUser || firstAttempt.pointed,');
     expect(route).toContain('modelAnswer.asked || modelAnswer.pointed,');
   });

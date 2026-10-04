@@ -166,7 +166,14 @@ const FAILURE_DIAGNOSTIC = (platform: 'android' | 'ios' = 'android'): string => 
       - name: Explain what stopped the build
         if: failure()
         run: |
-          if [ ! -d node_modules ]; then
+          # A PRE-FLIGHT that failed stopped the build before anything was installed, so the
+          # filesystem tests below would all read "install" — a false sentence on the user's GitHub
+          # page (report SHANKU-AI/instamony, 2026-10-01). The step ids are absent in a workflow that
+          # has no such check; GitHub then expands them to an empty string, which is never "failure".
+          if [ "\${{ steps.nbai-preflight-secrets.outcome }}" = "failure" ] || [ "\${{ steps.nbai-preflight-xcode.outcome }}" = "failure" ]; then
+            STAGE=preflight
+            WHY="It stopped before building anything, at a check that runs first. The error above says what it needs — usually a signing key that only you can add to the repository's secrets."
+          elif [ ! -d node_modules ]; then
             STAGE=install
             WHY="It stopped while installing your app's libraries. Usually one package listed in package.json cannot be found, or two of them need different versions of the same thing."
           elif [ ! -d dist ] && [ ! -d build ] && [ ! -d out ] && [ ! -d www ]; then
@@ -638,6 +645,7 @@ jobs:
       # Fail EARLY and honestly when signing is not configured — never hand back an unsigned bundle,
       # which Play would reject anyway.
       - name: Pre-flight — require signing secrets
+        id: nbai-preflight-secrets
         env:
           KEYSTORE: \${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           STORE_PASS: \${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -806,6 +814,7 @@ jobs:
       # Apple REJECTS uploads built with an SDK older than iOS 26, so fail before the long build
       # rather than after, when Apple would refuse the finished .ipa.
       - name: Select the newest Xcode
+        id: nbai-preflight-xcode
         run: |
           LATEST="$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)"
           if [ -z "$LATEST" ]; then echo "::error::No Xcode on this runner."; exit 1; fi
@@ -818,6 +827,7 @@ jobs:
           fi
 
       - name: Pre-flight — require Apple signing secrets
+        id: nbai-preflight-secrets
         env:
           IOS_ASC_KEY_ID: \${{ secrets.IOS_ASC_KEY_ID }}
           IOS_ASC_ISSUER_ID: \${{ secrets.IOS_ASC_ISSUER_ID }}

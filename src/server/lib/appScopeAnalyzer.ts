@@ -16,7 +16,7 @@
 // PURE: no I/O, no clock, no model. Never throws. The exact thresholds are meant to be reviewed against
 // real prompts (the admin will eye-ball the classifications) and tuned here.
 
-import { countEnumeratedFeatures, BIG_SOFTWARE_NOUN } from '../AgentV3/enumeratedFeatures';
+import { countEnumeratedFeatures, notAFeatureLine, BIG_SOFTWARE_NOUN } from '../AgentV3/enumeratedFeatures';
 import { withoutMachineText } from './machineText';
 
 export type AppSize = 'small' | 'large';
@@ -192,7 +192,9 @@ function featureCount(raw: string): number {
   // A pasted link is not a feature (autopsy 33812996). The famous-app check above still reads the
   // whole text on purpose: "a clone of https://zomato.com" names its product in the link.
   const text = withoutMachineText(raw, { drop: true });
-  const numbered = (text.match(/^\s*(?:\d+[.)]|[-*•])\s+\S/gm) || []).length;
+  // A question or a setting on a bullet is not a feature either (autopsy 0311186f) — the same rule the
+  // shared counter applies, so the two counts cannot disagree about one line.
+  const numbered = (text.match(/^\s*(?:\d+[.)]|[-*•])\s+\S.*$/gm) || []).filter((l) => !notAFeatureLine(l)).length;
   const verbs = (text.match(/\b(add|build|create|include|with|support|allow|enable|manage|integrate)\b/gi) || []).length;
   // Numbered lists are the strongest signal; verbs are a softer one (halved).
   const legacy = numbered + Math.floor(verbs / 2);

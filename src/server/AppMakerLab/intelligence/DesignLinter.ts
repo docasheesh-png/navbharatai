@@ -118,13 +118,24 @@ export function extractFontFamilies(code: string): string[] {
   return [...out];
 }
 
+/**
+ * A padding/margin/gap declaration and its value — ONE definition, as a source string so every reader
+ * builds its own stateful `g` regex (the `TAILWIND_DIRECTIVE_RE_SOURCE` precedent). `spacingSnap.ts`
+ * rewrites exactly what this finds, so a second copy there would be the drifted-copy class: the lint
+ * would report a value the snap never saw, or the snap would rewrite one the lint never counted.
+ */
+export const SPACING_DECL_RE_SOURCE = '(?:padding|margin|gap|row-gap|column-gap)[^:;{}]*:\\s*([^;"\'}]+)';
+
+/** A px length inside such a value. Same reasoning as above — one definition, two readers. */
+export const SPACING_PX_RE_SOURCE = '(\\d+(?:\\.\\d+)?)px';
+
 /** All px spacing values from padding/margin/gap declarations. Pure. */
 export function extractSpacingPx(code: string): number[] {
   const values: number[] = [];
-  const re = /(?:padding|margin|gap|row-gap|column-gap)[^:;{}]*:\s*([^;"'}]+)/gi;
+  const re = new RegExp(SPACING_DECL_RE_SOURCE, 'gi');
   let m: RegExpExecArray | null;
   while ((m = re.exec(code)) !== null) {
-    const nums = m[1].match(/(\d+(?:\.\d+)?)px/g);
+    const nums = m[1].match(new RegExp(SPACING_PX_RE_SOURCE, 'g'));
     if (nums) for (const n of nums) values.push(parseFloat(n));
   }
   return values;

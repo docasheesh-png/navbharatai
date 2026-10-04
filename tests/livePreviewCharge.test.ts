@@ -49,13 +49,19 @@ describe('userCostBreakdown carries the live-preview charge', () => {
 });
 
 describe('livePreviewChargeLine — the sentence in the success message', () => {
-  it('names the time, the money, and the free alternative', () => {
+  it('names what was charged — the build machine — with the time and the money', () => {
+    // Q-306 (admin chose "a", 2026-10-04, autopsy d798ddd3): the seconds are the BUILD's machine time,
+    // capped at the build's duration, never a live preview the user opened. So the line does not call
+    // it one, and offers no "free alternative" for a choice the user never made.
     const line = livePreviewChargeLine({ livePreviewSeconds: 240, livePreviewInr: 7.83 });
-    expect(line).toContain('Live preview');
-    expect(line).toContain('4 min');
-    expect(line).toContain('₹7.83');
-    // Telling the user how to spend less is what makes the total worth reading rather than auditing.
-    expect(line).toContain('in-browser preview is free');
+    expect(line).toBe('Build machine: 4 min — ₹7.83.');
+    expect(line).not.toMatch(/live preview|in-browser preview is free/i);
+  });
+
+  it('the "Why this cost?" panel names it the same way', () => {
+    const panel = readFileSync(join(process.cwd(), 'src/components/agentv3/AgentV3Panel.tsx'), 'utf8');
+    expect(panel).toContain('Build machine: {(state.costBreakdown.livePreviewSeconds ?? 0) >= 60');
+    expect(panel).not.toContain('· in-browser preview is free');
   });
 
   it('uses seconds when a build held the preview for under a minute', () => {

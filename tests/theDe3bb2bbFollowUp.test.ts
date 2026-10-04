@@ -128,7 +128,9 @@ describe('Q-067 — a word we do not know is not a service to connect to', () =>
     const route = read('src/server/routes/agentv3.ts');
     expect(route).toContain("intent === 'new_build' && !isImportTurn && unknownNameNoteEnabled() ? unknownNamesInRequest(prompt) : []");
     expect(route).toContain('buildPrompt = `${unknownNameNote}');
-    expect(route).toContain('const plannerGoalBase = unknownNameNote');
+    // The planner's goal carries it (since Q-274 beside the script-request note, in one list).
+    expect(route).toContain('const plannerGoalNotes = [unknownNameNote, scriptRequestNote].filter(Boolean)');
+    expect(route).toContain('const plannerGoalBase = plannerGoalNotes ?');
     expect(route).toContain('pastedBriefSuffix + unknownNameSuffix, framework');
   });
 });

@@ -88120,3 +88120,20 @@ Q-391** — chosen above every ID in `main` AND in every open PR's diff of the f
 anywhere is `Q-381` in #3493, so 300-series numbers were never free). The PROGRESS ledger bullets moved
 with them. ⚠️ **Do not pick a queue ID from this file alone** — the header says why, and the test is
 what makes the mistake visible rather than silent.
+
+**⚠️ #3492's BRANCH WAS TAKEN OVER BY ANOTHER PR'S WORK, AND THE FIX WAS A NEW BRANCH, NOT A FORCE-PUSH
+(2026-10-04).** An automated forward-merge sweep — pushing #3477's squash forward across branches —
+walked **#3485's change-engine chain, 60 commits, onto `claude/a-problem-the-user-can-act-on`**. Its head
+became `077c98ca1`, the commit immediately after #3485's own head `4ca8639b4`, so **#3492's diff carried
+another PR's entire feature**: the admin could not have merged it for the finding-classification work
+without silently merging #3485 too.
+**Nothing was discarded, deliberately.** CLAUDE.md's fourth concurrency rule says not to race another
+session's file, so the old branch is untouched, my commits remain ancestors of it, and #3485 keeps its
+own branch. The work was replayed onto current `main` as
+`claude/a-problem-the-user-can-act-on-v2` → **#3504**, verified **byte-identical file by file** to the
+tree that had just passed the gate, then re-gated in full on the new branch
+(`Tests 33644 passed | 1 skipped`, zero FAIL).
+🔑 **The lesson, and it is new: a branch name is not a private workspace here.** Automation pushes to
+branches, so "my branch still has my commits" is not the same as "my PR still means what I said it
+means" — the thing to check before reporting a PR ready is its **head SHA and its diff**, not whether
+the push succeeded. A push REJECTED as non-fast-forward was the only reason this was noticed at all.

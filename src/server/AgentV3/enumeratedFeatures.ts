@@ -224,6 +224,26 @@ export function readsAsSpecification(prompt: string): boolean {
  *
  * ⚠️ It counts ASKS, never words: a long, flowery prompt for a todo app still counts one or two.
  */
+/**
+ * 🔴 A QUESTION OR A SETTING IS NOT A FEATURE (autopsy 0311186f, 2026-10-04). The user pasted an assistant's
+ * reply — advice, the questions it asked them, and example values — and it counted 18 features:
+ * "Timeframe scalping? (1m / 5m?)", "Spread average kitna rehta?", "SL = 0.25% (example)",
+ * "Stop Loss = R", "Daily stop: -2% account equity". Eighteen is past the mega-project line, so a one-screen
+ * trading app was split into eight modules and the user saw nothing for two paid turns. A question asks for
+ * a decision, an assignment sets a number; neither names a part of the app. PURE.
+ */
+export function notAFeatureLine(raw: string): boolean {
+  const t = String(raw ?? '').replace(/[*_`]+/g, '').replace(/^\s*(?:[-*•]|\d{1,3}[.)])\s+/, '').trim();
+  if (!t) return false;
+  // A question, with or without a trailing parenthetical of example answers.
+  if (/\?\s*(?:\([^)]*\))?\s*$/.test(t)) return true;
+  // An assignment: "Stop Loss = R", "SL = 0.25% (example)".
+  if (/\s=\s/.test(t)) return true;
+  // A labelled value: "Daily stop: -2% account equity", "TP: 2× SL", "Risk per trade: 0.25%".
+  if (/^[^:]{1,40}:\s*[-+−~]?\s*[\d₹$%]/.test(t)) return true;
+  return false;
+}
+
 export function countEnumeratedFeatures(prompt: string): number {
   return Math.min(enumeratedFeatureItems(prompt).length, MAX_COUNTED);
 }
@@ -236,6 +256,7 @@ export function enumeratedFeatureItems(prompt: string, opts: { plainLines?: bool
 
   const seen = new Set<string>();
   const add = (raw: string): void => {
+    if (notAFeatureLine(raw)) return;
     const item = tidy(raw);
     if (!isItem(item)) return;
     if (isRecordAttribute(item)) return;

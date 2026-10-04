@@ -99,6 +99,9 @@ const PROCESS_ONLY_CODES = new Set([
   // Our own deterministic design-kit restore (kitRestore.ts, autopsy e725e002) and the note that the
   // sizers read the whole request (planningRequest.ts) — engine housekeeping, never app findings.
   'DESIGN_KIT_RESTORED', 'PLANNING_CONTEXT', 'DESIGN_KIT_KEPT', 'SHADOW_TWIN_REMOVED', 'USER_FILE_KEPT', 'FILES_REMOVED_TOLD', 'DURABLE_READ_FAILED',
+  // Our own deterministic 4px-grid snap (spacingSnap.ts, autopsy 536c8189) — housekeeping, and the thing
+  // it replaced was a model hand-back that cost three calls and made the stylesheet worse.
+  'SPACING_SNAPPED',
   // A measurement of our own write-time notes — never a finding against the app.
   'WRITE_TIME_QUALITY',
   // Same rule, same reason (autopsy 21b431e1): a dropped backslash that OUR deterministic pass put
@@ -1791,7 +1794,9 @@ export class BuildDiagnostics {
         // ℹ️ IS OUR OWN INFORMATION MARK (autopsy dfd81a3a): "ℹ️ Handling this message normally (project
         // plan stays paused at … — 1 failed)" was filed as an ERROR because the progress line inside it
         // counts a failed module. A line the platform opened with ℹ️ is a notice, whatever it quotes.
-        const platformNotice = /^\s*ℹ️/.test(t);
+        // 🧾 is our own money notice (autopsy 0311186f): "🧾 I could not confirm your app running here, so you
+        // have been charged only…" landed in the problems list as an ERROR, though it states a bill, not a fault.
+        const platformNotice = /^\s*(?:ℹ️|🧾)/.test(t);
         if (statusLike && problemWord && !platformNotice
           && !(remediationIntent && !failureVerb)
           && !(echoesPrompt && !failureVerb)) {
@@ -2044,6 +2049,11 @@ export class BuildDiagnostics {
    * length. Never throws; a malformed estimate is simply not stored, and the report then says nothing
    * about accuracy rather than something wrong.
    */
+  /** Forget the opening ETA: the turn turned out not to be the job it described (moduleTurnEta.ts). */
+  withdrawEtaPromise(): void {
+    this.etaPromise = undefined;
+  }
+
   setEtaPromise(p: EtaPromise): void {
     const estimateMs = Number(p?.estimateMs);
     if (!Number.isFinite(estimateMs) || estimateMs <= 0) return;

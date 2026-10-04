@@ -15,6 +15,12 @@ export interface ReviewIssue {
   severity: 'critical' | 'warning' | 'suggestion';
   file?: string;
   message: string;
+  /**
+   * The reviewer tagged this finding `[BROKEN]` — it says the behaviour is broken, rather than leaving
+   * us to infer that from its prose (autopsy 536c8189; see `BROKEN_TAG_RE`). The tag is stripped out of
+   * `message` so it never reaches a user; this flag is what the repair selectors read.
+   */
+  broken?: boolean;
 }
 
 export interface ReviewResult {
@@ -99,6 +105,22 @@ const SELF_DISMISSED_RE =
 const LOW_CONFIDENCE_RE = /\bconfidence\s*[:=]?\s*(low|medium)\b|\b(low|medium)[- ]confidence\b/i;
 
 /**
+ * THE REVIEWER'S OWN DECLARATION that a finding names broken behaviour, not polish.
+ *
+ * 🔑 THE STRUCTURAL HALF of autopsy 536c8189 (see `FUNCTIONAL_WARNING_RE`): the reviewer is a model we
+ * prompt, so the honest way to learn whether a finding describes a BREAK is to have it say so — not to
+ * guess from its prose with a list of phrases that has now been wrong twice. The instruction asks for
+ * `[BROKEN]` beside the severity tag; the marker is read here and then stripped from the message, so it
+ * never reaches a user's screen.
+ *
+ * 🔒 IT IS ADDITIVE, SO NOTHING REGRESSES WHEN THE REVIEWER IGNORES IT. A reviewer that never writes the
+ * tag keeps exactly today's behaviour (the classifier), and a tagged finding is still subject to the
+ * cosmetic veto — "[BROKEN] the aria-label is missing" stays advisory, because a model may not widen
+ * what a verified repair is allowed to touch on a working app just by typing a word.
+ */
+const BROKEN_TAG_RE = /\[broken\]/i;
+
+/**
  * Strip ALL leading finding-list noise — markdown heading (#), blockquote (>), the severity emoji,
  * bullets, list numbers and whitespace — ORDER-INDEPENDENTLY, so a heading is recognised whether the
  * reviewer wrote "### Issues", "🚨 ### Issues", or "- 🚨 Issues". Real report 8a6e4585 exposed the gap:
@@ -142,9 +164,12 @@ export function parseReviewOutput(text: string): ReviewIssue[] {
     else if (lower.includes('[suggestion]') || lower.startsWith('suggestion:') || line.includes('💡'))
       severity = 'suggestion';
     if (severity) {
+      // THE REVIEWER'S OWN "this is broken" MARKER. Read from the raw line, then stripped with the
+      // severity tags so a user never reads our internal vocabulary off their screen (autopsy 536c8189).
+      const broken = BROKEN_TAG_RE.test(line);
       const message = stripLeadingFindingNoise(
         line
-          .replace(/\[(critical|warning|suggestion)\]/gi, '')
+          .replace(/\[(critical|warning|suggestion|broken)\]/gi, '')
           .replace(/^(critical|warning|suggestion):/gi, ''),
       )
         .replace(/\*+/g, '') // strip markdown bold/italic asterisks
@@ -167,7 +192,7 @@ export function parseReviewOutput(text: string): ReviewIssue[] {
       // downgrade it to a warning so it is surfaced but never fails a working build. Un-tagged criticals
       // stay critical (backward-safe). Never UPGRADES anything.
       if (effective === 'critical' && LOW_CONFIDENCE_RE.test(line)) effective = 'warning';
-      issues.push(currentFile ? { severity: effective, file: currentFile, message } : { severity: effective, message });
+      issues.push({ severity: effective, ...(currentFile ? { file: currentFile } : {}), message, ...(broken ? { broken: true } : {}) });
     }
   }
   return issues;
@@ -183,8 +208,33 @@ export function parseReviewOutput(text: string): ReviewIssue[] {
 /** Cosmetic / advisory warning signals — NOT worth an auto-repair pass (a11y polish, naming, style). */
 const COSMETIC_WARNING_RE = /\b(aria-?\w*|landmark|<main>|semantic|role=|naming|readability|consider (adding|using|renaming)|could be|would be (nice|better|cleaner)|stylistic|cosmetic|whitespace|formatting|indentation|spacing|margin|padding|comment(s|ing)?|prefer\b|nit\b|minor)\b/i;
 
-/** Functional / correctness signals — a warning that names BROKEN behaviour or an unmet requirement. */
-const FUNCTIONAL_WARNING_RE = /\b(broke\w*|does ?n'?t|do ?n'?t|not work\w*|fail\w*|bug|incorrect|wrong|invalid|missing|never (fires|works|holds|updates|renders)|steal\w* focus|conflict\w*|ignor\w*|unnecessar\w*|block\w*|mismatch\w*|off-by|race\b|crash\w*|throw\w*|undefined\b|null\b|requirement|logic error)\b/i;
+/**
+ * Functional / correctness signals — a warning that names BROKEN behaviour or an unmet requirement.
+ *
+ * 🔴 `never \w+` IS DELIBERATELY OPEN, AND THAT IS THE FIX (autopsy 536c8189, 2026-10-01). It used to be
+ * the closed list `never (fires|works|holds|updates|renders)`, and the reviewer of a finished word-match
+ * game wrote: *"`setMatchedKeys` is never CALLED in `handleMatchClick` or elsewhere. The guard … always
+ * evaluates to `false`, so a key can be matched multiple times."* A real bug, in plain words, and not one
+ * of those five verbs — so nothing was selected, no repair ran, and the report carried no
+ * `REVIEW_FUNCTIONAL_*` code at all. Measured, every one of these was MISSED too: never invoked, never
+ * set, never read, never runs, never used, never enabled, never persisted.
+ *
+ * 🔑 THE CLASS, and it is why this is not a third list: a CLOSED set of phrases is being matched against
+ * open-ended prose a MODEL wrote. The same class was patched once already (ac41a924 added
+ * `FUNCTIONAL_OUTCOME_RE` for the same reason), and a third list would be patched again. Two changes
+ * together: the verb after `never` is now ANY word — the cosmetic veto below is what keeps precision, and
+ * it already catches "the aria-label is never set" and "consider never using inline styles" — and the
+ * reviewer now DECLARES it with `[BROKEN]` (`BROKEN_TAG_RE`), so the common case stops being inferred.
+ */
+const FUNCTIONAL_WARNING_RE = /\b(broke\w*|does ?n'?t|do ?n'?t|not work\w*|fail\w*|bug|incorrect|wrong|invalid|missing|never [a-z]+|steal\w* focus|conflict\w*|ignor\w*|unnecessar\w*|block\w*|mismatch\w*|off-by|race\b|crash\w*|throw\w*|undefined\b|null\b|requirement|logic error)\b/i;
+
+/**
+ * A guard or branch that can never be taken — the other half of the same report's missed finding.
+ * "always evaluates to false", "is always true", "will always be false": a dead condition is a defect
+ * with no verdict word in it. Deliberately NOT a bare `always`, which is how advice is written
+ * ("always use the kit classes", "always wrap it in a try").
+ */
+const DEAD_CONDITION_RE = /\balways (?:be |evaluates? to |returns? )?(?:true|false)\b|\balways (?:evaluates|returns the same)\b/i;
 
 /**
  * Functional signals written as an OUTCOME the user would see, not as a verdict word (autopsy
@@ -204,13 +254,26 @@ const FUNCTIONAL_OUTCOME_RE = /\b(not present|(?:do|does) not exist|no (?:\w+ ){
  */
 export function selectAutoFixableWarnings(issues: ReviewIssue[]): ReviewIssue[] {
   if (!Array.isArray(issues)) return [];
-  return issues.filter((i) => i && i.severity === 'warning' && isFunctionalFinding(i.message));
+  return issues.filter((i) => i && i.severity === 'warning' && namesBrokenBehaviour(i));
+}
+
+/**
+ * Does this finding name broken behaviour? The reviewer's own `[BROKEN]` tag when it wrote one, our
+ * classifier otherwise — and the cosmetic veto applies either way, so the tag can never widen what a
+ * repair may touch on a working app. One definition for both selectors. PURE.
+ */
+export function namesBrokenBehaviour(issue: ReviewIssue | null | undefined): boolean {
+  if (!issue || typeof issue.message !== 'string') return false;
+  if (COSMETIC_WARNING_RE.test(issue.message)) return false;
+  return issue.broken === true || isFunctionalFinding(issue.message);
 }
 
 /** One definition of "names broken behaviour, not polish" — shared by both selectors below. PURE. */
 export function isFunctionalFinding(message: unknown): boolean {
   if (typeof message !== 'string' || message.trim().length === 0) return false;
-  return (FUNCTIONAL_WARNING_RE.test(message) || FUNCTIONAL_OUTCOME_RE.test(message))
+  const declared = BROKEN_TAG_RE.test(message);
+  return (declared || FUNCTIONAL_WARNING_RE.test(message) || FUNCTIONAL_OUTCOME_RE.test(message)
+    || DEAD_CONDITION_RE.test(message))
     && !COSMETIC_WARNING_RE.test(message);
 }
 
@@ -222,7 +285,7 @@ export function isFunctionalFinding(message: unknown): boolean {
  */
 export function selectGreenRepairable(issues: ReviewIssue[]): ReviewIssue[] {
   if (!Array.isArray(issues)) return [];
-  return issues.filter((i) => i && (i.severity === 'critical' || i.severity === 'warning') && isFunctionalFinding(i.message));
+  return issues.filter((i) => i && (i.severity === 'critical' || i.severity === 'warning') && namesBrokenBehaviour(i));
 }
 
 /** Source-file extensions that mean "there is real reviewable code in the workspace". */
@@ -455,6 +518,15 @@ export function reviewerInstruction(opts: Omit<ReviewBuildOpts, 'spawn'>): strin
     '  [WARNING]  = works but has a bug or missing edge case.',
     '  [SUGGESTION] = minor improvement that would help.',
     '',
+    // THE REVIEWER SAYS IT, SO WE STOP GUESSING IT (autopsy 536c8189). "setMatchedKeys is never called,
+    // so the guard always evaluates to false" is a real bug our classifier did not recognise, so no
+    // repair ran. Severity is confidence; this is SUBJECT. Both are needed.
+    'Also add [BROKEN] to any finding where the app really MISBEHAVES for the user — a handler that is',
+    'never called, a guard that can never be true, state that is never saved, a control that does',
+    'nothing, a wrong result. Use it next to the severity tag: "[WARNING] [BROKEN] …". Do NOT add it to',
+    'advice, polish, naming, styling, accessibility wording or anything that merely "could be better" —',
+    'a [BROKEN] finding may be repaired automatically, so only tag what you are sure is really wrong.',
+    '',
     'Be precise with [CRITICAL] — it fails the whole build, so only use it for a real, confirmed break:',
     '  • Put the severity tag on the FINDING itself, never on a section heading (do not write "### [CRITICAL] Issues").',
     '  • If you inspect a tool-reported problem and conclude it is a false positive, or the app builds and',
@@ -486,8 +558,13 @@ export function reviewerInstruction(opts: Omit<ReviewBuildOpts, 'spawn'>): strin
     ] : []),
     ...(opts.mode === 'suggest' ? [
       '',
+      // 🔴 THIS SENTENCE USED TO PROMISE THE REVIEWER THAT NOTHING WOULD BE REPAIRED, which stopped being true on
+      // 2026-09-23 when `AGENTV3_GREEN_FUNCTIONAL_REPAIR` shipped: a [BROKEN]-class finding on a working
+      // app DOES get one verified repair. Telling the reviewer its findings are inert is exactly the
+      // wrong incentive for the one tag we now ask it to be careful with.
       'THIS APP IS PROVEN TO RENDER IN A REAL BROWSER, AND THIS REVIEW IS SUGGEST-ONLY: nothing you',
-      'report can fail the build, and no repair will run from it — your findings are shown to the user as',
+      'report can fail the build. A finding you tag [BROKEN] may get ONE automatic repair, which is undone',
+      'unless it is proven to work; everything else is shown to the user as',
       ...(leanReviewAnswersInOneCall(opts.inlineFiles) ? [
       'an offer. You have NO tools in this review: every file that changed is above, in full. Answer',
       'from it now, in this one reply. If nothing is genuinely wrong, say [PASS] immediately.',

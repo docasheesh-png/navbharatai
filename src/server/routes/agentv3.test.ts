@@ -2498,7 +2498,14 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     //      && !isImportTurn && !projectModuleRef && !megaRoadmapActive` and on the green latch not being set, so
     //      it never writes on an import/survey turn. It writes package.json (and the lock) only after the app's
     //      own production build passed without the removed packages. Considered ✓.
-    expect(count).toBe(31);
+    //   2× the 4px SPACING SNAP (autopsy 536c8189, 2026-10-01, spacingSnap.ts) — one per build lane, because
+    //      a deterministic pass wired into one lane of two is this repo's headline class. The architect-lane
+    //      site is gated on `!abort.signal.aborted && !isImportTurn && expectsArtifacts` and goes through
+    //      `writeUnlessFrozen`; the fast-lane site sits inside that lane's own verify, which is already
+    //      `!isImportTurn`. It rewrites ONLY padding/margin/gap px values, ONLY in files this build wrote,
+    //      ONLY above the `DESIGN_CONSISTENCY` finding's own threshold, and never on a file whose spacing
+    //      is coherently on another rhythm. Considered ✓.
+    expect(count).toBe(33);
   });
 
   it('the reviewer is gated on !isImportTurn, not just writtenFiles.size (build 77bd487b: infra writes defeated the size-only guard)', () => {

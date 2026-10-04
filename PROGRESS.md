@@ -87352,6 +87352,126 @@ open PR's CI failed with it (#3462 first).
 - **Class:** an upstream advisory landing between a PR's green CI and its merge. The gate is doing its job; the
   honest response is the pin, not an allowlist entry, because a fixed release exists.
 
+## 2026-10-04 — Autopsy 536c8189 ("an app like Duolingo"): arithmetic is not a model's job, a plain-English bug is still a bug, and "nothing to save" was said about an app that saves
+
+Build `536c8189`, Weak tier, `kimi-k2.7-code`, `ok: true`, 7.2 min (inside its 6.4–7.7 ETA band),
+₹152.52 billed on $0.42 real cost. The app worked. Three separate things in the report were wrong, and
+each had its own root cause. Ledger, one row per item:
+
+**Q-290 — 🥵 the off-grid hand-back is the first thing this build proves, and it proves it harmful.**
+`STYLE_RULES_RESUMED` gave the model the `DESIGN_CONSISTENCY` spacing values with "change each to the
+nearest multiple of 4px" (the Q-037 hand-back, shipped by #3458 three days earlier — this is its first
+real outing). The model answered with **three ad-hoc `node -e` regex scripts** that string-sliced and
+rewrote the whole 634-line `src/index.css`, plus one `edit_file` that failed with *"old_string is not
+unique in src/index.css (80 matches)"*. ~45 seconds and three model calls. One of the scripts contained,
+verbatim:
+
+```js
+.replace(/padding: 4px 8px/g, 'padding: 2px 6px')
+.replace(/gap: 4px;/g,        'gap: 6px;')
+```
+
+It moved values that were **already ON the grid OFF it**, and the build still ended at
+`DESIGN_CONSISTENCY` 98/100 with values off the grid.
+
+- **Root cause:** `round(v / 4) * 4` has exactly one right answer, so it was never a model's decision.
+  This repo already draws that line in the other direction and says so in `buildQualityLint.ts`
+  (*"a name for an icon button has to MEAN something, so it is never guessed by a deterministic pass"*).
+  The converse had no home.
+- **Class:** an end-of-turn hand-back is for what only a model can JUDGE — what a class should look
+  like, what an icon button is called, what an empty state should say. **Never for arithmetic with one
+  answer.** Handing arithmetic to a model buys three ways to be wrong: it mis-derives which values are
+  off-grid, it rewrites by regex over a file it cannot see whole, and it charges for both.
+- **Fix:** `src/server/AgentV3/spacingSnap.ts` — pure, nearest multiple of 4, **ties to the smaller**
+  (a layout that grows can overflow a phone, which `mobileLayoutCheck` then reports; one that tightens
+  cannot), never to zero. Only files THIS build wrote, only above the finding's own `MAX_OFFGRID`
+  threshold, never inside a comment, and it **stands down on a file that is coherently on another
+  rhythm** (`isCoherentOtherGrid`: the off-grid values share a divisor ≥ 5 that is not a multiple of 4,
+  over ≥ 3 values — `6/18/30/42` is a 6px system, `10/6/14` is just sloppy). Wired into **BOTH** lanes
+  (the architect's post-build integrity block beside `kitRestore`, and the fast lane's own verify),
+  because a deterministic pass wired into one lane of two is this repo's headline class. Report code
+  `SPACING_SNAPPED`, process-only. Kill switch `AGENTV3_SPACING_SNAP=off`.
+- **Siblings:** spacing is removed from `stylePolishResume` and from the runner's call, and
+  `offGridHandBack` — which then had no caller left — is **deleted** rather than kept "for the report";
+  `tests/offGridSpacingIsHandedBack.test.ts` is retired with it and its still-valid coverage (the
+  e49afa97 stylesheet) carried into the new suite against the snap. `extractSpacingPx`'s regex is now
+  `SPACING_DECL_RE_SOURCE` / `SPACING_PX_RE_SOURCE` in `DesignLinter.ts`, read by both the lint and the
+  snap, so the two cannot disagree about what a spacing declaration is.
+
+**Q-291 — ❌ the reviewer found a real bug and nothing repaired it, with no record of why.** On the
+working app the reviewer reported: *"`matchedKeys` and `setMatchedKeys` are declared and reset, but
+`setMatchedKeys` is never called in `handleMatchClick` or elsewhere. The guard `if
+(matchedKeys.includes(key)) return;` always evaluates to `false`, so a key can be matched multiple
+times."* A real bug, in plain words. **No `REVIEW_FUNCTIONAL_*` code appears anywhere in the report** —
+not even the `_REPAIR_SKIPPED` record, because `selectGreenRepairable` returned an empty list.
+
+- **Root cause, measured:** `FUNCTIONAL_WARNING_RE` had a CLOSED verb list behind `never` —
+  `never (fires|works|holds|updates|renders)`. Every one of these was MISSED: *never called, never
+  invoked, never set, never read, never runs, never used, never enabled, never persisted*. And a dead
+  guard (*"always evaluates to false"*, *"the condition is always true"*) had no rule at all.
+- **Class:** a CLOSED set of phrases matched against open-ended prose a MODEL wrote. It had been
+  patched once already for exactly this reason (autopsy ac41a924 added `FUNCTIONAL_OUTCOME_RE`), so a
+  third list would be patched again.
+- **Fix, both halves.** (1) `never [a-z]+` is open — the cosmetic veto is what keeps precision, and it
+  already catches *"the aria-label is never set"* and *"consider never using inline styles"* — plus a
+  `DEAD_CONDITION_RE` for a branch that can never be taken (deliberately not a bare `always`, which is
+  how advice is written). (2) **The structural half: the reviewer DECLARES it.** The instruction asks
+  for `[BROKEN]` beside the severity tag, `parseReviewOutput` reads the marker and **strips it from the
+  message** so it never reaches a user, and `namesBrokenBehaviour` is the one definition both selectors
+  read. It is additive — an untagged reviewer keeps exactly today's behaviour — and the cosmetic veto
+  still applies to a tagged finding, so a model cannot widen what a verified repair touches on a working
+  app by typing a word.
+- **Honesty half:** the suggest-mode prompt told the reviewer *"no repair will run from it"*, which
+  stopped being true on 2026-09-23 when `AGENTV3_GREEN_FUNCTIONAL_REPAIR` shipped. It now says a
+  `[BROKEN]` finding may get one automatic repair that is undone unless proven — the right incentive
+  for the one tag we are asking it to be careful with.
+
+**Q-292 — ❌ `JOURNEY_NOT_DERIVED` stated a falsehood about the app.** It carried
+`NO_DATA_ENTRY_REASON`: *"this app has no data-entry surface at all — a game, a dashboard or a landing
+page has nothing to save and reload, so there is no such journey to prove."* The app keeps XP, gems, a
+streak and the lessons you have finished in `localStorage` (`src/hooks/useProgress.ts`) and reads them
+back on every load. **That IS the save-and-reload journey this check exists to prove.**
+
+- **Root cause:** `appHasNoDataEntry` asks *"is there a FORM?"* and its sentence answers *"is there
+  anything to SAVE?"*. The two coincide for a landing page and part ways for every app whose controls
+  are buttons — a game, a counter, a tracker, a quiz. And the knowledge was already in the repo:
+  `SAVE_ACTION`, one screen down in the same file, lists `localStorage`. One predicate had it, its
+  sibling did not.
+- **Fix:** `savedStateEvidence` (a real storage / database / write-method WRITE, with theme, font-scale,
+  locale and consent keys excluded — every app from our starter writes a theme, so a bare storage match
+  would say "this app saves" about a landing page) and a third honest reason, `savedWithoutFormReason`,
+  which names the file and does not read as a defect. Asked in **BOTH** branches that reach the old
+  sentence — this module's own docblock says *"TWO branches now reach it"*, and fixing one is how a
+  sibling gets left behind.
+- **Sibling:** the release gate carried its **own paraphrase** of the same false claim
+  (*"this app has no data-entry flow"*). It now repeats the derivation's sentence through
+  `journeyNoneWhy`, with a still-true generic line as the fallback. One sentence, written once.
+
+**Q-293 — 🟡 five items argued NOT defects, awaiting the admin's yes:** 2× `PROVIDER_FALLBACK` (GLM
+crawled, 30 s = 7% of the clock, benched as designed — Q-009); the fast lane spending 15 s and handing
+off with nothing (`FAST_LANE_SKIPPED_REASONING_RUNG`, the designed stand-down on a reasoning rung);
+`WRITE_TIME_TYPECHECK`'s first run paying 13 s to install the compiler (Q-010 / Q-063);
+`DOMAIN_KNOWLEDGE` taking 11.5 s and returning nothing (the lookup ran and found nothing for this
+domain); `READY_BEFORE_END` 13 steps / 110 s (the style hand-back doing its job).
+
+**The missing subsystem, named:** nothing in this engine asks *"is this decision arithmetic or
+judgement?"* before choosing whether a model or a deterministic pass makes it. `buildQualityLint.ts`
+states the rule for one direction in a comment; `spacingSnap.ts` now states it for the other. Every
+future end-of-turn hand-back, and every future deterministic repair, has to answer that question — and
+the only enforcement today is the two docblocks saying so.
+
+**Proof:** `tests/theDuolingoAutopsy.test.ts` — 52 cases against the report's own verbatim text, with
+the full gate green on the final state (both typechecks, `noUnusedImports`, `npm run build`,
+`test:bundle`, `boot:check`, and **33,122 / 33,122** tests). Reversion-proven **seven** ways: the closed
+`never` list restored (7 failures), the dead-condition rule removed (3), the `[BROKEN]` declaration
+ignored (1), the journey sentence put back in both branches (2), the spacing hand-back restored (1),
+`snapToGrid` allowed to return 0 (1), and the fast lane's snap removed (1).
+
+**What to watch on the next real builds:** `SPACING_SNAPPED` appearing (and `DESIGN_CONSISTENCY`
+reaching 100 where it used to sit at 98); `REVIEW_FUNCTIONAL_REPAIRED` / `_REFUTED` appearing on green
+builds where the reviewer names a plain-English bug — each one is a real defect that used to ship with
+only a suggestion; and whether any reviewer actually writes `[BROKEN]` (if none does, the widened
+classifier is carrying the whole fix, which is the fallback working).
 ## 2026-10-01 — Autopsy 5759ad8b ("Can you make this app" → Kisaan Mandi Bhav): 3 root causes fixed, 3 open
 
 Weak build, 6.9 min, ₹96.58, rendered at 268 s, inside its ETA band. The build itself went well. The judges around it did not.
@@ -87484,6 +87604,48 @@ is what was adopted. The rows leave `BUILD_REPORT_QUEUE.md`; this entry is their
   - **The real lever then:** a ladder change (another lead rung on Weak/Normal). That is the admin's routing
     decision, not a code fix.
 
+## 2026-10-01 — Admin decisions on the queue: Q-087, Q-018, Q-085 built; four "not a defect" rows closed
+
+The admin accepted every recommendation in one line (*"aapki salah accepted"*). Q-065, Q-066, Q-067 and Q-068
+were left alone: PR #3467 (another session) already carries them.
+
+| ID | Decision | What changed | Lock |
+|---|---|---|---|
+| Q-087 | (a) | `bareTemplateRequestFor` in `goldenScaffolds/registry.ts`. A build verb plus one SIMPLE template's own name, and nothing else ("Build a calculator", "calculator banao", "ek gita app bana do"), seeds that template. Any other word still builds from scratch. A name two templates could answer ("notes", "timer") is on neither list, and the pro tier is excluded because its chip prompt is the spec that extends it. | `tests/aBareRequestGetsItsTemplate.test.ts`, reversion-proven (14 fail when the door is removed) |
+| Q-018 | (a) | A single text-file upload (`handleFilesUpload` and `resolveFileConflict` in `App.tsx`) now goes through the one edit seam, `applyIdeFileChange` → `source: 'ide-edit'`. **Found on the way: the upload used a raw `setFiles`, so the file never reached the build workspace at all.** The AI could not see a file the user had just uploaded. Now it does, and it joins `userFiles`, so `userFileGuard` protects it. Zip and repo imports keep `source: 'import'` and are not recorded. Binary uploads are not sent, because the seam carries text and a data URL written as text would be a corrupt image. | `tests/anUploadedFileIsTheUsers.test.ts`, reversion-proven |
+| Q-085 | (a) | `formAsksAi` in `journeyDerivation.ts`. A form whose own file, or a module it imports directly, calls an AI helper (`lib/ai`, `window.NavAI`, the gateway route, a chat-completions API, an AI SDK) gets a submit-only journey. It never gets create-and-reload. | `tests/anAiAskIsSubmittedNotReloaded.test.ts`, reversion-proven |
+| Q-024, Q-052, Q-086, Q-088 | not a defect | Closed as RESOLVED-not-a-defect on the admin's agreement. The evidence is in each row as last written (autopsies d382b398, 31254f9a, 1219c639, 52471441). | — |
+
+**Still to watch.** Q-085: the next AI-chat report should show #3451's reach getting to a form held in a sidebar-switched component.
+**Still open.** Binary single-file uploads still stay in the browser. A binary write path from the IDE to the workspace is a separate change, and nothing asked for it yet.
+
+## 2026-10-04 — Autopsy 0311186f (ALGO forex scalper: a pasted reply became an 8-module plan; two module turns, Weak)
+
+**What happened.** The user pasted an assistant's reply about an automatic forex scalper (advice, the six questions it had asked them, example values) and added "App name ALGO, LUXURY PERIUM". The engine counted 18 features and read the paste as a mega project. It split the request into 8 modules with the "App Shell" last, so both paid turns (₹8.30 and ₹7.98) built only constants, types and mock services, and the user saw nothing. Every user-facing line then spoke as if a whole app had failed to start.
+
+**Tally:** 0 self-heals · 0 workarounds · 1 skipped (the picture was never read) · 11 shipped wrong (nine are honesty defects shown to the user or the admin) · 1 struggle (the first typecheck paid 16.5 s to install the compiler).
+
+| # | Problem | Root cause → class | Fix | Lock |
+|---|---|---|---|---|
+| 1 | Release gate, `RELEASE_GATE_UNPROVEN` and `RUNTIME_UNCHECKED` were warnings ×2 on module turns | The 6a5fb04b module fix taught three readers (starter, preview, reviewer) and four were never hunted. **Class:** a fact about a module turn has to reach every reader of "is this the whole app?" | `awaitingShell` threaded into `releaseGate`, `runtimeUncheckedRecord`, the UNPROVEN block and the RELEASE_GATE severity | `tests/aModuleTurnIsNotTheWholeApp.test.ts` |
+| 2 | The user was told "could not verify end to end … open the preview" ×2 | same | The line is skipped on a module turn; the module progress line says what this turn did | same |
+| 3 | The recap said "Here's what I built … live preview didn't start — open the Preview tab" ×2 | same | `summarizeProject({ awaitingShell })` says "Built one part of your app … nothing to open yet" | same |
+| 4 | The bill sentence said "I could not confirm your app running … send a follow-up" ×2 | same | `decideMarkupOnProof({ awaitingShell })` names the module; it was wired at both bill paths | same (census of both calls) |
+| 5 | Our own 🧾 money notice was filed as an ERROR in problems | The narration classifier read "could not" as a failure verb | 🧾 is a platform notice, like ℹ️ | same |
+| 6 | 18 "features" → mega project → 8 modules | Questions ("Timeframe scalping? (1m / 5m?)") and settings ("SL = 0.25%", "Daily stop: -2%") were counted as features. **Class:** a line that asks or sets a value names no part of the app | `notAFeatureLine` in `enumeratedFeatures.ts`; `appScopeAnalyzer`'s bullet count reads the same rule | `tests/theForexPasteIsNotAnEightModuleProject.test.ts` |
+| 7 | `REQUIREMENT_GAPS` domain = real-estate; the builder was told to add listings, a map and an EMI calculator | "broker" was real estate's only word; no trading domain existed | New `trading` domain, placed last; "broker"/"listing" are stripped in a trading context. A property broker still reads as real estate | same |
+| 8 | `SUMMARY_OFF_TOPIC`: the user was warned the summary "never mentions" “**PERFECT level**” | Any quoted 2-word phrase was taken as the app's name | A quote is a name only where the sentence calls it one ("app called X", "the X app"); markdown inside the quotes is ignored | same + `offTopicSummary.test.ts` |
+| 9 | Module turns were promised 9–10 and 7–12 min; the accuracy line said "UNDER the band, 0.2×" | The ETA is computed from the whole request before project mode picks a module | `moduleTurnEta.ts`: on a module turn the ETA, the countdown and the accuracy promise are withdrawn, and no module-sized guess replaces them | same |
+| 10 | `PLANNING_CONTEXT` said the unread picture "is a photo, not a UI design" | `picturesSetAside` counted unread pictures | Counted only when the picture was read | same (source guard) |
+| 11 | A "continue" that built module 2 said "✏️ Editing your existing app (19 source files)" | The edit narration ran before the plan was read | It stands down when a continuation advances an unfinished plan | same (source guard) |
+| 12 | The picture was not read: vision is capped at 8 s | — | 🟡 **Q-091** (admin decision: raise the cap to 20 s only when a picture is attached) | — |
+| 13 | The first write-time typecheck took 16.5 s installing the compiler | Second occurrence of Q-063 | Recorded on Q-063 | — |
+| 14 | "No tests at all" ×2; module turns billed at real cost; idle sandbox; startTier "sonnet" | argued not defects | 🟡 **Q-092** | — |
+| 15 | A pasted reply is still sized as a spec (APP_SCOPE ~20 → mega roadmap) | — | 🟡 **Q-093** (decision; recommended to leave) | — |
+
+**Missing subsystem.** "Is this turn the whole app?" has no single owner. Each reader (starter, preview, reviewer, gate, recap, bill, ETA) asked it separately, and the module fact reached three of them. This PR threads `moduleAwaitsShell` into the rest. The real fix is one `turnScope` value that every verdict reads, alongside the open `turnKind` item.
+
+**Proactive.** Project mode orders modules by dependency, so the App Shell comes last and the user sees nothing for N−1 paid turns. Building the shell early, as a thin assembled app that grows with each module, would turn every module turn into something the user can open. That is a planner change and an admin decision; it is not built here.
 ## 2026-10-04 — Autopsy 241215d1 (paper-trading app for NSE/BSE: build 1 stopped at 2.3 min, build 2 "Continue…" 17.1 min, gate RED)
 
 Two builds, Weak tier, both on `kimi-k2.7-code` (complex routing). Build 2 shipped a FastAPI + React app that worked
@@ -87636,3 +87798,13 @@ turnKind, fail-open judge). The 67 still open (duplicates merged) are now rows Q
 | Q-247 | The explorer could not press "⏸" and could not say why | The skip note kept Playwright's first line and dropped the call log — the same class #3471 fixed for Q-192 the same hour (this PR's duplicate was dropped in the merge, safeguard #6 in real time) | On #3471's `pressFailureNote`: the cause line's colour codes are stripped (measured in a real browser, it read `\u001b[2m - <div …>`) | `aCoveredControlIsNamed`, real browser, reverted-and-failed |
 | Q-249 | WHAT covered "⏸" in 7da1cdca | 🟡 BLOCKED on the next report (the note now names it) | — | — |
 | Q-248 | Summary contradicts itself / claims unmeasured 44×44 | 🟡 BLOCKED — admin decision; recommendation: check size claims against the phone-layout measurement only | — | — |
+## 2026-10-04 — Correction to the 0311186f entry: one trading domain, not two
+
+The 0311186f ledger says a new `trading` domain was added "placed last". While this branch was open, #3471
+(autopsy 241215d1, a paper-trading app read as ecommerce) merged its OWN `trading` domain, placed early.
+Two entries with one key are the drifted-copy class, so the merge kept #3471's entry (it carries the order
+words: limit / stop-loss orders, order book, paper trading) and folded this branch's forex-scalper words
+into its pattern: forex, MT4/MT5, cTrader, algo trading, F&O, trading system/strategy/signals. A bare
+"scalper" is deliberately left out, because the domain now sits early in the list and a ticket-scalper app
+is not trading. `TRADING_CONTEXT` (the broker/listing strip) is unchanged. Both autopsies' tests pass on the
+merged state (`theForexPasteIsNotAnEightModuleProject`, `thePaperTradingAutopsy`).

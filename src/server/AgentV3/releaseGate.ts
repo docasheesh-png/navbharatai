@@ -99,6 +99,13 @@ export interface RuntimeEvidence {
    * data" — about an app with neither (autopsy e49afa97). Optional: omitted keeps a cause-free sentence.
    */
   journeyUnreachableWhy?: string;
+  /**
+   * Why there was no journey to drive at all, in the derivation's own words (`noJourneyReason`). The gate
+   * used to assert "this app has no data-entry flow" here, which was false of every app whose controls
+   * are buttons and whose state lives in storage (autopsy 536c8189). Optional: omitted keeps a generic,
+   * still-true sentence.
+   */
+  journeyNoneWhy?: string;
   explorePresses?: number;
 
   /**
@@ -140,6 +147,12 @@ export interface RuntimeEvidence {
    * blaming the app for a decision the user made. Optional, so every existing caller is unchanged.
    */
   stoppedByUser?: boolean;
+
+  /**
+   * The project module that assembles the app, when this turn built an earlier module (autopsy
+   * 0311186f). Nothing can run yet, so UNKNOWN here is "not due", not a gap in our coverage.
+   */
+  awaitingShell?: string | null;
 }
 
 export interface StaticFindings {
@@ -200,7 +213,7 @@ export interface GateVerdict {
 // ⚠️ Every field added to RuntimeEvidence that is NOT a runtime CHECK must be excluded here, or it
 // silently becomes a row the gate tries to label and grade. tsc catches the omission, which is
 // how `stoppedByUser` was caught the moment it was added.
-export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'noPageRoutes' | 'explore' | 'explorePresses' | 'journeyUnreachableWhy'>;
+export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'awaitingShell' | 'noPageRoutes' | 'explore' | 'explorePresses' | 'journeyUnreachableWhy' | 'journeyNoneWhy'>;
 
 /** What a PASS means. Phrased as a completed fact, because that is what `proven` is a list of. */
 const RUNTIME_LABEL: Record<CheckKey, string> = {
@@ -344,9 +357,18 @@ export function releaseGate(
         : 'a user journey was derived but could not be reached in the browser');
     }
     else if (outcome === 'none-derivable') {
-      // NOT a gap: the app has no data-entry flow to drive, so there was no journey to prove. Naming it as
-      // a missing capability is the category error this branch exists to prevent (a game "saves" nothing).
-      unproven.push('this app has no data-entry flow, so there was no user journey to prove (not a defect)');
+      // NOT a gap: there was no journey to DRIVE, so there was none to prove. Naming it as a missing
+      // capability is the category error this branch exists to prevent (a game "saves" nothing).
+      //
+      // 🔴 BUT IT MUST NOT SAY MORE THAN THAT (autopsy 536c8189, 2026-10-01). This sentence used to read
+      // "this app has no data-entry flow", in its own words, about a Duolingo-style app that keeps XP, a
+      // streak and finished lessons in browser storage — the SAME false claim `noJourneyReason` was
+      // making, in a second place, where only the first was fixed. When the derivation supplied its own
+      // reason, that reason is the true one and is used; the generic line is the fallback.
+      const why = String(ev.journeyNoneWhy ?? '').trim().replace(/\s+/g, ' ').slice(0, 200);
+      unproven.push(why
+        ? `${why} (not a defect)`
+        : 'there was no user journey here to drive, so none was proven (not a defect)');
     } else unproven.push(whyMissing(key, ev));
   }
   // A game / dashboard / landing page with no data-entry surface at all: there is genuinely no "save"
@@ -385,8 +407,11 @@ export function releaseGate(
   if (runtimeProofs.length === 0) {
     return {
       state: 'unknown',
-      headline: 'Cannot say whether this works — nothing here was ever proven to RUN. '
-        + 'The checks that would have told us all need a running app, and they all skipped.',
+      headline: ev.awaitingShell
+        ? `Not judged yet — this turn built one module of a larger app, and "${ev.awaitingShell}" puts the app `
+          + 'together; the runtime checks run on that turn.'
+        : 'Cannot say whether this works — nothing here was ever proven to RUN. '
+          + 'The checks that would have told us all need a running app, and they all skipped.',
       proven, unproven, failures,
     };
   }

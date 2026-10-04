@@ -70,8 +70,11 @@ const DOMAINS: DomainDef[] = [
     // (market, limit and stop-loss orders, an order book, a ledger) had no domain of its own, so the word
     // "order" made it ecommerce and the analysis said it lacked a cart, checkout and refunds. Headlines are
     // the market's own words — never a bare "stock" (an inventory register) or "order" (a shop).
+    // Autopsy 0311186f (same day) added the forex-scalper words (forex, MT4/MT5, cTrader, algo trading,
+    // F&O): that request's only domain word was "broker", which read it as REAL ESTATE. A bare "scalper"
+    // is deliberately absent: a ticket-scalper app is not trading.
     key: 'trading',
-    re: /\b(?:stock|share|equity|commodity|crypto|forex)\s+(?:market|trading|exchange|broker(?:age)?|portfolio)s?\b|\bpaper[\s-]?trad\w*|\btrading\s+(?:app|platform|simulator|terminal|bot|journal|engine|dashboard)\b|\b(?:nse|bse|sensex|nifty|demat|intraday)\b|\bcandlesticks?\b|\bohlc\b|\border\s?book\b|\b(?:limit|stop[\s-]?loss|market)\s+orders?\b|\bmutual\s+funds?\b|शेयर\s*बाज़?ार|शेयर\s*मार्केट/i,
+    re: /\b(?:stock|share|equity|commodity|crypto|forex)\s+(?:market|trading|exchange|broker(?:age)?|portfolio)s?\b|\bforex\b|\balgo\s*-?\s*trad\w*|\bmt[45]\b|\bctrader\b|\bf\s*&\s*o\b|\bcrypto\s+bot\b|\btrading\s+(?:system|strategy|signals?)\b|\bpaper[\s-]?trad\w*|\btrading\s+(?:app|platform|simulator|terminal|bot|journal|engine|dashboard)\b|\b(?:nse|bse|sensex|nifty|demat|intraday)\b|\bcandlesticks?\b|\bohlc\b|\border\s?book\b|\b(?:limit|stop[\s-]?loss|market)\s+orders?\b|\bmutual\s+funds?\b|शेयर\s*बाज़?ार|शेयर\s*मार्केट/i,
     features: [
       { label: 'live / historical price feed', re: /real.?time|live|feed|tick|quote|historical|yfinance|websocket/i },
       { label: 'order types (market / limit / stop-loss)', re: /market\s+orders?|limit|stop.?loss|take.?profit|order\s+types?/i },
@@ -501,6 +504,9 @@ export function stripNonDomainUses(input: string): string {
   // Questions Solved" — autopsy e7baf61d), and no construction of its own marks it. Only the NOUN is
   // stripped: "book a session", "book a slot" keep their booking meaning in any context.
   if (STUDY_CONTEXT.test(String(text || ''))) out = out.replace(STUDY_BOOK_NOUN, ' ');
+  // Same shape for "broker" and "listing": in a prompt about TRADING, a broker is where the orders go and a
+  // listing is a quoted instrument (autopsy 0311186f — a forex scalper read as real estate off "broker").
+  if (TRADING_CONTEXT.test(String(text || ''))) out = out.replace(/\b(?:brokers?|brokerage|listings?)\b/gi, ' ');
   // Same shape for "chat": in a prompt for an AI ASSISTANT, the chat is the user talking to the AI
   // (autopsy d8ed307a — a Bengali "personal AI Assistant" whose English words were "Chat History", "Chat"
   // and "Clear History" was read as SOCIAL and handed auth, a realtime feed and moderation). Only when
@@ -545,6 +551,8 @@ const AI_ASSISTANT_CONTEXT = /\b(?:(?:personal\s+)?ai[\s-]+(?:assistant|companio
 const PEOPLE_CHAT = /\bgroup\s+chats?\b|\bchat\s+(?:with|between)\s+(?:friends|users|people|members|each\s+other|other\s+users)\b|\b(?:users|members|people)\s+(?:can\s+)?(?:chat|message|talk)\b|\b(?:friends?|followers?|dm|direct\s+messages?)\b/i;
 
 /** Evidence that the prompt is about studying, so a bare "book" is a textbook (autopsy e7baf61d). */
+/** A prompt about trading markets. The strip it gates is a strip of two words, never a domain decision. */
+const TRADING_CONTEXT = /\b(?:forex|scalp(?:ing|er|ers)?|intraday|demat|mt[45]|ctrader|candlestick|nifty|sensex|pips?|stock\s*market|share\s*market|algo\s*-?\s*trad\w*|trading)\b/i;
 const STUDY_CONTEXT = /\b(?:syllabus|ncert|jee|neet|upsc|cbse|icse|pyqs?|chapters?\s+(?:tracker|completed|wise|list)|study\s+(?:hours?|sessions?|timer|plan|planner|tracker)|exam\s+prep(?:aration)?|revision\s+(?:schedule|system|reminders?))\b/i;
 const STUDY_BOOK_NOUN = /\bbooks?\b(?!\s+(?:a|an|the|your|my|now|online|appointments?|slots?|sessions?|tickets?|tables?|rooms?|seats?|classes?|tutors?|demos?)\b)/gi;
 

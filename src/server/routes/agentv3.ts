@@ -2,6 +2,7 @@ import { toSafeClientMessage } from '../lib/httpError';
 import type { Express, Request, Response } from 'express';
 import { copyName, copyStatus } from '../AgentV3/duplicateApp';
 import { decideMarkupOnProof, markupNeedsPreview, markupWaiverSettledLine } from '../AgentV3/previewEarnsMarkup';
+import { moduleTurnEtaLine, moduleTurnEtaNote } from '../AgentV3/moduleTurnEta';
 import { isPlatformFixRequest, inBrowserPreviewFixGuidance } from '../../lib/platformFixRequest';
 import { buildRateLimiter, rateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import express from 'express';
@@ -621,6 +622,7 @@ import { readyOverrunNote } from '../AgentV3/doneSignal';
 import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, isProjectStylesheet, danglingStylesheetImports, withoutStylesheetImports } from '../AgentV3/CssConsistency';
 import { kitRestorePatch, kitRestoreNote } from '../AgentV3/kitRestore';
+import { spacingSnapPatches, spacingSnapNote, type SpacingSnapPatch } from '../AgentV3/spacingSnap';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
 import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPolicy';
 import { buildServiceGraph } from '../AgentV3/serviceGraph';
@@ -10554,7 +10556,10 @@ async function noteBuildOutcome(
         // A picture is part of the spec only when it is a UI design (the describer returned a contract).
         // A photo of a person or a scene says what the picture shows, not what to build.
         const pictureIsSpec = designContract !== null;
-        picturesSetAside = images.length > 0 && !pictureIsSpec ? images.length : 0;
+        // Only a picture that was READ can be judged a photo (autopsy 0311186f: the vision call was abandoned
+        // at 8 s, and the report still said the picture was "a photo, not a UI design"). An unread picture is
+        // reported by ATTACHMENTS_READ as unread, never classified.
+        picturesSetAside = images.length > 0 && fate === 'read' && !pictureIsSpec ? images.length : 0;
         const specRaw = [docs, pictureIsSpec ? stripContractBlock(vis) : ''].filter(Boolean).join('\n\n');
         planningAttachmentText = specRaw.trim()
           ? `${fenceUntrusted('attached files', redactPII(specRaw))}${contractBlock ? `\n\n${contractBlock}` : ''}`
@@ -12491,6 +12496,7 @@ async function noteBuildOutcome(
             // Absent ⇒ false ⇒ the rule stands down, which is the direction that cannot over-charge.
             expectsArtifacts: billingCtx.expectsArtifacts === true,
             enabled: markupNeedsPreview(),
+            awaitingShell: moduleAwaitsShell,
           });
           watchdogBilledUsd = wdMarkup.billedUsd;
           if (!wdMarkup.markupApplied) {
@@ -15811,7 +15817,18 @@ async function noteBuildOutcome(
           // can't touch, so the old raw `fileTree.length` (e.g. 317) contradicted the import banner's
           // "165 files" for the SAME project. One shared count (fileClassification.ts) keeps them honest.
           const sourceCount = appSourceFileCount(fileTree);
-          events.emit({
+          // A "continue" that will build the next module of an unfinished project plan is not an edit of an
+          // app the user has (autopsy 0311186f: "✏️ Editing your existing app (19 source files)" about a plan
+          // that had built constants and types). The module progress line says what this turn does.
+          let continuesPlan = false;
+          const planModeOn = projectModeEnabled(process.env, { userId, email });
+          if (planModeOn && isContinuationMessage(prompt)) {
+            try {
+              const plan = await withTimeout(loadProjectPlan(workspaceId), 3_000, 'plan-peek');
+              continuesPlan = !!plan && !planComplete(plan);
+            } catch { /* unknown ⇒ the ordinary edit line */ }
+          }
+          if (!continuesPlan) events.emit({
             type: 'narration',
             agent: 'architect',
             text: `✏️ Editing your existing app (${sourceCount} source file${sourceCount === 1 ? '' : 's'}) — I'll make targeted changes, not rebuild it.`,
@@ -16902,6 +16919,18 @@ async function noteBuildOutcome(
               projectPlanRef = pPlan;
               projectModuleRef = pPlan.modules.find((m) => m.id === nextMod.id) ?? nextMod;
               buildPrompt = `${moduleBuildContext(pPlan, projectModuleRef)}\n\n---\n\nUser's message this turn:\n${buildPrompt}`;
+              // The opening ETA described the whole request; this turn builds one module of it (autopsy
+              // 0311186f). Withdraw it — the countdown, the band and the accuracy verdict — rather than
+              // judge a module against an app-sized promise. See moduleTurnEta.ts.
+              try {
+                const done = pPlan.modules.filter((m) => m.status === 'done').length;
+                if (etaTotalMs > 0 || etaRoughBand) {
+                  etaTotalMs = 0; etaBaseMs = 0; etaRoughBand = null; etaRoughHighMs = null; etaPromisedHighMs = 0;
+                  buildDiag.withdrawEtaPromise();
+                  events.emit({ type: 'narration', agent: 'architect', text: moduleTurnEtaLine(done, pPlan.modules.length, projectModuleRef.name), ts: Date.now(), id: 'eta-live' });
+                  buildDiag.record({ phase: 'plan', severity: 'info', code: 'ETA_WITHDRAWN', autoResolved: true, message: moduleTurnEtaNote(done, pPlan.modules.length, projectModuleRef.name) });
+                }
+              } catch { /* the ETA is best-effort and must never touch a build */ }
               // WHO ASSEMBLES THE APP? A module that does not own the entry leaves the starter page in
               // place by design, so this turn is judged on its own files, not as a whole app (autopsy
               // 6a5fb04b: a config module wrote its files, typechecked, and was failed for "Hello World").
@@ -17550,6 +17579,18 @@ async function noteBuildOutcome(
                   writtenFiles.set(patch.path, patch.content);
                   project = { ...project, [patch.path]: patch.content };
                   buildDiag.record({ phase: 'build', severity: 'info', code: 'DESIGN_KIT_RESTORED', message: kitRestoreNote(patch, 'before-repair'), autoResolved: true });
+                }
+              } catch { /* deterministic and best-effort — the check below still runs */ }
+              // 🔴 THE SAME LANE-DRIFT THIS REPO'S HEADLINE CLASS IS MADE OF: the spacing snap below runs
+              // in the architect's post-build block, and a fast-lane build would have been left with the
+              // `DESIGN_CONSISTENCY` warning the snap exists to kill. Both lanes, one function
+              // (autopsy 536c8189; cf. `ensureHtmlEntryScript`, fixed in one lane of two on 2026-09-21).
+              try {
+                const snaps = spacingSnapPatches(project, writtenFiles.keys());
+                if (snaps.length > 0) {
+                  await fastWrite(snaps.map((s) => ({ path: s.path, content: s.content })));
+                  for (const s of snaps) { writtenFiles.set(s.path, s.content); project = { ...project, [s.path]: s.content }; }
+                  buildDiag.record({ phase: 'build', severity: 'info', code: 'SPACING_SNAPPED', message: spacingSnapNote(snaps), autoResolved: true });
                 }
               } catch { /* deterministic and best-effort — the check below still runs */ }
               const cssErr = cssConsistencyError(project);
@@ -19471,6 +19512,31 @@ async function noteBuildOutcome(
            * below decides whether a model repair is needed, and again after any repair (which is told
            * to reuse the kit, and so can introduce kit classes the app's rewritten stylesheet lacks).
            */
+          /**
+           * 🔴 SPACING OFF THE 4px GRID, SNAPPED BY CONSTRUCTION (autopsy 536c8189, 2026-10-01). Between
+           * #3458 and that date these values were handed to the MODEL at the end of its turn; the first
+           * real build to meet that hand-back spent three calls writing `node -e` regex scripts over a
+           * 634-line stylesheet and moved ON-grid values OFF the grid. `round(v / 4) * 4` has one right
+           * answer, so it runs here instead — free, deterministic, and only over files THIS build wrote.
+           */
+          const snapSpacing = async (files: Record<string, string>): Promise<void> => {
+            try {
+              if (abort.signal.aborted || isImportTurn || !expectsArtifacts) return;
+              const patches = spacingSnapPatches(files, writtenFiles.keys());
+              if (patches.length === 0) return;
+              const landed: SpacingSnapPatch[] = [];
+              for (const patch of patches) {
+                const wrote = await runInPass('design-consistency-heal', () => writeUnlessFrozen(() => actuator.writeFile(workspaceId, patch.path, patch.content)));
+                if (!wrote) continue;
+                writtenFiles.set(patch.path, patch.content);
+                integrityFiles[patch.path] = patch.content;
+                await mergeWorkspaceFiles(workspaceId, { [patch.path]: patch.content }).catch(() => {});
+                landed.push(patch);
+              }
+              if (landed.length === 0) return;
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'SPACING_SNAPPED', message: spacingSnapNote(landed), autoResolved: true });
+            } catch { /* deterministic and best-effort — it can never affect a build */ }
+          };
           const restoreKitRules = async (files: Record<string, string>, when: 'before-repair' | 'after-repair'): Promise<void> => {
             try {
               const patch = kitRestorePatch(files);
@@ -19485,6 +19551,7 @@ async function noteBuildOutcome(
             } catch { /* deterministic and best-effort — it can never affect a build */ }
           };
           await restoreKitRules({ ...integrityFiles, ...designFiles }, 'before-repair');
+          await snapSpacing({ ...integrityFiles, ...designFiles, ...Object.fromEntries(writtenFiles) });
           const projectForCss = { ...integrityFiles, ...Object.fromEntries(writtenFiles) };
           const cssErr = (() => { try { return cssConsistencyError(projectForCss); } catch { return null; } })();
           if (cssErr) {
@@ -21407,7 +21474,13 @@ async function noteBuildOutcome(
             // game wrongly implied deficient). Conservative: any input/form/handler leaves it 'not-run'.
             // A lookup app (a search box and a sort over a fixed list, nothing that saves) is the same fact
             // for the gate: there is no save to prove (autopsy ee0e6de5).
-            if (appHasNoDataEntry(journeyFiles) || appOnlyShowsWhatItHolds(journeyFiles)) gateEvidence.journeys = 'none-derivable';
+            if (appHasNoDataEntry(journeyFiles) || appOnlyShowsWhatItHolds(journeyFiles)) {
+              gateEvidence.journeys = 'none-derivable';
+              // THE GATE SAYS WHAT THE DERIVATION SAID, not its own paraphrase (autopsy 536c8189): the
+              // gate's generic line asserted "this app has no data-entry flow" about an app that keeps
+              // its progress in browser storage. One sentence, written once, read in both places.
+              try { gateEvidence.journeyNoneWhy = noJourneyReason(journeyFiles); } catch { /* generic line stands */ }
+            }
           }
         } catch { /* evidence, never a gate — a failure here changes nothing about the build verdict */ }
       }
@@ -21978,6 +22051,8 @@ async function noteBuildOutcome(
         // ending paths, so the two can never tell the reader different stories about one build.
         try { gateEvidence.stoppedByUser = stoppedByUser(buildDiag.report().issues); }
         catch { /* the honest wording is best-effort; the verdict itself is unaffected */ }
+        // A project module that does not own the app's entry has nothing to run yet (autopsy 0311186f).
+        if (moduleAwaitsShell) gateEvidence.awaitingShell = moduleAwaitsShell;
         let gate = releaseGate(gateEvidence, gateFindings(), gateQuality);
 
         // ── THE BUDGET LEDGER: where this build's clock actually went ────────────────────────────
@@ -22122,12 +22197,15 @@ async function noteBuildOutcome(
           // was proven — but as an ERROR it made `counts.errors = 1` on a report whose own outcome line says
           // "STOPPED BY THE USER — no failure of the app or the engine is implied". The gate reads the same
           // `stoppedByUser` fact for its headline; the severity now reads it too.
-          severity: gate.state === 'red' && !result.ok && gateEvidence.stoppedByUser !== true ? 'error' : gate.state === 'green' ? 'info' : 'warning',
+          // 🧩 …AND A MODULE TURN WHOSE APP IS PUT TOGETHER LATER IS NOT UNPROVEN, IT IS NOT DUE (autopsy 0311186f):
+          // two module turns each carried three "nothing proven to run" warnings about an app that did not exist yet.
+          severity: gate.state === 'red' && !result.ok && gateEvidence.stoppedByUser !== true ? 'error'
+            : gate.state === 'green' || (gate.state === 'unknown' && !!moduleAwaitsShell) ? 'info' : 'warning',
           code: 'RELEASE_GATE',
           message: releaseGateSummary(gate),
           // A STOPPED build's RED is the user's own decision, not an item anyone must act on — leaving it open
           // made a clean Stop end with "2 unresolved" problems (autopsy 31254f9a). The verdict stays RED.
-          autoResolved: gate.state === 'green' || gateEvidence.stoppedByUser === true,
+          autoResolved: gate.state === 'green' || gateEvidence.stoppedByUser === true || (gate.state === 'unknown' && !!moduleAwaitsShell),
         });
         // ── THE VERDICT MAY NO LONGER CONTRADICT THE EVIDENCE ────────────────────────────────────
         //
@@ -22209,7 +22287,7 @@ async function noteBuildOutcome(
         // ships unproven, because nothing counted it. `RELEASE_GATE_UNPROVEN` is a first-class finding,
         // so the admin Failure Category panel can answer that from real builds — and only then is there
         // evidence to justify a stronger rule.
-        if (gate.state === 'unknown' && result.ok) {
+        if (gate.state === 'unknown' && result.ok && !moduleAwaitsShell) {
           buildDiag.record({
             phase: 'readiness', severity: 'warning', code: 'RELEASE_GATE_UNPROVEN',
             // NOT auto-resolved: nothing resolved it. The build simply ended without proof.
@@ -22480,7 +22558,7 @@ async function noteBuildOutcome(
               pageConsoleEvidence?.errors ?? [],
               { previewRendered: renderProvenNow() },
             );
-            buildDiag.record(fromPages ?? runtimeUncheckedRecord({ previewRendered: renderProvenNow() }));
+            buildDiag.record(fromPages ?? runtimeUncheckedRecord({ previewRendered: renderProvenNow(), awaitingShell: moduleAwaitsShell }));
           } else {
             buildDiag.record(runtimeVerifiedRecord());
           }
@@ -22772,7 +22850,7 @@ async function noteBuildOutcome(
           // files this turn authored, by the reviewer's own rule (`reviewChangedPaths`); a fresh build's
           // headline names no count, so it keeps reading the whole map.
           const summaryPaths = isEditMode ? reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden) : [...writtenFiles.keys()];
-          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl, changedFiles: summaryPaths.length, editMode: isEditMode, changedPaths: summaryPaths, platformAdded: isEditMode ? writtenFiles.size - summaryPaths.length : 0 });
+          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl, changedFiles: summaryPaths.length, editMode: isEditMode, changedPaths: summaryPaths, platformAdded: isEditMode ? writtenFiles.size - summaryPaths.length : 0, awaitingShell: moduleAwaitsShell });
           if (summaryText) events.emit({ type: 'narration', agent: 'architect', text: summaryText, ts: Date.now() });
         } catch { /* summary is best-effort — never affects the build */ }
       }
@@ -24101,6 +24179,7 @@ async function noteBuildOutcome(
         previewProven: buildObs.previewRendered === true,
         expectsArtifacts,
         enabled: markupNeedsPreview(),
+        awaitingShell: moduleAwaitsShell,
       });
       /**
        * 🔴 A MONEY STATEMENT IS MADE ONCE, AFTER THE MONEY IS FINAL (autopsy 586295b7, 2026-09-20).

@@ -51,7 +51,11 @@ export interface IEngineerActuator {
    * implementations without that isolation should reject instead of executing
    * in the server's own process.
    */
-  runCommand(workspaceId: string, command: string): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  runCommand(workspaceId: string, command: string): Promise<{
+    exitCode: number; stdout: string; stderr: string;
+    /** Optional: how long reaching the machine and the command itself took (commandTiming.ts, Q-273). */
+    timing?: { sandboxMs: number; runMs: number };
+  }>;
   /**
    * Is a sandbox for this workspace ALIVE IN THIS PROCESS right now? Synchronous, in-memory, no I/O.
    *

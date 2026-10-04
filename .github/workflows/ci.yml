@@ -18,7 +18,11 @@ jobs:
     runs-on: ubuntu-latest
     # Bounded well above the real cost (~10 min after the de-duplication below) so a genuine hang fails
     # fast and legibly, instead of holding a runner for the six-hour default.
-    timeout-minutes: 30
+    # 45, not 30 (merging session, 2026-10-04): with eight or nine PR runs in flight at once the shared
+    # runners slowed every run to 21-30 min, and three green-bound runs were cancelled at exactly 30:00
+    # ("The job has exceeded the maximum execution time of 30m0s"). A cancelled run is a re-run, i.e. the
+    # same minutes spent twice; a longer cap costs nothing when the job finishes early.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 

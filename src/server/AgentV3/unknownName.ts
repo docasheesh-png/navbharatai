@@ -82,6 +82,17 @@ const EMPHASIS = new Set([
 
 const CAPS_WORD = /(?<![A-Za-z0-9])[A-Z]{3,12}(?![A-Za-z0-9])/g;
 
+/**
+ * Is this text's case meaningless — more than 60% of its letters capital? Asked of the whole request
+ * AND of each line, because a long spec's ALL-CAPS HEADING is a request typed in capitals in miniature.
+ * One definition, so the two can never disagree. PURE.
+ */
+function mostlyCapitals(text: string): boolean {
+  const letters = String(text ?? '').replace(/[^A-Za-z]/g, '');
+  if (letters.length === 0) return false;
+  return letters.replace(/[^A-Z]/g, '').length / letters.length > 0.6;
+}
+
 function escape(w: string): string { return w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 /** True when the request itself names the word as an outside service to connect to. */
@@ -101,10 +112,30 @@ export function unknownNamesInRequest(prompt: string): string[] {
   const text = String(prompt ?? '');
   if (!text.trim()) return [];
   // A request typed entirely in capitals carries no signal in its case.
-  const letters = text.replace(/[^A-Za-z]/g, '');
-  if (letters.length > 0 && letters.replace(/[^A-Z]/g, '').length / letters.length > 0.6) return [];
+  if (mostlyCapitals(text)) return [];
+  // 🔴 NOR DOES A WORD INSIDE AN ALL-CAPS HEADING (autopsy 39e982bd, 2026-10-04). The stand-down above
+  // asks about the WHOLE request, and a structured spec defeats it: "BUILD PRIMECLASH ESPORTS —
+  // COMPLETE ANDROID APPLICATION", "1. PROJECT CONFIGURATION", "2. DESIGN AND BRANDING" are headings
+  // over a lower-case body, so the document is not mostly capitals and the scanner then read
+  // **COMPLETE** and **ANDROID** as outside services the builder must not write a client for.
+  // Measured on that report's own text before this line existed: `["PRIMECLASH","COMPLETE","ANDROID"]`.
+  //
+  // 🔑 Case carries meaning only where the surrounding text has a case to differ from, so the same
+  // test belongs per LINE — exactly what `enumeratedFeatures.ts` learned about a structured spec
+  // (autopsy 8e124182: "skips instruction sections and the prose of a structured spec"). A word in an
+  // ordinary sentence — the COACT the feature was built for — is untouched, and a test pins that.
+  const headingLines = new Set<number>();
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) if (mostlyCapitals(lines[i])) headingLines.add(i);
+  // Offset → line number, so a match can be asked which line it came from without re-scanning.
+  const lineOfOffset = (offset: number): number => {
+    let n = 0;
+    for (let i = 0, at = 0; i < lines.length; i++) { if (offset < at + lines[i].length + 1) { n = i; break; } at += lines[i].length + 1; n = i; }
+    return n;
+  };
   const out: string[] = [];
   for (const m of text.matchAll(CAPS_WORD)) {
+    if (headingLines.has(lineOfOffset(m.index ?? 0))) continue;
     const w = m[0];
     if (out.includes(w)) continue;
     if (COMMON_ACRONYMS.has(w) || KNOWN_SERVICES.has(w) || EMPHASIS.has(w)) continue;

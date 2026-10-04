@@ -88803,6 +88803,15 @@ renamed `honestIndex` / the three-rule push. Test file now 33 cases.
 | Q-575 | `safe=true` no longer filters nudity | Fixed in this PR; filters are now named explicitly |
 
 **Not defects (with evidence in the reply):** the GLM crawl bench, ladder rung 2, and the ₹47.75 bill (the markup was earned by a preview that ran).
+**One judgement with the sign-in explorer, and our own template (admin: "jo bhi kaam bacha hai, complete karo").**
+#3526 (Q-540, staged into this branch by the merging session) added `authLivesInTheBrowser` — the same fact this
+scanner discloses — and the two disagreed on Q-540's own school app (accounts written under a constant key). The
+scanner now asks that function; its separate sign-up shape is removed. The shared judgement's first catch was OUR
+"Login page" template: any valid email + 8 characters showed "Signed in". It is now real Supabase Auth (REST, no new
+dependency; email, Google, GitHub, Apple) and shows a red "not connected" line with the two key names until they are
+saved. Locked in `tests/noFakeButtonNoFakeFeature.test.ts` (agreement census + template test); 602 template tests
+green, strict and loose typecheck of every starter included. Q-421/Q-422 queue rows removed (#3518 merged).
+
 ## 2026-10-04 — AUTOPSY 39e982bd: the app was off the user's screen for eight of its nine minutes
 
 Report `39e982bd` — *"BUILD PRIMECLASH ESPORTS — COMPLETE ANDROID APPLICATION"*, a 228-feature request

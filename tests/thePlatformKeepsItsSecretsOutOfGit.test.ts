@@ -72,6 +72,8 @@ const NOT_A_SECRET: Record<string, string> = {
   'src/server/AgentV3/SecurityAnalysis.ts|url-embedded-credentials': 'the detection regex itself',
   'src/server/lib/DeployArtifactGenerator.ts|connection-string-credentials': "local docker-compose dev database passwords in a template for the USER's app",
   'src/components/ide/GitPanel.tsx|hardcoded-auth-header': "a literal placeholder ('vercel-api') sent to our own route, not a credential",
+  'src/server/AgentV3/signInExplore.ts|hardcoded-secret': 'the throwaway password the sign-in check makes at random for a browser-only app and discards with its browser profile (#3526) — not a credential',
+  'src/server/lib/appImageKeyOptions.ts|hardcoded-secret': "the label text 'sk_…' naming the key FORMAT the owner must paste (#3528) — no key material",
 };
 
 describe('🔒 this repository ships no secret (census)', () => {

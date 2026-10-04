@@ -8,6 +8,7 @@
 
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { turnDeadline, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../turnDeadline';
+import { throwIfStopped, raceStop } from '../stopSignal';
 import {
   toolDefsToGemini,
   transcriptToGemini,
@@ -23,7 +24,7 @@ export interface GeminiGenAiClient {
     generateContent(params: {
       model: string;
       contents: GeminiContent[];
-      config?: { systemInstruction?: string; tools?: GeminiTool[]; maxOutputTokens?: number };
+      config?: { systemInstruction?: string; tools?: GeminiTool[]; maxOutputTokens?: number; abortSignal?: AbortSignal };
     }): Promise<GeminiResponseLike>;
   };
 }
@@ -70,7 +71,7 @@ export class GeminiToolRunner implements TurnRunner {
     const { systemInstruction, contents } = transcriptToGemini(params.messages, params.system);
     const tools = toolDefsToGemini(params.tools);
 
-    const config: { systemInstruction?: string; tools?: GeminiTool[]; maxOutputTokens?: number } = {
+    const config: { systemInstruction?: string; tools?: GeminiTool[]; maxOutputTokens?: number; abortSignal?: AbortSignal } = {
       maxOutputTokens: params.maxTokens ?? this.opts.defaultMaxTokens ?? 8000,
     };
     if (systemInstruction) config.systemInstruction = systemInstruction;
@@ -80,7 +81,13 @@ export class GeminiToolRunner implements TurnRunner {
     // so it needed the caller's budget for exactly the same reason. With no deadline, unchanged.
     const bound = turnDeadline(this.opts.timeoutMs ?? 120_000, params.deadlineAt);
     if (bound.expired) throw new Error(BUDGET_EXHAUSTED_MESSAGE);
-    const response = await withTimeout(
+    // 🔴 STOP MEANS STOP HERE TOO (queue Q-129). This was the one runner family that never read the build's
+    // stop signal, so a pressed Stop waited up to two minutes for a call the user no longer wanted. The
+    // signal is handed to the SDK (it cancels the HTTP request) and the wait is raced against it, so the
+    // build ends at once with the shared `BuildStoppedError` — never a provider failure, never a bench.
+    throwIfStopped(params.signal);
+    if (params.signal) config.abortSignal = params.signal;
+    const response = await raceStop(withTimeout(
       this.client.models.generateContent({
         model: this.opts.model || params.model,
         contents,
@@ -88,7 +95,7 @@ export class GeminiToolRunner implements TurnRunner {
       }),
       bound.timeoutMs,
       bound.source === 'deadline' ? BUDGET_REACHED_MESSAGE : `Gemini/Vertex call exceeded ${bound.timeoutMs}ms`,
-    );
+    ), params.signal);
 
     const result = parseGeminiResponse(response);
     if (params.onText && result.text) params.onText(result.text);

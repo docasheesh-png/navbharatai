@@ -87452,3 +87452,17 @@ is what was adopted. The rows leave `BUILD_REPORT_QUEUE.md`; this entry is their
     day.
   - **The real lever then:** a ladder change (another lead rung on Weak/Normal). That is the admin's routing
     decision, not a code fix.
+
+## 2026-10-04 — CI audit gate went red on every PR: four advisories published after 2026-10-01 (PR #3467)
+
+`main` was green on 2026-10-01; the next run failed `audit:gate` with four NEW high advisories, and
+no dependency had changed. Each was traced, not waved through:
+- **`@fastify/busboy` 3.2.0 → 3.2.2** (GHSA-xjh9-v7x6-24jw, GHSA-x8mw-p69m-v3mx, multipart DoS). It is
+  RUNTIME (via `firebase-admin`, whose own range is `^3.0.0`), so it was FIXED: a lockfile-only update.
+- **`braces` / `chokidar`** (GHSA-vfj7-8cjw-p6xm). Affected range `*`, 3.0.3 is the latest, so no fix
+  exists. Reached only through `firebase-tools` (dev-only deploy CLI). Allowlisted with that reason.
+- **`node-forge`** (GHSA-86w9-cpqp-85rv, signature-VERIFY forgery). Affected range `*`, 1.4.0 is the
+  latest. Used only by `androidKeystore.ts` to CREATE a certificate and keystore, never to verify.
+  Allowlisted, and `tests/nodeForgeNeverVerifies.test.ts` holds the fact the entry depends on: a new
+  importer or any verify call fails CI (proven by reversion both ways).
+OPEN: remove the three allowlist entries when upstream publishes fixes.

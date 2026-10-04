@@ -80,7 +80,10 @@ export function signInCandidates(files: Readonly<Record<string, string>>): SignI
     .filter(([p, c]) => typeof c === 'string' && /\.(?:[cm]?[jt]sx?|vue|svelte|html)$/i.test(p) && !/(?:^|\/)(?:node_modules|dist)\//.test(p) && !/\.(?:test|spec)\./.test(p))
     .slice(0, 400);
 
-  const pair = new RegExp(String.raw`\b(?:email|username|user(?:name)?|login)\s*:\s*${Q}(${EMAIL}|[\w.-]{3,40})${Q}[^{}]{0,160}?\bpassword\s*:\s*${Q}([^'"\x60\n]{3,64})${Q}`, 'gi');
+  // 🔴 A demo password may sit behind a hash call or under a `passwordHash` key (autopsy 70e030bb):
+  // `const DEMO_USER = { username: "student", passwordHash: hashPassword("demo123") }`. The plaintext
+  // is still the literal the app compares against, so it is the password a person types.
+  const pair = new RegExp(String.raw`\b(?:email|username|user(?:name)?|login)\s*:\s*${Q}(${EMAIL}|[\w.-]{3,40})${Q}[^{}]{0,160}?\b(?:password|pass(?:word)?(?:Hash|Digest)?)\s*:\s*(?:[\w$.]+\(\s*)?${Q}([^'"\x60\n]{3,64})${Q}`, 'gi');
   for (const [, c] of sources) for (const m of c.matchAll(pair)) add(m[1], m[2], 'demo account in the source');
 
   for (const [, c] of sources) {

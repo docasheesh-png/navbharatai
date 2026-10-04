@@ -87487,3 +87487,11 @@ Two builds, Weak tier, both on `kimi-k2.7-code` (complex routing). Build 2 shipp
   self-started work). **BLOCKED:** Q-272 (reasoning rung on complex Weak builds — routing decision), Q-273 (11 s
   trivial command, needs a second instance), Q-274 (what a "Python script" request delivers — product decision),
   Q-275 (the request was cut mid-sentence before it reached us), Q-286 (eight items argued not defects).
+## 2026-10-01 — Q-021 done: PROGRESS.md's open root causes moved into the queue
+
+Four parallel read-only audits covered PROGRESS.md lines 1–87,401 (~260 "open root cause" markers). Each
+item was checked against later PROGRESS entries, the current code and the queue. Most July–August items
+were found CLOSED (e.g. coupon race, dead-sandbox recreate, preview door, in-flight call cancellation,
+turnKind, fail-open judge). The 67 still open (duplicates merged) are now rows Q-101…Q-167 in
+`BUILD_REPORT_QUEUE.md` — code-actionable ones OPEN, admin/infra/vendor ones 🟡 BLOCKED with what they need.
+"Unsure" items are marked as such in their row rather than guessed. Q-021 leaves the table.

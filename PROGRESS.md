@@ -87465,3 +87465,11 @@ were left alone: PR #3467 (another session) already carries them.
 **Missing subsystem.** "Is this turn the whole app?" has no single owner. Each reader (starter, preview, reviewer, gate, recap, bill, ETA) asked it separately, and the module fact reached three of them. This PR threads `moduleAwaitsShell` into the rest. The real fix is one `turnScope` value that every verdict reads, alongside the open `turnKind` item.
 
 **Proactive.** Project mode orders modules by dependency, so the App Shell comes last and the user sees nothing for N−1 paid turns. Building the shell early, as a thin assembled app that grows with each module, would turn every module turn into something the user can open. That is a planner change and an admin decision; it is not built here.
+## 2026-10-01 — Q-021 done: PROGRESS.md's open root causes moved into the queue
+
+Four parallel read-only audits covered PROGRESS.md lines 1–87,401 (~260 "open root cause" markers). Each
+item was checked against later PROGRESS entries, the current code and the queue. Most July–August items
+were found CLOSED (e.g. coupon race, dead-sandbox recreate, preview door, in-flight call cancellation,
+turnKind, fail-open judge). The 67 still open (duplicates merged) are now rows Q-101…Q-167 in
+`BUILD_REPORT_QUEUE.md` — code-actionable ones OPEN, admin/infra/vendor ones 🟡 BLOCKED with what they need.
+"Unsure" items are marked as such in their row rather than guessed. Q-021 leaves the table.

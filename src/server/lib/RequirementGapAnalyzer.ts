@@ -375,6 +375,11 @@ const NON_DOMAIN_USES: RegExp[] = [
   // match, and the build was handed employer & candidate roles and job postings to INCLUDE. A control
   // word written on the line next to "resume" is the same player control as one written beside it.
   /\b(?:pause|play|start|stop)\s*(?:\/|and|&|or|,)?\s*resume\b|\bresume\s*(?:\/|and|&|or|,)?\s*(?:pause|finish|stop|end|restart|reset)\b/gi,
+  // healthcare — a GAME's health is the player's hit points (autopsy f496c75b, found 2026-10-04): "a 3d
+  // fight game with … health bars" read as HEALTHCARE, so the heavy-game check (which asks for the game
+  // domain) failed and the builder would have been told to include patient records and staff roles.
+  /\b(?:health|hp|life|stamina|mana)\s*(?:bars?|points?|meters?|potions?|packs?|pickups?|regen(?:eration)?|gauges?)\b/gi,
+  /\b(?:player|enemy|enemies|boss|character|hero|fighter|monster)(?:'s|s'|s)?\s+health\b/gi,
   // ANY domain — a CODE CALL written into the prompt is an identifier, never a noun. A spec that lists an
   // API ("speak(text, language) stop() pause() resume()") read as a jobs app off `resume()` (autopsy
   // SignBridge, 2026-09-26) — and the builder of a sign-language translator was told to INCLUDE employer

@@ -3484,6 +3484,16 @@ Both scaffolds produce real, correctly wired code. The backend services (PocketB
     keywords: ['memory', 'context', 'remember', 'remember project', 'forget', 'fresh start', 'context lost', 'yaad', 'bhool gaya', 'pichla kaam', 'previous build', 'project context', 'session memory', 'unified memory'],
   },
   {
+    id: 'app-requirements-memory',
+    name: 'What your app does — requirements, open problems and change history',
+    path: 'NavBharatAI Pro → History tab → "What your app does"',
+    description: `NavBharatAI remembers every feature your app was asked for, across every edit, with a stable number (REQ-001, REQ-002 …). Each feature shows whether it was SEEN WORKING in a real browser, BUILT (finished by a change that passed its checks), NOT CONFIRMED YET, or MISSING SINCE THE LAST CHANGE. When you edit the app, NavBharatAI re-checks the features that were already working; if an edit accidentally removes one (for example a Delete button), it is caught and, where repairs are enabled, put back automatically — unless you asked to remove it ("remove the delete button" is respected, never undone). Problems found by earlier checks stay on a list with their own numbers until a later check proves them fixed, and every change gets a record (what kind of change it was, whether it finished, and whether it lost anything).`,
+    howToUse: 'Open your app in NavBharatAI Pro and go to the History tab. The "What your app does" card at the top lists your app\'s features with their status, the problems still open, and the recent changes. It updates after every build.',
+    relatedFeatures: ['build-version-history', 'unified-memory', 'pro_chat'],
+    aiSurface: 'pro_chat',
+    keywords: ['requirements', 'features list', 'what my app does', 'feature missing', 'button gayab', 'feature hat gaya', 'regression', 'broke after edit', 'edit ke baad toot gaya', 'open issues', 'problems list', 'change history', 'change log', 'kya kya bana', 'app me kya hai', 'verified features'],
+  },
+  {
     id: 'one-click-deploy',
     name: 'One-Click Publish Button',
     path: 'NavBharatAI Pro → header action row → "Publish" (visible after an app is built)',

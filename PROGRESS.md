@@ -87604,6 +87604,33 @@ is what was adopted. The rows leave `BUILD_REPORT_QUEUE.md`; this entry is their
   - **The real lever then:** a ladder change (another lead rung on Weak/Normal). That is the admin's routing
     decision, not a code fix.
 
+## 2026-10-04 — Change Intelligence Engine, slice 1 (admin request: spec-driven editing)
+
+- **Studied first:** GitHub Spec Kit (`ae5ade7`) — templates, converge, bug triad, analyze — and three audits of
+  our own edit pipeline and per-app storage. Design and phased plan: `docs/CHANGE_ENGINE.md`.
+- **Root cause addressed:** every "what was asked?" check reads only the current prompt, so an edit that removed a
+  working feature was never caught. Now each app has a server-side requirement ledger (`REQ-nnn`, verified only by a
+  real control in the running app), a regression re-probe on every edit (`FEATURE_REGRESSED`), an issue queue moved
+  only by evidence (`ISS-nnn`, DETECTED → TRIAGED → ASSIGNED → FIXED → VERIFIED), and a `CHG-nnnn` record per build.
+- **Flag:** `AGENTV3_CHANGE_ENGINE` (default ON, `off` reverts). Tests: `tests/changeEngine.test.ts` (the ten admin
+  scenarios), two guards reversion-proven.
+- **OPEN (by design, slice 2):** a regression is reported and queued, not repaired in the same build. Wiring it into
+  the feature heal waits on real reports showing the regression probe has no false positives.
+- **OPEN:** only the nine probe-able features can be verified; other requirements join in slice 3.
+
+## 2026-10-04 — Change Intelligence Engine, slices 2–7 (admin: "sara kaam karo, bas improvement chahiye")
+
+- **2:** a regressed feature joins the existing feature heal (same runner, `verifyAfterFix`, cohort gate); prompt says
+  restore, not redesign. `FEATURE_REGRESSION_HEALED`.
+- **3:** contract labels become non-probe-able requirements, `built` only after a GREEN gate.
+- **4:** impact set from the import graph for standard/deep edits (fenced).
+- **5:** deliberate removals are declined everywhere. **Root cause closed:** "remove" is the delete probe's own keyword,
+  so "remove the delete button" was graded as a missing Delete control and could be healed back.
+- **6:** high/medium security findings become owned issues; cleared only when their file was analysed.
+- **7 (user-visible):** History tab → "What your app does" card + `GET /api/agentv3/app-memory` (strict owner,
+  white-labelled) + AppKnowledgeBase `app-requirements-memory`.
+- **OPEN:** the regression probe's real false-positive rate (watch `FEATURE_REGRESSED`); `techDebt` and
+  `workspace_traceability` are not retired (other readers exist).
 ## 2026-10-01 — Autopsy a4be7fa2 + 3f959fde (Kerala-lottery data question, Telugu)
 
 Two builds in one workspace. Build 1 (stopped at 93 s, ₹0): "First data table lo draws check chesi e algorithm

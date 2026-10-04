@@ -3836,6 +3836,30 @@ the flag entries above promise.
   vendor, no split. The label says what can still move it: more work adds to it, the checks at the end
   can only lower it, a build that fails is free.
 
+- **🧠 `AGENTV3_CHANGE_ENGINE` — the app remembers what it is supposed to do, across edits (built
+  2026-10-04, slice 1 of `docs/CHANGE_ENGINE.md`). ⚠️ NOT set; the code default is ON**, and `off` stops
+  every read, write and prompt block with no deploy. Lives in `src/server/AgentV3/changeEngine/`.
+  🔴 **WHY:** every "what did the user ask for?" check reads only the CURRENT prompt
+  (`currentRequestForCoverage` returns the last request on purpose — report 1682cd03), so an edit that
+  silently removed a working Delete button was graded against "make the header blue" and passed.
+  **What it does:** classifies each change (micro-ui … architectural / large → light / standard / deep,
+  higher risk wins); keeps a requirement ledger with stable `REQ-nnn` ids, **verified only by a control a
+  real browser saw** (prose never verifies); re-probes every verified requirement on a later edit
+  (`probeFeatures`, same guards as the coverage probe) and records **`FEATURE_REGRESSED`**; queues
+  unresolved APP findings as `ISS-nnn` moved only by evidence (FIXED/VERIFIED need a build that reached its
+  release gate unstopped); and leaves a `CHG-nnnn` record per build. Report codes `CHANGE_CLASSIFIED`,
+  `CHANGE_RECORDED` (info), `FEATURE_REGRESSED` (warning).
+  🔒 **Server-side only** (`app_engineering_memory_v1/{workspaceId}`, erased with the workspace) — NOT a
+  `.navbharat/` folder in the app (GitHub push, Green Freeze, forgeable by an imported repo, served on the
+  preview URL). Stored text is platform-authored except a redacted 160-char request digest; issue text
+  reaches the builder **fenced**, in the per-turn message, never the cached prefix.
+  🔁 **SLICE 2 (same day, admin: "sara kaam karo"): a regression joins the EXISTING feature heal** — same
+  runner, same `verifyAfterFix` net, same `AGENTV3_FEATURE_HEAL` cohort gate (so it spends a repair pass
+  only for the 20% cohort today; widening `_PCT` widens this too). The prompt says RESTORE, never
+  redesign. A restore is recorded as `FEATURE_REGRESSION_HEALED`; what the heal could not restore stays
+  `FEATURE_REGRESSED`. ⚠️ The regression probe's false-positive rate on real builds is UNMEASURED — the
+  admin chose to ship the repair before that measurement. **What to watch:** `FEATURE_REGRESSED` and
+  `FEATURE_REGRESSION_HEALED` on edit builds, and any heal on an app the user says was fine.
 - **`AGENTV3_CONTRACT_FILE`** (default ON, set `off` to disable — added 2026-09-17, autopsy 57875eb3) —
   the fast lane's SHARED CONTRACT (the enums / interfaces / types every per-file call is handed) is now
   written as a REAL file, `src/types.ts` (or `types.ts` when the app has no `src/`), BEFORE any other file,

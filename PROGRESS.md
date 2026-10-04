@@ -88446,3 +88446,12 @@ Nothing was reworded or dropped. A line-count check confirmed every line of the 
 **New rule:** when the admin sets a Cloud Run key, its name is recorded in `docs/claude/ENV_REGISTRY.md`, not in `CLAUDE.md`. Long histories and rationales go in the matching `docs/claude/` file.
 
 Also: Q-013's queue row now says #3496 is merged.
+
+### 2026-10-04 — App Mart admin: the review page keeps what it approved; Remove from any app's page (Q-500)
+
+Admin report: listing a user's app emptied the App Mart review page, and there was no way to take an app down
+from its own page. Root cause: the web review list fetched listing REQUESTS only, so a listed app left the only
+screen that showed it — the sibling of the 2026-08-21 APK fix, which was never applied to the web lane. Now both
+lanes share `isLiveOnStore` (approved / listed ⇒ "On the store" badge + Remove only), the server returns listed apps
+on `?status=listed`, both info sheets carry an admin-only "Remove from App Mart" (confirmed; the server re-checks
+`isStoreAdmin`), and a refused or failed review decision is shown instead of swallowed.

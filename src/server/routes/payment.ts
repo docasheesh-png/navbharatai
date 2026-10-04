@@ -351,7 +351,11 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
 
     const result = await verifyPaymentInternal(orderId);
     if (result.success) {
-      return res.json(result.data);
+      // This route needs no sign-in (an order id is enough to ask), so it never returns the order OWNER's
+      // balances (forensic audit 2026-10-04): anyone holding an order id used to read them. No client
+      // reads them from here; the wallet is fetched through the owner-checked wallet route.
+      const { currentBalance: _balance, tokenBalance: _tokens, ...publicResult } = (result.data ?? {}) as Record<string, unknown>;
+      return res.json(publicResult);
     } else {
       return res.status(400).json({ error: result.error });
     }

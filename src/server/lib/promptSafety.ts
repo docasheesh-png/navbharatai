@@ -30,7 +30,7 @@
 //
 // PURE + deterministic + bounded. No model call, so the 99.9% path costs nothing at all.
 
-import { ILLEGAL_RULES, normalizeScanText, type PublishContentClass } from '../AgentV3/illegalContentRules';
+import { ILLEGAL_RULES, normalizeScanText, protectiveStandDown, type PublishContentClass } from '../AgentV3/illegalContentRules';
 import { redactSecrets, redactPII } from '../AgentV3/SecretRedactor';
 
 export type SafetyVerdict = 'allow' | 'flag' | 'block';
@@ -72,6 +72,9 @@ export function triagePrompt(text: string | null | undefined): PromptTriage {
     // a sexual-health clinic app and a harassment-reporting tool both contain the pair, and both are
     // apps NavBharatAI should want.
     if (rule.exempt?.test(body)) continue;
+    // Q-320: a child-protection or deepfake-detection app is not the offence it protects against —
+    // unless the request also carries a word such an app has no reason to use (then it is refused).
+    if (protectiveStandDown(rule, body)) continue;
 
     // The prompt carries the offending thing itself — the same pairing the publish scanner blocks on.
     if (rule.context.test(body)) {

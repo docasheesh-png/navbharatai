@@ -273,16 +273,20 @@ export interface LiveDataOptions {
 }
 
 /**
- * ONE dispatcher for every live source: the first source whose shape matches the message answers, and
- * '' means "nothing live applies — let the web search answer". Transit (env-keyed) is tried first
- * because a train/PNR/flight number is the most specific shape a message can have.
+ * ONE dispatcher for every live source: EVERY source whose shape matches the message answers, in a fixed
+ * order, and '' means "nothing live applies — let the web search answer".
+ *
+ * 🔴 IT USED TO BE THE FIRST SOURCE ONLY (queue Q-127). "Delhi me aaj mausam kaisa hai aur 100 dollar kitne
+ * rupaye" got the weather and nothing about the rupee: the loop returned at the first block, and because
+ * a live answer skips the web search, the second half of the question was simply dropped. Each source
+ * still decides for itself whether the message is its shape (that check is cheap and fetches nothing), so
+ * asking all of them costs a network call only for the ones that match — and they run side by side.
  */
 export async function liveDataContext(message: string, opts: LiveDataOptions = {}): Promise<string> {
   const env = opts.env ?? process.env;
   const fetchImpl = opts.fetchImpl ?? fetch;
   const now = opts.now ?? new Date();
-  const transit = await liveTransitContext(message, { env, fetchImpl, now }).catch(() => '');
-  if (transit) return transit;
+  const transit = liveTransitContext(message, { env, fetchImpl, now }).catch(() => '');
   /**
    * 🔒 THE ONE SOURCE HERE WHOSE LICENCE DOES NOT COVER A COMMERCIAL PRODUCT (admin 2026-09-09).
    *
@@ -307,9 +311,10 @@ export async function liveDataContext(message: string, opts: LiveDataOptions = {
   if (liveWeatherSourceEnabled(env)) sources.push(weatherBlock);
   if (cpcbAqiConfigured(env)) sources.push((m, f, n) => aqiBlock(m, f, n, env));
   sources.push(currencyBlock, pincodeBlock);
-  for (const source of sources) {
-    const block = await source(message, fetchImpl, now).catch(() => '');
-    if (block) return block;
-  }
-  return moviesBlock(message, fetchImpl, now, env).catch(() => '');
+  const blocks = await Promise.all([
+    transit,
+    ...sources.map((source) => source(message, fetchImpl, now).catch(() => '')),
+    moviesBlock(message, fetchImpl, now, env).catch(() => ''),
+  ]);
+  return blocks.filter((b) => typeof b === 'string' && b.trim()).join('\n\n');
 }

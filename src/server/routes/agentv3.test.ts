@@ -2513,9 +2513,12 @@ describe('writtenFiles census — a new writer must consider the read-only (impo
     expect(SRC).toContain('!opts.isImportTurn'); // reviewerShouldRun itself gates on the import turn
   });
 
-  it('the build summary still reports honestly from writtenFiles.size', () => {
-    // ProjectSummary picks "I analyzed your project — no files were changed" on changedFiles === 0.
-    expect(SRC).toContain('changedFiles: writtenFiles.size');
+  it('the build summary still reports honestly from writtenFiles', () => {
+    // ProjectSummary picks "I analyzed your project — no files were changed" on changedFiles === 0. A
+    // read-only turn writes nothing, so both branches below give 0 there. On an edit the count is what THIS
+    // turn authored (autopsy cf09c03c: our finishing passes were counted as "I changed 10 files").
+    expect(SRC).toContain('const summaryPaths = isEditMode ? reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden) : [...writtenFiles.keys()];');
+    expect(SRC).toContain('changedFiles: summaryPaths.length');
   });
 });
 

@@ -87422,3 +87422,52 @@ is what was adopted. The rows leave `BUILD_REPORT_QUEUE.md`; this entry is their
     day.
   - **The real lever then:** a ladder change (another lead rung on Weak/Normal). That is the admin's routing
     decision, not a code fix.
+
+## 2026-10-01 — Autopsy 6cd698cc: the repair that worked was undone, and a repair that changed nothing said it did
+
+Build: "Build an app best than chatgpt or gpt 5.6 free Life time in this app", Weak, ok, 10.6 min, ₹129.17.
+Already fixed on `main` after this build ran (14:19 UTC), so not re-fixed: the style resume skipping invented `nb-`
+classes, the "looks complete" narration over unstyled screens, and the SIMULATED "random song" example (#3459); a
+repair told "you read this the second time" (#3457 B); the crawl/timeout double strike (#3448).
+
+| ID | Problem | Root cause | Class | Siblings | Lock |
+|---|---|---|---|---|---|
+| Q-170 | The stylesheet repair wrote nothing and claimed "now defines every one of the 29 classes" | A run's final text was narrated whatever the run had changed | A repair's report of its own work was never checked against its writes | Every platform-requested runner (one door: `AgentRunner`'s narration); delegated writes counted via `changeCount()` | `theRepairThatWorkedWasUndone.test.ts` §1 |
+| Q-171 | The explorer repair fixed the bug in 61 s, then verified it itself until the 150 s cap; undone, ₹20.69 absorbed | It was given the reviewer's `judgeRepairPrompt` ("verify the app builds…"), the preview/browser tools, and the style hand-back | A repair the platform re-checks was told to check itself | The green functional repair had the same shape (same tools, same hand-back); both fixed | §2 |
+| Q-172 | TS1361 enum `import type` from the contract (f496c75b class again) | The heal ran only at the endgame; the write door and the timeout salvage had none | A deterministic fix applied in one place of three | Write-time typecheck + salvage now run the same fixes as the verify step | §3 |
+| Q-173 | Theme button crash: `store.set` handed out uncalled, reads `this` | Nothing named the pattern at write time | Unbound method handed out | Destructuring `const { set } = store` covered too | §4 |
+| Q-174 | Journey not run: icon send button named by `aria-label` | `submitTargetIn` read only inner text | Name read by text, while the browser uses the accessible name | type=submit and create-word branches both use `accessibleName` | §5 |
+| Q-175 | `SIMULATED_RESULT` on "mock API key" | `api` matched as a result noun | A credential read as a faked result | key / token / secret all excluded | §6 |
+| Q-176 | Eight items argued not defects | — | — | — | 🟡 needs the admin's agreement |
+| Q-085 | Chat-form journey | Q-174 makes the next chat journey run; in-memory chats would then FAIL the reload check | — | — | Decided by the admin (option a, submit-only); built in #3473, not here |
+
+Each fix was reverted in place and the suite failed, then restored. New flags (NOT set, default ON, `off` reverts):
+`AGENTV3_WRITE_TYPE_IMPORT_HEAL`, `AGENTV3_DETACHED_METHOD_NOTE`. The GLM crawls (≈30 s) are inside Q-009's accepted
+bounds. Housekeeping: rows Q-069..Q-080 (1219c639) left the open table — #3461 merged.
+
+## 2026-10-04 — Autopsy cf09c03c: "write a better prompt" built an app (PR #3470)
+
+Romanised Bengali, Weak, 3.6 min, ₹6.34. "Etake aro improve korar jonno ekta valo prompt likhe dao" asked for
+TEXT. "improve" locked it to an edit at HIGH, the workspace held only our starter, and the build replaced
+`src/App.tsx` with a page that displays a prompt. The turn before ("Create a image generated promt") was read
+as a picture request.
+
+🔴 **Recurrence:** the class is autopsy 6ae30b33's ("a build verb whose object is text the reply can write").
+That fix asked only the new-build verbs and had no "prompt" in its noun list; the edit verbs were never hunted.
+
+| ID | Problem | Root cause | Class | Siblings found and fixed | Test |
+|---|---|---|---|---|---|
+| Q-250 | Prompt request built an app | Edit branch never asked the written-content question | A verb whose object is text, read as an app order | New-build branch ("ek accha prompt likh do", "make a better prompt"), every edit verb, "image prompt" as a screen part | `aPromptIsTextNotAnApp` §1 |
+| Q-251 | "…generated promt" read as a picture | `detectImageIntent` had no notion of a prompt as the object | A prompt is text, not a picture | Shared detector: Pro, free chat, Professionals, SDA | §2 |
+| Q-253 | "I changed 10 files" (model wrote 2) | Summary counted `writtenFiles`, which our finishing passes also fill | Platform writes reported as the model's | Reviewer already used `reviewChangedPaths`; the summary now does too | §3 + `agentv3.test.ts` |
+| Q-254 | Lean review read inlined App.tsx twice | Kit stylesheet over the inline bound restored the tools | One omission withdrawing one-call mode | — | §4 |
+| Q-255 | "Editing your existing app" about our starter | — | Owned by #3475 (Q-206) | — | — |
+| Q-252 / Q-256 / Q-257 / Q-258 | Hindi reply to English (needs that turn's report) · ₹6.34 refund (admin) · slow first typecheck (Q-063 class, needs the ensure log) · eight items argued not defects | — | — | — | 🟡 in the queue |
+## 2026-10-01 — Q-021 done: PROGRESS.md's open root causes moved into the queue
+
+Four parallel read-only audits covered PROGRESS.md lines 1–87,401 (~260 "open root cause" markers). Each
+item was checked against later PROGRESS entries, the current code and the queue. Most July–August items
+were found CLOSED (e.g. coupon race, dead-sandbox recreate, preview door, in-flight call cancellation,
+turnKind, fail-open judge). The 67 still open (duplicates merged) are now rows Q-101…Q-167 in
+`BUILD_REPORT_QUEUE.md` — code-actionable ones OPEN, admin/infra/vendor ones 🟡 BLOCKED with what they need.
+"Unsure" items are marked as such in their row rather than guessed. Q-021 leaves the table.

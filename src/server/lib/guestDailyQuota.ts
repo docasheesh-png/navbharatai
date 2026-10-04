@@ -28,6 +28,7 @@
 // locking visitors out of a free chat. The per-minute and per-hour limiters stay in force regardless.
 
 import type { Request, Response, NextFunction } from 'express';
+import { clientAddress } from './clientAddress';
 import { createHash } from 'crypto';
 import { doc, getServerDb, runTransaction } from './serverDb';
 import { verifyFirebaseIdentity } from './authMiddleware';
@@ -78,8 +79,9 @@ export function readGuestId(value: unknown): string | null {
  * `req.ip` returns under `trust proxy`, is whatever the caller claimed.
  */
 export function requestAddress(req: Pick<Request, 'headers' | 'socket'>): string {
-  const fwd = String(req.headers['x-forwarded-for'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  return fwd[fwd.length - 1] || req.socket?.remoteAddress || 'unknown';
+  // The one definition lives in clientAddress.ts (security checklist 2026-10-04); kept under this name
+  // because callers and tests already import it from here.
+  return clientAddress(req);
 }
 
 /** A stored key that is not the raw id or address. */

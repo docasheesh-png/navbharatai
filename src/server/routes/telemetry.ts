@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express';
 import { errorTracker } from '../observability/ErrorTracker';
+import { clientAddress } from '../lib/clientAddress';
 import { recordAnalyticsEvent, getFunnel } from '../lib/AnalyticsPipeline';
 import { sendSafeError } from '../lib/httpError';
 
@@ -54,7 +55,7 @@ export function registerTelemetryRoutes(app: Express): void {
   app.post('/api/logs/error', (req: Request, res: Response) => {
     try {
       const { message, source, line, col, stack, url, ts, type } = req.body || {};
-      const ip = (req.headers['x-forwarded-for'] as string || req.socket?.remoteAddress || '').split(',')[0].trim();
+      const ip = clientAddress(req);
       console.error('[CLIENT_ERROR]', JSON.stringify({ message, source, line, col, stack, url, ts, type, ip }));
       // Reconstruct an Error so the stack groups correctly in Cloud Error Reporting.
       const err = new Error(String(message || type || 'client error'));

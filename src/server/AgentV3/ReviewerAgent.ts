@@ -441,6 +441,17 @@ function leanPriority(path: string): number {
 /**
  * Pick the changed source files a lean review is handed in full, bounded. PURE — the caller supplies
  * contents (the freshest copy it holds).
+ *
+ * 🔴 THE PER-FILE CAP STARVED THE ONE FILE IT WAS MEANT TO PROTECT THE OTHERS FROM (autopsy 8b8743a3,
+ * 2026-10-04). A 3D driving game's build changed exactly one source file, a 22,306-byte `src/App.tsx`.
+ * It was over `LEAN_REVIEW_FILE_CHARS` (16 KB) and so omitted — leaving NOTHING inline — yet it fits the
+ * 60 KB total four times over. The review therefore kept its tools, spent all 12 steps reading that one
+ * file 200 lines at a time (the LOOP GUARD fired at the ninth read), and reported nothing at all.
+ *
+ * 🔑 The per-file cap exists for ONE reason, stated where it is declared: so one large file cannot take
+ * the whole budget from the others. When everything that is a candidate fits the total ANYWAY, there is
+ * nothing to starve and the cap has no work to do — so it is not applied. A set that genuinely does not
+ * fit keeps today's behaviour exactly: the per-file cap, then the running total.
  */
 export function leanReviewInline(
   changed: readonly string[],
@@ -450,13 +461,16 @@ export function leanReviewInline(
   const paths = [...new Set(changed)]
     .filter((p) => LEAN_SOURCE.test(p) && !LEAN_SKIP.test(p))
     .sort((a, b) => leanPriority(a) - leanPriority(b) || a.localeCompare(b));
+  const readable = paths
+    .map((path) => ({ path, content: contentOf(path) }))
+    .filter((f): f is { path: string; content: string } => typeof f.content === 'string' && !!f.content.trim());
+  // Everything fits the total ⇒ the per-file cap has nothing to protect, so it does not apply.
+  const everythingFits = readable.reduce((n, f) => n + f.content.length, 0) <= maxChars;
   const files: { path: string; content: string }[] = [];
   const omitted: string[] = [];
   let used = 0;
-  for (const path of paths) {
-    const content = contentOf(path);
-    if (typeof content !== 'string' || !content.trim()) continue;
-    if (content.length > LEAN_REVIEW_FILE_CHARS || used + content.length > maxChars) { omitted.push(path); continue; }
+  for (const { path, content } of readable) {
+    if ((!everythingFits && content.length > LEAN_REVIEW_FILE_CHARS) || used + content.length > maxChars) { omitted.push(path); continue; }
     files.push({ path, content });
     used += content.length;
   }

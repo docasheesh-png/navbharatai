@@ -24,7 +24,10 @@ describe('the generated runner', () => {
   const mod = clickExplorerModule({ base: 'http://x/' });
 
   it('keeps the reason a press failed, without the call log\'s colour codes', () => {
-    expect(mod).toContain("res.note = pressFailureNote('could not be pressed: '");
+    // Since autopsy 8b8743a3 both lanes route their failure through ONE judge, which writes the note —
+    // so the cause line still reaches both, and the coverage probe cannot reach only one of them.
+    expect(mod).toContain('res.note = pressFailureNote(prefix, message, cfg.causeSrc, cfg.causeFlags)');
+    expect(mod).toContain("judgeFailedPress(page, res, 'data-nbai-x', marked, String(e && e.message || e), 'could not be pressed: ')");
     const coloured = 'locator.click: Timeout 4000ms exceeded.\nCall log:\n  \u001b[2m  - <div class="tc-pad"></div> intercepts pointer events\u001b[22m';
     expect(pressFailureNote('could not be pressed: ', coloured, PRESS_FAILURE_CAUSE.source, PRESS_FAILURE_CAUSE.flags))
       .toBe('could not be pressed: locator.click: Timeout 4000ms exceeded. — <div class="tc-pad"></div> intercepts pointer events');
@@ -71,8 +74,20 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
     const stdout = await new Promise<string>((res, rej) => execFile(process.execPath, [file], { env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: BROWSERS }, timeout: 90_000 }, (e, out) => (e ? rej(e) : res(out))));
     const run = parseExploreOutput(stdout);
     const pause = run.presses.find((p) => p.label !== 'Shuffle');
-    expect(pause?.verdict).toBe('skipped');
-    expect(pause?.note).toMatch(/— <div class="tc-pad"><\/div> intercepts pointer events$/);
+    /**
+     * 🔁 THE VERDICT CHANGED WITH AUTOPSY 8b8743a3 (same day, the other side of this class). It used to
+     * be `skipped` — "our instrument, not the app" — and that is what let a 3D driving game ship GREEN
+     * with all three of its controls unreachable: every skipped press is dropped by `summarizeExplore`,
+     * so the whole run reported `EXPLORE_NOTHING_TO_PRESS`, an info line with no offer and no repair.
+     *
+     * A transparent pad fixed over the pause button is a real defect whoever wrote it: on the user's
+     * screen the app cannot be paused. So it is now `covered`, a FAILING verdict that earns the user a
+     * one-tap fix — and this test's own point is kept, because the note still NAMES the element.
+     * The cause line this file was written for is still carried for a press that really was ours
+     * (the pure test above), where the verdict stays `skipped`.
+     */
+    expect(pause?.verdict).toBe('covered');
+    expect(pause?.note).toBe('it cannot be pressed: div.tc-pad is on top of it');
     expect(pause?.note).not.toMatch(/\u001b/);
     expect(run.presses.find((p) => p.label === 'Shuffle')?.verdict).toBe('ok');
   }, 120_000);

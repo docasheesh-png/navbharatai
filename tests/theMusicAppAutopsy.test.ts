@@ -85,7 +85,13 @@ describe('the lean review is handed the app\'s CSS, not our kit', () => {
   it('a kit stylesheet no longer costs the review its one-call mode', () => {
     const files = new Map([['src/App.tsx', 'export default function App() { return null; }'], ['src/index.css', css]]);
     const raw = leanReviewInline([...files.keys()], (p) => files.get(p));
-    expect(raw.omitted).toContain('src/index.css');
+    // The kit is over the PER-FILE cap, and since autopsy 8b8743a3 that cap applies only when the whole
+    // set cannot fit the total — these two do, so it is handed over in full rather than named.
+    expect(raw.omitted).toEqual([]);
+    // And a stylesheet that genuinely cannot fit still does not cost one-call mode (#3470's own rule).
+    const vast = leanReviewInline([...files.keys()], (p) => (p.endsWith('.css') ? 'a'.repeat(80_000) : files.get(p)));
+    expect(vast.omitted).toEqual(['src/index.css']);
+    expect(leanReviewAnswersInOneCall(vast)).toBe(true);
     expect(leanReviewAnswersInOneCall(raw)).toBe(true); // since #3470 an omitted stylesheet alone no longer costs one-call mode; the strip below still makes it fit inline
     const stripped = leanReviewInline([...files.keys()], (p) => (p.endsWith('.css') ? (appOwnStylesheet(files.get(p)!) ?? files.get(p)) : files.get(p)));
     expect(leanReviewAnswersInOneCall(stripped)).toBe(true);

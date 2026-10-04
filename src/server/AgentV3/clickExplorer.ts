@@ -168,6 +168,34 @@ export const THEME_CONTROL = /\btheme\b|\bdark\b|\bappearance\b|\b(?:light|night
 export const MAX_THEME_PRESSES = 3;
 
 /** Names or options that make a menu a sort or filter menu. Deliberately not "type", "status" or "show". */
+/**
+ * 🔎 A CONTROL THAT PROMISES MORE AND SHOWS NOTHING IS DEAD (autopsy 39e982bd / Q-518, 2026-10-04).
+ *
+ * The explorer pressed six controls on an esports app and recorded *"OK \"View Details\" — it responded
+ * (nothing visibly changed)"* as a PASS. A button labelled **View Details** that changes nothing is a
+ * dead control — the `UI_ONLY_CONTROL` class, reached by observation instead of by the build admitting
+ * it — and a user finds it in their first minute.
+ *
+ * `unresponsive` already existed for a search box, a sort menu and a theme switch; this is the fourth
+ * name that makes "nothing happened" a failure rather than a shrug.
+ *
+ * 🔒 WHY THIS IS SAFE, and it is the measurement that decides it: `res.changed` is false only when the
+ * URL is unchanged AND `document.body.innerHTML` **and** `innerText` hash identically. A modal, an
+ * accordion, a navigation, even a class toggle inside the body all change that hash — so a false
+ * failure needs a control that opens something with no DOM change at all, which for these labels cannot
+ * happen. (The theme switch escaped it because its class lands on `<html>`, which `measure` does not
+ * hash — hence its own colour check.)
+ *
+ * ⚠️ PRECISION-FIRST IN THE NAME, DELIBERATELY. Only labels that PROMISE more content: "view details",
+ * "details", "view more", "see more", "read more", "learn more", "show more", "open", "expand".
+ * A bare **"View"** is NOT here — a grid/list switcher is often labelled exactly that — and nor is
+ * "Copy", "Refresh" or "Share", which can legitimately change nothing on screen.
+ */
+// ⚠️ THE DEVANAGARI RUNS SIT OUTSIDE THE `\b` GROUP, and my own test caught it: `\b` is an ASCII word
+// boundary, so `\bविवरण` can never match — the exact class this repo swept in #3509. A Devanagari
+// alternative belongs beside the group, never inside its boundary.
+export const NAVIGATION_PROMISE = /\b(?:view\s+(?:details?|more|all|profile|order|item)|details?\b|more\s+(?:details?|info(?:rmation)?)|see\s+(?:more|details?|all)|read\s+more|learn\s+more|show\s+more|open\b|expand\b)|विवरण|अधिक\s*जानकारी|पूरा\s*देखें|पूरी\s*जानकारी/i;
+
 export const SORT_CONTROL = /sort|order by|arrange|filter|categor|\ba\s*[-–]\s*z\b|\bz\s*[-–]\s*a\b|ascending|descending|\basc\b|\bdesc\b|newest|oldest|latest|price|low to high|high to low|क्रम|छा[ँं]ट|श्रेणी/i;
 
 /**
@@ -248,6 +276,13 @@ export interface PressResult {
   /** How it was tried. Absent means pressed — every record written before 2026-09-30. */
   kind?: PressKind;
   /**
+   * WHY a press was `unresponsive`, so the user's sentence cannot describe the wrong thing. A press has
+   * had two reasons since 2026-10-04: a light/dark switch that never changed the colours (`theme`), and
+   * a control whose name promised more content and showed nothing (`promise`, autopsy 39e982bd / Q-518).
+   * Absent on every record written before that, and on every verdict but `unresponsive`.
+   */
+  deadReason?: 'theme' | 'promise';
+  /**
    * The first-screen control pressed to REACH this one, when it is a second-level control. Absent on
    * a first-screen press. It is a name a person can follow ("open Settings, then press Save").
    */
@@ -317,6 +352,9 @@ export function parseExploreOutput(stdout: string | null | undefined): ExploreRu
         ...(o.kind === 'type' || o.kind === 'pick' ? { kind: o.kind as PressKind } : {}),
         ...(typeof o.via === 'string' && o.via.trim() ? { via: o.via.slice(0, 60) } : {}),
         ...(typeof o.primedBy === 'string' && o.primedBy.trim() ? { primedBy: o.primedBy.slice(0, 60) } : {}),
+        // WHY a press was dead, so the user's sentence cannot describe the other reason. A field the
+        // page sets and the parser drops is a field nothing reads — the shape this autopsy keeps finding.
+        ...(o.deadReason === 'theme' || o.deadReason === 'promise' ? { deadReason: o.deadReason as 'theme' | 'promise' } : {}),
       });
       // A retry after a primer REPLACES the first try of the same first-screen control (MAX_PRIMED_RETRIES).
       const last = run.presses[run.presses.length - 1];
@@ -432,8 +470,12 @@ function failureSentence(p: PressResult): string {
       ? `Choosing a different option in ${pressName(p)} changed nothing on the screen.`
       : p.kind === 'type'
         ? `Typing into ${pressName(p)} changed nothing on the screen — it does not search the list.`
-        // A PRESS is judged unresponsive only for a light/dark switch (THEME_CONTROL).
-        : `Pressing ${pressName(p)} never changed the app's colours — the light/dark switch does not switch the theme.`;
+        // A PRESS has two reasons (`deadReason`): a theme switch that never changed the colours, and a
+        // control that promised more and showed nothing. One sentence each, so neither describes the
+        // other — a sentence about colours on a dead "View Details" is the honesty defect, not a typo.
+        : p.deadReason === 'promise'
+          ? `Pressing ${pressName(p)} showed nothing — it promises more to see and the screen does not change.`
+          : `Pressing ${pressName(p)} never changed the app's colours — the light/dark switch does not switch the theme.`;
     default: return `${doing} ${pressName(p)} caused an error in the app.`;
   }
 }
@@ -547,6 +589,7 @@ export function clickExplorerScript(previewUrl: string, opts: { blockWrites: boo
     searchSrc: SEARCH_CONTROL.source, searchFlags: SEARCH_CONTROL.flags,
     sortSrc: SORT_CONTROL.source, sortFlags: SORT_CONTROL.flags,
     themeSrc: THEME_CONTROL.source, themeFlags: THEME_CONTROL.flags,
+    promiseSrc: NAVIGATION_PROMISE.source, promiseFlags: NAVIGATION_PROMISE.flags,
     maxThemePresses: MAX_THEME_PRESSES,
     causeSrc: PRESS_FAILURE_CAUSE.source, causeFlags: PRESS_FAILURE_CAUSE.flags,
   };
@@ -638,7 +681,10 @@ function collect(a) {
       // may say only "Auto" or "🌓", so its aria-label and title are read too.
       const named = [label, el.getAttribute('aria-label') || '', el.getAttribute('title') || ''].join(' ');
       const theme = !!(a.themeSrc && new RegExp(a.themeSrc, a.themeFlags).test(named));
-      chosen.push({ i: chosen.length, tag, label, key, theme });
+      // A name that PROMISES more content (NAVIGATION_PROMISE) — read from the same three names, so an
+      // icon button labelled only by its aria-label is judged too.
+      const promise = !!(a.promiseSrc && new RegExp(a.promiseSrc, a.promiseFlags).test(named));
+      chosen.push({ i: chosen.length, tag, label, key, theme, promise });
     }
   }
   return { found: nodes.length, chosen, skipped, keys: Array.from(seen) };
@@ -924,7 +970,15 @@ async function pressOne(browser, target, discoverAgainst) {
       }
       if (res.errors.length > 0) { res.verdict = 'error'; res.note = 'the app threw an error when it was pressed again'; }
       else if (verdictLook === 'changed') { res.changed = true; res.note = presses > 1 ? "it changed the app's colours on press " + presses : "it changed the app's colours"; }
-      else if (verdictLook === 'same') { res.verdict = 'unresponsive'; res.note = 'pressing it ' + presses + " times never changed the app's colours — a light/dark switch that does not switch"; }
+      else if (verdictLook === 'same') { res.verdict = 'unresponsive'; res.deadReason = 'theme'; res.note = 'pressing it ' + presses + " times never changed the app's colours — a light/dark switch that does not switch"; }
+    }
+    // A control whose NAME promises more content and that changed nothing at all is dead
+    // (NAVIGATION_PROMISE). Judged last, so a crash, a blank screen, a broken link, an error and the
+    // theme verdict all keep precedence over it.
+    if (res.verdict === 'ok' && !res.changed && !res.primedBy && hit.promise) {
+      res.verdict = 'unresponsive';
+      res.deadReason = 'promise';
+      res.note = 'it promises more to see and showed nothing — the screen did not change at all';
     }
     armed = false;
     // Only a press that WORKED and CHANGED the screen can open a new screen worth exploring; a broken

@@ -88909,3 +88909,81 @@ cancels of #3515 (19:57), #3518 (20:44) and #3523 (20:45) read "The job has exce
 of 30m0s" — `ci.yml`'s own `timeout-minutes: 30`, hit because eight or nine PR runs in flight slowed every run to
 21–30 min. The cap is now 45 (#3524 staging). Lesson, the fourth rule's first step: read the run's own last
 words before naming a cause — a cancelled run names its canceller.
+
+## 2026-10-04 — autopsy 39e982bd CLOSED: Q-515, Q-516, Q-518, the last three
+
+The admin: *"apka jo bhi kaam bacha hai, complete karo! … pura kaam karo bina ruke!"* These are the
+three items that autopsy left OPEN, and with them every row of report 39e982bd has a final state.
+
+### Q-516 — the signal that steered the whole build
+
+`APP_SCOPE` recorded *"LARGE — clone of Free Fire"*, and that was the request's **only** scope signal,
+so one false reading is what handed the build to the mega-app roadmap planner. **Measured on `main`
+before a line was written:** `"a tournament app for Free Fire players"` and `"PUBG tournament
+registration app"` both returned `["asks to clone <game>"]`.
+
+The product name is followed by a noun naming DATA ABOUT ITS PLAYERS — the prompt's own registration
+fields are *"Free Fire IGN"*, *"Free Fire UID"*, *"Free Fire level"* — or the COMPETITION around it
+(tournament, match, lobby, squad, esports, leaderboard, rank, kills). That is the **sixth shape** of
+"the product is being used", after channels, content, markdown, prohibitions and launch verbs, and it
+joins the same `TOOL_AFTER` list rather than becoming a sixth special case. *"Make a Free Fire clone"*
+and *"Free Fire jaisa game banao"* still escalate; the module's own stated asymmetry points this way
+(a missed clone falls back to the ordinary build, a false clone spends a planner call on the wrong app).
+
+**The domain half of the same row.** `REQUIREMENT_GAPS` called an esports tournament app **ecommerce**
+and told the builder it lacked *"product catalog + search, order management, inventory tracking"*. The
+two words came from the gateway's own section — *"PayPal **checkout** integration"*, *"capture
+**orders** on the backend"* — and `checkout` is the NAME of PayPal's and Stripe's product. Measured:
+`ecommerce` with those three gaps → **`fintech`** with KYC, 2FA, fraud/limit checks and an audit log,
+which is exactly what an app moving real money needs. `RequirementGapAnalyzer` had already fixed
+`\border\b` for this class (73df1fbb); `checkout` was its unhunted sibling. The strip is the same
+context-gated shape as `broker` in a trading prompt, and it stands down the moment anything says goods
+are sold — so "a store with a cart and Stripe checkout" keeps every word, locked by a test.
+
+### Q-518 — a control that promises more and shows nothing
+
+The explorer recorded *"OK \"View Details\" — it responded (nothing visibly changed)"* as a PASS.
+`NAVIGATION_PROMISE` makes that `unresponsive` — the fourth name after a search box, a sort menu and a
+theme switch — which reaches `EXPLORE_FAILED`, the user's one-tap offer and `explorerRepair` with no
+new wiring, because `unresponsive` is already in `FAILING_VERDICTS`.
+
+🔒 **Safe by measurement, not by hope:** `res.changed` is false only when the URL is unchanged AND
+`document.body.innerHTML` **and** `innerText` hash identically, so a modal, an accordion, a navigation
+or even a class toggle inside the body all count as a change. A false failure would need a control that
+opens something with no DOM change at all. ⚠️ A bare **"View"** is deliberately NOT in the list — a
+grid/list switcher is often labelled exactly that — and nor are Copy, Refresh, Share, Save.
+
+**Two siblings found while wiring it, both the same shape as the autopsy itself:**
+- The user's sentence for an unresponsive PRESS hardcoded the theme wording, so a dead "View Details"
+  would have been described to the user as *"never changed the app's colours"*. `deadReason` now carries
+  which reason it was, with one sentence each.
+- **The parser dropped that field** — a field the page sets and nothing reads. Caught by writing the
+  test, not by the typechecker.
+- And my own test caught `\bविवरण` being **unmatchable**: `\b` is an ASCII word boundary, so a
+  Devanagari run inside a `\b(?:…)` group can never fire — the exact class #3509 swept. The Devanagari
+  alternatives now sit outside the group.
+
+### Q-515 — argued NOT a defect, with the evidence
+
+The row read *"the snapper fixed 6, the scorer reported 27 — 21 were left"*. **Reading the code says
+that is wrong.** `snapSpacingInSource` returns `changes: [...new Set(changes)]` — deduped to distinct
+mappings — while the finding counts OCCURRENCES. All 27 **were** rewritten: the post-snap re-check
+(autopsy e3b0ce25) found zero violations, which is precisely why that report's `DESIGN_CONSISTENCY`
+carries `autoResolved: true`. The fast-lane snap needs no such re-check either — it runs before the
+finding is ever recorded.
+
+**One real defect remains, and it is the one that misled the autopsy:** both lines said "N spacing
+value(s)" for two different units. The note now states both — `15 spacing value(s) (3 distinct)`.
+
+⚠️ Recorded because my first test case tripped it: three identical 18px share a divisor of 18, which
+`isCoherentOtherGrid` correctly reads as the file having its own 18px rhythm and leaves alone. Nobody
+should "fix" the snapper to break a design system.
+
+**Proof:** `tests/aTournamentAppIsNotACloneOfTheGame.test.ts` (18 cases), reversion-proven **six ways**
+— dropping the player nouns fails 3, dropping the gateway strip fails 2, stripping even where goods are
+sold fails 1, dropping the dead-promise verdict fails 1, dropping `deadReason` from the parser fails 1,
+reporting one unit again fails 1.
+
+**BUILD REPORT 39e982bd — RESOLUTION. Items: 9 · ✅ Resolved: 9 · 🟡 Blocked: 0 · Remaining: 0.**
+Q-510..Q-513 merged in #3523, Q-514/Q-517 in #3525, Q-515/Q-516/Q-518 in this PR. FINAL: ✅ COMPLETE
+once this merges — every row of that report has a final state, and none was closed without evidence.

@@ -59,8 +59,10 @@ export const MAX_SNAP_FILES = 8;
 export interface SpacingSnapPatch {
   path: string;
   content: string;
-  /** What moved, smallest first: `['6px → 4px', '10px → 8px']`. For the admin report only. */
+  /** What moved, smallest first and DEDUPED: `['6px → 4px', '10px → 8px']`. For the admin report only. */
   changes: string[];
+  /** How many DECLARATIONS were rewritten — `changes` is deduped, and the two differ (Q-515). */
+  occurrences?: number;
 }
 
 /**
@@ -109,7 +111,7 @@ export function isCoherentOtherGrid(offGrid: readonly number[], grid: number = S
  * Rewrite one file's off-grid spacing. Returns null when nothing changes, or when the file carries its
  * own rhythm (more off-grid values than on-grid ones — see `otherGrid` above). PURE.
  */
-export function snapSpacingInSource(source: string, grid: number = SPACING_GRID): { content: string; changes: string[] } | null {
+export function snapSpacingInSource(source: string, grid: number = SPACING_GRID): { content: string; changes: string[]; occurrences: number } | null {
   if (typeof source !== 'string' || source.length === 0) return null;
   // The lint judges the SHIPPED markup, so a commented-out value is neither counted nor rewritten. The
   // offsets of a stripped copy do not line up with the original, so the comment ranges are what the
@@ -152,7 +154,7 @@ export function snapSpacingInSource(source: string, grid: number = SPACING_GRID)
   }
   if (changes.length === 0) return null;
   out += source.slice(last);
-  return { content: out, changes: [...new Set(changes)] };
+  return { content: out, changes: [...new Set(changes)], occurrences: changes.length };
 }
 
 /** `[start, end)` of every block and line comment, so a rewrite can skip them. PURE. */
@@ -185,9 +187,9 @@ export function spacingSnapPatches(
     try { off = offGridSpacing(extractSpacingPx(stripCommentsForMarkup(content)), SPACING_GRID).length; } catch { continue; }
     if (off === 0) continue;
     total += off;
-    let patch: { content: string; changes: string[] } | null = null;
+    let patch: { content: string; changes: string[]; occurrences?: number } | null = null;
     try { patch = snapSpacingInSource(content, SPACING_GRID); } catch { patch = null; }
-    if (patch && patch.content !== content) candidates.push({ path, content: patch.content, changes: patch.changes });
+    if (patch && patch.content !== content) candidates.push({ path, content: patch.content, changes: patch.changes, ...(patch.occurrences === undefined ? {} : { occurrences: patch.occurrences }) });
   }
   // THE FINDING'S OWN THRESHOLD: below it the report says nothing, so neither does this.
   if (total <= MAX_OFFGRID) return [];
@@ -197,9 +199,19 @@ export function spacingSnapPatches(
 /** One sentence for the admin report — never user-facing, so it may name the mechanism. */
 export function spacingSnapNote(patches: readonly SpacingSnapPatch[]): string {
   const values = patches.reduce((n, p) => n + p.changes.length, 0);
+  const occurrences = patches.reduce((n, p) => n + (p.occurrences ?? p.changes.length), 0);
   const shown = [...new Set(patches.flatMap((p) => p.changes))].slice(0, 8).join(', ');
   const where = patches.map((p) => p.path).join(', ');
-  return `${values} spacing value(s) in ${patches.length} file(s) this build wrote were off the ${SPACING_GRID}px grid `
+  // 🔴 BOTH NUMBERS, BECAUSE ONE OF THEM MADE AN AUTOPSY WRONG (39e982bd / Q-515). `changes` is DEDUPED
+  // to distinct mappings, so this line said "6 spacing value(s)" in a report whose `DESIGN_CONSISTENCY`
+  // finding said "27 spacing values are off the 4px grid" about the SAME file — the same words for two
+  // different units. Every one of the 27 occurrences had in fact been rewritten (the re-check found
+  // zero violations and resolved the finding), and the autopsy still read it as "21 were left behind".
+  // A report that can be read two ways has already cost one investigation.
+  const count = occurrences === values
+    ? `${values} spacing value(s)`
+    : `${occurrences} spacing value(s) (${values} distinct)`;
+  return `${count} in ${patches.length} file(s) this build wrote were off the ${SPACING_GRID}px grid `
     + `and were snapped to the nearest multiple, deterministically, with no model call — ${where}: ${shown}. `
     + 'Until 2026-10-01 this list was handed to the model at the end of its turn (autopsy 536c8189), which '
     + 'spent three calls writing regex scripts over the stylesheet and moved on-grid values off the grid.';

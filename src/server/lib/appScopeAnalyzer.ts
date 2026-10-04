@@ -121,7 +121,25 @@ const TOOL_BEFORE = /\b(?:using|use|uses|via|through|thru|over|on|with|by|to|int
 // 3 and built a hard-coded math-quiz racer. A product name followed by a CONTENT noun (video, url,
 // playlist, clip, thumbnail…) or by a Hinglish possessive before an integration noun ("youtube ka
 // link", "instagram ki post") is the product being USED, exactly as a channel preposition before it is.
-const TOOL_AFTER = /^[\s/]*(?:(?:ka|ki|ke|wala|wali|wale|se)\s+)?(?:api|apis|sdk|login|log\s*in|sign[\s-]?in|oauth|auth|share|sharing|button|buttons|integration|notifications?|messages?|link|links|otp|business|pay|s3|web\s+services|account|accounts|group|groups|number|alerts?|widget|embed|embeds|channel|bot|webhook|ads|videos?|urls?|playlists?|clips?|thumbnails?|posts?|reels?|stories|feed|page|pages|content|audio|music|songs?|mp3|data|downloads?|kholo|kholna|khol\s+do|chalao|chalana|app\s+(?:kholo|chalao|open))\b|^[\s-]*to[\s-]*(?:mp3|mp4|audio|video|wav|gif|text|pdf)\b/i;
+const TOOL_AFTER = /^[\s/]*(?:(?:ka|ki|ke|wala|wali|wale|se)\s+)?(?:api|apis|sdk|login|log\s*in|sign[\s-]?in|oauth|auth|share|sharing|button|buttons|integration|notifications?|messages?|link|links|otp|business|pay|s3|web\s+services|account|accounts|group|groups|number|alerts?|widget|embed|embeds|channel|bot|webhook|ads|videos?|urls?|playlists?|clips?|thumbnails?|posts?|reels?|stories|feed|page|pages|content|audio|music|songs?|mp3|data|downloads?|kholo|kholna|khol\s+do|chalao|chalana|app\s+(?:kholo|chalao|open))\b|^[\s-]*to[\s-]*(?:mp3|mp4|audio|video|wav|gif|text|pdf)\b|^[\s/]*(?:ign|uid|uids|level|levels|username|usernames|handle|handles|tag|tags|player|players|gamer|gamers|tournament|tournaments|match|matches|lobby|lobbies|clan|clans|squad|roster|esports|e-sports|stats|rank|ranks|ranking|leaderboard|score|scores|kills?)\b/i;
+
+// 🔴 AN APP *ABOUT* A PRODUCT'S PLAYERS IS NOT A CLONE OF IT (autopsy 39e982bd / Q-516, 2026-10-04).
+// "BUILD PRIMECLASH ESPORTS" — a tournament app FOR Free Fire players, with "Free Fire IGN", "Free Fire
+// UID" and "Free Fire level" among its registration FIELDS — was classed *"LARGE — clone of Free Fire"*,
+// the ONLY scope signal it had, and that one false signal is what handed the build to the mega-app
+// roadmap planner. Measured: `"a tournament app for Free Fire players"` and `"PUBG tournament
+// registration app"` both returned `["asks to clone <game>"]`.
+//
+// A battle royale cannot be cloned by a wallet and a leaderboard, and nobody was asking. The product
+// name here is followed by a noun naming DATA ABOUT ITS PLAYERS (ign, uid, level, username, tag) or the
+// COMPETITION around it (tournament, match, lobby, clan, squad, esports, leaderboard, rank, kills) —
+// the sixth shape of "the product is being used", after channels, content, markdown, prohibitions and
+// launch verbs, and added to the same list rather than becoming a sixth special case.
+//
+// 🔒 "Make a Free Fire clone" and "Free Fire jaisa game banao" still escalate: neither is followed by
+// one of these nouns. And the asymmetry this module already states points the same way — a missed clone
+// falls back to the ordinary build (which the feature count may still escalate), while a false clone
+// spends a planner call and hands the build a roadmap for the wrong app.
 
 // 🔴 A PRODUCT A COMMAND OPENS IS NOT THE PRODUCT (autopsy 042e472f + dfd24058, 2026-10-01). A voice
 // assistant's command list — "Open YouTube", `"open YouTube"` — was classed "LARGE — clone of YouTube" in

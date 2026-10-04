@@ -543,6 +543,9 @@ export function stripNonDomainUses(input: string): string {
   // keep their meaning in any context.
   const raw = String(text || '');
   if (AI_ASSISTANT_CONTEXT.test(raw) && !PEOPLE_CHAT.test(raw)) out = out.replace(/\b(?:chats?|conversations?|messages?)\b/gi, ' ');
+  // Same shape for a payment gateway's own words — see PAYMENT_GATEWAY_CONTEXT. Only when nothing in
+  // the prompt says goods are sold, so a real shop keeps "checkout" and "order" whatever it integrates.
+  if (PAYMENT_GATEWAY_CONTEXT.test(raw) && !SELLS_GOODS.test(raw)) out = out.replace(GATEWAY_COMMERCE_WORDS, ' ');
   return withoutDeclinedSentences(out);
 }
 
@@ -582,6 +585,33 @@ const PEOPLE_CHAT = /\bgroup\s+chats?\b|\bchat\s+(?:with|between)\s+(?:friends|u
 /** Evidence that the prompt is about studying, so a bare "book" is a textbook (autopsy e7baf61d). */
 /** A prompt about trading markets. The strip it gates is a strip of two words, never a domain decision. */
 const TRADING_CONTEXT = /\b(?:forex|scalp(?:ing|er|ers)?|intraday|demat|mt[45]|ctrader|candlestick|nifty|sensex|pips?|stock\s*market|share\s*market|algo\s*-?\s*trad\w*|trading)\b/i;
+/**
+ * 🔴 A PAYMENT GATEWAY'S OWN VOCABULARY IS NOT A SHOP (autopsy 39e982bd / Q-516, 2026-10-04).
+ *
+ * An esports TOURNAMENT app — wallet, deposits, withdrawals, UPI, a PayPal module — was classified
+ * **ecommerce**, and the build was told it was missing *"product catalog + search, order management,
+ * inventory tracking"*. Nothing in it sells a product. Measured on the report's own prompt before this
+ * strip: `domain: ecommerce`, gaps `["product catalog + search","order management","inventory
+ * tracking"]`; after it, `fintech` with KYC, 2FA, fraud/limit checks and an audit log — which is
+ * exactly what an app moving real money needs.
+ *
+ * The two words came from the gateway's own section: *"Prepare an optional PayPal **checkout**
+ * integration"* and *"Create and capture **orders** on the backend"*. `checkout` is the name of
+ * PayPal's and Stripe's product, and a gateway's charge is an "order".
+ *
+ * 🔑 This file has already fixed one of the pair: autopsy 73df1fbb records `\border\b` matching
+ * "orders" and handing a build a cart and refunds. `checkout` is that sibling, never hunted — and the
+ * strip is the same context-gated shape as `broker` in a trading prompt and `book` in a study prompt.
+ *
+ * 🔒 A REAL SHOP IS UNTOUCHED, by construction: the strip stands down the moment anything says goods
+ * are sold, so "a shop with Stripe checkout" keeps every word it had. Only a prompt whose ONLY
+ * commerce signal is a gateway's vocabulary changes — which is the defect.
+ */
+const PAYMENT_GATEWAY_CONTEXT = /\b(?:paypal|stripe|razorpay|cashfree|payu|phonepe|paytm|braintree|adyen|instamojo|billdesk|ccavenue|upi\s+(?:id|deposit|payment)|google\s+pay)\b/i;
+const GATEWAY_COMMERCE_WORDS = /\b(?:checkouts?|orders?)\b/gi;
+/** Evidence the app really sells goods — then the words above keep their meaning, whatever is named. */
+const SELLS_GOODS = /\bshops?\b|shopping|\bstores?\b|e[-\s]?commerce|\bcarts?\b|\bproducts?\b|inventory|marketplace|catalog|\bdukaan\b|\bdukan\b|\bdukandar\b|\bkirana\b|\bbazaa?r\b|\bsam?aan\b|दुकान|किराना|बाजार|बाज़ार|सामान/i;
+
 const STUDY_CONTEXT = /\b(?:syllabus|ncert|jee|neet|upsc|cbse|icse|pyqs?|chapters?\s+(?:tracker|completed|wise|list)|study\s+(?:hours?|sessions?|timer|plan|planner|tracker)|exam\s+prep(?:aration)?|revision\s+(?:schedule|system|reminders?))\b/i;
 const STUDY_BOOK_NOUN = /\bbooks?\b(?!\s+(?:a|an|the|your|my|now|online|appointments?|slots?|sessions?|tickets?|tables?|rooms?|seats?|classes?|tutors?|demos?)\b)/gi;
 

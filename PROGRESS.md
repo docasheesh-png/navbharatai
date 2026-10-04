@@ -88329,3 +88329,25 @@ every fix reverted and seen to fail):
 
 Still BLOCKED on evidence (unchanged): Q-193 (a skipped press's cause line, added by Q-192), Q-273 (an 11 s trivial
 command — needs a second instance), Q-275 (the request was cut mid-sentence before it reached us).
+
+## 2026-10-04 — Q-320 and Q-329: the admin's two decisions, built (PR #3494)
+
+The admin answered both open questions ("aapki dono suggestion banao"):
+
+| Item | Decision | What was built | Lock |
+|---|---|---|---|
+| Q-320 child-protection and deepfake-detection apps refused as CSAM / NCII | option (b) | `protective` on `IllegalRule` + `protectiveStandDown`, read by `triagePrompt` AND `classifyPublishedText` (a protective app that was allowed to build would otherwise have been refused at publish). Stands down only when no unambiguous word (porn, nude, naked, xxx, erotic, sexy, "sexual videos", "undress", "make a deepfake") is present. | `tests/aProtectiveAppIsNotTheOffence.test.ts` — stand-down removed → 7 fail |
+| Q-329 step limit 80 | "haan" — closed by its causes (#3402) | nothing to build; evidence in the queue row | — |
+
+Honest limits: "parental filter to protect children from porn" stays blocked (it carries "porn" — the admin's rule).
+At publish the scanner reads the whole bundle, where "report" is common (a footer); the unambiguous words are what keep
+an offending page refused there. The other nine scripts have no protective words yet → new row Q-344 (🟡 BLOCKED on a
+native reader's word list).
+
+## 2026-10-04 — Queue pruned after #3491 merged (admin merged it 13:52 UTC)
+
+#3491 carried autopsy d798ddd3 (Q-300..307) and the pending items (Q-284, Q-274, Q-304 with Q-063 / Q-257, and
+Q-194, Q-195, Q-272, Q-286 resolved as not defects). All sixteen rows are now ✅ and are removed from the open table
+in `BUILD_REPORT_QUEUE.md`; their ledgers stay in the two entries above. **Watch on the next real builds:**
+`PYTHON_BACKEND_UP` / `_NOT_UP` on a Python-backed app, the `SCRIPT_REQUEST_AS_WEB_APP` start line, and the first
+write-time typecheck on a fresh starter dropping well under 15 s. Still BLOCKED on evidence: Q-193, Q-273, Q-275.

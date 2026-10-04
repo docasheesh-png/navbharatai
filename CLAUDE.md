@@ -227,9 +227,14 @@ promised to build it.** Every model refused — the model's virtue, never our de
   code (Safari 14 has no lookbehind). `tests/aWordBoundaryCanSeeHindi.test.ts` fails on any new one.
   The other nine scripts (Bengali, Gurmukhi, Gujarati, Odia, Tamil, Telugu, Kannada, Malayalam, Urdu) are
   read too since 2026-10-04 (Q-321): one list per script per rule in `indicSafetyWords.ts`, written without
-  a native reader of every script, so it is held to the strict side; add words there with a test. The
-  illegal rules also block child-protection and deepfake-detection apps, in every script; that is the
-  admin's decision (Q-320).
+  a native reader of every script, so it is held to the strict side; add words there with a test.
+  🛡️ **A child-protection or deepfake-detection app is not the offence (Q-320, admin chose (b) 2026-10-04).**
+  The CSAM and NCII rules carry a `protective` stand-down (report, prevention, awareness, POCSO, helpline,
+  detection, education…) that applies ONLY when no unambiguous word is present (porn, nude, naked, xxx,
+  erotic, sexy, "sexual videos", "undress", "make a deepfake"); then the request is refused as before. One
+  function, `protectiveStandDown`, read by the prompt triage AND the publish scanner. ⚠️ "sex"/"sexual"
+  alone are deliberately NOT unambiguous ("report child sexual abuse" needs them). The other nine scripts
+  have no protective words yet and stay strict (Q-344). `tests/aProtectiveAppIsNotTheOffence.test.ts`.
   ⚠️ **NO LOOKBEHIND MAY REACH THE WEB BUNDLE (Q-322).** Safari before 16.4 (iOS 15) throws on one and
   takes its screen down — the Image Generator did not open there. A server file the client imports is
   client code too. `scripts/noLookbehindInBundle.mjs` (in `npm run test:bundle`) reads the built bundle.

@@ -449,7 +449,8 @@ import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMiscon
 import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
 import { estimateBuildTime, complexityFromPrompt, projectSizedComplexity, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
-import { freeBuildWindow, noteFreeBuildStart, decideFreePause, freePauseMessage } from '../AgentV3/freeBuildTimeCap';
+import { freeBuildWindow, noteFreeBuildStartDurable, decideFreePauseDurable, freePauseMessage } from '../AgentV3/freeBuildTimeCap';
+import { firestoreFreeChainStore } from '../AgentV3/freeChainStore';
 import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionReserve';
 import { incrementalBuildCache, hashFiles, computeBuildPlan, buildPlanNarration } from '../AppMakerLab/IncrementalBuildCache';
 import { startBuildTrace } from '../telemetry/TracingManager';
@@ -533,7 +534,7 @@ import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain, internalPreviewUrl } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
-import { loadUserVaultSecrets } from '../lib/secrets';
+import { loadUserVaultSecrets, withheldVaultSecretNames, secretsWithheldNote } from '../lib/secrets';
 import { secretRequestPrompt, postBuildKeyAsks, postBuildKeyPrompt } from '../AgentV3/secretRequest';
 import { connectActions } from '../AgentV3/connectActions';
 import { saveUserActions } from '../AgentV3/UserActionStore';
@@ -12531,7 +12532,8 @@ async function noteBuildOutcome(
      * runner's own stop, the reserve and the reviewer's headroom all read the same shorter number.
      */
     const freeWindow = freeBuildWindow(scaleBuildSeconds(maxBuildSeconds(), buildDepth), freeTierBuildActive);
-    if (freeTierBuildActive) noteFreeBuildStart(workspaceId, prompt);
+    // Durable (Q-130): a new request clears the chain on every instance; the call never throws or blocks the build.
+    if (freeTierBuildActive) void noteFreeBuildStartDurable(workspaceId, prompt, firestoreFreeChainStore()).catch(() => {});
     const effectiveBuildSeconds = freeWindow.seconds;
     const deadlineMs = effectiveBuildSeconds * 1000;
     // P-ARCH+.3 — tokens spent by the optional up-front blueprint step (below). Declared here so the
@@ -12801,7 +12803,7 @@ async function noteBuildOutcome(
       // A FREE build's unattended chain is bounded HERE (freeBuildTimeCap.ts): once this request's free
       // windows have used their allowance, the pause is not resumable — the work is saved and one
       // "continue" from the user buys the next window. A paid build, and a finished app, are untouched.
-      const freePause = !ok && freeTierBuildActive ? decideFreePause(workspaceId, deadlineMs) : null;
+      const freePause = !ok && freeTierBuildActive ? await decideFreePauseDurable(workspaceId, deadlineMs, firestoreFreeChainStore()) : null;
       const pauseResumable = freePause ? freePause.resumable : true;
       if (freePause && !freePause.resumable) {
         try {
@@ -15661,6 +15663,12 @@ async function noteBuildOutcome(
           // keep it OUT of the built app's .env; it is only used to build the DB context prompt below.
           const { [DB_PROVIDER_MARKER]: _dbMarker, ...appEnv } = vaultSecrets;
           dispatcher.setUserSecrets(appEnv);
+          // WHICH SAVED KEYS THIS APP DID NOT GET (Q-155). Least privilege's own failure mode is "I saved that
+          // key — why is it not in my app?"; the build report now answers it by name. Names only, never values.
+          try {
+            const withheld = await withheldVaultSecretNames(userId, workspaceId);
+            if (withheld.length > 0) buildDiag.record({ phase: 'plan', severity: 'info', code: 'SECRETS_WITHHELD', message: secretsWithheldNote(withheld), autoResolved: true });
+          } catch { /* a report line — never a reason a build changes */ }
           // CONNECTED SERVICES (MCP). Fetched ONCE here, before the loop, so the tool list the model
           // sees is fixed for the whole build — a server that changes its tools mid-build cannot swap
           // one out from under a call the model has already decided to make.
@@ -19952,6 +19960,18 @@ async function noteBuildOutcome(
                 const after = lintBuiltApp(integrityFiles);
                 if (after && buildDiag.resolveOnRecheck('DESIGN_CONSISTENCY') > 0 && after.design.violations.length > 0) {
                   buildDiag.record({ phase: 'build', severity: 'warning', code: 'DESIGN_CONSISTENCY', ...obs(`After the spacing snap: ${designLintSummary(after)}`) });
+                }
+                // Q-515 (autopsy 39e982bd): WRITE_TIME_QUALITY is measured before the snap too, so it said
+                // src/theme.css "had been noted and not fixed" while the snap then fixed every value in it,
+                // and the autopsy read that as 21 values left. It stays true about the MODEL; this line says
+                // what is true about the APP now.
+                if (after) {
+                  const stillFlagged = [...new Set(Object.values(after.offenders ?? {}).flat().map((o) => o.path))];
+                  const nowClear = landed.map((p) => p.path).filter((path) => !stillFlagged.includes(path));
+                  if (nowClear.length > 0) {
+                    buildDiag.record({ phase: 'build', severity: 'info', code: 'WRITE_TIME_QUALITY', autoResolved: true,
+                      message: `After the spacing snap: ${nowClear.join(', ')} ${nowClear.length === 1 ? 'is' : 'are'} no longer flagged — any "noted and not fixed" above describes the model's turn, not the app as shipped.` });
+                  }
                 }
               } catch { /* the earlier finding stands */ }
             } catch { /* deterministic and best-effort — it can never affect a build */ }
@@ -24950,7 +24970,13 @@ async function noteBuildOutcome(
           // copies the signal onto the timeline, and this asks the broader of the two questions —
           // "did this build reach the point of having a capability to judge?" — which is NO whether
           // the person or their own sentence stopped it.
-          const stopped = buildWasStopped(buildDiag.report().issues) || buildDiag.toolWasUsed('stop_build');
+          // ONE DEFINITION OF "STOPPED" (Q-131, 2026-10-04). This used to add `|| toolWasUsed('stop_build')`,
+          // a second answer to the same question. It never agreed more often than the timeline alone — the
+          // model's `stop_build` records USER_STOPPED_BUILD and then raises the same abort as the button
+          // (setStopBuild above), and the back-fill copies every other stop onto the timeline — but it
+          // disagreed in the one case that matters: a `stop_build` the dispatcher could NOT carry out
+          // ("stopping is not available here") still counted as a stop. The timeline is the one source.
+          const stopped = buildWasStopped(buildDiag.report().issues);
           // …AND OUR OWN INTERRUPTIONS, which `stopped` above cannot see (2026-09-26). It reads
           // `USER_STOPPED_BUILD`, which only a user or model stop writes; a deploy draining the build,
           // a newer build reclaiming its lock, the reaper, or an abort we cannot explain write nothing

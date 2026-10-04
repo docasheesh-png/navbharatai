@@ -1,5 +1,6 @@
 import path from 'path';
 import axios from 'axios';
+import { isLiveEnvFilePath } from '../../lib/envFile';
 import type { Express, Request, Response } from 'express';
 import { sendSafeError } from '../lib/httpError';
 
@@ -292,7 +293,7 @@ export function registerGithubRoutes(app: Express): void {
         if (
           lowerPath.includes('node_modules/') ||
           lowerPath.includes('.git/') ||
-          (lowerPath.startsWith('.env') && !lowerPath.endsWith('.example')) ||
+          isLiveEnvFilePath(path) || // any depth (apps/web/.env too) — the one definition, src/lib/envFile.ts
           lowerPath.includes('firebase-applet-config.json') ||
           lowerPath.includes('serviceaccount') ||
           lowerPath.includes('secret') ||

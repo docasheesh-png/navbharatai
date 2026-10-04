@@ -24,6 +24,7 @@ import { useSocialStats, useSignedIn, webKey, apkKey, fetchFeed, askToSignIn } f
 import { BROWSE_VIEWS, kindFilterOptions, shelvesFor, emptyViewMessage, viewNeedsSignIn, type BrowseView, type KindFilter } from './appMart/browseViews';
 import { readStoreStatus, storeStatusReport, type StoreStatus } from './appMart/storeStatus';
 import { parseAppMartTarget } from '../../lib/appMartTarget';
+import { writeFailure } from '../../lib/serverAnswer';
 
 // Nav App Store — publish your Android app, and install other people's.
 //
@@ -326,6 +327,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   const [reviewing, setReviewing] = useState('');
   // The last review decision the server refused or could not save — shown, never swallowed.
   const [reviewError, setReviewError] = useState('');
+  const [webActionError, setWebActionError] = useState('');
   const liveRef = useRef(true);
   const statusReportedRef = useRef(false);
   useEffect(() => () => { liveRef.current = false; }, []);
@@ -568,14 +570,20 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
   /** Owner action on one of MY web apps; the store reloads so the change is visibly real. */
   const webAppAction = useCallback(async (id: string, body: Record<string, unknown>) => {
     setWebBusy(id);
+    setWebActionError('');
     try {
-      await fetch(`/api/nav-store/web/app/${encodeURIComponent(id)}/settings`, {
+      // A refused unpublish used to look done (the list just reloaded) while the link stayed live.
+      const res = await fetch(`/api/nav-store/web/app/${encodeURIComponent(id)}/settings`, {
         method: 'POST',
         headers: await authedHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body),
       });
+      const failure = await writeFailure(res, 'That change could not be saved.');
+      if (failure) setWebActionError(failure);
       void loadWebMine();
       void loadWebApps();
+    } catch {
+      setWebActionError('That change could not be saved (no connection).');
     } finally {
       if (liveRef.current) setWebBusy('');
     }
@@ -1273,6 +1281,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
         {/* ── My apps ── */}
         {tab === 'mine' && webMine.length > 0 && (
           <div className="mb-5">
+            {webActionError && <p role="alert" className="text-xs text-danger mb-2">{webActionError}</p>}
             {owned.length > 0 && (
               <div className="mb-6">
                 <p className="text-xs font-bold uppercase tracking-wider text-faint mb-2 flex items-center gap-1.5">

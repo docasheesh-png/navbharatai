@@ -56,3 +56,16 @@ describe('one list for both lanes', () => {
     expect(deny).toBeLessThan(src.indexOf('app.use(express.static(distPath'));
   });
 });
+
+describe('the two private-file predicates are one (merge of #3529 and #3538)', () => {
+  it('there is no second predicate module — the decoded one is the only one', async () => {
+    // #3529's privateBuildFiles.ts read the RAW path and let /server.cjs.m%61p through. After the merge it
+    // survived only as an alias nothing imported (deadCodeGuard flagged it), so it was removed.
+    const { existsSync } = await import('node:fs');
+    expect(existsSync('src/server/lib/privateBuildFiles.ts')).toBe(false);
+    for (const p of ['/server.cjs', '/server.cjs.map', '/server.cjs.m%61p', '/assets/app.js.map', '/a/../server.cjs', '/server.js']) {
+      expect(isServerOnlyArtifactPath(p), p).toBe(true);
+    }
+    for (const p of ['/assets/app.js', '/index.html', '/sw.js']) expect(isServerOnlyArtifactPath(p), p).toBe(false);
+  });
+});

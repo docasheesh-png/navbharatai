@@ -88428,6 +88428,145 @@ module), with five false findings on the way. Ledger (problem → root cause →
 - 🟡 Q-396 (no-tests warning on module turns), Q-397 (ignored theme note), Q-398 (APP_SCOPE small word as reason):
   BLOCKED with options in the queue. Q-399 (crawl bench, Haiku planner) resolved as admin-decided behaviour.
 
+## 2026-10-04 — Q-313: an 8-minute game edit was priced from the history of "hi" (PR #3520)
+
+The last OPEN row of autopsy `8b8743a3`. **Its own theory was wrong, and measuring before acting is what
+found that** — the fourth rule's first step, earning its place: *"if the evidence contradicts the reported
+theory, follow the evidence."*
+
+**What the row claimed:** the scorer could not read a GAME feature list, so `COMPLEX_APP_SIGNAL` needed
+widening toward game vocabulary, which needed a precision corpus first.
+
+**What measurement said:** the widening is not needed at all. A game IS recognised — `Make a racing game`
+scores `simple_app`, domain `game` — and recognising *"Road infinite both side street light with start
+restart scoring"* would have moved it from `chat` to `simple_app`: **the same tier, the same 15**. The
+risky keyword widening would have bought nothing and could only have cost precision.
+
+**Two wiring facts explain the whole observation.**
+
+1. **The turn was an EDIT, and `app_unsized` only ever covered `new_build`.** That label exists because
+   *"leaving it filed as `chat` sent its ETA to the history of a bucket named for something else"*
+   (autopsy 0473628e, quoted from the code). `etaTaskKey` returns the task type verbatim, **so the label
+   IS the fleet bucket** — an 8.0-minute build's estimate was learned from greetings, questions and
+   capability checks, and the user was promised 3–5 minutes. ⚠️ **The harm runs both ways:** the `chat`
+   bucket was simultaneously being taught that a chat turn takes eight minutes, which is the
+   bucket-pollution half of autopsies a5b661c8 and 4a1c0157 in a third place. The sibling lane was never
+   hunted — this repo's headline class, for the nth time.
+2. **`fileCount` was never passed.** `projectFileCount` has been in scope ~2,600 lines above the ONE
+   `analyzeRequest` call site, and the analyser's docblock justifies excluding an edit from the unsized
+   floor with *"an edit is not an app being ordered, **and its file count already raises the score**"* —
+   a compensation that never ran. **A guard justified by a mechanism that is not wired.** Measured:
+   `chat/5` where `chat/11` was honest, and an edit of a 200-file project scored like an edit of an
+   empty one.
+
+**The fix:** `edit_unsized` — the same label one lane over, same floor of 15 — plus the file count wired.
+Routing-neutral by MEASUREMENT rather than assertion: 17 prompts × both build intents × `fileCount`
+0/14/40, and **zero** cross the 40 line that decides which rung opens a build; one prompt moves on the
+legacy tier ladder (*"optimise the bundle, it loads slowly in production"* on a real project, gemini →
+haiku, the right direction). `AGENTV3_SIZE_EDIT_TURNS=off` and `AGENTV3_SIZE_PROJECT=off` revert each half.
+
+**Two things recorded because they surprised me while building it.**
+
+- 🔎 **The floor swallows a small project's bump, deliberately.** On an unsized edit the floor is applied
+  LAST and can only RAISE, so 5+0 and 5+6 both land on 15 — the file count contributes nothing until it
+  exceeds the floor. Making them additive would put a one-line edit of a 14-file project at 21, across the
+  ≤20 tier boundary, on nothing but a file count. The first draft of the test expected otherwise and was
+  wrong, not the code; the case is now in the suite with that reasoning.
+- ⚠️ **`add pagination to the product list` scores `complex_app` 58 on an EDIT** (the `ecommerce` domain,
+  via `namesBusinessDomain`), which buys a 150-step ceiling and the Sonnet rung for adding pagination.
+  Noticed while building the corpus, NOT chased — it is a different predicate with its own precision
+  history, and widening or narrowing it from one observation is how that file's six recorded autopsies
+  happened. If it shows up in a real report it is a row of its own.
+
+**A pinned test relaxed, and why it is not "changing a test to match broken behaviour":**
+`theSizersReadWhatTheBuilderReads` pinned `/analyzeRequest\(\{ prompt: planning\.sizing/` — the one-line
+form. The call became multi-line when `fileCount` joined it. The invariant that row guards is *"the sizer
+reads `planning.sizing`, never the bare message"*, which is unchanged; only the line break is now allowed,
+and I re-proved the relaxed regex still bites by pointing the call at `prompt` and watching it fail.
+
+**My own measurement was wrong once, and the shape is this file's own lesson.** The first probe passed a
+STRING to `analyzeRequest`, which takes `{ prompt }` — so `input?.prompt` was undefined and **every one of
+nine prompts returned `chat`/5, including `hospital management system`**, a case the code fixes and has a
+test for. A derivation that returns the same answer for every input cannot fail, and *"not invented" is a
+weaker standard than "checked"* (the `E2B_USD_PER_HOUR` entry's words). It was caught by the one result
+that contradicted a documented fix.
+
+## 2026-10-04 — CI cancels the head's run when a branch is pushed twice (Q-500, measured)
+
+Both of today's PRs had their head CI run come back **`cancelled`**, and the first instinct — "the billing
+stop is back" — was wrong. Measured instead of assumed, across every run since CI resumed at 17:22 UTC:
+
+| | runs |
+|---|---|
+| success | 16 |
+| cancelled | 5 |
+| still running | 7 |
+
+**The shape, and it is consistent on PR branches:** each cancelled run had a sibling run on the SAME
+branch created **11–67 seconds earlier** that survived and went green, and the cancelled one is the
+**later** one — i.e. the run for the actual head, the one the merge gate reads. It is cut mid-step after
+1.1–4.3 minutes (mine at `typecheck:server`, 2 min 35 s).
+
+**What was ruled out, so nobody re-derives it:**
+- **Not the 15-minute cap `ci.yml` already records** (*"two consecutive runs were cancelled at exactly
+  15.0 and 15.1 minutes … a hard cap that comes from outside this file"*) — today's cuts are 1–4 minutes.
+- **Not concurrency.** Correlated every run's cancellation time against how many runs overlapped it:
+  runs **succeeded with 7 others overlapping** (18:25:40, 18:50:13), while cancellations happened at
+  6–8 overlapping. Overlap does not predict it; a same-branch sibling does.
+- **Not the code.** A plain re-run of the cancelled run succeeds — #3514 attempt 2 and #3520 attempt 2.
+- **Not anything in this repository.** No `concurrency:` block exists in any of the eight workflows
+  (grepped), and nothing in them cancels a run.
+- **The account's Actions billing cannot be read from a session** (`users/…/settings/billing/actions` is
+  refused by the session's GitHub proxy), so the earlier billing stop can be neither confirmed nor
+  excluded as the cause. Recorded as a 🟡 row rather than guessed at.
+
+🔑 **THE WORKAROUND EVERY SESSION CAN USE TODAY, AND IT COSTS NOTHING: push ONCE per branch.** Splitting
+a change into a code push and a docs push — which is exactly what I did on #3520 — is what produces the
+pair. If a second push is genuinely needed, **re-run the head's run afterwards** and read THAT result;
+the stale run's green says nothing about what would be merged.
+
+⚠️ **And the branch-takeover class fired for the third time today**, on #3514: its head moved from the
+`ae3da9f5` I pushed to `710a1d3e`, a forward-merge of `origin/main` made by automation. This one was
+legitimate and well-labelled — it resolved a real conflict (#3513 had removed Q-342, and the merge keeps
+it removed) and **every one of my edits survived**, verified file by file. Which is the point: the first
+takeover today looked like a loss and was not, and this one looked identical and was not either. **The
+check is always the head SHA and the diff, never the push.**
+### 2026-10-04 — Q-396 and Q-398 (admin accepted both recommendations)
+
+- **Q-396:** a Project Mode module whose shell comes later is no longer told "No tests at all" — the warning reads
+  the same `_starterExpected` flag as the starter blocker. The shell turn and ordinary builds are unchanged.
+- **Q-398:** APP_SCOPE's reason now comes from the request's SUBJECT (first line, cut where the feature list
+  starts): a Sleep Timer in a music player is a feature, not what the app is. **The decision was deliberately left
+  unchanged:** narrowing it was measured to send 8 of 7,403 test prompts to the roadmap planner, which CLAUDE.md's
+  "never more eager" rule for that gate forbids without a decision. Sibling: appScope's feature count sizes a
+  sectioned spec by its sections (only ever smaller).
+### 2026-10-04 — Q-421 and Q-422 decided by the admin, Q-422 built
+
+- **Q-421 ✅** — admin: keep the ₹0 bill. The preview fell because of our own bug (Q-410/Q-414), so the "paid only
+  when the preview ran" rule applies as written. No code change.
+- **Q-422 ✅ (on merge)** — admin: keep waiting for the in-flight call, but show what is finished. `SimpleBuilder`
+  now saves and announces the finished files the moment the lane decides to hand off, and each in-flight file as
+  it lands; the catch awaits those saves before the salvage write. Kill switch `AGENTV3_HANDOFF_EARLY_SAVE=off`.
+  Test `tests/theHandOffShowsWhatIsFinished.test.ts`, reverted-and-failed (2 of 4).
+- **Q-414** stays 🟡: it waits for a report carrying the new `package.json was EMPTY` evidence line.
+## 2026-10-04 — Admin accepted every recommendation ("apke sare suggestion accepted! ab kam karo") — PR #3512
+
+| ID | Decision | What was done | Lock |
+|---|---|---|---|
+| Q-362 | (a) catch an app whose own screen shows an error | `visibleAppError.ts` reads the DOM the real browser captured after paint: an alert (`role="alert"` / `aria-live="assertive"`) or an element NAMED as an error (`react-pdf__message--error`, `errorBox`) whose own text says something failed, or a short line only a failing runtime writes ("TypeError: …", "Setting up fake worker failed", a line opening "Failed to load…"). Ignores `<pre>`/`<code>`/`<textarea>`, hidden subtrees, list items and table cells (the app's data), designed empty states and whole-page text. Both render checks (render rescue, preview verify) record `APP_SHOWS_ERROR` (warning, once per build); a later render check that no longer shows it clears it. One-tap offer "Fix the error your app shows". Never a gate, never a repair by itself, moves no money. | `tests/anAppThatShowsItsOwnErrorIsNotDone.test.ts` (the real react-pdf element from 981ce4cc + 13 designed pages that must stay clean); reverted twice (route call removed; error-name words emptied) and failed each time |
+| Q-461 | (a) leave the Kimi starvation; re-measure after Q-451 | Resolved as decided behaviour. Watch: a Weak build where `kimi-k2.7-code` starves on a turn that is NOT a bloated duplicate-build context. | — |
+| Q-359 | (a) keep today's rule: an attachment never becomes a project file | Resolved as decided behaviour; Q-358 keeps it honest. | — |
+| Q-367, Q-224, Q-464 | agree the argued "not a defect" items | Resolved as not-a-defect with the evidence already in their rows. | — |
+
+Still open from these reports (missing information): Q-364, Q-365, Q-366, Q-221, Q-462, Q-463.
+### 2026-10-04 — Command-shape census (class behind Q-390) — Q-490
+
+#3506 fixed the instance (a path containing `vite`). The census of every command builder the platform runs found the
+rest of the class: a word inside a HYPHENATED name still counted (`ls /x/vite-react`, `cd my-dev-app`, `vite-node`).
+`vite` and `dev/serve/watch` now need whole names; `--watch`, `webpack-dev-server` and `vue-cli-service serve` stay
+launches. The warm-cache path had a second copy in `E2BActuator.ts`; it now reads `WARM_NODE_MODULES`. Locked by
+`tests/ourOwnCommandsAreNotDevServerLaunches.test.ts`, which fails when a new command builder is not classified.
+Queue: Q-370, Q-371 (#3497) and Q-390..Q-395, Q-399 (#3506) leave the open table on merge.
 ## 2026-10-04 — RESOLUTION of autopsy 8b8743a3, and what the two merges really did
 
 **Both PRs are MERGED and their work is on `main` — verified from the merged state, not from the push.**
@@ -88523,3 +88662,20 @@ the write-time note; the on-screen line needs an `index.html` (a Next.js app get
 adding a key does not rewrite the fake code — the user is told to reply "make it real" or press the offer.
 **Watch on real builds:** `FAKE_FEATURE_SHIPPED` frequency and any red line on a screen the user says was real.
 
+### 2026-10-04 — App Mart admin: the review page keeps what it approved; Remove from any app's page (Q-501)
+
+Admin report: listing a user's app emptied the App Mart review page, and there was no way to take an app down
+from its own page. Root cause: the web review list fetched listing REQUESTS only, so a listed app left the only
+screen that showed it — the sibling of the 2026-08-21 APK fix, which was never applied to the web lane. Now both
+lanes share `isLiveOnStore` (approved / listed ⇒ "On the store" badge + Remove only), the server returns listed apps
+on `?status=listed`, both info sheets carry an admin-only "Remove from App Mart" (confirmed; the server re-checks
+`isStoreAdmin`), and a refused or failed review decision is shown instead of swallowed.
+### Correction (merging session, 2026-10-04 19:40 UTC) — Q-500's cancellations were deliberate, not GitHub's
+
+The five `cancelled` runs above were cancelled by the merging session (`actions/runs/<id>/cancel`) on PRs
+it had already reviewed and queued for a staging push, to spend one Actions run per PR after the admin's
+"kam se kam $ kharch karna". Nothing in GitHub, the account, or the workflows cancels a run. The row is
+RESOLVED as not-a-defect; the class fix is the "queued; do not push; interim CI cancelled" comment the
+merging session now posts on each PR at the moment it cancels. Re-running a cancelled run on such a PR
+spends minutes for a result the merge gate never reads. The author's workaround ("push once per branch")
+is still good advice for a different reason: every push is a billed run.

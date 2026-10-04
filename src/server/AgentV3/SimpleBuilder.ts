@@ -63,6 +63,14 @@ export interface SimpleFileSpec {
 
 const HEAVY_OR_UNSAFE = /^(node_modules|\.git|dist|build)\//;
 
+/**
+ * Q-422: save the finished files the moment the lane decides to hand off, rather than after the
+ * in-flight calls finish. `AGENTV3_HANDOFF_EARLY_SAVE=off` restores the old wait-then-save exactly.
+ */
+export function handOffEarlySaveEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.AGENTV3_HANDOFF_EARLY_SAVE ?? '').trim().toLowerCase() !== 'off';
+}
+
 /** The lane's budget for an ordinary request — unchanged since 2026-07. */
 export const FAST_LANE_BUDGET_MS = 240_000;
 /**
@@ -1644,6 +1652,21 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
   // One budget for the whole lane, read ONCE — the race below and the tier arithmetic inside must agree.
   const laneBudgetMs = deps.overallTimeoutMs ?? fastLaneBudgetMs(deps.complex === true);
   const generatedSoFar: OneShotFile[] = [];
+  // Q-422 (autopsy 1eaa5f5a, admin chose "wait, but show the finished files"): once the lane has decided
+  // to hand off, the tier still waits for the calls already in flight — 67 s there, with nothing on the
+  // user's screen. The files finished so far are saved and announced the moment the decision is taken,
+  // and each in-flight file as it lands, so the preview fills in while the wait runs. The catch below
+  // waits for these saves before its own salvage write, so its import-fixed copy is always the last word.
+  const handOffSaves: Promise<void>[] = [];
+  const saveForPreviewNow = (files: OneShotFile[]): void => {
+    if (lapsed || files.length === 0 || !handOffEarlySaveEnabled()) return;
+    handOffSaves.push(
+      Promise.resolve()
+        .then(() => deps.writeFiles(files))
+        .then(() => { if (deps.onFilesReady) void Promise.resolve(deps.onFilesReady(files)).catch(() => {}); })
+        .catch(() => { /* a preview head start never touches the build */ }),
+    );
+  };
   // The contract module (see `contractModule`) — '' / null when the contract stays prose-only.
   let contractPath = '';
   let contractFile: OneShotFile | null = null;
@@ -1902,7 +1925,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         // Refuse BEFORE spending the call; the tier boundary below turns the refusal into a hand-off.
         if (deps.signal?.aborted) return null; // stopped — the tier boundary below ends the lane
         const stop = deps.stopLane?.();
-        if (stop) { laneStopReason = laneStopReason ?? stop; return null; }
+        if (stop) {
+          if (!laneStopReason) saveForPreviewNow([...generatedSoFar]);
+          laneStopReason = laneStopReason ?? stop;
+          return null;
+        }
         try {
           // Fix 69 — feed consumers the producers' EXPORT SURFACE (exact names/shapes/signatures,
           // full-file scan so no export is truncation-hidden) instead of full bodies: same contract
@@ -1940,6 +1967,7 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           deps.log?.(`✓ ${spec.path} (${filesDone}/${manifest.length})`);
           const file = { path: spec.path, content: ensureReactValueImport(spec.path, match.content) };
           generatedSoFar.push(file); // mirror outside the closure so a timeout can salvage finished work
+          if (laneStopReason) saveForPreviewNow([file]); // landed after the hand-off decision (Q-422)
           return file;
         } catch {
           return null; // a single file's call failing must not kill the whole build
@@ -2147,6 +2175,9 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
     })(), laneBudgetMs, 'simple-build');
   } catch (e) {
     lapsed = true; // from this instant the orphaned closure can neither write files nor burn more tokens
+    // The hand-off's early preview saves (Q-422) finish before the final save below, so they can never
+    // land on top of it.
+    if (handOffSaves.length > 0) await withTimeout(Promise.allSettled(handOffSaves), 30_000, 'simple-build-handoff-saves').catch(() => {});
     const reason = e instanceof Error ? e.message : String(e);
     // A STOP IS NOT A HANDOFF. Keep what finished — the user was promised their files are saved — and
     // say nothing about "carrying on": nothing carries on after a stop.

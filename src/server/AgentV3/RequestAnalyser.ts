@@ -57,6 +57,22 @@ export type TaskType =
    * is the only reader.
    */
   | 'app_unsized'
+  /**
+   * An EDIT of an existing app ran on the build path and this module could not recognise what the
+   * edit was (2026-10-04, autopsy 8b8743a3 / Q-313). The sibling of `app_unsized`, one lane over.
+   *
+   * 🔴 WHY IT HAD TO EXIST. `app_unsized` was built for `new_build` only, and its own docblock names
+   * the harm it exists to stop: *"leaving it filed as `chat` sent its ETA to the history of a bucket
+   * named for something else"* (autopsy 0473628e). An EDIT turn that falls through to `chat` suffers
+   * exactly that, and nobody hunted the sibling — so a 3D driving game whose 8.0-minute edit turn
+   * matched no signal was priced from the fleet history of **greetings and questions**, and the user
+   * was promised 3–5 minutes. `etaTaskKey` returns the task type verbatim, so the label IS the bucket.
+   *
+   * Its `BASE_SCORE` entry is a FLOOR applied last, never a starting base — the same 15 as
+   * `app_unsized`, so this is provably routing-neutral and changes only what the report SAYS and
+   * which history the ETA learns from.
+   */
+  | 'edit_unsized'
   | 'translate'
   | 'summary'
   | 'simple_app'
@@ -324,6 +340,52 @@ export function anAppWasOrderedButNotRecognised(prompt: string, buildIntent?: Bu
 }
 
 /**
+ * PURE. TRUE when the platform ran this turn on the BUILD path as an EDIT and no signal in this
+ * module recognised what the edit was — so `detectTaskType` fell through to `chat` for a turn that
+ * really edits an app. The sibling of `anAppWasOrderedButNotRecognised`, one lane over.
+ *
+ * 🔴 THE DEFECT (autopsy `8b8743a3`, Q-313, 2026-10-04). *"Road infinite both side street light with
+ * start restart scoring"* — an 8.0-minute edit of a 3D driving game — was filed as `taskType: 'chat'`,
+ * `complexityScore: 5`, and the user was promised **3–5 minutes**. `etaTaskKey` returns the task type
+ * verbatim, so the fleet estimate for that build was learned from the history of the `chat` bucket:
+ * greetings, questions and capability checks. **A real app build was priced from the history of
+ * "hi".**
+ *
+ * 🔑 THE CLASS, and this module already names it: the `app_unsized` label exists because *"leaving it
+ * filed as `chat` sent its ETA to the history of a bucket named for something else"* (autopsy
+ * 0473628e). That fix covered `new_build` and the EDIT lane was never hunted — this repo's headline
+ * shape, the instance fixed in one of the two lanes that carry it. Every reason given for the first
+ * label is true of this one, word for word.
+ *
+ * 🔒 THE PRECISION LOCK IS THE **AND** OF THREE FACTS, measured before a line was written:
+ *
+ *   | turn                                                | intent        | matched nothing | verdict |
+ *   |-----------------------------------------------------|---------------|-----------------|---------|
+ *   | `Road infinite both side street light…`             | edit_existing | yes             | **edit_unsized** |
+ *   | `change the primary colour to green`                | edit_existing | yes             | **edit_unsized** |
+ *   | `add pagination to the product list`                | edit_existing | no (complex_app)| complex_app |
+ *   | `is it working?` · `how much does this cost?`       | chat          | yes             | chat    |
+ *   | `hi`                                                | (any)         | —               | chat    |
+ *
+ * ⚠️ `describesWorkAlreadyStarted` is deliberately NOT applied here, and the difference is the whole
+ * reason this is a separate predicate rather than a widened `buildIntent` check. That refusal guards
+ * the CLAIM *"an app was ordered"* — false of *"continue from where you left off"*, which is a verdict
+ * turn (autopsy 697b38ee). This label claims only *"a build turn we could not size"*, which is TRUE of
+ * a continuation, and a continuation's ETA must not come from the greeting bucket either. The claim is
+ * narrower, so the guard it needs is narrower.
+ *
+ * ⚠️ A GREETING IS NEVER A BUILD TURN, whatever the intent says. If something upstream routed "hi" to
+ * `edit_existing`, mislabelling it here helps nobody and pollutes the new bucket on day one.
+ */
+export function anEditTurnThatCouldNotBeSized(prompt: string, buildIntent?: BuildIntent): boolean {
+  if (buildIntent !== 'edit_existing') return false;
+  const text = String(prompt ?? '');
+  const p = text.toLowerCase();
+  if (!p.trim() || RE.greeting.test(p)) return false;
+  return detectTaskType(p) === 'chat';
+}
+
+/**
  * PURE. TRUE when NONE of this module's signals matched — the request was read, and nothing in it was
  * recognised.
  *
@@ -375,6 +437,10 @@ const BASE_SCORE: Record<TaskType, number> = {
   // The cheapest APP we recognise — deliberately not a paisa more. Used as a FLOOR, never as a base;
   // see `anAppWasOrderedButNotRecognised` and the block that applies it.
   app_unsized: 15,
+  // The same floor as `app_unsized`, for the same reason and with the same proof: 15 and 5 route
+  // identically (both ≤20 → 'gemini', both below the 40 line, both outside the ±3 boundary margin),
+  // so an edit turn's LABEL and ETA bucket are corrected without moving a rupee of spend.
+  edit_unsized: 15,
   translate: 10,
   summary: 10,
   simple_app: 15, // cheap models handle these → Gemini
@@ -624,7 +690,16 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
    * a report should not file a real app build under "chat" on either path.
    */
   const unsizedApp = anAppWasOrderedButNotRecognised(prompt, input?.buildIntent);
-  const taskType: TaskType = unsizedApp ? 'app_unsized' : detected;
+  /**
+   * The same relabel, one lane over — see `anEditTurnThatCouldNotBeSized`. `AGENTV3_SIZE_EDIT_TURNS=off`
+   * is the instant, no-deploy revert: an unsized edit turn is filed as `chat` again, exactly as before
+   * 2026-10-04. Read here rather than at the call site because the label, its floor and the ETA bucket
+   * it feeds must move together or not at all.
+   */
+  const unsizedEdit = !unsizedApp
+    && process.env.AGENTV3_SIZE_EDIT_TURNS !== 'off'
+    && anEditTurnThatCouldNotBeSized(prompt, input?.buildIntent);
+  const taskType: TaskType = unsizedApp ? 'app_unsized' : unsizedEdit ? 'edit_unsized' : detected;
 
   // A PAID pinned tier bypasses the ladder entirely: the build runs on the tier's pinned model,
   // no cheap start, no escalation. Strong ('mini') pins SONNET (admin 2026-07-13); Powerful/Full
@@ -745,6 +820,16 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
       reasons.push(`floor ${floor} — an app was ordered but no signal recognised it`);
     } else {
       reasons.push('an app was ordered but no signal recognised it');
+    }
+  } else if (unsizedEdit) {
+    // The same floor, applied the same way and for the same reason — the sentence differs because the
+    // fact differs: nobody ordered an app here, a build turn edited one and we could not size it.
+    const floor = BASE_SCORE.edit_unsized;
+    if (floor > score) {
+      score = floor;
+      reasons.push(`floor ${floor} — an edit ran on the build path but no signal recognised it`);
+    } else {
+      reasons.push('an edit ran on the build path but no signal recognised it');
     }
   }
 

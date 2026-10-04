@@ -148,7 +148,8 @@ describe('🔒 REVERSION GUARDS — tsc and vitest cannot see an argument that s
   // rewrites `result.summary` between the readers. What these guards exist to prove — each reader is
   // really given the fact — is asserted below against the new spelling.
   it('the retry decision is really given the fact', () => {
-    expect(route).toContain('const firstAttempt = readTurnAnswer(result.summary, prompt);');
+    // Read through `modelsOwnWords` since autopsy 0473628e: the runner appends its own sentence to the summary.
+    expect(route).toContain('const firstAttempt = readTurnAnswer(modelsOwnWords(result), prompt);');
     expect(route).toContain('const firstAttemptAskedTheUser = firstAttempt.asked;');
     expect(route).toContain('modelAskedTheUser: firstAttemptAskedTheUser');
   });
@@ -160,7 +161,7 @@ describe('🔒 REVERSION GUARDS — tsc and vitest cannot see an argument that s
   it('🔑 the predicate is IMPORTED, never re-implemented beside its sibling', () => {
     // A second copy of "does this end on a question mark?" is how the two guards drift back apart.
     // The route reaches it only through `readTurnAnswer`, which imports it from `nudgeToBuild`.
-    expect(route).toContain("import { readTurnAnswer, answeredWithoutBuilding } from '../AgentV3/turnAnswer'");
+    expect(route).toContain("import { readTurnAnswer, answeredWithoutBuilding, modelsOwnWords } from '../AgentV3/turnAnswer'");
     const reader = fs.readFileSync(path.join(process.cwd(), 'src/server/AgentV3/turnAnswer.ts'), 'utf8');
     expect(reader).toContain("import { turnAskedTheUser, turnPointedToPlatformFeature } from './nudgeToBuild'");
     expect(route).not.toMatch(/const\s+\w*[Aa]skedTheUser\s*=\s*\/.*\?/);

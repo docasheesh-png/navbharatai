@@ -743,8 +743,7 @@ export function HostingChooser({
                     opens INSIDE the Android shell's own WebView rather than in the browser, which is
                     precisely what the request for those two screens rules out. `openExternalUrl`
                     passes `_system` on native, validates the scheme, and adds noopener on the web.
-                    ⚠️ The wider class is NOT swept here: 45 bare `target="_blank"` links remain across
-                    24 files, recorded as an open root cause in PROGRESS.md rather than half-fixed. */}
+                    The wider class is closed by `installExternalLinkHandler` (nativeShell.ts, Q-112). */}
                 <button
                   type="button"
                   onClick={() => openExternalUrl(a.url)}

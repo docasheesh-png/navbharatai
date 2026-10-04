@@ -6,6 +6,8 @@
 // build never writes — so the preview looked permanently "disconnected" from the v5.0 engine.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { readPreviewAiAsk } from '../../lib/previewAiProtocol';
+import { answerPreviewAiAsk } from './previewAiRelay';
 import { RotateCcw, Wand2, Stethoscope, Pen, Eye, Smartphone, Tablet, Monitor, Maximize2, Terminal, Sparkles, ChevronLeft, ChevronRight, Sun, Moon } from 'lucide-react';
 import { canOfferRestart, restartStatusLine } from './previewRestart';
 import { nextDoorUrl } from './previewDoorClient';
@@ -1146,6 +1148,23 @@ export function PreviewSurface({ url, snapshotUrl, snapshotIdleNote, workspaceId
     window.addEventListener('message', onPicked);
     return () => window.removeEventListener('message', onPicked);
   }, [onAskAiAboutElement]);
+  // THE APP'S OWN ASSISTANT, IN THE PREVIEW (admin 2026-10-04). The app asks its parent — this page —
+  // and only a question from one of OUR two preview frames is answered, with the owner's own login.
+  // Nothing is handed to the app's page except the answer itself.
+  useEffect(() => {
+    const onAiAsk = (e: MessageEvent) => {
+      const ask = readPreviewAiAsk(e.data);
+      if (!ask) return;
+      const frames = [liveIframeRef.current?.contentWindow, inBrowserIframeRef.current?.contentWindow];
+      if (!e.source || !frames.includes(e.source as Window)) return;
+      const reply = e.source as Window;
+      void answerPreviewAiAsk(ask, workspaceId).then((answer) => {
+        try { reply.postMessage(answer, '*'); } catch { /* the frame went away */ }
+      });
+    };
+    window.addEventListener('message', onAiAsk);
+    return () => window.removeEventListener('message', onAiAsk);
+  }, [workspaceId]);
   /** Post to whichever preview is actually on screen — they are different frames. */
   const postToPreview = useCallback((msg: Record<string, unknown>) => {
     const frame = mode === 'live' ? liveIframeRef.current : inBrowserIframeRef.current;

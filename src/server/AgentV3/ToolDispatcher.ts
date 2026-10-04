@@ -16,7 +16,7 @@ import { declaredRoutes, paramOnlyMatch, type DeclaredRoute } from './routerPath
 import { DECLARED_PORT_FILES } from './declaredPort';
 import { appPortsFrom, isSecondaryAppPort, type AppPortMap } from './appPorts';
 import { sandboxStore } from './SandboxStore';
-import { buildPreKillPortCommand } from './sandbox/EngineerAI/actuators/devServerHost';
+import { buildPreKillPortCommand, detachBackgroundJobs, isLongRunningCommand, BACKGROUND_JOB_LOG } from './sandbox/EngineerAI/actuators/devServerHost';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
 import { inspectCredentials } from './credentialSafety';
@@ -44,8 +44,8 @@ import type { Checkpointer } from './GitManager';
 import { isWorkerRole, isPlanningOnlyRole, PLAN_YOURSELF_NOTE } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { shellBuildProvesSuccess } from './buildFailurePrediction';
-import { robustTscCommand } from './tscCommand';
-import { parseTscErrors, type TscError } from './EndgameRepair';
+import { robustTscCommand, recipeInstallCommand, RECIPE_DEPS_BUSY_MARKER } from './tscCommand';
+import { parseTscErrors, fixTypeOnlyValueImports as fixTypeOnlyValueImportsFromErrors, type TscError } from './EndgameRepair';
 import { tscOutputProvesClean, looksLikeTypecheckCommand, tscVerdict, countTscErrors } from './TscGate';
 import { pathMissHint } from './suggestFilePath';
 import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
@@ -86,23 +86,27 @@ import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServ
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
-import { lintBuiltApp, a11yHandBack, offGridHandBack } from './buildQualityLint';
+import { lintBuiltApp, a11yHandBack } from './buildQualityLint';
 import { storeEffectLoopNote } from './storeEffectLoop';
+import { detachedMethodNote } from './detachedMethod';
 import { rootThemeHooks, deadThemeSwitchNote } from './deadThemeSwitch';
 import { pruneGeneratedListing } from './generatedListing';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, leftToTheKit, usesNonKitNbClass } from './kitRestore';
 import { findUndefinedClasses, isProjectStylesheet, undefinedClassesInFile, undefinedClassesWriteNote, stylesheetClassBrief, undefinedClassWriteNote, cssImportsOf, unimportedSheetNote, missingImportedSheetNote, collectDefinedClasses } from './CssConsistency';
+import { scopeStyleHandBack } from './stylePolishResume';
+import { batchSizeNote } from './batchSize';
 import { pageDesignWriteNote, isPageFile, analyzeDesignCoverage, type DesignDefect } from './DesignCoverage';
 import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
-import { shellWriteTargets, shellRemovalTargets } from './shellWriteTargets';
+import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets, shellRemovedOperands, removedRecordedPaths } from './shellWriteTargets';
 import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
-import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
+import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames } from './tscErrorCause';
 import {
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckWarmupCommand, WARMUP_COMPILED_MARKER, writeTypecheckNote, writeTypecheckCleanNote, WriteTypecheckQueue,
   shouldProbeTsconfig, probeExhausted, isMissingFileError, type TsProjectVerdict,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
+  typeOnlyWriteHealEnabled, typeOnlyHealTargets, withoutHealedTypeOnly, healedTypeOnlyNames, typeOnlyHealNote,
 } from './writeTimeTypecheck';
 import { scanAuthenticity, authenticitySummary, fakeResultWriteNote } from './AuthenticityAnalysis';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
@@ -312,7 +316,8 @@ import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
-import { missingLayerFiles, missingLayersNote } from '../lib/gameRecipeLayers';
+import { missingLayerFiles, missingLayersNote, recipeDependenciesNeeded } from '../lib/gameRecipeLayers';
+import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
@@ -651,6 +656,23 @@ export class ToolDispatcher {
   }
 
   /**
+   * Record the files a shell command wrote, read back from the sandbox (see the bash tool). A target
+   * that is gone (`rm`) or unreadable is skipped; generated and dependency folders are never recorded.
+   * `skip` is a path another read-back already recorded. Best-effort: the sandbox scan at the final
+   * save remains the net for a write the command's text did not show.
+   */
+  private async recordShellWrites(command: string, skip: string | null): Promise<void> {
+    let targets: string[];
+    try { targets = shellReadBackTargets(command, skip); } catch { return; }
+    for (const path of targets) {
+      try {
+        const content = await this.actuator.readFile(this.workspaceId, path);
+        if (typeof content === 'string') this.onFileWrite(path, content);
+      } catch { /* removed or unreadable — nothing to record */ }
+    }
+  }
+
+  /**
    * THE DURABLE STORE IS WHAT A PUBLISH SERVES, SO NOTHING OF OURS MAY REACH IT (autopsy fd021c64).
    *
    * `stripPreviewBridge`'s own doc claims the bridge is "closed at both ends" — the file the model
@@ -723,6 +745,20 @@ export class ToolDispatcher {
   wroteAnything(): boolean {
     this.flushUnrecordedWrites();
     return this._writtenPaths.size > 0 || this._delegateWrote;
+  }
+
+  /** Delegations whose sub-agent wrote something (or could not say) — counted, so a RUN can ask about itself. */
+  private _delegateWrites = 0;
+
+  /**
+   * How many changes this agent has made so far — its own writes plus delegations that wrote. A number,
+   * not a yes/no, because a repair pass on the architect's dispatcher must ask "did THIS run change
+   * anything?", and `wroteAnything()` is already true from the build that came before it (autopsy
+   * 6cd698cc — see `repairClaimWithoutChange` in AgentRunner).
+   */
+  changeCount(): number {
+    this.flushUnrecordedWrites();
+    return this._writeSeq + this._delegateWrites;
   }
 
   // Preview loop-breaker state (build-diagnostics root cause: with no cross-call memory the model
@@ -844,6 +880,29 @@ export class ToolDispatcher {
 
   setFileDeletionSink(sink: (paths: string[]) => void): void {
     if (typeof sink === 'function') this.fileDeletionSink = sink;
+  }
+
+  /**
+   * Every path the build has recorded for the saved project (queue Q-246). A shell command that removes
+   * one of them — any file kind, a folder, a glob, the source of a `mv` — is checked against the sandbox
+   * and forgotten, so the final save cannot put it back. Unset ⇒ only the delete guard's single source
+   * files are reconciled, as before.
+   */
+  private recordedPaths?: () => Iterable<string>;
+
+  setRecordedPaths(getter: () => Iterable<string>): void {
+    if (typeof getter === 'function') this.recordedPaths = getter;
+  }
+
+  /** The parent's deletion wiring, for a sub-agent's dispatcher (queue Q-246). */
+  deletionWiring(): { sink?: (paths: string[]) => void; recorded?: () => Iterable<string> } {
+    return { sink: this.fileDeletionSink, recorded: this.recordedPaths };
+  }
+
+  /** Called once at spawn: a sub-agent's shell deletions reach the parent's saved project too. */
+  shareDeletionWiring(w: { sink?: (paths: string[]) => void; recorded?: () => Iterable<string> } | undefined): void {
+    if (w?.sink) this.setFileDeletionSink(w.sink);
+    if (w?.recorded) this.setRecordedPaths(w.recorded);
   }
 
   /** Told when a delete of the user's own file is refused, so the build report says so. */
@@ -2831,6 +2890,22 @@ export class ToolDispatcher {
         if (typeof content === 'string' && content) out[p] = content;
       } catch { /* absent or unreadable — not evidence either way */ }
     }));
+    // …and the modules that DO export the missing name, so an import of the wrong module is told to
+    // change its import rather than to add the name to the wrong file (tscErrorCause.exportedElsewhere).
+    // One bounded grep, at most four reads; only when such an error exists.
+    try {
+      const cmd = exportSearchCommand(missingExportNames(own));
+      if (cmd) {
+        const r = await withTimeout(this.actuator.runCommand(this.workspaceId, cmd), 5_000, 'write-typecheck-export-search');
+        const hits = String(r?.stdout ?? '').split('\n').map((l) => l.trim()).filter((l) => l && !(l in held) && !(l in out)).slice(0, 4);
+        await Promise.all(hits.map(async (p) => {
+          try {
+            const content = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'write-typecheck-export-source');
+            if (typeof content === 'string' && content) out[p] = content;
+          } catch { /* not evidence either way */ }
+        }));
+      }
+    } catch { /* a search that fails leaves the note exactly as it was */ }
     return out;
   }
 
@@ -2903,18 +2978,92 @@ export class ToolDispatcher {
    * for the tool result. Best-effort: a failure leaves the recipe's own result exactly as it was.
    */
   private async addMissingRecipeLayers(written: Record<string, string>, agent: AgentRole): Promise<string> {
+    let layersNote = '';
+    const all: Record<string, string> = { ...written };
     try {
       const listed = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
       const present = new Set(listed.map((f) => String(f).replace(/^\.?\//, '')));
       const missing = missingLayerFiles(written, present);
-      if (missing.size === 0) return '';
       for (const [path, f] of missing) {
         await this.actuator.writeFile(this.workspaceId, path, f.content);
         this.state?.recordFileChange({ path, kind: 'create' }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, f.content);
+        all[path] = f.content;
       }
-      return missingLayersNote(missing);
-    } catch { return ''; }
+      layersNote = missingLayersNote(missing);
+    } catch { /* the recipe's own result stands */ }
+    return layersNote + await this.installRecipeDependencies(all);
+  }
+
+  /**
+   * Install the packages these recipe files import and the project does not list yet — only packages a
+   * recipe declares, at the version it declares (gameRecipeLayers.recipeDependenciesNeeded). Under the
+   * install lock, so it never races the background install; when that install is still busy, or npm
+   * fails, the tool result says what to install instead of claiming it was done. The rewritten
+   * package.json is recorded through the one write door, so the saved project lists the package too.
+   */
+  private async installRecipeDependencies(files: Record<string, string>): Promise<string> {
+    let pkg: string | null = null;
+    try { pkg = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { return ''; }
+    const needed = recipeDependenciesNeeded(files, pkg);
+    if (needed.length === 0) return '';
+    return `\n\n${await this.installDependencies(needed, '')}`;
+  }
+
+  /**
+   * Replace a recipe result's `Add the dependency: …` line with what happened when we installed it, into
+   * the package.json the recipe's files belong to (recipeDependencyLine.ts). A dependency already listed
+   * is not installed again; an unreadable manifest is left alone and the line stays as the recipe wrote it.
+   */
+  private async settleNamedDependencies(content: string, writtenPaths: string[]): Promise<string> {
+    const named = namedDependencies(content);
+    if (!named) return content;
+    const candidates = new Set<string>();
+    for (const p of writtenPaths) {
+      const parts = String(p).split('/').slice(0, -1);
+      for (let i = parts.length; i > 0; i--) candidates.add(parts.slice(0, i).join('/'));
+    }
+    const withManifest = new Set<string>();
+    for (const dir of [...candidates].slice(0, 8)) {
+      try { await this.actuator.readFile(this.workspaceId, `${dir}/package.json`); withManifest.add(dir); } catch { /* none there */ }
+    }
+    const dir = manifestDirFor(writtenPaths, (d) => withManifest.has(d));
+    const manifest = dir ? `${dir}/package.json` : 'package.json';
+    let pkg: string | null = null;
+    try { pkg = await this.actuator.readFile(this.workspaceId, manifest); } catch { return content; }
+    const missing = unlistedDependencies(named.deps, pkg);
+    if (missing === null) return content;
+    const outcome = missing.length === 0
+      ? `Dependency already in ${manifest}: ${named.deps.map((d) => d.name).join(', ')} — nothing to install.`
+      : await this.installDependencies(missing, dir);
+    return content.replace(named.line, outcome);
+  }
+
+  /**
+   * Install known packages under the npm install lock, record the rewritten manifest, and say honestly
+   * what happened — installed, deferred because another install is running, or failed.
+   */
+  private async installDependencies(deps: ReadonlyArray<{ name: string; version: string; dev: boolean }>, dir: string): Promise<string> {
+    const named = deps.map((d) => `${d.name}@${d.version}`).join(', ');
+    const base = recipeInstallCommand(deps);
+    if (!base) return `Add the dependency: ${named}`;
+    const cmd = dir ? `cd ${dir} && ${base}` : base;
+    const manifest = dir ? `${dir}/package.json` : 'package.json';
+    try {
+      const started = Date.now();
+      const r = await withTimeout(this.actuator.runCommand(this.workspaceId, cmd), 150_000, 'recipe-dependencies');
+      try { this.onCommand?.({ command: cmd, exitCode: r.exitCode, stdout: r.stdout || '', stderr: r.stderr || '', durationMs: Date.now() - started }); } catch { /* diagnostics are best-effort */ }
+      if (String(r.stdout ?? '').includes(RECIPE_DEPS_BUSY_MARKER)) {
+        return `📦 This code needs ${named}. The app's packages are still being installed, so add them when that finishes: npm install ${deps.map((d) => `${d.name}@${d.version}`).join(' ')}${dir ? ` (in ${dir})` : ''}`;
+      }
+      if (r.exitCode !== 0) {
+        return `📦 Installing ${named} failed (npm exit ${r.exitCode}). Install them before you finish — this code does not compile without them.`;
+      }
+      try { this.onFileWrite(manifest, await this.actuator.readFile(this.workspaceId, manifest)); } catch { /* the final save's scan still sees it */ }
+      return `📦 Installed ${named} into ${manifest} — this code imports them. Do not install them again.`;
+    } catch {
+      return `📦 This code needs ${named} — install them before you finish.`;
+    }
   }
 
   /**
@@ -3001,7 +3150,7 @@ export class ToolDispatcher {
       if (unprobed) s.compiledUnprobed += 1;
       let silentRun = false; // tsc printed nothing at all — the only output that means "clean"
       let neverRan = false; // the compiler did not look at the project — neither clean nor failed
-      const errors = await this._writeTypecheckQueue.run(async () => {
+      let errors = await this._writeTypecheckQueue.run(async () => {
         const command = writeTypecheckCommand();
         const startedAt = Date.now();
         let r: { stdout: string; stderr: string };
@@ -3041,6 +3190,15 @@ export class ToolDispatcher {
         return '';
       }
       if (errors.length === 0) s.cleanRuns += 1;
+      // A type-only import of a value is a string edit with one correct form — done here, not asked of the
+      // model (autopsy 6cd698cc, writeTimeTypecheck.ts). Only in files this build wrote.
+      const healedTypeOnly = errors.length > 0 ? await this.healTypeOnlyImportsAtWrite(errors, tsPaths, sources) : null;
+      const healedNote = healedTypeOnly ? typeOnlyHealNote(healedTypeOnly.healed) : '';
+      if (healedTypeOnly && healedTypeOnly.healed.size > 0) {
+        sources = { ...sources, ...healedTypeOnly.files };
+        errors = withoutHealedTypeOnly(errors, healedTypeOnly.healed);
+        if (errors.length === 0) return healedNote;
+      }
       const own = splitByWrittenFiles(errors, tsPaths).own.length;
       s.ownErrorsSurfaced += own;
       if (own > 0) {
@@ -3058,10 +3216,44 @@ export class ToolDispatcher {
       sources = { ...(await this.exportTargetSources(splitByWrittenFiles(errors, tsPaths).own, sources)), ...sources };
       // The members of a type the code guessed at (autopsy 0bb437b4) ride after the typecheck's own note.
       const members = await this.missingMemberNote(splitByWrittenFiles(errors, tsPaths).own, sources);
-      if (members) return writeTypecheckNote(errors, tsPaths, sources) + members;
-      return writeTypecheckNote(errors, tsPaths, sources);
+      if (members) return healedNote + writeTypecheckNote(errors, tsPaths, sources) + members;
+      return healedNote + writeTypecheckNote(errors, tsPaths, sources);
     } catch {
       return ''; // the check's own failure must never reach the write's result as anything but silence
+    }
+  }
+
+  /**
+   * Fix TS1361 (a value imported with `import type`) in files THIS build wrote, through the heal write path,
+   * and return what landed. The compiler named file, line and name, so the edit is exact; a file the user
+   * wrote and this build never touched is left to the model, as before. Best-effort: anything that fails
+   * leaves the error to be quoted exactly as it was.
+   */
+  private async healTypeOnlyImportsAtWrite(errors: TscError[], tsPaths: string[], sources: Record<string, string>): Promise<{ healed: Map<string, Set<string>>; files: Record<string, string> }> {
+    const none = { healed: new Map<string, Set<string>>(), files: {} as Record<string, string> };
+    try {
+      if (!typeOnlyWriteHealEnabled()) return none;
+      const targets = typeOnlyHealTargets(errors, new Set([...tsPaths, ...this._writtenPaths]));
+      if (targets.length === 0) return none;
+      const before: Record<string, string> = {};
+      for (const file of new Set(targets.map((e) => e.file))) {
+        const known = sources[file];
+        const content = typeof known === 'string' ? known : await this.actuator.readFile(this.workspaceId, file).catch(() => null);
+        if (typeof content === 'string') before[file] = content;
+      }
+      const fix = fixTypeOnlyValueImportsFromErrors(before, targets);
+      const named = healedTypeOnlyNames(fix.fixed);
+      const healed = new Map<string, Set<string>>();
+      const files: Record<string, string> = {};
+      for (const [file, names] of named) {
+        const after = fix.files[file];
+        if (typeof after !== 'string' || after === before[file]) continue;
+        if (healWouldOscillate(this.workspaceId, file, after)) continue;
+        if (await this.landHealWrite(file, after, before[file])) { healed.set(file, names); files[file] = after; }
+      }
+      return { healed, files };
+    } catch {
+      return none;
     }
   }
 
@@ -3085,11 +3277,20 @@ export class ToolDispatcher {
         ? await this.runVisual(call)
         : null;
       this.flushUnrecordedWrites(); // anything written outside a tool call, before this one runs
+      const writtenBefore = new Set(this._writtenPaths);
       let content: string;
       try {
         content = visual ? visual.content : await this.run(call, agent);
       } finally {
         this.flushUnrecordedWrites(); // every write this call made reaches the saved project
+      }
+      // A RECIPE'S DEPENDENCY IS INSTALLED, NOT NAMED (recipeDependencyLine.ts) — one door for every recipe.
+      const recipeCalled = call.name === 'run_recipe'
+        ? String((call.input as Record<string, unknown> | undefined)?.name ?? '')
+        : call.name;
+      if (!visual && isRecipeName(recipeCalled)) {
+        try { content = await this.settleNamedDependencies(content, [...this._writtenPaths].filter((p) => !writtenBefore.has(p))); }
+        catch { /* the recipe's own result stands */ }
       }
       this.events?.emit({
         type: 'tool_result',
@@ -3315,6 +3516,8 @@ export class ToolDispatcher {
     // A whole-store dependency that loops the app forever (autopsy 6a4a799f) — said while the file is open.
     let storeLoop = '';
     try { storeLoop = storeEffectLoopNote(files); } catch { /* a note is best-effort */ }
+    // A `this`-reading method handed out uncalled (autopsy 6cd698cc — the theme button). See detachedMethod.ts.
+    try { storeLoop += detachedMethodNote(files); } catch { /* a note is best-effort */ }
     // An `nb-` class the kit does not have and nothing defines (autopsy 466c260a) — said while the file
     // is open, instead of by the end-of-build check inside a four-minute heal.
     const invented = await this.inventedKitClassNotes(files);
@@ -3399,7 +3602,7 @@ export class ToolDispatcher {
    * stylesheet that cannot be read returns `[]`: this answer sends a model back to work, so it must never
    * name a class as undefined because the file that defines it was not read.
    */
-  async undefinedClassesNow(): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }>; offGrid?: Array<{ file: string; values: string[] }> }> {
+  async undefinedClassesNow(opts: { onlyWritten?: boolean } = {}): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }> }> {
     try {
       let listing: string[] = [];
       try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'style-resume-listing'); }
@@ -3433,11 +3636,19 @@ export class ToolDispatcher {
       // line uses, over the same files already read here, so the two can never disagree.
       let a11y: Array<{ file: string; issues: string[] }> = [];
       try { a11y = a11yHandBack(lintBuiltApp(project)); } catch { a11y = []; }
-      // Spacing off the 4px grid — the DESIGN_CONSISTENCY finding (Q-037 / Q-022) — only in files THIS agent
-      // wrote, so a value in the user's own code is never handed back as ours to restyle (Q-015).
-      let offGrid: Array<{ file: string; values: string[] }> = [];
-      try { offGrid = offGridHandBack(project, this._writtenPaths).map(({ file, values }) => ({ file, values })); } catch { offGrid = []; }
-      return { missing, sheet, pages, a11y, offGrid };
+      // 🔴 SPACING IS NO LONGER HANDED BACK TO THE MODEL (autopsy 536c8189, 2026-10-01). It was, from
+      // #3458 until this date — `offGridHandBack` fed the `DESIGN_CONSISTENCY` values into the end-of-turn
+      // message with "change each to the nearest multiple of 4px". The first real build to meet it answered
+      // with three `node -e` regex scripts over a 634-line stylesheet, one failed `edit_file`, three model
+      // calls, ~45 s — and moved `padding: 4px 8px` to `2px 6px`, i.e. ON-grid values OFF the grid.
+      // `round(v / 4) * 4` has exactly one right answer, so it is now done by construction, for free, in
+      // `spacingSnap.ts`. The hand-back keeps the findings only a model can judge: a class with no rule, a
+      // page with no empty state, a control with no name. `offGridHandBack` is deleted with it.
+      // A SUB-AGENT is handed back only what ITS OWN files use (Q-066, autopsy de3bb2bb). Specialists run
+      // in parallel, so a class a sibling's screen uses is that sibling's to define; handing it here would
+      // send two agents to edit one stylesheet for the same rule.
+      if (opts.onlyWritten) return scopeStyleHandBack({ missing, sheet, pages, a11y }, project, this._writtenPaths);
+      return { missing, sheet, pages, a11y };
     } catch {
       return { missing: [], pages: [] };
     }
@@ -3838,11 +4049,16 @@ export class ToolDispatcher {
         const unchanged = prior !== undefined && prior.content === full;
         const nothingWritten = prior !== undefined && prior.writeSeq === this._writeSeq;
         const stalls = unchanged && nothingWritten ? (prior?.stalls ?? 0) + 1 : 0;
-        const unchangedRereads = (prior?.unchangedRereads ?? 0) + (unchanged ? 1 : 0);
-        this._readLedger.set(ledgerKey, { count: readCount, content: full, writeSeq: this._writeSeq, stalls, unchangedRereads });
         const own = this._ownReads.get(ledgerKey);
         const ownCount = (own?.count ?? 0) + 1;
         const ownUnchanged = own !== undefined && own.content === full;
+        // 🔴 A SPECIALIST'S FIRST READ IS NOT A WASTED RE-READ (autopsy 3f959fde, 2026-10-01). The report
+        // counted a file "re-read unchanged" whenever ANY agent had read it before — so the Frontend
+        // specialist's first look at `src/App.tsx`, which it needed because a child starts with an empty
+        // context, was billed in REPEATED_READS as a step that "buys nothing". Waste is THIS agent reading
+        // what it already holds; the shared ledger keeps counting every read for the totals.
+        const unchangedRereads = (prior?.unchangedRereads ?? 0) + (ownUnchanged && !(ownCount === 2 && own?.handed === true) ? 1 : 0);
+        this._readLedger.set(ledgerKey, { count: readCount, content: full, writeSeq: this._writeSeq, stalls, unchangedRereads });
         const ownStalls = ownUnchanged && own.writeSeq === this._writeSeq ? own.stalls + 1 : 0;
         this._ownReads.set(ledgerKey, { count: ownCount, content: full, writeSeq: this._writeSeq, stalls: ownStalls });
         // A file handed over in the task, read for the first time, is a copy the agent HOLDS — but it did
@@ -4158,7 +4374,7 @@ export class ToolDispatcher {
         // Sequential on purpose: the first call lists the sandbox once and the rest reuse it.
         let twinNotes = '';
         for (const p of written) twinNotes += await this.removeShadowTwins(p, agent);
-        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchSteeringNotes}${kitKeepNotes}${twinNotes}`;
+        return `Wrote ${written.length} file(s) in dependency order: ${written.join(', ')}.${overwriteWarning}${contentLossWarning}${blockedWarning}${dupWarning}${batchSteeringNotes}${kitKeepNotes}${twinNotes}${batchSizeNote(dedupedByPath.size)}`;
       }
 
       case 'edit_file': {
@@ -4455,7 +4671,16 @@ export class ToolDispatcher {
             }
           } catch { /* best-effort — the reactive DB-unreachable net below still catches a dead DB honestly */ }
         }
-        let { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, effectiveCommand);
+        // A BACKGROUNDED JOB NEVER HOLDS THE COMMAND'S PIPE (autopsy 241215d1): `python server.py &` then a
+        // `curl` waited out the whole 300 s timeout because the server kept stdout open. A dev-server
+        // launch is left to the managed boot, which strips its `&` itself (stripDevServerBackgrounding).
+        const background = isLongRunningCommand(effectiveCommand)
+          ? { command: effectiveCommand, detached: 0 }
+          : detachBackgroundJobs(effectiveCommand);
+        let { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, background.command);
+        if (background.detached > 0) {
+          stdout = `${stdout ?? ''}\n[note] ${background.detached === 1 ? 'The background job was' : `${background.detached} background jobs were`} started detached so this command could finish; its output goes to ${BACKGROUND_JOB_LOG} (read it with \`tail ${BACKGROUND_JOB_LOG}\`).`;
+        }
         // WHAT npm WROTE IS WHAT GETS SAVED (2026-09-27). A shell install edits package.json behind the
         // captured writes, and a package.json the model wrote earlier would otherwise win at the final
         // save — dropping the dependency just installed (see manifestRewrittenBy). Read it back and record
@@ -4467,6 +4692,14 @@ export class ToolDispatcher {
             catch { /* the sandbox scan at the final save still sees it */ }
           }
         }
+        // AND SO IS EVERY FILE THE COMMAND PLAINLY WROTE (iPhone/candy report 7da1cdca, 2026-10-04). The
+        // npm read-back above was one instance of a class: a shell write lands in the sandbox and never
+        // reaches the captured writes, so the copy the model wrote EARLIER wins at the final save. In that
+        // report `sed -i` snapped spacing in two files, every browser check saw the new files, and the
+        // saved project, the preview copy and any publish got the old ones (SAVED_SOURCE_DIVERGES,
+        // PREVIEW_SNAPSHOT_STALE). Read back what the shell's own syntax says it wrote — whatever the exit
+        // code, because a failed command may still have changed a file — and record it through the one door.
+        await this.recordShellWrites(effectiveCommand, manifestRewrittenBy(effectiveCommand));
         // PRISMA RELATION SELF-HEAL (ShopKhata autopsy 2026-07-17): an LLM-written schema routinely
         // ships a HALF-relation ("user User?" with no opposite field / no references) — prisma
         // generate then fails with a validation error whose OWN message says the fix: "run `prisma
@@ -4646,8 +4879,16 @@ export class ToolDispatcher {
         // line already knew which source files the command would remove; nothing had ever acted on it
         // once the command succeeded, so a build that tidied up its own debris was then failed over the
         // debris. `fileDeletion.ts` carries the evidence and the three conditions.
-        if (deleteTargets.length > 0) {
-          try { await this.reconcileDeletions(deletionCandidates(deleteTargets, exitCode)); }
+        // …AND EVERYTHING ELSE A SHELL TOOK OUT (queue Q-246): a stylesheet, a folder, a glob, the source
+        // of a `mv`. Only recorded paths are named, and each is confirmed gone in the sandbox first.
+        let removedRecorded: string[] = [];
+        if (exitCode === 0 && this.recordedPaths) {
+          try { removedRecorded = removedRecordedPaths(shellRemovedOperands(command), this.recordedPaths()); }
+          catch { removedRecorded = []; }
+        }
+        if (deleteTargets.length > 0 || removedRecorded.length > 0) {
+          const candidates = [...new Set([...deletionCandidates(deleteTargets, exitCode), ...removedRecorded])];
+          try { await this.reconcileDeletions(candidates); }
           catch { /* reconciliation is best-effort — a failure simply keeps today's stale entry */ }
         }
         /**
@@ -5119,7 +5360,9 @@ export class ToolDispatcher {
         if (envTemplateSecrets.length) extra.push({ severity: 'high', label: `${envTemplateSecrets.length} real secret(s) committed in an .env template` });
         for (const f of runnability.findings) extra.push({ severity: f.level === 'high' ? 'high' : 'medium', label: `Runnability: ${f.message}` });
         for (const i of securityConfig) extra.push({ severity: i.severity === 'high' ? 'high' : 'medium', label: `Security config (${i.rule})` });
-        if (hardcodedUrls.length) extra.push({ severity: 'medium', label: `${hardcodedUrls.length} hardcoded localhost URL(s)` });
+        // The label names WHERE (autopsy 241215d1: "1 hardcoded localhost URL(s)" with no file, so the
+        // report could not say whether it was app code or a help text).
+        if (hardcodedUrls.length) extra.push({ severity: 'medium', label: `${hardcodedUrls.length} hardcoded localhost URL(s) — first at ${hardcodedUrls[0].file}:${hardcodedUrls[0].line}` });
         if (sriIssues.length) extra.push({ severity: 'medium', label: `${sriIssues.length} third-party <script> without an integrity hash (SRI)` });
         if (cspIssues.length) extra.push({ severity: 'medium', label: `${cspIssues.length} static-SPA page(s) with third-party scripts but no Content-Security-Policy` });
         if (commentLangIssues.length) extra.push({ severity: 'medium', label: `${commentLangIssues.length} non-English code comment(s) (professional-English standard)` });
@@ -8019,8 +8262,9 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('3D layer');
         // Naming the install is not optional: a 3D layer whose `three` dependency is never added
         // produces an app that cannot build, which is the honest-failure rule applied to a generator.
-        const g3Deps = g3.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
-        return `Wired the 3D layer:\n${g3Written.join('\n')}\nAdd the dependency: ${g3Deps} (and @types/three)\n\n${g3.instructions}${g3Layers}`;
+        // Since 2026-10-04 the dependency is INSTALLED, not named (installRecipeDependencies, called by
+        // addMissingRecipeLayers): `g3Layers` says what happened, including when it could not be done.
+        return `Wired the 3D layer:\n${g3Written.join('\n')}\n\n${g3.instructions}${g3Layers}`;
       }
 
       case 'generate_game_runtime': {
@@ -10107,7 +10351,7 @@ export class ToolDispatcher {
         if (isPlanningOnlyRole(role)) return PLAN_YOURSELF_NOTE;
         this.events?.emit({ type: 'agent_spawned', agent: role, task: instruction, ts: Date.now() });
         const result = await this.spawnSubAgent(role, instruction + await this.stylesheetBriefFor(role));
-        if (!Array.isArray(result.written) || result.written.length > 0) this._delegateWrote = true;
+        if (!Array.isArray(result.written) || result.written.length > 0) { this._delegateWrote = true; this._delegateWrites += 1; }
         return taskResultWithWrites(role, result);
       }
 
@@ -10457,6 +10701,9 @@ export class ToolDispatcher {
             .catch(() => ({ exitCode: -1, stdout: '', stderr: '' }));
           removed = rm.exitCode === 0;
           if (removed) this.state?.recordFileChange({ path: from, kind: 'delete' }, agent);
+          // The old path must leave the build's own maps too, or the final save puts it back (Q-246's
+          // sibling: every other delete already reconciles; this rm did not).
+          if (removed) await this.reconcileDeletions([from]);
         }
         this.scheduleCheckpoint(`codemod move ${from} → ${to}`);
         return result.summary + (removed ? '' : `\nNOTE: could not delete the old file ${from} — remove it manually (its importers already point to ${to}).`);
@@ -10647,6 +10894,34 @@ function flexibleWhitespaceRegex(literal: string): RegExp | null {
  * message. Copy-safe: NO line-number prefixes inside the fenced block (the range is stated in the header),
  * so the model can copy the shown lines verbatim into a new old_string.
  */
+/**
+ * The CSS selectors an edit's `old_string` opens a rule for (`.btn-danger {`) that have no rule in the
+ * file. Only selector-shaped lines ending in `{` are read, so a JS/TS edit can never produce one. PURE.
+ */
+export function missingCssSelectors(existing: string, oldStr: string): string[] {
+  const out: string[] = [];
+  for (const raw of String(oldStr ?? '').split('\n')) {
+    // Linear by construction: an end check, then one class with no nesting (a nested optional group
+    // here backtracked for a full minute on an ordinary sentence — caught by the existing suite).
+    const line = raw.trim();
+    if (!line.endsWith('{') || line.length > 200) continue;
+    const sel = line.slice(0, -1).trim();
+    if (!/^[.#][\w-][\w\s.#:>+~,()-]*$/.test(sel)) continue;
+    if (!/^[.#]/.test(sel)) continue; // class/id rules only — a bare `div {` or `@media … {` is too common to judge
+    const re = new RegExp(`(^|[\\s,}])${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\s*[,{]`, 'm');
+    if (!re.test(existing) && !out.includes(sel)) out.push(sel);
+  }
+  return out.slice(0, 5);
+}
+
+/** The head-and-tail view of a long file used when an edit's anchor is nowhere in it. PURE. */
+function nearestEditRegionHeadTail(existing: string, maxChars: number): string {
+  if (existing.length <= maxChars) return `Current file content:\n\`\`\`\n${existing}\n\`\`\`\n`;
+  const tailChars = Math.floor(maxChars * 0.4);
+  return `Top of the file:\n\`\`\`\n${existing.slice(0, maxChars - tailChars)}\n…\n\`\`\`\n`
+    + `End of the file:\n\`\`\`\n…\n${existing.slice(existing.length - tailChars)}\n\`\`\`\n`;
+}
+
 export function nearestEditRegion(existing: string, oldStr: string, windowLines = 24, maxChars = 2400): string {
   const lines = existing.split('\n');
   // Distinctive anchors from the intended edit: longest trimmed lines first — a token-bearing line like
@@ -10660,6 +10935,16 @@ export function nearestEditRegion(existing: string, oldStr: string, windowLines 
   for (const a of anchors) { const i = lines.findIndex((l) => l.trim() === a); if (i >= 0) { hit = i; break; } }
   if (hit < 0) for (const a of anchors) { const i = lines.findIndex((l) => l.includes(a)); if (i >= 0) { hit = i; break; } }
   if (hit < 0) {
+    // 🔴 A RULE THAT WAS NEVER THERE (autopsy 51ef24ad, 2026-10-04). A sub-agent tried to EDIT
+    // `.btn-danger { … }` and `.nb-main { … }` in the design-kit stylesheet three times — neither rule
+    // existed. Its read had been compacted to head+tail, so it edited from memory, and the miss showed it
+    // only the top of the file, which could not tell it "that rule does not exist". Said directly now.
+    const absent = missingCssSelectors(existing, oldStr);
+    const absentNote = absent.length > 0
+      ? `The rule${absent.length === 1 ? '' : 's'} ${absent.map((x) => `\`${x}\``).join(', ')} ${absent.length === 1 ? 'does' : 'do'} not exist in this file — `
+        + 'there is nothing to edit. To add it, call edit_file with an EMPTY old_string and the full rule as new_string (it appends).\n'
+      : '';
+    if (absentNote) return absentNote + nearestEditRegionHeadTail(existing, maxChars);
     // No anchor located anywhere — the intended text may be entirely gone/hallucinated. Show the head,
     // honestly labelled as such (not the target), so the model re-reads instead of trusting a wrong region.
     if (existing.length <= maxChars) {

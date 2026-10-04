@@ -60,3 +60,17 @@ export function readTurnAnswer(answer: string | null | undefined, request?: stri
 export function answeredWithoutBuilding(answer: TurnAnswer): boolean {
   return answer.declined || answer.asked || answer.pointed;
 }
+
+/**
+ * The text a "what did the model answer?" question must be asked of: the model's own words when the runner
+ * kept them apart from a summary it extended (`AgentRunResult.modelAnswer`), else the summary. PURE.
+ *
+ * 🔴 AUTOPSY 0473628e. The runner returns `turn.text + "(No files were created, so the build did not run.)"`
+ * for a turn that built nothing. The question detector reads the LAST line, so it read our sentence: the
+ * model had asked the user two scope questions, the nudge had stood down for exactly that reason, and the
+ * empty-build retry fired anyway — the e628efd4 class (a verdict asked of text the platform rewrote), through
+ * the runner rather than the route.
+ */
+export function modelsOwnWords(result: { summary?: string | null; modelAnswer?: string | null }): string {
+  return typeof result.modelAnswer === 'string' && result.modelAnswer.trim() ? result.modelAnswer : String(result.summary ?? '');
+}

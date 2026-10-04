@@ -31,7 +31,7 @@ describe('planningRequest — the request as the builder reads it', () => {
 
   it('the message alone is returned unchanged when nothing else exists', () => {
     const r = planningRequest({ prompt: 'mkdir src', userAppExists: false });
-    expect(r).toEqual({ text: 'mkdir src', sources: [], picturesSetAside: 0 });
+    expect(r).toEqual({ text: 'mkdir src', sizing: 'mkdir src', sources: [], picturesSetAside: 0 });
   });
 
   it('an attached file is read with the message (the e725e002 case)', () => {
@@ -61,7 +61,7 @@ describe('planningRequest — the request as the builder reads it', () => {
 
   it('once an app exists, earlier requests are NOT read — "make the button blue" is not the whole app again', () => {
     const r = planningRequest({ prompt: 'make the button blue', recentRequests: [shopSpec], userAppExists: true });
-    expect(r).toEqual({ text: 'make the button blue', sources: [], picturesSetAside: 0 });
+    expect(r).toEqual({ text: 'make the button blue', sizing: 'make the button blue', sources: [], picturesSetAside: 0 });
   });
 
   it('a huge attachment is capped, so a sizing heuristic cannot stall on a 200-page PDF', () => {
@@ -87,18 +87,19 @@ describe('planningRequest — the request as the builder reads it', () => {
   });
 });
 
-describe('the route — every sizer and planner reads planning.text', () => {
+describe('the route — every sizer reads planning.sizing, every model reads planning.text', () => {
   it('builds the planning request once, from what the builder receives', () => {
     // Since autopsy 19641ab5 the sizers read the part of the attachment that DESCRIBES AN APP (a photo is set aside).
     // Since autopsy 2f723acb an app that was started but never assembled still has its earlier requests read.
-    expect(ROUTE).toMatch(/const planning = planningRequest\(\{ prompt, attachmentText: planningAttachmentText, picturesSetAside, recentTurns, userAppExists, appStillUnbuilt \}\)/);
+    // Since autopsy 5759ad8b a message that points at the conversation ("make this app") also reads its last answer.
+    expect(ROUTE).toMatch(/const planning = planningRequest\(\{ prompt, attachmentText: planningAttachmentText, picturesSetAside, recentTurns, conversationReply, userAppExists, appStillUnbuilt \}\)/);
   });
   it.each([
-    ['wall-clock complexity', /const buildComplexity = complexityFromPrompt\(planning\.text\)/],
-    ['ETA complexity', /const etaComplexity = complexityFromPrompt\(planning\.text\)/],
-    ['request analysis', /analyzeRequest\(\{ prompt: planning\.text/],
-    ['complexity routing', /\{ prompt: planning\.text, score: analysis\?\.complexityScore/],
-    ['project-mode detection', /detectMegaProject\(planning\.text\)/],
+    ['wall-clock complexity', /const buildComplexity = complexityFromPrompt\(planning\.sizing\)/],
+    ['ETA complexity', /const etaComplexity = complexityFromPrompt\(planning\.sizing\)/],
+    ['request analysis', /analyzeRequest\(\{ prompt: planning\.sizing/],
+    ['complexity routing', /\{ prompt: planning\.sizing, score: analysis\?\.complexityScore/],
+    ['project-mode detection', /detectMegaProject\(planning\.sizing\)/],
     ['fast lane', /runSimpleBuild\(\{ prompt: planning\.text/],
   ])('%s', (_name, re) => {
     expect(ROUTE).toMatch(re);

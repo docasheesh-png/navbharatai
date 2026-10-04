@@ -101,7 +101,7 @@
     "@capacitor/cli": "^8.4.1",
     "@capacitor/ios": "^8.4.1",
     "@csstools/postcss-cascade-layers": "^6.0.0",
-    "@csstools/postcss-color-mix-function": "^4.0.8",
+    "@csstools/postcss-color-mix-function": "^4.0.14",
     "@csstools/postcss-oklab-function": "^5.0.8",
     "@csstools/postcss-progressive-custom-properties": "^5.1.2",
     "@electric-sql/pglite": "^0.5.8",

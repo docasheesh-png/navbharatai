@@ -147,6 +147,39 @@ function stripLeadingFindingNoise(s: string): string {
  * finding. Autopsy f496c75b: the findings came under "Review of `src/hooks/useInput.ts`:" and carried no
  * file, so once a repair deleted that file the user was still offered a fix for it.
  */
+/**
+ * A FINDING WRITTEN WITHOUT OUR TAG IS STILL A FINDING (autopsy d798ddd3, 2026-10-04).
+ *
+ * 🔴 The lean review of a finished calculator answered *"I found genuine correctness issues"* and listed
+ * them as `**1. Bug: entering \`.\` after an operator produces \`NaN\`**` and `**2. Bug: entering a digit
+ * after \`Error\` corrupts the display**` — no `[WARNING]`, no `[BROKEN]`. `parseReviewOutput` reads a
+ * severity ONLY from a tag, so it returned no issues: the review was shown headed ✅, the one verified
+ * repair (`selectGreenRepairable`) had nothing to select, and the report carried no `REVIEW_FUNCTIONAL_*`
+ * code at all. Two real bugs shipped, found and named by our own reviewer.
+ *
+ * 🔑 THE CLASS: the finding FORMAT is prose a model writes, and a format we only recognise when the model
+ * obeys it fails silently when it does not. #3474 closed the same class for the finding's WORDS inside a
+ * tagged line; this is its sibling for the line itself. A heading-shaped line that LABELS itself — "Bug:",
+ * "Defect:", "Issue:", "Problem:", optionally numbered, bolded or under a `#` — is a finding. "Bug" and
+ * "Defect" are the reviewer saying the behaviour is broken, so they carry `broken`; "Issue" and "Problem"
+ * are left to the classifier. Every guard below (no-findings, self-dismissal, the cosmetic veto in the
+ * selectors) applies unchanged.
+ *
+ * ⚠️ Precision first: only the START of a line, only those four nouns, and only with a colon or dash after
+ * them, so "This bug was fixed earlier" or "No issues found" is never read as a finding.
+ */
+const LABELLED_FINDING_RE =
+  /^\s*(?:#{1,6}\s*)?(?:[-*•]\s+)?(?:\*\*|__)?\s*(?:\d+[.)]\s*)?(?:\*\*|__)?\s*(bug|defect|issue|problem)\s*(?:#?\d+)?\s*(?:\*\*|__)?\s*[:—–-]\s*(?:\*\*|__)?\s*(.+?)\s*(?:\*\*|__)?\s*$/i;
+
+/** A labelled finding's severity and message, or null when the line is not one. PURE. */
+export function readLabelledFinding(line: string): { message: string; broken: boolean } | null {
+  const m = LABELLED_FINDING_RE.exec(line);
+  if (!m) return null;
+  const message = m[2].replace(/\*+/g, '').replace(/[ \t]{2,}/g, ' ').trim();
+  if (message.split(/\s+/).length < 3) return null;
+  return { message, broken: /^(bug|defect)$/i.test(m[1]) };
+}
+
 const FILE_HEADING_RE = /^\s*(?:#{1,6}\s*)?(?:(?:review|findings|issues)\s+(?:of|for|in)\s+)?[`*]{1,2}([\w./@-]+\.[a-z0-9]{1,5})[`*]{1,2}\s*:?\s*$/i;
 
 export function parseReviewOutput(text: string): ReviewIssue[] {
@@ -163,6 +196,20 @@ export function parseReviewOutput(text: string): ReviewIssue[] {
       severity = 'warning';
     else if (lower.includes('[suggestion]') || lower.startsWith('suggestion:') || line.includes('💡'))
       severity = 'suggestion';
+    if (!severity) {
+      // An untagged finding that labels itself (see LABELLED_FINDING_RE) — read, never invented.
+      const labelled = readLabelledFinding(line);
+      if (labelled && !NO_FINDINGS_RE.test(labelled.message) && !SECTION_LABEL_RE.test(labelled.message)) {
+        const dismissed = SELF_DISMISSED_RE.test(line);
+        issues.push({
+          severity: dismissed ? 'suggestion' : 'warning',
+          ...(currentFile ? { file: currentFile } : {}),
+          message: labelled.message,
+          ...(labelled.broken && !dismissed ? { broken: true } : {}),
+        });
+      }
+      continue;
+    }
     if (severity) {
       // THE REVIEWER'S OWN "this is broken" MARKER. Read from the raw line, then stripped with the
       // severity tags so a user never reads our internal vocabulary off their screen (autopsy 536c8189).
@@ -514,6 +561,7 @@ export function reviewerInstruction(opts: Omit<ReviewBuildOpts, 'spawn'>): strin
     fileContext,
     '',
     'For each issue, prefix the line with [CRITICAL], [WARNING], or [SUGGESTION]:',
+    'Start EVERY finding\'s line with its tag — a finding written without one ("**1. Bug: …**") is not read, so it is never fixed.',
     '  [CRITICAL] = feature is missing or completely broken.',
     '  [WARNING]  = works but has a bug or missing edge case.',
     '  [SUGGESTION] = minor improvement that would help.',
@@ -613,7 +661,7 @@ export async function reviewBuild(opts: ReviewBuildOpts): Promise<ReviewResult> 
       : passed
       ? 85
       : 40;
-    return { passed, score, scoreStated: Boolean(scoreMatch), issues, summary: summary.slice(0, 600) };
+    return { passed, score, scoreStated: Boolean(scoreMatch), issues, summary: trimReviewSummary(summary) };
   } catch {
     return { passed: true, score: 0, issues: [], summary: 'Review skipped.' };
   }
@@ -626,6 +674,38 @@ export function isReviewFailureSummary(summary: unknown): boolean {
 }
 
 /** Format a ReviewResult as a narration string. Returns '' if score is 0 (skipped). */
+/**
+ * The review's prose, cut at a paragraph or sentence boundary — never mid-word (autopsy d798ddd3: the
+ * user's review ended "Fix: start with `0.` when the first digit is a d"). An open code fence is closed
+ * so the cut cannot leave the rest of the chat rendered as code. PURE.
+ */
+export const REVIEW_SUMMARY_MAX = 600;
+export function trimReviewSummary(summary: string, max = REVIEW_SUMMARY_MAX): string {
+  const text = typeof summary === 'string' ? summary : '';
+  if (text.length <= max) return text;
+  const head = text.slice(0, max);
+  const para = head.lastIndexOf('\n\n');
+  const sentence = Math.max(head.lastIndexOf('. '), head.lastIndexOf('.\n'));
+  const cut = para >= max * 0.4 ? para : sentence >= max * 0.4 ? sentence + 1 : head.lastIndexOf(' ');
+  let out = head.slice(0, cut > 0 ? cut : max).trimEnd();
+  if ((out.match(/```/g) ?? []).length % 2 === 1) out += '\n```';
+  return `${out} …`;
+}
+
+/**
+ * A review that says it found bugs and from which we read none (autopsy d798ddd3). Every finding format
+ * we know is parsed above; this is the honest net for the next one we do not — the admin is told the
+ * review's findings were not read, and the user is never shown a ✅ over "I found genuine issues". PURE.
+ */
+const REVIEW_DEFECT_SENTENCE_RE = /\b(bugs?|broken|incorrect|wrong (?:result|value|output|answer)|crash(?:es)?|NaN|corrupts?|does not work|doesn'?t work)\b/i;
+export function reviewHasUnreadFindings(review: Pick<ReviewResult, 'issues' | 'summary'> | null | undefined): boolean {
+  if (!review || typeof review.summary !== 'string' || (review.issues?.length ?? 0) > 0) return false;
+  if (/\[pass\]/i.test(review.summary)) return false;
+  return review.summary
+    .split(/(?<=[.!?])\s+|\n+/)
+    .some((sentence) => REVIEW_DEFECT_SENTENCE_RE.test(sentence) && !NO_FINDINGS_RE.test(sentence.replace(/^[#>*\s\d.)-]+/, '')));
+}
+
 export function formatReview(review: ReviewResult): string {
   if (review.score === 0) return '';
   // AN INFERRED NUMBER IS NEVER SHOWN, AND NEVER PICKS THE ICON (autopsy 4d538ca3). A clean [PASS]
@@ -636,7 +716,7 @@ export function formatReview(review: ReviewResult): string {
   const icon = shownScore
     ? (review.score >= 90 ? '✅' : review.score >= 70 ? '⚠️' : '❌')
     : review.issues.some((i) => i.severity === 'critical') ? '❌'
-      : review.issues.some((i) => i.severity === 'warning') ? '⚠️' : '✅';
+      : review.issues.some((i) => i.severity === 'warning') || reviewHasUnreadFindings(review) ? '⚠️' : '✅';
   const header = shownScore
     ? `${icon} Build Review (${review.score}/100): ${review.summary}`
     : `${icon} Build Review: ${review.summary}`;

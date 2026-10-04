@@ -162,6 +162,8 @@ export interface StaticFindings {
   highSeverity: number;
   /** Everything else worth mentioning. */
   warnings: number;
+  /** What those warnings ARE, in a few words each (`shippingIssueLabels`) — named in the headline. */
+  warningLabels?: string[];
 }
 
 /**
@@ -440,7 +442,7 @@ export function releaseGate(
     // Loudest first: a failed typecheck or test suite is the most serious thing that can be true of an
     // app that still runs, so it leads the caveats rather than trailing the count of "things".
     ...softFailures,
-    f.warnings > 0 ? `${f.warnings} thing(s) worth a look` : '',
+    f.warnings > 0 ? `${f.warnings} thing(s) worth a look${namedWarnings(f)}` : '',
     ...qualityCaveats,
   ].filter(Boolean).join(', ');
   // The honest not-proven headline. For an app with no data-entry flow at all, "whether it SAVES anything
@@ -461,6 +463,14 @@ export function releaseGate(
       : notProvenHeadline,
     proven, unproven, failures,
   };
+}
+
+/** " (design consistency 96/100)" — the warnings the count above stands for, when they were given. PURE. */
+function namedWarnings(f: StaticFindings): string {
+  const labels = (f.warningLabels ?? []).filter((l) => typeof l === 'string' && l.trim());
+  if (labels.length === 0) return '';
+  const more = f.warnings > labels.length ? `, +${f.warnings - labels.length} more` : '';
+  return ` (${labels.join('; ')}${more})`;
 }
 
 const STATE_WORD: Record<GateState, string> = {

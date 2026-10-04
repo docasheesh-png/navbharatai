@@ -556,7 +556,7 @@ import { escalationRolloutPercent, inEscalationRollout, escalationCohort } from 
 import { applyStrictTrial, strictCohort } from '../AgentV3/strictTrial';
 import { buildHealthFromDiagnostics } from '../AgentV3/buildHealthCard';
 import { backstopHonestyNote, backstopNarration } from '../AgentV3/backstopHonesty';
-import { reviewBuild, formatReview, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall, reviewChangedPaths } from '../AgentV3/ReviewerAgent';
+import { reviewBuild, formatReview, reviewHasUnreadFindings, hasReviewableSource, selectAutoFixableWarnings, selectGreenRepairable, leanReviewInline, leanReviewAnswersInOneCall, reviewChangedPaths } from '../AgentV3/ReviewerAgent';
 import { refuteReviewByEvidence, missingClassClaim } from '../AgentV3/reviewEvidence';
 import { SALVAGE_HANDOFF_MARKER, HANDOFF_NOTE_FIX_LINE } from '../AgentV3/handoffRule';
 import { salvageReview, formatPartialReview } from '../AgentV3/partialReview';
@@ -22165,6 +22165,7 @@ async function noteBuildOutcome(
           // would report one problem twice in the same sentence.
           highSeverity: 0,
           warnings: buildDiag.shippingIssueCount('warning'),
+          warningLabels: buildDiag.shippingIssueLabels('warning'),
         });
         // A build the USER stopped is not a build that failed — see releaseGate's `stoppedByUser`.
         // Read off the timeline (the same source `rootCause` uses) rather than threaded through the
@@ -23270,6 +23271,12 @@ async function noteBuildOutcome(
             }
           }
           const reviewText = review ? formatReview(review) : '';
+          // A review that names bugs we could not read is a fault in OUR reading, said so (autopsy d798ddd3).
+          if (reviewHasUnreadFindings(review)) {
+            buildDiag.record({ phase: 'build', severity: 'warning', code: 'REVIEW_FINDINGS_UNREAD', autoResolved: false,
+              message: 'The review described bugs, but none of its findings could be read — so none was repaired or offered as a fix.',
+              detail: (review?.summary ?? '').slice(0, 300) });
+          }
           if (reviewText) {
             events.emit({ type: 'narration', agent: 'architect', text: reviewText, ts: Date.now() });
             // Capture the FULL review (every small problem it listed) into the report — the narration

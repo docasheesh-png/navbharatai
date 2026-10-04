@@ -87842,3 +87842,36 @@ into its pattern: forex, MT4/MT5, cTrader, algo trading, F&O, trading system/str
 "scalper" is deliberately left out, because the domain now sits early in the list and a ticket-scalper app
 is not trading. `TRADING_CONTEXT` (the broker/listing strip) is unchanged. Both autopsies' tests pass on the
 merged state (`theForexPasteIsNotAnEightModuleProject`, `thePaperTradingAutopsy`).
+
+## 2026-10-04 — Autopsy d798ddd3 ("Calculator app", Weak, ok, ₹43.75, 3.7 min)
+
+The app rendered, typechecked, built for production, and 12 of its controls were pressed without a break.
+Then the lean review found two real bugs ("." after an operator → `NaN`; a digit after `Error` corrupts the
+display) and **both shipped**: the review wrote them as `**1. Bug: …**` without a severity tag, the parser
+read none, the review was headed ✅, and the one verified green repair had nothing to select.
+
+🔴 **This is Q-291 coming back.** #3474 (autopsy 536c8189) fixed the finding's WORDS inside a tagged line; the
+untagged LINE was the sibling it did not reach. The class is "a finding format we only recognise when the
+model obeys it", and it is now closed on both sides: the line is read (`readLabelledFinding`), and anything
+still missed is said (`REVIEW_FINDINGS_UNREAD`, a ⚠️ header instead of ✅).
+
+Tally: ✅ self-healed 2 (the 5 type errors fixed in one edit by the write-time typecheck; the undefined
+`.calc-*` classes) · 🔀 workaround 1 (GLM crawled 15 s, ladder fell to the reasoning rung) · ⏭️ skipped 1
+(the review's bugs, never repaired or offered) · ❌ shipped imperfect 2 (the two bugs; the off-grid spacing,
+already fixed by #3474 after this build ran) · 🥵 struggle 3 (a 9-file plan for a 2-file app; a contract call
+for one component; a 15.6 s first typecheck).
+
+| Item | Problem | Root cause → class | Siblings | Lock |
+|---|---|---|---|---|
+| Q-300 | review's two bugs shipped unread | severity read only from a tag → a finding format that fails silently when the model ignores it | `partialReview.hasSalvageableFindings` (same tag-only test); the review shown to the user cut mid-word (`summary.slice(0, 600)`) → `trimReviewSummary` | `tests/theCalculatorReviewWasNeverRead.test.ts` §1–3, reversion-proven |
+| Q-301 | 9 planned files, 6 of them "(provided)" by the planner itself | the plan counted entries the planner said it would not change | the handed-off plan (`plannedPaths`) reads the same filtered manifest | §4, reversion-proven |
+| Q-302 | contract call for one component, crawled 15 s | the contract pass ran whatever the plan's shape | — (one lane runs a contract) | §5 (real lane run), reversion-proven |
+| Q-303 | gate "1 thing(s) worth a look", unnamed | the gate got a count, never the findings | — | §6, reversion-proven |
+| Q-304 | 15.6 s first typecheck | Q-063 / Q-257 class, third occurrence | — | 🟡 needs the ensure log |
+| Q-305 | explorer cannot test a press that changes nothing on the first screen | judging by text on a fresh load | — | 🟡 `clickExplorer.ts` in flight in #3488 |
+| Q-306 | "Live preview" line for build-machine time the user did not choose | wording of an admin-designed line | — | 🟡 admin decision |
+| Q-307 | eight items argued not defects | — | — | 🟡 admin yes/no |
+
+Proactive: the biggest lever this report shows is that a **green app's review is now the place real bugs are
+found**, and the green repair is what turns that into a fixed app. The next report with a "Bug:" review should
+carry `REVIEW_FUNCTIONAL_REPAIRED` — that line is the proof this autopsy worked.

@@ -155,6 +155,7 @@ const NEVER_SUGGEST = new Set([
   'STYLE_RULES_RESUMED', // our end-of-turn steer (stylePolishResume.ts), never a finding
   'SPACING_SNAPPED', // our own deterministic 4px-grid snap (spacingSnap.ts, autopsy 536c8189) — already done
   'REPAIR_CLAIM_WITHHELD', // our repair pass claimed a change it never made (repairClaim.ts)
+  'REVIEW_FINDINGS_UNREAD', // our parser could not read the review's findings (autopsy d798ddd3)
   'UNSUPPORTED_STACK', // the user is told in the ready message already (unsupportedStack.ts)
   'UNKNOWN_NAME_IN_REQUEST', // a note to our builder (unknownName.ts), never a finding
   'AUTH_EXPLORE_SIGNED_IN', 'AUTH_EXPLORE_NOT_RUN', // our sign-in instrument, never the app's defect

@@ -209,7 +209,7 @@ describe('a lean review is handed the code it judges', () => {
 
   it('the route hands it the changed files only in suggest mode', () => {
     const route = read('src/server/routes/agentv3.ts');
-    expect(route).toContain("const reviewInline = reviewPlan.mode === 'suggest' ? leanReviewInline(reviewChanged, (p) => writtenFiles.get(p)) : undefined;");
+    expect(route).toContain("const reviewInline = reviewPlan.mode === 'suggest'\n            ? leanReviewInline(reviewChanged, (p) => {\n              const c = writtenFiles.get(p);");
     expect(route).toContain('...(reviewInline ? { inlineFiles: reviewInline } : {}),');
   });
 });

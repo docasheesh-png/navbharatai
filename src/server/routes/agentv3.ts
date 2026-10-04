@@ -18132,58 +18132,7 @@ async function noteBuildOutcome(
        * genuinely produced and saved (the common, resumable case — the user just sends another message),
        * `error` when nothing was built at all (the build never got moving, worth real attention).
        */
-      // THE DONE SIGNAL's measurement (doneSignal.ts, admin 2026-09-18). How much of this build ran
-      // AFTER the platform's own readiness scan already judged the app finished. Recorded on EVERY
-      // build, including the ones that never got there, because "never judged finished" and "finished
-      // and stopped immediately" are opposite facts and a missing line would read as the second.
-      // This is the number the open decision needs — whether the loop should END itself at that point
-      // rather than merely say so — and nobody has it today.
-      // READY_BEFORE_END is recorded AFTER the empty-build retry, beside WRITE_TIME_TYPECHECK (autopsy
-      // 0473628e): here it described the ABANDONED first attempt ("never judged finished") on a build whose
-      // retry then finished and shipped.
 
-      /**
-       * ── HOW THE ENGINE BEHAVED, MEASURED ON EVERY BUILD ────────────────────────────────────────
-       *
-       * 🔴 AUTOPSY c847b523 (2026-09-20). The build read `src/App.tsx` NINE times, wrote nothing, and
-       * the user pressed Stop at 108 s. `REPEATED_READS` — the one finding that names exactly that —
-       * is absent from the report, and it was not a detection failure: it had been nested inside
-       *
-       *     if (credentialGuardEnabled() && expectsArtifacts && writtenFiles.size > 0 && !abort.signal.aborted)
-       *
-       * purely because that feature had already assembled the file map it wanted for something else.
-       * Three of those four conditions were false in this build, so the measurement could not fire in
-       * precisely the shape of build it exists to describe. It had been reporting only on builds that
-       * wrote files and were never stopped — the ones least likely to have looped.
-       *
-       * 🔑 THE CLASS, named so it is recognised again: AN INSTRUMENT ABOUT OUR OWN ENGINE MUST NOT
-       * LIVE INSIDE ANOTHER FEATURE'S CONDITIONAL. Its only precondition is that the build ran. A
-       * measurement whose coverage is decided by an unrelated flag reports a biased sample and reads
-       * as an absence of the problem — which is worse than no measurement, because nobody doubts it.
-       *
-       * So both lines now sit here, beside READY_BEFORE_END, for the reason that block already states:
-       * "never got there" and "got there and stopped at once" are opposite facts, and a missing line
-       * reads as the second. Each is independently wrapped — neither can suppress the other.
-       */
-      // ⚠️ THE SAME FILE, READ AGAIN — 84% of all reads in the report that prompted this
-      // (repeatedReads.ts). Reported, not only nudged, so the NEXT report says whether the nudge
-      // worked: a behavioural fix nobody measures is a hope.
-      try {
-        const line = repeatedReadSummary(dispatcher.readLedgerCounts(), dispatcher.readLedgerUnchangedRereads());
-        const stops = dispatcher.readLoopStops();
-        if (line) {
-          buildDiag.record({
-            phase: 'build', severity: 'warning', code: 'REPEATED_READS',
-            message: line, autoResolved: false,
-            // WHETHER THE BREAKER FIRED, AND WHETHER IT WORKED. A build with stops AND a still-high
-            // re-read count is the escalation being IGNORED — a different problem from the one it
-            // was built for, and it must be legible as such rather than hidden inside a total.
-            detail: stops > 0
-              ? `${stops} STOP-level notice(s) issued after ${READ_LOOP_LIMIT} no-progress reads of the same path.`
-              : 'No read reached the no-progress limit — every re-read followed a real change, or the streak was short.',
-          });
-        }
-      } catch { /* an advisory finding must never affect a build */ }
       // 🎨 A REWRITE OF THE STYLESHEET THAT WOULD HAVE DROPPED THE DESIGN KIT (autopsy e725e002). The
       // write door kept those rules (kitRestore.ts `keepKitOnRewrite`); said here so the report shows
       // the prevention firing — a keep that fires on every build is a prompt that is not being obeyed.
@@ -18365,6 +18314,64 @@ async function noteBuildOutcome(
           });
         } catch { /* a note must never fail a build */ }
       }
+      /**
+       * ── HOW THE ENGINE BEHAVED, MEASURED ON EVERY BUILD ────────────────────────────────────────
+       *
+       * 🔴 AUTOPSY c847b523 (2026-09-20). The build read `src/App.tsx` NINE times, wrote nothing, and
+       * the user pressed Stop at 108 s. `REPEATED_READS` — the one finding that names exactly that —
+       * is absent from the report, and it was not a detection failure: it had been nested inside
+       *
+       *     if (credentialGuardEnabled() && expectsArtifacts && writtenFiles.size > 0 && !abort.signal.aborted)
+       *
+       * purely because that feature had already assembled the file map it wanted for something else.
+       * Three of those four conditions were false in this build, so the measurement could not fire in
+       * precisely the shape of build it exists to describe. It had been reporting only on builds that
+       * wrote files and were never stopped — the ones least likely to have looped.
+       *
+       * 🔑 THE CLASS, named so it is recognised again: AN INSTRUMENT ABOUT OUR OWN ENGINE MUST NOT
+       * LIVE INSIDE ANOTHER FEATURE'S CONDITIONAL. Its only precondition is that the build ran. A
+       * measurement whose coverage is decided by an unrelated flag reports a biased sample and reads
+       * as an absence of the problem — which is worse than no measurement, because nobody doubts it.
+       *
+       * So both lines sit here, beside READY_BEFORE_END and after the empty-build retry (autopsy
+       * 0473628e: before the retry they described the abandoned first attempt), for the reason that block states:
+       * "never got there" and "got there and stopped at once" are opposite facts, and a missing line
+       * reads as the second. Each is independently wrapped — neither can suppress the other.
+       */
+      // THE DONE SIGNAL's measurement (doneSignal.ts, admin 2026-09-18). How much of this build ran
+      // AFTER the platform's own readiness scan already judged the app finished. Recorded on EVERY
+      // build, including the ones that never got there, because "never judged finished" and "finished
+      // and stopped immediately" are opposite facts and a missing line would read as the second.
+      // This is the number the open decision needs — whether the loop should END itself at that point
+      // rather than merely say so — and nobody has it today.
+      // It is read from the FINAL `result`, after the empty-build retry (autopsy 0473628e): before the retry it
+      // described the ABANDONED first attempt ("never judged finished") on a build whose retry finished and shipped.
+      try {
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'READY_BEFORE_END',
+          message: readyOverrunNote(result.readyAt, result.steps, Date.now() - buildStartedAt, { editingExistingApp: isEditMode }),
+          autoResolved: true,
+        });
+      } catch { /* an advisory line must never affect a build */ }
+      // ⚠️ THE SAME FILE, READ AGAIN — 84% of all reads in the report that prompted this
+      // (repeatedReads.ts). Reported, not only nudged, so the NEXT report says whether the nudge
+      // worked: a behavioural fix nobody measures is a hope.
+      try {
+        const line = repeatedReadSummary(dispatcher.readLedgerCounts(), dispatcher.readLedgerUnchangedRereads());
+        const stops = dispatcher.readLoopStops();
+        if (line) {
+          buildDiag.record({
+            phase: 'build', severity: 'warning', code: 'REPEATED_READS',
+            message: line, autoResolved: false,
+            // WHETHER THE BREAKER FIRED, AND WHETHER IT WORKED. A build with stops AND a still-high
+            // re-read count is the escalation being IGNORED — a different problem from the one it
+            // was built for, and it must be legible as such rather than hidden inside a total.
+            detail: stops > 0
+              ? `${stops} STOP-level notice(s) issued after ${READ_LOOP_LIMIT} no-progress reads of the same path.`
+              : 'No read reached the no-progress limit — every re-read followed a real change, or the streak was short.',
+          });
+        }
+      } catch { /* an advisory finding must never affect a build */ }
       // WRITE → TYPECHECK → NEXT (admin 2026-09-17, autopsy e706e068): how many compiles ran at
       // write time and how many errors were caught while the model still held the file. Reported
       // so the next autopsy can say whether the 7-minute endgame grind actually went away.
@@ -18394,15 +18401,6 @@ async function noteBuildOutcome(
         });
       } catch { /* an advisory line must never affect a build */ }
 
-      // How much of the build ran after the readiness scan judged the app finished — read from the FINAL
-      // `result`, i.e. after the retry, so it describes the build that shipped (autopsy 0473628e).
-      try {
-        buildDiag.record({
-          phase: 'build', severity: 'info', code: 'READY_BEFORE_END',
-          message: readyOverrunNote(result.readyAt, result.steps, Date.now() - buildStartedAt, { editingExistingApp: isEditMode }),
-          autoResolved: true,
-        });
-      } catch { /* an advisory line must never affect a build */ }
 
       // Whether the browser console could be READ this run — hoisted so the claim audit can compare the
       // model's "no console errors" against whether anyone actually looked.

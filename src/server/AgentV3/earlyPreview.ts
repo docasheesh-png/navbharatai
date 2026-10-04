@@ -65,6 +65,37 @@ export function shellEarlyRule(env: NodeJS.ProcessEnv = process.env): string[] {
   ];
 }
 
+/**
+ * 🔴 THE RULE ABOVE IS PROSE IN A 90 KB PROMPT, AND IT WAS IGNORED (autopsy 39e982bd, 2026-10-04).
+ *
+ * `shellEarlyRule` has been in the architect's system prompt since this file shipped. On the PrimeClash
+ * eSports build the model wrote, in order: `src/types.ts`, the Firebase client, a service, four hooks,
+ * two components, six screens, a stylesheet, `src/main.tsx` — and `src/App.tsx` **twenty-third of
+ * twenty-four writes**, eight minutes in. `TIME_TO_FIRST_RENDER: 495s` on a 571-second build: the user
+ * watched a starter page for 87% of their build, which is the exact harm this file was written for.
+ *
+ * 🔑 THE CLASS, AND THIS REPO HAS PAID FOR IT BEFORE: a rule the model is TOLD competes with a habit
+ * the model HAS, and in a prompt this size the habit wins. Every rule here that actually changed
+ * behaviour became mechanical — `undefinedClassWriteNote`, `stylePolishResume`, `orphanHandBack`,
+ * `SPACING_SNAPPED` (whose own report line records three model calls wasted on the advisory version).
+ * So this is the same rule, handed back at the one moment it is actionable: the model has just written
+ * a source file, the entry is still our starter, and the file it should write next is named.
+ *
+ * ⚠️ ONCE PER BUILD, and never for the entry's own write. A note repeated on every leaf would be the
+ * nag that the READ_LOOP escalation was written to replace, and the model that has just written the
+ * entry needs no instruction about it.
+ */
+export function entryFirstWriteNote(entryPath: string, env: NodeJS.ProcessEnv = process.env): string {
+  if (!earlyPreviewEnabled(env)) return '';
+  if (!entryPath) return '';
+  return `\n🖥️ The user's live preview still shows the starter page: \`${entryPath}\` has not been written yet, `
+    + `so nothing you have written is on their screen. Write \`${entryPath}\` NEXT — the real layout, navigation `
+    + 'and imports of the screens — then carry on with the rest. Every screen you have not written yet appears '
+    + 'as a "being built" card and turns into the real screen the moment you write it, so the app is on screen '
+    + 'in seconds instead of at the end. The typecheck will name those imports as missing until you write them; '
+    + 'that is expected — write them, never stub them out.';
+}
+
 /** The specialists that write the app's UI and therefore its entry. */
 export function writesTheEntry(role: string): boolean {
   return role === 'frontend' || role === 'fullstack' || role === 'mobile';

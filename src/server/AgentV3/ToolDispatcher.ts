@@ -183,8 +183,8 @@ import { analyzePwa, pwaSummary } from './PwaAnalysis';
 import { extractEnvRefs, parseEnvKeys, analyzeEnvVars, envVarSummary } from './EnvVarAnalysis';
 import { resolveLocalImport } from './ArchitectureAnalysis';
 import { assessReadiness, readinessVerdict, type ExtraFinding, type ReadinessReport } from './Readiness';
-import { STARTER_ENTRY_CONTENT, entryIsStillTheStarter, starterAppBlocker } from './stillTheStarterApp';
-import { isUiComponentPath, entryLateNote, MIN_SCREENS_BEFORE_NOTE } from './earlyPreview';
+import { STARTER_ENTRY_CONTENT, STARTER_ENTRY_PATHS, entryIsStillTheStarter, starterAppBlocker } from './stillTheStarterApp';
+import { isUiComponentPath, entryLateNote, MIN_SCREENS_BEFORE_NOTE, entryFirstWriteNote } from './earlyPreview';
 import { authoredPathSet, splitByAuthorship, preExistingCodeObservation, droppedRelativeImports, droppedImportOrphanLabel, importStem } from './buildAuthorship';
 import { computeReachability, splitByReachability, unreachableCodeObservation, type ReachabilityVerdict } from './appReachability';
 import { deletionCandidates, deletionReconciledMessage } from './fileDeletion';
@@ -881,6 +881,8 @@ export class ToolDispatcher {
   private coverageRequest: string | null = null;
   /** The keyboard-only-game note is said once per build (touchPlayableGame.ts). */
   private _touchGameNoted = false;
+  /** The entry-first hand-back is said once per build (earlyPreview.ts, autopsy 39e982bd). */
+  private _entryFirstNoted = false;
   setCoverageRequest(text: string | null): void {
     this.coverageRequest = typeof text === 'string' && text.trim() ? text : null;
   }
@@ -3662,7 +3664,54 @@ export class ToolDispatcher {
     shadow += await this.entryLateNoteFor(paths);
     // A light/dark switch that sets a class or attribute nothing styles (autopsy 8257ca59) — said while open.
     const theme = await this.deadThemeSwitchNotes(files);
-    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow + theme + touch;
+    // The app is not on the user's screen until its ENTRY is written (autopsy 39e982bd) — said once, at
+    // the first leaf write, because the prose rule in the system prompt lost to the leaves-first habit.
+    const entryFirst = await this.entryFirstNote(files);
+    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow + theme + touch + entryFirst;
+  }
+
+  /**
+   * ONCE per build, at the first SOURCE write that is not the entry: the entry is still our untouched
+   * starter, so nothing written so far is on the user's screen. See `entryFirstWriteNote`.
+   *
+   * 🔒 Four narrowing conditions, each for a measured reason:
+   *   • the write must include an app source file — a `package.json`, a `.env.example` or a stylesheet
+   *     write says nothing about whether the app can render yet;
+   *   • none of the written files may BE a starter entry — a model that has just written the entry needs
+   *     no instruction about it;
+   *   • the entry on disk must still be the untouched starter, asked through `entryIsStillTheStarter`,
+   *     the same question every render proof and the readiness gate ask (so a plain-JavaScript app whose
+   *     index.html no longer mounts `src/` is never nagged about `App.tsx`);
+   *   • `_starterExpected` — a Project Mode module that does not own the entry (autopsy 6a5fb04b) — is
+   *     exempt by the same flag the readiness gate reads.
+   */
+  private async entryFirstNote(files: Record<string, string>): Promise<string> {
+    if (this._entryFirstNoted || this._starterExpected) return '';
+    try {
+      const paths = Object.keys(files ?? {});
+      if (paths.some((p) => STARTER_ENTRY_PATHS.includes(p.replace(/^\.?\/+/, '')))) {
+        // The entry itself was just written — the thing the note asks for already happened.
+        this._entryFirstNoted = true;
+        return '';
+      }
+      if (!paths.some((p) => /^src\/.*\.(?:[cm]?[jt]sx?|vue|svelte)$/.test(p.replace(/^\.?\/+/, '')))) return '';
+      const read = (path: string) => withTimeout(this.actuator.readFile(this.workspaceId, path), 5_000, 'entry-first-read');
+      if (!(await entryIsStillTheStarter(read))) {
+        // Already a real app — this build is an edit, and the note would be false.
+        this._entryFirstNoted = true;
+        return '';
+      }
+      let entryPath = '';
+      for (const p of STARTER_ENTRY_PATHS) {
+        try { if (typeof (await read(p)) === 'string') { entryPath = p; break; } } catch { /* try the next */ }
+      }
+      if (!entryPath) return '';
+      const note = entryFirstWriteNote(entryPath);
+      if (note) this._entryFirstNoted = true;
+      return note;
+    } catch {
+      return '';
+    }
   }
 
   /**
@@ -5514,7 +5563,10 @@ export class ToolDispatcher {
             ? `${errorBoundary.brokenBoundaries[0]} is named like an error boundary but implements none — fix that file, do NOT add another`
             : 'React app has no error boundary' });
         }
-        if (testCoverage.findings.some((f) => f.level === 'high')) extra.push({ severity: 'medium', label: 'No tests at all' });
+        // A Project Mode module that does not assemble the app is judged on its own files (Q-396, Sur Taal):
+        // "No tests at all" is true of the unfinished app and was repeated on every module turn. It returns on
+        // the shell module's turn, where the whole app is judged.
+        if (!this._starterExpected && testCoverage.findings.some((f) => f.level === 'high')) extra.push({ severity: 'medium', label: 'No tests at all' });
         // Best-effort design-consistency pass (P-PIPE.C stage 32 — advisory, NEVER a readiness
         // blocker, exactly like SEO): lint the generated style-bearing code for palette/typography/
         // spacing/token consistency so a build reports its visual polish, not just its correctness.

@@ -81,8 +81,8 @@ import { injectPreviewBridge, withoutPreviewBridge, PREVIEW_BRIDGE_MARKER } from
 import { browseConsoleCaptureEnabled, CANCELLED_REQUEST_RE } from '../../../renderCheckConsole';
 import { gunzipSync } from 'zlib';
 import { LIST_PRUNE_DIRS, isListPrunedPath } from '../../../../lib/generatedDirs';
-import { NPM_INSTALL_LOCK, PRIME_NODE_MODULES } from '../../../tscCommand';
 import type { ActuatorCommandTiming } from '../../../commandTiming';
+import { NPM_INSTALL_LOCK, PRIME_NODE_MODULES, WARM_NODE_MODULES } from '../../../tscCommand';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -843,7 +843,7 @@ export class E2BActuator implements IEngineerActuator {
     // reconcile any version drift. Fully guarded: if the warm dir isn't present (i.e. the template
     // hasn't been rebuilt yet) this is a no-op and behaviour is byte-identical to today.
     try {
-      const warmDir = '/home/user/.warm/vite-react/node_modules';
+      const warmDir = WARM_NODE_MODULES;
       const [warmExists, hasModules] = await Promise.all([
         sandbox.files.exists(warmDir).catch(() => false),
         sandbox.files.exists(`${WORKSPACE_ROOT}/node_modules`).catch(() => false),

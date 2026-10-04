@@ -16,6 +16,7 @@
 import { isAffirmativelyRequested } from './featureRequest';
 import { inFlagRollout } from './escalationRollout';
 import { envFlag } from '../lib/envFlag';
+import { NO_FAKE_FEATURE_RULE } from './noEvalRule';
 
 /**
  * WHAT a "present" verdict actually rests on — and the distinction is load-bearing, not bookkeeping.
@@ -555,5 +556,8 @@ export function featurePresenceRepairPrompt(r: FeaturePresenceResult, regressed:
     'Add the missing UI + wiring so each of these features is actually usable in the app. Read the',
     'relevant components first, make the minimum targeted edits, and keep the existing working features',
     'intact. Do not add anything the user did not ask for.',
+    // A heal told to "add the missing login" is the likeliest place a fake one gets written (admin
+    // 2026-10-04, NO FAKE BUTTON): the rule rides the instruction, not only the system prompt.
+    NO_FAKE_FEATURE_RULE,
   ].join('\n');
 }

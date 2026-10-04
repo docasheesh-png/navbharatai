@@ -88717,6 +88717,65 @@ Also: Q-013's queue row now says #3496 is merged.
   Action Type | Permission | Audit Required). Anything unclear, duplicated or misplaced is named, not hidden.
   D3 (the three duplicate cards) moves to PR 4.
 
+### 2026-10-04 — ⛔ NO FAKE BUTTON, NO FAKE FEATURE: the rule, enforced on the apps NavBharatAI builds (admin-mandated, unbreakable)
+
+Admin, verbatim: *"navbharatai kab bhi koi app banaye, usme koi bhi function fake nahi hona chahiye! jab 'login' button
+bane, to fake login na bane, real login button ho, google login, apple login, user se real api secret mange jaye! …
+agar koi button/feature fake banaya hai, ya dummy/demo banaya hai, to user ko clearly bataya jaye ki yeh button fake
+hai, aur bataya jaye kyu fake hai … 3 dot menu ke secret and keys ya settings ke secret and keys me yeh secret dalo!
+red colour me saf saf likho user ki language me ki iske bina kaam fake/dummy/demo hoga!!!"*
+
+**Root cause (why keys were never asked for).** Three guards existed and all three were blind to the same app:
+`AppRequirements` demands a key only when the app's code NAMES one (a package or an env var); `AuthenticityAnalysis`
+finds the WORDS mock / fake / simulate; `SEED_PASSWORD_RULE` told the builder how to seed a demo user and nothing said
+a seeded user is not a login. A login that checks `password === 'demo123'` names no key and carries no such word.
+**The class:** a feature whose real version needs the USER'S OWN credential (login, Google/Apple button, payment, OTP,
+email) implemented LOCALLY in ordinary code, so the machinery that demands the credential never fired. Siblings never
+hunted before: the one-shot lane carried NO honesty rule at all; `signInExplore` reads demo accounts out of apps (the
+engine had institutionalised them) while nothing told the user they were demos.
+
+**Fix at the class** (`src/server/AgentV3/fakeFeatureScan.ts`, zero model calls, flag `AGENTV3_NO_FAKE_FEATURES`, default ON):
+- the whole project is read by SHAPE, not words: a sign-in screen whose password lives in the app or is compared in the
+  browser; "Continue with Google" with no OAuth SDK/route; a pay action that marks itself paid with no gateway/UPI link;
+  an OTP the page makes up; "email sent" with no transport — each only when NO provider exists anywhere in the project;
+- a RED line in the user's language on the app's own screen (`withHonestyBanner` → `index.html` at the production-defaults
+  pass; idempotent, removed when the fake is made real; 36px dismiss so the mobile check does not flag it);
+- one 🔴 chat line per fake (11 languages) with files, exact keys and both paths (`⋮ More → Keys & Secrets` /
+  `Settings → App Settings → Secrets & API Keys`); admin finding `FAKE_FEATURE_SHIPPED` with a one-tap offer;
+- the fake IMPLIES the service (`impliedRequirementsFor`): new implied-only `login` catalogue entry + `login` recipe
+  (Supabase Auth first — real email, Google, Apple; one-tap database includes it), `payments_razorpay`, `sms`,
+  `email_api` — so the closing ask card asks for the exact keys, which it never could before;
+- `NO_FAKE_FEATURE_RULE` in ALL THREE lanes (architect, fast lane, one-shot), `SEED_PASSWORD_RULE` amended,
+  `fakeFeatureWriteNote` at write time beside `fakeResultWriteNote`.
+- Precision locks: PIN lock ≠ login, "mark as paid" ≠ payment, "message sent" ≠ email, comments/tests never, import
+  turns never, a request that asked for a demo/offline login/cash-only stands the matching rule down; every golden
+  scaffold passes the reader.
+- Proof: `tests/noFakeButtonNoFakeFeature.test.ts` (27 cases; 20 fail with the reader disabled — reversion-proven).
+- Docs: `docs/claude/ENV_REGISTRY.md` (full design), `CLAUDE.md` (one bullet under the second absolute rule),
+  `AppKnowledgeBase.ts`.
+
+**Honest limits, stated:** detection is by shape, so a fake in an unlisted shape is caught only by the prompt rule and
+the write-time note; the on-screen line needs an `index.html` (a Next.js app gets the chat line and the ask only);
+adding a key does not rewrite the fake code — the user is told to reply "make it real" or press the offer.
+**Watch on real builds:** `FAKE_FEATURE_SHIPPED` frequency and any red line on a screen the user says was real.
+
+**Siblings killed the same evening (admin: "isko wapas se polish karo aur rocksolid banao! sath kill the siblings"):**
+writing specialists carry the rule (`SubAgent.ts`); the feature-presence heal and the completion heal carry it in their
+own instruction (the two passes most likely to WRITE a fake login); the server-built in-browser preview carries the red
+block (`src/lib/honestyBanner.ts`, one definition of the markers, both renderers tested); the claim audit contradicts a
+summary that sells the demo (`feature-claimed-but-demo`); four more shapes (sign-up to localStorage, "reset link sent",
+"SMS sent", "uploaded to the cloud" with no storage → `storage`). Three other PRs' source guards were updated for the
+renamed `honestIndex` / the three-rule push. Test file now 33 cases.
+
+**One judgement with the sign-in explorer, and our own template (admin: "jo bhi kaam bacha hai, complete karo").**
+#3526 (Q-540, staged into this branch by the merging session) added `authLivesInTheBrowser` — the same fact this
+scanner discloses — and the two disagreed on Q-540's own school app (accounts written under a constant key). The
+scanner now asks that function; its separate sign-up shape is removed. The shared judgement's first catch was OUR
+"Login page" template: any valid email + 8 characters showed "Signed in". It is now real Supabase Auth (REST, no new
+dependency; email, Google, GitHub, Apple) and shows a red "not connected" line with the two key names until they are
+saved. Locked in `tests/noFakeButtonNoFakeFeature.test.ts` (agreement census + template test); 602 template tests
+green, strict and loose typecheck of every starter included. Q-421/Q-422 queue rows removed (#3518 merged).
+
 ## 2026-10-04 — AUTOPSY 39e982bd: the app was off the user's screen for eight of its nine minutes
 
 Report `39e982bd` — *"BUILD PRIMECLASH ESPORTS — COMPLETE ANDROID APPLICATION"*, a 228-feature request

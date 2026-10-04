@@ -88931,3 +88931,23 @@ Siblings hunted: `readAsDataURL` across the whole repo — the only generated-ap
 (the rest is NavBharatAI's own client sending images to APIs, not storing them). The `catch {}` that hid a
 failed save lived only in `proShell.ts`'s `useCollection`.
 
+
+
+### Q-115: a forgotten package import is restored on the installed package's own word (2026-10-04)
+
+**The gap.** Autopsy 424ecdab ended RED on `<Clock>` and `<IndianRupee>`. Both are lucide-react icons, used once and imported nowhere. The missing-import heal could only copy an import another file had already proven. Guessing lucide's export list was refused on purpose: the heal once turned a broken build into an unparseable one by guessing. The open root cause was recorded as *"read the installed package's own declarations"*.
+
+**The fix.** The endgame repair now asks the sandbox's own `node_modules` which of the compiler's undefined names each dependency really exports (`installedExports.ts`). It uses a single bounded node command: up to 100 dependencies, 25 s, true named exports only, and names validated as identifiers before they reach the script. A forgotten import is restored only when all of these hold:
+- The compiler itself reported the name (TS2304). A global like `fetch` is never captured.
+- Exactly ONE installed package exports it. `Link`, which is both a router link and an icon, is never decided.
+- No project module or proven import already owns it.
+
+**Measured.** Against this repo's 61 dependencies, the command took 3 s. It returned `lucide-react: Clock, IndianRupee` and dropped the hostile name `bad name;rm`.
+
+**Tests.**
+- `installedExports.test.ts`: injection, a real run against the installed lucide-react, and parsing.
+- 5 heal cases.
+- 2 endgame cases. One uses the report's real shape and turns green with no model call.
+- With the heal change reverted, the two real-case tests fail.
+
+**Where it runs.** It is wired where the compiler's errors are in hand: the endgame repair, both the step-cap net and the error-trend checkpoint. The write-time and fast-lane callers are unchanged, because they do not carry the TS2304 list.

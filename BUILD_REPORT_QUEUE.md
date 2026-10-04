@@ -41,7 +41,7 @@ Seeded 2026-10-01 from the items the 6461025c and bee95692 autopsies left withou
 | Q-111 | L49276 | Slow-build alert threshold (10 min) is unmeasured | OPEN | — | Migrated from PROGRESS.md (Q-021, 2026-10-01). Needs the real build-duration distribution, then set the threshold from it. |
 | Q-113 | L54063 | Dead `billingLogs` chain (tidy-up; the leak itself is closed) | OPEN | — | Migrated from PROGRESS.md (Q-021, 2026-10-01). `usePaymentEngine.ts:85` → `App.tsx:308` → `BillingPanel.tsx:47`. |
 | Q-114 | L54328, L63575 | Build spend is not in `ai_usage_logs` (chat-only) | OPEN | — | Migrated from PROGRESS.md (Q-021, 2026-10-01). Two separate cost accountings. |
-| Q-115 | L54667 | Missing package exports (e.g. lucide icons) are not healed from the package's own types | OPEN | — | Migrated from PROGRESS.md (Q-021, 2026-10-01). Unsure-open. |
+| Q-115 | L54667 | Missing package exports (e.g. lucide icons) are not healed from the package's own types | IN PROGRESS | (this branch) | Migrated from PROGRESS.md (Q-021, 2026-10-01). Unsure-open. |
 | Q-116 | L62255, L66215 | Pre-edit knowledge gate on a hollow graph: the graph fill shipped, the gate did not | OPEN | — | Migrated from PROGRESS.md (Q-021, 2026-10-01).  |
 | Q-117 | L65671, L68026 | Domain tie-break: "dhaba… order" resolves to ecommerce, not restaurant | 🟡 BLOCKED | — | Migrated from PROGRESS.md (Q-021, 2026-10-01). Pinned as a test deliberately — admin product decision. |
 | Q-118 | baa0b3c7 (L65379, L65467) | No guard against a destructive "fix" that deletes a feature component; TS-error→missing-package mapping | OPEN | — | Migrated from PROGRESS.md (Q-021, 2026-10-01).  |

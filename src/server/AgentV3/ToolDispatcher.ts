@@ -197,6 +197,7 @@ import { dedupeDuplicateImports } from './DuplicateImportGuard';
 import { isReactFamilyFramework } from './frameworkFamily';
 import { analyzeImportExports } from './ImportExportAnalysis';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports, fixTypeOnlyValueImports } from './ImportExportReconcile';
+import { installedExportsCommand, parseInstalledExports } from './installedExports';
 import { analyzeJsxComponents } from './JsxComponentAnalysis';
 import { analyzeUndefinedHooks } from './UndefinedHookAnalysis';
 import { analyzeDependencyConstraints } from '../AI/reasoning/ConstraintSolver';
@@ -2028,8 +2029,19 @@ export class ToolDispatcher {
     } catch { return null; /* never block a write on the guard's own failure */ }
   }
 
-  endgameIo(): { runTsc: () => Promise<string>; readFiles: () => Promise<Record<string, string>>; writeFile: (path: string, content: string) => Promise<void> } {
+  endgameIo(): {
+    runTsc: () => Promise<string>;
+    readFiles: () => Promise<Record<string, string>>;
+    writeFile: (path: string, content: string) => Promise<void>;
+    installedExports: (names: string[]) => Promise<Record<string, string[]>>;
+  } {
     return {
+      // Q-115: ask the installed packages themselves which of these undefined names they export, so a
+      // forgotten `import { Clock } from 'lucide-react'` can be restored on the package's own word.
+      installedExports: async (names: string[]) => {
+        const r = await this.actuator.runCommand(this.workspaceId, installedExportsCommand(names));
+        return parseInstalledExports(`${r.stdout || ''}`);
+      },
       runTsc: async () => {
         // Slice 4 — INCREMENTAL tsc: the .tsbuildinfo cache makes every peek after the first
         // ~0.3-0.8s instead of ~2s, so the 25-step trend checkpoint and the endgame re-verifies are

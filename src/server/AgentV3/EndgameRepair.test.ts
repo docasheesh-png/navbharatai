@@ -9,6 +9,7 @@ import {
   errorTrendConfig,
   shouldTriggerMidBuildRepair,
   stepResumeBudget,
+  unresolvedNames,
 } from './EndgameRepair';
 
 // Real output shapes from the QuizArena build report (2026-07-17) — the build that died at the
@@ -263,5 +264,35 @@ describe('Slice 3 — stepResumeBudget', () => {
     expect(stepResumeBudget({ AGENTV3_STEP_RESUME: '0' } as unknown as NodeJS.ProcessEnv)).toBe(0);
     expect(stepResumeBudget({ AGENTV3_STEP_RESUME: '2' } as unknown as NodeJS.ProcessEnv)).toBe(2);
     expect(stepResumeBudget({ AGENTV3_STEP_RESUME: '99' } as unknown as NodeJS.ProcessEnv)).toBe(3);
+  });
+});
+
+describe('the endgame asks the installed packages about names the compiler could not find (Q-115)', () => {
+  it('unresolvedNames reads TS2304 and nothing else', () => {
+    const errs = parseTscErrors([
+      "src/pages/Apply.tsx(2,22): error TS2304: Cannot find name 'Clock'.",
+      "src/pages/Apply.tsx(2,40): error TS2304: Cannot find name 'IndianRupee'.",
+      "src/pages/Apply.tsx(3,1): error TS2552: Cannot find name 'Clok'. Did you mean 'Clock'?",
+      "src/x.ts(1,1): error TS2307: Cannot find module './y' or its corresponding type declarations.",
+    ].join('\n'));
+    expect(unresolvedNames(errs)).toEqual(['Clock', 'IndianRupee']);
+  });
+
+  it('turns the two missing icons green mechanically — no model call', async () => {
+    let tscCalls = 0;
+    const written: Record<string, string> = {};
+    const asked: string[][] = [];
+    const verdict = await runEndgameRepair({
+      runTsc: async () => (tscCalls++ === 0
+        ? "src/pages/Apply.tsx(2,22): error TS2304: Cannot find name 'Clock'.\nsrc/pages/Apply.tsx(2,40): error TS2304: Cannot find name 'IndianRupee'."
+        : ''),
+      readFiles: async () => ({ 'src/pages/Apply.tsx': 'export function Apply() {\n  return <div><Clock /><IndianRupee /></div>;\n}\n' }),
+      writeFile: async (p, c) => { written[p] = c; },
+      installedExports: async (names) => { asked.push(names); return { 'lucide-react': ['Clock', 'IndianRupee'] }; },
+    });
+    expect(asked).toEqual([['Clock', 'IndianRupee']]);
+    expect(written['src/pages/Apply.tsx']).toContain('from "lucide-react"');
+    expect(verdict.errorsAfter).toBe(0);
+    expect(verdict.llmFilesWritten).toBe(0);
   });
 });

@@ -296,9 +296,24 @@ export interface EndgameDeterministicResult {
  * proven import/export reconcilers over the WHOLE map. Best-effort — a reconciler throw skips only
  * that reconciler. Returns the updated map + honest fix list.
  */
+/**
+ * The names the compiler reported as undefined — TS2304 "Cannot find name 'X'". Exactly these, and only
+ * these, may be imported from an installed package on the package's own word (Q-115). PURE.
+ */
+export function unresolvedNames(errors: TscError[]): string[] {
+  const out = new Set<string>();
+  for (const e of errors) {
+    if (e.code !== 'TS2304') continue;
+    const m = /^Cannot find name '([A-Za-z_$][\w$]*)'/.exec(e.message);
+    if (m) out.add(m[1]);
+  }
+  return [...out];
+}
+
 export async function endgameDeterministicPass(
   files: Record<string, string>,
   errors: TscError[],
+  installedExports?: Record<string, readonly string[]>,
 ): Promise<EndgameDeterministicResult> {
   const fixes: string[] = [];
   let cur = files;
@@ -323,7 +338,7 @@ export async function endgameDeterministicPass(
     fixes.push(...r.fixes.map((f) => `${f.file}: ${f.kind} '${f.name}' from '${f.from}'`));
   } catch { /* best-effort */ }
   try {
-    const a = await addMissingProjectImports(cur);
+    const a = await addMissingProjectImports(cur, { installedExports, unresolvedNames: unresolvedNames(errors) });
     cur = a.files;
     fixes.push(...a.added.map((f) => `${f.file}: added missing import '${f.name}' from '${f.from}'`));
   } catch { /* best-effort */ }
@@ -364,6 +379,11 @@ export interface EndgameIo {
    * files (fast-lane repair shape). Absent → deterministic-only endgame.
    */
   llmRepair?(errorText: string, files: Array<{ path: string; content: string }>): Promise<Array<{ path: string; content: string }>>;
+  /**
+   * Ask the INSTALLED packages which of these names they export (bare specifier → names). Absent, or a
+   * failure, means no package import is added on a package's word — exactly the behaviour before Q-115.
+   */
+  installedExports?(names: string[]): Promise<Record<string, string[]>>;
   log?(msg: string): void;
 }
 
@@ -490,7 +510,11 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
     if (errors1.length === 0) return { ...NO_ATTEMPT, attempted: true }; // already clean — nothing to do
     io.log?.(`🔧 Endgame repair: ${errors1.length} compile error(s) left — fixing mechanically first…`);
     let files = await io.readFiles();
-    const det = await endgameDeterministicPass(files, errors1);
+    const missing = unresolvedNames(errors1);
+    const installed = missing.length > 0 && io.installedExports
+      ? await io.installedExports(missing).catch(() => undefined)
+      : undefined;
+    const det = await endgameDeterministicPass(files, errors1, installed);
     for (const p of det.changedPaths) await io.writeFile(p, det.files[p]).catch(() => {});
     files = det.files;
     const out2 = det.changedPaths.length > 0 ? await io.runTsc() : out1;

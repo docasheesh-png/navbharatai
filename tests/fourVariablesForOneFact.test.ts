@@ -163,7 +163,8 @@ describe('the consumers', () => {
     const near = ROUTE.slice(at, at + 700);
     expect(near).toContain("provenFromTimeline(buildDiag.report().issues).preview === 'passed'");
     expect(ROUTE).toContain('{ previewRendered: renderProvenNow() }');
-    expect(ROUTE).toContain('runtimeUncheckedRecord({ previewRendered: renderProvenNow() })');
+    // A module turn also passes the shell it awaits (autopsy 0311186f); the render question is unchanged.
+    expect(ROUTE).toMatch(/runtimeUncheckedRecord\(\{ previewRendered: renderProvenNow\(\)(?:, awaitingShell: moduleAwaitsShell)? \}\)/);
   });
 
   it('WHAT THE MISSING COPY COST: the failure card needs `appRendered` true to stand down', () => {

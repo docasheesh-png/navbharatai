@@ -180,7 +180,8 @@ describe('§4 a Stop is reported as a Stop', () => {
   it('SOURCE: no "handed off to the full builder" after a Stop; the stopped gate is not left open', () => {
     expect(route).toMatch(/sb\.ok \? 'SIMPLE_BUILD_SUCCESS' : sb\.stopped \? 'SIMPLE_BUILD_STOPPED' : 'SIMPLE_BUILD_FALLBACK'/);
     expect(route).toMatch(/if \(sb\.outcome && !sb\.stopped\) \{/);
-    expect(route).toMatch(/autoResolved: gate\.state === 'green' \|\| gateEvidence\.stoppedByUser === true,/);
+    // A module turn's not-yet-due gate is closed too (autopsy 0311186f); the Stop clause is unchanged.
+    expect(route).toMatch(/autoResolved: gate\.state === 'green' \|\| gateEvidence\.stoppedByUser === true(?: \|\| \(gate\.state === 'unknown' && !!moduleAwaitsShell\))?,/);
   });
 
   it('the ladder line describes routing, never how much was built', () => {

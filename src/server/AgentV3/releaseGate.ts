@@ -147,6 +147,12 @@ export interface RuntimeEvidence {
    * blaming the app for a decision the user made. Optional, so every existing caller is unchanged.
    */
   stoppedByUser?: boolean;
+
+  /**
+   * The project module that assembles the app, when this turn built an earlier module (autopsy
+   * 0311186f). Nothing can run yet, so UNKNOWN here is "not due", not a gap in our coverage.
+   */
+  awaitingShell?: string | null;
 }
 
 export interface StaticFindings {
@@ -207,7 +213,7 @@ export interface GateVerdict {
 // ⚠️ Every field added to RuntimeEvidence that is NOT a runtime CHECK must be excluded here, or it
 // silently becomes a row the gate tries to label and grade. tsc catches the omission, which is
 // how `stoppedByUser` was caught the moment it was added.
-export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'noPageRoutes' | 'explore' | 'explorePresses' | 'journeyUnreachableWhy' | 'journeyNoneWhy'>;
+export type CheckKey = keyof Omit<RuntimeEvidence, 'buildOk' | 'previewUrlPublished' | 'testSuitePresent' | 'testSuiteIsOurStarter' | 'stoppedByUser' | 'awaitingShell' | 'noPageRoutes' | 'explore' | 'explorePresses' | 'journeyUnreachableWhy' | 'journeyNoneWhy'>;
 
 /** What a PASS means. Phrased as a completed fact, because that is what `proven` is a list of. */
 const RUNTIME_LABEL: Record<CheckKey, string> = {
@@ -401,8 +407,11 @@ export function releaseGate(
   if (runtimeProofs.length === 0) {
     return {
       state: 'unknown',
-      headline: 'Cannot say whether this works — nothing here was ever proven to RUN. '
-        + 'The checks that would have told us all need a running app, and they all skipped.',
+      headline: ev.awaitingShell
+        ? `Not judged yet — this turn built one module of a larger app, and "${ev.awaitingShell}" puts the app `
+          + 'together; the runtime checks run on that turn.'
+        : 'Cannot say whether this works — nothing here was ever proven to RUN. '
+          + 'The checks that would have told us all need a running app, and they all skipped.',
       proven, unproven, failures,
     };
   }

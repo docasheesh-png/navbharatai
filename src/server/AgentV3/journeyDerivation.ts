@@ -240,19 +240,25 @@ export function dataEntryEvidence(files: Record<string, string>): { path: string
  */
 export const LOOKUP_ONLY_REASON =
   'this app only looks things up — its inputs (a search box, a sort or a filter) change what is shown, '
-  + 'and it has no button, form or storage that saves anything, so there is no save-and-reload journey to prove';
+  + 'and nothing in it — no form, no storage, no button that adds or saves — keeps anything, so there is no '
+  + 'save-and-reload journey to prove';
 
 const APP_SOURCE_FILE = /\.(?:tsx|jsx|ts|js|mjs|vue|svelte|html)$/i;
 /** Test suites, build config, static assets and our own service worker are not the app's UI. */
 const NOT_APP_UI = /(?:^|\/)(?:e2e|tests?|__tests__|public|node_modules|dist|build)\/|\.(?:test|spec)\.[a-z]+$|(?:^|\/)[\w.-]+\.config\.[a-z]+$|\.d\.ts$/i;
 /** The scaffold's error screen carries a "try again" button that saves nothing. */
 const ERROR_BOUNDARY_FILE = /(?:^|\/)ErrorBoundary\.(?:tsx|jsx|ts|js)$/;
+/**
+ * Signs that something can take what a user gives it and KEEP it. A plain `<button>` and an `onClick` are not
+ * on this list: they are judged one by one in `pressCanKeepInput`, because the commonest button in an app
+ * changes the screen and keeps nothing (autopsy 5759ad8b, below).
+ */
 const SAVE_ACTION: readonly RegExp[] = [
-  /<(?:form|textarea|button)\b/i,
+  /<(?:form|textarea)\b/i,
   /<(?:Form|Textarea|TextField|Button|IconButton)\b/,
   /role\s*=\s*["']button/i,
   /type\s*=\s*["']submit/i,
-  /\bon(?:Submit|Click|DoubleClick|KeyDown|KeyUp|KeyPress|Blur|Drop|PointerDown|MouseDown|TouchStart)\s*=/,
+  /\bon(?:Submit|DoubleClick|KeyDown|KeyUp|KeyPress|Blur|Drop|PointerDown|MouseDown|TouchStart)\s*=/,
   /\bcontentEditable\b/i,
   /\b(?:localStorage|sessionStorage|indexedDB|IDBDatabase|FormData|sendBeacon)\b/,
   /method\s*:\s*["'](?:POST|PUT|PATCH|DELETE)/i,
@@ -335,8 +341,18 @@ export function savedWithoutFormReason(where: { path: string; what: string }): s
  * answers false on ANY sign of a way to save: a button, a form, a submit, a click or key handler, an
  * editable surface, browser storage, or a write call to a server or database. A to-do list that adds
  * on Enter, or an app that loses its data on reload, therefore still reads as a data app, and its
- * missing journey is still a gap. The worst a wrong `true` can do is change the WORDING of a YELLOW:
- * `none-derivable` can never earn GREEN. Pure.
+ * missing journey is still a gap. ⚠️ Since autopsy 8257ca59 a `true` here CAN earn GREEN — but only when the
+ * click explorer pressed the app's controls in a real browser and none broke — so a wrong `true` costs more
+ * than wording, and every relaxation of it below stays precision-first.
+ *
+ * 🔴 A BUTTON THAT CHANGES THE SCREEN KEEPS NOTHING (autopsy 5759ad8b, 2026-10-01). A mandi-price app had
+ * crop and district filters (`<select onChange>`) over its own sample data and a bottom bar of three
+ * `<button onClick={() => setScreen('mandi')}>` tabs. The journey check said, correctly, *"the fields act
+ * as you type … nothing needs changing"* — and the release gate still said *"whether it keeps what a user
+ * enters is untested"*, because this predicate counted the tab bar as a way to save. Two readers of one
+ * question disagreed, and the one the user reads was wrong. A plain `<button>` or `onClick` now counts as
+ * a save unless its handler only switches what is shown (see `pressCanKeepInput`); every other press keeps
+ * the old, conservative answer. Pure.
  */
 export function appOnlyShowsWhatItHolds(files: Record<string, string>): boolean {
   let sawControl = false;
@@ -344,12 +360,68 @@ export function appOnlyShowsWhatItHolds(files: Record<string, string>): boolean 
   for (const [path, src] of Object.entries(appOwnFiles(files))) {
     if (!src || !APP_SOURCE_FILE.test(path) || NOT_APP_UI.test(path) || ERROR_BOUNDARY_FILE.test(path)) continue;
     if (SAVE_ACTION.some((re) => re.test(src))) return false;
+    if (pressCanKeepInput(src)) return false;
     if (/<(?:input|select)\b/i.test(src) || /<(?:Input|Select)\b/.test(src)) sawControl = true;
     if (/\bon(?:Change|Input)\s*=/.test(src)) sawNarrowing = true;
   }
   // A control nothing listens to is not a filter; it is an unwired field, and the remedy sentence for
   // an unaddressable form is the right one for it.
   return sawControl && sawNarrowing;
+}
+
+/** The setter or callback names a press may call while only changing what is SHOWN. */
+const SHOW_STATE_NAME = /^(?:set)?(?:active|current|selected)?(?:screen|tab|view|page|route|mode|theme|section|panel|step|menu|open|show|visible|expanded|collapsed|filter|sort|category|lang|language|unit|city|district|crop|region|day|period|range)s?$/i;
+/** A callback prop that navigates: `onNavigate('home')`, `navigate('/x')`, `goTo('a')`. */
+const NAVIGATE_CALL = /^(?:navigate|goTo|go|onNavigate|onSelect|onTabChange|onScreenChange|onChangeScreen|onChangeTab|router\.push|history\.push)$/;
+
+/** The handler expression inside `onClick={…}` starting at `open` (the `{`), brace-matched. */
+function handlerAt(src: string, open: number): string | null {
+  let depth = 0;
+  for (let i = open; i < src.length && i < open + 400; i++) {
+    const c = src[i];
+    if (c === '{') depth++;
+    else if (c === '}') { depth--; if (depth === 0) return src.slice(open + 1, i).trim(); }
+  }
+  return null;
+}
+
+/**
+ * Does this handler only change what is shown — one call that sets a screen/tab/filter-style state to a
+ * literal, a toggled boolean or a list item's own id, or navigates? Anything else (`addItem(text)`,
+ * `setItems([...items, x])`, `save()`, a block of statements) is NOT judged harmless. PURE.
+ */
+export function handlerOnlyChangesView(expr: string): boolean {
+  const body = expr.replace(/^\(\s*\)\s*=>\s*/, '').replace(/^\{\s*([^{};]*?);?\s*\}$/, '$1').trim();
+  const m = /^([\w$]+(?:\.[\w$]+)?)\s*\(([^]*)\)$/.exec(body);
+  if (!m) return false;
+  const name = m[1];
+  const arg = m[2].trim();
+  const literal = /^(?:'[^']*'|"[^"]*"|`[^`$]*`|-?\d+(?:\.\d+)?|true|false|null)$/.test(arg);
+  const toggle = /^!\s*[\w$]+$/.test(arg) || /^\(?\s*[\w$]+\s*\)?\s*=>\s*!\s*[\w$]+$/.test(arg);
+  const ownId = /^[\w$]+\.(?:id|key|value|name|slug|path|href|to)$/.test(arg);
+  if (NAVIGATE_CALL.test(name)) return literal || ownId;
+  if (!/^set[A-Z]/.test(name)) return false;
+  if (literal) return true;
+  return SHOW_STATE_NAME.test(name) && (toggle || ownId);
+}
+
+/**
+ * Could pressing something in this file keep what a user typed? True for any `onClick` whose handler does
+ * more than change what is shown, and for any plain `<button>` that has no `onClick` of its own to judge
+ * (or a submit-reading label). Conservative: an unreadable handler counts as a way to keep. PURE.
+ */
+export function pressCanKeepInput(src: string): boolean {
+  if (submitTargetIn(src) !== null) return true;
+  for (const t of scanMarkup(src)) {
+    if (t.isElement && t.name === 'button' && !/\bonClick\s*=/.test(t.tag)) return true;
+  }
+  const re = /\bonClick\s*=\s*\{/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src)) !== null) {
+    const expr = handlerAt(src, m.index + m[0].length - 1);
+    if (expr === null || !handlerOnlyChangesView(expr)) return true;
+  }
+  return false;
 }
 
 /**
@@ -399,7 +471,33 @@ export function valueForInput(tag: string, marker: string): string {
   if (type === 'url' || /url|website|link/.test(hint)) return 'https://example.com';
   if (type === 'date') return '2030-01-01';
   if (type === 'checkbox' || type === 'radio') return '';
+  const example = lookupKeyExample(tag);
+  if (example) return example;
   return marker;
+}
+
+/** A field that names something that must already EXIST (a ticker, a product code, a PIN). */
+const LOOKUP_KEY_HINT = /\b(?:symbol|ticker|scrip|isin|sku|ifsc|pin\s?code|pincode|zip|postal|coupon|promo|voucher|product\s?code|item\s?code|hsn)\b/i;
+
+/**
+ * The example a lookup-key field's own placeholder gives (`placeholder="e.g. RELIANCE"` → `RELIANCE`).
+ *
+ * 🔴 WHY (autopsy 241215d1, 2026-10-04). A paper-trading app's order form takes a stock SYMBOL. The
+ * journey typed its marker there, the app (correctly) refused an order for a ticker that does not
+ * exist, the marker never appeared, and the release gate called the app "Not shippable — a real user
+ * journey failed" — about an order flow the build had verified with five curl calls. A made-up value
+ * in a field that must name an existing thing tests our input, not the app. The field's own example is
+ * the one value the app tells every user to type. Only a lookup-key field, and only when the
+ * placeholder gives an example: a "Task name, e.g. Buy milk" field still gets the marker, and a key
+ * field with no example keeps it too (the form then submits a value the app may reject — the same as
+ * before). PURE.
+ */
+export function lookupKeyExample(tag: string): string | null {
+  const name = `${ATTR(tag, 'name') || ''} ${ATTR(tag, 'id') || ''} ${ATTR(tag, 'aria-label') || ''}`;
+  const placeholder = ATTR(tag, 'placeholder') || '';
+  if (!LOOKUP_KEY_HINT.test(`${name} ${placeholder}`)) return null;
+  const m = placeholder.match(/\b(?:e\.?\s?g\.?|eg|for example|such as|like)\s*[:,-]?\s*([A-Za-z0-9][A-Za-z0-9._&-]{0,30})/i);
+  return m ? m[1].replace(/[.,]+$/, '') : null;
 }
 
 /**
@@ -446,6 +544,21 @@ export function submitTargetIn(source: string): Target | null {
   // the button's "text" (see `inputScans`).
   const buttons = buttonsIn(source);
   const plainText = (inner: string): string => inner.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  // 🔴 THE NAME A BROWSER GIVES THE BUTTON, NOT ITS INNER TEXT (autopsy 6cd698cc, 2026-10-01). The journey
+  // finds the button with getByRole('button', { name }) — an ACCESSIBLE-name match — and an `aria-label`
+  // replaces the inner text as that name. The chat app's send button was `<button type="submit"
+  // aria-label="Send message">➤</button>`; the journey asked for a button named "➤", found none, and
+  // reported "the submit control was not present on the running page" beside a send button on screen.
+  // A dynamic label or `aria-labelledby` is not a name we can read here, so it falls back to the role.
+  const accessibleName = (tag: string, inner: string): string | null => {
+    if (/\baria-labelledby\s*=/i.test(tag)) return null;
+    if (/\baria-label\s*=/i.test(tag)) {
+      const aria = ATTR(tag, 'aria-label'); // a quoted, static value — `aria-label={x}` reads as null
+      return aria && !/[{}]/.test(aria) ? aria.trim() : null;
+    }
+    const text = plainText(inner);
+    return text && !/[{}]/.test(text) ? text : null;
+  };
   for (const { tag } of buttons) {
     const testid = ATTR(tag, 'data-testid');
     if (testid && (/(submit|save|add|create)/i.test(testid) || /type\s*=\s*["']submit["']/i.test(tag))) {
@@ -454,14 +567,15 @@ export function submitTargetIn(source: string): Target | null {
   }
   for (const { tag, inner } of buttons) {
     if (/type\s*=\s*["']submit["']/i.test(tag)) {
-      const text = plainText(inner);
-      if (text && !/[{}]/.test(text)) return { kind: 'text', value: text };
+      const name = accessibleName(tag, inner);
+      if (name) return { kind: 'text', value: name };
       return { kind: 'role', value: 'submit' };
     }
   }
-  for (const { inner } of buttons) {
+  for (const { tag, inner } of buttons) {
+    const name = accessibleName(tag, inner);
     const text = plainText(inner);
-    if (text && !/[{}]/.test(text) && CREATE_WORDS.test(text)) return { kind: 'text', value: text };
+    if (name && (CREATE_WORDS.test(name) || (text && !/[{}]/.test(text) && CREATE_WORDS.test(text)))) return { kind: 'text', value: name };
   }
   // `<input type="submit" value="Add">` — older markup, still real.
   const inputSubmit = inputTags(source).find((t) => /type\s*=\s*["']submit["']/i.test(t));
@@ -608,6 +722,33 @@ export function formFeedsList(source: string, submit: Target | null): FormFeedsL
     }
   }
   return opaque ? 'unknown' : 'no';
+}
+
+/**
+ * 🤖 AN AI ASK IS SUBMITTED, NOT RELOADED (queue Q-085, autopsy 1219c639, admin-approved 2026-10-01).
+ * A chat that asks the app's AI appends the question and the answer to a list, so it read as a
+ * create form, and the journey then checked that the "item" survived a reload. A chat's messages
+ * usually live in memory, so that check would fail a working app; and in the preview the AI may not
+ * answer at all (the gateway answers after publish). Such a form is checked as a submit that does not
+ * break the app.
+ *
+ * Evidence, not a guess: the form's own file, or a local module it imports directly, calls into an AI
+ * helper (`src/lib/ai`, `window.NavAI`, the gateway route, a chat-completions API or an AI SDK). Pure.
+ */
+const AI_CALL_RE = /from\s*["'][^"']*\/(?:lib|services|api|utils|hooks)\/ai["']|window\.NavAI\b|\bNavAI\.ask\b|\/api\/app-ai\/|\/chat\/completions\b|\/v1\/messages\b|from\s*["'](?:openai|@anthropic-ai\/sdk|@google\/generative-ai|@google\/genai)["']/;
+
+export function formAsksAi(formPath: string, files: Record<string, string>): boolean {
+  const own = files?.[formPath];
+  if (typeof own !== 'string') return false;
+  if (AI_CALL_RE.test(own)) return true;
+  const specs = own.match(/\bfrom\s*["'][^"']+["']/g) || [];
+  for (const raw of specs.slice(0, MAX_IMPORTS_PER_PAGE)) {
+    const spec = /["']([^"']+)["']/.exec(raw)?.[1];
+    if (!spec) continue;
+    const resolved = resolveLocalImport(formPath, spec, files);
+    if (resolved && AI_CALL_RE.test(files[resolved] || '')) return true;
+  }
+  return false;
 }
 
 /**
@@ -916,8 +1057,9 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
     // A list on the page is not enough: the form must be one that ADDS to a list (see formFeedsList).
     // Only a handler we could read, and that plainly adds nothing, downgrades the journey.
     const feeds = formFeedsList(source, submit) !== 'no';
+    const asksAi = formAsksAi(formPath, files);
 
-    if (listed && markerTyped && feeds && !noWrites) {
+    if (listed && markerTyped && feeds && !noWrites && !asksAi) {
       out.push({
         id: `create-persists:${path}`,
         kind: 'create-persists',
@@ -933,9 +1075,13 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
         id: `form-submit:${path}`,
         kind: 'form-submit',
         route,
-        title: reach
-          ? `Open the "${reach}" screen, fill and submit its form without the app breaking`
-          : `Fill and submit the form on ${route} without the app breaking`,
+        title: asksAi
+          ? (reach
+            ? `Open the "${reach}" screen, ask the app's AI and check the app does not break`
+            : `Ask the app's AI on ${route} and check the app does not break`)
+          : reach
+            ? `Open the "${reach}" screen, fill and submit its form without the app breaking`
+            : `Fill and submit the form on ${route} without the app breaking`,
         fields, submit,
         // A submit still POSTs. Treated as a write unless it is plainly a search/filter form.
         writes: !/search|filter|query/i.test(path),
@@ -976,14 +1122,17 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
     const listed = rendersList(src);
     const markerTyped = fields.some((f) => f.value.includes(marker));
     const feeds = formFeedsList(src, submit) !== 'no';
-    const create = listed && markerTyped && feeds && !noWrites;
+    const asksAi = formAsksAi(path, files);
+    const create = listed && markerTyped && feeds && !noWrites && !asksAi;
     out.push({
       id: `${create ? 'create-persists' : 'form-submit'}:${path}`,
       kind: create ? 'create-persists' : 'form-submit',
       route: '/',
       title: create
         ? `Open the "${reach}" screen, create an item and check it survives a reload`
-        : `Open the "${reach}" screen, fill and submit its form without the app breaking`,
+        : asksAi
+          ? `Open the "${reach}" screen, ask the app's AI and check the app does not break`
+          : `Open the "${reach}" screen, fill and submit its form without the app breaking`,
       fields, submit,
       writes: create || !/search|filter|query/i.test(path),
       reach,

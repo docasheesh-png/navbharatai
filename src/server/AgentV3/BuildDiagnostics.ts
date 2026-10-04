@@ -54,6 +54,7 @@ const PROCESS_ONLY_CODES = new Set([
   'PASTED_APP_KEPT_ONE_FILE',
   // The user named a stack we do not build (unsupportedStack.ts) — a fact about OUR templates, not the app.
   'UNSUPPORTED_STACK',
+  'UNKNOWN_NAME_IN_REQUEST',
   // Whether OUR checks could sign in behind the app's login page (signInExplore.ts) — our instrument.
   'AUTH_EXPLORE_SIGNED_IN', 'AUTH_EXPLORE_NOT_RUN',
   // Whether the platform's additions to the reply reached the screen (summaryAdditions.ts): a fact about our delivery.
@@ -71,6 +72,8 @@ const PROCESS_ONLY_CODES = new Set([
   'FREE_BUILD_TIME_CAP', 'FREE_BUILD_CHAIN_PAUSED',
   // OUR end-of-turn steer that handed the model its undefined classes (stylePolishResume.ts, autopsy 1be16985).
   'STYLE_RULES_RESUMED',
+  // OUR repair pass's closing claim withheld because the pass changed nothing (repairClaim.ts, autopsy 6cd698cc).
+  'REPAIR_CLAIM_WITHHELD',
   // A reviewer finding OUR evidence refuted (reviewEvidence.ts) is a fact about the reviewer, not the app.
   'REVIEW_REFUTED_BY_EVIDENCE',
   // …and a finding not offered because its file no longer exists (autopsy f496c75b): about the reviewer.
@@ -805,6 +808,8 @@ export class BuildDiagnostics {
   private requestAnalysis?: { taskType: string; complexityScore: number; startTier: string; startBand?: string; signalsCouldNotRead?: boolean };
   /** See the transient-status note in the narration handler. */
   private transientStatusRecorded = false;
+  /** Readiness warnings already recorded this build — each is recorded once (Q-068). */
+  private readonly readinessWarningsSeen = new Set<string>();
   private readonly meta: BuildDiagnosticsMeta;
   private readonly now: () => number;
   private readonly startedAt: number;
@@ -1700,6 +1705,11 @@ export class BuildDiagnostics {
             this.record({ phase: 'readiness', severity: 'error', code: 'READINESS_BLOCKER', message: b, autoResolved: false });
           }
           for (const w of e.readiness.warnings ?? []) {
+            // ONE LINE PER WARNING PER BUILD (Q-068, autopsy de3bb2bb): every runner that runs the readiness gate
+            // emits its own `done` — the architect, then each heal runner — so "No tests at all" was recorded
+            // twice, 48 s apart, about one unchanged fact. A warning already recorded this build is not news.
+            if (this.readinessWarningsSeen.has(w)) continue;
+            this.readinessWarningsSeen.add(w);
             this.record({ phase: 'readiness', severity: 'warning', code: 'READINESS_WARNING', message: w, autoResolved: true });
           }
         }
@@ -1784,7 +1794,9 @@ export class BuildDiagnostics {
         // ℹ️ IS OUR OWN INFORMATION MARK (autopsy dfd81a3a): "ℹ️ Handling this message normally (project
         // plan stays paused at … — 1 failed)" was filed as an ERROR because the progress line inside it
         // counts a failed module. A line the platform opened with ℹ️ is a notice, whatever it quotes.
-        const platformNotice = /^\s*ℹ️/.test(t);
+        // 🧾 is our own money notice (autopsy 0311186f): "🧾 I could not confirm your app running here, so you
+        // have been charged only…" landed in the problems list as an ERROR, though it states a bill, not a fault.
+        const platformNotice = /^\s*(?:ℹ️|🧾)/.test(t);
         if (statusLike && problemWord && !platformNotice
           && !(remediationIntent && !failureVerb)
           && !(echoesPrompt && !failureVerb)) {
@@ -2037,6 +2049,11 @@ export class BuildDiagnostics {
    * length. Never throws; a malformed estimate is simply not stored, and the report then says nothing
    * about accuracy rather than something wrong.
    */
+  /** Forget the opening ETA: the turn turned out not to be the job it described (moduleTurnEta.ts). */
+  withdrawEtaPromise(): void {
+    this.etaPromise = undefined;
+  }
+
   setEtaPromise(p: EtaPromise): void {
     const estimateMs = Number(p?.estimateMs);
     if (!Number.isFinite(estimateMs) || estimateMs <= 0) return;

@@ -456,7 +456,20 @@ export function reviewFileList(fileTree: readonly string[], changed: readonly st
  * keeps its read tools, because then reading is the only way to see the code. PURE.
  */
 export function leanReviewAnswersInOneCall(inline: LeanReviewInline | undefined): boolean {
-  return !!inline && inline.files.length > 0 && inline.omitted.length === 0;
+  return !!inline && inline.files.length > 0 && inline.omitted.every(isStylesheetPath);
+}
+
+/**
+ * 🔴 A STYLESHEET TOO BIG TO INLINE IS NOT A REASON TO READ (autopsy cf09c03c, 2026-10-04). The builder
+ * changed `src/App.tsx` and appended a few rules to `src/index.css`, which carries our ~18 KB design kit and
+ * so is over `LEAN_REVIEW_FILE_CHARS`. That one omission gave the lean review its tools back, and it read
+ * `src/App.tsx` twice although the file was in its instruction in full. A review judges behaviour from the
+ * code; it has never needed the kit's rules to do it. Any other omitted file still keeps the tools, and a
+ * turn that changed only a stylesheet inlines nothing, so it keeps them too. PURE.
+ */
+const STYLESHEET_PATH = /\.(css|scss|sass|less)$/i;
+export function isStylesheetPath(path: string): boolean {
+  return STYLESHEET_PATH.test(path);
 }
 
 /**
@@ -538,7 +551,9 @@ export function reviewerInstruction(opts: Omit<ReviewBuildOpts, 'spawn'>): strin
       ...opts.inlineFiles.files.map(({ path, content }) => `\n=== ${path} ===\n${content}`),
       ...(opts.inlineFiles.omitted.length > 0 ? [
         '',
-        `Changed but not included (too large for this review): ${opts.inlineFiles.omitted.join(', ')} — read one only if a finding depends on it.`,
+        leanReviewAnswersInOneCall(opts.inlineFiles)
+          ? `Changed but not included (a stylesheet too large for this review): ${opts.inlineFiles.omitted.join(', ')}. You have no tools in this review — judge the code above.`
+          : `Changed but not included (too large for this review): ${opts.inlineFiles.omitted.join(', ')} — read one only if a finding depends on it.`,
       ] : []),
     ] : []),
     ...(opts.mode === 'suggest' ? [

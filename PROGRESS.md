@@ -87919,3 +87919,34 @@ All on PR #3488, each locked by a test proven by reversion.
 | Q-112 | New-tab links opened inside the phone app's own WebView | Fixed one link at a time; the next link written was bare again. (Measured: every JSX new-tab link already carried `rel`.) | One delegated listener in the native shell (`installExternalLinkHandler`) sends them to the system browser; our own origin, downloads and modified clicks are left alone | `aNewTabLinkOpensTheRealBrowser` |
 
 ⚠️ Q-112 reaches phone users only with a fresh `.aab`/`.ipa` (bundled mode).
+
+## 2026-10-04 — Autopsy 981ce4cc ("Edit pdf"): a file noun is not an app edit; a stale dev-server pre-bundle; peer-blind npm hints (PR #3493)
+
+A scanned experience letter attached with "Edit pdf", in a chat holding only our starter. The engine built a PDF
+annotation app (98 model calls, Weak, 80-step cap) and published it broken: the admin's screenshot shows "Setting
+up fake worker failed: Cannot load script at …pdfjs-dist@3.11.174/build/pdf.worker.min.mjs" and "Failed to load
+PDF file".
+
+**The chain, traced in the report's own lines:** "Edit" read as a certain edit → no offer → build. `npm install
+react-pdf` → ERESOLVE (react-pdf@11 needs React 19) with no hint → two invented versions (ETARGET) → the hint said
+"use react-pdf@^11" → forced with `--legacy-peer-deps` → crash `(0 , import_react.use) is not a function`. The model
+then installed react-pdf@9.2.1 (which supports React 18), but the RUNNING dev server was reused ("already healthy —
+reused it") and kept serving its pre-bundled react-pdf@11 (same `react-pdf.js?v=24816a75:32103`). Believing 9.2.1
+was broken, it downgraded to react-pdf@8.0.2 / pdfjs-dist@3.11.174 (a published advisory), whose worker file is
+`.js`, not the `.mjs` its CDN URL named. Separately, it wrote a made-up PDF ("Created PDF placeholder") and told the
+user their letter was loaded.
+
+| Item | Root cause | Class | Siblings | Lock |
+|---|---|---|---|---|
+| Q-350 build of "Edit pdf" | edit verb + any object ⇒ HIGH | an edit verb whose object is not a screen (6ae30b33, cf09c03c) | text nouns already covered; file nouns added | `FILE_NOUN`, test reversion-proven |
+| Q-351/352 "your existing app" about our starter | banner/note counted files, not owners | the starter counted as the user's work (31254f9a) | banner + READY note | `editBannerText` |
+| Q-353 stale pre-bundle | reuse asked "is an install needed?", never "is the server older than the install?" | a cache that outlives its input | every reuse goes through the one fast path | `buildPrebundleStaleCheckCommand`, shell-tested |
+| Q-354/355 peer-blind hints | hint picked "latest"; ERESOLVE and forced installs said nothing | advice that ignores the project | ETARGET, ERESOLVE, forced install | `peerCompatHint.ts` |
+| Q-357 CDN worker URL | a versioned file name built into a CDN path | — | pdf.js only (precision) | `pdfWorkerSource.ts` |
+| Q-358 made-up PDF + false claim | nothing said the bytes were absent | stand-in data (Q-PR-2 class) | every binary attachment | `attachedBytesNote` |
+| Q-360 blind a11y edits | count without location | — | write-time note | `unlabelledFieldLines` |
+| Q-361 ambiguous anchor | only the not-found error taught append | — | both edit errors | `ambiguousEditRegions` |
+
+Open: Q-359 (writing attachments into the project — a privacy/publish decision), Q-362 (an app's own error banner
+is unseen by every check — design decision), Q-364/365/366 (missing information), Q-367 (agreement). The user's
+published app still carries the broken worker and the vulnerable versions until it is edited again.

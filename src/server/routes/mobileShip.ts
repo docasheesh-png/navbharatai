@@ -867,6 +867,11 @@ export function registerMobileShipRoutes(app: Express): void {
     if (cureFamily(diag.code) === 'user-credentials') {
       return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail, failureLine });
     }
+    // The same for a build machine that cannot build for the store (queue Q-237): no change to the
+    // repository helps, so neither a model nor an attempt is spent. The summary says to build again later.
+    if (cureFamily(diag.code) === 'build-machine') {
+      return res.json({ fixed: false, code: diag.code, summary: diag.summary, detail: diag.detail, failureLine });
+    }
     // The same failure is back and NOTHING was changed after it last time — so nothing will change
     // this time either. The cycle ends here, before a model or a five-minute run is spent on it.
     if (repeat.kind === 'repeat-after-nothing') {

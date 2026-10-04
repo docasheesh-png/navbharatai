@@ -190,3 +190,69 @@ export function shellReadBackTargets(command: string, skip: string | null = null
     .filter((p) => p !== skip && !removedOnly.has(p) && !NOT_SOURCE.test(p))
     .slice(0, MAX_READ_BACK);
 }
+
+/**
+ * WHAT A SHELL COMMAND TOOK OUT OF THE PROJECT (queue Q-246, candy report 7da1cdca).
+ *
+ * `fileDeletion.ts` drops a deleted file from the saved project, but only for what the delete guard
+ * parses: a single SOURCE file (`.ts`, `.tsx`, …) named by `rm`. Everything else a command removes stayed
+ * in the build's captured writes, and the final save lets captured writes win over the sandbox scan. So
+ * `rm src/old.css`, `rm -rf src/legacy`, `rm src/*.bak.ts` and the source of `mv a.ts b.ts` were all put
+ * back into the saved project, and restored into the next sandbox.
+ *
+ * This returns the operands that may have gone: the `rm` / `unlink` / `git rm` paths and globs, plus the
+ * sources of `mv` / `git mv` (every operand but the last; `-t DIR` is not read, precision over recall).
+ * The caller matches them against the paths it recorded and asks the sandbox before forgetting any. PURE.
+ */
+export function shellRemovedOperands(command: string): { paths: string[]; globs: string[] } {
+  const removal = shellRemovalTargets(command);
+  const paths = new Set(removal.paths);
+  const globs = new Set(removal.globs);
+  for (const variant of shellCommandVariants(String(command ?? ''))) {
+    for (const words of simpleCommands(withoutHeredocBodies(variant))) {
+      const args = words.filter((w, i) => !/^(?:[0-9]|&)?[<>]/.test(w) && !/^(?:[0-9]|&)?[<>]/.test(words[i - 1] ?? ''));
+      let [cmd, ...rest] = args;
+      if (!cmd) continue;
+      let name = cmd.split('/').pop() ?? cmd;
+      if (name === 'git' && rest[0] === 'mv') { name = 'git-mv'; rest = rest.slice(1); }
+      if (name !== 'mv' && name !== 'git-mv') continue;
+      if (rest.some((a) => a === '-t' || a.startsWith('--target-directory'))) continue;
+      const operands = rest.filter((a) => !a.startsWith('-'));
+      for (const src of operands.slice(0, -1)) {
+        const p = toWorkspacePath(src);
+        if (p) paths.add(p);
+      }
+    }
+  }
+  return { paths: [...paths], globs: [...globs] };
+}
+
+/** A shell glob as a regex over one path: `*` and `?` never cross a `/`. */
+function globRegex(glob: string): RegExp {
+  const body = glob.replace(/^\.\//, '').replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]');
+  return new RegExp(`^${body}$`);
+}
+
+/** At most this many recorded paths are checked against the sandbox after one command. */
+export const MAX_REMOVAL_PROBES = 200;
+
+/**
+ * The recorded paths a command's removed operands name: the path itself, everything under it when it is
+ * a folder, and every path a glob matches. Only RECORDED paths are returned, so this can never name a
+ * file the build did not save. Generated folders are never source. PURE.
+ */
+export function removedRecordedPaths(
+  removed: { paths: readonly string[]; globs: readonly string[] },
+  recorded: Iterable<string>,
+): string[] {
+  const res = removed.globs.map(globRegex);
+  const out: string[] = [];
+  for (const raw of recorded) {
+    const p = String(raw ?? '');
+    if (!p || NOT_SOURCE.test(p)) continue;
+    const named = removed.paths.some((r) => p === r || p.startsWith(`${r.replace(/\/+$/, '')}/`)) || res.some((re) => re.test(p));
+    if (named && !out.includes(p)) out.push(p);
+    if (out.length >= MAX_REMOVAL_PROBES) break;
+  }
+  return out;
+}

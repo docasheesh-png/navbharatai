@@ -89185,3 +89185,12 @@ for a single owning package. Precision rules: JSX tag names only (lucide exports
 must never be bound to it), the project's own module wins, ambiguity ⇒ nothing, inputs validated before the
 shell. Lock: `tests/anIconTheProjectNeverImportedIsHealed.test.ts`.
 
+### 2026-10-04 — Q-141: the knowledge base no longer claims the release gate stops live deploys
+
+The `admin-release-gate` AppKnowledgeBase entry said "the deploy pipeline checks /api/release/gate and refuses to
+deploy when the gate is closed". The live site deploys through Cloud Build, which has no such step; only the
+backup GitHub workflow checks it, and only with `RELEASE_GATE_URL` set (unset today). Every AI in NavBharatAI
+would have told an admin a freeze protects production when it does not. The entry now states exactly where it
+is enforced. The enforcement itself is 🟡 BLOCKED on the admin approving a `cloudbuild.yaml` step (options and
+recommendation in the queue row).
+

@@ -30,6 +30,7 @@ import { turnStarvedItsBudget } from './floorBudget';
 import { decideBuildNudge, standDownNote } from './nudgeToBuild';
 import { decideUnfinishedResume, unfinishedResumeStandDownNote, unfinishedResumeNote } from './unfinishedResume';
 import { decideStyleResume, doneStyleNote, styleResumeEnabled, styleResumeNote } from './stylePolishResume';
+import { handBackNotice } from './handBackNotice';
 import { asPlatformRequest } from './platformRequest';
 import { repairClaimWithoutChange, repairClaimNote, NO_CHANGE_LINE } from './repairClaim';
 import { streamThinkingToChat } from './thinkingStream';
@@ -1031,6 +1032,8 @@ export class AgentRunner {
                 if (decision.resume) {
                   styleResumes++;
                   summaryBeforeStyleResume = turn.text.trim() || null;
+                  const styleNotice = handBackNotice('style', turn.text);
+                  if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
                   try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length, (style.offGrid ?? []).length), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.offGrid ?? []).map((o) => `${o.file}:off-grid(${o.values.join(',')})`)].join(' ') }); } catch { /* a note must never fail a build */ }
                   pushPlatformTurn(decision.message);
                   continue;
@@ -1046,6 +1049,8 @@ export class AgentRunner {
                 if (standDownNote) { try { this.opts.onNote?.({ code: 'UNFINISHED_RESUME_STOOD_DOWN', message: standDownNote, detail: readiness.blockers.slice(0, 5).join(' | ') }); } catch { /* a note must never fail a build */ } }
                 if (resume.resume && !this.opts.signal?.aborted) {
                   unfinishedResumes++;
+                  const unfinishedNotice = handBackNotice('unfinished', turn.text);
+                  if (unfinishedNotice) events.emit({ type: 'narration', agent: agentRole, text: unfinishedNotice, ts: Date.now() });
                   try { this.opts.onNote?.({ code: 'UNFINISHED_BUILD_RESUMED', message: unfinishedResumeNote(unfinishedResumes, readiness.blockers.length), detail: readiness.blockers.slice(0, 5).join(' | ') }); } catch { /* a note must never fail a build */ }
                   pushPlatformTurn(resume.message);
                   continue;

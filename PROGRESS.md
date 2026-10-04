@@ -87352,6 +87352,45 @@ open PR's CI failed with it (#3462 first).
 - **Class:** an upstream advisory landing between a PR's green CI and its merge. The gate is doing its job; the
   honest response is the pin, not an allowlist entry, because a fixed release exists.
 
+## 2026-10-01 — Autopsy 8f797751 (maths solver, stopped at 6.4 min, 6 s after the dev server came up)
+
+- **A ✅** At 4.6 min the model said "Your Math Solver app is ready … Open the Preview tab"; the platform
+  handed the turn back to style 41 unstyled classes and told only the admin report. No preview existed,
+  and the user stopped. Both hand-backs (style, unfinished) now put "⏳ Not finished yet …" in the chat
+  (`handBackNotice.ts`).
+- **B ✅** The fast lane's planned handoff was labelled "could not produce the app" / `BUILD_FAILED` beside
+  `LLM_CALL_HANDED_OFF`; now `handedOff` and an honest outcome line. (The contract-phase handoff wording,
+  and "Building 11 file(s)" before nothing was built, were already fixed on main by #3461.)
+- **C 🟡 → Q-090** Publish a preview the first time the app compiles clean, mid-build — admin decision.
+- **Q-009** recurred (GLM crawled twice).
+- Not defects: `mathjs` imported before it was installed (the note named the fix; the model wrote the
+  files the same note listed first, then installed); a `types.ts` syntax slip and a non-existent
+  `math.solve`, both self-corrected; a duplicate declaration refused by the write guard; one-file batches
+  (model choice); a manual `tsc` after the clean note; a brand-new workspace given our starter (expected).
+Tests: `tests/readyWasSaidBeforeThePreview.test.ts`, proven by reversion.
+## 2026-10-01 — Autopsy 52471441 ("Build a calculator", Weak, stopped by the user at 38 s)
+
+**What happened.** Setup took 8 s. The fast lane's file-list call (a ~500-token prompt) crawled on GLM `glm-4.7-flashx`
+and was abandoned at 15 s, then handed off because the next rung (KIMI) reasons before every answer. The full builder
+started on KIMI and read the starter files. No file had been written when the user pressed Stop at 38 s. Bill ₹0.
+
+**Tally:** 0 self-heals · 1 workaround (fast lane → full builder after the crawl) · 0 skips · 0 shipped broken ·
+1 struggle (15 s crawl = 37% of the clock, before anything reached the screen).
+
+| Item | Root cause | State |
+|---|---|---|
+| Nothing on screen in 38 s; the tested calculator template was not used | `goldenScaffoldForPrompt` seeds a template only for the chip's exact text; "Build a calculator" is shorter | Q-087 🟡 admin decision (option a recommended: verb + template name only) |
+| GLM crawl, 15 s | Provider latency (Z.ai) | Recurrence of Q-009, which #3465 closes as accepted provider weather. This instance (15 s) is under that decision's reopen line (60 s per build) |
+| Five lines read as defects but are true | See the row | Q-088 🟡 needs the admin's yes |
+
+**Missing subsystem (Step 2):** none new. The lever is Q-087: a bare request for a thing we already have a tested
+template for should get that template, which removes the plan call, the crawl and the wait together.
+
+**Proactive (Step 6), not built:** the crawl grace (`STREAM_THROUGHPUT_GRACE_MS`, 15 s) was sized for a 26,569-token
+prompt's ingestion. The fast lane's plan call is ~500 tokens, where a healthy `glm-4.7-flashx` (thinking disabled)
+answered in 2.4 s in autopsy 876afca9. A grace scaled by prompt size would cut a dead call's cost from 15 s to a few
+seconds. It changes when the ladder moves to KIMI, so it touches the admin's routing decision on Q-009; offered, not
+built.
 ## 2026-10-01 — Admin decisions on Q-009, Q-014, Q-015, Q-023 (and Q-064 folded into Q-009)
 
 The admin answered "karo" to the line naming these rows. Each decision row had a recommended option, and that option
@@ -87393,14 +87432,14 @@ repair told "you read this the second time" (#3457 B); the crawl/timeout double 
 
 | ID | Problem | Root cause | Class | Siblings | Lock |
 |---|---|---|---|---|---|
-| Q-087 | The stylesheet repair wrote nothing and claimed "now defines every one of the 29 classes" | A run's final text was narrated whatever the run had changed | A repair's report of its own work was never checked against its writes | Every platform-requested runner (one door: `AgentRunner`'s narration); delegated writes counted via `changeCount()` | `theRepairThatWorkedWasUndone.test.ts` §1 |
-| Q-088 | The explorer repair fixed the bug in 61 s, then verified it itself until the 150 s cap; undone, ₹20.69 absorbed | It was given the reviewer's `judgeRepairPrompt` ("verify the app builds…"), the preview/browser tools, and the style hand-back | A repair the platform re-checks was told to check itself | The green functional repair had the same shape (same tools, same hand-back); both fixed | §2 |
-| Q-089 | TS1361 enum `import type` from the contract (f496c75b class again) | The heal ran only at the endgame; the write door and the timeout salvage had none | A deterministic fix applied in one place of three | Write-time typecheck + salvage now run the same fixes as the verify step | §3 |
-| Q-090 | Theme button crash: `store.set` handed out uncalled, reads `this` | Nothing named the pattern at write time | Unbound method handed out | Destructuring `const { set } = store` covered too | §4 |
-| Q-091 | Journey not run: icon send button named by `aria-label` | `submitTargetIn` read only inner text | Name read by text, while the browser uses the accessible name | type=submit and create-word branches both use `accessibleName` | §5 |
-| Q-092 | `SIMULATED_RESULT` on "mock API key" | `api` matched as a result noun | A credential read as a faked result | key / token / secret all excluded | §6 |
-| Q-093 | Eight items argued not defects | — | — | — | 🟡 needs the admin's agreement |
-| Q-085 | Chat-form journey | Q-091 makes the next chat journey run; in-memory chats would then FAIL the reload check | — | — | 🟡 decision (options in the queue) |
+| Q-170 | The stylesheet repair wrote nothing and claimed "now defines every one of the 29 classes" | A run's final text was narrated whatever the run had changed | A repair's report of its own work was never checked against its writes | Every platform-requested runner (one door: `AgentRunner`'s narration); delegated writes counted via `changeCount()` | `theRepairThatWorkedWasUndone.test.ts` §1 |
+| Q-171 | The explorer repair fixed the bug in 61 s, then verified it itself until the 150 s cap; undone, ₹20.69 absorbed | It was given the reviewer's `judgeRepairPrompt` ("verify the app builds…"), the preview/browser tools, and the style hand-back | A repair the platform re-checks was told to check itself | The green functional repair had the same shape (same tools, same hand-back); both fixed | §2 |
+| Q-172 | TS1361 enum `import type` from the contract (f496c75b class again) | The heal ran only at the endgame; the write door and the timeout salvage had none | A deterministic fix applied in one place of three | Write-time typecheck + salvage now run the same fixes as the verify step | §3 |
+| Q-173 | Theme button crash: `store.set` handed out uncalled, reads `this` | Nothing named the pattern at write time | Unbound method handed out | Destructuring `const { set } = store` covered too | §4 |
+| Q-174 | Journey not run: icon send button named by `aria-label` | `submitTargetIn` read only inner text | Name read by text, while the browser uses the accessible name | type=submit and create-word branches both use `accessibleName` | §5 |
+| Q-175 | `SIMULATED_RESULT` on "mock API key" | `api` matched as a result noun | A credential read as a faked result | key / token / secret all excluded | §6 |
+| Q-176 | Eight items argued not defects | — | — | — | 🟡 needs the admin's agreement |
+| Q-085 | Chat-form journey | Q-174 makes the next chat journey run; in-memory chats would then FAIL the reload check | — | — | 🟡 decision (options in the queue) |
 
 Each fix was reverted in place and the suite failed, then restored. New flags (NOT set, default ON, `off` reverts):
 `AGENTV3_WRITE_TYPE_IMPORT_HEAL`, `AGENTV3_DETACHED_METHOD_NOTE`. The GLM crawls (≈30 s) are inside Q-009's accepted

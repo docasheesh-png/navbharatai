@@ -55,6 +55,7 @@ import {
 import { adminFooterItems, type AdminFooterApi } from './admin/adminFooterApi';
 import { ReportShot } from './ReportShot';
 import { compressForReport } from '../lib/reportImage';
+import { writeFailure } from '../lib/serverAnswer';
 
 interface AdminDashboardProps {
   adminToken: string;
@@ -678,12 +679,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
   const markUserReport = useCallback(async (id: string, status: string) => {
     try {
-      await fetch(`/api/admin/reports/${encodeURIComponent(id)}/status`, {
+      const res = await fetch(`/api/admin/reports/${encodeURIComponent(id)}/status`, {
         method: 'POST', headers, body: JSON.stringify({ status }),
       });
+      const failure = await writeFailure(res, 'That report could not be updated.');
+      if (failure) { toast(failure); return; }
       setOpenReport(null);
       void fetchUserReports();
-    } catch { /* the row stays as it was; the admin can retry */ }
+    } catch { toast('That report could not be updated (no connection).'); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken, fetchUserReports]);
 
@@ -711,19 +714,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
 
   const markApkReport = useCallback(async (id: string, fixed: boolean) => {
     try {
-      await fetch(`/api/admin/apk-reports/${encodeURIComponent(id)}/mark`, {
+      const res = await fetch(`/api/admin/apk-reports/${encodeURIComponent(id)}/mark`, {
         method: 'POST', headers, body: JSON.stringify({ fixed }),
       });
+      const failure = await writeFailure(res, 'That APK report could not be marked.');
+      if (failure) { toast(failure); return; }
       setOpenApkReport(null);
       void fetchApkReports();
-    } catch { /* the row stays as it was; the admin can retry */ }
+    } catch { toast('That APK report could not be marked (no connection).'); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken, fetchApkReports]);
 
   const deleteApkReportRow = useCallback(async (id: string) => {
     if (!window.confirm('Delete this APK build report permanently?')) return;
     try {
-      await fetch(`/api/admin/apk-reports/${encodeURIComponent(id)}`, { method: 'DELETE', headers });
+      // The row leaves the list only when the server deleted it — dropping it on a refused delete
+      // showed an empty inbox over reports the store still held.
+      const res = await fetch(`/api/admin/apk-reports/${encodeURIComponent(id)}`, { method: 'DELETE', headers });
+      const failure = await writeFailure(res, 'Could not delete that report.');
+      if (failure) { toast(failure); return; }
       setOpenApkReport(null);
       setApkReports((rows) => rows.filter((row) => row.id !== id));
     } catch { toast('Could not delete that report.'); }
@@ -734,7 +743,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminToken, onLo
     if (apkReports.length === 0) { toast('The inbox is already empty.'); return; }
     if (!window.confirm(`Delete ALL ${apkReports.length} APK build reports permanently? This cannot be undone.`)) return;
     try {
-      await fetch('/api/admin/apk-reports/clear', { method: 'POST', headers, body: JSON.stringify({ confirm: true }) });
+      const res = await fetch('/api/admin/apk-reports/clear', { method: 'POST', headers, body: JSON.stringify({ confirm: true }) });
+      const failure = await writeFailure(res, 'Could not clear the APK reports.');
+      if (failure) { toast(failure); return; }
       setApkReports([]);
     } catch { toast('Could not clear the APK reports.'); }
     // eslint-disable-next-line react-hooks/exhaustive-deps

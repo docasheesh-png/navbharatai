@@ -30,7 +30,9 @@ describe('1 · a STOPPED build is never asked for money', () => {
     // the Stop BUTTON never recorded a `stop_build` TOOL call and so was invisible here — the tool
     // check stays as the second half. The property this test protects is the ORDER below, which is
     // unchanged: `stopped` is established first and every later reading stands down on it.
-    expect(route).toContain("const stopped = buildWasStopped(buildDiag.report().issues) || buildDiag.toolWasUsed('stop_build');");
+    // Q-131 (2026-10-04): the `|| toolWasUsed('stop_build')` half was a second definition of a stop and
+    // is gone — the timeline alone answers it for every stop path (see tests/oneDefinitionOfStopped).
+    expect(route).toContain('const stopped = buildWasStopped(buildDiag.report().issues);');
     // Each subsequent reading must stand down when the build was stopped — it is reasoning about
     // evidence that was never gathered.
     expect(route).toContain('const refused = !stopped && modelAnswer.declined;');

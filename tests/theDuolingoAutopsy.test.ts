@@ -165,7 +165,7 @@ describe('spacing is snapped by construction, not by asking a model', () => {
   });
 
   it('the admin note names what moved', () => {
-    const note = spacingSnapNote([{ path: 'src/index.css', content: '', changes: ['6px → 4px'] }]);
+    const note = spacingSnapNote([{ path: 'src/index.css', content: '', changes: ['6px → 4px'], snapped: 1 }]);
     expect(note).toContain('6px → 4px');
     expect(note).toContain('src/index.css');
   });

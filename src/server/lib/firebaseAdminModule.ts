@@ -1,3 +1,4 @@
+import { interopDefault } from './interopDefault';
 /**
  * Interop-safe loader for the firebase-admin CJS module via dynamic import.
  *
@@ -20,5 +21,5 @@ export async function loadFirebaseAdmin(): Promise<typeof import('firebase-admin
   } & typeof import('firebase-admin');
   // `.default` is the real CJS module.exports (initializeApp/apps/auth/firestore/credential…);
   // fall back to `mod` for any loader (e.g. esbuild's __toESM) that already hoisted them.
-  return (mod.default ?? mod) as typeof import('firebase-admin');
+  return interopDefault<typeof import('firebase-admin')>(mod);
 }

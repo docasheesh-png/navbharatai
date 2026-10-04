@@ -44,7 +44,6 @@ export interface BillingPanelProps {
   loadingWallet: boolean;
   dailyUsage: { date: string; count: number; builds: number };
   billingTransactions: any[];
-  billingLogs: any[];
   activeBillingDetailTab: BillingDetailTab;
   couponCodeInput: string;
   isRedeemingCoupon: boolean;
@@ -101,7 +100,7 @@ export interface BillingPanelProps {
 export function BillingPanel(props: BillingPanelProps) {
   const {
     user, wallet, loadingWallet, dailyUsage,
-    billingTransactions, billingLogs, activeBillingDetailTab,
+    billingTransactions, activeBillingDetailTab,
     couponCodeInput,
     isRedeemingCoupon, couponError, couponSuccess,
     buyAmountInput, isRecharging,

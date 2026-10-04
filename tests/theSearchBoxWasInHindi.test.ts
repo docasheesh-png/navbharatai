@@ -186,11 +186,12 @@ describe('The route carries the evidence (source guard — tsc and vitest cannot
   const sugg = readFileSync(join(__dirname, '../src/server/AgentV3/buildFindingSuggestions.ts'), 'utf8');
 
   it('the copy records per-file hashes', () => {
-    expect(route).toMatch(/snapshotTaken = \{[^}]*fileHashes: source \? fileContentHashes\(source\)/);
+    expect(route).toMatch(/snapshotTaken = \{[^}]*fileHashes: source \? fileContentHashes\(identitySource\(source\)\)/);
   });
   it('the confirmation passes the saved and the sandbox per-file hashes', () => {
-    expect(route).toContain('persistedFileHashes: fileContentHashes(persisted)');
-    expect(route).toContain('sandboxFileHashes: sandboxScan && persisted === toSave ? fileContentHashes(sandboxScan) : undefined');
+    // Both sides through identitySource (autopsy cc3ef776: a secrets file is never part of the copy).
+    expect(route).toContain('persistedFileHashes: fileContentHashes(identitySource(persisted))');
+    expect(route).toContain('sandboxFileHashes: sandboxScan && persisted === toSave ? fileContentHashes(identitySource(sandboxScan)) : undefined');
   });
   it('a divergence is recorded, and is a fact about our engine, never the user’s app', () => {
     expect(route).toContain("code: 'SAVED_SOURCE_DIVERGES'");

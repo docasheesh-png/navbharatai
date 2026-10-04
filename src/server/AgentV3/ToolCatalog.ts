@@ -3050,14 +3050,16 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
       name: 'generate_image_ai',
       description:
         'Add real AI image generation (text in, picture out) to the app — an AI image generator, art / logo / ' +
-        'wallpaper / avatar maker. Default: Pollinations AI, which needs NO key and NO signup and works in the ' +
-        'preview and after publishing, called straight from the page (src/lib/imageAi.ts: generateImage, ' +
-        'downloadImage; plus useImageGenerator() for React). Handles empty prompts, timeouts, rate limits, ' +
-        'retries, network failures and cancellation. Pass server: true when the app has a server or the owner ' +
-        'wants their OWN image provider key: the page then calls the app\'s /api/generate-image route and the ' +
-        'server picks the engine from settings (no IMAGE_API_KEY ⇒ Pollinations; IMAGE_PROVIDER = pollinations | ' +
-        'openai | stability with IMAGE_API_KEY), so the key never reaches the browser and can be changed at any ' +
-        'time without a code change. Never overwrites an existing .env.example.',
+        'wallpaper / avatar maker. EVERY image engine needs an API key (there is no free, keyless engine any ' +
+        'more). Default: the page asks NavBharatAI (window.NavAI.image) and NavBharatAI makes the picture with ' +
+        'the image key the owner saves in Keys & Secrets (NAVBHARATAI_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, ' +
+        'XAI_API_KEY or POLLINATIONS_API_KEY) — in the preview and after publishing (src/lib/imageAi.ts: ' +
+        'generateImage, downloadImage; plus useImageGenerator() for React). Handles empty prompts, a missing ' +
+        'key, timeouts, rate limits, network failures and cancellation. Pass server: true only when the app has ' +
+        'its own server: the page then calls the app\'s /api/generate-image route and the server reads the same ' +
+        'key names (or IMAGE_PROVIDER + IMAGE_API_KEY), so the key never reaches the browser and can be changed ' +
+        'at any time without a code change. The result tells you exactly what to say to the user about keys. ' +
+        'Never overwrites an existing .env.example.',
       input_schema: {
         type: 'object',
         properties: {

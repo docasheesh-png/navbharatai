@@ -7,10 +7,12 @@ import net from 'net';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { LEGACY_EMBEDDED_API_KEY } from './src/server/lib/aiClients';
 import { corsMiddleware } from './src/server/lib/cors';
+import { TRUSTED_PROXY_HOPS } from './src/server/lib/clientAddress';
 import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
 import { spaFallbackShouldDefer } from './src/server/lib/spaFallback';
 import { noteWebsiteVisit } from './src/server/lib/ownAudience';
 import { registerTelemetryRoutes } from './src/server/routes/telemetry';
+import { isPrivateBuildFile } from './src/server/lib/privateBuildFiles';
 import { registerTeamRoutes } from './src/server/routes/team';
 import { registerShareRoutes } from './src/server/routes/share';
 import { audit } from './src/server/lib/audit';
@@ -27,6 +29,7 @@ import { registerAppLockRoutes } from './src/server/routes/appLock';
 import { registerPushRoutes } from './src/server/routes/push';
 import { registerSbomRoutes } from './src/server/routes/sbom';
 import { registerLegalRoutes } from './src/server/routes/legal';
+import { registerSiteIndexRoutes } from './src/server/routes/siteIndex';
 import { registerCheckoutHandoffRoute } from './src/server/routes/checkoutHandoff';
 import { registerBuildAnalyticsRoutes } from './src/server/routes/buildAnalytics';
 import { registerSupabaseIntegrationRoutes } from './src/server/routes/supabaseIntegration';
@@ -403,8 +406,12 @@ setInterval(() => {
   const PORT = Number(process.env.PORT || 8080);
   // aiRouter — shared singleton from src/server/lib/aiRouter.ts (Phase 1, AI-core).
 
-  // Trust proxy for correct req.protocol and req.get('host') behind reverse proxies
-  app.set('trust proxy', true);
+  // Trust EXACTLY ONE proxy hop — Google's Cloud Run front end (navbharatai.com resolves to it). With
+  // `true`, req.ip was the FIRST X-Forwarded-For entry, which the caller writes, so every per-address
+  // limit (admin login lockout, OTP sends, the bot guard, auth rate limits) could be walked past with one
+  // header. One hop makes req.ip the address Google saw — the same answer as clientAddress().
+  // req.protocol / req.hostname still come from that trusted hop. See src/server/lib/clientAddress.ts.
+  app.set('trust proxy', TRUSTED_PROXY_HOPS);
 
     app.use(express.json({
       limit: '30mb',  // room for vision attachments (images/PDFs as base64)
@@ -548,6 +555,8 @@ setInterval(() => {
       console.log(`[PRODUCTION] Serving static files from: ${distPath}`);
       // The build's ready-made brotli-11 / gzip-9 copies of JS/CSS (written by scripts/precompress.mjs in
       // the Dockerfile). Falls through to express.static below whenever there is no copy.
+      // The server bundle and every source map live in dist/ too, and are never public.
+      app.use((req: any, res: any, next: any) => (isPrivateBuildFile(req.path) ? res.status(404).end() : next()));
       app.use(precompressedStatic(distPath));
       // 12.7 — CDN-friendly Cache-Control headers for static assets
       app.use(express.static(distPath, {
@@ -746,6 +755,8 @@ setInterval(() => {
   // both are checked by tools that may not run JS. Both paths are declared in spaFallback.ts, so the
   // SPA catch-all defers to these handlers instead of returning index.html.
   registerLegalRoutes(app);
+  // robots.txt + sitemap.xml, derived from the same legal-page list (declared in spaFallback.ts too).
+  registerSiteIndexRoutes(app);
   // PUBLIC checkout hand-off (/pay) — the ONE origin the payment gateway has approved. The native
   // Android shell opens this in the system browser because its own WebView origin (https://localhost)
   // can never be whitelisted. Declared in spaFallback.ts, or the catch-all would swallow it.

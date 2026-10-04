@@ -4,6 +4,10 @@
 // change kare, agar user keys na de, to default pollination ai" — with a brief asking that "build me an AI
 // image generator" produce an app that really makes pictures, not a mock-up.
 //
+// 🔴 2026-10-04: the keyless default is gone (the provider answers 401 without an account key, and a key may
+// never be in browser code). Pictures now come through NavBharatAI with the OWNER's saved image key — see
+// lib/appImageKeyOptions.ts for the keys and where each is made.
+//
 // The capability itself is the `generate_image_ai` recipe (src/server/lib/ImageAiGenerator.ts). This module
 // holds the three things around it that are not code generation:
 //   1. IMAGE_IN_APP_RULE — the builder's instruction, read by the architect AND every writing sub-agent, so
@@ -21,11 +25,13 @@ export const IMAGE_IN_APP_RULE =
   'generator, an AI art / logo / wallpaper / avatar maker, "generate an image from a prompt"), call ' +
   'run_recipe with name "generate_image_ai" — never hand-write the provider call, and never show a stock, ' +
   'placeholder or random photo as a generated result. Input { "server": false } for an app without a ' +
-  'server: it uses Pollinations AI with no key, and it works in the preview and after publishing. Pass ' +
-  '{ "server": true } only when the app already has a server or the user wants to use their OWN image ' +
-  'provider key (a key must never be in browser code). Build the screen the recipe describes (prompt box, ' +
-  'Generate, a visible progress state, the picture, Download, generate again, errors with Retry). In your ' +
-  'final message say which engine makes the pictures and how the owner can switch to their own key.';
+  'server: the page asks NavBharatAI (window.NavAI.image) and NavBharatAI makes the picture with the image ' +
+  'API key the owner saves, in the preview and after publishing. Pass { "server": true } only when the app ' +
+  'already has its own server (a key must never be in browser code). Build the screen the recipe describes ' +
+  '(prompt box, Generate, a visible progress state, the picture, Download, generate again, errors with ' +
+  'Retry). EVERY image engine now needs an API key — there is no free, keyless engine any more. In your ' +
+  'final message say so plainly and list the key options the recipe gives you, with where to get each and ' +
+  'where to paste it. Never call the pictures free or say no key is needed.';
 
 /**
  * Words that NAME the thing being generated — a picture of some kind. Kept to nouns that are a picture by

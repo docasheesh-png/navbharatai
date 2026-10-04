@@ -21,6 +21,7 @@ import { Popover } from '../ui/Popover';
 import { Donut } from '../ui/charts';
 import { cardClasses } from '../ui/variants';
 import { buildComponentTree, type TreeNode } from '../../lib/componentTree';
+import { writeFailure } from '../../lib/serverAnswer';
 
 interface ProjectInsightsPanelProps {
   user: FirebaseUser | null;
@@ -104,7 +105,13 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
   };
   const delHook = async (id: string) => {
     if (!uid) return;
-    try { await fetch(`/api/webhooks/${uid}/${id}`, { method: 'DELETE', headers: await authedHeaders() }); fetchHooks(); } catch { /* ignore */ }
+    setWhMsg('');
+    try {
+      const r = await fetch(`/api/webhooks/${uid}/${id}`, { method: 'DELETE', headers: await authedHeaders() });
+      const failure = await writeFailure(r, 'Could not delete the webhook, so it still fires.');
+      if (failure) setWhMsg(failure);
+      fetchHooks();
+    } catch (e: any) { setWhMsg(`Error: ${e?.message || e}`); }
   };
   const testHooks = async () => {
     if (!uid) return;
@@ -237,6 +244,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
   const [rvLine, setRvLine] = useState('');
   const [rvBody, setRvBody] = useState('');
   const [rvBusy, setRvBusy] = useState(false);
+  const [rvMsg, setRvMsg] = useState('');
   const loadComments = useCallback(async () => {
     if (!workspaceId) return;
     try {
@@ -248,23 +256,29 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
   const addComment = async () => {
     if (!workspaceId || !rvFile.trim() || !rvBody.trim()) return;
     setRvBusy(true);
+    setRvMsg('');
     try {
       const r = await fetch(`/api/workspace/${encodeURIComponent(workspaceId)}/review`, {
         method: 'POST', headers: await authedHeaders(),
         body: JSON.stringify({ file: rvFile.trim(), line: Math.max(0, parseInt(rvLine, 10) || 0), body: rvBody.trim() }),
       });
-      if (r.ok) { setRvBody(''); setRvLine(''); await loadComments(); }
-    } catch { /* ignore */ }
+      const failure = await writeFailure(r, 'The comment could not be added.');
+      if (failure) { setRvMsg(failure); return; }
+      setRvBody(''); setRvLine(''); await loadComments();
+    } catch { setRvMsg('The comment could not be added (no connection).'); }
     finally { setRvBusy(false); }
   };
   const toggleResolve = async (id: string, resolved: boolean) => {
     if (!workspaceId) return;
+    setRvMsg('');
     try {
-      await fetch(`/api/workspace/${encodeURIComponent(workspaceId)}/review/${encodeURIComponent(id)}/resolve`, {
+      const r = await fetch(`/api/workspace/${encodeURIComponent(workspaceId)}/review/${encodeURIComponent(id)}/resolve`, {
         method: 'POST', headers: await authedHeaders(), body: JSON.stringify({ resolved }),
       });
+      const failure = await writeFailure(r, 'The comment could not be updated.');
+      if (failure) setRvMsg(failure);
       await loadComments();
-    } catch { /* ignore */ }
+    } catch { setRvMsg('The comment could not be updated (no connection).'); }
   };
 
   // Pure and cheap, but re-deriving it on every keystroke of an unrelated panel would be wasteful.
@@ -550,6 +564,7 @@ export const ProjectInsightsPanel: React.FC<ProjectInsightsPanelProps> = ({ user
           </div>
           <textarea value={rvBody} onChange={(e) => setRvBody(e.target.value)} placeholder="Comment…" className="w-full h-14 bg-well border border-line rounded px-2 py-1 text-[10px] text-body resize-y focus:outline-none focus:border-violet-500" />
           <Button size="sm" onClick={addComment} disabled={rvBusy || !rvFile.trim() || !rvBody.trim()} className="uppercase tracking-widest bg-violet-600 hover:bg-violet-700 text-on-accent">{rvBusy ? 'Adding…' : 'Add comment'}</Button>
+          {rvMsg && <p role="alert" className="text-[11px] text-warn">{rvMsg}</p>}
           {comments.length > 0 && (
             <div className="space-y-1 max-h-52 overflow-auto">{pagedComments.visible.map((c) => (
               <div key={c.id} className={cn('bg-well rounded px-3 py-2 text-[10px] space-y-1', c.resolved && 'opacity-50')}>

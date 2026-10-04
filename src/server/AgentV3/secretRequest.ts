@@ -178,6 +178,11 @@ export interface RequirementLike {
   envVars: readonly string[];
   /** The names the app's OWN code actually reads — preferred, so a Mapbox user is never asked for a Google key. */
   matchedEnvVars: readonly string[];
+  /**
+   * The card's own wording when "Needed for <label>" would mislead — a requirement IMPLIED by a fake
+   * feature (fakeFeatureScan.ts) says the feature is a demo until the key is added.
+   */
+  why?: string;
 }
 
 /** The card stays a form, not a wall — beyond this many keys, the rest go to Settings via the text notice. */
@@ -199,7 +204,7 @@ export function postBuildKeyAsks(
   for (const req of missing || []) {
     const names = (req.matchedEnvVars?.length ? req.matchedEnvVars : req.envVars) || [];
     for (const name of names) {
-      raw.push({ name, why: `Needed for ${req.label}. Your app is built — this key is what makes that feature actually work.` });
+      raw.push({ name, why: req.why || `Needed for ${req.label}. Your app is built — this key is what makes that feature actually work.` });
     }
   }
   return planSecretRequest(raw, alreadySaved).ask.slice(0, POST_BUILD_ASK_MAX);

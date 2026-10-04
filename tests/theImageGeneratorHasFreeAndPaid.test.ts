@@ -45,10 +45,19 @@ describe('the image generator has a free mode and a paid mode', () => {
     expect(gen).toContain('tier: tierNow,');
   });
 
-  it('the developer API has no image permission and no image door', () => {
-    expect(API_SCOPES as readonly string[]).not.toContain('ai:images');
-    for (const r of Object.values(SCOPE_ROUTES)) expect(r.path).not.toMatch(/image/);
-    expect(code(read('src/server/routes/developerApi.ts'))).not.toMatch(/\/api\/images\//);
+  // 🔁 2026-10-04 — THE IMAGE DOOR IS BACK, ON THE ADMIN'S WORD. It was removed with the paid tier on
+  // 2026-09-23. When the free image provider began refusing every keyless request, the admin ruled:
+  // "user ko saaf saaf bolo ki API keys chahiye … user ko navbhatai api keys ka offer den". A NavBharatAI
+  // key cannot make an app's pictures without this door. It is priced exactly like Paid mode (5 free a
+  // day, then the admin's ₹1) and charged to the same single wallet line — never a second price.
+  it('the developer API image door exists, needs the Images permission, and uses the one image price', () => {
+    expect(API_SCOPES as readonly string[]).toContain('ai:images');
+    expect(SCOPE_ROUTES['ai:images' as keyof typeof SCOPE_ROUTES]).toEqual({ method: 'POST', path: '/api/v1/images/generations' });
+    const route = code(read('src/server/routes/developerApi.ts'));
+    expect(route).toMatch(/app\.post\('\/api\/images\/generations', ipLimiter, apiKeyAuth, requireScope\('ai:images'\)/);
+    const engine = code(read('src/server/lib/navbharatImageEngine.ts'));
+    expect(engine).toContain('imageFeeForCount(');
+    expect(engine).toContain("feature: 'image'");
   });
 
   // 🔁 2026-09-30 (admin: "per day 5 image free for user, uske bad 1₹/image"): Paid mode has a daily

@@ -101,6 +101,27 @@ const DOMAINS: DomainDef[] = [
     ],
   },
   {
+    // A TOURNAMENT APP IS NOT A SHOP (Q-516, autopsy 39e982bd, 2026-10-04). "PrimeClash Esports" — a
+    // tournament platform for Free Fire players, with a wallet, entry fees and offers — had no domain of
+    // its own, so its money words read it as ECOMMERCE and the build was asked *"Does it need inventory
+    // tracking?"*. What it needs is what every tournament app needs, esports or cricket or chess: team
+    // registration, brackets, match rooms, verified results, prize payouts and a leaderboard. Headlines
+    // are the event's own words — never a bare "game" (that is the `game` domain, an app you PLAY) or
+    // "match" (a dating app). Listed before ecommerce so an exact tie, which only a genuine tournament
+    // prompt with money words can produce, goes here.
+    key: 'tournament',
+    re: /\btournaments?\b|\bturnaments?\b|\be-?sports?\b|\bprize\s+pools?\b|\broom\s+ids?\b|\bknock-?out\s+(?:rounds?|stages?|brackets?)\b|\bfixtures?\s+(?:list|schedule|generator)\b|टूर्नामेंट/i,
+    features: [
+      { label: 'team / player registration (solo, duo, squad)', re: /regist|sign.?up|join|squad|team|duo|solo|roster/i },
+      { label: 'brackets, rounds and match schedule', re: /bracket|round|schedul|fixture|knock.?out|league|group stage/i },
+      { label: 'match rooms (room ID and password shared at start)', re: /room|lobby|match.?id|password|custom match/i },
+      { label: 'result submission and verification (screenshots, disputes)', re: /result|screenshot|verif|proof|dispute|kill/i },
+      { label: 'entry fees, prize pool and payouts', re: /entry.?fee|prize|payout|withdraw|wallet|reward|winning/i },
+      { label: 'leaderboards and player stats', re: /leaderboard|rank|stats|points?\b|mvp/i },
+      { label: 'organiser / admin panel with anti-cheat and bans', re: /admin|organi[sz]er|moderat|cheat|\bban\b|report/i },
+    ],
+  },
+  {
     key: 'ecommerce',
     // `shop`/`store`/`cart` are boundary-anchored (see the corpus test): unanchored they matched inside
     // "photoshop", "bookstore"/"restore" and "cartoon", turning a drawing app into an ecommerce build.

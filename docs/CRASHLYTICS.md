@@ -1,0 +1,101 @@
+# Crash and error reporting (Firebase Crashlytics)
+
+Built 2026-10-04. This file describes what the code does. If the code changes, update this file in the same PR.
+
+## 1. Three pipes, kept separate on purpose
+
+| What | Where it goes | Code |
+|---|---|---|
+| **Native crashes** (Java on Android, Swift/Objective-C on iOS, fatal and non-fatal) | Firebase Crashlytics, captured by the SDK inside the phone app before any JavaScript runs | `@capacitor-firebase/crashlytics` (Android Gradle plugin, iOS SwiftPM) |
+| **JavaScript errors** (React render errors, `window` errors, unhandled rejections, a few handled failures) | Inside the phone apps: Crashlytics **non-fatal** reports. Everywhere: our own `POST /api/logs/error`, which feeds Cloud Error Reporting and the admin Errors view | `src/lib/observability/` |
+| **Server errors** | Cloud Error Reporting through `ErrorTracker`, with a trace id per request | `src/server/observability/ErrorTracker.ts` (unchanged) |
+
+A JavaScript error is never reported as a native crash. On the **website** nothing goes to Crashlytics,
+because the plugin has no web implementation. Website errors reach only our own server.
+
+## 2. The client reporter (`src/lib/observability/`)
+
+- `index.ts` holds the reporter:
+  - Functions: `initializeObservability`, `recordError`, `recordNonFatal`, `addBreadcrumb`, `setCrashKey`, `setAppContext`, `setFeatureContext`, `setUserContext` and `clearUserContext`.
+  - Helpers: `featureAreaForView` and `CRASH_REPORT_POLICY_PHRASES`.
+- `sanitize.ts` is the ONE sanitizer. The server intake uses it too.
+- `native.ts` holds the production wiring: the Crashlytics plugin as plain functions, and the offline-queue POST.
+
+**Where it is called (and nowhere else):**
+- `src/main.tsx`: initialization, app context (platform, environment, web build time, native build number) and the two global handlers.
+- `src/components/ErrorBoundary.tsx`: React render errors, with the retry count and the failing component's name.
+- `src/App.tsx`:
+  - `onAuthStateChanged` sets and clears the user. Every sign-out path ends there.
+  - The active-view effect sets `screen` and `feature_area`.
+  - The GitHub sign-in ticket failure records a non-fatal.
+- Non-fatals: push registration failure (`pushNotifications.ts`), App Check not starting (`appCheckClient.ts`), payment verification request failure (`usePaymentEngine.ts`, HTTP status only).
+
+**Guarantees, each locked by `tests/crashReportsCarryNoSecrets.test.ts`:**
+- **Never throws.** Every sink call is wrapped. A Crashlytics SDK that fails to load is remembered as absent and never retried in a loop.
+- **Production only.** `import.meta.env.PROD`. A development build sends nothing.
+- **Storm control.** An identical report within 5 minutes is dropped. At most 20 reports leave per 5 minutes. A report raised while reporting is dropped, so there is no recursion.
+- **Only the message and stack of an error are read.** No other property is copied, so a request body or prompt hanging off an error object cannot leave the device.
+- **The user is a one-way hash.** It is the first 32 hex characters of `SHA-256("nbai-crash:" + uid)`. The id is set to empty on sign-out. To find a known user's reports, compute that hash of their uid.
+- **JS never calls `setEnabled`.** It persists on the device. Collection on or off is decided natively (below).
+
+**What a report may carry:**
+- the error message and stack;
+- the page origin and path (never a query string);
+- custom keys: `platform`, `environment`, `web_build`, `native_build`, `screen`, `feature_area`, `signed_in`, `retries`, `component`, `http_status`, `reason`;
+- Crashlytics' own device facts.
+
+**What it may never carry (the sanitizer removes it):**
+- passwords, tokens, JWTs, API keys, cookies and Authorization headers;
+- card numbers (Luhn-checked) and UPI addresses;
+- emails, phone numbers, PAN, IFSC and Aadhaar;
+- URL query strings and fragments;
+- any opaque run of 40+ characters.
+
+A custom key whose name mentions tokens, passwords, wallet, balance, amount, email, phone, prompt or message is refused whatever its value.
+
+## 3. Android
+
+- `android/build.gradle` adds `com.google.firebase:firebase-crashlytics-gradle:3.0.6` to the classpath.
+- `android/app/build.gradle` applies `com.google.firebase.crashlytics` inside the same condition as `google-services`.
+- Collection is controlled by the manifest meta-data `firebase_crashlytics_collection_enabled`. The value comes from `manifestPlaceholders`: `"false"` by default (debug builds, including `android-app.yml`) and `"true"` for `release`.
+- `minifyEnabled false`, so there is no R8 mapping file to upload.
+- Native `.so` symbols already go into the `.aab` (`ndk.debugSymbolLevel 'SYMBOL_TABLE'`), so Play Console native crashes are symbolicated. NDK crash capture through Crashlytics (`firebase-crashlytics-ndk`) is deliberately not added: the app ships no native code of its own.
+- `capacitor.settings.gradle` and `capacitor.build.gradle` are regenerated by `npx cap sync android` in CI. The committed copies already list the plugin.
+
+## 4. iOS
+
+- The plugin comes in through SwiftPM.
+- `capacitor.config.ts` sets `packageOptions['@capacitor-firebase/crashlytics'] = { symlink: true }`. The plugin README requires this to avoid a package-identity clash.
+- Release builds already produce dSYMs: the Capacitor SPM template sets `dwarf-with-dsym` for Release.
+- `fastlane/Fastfile` pins `derived_data_path` and, after `build_app`, runs `upload_symbols_to_crashlytics` with the `upload-symbols` tool SwiftPM checked out. A failed upload is logged loudly and never fails the release.
+- The `GoogleService-Info.plist` is the committed `ios-config/` copy that CI already places in the app.
+
+## 5. Source maps and private build files
+
+- No client source map is emitted (Vite default).
+- `npm run build` writes `dist/server.cjs` and `dist/server.cjs.map` next to the website. Until this change `express.static(dist)` served both, which put the full server source one GET away.
+- `src/server/lib/privateBuildFiles.ts` now refuses `/server.cjs` and every `*.map` before any static handler, and `firebase.json` ignores the same files.
+- Minified JS stacks in Crashlytics are therefore **not de-minified**. Crashlytics has no JS source-map support. Reading a minified frame means building the same commit locally with `vite build --sourcemap` and looking up the position.
+
+## 6. Verifying the first real event (crash-test build)
+
+1. In Firebase Console → Crashlytics, enable Crashlytics for both apps (`com.navbharat.ai`).
+2. Run **Build Android App Bundle** with `crash_test` ticked and `upload_to_play` **unticked**. The workflow refuses the combination. Install the `.apk` artifact on a test phone.
+3. Open the app and, from a remote-debugging console (Chrome `chrome://inspect`), run:
+   - `__nbaiCrashTest.nonFatal()` → a non-fatal should appear in Crashlytics within about 5 minutes.
+   - `__nbaiCrashTest.crash()` → the app crashes. Reopen it; the crash is uploaded on the next launch.
+4. iOS: the same with **Build iOS (.ipa)**, `crash_test` ticked and `upload` unticked. Install through an ad-hoc route or Xcode, and use the Safari Web Inspector.
+
+The tools exist only in a bundle built with `VITE_CRASH_TEST=1`, which only these workflow inputs set. A normal build contains no reachable crash path.
+
+## 7. Release tracking
+
+- **Android:** `versionCode` = the CI run number, `versionName` = `1.0.<run>`. Crashlytics records both.
+- **iOS:** `CFBundleVersion` = the CI run number. ⚠️ `CFBundleShortVersionString` is never set. It stays at the template default, so iOS reports separate builds by build number only (see `PROGRESS.md`).
+- **Web:** the `web_build` key carries the build time stamped by Vite (`__BUILD_TIME__`).
+
+## 8. Before the first build with Crashlytics ships (manual)
+
+- Firebase Console: enable Crashlytics for the Android and iOS apps.
+- Play Console → Data safety, and App Store Connect → App Privacy: declare crash and diagnostic data. See `MOBILE_PUBLISHING.md`, "Crash reporting and the store declarations".
+- Privacy Policy §3.4 already discloses it. `tests/privacyPolicyTruth.test.ts` keeps the two in step.

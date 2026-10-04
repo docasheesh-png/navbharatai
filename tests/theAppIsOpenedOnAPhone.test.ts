@@ -23,7 +23,7 @@ describe('the verdict says what a phone user meets, in three outcomes', () => {
     expect(v.code).toBe('MOBILE_LAYOUT_ISSUES');
     expect(v.severity).toBe('warning');
     expect(v.message).toContain('scrolls SIDEWAYS by 310px');
-    expect(v.message).toContain('<table class="orders"> at 700px');
+    expect(v.message).toContain('<table class="orders"> (700px wide)');
   });
 
   it('three or more tiny controls is a finding; one icon button is not', () => {
@@ -93,6 +93,12 @@ describe.skipIf(!haveBrowser)('in a real browser at phone size', () => {
     '/good': '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0"><div id="root">'
       + '<h1>Orders</h1><div style="max-width:100%">fits</div><button style="min-width:44px;min-height:44px">Add</button>'
       + '<p>Read <a href="/x">more</a> here.</p></div></body></html>',
+    // Autopsy cc3ef776: a chip inside its own sideways-scrolling row was named, while the page really
+    // overflowed because a row of buttons did not wrap.
+    '/chips': '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0"><div id="root" style="padding:0 16px">'
+      + '<h1>Make a picture</h1><div class="nb-chips" style="display:flex;gap:8px;overflow-x:auto"><button class="nb-chip" style="flex:none;white-space:nowrap;width:493px">A tiger resting under a banyan tree at golden hour</button></div>'
+      + '<div class="row" style="display:flex;gap:12px"><span style="flex:none;width:60px">Shape</span><button style="flex:none;width:90px;min-height:44px">Square</button><button style="flex:none;width:90px;min-height:44px">Wide</button><button style="flex:none;width:104px;min-height:44px">Portrait</button></div>'
+      + '</div></body></html>',
   };
   beforeAll(async () => {
     server = http.createServer((q, r) => { const b = pages[(q.url ?? '/').split('?')[0]]; r.writeHead(b ? 200 : 404, { 'content-type': 'text/html' }); r.end(b ?? 'no'); });
@@ -117,6 +123,14 @@ describe.skipIf(!haveBrowser)('in a real browser at phone size', () => {
     expect(run.overflow).toBeGreaterThan(200);
     expect(run.wide?.[0]).toMatchObject({ tag: 'div', cls: 'grid' });
     expect(run.smallCount).toBe(3); // the link inside the paragraph is running text, not a control
+  }, 90_000);
+
+  it('content clipped by its own scrolling row is never blamed — the element that sticks out is', async () => {
+    const run = await measure('/chips');
+    expect(run.overflow).toBeGreaterThan(0);
+    expect(run.wide?.[0]).toMatchObject({ tag: 'button', name: 'Portrait' });
+    expect((run.wide ?? []).some((w) => w.cls === 'nb-chip')).toBe(false);
+    expect(mobileLayoutVerdict(run).message).toMatch(/sticking out: <button> "Portrait"/);
   }, 90_000);
 
   it('a responsive page passes', async () => {

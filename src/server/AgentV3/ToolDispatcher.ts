@@ -10701,6 +10701,9 @@ export class ToolDispatcher {
             .catch(() => ({ exitCode: -1, stdout: '', stderr: '' }));
           removed = rm.exitCode === 0;
           if (removed) this.state?.recordFileChange({ path: from, kind: 'delete' }, agent);
+          // The old path must leave the build's own maps too, or the final save puts it back (Q-246's
+          // sibling: every other delete already reconciles; this rm did not).
+          if (removed) await this.reconcileDeletions([from]);
         }
         this.scheduleCheckpoint(`codemod move ${from} → ${to}`);
         return result.summary + (removed ? '' : `\nNOTE: could not delete the old file ${from} — remove it manually (its importers already point to ${to}).`);

@@ -85,7 +85,7 @@ class ShellActuator implements ActuatorPort {
   async listFiles(): Promise<string[]> { return [...this.files.keys()]; }
   async runCommand(_ws: string, command: string) {
     if (!this.pretendOnly) {
-      const rm = /^rm\s+(?:-\w+\s+)*(\S+)$/.exec(command.trim());
+      const rm = /^rm\s+(?:-\w+\s+)*'?([^\s']+)'?$/.exec(command.trim());
       if (rm) for (const k of [...this.files.keys()]) if (k === rm[1] || k.startsWith(`${rm[1]}/`)) this.files.delete(k);
       const mv = /^mv\s+(\S+)\s+(\S+)$/.exec(command.trim());
       if (mv && this.files.has(mv[1])) { this.files.set(mv[2], this.files.get(mv[1])!); this.files.delete(mv[1]); }
@@ -137,6 +137,14 @@ describe('🔴 end to end: what the shell removed is not saved again', () => {
     const act = new ShellActuator();
     const { d, captured } = harness(act, 'ws-q246-mv');
     await d.run(bash('mv src/a.ts src/b.ts'), 'architect');
+    expect(captured.has('src/a.ts')).toBe(false);
+  });
+
+  it('the old path of a codemod move leaves the captured set (the move\'s own rm never reconciled)', async () => {
+    const act = new ShellActuator();
+    const { d, captured } = harness(act, 'ws-q246-codemod');
+    await d.run({ id: 'm1', name: 'codemod_move_file', input: { from: 'src/a.ts', to: 'src/lib/moved.ts' } }, 'architect');
+    expect(act.files.has('src/a.ts')).toBe(false);
     expect(captured.has('src/a.ts')).toBe(false);
   });
 

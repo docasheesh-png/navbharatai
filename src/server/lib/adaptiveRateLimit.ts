@@ -21,6 +21,7 @@
  * remain open sub-items; the behavioural layer below is the part that is fully buildable today.
  */
 import type { Request, Response, NextFunction } from 'express';
+import { errorTracker } from '../observability/ErrorTracker';
 
 /** Substrings that, in a User-Agent, strongly indicate an automated client. */
 const BOT_UA_SIGNATURES = [
@@ -85,6 +86,38 @@ export function isGuardedPath(path: string): boolean {
   if (!path.startsWith('/api/')) return false;
   if (path.startsWith('/api/agentv3/')) return false; // interactive v5.0 build surface — exempt
   return true;
+}
+
+/**
+ * What the admin Errors view is told when this guard STARTS a hard block (queue Q-013, 2026-10-04).
+ *
+ * 🔴 WHY: an iPhone's App Mart was answered with an `{ error }` body instead of the store status, and
+ * nothing on the server could say which guard sent it. This guard is one of only two candidates (the
+ * other is the global 500 handler, which already reports itself), and its blocks were silent. Now the
+ * first refusal of every block is recorded once, naming the reason, the path and the client kind, so the
+ * next occurrence answers the question without a screenshot.
+ *
+ * The IP is deliberately NOT recorded (it is personal data and is not needed to name the guard). The
+ * User-Agent is kept, truncated, because "an iPhone app was blocked" and "curl was blocked" are the two
+ * answers the admin needs to tell apart. PURE.
+ */
+export function blockReport(input: {
+  reason: 'bot-user-agent' | 'burst';
+  method: string;
+  path: string;
+  userAgent?: string | null;
+  requestsInWindow: number;
+  windowMs: number;
+  blockMs: number;
+}): { message: string; meta: Record<string, unknown> } {
+  const why = input.reason === 'burst'
+    ? `${input.requestsInWindow} requests in ${Math.round(input.windowMs / 1000)}s from one address`
+    : 'its User-Agent looks automated';
+  const ua = (input.userAgent || '').trim().slice(0, 160) || '(none)';
+  return {
+    message: `Adaptive guard blocked a caller for ${Math.round(input.blockMs / 1000)}s (${why}); the request that tipped it: ${input.method} ${input.path}`,
+    meta: { guard: 'adaptive-rate-limit', reason: input.reason, userAgent: ua, requestsInWindow: input.requestsInWindow },
+  };
 }
 
 interface ClientState {
@@ -189,6 +222,21 @@ export function adaptiveGuard(options: AdaptiveGuardOptions = {}) {
     // Repeat offender → hard block.
     if (state.violations >= blockAfter) {
       state.blockedUntil = now + blockMs;
+      try {
+        const ua = req.headers['user-agent'] as string | undefined;
+        const report = blockReport({
+          reason: bursty ? 'burst' : 'bot-user-agent',
+          method: req.method,
+          path: req.path,
+          userAgent: ua,
+          requestsInWindow: state.history.length,
+          windowMs,
+          blockMs,
+        });
+        errorTracker.capture(new Error(report.message), {
+          source: 'middleware', httpMethod: req.method, httpUrl: req.path, httpStatus: 429, meta: report.meta,
+        });
+      } catch { /* reporting a block must never change it */ }
       const retryAfterSec = Math.ceil(blockMs / 1000);
       res.setHeader('Retry-After', String(retryAfterSec));
       res.status(429).json({ error: `Too many automated requests. Try again in ${retryAfterSec}s.` });

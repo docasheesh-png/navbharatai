@@ -4,6 +4,7 @@ import { Globe, Search, ExternalLink, Eye, X, Ban as BanIcon } from 'lucide-reac
 import {
   canBan, canUnpublish, matchesBuiltApp, previewPlan, publishStateView, replaceRow, type BuiltAppRow,
 } from '../../lib/adminAppModeration';
+import { UNTRUSTED_PREVIEW_SANDBOX } from '../../lib/previewSandbox';
 
 /**
  * BUILT APPS — every user's built app, twelve at a time, each with a preview (admin 2026-09-18).
@@ -406,7 +407,10 @@ export const BuiltAppsPanel: React.FC<BuiltAppsPanelProps> = ({ headers, openAcc
                   />
                 )}
                 {plan.source === 'render' && preview.html && (
-                  <iframe title={`In-browser render of ${preview.row.workspaceId}`} srcDoc={preview.html} className="w-full h-full border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox={IFRAME_SANDBOX} />
+                  {/* 🔒 A STRANGER'S code rendered inside the ADMIN's session (forensic audit 2026-10-04, P0): a
+                      srcDoc frame with allow-same-origin IS this page, so any user's app could read the admin's
+                      Firebase session from localStorage. The opaque sandbox keeps it out of the platform origin. */}
+                  <iframe title={`In-browser render of ${preview.row.workspaceId}`} srcDoc={preview.html} className="w-full h-full border-0" allow={PREVIEW_IFRAME_ALLOW} sandbox={UNTRUSTED_PREVIEW_SANDBOX} />
                 )}
                 {plan.source === 'render' && preview.loading && (
                   <p className="p-6 text-[12px] text-muted">Rendering from the saved files…</p>

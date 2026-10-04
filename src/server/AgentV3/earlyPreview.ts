@@ -125,3 +125,35 @@ export function renderWhileBuilding(clientSaysBuilding: unknown, buildRunningHer
   if (!earlyPreviewEnabled(env)) return false;
   return clientSaysBuilding === true || buildRunningHere === true;
 }
+
+/**
+ * 🔴 THE RULE ALONE WAS NOT FOLLOWED — so the write that breaks it is answered at once (autopsy 68f0a486,
+ * 2026-10-04). `shellEarlyRule` is a sentence in the prompt. On the school app the builder wrote the
+ * types, the store, the sidebar, the top bar, the dashboard and six screens, and `src/App.tsx` LAST — 375 s
+ * of a starter page, the same shape as the calendar report the rule was written for. A prompt line a model
+ * may skip is now backed by a note in the tool result of the write that skipped it: once the builder has
+ * written `MIN_SCREENS_BEFORE_NOTE` UI files and the entry is still our starter, it is told, while the
+ * files are open, to write the entry next. Once per agent; never on a module turn that does not own the
+ * entry (the dispatcher's `starterExpected`).
+ */
+export const MIN_SCREENS_BEFORE_NOTE = 2;
+
+/** A React UI file under src/ that is not the entry or the mount — a screen or a component. PURE. */
+export function isUiComponentPath(path: string): boolean {
+  const p = String(path ?? '').replace(/^\.?\//, '');
+  if (!/^src\/.+\.(?:tsx|jsx)$/.test(p)) return false;
+  if (/^src\/(?:App|main|index)\.(?:tsx|jsx)$/.test(p)) return false;
+  return !/\.(?:test|spec|stories)\.(?:tsx|jsx)$/.test(p);
+}
+
+/** The note for a builder that has written screens while the entry is still the starter. '' when off. PURE. */
+export function entryLateNote(screensWritten: readonly string[], env: NodeJS.ProcessEnv = process.env): string {
+  if (!earlyPreviewEnabled(env)) return '';
+  const screens = screensWritten.filter(isUiComponentPath);
+  if (screens.length < MIN_SCREENS_BEFORE_NOTE) return '';
+  const names = screens.slice(0, 6).map((p) => p.replace(/^.*\//, '').replace(/\.(?:tsx|jsx)$/, '')).join(', ');
+  return `\n🖥️ The user's live preview still shows the STARTER page: src/App.tsx has not been written, so none of the `
+    + `${screens.length} screen(s) you wrote (${names}) can be seen. Write src/App.tsx NEXT, before any other file — `
+    + 'the real layout and navigation, importing the screens written so far AND the ones still to come (an unwritten '
+    + 'one shows as a "being built" card until you write it).';
+}

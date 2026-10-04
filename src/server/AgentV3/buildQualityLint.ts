@@ -220,6 +220,8 @@ const HAND_BACK_A11Y: Record<string, string> = {
   'control-name': 'button/link with no accessible name (add visible text or an aria-label)',
   'input-label': 'form field with no label (a <label htmlFor> or an aria-label)',
   'img-alt': 'image with no alt text',
+  // A clickable <div>/<span> (autopsy c70bcbb4) — keyboard and screen-reader users cannot press it.
+  'click-noninteractive': 'clickable div/span a keyboard cannot press (make it a <button>, or add role="button", tabIndex={0} and a key handler)',
 };
 
 /**

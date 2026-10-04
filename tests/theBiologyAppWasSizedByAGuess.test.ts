@@ -218,7 +218,7 @@ describe('7 · an engine-written turn is never restored as the person\'s own wor
     // below when it carries a steer). Any other raw user push is an engine steer that escaped the marking.
     expect(rawUserPushes).toHaveLength(3);
     expect(rawUserPushes.some((l) => l === "messages.push({ role: 'user', content });")).toBe(true);
-    expect(rawUserPushes.some((l) => l.includes('liveUserMessageTurn(sm)'))).toBe(true);
+    expect(rawUserPushes.some((l) => l.includes('liveUserMessageTurn(sm'))).toBe(true); // (sm) or (sm, shownEta) — the person's live message
     expect(rawUserPushes.some((l) => l.includes('resultBlocks'))).toBe(true);
     expect(src).toMatch(/if \(steer\) platformMsgIdx\.add\(messages\.length - 1\)/);
     expect(src).toMatch(/platformMsgIdx\.has\(startIdx \+ i\)\) out = \{ \.\.\.out, origin: 'platform' \}/);

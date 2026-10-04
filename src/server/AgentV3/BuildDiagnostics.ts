@@ -35,6 +35,7 @@ import { mergeTruncation, pushBounded, boundedWindow, COMPLETE, type ChannelTrun
 import { capPromptPreview } from './promptPreviewShape';
 import { renderProvenByAnyActor, noteRenderSeen, forgetRenderSeen, RENDER_PROVEN_CODES } from './renderProof';
 import { isSelfHeal, isWorkaroundIssue, isNarrationIssue, isLeftOpen, HEAL_RULE } from '../../lib/healIssue';
+import { commandTimingText, ourCommandLabel, type CommandTiming } from './commandTiming';
 
 export type IssuePhase =
   | 'sandbox' | 'provider' | 'plan' | 'tool' | 'build' | 'readiness' | 'preview' | 'autofix' | 'deploy';
@@ -1062,7 +1063,7 @@ export class BuildDiagnostics {
    */
   private compatibleAuditFixRan = false;
 
-  recordCommand(rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number }): void {
+  recordCommand(rec: { command: string; exitCode: number | null; stdout?: string; stderr?: string; durationMs?: number; timing?: CommandTiming }): void {
     // NPM ALREADY TOLD US (dukaan report 2026-08-12). That build's install printed "8 vulnerabilities
     // (4 moderate, 4 high)" and the report said nothing at all — not "clean", not "couldn't check". The
     // OSV-backed dep-health gate returns '' for BOTH outcomes, so silence proved nothing either way,
@@ -1140,8 +1141,10 @@ export class BuildDiagnostics {
       // sandbox, a test's named-vs-default import) is not an APP-build failure — the app ships without
       // its test files and compiles clean. See isTestOnlyTypecheckFailure (deep-test build #4 rootCause).
       && !isTestOnlyTypecheckFailure(rec.command, rec.stdout, rec.stderr);
-    const cmdHead = rec.command.split('\n')[0].slice(0, 120);
+    const cmdHead = ourCommandLabel(rec.command) ?? rec.command.split('\n')[0].slice(0, 120);
     const durTxt = rec.durationMs != null ? ` (${Math.round(rec.durationMs / 1000)}s)` : '';
+    // Q-273 — a slow command says where its time went (our setup / the machine / the command).
+    const splitTxt = commandTimingText(rec.timing, rec.durationMs);
     // HONESTY (ShopSphere autopsy 2026-07-19): an `exit -1 (0s, empty)` means the command COULD NOT RUN
     // because the sandbox was reaped/expired/unreachable — an INFRASTRUCTURE condition, NOT an app-build
     // error. Reported as SANDBOX_CMD_FAILED it read like the app failed to compile (`tsc → exit -1`,
@@ -1184,7 +1187,7 @@ export class BuildDiagnostics {
       phase: 'build',
       severity: failed ? 'error' : 'info',
       code: failed ? 'SANDBOX_CMD_FAILED' : 'SANDBOX_CMD',
-      message: `$ ${cmdHead} → ${commandOutcomeText(rec)}${durTxt}`,
+      message: `$ ${cmdHead} → ${commandOutcomeText(rec)}${durTxt}${splitTxt}`,
       autoResolved: !failed,
       detail: failed ? capTail(rec.stderr || rec.stdout, 400) : undefined,
     });

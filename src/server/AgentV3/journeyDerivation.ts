@@ -256,8 +256,18 @@ const NON_DATA_INPUT_TYPE = /(?<![-\w])type\s*=\s*["']\s*(?:range|button|submit|
 function insideNonDataControl(src: string, offset: number): boolean {
   const tag = enclosingTag(src, offset);
   if (!tag || !isHtmlElement(tag) || tagName(tag).toLowerCase() !== 'input') return false;
-  return NON_DATA_INPUT_TYPE.test(tag);
+  return NON_DATA_INPUT_TYPE.test(tag) || SEARCH_INPUT.test(tag);
 }
+
+/**
+ * 🔴 A SEARCH BOX IS NOT DATA THE USER WANTS SAVED (autopsy c70bcbb4, 2026-10-04) — the speed slider's sibling.
+ * A music player's one text box searched its library; the gate read it as data entry and told the user
+ * "whether it keeps what a user enters is untested" about an app with nothing to keep. An `<input>` that
+ * names itself a search — `type="search"`, or a placeholder / aria-label / name / id that says search, khoj,
+ * dhoondh or filter — narrows what is shown; the explorer's narrowing probe already presses it. Any other
+ * field in the same app still counts, so a contacts app with search AND an add form is a data app as before.
+ */
+const SEARCH_INPUT = /(?<![-\w])type\s*=\s*["']\s*search\s*["']|(?<![-\w])(?:placeholder|aria-label|name|id)\s*=\s*\{?\s*["'`][^"'`]*(?:search|khoj|dhoond|dhundh|खोज|ढूंढ|ढूँढ|filter)/i;
 
 /**
  * WHICH file made `appHasNoDataEntry` answer false, and why — or null when nothing did.

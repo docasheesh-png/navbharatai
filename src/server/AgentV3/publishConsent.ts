@@ -49,6 +49,56 @@ const REFUSE = [
   /\blater\b/i, /\bbaad\s+me[in]?\b/i, /\babhi\s+(?:nahi|mat|na)\b/i,
 ];
 
+/**
+ * 🔴 A PUBLISH WORD THAT NAMES A FEATURE OF THE APP IS NOT AN ASK (autopsy 68f0a486, 2026-10-04).
+ *
+ * "app mein video upload karne ke liye option ho" asked for an upload BUTTON inside a school app; the
+ * pattern `upload\s+kar` read it as "upload (publish) it", and the deploy tool was switched on for a
+ * user who never asked to go public. The same shape grants on "a blog where users can publish posts",
+ * "live karne ka option" (a streaming feature) and "event host karne ke liye". The asymmetry decides
+ * the direction: a missed ask costs one press of the Publish button; a false one can put somebody's
+ * app on a public URL. So each occurrence is read in its sentence, and one that is a FEATURE is skipped.
+ */
+const FEATURE_AFTER = [
+  // a purpose clause: "upload karne ke liye", "publish karne ka option", "लाइव करने के लिए"
+  /^(?:\s*k(?:ar|r))?(?:ne|na|ni)\s+(?:ke\s+liye|ka\b|ki\b|ke\s+(?:option|feature|button)|wal[ae]\b)/i,
+  /^(?:\s*कर)?(?:ने|ना|नी)\s*(?:के\s*लिए|का|की|वाला|वाली)/,
+  // the thing being published is the users' content, not the app: "publish posts", "upload their videos"
+  /^\s+(?:their|his|her|your|own|new|the|any)?\s*(?:posts?|videos?|articles?|blogs?|stories|notes?|pdfs?|files?|photos?|images?|content|events?|results?|notices?|assignments?|courses?|lessons?|recipes?|listings?|products?|reviews?|comments?|documents?)\b/i,
+];
+const FEATURE_BEFORE = [
+  // who does it inside the app: "users can publish", "students ko upload kar"
+  /\b(?:users?|students?|teachers?|people|members?|customers?|authors?|writers?|sellers?|admins?|they|anyone|everyone|creators?|parents?)\s+(?:can|could|will|should|may|to|ko|ke\s+liye)\s+(?:[a-z]+\s+){0,2}$/i,
+  // the control that does it: "an option to publish", "a button to upload", "allow users to publish"
+  /\b(?:option|feature|button|ability|allows?|allowing|let|lets)\s+(?:[a-z]+\s+){0,2}(?:to\s+)?$/i,
+  // Hindi word order puts the object first: "video upload kar", "posts publish karne"
+  /\b(?:posts?|videos?|pdfs?|files?|photos?|notes?|content|articles?|blogs?|notices?|assignments?|results?|courses?|lectures?|images?|documents?)\s+$/i,
+  /(?:वीडियो|पोस्ट|फोटो|फ़ोटो|फाइल|फ़ाइल|नोट्स|पीडीएफ)\s*$/,
+];
+/** "deployment tracker" is a product, not an order to deploy. */
+const COMPOUND_AFTER = /^\s+(?:tracker|dashboard|pipeline|manager|logs?|history|status|tool|system|platform|monitor)\b/i;
+
+/** Is THIS occurrence of a publish word an order about the app, rather than a feature inside it? */
+function isAnOrder(text: string, index: number, word: string): boolean {
+  const before = text.slice(Math.max(0, index - 48), index);
+  const after = text.slice(index + word.length, index + word.length + 48);
+  if (FEATURE_AFTER.some((re) => re.test(after))) return false;
+  if (FEATURE_BEFORE.some((re) => re.test(before))) return false;
+  if (/ment$/i.test(word) && COMPOUND_AFTER.test(after)) return false;
+  return true;
+}
+
+/** Does any occurrence of any ask pattern read as an order? PURE. */
+function askedAsAnOrder(text: string): boolean {
+  return ASK.some((re) => {
+    const all = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
+    for (const m of text.matchAll(all)) {
+      if (isAnOrder(text, m.index ?? 0, m[0])) return true;
+    }
+    return false;
+  });
+}
+
 export type PublishConsent = 'granted' | 'denied';
 
 export interface ConsentDecision {
@@ -71,7 +121,7 @@ export function decidePublishConsent(userMessage: string | null | undefined): Co
   const text = String(userMessage ?? '').trim();
   if (!text) return { consent: 'denied', reason: 'not-asked' };
 
-  const asked = ASK.some((re) => re.test(text));
+  const asked = askedAsAnOrder(text);
   if (!asked) return { consent: 'denied', reason: 'not-asked' };
 
   // The ask exists — but a negation anywhere in a short instruction almost always governs it.

@@ -11,7 +11,7 @@ import { siteAnalyticsStore } from '../lib/siteAnalyticsStore';
 import { siteIdForWorkspace } from '../lib/firebaseCustomDomain';
 import { validateSiteConfig, DEFAULT_SITE_CONFIG, MAX_REDIRECTS } from '../AgentV3/siteConfig';
 import { siteConfigStore } from '../AgentV3/siteConfigStore';
-import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX } from '../lib/identityPolicy';
+import { SESSION_ID_RE, verifiedIdentity, ANON_WORKSPACE_PREFIX, requireVerifiedForMoney } from '../lib/identityPolicy';
 import { redactProviderError, redactProvidersText } from '../lib/providerRedaction';
 import { recordPlatformBuild } from '../lib/platformBuildMetrics';
 import { isAdminEmail } from '../lib/adminEmails';
@@ -5464,11 +5464,19 @@ async function noteBuildOutcome(
   app.post('/api/agentv3/host-app', deployOpsRateLimiter(), async (req: Request, res: Response) => {
     // The VERIFIED identity, never the body's claim — a spoofed email deciding admin access is the
     // exact hole every other gate in this file closes.
-    const { userId, email } = await resolveReadIdentity(req);
+    // 🔴 FORENSIC AUDIT 2026-10-04 (P0): the comment above was true only with a token. This read
+    // `resolveReadIdentity`, which falls back to the BODY's email when no token is sent — so a request
+    // with no Authorization header and `email: <the admin's address>` was the admin to `isReportAdmin`,
+    // skipped the plan and server caps, and deployed a container on NavBharatAI's own cloud bill.
+    // Money and admin decisions take the Tier-1 verified identity (identityPolicy.ts), or refuse.
+    const verified = await requireVerifiedForMoney(req);
+    if (!verified.ok) { res.status(verified.status).json({ error: verified.error }); return; }
+    const userId = verified.uid;
+    const email = verified.email;
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
 
     // A server app runs only on a plan — the probe is cached and fails CLOSED (`known: false` ⇒ no
     // plan), so a lookup that could not answer never opens a paid path. See hostApp.hostingAvailability.
@@ -5550,11 +5558,16 @@ async function noteBuildOutcome(
    * something we did not observe.
    */
   app.post('/api/agentv3/host-usage', deployOpsRateLimiter(), async (req: Request, res: Response) => {
-    const { userId, email } = await resolveReadIdentity(req);
+    // Admin-only, so the identity is the VERIFIED one — never a body email (forensic audit 2026-10-04;
+    // see host-app above for the claimed-email hole this closes).
+    const verified = await requireVerifiedForMoney(req);
+    if (!verified.ok) { res.status(verified.status).json({ error: verified.error }); return; }
+    const userId = verified.uid;
+    const email = verified.email;
     const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : '';
     if (!isAgentV3Enabled(userId, email)) { res.status(404).json({ error: 'NavBharatAI Pro is not available for this account.' }); return; }
     if (!workspaceId) { res.status(400).json({ error: 'workspaceId is required.' }); return; }
-    if (!(await assertWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
+    if (!(await assertVerifiedWorkspaceOwner(req, workspaceId))) { res.status(403).json({ error: 'Forbidden: this workspace does not belong to you.' }); return; }
     // Cost figures are OUR infrastructure spend, which the white-label law keeps admin-side. A user
     // never sees a provider line item — they see the wallet, once slice 2c debits it.
     if (!isReportAdmin(email)) { res.status(403).json({ error: 'Not available for this account.' }); return; }

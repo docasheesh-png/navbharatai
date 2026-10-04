@@ -157,7 +157,6 @@ const ENDPOINTS = {
   assistant: '/api/admin/assistant-spend?days=14',
   providers: '/api/admin/provider-status',
   gate: '/api/admin/release-gate',
-  flags: '/api/admin/feature-flags',
   keyVersion: '/api/admin/key-version',
   events: '/api/admin/events?limit=100',
   deployments: '/api/admin/deployments?limit=100',
@@ -597,19 +596,9 @@ export function EngineReportsPanel({ adminToken, onStatus }: EngineReportsPanelP
         )}
       </ReportCard>
 
-      <ReportCard
-        title="Persisted feature flags" source={ENDPOINTS.flags} icon={Shield}
-        state={s('flags')} onRefresh={() => void load('flags')} onStatus={onStatus}
-        note="The flag config that is actually stored, with its rollout percentages and per-user overrides. Cloud Run env keys are separate and are not shown here."
-      >
-        {(d) => (
-          <div className="grid grid-cols-3 gap-2">
-            <Stat label="Flags" value={countOf(d?.flags)} />
-            <Stat label="Rollouts" value={countOf(d?.rollout)} />
-            <Stat label="Overrides" value={countOf(d?.overrides)} />
-          </div>
-        )}
-      </ReportCard>
+      {/* "Persisted feature flags" was removed with the Feature Flags controls (admin panel audit, PR 1,
+          2026-10-04): the stored flags are read by no route, so a card showing them described switches
+          that switch nothing. The route stays on the server, unused by this screen. */}
 
       <ReportCard
         title="Encryption key version" source={ENDPOINTS.keyVersion} icon={Shield}

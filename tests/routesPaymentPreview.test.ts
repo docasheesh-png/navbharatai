@@ -4,7 +4,15 @@
  * Tests early-return 400 branches that fire before any Firestore or AI call.
  * No server boot required; uses captureRoutes() + direct handler invocation.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// A request with a Bearer header is a signed-in caller; without one it is not. Everything else in the
+// module is real. (POST /api/preview requires an account since the forensic audit of 2026-10-04.)
+vi.mock('../src/server/lib/authMiddleware', async (orig) => ({
+  ...(await orig<typeof import('../src/server/lib/authMiddleware')>()),
+  verifyFirebaseToken: vi.fn(async (req: { headers?: Record<string, string> }) =>
+    (req.headers?.authorization ?? '').startsWith('Bearer ') ? 'u1' : null),
+}));
 import { captureRoutes, mockReq, mockRes } from './helpers/routeTestUtils';
 
 process.env.VITEST = 'true';
@@ -191,12 +199,22 @@ describe('Preview routes — /api/preview-vue', () => {
 });
 
 describe('Preview routes — /api/preview', () => {
+  it('returns 401 for a caller with no account', async () => {
+    const register = await importPreviewRoutes();
+    const routes = captureRoutes(register);
+    const handler = routes.get('POST /api/preview')!;
+
+    const res = mockRes();
+    await handler(mockReq({ body: { files: { 'index.html': '<h1>x</h1>' } } }), res);
+    expect(res.statusCode).toBe(401);
+  });
+
   it('returns 400 when files is missing', async () => {
     const register = await importPreviewRoutes();
     const routes = captureRoutes(register);
     const handler = routes.get('POST /api/preview')!;
 
-    const req = mockReq({ body: {} });
+    const req = mockReq({ body: {}, headers: { authorization: 'Bearer t' } });
     const res = mockRes();
     await handler(req, res);
     expect(res.statusCode).toBe(400);
@@ -208,7 +226,7 @@ describe('Preview routes — /api/preview', () => {
     const routes = captureRoutes(register);
     const handler = routes.get('POST /api/preview')!;
 
-    const req = mockReq({ body: { files: {} } });
+    const req = mockReq({ body: { files: {} }, headers: { authorization: 'Bearer t' } });
     const res = mockRes();
     await handler(req, res);
     expect(res.statusCode).toBe(400);

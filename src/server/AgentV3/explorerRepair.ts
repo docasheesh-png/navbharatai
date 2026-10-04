@@ -109,7 +109,13 @@ export function explorerRepairFindings(targets: PressResult[]): string[] {
       : p.verdict === 'unresponsive'
         ? (p.kind === 'pick'
           ? 'Wire the menu to the list it sits above so choosing an option really sorts or filters that list.'
-          : 'Wire the box to the list it sits above so typing really filters that list as the user types.')
+          : p.kind === 'type'
+            ? 'Wire the box to the list it sits above so typing really filters that list as the user types.'
+            // A PRESS: by what its name promised. Until 2026-10-04 every unresponsive press fell through to the
+            // search box's instruction above, so a dead light/dark switch was told to "filter the list".
+            : p.expects === 'view'
+              ? 'Make it open what its name says — a details screen, a panel or a dialog with the real item\'s information — using data the app already has.'
+              : 'Make the switch really change the app\'s colours: set the theme the stylesheet already styles (for example data-theme on <html>), or add the rules for the one it sets.')
         : p.verdict === 'covered'
           ? 'Fix the stacking so the control sits ABOVE whatever is over it and can be clicked: give the menu or overlay that holds it a higher z-index than the element on top, and make sure a full-screen canvas, image or backdrop does not sit over the controls (or does not receive pointer events) while they are meant to be used.'
           : needsAbsentDevice(p.errors)

@@ -88,6 +88,7 @@ import { auth, db, signOutEverywhere, ensureNativeSessionPersisted } from './lib
 import { readRedirectMarker, clearRedirectMarker, redirectReturnVerdict, redirectLostMessage } from './lib/redirectSignInMarker';
 import { isNewAccount, decideSignupReport, SIGNUP_REPORTED_KEY } from './lib/signupSignal';
 import { authedHeaders } from './lib/authHeaders';
+import { writeFailure } from './lib/serverAnswer';
 import { LS_EVICTABLE, safeLS } from './lib/localStorageSafe';
 import { rememberGithubOwner, clearGithubConnection, readGithubOwner } from './lib/githubTokenStore';
 import { performSignOut, defaultClearAuthStorage, deleteFirebaseAuthDb } from './lib/signOutFlow';
@@ -305,7 +306,6 @@ export default function App() {
   const {
     wallet, setWallet,
     dailyUsage, setDailyUsage, incrementDailyUsage,
-    billingLogs, setBillingLogs,
     billingTransactions, setBillingTransactions,
     loadingWallet, setLoadingWallet,
     monthlyAiCost, setMonthlyAiCost,
@@ -1031,7 +1031,6 @@ export default function App() {
       fetchWallet();
     } else {
       setWallet(null);
-      setBillingLogs([]);
       setBillingTransactions([]);
     }
   }, [user]);
@@ -2358,13 +2357,22 @@ export default function App() {
         const tok = await auth.currentUser?.getIdToken();
         if (tok) headers.Authorization = `Bearer ${tok}`;
       } catch { /* token optional — server falls back to claimed userId */ }
-      await fetch('/api/agentv3/delete-files', {
+      const res = await fetch('/api/agentv3/delete-files', {
         method: 'POST',
         headers,
         body: JSON.stringify({ workspaceId, userId: uid, email: user?.email || '', paths }),
       });
-    } catch { /* best-effort — never block the IDE delete */ }
-  }, [user]);
+      // 404 is the engine being off for this account — there is no saved workspace to clean. Any
+      // other refusal means the saved copy still holds the files, and they come back on the next
+      // load, so the user is told instead of shown a delete that did not happen.
+      if (res.status !== 404) {
+        const failure = await writeFailure(res, 'failed');
+        if (failure) addToast('The file was removed here, but the saved project still has it. It may come back — please delete it again.', 'error');
+      }
+    } catch {
+      addToast('The file was removed here, but the saved project could not be reached. It may come back — please delete it again.', 'error');
+    }
+  }, [user, addToast]);
 
   // THE one real file delete — every UI delete (Files panel, v5.0 Files tab, sidebar Files) flows
   // through here: React state + open-editor fix + IndexedDB + the v5.0 durable workspace. Before
@@ -4104,7 +4112,6 @@ export default function App() {
               loadingWallet={loadingWallet}
               dailyUsage={dailyUsage}
               billingTransactions={billingTransactions}
-              billingLogs={billingLogs}
               activeBillingDetailTab={activeBillingDetailTab}
               couponCodeInput={couponCodeInput}
               isRedeemingCoupon={isRedeemingCoupon}

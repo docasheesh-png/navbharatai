@@ -4,20 +4,24 @@ import { normalizeMissingBody } from './src/server/lib/expressCompat';
 import helmet from 'helmet';
 import crypto from 'crypto';
 import net from 'net';
-import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
-import { LEGACY_EMBEDDED_API_KEY } from './src/server/lib/aiClients';
+import rateLimit from 'express-rate-limit';
 import { corsMiddleware } from './src/server/lib/cors';
+import { TRUSTED_PROXY_HOPS } from './src/server/lib/clientAddress';
+import { denyServerOnlyArtifacts } from './src/server/lib/serverOnlyArtifacts';
+// Side-effect import: every axios error in this process loses its credential headers (P1, 2026-10-04).
+import './src/server/lib/axiosCredentialRedaction';
 import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
 import { spaFallbackShouldDefer } from './src/server/lib/spaFallback';
 import { noteWebsiteVisit } from './src/server/lib/ownAudience';
+// The rate-limit keys (forensic audit 2026-10-04): an address string, or a verified uid — never a request.
+import { identityRateKey, addressRateKey } from './src/server/lib/clientAddress';
 import { registerTelemetryRoutes } from './src/server/routes/telemetry';
-import { isPrivateBuildFile } from './src/server/lib/privateBuildFiles';
 import { registerTeamRoutes } from './src/server/routes/team';
 import { registerShareRoutes } from './src/server/routes/share';
 import { audit } from './src/server/lib/audit';
 import { adaptiveGuard } from './src/server/lib/adaptiveRateLimit';
 import { appCheckGuard } from './src/server/lib/appCheck';
-import { securityHeadersConfig } from './src/server/lib/securityHeaders';
+import { securityHeadersConfig, permissionsPolicyMiddleware } from './src/server/lib/securityHeaders';
 import { responseCompression } from './src/server/lib/responseCompression';
 import { setDb as setSharedDb } from './src/server/lib/db';
 import { envFlag } from './src/server/lib/envFlag';
@@ -28,6 +32,7 @@ import { registerAppLockRoutes } from './src/server/routes/appLock';
 import { registerPushRoutes } from './src/server/routes/push';
 import { registerSbomRoutes } from './src/server/routes/sbom';
 import { registerLegalRoutes } from './src/server/routes/legal';
+import { registerSiteIndexRoutes } from './src/server/routes/siteIndex';
 import { registerCheckoutHandoffRoute } from './src/server/routes/checkoutHandoff';
 import { registerBuildAnalyticsRoutes } from './src/server/routes/buildAnalytics';
 import { registerSupabaseIntegrationRoutes } from './src/server/routes/supabaseIntegration';
@@ -186,15 +191,27 @@ import { assetLinksJson, malformedFingerprints, ASSET_LINKS_PATH } from './src/s
 import { rewriteProxyHeaders } from './src/server/lib/authProxyCookies';
 import { canonicalHostRedirect, canonicalHostFromEnv } from './src/server/lib/canonicalHost';
 import { auditEnv } from './src/server/audit_env';
+import { assertProductionConfig } from './src/server/lib/productionConfigContract';
 
 auditEnv();
+// The production configuration contract — before any route exists (productionConfigContract.ts).
+assertProductionConfig();
 
 // ── In-memory server stats ─────────────────────────────────────────────────
 // serverStats singleton — extracted to src/server/lib/serverStats.ts (Phase 1).
 
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
-// Fallback: load .env file first, then .env.example (skip placeholder values)
+// Fallback: load a local .env file (skip placeholder values).
+//
+// 🔒 FORENSIC AUDIT 2026-10-04 — two things were removed from this block, on purpose:
+//  • `.env.example` is no longer loaded. It is a TEMPLATE committed to git; loading it turned any
+//    non-placeholder line in it into live configuration (it carried one, a redirect URI nothing reads).
+//    An example file is documentation, never config.
+//  • The boot-time "debug dump" is gone. It wrote an environment dump file on EVERY boot, including
+//    production, listing every environment variable with its length and its first six characters — a
+//    prefix of every secret the server holds, on disk, for anything that can read the working directory.
+//    Nothing read the file. `tests/noEnvValueMaterialInLogsOrFiles.test.ts` keeps the class out.
 const isEnvPlaceholder = (v: string) =>
   v.startsWith('your_') || v.endsWith('_here') || v === '' || v === 'undefined';
 
@@ -220,29 +237,6 @@ const loadEnvFile = (filePath: string) => {
 };
 
 loadEnvFile(path.join(process.cwd(), '.env'));
-loadEnvFile(path.join(process.cwd(), '.env.example'));
-
-// Generate the debug dump
-try {
-  const envSummary: Record<string, any> = {
-    _timestamp: new Date().toISOString(),
-    _all_keys: Object.keys(process.env)
-  };
-  Object.keys(process.env).forEach(k => {
-    const val = process.env[k];
-    envSummary[k] = {
-      exists: !!val,
-      length: val ? val.length : 0,
-      isPlaceholder: val === LEGACY_EMBEDDED_API_KEY,
-      prefix: val ? val.substring(0, Math.min(6, val.length)) : ''
-    };
-  });
-  fs.writeFileSync(path.join(process.cwd(), 'test_environment_debug.json'), JSON.stringify(envSummary, null, 2));
-} catch (dumpErr: any) {
-  try {
-    fs.writeFileSync(path.join(process.cwd(), 'test_environment_debug.json'), JSON.stringify({ error: dumpErr?.message || String(dumpErr) }, null, 2));
-  } catch (fErr) {}
-}
 
 // Initialize Firebase SDK for Node process (Backend Database Sync)
 let firebaseApp: any;
@@ -314,6 +308,7 @@ setInterval(() => {
   // src/server/lib/securityHeaders.ts so it can be unit-tested; see that file for why each
   // directive is shaped the way it is (Firebase Auth popups, live-preview iframes, OAuth opener).
   app.use(helmet(securityHeadersConfig));
+  app.use(permissionsPolicyMiddleware());
   app.use(traceMiddleware);
   // gzip for JSON/HTML/JS/CSS — an ALLOWLIST so it can never buffer a live stream (the v5 build's
   // text/plain NDJSON progress, chat's event-stream). See responseCompression.ts for the reasoning
@@ -333,21 +328,42 @@ setInterval(() => {
   app.use(corsMiddleware());
 
   // ── Rate Limiters (4.3) ──────────────────────────────────────────────────
+  // 🔴 FORENSIC AUDIT 2026-10-04 — until this change NONE of these limited anything. Each was keyed
+  // `ipKeyGenerator(req as any)`: that function takes an address string, returns a non-string argument
+  // unchanged, and so every request carried a key nobody had seen before. And under `trust proxy: true`
+  // the address itself was the caller's own X-Forwarded-For. Both are fixed in clientAddress.ts; the
+  // census in tests/aCallerCannotChooseItsOwnAddress.test.ts keeps a request out of the address slot.
+  //
+  // Because these limits now really apply for the first time, each is sized to the traffic that already
+  // goes through it, so no real user meets a limit that was never there before:
+  //  • signed-in traffic is keyed on the VERIFIED account, not the address — an Indian mobile carrier puts
+  //    many phones behind one address, and they must not share one budget;
+  //  • a forged or missing token falls back to the real address, so it cannot mint fresh buckets;
+  //  • the live preview gets its own, wider limit: it re-bundles 500 ms after every file change, so a
+  //    build writing files is many bundles a minute, and it spends server CPU, not AI money.
+  const identityKey = (req: any) => identityRateKey(req, verifyFirebaseTokenForIntegrations);
   const chatLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 20,   // 20 req/min per IP — generous for normal chat, tight for abuse
-    // Key on IP only. The client-supplied x-user-id header is spoofable — rotating it let an
-    // attacker bypass the limit entirely and burn NavBharatAI's own AI budget.
-    keyGenerator: (req) => ipKeyGenerator(req as any),
+    max: 20,   // 20 req/min per account (per address for a guest) — generous for chat, tight for abuse
+    keyGenerator: identityKey,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests. Please wait a moment before sending again.' },
   });
 
+  const previewLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 240,  // the preview re-bundles on every file change; this bounds abuse, never a build in flight
+    keyGenerator: identityKey,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many preview refreshes. Please wait a moment.' },
+  });
+
   const paymentLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 5,
-    keyGenerator: (req) => ipKeyGenerator(req as any),
+    max: 10,   // one payment is create-order + verify + a reconcile or two; ten leaves room for a retry
+    keyGenerator: identityKey,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many payment requests. Please slow down.' },
@@ -355,8 +371,8 @@ setInterval(() => {
 
   const adminLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 5,
-    keyGenerator: (req) => ipKeyGenerator(req as any),
+    max: 5,    // admin LOGIN — the caller has no account token yet, so the real address is the key
+    keyGenerator: (req: any) => addressRateKey(req),
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many admin requests.' },
@@ -404,8 +420,12 @@ setInterval(() => {
   const PORT = Number(process.env.PORT || 8080);
   // aiRouter — shared singleton from src/server/lib/aiRouter.ts (Phase 1, AI-core).
 
-  // Trust proxy for correct req.protocol and req.get('host') behind reverse proxies
-  app.set('trust proxy', true);
+  // Trust EXACTLY ONE proxy hop — Google's Cloud Run front end (navbharatai.com resolves to it). With
+  // `true`, req.ip was the FIRST X-Forwarded-For entry, which the caller writes, so every per-address
+  // limit (admin login lockout, OTP sends, the bot guard, auth rate limits) could be walked past with one
+  // header. One hop makes req.ip the address Google saw — the same answer as clientAddress().
+  // req.protocol / req.hostname still come from that trusted hop. See src/server/lib/clientAddress.ts.
+  app.set('trust proxy', TRUSTED_PROXY_HOPS);
 
     app.use(express.json({
       limit: '30mb',  // room for vision attachments (images/PDFs as base64)
@@ -549,8 +569,8 @@ setInterval(() => {
       console.log(`[PRODUCTION] Serving static files from: ${distPath}`);
       // The build's ready-made brotli-11 / gzip-9 copies of JS/CSS (written by scripts/precompress.mjs in
       // the Dockerfile). Falls through to express.static below whenever there is no copy.
-      // The server bundle and every source map live in dist/ too, and are never public.
-      app.use((req: any, res: any, next: any) => (isPrivateBuildFile(req.path) ? res.status(404).end() : next()));
+      // The server's own bundle and its sourcemap live in dist/ too — never served (serverOnlyArtifacts.ts).
+      app.use(denyServerOnlyArtifacts());
       app.use(precompressedStatic(distPath));
       // 12.7 — CDN-friendly Cache-Control headers for static assets
       app.use(express.static(distPath, {
@@ -749,6 +769,8 @@ setInterval(() => {
   // both are checked by tools that may not run JS. Both paths are declared in spaFallback.ts, so the
   // SPA catch-all defers to these handlers instead of returning index.html.
   registerLegalRoutes(app);
+  // robots.txt + sitemap.xml, derived from the same legal-page list (declared in spaFallback.ts too).
+  registerSiteIndexRoutes(app);
   // PUBLIC checkout hand-off (/pay) — the ONE origin the payment gateway has approved. The native
   // Android shell opens this in the system browser because its own WebView origin (https://localhost)
   // can never be whitelisted. Declared in spaFallback.ts, or the catch-all would swallow it.
@@ -792,7 +814,7 @@ setInterval(() => {
   // Chunked zip import — the only path a project larger than one HTTP request can take (see zipUpload.ts).
   registerZipUploadRoutes(app);
   // Preview routes (Phase 3 — hybrid runtime preview via PreviewService).
-  registerPreviewRoutes(app, chatLimiter);
+  registerPreviewRoutes(app, previewLimiter);
   // Same-origin npm mirror for the in-browser preview — immutable-cached, host-pinned to esm.sh.
   // Deliberately NOT rate-limited: one preview legitimately requests dozens of modules in a burst,
   // and a 429 here would blank it; the LRU + entry caps are the resource bound.

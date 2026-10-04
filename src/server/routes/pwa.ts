@@ -6,6 +6,7 @@ import { buildRateLimiter, verifyFirebaseToken, enforceNotBanned } from '../lib/
 import { injectBadge } from '../lib/madeWithBadge';
 import { probeHostingPlan } from '../lib/hostingPlan';
 import { routeParam, routeParams } from '../lib/expressCompat';
+import { sendUntrustedHtml } from '../lib/untrustedHtml';
 
 // In-memory PWA cache entry (the durable copy lives in Firestore — see below).
 export interface PwaEntry {
@@ -86,6 +87,10 @@ async function loadEntry(pwaStore: PwaStore, id: string): Promise<PwaEntry | nul
 
 const EXPIRED_PAGE = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>App Not Found</title><style>body{font-family:system-ui;background:#0d1117;color:#c9d1d9;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;flex-direction:column;gap:1rem;text-align:center;padding:2rem}</style></head><body><div style="font-size:3rem">⏳</div><h2>App Not Found</h2><p style="color:#8b949e">This app link has expired or does not exist.<br>Publish again from NavBharatAI to get a fresh link.</p></body></html>`;
 
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 export function registerPwaRoutes(app: Express, pwaStore: PwaStore): void {
   app.post('/api/pwa/save', buildRateLimiter(), enforceNotBanned(), async (req: Request, res: Response) => {
     // Durable hosting on our domain must belong to a real account (abuse/phishing control).
@@ -138,6 +143,9 @@ export function registerPwaRoutes(app: Express, pwaStore: PwaStore): void {
   });
 
   app.get('/pwa/:id/sw.js', (req: Request, res: Response) => {
+    // The id goes into JavaScript and a response header below — only an id this module minted
+    // (16 hex characters) is ever echoed (forensic audit 2026-10-04: `/pwa/a'b/sw.js` injected script).
+    if (!PWA_ID_RE.test(routeParam(req.params.id))) return res.status(404).json({ error: 'App not found or expired' });
     res.setHeader('Content-Type', 'application/javascript');
     res.setHeader('Service-Worker-Allowed', `/pwa/${routeParam(req.params.id)}`);
     res.send(`
@@ -159,7 +167,7 @@ self.addEventListener('fetch',e=>e.respondWith(
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="${entry.name}">
+<meta name="apple-mobile-web-app-title" content="${escapeAttr(entry.name)}">
 <meta name="theme-color" content="#6366f1">
 <script>if('serviceWorker'in navigator){navigator.serviceWorker.register('/pwa/${id}/sw.js',{scope:'/pwa/${id}'}).catch(()=>{})}<\/script>`;
     let html = entry.html;
@@ -172,7 +180,7 @@ self.addEventListener('fetch',e=>e.respondWith(
     // and an unknown answer keeps the badge (safe direction).
     const plan = await probeHostingPlan(entry.userId);
     html = injectBadge(html, { paidRemoval: plan.known && plan.active });
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(html);
+    // A user's HTML on our origin: sandboxed into an opaque origin (untrustedHtml.ts).
+    sendUntrustedHtml(res, html);
   });
 }

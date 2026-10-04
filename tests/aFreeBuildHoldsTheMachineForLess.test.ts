@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   freeBuildWindow, freeBuildWindowSeconds, freeBuildAutoSeconds, noteFreeBuildStart, decideFreePause,
-  freePauseMessage, resetFreeBuildChainsForTests,
+  freePauseMessage, resetFreeBuildChainsForTests, decideFreePauseDurable, noteFreeBuildStartDurable,
   FREE_BUILD_SECONDS_DEFAULT, FREE_BUILD_AUTO_SECONDS_DEFAULT, FREE_BUILD_SECONDS_MIN,
 } from '../src/server/AgentV3/freeBuildTimeCap';
 
@@ -112,12 +112,61 @@ describe('the wiring (source guards)', () => {
   it('the free window is applied to effectiveBuildSeconds, the one number every budget reads', () => {
     expect(route).toContain('const freeWindow = freeBuildWindow(scaleBuildSeconds(maxBuildSeconds(), buildDepth), freeTierBuildActive);');
     expect(route).toContain('const effectiveBuildSeconds = freeWindow.seconds;');
-    expect(route).toContain('if (freeTierBuildActive) noteFreeBuildStart(workspaceId, prompt);');
+    // Q-130: the chain is durable now — same call site, counted across instances.
+    expect(route).toContain('if (freeTierBuildActive) void noteFreeBuildStartDurable(workspaceId, prompt, firestoreFreeChainStore()).catch(() => {});');
   });
 
   it('the watchdog pause is resumable only while the chain allows it, and only a free unfinished build is asked', () => {
-    expect(route).toContain('const freePause = !ok && freeTierBuildActive ? decideFreePause(workspaceId, deadlineMs) : null;');
+    expect(route).toContain('const freePause = !ok && freeTierBuildActive ? await decideFreePauseDurable(workspaceId, deadlineMs, firestoreFreeChainStore()) : null;');
     expect(route).toContain("emit({ type: 'result', ok: false, resumable: pauseResumable,");
     expect(route).not.toContain("emit({ type: 'result', ok: false, resumable: true, summary: pauseMsg.summary");
+  });
+});
+
+describe('the chain is counted across instances (Q-130)', () => {
+  const ENV = { AGENTV3_FREE_BUILD_AUTO_SECONDS: '3000' } as Record<string, string>;
+  const memStore = () => {
+    const m = new Map<string, { spentMs: number; touchedAt: number }>();
+    return { m, store: { get: async (k: string) => m.get(k) ?? null, set: async (k: string, c: { spentMs: number; touchedAt: number }) => { m.set(k, c); }, remove: async (k: string) => { m.delete(k); } } };
+  };
+
+  it('a window spent on ANOTHER instance counts here — the second window ends the unattended chain', async () => {
+    const { store } = memStore();
+    resetFreeBuildChainsForTests();
+    const first = await decideFreePauseDurable('ws1', 1500_000, store, ENV, 1_000);
+    expect(first.resumable).toBe(true);
+    resetFreeBuildChainsForTests(); // the next window lands on a fresh instance: its memory is empty
+    const second = await decideFreePauseDurable('ws1', 1500_000, store, ENV, 2_000);
+    expect(second.spentSeconds).toBe(3000);
+    expect(second.resumable).toBe(false);
+  });
+
+  it('a new real request clears the chain everywhere; "continue" keeps it', async () => {
+    const { m, store } = memStore();
+    m.set('ws2', { spentMs: 2_000_000, touchedAt: 1_000 });
+    await noteFreeBuildStartDurable('ws2', 'continue', store, 2_000);
+    expect(m.has('ws2')).toBe(true);
+    await noteFreeBuildStartDurable('ws2', 'make me a recipe app', store, 3_000);
+    expect(m.has('ws2')).toBe(false);
+  });
+
+  it('a missing, failing or slow store leaves exactly the memory-only answer', async () => {
+    resetFreeBuildChainsForTests();
+    const none = await decideFreePauseDurable('ws3', 1500_000, null, ENV, 1_000);
+    resetFreeBuildChainsForTests();
+    const failing = await decideFreePauseDurable('ws3', 1500_000, {
+      get: async () => { throw new Error('down'); }, set: async () => { throw new Error('down'); }, remove: async () => {},
+    }, ENV, 1_000);
+    expect(failing).toEqual(none);
+    expect(failing.resumable).toBe(true);
+  });
+
+  it('a durable record older than the forget window counts as no chain', async () => {
+    const { m, store } = memStore();
+    resetFreeBuildChainsForTests();
+    m.set('ws4', { spentMs: 9_000_000, touchedAt: 0 });
+    const d = await decideFreePauseDurable('ws4', 1500_000, store, ENV, 7 * 60 * 60 * 1000);
+    expect(d.spentSeconds).toBe(1500);
+    expect(d.resumable).toBe(true);
   });
 });

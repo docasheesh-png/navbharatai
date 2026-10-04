@@ -41,6 +41,7 @@ import { alignNativePlugins } from '../AgentV3/nativeCapabilities';
 // ONE definition of "which asset imports will not resolve" — shared with the App Store's publish gate.
 // See assetImports.ts for why the two callers treat the same fact differently (a note vs a refusal).
 import { unshippableAssetImports } from './assetImports';
+import { isLiveEnvFile, publicEnvOnly, hasNoAssignments } from './publicEnvOnly';
 
 /** Ignore anything that cannot be part of a web build — these bloat the repo and break nothing by leaving. */
 const SKIP_PATH = /(^|\/)(node_modules|\.git|dist|build|\.next|\.cache|coverage)(\/|$)/;
@@ -588,8 +589,22 @@ export function assembleMobileProject(
     notes.push(`The package name was adjusted to "${appId}" so Android accepts it (it must look like com.company.app).`);
   }
 
-  const usable = Object.entries(appFiles).filter(([p, c]) => !SKIP_PATH.test(p) && typeof c === 'string');
-  const sourceKind = detectProjectKind(Object.fromEntries(usable));
+  const candidates = Object.entries(appFiles).filter(([p, c]) => !SKIP_PATH.test(p) && typeof c === 'string');
+  const sourceKind = detectProjectKind(Object.fromEntries(candidates));
+  // 🔒 A LIVE .env CARRIES ONLY WHAT THE APP PUBLISHES ANYWAY (security checklist 2026-10-04). It used to
+  // be pushed whole — server secrets included — and in a static app it was packaged into the APK at
+  // www/.env. A static app has no bundler, so its .env is read by nothing and is dropped; any other app
+  // keeps only its client-public lines (VITE_…), whose values are inside the built app regardless.
+  // See publicEnvOnly.ts.
+  const envRemoved: string[] = [];
+  const usable: [string, string][] = [];
+  for (const [p, c] of candidates as [string, string][]) {
+    if (!isLiveEnvFile(p)) { usable.push([p, c]); continue; }
+    const { content, removed } = publicEnvOnly(c);
+    envRemoved.push(...removed);
+    if (sourceKind === 'static' || hasNoAssignments(content)) continue;
+    usable.push([p, content]);
+  }
   // A production build made here turns a BUILT app into a STATIC ship: the pipeline's view is "static",
   // because that is exactly what the runner should do with it — nothing.
   const prebuilt = sourceKind === 'built' && opts.prebuilt ? opts.prebuilt : null;
@@ -597,6 +612,10 @@ export function assembleMobileProject(
   const webDir = prebuilt ? 'www' : detectWebDir(Object.fromEntries(usable), kind);
 
   const files: Record<string, string> = {};
+  if (envRemoved.length > 0) {
+    // Names only — never a value.
+    notes.push(`${envRemoved.length} server-only setting(s) in .env were left out of the repository (${[...new Set(envRemoved)].slice(0, 4).join(', ')}${envRemoved.length > 4 ? '…' : ''}). A phone app never reads them, and a repository is no place for a secret.`);
+  }
 
   if (prebuilt) {
     // THE APP WAS BUILT HERE; GITHUB ONLY PACKAGES IT (admin 2026-09-22, "toote hi na"). The runner's

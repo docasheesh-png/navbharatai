@@ -1,5 +1,6 @@
 import path from 'path';
 import axios from 'axios';
+import { isLiveEnvFilePath } from '../../lib/envFile';
 import type { Express, Request, Response } from 'express';
 import { sendSafeError } from '../lib/httpError';
 
@@ -81,7 +82,9 @@ export function registerGithubRoutes(app: Express): void {
                       const content = Buffer.from(blobRes.data.content, 'base64').toString('utf-8');
                       files[item.path] = content;
                   } catch (err) {
-                      console.warn(`Failed to fetch blob for ${item.path}:`, err);
+                      // Status and message only — never the error object, which carries the request's
+                      // Authorization header (axiosCredentialRedaction.ts closes the class process-wide).
+                      console.warn(`Failed to fetch blob for ${item.path}: ${(err as any)?.response?.status ?? ''} ${(err as Error)?.message ?? ''}`);
                   }
               }
           }
@@ -290,7 +293,7 @@ export function registerGithubRoutes(app: Express): void {
         if (
           lowerPath.includes('node_modules/') ||
           lowerPath.includes('.git/') ||
-          (lowerPath.startsWith('.env') && !lowerPath.endsWith('.example')) ||
+          isLiveEnvFilePath(path) || // any depth (apps/web/.env too) — the one definition, src/lib/envFile.ts
           lowerPath.includes('firebase-applet-config.json') ||
           lowerPath.includes('serviceaccount') ||
           lowerPath.includes('secret') ||

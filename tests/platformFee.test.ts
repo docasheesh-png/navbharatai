@@ -104,7 +104,7 @@ describe('what the user is told', () => {
 describe('crediting the wallet', () => {
   it('a recharge credits the NET, and the ledger NAMES the fee', () => {
     const tx: WalletCreditTx = { userId: 'u1', amountPaid: 500, balanceAdded: 490, platformFeeInr: 10 };
-    const { wallet } = computeCreditedWallet(EMPTY, tx, null, T);
+    const { wallet } = computeCreditedWallet(EMPTY, tx, T);
     expect(wallet.remaining_balance).toBe(490);
     expect(wallet.tokenBalance).toBe(490 * TOKENS_PER_RUPEE);
     // totalMoneySpent answers "how much has this user paid us" — that is the GROSS.
@@ -118,7 +118,7 @@ describe('crediting the wallet', () => {
     const paid = 150;
     const fee = 3;
     const tx: WalletCreditTx = { userId: 'u1', amountPaid: paid, balanceAdded: paid - fee, platformFeeInr: fee };
-    const { wallet } = computeCreditedWallet(EMPTY, tx, null, T);
+    const { wallet } = computeCreditedWallet(EMPTY, tx, T);
     expect(wallet.tokenBalance).toBe((paid - fee) * TOKENS_PER_RUPEE);
     expect(wallet.remaining_balance).toBe(paid - fee);
   });
@@ -127,7 +127,7 @@ describe('crediting the wallet', () => {
     // A pending order created before the fee existed was SOLD at rupee-for-rupee, and a Play pack is
     // priced with its fee already inside. Both must credit exactly what they promised.
     const tx: WalletCreditTx = { userId: 'u1', amountPaid: 99, balanceAdded: 99 };
-    const { wallet } = computeCreditedWallet(EMPTY, tx, null, T);
+    const { wallet } = computeCreditedWallet(EMPTY, tx, T);
     expect(wallet.tokenBalance).toBe(99 * TOKENS_PER_RUPEE);
     expect(wallet.remaining_balance).toBe(99);
   });

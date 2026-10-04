@@ -4,7 +4,7 @@ import { appendLedgerEntry, LEDGER_OPENING_FIELD, LEDGER_DROPPED_FIELD } from '.
 // ADMIN-SDK binding (security-rules-bypassing) — see serverDb.ts. Credits user_token_wallets /
 // payment_transactions / promo_redemptions, all server-only under navbharat-prod's rules.
 import { doc, getDoc, updateDoc, runTransaction, getServerDb as getDb } from './serverDb';
-import { getSecretValue } from './secrets';
+import { platformCashfreeCredentials } from './cashfreeCredentials';
 import { mintCodeForOrder } from './giftCodeStore';
 import { TOKENS_PER_RUPEE } from '../../lib/walletPricing';
 import { professionalPassStore } from '../professionals/ProfessionalPassStore';
@@ -111,8 +111,7 @@ export function recordedPlatformFee(txData: WalletCreditTx): number {
 }
 
 /**
- * PURE credit computation: given the CURRENT wallet doc, a verified paid order, and an optional pending
- * promo, return the FULL new wallet doc after crediting. No I/O. The caller runs read→compute→write
+ * PURE credit computation: given the CURRENT wallet doc and a verified paid order, return the FULL new wallet doc after crediting. No I/O. The caller runs read→compute→write
  * INSIDE a Firestore transaction that re-reads `current` in-transaction, so two concurrent credits to
  * the same wallet (two orders, or webhook + client poll, or a coupon credit) can't lost-update: on a
  * concurrent commit the transaction retries, re-reads the now-higher balance, and re-applies the delta
@@ -121,9 +120,8 @@ export function recordedPlatformFee(txData: WalletCreditTx): number {
 export function computeCreditedWallet(
   current: Record<string, any>,
   txData: WalletCreditTx,
-  promo: { mode?: string } | null,
   now: string,
-): { wallet: Record<string, any>; promoApplied: boolean } {
+): { wallet: Record<string, any> } {
   const w = current || {};
   const n = (v: any): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
   const amountPaid = n(txData.amountPaid);
@@ -152,28 +150,16 @@ export function computeCreditedWallet(
 
   const update: Record<string, any> = {};
 
-  // THE PENDING-PROMO BRANCH, and what was cut out of it.
-  //
-  // It used to ALSO grant `hasVishwakarmaPass` and push `promo.mode` onto `unlockedModes` — both
-  // Vishwakarma entitlements, both now meaningless, so both removed. The promo itself still credits
-  // its tokens, so the mechanism survives its dead reward.
-  //
-  // ⚠️ IT IS UNREACHABLE TODAY, and that is recorded rather than relied on: the only thing that ever
-  // wrote `promo_redemptions/promo_pending_*` would have been `/api/payment/validate-mode-promo`, a
-  // route that never existed on the server (see usePaymentEngine.ts, which removed its caller for
-  // exactly that reason). The branch is kept because the read costs one Firestore get inside a
-  // transaction that already does two, and because a future promo can hook into it honestly. The
-  // LIVE coupon path is `/api/payment/redeem-coupon` and is untouched by any of this.
-  //
-  // It also had a real arithmetic bug worth naming: it credited 1,000 tokens while recording 10,000
-  // in `totalTokensPurchased` and in the user's own ledger line. One number now drives all three.
-  const PROMO_TOKENS = 1000;
-  const promoApplied = !!promo;
-  if (promoApplied) update.tokenBalance = n(w.tokenBalance) + PROMO_TOKENS;
-
-  // ── ONE credit path for every purchase: web recharge, Play pack, Apple pack ──
-  const creditedTokens = promoApplied ? PROMO_TOKENS : tokensToCredit;
-  if (!promoApplied) update.tokenBalance = n(w.tokenBalance) + tokensToCredit;
+  // 🔴 THE PENDING-PROMO BRANCH IS GONE (forensic audit 2026-10-04, P0). It read
+  // `promo_redemptions/promo_pending_<uid>` and, when present, credited a flat 1,000 tokens INSTEAD of
+  // the paid amount while `remaining_balance` still got the full rupees. Its comment called it
+  // unreachable because no route wrote that document — but the Firestore rules let ANY signed-in user
+  // create it, for any uid. So a user could plant one on a stranger's wallet (their next ₹5,000 recharge
+  // credited ₹10 of tokens) or on their own (the two balance views diverged, and the spending gate reads
+  // the larger while the overdraft floor reads the smaller — free usage). A credit is the verified paid
+  // amount, always; the rules now refuse every client write to that collection.
+  const creditedTokens = tokensToCredit;
+  update.tokenBalance = n(w.tokenBalance) + tokensToCredit;
   update.totalTokensPurchased = n(w.totalTokensPurchased) + creditedTokens;
   // GROSS here on purpose: "how much has this user paid us" is the full amount, fee included.
   update.totalMoneySpent = n(w.totalMoneySpent) + amountPaid;
@@ -205,7 +191,7 @@ export function computeCreditedWallet(
     timestamp: now,
     // The fee is NAMED in the user's own ledger when there was one — a deduction the user can see in
     // their history is a disclosure; one they can only infer from a smaller number is not.
-    description: `Wallet recharge: ₹${amountPaid}${platformFee > 0 ? ` (₹${platformFee.toFixed(2)} platform fee)` : ''} (${creditedTokens.toLocaleString()} tokens added)${promoApplied ? ' — promo credit' : ''}`,
+    description: `Wallet recharge: ₹${amountPaid}${platformFee > 0 ? ` (₹${platformFee.toFixed(2)} platform fee)` : ''} (${creditedTokens.toLocaleString()} tokens added)`,
   };
   // 🔴 THIS APPEND USED TO BE UNBOUNDED while every DEBIT path trimmed at 500 — so a wallet's
   // purchase rows could grow without limit toward Firestore's 1 MiB document cap, and the two halves
@@ -223,7 +209,7 @@ export function computeCreditedWallet(
   update.total_balance = n(w.total_balance) + balanceAdded;
 
   update.updatedAt = now;
-  return { wallet: { ...w, ...update }, promoApplied };
+  return { wallet: { ...w, ...update } };
 }
 
 /**
@@ -249,18 +235,9 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
     }
 
     const userId = txData.userId;
-    const dbClientId = await getSecretValue(userId, 'CASHFREE_CLIENT_ID') || await getSecretValue(userId, 'CASHFREE_APP_ID');
-    const dbClientSecret = await getSecretValue(userId, 'CASHFREE_CLIENT_SECRET') || await getSecretValue(userId, 'CASHFREE_SECRET_KEY');
-
-    const clientId = (dbClientId || process.env.CASHFREE_CLIENT_ID || process.env.CASHFREE_APP_ID)?.trim();
-    const clientSecret = (dbClientSecret || process.env.CASHFREE_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY)?.trim();
-    const env = process.env.CASHFREE_ENV || (clientSecret && (clientSecret.toLowerCase().includes('test') || clientSecret.toLowerCase().includes('sandbox')) ? 'sandbox' : 'production');
-
-    const isPlaceholder = !clientId || !clientSecret ||
-      clientId.toLowerCase().includes('placeholder') ||
-      clientSecret.toLowerCase().includes('placeholder') ||
-      clientId.trim() === '' ||
-      clientSecret.trim() === '';
+    // The merchant credentials are NavBharatAI's own and come only from the server environment —
+    // never from the order owner's secret vault (cashfreeCredentials.ts, forensic audit 2026-10-04).
+    const { clientId, clientSecret, mode: env, placeholder: isPlaceholder } = platformCashfreeCredentials();
 
     let isPaid = false;
     let cfOrderIdRef = 'cf_' + orderId;
@@ -405,11 +382,11 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
           randomBytes: (n: number) => new Uint8Array(randomBytes(n)),
         });
         try { await updateDoc(txRef, { giftCode: code, fulfilledAt: new Date().toISOString() }); } catch { /* the code exists; the audit note is best-effort */ }
-        return { success: true, data: { giftCode: code, giftFaceInr: face, paidInr: Number(txData.amountPaid) || 0 } };
+        // `buyerUid` is for the route's owner check only; `verify-payment` strips it before answering (Q-630).
+        return { success: true, data: { giftCode: code, giftFaceInr: face, paidInr: Number(txData.amountPaid) || 0, buyerUid: txData.userId } };
       }
 
       const walletRef = doc(db, 'user_token_wallets', txData.userId);
-      const promoRef = doc(db, 'promo_redemptions', `promo_pending_${txData.userId}`);
       const DEFAULT_WALLET: Record<string, any> = {
         userId: txData.userId,
         unlockedModes: [],
@@ -425,21 +402,16 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
         updatedAt: new Date().toISOString(),
       };
 
-      // CONCURRENCY (fix): credit the wallet INSIDE a transaction that re-reads the wallet + pending
-      // promo in-transaction. Two concurrent credits to the SAME wallet (two orders, webhook + client
+      // CONCURRENCY (fix): credit the wallet INSIDE a transaction that re-reads the wallet
+      // in-transaction. Two concurrent credits to the SAME wallet (two orders, webhook + client
       // poll, or a coupon credit) used to lost-update because the old getDoc→compute→full setDoc ran
       // outside any transaction. Now Firestore aborts+retries this transaction on a concurrent commit,
       // so every credit re-reads the latest balance and adds its delta on top — never overwrites.
       // (SECURITY C4: tokens still derive from the VERIFIED paid amount inside computeCreditedWallet.)
       const integratedWallet = await runTransaction(db, async (tx: any) => {
         const walletSnap = await tx.get(walletRef);
-        const promoSnap = await tx.get(promoRef); // all reads BEFORE any write (Firestore rule)
         const walletData = walletSnap.exists() ? walletSnap.data() : { ...DEFAULT_WALLET };
-        const promo = promoSnap.exists() && promoSnap.data().status === 'PENDING'
-          ? { mode: promoSnap.data().mode }
-          : null;
-        const { wallet, promoApplied } = computeCreditedWallet(walletData, txData as WalletCreditTx, promo, new Date().toISOString());
-        if (promoApplied) tx.update(promoRef, { status: 'USED' });
+        const { wallet } = computeCreditedWallet(walletData, txData as WalletCreditTx, new Date().toISOString());
         tx.set(walletRef, wallet);
         return wallet;
       });

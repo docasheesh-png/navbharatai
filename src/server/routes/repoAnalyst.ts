@@ -4,6 +4,7 @@ import { runRepoAnalystChat, type AnalystTurn } from '../repoAnalyst/analyst';
 import { runRepoImprovementGen } from '../repoAnalyst/generate';
 import { sendSafeError } from '../lib/httpError';
 import { guestDailyQuota } from '../lib/guestDailyQuota';
+import { githubTokenFromRequest } from '../lib/mobileShipAuth';
 
 /**
  * GitHub Repo Analyst & Improver route.
@@ -20,7 +21,9 @@ export function registerRepoAnalystRoutes(app: Express): void {
       res.status(400).json({ error: 'message is required.' });
       return;
     }
-    const token = req.headers.authorization?.split(' ')[1];
+    // A GitHub token only — never the caller's Firebase session token, which this used to forward to
+    // api.github.com (forensic audit 2026-10-04). The shared reader refuses a JWT-shaped value.
+    const token = githubTokenFromRequest(req) ?? undefined;
     const turns: AnalystTurn[] = Array.isArray(history)
       ? history
           .filter((m: any) => m && typeof m.content === 'string')
@@ -37,7 +40,9 @@ export function registerRepoAnalystRoutes(app: Express): void {
   // "Improver" — generate concrete improvement files for the referenced repo.
   app.post('/api/repo-analyst/generate', buildRateLimiter(), enforceNotBanned(), guestDailyQuota('repo-analyst'), async (req: Request, res: Response) => {
     const { message, history } = req.body || {};
-    const token = req.headers.authorization?.split(' ')[1];
+    // A GitHub token only — never the caller's Firebase session token, which this used to forward to
+    // api.github.com (forensic audit 2026-10-04). The shared reader refuses a JWT-shaped value.
+    const token = githubTokenFromRequest(req) ?? undefined;
     const turns: AnalystTurn[] = Array.isArray(history)
       ? history
           .filter((m: any) => m && typeof m.content === 'string')

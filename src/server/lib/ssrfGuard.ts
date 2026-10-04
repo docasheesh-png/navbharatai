@@ -111,3 +111,20 @@ export async function assertPublicHttpUrl(rawUrl: string): Promise<UrlCheck> {
   }
   return { ok: true };
 }
+
+
+/**
+ * A fetch for a URL a USER supplied (forensic audit 2026-10-04): the address is vetted first
+ * (`assertPublicHttpUrl`), redirects are refused (a redirect is an unvetted second hop), and a refused
+ * URL comes back as an honest 403-shaped response rather than an exception. The bot flow's API nodes
+ * used to call the global fetch directly — a bot owner could point one at the cloud metadata server.
+ */
+export async function guardedPublicFetch(
+  url: string,
+  init: { method?: string; headers?: Record<string, string>; body?: string } = {},
+): Promise<{ ok: boolean; status: number; text: () => Promise<string> }> {
+  const check = await assertPublicHttpUrl(url);
+  if (!check.ok) return { ok: false, status: 403, text: async () => check.reason ?? 'blocked' };
+  const r = await fetch(url, { ...init, redirect: 'error' });
+  return { ok: r.ok, status: r.status, text: () => r.text() };
+}

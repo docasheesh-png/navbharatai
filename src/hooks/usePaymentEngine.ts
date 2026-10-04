@@ -83,7 +83,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
   const [playPluginReady, setPlayPluginReady] = useState(false);
   const [buyingProductId, setBuyingProductId] = useState<string | null>(null);
   const [storePurchaseNotice, setStorePurchaseNotice] = useState<string | null>(null);
-  const [billingLogs, setBillingLogs] = useState<any[]>([]);
   const [billingTransactions, setBillingTransactions] = useState<any[]>([]);
   const [loadingWallet, setLoadingWallet] = useState(false);
   const [monthlyAiCost, setMonthlyAiCost] = useState<{ totalBuilds: number; totalCostUsd: number; month: string } | null>(null);
@@ -143,20 +142,20 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     setLoadingWallet(true);
     try {
       const walletHeaders = await authedHeaders();
-      // Fire the wallet, logs, transactions and usage calls IN PARALLEL (was 4 sequential awaits).
+      // Fire the wallet, transactions and usage calls IN PARALLEL (was sequential awaits). The usage
+      // LOG call that used to ride here was dropped (Q-113): nothing has rendered it since its table was
+      // removed on 2026-09-14, so it cost a Firestore read on every wallet load for nobody.
       // On a native app these are cross-origin to the production API and often hit a cold instance;
       // serialising them made a cold post-login stack up round-trip after round-trip (the "app is slow
-      // to load after login on the app" symptom). allSettled keeps each independent — a failed logs/
+      // to load after login on the app" symptom). allSettled keeps each independent — a failed
       // transactions call never loses the wallet balance, exactly like the old per-call resilience.
       const usageUrl = `/api/user/usage/${encodeURIComponent(user.uid)}`;
-      const [walletR, logsR, txsR, usageR] = await Promise.allSettled([
+      const [walletR, txsR, usageR] = await Promise.allSettled([
         axios.get(`/api/wallet/${user.uid}?email=${encodeURIComponent(user.email || '')}&name=${encodeURIComponent(user.displayName || '')}`, { headers: walletHeaders }),
-        axios.get(`/api/wallet/${user.uid}/logs`, { headers: walletHeaders }),
         axios.get(`/api/wallet/${user.uid}/transactions`, { headers: walletHeaders }),
         fetch(usageUrl, { headers: walletHeaders }),
       ]);
       if (walletR.status === 'fulfilled') setWallet(walletR.value.data);
-      if (logsR.status === 'fulfilled') setBillingLogs(Array.isArray(logsR.value.data) ? logsR.value.data : []);
       if (txsR.status === 'fulfilled') setBillingTransactions(Array.isArray(txsR.value.data) ? txsR.value.data : []);
       // Monthly AI cost — best-effort, never blocks the wallet.
       if (usageR.status === 'fulfilled' && usageR.value.ok) {
@@ -180,9 +179,8 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
    * this call). So the "Have a promo code?" box answered every code — valid or not — with "Validation
    * failed", blaming the user's code for a missing endpoint.
    *
-   * Recorded because the server still carries the other half: `computeCreditedWallet` reads a pending
-   * `promo_redemptions/promo_pending_*` document that nothing has ever written, precisely because this
-   * was its only would-be writer.
+   * The server's other half — a pending-promo branch in `computeCreditedWallet` — was removed in the
+   * forensic audit of 2026-10-04: the Firestore rules let any client plant that document.
    *
    * The working promo redemption is `redeemPromoCoupon` below (`POST /api/payment/redeem-coupon`,
    * surfaced in Wallet & Billing) — a user with a code still has a real place to use it.
@@ -424,7 +422,7 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
         orderId: paymentSession.orderId,
         isSimulator: paymentSession.isSimulator,
         transactionStatus: status
-      });
+      }, { headers: await authedHeaders() }); // the buyer's token: a gift code is returned only to its buyer (Q-630)
       if (res.data.success) {
         addLog(`Payment for ORDER #${paymentSession.orderId} verified successfully! credited ₹${paymentSession.orderAmount}.`, 'success');
         reportPurchaseOnce(paymentSession.orderId, Number(paymentSession.orderAmount));
@@ -557,7 +555,7 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
    */
   const verifyOrderAndReport = useCallback(async (orderRef: string) => {
     try {
-      const res = await axios.post('/api/payment/verify-payment', { orderId: orderRef });
+      const res = await axios.post('/api/payment/verify-payment', { orderId: orderRef }, { headers: await authedHeaders() });
       const data = res.data || {};
       if (data.professionalPass) {
         addLog(`Professional Pass activated for Order #${orderRef} (${data.days} days).`, 'success');
@@ -674,7 +672,6 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     wallet, setWallet,
     dailyUsage, setDailyUsage, incrementDailyUsage,
     // billing data
-    billingLogs, setBillingLogs,
     billingTransactions, setBillingTransactions,
     loadingWallet, setLoadingWallet,
     monthlyAiCost, setMonthlyAiCost,

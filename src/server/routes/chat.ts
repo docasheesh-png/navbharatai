@@ -22,6 +22,7 @@ import { requireAccountForCostlyAi } from '../lib/costlyAiAccess';
 import { gateToolAction, burnToolAction } from '../tools/toolGate';
 import { guestDailyQuota } from '../lib/guestDailyQuota';
 import { POLLINATIONS_BLOCK_MESSAGE } from '../lib/pollinationsGuard';
+import { checkChatInput } from '../lib/chatInputLimits';
 
 /**
  * Chat routes (the general/FREE chat) extracted from the server.ts monolith
@@ -253,6 +254,10 @@ Be helpful, concise, and accurate. If the user wants to build an app, guide them
     let { message, history, currentApp, mode, intent, userProfile, fileAttachments, memorySummary } = req.body;
     if (!message && !Array.isArray(fileAttachments)) return res.status(400).json({ reply: 'Message is required' });
     message = message || '';
+    // Bounded BEFORE any extraction or provider call (chatInputLimits.ts, forensic audit 2026-10-04).
+    const limits = checkChatInput({ message, fileAttachments, history });
+    if (!limits.ok) return res.status(limits.status).json({ reply: limits.reply });
+    history = limits.history;
 
     // Process attached files
     // Images + PDFs → Gemini vision (inlineData); text/code files → decode to message text

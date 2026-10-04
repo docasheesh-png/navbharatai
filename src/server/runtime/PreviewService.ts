@@ -17,6 +17,7 @@ import { VirtualFileSystem } from '../project/ProjectModel';
 import { routeRuntime, type RuntimeTarget, type PreviewRuntime } from './RuntimeRouter';
 import { StaticRuntime } from './StaticRuntime';
 import { ServerContainerRuntime } from './ServerContainerRuntime';
+import { localActuatorExecAllowed } from '../lib/actuatorGuard';
 import { isReactProject } from './ReactPreview';
 import { isVueProject } from './VuePreview';
 
@@ -48,15 +49,19 @@ export interface PreviewResult {
 export interface PreviewServiceDeps {
   staticRuntime?: StaticRuntime;
   serverRuntime?: PreviewRuntime;
+  /** May a user's app be run in THIS process? Default: the host-exec guard (dev only). */
+  hostExecAllowed?: () => boolean;
 }
 
 export class PreviewService {
   private staticRuntime: StaticRuntime;
   private serverRuntime: PreviewRuntime;
+  private hostExecAllowed: () => boolean;
 
   constructor(deps: PreviewServiceDeps = {}) {
     this.staticRuntime = deps.staticRuntime ?? new StaticRuntime();
     this.serverRuntime = deps.serverRuntime ?? new ServerContainerRuntime();
+    this.hostExecAllowed = deps.hostExecAllowed ?? (() => localActuatorExecAllowed());
   }
 
   /** Expose the static runtime so the HTTP layer can serve /preview/:id. */
@@ -83,6 +88,16 @@ export class PreviewService {
     }
 
     if (target === 'server-container') {
+      // An app with a server cannot be previewed by running it HERE outside development — that would be
+      // the user's code inside NavBharatAI's own process (forensic audit 2026-10-04). An honest
+      // not-available state, never a fake success and never a host install.
+      if (!this.hostExecAllowed()) {
+        return {
+          ok: false,
+          target,
+          reason: 'This app has its own server, so it previews in the build sandbox, not here. Open it from the builder to see it running.',
+        };
+      }
       const { url, sessionId } = await this.serverRuntime.start(projectId, vfs);
       return { ok: true, target, url, sessionId };
     }

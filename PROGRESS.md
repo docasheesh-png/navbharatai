@@ -88912,6 +88912,28 @@ merging session now posts on each PR at the moment it cancels. Re-running a canc
 spends minutes for a result the merge gate never reads. The author's workaround ("push once per branch")
 is still good advice for a different reason: every push is a billed run.
 
+## 2026-10-04 — Security checklist (21 points) applied to NavBharatAI itself
+
+The admin forwarded a 21-point "don't ship until you check this" list (external text, adapted). Audited against
+the code; five real gaps fixed as classes (local branch `local/security-checklist`, locked by
+`tests/thePlatformKeepsItsSecretsOutOfGit.test.ts`, every fix reversion-proven):
+- `.gitignore` / `.dockerignore` did not ignore a live `.env` → both now do (`.env`, `.env.*`, `!.env.example`).
+- No secret scan of THIS repo (the engine scanned users' apps only) → CI census with `scanSecurity` + a reasoned
+  allowlist (Firebase web keys, PEM header text, templates). Local history (7,372 commits, shallow clone) scanned:
+  only test fakes.
+- `trust proxy true` made `req.ip` the caller-written first X-Forwarded-For entry → admin login lockout, OTP send
+  limit, bot guard, auth rate limits bypassable with one header. Now one hop (`TRUSTED_PROXY_HOPS`) +
+  `clientAddress()` (last entry); OTP / phone-exchange / client-error routes use it. navbharatai.com → 216.239.38.21
+  (Google Cloud Run front end), so one hop is the real topology; `guestDailyQuota` has relied on it since 09-27.
+- Phone build pushed a workspace `.env` whole (static apps: packaged into the APK at `www/.env`) → static drops it,
+  others keep only client-public lines (`publicEnvOnly.ts`).
+- GitHub push excluded only a root `.env` → one definition `src/lib/envFile.ts`, any depth.
+- Census: every `/api/admin` route guarded server-side.
+OPEN (admin's, BLOCKED — console access): (1) confirm the LIVE Firestore rules of database `navbharat-prod` match
+`firestore.rules` — no pipeline deploys them, and `.firebaserc` points at the hosting project; (2) set Firebase
+Storage rules to deny client access on the project's buckets (the client never uses Storage; the web config is
+public); (3) turn on GitHub secret scanning / push protection if the plan allows; (4) decision: the documented
+`verifiedUid ?? claimedUid` fallback on v5.0 workspace routes (private reads already verified-only).
 ## 2026-10-04 — Firebase Crashlytics, built after a three-part audit (admin: "Ask the council")
 
 **What existed before:**
@@ -89029,6 +89051,146 @@ cancels of #3515 (19:57), #3518 (20:44) and #3523 (20:45) read "The job has exce
 of 30m0s" — `ci.yml`'s own `timeout-minutes: 30`, hit because eight or nine PR runs in flight slowed every run to
 21–30 min. The cap is now 45 (#3524 staging). Lesson, the fourth rule's first step: read the run's own last
 words before naming a cause — a cancelled run names its canceller.
+
+
+### Q-127: a live-data question that asks two things gets both (2026-10-04)
+
+**Problem.** `liveDataContext` returned the first source that answered. So "delhi ka mausam aur AQI" got only the weather. And because a live block skips the web search, nothing else answered the second half either.
+
+**Fix.** Every source now runs side by side, and every block that answered is returned, in dispatch order. The transit source joined the same list. Each source still gates on its own regex before touching the network, so a source the question never mentions costs nothing. A test proves this by host: a currency question calls only the currency host.
+
+**Tests.** `liveDataSources.test.ts` gains three cases:
+- weather + currency in one message
+- one source down, the other kept
+- no host touched for an unmentioned source
+
+**Proof by reversion:** with the old loop back, the two-part test fails.
+
+**Sibling, recorded as Q-601.** `liveSearchContext` skips the web search whenever any live block exists. So "delhi ka mausam aur aaj gold rate" gets the weather and nothing for gold, which has no live source. Fixing it needs a rule for "the question also asks something no live source covers". A guessed word list would over-search or under-search, so it is written down with that need rather than shipped as a guess.
+
+
+### Q-129: Stop reaches the Gemini/Vertex runner (2026-10-04)
+
+**Problem.** `GeminiToolRunner` never read the build's stop signal. A Stop pressed during a Gemini or Vertex call waited out the whole call, up to the 120 s bound. The Claude and OpenAI-shaped runners already honoured the signal.
+
+**Fix.** The runner now does three things:
+- It never starts a call for a build that is already stopped.
+- It hands the signal to the SDK (`config.abortSignal`), so the HTTP request itself is cancelled.
+- It races the wait with `raceStop`, so a client that ignores the signal still lets go at once. That release comes as `BuildStoppedError`, which the chain never benches a vendor for.
+
+**Tests.**
+- `GeminiToolRunner.test.ts` gains 4 cases. With the old runner, 3 of them fail.
+- New `tests/everyTurnRunnerHearsStop.test.ts` is a class census: every class that implements `TurnRunner` must read `params.signal`, so a new provider family cannot be added deaf.
+
+**Honest limit.** The SDK note says aborting is client-side only: Google still bills the tokens of a call already in flight. The build stops waiting and stops spending on later turns, but the in-flight call's cost cannot be recalled.
+
+
+### Q-131: one definition of "was the build stopped?" (2026-10-04)
+
+**Finding.** The upsell asked `buildWasStopped(timeline) || toolWasUsed('stop_build')`. Every other reader asked the abort signal. The two sources already agree on every reachable path, for two reasons:
+- The model's `stop_build` records `USER_STOPPED_BUILD` and then raises the same `'user-stop'` abort as the button (`setStopBuild`).
+- The b89ba6f8 back-fill copies every signal-only stop onto the timeline, and it runs before the upsell, in the same handler.
+
+The tool-call half added no case. It could only disagree when a `stop_build` the dispatcher could not carry out ("stopping is not available here") still counted as a stop.
+
+**Fix.** The clause is removed, and the timeline is the one definition.
+
+**Test.** `tests/oneDefinitionOfStopped.test.ts` pins both invariants: record-then-abort order, and back-fill before the verdict. It also forbids `toolWasUsed('stop_build')` as a stop definition. With the old clause back, 2 tests fail. The fdd59ef8 pin was updated to the single definition. The ordering it protects is unchanged.
+
+
+### Q-132: every direct durable write is audited against the Green Freeze (2026-10-04)
+
+**Scope.** All 44 direct `saveWorkspaceFiles` / `mergeWorkspaceFiles` calls in `routes/agentv3.ts` were read one by one, plus the two callers outside it (`navStore` copying a bought app into a new workspace; the import and mobile routes).
+
+**Result: none can keep a change the freeze refused.** Each one falls into one of these groups:
+- **Saves only what landed:** `writtenFiles` is set only after a write succeeds, or the save is a sandbox scan.
+- **Follows a write in the same try:** a freeze refusal throws before the save.
+- **Gated:** saves only after `writeUnlessFrozen` returned true.
+- **Runs before the build can be green:** the reopen heal, the turn-start reconcile, the seeds, the imports.
+- **Writes a different record:** the green snapshot, the attempt copy, the route fingerprint.
+- **Is the user's own edit or revert route.**
+
+The one writer that bypasses `writeFile` is the unused-dependency prune, which goes through npm. It already stands down with `!isGreenLatched(workspaceId)`.
+
+**Lock.** `tests/everyDurableWriteRespectsGreenFreeze.test.ts` records each call site with its verdict and count. A new direct save, a second copy of a classified one, or a stale verdict fails CI. The audit therefore cannot quietly go out of date.
+---
+
+## 2026-10-04 — Q-515, Q-516, Q-518: the three items autopsy 39e982bd left OPEN (branch `claude/q515-q516-q518`)
+
+Q-501 was removed from the queue because its PR (#3521, App Mart) is merged.
+
+| Row | Problem | Root cause | Class | Siblings | Locked by |
+|---|---|---|---|---|---|
+| **Q-515** | "6 snapped" next to "27 off the grid" was read as 21 left behind | Reproduced on the report's shape: 27 off the grid before, **0 after**, and the note said "6". `changes` is de-duplicated for display and the note summed it. WRITE_TIME_QUALITY ("noted and not fixed") is measured before the snap and was never restated. | A report count taken from a de-duplicated display list. | 🔁 **This had come back:** e3b0ce25's "4 off / 2 snapped" was this undercount, but that autopsy fixed only the staleness. The kit-restore note counts classes, which are distinct by nature, so it is clean. | `tests/theSnapCountedEveryValue.test.ts` (reverted and failed) |
+| **Q-516** | `APP_SCOPE` said "clone of Free Fire" for a tournament app *for* Free Fire players; the requirement analysis asked an esports app about "inventory tracking" | No audience/event shape in `namesAsProduct`, and no tournament domain, so money words read as ecommerce. | A product used as the audience is not a clone; an event app needs its own domain. | Measured over 52,779 test strings: no scope decision changed, and only the four 39e982bd lines changed domain. "like / jaisa / clone" still wins. "Make a game like Free Fire" stays in `game`, and a CSS "scrim" is not esports. | `tests/aTournamentForAGameIsNotAClone.test.ts` (both halves reverted and failed) |
+| **Q-518** | The explorer passed "View Details — nothing visibly changed" | A quiet press was never judged by what its name promised. | `PROMISES_VIEW`: such a press fails only if the whole-page hash, the address and every scroll position are identical and no tab, file picker or download opened. It gets the primed retry first. | The repair text for every unresponsive PRESS was the search box's ("filters that list"), so a dead light/dark switch got the wrong fix. Each kind now has its own repair. | Real Chromium in `tests/aViewButtonMustShowSomething.test.ts`: the dead button fails; a dialog, a scroll, a new tab, a file picker, Copy and Show more all pass. Reverted both ways. |
+
+**What to watch on the next real build:**
+- Q-518: a "View …" control that opens nothing is now reported and repaired.
+- Q-516: a tournament app's requirement questions are about brackets, rooms and payouts.
+
+**Same branch, two migrated queue rows:**
+
+| Row | Problem | Root cause | Fix | Locked by |
+|---|---|---|---|---|
+| **Q-150** (77bd487b) | Error logs were flagged as credential leaks because of their label text | `lineLogsCredential` matched the sensitive word anywhere on the line. | A leak now needs either a sensitive name logged as a value, or a label beside a value that is not an error. "password:" next to `pw` is still a leak. The redaction heal reads the same definition. | `tests/aLabelIsNotALeak.test.ts`, using the report's own lines (reverted and failed) |
+| **Q-155** | `withheldSecretNames` existed but was never called, so a correctly withheld key was never explained | No call site. | The build now records `SECRETS_WITHHELD` (names only) right after the app's keys are set. One vault read. | `tests/aWithheldKeyIsNamed.test.ts` (reverted and failed) |
+
+### Launch checklist ("vibe-coded app" 20 points), 2026-10-04, branch `local/security-checklist` (not pushed)
+
+The admin sent a 20-point launch checklist for apps built with AI tools. Each point was checked twice: on NavBharatAI's own site, and on the apps it generates.
+
+**Fixed in this change (commit eb55c4211):**
+- **`/robots.txt` and `/sitemap.xml`.** Before this, both were answered with `index.html` and a 200 by the SPA catch-all. They are now real server routes (`src/server/lib/siteIndex.ts`, `routes/siteIndex.ts`), and the page list is derived from `legalPaths.ts`.
+  - The class: a server-owned path registered after the catch-all. The fix lists both paths in `spaFallback.ts` `SERVER_ROUTE_EXACT`.
+- **`index.html` meta.**
+  - It had no meta description and no canonical URL.
+  - `og:image` and `twitter:image` were relative; crawlers do not reliably resolve those.
+  - The share text was Devanagari, which breaks the UI language rule.
+  - All of these are fixed.
+- **Generated apps' `twitter:card`.** `appDefaults` always said `summary_large_image`, even with no `og:image`. Now it says `summary` unless the page has an image. This is the same rule `SeoGenerator.ts` already used, so the two siblings now agree.
+- **Lock:** `tests/theSiteCanBeFoundAndShared.test.ts` (12 tests). I reverted the `spaFallback` and `appDefaults` fixes and 2 tests failed; with the fixes back, they pass.
+
+**Already present (verified):**
+- Privacy and terms pages (`legalPaths.ts`).
+- HTTPS (Cloud Run).
+- Favicon, apple-touch-icon and manifest.
+- Every real `<img>` in the client has alt text. All 11 grep hits were comments or strings.
+- No third-party trackers and no cookies, so no consent banner is needed.
+- Secrets are kept out of the frontend (the security checklist commit).
+- Generated apps already get meta, a manifest, an icon and `robots.txt` (`appDefaults`), plus an offered 404 suggestion (`nextBuildSuggestions.ts`).
+
+**Proposed, not built (admin decisions):**
+- An `og:image` and a sitemap for published apps, generated at publish time. The final URL is only known per hosting provider.
+- Privacy and terms pages for generated apps that collect data.
+- A spam guard (honeypot plus rate limit) for public forms in generated apps.
+- A page-speed and image-size check in the build verdict.
+
+
+### A client write reads the server's answer (2026-10-04, same branch): Q-113 plus a security sibling sweep
+
+**Why I started.** Working queue row Q-113 (the dead `billingLogs` chain) led to a larger class.
+
+**Q-113.** The wallet load fetched `/api/wallet/:uid/logs` on every load, and nothing has rendered it since 2026-09-14. The fetch, the state, the `App.tsx` threading and the `BillingPanel` prop are removed. The server route stays, so already-installed phone bundles keep working.
+
+**The class.** `fetch` resolves for a 401, 403 or 500 alike. A client write followed by a success message therefore told the user something happened whether or not it did. A census found 28 client writes whose Response was thrown away. The real defects:
+- **Team:** remove member, change role and revoke invite always said they succeeded. A refused remove left the member with access. This one is security.
+- **Share for review:** revoke cleared the link from the screen while the link stayed live.
+- **Profile budget:** the editor closed over a refused save. `saveError` was set but never rendered, so the "invalid amount" message was invisible too.
+- **Admin:** APK report delete, clear and mark, and the complaint status change, dropped rows the server still held.
+- **Stop:** a Stop that never reached the server left the build running under a screen that said it had stopped. Now the real Stop button comes back with the reason.
+- **Permission answer:** an answer that never landed was auto-denied after the timeout. Now the question is put back on screen.
+- **Chat delete and IDE file delete:** a failed server delete was silent, and the item came back on the next load. Now the user is told.
+- **App Mart owner settings, including unpublish; built-app forget; webhook delete; review comments:** failures were silent. Now the user is told.
+
+**The fix.** `src/lib/serverAnswer.ts` `writeFailure(res, fallback)` is the one reader: it returns null on 2xx, else the server's `error` text.
+
+**The lock.** `tests/aClientWriteReadsTheServerAnswer.test.ts` is a census of every client write whose answer is discarded.
+- The 10 remaining ones are each argued safe: read-marks, terminal close/resize, a self-healing queue item, upload abort, a failure count, and two code-sample strings.
+- A new discarded write fails CI, and so does a stale allowlist entry.
+- Reverting TeamCollaboration and usePaymentEngine made 3 tests fail; with the fixes back, they pass.
+
+**Found and recorded, not done here (Q-600).** `tsc --noUnusedLocals` lists 93 client locals nothing reads. They sit mostly in `App.tsx` and `AgentV3Panel.tsx`, which several live sessions edit, so sweeping them now would collide. The class lock that fits is a per-file ratchet in CI, like `themeTokensOnly`.
 ### 2026-10-04 — Admin decisions on the 68f0a486 / c70bcbb4 / 241215d1 open rows
 
 - **Q-541 and Q-527 (items argued not defects): agreed by the admin ("han, band kar do").** Resolved as
@@ -89113,3 +89275,99 @@ the right answer; the census proves both readers ask it. The live effect to watc
 `lintBuiltApp`, `analyzeDesignCoverage`, `analyzeHooksRules`, `findBootKillingEnvGuards`) and every call of the
 four file-scoped scans. The asymmetry existed in exactly one place, because reachability filtering existed in
 exactly four — and that is now five, named, and counted.
+### 2026-10-04 — Forensic security / reliability audit (PR #NNNN, branch `claude/new-session-gx9294`)
+
+The admin asked for a repo-wide audit, with every finding fixed P0 → P3 and locked by a test proven by
+reversion. Eight domain audits (auth/IDOR, API surface, AI cost, preview isolation, rules, payments, GitHub,
+secrets/supply chain) were run and **every finding was re-verified by hand before it was fixed** — several
+audit claims turned out false and were dropped. Each fix below ships with a test that fails when the bug is
+put back.
+
+| Sev | Problem | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|---|
+| P0 | `/api/preview` let any caller run code on the HOST | `ServerContainerRuntime` / `SandboxManager` spawned user code with `child_process` and the server's env | user code on the platform's machine | `assertHostExecAllowed` refuses outside dev; allowlisted `hostChildEnv`; `npm install --ignore-scripts`; 5-min install kill; route needs a token | `userCodeNeverRunsOnTheHost` (census of every `child_process` importer) |
+| P0 | The preview bundler read any file on the server (`import '/etc/passwd'`, `../../server.ts`, `@/../`) | esbuild resolved paths with no root | a resolver with no boundary | `confineToWorkspace` plugin on the resolved path; `@/` confined; `file:` refused | `previewBundleStaysInsideTheProject` |
+| P0 | `/pwa/:id`, `/preview/:id` served a user's HTML as navbharatai.com | HTML sent with our origin's cookies/storage | untrusted HTML on our origin | `sendUntrustedHtml` — CSP `sandbox` without `allow-same-origin` (opaque origin) | `userHtmlNeverRunsAsNavBharatAI` |
+| P0 | The admin's Built Apps panel rendered a user's app same-origin | `srcDoc` iframe with `allow-same-origin` | same class, admin surface | `UNTRUSTED_PREVIEW_SANDBOX` | `aStrangersCodeNeverRunsInOurOrigin` (census; `PreviewSurface.tsx` = Q-140) |
+| P0 | Cashfree merchant credentials could come from the USER's vault | `getSecretValue(uid, …)` read the caller's secrets | platform credential from user input | `platformCashfreeCredentials(env)` — env only; `getSecretValue` removed | `platformCredentialsNeverComeFromAUser` |
+| P0 | Any signed-in user could plant `promo_pending_<uid>` and be credited 1,000 tokens for any payment | client-writable Firestore doc read on the money path | a client write deciding a credit | promo branch removed from `computeCreditedWallet`; rule `false` | `aClientCannotWriteTheMoneyPath` (+ emulator) |
+| P0 | host-app / host-usage trusted an email in the request body as admin | non-strict owner gate | claimed identity as authority | `requireVerifiedForMoney` + `assertVerifiedWorkspaceOwner` | `aClaimedEmailIsNeverAnAdmin` |
+| P0 | GitHub OAuth `returnUrl` could send the token to `/api/...` or a file path on our origin | path check before decoding, no deny for server paths | open redirect of a credential | `safeReturnUrl` decodes, lowercases, refuses server/file paths, drops fragments | `aGithubTokenOnlyReturnsToOurOwnApp` |
+| P0 | The org git token stayed in the sandbox's `.git/config` | hydrate copied the authenticated remote | a credential left on disk | `credentialFreeRepoUrl`; remote rewritten before copy and after push | `aGitTokenNeverStaysInTheSandbox` |
+| P1 | Every per-IP limit could be bypassed with one header; three limiters never limited | `trust proxy: true` (leftmost XFF) + `ipKeyGenerator(req)` returning the request object | caller-chosen address; wrong argument hidden by `as any` | one hop (`TRUSTED_PROXY_HOPS`, aligned with #3531), `clientAddress`, `addressRateKey` / `identityRateKey`, preview limiter | `aCallerCannotChooseItsOwnAddress` (real Express + limiter) |
+| P1 | `GET /server.cjs.map` served 27 MB of server source | build wrote it into the static root | server artifact in public dir | `denyServerOnlyArtifacts` on the DECODED name, every `.map` | `theServerSourceIsNeverServed` |
+| P1 | GitHub tokens in logs (axios errors) | error objects carry request headers | credential in an error | global axios interceptor redacts (incl. symbol-keyed headers) | `anHttpErrorNeverCarriesACredential` |
+| P1 | Anyone who guessed a shell id controlled that terminal | shells keyed by a short id only | capability without owner check | shells scoped to their workspace; UUID ids | `aTerminalBelongsToItsWorkspace` |
+| P1 | A claimed `userId` read, deployed, restored or pushed someone else's app | 14 source routes used the non-strict owner gate | claimed identity | `assertVerifiedWorkspaceOwner` on all 14 | `aClaimedUidReadsNoOnesSource` |
+| P1 | Free chat / security scan unbounded (size, attachments, history, rate) | no input limits before provider call | unmetered spend | `checkChatInput`; scan limiter + 200k-char cap | `aFreeAiRequestIsBounded` |
+| P1 | Doctor AI paid answers recorded no cost | racers returned text only | unmeasured spend | racers return `{text, spend}` | `everyPaidDoctorAiTurnIsMeasured` |
+| P1 | Professionals ran vision on attachments before the gate | order of checks | spend before allow | gate first | `nothingIsSpentBeforeATurnIsAllowed` |
+| P1 | One malformed request benched a provider for every user | any error set a cooldown | breaker poisoning | only provider-health errors cool a provider | `oneRequestNeverBenchesAProvider` |
+| P1 | The free Repo Analyst fell through to Claude Sonnet | a `callClaude` rung | free surface on a paid rung | rung removed | `aFreeSurfaceNeverRunsSonnet` |
+| P1 | Bot webhooks / MCP fetched user URLs with redirects followed | redirects unvetted | SSRF via redirect | `guardedPublicFetch`, `redirect: 'error'` | `aUserSuppliedUrlIsVettedOnEveryHop` |
+| P2 | Boot printed env values / key prefixes; `/api/agentv3/diag` public | debug logging | secret in logs | presence + length only; diag admin-only | `noEnvValueMaterialInLogsOrFiles` |
+| P2 | Webhook signature compared with `===` | non-constant-time compare | timing oracle | `timingSafeStringEqual` | `cashfreeWebhookSignature` |
+| P2 | `.env` not ignored by git / docker; no Permissions-Policy | missing config | secrets in repo/image | ignore files (identical to #3531); policy header | `localSecretsAndUnusedFeaturesStayOut` |
+| P2 | Production could boot with a test switch on | no config contract | silent security downgrade | `assertProductionConfig` (VITEST fatal; warnings for missing keys) | `productionRefusesASwitchedOffControl` |
+| P2 | Firestore: owner could write any field of `users`; template `posts`/`groups` open; `userId` re-assignable; collab comments rewritable; no Storage rules | permissive template rules | client writes the server never reads safely | rules write only what the app writes; deny-all `storage.rules` | `firestoreRulesAuditHardening` (emulator) |
+| P2 | Q-630: `verify-payment` (no sign-in) returned a fulfilled gift order's CODE to whoever held the order id — which travels in the redirect URL | the route answered with the fulfilment data as-is | a bearer value handed to an unidentified caller | code only to the buyer's verified token; client sends it | `aGiftCodeGoesOnlyToItsBuyer` |
+| P3 | Legacy `/create-order` unauthenticated; `verify-payment` returned balances by order id; Repo Analyst forwarded the session token to GitHub | dead / over-sharing routes | small leaks | 410; balances stripped; GitHub token only | `smallLeaksClosed` |
+
+**Overlap with other sessions (honest record).** #3531 carries the same trust-proxy / `clientAddress` /
+`.gitignore` change; this branch was aligned to its exact text so the second merge has the smallest conflict.
+#3529 adds `isPrivateBuildFile` for the same source-map leak — **its check reads the raw path, and
+`/server.cjs.m%61p` still returns the source through `express.static` (reproduced locally)**. Not edited here
+(another session's in-flight file); reported to the admin. When both land, one of the two middlewares should
+be removed.
+
+**Not fixed in this PR — every item is a row in `BUILD_REPORT_QUEUE.md`:** Q-140 (P0, builder preview
+same-origin, infra-blocked), Q-610 (rules must be deployed by hand to `gen-lang-client-0866594388`), Q-611
+(rotate credentials in git history), Q-612 … Q-629. Q-630 was found by the row verification and fixed here.
+
+### Q-115: a forgotten package import is restored on the installed package's own word (2026-10-04)
+
+**The gap.** Autopsy 424ecdab ended RED on `<Clock>` and `<IndianRupee>`. Both are lucide-react icons, used once and imported nowhere. The missing-import heal could only copy an import another file had already proven. Guessing lucide's export list was refused on purpose: the heal once turned a broken build into an unparseable one by guessing. The open root cause was recorded as *"read the installed package's own declarations"*.
+
+**The fix.** The endgame repair now asks the sandbox's own `node_modules` which of the compiler's undefined names each dependency really exports (`installedExports.ts`). It uses a single bounded node command: up to 100 dependencies, 25 s, true named exports only, and names validated as identifiers before they reach the script. A forgotten import is restored only when all of these hold:
+- The compiler itself reported the name (TS2304). A global like `fetch` is never captured.
+- Exactly ONE installed package exports it. `Link`, which is both a router link and an icon, is never decided.
+- No project module or proven import already owns it.
+
+**Measured.** Against this repo's 61 dependencies, the command took 3 s. It returned `lucide-react: Clock, IndianRupee` and dropped the hostile name `bad name;rm`.
+
+**Tests.**
+- `installedExports.test.ts`: injection, a real run against the installed lucide-react, and parsing.
+- 5 heal cases.
+- 2 endgame cases. One uses the report's real shape and turns green with no model call.
+- With the heal change reverted, the two real-case tests fail.
+
+**Where it runs.** It is wired where the compiler's errors are in hand: the endgame repair, both the step-cap net and the error-trend checkpoint. The write-time and fast-lane callers are unchanged, because they do not carry the TS2304 list.
+
+
+### Q-130: the free-build unattended chain is counted across instances (2026-10-04)
+
+**Problem.** The cap on how long a free request may run unattended was counted in one Cloud Run instance's memory. An auto-continue that landed on another instance started a fresh chain, so a free request could still hold a paid-for machine for hours: one allowance per instance.
+
+**Fix.**
+- `decideFreePauseDurable` and `noteFreeBuildStartDurable` keep the chain in one Firestore record per workspace (`agentv3_free_chains`, admin SDK, `freeChainStore.ts`).
+- The count is the LARGER of the record and memory.
+- Each durable call is bounded at 2 s.
+- Every failure (no database, slow, erroring) leaves exactly the old memory-only answer. This means it can never stop a build the old code would have let run.
+
+**Tests.**
+- Cross-instance: a window spent elsewhere ends the chain here.
+- A new request clears the chain everywhere; "continue" keeps it.
+- A failing store gives the memory answer.
+- A stale record counts as no chain.
+- Store round-trip with a fake database.
+- Proof by reversion: with the change removed, 6 tests fail.
+- The two wiring pins were updated to the durable calls at the same call sites.
+
+**Siblings checked.** The other daily spend gates (`guestDailyQuota`, the professionals `passGate`, `toolGate`, and the routes that use them) already keep their counts in Firestore. The free-build chain was the only spend limit kept in instance memory.
+
+**Gate note (Q-130):** the first full run caught one failure, from `everyCollectionIsClassified`. It flagged the new `agentv3_free_chains` store as unclassified, which is exactly what that census exists to catch. The store is now classified as `retained`, with a one-day `RETENTION_POLICIES` entry on `touchedAt`. The engine already ignores a record older than six hours, so without the policy one dead document per paused workspace would have stayed forever.
+### Two stale queue rows closed with evidence (2026-10-04)
+
+- **Q-122 ✅ (`UI_WITHOUT_BUILD` false positive when only `App.tsx` was edited)** was already fixed. After build 70115adf, `uiWithoutBuildVerdict` got a "complete view" guard: with no `package.json` in view, it refuses to judge, because what it sees is a fragment. `tests/uiWithoutBuild.test.ts` encodes exactly this case: the view `['src/App.tsx']` gives no finding. The row was never removed after that fix.
+- **Q-125 ✅ (Sonnet cache reads "over-stated")** had a wrong premise, as its own row said on 2026-10-04. Anthropic's `input_tokens` excludes cache shares, so a Claude turn is UNDER-stated. That real defect is Q-343, which is 🟡 BLOCKED on the admin's money decision, with options and a recommendation. Q-125 has nothing left of its own to fix.
+- **Gate note for this branch:** the first full run caught one failure: `licenceExposure.test.ts` pins `sources.push(currencyBlock, pincodeBlock);` as proof that those two sources sit outside every gate. Q-127 had folded movies into that line. The line is restored and movies is pushed separately. That keeps the property, and the pin stays as it was.

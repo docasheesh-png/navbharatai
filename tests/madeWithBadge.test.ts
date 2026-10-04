@@ -139,12 +139,13 @@ describe('injection choke points', () => {
     expect(inject).toBeLessThan(deploy); // stamped into the very bytes the provider publishes
   });
 
-  it('instant hosting (/pwa) stamps at SERVE time, before res.send', () => {
+  it('instant hosting (/pwa) stamps at SERVE time, before the page is sent', () => {
     const src = readFileSync(join(__dirname, '..', 'src/server/routes/pwa.ts'), 'utf8');
     const code = stripComments(src);
     const inject = code.indexOf('injectBadge(html');
     expect(inject).toBeGreaterThan(-1);
-    expect(inject).toBeLessThan(code.lastIndexOf('res.send(html)'));
+    // Sent through the sandboxed sender since the forensic audit of 2026-10-04 (untrustedHtml.ts).
+    expect(inject).toBeLessThan(code.lastIndexOf('sendUntrustedHtml(res, html)'));
   });
 
   it('the in-app AIs can answer badge questions honestly (AppKnowledgeBase entry exists)', () => {

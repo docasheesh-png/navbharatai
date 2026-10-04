@@ -65,7 +65,7 @@ describe('a module turn is judged as a module', () => {
     expect(route).toMatch(/if \(moduleAwaitsShell\) gateEvidence\.awaitingShell = moduleAwaitsShell;/);
     expect(route).toMatch(/if \(gate\.state === 'unknown' && result\.ok && !moduleAwaitsShell\) \{/);
     expect(route).toMatch(/runtimeUncheckedRecord\(\{ previewRendered: renderProvenNow\(\), awaitingShell: moduleAwaitsShell \}\)/);
-    expect(route).toMatch(/changedPaths: \[\.\.\.writtenFiles\.keys\(\)\], awaitingShell: moduleAwaitsShell \}\)/);
+    expect(route).toMatch(/const summaryText = summarizeProject\([^\n]*awaitingShell: moduleAwaitsShell \}\)/);
     const billCalls = route.match(/decideMarkupOnProof\(\{[\s\S]*?\}\);/g) || [];
     expect(billCalls.length).toBe(2); // the settle and the deadline finalizer
     for (const c of billCalls) expect(c).toMatch(/awaitingShell: moduleAwaitsShell/);

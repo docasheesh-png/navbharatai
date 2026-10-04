@@ -70,6 +70,31 @@ export interface IllegalRule {
    * harassment-reporting tool. A rule whose refusal is harsh must be able to stand down.
    */
   exempt?: RegExp;
+  /**
+   * A PROTECTIVE purpose that stands an ILLEGAL rule down — but only while no unambiguously sexual
+   * word is present (queue Q-320, admin chose option (b) on 2026-10-04).
+   *
+   * 🔴 WHY: the CSAM and NCII rules had no stand-down, so "build an app to report child sexual abuse",
+   * "POCSO awareness app", "sex education app for kids" and "an app that detects deepfake photos" were
+   * refused with the AUP message and logged as the offence itself. `exempt` could not be reused: on
+   * these rules "child sexual abuse" IS the name of the offence, so a plain stand-down on "report" or
+   * "prevention" would open a hole a single word wide.
+   *
+   * 🔒 THE CONDITION THAT CLOSES THE HOLE: `unambiguous` names the words a protective app has no reason
+   * to use (porn, nude, naked, xxx, erotic, sexy, "sexual videos", "undress", "make a deepfake") and the
+   * stand-down never applies when one is present. A request that carries such a word is refused exactly
+   * as before, however protective it sounds.
+   *
+   * ⚠️ The other nine Indian scripts have no protective words yet (they need a native reader), so their
+   * own words for the rule are listed in `unambiguous`: a request written in them stays on the strict side.
+   */
+  protective?: { purpose: RegExp; unambiguous: RegExp };
+}
+
+/** Does this rule's protective purpose stand it down for `body` (already normalised)? PURE. */
+export function protectiveStandDown(rule: IllegalRule, body: string): boolean {
+  if (!rule.protective) return false;
+  return rule.protective.purpose.test(body) && !rule.protective.unambiguous.test(body);
 }
 
 /**
@@ -118,6 +143,65 @@ export function normalizeScanText(text: string): string {
 }
 
 /**
+ * Q-320 — the words of the protective stand-down (see `protective` on IllegalRule).
+ *
+ * `SEXUAL_UNAMBIGUOUS` is what a child-protection or detection app has no reason to say. "sex" and
+ * "sexual" alone are NOT in it — "report child sexual abuse" and "sex education" need both — but
+ * "sexual videos", "sex chat" and the like are. Other scripts: the rule's own words, so a request in
+ * them stays strict (no protective words there yet).
+ */
+const SEXUAL_UNAMBIGUOUS_LATIN =
+  'porn\\w*|nud(?:e|es|ity)|naked|xxx|erotic\\w*|sexy|hardcore|sexting|'
+  + '(?:explicit|sexual|sex)\\s+(?:photos?|pictures?|pics?|images?|videos?|clips?|content|stories|story|chats?|roleplay|role[-\\s]play|acts?|material)';
+const SEXUAL_UNAMBIGUOUS_DEVA = [
+  'पोर्न', 'पॉर्न', 'नग्न', 'नंगी', 'नंगा' + END, 'एक्सएक्सएक्स', 'कामुक', 'अश्लील',
+  'सेक्स\\s*(?:वीडियो|फ' + NUKTA + 'ोटो|तस्वीर|चैट|कहानी)',
+];
+function unionWords(...lists: ScriptWords[]): ScriptWords {
+  const out = {} as Record<keyof ScriptWords, string[]>;
+  for (const list of lists) {
+    for (const [script, words] of Object.entries(list) as Array<[keyof ScriptWords, readonly string[]]>) {
+      out[script] = [...(out[script] ?? []), ...words];
+    }
+  }
+  return out;
+}
+
+const CSAM_PROTECTIVE = {
+  purpose: withDevanagari(
+    /\b(report\w*|prevent\w*|awareness|aware|pocso|helplines?|protect\w*|safety|safeguard\w*|detect\w*|educat\w*|ngos?|police|complaints?|moderat\w*|filter\w*|block(?:s|er|ers|ing|ed)?|counsel\w*)\b/i,
+    ['रिपोर्ट', 'शिकायत', 'रोकथाम', 'रोकन', 'रोकने', 'जागरूक', 'पॉक्सो', 'पोक्सो', 'हेल्पलाइन', 'सुरक्षा', 'सुरक्षित', 'बचाव', 'बचान', 'बचाने', 'डिटेक्ट', 'पहचान', 'शिक्षा', 'शैक्षिक', 'पुलिस', 'एनजीओ', 'फ' + NUKTA + 'िल्टर', 'ब्लॉक', 'परामर्श', 'काउंसलिंग'],
+  ),
+  unambiguous: withDevanagari(
+    new RegExp(`\\b(?:${SEXUAL_UNAMBIGUOUS_LATIN})\\b`, 'i'),
+    SEXUAL_UNAMBIGUOUS_DEVA,
+    unionWords(W.CSAM_SIGNAL.subject, W.CSAM_SIGNAL.context),
+  ),
+};
+
+const NCII_PROTECTIVE = {
+  purpose: withDevanagari(
+    /\b(detect\w*|report\w*|awareness|verif\w*|fact[-\s]?check\w*|identif\w*|spot(?:s|ting)?|authentic\w*|take[-\s]?downs?|complaints?|protect\w*|prevent\w*|educat\w*|police|helplines?)\b/i,
+    ['पहचान', 'डिटेक्ट', 'रिपोर्ट', 'शिकायत', 'जागरूक', 'सत्यापन', 'जाँच', 'जांच', 'फ' + NUKTA + 'ैक्ट\\s*चेक', 'बचाव', 'सुरक्षा', 'रोकथाम', 'पुलिस', 'हेल्पलाइन', 'शिक्षा'],
+  ),
+  // The sexual words, the undressing subjects, and any request to MAKE a fake (a detector never says so).
+  unambiguous: withDevanagari(
+    new RegExp(
+      `\\b(?:${SEXUAL_UNAMBIGUOUS_LATIN}|nudif\\w*|undress\\w*|upskirt|hidden[-\\s]?cams?|`
+      + '(?:remove|take\\s+off)\\s+(?:her\\s+|his\\s+|their\\s+|the\\s+)?clothes|'
+      + '(?:make|making|create|creating|generate|generating)\\s+(?:a\\s+|an\\s+)?(?:deep[-\\s]?fakes?|face[-\\s]?swaps?)|'
+      + '(?:deep[-\\s]?fakes?|face[-\\s]?swaps?)\\s+(?:generator|maker|creator|editor)s?)\\b',
+      'i',
+    ),
+    [
+      ...SEXUAL_UNAMBIGUOUS_DEVA, 'न्यूडिफ', 'कपड' + NUKTA + 'े\\s+उता', 'हिडन\\s+कैम', 'छिप' + '[ाे]' + '\\s+कैमर',
+      'डीप\\s*फ' + NUKTA + 'े' + 'क\\s+(?:बना|जनरेटर)', 'फ' + NUKTA + 'े' + 'स\\s*स्वैप\\s+(?:बना|जनरेटर)',
+    ],
+    unionWords(W.CSAM_SIGNAL.context, W.NON_CONSENSUAL_IMAGERY.subject),
+  ),
+};
+
+/**
  * The rules.
  *
  * Every pattern uses word boundaries so it cannot fire inside an identifier (`bombardElement`,
@@ -142,6 +226,7 @@ export const ILLEGAL_RULES: readonly IllegalRule[] = [
       /\b(porn|pornography|nude|nudes|naked|sex|sexual|sexy|erotic|xxx|hardcore|explicit)\b/i,
       ['पोर्न', 'पॉर्न', 'सेक्स', 'यौन', 'अश्लील', 'नग्न', 'नंगी', 'नंगा' + '(?![\\u0900-\\u097F])', 'एक्सएक्सएक्स', 'कामुक'], W.CSAM_SIGNAL.context,
     ),
+    protective: CSAM_PROTECTIVE,
   },
   {
     id: 'NON_CONSENSUAL_IMAGERY',
@@ -163,6 +248,7 @@ export const ILLEGAL_RULES: readonly IllegalRule[] = [
       /\b(app|tool|site|website|bot|service|generator)\b/i,
       ['ऐप', 'एप' + END, 'टूल', 'साइट', 'वेबसाइट', 'बॉट', 'सर्विस', 'जनरेटर'], W.NON_CONSENSUAL_IMAGERY.intent,
     ),
+    protective: NCII_PROTECTIVE,
   },
   {
     id: 'WEAPON_MANUFACTURE',
@@ -304,7 +390,8 @@ export function classifyPublishedText(text: string | null | undefined): IllegalS
 
   for (const rule of ILLEGAL_RULES) {
     // BOTH halves, in the same app. Either alone is an innocent mention.
-    if (rule.subject.test(body) && rule.context.test(body)) {
+    // A protective app (Q-320) is not the offence it protects against.
+    if (rule.subject.test(body) && rule.context.test(body) && !protectiveStandDown(rule, body)) {
       findings.push({ id: rule.id, contentClass: rule.contentClass, description: rule.description });
     }
   }

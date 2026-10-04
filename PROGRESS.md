@@ -88201,3 +88201,18 @@ every fix reverted and seen to fail):
 
 Still BLOCKED on evidence (unchanged): Q-193 (a skipped press's cause line, added by Q-192), Q-273 (an 11 s trivial
 command — needs a second instance), Q-275 (the request was cut mid-sentence before it reached us).
+
+## 2026-10-04 — Q-320 and Q-329: the admin's two decisions, built (PR #3494)
+
+The admin answered both open questions ("aapki dono suggestion banao"):
+
+| Item | Decision | What was built | Lock |
+|---|---|---|---|
+| Q-320 child-protection and deepfake-detection apps refused as CSAM / NCII | option (b) | `protective` on `IllegalRule` + `protectiveStandDown`, read by `triagePrompt` AND `classifyPublishedText` (a protective app that was allowed to build would otherwise have been refused at publish). Stands down only when no unambiguous word (porn, nude, naked, xxx, erotic, sexy, "sexual videos", "undress", "make a deepfake") is present. | `tests/aProtectiveAppIsNotTheOffence.test.ts` — stand-down removed → 7 fail |
+| Q-329 step limit 80 | "haan" — closed by its causes (#3402) | nothing to build; evidence in the queue row | — |
+
+Honest limits: "parental filter to protect children from porn" stays blocked (it carries "porn" — the admin's rule).
+At publish the scanner reads the whole bundle, where "report" is common (a footer); the unambiguous words are what keep
+an offending page refused there. The other nine scripts have no protective words yet → new row Q-344 (🟡 BLOCKED on a
+native reader's word list).
+

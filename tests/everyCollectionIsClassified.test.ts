@@ -44,6 +44,7 @@ const CLASSIFICATION: Record<string, { kind: 'user' | 'workspace' | 'platform' |
   site_configs:        { kind: 'workspace', why: "per-app config, doc id is the workspaceId" },
   agentv3_mcp_servers: { kind: 'workspace', why: "per-app MCP wiring, doc id is the workspaceId" },
   site_uptime:         { kind: 'workspace', why: 'one record per connected domain, not per user' },
+  app_engineering_memory_v1: { kind: 'workspace', why: "the app's requirement ledger, issues and change log — doc id is the workspaceId, erased with the workspace (changeEngine)" },
 
   job_leases:          { kind: 'platform', why: 'one doc per job id; a lease that expires by its own clock' },
   agentv3_build_leases: { kind: 'platform', why: 'one doc per BUILDING workspace, deleted when the build ends and stale after 90 s — holds a uid only while that build runs (workspaceBuildLease.ts)' },

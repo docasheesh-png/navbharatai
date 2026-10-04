@@ -31,6 +31,7 @@
 //
 // PURE — no I/O, no clock.
 
+import { detectBackendPresence } from './BackendPresence';
 import crypto from 'crypto';
 
 /** Kill switch. Default ON. `off` restores the retry page for a dead sandbox. */
@@ -79,8 +80,14 @@ export function isSnapshotChannelId(channelId: string | null | undefined): boole
  * "this preview has expired". Detected from the app's own package.json rather than from the framework
  * label the client sent, because the label is a request and the scripts are a fact.
  */
-export function snapshotSuitable(packageJsonRaw: string | null | undefined): boolean {
+export function snapshotSuitable(packageJsonRaw: string | null | undefined, projectFiles?: Record<string, string>): boolean {
   if (!packageJsonRaw) return false;
+  // 🔴 A SERVER OUTSIDE package.json IS STILL A SERVER (autopsy 241215d1, 2026-10-04). A Vite front end
+  // proxying /api to a Python FastAPI app in `server/` passed every test below — the root package.json
+  // is a plain Vite app — so a dist-only copy was saved and the build said "the preview still works
+  // after its live server expires". That copy renders the shell and fails every request to the API.
+  // `detectBackendPresence` already reads Python manifests and sources; one rule, both readers.
+  if (projectFiles && detectBackendPresence({ ...projectFiles, 'package.json': String(packageJsonRaw) }).hasBackend) return false;
   try {
     const pkg = JSON.parse(String(packageJsonRaw));
     const scripts = pkg?.scripts ?? {};

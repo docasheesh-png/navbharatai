@@ -87352,6 +87352,37 @@ open PR's CI failed with it (#3462 first).
 - **Class:** an upstream advisory landing between a PR's green CI and its merge. The gate is doing its job; the
   honest response is the pin, not an allowlist entry, because a fixed release exists.
 
+## 2026-10-01 — Autopsy 5759ad8b ("Can you make this app" → Kisaan Mandi Bhav): 3 root causes fixed, 3 open
+
+Weak build, 6.9 min, ₹96.58, rendered at 268 s, inside its ETA band. The build itself went well. The judges around it did not.
+
+**Ledger (problem → root cause → class → siblings → lock):**
+- **Q-190 · the sizers were blind.** "Can you make this app" had no attachment and no earlier BUILD request; the app was
+  described in CHAT, which `planningRequest` drops by design (6ae30b33). Complexity 15 ("recognised nothing"), and the
+  fast-lane planner planned "Main app component with counter logic". **Class:** a judge that reads less than the
+  worker (e725e002), here via a pointer ("this app") into the conversation. **Fix:** `conversationReference.ts`
+  (`refersToConversation`, ≤ 14 words, English / Romanised Hindi / Devanagari); `planningRequest` keeps the chat turns
+  and the last answer (`lastAssistantText`, uncut; the recap cuts each turn to 280 chars) only for such a message on a
+  workspace with no finished app. **Siblings:** every sizer already reads `planning.text`, so one input covers the
+  complexity score, routing, ETA, project mode, scope and the fast lane. **Lock:** `tests/theMandiBhavAutopsy.test.ts`,
+  reverted-and-failed.
+- **Q-191 · the gate said "untested" about an app with nothing to save.** The journey check (correctly) said the filters
+  act as you type; the gate's `appOnlyShowsWhatItHolds` counted the bottom tab bar (`onClick={() => setScreen('mandi')}`)
+  as a save. **Class:** two readers of "does this app keep input?" disagreeing. **Fix:** a plain button / click counts
+  unless its handler only changes what is shown (`handlerOnlyChangesView`, `pressCanKeepInput`). The stale comment that a
+  `none-derivable` app "can never earn GREEN" is corrected (it can since 8257ca59, when its controls were pressed).
+  **Lock:** same file, reverted-and-failed; the existing lookup suite (74 tests) unchanged.
+- **Q-192 · a skipped press gave no cause.** "Mausam — Timeout 4000ms exceeded" was the error's first line only.
+  **Fix:** `pressFailureNote` adds Playwright's call-log line naming the cause; the runner embeds the function by value
+  (bound to a const, so a bundler rename cannot break it — checked with the real esbuild bundle and `node --check`).
+- **Already fixed by PRs merged after this build ran (19:53 IST):** the plan hand-off's "NOT written yet" (Q-079, #3461),
+  the contract hand-off narration (Q-078, #3461), the reviewer told to run tsc (Q-080, #3461), "✅ The app looks
+  complete" over undefined classes (2f723acb, #3459), the non-unique `edit_file` error without match regions (#3459),
+  the 12 off-grid values in a stylesheet this build wrote (#3458).
+- **Open:** Q-193 (why the third tab could not be pressed — needs the cause line or the source), Q-194
+  (`LIST_WITHOUT_EMPTY_STATE` on function-returned sample lists — your choice), Q-195 (four items argued not defects).
+  Recurrences recorded on Q-063 (17 s first typecheck) and Q-052 (`startTier: "gemini"`). The two GLM crawls (30 s, 7%)
+  fall under Q-009, which you closed as provider weather in #3465; the crawl bench behaved as designed.
 ## 2026-10-01 — Autopsy de3bb2bb follow-up: the five decisions (PR #3467)
 
 The admin decided the five 🟡 rows the de3bb2bb autopsy left open. Ledger:
@@ -87495,6 +87526,39 @@ were left alone: PR #3467 (another session) already carries them.
 **Missing subsystem.** "Is this turn the whole app?" has no single owner. Each reader (starter, preview, reviewer, gate, recap, bill, ETA) asked it separately, and the module fact reached three of them. This PR threads `moduleAwaitsShell` into the rest. The real fix is one `turnScope` value that every verdict reads, alongside the open `turnKind` item.
 
 **Proactive.** Project mode orders modules by dependency, so the App Shell comes last and the user sees nothing for N−1 paid turns. Building the shell early, as a thin assembled app that grows with each module, would turn every module turn into something the user can open. That is a planner change and an admin decision; it is not built here.
+## 2026-10-04 — Autopsy 241215d1 (paper-trading app for NSE/BSE: build 1 stopped at 2.3 min, build 2 "Continue…" 17.1 min, gate RED)
+
+Two builds, Weak tier, both on `kimi-k2.7-code` (complex routing). Build 2 shipped a FastAPI + React app that worked
+(five curl-verified order flows, preview rendered), yet the release gate said "Not shippable". Ledger (rows in
+`BUILD_REPORT_QUEUE.md`, test `tests/thePaperTradingAutopsy.test.ts`, every fix reverted and seen to fail):
+
+- **Q-278 · an installer was run as a server.** `pip install --user fastapi uvicorn …` matched `\buvicorn\b`, took the
+  managed dev-server boot (port 8000 from the uvicorn default), restarted the install twice and returned pip's output
+  mixed with "[health-check] dev server did not come up on port 8000". Class: an installer's package list naming a
+  server. Only npm installers were exempt; now every common installer is, and `apt-get install python3-dev` too.
+- **Q-280 · a background job held the command for 300 s.** `python start_backend.py &` + `sleep; curl` waited out the
+  timeout because the job kept stdout open. Class: any backgrounded job without redirects, any language (the existing
+  `backgroundedServerSmokeCheckMs` only shortened it, for Node). `detachBackgroundJobs` now detaches such a job in the
+  bash tool; dev-server launches are untouched (the managed boot strips their `&`).
+- **Q-279 · PEP 668.** `pip --user` is refused in the sandbox; the builder prompt now says venv first and start Python
+  servers with uvicorn/gunicorn/flask so the sandbox manages them.
+- **Q-276 · the checks graded "continue".** Coverage, the feature probe and the claim audit read the 86-character
+  message; e725e002 had fixed only the sizers. `requestForChecks.ts` hands them the earlier request when the message
+  names nothing of its own (labels stripped, attachments excluded).
+- **Q-277 · memory cut the request at 2,000 characters** while the planner reads 4,000 — the continue turn never saw
+  the risk metrics and architecture rules. `REQUEST_EPISODE_MAX` 4,000 for requests only.
+- **Q-282 · the journey typed its marker into a ticker field**, the app refused an unknown symbol, and the gate went
+  RED on a working app. A lookup-key field now gets its own placeholder example ("e.g. RELIANCE").
+- **Q-283 · a dist-only "permanent copy" was kept for an app whose API is a Python server.** `snapshotSuitable` now asks
+  `detectBackendPresence` over the project files.
+- **Q-270 / Q-271 · domain and coverage words.** A `trading` domain (market words only); an investment portfolio is not
+  a gallery request.
+- **Q-281 · localhost governed as "an external host"** on 22 commands. Loopback is exempt; any other URL still counts.
+- **Q-285 · instrument:** the hardcoded-localhost readiness line names its first `file:line`.
+- **OPEN:** Q-284 (a Python backend is invisible to the service graph, the revival recipe and the wake path — next
+  self-started work). **BLOCKED:** Q-272 (reasoning rung on complex Weak builds — routing decision), Q-273 (11 s
+  trivial command, needs a second instance), Q-274 (what a "Python script" request delivers — product decision),
+  Q-275 (the request was cut mid-sentence before it reached us), Q-286 (eight items argued not defects).
 ## 2026-10-04 — CI audit gate went red on every PR: four advisories published after 2026-10-01 (PR #3467)
 
 > Merged note: #3476 (another session) landed the same lockfile update and allowlist entries first; #3467 kept

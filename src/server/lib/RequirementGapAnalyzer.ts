@@ -66,6 +66,26 @@ const DOMAINS: DomainDef[] = [
     ],
   },
   {
+    // A STOCK-MARKET APP IS NOT A SHOP (autopsy 241215d1, 2026-10-04). A paper-trading app for NSE/BSE
+    // (market, limit and stop-loss orders, an order book, a ledger) had no domain of its own, so the word
+    // "order" made it ecommerce and the analysis said it lacked a cart, checkout and refunds. Headlines are
+    // the market's own words — never a bare "stock" (an inventory register) or "order" (a shop).
+    // Autopsy 0311186f (same day) added the forex-scalper words (forex, MT4/MT5, cTrader, algo trading,
+    // F&O): that request's only domain word was "broker", which read it as REAL ESTATE. A bare "scalper"
+    // is deliberately absent: a ticket-scalper app is not trading.
+    key: 'trading',
+    re: /\b(?:stock|share|equity|commodity|crypto|forex)\s+(?:market|trading|exchange|broker(?:age)?|portfolio)s?\b|\bforex\b|\balgo\s*-?\s*trad\w*|\bmt[45]\b|\bctrader\b|\bf\s*&\s*o\b|\bcrypto\s+bot\b|\btrading\s+(?:system|strategy|signals?)\b|\bpaper[\s-]?trad\w*|\btrading\s+(?:app|platform|simulator|terminal|bot|journal|engine|dashboard)\b|\b(?:nse|bse|sensex|nifty|demat|intraday)\b|\bcandlesticks?\b|\bohlc\b|\border\s?book\b|\b(?:limit|stop[\s-]?loss|market)\s+orders?\b|\bmutual\s+funds?\b|शेयर\s*बाज़?ार|शेयर\s*मार्केट/i,
+    features: [
+      { label: 'live / historical price feed', re: /real.?time|live|feed|tick|quote|historical|yfinance|websocket/i },
+      { label: 'order types (market / limit / stop-loss)', re: /market\s+orders?|limit|stop.?loss|take.?profit|order\s+types?/i },
+      { label: 'portfolio, holdings & P&L', re: /portfolio|holding|position|p\s?&\s?l|pnl|profit|equity/i },
+      { label: 'watchlist & search', re: /watch\s?list|search|symbol|ticker/i },
+      { label: 'charts (candles / OHLC)', re: /chart|candle|ohlc|graph/i },
+      { label: 'brokerage, fees & taxes', re: /brokerage|fee|commission|charges|stt|slippage|tax/i },
+      { label: 'risk metrics (drawdown / win rate)', re: /drawdown|sharpe|win\s?rate|risk|volatility/i },
+    ],
+  },
+  {
     key: 'ecommerce',
     // `shop`/`store`/`cart` are boundary-anchored (see the corpus test): unanchored they matched inside
     // "photoshop", "bookstore"/"restore" and "cartoon", turning a drawing app into an ecommerce build.
@@ -289,23 +309,6 @@ const DOMAINS: DomainDef[] = [
       { label: 'sound effects and music', re: /sound|audio|music|\bsfx\b|noise|effect/i },
       { label: 'pause and restart', re: /pause|restart|retry|resume|menu|replay|play.?again/i },
       { label: 'a tutorial or first-run explanation of the controls', re: /tutorial|how to play|instruction|onboard|explain|guide|help/i },
-    ],
-  },
-  {
-    // 📈 TRADING (autopsy 0311186f, 2026-10-04). An automatic forex scalper read as REAL ESTATE — its only
-    // domain word anywhere was "broker" ("Kaunsa broker / platform? (MT4 / MT5?)") — and the builder was
-    // told to INCLUDE property listings, a map view, saved searches and a mortgage calculator. Placed LAST,
-    // so every existing classification is unchanged unless a prompt names trading itself.
-    key: 'trading',
-    re: /\bforex\b|\bscalp(?:ing|er|ers)?\b|\bintraday\b|\b(?:stock|share)\s*market\b|\balgo\s*-?\s*trad|\btrading\s+(?:bot|app|platform|system|terminal|strategy|journal|signals?|dashboard)\b|\bdemat\b|\bmt[45]\b|\bctrader\b|candlestick|\bnifty\b|\bsensex\b|\bf\s*&\s*o\b|\bcrypto\s+(?:trading|exchange|bot)\b/i,
-    features: [
-      { label: 'live prices and charts', re: /chart|candle|price|tick|quote|ohlc|live/i },
-      { label: 'orders with stop-loss and take-profit', re: /stop.?loss|\bsl\b|take.?profit|\btp\b|order|entry|exit/i },
-      { label: 'risk limits (daily loss, position size)', re: /risk|daily\s+(?:loss|limit)|drawdown|position\s+siz|lot\s+siz|exposure/i },
-      { label: 'backtesting on past data', re: /backtest|historical|past\s+data|simulat/i },
-      { label: 'trade log and profit & loss', re: /journal|trade\s+(?:log|history)|p\s*&\s*l|profit|pnl/i },
-      { label: 'price and signal alerts', re: /alert|notif|signal/i },
-      { label: 'a paper / demo mode before real money', re: /paper|demo|practice|virtual|sandbox|test\s+mode/i },
     ],
   },
 ];

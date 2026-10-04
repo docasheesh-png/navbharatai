@@ -397,6 +397,22 @@ const ONE_SHOT_PREFIX = /^\s*(?:pkill|pgrep|ps|kill|grep|netstat|lsof|fuser|ss|h
 const PM_ONE_SHOT_SUBCOMMAND =
   /^\s*(?:sudo\s+)?(?:npm|pnpm|yarn|bun)\s+(?:install|i|add|ci|uninstall|remove|un|update|up|upgrade|audit|ls|list|outdated|dedupe|prune|link|unlink|pkg|cache|why|info|view|init|publish|pack|version|rebuild|fund)\b/i;
 
+/**
+ * Another language's package installer: it installs and exits, whatever the package list names.
+ *
+ * 🔴 WHY (autopsy 241215d1, 2026-10-04). `pip install --user fastapi uvicorn pydantic pandas aiohttp`
+ * names the package `uvicorn`, and the keyword rule below reads `\buvicorn\b` as a server being
+ * started. The install was handed to the managed dev-server boot: its output went into the dev log, the
+ * port wait looked for 8000 (the uvicorn default), recovery RESTARTED the install twice, and the model's
+ * tool result came back as pip's last lines mixed with "[health-check] dev server did not come up on
+ * port 8000 … Automatic recovery is exhausted" — about a server nobody had started. 89 s, then 72 s for
+ * the venv retry. The same door as `--save-dev` above, for every installer that is not npm's.
+ * `apt-get install python3-dev` met it through the bare `dev` rule. `uv run` / `poetry run` are absent
+ * on purpose: they really can start a server.
+ */
+const OTHER_INSTALLER_ONE_SHOT =
+  /^\s*(?:sudo\s+)?(?:(?:python[0-9.]*\s+-m\s+)?pip[0-9.]*\s+(?:install|uninstall|download|freeze|list|show)|uv\s+(?:pip\s+\w+|add|remove|sync|lock|venv)|poetry\s+(?:add|install|remove|lock|update)|pipenv\s+(?:install|uninstall|lock|sync)|(?:conda|mamba|micromamba)\s+(?:install|create|remove)|apt(?:-get)?\s+(?:install|update|remove|upgrade)|apk\s+(?:add|del|update)|brew\s+(?:install|uninstall|upgrade)|gem\s+install|cargo\s+(?:install|add|fetch)|go\s+(?:get|mod)|composer\s+(?:install|require|update))\b/i;
+
 /** True when a single command segment (no `;`/`&&`/`||` chaining left in it) itself starts a
  *  dev/preview server. Extracted so isLongRunningCommand can apply it PER-SEGMENT of a compound
  *  command (see below) instead of only to the whole string. */
@@ -405,6 +421,7 @@ function isDevServerInvocation(segment: string): boolean {
   // keyword rule below is spared the option-flag ambiguity, and it lives HERE rather than in
   // isLongRunningCommand so a future caller inherits it.
   if (PM_ONE_SHOT_SUBCOMMAND.test(segment)) return false;
+  if (OTHER_INSTALLER_ONE_SHOT.test(segment)) return false;
   // Any Vite invocation is a dev/preview server EXCEPT `vite build` (compiles then exits).
   const isVite = /\bvite(?:\.js)?\b/i.test(segment) && !/\bvite(?:\.js)?\b[^\n]*\bbuild\b/i.test(segment);
   return (
@@ -783,6 +800,83 @@ export function backgroundedServerSmokeCheckMs(command: string, capMs = 45_000):
     /\b(?:tsx|ts-node|nodemon)\b[^\n&|;]*\bserver\b/i.test(command) ||
     /\bnode\b[^\n&|;]*\bserver(?:[/\\]index)?\.(?:ts|js|mjs|cjs)\b/i.test(command);
   return startsServer ? capMs : null;
+}
+
+/** Where a backgrounded job's output goes when the command did not say. */
+export const BACKGROUND_JOB_LOG = '/tmp/nbai-background.log';
+
+/**
+ * A job the command sends to the background (`cmd &`) with its output still on the command's own pipe is
+ * detached from that pipe: `nohup bash -c '<cmd>' > /tmp/nbai-background.log 2>&1 < /dev/null &`.
+ *
+ * 🔴 WHY (autopsy 241215d1, 2026-10-04). `. .venv/bin/activate && python start_backend.py &` followed by
+ * `sleep 3` and a `curl` of the server hung for the full 300 s command timeout (`deadline_exceeded`):
+ * the server kept stdout open, and the command is not over until every writer of its pipe has closed.
+ * Two lines later the model wrote the same launch as `nohup … > backend.log 2>&1 &` and it returned in
+ * 2 s. `backgroundedServerSmokeCheckMs` only SHORTENS that wait, and only for Node servers it can name;
+ * a Python, Go or any other server got the whole 300 s. Detaching is the class fix: a backgrounded job
+ * never holds the pipe, whatever language it is written in.
+ *
+ * 🔒 Narrow, and byte-identical otherwise:
+ *  - only a real backgrounding `&` (never `&&`, `2>&1`, `&>`, `>&`), with quotes respected;
+ *  - a job that already redirects BOTH stdout and stderr is left exactly as written (the model chose
+ *    where its output goes);
+ *  - a command with a heredoc is returned unchanged (its body is data, not commands);
+ *  - the job runs under `bash -c` so a compound job (`a && b &`) and `source`/`.` keep their meaning,
+ *    and `nohup` so it survives the end of the command, as the model's own working form did.
+ * PURE. `detached` says how many jobs were rewritten, for the note the caller shows.
+ */
+export function detachBackgroundJobs(command: string): { command: string; detached: number } {
+  const input = String(command ?? '');
+  if (!input.includes('&') || /<</.test(input)) return { command: input, detached: 0 };
+  // Shell grammar this splitter does not parse (loops, conditionals, subshells, groups, functions):
+  // left exactly as written rather than cut in the wrong place.
+  const unquoted = input.replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, ' ');
+  // A keyword counts only where a command starts (`echo done` is an argument, `; done` is grammar).
+  if (/[(){}`]|\$\(|(?:^|[;&|\n])\s*(?:if|then|else|elif|fi|for|while|until|do|done|case|esac|select|function)\b/.test(unquoted)) {
+    return { command: input, detached: 0 };
+  }
+  const out: string[] = [];
+  let cur = '';
+  let quote: string | null = null;
+  let detached = 0;
+  const flushJob = () => {
+    const job = cur;
+    cur = '';
+    const body = job.trim();
+    if (!body) { out.push(job + '&'); return; }
+    const words = body.replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, ' ');
+    const stdoutRedirected = /(?:^|[^0-9&>])(?:1?>>?|&>>?)\s*\S/.test(words);
+    const stderrRedirected = /2>>?\s*\S|2>&1|&>/.test(words);
+    if (stdoutRedirected && stderrRedirected) { out.push(job + '&'); return; }
+    const lead = job.slice(0, job.length - job.trimStart().length);
+    const escaped = body.replace(/^nohup\s+/, '').replace(/'/g, `'\\''`);
+    out.push(`${lead}nohup bash -c '${escaped}' > ${BACKGROUND_JOB_LOG} 2>&1 < /dev/null &`);
+    detached++;
+  };
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (quote) {
+      cur += ch;
+      if (ch === '\\' && quote === '"' && i + 1 < input.length) { cur += input[++i]; continue; }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') { quote = ch; cur += ch; continue; }
+    if (ch === '\n' || ch === ';') { out.push(cur + ch); cur = ''; continue; }
+    if (ch === '&') {
+      const prev = input[i - 1];
+      const next = input[i + 1];
+      if (next === '&') { cur += '&&'; i++; continue; }
+      if (prev === '>' || next === '>') { cur += ch; continue; }
+      flushJob();
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur);
+  if (detached === 0) return { command: input, detached: 0 };
+  return { command: out.join(''), detached };
 }
 
 /**

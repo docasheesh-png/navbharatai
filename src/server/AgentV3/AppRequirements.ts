@@ -64,6 +64,15 @@ export interface AppRequirement {
    * listed first. Empty when the service was detected from an env reference alone.
    */
   matchedPackages: string[];
+  /**
+   * Set when the requirement was IMPLIED by a fake feature (fakeFeatureScan.ts) rather than detected
+   * from the app's packages or env references: the app names no key, because it only pretends to do the
+   * thing. `matchedEnvVars` then holds the names the REAL version would read (the recipe's recommended
+   * provider), so the ask card asks for exactly those.
+   */
+  implied?: true;
+  /** The ask card's own wording for this requirement, when the generic "Needed for <label>" would mislead. */
+  why?: string;
 }
 
 /** What the detector reads. All fields optional — a caller with only a file map still gets a result. */
@@ -83,6 +92,12 @@ interface ServiceSpec extends Omit<AppRequirement, 'kind' | 'matchedEnvVars' | '
   packages: string[];
   /** Env-var names whose mere REFERENCE in code implies this service (superset of `envVars`). */
   envHints: string[];
+  /**
+   * Never detected from the app's code — only materialised by `impliedRequirement` when a fake feature
+   * stands in for the service (fakeFeatureScan.ts). An app that READS one of these names is detected as
+   * the service that owns the name (Supabase keys ⇒ `database_hosted`), never as this entry too.
+   */
+  impliedOnly?: true;
 }
 
 const SECRETS_PATH = 'Settings → App Settings → Secrets & API Keys';
@@ -155,6 +170,19 @@ const SERVICES: ServiceSpec[] = [
     packages: ['@clerk/clerk-react', '@clerk/nextjs', '@clerk/backend', '@auth0/auth0-react', 'auth0'],
     envVars: ['CLERK_SECRET_KEY', 'AUTH0_CLIENT_ID'],
     envHints: ['CLERK_SECRET_KEY', 'VITE_CLERK_PUBLISHABLE_KEY', 'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'AUTH0_CLIENT_ID', 'AUTH0_CLIENT_SECRET', 'AUTH0_DOMAIN'],
+  },
+  // ── A REAL login, implied by a FAKE one (admin 2026-10-04: "real login button ho, google login, apple
+  // login, user se real api secret mange jaye"). Never detected from code: a demo login names no key, which
+  // is exactly why nothing ever asked for one. fakeFeatureScan.ts materialises this entry when a sign-in
+  // screen checks a password written into the app, or a "Continue with Google" button has nothing behind
+  // it. ANY one of the four providers' keys counts as configured — the same four AuthSettings.tsx offers —
+  // and the recipe's recommended provider (Supabase Auth: real email, Google and Apple sign-in on a free
+  // project, or NavBharatAI's one-tap database, which includes it) is what the ask card asks for.
+  {
+    id: 'login', label: 'Real login (Google / Apple / email)', kind: 'user', settingsPath: AUTH_PATH, impliedOnly: true,
+    packages: [],
+    envVars: ['VITE_SUPABASE_URL', 'VITE_FIREBASE_API_KEY', 'VITE_CLERK_PUBLISHABLE_KEY', 'CLERK_SECRET_KEY', 'VITE_AUTH0_CLIENT_ID', 'AUTH0_CLIENT_ID'],
+    envHints: ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY', 'VITE_FIREBASE_API_KEY', 'VITE_FIREBASE_AUTH_DOMAIN', 'VITE_FIREBASE_PROJECT_ID', 'VITE_CLERK_PUBLISHABLE_KEY', 'CLERK_SECRET_KEY', 'VITE_AUTH0_DOMAIN', 'VITE_AUTH0_CLIENT_ID', 'AUTH0_CLIENT_ID'],
   },
   // ── Database ─────────────────────────────────────────────────────────────────────────────────────
   // NOTE `kind: 'auto'` for the SQL case: the sandbox provisions a real Postgres for the preview
@@ -234,6 +262,7 @@ export function detectAppRequirements(input: RequirementInput): AppRequirement[]
   const found: AppRequirement[] = [];
   const seen = new Set<string>();
   for (const spec of SERVICES) {
+    if (spec.impliedOnly) continue; // only a fake feature implies it — see impliedRequirement()
     const matchedEnvVars = spec.envHints.filter((n) => envs.has(n));
     const matchedPackages = spec.packages.filter((n) => pkgs.has(n));
     if ((matchedPackages.length === 0 && matchedEnvVars.length === 0) || seen.has(spec.id)) continue;
@@ -258,6 +287,21 @@ export function detectAppRequirements(input: RequirementInput): AppRequirement[]
 export function serviceEnvNames(id: string): string[] {
   const spec = SERVICES.find((s) => s.id === id);
   return spec ? Array.from(new Set([...spec.envVars, ...spec.envHints])) : [];
+}
+
+/**
+ * A `kind: 'user'` requirement materialised WITHOUT a code signal — for a feature that only pretends to
+ * use the service (fakeFeatureScan.ts). `matchedEnvVars` is the names the real version would read, so the
+ * notice and the ask card name one provider's keys rather than every provider's. `null` for an unknown
+ * id or an `auto` service, which nothing should ever imply. PURE.
+ */
+export function impliedRequirement(id: string, matchedEnvVars: readonly string[] = []): AppRequirement | null {
+  const spec = SERVICES.find((s) => s.id === id);
+  if (!spec || spec.kind !== 'user') return null;
+  return {
+    id: spec.id, label: spec.label, kind: 'user', envVars: [...spec.envVars], settingsPath: spec.settingsPath,
+    matchedEnvVars: [...matchedEnvVars], matchedPackages: [], implied: true,
+  };
 }
 
 /**

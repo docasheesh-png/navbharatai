@@ -88122,3 +88122,22 @@ Q-194, Q-195, Q-272, Q-286 resolved as not defects). All sixteen rows are now �
 in `BUILD_REPORT_QUEUE.md`; their ledgers stay in the two entries above. **Watch on the next real builds:**
 `PYTHON_BACKEND_UP` / `_NOT_UP` on a Python-backed app, the `SCRIPT_REQUEST_AS_WEB_APP` start line, and the first
 write-time typecheck on a fresh starter dropping well under 15 s. Still BLOCKED on evidence: Q-193, Q-273, Q-275.
+
+### 2026-10-04 — Autopsy "Sur Taal" (music player, builds b8c31d3d / c497c9cb) — Q-390..Q-399
+
+A music player described in eight numbered Hindi design sections became a 23-module project (one "continue" per
+module), with five false findings on the way. Ledger (problem → root cause → class → fix → lock), all locked in
+`tests/theMusicPlayerIsNotATwentyThreeModuleProject.test.ts` with the report's own prompt
+(`tests/fixtures/surTaalPrompt.txt`):
+- **Q-390** — #3491's warm-cache path (`/home/user/.warm/vite-react/…`) made the write-time typecheck and the
+  warm-up read as dev-server launches (`vite` matched inside a PATH): bash syntax error, log pollution, false
+  restarts, a 10 s typecheck timeout. **#3491's own "watch" item (typecheck well under 15 s) was defeated by its
+  own change** — the earlier fix was incomplete. Fixed by judging a command on path basenames.
+- **Q-391** — `countEnumeratedFeatures` counted every bullet under every heading (40); a sectioned spec is now
+  sized by its sections (8), so project mode does not fire.
+- **Q-392** — Devanagari words matched inside longer words (`\b` is ASCII-only) and a UI menu read as a food menu.
+- **Q-393** — phone powers matched words in labels ("Music Scanner", "Contact us", "Event location").
+- **Q-394** — the app's own palette module was counted as a colour explosion.
+- **Q-395** — a "continue" module turn showed the whole-app ETA and withdrew it seconds later; now never shown.
+- 🟡 Q-396 (no-tests warning on module turns), Q-397 (ignored theme note), Q-398 (APP_SCOPE small word as reason):
+  BLOCKED with options in the queue. Q-399 (crawl bench, Haiku planner) resolved as admin-decided behaviour.

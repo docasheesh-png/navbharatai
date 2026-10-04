@@ -165,6 +165,9 @@ describe('5 · the checks grade the request a "continue" continues', () => {
     expect(ROUTE.match(/checkFeaturePresence\(milestoneRequest \?\? checksRequest,/g)?.length).toBe(4);
     expect(ROUTE).not.toContain('checkFeaturePresence(milestoneRequest ?? prompt,');
     expect(ROUTE).toContain('userRequest: checksRequest,');
+    // Siblings: the post-build reviewer and every sub-agent read the same request.
+    expect(ROUTE).toContain('userRequest: milestoneRequest ?? checksRequest,');
+    expect(ROUTE).toContain('userRequest: () => checksRequest,');
   });
 });
 

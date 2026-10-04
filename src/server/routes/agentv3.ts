@@ -14931,7 +14931,8 @@ async function noteBuildOutcome(
         aiRule: () => aiInAppRule(),
         // And the user's own words (autopsy 6db0ff31) — the two lines above derive from them, and a
         // child handed only a thin instruction asked the ARCHITECT "what would you like me to build?".
-        userRequest: () => prompt,
+        // On a "Continue…" turn the user's words are the request it continues (requestForChecks.ts).
+        userRequest: () => checksRequest,
       };
       const spawnSubAgent = makeSubAgentSpawn(subAgentDeps);
       // Layer 84 (Multi-Model Ensemble): the Architect can call second_opinion to
@@ -22890,7 +22891,7 @@ async function noteBuildOutcome(
           const reviewPromise = runInBillingPhase(PHASE_POST_BUILD_REVIEW, async () => reviewBuild({
               // A roadmap milestone is reviewed against its own brief (autopsy 728a402d), never against
               // the later milestones this build was told not to build.
-              userRequest: milestoneRequest ?? prompt,
+              userRequest: milestoneRequest ?? checksRequest,
               // A suggest-only review is handed the changed code in full, so it answers in one call.
               ...(reviewInline ? { inlineFiles: reviewInline } : {}),
               fileTree: rFiles,

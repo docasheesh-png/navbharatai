@@ -267,7 +267,18 @@ function relImportSpecifier(importer: string, target: string): string {
  * declared or imported anywhere in the file. It only ADDS an import that must exist — it can only turn a
  * broken build into a working one. Pure; never throws.
  */
-export async function addMissingProjectImports(files: Record<string, string>): Promise<AddMissingResult> {
+export async function addMissingProjectImports(
+  files: Record<string, string>,
+  opts: {
+    /**
+     * What the project's own installed packages export, read from the sandbox (`packageExportsCommand`):
+     * package specifier → the names it exports, limited to the names asked about (Q-115). Used ONLY for a
+     * JSX tag nothing in the file binds — see the pass at the end of this function. Absent ⇒ today's
+     * behaviour exactly.
+     */
+    packageExports?: Readonly<Record<string, readonly string[]>>;
+  } = {},
+): Promise<AddMissingResult> {
   const unchanged: AddMissingResult = { files, added: [] };
   const mod = await loadTsMorph();
   if (!mod) return unchanged;
@@ -356,7 +367,8 @@ export async function addMissingProjectImports(files: Record<string, string>): P
     candidates.set(name, { owner: [...specs][0], isPackage: true });
   }
 
-  if (candidates.size === 0) return unchanged;
+  // Nothing to copy AND no package answer ⇒ nothing to do. With a package answer the JSX pass below still runs.
+  if (candidates.size === 0 && !opts.packageExports) return unchanged;
 
   const added: AddedImport[] = [];
   const touched = new Set<string>();
@@ -425,6 +437,37 @@ export async function addMissingProjectImports(files: Record<string, string>): P
 
     // Candidate: iterate the (small) set of project-exported names and see if THIS file uses one as a
     // value without declaring/importing it.
+    // 🆕 A JSX TAG NOTHING BINDS, owned by exactly ONE installed package (queue Q-115). `<IndianRupee />` used
+    // once and imported nowhere could not be healed: the package half above only copies imports the project
+    // already made. The package's own export list now answers it — read from node_modules in the sandbox,
+    // never guessed. Only JSX tag names, because a bare identifier may be a browser global (lucide exports an
+    // `Image` icon; `new Image()` must never be bound to it), while an unbound JSX tag can only be a component.
+    if (opts.packageExports) {
+      const owners = new Map<string, Set<string>>();
+      for (const [spec, names] of Object.entries(opts.packageExports)) {
+        for (const n of names ?? []) { if (!owners.has(n)) owners.set(n, new Set()); owners.get(n)!.add(spec); }
+      }
+      try {
+        const tags = [
+          ...sf.getDescendantsOfKind(SyntaxKind.JsxOpeningElement),
+          ...sf.getDescendantsOfKind(SyntaxKind.JsxSelfClosingElement),
+        ].map((el: any) => { try { return String(el.getTagNameNode().getText()); } catch { return ''; } });
+        for (const tag of new Set(tags)) {
+          if (!/^[A-Z][A-Za-z0-9]*$/.test(tag)) continue;             // a component name, not `motion.div` / `div`
+          if (local.has(tag) || candidates.has(tag) || exportIndex.has(tag)) continue; // bound, or the project's own
+          const specs = owners.get(tag);
+          if (!specs || specs.size !== 1) continue;                    // nobody, or two packages → never guess
+          const spec = [...specs][0];
+          try {
+            sf.addImportDeclaration({ moduleSpecifier: spec, namedImports: [tag] });
+            local.add(tag);
+            touched.add(path);
+            added.push({ file: path, name: tag, from: spec, statement: `import { ${tag} } from "${spec}";` });
+          } catch { /* leave untouched on any mutation error */ }
+        }
+      } catch { /* a file whose JSX we cannot read is left alone */ }
+    }
+
     for (const [name, cand] of candidates) {
       const owner = cand.owner;
       if (!cand.isPackage && owner === path) continue; // a module can't import from itself
@@ -754,3 +797,77 @@ export async function reconcileAndReanalyze(files: Record<string, string>) {
   const report = await analyzeImportExports(rec.files);
   return { files: rec.files, fixes: rec.fixes, report };
 }
+
+/**
+ * The capitalised JSX tags a file renders and nothing in it binds — the only names the package-export pass
+ * may ever import. Cheap, textual, deliberately over-inclusive (the AST pass decides): it only chooses
+ * which names to ASK the sandbox about. PURE.
+ */
+export function unboundJsxTagCandidates(files: Readonly<Record<string, string>>): string[] {
+  const out = new Set<string>();
+  for (const [path, c] of Object.entries(files ?? {})) {
+    if (!/\.(?:jsx|tsx)$/i.test(path) || typeof c !== 'string') continue;
+    for (const m of c.matchAll(/<([A-Z][A-Za-z0-9]*)\b/g)) {
+      const tag = m[1];
+      if (new RegExp(`(?:import[^;]*\\b${tag}\\b|(?:const|let|var|function|class)\\s+${tag}\\b)`).test(c)) continue;
+      out.add(tag);
+    }
+  }
+  return [...out].sort().slice(0, 60);
+}
+
+/**
+ * The sandbox command that answers "which of the project's installed packages export these names?" as one
+ * JSON line. Imports each DEPENDENCY (never a dev tool) from the project's own node_modules; a package that
+ * cannot be imported in Node (browser-only side effects) simply answers nothing. Names are validated to be
+ * identifiers before they are embedded, so the command cannot be steered by file content.
+ */
+export const PACKAGE_EXPORTS_MARKER = 'NBAI_PKG_EXPORTS ';
+export function packageExportsCommand(names: readonly string[], deps: readonly string[]): string | null {
+  const ns = [...new Set(names)].filter((n) => /^[A-Z][A-Za-z0-9]*$/.test(n)).slice(0, 60);
+  const ds = [...new Set(deps)].filter((d) => /^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/i.test(d)).slice(0, 40);
+  if (ns.length === 0 || ds.length === 0) return null;
+  const script = `const ns=${JSON.stringify(ns)},ds=${JSON.stringify(ds)},o={};`
+    + `for(const d of ds){try{const m=await import(d);const k=new Set(Object.keys(m).concat(m.default&&typeof m.default==='object'?Object.keys(m.default):[]));const h=ns.filter(n=>k.has(n));if(h.length)o[d]=h;}catch(e){}}`
+    + `console.log(${JSON.stringify(PACKAGE_EXPORTS_MARKER)}+JSON.stringify(o));process.exit(0);`;
+  return `node --input-type=module -e '${script.replace(/'/g, `'\\''`)}' 2>/dev/null`;
+}
+
+/** Parse the command's one JSON line. Anything unreadable ⇒ an empty answer (the heal then does nothing). PURE. */
+export function parsePackageExports(stdout: string | null | undefined): Record<string, string[]> {
+  const line = String(stdout ?? '').split('\n').find((l) => l.startsWith(PACKAGE_EXPORTS_MARKER));
+  if (!line) return {};
+  try {
+    const o = JSON.parse(line.slice(PACKAGE_EXPORTS_MARKER.length)) as Record<string, unknown>;
+    const out: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(o)) if (Array.isArray(v)) out[k] = v.filter((x): x is string => typeof x === 'string');
+    return out;
+  } catch { return {}; }
+}
+
+/**
+ * Ask the sandbox which installed packages export the unbound JSX tags in `files` — the one way any caller
+ * reads `packageExports` (Q-115), so the ToolDispatcher heal and the endgame cannot ask it differently.
+ * `run` executes a shell command in the project and returns its stdout. Undefined ⇒ nothing to ask, or no
+ * readable answer; the heal then behaves exactly as before. Never throws.
+ */
+export async function readPackageExports(
+  files: Readonly<Record<string, string>>,
+  run: (command: string) => Promise<string>,
+  readPackageJson?: () => Promise<string>,
+): Promise<Record<string, string[]> | undefined> {
+  try {
+    const names = unboundJsxTagCandidates(files);
+    if (names.length === 0) return undefined;
+    const pkgText = typeof files['package.json'] === 'string' ? files['package.json'] : await readPackageJson?.();
+    if (typeof pkgText !== 'string') return undefined;
+    const deps = Object.keys((JSON.parse(pkgText) as { dependencies?: Record<string, string> })?.dependencies ?? {});
+    const cmd = packageExportsCommand(names, deps);
+    if (!cmd) return undefined;
+    const out = parsePackageExports(await run(cmd));
+    return Object.keys(out).length > 0 ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
+

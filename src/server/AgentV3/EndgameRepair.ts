@@ -20,7 +20,7 @@
 // unit-testable with the real QuizArena error text. The dispatcher/runner supply sandbox I/O and
 // the single LLM call. Kill switch: AGENTV3_ENDGAME_REPAIR=off.
 
-import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports } from './ImportExportReconcile';
+import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports, readPackageExports } from './ImportExportReconcile';
 import { tscErrorCauses, tscCauseNote } from './tscErrorCause';
 import { tscNeverRan } from './TscGate';
 import { reactNamespaceValueUse } from './PostEditReviewer';
@@ -299,6 +299,7 @@ export interface EndgameDeterministicResult {
 export async function endgameDeterministicPass(
   files: Record<string, string>,
   errors: TscError[],
+  opts: { packageExports?: Readonly<Record<string, readonly string[]>> } = {},
 ): Promise<EndgameDeterministicResult> {
   const fixes: string[] = [];
   let cur = files;
@@ -323,7 +324,7 @@ export async function endgameDeterministicPass(
     fixes.push(...r.fixes.map((f) => `${f.file}: ${f.kind} '${f.name}' from '${f.from}'`));
   } catch { /* best-effort */ }
   try {
-    const a = await addMissingProjectImports(cur);
+    const a = await addMissingProjectImports(cur, { packageExports: opts.packageExports });
     cur = a.files;
     fixes.push(...a.added.map((f) => `${f.file}: added missing import '${f.name}' from '${f.from}'`));
   } catch { /* best-effort */ }
@@ -365,6 +366,8 @@ export interface EndgameIo {
    */
   llmRepair?(errorText: string, files: Array<{ path: string; content: string }>): Promise<Array<{ path: string; content: string }>>;
   log?(msg: string): void;
+  /** Run a shell command in the project, returning stdout — lets the endgame read installed packages' exports (Q-115). Optional. */
+  runCommand?(command: string): Promise<string>;
 }
 
 export interface EndgameVerdict {
@@ -490,7 +493,9 @@ export async function runEndgameRepair(io: EndgameIo): Promise<EndgameVerdict> {
     if (errors1.length === 0) return { ...NO_ATTEMPT, attempted: true }; // already clean — nothing to do
     io.log?.(`🔧 Endgame repair: ${errors1.length} compile error(s) left — fixing mechanically first…`);
     let files = await io.readFiles();
-    const det = await endgameDeterministicPass(files, errors1);
+    // An icon used once and imported nowhere is healed from the package's own exports (Q-115).
+    const packageExports = io.runCommand ? await readPackageExports(files, io.runCommand) : undefined;
+    const det = await endgameDeterministicPass(files, errors1, { packageExports });
     for (const p of det.changedPaths) await io.writeFile(p, det.files[p]).catch(() => {});
     files = det.files;
     const out2 = det.changedPaths.length > 0 ? await io.runTsc() : out1;

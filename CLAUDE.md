@@ -4137,6 +4137,15 @@ the flag entries above promise.
   `planningRequest.ts`); a build cut short before its ETA band is `untested`; the platform ETA prior averages
   successful builds; and setup puts back the template when a workspace holds only a piece of our own starter
   (`starterFragment.ts`). Test-locked in `tests/aPictureIsNotAnApp.test.ts`.
+- **✍️ A REQUEST TO WRITE A PROMPT IS ANSWERED, NOT BUILT (autopsy cf09c03c, 2026-10-04; no flag).** "Etake aro
+  improve korar jonno ekta valo prompt likhe dao" (write a better prompt) was locked to an EDIT by "improve" and
+  replaced our starter's App.tsx with a page showing a prompt (₹6.34). 6ae30b33's written-content rule had asked
+  only the NEW-build verbs and had no "prompt" noun. Now the edit verbs ask it too (`asksForWrittenText` → chat
+  LOW; `namesTextNotScreen` → edit LOW, so "change the caption" still reaches the reader as an edit), and
+  `asksForPromptText` in `lib/imageIntent.ts` stops a request to WRITE a prompt reading as a picture on every
+  chat surface (a prompt the user GIVES is still a picture). Same change: on an edit, "I changed N files" counts
+  what the turn authored (`reviewChangedPaths`), and an omitted stylesheet no longer gives the lean review its
+  tools back. Test: `tests/aPromptIsTextNotAnApp.test.ts`.
 - **🧪 `AGENTV3_STRICT_TRIAL` — A SHARE OF NEW APPS START WITH TYPESCRIPT STRICT MODE ON (queue Q-008, admin "han"
   2026-10-01). ⚠️ NOT set; default ON; `off` seeds every new app loose as before.** `AGENTV3_STRICT_TRIAL_PCT` (NOT set;
   default **20**; `0` pauses; unreadable ⇒ 0, never 100). `strictTrial.ts`. The Vite-React starter compiles with strict

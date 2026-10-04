@@ -87444,3 +87444,22 @@ repair told "you read this the second time" (#3457 B); the crawl/timeout double 
 Each fix was reverted in place and the suite failed, then restored. New flags (NOT set, default ON, `off` reverts):
 `AGENTV3_WRITE_TYPE_IMPORT_HEAL`, `AGENTV3_DETACHED_METHOD_NOTE`. The GLM crawls (≈30 s) are inside Q-009's accepted
 bounds. Housekeeping: rows Q-069..Q-080 (1219c639) left the open table — #3461 merged.
+
+## 2026-10-04 — Autopsy cf09c03c: "write a better prompt" built an app (PR #3470)
+
+Romanised Bengali, Weak, 3.6 min, ₹6.34. "Etake aro improve korar jonno ekta valo prompt likhe dao" asked for
+TEXT. "improve" locked it to an edit at HIGH, the workspace held only our starter, and the build replaced
+`src/App.tsx` with a page that displays a prompt. The turn before ("Create a image generated promt") was read
+as a picture request.
+
+🔴 **Recurrence:** the class is autopsy 6ae30b33's ("a build verb whose object is text the reply can write").
+That fix asked only the new-build verbs and had no "prompt" in its noun list; the edit verbs were never hunted.
+
+| ID | Problem | Root cause | Class | Siblings found and fixed | Test |
+|---|---|---|---|---|---|
+| Q-250 | Prompt request built an app | Edit branch never asked the written-content question | A verb whose object is text, read as an app order | New-build branch ("ek accha prompt likh do", "make a better prompt"), every edit verb, "image prompt" as a screen part | `aPromptIsTextNotAnApp` §1 |
+| Q-251 | "…generated promt" read as a picture | `detectImageIntent` had no notion of a prompt as the object | A prompt is text, not a picture | Shared detector: Pro, free chat, Professionals, SDA | §2 |
+| Q-253 | "I changed 10 files" (model wrote 2) | Summary counted `writtenFiles`, which our finishing passes also fill | Platform writes reported as the model's | Reviewer already used `reviewChangedPaths`; the summary now does too | §3 + `agentv3.test.ts` |
+| Q-254 | Lean review read inlined App.tsx twice | Kit stylesheet over the inline bound restored the tools | One omission withdrawing one-call mode | — | §4 |
+| Q-255 | "Editing your existing app" about our starter | — | Owned by #3475 (Q-206) | — | — |
+| Q-252 / Q-256 / Q-257 / Q-258 | Hindi reply to English (needs that turn's report) · ₹6.34 refund (admin) · slow first typecheck (Q-063 class, needs the ensure log) · eight items argued not defects | — | — | — | 🟡 in the queue |

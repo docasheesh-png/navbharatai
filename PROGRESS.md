@@ -88941,3 +88941,16 @@ words before naming a cause — a cancelled run names its canceller.
 - New `tests/everyTurnRunnerHearsStop.test.ts` is a class census: every class that implements `TurnRunner` must read `params.signal`, so a new provider family cannot be added deaf.
 
 **Honest limit.** The SDK note says aborting is client-side only: Google still bills the tokens of a call already in flight. The build stops waiting and stops spending on later turns, but the in-flight call's cost cannot be recalled.
+
+
+### Q-131: one definition of "was the build stopped?" (2026-10-04)
+
+**Finding.** The upsell asked `buildWasStopped(timeline) || toolWasUsed('stop_build')`. Every other reader asked the abort signal. The two sources already agree on every reachable path, for two reasons:
+- The model's `stop_build` records `USER_STOPPED_BUILD` and then raises the same `'user-stop'` abort as the button (`setStopBuild`).
+- The b89ba6f8 back-fill copies every signal-only stop onto the timeline, and it runs before the upsell, in the same handler.
+
+The tool-call half added no case. It could only disagree when a `stop_build` the dispatcher could not carry out ("stopping is not available here") still counted as a stop.
+
+**Fix.** The clause is removed, and the timeline is the one definition.
+
+**Test.** `tests/oneDefinitionOfStopped.test.ts` pins both invariants: record-then-abort order, and back-fill before the verdict. It also forbids `toolWasUsed('stop_build')` as a stop definition. With the old clause back, 2 tests fail. The fdd59ef8 pin was updated to the single definition. The ordering it protects is unchanged.

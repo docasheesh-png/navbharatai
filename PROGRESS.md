@@ -88361,15 +88361,15 @@ note became one edit: four parallel frontend specialists each built the whole ap
 closed with 33–47 type errors, RED, $3.35 of NavBharatAI's money, ₹0 billed.
 
 ⚠️ **The same report was autopsied by another session at the same time (#3506, opened first).** It owns the
-sizing, Devanagari-domain, phone-power and palette items (Q-390–Q-399, recorded here as Q-425). This PR carries
-only what #3506 does not: Q-410–Q-420 (fixed, `tests/theSurTaalAutopsy.test.ts`, reversion-proven) and
-Q-421–Q-424 (🟡). The overlapping fixes this session had written were dropped rather than raced.
+sizing, Devanagari-domain, phone-power and palette items (Q-390–Q-399, recorded here as Q-465). This PR carries
+only what #3506 does not: Q-450–Q-460 (fixed, `tests/theSurTaalAutopsy.test.ts`, reversion-proven) and
+Q-461–Q-464 (🟡). The overlapping fixes this session had written were dropped rather than raced.
 
-- **Q-410** our own continue sentences are shared constants (`src/lib/continueBuildPrompts.ts`) and "continue the
+- **Q-450** our own continue sentences are shared constants (`src/lib/continueBuildPrompts.ts`) and "continue the
   build" is a continuation — the noun "build" (697b38ee's class, one stage earlier) no longer reads as an order.
-- **Q-411** parallel writers are told each other's tasks and the shared-file rules (`parallelSiblings.ts`); the
+- **Q-451** parallel writers are told each other's tasks and the shared-file rules (`parallelSiblings.ts`); the
   architect writes shared pieces before parallel screens; case-only twin files are named at write time.
-- **Q-412–Q-419** file formats, a stopped module → pending, READY on a module turn, the write-time typecheck never
+- **Q-452–Q-459** file formats, a stopped module → pending, READY on a module turn, the write-time typecheck never
   waits for an install, deprecated packages, mixed-script words, ETA follows the complexity router, delegation role.
 ### 2026-10-04 — Autopsy "Sur Taal" (music player, builds b8c31d3d / c497c9cb) — Q-390..Q-399
 

@@ -275,19 +275,26 @@ export default function App() {
 }
 `;
 
-export const socialFeedAppTsx = `import { useMemo, useRef, useState } from 'react';
+export const socialFeedAppTsx = `import { useEffect, useMemo, useRef, useState } from 'react';
 import { Shell, Card, Badge, Button, Field, Modal, Empty } from './lib/ui';
 import { useCollection, shortDate, newId, type Entity } from './lib/store';
+import { saveFile, useFileUrl } from './lib/files';
 import ThemeToggle from './theme';
 
 interface Comment { id: string; author: string; text: string; at: string }
 interface Post extends Entity {
-  author: string; text: string; image: string; at: string;
+  // A photo is kept as the FILE in this device's file store (src/lib/files.ts); the post holds only its id.
+  author: string; text: string; imageId: string; at: string;
   likedBy: string[]; comments: Comment[]; reported: boolean;
 }
 interface Person extends Entity { name: string; bio: string }
 
 const ME = 'You';
+
+function PostImage(props: { id: string }) {
+  const url = useFileUrl(props.id);
+  return url ? <img src={url} alt="" style={{ width: '100%', borderRadius: 10, marginBottom: 10, display: 'block' }} /> : null;
+}
 
 const SEED_PEOPLE: Person[] = [
   { id: 'u1', name: 'Asha', bio: 'Photographer in Jaipur' },
@@ -296,8 +303,8 @@ const SEED_PEOPLE: Person[] = [
 ];
 
 const SEED_POSTS: Post[] = [
-  { id: 'p1', author: 'Asha', text: 'Sunrise over Amber Fort this morning.', image: '', at: '2026-08-03', likedBy: ['Rohit'], comments: [{ id: 'c1', author: 'Meera', text: 'Beautiful!', at: '2026-08-03' }], reported: false },
-  { id: 'p2', author: 'Rohit', text: 'New masala chai recipe at the stall — come try it.', image: '', at: '2026-08-02', likedBy: [], comments: [], reported: false },
+  { id: 'p1', author: 'Asha', text: 'Sunrise over Amber Fort this morning.', imageId: '', at: '2026-08-03', likedBy: ['Rohit'], comments: [{ id: 'c1', author: 'Meera', text: 'Beautiful!', at: '2026-08-03' }], reported: false },
+  { id: 'p2', author: 'Rohit', text: 'New masala chai recipe at the stall — come try it.', imageId: '', at: '2026-08-02', likedBy: [], comments: [], reported: false },
 ];
 
 export default function App() {
@@ -309,7 +316,9 @@ export default function App() {
   });
   const [composing, setComposing] = useState(false);
   const [text, setText] = useState('');
-  const [image, setImage] = useState('');
+  const [picked, setPicked] = useState<File | null>(null);
+  const [preview, setPreview] = useState('');
+  const [saveError, setSaveError] = useState('');
   const [commentOn, setCommentOn] = useState<string | null>(null);
   const [commentText, setCommentText] = useState('');
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -340,20 +349,33 @@ export default function App() {
     saveFollowing(following.includes(name) ? following.filter((n) => n !== name) : [...following, name]);
   }
 
+  // The picked photo is shown from the file itself; it is saved only when the post is published.
+  useEffect(() => {
+    if (!picked) { setPreview(''); return; }
+    const url = URL.createObjectURL(picked);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [picked]);
+
   function pickImage(file: File | undefined) {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setImage(typeof reader.result === 'string' ? reader.result : '');
-    reader.readAsDataURL(file);
+    setSaveError('');
+    setPicked(file ?? null);
   }
 
-  function publish() {
-    if (!text.trim() && !image) return;
+  async function publish() {
+    if (!text.trim() && !picked) return;
+    let imageId = '';
+    if (picked) {
+      try { imageId = (await saveFile(picked)).id; } catch (e) {
+        setSaveError(e instanceof Error ? e.message : 'The photo could not be saved.');
+        return;
+      }
+    }
     posts.add({
-      author: ME, text: text.trim(), image, at: new Date().toISOString().slice(0, 10),
+      author: ME, text: text.trim(), imageId, at: new Date().toISOString().slice(0, 10),
       likedBy: [], comments: [], reported: false,
     });
-    setText(''); setImage(''); setComposing(false); setScreen('feed');
+    setText(''); setPicked(null); setSaveError(''); setComposing(false); setScreen('feed');
   }
 
   function toggleLike(p: Post) {
@@ -407,7 +429,7 @@ export default function App() {
                 )}
               </div>
               {p.text && <p style={{ fontSize: 15, margin: '0 0 10px', lineHeight: 1.5 }}>{p.text}</p>}
-              {p.image && <img src={p.image} alt="" style={{ width: '100%', borderRadius: 10, marginBottom: 10, display: 'block' }} />}
+              {p.imageId && <PostImage id={p.imageId} />}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Button variant="ghost" onClick={() => toggleLike(p)}>
                   {p.likedBy.includes(ME) ? 'Liked' : 'Like'} ({p.likedBy.length})
@@ -471,11 +493,13 @@ export default function App() {
           />
           <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
             <Button variant="ghost" onClick={() => fileRef.current && fileRef.current.click()}>
-              {image ? 'Change photo' : 'Add photo'}
+              {picked ? 'Change photo' : 'Add photo'}
             </Button>
-            {image && <Button variant="ghost" onClick={() => setImage('')}>Remove</Button>}
+            {picked && <Button variant="ghost" onClick={() => setPicked(null)}>Remove</Button>}
           </div>
-          {image && <img src={image} alt="" style={{ width: '100%', borderRadius: 10, marginBottom: 10, display: 'block' }} />}
+          {preview && <img src={preview} alt="" style={{ width: '100%', borderRadius: 10, marginBottom: 10, display: 'block' }} />}
+          <p style={{ fontSize: 12, margin: '0 0 10px', opacity: 0.75 }}>Photos are saved on this device.</p>
+          {saveError && <p role="alert" style={{ fontSize: 13, margin: '0 0 10px' }}>{saveError}</p>}
           <div style={{ display: 'flex', gap: 8 }}>
             <Button onClick={publish}>Post</Button>
             <Button variant="ghost" onClick={() => setComposing(false)}>Cancel</Button>

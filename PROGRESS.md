@@ -88971,3 +88971,25 @@ The tool-call half added no case. It could only disagree when a `stop_build` the
 The one writer that bypasses `writeFile` is the unused-dependency prune, which goes through npm. It already stands down with `!isGreenLatched(workspaceId)`.
 
 **Lock.** `tests/everyDurableWriteRespectsGreenFreeze.test.ts` records each call site with its verdict and count. A new direct save, a second copy of a classified one, or a stale verdict fails CI. The audit therefore cannot quietly go out of date.
+### 2026-10-04 — Admin decisions on the 68f0a486 / c70bcbb4 / 241215d1 open rows
+
+- **Q-541 and Q-527 (items argued not defects): agreed by the admin ("han, band kar do").** Resolved as
+  not-a-defect; the evidence for each is in the row text recorded in #3524 and in the ledgers above.
+- **Q-275 (a request that ended mid-sentence): closed by the admin as not ours.** Measured: 2,429 characters
+  ending at a line break; nothing on our side cuts there (server limit 20,000, no composer `maxLength`, no
+  long-paste conversion, the report stores the prompt in full).
+- **Q-540: the admin chose option (b)** — "navbharatai jo bhi app banaye, uske andar jo bhi function banaye jaye,
+  woh real hone chahiye, production grade". The explorer may sign up a throwaway account only in apps whose
+  sign-in lives in the browser alone. Being built in the follow-up PR.
+
+### 2026-10-04 — Follow-up to 68f0a486: Q-540 built (option b) and Q-542 (uploads in localStorage)
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-540 screens behind a sign-in page with no demo account never checked | the explorer could only use accounts the app ships | a check with no way past a door the app itself opens to anyone | `authLivesInTheBrowser(files)` — no backend, no hosted auth/database SDK, no `NavData`, no network sign-in, no API base URL, and a password handled beside browser storage — lets the sign-in check sign up ONE throwaway account through the app's own form (in its own discarded browser profile) and sign in with it. Every other app keeps "no account is ever created" | `tests/theSchoolAppBehindItsSignInPage.test.ts` (real browser, both sign-up shapes; reverted → 4 fail) |
+| Q-542 uploads as data URLs in localStorage, summary "uploads work" | nothing said where a file goes without a database; our social starter modelled `readAsDataURL` into `useCollection`, whose quota error was swallowed | file bytes in a small key-value store (localStorage, sessionStorage, NavData) | `browserFileStore.ts` IndexedDB store shipped as `src/lib/files.ts` in every pro starter; social starter uses it; failed saves shown on every screen; prompt rule; once-per-build write-time note; claim audit `uploads-in-small-store` | `tests/anUploadIsKeptWhereFilesBelong.test.ts` (real browser 6 MB proof; census over every starter, per file; each layer reverted → fails) |
+
+Siblings hunted: `readAsDataURL` across the whole repo — the only generated-app site was the social starter
+(the rest is NavBharatAI's own client sending images to APIs, not storing them). The `catch {}` that hid a
+failed save lived only in `proShell.ts`'s `useCollection`.
+

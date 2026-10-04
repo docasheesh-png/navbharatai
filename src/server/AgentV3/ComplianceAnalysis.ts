@@ -46,7 +46,78 @@ export const CONSOLE_CALL = /\bconsole\.(log|info|warn|error|debug)\s*\(/;
  * what this detector flags — one shared definition, so the two can never drift (rule 2).
  */
 export function lineLogsCredential(line: string): boolean {
-  return CONSOLE_CALL.test(line) && SENSITIVE.test(line);
+  const at = String(line ?? '').search(CONSOLE_CALL);
+  if (at < 0) return false;
+  const call = line.slice(at);
+  const { code, labels } = splitStrings(call);
+  // (a) A VALUE is logged: the sensitive name is code — `password`, `user.token`, `${apiKey}`.
+  if (SENSITIVE.test(code)) return true;
+  // (b) A label that introduces a value: "password:", `token=${t}`, "OTP is", followed by something that is
+  // not an error. "Failed to reset password", err names a task, not a credential (Q-150).
+  return labels.some((l) => SENSITIVE_LABEL_END.test(l.text) && l.next !== null && !ERRORISH.test(l.next.split('.')[0].trim()));
+}
+
+/**
+ * 🔴 THE LABEL IS NOT THE VALUE (queue Q-150, autopsy 77bd487b). This matched the WHOLE line, so
+ * `console.error('Failed to reset password', err)` was a high-severity `pii-in-logs` finding: the build's
+ * one hard compliance block, and then the "heal" emptied the call to `console.error()` — deleting a real
+ * error log to fix a leak that never existed. A credential is leaked when its VALUE reaches the console:
+ * the sensitive name is code, or a string label ends on it ("password:", `token=${…}`) and a value follows.
+ */
+const SENSITIVE_LABEL_END = /\b(?:password|passwd|aadhaar|aadhar|pan|cvv|ssn|credit[_ -]?card|card[_ -]?number|otp|secret|api[_ -]?key|apikey|access[_ -]?token|refresh[_ -]?token|private[_ -]?key|passport|token)\s*(?:[:=]|\bis\b)\s*$/i;
+/** What follows the label is an error, not a value: `err`, `error`, `e`, `ex`, `reason`, `*Error`. */
+const ERRORISH = /^(?:err|error|e|ex|exc|exception|reason|\w*Error|\w*Err)$/i;
+
+/**
+ * The console call with every string's TEXT blanked (template `${…}` expressions kept as code), plus each
+ * string piece and the argument or expression right after it. Single-line, quote-aware. PURE.
+ */
+function splitStrings(call: string): { code: string; labels: Array<{ text: string; next: string | null }> } {
+  let code = '';
+  const labels: Array<{ text: string; next: string | null }> = [];
+  const nextArg = (from: number): string | null => {
+    const m = /^\s*,\s*([\w$.]+)/.exec(call.slice(from));
+    return m ? m[1] : null;
+  };
+  let i = 0;
+  while (i < call.length) {
+    const c = call[i];
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      let text = '';
+      while (j < call.length && call[j] !== c) { if (call[j] === '\\') j++; else text += call[j]; j++; }
+      labels.push({ text, next: nextArg(j + 1) });
+      code += '""';
+      i = j + 1;
+      continue;
+    }
+    if (c === '`') {
+      let j = i + 1;
+      let text = '';
+      while (j < call.length && call[j] !== '`') {
+        if (call[j] === '\\') { j += 2; continue; }
+        if (call[j] === '$' && call[j + 1] === '{') {
+          let depth = 1;
+          let k = j + 2;
+          while (k < call.length && depth > 0) { if (call[k] === '{') depth++; else if (call[k] === '}') depth--; k++; }
+          const expr = call.slice(j + 2, k - 1);
+          labels.push({ text, next: expr.trim() || null });
+          code += ` ${expr} `;
+          text = '';
+          j = k;
+          continue;
+        }
+        text += call[j];
+        j++;
+      }
+      labels.push({ text, next: nextArg(j + 1) });
+      i = j + 1;
+      continue;
+    }
+    code += c;
+    i++;
+  }
+  return { code, labels };
 }
 
 // PII form-field signals — used to decide whether the app collects personal data

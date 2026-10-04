@@ -818,13 +818,21 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '    5b. generate_melody       — the SOUND ITSELF. generate_game_vfx only loads sound FILES, which',
     '       the app does not have, so call this too and a game is never silent: synthesised music and',
     '       cues (coin, success, level-up) from notes, no file, no dependency, no cost.',
-    '    6. generate_game_shell    — LAST. Composes all of the above into something playable, with HUD,',
+    '    6. generate_game_shell    — LAST, and ONLY for a game drawn in 3D: it renders a three.js scene.',
+    '       Composes all of the above into something playable, with HUD,',
     '       on-screen TOUCH CONTROLS (joystick, camera drag, Attack/Jump/Use/Run, Pause — shown only on a',
     '       touch screen; choose buttons with `touchControls`, never hand-roll a joystick),',
     '       pause and restart, and handles WebGL teardown so the tab does not die after a few visits.',
     '  Then write only the GAME ITSELF — the levels, the rules, the content — passing it to the shell',
     '  through setup() and update(). Emit events for anything that should be seen or heard; never call',
     '  particles or audio from gameplay code.',
+    // 🍬 Candy report 7da1cdca (2026-10-04): a match-3 puzzle got the 3D shell, the 3D layer and its
+    // character controller — 24 files nothing used, and `three` installed for an app that draws emoji
+    // in a grid. The shell was the "LAST" step of every game because nothing said it was 3D-only.
+    '  🧩 A 2D GAME ON A BOARD OR THE PAGE — puzzle, match-3, memory cards, quiz, snake, tic-tac-toe,',
+    '  sudoku, word game — takes NEITHER generate_game_3d NOR generate_game_shell. Draw it with React',
+    '  (or one 2D canvas), keep generate_game_runtime, generate_game_vfx and generate_melody for the loop,',
+    '  the feel and the sound, and make every control a real button (or pointer events) so it plays by touch.',
     // 🏁 ADMIN 2026-08-25, from a real racing game: "baar baar kehne par gaadi ki speed kyu nahi badhayi
     // ja rahi… speed 0 sirf aur sirf tab ho, jab user bole". A vehicle that will not move is not a
     // difficulty setting — it is an unplayable game, and it is the single easiest way to ship one.

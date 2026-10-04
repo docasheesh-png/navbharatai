@@ -2263,7 +2263,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
     {
       name: 'generate_game_shell',
       description:
-        'COMPOSE a runnable game from the other game layers. Call generate_game_runtime, '
+        'COMPOSE a runnable 3D game from the other game layers — it renders a three.js scene, so a 2D '
+        + 'board or page game (puzzle, match-3, cards, quiz) never calls it. Call generate_game_runtime, '
         + 'generate_game_3d, generate_game_controller and generate_game_vfx first — this wires them '
         + 'together and is what turns four toolkits into a game you can actually play. Emits '
         + 'src/game/Game.ts (the composition root), src/game/GameCanvas.tsx (React mount) and '

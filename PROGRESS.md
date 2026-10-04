@@ -87495,3 +87495,19 @@ sibling workflow prints a different sentence and was never hunted.
 
 All fixes reversion-proven (`tests/eachPlatformKnowsItsOwnKeys.test.ts`). The missing keys themselves are
 the user's to add; NavBharatAI now says so before a run, in plain words, and cannot create Apple keys.
+
+## 2026-10-04 — Autopsy 7da1cdca: "Ek puzzle game bnao candy wala" — four of our own defects (PR #3467)
+
+Weak tier, build succeeded, the game rendered and played (₹110.75 billed on $0.30 real cost).
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-240/241 saved copy ≠ sandbox | a shell write never reached the captured writes, and captured writes win at save | npm's read-back (2026-09-27) fixed ONE instance | bash reads back every file it plainly wrote (`sed -i`, `tee`, redirects, `cp`/`mv`, inline `node -e`/`python -c` literal writes) | dispatcher test, reverted-and-failed |
+| Q-242 false "unstyled" | CSS defined in a script string was invisible to the class check | our own recipe failing our own gate | `classesDefinedInScriptStrings` | real shell census, reverted-and-failed |
+| Q-243 `three` missing | recipes NAMED their dependency and left the install to the model | 24 sites (7 game recipes + 22 `Add the dependency:` lines) | installed at the recipe doors under the npm lock, into the right package.json; busy/failed said honestly | dispatcher tests (game shell, QR), reverted-and-failed |
+| Q-244 edits to `melody.ts` | the "fixed in ANOTHER file" note never asked whether another module exports the name | a routing claim made without the evidence that decides it | bounded grep + `exportedElsewhere` | report's error, reverted-and-failed |
+| Q-245 3D shell for a 2D game | "LAST" step of every game, 3D-only nowhere said | — | prompt + tool text | text guard; real effect needs the next 2D game |
+
+Owned elsewhere (not duplicated): spacing snap and "a game that saves is not 'nothing to save'" (#3474 Q-091/Q-093);
+GLM crawl (Q-009, admin: leave); `startTier: "gemini"` (Q-052). OPEN here: Q-246 (shell `rm` resurrected by the
+save), Q-247 (explorer could not press ⏸), Q-248 (summary contradicts itself).

@@ -44,7 +44,7 @@ import type { Checkpointer } from './GitManager';
 import { isWorkerRole, isPlanningOnlyRole, PLAN_YOURSELF_NOTE } from './AgentRegistry';
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { shellBuildProvesSuccess } from './buildFailurePrediction';
-import { robustTscCommand } from './tscCommand';
+import { robustTscCommand, recipeInstallCommand, RECIPE_DEPS_BUSY_MARKER } from './tscCommand';
 import { parseTscErrors, type TscError } from './EndgameRepair';
 import { tscOutputProvesClean, looksLikeTypecheckCommand, tscVerdict, countTscErrors } from './TscGate';
 import { pathMissHint } from './suggestFilePath';
@@ -96,10 +96,10 @@ import { scopeStyleHandBack } from './stylePolishResume';
 import { batchSizeNote } from './batchSize';
 import { pageDesignWriteNote, isPageFile, analyzeDesignCoverage, type DesignDefect } from './DesignCoverage';
 import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
-import { shellWriteTargets, shellRemovalTargets } from './shellWriteTargets';
+import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets } from './shellWriteTargets';
 import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
-import { tscErrorCauses, tscCauseNote, exportTargetCandidates } from './tscErrorCause';
+import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames } from './tscErrorCause';
 import {
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckWarmupCommand, WARMUP_COMPILED_MARKER, writeTypecheckNote, writeTypecheckCleanNote, WriteTypecheckQueue,
   shouldProbeTsconfig, probeExhausted, isMissingFileError, type TsProjectVerdict,
@@ -314,7 +314,8 @@ import { generateGameVfxAudio } from '../lib/GameVfxAudioGenerator';
 import { generateMelody } from '../lib/MelodyGenerator';
 import { generateGameShell } from '../lib/GameShellGenerator';
 import { generateGameSystems } from '../lib/GameSystemsGenerator';
-import { missingLayerFiles, missingLayersNote } from '../lib/gameRecipeLayers';
+import { missingLayerFiles, missingLayersNote, recipeDependenciesNeeded } from '../lib/gameRecipeLayers';
+import { namedDependencies, manifestDirFor, unlistedDependencies } from './recipeDependencyLine';
 import { generateUiStates } from '../lib/UiStatesGenerator';
 import { generateFrontendStateIntegration } from '../lib/FrontendStateGenerator';
 import { generateImageOptimization } from '../lib/ImageOptGenerator';
@@ -649,6 +650,23 @@ export class ToolDispatcher {
     this._unrecorded.clear();
     for (const [path, content] of pending) {
       try { this.onFileWrite(path, content); } catch { /* the durable record is best-effort */ }
+    }
+  }
+
+  /**
+   * Record the files a shell command wrote, read back from the sandbox (see the bash tool). A target
+   * that is gone (`rm`) or unreadable is skipped; generated and dependency folders are never recorded.
+   * `skip` is a path another read-back already recorded. Best-effort: the sandbox scan at the final
+   * save remains the net for a write the command's text did not show.
+   */
+  private async recordShellWrites(command: string, skip: string | null): Promise<void> {
+    let targets: string[];
+    try { targets = shellReadBackTargets(command, skip); } catch { return; }
+    for (const path of targets) {
+      try {
+        const content = await this.actuator.readFile(this.workspaceId, path);
+        if (typeof content === 'string') this.onFileWrite(path, content);
+      } catch { /* removed or unreadable — nothing to record */ }
     }
   }
 
@@ -2833,6 +2851,22 @@ export class ToolDispatcher {
         if (typeof content === 'string' && content) out[p] = content;
       } catch { /* absent or unreadable — not evidence either way */ }
     }));
+    // …and the modules that DO export the missing name, so an import of the wrong module is told to
+    // change its import rather than to add the name to the wrong file (tscErrorCause.exportedElsewhere).
+    // One bounded grep, at most four reads; only when such an error exists.
+    try {
+      const cmd = exportSearchCommand(missingExportNames(own));
+      if (cmd) {
+        const r = await withTimeout(this.actuator.runCommand(this.workspaceId, cmd), 5_000, 'write-typecheck-export-search');
+        const hits = String(r?.stdout ?? '').split('\n').map((l) => l.trim()).filter((l) => l && !(l in held) && !(l in out)).slice(0, 4);
+        await Promise.all(hits.map(async (p) => {
+          try {
+            const content = await withTimeout(this.actuator.readFile(this.workspaceId, p), 5_000, 'write-typecheck-export-source');
+            if (typeof content === 'string' && content) out[p] = content;
+          } catch { /* not evidence either way */ }
+        }));
+      }
+    } catch { /* a search that fails leaves the note exactly as it was */ }
     return out;
   }
 
@@ -2905,18 +2939,92 @@ export class ToolDispatcher {
    * for the tool result. Best-effort: a failure leaves the recipe's own result exactly as it was.
    */
   private async addMissingRecipeLayers(written: Record<string, string>, agent: AgentRole): Promise<string> {
+    let layersNote = '';
+    const all: Record<string, string> = { ...written };
     try {
       const listed = await this.actuator.listFiles(this.workspaceId).catch(() => [] as string[]);
       const present = new Set(listed.map((f) => String(f).replace(/^\.?\//, '')));
       const missing = missingLayerFiles(written, present);
-      if (missing.size === 0) return '';
       for (const [path, f] of missing) {
         await this.actuator.writeFile(this.workspaceId, path, f.content);
         this.state?.recordFileChange({ path, kind: 'create' }, agent);
         getWorkspaceMemory(this.workspaceId).indexFile(path, f.content);
+        all[path] = f.content;
       }
-      return missingLayersNote(missing);
-    } catch { return ''; }
+      layersNote = missingLayersNote(missing);
+    } catch { /* the recipe's own result stands */ }
+    return layersNote + await this.installRecipeDependencies(all);
+  }
+
+  /**
+   * Install the packages these recipe files import and the project does not list yet — only packages a
+   * recipe declares, at the version it declares (gameRecipeLayers.recipeDependenciesNeeded). Under the
+   * install lock, so it never races the background install; when that install is still busy, or npm
+   * fails, the tool result says what to install instead of claiming it was done. The rewritten
+   * package.json is recorded through the one write door, so the saved project lists the package too.
+   */
+  private async installRecipeDependencies(files: Record<string, string>): Promise<string> {
+    let pkg: string | null = null;
+    try { pkg = await this.actuator.readFile(this.workspaceId, 'package.json'); } catch { return ''; }
+    const needed = recipeDependenciesNeeded(files, pkg);
+    if (needed.length === 0) return '';
+    return `\n\n${await this.installDependencies(needed, '')}`;
+  }
+
+  /**
+   * Replace a recipe result's `Add the dependency: …` line with what happened when we installed it, into
+   * the package.json the recipe's files belong to (recipeDependencyLine.ts). A dependency already listed
+   * is not installed again; an unreadable manifest is left alone and the line stays as the recipe wrote it.
+   */
+  private async settleNamedDependencies(content: string, writtenPaths: string[]): Promise<string> {
+    const named = namedDependencies(content);
+    if (!named) return content;
+    const candidates = new Set<string>();
+    for (const p of writtenPaths) {
+      const parts = String(p).split('/').slice(0, -1);
+      for (let i = parts.length; i > 0; i--) candidates.add(parts.slice(0, i).join('/'));
+    }
+    const withManifest = new Set<string>();
+    for (const dir of [...candidates].slice(0, 8)) {
+      try { await this.actuator.readFile(this.workspaceId, `${dir}/package.json`); withManifest.add(dir); } catch { /* none there */ }
+    }
+    const dir = manifestDirFor(writtenPaths, (d) => withManifest.has(d));
+    const manifest = dir ? `${dir}/package.json` : 'package.json';
+    let pkg: string | null = null;
+    try { pkg = await this.actuator.readFile(this.workspaceId, manifest); } catch { return content; }
+    const missing = unlistedDependencies(named.deps, pkg);
+    if (missing === null) return content;
+    const outcome = missing.length === 0
+      ? `Dependency already in ${manifest}: ${named.deps.map((d) => d.name).join(', ')} — nothing to install.`
+      : await this.installDependencies(missing, dir);
+    return content.replace(named.line, outcome);
+  }
+
+  /**
+   * Install known packages under the npm install lock, record the rewritten manifest, and say honestly
+   * what happened — installed, deferred because another install is running, or failed.
+   */
+  private async installDependencies(deps: ReadonlyArray<{ name: string; version: string; dev: boolean }>, dir: string): Promise<string> {
+    const named = deps.map((d) => `${d.name}@${d.version}`).join(', ');
+    const base = recipeInstallCommand(deps);
+    if (!base) return `Add the dependency: ${named}`;
+    const cmd = dir ? `cd ${dir} && ${base}` : base;
+    const manifest = dir ? `${dir}/package.json` : 'package.json';
+    try {
+      const started = Date.now();
+      const r = await withTimeout(this.actuator.runCommand(this.workspaceId, cmd), 150_000, 'recipe-dependencies');
+      try { this.onCommand?.({ command: cmd, exitCode: r.exitCode, stdout: r.stdout || '', stderr: r.stderr || '', durationMs: Date.now() - started }); } catch { /* diagnostics are best-effort */ }
+      if (String(r.stdout ?? '').includes(RECIPE_DEPS_BUSY_MARKER)) {
+        return `📦 This code needs ${named}. The app's packages are still being installed, so add them when that finishes: npm install ${deps.map((d) => `${d.name}@${d.version}`).join(' ')}${dir ? ` (in ${dir})` : ''}`;
+      }
+      if (r.exitCode !== 0) {
+        return `📦 Installing ${named} failed (npm exit ${r.exitCode}). Install them before you finish — this code does not compile without them.`;
+      }
+      try { this.onFileWrite(manifest, await this.actuator.readFile(this.workspaceId, manifest)); } catch { /* the final save's scan still sees it */ }
+      return `📦 Installed ${named} into ${manifest} — this code imports them. Do not install them again.`;
+    } catch {
+      return `📦 This code needs ${named} — install them before you finish.`;
+    }
   }
 
   /**
@@ -3087,11 +3195,20 @@ export class ToolDispatcher {
         ? await this.runVisual(call)
         : null;
       this.flushUnrecordedWrites(); // anything written outside a tool call, before this one runs
+      const writtenBefore = new Set(this._writtenPaths);
       let content: string;
       try {
         content = visual ? visual.content : await this.run(call, agent);
       } finally {
         this.flushUnrecordedWrites(); // every write this call made reaches the saved project
+      }
+      // A RECIPE'S DEPENDENCY IS INSTALLED, NOT NAMED (recipeDependencyLine.ts) — one door for every recipe.
+      const recipeCalled = call.name === 'run_recipe'
+        ? String((call.input as Record<string, unknown> | undefined)?.name ?? '')
+        : call.name;
+      if (!visual && isRecipeName(recipeCalled)) {
+        try { content = await this.settleNamedDependencies(content, [...this._writtenPaths].filter((p) => !writtenBefore.has(p))); }
+        catch { /* the recipe's own result stands */ }
       }
       this.events?.emit({
         type: 'tool_result',
@@ -4473,6 +4590,14 @@ export class ToolDispatcher {
             catch { /* the sandbox scan at the final save still sees it */ }
           }
         }
+        // AND SO IS EVERY FILE THE COMMAND PLAINLY WROTE (iPhone/candy report 7da1cdca, 2026-10-04). The
+        // npm read-back above was one instance of a class: a shell write lands in the sandbox and never
+        // reaches the captured writes, so the copy the model wrote EARLIER wins at the final save. In that
+        // report `sed -i` snapped spacing in two files, every browser check saw the new files, and the
+        // saved project, the preview copy and any publish got the old ones (SAVED_SOURCE_DIVERGES,
+        // PREVIEW_SNAPSHOT_STALE). Read back what the shell's own syntax says it wrote — whatever the exit
+        // code, because a failed command may still have changed a file — and record it through the one door.
+        await this.recordShellWrites(effectiveCommand, manifestRewrittenBy(effectiveCommand));
         // PRISMA RELATION SELF-HEAL (ShopKhata autopsy 2026-07-17): an LLM-written schema routinely
         // ships a HALF-relation ("user User?" with no opposite field / no references) — prisma
         // generate then fails with a validation error whose OWN message says the fix: "run `prisma
@@ -8025,8 +8150,9 @@ export class ToolDispatcher {
         this.scheduleCheckpoint('3D layer');
         // Naming the install is not optional: a 3D layer whose `three` dependency is never added
         // produces an app that cannot build, which is the honest-failure rule applied to a generator.
-        const g3Deps = g3.dependencies.map((d) => `${d.name}@${d.version}`).join(', ');
-        return `Wired the 3D layer:\n${g3Written.join('\n')}\nAdd the dependency: ${g3Deps} (and @types/three)\n\n${g3.instructions}${g3Layers}`;
+        // Since 2026-10-04 the dependency is INSTALLED, not named (installRecipeDependencies, called by
+        // addMissingRecipeLayers): `g3Layers` says what happened, including when it could not be done.
+        return `Wired the 3D layer:\n${g3Written.join('\n')}\n\n${g3.instructions}${g3Layers}`;
       }
 
       case 'generate_game_runtime': {

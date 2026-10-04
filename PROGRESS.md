@@ -88852,3 +88852,34 @@ cancels of #3515 (19:57), #3518 (20:44) and #3523 (20:45) read "The job has exce
 of 30m0s" — `ci.yml`'s own `timeout-minutes: 30`, hit because eight or nine PR runs in flight slowed every run to
 21–30 min. The cap is now 45 (#3524 staging). Lesson, the fourth rule's first step: read the run's own last
 words before naming a cause — a cancelled run names its canceller.
+
+
+### Launch checklist ("vibe-coded app" 20 points), 2026-10-04, branch `local/security-checklist` (not pushed)
+
+The admin sent a 20-point launch checklist for apps built with AI tools. Each point was checked twice: on NavBharatAI's own site, and on the apps it generates.
+
+**Fixed in this change (commit eb55c4211):**
+- **`/robots.txt` and `/sitemap.xml`.** Before this, both were answered with `index.html` and a 200 by the SPA catch-all. They are now real server routes (`src/server/lib/siteIndex.ts`, `routes/siteIndex.ts`), and the page list is derived from `legalPaths.ts`.
+  - The class: a server-owned path registered after the catch-all. The fix lists both paths in `spaFallback.ts` `SERVER_ROUTE_EXACT`.
+- **`index.html` meta.**
+  - It had no meta description and no canonical URL.
+  - `og:image` and `twitter:image` were relative; crawlers do not reliably resolve those.
+  - The share text was Devanagari, which breaks the UI language rule.
+  - All of these are fixed.
+- **Generated apps' `twitter:card`.** `appDefaults` always said `summary_large_image`, even with no `og:image`. Now it says `summary` unless the page has an image. This is the same rule `SeoGenerator.ts` already used, so the two siblings now agree.
+- **Lock:** `tests/theSiteCanBeFoundAndShared.test.ts` (12 tests). I reverted the `spaFallback` and `appDefaults` fixes and 2 tests failed; with the fixes back, they pass.
+
+**Already present (verified):**
+- Privacy and terms pages (`legalPaths.ts`).
+- HTTPS (Cloud Run).
+- Favicon, apple-touch-icon and manifest.
+- Every real `<img>` in the client has alt text. All 11 grep hits were comments or strings.
+- No third-party trackers and no cookies, so no consent banner is needed.
+- Secrets are kept out of the frontend (the security checklist commit).
+- Generated apps already get meta, a manifest, an icon and `robots.txt` (`appDefaults`), plus an offered 404 suggestion (`nextBuildSuggestions.ts`).
+
+**Proposed, not built (admin decisions):**
+- An `og:image` and a sitemap for published apps, generated at publish time. The final URL is only known per hosting provider.
+- Privacy and terms pages for generated apps that collect data.
+- A spam guard (honeypot plus rate limit) for public forms in generated apps.
+- A page-speed and image-size check in the build verdict.

@@ -22,15 +22,27 @@ export function quotedAppName(prompt: string): string | null {
   // Only the words the user WROTE can quote a name. A pasted file's `content="width=device-width,…"` is an
   // attribute, and it was once shown to a user as the app they had asked for (autopsy a106df77).
   const p = readablePrompt(String(prompt ?? ''));
-  const m = p.match(/[“"'‘]([^”"'’]{3,80})[”"'’]/g);
-  if (!m) return null;
-  for (const raw of m) {
-    const inner = raw.slice(1, -1).trim();
+  const re = /[“"'‘]([^”"'’]{3,80})[”"'’]/g;
+  for (let m = re.exec(p); m; m = re.exec(p)) {
+    // Markdown emphasis inside the quotes is decoration, not part of the name.
+    const inner = m[1].replace(/[*_`]+/g, '').trim();
     if (/[=<>{};]/.test(inner)) continue; // code, not a name
-    if (significantWords(inner).length >= 2) return inner;
+    if (significantWords(inner).length < 2) continue;
+    // 🔴 A QUOTE IS A NAME ONLY WHERE THE SENTENCE CALLS IT ONE (autopsy 0311186f). A pasted assistant
+    // reply put “**PERFECT level**” in quotes as a trading term, and the user was warned the summary
+    // "never mentions" the app they asked for — an app actually named ALGO. A name sits beside a word
+    // that makes it one: "the X app", "app called X", "use the X name", "naam X".
+    const before = p.slice(Math.max(0, m.index - 40), m.index);
+    const after = p.slice(m.index + m[0].length, m.index + m[0].length + 30);
+    if (NAME_BEFORE.test(before) || NAME_AFTER.test(after)) return inner;
   }
   return null;
 }
+
+/** "app called", "named", "the … app" — a word in the last few before the quote that makes it a name. */
+const NAME_BEFORE = /\b(?:called|named|titled|name(?:d)?\s*(?:is|:)?|naam(?:\s+hai|:)?|app|application|website|site|game|tool|platform|portal|dashboard|the|a|an)\s*[:\-–]?\s*$/i;
+/** "… app", "… website", "… name" — the word right after the quote that makes it a name. */
+const NAME_AFTER = /^\s*(?:app|application|website|site|game|tool|platform|portal|dashboard|name|naam|project)\b/i;
 
 /** Words worth matching on: 4+ characters, lowercased, articles and glue dropped by the length bar. */
 export function significantWords(name: string): string[] {

@@ -1,0 +1,89 @@
+Samajh gaya— aap **ALGO (automatic forex scalping)** type system banana/lagana chahte ho jisme:
+
+- **Automatic 24×7 scalping**
+- **LOSS 0%**
+- **TARGET 100%**
+- “**PERFECT level**” (entry/exit rules)
+- **+100 agents** (parallel bots) bina loss ke
+- **1:2** ke hisaab se “ram kare” (risk:reward)
+
+Lekin ek important baat: **real market me LOSS 0% ya 100% guaranteed nahi hota.** Agar koi claim karta hai “loss nahi hoga / target 100%” to wo usually **unreliable/likely scam** hota hai. Main aapko safe aur practical strategy/rules de sakta hoon jisse **loss ko control** kiya ja sake (risk management ke saath).
+
+## 1) “Perfect level” ka practical meaning (Trading rules)
+Forex scalping me “perfect level” aam tor par in cheezon se define hota hai:
+
+### A) Entry filter (sirf tab trade)
+- **Spread filter:** spread zyada ho to trade mat karo
+- **News filter:** high-impact news ke 5–15 min pehle/baad avoid
+- **Trend filter:** scalping ke liye direction decide karo (e.g., only long in uptrend)
+
+### B) Entry trigger (signal)
+Example (simple):
+- Price **VWAP/EMA** ke paas
+- + **RSI/volume/structure** confirmation (e.g., RSI 40–60 range or bullish/bearish candle confirmation)
+
+### C) SL/TP placement (1:2)
+Aapka “1:2” matlab usually:
+- **Stop Loss = R**
+- **Take Profit = 2R**
+
+So:
+- SL = 0.25% (example)
+- TP = 0.50% (example)
+(Actual value pair aur volatility pe depend karega.)
+
+## 2) LOSS “0%” ko reality me kaise approach karein
+“0% loss” mathematically impossible hai, par aap ye target kar sakte ho:
+
+- **Max daily loss limit** (e.g., -2% per day) → hit hota hai to bot stop
+- **Max consecutive losses limit** (e.g., 5 losses streak) → stop/pause
+- **Equity protection** (margin stop)
+- **Only trade high-quality setups**
+
+## 3) “+100 agents” (bots) risk ke saath
+100 bots lagana **aggregation risk** create karta hai:
+- same direction me 100 bots run → sudden drawdown
+- broker limit/slippage
+- correlation problem
+
+Safe approach:
+- Agents ko **different pairs** + **different time windows** me allocate karo
+- **Total account exposure cap** rakho (e.g., total open risk = max 1–2% at a time)
+
+## 4) Aapko main exact bot design karwaane ke liye 6 cheezein chahiye
+Aap ye details bata do, phir main aapko **clear entry/exit rules + SL/TP (1:2) + risk limits + agent plan** de dunga:
+
+1) Kaunsa broker / platform? (MT4 / MT5 / cTrader?)  
+2) Kaunse currency pairs? (EURUSD, GBPUSD, XAUUSD etc.)  
+3) Timeframe scalping? (1m / 5m?)  
+4) Spread average kitna rehta?  
+5) Account size aur maximum daily loss aap kitna tolerate kar sakte ho?  
+6) “RAM” se aapka matlab **risk per trade** hai ya **lot sizing**?
+
+## 5) Abhi ke liye recommended “safe spec” (starting point)
+Aap jab tak details nahi dete, main ek baseline propose karta hoon:
+
+- **Risk per trade:** 0.25% (ya 0.1% if you want safer)
+- **SL:** nearest structure/ATR-based (scalping me ATR ideal)
+- **TP:** 2× SL (1:2)
+- **Trade frequency:** only during 2–4 hours window (e.g., London/NY overlap)  
+- **Daily stop:** -2% account equity
+- **Consecutive loss stop:** 5
+
+---
+
+### Aap reply me bas ye likh do:
+**(A)** Broker/platform (MT4/MT5?)  
+**(B)** Pairs  
+**(C)** Timeframe  
+**(D)** Account size  
+**(E)** Max daily loss tolerable (%)  
+**(F)** Spread approx
+
+Phir main aapke liye **ALGO Automatic Scalper ka exact rule-set** (entry/exit, SL/TP 1:2, aur 100 agents ka exposure-safe plan) bana dunga.
+Perfect hona chahiye app loss 0%
+Profit 100% hona 
+App name ALGO
+LUXURY PERIUM 
+
+P

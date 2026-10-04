@@ -2036,6 +2036,11 @@ export class BuildDiagnostics {
    * length. Never throws; a malformed estimate is simply not stored, and the report then says nothing
    * about accuracy rather than something wrong.
    */
+  /** Forget the opening ETA: the turn turned out not to be the job it described (moduleTurnEta.ts). */
+  withdrawEtaPromise(): void {
+    this.etaPromise = undefined;
+  }
+
   setEtaPromise(p: EtaPromise): void {
     const estimateMs = Number(p?.estimateMs);
     if (!Number.isFinite(estimateMs) || estimateMs <= 0) return;

@@ -2,6 +2,7 @@ import { toSafeClientMessage } from '../lib/httpError';
 import type { Express, Request, Response } from 'express';
 import { copyName, copyStatus } from '../AgentV3/duplicateApp';
 import { decideMarkupOnProof, markupNeedsPreview, markupWaiverSettledLine } from '../AgentV3/previewEarnsMarkup';
+import { moduleTurnEtaLine, moduleTurnEtaNote } from '../AgentV3/moduleTurnEta';
 import { isPlatformFixRequest, inBrowserPreviewFixGuidance } from '../../lib/platformFixRequest';
 import { buildRateLimiter, rateLimiter, workspaceRateLimiter, workspacePollRateLimiter, deployOpsRateLimiter, inbrowserPreviewRateLimiter, previewPollRateLimiter, shellInputRateLimiter, verifyFirebaseToken, verifyFirebaseIdentity, verifyFirebaseIdentityDiag, resolveVerifiedEmail, resolveVerifiedName, enforceNotBanned } from '../lib/authMiddleware';
 import express from 'express';
@@ -10550,7 +10551,10 @@ async function noteBuildOutcome(
         // A picture is part of the spec only when it is a UI design (the describer returned a contract).
         // A photo of a person or a scene says what the picture shows, not what to build.
         const pictureIsSpec = designContract !== null;
-        picturesSetAside = images.length > 0 && !pictureIsSpec ? images.length : 0;
+        // Only a picture that was READ can be judged a photo (autopsy 0311186f: the vision call was abandoned
+        // at 8 s, and the report still said the picture was "a photo, not a UI design"). An unread picture is
+        // reported by ATTACHMENTS_READ as unread, never classified.
+        picturesSetAside = images.length > 0 && fate === 'read' && !pictureIsSpec ? images.length : 0;
         const specRaw = [docs, pictureIsSpec ? stripContractBlock(vis) : ''].filter(Boolean).join('\n\n');
         planningAttachmentText = specRaw.trim()
           ? `${fenceUntrusted('attached files', redactPII(specRaw))}${contractBlock ? `\n\n${contractBlock}` : ''}`
@@ -15785,7 +15789,17 @@ async function noteBuildOutcome(
           // can't touch, so the old raw `fileTree.length` (e.g. 317) contradicted the import banner's
           // "165 files" for the SAME project. One shared count (fileClassification.ts) keeps them honest.
           const sourceCount = appSourceFileCount(fileTree);
-          events.emit({
+          // A "continue" that will build the next module of an unfinished project plan is not an edit of an
+          // app the user has (autopsy 0311186f: "✏️ Editing your existing app (19 source files)" about a plan
+          // that had built constants and types). The module progress line says what this turn does.
+          let continuesPlan = false;
+          if (projectModeEnabled(process.env, { userId, email }) && isContinuationMessage(prompt)) {
+            try {
+              const plan = await withTimeout(loadProjectPlan(workspaceId), 3_000, 'plan-peek');
+              continuesPlan = !!plan && !planComplete(plan);
+            } catch { /* unknown ⇒ the ordinary edit line */ }
+          }
+          if (!continuesPlan) events.emit({
             type: 'narration',
             agent: 'architect',
             text: `✏️ Editing your existing app (${sourceCount} source file${sourceCount === 1 ? '' : 's'}) — I'll make targeted changes, not rebuild it.`,
@@ -16866,6 +16880,18 @@ async function noteBuildOutcome(
               projectPlanRef = pPlan;
               projectModuleRef = pPlan.modules.find((m) => m.id === nextMod.id) ?? nextMod;
               buildPrompt = `${moduleBuildContext(pPlan, projectModuleRef)}\n\n---\n\nUser's message this turn:\n${buildPrompt}`;
+              // The opening ETA described the whole request; this turn builds one module of it (autopsy
+              // 0311186f). Withdraw it — the countdown, the band and the accuracy verdict — rather than
+              // judge a module against an app-sized promise. See moduleTurnEta.ts.
+              try {
+                const done = pPlan.modules.filter((m) => m.status === 'done').length;
+                if (etaTotalMs > 0 || etaRoughBand) {
+                  etaTotalMs = 0; etaBaseMs = 0; etaRoughBand = null; etaRoughHighMs = null; etaPromisedHighMs = 0;
+                  buildDiag.withdrawEtaPromise();
+                  events.emit({ type: 'narration', agent: 'architect', text: moduleTurnEtaLine(done, pPlan.modules.length, projectModuleRef.name), ts: Date.now(), id: 'eta-live' });
+                  buildDiag.record({ phase: 'plan', severity: 'info', code: 'ETA_WITHDRAWN', autoResolved: true, message: moduleTurnEtaNote(done, pPlan.modules.length, projectModuleRef.name) });
+                }
+              } catch { /* the ETA is best-effort and must never touch a build */ }
               // WHO ASSEMBLES THE APP? A module that does not own the entry leaves the starter page in
               // place by design, so this turn is judged on its own files, not as a whole app (autopsy
               // 6a5fb04b: a config module wrote its files, typechecked, and was failed for "Hello World").

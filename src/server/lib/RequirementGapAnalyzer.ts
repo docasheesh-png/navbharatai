@@ -291,6 +291,23 @@ const DOMAINS: DomainDef[] = [
       { label: 'a tutorial or first-run explanation of the controls', re: /tutorial|how to play|instruction|onboard|explain|guide|help/i },
     ],
   },
+  {
+    // 📈 TRADING (autopsy 0311186f, 2026-10-04). An automatic forex scalper read as REAL ESTATE — its only
+    // domain word anywhere was "broker" ("Kaunsa broker / platform? (MT4 / MT5?)") — and the builder was
+    // told to INCLUDE property listings, a map view, saved searches and a mortgage calculator. Placed LAST,
+    // so every existing classification is unchanged unless a prompt names trading itself.
+    key: 'trading',
+    re: /\bforex\b|\bscalp(?:ing|er|ers)?\b|\bintraday\b|\b(?:stock|share)\s*market\b|\balgo\s*-?\s*trad|\btrading\s+(?:bot|app|platform|system|terminal|strategy|journal|signals?|dashboard)\b|\bdemat\b|\bmt[45]\b|\bctrader\b|candlestick|\bnifty\b|\bsensex\b|\bf\s*&\s*o\b|\bcrypto\s+(?:trading|exchange|bot)\b/i,
+    features: [
+      { label: 'live prices and charts', re: /chart|candle|price|tick|quote|ohlc|live/i },
+      { label: 'orders with stop-loss and take-profit', re: /stop.?loss|\bsl\b|take.?profit|\btp\b|order|entry|exit/i },
+      { label: 'risk limits (daily loss, position size)', re: /risk|daily\s+(?:loss|limit)|drawdown|position\s+siz|lot\s+siz|exposure/i },
+      { label: 'backtesting on past data', re: /backtest|historical|past\s+data|simulat/i },
+      { label: 'trade log and profit & loss', re: /journal|trade\s+(?:log|history)|p\s*&\s*l|profit|pnl/i },
+      { label: 'price and signal alerts', re: /alert|notif|signal/i },
+      { label: 'a paper / demo mode before real money', re: /paper|demo|practice|virtual|sandbox|test\s+mode/i },
+    ],
+  },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -484,6 +501,9 @@ export function stripNonDomainUses(input: string): string {
   // Questions Solved" — autopsy e7baf61d), and no construction of its own marks it. Only the NOUN is
   // stripped: "book a session", "book a slot" keep their booking meaning in any context.
   if (STUDY_CONTEXT.test(String(text || ''))) out = out.replace(STUDY_BOOK_NOUN, ' ');
+  // Same shape for "broker" and "listing": in a prompt about TRADING, a broker is where the orders go and a
+  // listing is a quoted instrument (autopsy 0311186f — a forex scalper read as real estate off "broker").
+  if (TRADING_CONTEXT.test(String(text || ''))) out = out.replace(/\b(?:brokers?|brokerage|listings?)\b/gi, ' ');
   // Same shape for "chat": in a prompt for an AI ASSISTANT, the chat is the user talking to the AI
   // (autopsy d8ed307a — a Bengali "personal AI Assistant" whose English words were "Chat History", "Chat"
   // and "Clear History" was read as SOCIAL and handed auth, a realtime feed and moderation). Only when
@@ -528,6 +548,8 @@ const AI_ASSISTANT_CONTEXT = /\b(?:(?:personal\s+)?ai[\s-]+(?:assistant|companio
 const PEOPLE_CHAT = /\bgroup\s+chats?\b|\bchat\s+(?:with|between)\s+(?:friends|users|people|members|each\s+other|other\s+users)\b|\b(?:users|members|people)\s+(?:can\s+)?(?:chat|message|talk)\b|\b(?:friends?|followers?|dm|direct\s+messages?)\b/i;
 
 /** Evidence that the prompt is about studying, so a bare "book" is a textbook (autopsy e7baf61d). */
+/** A prompt about trading markets. The strip it gates is a strip of two words, never a domain decision. */
+const TRADING_CONTEXT = /\b(?:forex|scalp(?:ing|er|ers)?|intraday|demat|mt[45]|ctrader|candlestick|nifty|sensex|pips?|stock\s*market|share\s*market|algo\s*-?\s*trad\w*|trading)\b/i;
 const STUDY_CONTEXT = /\b(?:syllabus|ncert|jee|neet|upsc|cbse|icse|pyqs?|chapters?\s+(?:tracker|completed|wise|list)|study\s+(?:hours?|sessions?|timer|plan|planner|tracker)|exam\s+prep(?:aration)?|revision\s+(?:schedule|system|reminders?))\b/i;
 const STUDY_BOOK_NOUN = /\bbooks?\b(?!\s+(?:a|an|the|your|my|now|online|appointments?|slots?|sessions?|tickets?|tables?|rooms?|seats?|classes?|tutors?|demos?)\b)/gi;
 

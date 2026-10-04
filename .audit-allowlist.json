@@ -1,155 +1,203 @@
 {
-  "_comment": "P-TQA.7 — accepted/pre-existing high+critical advisories. The audit gate (scripts/auditGate.mjs) BLOCKS any high/critical NOT listed here. Each entry is triaged: dev-only, no safe fix, or a separate upgrade task. Re-triage periodically and remove once fixed. A NEW high/critical in any other package fails CI.",
+  "_comment": "P-TQA.7 — accepted/pre-existing high+critical advisories. The audit gate (scripts/auditGate.mjs) BLOCKS any high/critical NOT listed here. Each entry is triaged: dev-only, no safe fix, or a separate upgrade task. Re-triage periodically and remove once fixed. A NEW high/critical in any other package fails CI. Since 2026-10-04 (Q-619) an entry accepts ONLY the high/critical advisory ids in its advisories list: a new advisory in an allowlisted package blocks until it is triaged and its id added. An entry vulnerable only through another package lists none; that advisory is judged on its own package.",
   "allow": [
     {
       "package": "vitest",
       "severity": "critical",
-      "reason": "dev-only test runner (not shipped to users); fix requires a major-version bump tracked as a separate task."
+      "reason": "dev-only test runner (not shipped to users); fix requires a major-version bump tracked as a separate task.",
+      "advisories": []
     },
     {
       "package": "@vitest/coverage-v8",
       "severity": "critical",
-      "reason": "dev-only coverage tool (P-TQA.1); same advisory as vitest (via: vitest) — fix is a semver-major vitest 4 upgrade tracked with the vitest entry. Never shipped to users."
+      "reason": "dev-only coverage tool (P-TQA.1); same advisory as vitest (via: vitest) — fix is a semver-major vitest 4 upgrade tracked with the vitest entry. Never shipped to users.",
+      "advisories": []
     },
     {
       "package": "vite",
       "severity": "high",
-      "reason": "dev/build-only toolchain (not shipped at runtime); upgrade tracked separately to avoid a risky major bump."
+      "reason": "dev/build-only toolchain (not shipped at runtime); upgrade tracked separately to avoid a risky major bump.",
+      "advisories": []
     },
     {
       "package": "axios",
       "severity": "high",
-      "reason": "pre-existing transitive; upgrade evaluated separately (used server-side; needs regression check before bumping)."
+      "reason": "pre-existing transitive; upgrade evaluated separately (used server-side; needs regression check before bumping).",
+      "advisories": [
+        "GHSA-3pq3-5fj3-cg6v",
+        "GHSA-542g-h47m-68v8",
+        "GHSA-c29m-xwm3-cm6r",
+        "GHSA-m8m8-qj5v-23w3",
+        "GHSA-mghh-pgcx-3jjj",
+        "GHSA-r4gj-5m52-g5wh",
+        "GHSA-x97p-jq2g-jp4f"
+      ]
     },
     {
       "package": "cashfree-pg",
       "severity": "high",
-      "reason": "payments SDK; vendor-pinned — upgrade requires payment-flow re-verification, tracked separately."
+      "reason": "payments SDK; vendor-pinned — upgrade requires payment-flow re-verification, tracked separately.",
+      "advisories": []
     },
     {
       "package": "undici",
       "severity": "high",
-      "reason": "transitive (fetch/runtime); pre-existing, upgrade tracked separately."
+      "reason": "transitive (fetch/runtime); pre-existing, upgrade tracked separately.",
+      "advisories": [
+        "GHSA-rfgv-xxqx-mfg5",
+        "GHSA-w293-vg96-wgc3"
+      ]
     },
     {
       "package": "xlsx",
       "severity": "high",
-      "reason": "no upstream fix available on npm (prototype-pollution/ReDoS advisories); usage is server-side and input-controlled — tracked separately."
+      "reason": "no upstream fix available on npm (prototype-pollution/ReDoS advisories); usage is server-side and input-controlled — tracked separately.",
+      "advisories": []
     },
     {
       "package": "react-router",
       "severity": "high",
-      "reason": "GHSA (RSC-mode CSRF bypass, range >=7.12.0 <8.3.0) applies ONLY to React Router's RSC/server-action mode; NavBharatAI is a Vite SPA using client-side routing (no RSC), so it is not exploitable. The only npm 'fix' is a breaking v8 major (>=8.3.0) or a downgrade to <7.12.0 which REINTRODUCES the 7.18.0-patched DoS (GHSA-chx6-hx7r-mcp5). Pinned at 7.18.1 (DoS-patched); v8 migration tracked separately."
+      "reason": "GHSA (RSC-mode CSRF bypass, range >=7.12.0 <8.3.0) applies ONLY to React Router's RSC/server-action mode; NavBharatAI is a Vite SPA using client-side routing (no RSC), so it is not exploitable. The only npm 'fix' is a breaking v8 major (>=8.3.0) or a downgrade to <7.12.0 which REINTRODUCES the 7.18.0-patched DoS (GHSA-chx6-hx7r-mcp5). Pinned at 7.18.1 (DoS-patched); v8 migration tracked separately.",
+      "advisories": []
     },
     {
       "package": "react-router-dom",
       "severity": "high",
-      "reason": "Same advisory as react-router (via react-router). RSC-mode-only CSRF, not applicable to our SPA. Pinned at 7.18.1 (DoS-patched); v8 upgrade is a breaking major, tracked separately."
+      "reason": "Same advisory as react-router (via react-router). RSC-mode-only CSRF, not applicable to our SPA. Pinned at 7.18.1 (DoS-patched); v8 upgrade is a breaking major, tracked separately.",
+      "advisories": []
     },
     {
       "package": "brace-expansion",
       "severity": "high",
-      "reason": "GHSA-mh99-v99m-4gvg (DoS via unbounded expansion), fixed only in 5.0.8. Root-caused and attempted a `package.json` overrides pin to 5.0.8 (2026-07-25) — reverted because 5.0.8 changed its CJS export shape and broke the legacy minimatch bundled inside glob (used by @vitest/coverage-v8's test-exclude → glob chain): `brace_expansion_1.default is not a function`, a real CI failure, not a hypothetical. Every reachable instance is transitive-only via dev/CLI tooling (firebase-tools, vitest coverage) — never imported in src/, never shipped, never run against user-supplied input (only against our own trusted repo paths/config globs). True fix needs glob's bundled minimatch (inside test-exclude/coverage-v8) and firebase-tools' vendored minimatch to publish a brace-expansion@5.x-compatible release; tracked as an open root cause, revisit periodically."
+      "reason": "GHSA-mh99-v99m-4gvg (DoS via unbounded expansion), fixed only in 5.0.8. Root-caused and attempted a `package.json` overrides pin to 5.0.8 (2026-07-25) — reverted because 5.0.8 changed its CJS export shape and broke the legacy minimatch bundled inside glob (used by @vitest/coverage-v8's test-exclude → glob chain): `brace_expansion_1.default is not a function`, a real CI failure, not a hypothetical. Every reachable instance is transitive-only via dev/CLI tooling (firebase-tools, vitest coverage) — never imported in src/, never shipped, never run against user-supplied input (only against our own trusted repo paths/config globs). True fix needs glob's bundled minimatch (inside test-exclude/coverage-v8) and firebase-tools' vendored minimatch to publish a brace-expansion@5.x-compatible release; tracked as an open root cause, revisit periodically. RE-TRIAGED 2026-10-04 (Q-619) for GHSA-qhr7-859c-m2p7 and GHSA-6j4f-fj2g-mc7p — both NEWER than the advisory this entry was written for, and both had been passing under its package name unseen. Same reachability: every copy is transitive (firebase-tools CLI, vitest coverage, and exceljs → unzipper → fstream, whose glob-using writer exceljs never calls — it parses xlsx in memory). None expands a pattern a user supplies.",
+      "advisories": [
+        "GHSA-6j4f-fj2g-mc7p",
+        "GHSA-qhr7-859c-m2p7"
+      ]
     },
     {
       "package": "minimatch",
       "severity": "high",
-      "reason": "Same brace-expansion cascade (glob's bundled minimatch, and the copy vendored inside firebase-tools). Dev-only (firebase-tools CLI / vitest coverage), never shipped, never reachable by users. See brace-expansion entry above for the full root-cause note."
+      "reason": "Same brace-expansion cascade (glob's bundled minimatch, and the copy vendored inside firebase-tools). Dev-only (firebase-tools CLI / vitest coverage), never shipped, never reachable by users. See brace-expansion entry above for the full root-cause note.",
+      "advisories": []
     },
     {
       "package": "glob",
       "severity": "high",
-      "reason": "Same brace-expansion/minimatch cascade. Dev-only: only reached via firebase-tools (CLI) and test-exclude (vitest coverage tooling). Never shipped, never reachable by users."
+      "reason": "Same brace-expansion/minimatch cascade. Dev-only: only reached via firebase-tools (CLI) and test-exclude (vitest coverage tooling). Never shipped, never reachable by users.",
+      "advisories": []
     },
     {
       "package": "firebase-tools",
       "severity": "high",
-      "reason": "Aggregates the brace-expansion/minimatch/glob cascade in its own dependency tree. devDependency only (the Firebase deploy CLI) — never imported in src/, never bundled into the shipped app or server. npm's suggested 'fix' is a downgrade to 14.23.0 (a semver-major regression, not an upgrade); the real fix is upstream (firebase-tools needs to update its vendored glob/minimatch to a brace-expansion@5.x-compatible version). Tracked as an open root cause."
+      "reason": "Aggregates the brace-expansion/minimatch/glob cascade in its own dependency tree. devDependency only (the Firebase deploy CLI) — never imported in src/, never bundled into the shipped app or server. npm's suggested 'fix' is a downgrade to 14.23.0 (a semver-major regression, not an upgrade); the real fix is upstream (firebase-tools needs to update its vendored glob/minimatch to a brace-expansion@5.x-compatible version). Tracked as an open root cause.",
+      "advisories": []
     },
     {
       "package": "archiver",
       "severity": "high",
-      "reason": "Transitive via firebase-tools (glob/minimatch/brace-expansion cascade — see firebase-tools entry). Dev-only CLI dependency, never shipped."
+      "reason": "Transitive via firebase-tools (glob/minimatch/brace-expansion cascade — see firebase-tools entry). Dev-only CLI dependency, never shipped.",
+      "advisories": []
     },
     {
       "package": "archiver-utils",
       "severity": "high",
-      "reason": "Transitive via firebase-tools/archiver (same cascade). Dev-only CLI dependency, never shipped."
+      "reason": "Transitive via firebase-tools/archiver (same cascade). Dev-only CLI dependency, never shipped.",
+      "advisories": []
     },
     {
       "package": "readdir-glob",
       "severity": "high",
-      "reason": "Transitive via firebase-tools/archiver (same cascade). Dev-only CLI dependency, never shipped."
+      "reason": "Transitive via firebase-tools/archiver (same cascade). Dev-only CLI dependency, never shipped.",
+      "advisories": []
     },
     {
       "package": "zip-stream",
       "severity": "high",
-      "reason": "Transitive via firebase-tools/archiver (same cascade). Dev-only CLI dependency, never shipped."
+      "reason": "Transitive via firebase-tools/archiver (same cascade). Dev-only CLI dependency, never shipped.",
+      "advisories": []
     },
     {
       "package": "rimraf",
       "severity": "high",
-      "reason": "Transitive via firebase-tools (glob cascade). Dev-only CLI dependency, never shipped."
+      "reason": "Transitive via firebase-tools (glob cascade). Dev-only CLI dependency, never shipped.",
+      "advisories": []
     },
     {
       "package": "superstatic",
       "severity": "high",
-      "reason": "Transitive via firebase-tools (minimatch cascade — it's firebase-tools' local hosting emulator). Dev-only CLI dependency, never shipped."
+      "reason": "Transitive via firebase-tools (minimatch cascade — it's firebase-tools' local hosting emulator). Dev-only CLI dependency, never shipped.",
+      "advisories": []
     },
     {
       "package": "exegesis",
       "severity": "high",
-      "reason": "Transitive via firebase-tools (glob cascade — used by its Cloud Functions emulator). Dev-only CLI dependency, never shipped."
+      "reason": "Transitive via firebase-tools (glob cascade — used by its Cloud Functions emulator). Dev-only CLI dependency, never shipped.",
+      "advisories": []
     },
     {
       "package": "exegesis-express",
       "severity": "high",
-      "reason": "Transitive via firebase-tools/exegesis (same cascade). Dev-only CLI dependency, never shipped."
+      "reason": "Transitive via firebase-tools/exegesis (same cascade). Dev-only CLI dependency, never shipped.",
+      "advisories": []
     },
     {
       "package": "gaxios",
       "severity": "high",
-      "reason": "Transitive via firebase-tools (rimraf/uuid cascade — its Google API HTTP client). Dev-only CLI dependency, never shipped."
+      "reason": "Transitive via firebase-tools (rimraf/uuid cascade — its Google API HTTP client). Dev-only CLI dependency, never shipped.",
+      "advisories": []
     },
     {
       "package": "gcp-metadata",
       "severity": "high",
-      "reason": "Transitive via firebase-tools/gaxios (same cascade). Dev-only CLI dependency, never shipped."
+      "reason": "Transitive via firebase-tools/gaxios (same cascade). Dev-only CLI dependency, never shipped.",
+      "advisories": []
     },
     {
       "package": "google-gax",
       "severity": "high",
-      "reason": "Transitive via firebase-tools (rimraf/uuid cascade — Google API client generator runtime). Dev-only CLI dependency, never shipped."
+      "reason": "Transitive via firebase-tools (rimraf/uuid cascade — Google API client generator runtime). Dev-only CLI dependency, never shipped.",
+      "advisories": []
     },
     {
       "package": "googleapis-common",
       "severity": "high",
-      "reason": "Transitive via firebase-tools/gaxios (same cascade). Dev-only CLI dependency, never shipped."
+      "reason": "Transitive via firebase-tools/gaxios (same cascade). Dev-only CLI dependency, never shipped.",
+      "advisories": []
     },
     {
       "package": "@google-cloud/pubsub",
       "severity": "high",
-      "reason": "Transitive via firebase-tools/google-gax (same cascade). Dev-only CLI dependency, never shipped."
+      "reason": "Transitive via firebase-tools/google-gax (same cascade). Dev-only CLI dependency, never shipped.",
+      "advisories": []
     },
     {
       "package": "test-exclude",
       "severity": "high",
-      "reason": "Transitive via @vitest/coverage-v8 (its own glob/minimatch/brace-expansion cascade — separate from the firebase-tools one but same root advisory). Already covered in spirit by the existing @vitest/coverage-v8 entry; fix requires the same vitest v4 major bump. Dev-only coverage tooling, never shipped."
+      "reason": "Transitive via @vitest/coverage-v8 (its own glob/minimatch/brace-expansion cascade — separate from the firebase-tools one but same root advisory). Already covered in spirit by the existing @vitest/coverage-v8 entry; fix requires the same vitest v4 major bump. Dev-only coverage tooling, never shipped.",
+      "advisories": []
     },
     {
       "package": "node-forge",
       "severity": "high",
-      "reason": "GHSA-86w9-cpqp-85rv (RSA PKCS#1 v1.5 signature VERIFICATION accepts extra nested DigestAlgorithm elements); published 2026-10-04, no fixed release (<=1.4.0 is every release). Direct dependency used ONLY in src/server/lib/androidKeystore.ts to GENERATE a user's Android upload key: createCertificate + self-sign + PKCS#12 export. Nothing in the repo calls node-forge's signature verification, and no untrusted signature is ever handed to it, so the flawed path is unreachable. Re-triage when a fixed release exists."
+      "reason": "GHSA-86w9-cpqp-85rv (RSA PKCS#1 v1.5 signature VERIFICATION accepts extra nested DigestAlgorithm elements); published 2026-10-04, no fixed release (<=1.4.0 is every release). Direct dependency used ONLY in src/server/lib/androidKeystore.ts to GENERATE a user's Android upload key: createCertificate + self-sign + PKCS#12 export. Nothing in the repo calls node-forge's signature verification, and no untrusted signature is ever handed to it, so the flawed path is unreachable. Re-triage when a fixed release exists. RE-TRIAGED 2026-10-04 (Q-619) for GHSA-86w9-cpqp-85rv (RSA PKCS#1 v1.5 signature VERIFICATION accepts malformed signatures; no fixed version exists): `androidKeystore.ts` only GENERATES and SERIALISES keystores with forge (keygen runs on Node's native crypto); no code verifies a signature with node-forge.",
+      "advisories": [
+        "GHSA-86w9-cpqp-85rv"
+      ]
     },
     {
       "package": "braces",
       "severity": "high",
-      "reason": "GHSA-vfj7-8cjw-p6xm (stack exhaustion on deeply nested patterns), published 2026-10-04; the advisory covers <=3.0.3 and 3.0.3 is the LATEST release, so no fix exists upstream. Reached only as firebase-tools -> chokidar@3 -> braces: a devDependency CLI (the Firebase deploy tool), never imported in src/, never shipped, never run against user-supplied patterns. Remove when chokidar@4 (no braces) reaches firebase-tools or braces publishes a fix."
+      "reason": "GHSA-vfj7-8cjw-p6xm (stack exhaustion on deeply nested patterns), published 2026-10-04; the advisory covers <=3.0.3 and 3.0.3 is the LATEST release, so no fix exists upstream. Reached only as firebase-tools -> chokidar@3 -> braces: a devDependency CLI (the Firebase deploy tool), never imported in src/, never shipped, never run against user-supplied patterns. Remove when chokidar@4 (no braces) reaches firebase-tools or braces publishes a fix. RE-TRIAGED 2026-10-04 (Q-619) for GHSA-vfj7-8cjw-p6xm: only via chokidar inside the firebase-tools CLI (dev/deploy tooling), never shipped, never fed user patterns.",
+      "advisories": [
+        "GHSA-vfj7-8cjw-p6xm"
+      ]
     },
     {
       "package": "chokidar",
       "severity": "high",
-      "reason": "Same braces advisory, via chokidar@3's dependency on braces (firebase-tools pins ^3.6.0 as of 15.32.1). Dev-only firebase-tools CLI, never shipped. See the braces entry."
+      "reason": "Same braces advisory, via chokidar@3's dependency on braces (firebase-tools pins ^3.6.0 as of 15.32.1). Dev-only firebase-tools CLI, never shipped. See the braces entry.",
+      "advisories": []
     }
   ]
 }

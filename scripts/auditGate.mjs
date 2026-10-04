@@ -16,19 +16,47 @@ import { pathToFileURL } from 'node:url';
 const BLOCKING = new Set(['high', 'critical']);
 
 /**
- * Pure: given parsed `npm audit --json` output and the allowlist (a Set of package names),
- * return { ok, blocking[], allowed[], counts }. `blocking` = high/critical packages NOT
- * allowlisted. No I/O — unit-tested.
+ * The HIGH/CRITICAL advisory ids an audit entry carries ITSELF (`via` objects). An entry that is vulnerable
+ * only THROUGH another package (`via` strings) carries none — that advisory is judged on its own package.
  */
-export function evaluateAudit(audit, allowSet) {
+export function blockingAdvisoryIds(info) {
+  const ids = new Set();
+  for (const v of (info && info.via) || []) {
+    if (!v || typeof v !== 'object' || !BLOCKING.has(v.severity)) continue;
+    const m = String(v.url || '').match(/GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}/i);
+    ids.add(m ? m[0] : `npm-${v.source}`);
+  }
+  return [...ids].sort();
+}
+
+/** A Set of package names (legacy callers, tests) or a Map of package → accepted advisory ids. */
+function asAllowMap(allow) {
+  if (allow instanceof Map) return allow;
+  return new Map([...(allow || [])].map((name) => [name, new Set()]));
+}
+
+/**
+ * Pure: given parsed `npm audit --json` output and the allowlist, return { ok, blocking[], allowed[], counts }.
+ *
+ * 🔒 AN ALLOWLIST ENTRY ACCEPTS THE ADVISORIES IT NAMES, NOT THE PACKAGE (forensic audit 2026-10-04, Q-619).
+ * It used to accept the package name, so once `axios` was triaged for one advisory, every LATER high or
+ * critical advisory in axios passed silently too — and seven had: axios 1.19.0 carried seven HIGH advisories
+ * (ReDoS, prototype-pollution gadgets, a redirect limit not enforced) behind a reason written for one. Now
+ * a high/critical advisory id the entry does not list blocks, even in an allowlisted package.
+ */
+export function evaluateAudit(audit, allowlist) {
+  const allow = asAllowMap(allowlist);
   const vulns = (audit && audit.vulnerabilities) || {};
   const blocking = [];
   const allowed = [];
   for (const [name, info] of Object.entries(vulns)) {
     const severity = (info && info.severity) || 'unknown';
     if (!BLOCKING.has(severity)) continue;
-    if (allowSet.has(name)) allowed.push({ name, severity });
-    else blocking.push({ name, severity });
+    const accepted = allow.get(name);
+    if (!accepted) { blocking.push({ name, severity }); continue; }
+    const unlisted = blockingAdvisoryIds(info).filter((id) => !accepted.has(id));
+    if (unlisted.length) blocking.push({ name, severity, advisories: unlisted });
+    else allowed.push({ name, severity });
   }
   const counts = (audit && audit.metadata && audit.metadata.vulnerabilities) || {};
   return { ok: blocking.length === 0, blocking, allowed, counts };
@@ -50,15 +78,15 @@ export function isAuditErrorResponse(audit) {
   return typeof audit.statusCode === 'number' && audit.statusCode >= 400 && !!audit.error;
 }
 
-/** Load the allowlist file → Set of allowed package names. Missing file → empty set. */
+/** Load the allowlist file → Map of package → accepted advisory ids. Missing file → empty map. */
 export function loadAllowlist(path = '.audit-allowlist.json') {
-  if (!existsSync(path)) return new Set();
+  if (!existsSync(path)) return new Map();
   try {
     const data = JSON.parse(readFileSync(path, 'utf-8'));
     const entries = Array.isArray(data?.allow) ? data.allow : [];
-    return new Set(entries.map((e) => e.package).filter(Boolean));
+    return new Map(entries.filter((e) => e && e.package).map((e) => [e.package, new Set(Array.isArray(e.advisories) ? e.advisories : [])]));
   } catch {
-    return new Set();
+    return new Map();
   }
 }
 
@@ -90,9 +118,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
     if (allowed.length) console.log(`  allowed (pre-triaged): ${allowed.map((a) => `${a.name}[${a.severity}]`).join(', ')}`);
     if (!ok) {
       console.error('\n❌ NEW high/critical vulnerabilities (not allowlisted):');
-      for (const b of blocking) console.error(`   • ${b.name} [${b.severity}]`);
+      for (const b of blocking) console.error(`   • ${b.name} [${b.severity}]${b.advisories ? ` — advisories not triaged: ${b.advisories.join(', ')}` : ''}`);
       console.error('\nFix it (npm audit fix / bump the dep), or — if accepted/unfixable — add it to');
-      console.error('.audit-allowlist.json with a reason. This gate only blocks high & critical.');
+      console.error('.audit-allowlist.json with a reason AND its advisory id. This gate only blocks high & critical.');
       process.exit(1);
     }
     console.log('\n✅ No new high/critical vulnerabilities.');

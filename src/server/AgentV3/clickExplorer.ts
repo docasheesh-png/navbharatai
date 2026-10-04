@@ -448,6 +448,34 @@ export function mergeUserProofs(...proofs: ReadonlyArray<UserProof | null | unde
 }
 
 /** Build the in-sandbox runner. PURE — returns a shell command string. */
+/**
+ * The line of Playwright's call log that says WHY a press could not complete.
+ *
+ * 🔴 WHY (autopsy 5759ad8b, 2026-10-01). A mandi-price app's third tab, "🌤️ Mausam", was reported as
+ * *"could not be pressed: locator.click: Timeout 4000ms exceeded."* — the first line of the error, which
+ * says that it failed and never why. Playwright's own call log, a few lines below, names the cause
+ * ("<nav …> intercepts pointer events", "element is outside of the viewport", "element is not visible"),
+ * and whether that is the app's defect (a bar covering a button) or our instrument's is exactly the
+ * question the report could not answer. The note now carries that line.
+ */
+export const PRESS_FAILURE_CAUSE = /intercepts pointer events|not visible|outside of the viewport|not enabled|is disabled|not stable|detached|not attached|not editable|not a <select>/i;
+
+/**
+ * `prefix` + the error's first line + the last call-log line naming a cause. Self-contained on purpose: the
+ * runner embeds this function's own source, so the browser lane and this file cannot drift. PURE.
+ */
+export function pressFailureNote(prefix: string, message: string, causeSrc: string, causeFlags: string): string {
+  // Playwright colours its call log; the codes are not part of the reason (queue Q-247).
+  const lines = String(message || '').split('\n').map((l) => l.replace(/\u001b\[[0-9;]*m/g, '').trim()).filter(Boolean);
+  const head = (lines[0] || '').slice(0, 120);
+  const cause = new RegExp(causeSrc, causeFlags);
+  let why = '';
+  for (let i = lines.length - 1; i > 0; i--) {
+    if (cause.test(lines[i])) { why = lines[i].replace(/^-\s*/, ''); break; }
+  }
+  return prefix + head + (why ? ' — ' + why.slice(0, 160) : '');
+}
+
 export function clickExplorerScript(previewUrl: string, opts: { blockWrites: boolean; maxClicks?: number; budgetMs?: number; storageState?: string | null }): string {
   const base = String(previewUrl ?? '').trim();
   const cfg = {
@@ -469,6 +497,7 @@ export function clickExplorerScript(previewUrl: string, opts: { blockWrites: boo
     sortSrc: SORT_CONTROL.source, sortFlags: SORT_CONTROL.flags,
     themeSrc: THEME_CONTROL.source, themeFlags: THEME_CONTROL.flags,
     maxThemePresses: MAX_THEME_PRESSES,
+    causeSrc: PRESS_FAILURE_CAUSE.source, causeFlags: PRESS_FAILURE_CAUSE.flags,
   };
   return `cat > /tmp/nbai-explore.mjs <<'NBAI_EOF'
 ${clickExplorerModule(cfg)}
@@ -486,6 +515,9 @@ const cfg = ${JSON.stringify(cfg)};
 const say = (o) => console.log(cfg.marker + JSON.stringify(o));
 const started = Date.now();
 const noise = new RegExp(cfg.noiseSrc, cfg.noiseFlags);
+// This file's own pressFailureNote, embedded by value — bound to a const so a bundler that renames the
+// declaration cannot break the calls below.
+const pressFailureNote = ${pressFailureNote.toString()};
 
 // Runs INSIDE the page. It must mirror pressDecision() exactly — the same regexes are passed in.
 function collect(a) {
@@ -688,18 +720,6 @@ async function press(page, i) {
   }
 }
 
-// Why a press did not complete, read from Playwright's own call log (queue Q-247). Its first line is only
-// "Timeout 4000ms exceeded"; the element that took the click, or the state the click waited for, is
-// further down. A covered control is named with what covers it, so the next report can say whose it is.
-function pressFailureNote(e) {
-  const lines = String(e && e.message || e).split('\\n').map((l) => l.replace(/\\u001b\\[[0-9;]*m/g, '').trim().replace(/^-\\s*/, ''));
-  const cover = lines.find((l) => /intercepts pointer events/.test(l));
-  if (cover) return 'covered by ' + cover.replace(/\\s*intercepts pointer events.*$/, '').replace(/\\s+/g, ' ').slice(0, 100);
-  const state = lines.slice().reverse().find((l) => /element is not (?:visible|enabled|stable|attached)|outside of the viewport/.test(l));
-  if (state) return state.slice(0, 100);
-  return lines[0].slice(0, 120);
-}
-
 async function settle(page) {
   await page.waitForLoadState('networkidle', { timeout: 2500 }).catch(() => {});
   await page.waitForTimeout(500);
@@ -772,7 +792,7 @@ async function pressOne(browser, target, discoverAgainst) {
     // The press itself could not complete (covered, detached, timed out). That is our instrument,
     // not the app — reported as skipped, never as a failure.
     res.verdict = 'skipped';
-    res.note = 'could not be pressed: ' + pressFailureNote(e);
+    res.note = pressFailureNote('could not be pressed: ', String(e && e.message || e), cfg.causeSrc, cfg.causeFlags);
   }
   armed = false;
   await page.close().catch(() => {});
@@ -846,7 +866,7 @@ async function narrowOne(browser, target) {
     }
   } catch (e) {
     res.verdict = 'skipped';
-    res.note = 'could not be used: ' + pressFailureNote(e);
+    res.note = pressFailureNote('could not be used: ', String(e && e.message || e), cfg.causeSrc, cfg.causeFlags);
   }
   armed = false;
   await page.close().catch(() => {});

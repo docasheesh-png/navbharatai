@@ -46,9 +46,14 @@
 //     then returns a design contract); a photo of a person or a scene describes a subject. So the
 //     caller passes only what describes an app, and says how many pictures it set aside. The builder
 //     still receives every description in full; only the sizers stop reading a photo as a spec.
+//   • 🔴 and, when the message POINTS at the conversation ("make this app", "yeh app bana do"), the
+//     conversation itself (autopsy 5759ad8b, 2026-10-01): its chat turns AND the last answer. The rule
+//     above still holds for every other message; see conversationReference.ts for why a pointer is the
+//     one case where the chat IS the spec.
 // Kill switch: AGENTV3_PLANNING_CONTEXT=off returns the message alone — the pre-change behaviour.
 
 import { classifyIntentWithConfidence } from './IntentClassifier';
+import { refersToConversation, CONVERSATION_REPLY_MAX } from './conversationReference';
 import type { RequestLane } from './WorkspaceMemory';
 
 /** Kill switch. Default ON. */
@@ -63,7 +68,7 @@ export const PLANNING_EARLIER_REQUEST_MAX = 4_000;
 /** How many earlier requests are carried — the most recent ones. */
 export const PLANNING_EARLIER_REQUESTS = 3;
 
-export type PlanningSource = 'attachment' | 'earlier-requests';
+export type PlanningSource = 'attachment' | 'earlier-requests' | 'conversation';
 
 export interface PlanningRequestInput {
   /** The user's message for this turn. */
@@ -82,6 +87,11 @@ export interface PlanningRequestInput {
    * newest. A chat turn is dropped; an untagged (older) turn is kept unless it reads as chat.
    */
   recentTurns?: ReadonlyArray<{ text: string; lane?: RequestLane }> | null;
+  /**
+   * The last answer given in this workspace's conversation ('' or absent when none). Read ONLY when the
+   * message points at the conversation (`refersToConversation`) and no finished app exists.
+   */
+  conversationReply?: string | null;
   /** Does the workspace already hold a user app? Earlier requests are added only when it does not. */
   userAppExists: boolean;
   /**
@@ -142,11 +152,16 @@ export function planningRequest(input: PlanningRequestInput): PlanningRequest {
     sources.push('attachment');
   }
 
+  const noFinishedApp = !input.userAppExists || input.appStillUnbuilt === true;
+  // A message whose subject is a pointer into the conversation ("make this app") is sized from the
+  // conversation: its chat turns count, and so does the last answer (autopsy 5759ad8b).
+  const pointsAtConversation = noFinishedApp && refersToConversation(prompt);
   const candidates: string[] = [
     ...(Array.isArray(input.recentRequests) ? input.recentRequests : []),
-    ...(Array.isArray(input.recentTurns) ? input.recentTurns.filter(wasBuildRequest).map((t) => t.text) : []),
+    ...(Array.isArray(input.recentTurns)
+      ? input.recentTurns.filter((t) => pointsAtConversation ? !!t && typeof t.text === 'string' : wasBuildRequest(t)).map((t) => t.text)
+      : []),
   ];
-  const noFinishedApp = !input.userAppExists || input.appStillUnbuilt === true;
   if (noFinishedApp && candidates.length > 0) {
     const own = prompt.trim();
     const earlier = candidates
@@ -163,6 +178,12 @@ export function planningRequest(input: PlanningRequestInput): PlanningRequest {
     }
   }
 
+  const reply = pointsAtConversation && typeof input.conversationReply === 'string' ? input.conversationReply.trim() : '';
+  if (reply) {
+    parts.push(`[The message refers to the conversation above. The last answer in it, which describes what to build:]\n${clip(reply, CONVERSATION_REPLY_MAX)}`);
+    sources.push('conversation');
+  }
+
   return { text: parts.join('\n\n'), sources, picturesSetAside };
 }
 
@@ -172,6 +193,10 @@ export function planningContextNote(req: PlanningRequest, promptChars: number): 
     ? ` ${req.picturesSetAside} attached picture(s) were not read as part of the request: they are photos, not UI designs, so their descriptions say what the picture shows, not what to build (the builder still sees them).`
     : '';
   if (req.sources.length === 0) return `Sized and planned from the message alone (${promptChars} characters).${aside}`;
-  const what = req.sources.map((s) => (s === 'attachment' ? 'the attached file(s)' : 'the earlier requests in this conversation')).join(' and ');
+  const what = req.sources.map((s) => (s === 'attachment'
+    ? 'the attached file(s)'
+    : s === 'conversation'
+      ? 'the conversation\'s last answer (the message points at it)'
+      : 'the earlier requests in this conversation')).join(' and ');
   return `Sized and planned from the message plus ${what} (${req.text.length} characters read, the message itself is ${promptChars}) — the same request the builder receives, so the complexity score, the ETA and the fast lane's file plan describe the app actually being built.${aside}`;
 }

@@ -152,6 +152,7 @@ const NEVER_SUGGEST = new Set([
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', 'LADDER_DEPTH', 'STRICT_TRIAL', 'SAVED_SOURCE_DIVERGES', 'ATTACHMENTS_READ',
   'FREE_BUILD_TIME_CAP', 'FREE_BUILD_CHAIN_PAUSED', // our free-tier time policy (freeBuildTimeCap.ts)
   'STYLE_RULES_RESUMED', // our end-of-turn steer (stylePolishResume.ts), never a finding
+  'SPACING_SNAPPED', // our own deterministic 4px-grid snap (spacingSnap.ts, autopsy 536c8189) — already done
   'UNSUPPORTED_STACK', // the user is told in the ready message already (unsupportedStack.ts)
   'AUTH_EXPLORE_SIGNED_IN', 'AUTH_EXPLORE_NOT_RUN', // our sign-in instrument, never the app's defect
   'DESIGN_KIT_RESTORED', 'PLANNING_CONTEXT', 'DESIGN_KIT_KEPT', 'SHADOW_TWIN_REMOVED', 'USER_FILE_KEPT', 'FILES_REMOVED_TOLD', 'DURABLE_READ_FAILED', 'LLM_CALL_HANDED_OFF', 'REPEATED_READS', 'WORKSPACE_SCAN_FAILED', 'EMPTY_BUILD_RETRY', // our own housekeeping (autopsy e725e002, 4d538ca3, d382b398, de3bb2bb)

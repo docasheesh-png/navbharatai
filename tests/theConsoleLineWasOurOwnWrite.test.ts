@@ -86,7 +86,7 @@ describe('the defaults pass writes what index.html names before index.html', () 
   it('🔒 the public files are written, then the index.html patch', () => {
     const pass = route.slice(route.indexOf('const defaults = planAppDefaults('), route.indexOf('🔒 SAY WHAT LANDED, NOT WHAT WAS PLANNED'));
     const files = pass.indexOf('for (const [rel, content] of Object.entries(defaults.files))');
-    const patch = pass.indexOf('if (defaults.indexHtml != null && indexHtml != null && defaults.indexHtml !== indexHtml)');
+    const patch = pass.indexOf('if (honestIndex != null && indexHtml != null && honestIndex !== indexHtml)');
     expect(files).toBeGreaterThan(0);
     expect(patch).toBeGreaterThan(files);
   });

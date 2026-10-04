@@ -10,6 +10,7 @@
 
 import type { Express, Request, Response } from 'express';
 import { firestoreBackup } from '../lib/FirestoreBackup';
+import { audit } from '../lib/audit';
 import { noteAppOpen } from '../lib/ownAudience';
 import { doraMetrics } from '../lib/DoraMetrics';
 import { serverStats } from '../lib/serverStats';
@@ -265,6 +266,7 @@ export function registerHealthRoutes(app: Express): void {
   app.post('/api/admin/backup/firestore', async (req: Request, res: Response) => {
     if (!adminOk(req)) { res.status(403).json({ error: 'admin only' }); return; }
     const result = await firestoreBackup.trigger();
+    audit('ADMIN_FIRESTORE_BACKUP', { result: result.ok ? 'ok' : (result.configured ? 'failed' : 'not-configured'), ip: req.ip });
     res.status(result.ok ? 200 : (result.configured ? 502 : 400)).json(result);
   });
 }

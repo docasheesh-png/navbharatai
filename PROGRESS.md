@@ -88428,6 +88428,26 @@ module), with five false findings on the way. Ledger (problem → root cause →
 - 🟡 Q-396 (no-tests warning on module turns), Q-397 (ignored theme note), Q-398 (APP_SCOPE small word as reason):
   BLOCKED with options in the queue. Q-399 (crawl bench, Haiku planner) resolved as admin-decided behaviour.
 
+## 2026-10-04 — Admin panel audit, PR 1: safety + dead code (admin approved the sequenced plan)
+
+The admin forwarded a reviewed plan (external text, adapted): PR 1 safety, PR 2 the nine-tab menu, PR 3 gallery
+review / restore / App Check / audit log, PR 4 optional cleanup — one PR at a time, each waiting for approval.
+D2/D3/D4 work done earlier the same day is kept on the LOCAL branch `local/admin-d2-d3-d4` (not pushed) for PR 2/3.
+- **Confirmations + reasons.** Ban, token adjustment and messaging users go through `ConfirmActionDialog`. A ban and a
+  token change need the admin's own reason; a message to all users shows recipients + exact text. One rule,
+  `src/lib/adminActionReason.ts`, read by the screen and enforced by the server (placeholder reasons refused,
+  all-users broadcast needs `confirmScope: 'ALL_USERS'`). Token adjustments audit admin, user, amount, previous and
+  new balance, reason, result.
+- **Audit lines added:** release gate (before/after), update broadcast, build/APK report delete + clear-all, MFA
+  enrol start, push test, About page edit, user-report status, Firestore backup. Census in
+  `tests/adminActionsNeedAReason.test.ts` fails on a new mutating `/api/admin` route with no `audit(`.
+- **D1 (admin chose remove):** Maintenance Mode, Feature Flags, Pricing Configuration and the "Persisted feature
+  flags" card are gone with their state/handlers. **Intentionally kept:** `POST /api/admin/settings`,
+  `/api/admin/feature-flags` and `serverStats.maintenanceMode` (read by `/api/health`) — now written by no screen;
+  candidates for removal in a later PR once proven unused by any other caller.
+- Removed App.tsx's tokenless `/api/admin/analytics` fetch (always 401, result read by nothing).
+- ⚠️ An older bundled admin client (phone app) that still sends "Admin action" or an unscoped broadcast now gets an
+  honest refusal instead of a silent action.
 ### 2026-10-04 — Q-273 / Q-275 follow-up (autopsy 241215d1)
 
 - **Q-273 → fix in PR.** Problem: `python3 --version && which python3 → exit 0 (11s)`, while `head -50` took 1 s a
@@ -88689,6 +88709,13 @@ Nothing was reworded or dropped. A line-count check confirmed every line of the 
 **New rule:** when the admin sets a Cloud Run key, its name is recorded in `docs/claude/ENV_REGISTRY.md`, not in `CLAUDE.md`. Long histories and rationales go in the matching `docs/claude/` file.
 
 Also: Q-013's queue row now says #3496 is merged.
+- **PR 2 acceptance requirement (admin, 2026-10-04):** for every moved feature verify category, natural place, primary
+  action, separate/appropriate destructive actions, label = behaviour, no duplicate left elsewhere, same backend/API
+  correctly called, authorization intact, confirmation on destructive actions, audit on important actions. Where two
+  locations are both reasonable, decide from the feature's purpose and the admin's workflow and write the reason.
+  PR 2 is NOT complete without a "FEATURE LOCATION AUDIT" table (Feature | Old Location | New Location | Why |
+  Action Type | Permission | Audit Required). Anything unclear, duplicated or misplaced is named, not hidden.
+  D3 (the three duplicate cards) moves to PR 4.
 
 ## 2026-10-04 — AUTOPSY 39e982bd: the app was off the user's screen for eight of its nine minutes
 

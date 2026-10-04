@@ -35,7 +35,10 @@ describe('Admin UI — Message Users', () => {
     expect(dash).toContain('<option value="all">All Users</option>');
     expect(dash).toContain('<option value="user">A Specific User</option>');
     // The email is sent only for a single-user message.
-    expect(dash).toContain("target: annTarget, email: annTarget === 'user' ? annEmail.trim() : undefined");
+    // Since PR 1 of the admin panel audit (2026-10-04) the send goes through the preview: the email is
+    // sent only for a one-user message, and an all-users message carries the confirmed scope.
+    expect(dash).toContain("email: a.target === 'user' ? a.email : undefined");
+    expect(dash).toContain("confirmScope: a.target === 'all' ? ALL_USERS_SCOPE : undefined");
     // No fake pro/free targets that the server doesn't deliver — scoped to the Message Users <select>
     // (a whole-file match collides with unrelated filter dropdowns elsewhere in the admin panel, e.g. the
     // Build Reports "free/paid" filter, which legitimately uses <option value="free">).

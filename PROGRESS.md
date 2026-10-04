@@ -89224,3 +89224,12 @@ route, so the old version kept its port; `stopVersionPreview` now runs on dismis
 `tests/everyRouteHasACaller.test.ts` + `tests/fixtures/uncalledApiRoutesBaseline.json` (new uncalled route fails CI;
 baseline only shrinks; every entry carries its reason kind). 45 `undecided` routes are 🟡 BLOCKED on the admin's
 yes to deciding each one when its file is next touched.
+
+### 2026-10-04 — Q-153: the app's own script sees the app's `.env` when the agent runs it
+
+`node scripts/seed.js` reading `process.env.DATABASE_URL` without dotenv crashed on `undefined` although `.env`
+held the value; only the dev server loaded `.env`. A blanket load would let `NODE_ENV=production` reach the
+agent's `npm install`, so the fix is narrow: when the whole command is `node|tsx <file>` or `npm run <task>`
+(not build/dev/start/test/lint/install hooks), it runs under Node's `--env-file=.env` — dotenv syntax, and the
+environment always wins. Missing `.env`, or npm not being the plain Node script, falls back to the original
+command. Kill switch `AGENTV3_AGENT_CMD_ENV_FILE=off`. Lock: `tests/theAppsScriptSeesItsEnv.test.ts`.

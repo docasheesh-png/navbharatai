@@ -432,6 +432,7 @@ import { matchingIgnoreRule, protectedWriteMessage, type IgnoreRule } from './ig
 import { withoutPreviewBridge, bridgeShellNote } from './previewBridge';
 import { LIST_PRUNE_DIRS, isListPrunedPath } from '../lib/generatedDirs';
 import { turnAskedTheUser } from './nudgeToBuild';
+import { withAppEnvFile } from './appEnvFileForCommand';
 
 /**
  * Spawns a specialist sub-agent for the `task` tool and returns its result.
@@ -4880,7 +4881,8 @@ export class ToolDispatcher {
           ? { command: effectiveCommand, detached: 0 }
           : detachBackgroundJobs(effectiveCommand);
         const runStartedAt = Date.now();
-        const ran = await this.actuator.runCommand(this.workspaceId, background.command);
+        // Q-153 — `node <file>` running the app's own script reads the app's `.env` (appEnvFileForCommand.ts).
+        const ran = await this.actuator.runCommand(this.workspaceId, withAppEnvFile(background.command));
         let { exitCode, stdout, stderr } = ran;
         // Q-273 — the report splits a slow command into our setup, reaching the machine and the command.
         const timing: CommandTiming | undefined = ran.timing

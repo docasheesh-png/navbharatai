@@ -87453,3 +87453,37 @@ is what was adopted. The rows leave `BUILD_REPORT_QUEUE.md`; this entry is their
     day.
   - **The real lever then:** a ladder change (another lead rung on Weak/Normal). That is the admin's routing
     decision, not a code fix.
+
+## 2026-10-04 — Autopsy 241215d1 (paper-trading app for NSE/BSE: build 1 stopped at 2.3 min, build 2 "Continue…" 17.1 min, gate RED)
+
+Two builds, Weak tier, both on `kimi-k2.7-code` (complex routing). Build 2 shipped a FastAPI + React app that worked
+(five curl-verified order flows, preview rendered), yet the release gate said "Not shippable". Ledger (rows in
+`BUILD_REPORT_QUEUE.md`, test `tests/thePaperTradingAutopsy.test.ts`, every fix reverted and seen to fail):
+
+- **Q-278 · an installer was run as a server.** `pip install --user fastapi uvicorn …` matched `\buvicorn\b`, took the
+  managed dev-server boot (port 8000 from the uvicorn default), restarted the install twice and returned pip's output
+  mixed with "[health-check] dev server did not come up on port 8000". Class: an installer's package list naming a
+  server. Only npm installers were exempt; now every common installer is, and `apt-get install python3-dev` too.
+- **Q-280 · a background job held the command for 300 s.** `python start_backend.py &` + `sleep; curl` waited out the
+  timeout because the job kept stdout open. Class: any backgrounded job without redirects, any language (the existing
+  `backgroundedServerSmokeCheckMs` only shortened it, for Node). `detachBackgroundJobs` now detaches such a job in the
+  bash tool; dev-server launches are untouched (the managed boot strips their `&`).
+- **Q-279 · PEP 668.** `pip --user` is refused in the sandbox; the builder prompt now says venv first and start Python
+  servers with uvicorn/gunicorn/flask so the sandbox manages them.
+- **Q-276 · the checks graded "continue".** Coverage, the feature probe and the claim audit read the 86-character
+  message; e725e002 had fixed only the sizers. `requestForChecks.ts` hands them the earlier request when the message
+  names nothing of its own (labels stripped, attachments excluded).
+- **Q-277 · memory cut the request at 2,000 characters** while the planner reads 4,000 — the continue turn never saw
+  the risk metrics and architecture rules. `REQUEST_EPISODE_MAX` 4,000 for requests only.
+- **Q-282 · the journey typed its marker into a ticker field**, the app refused an unknown symbol, and the gate went
+  RED on a working app. A lookup-key field now gets its own placeholder example ("e.g. RELIANCE").
+- **Q-283 · a dist-only "permanent copy" was kept for an app whose API is a Python server.** `snapshotSuitable` now asks
+  `detectBackendPresence` over the project files.
+- **Q-270 / Q-271 · domain and coverage words.** A `trading` domain (market words only); an investment portfolio is not
+  a gallery request.
+- **Q-281 · localhost governed as "an external host"** on 22 commands. Loopback is exempt; any other URL still counts.
+- **Q-285 · instrument:** the hardcoded-localhost readiness line names its first `file:line`.
+- **OPEN:** Q-284 (a Python backend is invisible to the service graph, the revival recipe and the wake path — next
+  self-started work). **BLOCKED:** Q-272 (reasoning rung on complex Weak builds — routing decision), Q-273 (11 s
+  trivial command, needs a second instance), Q-274 (what a "Python script" request delivers — product decision),
+  Q-275 (the request was cut mid-sentence before it reached us), Q-286 (eight items argued not defects).

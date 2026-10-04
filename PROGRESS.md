@@ -89042,3 +89042,14 @@ The fail direction was checked deliberately: a store that cannot be read leaves 
 behaviour), and the window is added once even when the store hangs — an earlier draft with a route-level timeout
 and fallback would have counted it twice and stopped a build early.
 
+### 2026-10-04 — Q-151 closed: the chunked zip upload already survives the load balancer (evidence)
+
+Q-151 ("zip chunk upload assumes every chunk reaches the same Cloud Run instance") was migrated from the 2026-08
+open note, but `src/server/lib/zipUploadStore.ts` fixed it (admin report "161 MB zip upload nahi ho rahi"): the
+upload record lives in Firestore (`zip_uploads`) and every chunk is its own Cloud Storage object
+(`zip-uploads/<id>/<index>.part`, zero-padded so listing order is numeric order), so any instance validates and any
+instance assembles. It is active wherever a bucket is set — `NAV_STORE_BUCKET` (set in Cloud Run per
+`docs/claude/ENV_REGISTRY.md`) or `FIREBASE_STORAGE_BUCKET` — and keeps the single-instance path only where there
+is one instance (local dev, CI). Locked by `src/server/lib/zipUploadStore.test.ts` and
+`src/server/routes/zipUpload.test.ts`. Row removed.
+

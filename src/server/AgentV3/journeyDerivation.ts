@@ -267,6 +267,65 @@ const SAVE_ACTION: readonly RegExp[] = [
 ];
 
 /**
+ * 🔴 "NOTHING TO SAVE AND RELOAD" WAS SAID ABOUT AN APP THAT SAVES AND RELOADS (autopsy 536c8189,
+ * 2026-10-01). A Duolingo-style app shipped green and `JOURNEY_NOT_DERIVED` carried `NO_DATA_ENTRY_REASON`
+ * — *"this app has no data-entry surface at all … nothing to save and reload"*. It keeps XP, gems, a
+ * streak and the lessons you have finished in `localStorage`, read back on every load, in
+ * `src/hooks/useProgress.ts`. That IS the save-and-reload journey this check exists to prove.
+ *
+ * 🔑 THE CLASS: `appHasNoDataEntry` asks "IS THERE A FORM?" and its sentence answers "IS THERE ANYTHING
+ * TO SAVE?" — two different questions. They coincide for a landing page and part ways for every app
+ * whose controls are buttons: a game, a counter, a tracker, a quiz. And this repo already knew storage is
+ * a save signal — `SAVE_ACTION`, one screen down in this same file, lists `localStorage` — so the
+ * knowledge existed in one predicate and not in its sibling. The drifted-copy class, in two sentences.
+ *
+ * 🔒 THE THEME IS NOT THE APP'S DATA. Every app from our own starter writes a theme (and a font scale,
+ * and a consent flag) to `localStorage`, so a bare storage match would say "this app saves" about a
+ * landing page. A write whose key is one of ours, or plainly a display preference, is not evidence —
+ * the direction of the doubt is deliberate: a missed save keeps today's wording, a false one would
+ * promise a journey that does not exist.
+ */
+const PERSIST_WRITE: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\b(?:localStorage|sessionStorage)\s*(?:\.\s*setItem\s*\(|\[)/, 'browser storage'],
+  [/\b(?:localStorage|sessionStorage)\.\w+\s*=/, 'browser storage'],
+  [/\b(?:indexedDB|IDBDatabase)\b/, 'a browser database'],
+  [/\b(?:addDoc|setDoc|updateDoc|deleteDoc)\s*\(/, 'a database write'],
+  [/\.(?:insert|upsert|update|delete)\s*\(/, 'a database write'],
+  [/method\s*:\s*["'](?:POST|PUT|PATCH|DELETE)/i, 'a write to its server'],
+];
+
+/** Storage keys that are a display preference or ours, never the user's records. */
+const NOT_APP_DATA_KEY = /\b(?:theme|colou?r[-_]?scheme|dark[-_]?mode|font[-_]?scale|locale|language|consent|cookie|nbai|nb-)\b/i;
+
+/**
+ * WHERE this app saves state, or null when nothing does — the fact `appHasNoDataEntry` cannot see.
+ * Only app UI files (the same selection `appOnlyShowsWhatItHolds` uses). PURE.
+ */
+export function savedStateEvidence(files: Record<string, string>): { path: string; what: string } | null {
+  for (const [path, src] of Object.entries(appOwnFiles(files))) {
+    if (!src || !APP_SOURCE_FILE.test(path) || NOT_APP_UI.test(path) || ERROR_BOUNDARY_FILE.test(path)) continue;
+    for (const [re, what] of PERSIST_WRITE) {
+      const m = re.exec(src);
+      if (!m) continue;
+      // The line itself decides: a theme write is not the app's data.
+      const start = src.lastIndexOf('\n', m.index) + 1;
+      const end = src.indexOf('\n', m.index);
+      const line = src.slice(start, end < 0 ? undefined : end);
+      if (NOT_APP_DATA_KEY.test(line)) continue;
+      return { path, what };
+    }
+  }
+  return null;
+}
+
+/** The honest sentence for an app that saves state but has no form to fill in. PURE. */
+export function savedWithoutFormReason(where: { path: string; what: string }): string {
+  return `this app does save state (${where.what} in ${where.path}) and reads it back, but it has no form to fill in — `
+    + 'its controls are buttons, so there is no form-and-reload journey to drive here. The click explorer '
+    + 'presses those controls instead';
+}
+
+/**
  * True when every input the app has only narrows what it shows — a search box over a fixed list, a
  * sort, a filter — and nothing anywhere can take a record from the user and keep it.
  *
@@ -1128,8 +1187,13 @@ export function noJourneyReason(files: Record<string, string>): string {
     // REQUIRES POSITIVE EVIDENCE OF A UI — see hasRenderSurface. An absence of data entry is equally
     // true of a canvas game, an empty file map and a project we are holding one utility file for, and
     // only the first of those is "there is nothing here to prove".
+    // 🔒 AND THE SECOND QUESTION, IN BOTH BRANCHES (autopsy 536c8189). This module's own docblock on
+    // `NO_DATA_ENTRY_REASON` says "TWO branches now reach it"; only the other one was fixed when the
+    // Duolingo app was told it had nothing to save, and a sibling left behind is this repo's headline
+    // class. `savedStateEvidence` is asked here too, so the two branches cannot say different things.
     if (hasRenderSurface(files ?? {}) && appHasNoDataEntry(files ?? {})) {
-      return NO_DATA_ENTRY_REASON;
+      const saved = savedStateEvidence(files ?? {});
+      return saved ? savedWithoutFormReason(saved) : NO_DATA_ENTRY_REASON;
     }
     return 'no page components were found to derive a user journey from';
   }
@@ -1152,7 +1216,13 @@ export function noJourneyReason(files: Record<string, string>): string {
     // components, change/submit handlers and contentEditable, so an app whose form merely sits deeper
     // than `formSourcesFor` looks (the real defect this sentence is for) still gets the form wording.
     // Only an app with a render surface and no data entry anywhere reads as a game.
-    if (hasRenderSurface(files ?? {}) && appHasNoDataEntry(files ?? {})) return NO_DATA_ENTRY_REASON;
+    // 🔒 …AND "NO FORM" IS NOT "NOTHING TO SAVE" (autopsy 536c8189 — see `savedStateEvidence`). Ask the
+    // second question before saying the second sentence: an app whose controls are buttons and which keeps
+    // its state in storage DOES save and reload, and telling the user it has nothing to save is false.
+    if (hasRenderSurface(files ?? {}) && appHasNoDataEntry(files ?? {})) {
+      const saved = savedStateEvidence(files ?? {});
+      return saved ? savedWithoutFormReason(saved) : NO_DATA_ENTRY_REASON;
+    }
     if (appOnlyShowsWhatItHolds(files ?? {})) return LOOKUP_ONLY_REASON;
     // 🔴 "NOTHING HERE TAKES USER INPUT" WAS SAID ABOUT AN APP WHOSE FORMS SIT ON SCREENS NO PAGE REACHES
     // (autopsy 2b1f845e: a five-step wizard in src/steps/, switched by state, no router). The data-entry

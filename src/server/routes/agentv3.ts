@@ -622,6 +622,7 @@ import { readyOverrunNote } from '../AgentV3/doneSignal';
 import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, isProjectStylesheet, danglingStylesheetImports, withoutStylesheetImports } from '../AgentV3/CssConsistency';
 import { kitRestorePatch, kitRestoreNote } from '../AgentV3/kitRestore';
+import { spacingSnapPatches, spacingSnapNote, type SpacingSnapPatch } from '../AgentV3/spacingSnap';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
 import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPolicy';
 import { buildServiceGraph } from '../AgentV3/serviceGraph';
@@ -17576,6 +17577,18 @@ async function noteBuildOutcome(
                   buildDiag.record({ phase: 'build', severity: 'info', code: 'DESIGN_KIT_RESTORED', message: kitRestoreNote(patch, 'before-repair'), autoResolved: true });
                 }
               } catch { /* deterministic and best-effort — the check below still runs */ }
+              // 🔴 THE SAME LANE-DRIFT THIS REPO'S HEADLINE CLASS IS MADE OF: the spacing snap below runs
+              // in the architect's post-build block, and a fast-lane build would have been left with the
+              // `DESIGN_CONSISTENCY` warning the snap exists to kill. Both lanes, one function
+              // (autopsy 536c8189; cf. `ensureHtmlEntryScript`, fixed in one lane of two on 2026-09-21).
+              try {
+                const snaps = spacingSnapPatches(project, writtenFiles.keys());
+                if (snaps.length > 0) {
+                  await fastWrite(snaps.map((s) => ({ path: s.path, content: s.content })));
+                  for (const s of snaps) { writtenFiles.set(s.path, s.content); project = { ...project, [s.path]: s.content }; }
+                  buildDiag.record({ phase: 'build', severity: 'info', code: 'SPACING_SNAPPED', message: spacingSnapNote(snaps), autoResolved: true });
+                }
+              } catch { /* deterministic and best-effort — the check below still runs */ }
               const cssErr = cssConsistencyError(project);
               if (cssErr) return { ok: false, errors: cssErr };
             } catch { /* css check is best-effort — never blocks on its own failure */ }
@@ -19495,6 +19508,31 @@ async function noteBuildOutcome(
            * below decides whether a model repair is needed, and again after any repair (which is told
            * to reuse the kit, and so can introduce kit classes the app's rewritten stylesheet lacks).
            */
+          /**
+           * 🔴 SPACING OFF THE 4px GRID, SNAPPED BY CONSTRUCTION (autopsy 536c8189, 2026-10-01). Between
+           * #3458 and that date these values were handed to the MODEL at the end of its turn; the first
+           * real build to meet that hand-back spent three calls writing `node -e` regex scripts over a
+           * 634-line stylesheet and moved ON-grid values OFF the grid. `round(v / 4) * 4` has one right
+           * answer, so it runs here instead — free, deterministic, and only over files THIS build wrote.
+           */
+          const snapSpacing = async (files: Record<string, string>): Promise<void> => {
+            try {
+              if (abort.signal.aborted || isImportTurn || !expectsArtifacts) return;
+              const patches = spacingSnapPatches(files, writtenFiles.keys());
+              if (patches.length === 0) return;
+              const landed: SpacingSnapPatch[] = [];
+              for (const patch of patches) {
+                const wrote = await runInPass('design-consistency-heal', () => writeUnlessFrozen(() => actuator.writeFile(workspaceId, patch.path, patch.content)));
+                if (!wrote) continue;
+                writtenFiles.set(patch.path, patch.content);
+                integrityFiles[patch.path] = patch.content;
+                await mergeWorkspaceFiles(workspaceId, { [patch.path]: patch.content }).catch(() => {});
+                landed.push(patch);
+              }
+              if (landed.length === 0) return;
+              buildDiag.record({ phase: 'build', severity: 'info', code: 'SPACING_SNAPPED', message: spacingSnapNote(landed), autoResolved: true });
+            } catch { /* deterministic and best-effort — it can never affect a build */ }
+          };
           const restoreKitRules = async (files: Record<string, string>, when: 'before-repair' | 'after-repair'): Promise<void> => {
             try {
               const patch = kitRestorePatch(files);
@@ -19509,6 +19547,7 @@ async function noteBuildOutcome(
             } catch { /* deterministic and best-effort — it can never affect a build */ }
           };
           await restoreKitRules({ ...integrityFiles, ...designFiles }, 'before-repair');
+          await snapSpacing({ ...integrityFiles, ...designFiles, ...Object.fromEntries(writtenFiles) });
           const projectForCss = { ...integrityFiles, ...Object.fromEntries(writtenFiles) };
           const cssErr = (() => { try { return cssConsistencyError(projectForCss); } catch { return null; } })();
           if (cssErr) {
@@ -21431,7 +21470,13 @@ async function noteBuildOutcome(
             // game wrongly implied deficient). Conservative: any input/form/handler leaves it 'not-run'.
             // A lookup app (a search box and a sort over a fixed list, nothing that saves) is the same fact
             // for the gate: there is no save to prove (autopsy ee0e6de5).
-            if (appHasNoDataEntry(journeyFiles) || appOnlyShowsWhatItHolds(journeyFiles)) gateEvidence.journeys = 'none-derivable';
+            if (appHasNoDataEntry(journeyFiles) || appOnlyShowsWhatItHolds(journeyFiles)) {
+              gateEvidence.journeys = 'none-derivable';
+              // THE GATE SAYS WHAT THE DERIVATION SAID, not its own paraphrase (autopsy 536c8189): the
+              // gate's generic line asserted "this app has no data-entry flow" about an app that keeps
+              // its progress in browser storage. One sentence, written once, read in both places.
+              try { gateEvidence.journeyNoneWhy = noJourneyReason(journeyFiles); } catch { /* generic line stands */ }
+            }
           }
         } catch { /* evidence, never a gate — a failure here changes nothing about the build verdict */ }
       }

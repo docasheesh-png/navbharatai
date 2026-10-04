@@ -86,7 +86,7 @@ import { parseDevServerHealthLine } from './sandbox/EngineerAI/actuators/DevServ
 import { collectWorkspaceFiles } from './WorkspaceFiles';
 import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
-import { lintBuiltApp, a11yHandBack, offGridHandBack } from './buildQualityLint';
+import { lintBuiltApp, a11yHandBack } from './buildQualityLint';
 import { storeEffectLoopNote } from './storeEffectLoop';
 import { detachedMethodNote } from './detachedMethod';
 import { rootThemeHooks, deadThemeSwitchNote } from './deadThemeSwitch';
@@ -3579,7 +3579,7 @@ export class ToolDispatcher {
    * stylesheet that cannot be read returns `[]`: this answer sends a model back to work, so it must never
    * name a class as undefined because the file that defines it was not read.
    */
-  async undefinedClassesNow(opts: { onlyWritten?: boolean } = {}): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }>; offGrid?: Array<{ file: string; values: string[] }> }> {
+  async undefinedClassesNow(opts: { onlyWritten?: boolean } = {}): Promise<{ missing: string[]; sheet?: string; pages: Array<{ file: string; defects: DesignDefect[] }>; a11y?: Array<{ file: string; issues: string[] }> }> {
     try {
       let listing: string[] = [];
       try { listing = await withTimeout(this.actuator.listFiles(this.workspaceId), 5_000, 'style-resume-listing'); }
@@ -3613,15 +3613,19 @@ export class ToolDispatcher {
       // line uses, over the same files already read here, so the two can never disagree.
       let a11y: Array<{ file: string; issues: string[] }> = [];
       try { a11y = a11yHandBack(lintBuiltApp(project)); } catch { a11y = []; }
-      // Spacing off the 4px grid — the DESIGN_CONSISTENCY finding (Q-037 / Q-022) — only in files THIS agent
-      // wrote, so a value in the user's own code is never handed back as ours to restyle (Q-015).
-      let offGrid: Array<{ file: string; values: string[] }> = [];
-      try { offGrid = offGridHandBack(project, this._writtenPaths).map(({ file, values }) => ({ file, values })); } catch { offGrid = []; }
+      // 🔴 SPACING IS NO LONGER HANDED BACK TO THE MODEL (autopsy 536c8189, 2026-10-01). It was, from
+      // #3458 until this date — `offGridHandBack` fed the `DESIGN_CONSISTENCY` values into the end-of-turn
+      // message with "change each to the nearest multiple of 4px". The first real build to meet it answered
+      // with three `node -e` regex scripts over a 634-line stylesheet, one failed `edit_file`, three model
+      // calls, ~45 s — and moved `padding: 4px 8px` to `2px 6px`, i.e. ON-grid values OFF the grid.
+      // `round(v / 4) * 4` has exactly one right answer, so it is now done by construction, for free, in
+      // `spacingSnap.ts`. The hand-back keeps the findings only a model can judge: a class with no rule, a
+      // page with no empty state, a control with no name. `offGridHandBack` is deleted with it.
       // A SUB-AGENT is handed back only what ITS OWN files use (Q-066, autopsy de3bb2bb). Specialists run
       // in parallel, so a class a sibling's screen uses is that sibling's to define; handing it here would
       // send two agents to edit one stylesheet for the same rule.
-      if (opts.onlyWritten) return scopeStyleHandBack({ missing, sheet, pages, a11y, offGrid }, project, this._writtenPaths);
-      return { missing, sheet, pages, a11y, offGrid };
+      if (opts.onlyWritten) return scopeStyleHandBack({ missing, sheet, pages, a11y }, project, this._writtenPaths);
+      return { missing, sheet, pages, a11y };
     } catch {
       return { missing: [], pages: [] };
     }

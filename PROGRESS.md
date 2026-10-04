@@ -87352,6 +87352,126 @@ open PR's CI failed with it (#3462 first).
 - **Class:** an upstream advisory landing between a PR's green CI and its merge. The gate is doing its job; the
   honest response is the pin, not an allowlist entry, because a fixed release exists.
 
+## 2026-10-04 — Autopsy 536c8189 ("an app like Duolingo"): arithmetic is not a model's job, a plain-English bug is still a bug, and "nothing to save" was said about an app that saves
+
+Build `536c8189`, Weak tier, `kimi-k2.7-code`, `ok: true`, 7.2 min (inside its 6.4–7.7 ETA band),
+₹152.52 billed on $0.42 real cost. The app worked. Three separate things in the report were wrong, and
+each had its own root cause. Ledger, one row per item:
+
+**Q-290 — 🥵 the off-grid hand-back is the first thing this build proves, and it proves it harmful.**
+`STYLE_RULES_RESUMED` gave the model the `DESIGN_CONSISTENCY` spacing values with "change each to the
+nearest multiple of 4px" (the Q-037 hand-back, shipped by #3458 three days earlier — this is its first
+real outing). The model answered with **three ad-hoc `node -e` regex scripts** that string-sliced and
+rewrote the whole 634-line `src/index.css`, plus one `edit_file` that failed with *"old_string is not
+unique in src/index.css (80 matches)"*. ~45 seconds and three model calls. One of the scripts contained,
+verbatim:
+
+```js
+.replace(/padding: 4px 8px/g, 'padding: 2px 6px')
+.replace(/gap: 4px;/g,        'gap: 6px;')
+```
+
+It moved values that were **already ON the grid OFF it**, and the build still ended at
+`DESIGN_CONSISTENCY` 98/100 with values off the grid.
+
+- **Root cause:** `round(v / 4) * 4` has exactly one right answer, so it was never a model's decision.
+  This repo already draws that line in the other direction and says so in `buildQualityLint.ts`
+  (*"a name for an icon button has to MEAN something, so it is never guessed by a deterministic pass"*).
+  The converse had no home.
+- **Class:** an end-of-turn hand-back is for what only a model can JUDGE — what a class should look
+  like, what an icon button is called, what an empty state should say. **Never for arithmetic with one
+  answer.** Handing arithmetic to a model buys three ways to be wrong: it mis-derives which values are
+  off-grid, it rewrites by regex over a file it cannot see whole, and it charges for both.
+- **Fix:** `src/server/AgentV3/spacingSnap.ts` — pure, nearest multiple of 4, **ties to the smaller**
+  (a layout that grows can overflow a phone, which `mobileLayoutCheck` then reports; one that tightens
+  cannot), never to zero. Only files THIS build wrote, only above the finding's own `MAX_OFFGRID`
+  threshold, never inside a comment, and it **stands down on a file that is coherently on another
+  rhythm** (`isCoherentOtherGrid`: the off-grid values share a divisor ≥ 5 that is not a multiple of 4,
+  over ≥ 3 values — `6/18/30/42` is a 6px system, `10/6/14` is just sloppy). Wired into **BOTH** lanes
+  (the architect's post-build integrity block beside `kitRestore`, and the fast lane's own verify),
+  because a deterministic pass wired into one lane of two is this repo's headline class. Report code
+  `SPACING_SNAPPED`, process-only. Kill switch `AGENTV3_SPACING_SNAP=off`.
+- **Siblings:** spacing is removed from `stylePolishResume` and from the runner's call, and
+  `offGridHandBack` — which then had no caller left — is **deleted** rather than kept "for the report";
+  `tests/offGridSpacingIsHandedBack.test.ts` is retired with it and its still-valid coverage (the
+  e49afa97 stylesheet) carried into the new suite against the snap. `extractSpacingPx`'s regex is now
+  `SPACING_DECL_RE_SOURCE` / `SPACING_PX_RE_SOURCE` in `DesignLinter.ts`, read by both the lint and the
+  snap, so the two cannot disagree about what a spacing declaration is.
+
+**Q-291 — ❌ the reviewer found a real bug and nothing repaired it, with no record of why.** On the
+working app the reviewer reported: *"`matchedKeys` and `setMatchedKeys` are declared and reset, but
+`setMatchedKeys` is never called in `handleMatchClick` or elsewhere. The guard `if
+(matchedKeys.includes(key)) return;` always evaluates to `false`, so a key can be matched multiple
+times."* A real bug, in plain words. **No `REVIEW_FUNCTIONAL_*` code appears anywhere in the report** —
+not even the `_REPAIR_SKIPPED` record, because `selectGreenRepairable` returned an empty list.
+
+- **Root cause, measured:** `FUNCTIONAL_WARNING_RE` had a CLOSED verb list behind `never` —
+  `never (fires|works|holds|updates|renders)`. Every one of these was MISSED: *never called, never
+  invoked, never set, never read, never runs, never used, never enabled, never persisted*. And a dead
+  guard (*"always evaluates to false"*, *"the condition is always true"*) had no rule at all.
+- **Class:** a CLOSED set of phrases matched against open-ended prose a MODEL wrote. It had been
+  patched once already for exactly this reason (autopsy ac41a924 added `FUNCTIONAL_OUTCOME_RE`), so a
+  third list would be patched again.
+- **Fix, both halves.** (1) `never [a-z]+` is open — the cosmetic veto is what keeps precision, and it
+  already catches *"the aria-label is never set"* and *"consider never using inline styles"* — plus a
+  `DEAD_CONDITION_RE` for a branch that can never be taken (deliberately not a bare `always`, which is
+  how advice is written). (2) **The structural half: the reviewer DECLARES it.** The instruction asks
+  for `[BROKEN]` beside the severity tag, `parseReviewOutput` reads the marker and **strips it from the
+  message** so it never reaches a user, and `namesBrokenBehaviour` is the one definition both selectors
+  read. It is additive — an untagged reviewer keeps exactly today's behaviour — and the cosmetic veto
+  still applies to a tagged finding, so a model cannot widen what a verified repair touches on a working
+  app by typing a word.
+- **Honesty half:** the suggest-mode prompt told the reviewer *"no repair will run from it"*, which
+  stopped being true on 2026-09-23 when `AGENTV3_GREEN_FUNCTIONAL_REPAIR` shipped. It now says a
+  `[BROKEN]` finding may get one automatic repair that is undone unless proven — the right incentive
+  for the one tag we are asking it to be careful with.
+
+**Q-292 — ❌ `JOURNEY_NOT_DERIVED` stated a falsehood about the app.** It carried
+`NO_DATA_ENTRY_REASON`: *"this app has no data-entry surface at all — a game, a dashboard or a landing
+page has nothing to save and reload, so there is no such journey to prove."* The app keeps XP, gems, a
+streak and the lessons you have finished in `localStorage` (`src/hooks/useProgress.ts`) and reads them
+back on every load. **That IS the save-and-reload journey this check exists to prove.**
+
+- **Root cause:** `appHasNoDataEntry` asks *"is there a FORM?"* and its sentence answers *"is there
+  anything to SAVE?"*. The two coincide for a landing page and part ways for every app whose controls
+  are buttons — a game, a counter, a tracker, a quiz. And the knowledge was already in the repo:
+  `SAVE_ACTION`, one screen down in the same file, lists `localStorage`. One predicate had it, its
+  sibling did not.
+- **Fix:** `savedStateEvidence` (a real storage / database / write-method WRITE, with theme, font-scale,
+  locale and consent keys excluded — every app from our starter writes a theme, so a bare storage match
+  would say "this app saves" about a landing page) and a third honest reason, `savedWithoutFormReason`,
+  which names the file and does not read as a defect. Asked in **BOTH** branches that reach the old
+  sentence — this module's own docblock says *"TWO branches now reach it"*, and fixing one is how a
+  sibling gets left behind.
+- **Sibling:** the release gate carried its **own paraphrase** of the same false claim
+  (*"this app has no data-entry flow"*). It now repeats the derivation's sentence through
+  `journeyNoneWhy`, with a still-true generic line as the fallback. One sentence, written once.
+
+**Q-293 — 🟡 five items argued NOT defects, awaiting the admin's yes:** 2× `PROVIDER_FALLBACK` (GLM
+crawled, 30 s = 7% of the clock, benched as designed — Q-009); the fast lane spending 15 s and handing
+off with nothing (`FAST_LANE_SKIPPED_REASONING_RUNG`, the designed stand-down on a reasoning rung);
+`WRITE_TIME_TYPECHECK`'s first run paying 13 s to install the compiler (Q-010 / Q-063);
+`DOMAIN_KNOWLEDGE` taking 11.5 s and returning nothing (the lookup ran and found nothing for this
+domain); `READY_BEFORE_END` 13 steps / 110 s (the style hand-back doing its job).
+
+**The missing subsystem, named:** nothing in this engine asks *"is this decision arithmetic or
+judgement?"* before choosing whether a model or a deterministic pass makes it. `buildQualityLint.ts`
+states the rule for one direction in a comment; `spacingSnap.ts` now states it for the other. Every
+future end-of-turn hand-back, and every future deterministic repair, has to answer that question — and
+the only enforcement today is the two docblocks saying so.
+
+**Proof:** `tests/theDuolingoAutopsy.test.ts` — 52 cases against the report's own verbatim text, with
+the full gate green on the final state (both typechecks, `noUnusedImports`, `npm run build`,
+`test:bundle`, `boot:check`, and **33,122 / 33,122** tests). Reversion-proven **seven** ways: the closed
+`never` list restored (7 failures), the dead-condition rule removed (3), the `[BROKEN]` declaration
+ignored (1), the journey sentence put back in both branches (2), the spacing hand-back restored (1),
+`snapToGrid` allowed to return 0 (1), and the fast lane's snap removed (1).
+
+**What to watch on the next real builds:** `SPACING_SNAPPED` appearing (and `DESIGN_CONSISTENCY`
+reaching 100 where it used to sit at 98); `REVIEW_FUNCTIONAL_REPAIRED` / `_REFUTED` appearing on green
+builds where the reviewer names a plain-English bug — each one is a real defect that used to ship with
+only a suggestion; and whether any reviewer actually writes `[BROKEN]` (if none does, the widened
+classifier is carrying the whole fix, which is the fallback working).
 ## 2026-10-01 — Autopsy 5759ad8b ("Can you make this app" → Kisaan Mandi Bhav): 3 root causes fixed, 3 open
 
 Weak build, 6.9 min, ₹96.58, rendered at 268 s, inside its ETA band. The build itself went well. The judges around it did not.

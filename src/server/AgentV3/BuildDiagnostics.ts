@@ -329,6 +329,8 @@ export const HEAL_RESOLVES: Readonly<Record<string, readonly string[]>> = {
   CSS_CLASSES_HEALED: ['CSS_CLASSES_UNDEFINED'],
   ACCESSIBILITY_HEALED: ['ACCESSIBILITY'],
   EXPLORE_REPAIRED: ['EXPLORE_FAILED'],
+  // Change engine slice 2: a feature an edit removed, restored by the feature heal.
+  FEATURE_REGRESSION_HEALED: ['FEATURE_REGRESSED'],
   REVIEW_FUNCTIONAL_REPAIRED: [],
   HOOKS_RULES_HEALED: [],
   INCOMPLETE_CODE_HEALED: [],

@@ -21069,18 +21069,20 @@ async function noteBuildOutcome(
               if (changeSession) {
                 observeProbes(changeSession, coverage.probes);
                 const stillRegressed = regressionsSoFar(changeSession);
-                if (stillRegressed.length > 0) {
-                  buildDiag.record({
-                    phase: 'readiness', severity: 'warning', code: 'FEATURE_REGRESSED', autoResolved: false,
-                    message: `Was working before this change and is missing now: ${stillRegressed.map((r) => `${r.id} ${r.label}`).join(', ')}`,
-                    detail: 'Re-probed from the app\'s requirement ledger — each of these had a real control seen in the running app on an earlier build.',
-                  });
-                }
+                // The restore is recorded FIRST: a heal code resolves what is already open when it is
+                // recorded (HEAL_RESOLVES), so a regression that is STILL missing must come after it.
                 const restoredNow = regressedBeforeHeal.filter((r) => !stillRegressed.some((x) => x.id === r.id));
                 if (restoredNow.length > 0) {
                   buildDiag.record({
                     phase: 'readiness', severity: 'info', code: 'FEATURE_REGRESSION_HEALED', autoResolved: true,
                     message: `Restored after this change removed them: ${restoredNow.map((r) => `${r.id} ${r.label}`).join(', ')}`,
+                  });
+                }
+                if (stillRegressed.length > 0) {
+                  buildDiag.record({
+                    phase: 'readiness', severity: 'warning', code: 'FEATURE_REGRESSED', autoResolved: false,
+                    message: `Was working before this change and is missing now: ${stillRegressed.map((r) => `${r.id} ${r.label}`).join(', ')}`,
+                    detail: 'Re-probed from the app\'s requirement ledger — each of these had a real control seen in the running app on an earlier build.',
                   });
                 }
               }

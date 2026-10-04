@@ -88427,3 +88427,14 @@ module), with five false findings on the way. Ledger (problem → root cause →
 - **Q-395** — a "continue" module turn showed the whole-app ETA and withdrew it seconds later; now never shown.
 - 🟡 Q-396 (no-tests warning on module turns), Q-397 (ignored theme note), Q-398 (APP_SCOPE small word as reason):
   BLOCKED with options in the queue. Q-399 (crawl bench, Haiku planner) resolved as admin-decided behaviour.
+
+## 2026-10-04 — Admin accepted every recommendation ("apke sare suggestion accepted! ab kam karo") — PR #3512
+
+| ID | Decision | What was done | Lock |
+|---|---|---|---|
+| Q-362 | (a) catch an app whose own screen shows an error | `visibleAppError.ts` reads the DOM the real browser captured after paint: an alert (`role="alert"` / `aria-live="assertive"`) or an element NAMED as an error (`react-pdf__message--error`, `errorBox`) whose own text says something failed, or a short line only a failing runtime writes ("TypeError: …", "Setting up fake worker failed", a line opening "Failed to load…"). Ignores `<pre>`/`<code>`/`<textarea>`, hidden subtrees, list items and table cells (the app's data), designed empty states and whole-page text. Both render checks (render rescue, preview verify) record `APP_SHOWS_ERROR` (warning, once per build); a later render check that no longer shows it clears it. One-tap offer "Fix the error your app shows". Never a gate, never a repair by itself, moves no money. | `tests/anAppThatShowsItsOwnErrorIsNotDone.test.ts` (the real react-pdf element from 981ce4cc + 13 designed pages that must stay clean); reverted twice (route call removed; error-name words emptied) and failed each time |
+| Q-461 | (a) leave the Kimi starvation; re-measure after Q-451 | Resolved as decided behaviour. Watch: a Weak build where `kimi-k2.7-code` starves on a turn that is NOT a bloated duplicate-build context. | — |
+| Q-359 | (a) keep today's rule: an attachment never becomes a project file | Resolved as decided behaviour; Q-358 keeps it honest. | — |
+| Q-367, Q-224, Q-464 | agree the argued "not a defect" items | Resolved as not-a-defect with the evidence already in their rows. | — |
+
+Still open from these reports (missing information): Q-364, Q-365, Q-366, Q-221, Q-462, Q-463.

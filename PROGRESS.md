@@ -88437,3 +88437,40 @@ module), with five false findings on the way. Ledger (problem → root cause →
   unchanged:** narrowing it was measured to send 8 of 7,403 test prompts to the roadmap planner, which CLAUDE.md's
   "never more eager" rule for that gate forbids without a decision. Sibling: appScope's feature count sizes a
   sectioned spec by its sections (only ever smaller).
+### 2026-10-04 — Q-421 and Q-422 decided by the admin, Q-422 built
+
+- **Q-421 ✅** — admin: keep the ₹0 bill. The preview fell because of our own bug (Q-410/Q-414), so the "paid only
+  when the preview ran" rule applies as written. No code change.
+- **Q-422 ✅ (on merge)** — admin: keep waiting for the in-flight call, but show what is finished. `SimpleBuilder`
+  now saves and announces the finished files the moment the lane decides to hand off, and each in-flight file as
+  it lands; the catch awaits those saves before the salvage write. Kill switch `AGENTV3_HANDOFF_EARLY_SAVE=off`.
+  Test `tests/theHandOffShowsWhatIsFinished.test.ts`, reverted-and-failed (2 of 4).
+- **Q-414** stays 🟡: it waits for a report carrying the new `package.json was EMPTY` evidence line.
+## 2026-10-04 — Admin accepted every recommendation ("apke sare suggestion accepted! ab kam karo") — PR #3512
+
+| ID | Decision | What was done | Lock |
+|---|---|---|---|
+| Q-362 | (a) catch an app whose own screen shows an error | `visibleAppError.ts` reads the DOM the real browser captured after paint: an alert (`role="alert"` / `aria-live="assertive"`) or an element NAMED as an error (`react-pdf__message--error`, `errorBox`) whose own text says something failed, or a short line only a failing runtime writes ("TypeError: …", "Setting up fake worker failed", a line opening "Failed to load…"). Ignores `<pre>`/`<code>`/`<textarea>`, hidden subtrees, list items and table cells (the app's data), designed empty states and whole-page text. Both render checks (render rescue, preview verify) record `APP_SHOWS_ERROR` (warning, once per build); a later render check that no longer shows it clears it. One-tap offer "Fix the error your app shows". Never a gate, never a repair by itself, moves no money. | `tests/anAppThatShowsItsOwnErrorIsNotDone.test.ts` (the real react-pdf element from 981ce4cc + 13 designed pages that must stay clean); reverted twice (route call removed; error-name words emptied) and failed each time |
+| Q-461 | (a) leave the Kimi starvation; re-measure after Q-451 | Resolved as decided behaviour. Watch: a Weak build where `kimi-k2.7-code` starves on a turn that is NOT a bloated duplicate-build context. | — |
+| Q-359 | (a) keep today's rule: an attachment never becomes a project file | Resolved as decided behaviour; Q-358 keeps it honest. | — |
+| Q-367, Q-224, Q-464 | agree the argued "not a defect" items | Resolved as not-a-defect with the evidence already in their rows. | — |
+
+Still open from these reports (missing information): Q-364, Q-365, Q-366, Q-221, Q-462, Q-463.
+## 2026-10-04 — CLAUDE.md shrunk from 563 KB to 71 KB (admin: "han")
+
+`CLAUDE.md` is loaded into every message of every session. At 563 KB (about 140,000 tokens) it was the largest single cost of the admin's Claude usage. Six sections were moved **verbatim** into `docs/claude/`:
+
+| File | What | Size |
+|---|---|---|
+| `ENV_REGISTRY.md` | the Cloud Run key registry, the money audit, the Cloud Run audit | 375 KB |
+| `ROUTING_AND_BILLING.md` | model routing, three tiers, billing, one wallet, White-Label Law | 68 KB |
+| `PRODUCT_POLICY_PRECEDENTS.md` | porn ban, read the mood, zero files, provider facts, server-body rule | 19 KB |
+| `THEME_RULES.md` | colour tokens and the theme rules | 16 KB |
+| `RELEASE.md` | Play Store and App Store releases | 13 KB |
+| `SCALE_PLAN.md` | the do-not-build-now scale plan | 9 KB |
+
+Nothing was reworded or dropped. A line-count check confirmed every line of the old file is in the new `CLAUDE.md` or one of these files. `CLAUDE.md` keeps every absolute rule, the safeguards, the session-concurrency rules and the merge rule in full. It also has a short binding summary in place of each moved section, and a "before you touch X, read Y" table under **Where things live**.
+
+**New rule:** when the admin sets a Cloud Run key, its name is recorded in `docs/claude/ENV_REGISTRY.md`, not in `CLAUDE.md`. Long histories and rationales go in the matching `docs/claude/` file.
+
+Also: Q-013's queue row now says #3496 is merged.

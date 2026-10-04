@@ -72,6 +72,11 @@ export interface Journey {
    */
   reach?: string;
   /**
+   * Other words the SAME door may carry, when the file's word is a developer's word and the control's
+   * is a user's. See `reachAliasesFor` — set only where the two genuinely differ, never a guess.
+   */
+  reachAlso?: readonly string[];
+  /**
    * The form asks for a password: a sign-in or sign-up form. It is driven signed OUT (a session would
    * only redirect away from it), and it never becomes a create-persists journey — what is typed into it
    * is a login, not an item that should appear in a list (autopsy 70e030bb).
@@ -1085,6 +1090,35 @@ export function reachWordFor(path: string): string | null {
 }
 
 /**
+ * The OTHER words the same door may carry, when the file's word is a developer's word and no control
+ * a user sees will ever carry it. PURE. `[]` for every ordinary screen.
+ *
+ * 🔴 AUTOPSY 39e982bd / Q-514 (2026-10-04). `src/screens/AuthScreen.tsx` holds a sign-in form, so
+ * `reachWordFor` returned **`auth`** — and the runner looks for a visible control whose name contains
+ * it. **No app on earth labels a button "auth".** The journey therefore could not be reached, the
+ * report said *"no visible control named after the \"auth\" screen was found to open it"*, and the
+ * release gate went **YELLOW** with *"whether it keeps what a user enters is untested"* — about an app
+ * whose form was two taps away. Every app with a login screen is in that shape.
+ *
+ * 🔑 THE GENERAL HALF IS NOT A SYNONYM TABLE, AND IT MATTERS MORE THAN THE TABLE. A file's word is
+ * CONCATENATED (`login`, `checkout`, `signup`) while the control's label is SPACED (`Log in`,
+ * `Check out`), and `"log in".includes("login")` is **false** — so a substring match could never
+ * bridge the two however many synonyms were listed. `pressReach` now compares with the letters alone,
+ * which fixes `login`/`Log in` for every screen and needs no list at all.
+ *
+ * 🔒 THE TABLE IS WHAT IS LEFT: one entry, for a word that is genuinely developer-only. And the
+ * aliases are deliberately only the NON-CREATING doors — "sign in", "log in", "login". "Sign up",
+ * "Register" and "Create account" are in `WRITE_VERBS`, so `pressReach` refuses them anyway (pressing
+ * one could create an account), and listing them would be noise that can never fire. A screen whose
+ * only door is "Sign up" stays unreachable, correctly.
+ */
+export function reachAliasesFor(word: string | null | undefined): readonly string[] {
+  const w = String(word ?? '').trim().toLowerCase();
+  if (w === 'auth' || w === 'authentication') return ['sign in', 'log in', 'login'];
+  return [];
+}
+
+/**
  * Is this page file a screen the app switches to by STATE rather than by URL? True when its route is
  * `/` only because nothing named it — no router declares the file, and it is not the home screen by
  * name. `App.tsx` and `Home.tsx` are on `/` for real; `src/screens/Medicines.tsx` in an app with no
@@ -1177,7 +1211,7 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
           ? `Open the "${reach}" screen, create an item and check it survives a reload`
           : `Create an item on ${route} and check it survives a reload`,
         fields, submit, writes: true,
-        ...(reach ? { reach } : {}),
+        ...(reach ? { reach, ...(reachAliasesFor(reach).length > 0 ? { reachAlso: reachAliasesFor(reach) } : {}) } : {}),
       });
     } else {
       out.push({
@@ -1196,7 +1230,7 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
         fields, submit,
         // A submit still POSTs. Treated as a write unless it is plainly a search/filter form.
         writes: !/search|filter|query/i.test(path),
-        ...(reach ? { reach } : {}),
+        ...(reach ? { reach, ...(reachAliasesFor(reach).length > 0 ? { reachAlso: reachAliasesFor(reach) } : {}) } : {}),
         ...(credential ? { signIn: true } : {}),
       });
     }
@@ -1249,6 +1283,7 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
       fields, submit,
       writes: create || !/search|filter|query/i.test(path),
       reach,
+      ...(reachAliasesFor(reach).length > 0 ? { reachAlso: reachAliasesFor(reach) } : {}),
       ...(credential ? { signIn: true } : {}),
     });
   }
@@ -1446,6 +1481,7 @@ export function journeyScript(previewUrl: string, journeys: readonly Journey[], 
     kind: ${JSON.stringify(j.kind)},
     route: ${JSON.stringify(j.route)},
     reach: ${JSON.stringify(j.reach ?? null)},
+    reachAlso: ${JSON.stringify(j.reachAlso ?? [])},
     // A sign-in form is driven signed OUT (a session would only redirect away from it); every other
     // journey runs behind the door when the app has one (signInExplore.ts).
     pageOpts: ${newPageOptionsExpr(isSignInRoute(j.route) || j.signIn ? null : opts.storageState)},
@@ -1494,6 +1530,12 @@ for (const j of journeys) {
       await c.getAttribute('aria-label').catch(() => ''),
       await c.getAttribute('title').catch(() => ''),
     ].map((x) => String(x || '').replace(/\\s+/g, ' ').trim().slice(0, 60)).filter(Boolean);
+    // 🔑 LETTERS ONLY, AND THE ALIASES (autopsy 39e982bd / Q-514). A file's word is concatenated
+    // ("login", "checkout") while a control's label is spaced ("Log in"), and
+    // "log in".includes("login") is FALSE — so the substring match could never bridge the two. The
+    // aliases cover the one word no user-facing control carries at all ("auth"); see reachAliasesFor.
+    const letters = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const reachWords = [j.reach, ...(j.reachAlso || [])].filter(Boolean);
     const pressReach = async (exact) => {
       const cands = page.locator('button, [role=tab], [role=button], a[href="#"], a:not([href])');
       const n = Math.min(await cands.count(), 60);
@@ -1501,7 +1543,7 @@ for (const j of journeys) {
         const c = cands.nth(i);
         if (!(await c.isVisible().catch(() => false))) continue;
         const names = await namesOf(c);
-        const name = exact ? names.find((x) => x === exact) : names.find((x) => x.toLowerCase().includes(j.reach));
+        const name = exact ? names.find((x) => x === exact) : names.find((x) => reachWords.some((w) => letters(x).includes(letters(w))));
         if (!name) continue;
         if (NEVER.test(name) || REACH_SKIP.test(name)) continue;
         if ((await c.getAttribute('type').catch(() => '')) === 'submit') continue;
@@ -1513,7 +1555,7 @@ for (const j of journeys) {
     };
     if (j.reach && !(await submitVisible())) {
       const via = await pressReach(null);
-      if (!via) { out.note = 'no visible control named after the "' + j.reach + '" screen was found to open it'; throw new Error('no-reach'); }
+      if (!via) { out.note = 'no visible control named after the "' + j.reach + '" screen was found to open it (looked for: ' + reachWords.join(', ') + ')'; throw new Error('no-reach'); }
       out.via = via;
     }
     if (!(await submitVisible())) {

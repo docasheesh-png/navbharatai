@@ -88750,3 +88750,56 @@ written down in plain words.
 **What survives, with the reason changed:** pushing ONCE per branch is still right, now simply because a
 second push creates a second run that somebody then has to cancel or wait out. Nothing is wrong with
 GitHub, nothing needs looking at in Actions settings, and the admin can ignore that request entirely.
+
+## 2026-10-04 — Q-514 and Q-517 from autopsy 39e982bd: the door the user sees, and a warning that became false
+
+Two of the five items that autopsy left OPEN, taken in order of user harm.
+
+### Q-514 — no app on earth labels a button "auth"
+
+`JOURNEY_NOT_RUN` → **RELEASE_GATE YELLOW**, *"whether it keeps what a user enters is untested"*. The
+one journey derived was the sign-in form in `src/screens/AuthScreen.tsx`, and the control the runner
+went looking for was named **`auth`** — the word the FILE carries. **Every app with a login screen is
+in that shape**, so a correct app is told its saving is untested.
+
+🔑 **THE GENERAL HALF IS NOT A SYNONYM TABLE, and it matters more than the table.** A file's word is
+CONCATENATED (`login`, `checkout`, `signup`) and a control's label is SPACED (`Log in`, `Check out`),
+and `pressReach` matched with `includes` — so **`"log in".includes("login")` is `false`**. No list of
+synonyms could ever have bridged that. The matcher now compares the LETTERS alone, which fixes
+`login`/`Log in` for every screen and needs no list.
+
+🔒 **The table is the remainder: one entry.** `auth` / `authentication` → `sign in`, `log in`, `login`
+— and deliberately only the NON-CREATING doors. "Sign up", "Register" and "Create account" are in
+`WRITE_VERBS`, so `pressReach` refuses them anyway (pressing one could create an account), and listing
+them would be noise that can never fire. A screen whose only door is "Sign up" stays unreachable,
+correctly, and a test asserts that every alias is a word `pressReach` will actually press.
+
+The failure note now names the words it looked for, so the next occurrence says which vocabulary missed.
+
+⚠️ **Said plainly: this may not have produced a journey for THAT build.** With Firebase unconfigured the
+app rendered its five tabs, and whether the sign-in form was reachable from them at all is not in the
+report. The fix is for the class — which is every login app — not for that one run.
+
+### Q-517 — "No tests at all" was false 17 seconds later
+
+The readiness gate records that warning before the E2E scaffold pass runs, so one report carried
+*"No tests at all"* at 19:30:09 and `E2E_SCAFFOLDED` writing a Playwright suite at 19:30:26, with
+`TEST_SUITE_UNVERIFIED` stating the honest end state in the same report. Two codes, one build,
+contradicting.
+
+The scaffold pass now clears that warning — **by its own sentence, never by its code.**
+`resolveOnRecheck` gained `messageIncludes`, because `READINESS_WARNING` carries many unrelated facts
+("Requested feature not found: search", …) and clearing the whole code would silence a real one in the
+same build. A precision test locks exactly that, and the existing whole-code callers (`EXPLORE_FAILED`,
+the heal table) are untouched.
+
+**Proof:** `tests/noAppLabelsAButtonAuth.test.ts` (14 cases), reversion-proven five ways — dropping the
+aliases fails 3, restoring the raw-substring match fails 1, dropping `reachAlso` from the generated
+module fails 2, dropping the message filter fails 1, dropping the call at the scaffold fails 1. The
+generated journey module is parsed with the real `node --check`, because that script has shipped broken
+twice before (a backtick inside a comment; a `\b` that reached the page as a backspace).
+
+**Still OPEN from that autopsy: Q-515, Q-516, Q-518** — the snapper-vs-scorer 21-value disagreement,
+`APP_SCOPE`'s false *"clone of Free Fire"* with the ecommerce domain, and the explorer passing
+*"View Details — nothing visibly changed"*. Each needs a cheap diagnosis or a precision corpus; none is
+guessed at.

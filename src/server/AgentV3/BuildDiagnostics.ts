@@ -2320,10 +2320,19 @@ export class BuildDiagnostics {
    * 🔒 THE CALLER'S OBLIGATION: reach here only when the SAME check re-ran over the whole app and found
    * no failure at all — never because a repair "probably worked", and never on a partial fix.
    */
-  resolveOnRecheck(code: string): number {
+  /**
+   * `messageIncludes` narrows the clear to the findings whose message contains that text — needed for a
+   * code that carries MANY different facts (autopsy 39e982bd / Q-517). `READINESS_WARNING` is one
+   * ("No tests at all", "Requested feature not found: search", …), so clearing the whole code would
+   * silence unrelated warnings; a readiness warning that a later pass made FALSE must be cleared by
+   * its own sentence and nothing else.
+   */
+  resolveOnRecheck(code: string, opts: { messageIncludes?: string } = {}): number {
+    const needle = typeof opts.messageIncludes === 'string' ? opts.messageIncludes : null;
     let cleared = 0;
     for (const issue of this.issues) {
       if (issue.code !== code || issue.autoResolved === true) continue;
+      if (needle !== null && !String(issue.message ?? '').includes(needle)) continue;
       issue.autoResolved = true;
       cleared++;
     }

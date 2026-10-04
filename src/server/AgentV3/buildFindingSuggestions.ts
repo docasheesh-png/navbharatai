@@ -152,6 +152,7 @@ const NEVER_SUGGEST = new Set([
   'TIME_TO_FIRST_RENDER', 'POST_GREEN_WRITES', 'LADDER_DEPTH', 'STRICT_TRIAL', 'SAVED_SOURCE_DIVERGES', 'ATTACHMENTS_READ',
   'FREE_BUILD_TIME_CAP', 'FREE_BUILD_CHAIN_PAUSED', // our free-tier time policy (freeBuildTimeCap.ts)
   'STYLE_RULES_RESUMED', // our end-of-turn steer (stylePolishResume.ts), never a finding
+  'REPAIR_CLAIM_WITHHELD', // our repair pass claimed a change it never made (repairClaim.ts)
   'UNSUPPORTED_STACK', // the user is told in the ready message already (unsupportedStack.ts)
   'UNKNOWN_NAME_IN_REQUEST', // a note to our builder (unknownName.ts), never a finding
   'AUTH_EXPLORE_SIGNED_IN', 'AUTH_EXPLORE_NOT_RUN', // our sign-in instrument, never the app's defect

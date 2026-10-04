@@ -45,7 +45,7 @@ import { isWorkerRole, isPlanningOnlyRole, PLAN_YOURSELF_NOTE } from './AgentReg
 import { getWorkspaceMemory } from './WorkspaceMemory';
 import { shellBuildProvesSuccess } from './buildFailurePrediction';
 import { robustTscCommand, recipeInstallCommand, RECIPE_DEPS_BUSY_MARKER } from './tscCommand';
-import { parseTscErrors, type TscError } from './EndgameRepair';
+import { parseTscErrors, fixTypeOnlyValueImports as fixTypeOnlyValueImportsFromErrors, type TscError } from './EndgameRepair';
 import { tscOutputProvesClean, looksLikeTypecheckCommand, tscVerdict, countTscErrors } from './TscGate';
 import { pathMissHint } from './suggestFilePath';
 import { analyzeCodeSmells, renderCodeSmells } from './CodeSmellAnalyzer';
@@ -88,6 +88,7 @@ import { importCheckNote } from './writeTimeImportCheck';
 import { qualityNote, writeQualityEnabled } from './writeTimeQualityCheck';
 import { lintBuiltApp, a11yHandBack, offGridHandBack } from './buildQualityLint';
 import { storeEffectLoopNote } from './storeEffectLoop';
+import { detachedMethodNote } from './detachedMethod';
 import { rootThemeHooks, deadThemeSwitchNote } from './deadThemeSwitch';
 import { pruneGeneratedListing } from './generatedListing';
 import { inventedKitClasses, inventedKitClassNote, keepKitOnRewrite, kitKeepToolNote, leftToTheKit, usesNonKitNbClass } from './kitRestore';
@@ -105,6 +106,7 @@ import {
   shouldProbeTsconfig, probeExhausted, isMissingFileError, type TsProjectVerdict,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
   type WriteTypecheckStats,
+  typeOnlyWriteHealEnabled, typeOnlyHealTargets, withoutHealedTypeOnly, healedTypeOnlyNames, typeOnlyHealNote,
 } from './writeTimeTypecheck';
 import { scanAuthenticity, authenticitySummary, fakeResultWriteNote } from './AuthenticityAnalysis';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
@@ -743,6 +745,20 @@ export class ToolDispatcher {
   wroteAnything(): boolean {
     this.flushUnrecordedWrites();
     return this._writtenPaths.size > 0 || this._delegateWrote;
+  }
+
+  /** Delegations whose sub-agent wrote something (or could not say) — counted, so a RUN can ask about itself. */
+  private _delegateWrites = 0;
+
+  /**
+   * How many changes this agent has made so far — its own writes plus delegations that wrote. A number,
+   * not a yes/no, because a repair pass on the architect's dispatcher must ask "did THIS run change
+   * anything?", and `wroteAnything()` is already true from the build that came before it (autopsy
+   * 6cd698cc — see `repairClaimWithoutChange` in AgentRunner).
+   */
+  changeCount(): number {
+    this.flushUnrecordedWrites();
+    return this._writeSeq + this._delegateWrites;
   }
 
   // Preview loop-breaker state (build-diagnostics root cause: with no cross-call memory the model
@@ -3111,7 +3127,7 @@ export class ToolDispatcher {
       if (unprobed) s.compiledUnprobed += 1;
       let silentRun = false; // tsc printed nothing at all — the only output that means "clean"
       let neverRan = false; // the compiler did not look at the project — neither clean nor failed
-      const errors = await this._writeTypecheckQueue.run(async () => {
+      let errors = await this._writeTypecheckQueue.run(async () => {
         const command = writeTypecheckCommand();
         const startedAt = Date.now();
         let r: { stdout: string; stderr: string };
@@ -3151,6 +3167,15 @@ export class ToolDispatcher {
         return '';
       }
       if (errors.length === 0) s.cleanRuns += 1;
+      // A type-only import of a value is a string edit with one correct form — done here, not asked of the
+      // model (autopsy 6cd698cc, writeTimeTypecheck.ts). Only in files this build wrote.
+      const healedTypeOnly = errors.length > 0 ? await this.healTypeOnlyImportsAtWrite(errors, tsPaths, sources) : null;
+      const healedNote = healedTypeOnly ? typeOnlyHealNote(healedTypeOnly.healed) : '';
+      if (healedTypeOnly && healedTypeOnly.healed.size > 0) {
+        sources = { ...sources, ...healedTypeOnly.files };
+        errors = withoutHealedTypeOnly(errors, healedTypeOnly.healed);
+        if (errors.length === 0) return healedNote;
+      }
       const own = splitByWrittenFiles(errors, tsPaths).own.length;
       s.ownErrorsSurfaced += own;
       if (own > 0) {
@@ -3168,10 +3193,44 @@ export class ToolDispatcher {
       sources = { ...(await this.exportTargetSources(splitByWrittenFiles(errors, tsPaths).own, sources)), ...sources };
       // The members of a type the code guessed at (autopsy 0bb437b4) ride after the typecheck's own note.
       const members = await this.missingMemberNote(splitByWrittenFiles(errors, tsPaths).own, sources);
-      if (members) return writeTypecheckNote(errors, tsPaths, sources) + members;
-      return writeTypecheckNote(errors, tsPaths, sources);
+      if (members) return healedNote + writeTypecheckNote(errors, tsPaths, sources) + members;
+      return healedNote + writeTypecheckNote(errors, tsPaths, sources);
     } catch {
       return ''; // the check's own failure must never reach the write's result as anything but silence
+    }
+  }
+
+  /**
+   * Fix TS1361 (a value imported with `import type`) in files THIS build wrote, through the heal write path,
+   * and return what landed. The compiler named file, line and name, so the edit is exact; a file the user
+   * wrote and this build never touched is left to the model, as before. Best-effort: anything that fails
+   * leaves the error to be quoted exactly as it was.
+   */
+  private async healTypeOnlyImportsAtWrite(errors: TscError[], tsPaths: string[], sources: Record<string, string>): Promise<{ healed: Map<string, Set<string>>; files: Record<string, string> }> {
+    const none = { healed: new Map<string, Set<string>>(), files: {} as Record<string, string> };
+    try {
+      if (!typeOnlyWriteHealEnabled()) return none;
+      const targets = typeOnlyHealTargets(errors, new Set([...tsPaths, ...this._writtenPaths]));
+      if (targets.length === 0) return none;
+      const before: Record<string, string> = {};
+      for (const file of new Set(targets.map((e) => e.file))) {
+        const known = sources[file];
+        const content = typeof known === 'string' ? known : await this.actuator.readFile(this.workspaceId, file).catch(() => null);
+        if (typeof content === 'string') before[file] = content;
+      }
+      const fix = fixTypeOnlyValueImportsFromErrors(before, targets);
+      const named = healedTypeOnlyNames(fix.fixed);
+      const healed = new Map<string, Set<string>>();
+      const files: Record<string, string> = {};
+      for (const [file, names] of named) {
+        const after = fix.files[file];
+        if (typeof after !== 'string' || after === before[file]) continue;
+        if (healWouldOscillate(this.workspaceId, file, after)) continue;
+        if (await this.landHealWrite(file, after, before[file])) { healed.set(file, names); files[file] = after; }
+      }
+      return { healed, files };
+    } catch {
+      return none;
     }
   }
 
@@ -3434,6 +3493,8 @@ export class ToolDispatcher {
     // A whole-store dependency that loops the app forever (autopsy 6a4a799f) — said while the file is open.
     let storeLoop = '';
     try { storeLoop = storeEffectLoopNote(files); } catch { /* a note is best-effort */ }
+    // A `this`-reading method handed out uncalled (autopsy 6cd698cc — the theme button). See detachedMethod.ts.
+    try { storeLoop += detachedMethodNote(files); } catch { /* a note is best-effort */ }
     // An `nb-` class the kit does not have and nothing defines (autopsy 466c260a) — said while the file
     // is open, instead of by the end-of-build check inside a four-minute heal.
     const invented = await this.inventedKitClassNotes(files);
@@ -10239,7 +10300,7 @@ export class ToolDispatcher {
         if (isPlanningOnlyRole(role)) return PLAN_YOURSELF_NOTE;
         this.events?.emit({ type: 'agent_spawned', agent: role, task: instruction, ts: Date.now() });
         const result = await this.spawnSubAgent(role, instruction + await this.stylesheetBriefFor(role));
-        if (!Array.isArray(result.written) || result.written.length > 0) this._delegateWrote = true;
+        if (!Array.isArray(result.written) || result.written.length > 0) { this._delegateWrote = true; this._delegateWrites += 1; }
         return taskResultWithWrites(role, result);
       }
 

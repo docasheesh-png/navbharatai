@@ -89081,3 +89081,12 @@ A read-only audit of 21 migrated rows against today's code. Changes made from it
 anywhere in the client, and every remaining call has a reader. Client typecheck, unused-import scan and the 200
 billing/payment tests green.
 
+### 2026-10-04 — Q-164: the Monitor's request count is the number of real model calls
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-164 `aiRequests` = one per provider per build | `recordPlatformBuild` reports token TOTALS once per provider; `recordModelCall` added 1 per report | a count read from a total that does not carry it | ledger counts calls on `add` (`callsByProvider`); `providerCalls` on `PlatformBuildRecord`; `MetricsRegistry.recordModelCall(…, calls)`, sink and timeline forward it; absent ⇒ 1 | `tests/theMonitorCountsRealCalls.test.ts` (reverted → 2 fail) |
+
+⚠️ For whoever reads the Monitor next: request counts step UP at this deploy — that is the measurement becoming
+true, not a change in traffic. Token and cost totals are unchanged.
+

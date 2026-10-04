@@ -835,7 +835,7 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
         const walletRef = doc(db, 'user_token_wallets', userId);
         const walletSnap = await tx.get(walletRef);
         const walletData = walletSnap.exists() ? walletSnap.data() : { userId, tokenBalance: 0, totalTokensPurchased: 0, totalTokensUsed: 0, totalMoneySpent: 0, walletLedger: [], remaining_balance: 0, total_balance: 0 };
-        const { wallet: credited } = computeCreditedWallet(walletData, txData as any, null, nowIso);
+        const { wallet: credited } = computeCreditedWallet(walletData, txData as any, nowIso);
         tx.set(walletRef, credited);
         tx.set(txRef, txData);
         return credited;

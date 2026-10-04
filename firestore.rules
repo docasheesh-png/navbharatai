@@ -125,11 +125,11 @@ service cloud.firestore {
       allow write: if false; // server-only
     }
 
-    // Promo redemptions — user can create own, no update/delete
+    // Promo redemptions — SERVER-ONLY (forensic audit 2026-10-04, P0). The old rule let any signed-in
+    // user CREATE `promo_pending_<anyUid>`, and the payment path read it to credit 1,000 tokens instead of
+    // the paid amount — a client write on the money path. No client reads or writes this collection.
     match /promo_redemptions/{redemptionId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
-      allow update, delete: if false;
+      allow read, write: if false;
     }
 
     // User secrets — owner only, strict

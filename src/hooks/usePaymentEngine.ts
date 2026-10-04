@@ -179,9 +179,8 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
    * this call). So the "Have a promo code?" box answered every code — valid or not — with "Validation
    * failed", blaming the user's code for a missing endpoint.
    *
-   * Recorded because the server still carries the other half: `computeCreditedWallet` reads a pending
-   * `promo_redemptions/promo_pending_*` document that nothing has ever written, precisely because this
-   * was its only would-be writer.
+   * The server's other half — a pending-promo branch in `computeCreditedWallet` — was removed in the
+   * forensic audit of 2026-10-04: the Firestore rules let any client plant that document.
    *
    * The working promo redemption is `redeemPromoCoupon` below (`POST /api/payment/redeem-coupon`,
    * surfaced in Wallet & Billing) — a user with a code still has a real place to use it.

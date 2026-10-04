@@ -65,6 +65,37 @@ export function shellEarlyRule(env: NodeJS.ProcessEnv = process.env): string[] {
   ];
 }
 
+/**
+ * 🔴 THE RULE ABOVE IS PROSE IN A 90 KB PROMPT, AND IT WAS IGNORED (autopsy 39e982bd, 2026-10-04).
+ *
+ * `shellEarlyRule` has been in the architect's system prompt since this file shipped. On the PrimeClash
+ * eSports build the model wrote, in order: `src/types.ts`, the Firebase client, a service, four hooks,
+ * two components, six screens, a stylesheet, `src/main.tsx` — and `src/App.tsx` **twenty-third of
+ * twenty-four writes**, eight minutes in. `TIME_TO_FIRST_RENDER: 495s` on a 571-second build: the user
+ * watched a starter page for 87% of their build, which is the exact harm this file was written for.
+ *
+ * 🔑 THE CLASS, AND THIS REPO HAS PAID FOR IT BEFORE: a rule the model is TOLD competes with a habit
+ * the model HAS, and in a prompt this size the habit wins. Every rule here that actually changed
+ * behaviour became mechanical — `undefinedClassWriteNote`, `stylePolishResume`, `orphanHandBack`,
+ * `SPACING_SNAPPED` (whose own report line records three model calls wasted on the advisory version).
+ * So this is the same rule, handed back at the one moment it is actionable: the model has just written
+ * a source file, the entry is still our starter, and the file it should write next is named.
+ *
+ * ⚠️ ONCE PER BUILD, and never for the entry's own write. A note repeated on every leaf would be the
+ * nag that the READ_LOOP escalation was written to replace, and the model that has just written the
+ * entry needs no instruction about it.
+ */
+export function entryFirstWriteNote(entryPath: string, env: NodeJS.ProcessEnv = process.env): string {
+  if (!earlyPreviewEnabled(env)) return '';
+  if (!entryPath) return '';
+  return `\n🖥️ The user's live preview still shows the starter page: \`${entryPath}\` has not been written yet, `
+    + `so nothing you have written is on their screen. Write \`${entryPath}\` NEXT — the real layout, navigation `
+    + 'and imports of the screens — then carry on with the rest. Every screen you have not written yet appears '
+    + 'as a "being built" card and turns into the real screen the moment you write it, so the app is on screen '
+    + 'in seconds instead of at the end. The typecheck will name those imports as missing until you write them; '
+    + 'that is expected — write them, never stub them out.';
+}
+
 /** The specialists that write the app's UI and therefore its entry. */
 export function writesTheEntry(role: string): boolean {
   return role === 'frontend' || role === 'fullstack' || role === 'mobile';
@@ -93,4 +124,36 @@ export function entryFirstHandoffLine(unwritten: readonly string[] | undefined, 
 export function renderWhileBuilding(clientSaysBuilding: unknown, buildRunningHere: boolean, env: NodeJS.ProcessEnv = process.env): boolean {
   if (!earlyPreviewEnabled(env)) return false;
   return clientSaysBuilding === true || buildRunningHere === true;
+}
+
+/**
+ * 🔴 THE RULE ALONE WAS NOT FOLLOWED — so the write that breaks it is answered at once (autopsy 68f0a486,
+ * 2026-10-04). `shellEarlyRule` is a sentence in the prompt. On the school app the builder wrote the
+ * types, the store, the sidebar, the top bar, the dashboard and six screens, and `src/App.tsx` LAST — 375 s
+ * of a starter page, the same shape as the calendar report the rule was written for. A prompt line a model
+ * may skip is now backed by a note in the tool result of the write that skipped it: once the builder has
+ * written `MIN_SCREENS_BEFORE_NOTE` UI files and the entry is still our starter, it is told, while the
+ * files are open, to write the entry next. Once per agent; never on a module turn that does not own the
+ * entry (the dispatcher's `starterExpected`).
+ */
+export const MIN_SCREENS_BEFORE_NOTE = 2;
+
+/** A React UI file under src/ that is not the entry or the mount — a screen or a component. PURE. */
+export function isUiComponentPath(path: string): boolean {
+  const p = String(path ?? '').replace(/^\.?\//, '');
+  if (!/^src\/.+\.(?:tsx|jsx)$/.test(p)) return false;
+  if (/^src\/(?:App|main|index)\.(?:tsx|jsx)$/.test(p)) return false;
+  return !/\.(?:test|spec|stories)\.(?:tsx|jsx)$/.test(p);
+}
+
+/** The note for a builder that has written screens while the entry is still the starter. '' when off. PURE. */
+export function entryLateNote(screensWritten: readonly string[], env: NodeJS.ProcessEnv = process.env): string {
+  if (!earlyPreviewEnabled(env)) return '';
+  const screens = screensWritten.filter(isUiComponentPath);
+  if (screens.length < MIN_SCREENS_BEFORE_NOTE) return '';
+  const names = screens.slice(0, 6).map((p) => p.replace(/^.*\//, '').replace(/\.(?:tsx|jsx)$/, '')).join(', ');
+  return `\n🖥️ The user's live preview still shows the STARTER page: src/App.tsx has not been written, so none of the `
+    + `${screens.length} screen(s) you wrote (${names}) can be seen. Write src/App.tsx NEXT, before any other file — `
+    + 'the real layout and navigation, importing the screens written so far AND the ones still to come (an unwritten '
+    + 'one shows as a "being built" card until you write it).';
 }

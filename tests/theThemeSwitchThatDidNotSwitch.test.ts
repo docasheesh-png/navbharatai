@@ -58,7 +58,11 @@ describe('1 · a theme switch that sets something nothing styles is named while 
   it('is one of the write-time notes every write door asks', () => {
     const src = read('src/server/AgentV3/ToolDispatcher.ts');
     expect(src).toMatch(/const theme = await this\.deadThemeSwitchNotes\(files\);/);
-    expect(src).toMatch(/\+ security \+ shadow \+ theme \+ touch;/);
+    // The invariant is that `theme` is a TERM of the one shared return, not the exact list of its
+    // siblings: pinning the whole expression made every later note (autopsy 39e982bd added
+    // `entryFirst`) fail a test about the theme switch. The guard still bites if the term is dropped.
+    const ret = src.slice(src.indexOf('private async writeSteeringNotes(')).match(/\n    return hooks \+[^;]*;/)?.[0] ?? '';
+    expect(ret).toMatch(/\+ theme\b/);
   });
 });
 

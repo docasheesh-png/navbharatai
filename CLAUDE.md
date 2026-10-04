@@ -240,6 +240,16 @@ The rule, in `IntentClassifier.ts`:
 - An **order** ("build a notes app", "ek billing app banao") is not a question — it stays HIGH and
   instant. The common path pays nothing.
 
+🔴 **WIDENED BY THE ADMIN 2026-10-03 (Q-200, autopsy 3f959fde): "100% confirm nahi hai, to pahle text reply,
+phir app banane ke bare me puchna hai."** A data question in Telugu with a sheet attached was built as a ₹272 app
+because the reader answered "build". Now a `new_build` — or an "edit" of a chat that holds nothing of the user's —
+goes ahead only when the MESSAGE confirms it (`buildConfirmation.ts`): a certain order, a complete-app or
+start-over request, pasted source, or a non-question naming a whole product (app, website, game, tool…; a UI
+part such as "table" is not enough). **A question that names an app is now answered and offered too** — this
+replaces the bullet above that let it keep its build intent. The turn is recorded with lane `offer`; a short
+"yes / haan / bana do" within 6 hours builds the OFFERED request (`prompt` becomes it; the chat history keeps
+what was typed). Edits of an app the user really has are unchanged. `AGENTV3_CONFIRM_BUILD=off` reverts.
+
 ⚠️ **The asymmetry is the whole justification, and it must not be reversed.** Wrong toward chat costs
 one message — and the chat reply already offers to build, so "haan" starts it. Wrong toward build costs
 29 minutes, real money, and a user who asked for none of it.
@@ -1841,6 +1851,26 @@ the code (it is actually read somewhere) on 2026-07-11.
   override yet**, because nothing in the product can set one and a field with no screen behind it is a
   promise. Reverting is one key: unset it and new publishes stamp nothing, while apps already carrying
   a token get an honest "not available" from the endpoint.
+- **🤖 THE APP'S OWN AI WORKS IN THE PREVIEW, ON THE OWNER'S KEY IF THEY WANT, AND IT CAN BE SWITCHED OFF
+  (built 2026-10-04; admin: "preview me AI chalao ₹2/din … apni api keys … red dot … navbharatai ki api
+  delete kar de … navbharatai api browser me na jaye").** One key, NOT set, code default governs:
+  `APP_AI_PREVIEW_CAP_INR` (**₹2 a day per app**, unreadable ⇒ 2, never "no limit"). Everything rides the
+  existing `APP_AI_GATEWAY` switch. Code: `src/lib/previewAiProtocol.ts` (the relay), `lib/appAiAnswer.ts`
+  (ONE answer path for published + preview), `lib/appAiOwnKey.ts`, `lib/AppAiSettingsStore.ts`
+  (`app_ai_settings`, erased with the workspace), `routes/appAiOwner.ts`, `AppAiSettingsCard.tsx`.
+  🔒 **NO CREDENTIAL IN THE PREVIEW PAGE:** the app posts its question to its PARENT (the NavBharatAI page the
+  owner is signed in to), which asks `POST /api/app-ai/preview-ask` with the owner's own login (strict
+  `ownedByVerifiedUid`). Opened anywhere else there is no parent to answer. The saved preview copy gets the
+  same relay (`withPreviewAiRelay`) only when its bundle uses `NavAI`.
+  🔑 **OWN KEY = SERVER-SIDE:** `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` in the vault (shared or for that app)
+  makes BOTH the preview and the published app answer on that key from our server; ₹0 to the wallet; the
+  app's code does not change. A refused key is reported, **never silently replaced by our engine**.
+  🔘 **THE SWITCH** (`POST /api/app-ai/settings`) stops NavBharatAI's engine for that app immediately,
+  published and preview, no republish. 🔴 **RED DOT** on More → Keys & Secrets (`secrets.ai-notice`) until
+  the owner opens the "AI in this app" card (seen-state is per device, localStorage).
+  ⚠️ **Honest limit:** a PUBLISHED page still carries the public, signed app token — it is an identifier,
+  not a key, and the per-app (₹20) and per-visitor (₹2) caps are what bound it. Nothing callable from a
+  public page can be made secret; provider keys never leave the server.
 - **🧮 `AI_IMAGE_FREE_PAID_DAILY_CAP` — the PLATFORM-WIDE daily ceiling on images the FREE tier gets
   from a PAID engine (built 2026-09-21; the number PR #3234 left open). ⚠️ NOT set, and the code default
   is **300 a day across the whole platform**.** Read by `src/server/lib/imageFreePaidBudget.ts`; its
@@ -3227,6 +3257,18 @@ the flag entries above promise.
   says so, `null` means *not supplied* and never zero, and `writeTypecheckUntouched` makes the
   silence unrepresentable as a fact about the build. Test-locked and reversion-proven four ways in
   `tests/theCounterWatchedOneLaneOfTwo.test.ts`.
+- **🔧 A REPAIR THE PLATFORM CHECKS DOES NOT CHECK ITSELF, AND A REPAIR THAT CHANGED NOTHING SAYS SO (autopsy
+  6cd698cc, 2026-10-01).** The explorer repair fixed a theme button in 61 s, then ran the production build, a dev
+  server, the preview and a browser of its own (its prompt was the reviewer's `judgeRepairPrompt`, "verify the app
+  builds…") until its 150 s cap; the platform undid the working fix. Now the explorer and green functional repairs
+  get `PLATFORM_CHECKS_THE_FIX` (`repairScope.ts`), run without the preview/browser tools (`withoutPlatformCheckTools`)
+  and with `focusedRepair` (no style hand-back). ⚠️ Never hand a platform-checked repair `judgeRepairPrompt`. And a
+  platform-requested run whose last turn claims a change while it changed no file is narrated as "No change was made
+  in that step." (`repairClaim.ts`, `REPAIR_CLAIM_WITHHELD`). Two keys, NEITHER set, default ON, `off` reverts:
+  **`AGENTV3_WRITE_TYPE_IMPORT_HEAL`** (the write-time typecheck rewrites a TS1361 `import type` of a value in a file
+  this build wrote, and says so; the fast lane's timeout salvage runs the same `deterministicImportFixes` as its
+  verify) and **`AGENTV3_DETACHED_METHOD_NOTE`** (a write-time note names a method that reads `this` and is handed
+  out uncalled, e.g. `return store.set`; `detachedMethod.ts`). Test: `tests/theRepairThatWorkedWasUndone.test.ts`.
 - **`AGENTV3_WRITE_SECURITY`** (NOT set; default ON, `off` disables — added 2026-09-30, autopsy 466c260a) —
   `scanSecurity`'s medium/high findings (an XSS sink such as `dangerouslySetInnerHTML` / raw `innerHTML`, a
   hardcoded secret) are handed back with every write (`securityWriteNote`, via `writeSteeringNotes`). Before
@@ -3309,6 +3351,21 @@ the flag entries above promise.
     its reply.
 
   Test-locked in `tests/theAskComesLast.test.ts`.
+- **🐍 `AGENTV3_PYTHON_BACKEND_BOOT` — A PYTHON BACKEND COMES BACK WITH ITS APP (Q-284, autopsy 241215d1, 2026-10-04).
+  ⚠️ NOT set; default ON; `off` reverts.** `pythonBackendBoot.ts`. Every platform start of an app (the preview wake,
+  our own preview start, both in-build restarts) used to run only `npm run dev`, so a FastAPI/Flask server came back
+  with no venv and no process. Now one plan (start command read by `pythonStart.ts`, port from the front end's proxy
+  target, else the server's own, else 8000) is used by the service graph (a `python:` backend) and by every start
+  path, which boots it first: venv, install only when the manifest changed (`timeout 240`), detached start, 30 s port
+  wait. The script is sent base64-encoded so it is never treated as a dev-server launch. 🔒 No declared server ⇒ no
+  plan ⇒ the old behaviour. A recipe recorded from the backend's launch is never replayed as the preview.
+  Report codes `PYTHON_BACKEND_UP` (process-only) / `PYTHON_BACKEND_NOT_UP`.
+- **📝 `AGENTV3_SCRIPT_REQUEST_NOTE` — A SCRIPT REQUEST IS BUILT AS A WEB APP, AND THE USER HEARS IT FIRST (Q-274,
+  admin chose "a" 2026-10-04). ⚠️ NOT set; default ON; `off` reverts.** `scriptRequest.ts`: a request for a Python
+  script, a command-line tool, a Streamlit dashboard or a notebook (precision-first: a film script, JavaScript, a
+  build script, a conversion or an explicit web-app request stand down) gets a builder note and one start-of-build
+  line. When live data was asked, sample data must be labelled "Sample data", and `claimAudit` (`live-data-claimed`)
+  corrects a summary that calls a simulated feed live. Report code `SCRIPT_REQUEST_AS_WEB_APP` (process-only).
 - **📋 A PASTED APP IS THE SPEC, AND PASTED CODE IS NOT PROSE (autopsy a106df77, 2026-10-01).** Two keys, NEITHER
   set, default ON: **`AGENTV3_PASTED_APP_BRIEF`** (`off` drops the brief). A user pasted their own HTML bill maker with no other words.
   The published title became `<!doctype html> <html lang="en"> <head>`, a `<meta content="width=…">` was shown
@@ -4061,6 +4118,11 @@ the flag entries above promise.
   app) all read the four words. `planningRequest.ts` is ONE request (message + capped attachment + the last 3
   earlier requests ONLY while no app exists) that every sizer and planner reads; intent and the golden
   scaffold still read the message. Admin line `PLANNING_CONTEXT`.
+  🔁 **A message that POINTS at the conversation reads the conversation (autopsy 5759ad8b, 2026-10-01).** "Can you
+  make this app" meant an app described in CHAT, which this block drops by design (6ae30b33); the fast lane planned a
+  counter. A short message (≤ 14 words) whose subject is a pointer ("this app", "yeh app", "isko banao", "यह ऐप") on a
+  workspace with no finished app now adds its chat turns and the conversation's last answer (one bounded read,
+  `conversationReference.ts`, `lastAssistantText`). Every other message is unchanged.
   `kitRestore.ts`: the design repair is told the kit is "already in the project" — it was not, the architect
   had rewritten `src/index.css` — so four empty states shipped on undefined `.nb-empty*`. A kit class with no
   rule has exactly one right rule, the kit's, so it is appended deterministically (with its media rules,
@@ -4115,6 +4177,22 @@ the flag entries above promise.
   `openErrors`, one output-read door `noteCompileOutput` — the shell path had marked tsc clean on a `| head`
   exit code of 0); and when the release gate's typecheck passed, a reviewer finding claiming the project does
   not compile is dropped before the user sees it (`reviewEvidence.ts`, `REVIEW_REFUTED_BY_EVIDENCE`).
+- **🧩 FOLLOW-UP TO AUTOPSY de3bb2bb — THREE BUILDER RULES AND ONE REPORT FIX (admin decisions 2026-10-01, PR #3467).**
+  - **Small batches, no flag:** `write_files_batch` carries at most `MAX_FILES_PER_BATCH = 3` new files
+    (`batchSize.ts`, read by the prompt, the tool text and the dispatcher). One 189 s call had written 7 files, so
+    the preview showed nothing for three minutes. The old prompt line ("pass all files in one call … 3× faster")
+    was never measured; do not restore it. An oversized batch is still written in full and told to shrink.
+  - **Sub-agents get the style hand-back, no flag of its own** (rides `AGENTV3_STYLE_RESUME`): a writing
+    specialist is handed back, once, the undefined classes / page defects / unnamed controls in the files IT
+    wrote (`scopeStyleHandBack`). A sibling's class is the sibling's, because specialists run in parallel.
+  - **`AGENTV3_UNKNOWN_NAME_NOTE`** (NOT set; default ON; `off` disables), `unknownName.ts`: on a NEW build, an
+    all-caps word NavBharatAI does not know ("COACT", most likely "collect") is not built as an outside service.
+    The builder, planner and fast lane are told: no client, no API URL, no env variable for it; build
+    self-contained; say in one sentence how the word was read. Precision-first: acronyms, known services,
+    emphasis words, a word the request names as a service ("ACME API", "ACME se connect") and all-caps prompts
+    stand down. Report code `UNKNOWN_NAME_IN_REQUEST` (process-only).
+  - A readiness warning is recorded once per build (`readinessWarningsSeen` in `BuildDiagnostics`); each runner's
+    `done` had recorded "No tests at all" again.
 - **🎨 `AGENTV3_STYLE_RESUME` — A TURN THAT ENDS WITH UNSTYLED SCREENS IS HANDED THE CLASS LIST ONCE (autopsy
   1be16985, 2026-10-01). ⚠️ NOT set; default ON; `off` reverts.** `stylePolishResume.ts`, applied in
   `AgentRunner` after a READY readiness verdict. The write-time note (`undefinedClassWriteNote`, e6d46cde)
@@ -4144,6 +4222,24 @@ the flag entries above promise.
   `planningRequest.ts`); a build cut short before its ETA band is `untested`; the platform ETA prior averages
   successful builds; and setup puts back the template when a workspace holds only a piece of our own starter
   (`starterFragment.ts`). Test-locked in `tests/aPictureIsNotAnApp.test.ts`.
+- **✍️ A REQUEST TO WRITE A PROMPT IS ANSWERED, NOT BUILT (autopsy cf09c03c, 2026-10-04; no flag).** "Etake aro
+  improve korar jonno ekta valo prompt likhe dao" (write a better prompt) was locked to an EDIT by "improve" and
+  replaced our starter's App.tsx with a page showing a prompt (₹6.34). 6ae30b33's written-content rule had asked
+  only the NEW-build verbs and had no "prompt" noun. Now the edit verbs ask it too (`asksForWrittenText` → chat
+  LOW; `namesTextNotScreen` → edit LOW, so "change the caption" still reaches the reader as an edit), and
+  `asksForPromptText` in `lib/imageIntent.ts` stops a request to WRITE a prompt reading as a picture on every
+  chat surface (a prompt the user GIVES is still a picture). Same change: on an edit, "I changed N files" counts
+  what the turn authored (`reviewChangedPaths`), and an omitted stylesheet no longer gives the lean review its
+  tools back. Test: `tests/aPromptIsTextNotAnApp.test.ts`.
+- **🙋 `AGENTV3_CONFIRM_BUILD` + 📎 `AGENTV3_ATTACHMENT_MEMORY` (admin 2026-10-03, Q-200 / Q-201). ⚠️ NEITHER is set;
+  both default ON; `off` reverts each alone.** `buildConfirmation.ts`: see "READ THE MOOD FIRST" above — an unconfirmed
+  build is answered and offered, and a "yes" builds the offered request. `lib/attachmentMemory.ts`: the latest
+  attached DOCUMENT's text (PII masked, ≤ 50 KB, 30 days) is kept per chat in `agentv3_attachment_memory/<workspaceId>`
+  and handed back only to a later message in the SAME chat that brings no file and talks about the data/file or
+  accepts an offer. The record carries the uid and a read with another uid gets nothing (admin: *"ek chat ki baat
+  dusre chat me na jaye"*). Deleted with the chat (`purgeWorkspace`) and on unsend; disclosed in Privacy Policy §6 (retention).
+  Report codes `BUILD_OFFER_ACCEPTED` / `ATTACHMENT_RECALLED` (process-only). Test-locked and reversion-proven in
+  `tests/aBuildStartsOnlyWhenAskedFor.test.ts`.
 - **🧪 `AGENTV3_STRICT_TRIAL` — A SHARE OF NEW APPS START WITH TYPESCRIPT STRICT MODE ON (queue Q-008, admin "han"
   2026-10-01). ⚠️ NOT set; default ON; `off` seeds every new app loose as before.** `AGENTV3_STRICT_TRIAL_PCT` (NOT set;
   default **20**; `0` pauses; unreadable ⇒ 0, never 100). `strictTrial.ts`. The Vite-React starter compiles with strict

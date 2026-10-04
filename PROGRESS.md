@@ -87352,6 +87352,187 @@ open PR's CI failed with it (#3462 first).
 - **Class:** an upstream advisory landing between a PR's green CI and its merge. The gate is doing its job; the
   honest response is the pin, not an allowlist entry, because a fixed release exists.
 
+## 2026-10-04 — Autopsy 536c8189 ("an app like Duolingo"): arithmetic is not a model's job, a plain-English bug is still a bug, and "nothing to save" was said about an app that saves
+
+Build `536c8189`, Weak tier, `kimi-k2.7-code`, `ok: true`, 7.2 min (inside its 6.4–7.7 ETA band),
+₹152.52 billed on $0.42 real cost. The app worked. Three separate things in the report were wrong, and
+each had its own root cause. Ledger, one row per item:
+
+**Q-290 — 🥵 the off-grid hand-back is the first thing this build proves, and it proves it harmful.**
+`STYLE_RULES_RESUMED` gave the model the `DESIGN_CONSISTENCY` spacing values with "change each to the
+nearest multiple of 4px" (the Q-037 hand-back, shipped by #3458 three days earlier — this is its first
+real outing). The model answered with **three ad-hoc `node -e` regex scripts** that string-sliced and
+rewrote the whole 634-line `src/index.css`, plus one `edit_file` that failed with *"old_string is not
+unique in src/index.css (80 matches)"*. ~45 seconds and three model calls. One of the scripts contained,
+verbatim:
+
+```js
+.replace(/padding: 4px 8px/g, 'padding: 2px 6px')
+.replace(/gap: 4px;/g,        'gap: 6px;')
+```
+
+It moved values that were **already ON the grid OFF it**, and the build still ended at
+`DESIGN_CONSISTENCY` 98/100 with values off the grid.
+
+- **Root cause:** `round(v / 4) * 4` has exactly one right answer, so it was never a model's decision.
+  This repo already draws that line in the other direction and says so in `buildQualityLint.ts`
+  (*"a name for an icon button has to MEAN something, so it is never guessed by a deterministic pass"*).
+  The converse had no home.
+- **Class:** an end-of-turn hand-back is for what only a model can JUDGE — what a class should look
+  like, what an icon button is called, what an empty state should say. **Never for arithmetic with one
+  answer.** Handing arithmetic to a model buys three ways to be wrong: it mis-derives which values are
+  off-grid, it rewrites by regex over a file it cannot see whole, and it charges for both.
+- **Fix:** `src/server/AgentV3/spacingSnap.ts` — pure, nearest multiple of 4, **ties to the smaller**
+  (a layout that grows can overflow a phone, which `mobileLayoutCheck` then reports; one that tightens
+  cannot), never to zero. Only files THIS build wrote, only above the finding's own `MAX_OFFGRID`
+  threshold, never inside a comment, and it **stands down on a file that is coherently on another
+  rhythm** (`isCoherentOtherGrid`: the off-grid values share a divisor ≥ 5 that is not a multiple of 4,
+  over ≥ 3 values — `6/18/30/42` is a 6px system, `10/6/14` is just sloppy). Wired into **BOTH** lanes
+  (the architect's post-build integrity block beside `kitRestore`, and the fast lane's own verify),
+  because a deterministic pass wired into one lane of two is this repo's headline class. Report code
+  `SPACING_SNAPPED`, process-only. Kill switch `AGENTV3_SPACING_SNAP=off`.
+- **Siblings:** spacing is removed from `stylePolishResume` and from the runner's call, and
+  `offGridHandBack` — which then had no caller left — is **deleted** rather than kept "for the report";
+  `tests/offGridSpacingIsHandedBack.test.ts` is retired with it and its still-valid coverage (the
+  e49afa97 stylesheet) carried into the new suite against the snap. `extractSpacingPx`'s regex is now
+  `SPACING_DECL_RE_SOURCE` / `SPACING_PX_RE_SOURCE` in `DesignLinter.ts`, read by both the lint and the
+  snap, so the two cannot disagree about what a spacing declaration is.
+
+**Q-291 — ❌ the reviewer found a real bug and nothing repaired it, with no record of why.** On the
+working app the reviewer reported: *"`matchedKeys` and `setMatchedKeys` are declared and reset, but
+`setMatchedKeys` is never called in `handleMatchClick` or elsewhere. The guard `if
+(matchedKeys.includes(key)) return;` always evaluates to `false`, so a key can be matched multiple
+times."* A real bug, in plain words. **No `REVIEW_FUNCTIONAL_*` code appears anywhere in the report** —
+not even the `_REPAIR_SKIPPED` record, because `selectGreenRepairable` returned an empty list.
+
+- **Root cause, measured:** `FUNCTIONAL_WARNING_RE` had a CLOSED verb list behind `never` —
+  `never (fires|works|holds|updates|renders)`. Every one of these was MISSED: *never called, never
+  invoked, never set, never read, never runs, never used, never enabled, never persisted*. And a dead
+  guard (*"always evaluates to false"*, *"the condition is always true"*) had no rule at all.
+- **Class:** a CLOSED set of phrases matched against open-ended prose a MODEL wrote. It had been
+  patched once already for exactly this reason (autopsy ac41a924 added `FUNCTIONAL_OUTCOME_RE`), so a
+  third list would be patched again.
+- **Fix, both halves.** (1) `never [a-z]+` is open — the cosmetic veto is what keeps precision, and it
+  already catches *"the aria-label is never set"* and *"consider never using inline styles"* — plus a
+  `DEAD_CONDITION_RE` for a branch that can never be taken (deliberately not a bare `always`, which is
+  how advice is written). (2) **The structural half: the reviewer DECLARES it.** The instruction asks
+  for `[BROKEN]` beside the severity tag, `parseReviewOutput` reads the marker and **strips it from the
+  message** so it never reaches a user, and `namesBrokenBehaviour` is the one definition both selectors
+  read. It is additive — an untagged reviewer keeps exactly today's behaviour — and the cosmetic veto
+  still applies to a tagged finding, so a model cannot widen what a verified repair touches on a working
+  app by typing a word.
+- **Honesty half:** the suggest-mode prompt told the reviewer *"no repair will run from it"*, which
+  stopped being true on 2026-09-23 when `AGENTV3_GREEN_FUNCTIONAL_REPAIR` shipped. It now says a
+  `[BROKEN]` finding may get one automatic repair that is undone unless proven — the right incentive
+  for the one tag we are asking it to be careful with.
+
+**Q-292 — ❌ `JOURNEY_NOT_DERIVED` stated a falsehood about the app.** It carried
+`NO_DATA_ENTRY_REASON`: *"this app has no data-entry surface at all — a game, a dashboard or a landing
+page has nothing to save and reload, so there is no such journey to prove."* The app keeps XP, gems, a
+streak and the lessons you have finished in `localStorage` (`src/hooks/useProgress.ts`) and reads them
+back on every load. **That IS the save-and-reload journey this check exists to prove.**
+
+- **Root cause:** `appHasNoDataEntry` asks *"is there a FORM?"* and its sentence answers *"is there
+  anything to SAVE?"*. The two coincide for a landing page and part ways for every app whose controls
+  are buttons — a game, a counter, a tracker, a quiz. And the knowledge was already in the repo:
+  `SAVE_ACTION`, one screen down in the same file, lists `localStorage`. One predicate had it, its
+  sibling did not.
+- **Fix:** `savedStateEvidence` (a real storage / database / write-method WRITE, with theme, font-scale,
+  locale and consent keys excluded — every app from our starter writes a theme, so a bare storage match
+  would say "this app saves" about a landing page) and a third honest reason, `savedWithoutFormReason`,
+  which names the file and does not read as a defect. Asked in **BOTH** branches that reach the old
+  sentence — this module's own docblock says *"TWO branches now reach it"*, and fixing one is how a
+  sibling gets left behind.
+- **Sibling:** the release gate carried its **own paraphrase** of the same false claim
+  (*"this app has no data-entry flow"*). It now repeats the derivation's sentence through
+  `journeyNoneWhy`, with a still-true generic line as the fallback. One sentence, written once.
+
+**Q-293 — 🟡 five items argued NOT defects, awaiting the admin's yes:** 2× `PROVIDER_FALLBACK` (GLM
+crawled, 30 s = 7% of the clock, benched as designed — Q-009); the fast lane spending 15 s and handing
+off with nothing (`FAST_LANE_SKIPPED_REASONING_RUNG`, the designed stand-down on a reasoning rung);
+`WRITE_TIME_TYPECHECK`'s first run paying 13 s to install the compiler (Q-010 / Q-063);
+`DOMAIN_KNOWLEDGE` taking 11.5 s and returning nothing (the lookup ran and found nothing for this
+domain); `READY_BEFORE_END` 13 steps / 110 s (the style hand-back doing its job).
+
+**The missing subsystem, named:** nothing in this engine asks *"is this decision arithmetic or
+judgement?"* before choosing whether a model or a deterministic pass makes it. `buildQualityLint.ts`
+states the rule for one direction in a comment; `spacingSnap.ts` now states it for the other. Every
+future end-of-turn hand-back, and every future deterministic repair, has to answer that question — and
+the only enforcement today is the two docblocks saying so.
+
+**Proof:** `tests/theDuolingoAutopsy.test.ts` — 52 cases against the report's own verbatim text, with
+the full gate green on the final state (both typechecks, `noUnusedImports`, `npm run build`,
+`test:bundle`, `boot:check`, and **33,122 / 33,122** tests). Reversion-proven **seven** ways: the closed
+`never` list restored (7 failures), the dead-condition rule removed (3), the `[BROKEN]` declaration
+ignored (1), the journey sentence put back in both branches (2), the spacing hand-back restored (1),
+`snapToGrid` allowed to return 0 (1), and the fast lane's snap removed (1).
+
+**What to watch on the next real builds:** `SPACING_SNAPPED` appearing (and `DESIGN_CONSISTENCY`
+reaching 100 where it used to sit at 98); `REVIEW_FUNCTIONAL_REPAIRED` / `_REFUTED` appearing on green
+builds where the reviewer names a plain-English bug — each one is a real defect that used to ship with
+only a suggestion; and whether any reviewer actually writes `[BROKEN]` (if none does, the widened
+classifier is carrying the whole fix, which is the fallback working).
+## 2026-10-01 — Autopsy 5759ad8b ("Can you make this app" → Kisaan Mandi Bhav): 3 root causes fixed, 3 open
+
+Weak build, 6.9 min, ₹96.58, rendered at 268 s, inside its ETA band. The build itself went well. The judges around it did not.
+
+**Ledger (problem → root cause → class → siblings → lock):**
+- **Q-190 · the sizers were blind.** "Can you make this app" had no attachment and no earlier BUILD request; the app was
+  described in CHAT, which `planningRequest` drops by design (6ae30b33). Complexity 15 ("recognised nothing"), and the
+  fast-lane planner planned "Main app component with counter logic". **Class:** a judge that reads less than the
+  worker (e725e002), here via a pointer ("this app") into the conversation. **Fix:** `conversationReference.ts`
+  (`refersToConversation`, ≤ 14 words, English / Romanised Hindi / Devanagari); `planningRequest` keeps the chat turns
+  and the last answer (`lastAssistantText`, uncut; the recap cuts each turn to 280 chars) only for such a message on a
+  workspace with no finished app. **Siblings:** every sizer already reads `planning.text`, so one input covers the
+  complexity score, routing, ETA, project mode, scope and the fast lane. **Lock:** `tests/theMandiBhavAutopsy.test.ts`,
+  reverted-and-failed.
+- **Q-191 · the gate said "untested" about an app with nothing to save.** The journey check (correctly) said the filters
+  act as you type; the gate's `appOnlyShowsWhatItHolds` counted the bottom tab bar (`onClick={() => setScreen('mandi')}`)
+  as a save. **Class:** two readers of "does this app keep input?" disagreeing. **Fix:** a plain button / click counts
+  unless its handler only changes what is shown (`handlerOnlyChangesView`, `pressCanKeepInput`). The stale comment that a
+  `none-derivable` app "can never earn GREEN" is corrected (it can since 8257ca59, when its controls were pressed).
+  **Lock:** same file, reverted-and-failed; the existing lookup suite (74 tests) unchanged.
+- **Q-192 · a skipped press gave no cause.** "Mausam — Timeout 4000ms exceeded" was the error's first line only.
+  **Fix:** `pressFailureNote` adds Playwright's call-log line naming the cause; the runner embeds the function by value
+  (bound to a const, so a bundler rename cannot break it — checked with the real esbuild bundle and `node --check`).
+- **Already fixed by PRs merged after this build ran (19:53 IST):** the plan hand-off's "NOT written yet" (Q-079, #3461),
+  the contract hand-off narration (Q-078, #3461), the reviewer told to run tsc (Q-080, #3461), "✅ The app looks
+  complete" over undefined classes (2f723acb, #3459), the non-unique `edit_file` error without match regions (#3459),
+  the 12 off-grid values in a stylesheet this build wrote (#3458).
+- **Open:** Q-193 (why the third tab could not be pressed — needs the cause line or the source), Q-194
+  (`LIST_WITHOUT_EMPTY_STATE` on function-returned sample lists — your choice), Q-195 (four items argued not defects).
+  Recurrences recorded on Q-063 (17 s first typecheck) and Q-052 (`startTier: "gemini"`). The two GLM crawls (30 s, 7%)
+  fall under Q-009, which you closed as provider weather in #3465; the crawl bench behaved as designed.
+## 2026-10-01 — Autopsy de3bb2bb follow-up: the five decisions (PR #3467)
+
+The admin decided the five 🟡 rows the de3bb2bb autopsy left open. Ledger:
+
+BUILD REPORT de3bb2bb — RESOLUTION (follow-up)
+Items: 5 · ✅ Resolved: 5 (Q-064 closed by #3465, folded into Q-009; Q-065–Q-068 on merge of #3467) · 🟡 Blocked: 0 · Remaining: 0
+- **Q-064 ✅ (not our defect, admin: "leave")** — GLM flashx crawled twice; provider speed is Z.ai's. The crawl bench
+  (180 s, one re-probe) did what it was built to do. Third instance of Q-009; closed in the queue by #3465, which folded it into Q-009.
+- **Q-065 ✅** — a 189 s KIMI call wrote 7 files in one `write_files_batch`, so nothing reached the preview for three
+  minutes. Root cause: the prompt told the builder to "pass all files in one call … 3× faster", which was never
+  measured. Class: a size limit stated nowhere, so the call's length was the size of the app. Fix:
+  `MAX_FILES_PER_BATCH = 3` in `batchSize.ts`, read by the prompt, the tool description and the dispatcher (which
+  still writes an oversized batch and tells the model to shrink the next one). Siblings: the tool description said
+  "faster" too; fixed in the same change.
+- **Q-066 ✅** — the end-of-turn style hand-back (`stylePolishResume`) ran only inside the top-level readiness gate,
+  so a Frontend sub-agent's undefined classes waited for the architect. Class: an end-of-turn check living on one
+  lane of two. Fix: `styleHandBack` for writing sub-agents, scoped to the files they wrote (`scopeStyleHandBack` —
+  parallel siblings keep their own classes); `onNote` added to `SubAgentDeps` so the note reaches the report.
+- **Q-067 ✅ (class)** — "COACT" (most likely "collect") became a chat to "the COACT backend". Class: an unknown word
+  becomes an imaginary integration. Fix: `unknownName.ts` — new builds only, precision-first (acronyms, known
+  services, emphasis words, a word the request itself names as a service, and all-caps prompts stand down); the
+  builder, the planner and the fast lane are told to build no client / API URL / env var for it and to say how
+  they read it. Kill switch `AGENTV3_UNKNOWN_NAME_NOTE=off`, report code `UNKNOWN_NAME_IN_REQUEST`. ⚠️ Whether
+  `chatApi.ts` was dead code in that one shipped app stays unverifiable (the report carries no source).
+- **Q-068 ✅** — five items agreed as correct reports (admin: "jo chahiye banao"); the real noise, "No tests at all"
+  recorded twice by two runners' `done` events, is now recorded once per build (`readinessWarningsSeen`).
+
+Proof: `tests/theDe3bb2bbFollowUp.test.ts` (17 cases), each fix reverted and its tests seen failing.
+**What to watch:** smaller `write_files_batch` calls; `STYLE_RULES_RESUMED` lines prefixed with a sub-agent role;
+`UNKNOWN_NAME_IN_REQUEST` on a real prompt with a typo in capitals.
 ## 2026-10-01 — Autopsy 8f797751 (maths solver, stopped at 6.4 min, 6 s after the dev server came up)
 
 - **A ✅** At 4.6 min the model said "Your Math Solver app is ready … Open the Preview tab"; the platform
@@ -87436,3 +87617,355 @@ is what was adopted. The rows leave `BUILD_REPORT_QUEUE.md`; this entry is their
 - **OPEN (by design, slice 2):** a regression is reported and queued, not repaired in the same build. Wiring it into
   the feature heal waits on real reports showing the regression probe has no false positives.
 - **OPEN:** only the nine probe-able features can be verified; other requirements join in slice 3.
+## 2026-10-01 — Autopsy a4be7fa2 + 3f959fde (Kerala-lottery data question, Telugu)
+
+Two builds in one workspace. Build 1 (stopped at 93 s, ₹0): "First data table lo draws check chesi e algorithm
+suitable check cheyu" with no file attached — the data had come in an earlier turn. Build 2 (17.6 min, ₹272.26):
+"Ipudu e data ni check cheyu …" with the sheet attached; a working Kerala Lottery Analyzer was delivered.
+
+| ID | Problem | Root cause | Class | Fix / state |
+|---|---|---|---|---|
+| Q-204 | The reply opened with "Now final summary. No more tools. … Proceed." | The model wrote its own plan into the ANSWER, then a gap, then the reply; the runner showed `turn.text` whole | A model's notes to itself shown as its answer | `answerAfterPlanning.ts` in `AgentRunner` (reply turns, before narration and summary). ✅ on merge |
+| Q-205 | 88 / LARGE / ~40 features for a question | Our own attachment label read as a messaging app (every attachment build); table rows counted as features; dates passed `isItem` | A label written for a model read by a word-matcher | `planning.sizing` for every deterministic sizer, `condenseDataTables`, `isDataValue`. ✅ on merge |
+| Q-206 | "Editing your existing app" about our starter | The starter-only reading ran only for `new_build`; the reader said edit | Starter counted as the user's app (sibling of 31254f9a) | Edit of a starter-only workspace → fresh build. ✅ on merge |
+| Q-207 | Specialist built a generic analyser | The child got the bare six-word message | A child handed less than the architect reads | `userRequest: () => planning.text`. ✅ on merge |
+| Q-208 | "needs a major-version upgrade" for "No fix available"; xlsx installed anyway | The note had two branches, neither for no-fix; the steer came only after the install | Advice that cannot be true; advice after the fact | `noFix` in the audit summary; `packageChoiceRule()` in both prompts. ✅ on merge |
+| Q-209 | Journey evidence named an orphan component | `dataEntryEvidence` read every file | Unreachable code read as the app | `unreferencedComponents`. ✅ on merge |
+| Q-210 | REPEATED_READS counted a specialist's first read as waste | Shared ledger compared across agents | A lying analyzer | Own-view comparison; honest worst list. ✅ on merge |
+| Q-211 | "BUILD_FAILED" for a planned hand-off | The outcome line ignored the reasoning-rung stop | Contradicting lines in one report | ✅ Fixed by #3468 (`sb.handedOff`), merged while this PR was open; this PR's duplicate was dropped at the merge |
+| Q-212 | "User should be asked" — nobody asked | The resume pushed on; its words did not say to ask the user | A need of the user's kept by the model | Resume message names it. ✅ on merge |
+| Q-200 | A data question became a ₹272 app | The reader's guess was trusted as a confirmed build | A build started on an unconfirmed verdict | Admin 2026-10-03: answer first, then offer. `buildConfirmation.ts`, `offer` lane, "yes" builds the offered request. ✅ on merge (#3475) |
+| Q-201 | Earlier attachment unavailable | No store for attachment text across turns | A file lived only for its own turn | Admin 2026-10-03: keep it, no cross-chat leak. `lib/attachmentMemory.ts` (per chat, masked, 50 KB, 30 days, uid-checked; purge + unsend delete). ✅ on merge (#3475) |
+| Q-202 | Orphan components after a pivot | No end-of-turn hand-back for unimported new files | — | 🟡 blocked on #3467 (same block) |
+| Q-203 | Six argued not-defects | — | — | ✅ RESOLVED as not-a-defect — the admin agreed 2026-10-03 ("de di sahmati"); removed from the open queue |
+
+Self-heals noted (each points to an existing class): `:)` written at the head of App.tsx and fixed by the model (the
+write-time parse note caught it); a TS2322 `null` narrowing under the strict-new trial (Q-008 data point); 12 type
+errors from consumers written before `types.ts` (the contract-first rule); invented `nb-` classes (#3459).
+
+## 2026-10-04 — Autopsy 0473628e ("Music App", Weak, 6.8 min, ₹99.11)
+
+The app shipped and rendered. The struggle was the first 40 s: the model asked scope questions twice, the platform retried
+and nudged instead of reading them as the questions they were, and the style hand-back then spent 8 edits on spacing.
+
+| ID | Problem | Root cause | Class | Fix / state |
+|---|---|---|---|---|
+| Q-213 | Retry after the model asked the user | The runner appends its own sentence to the summary; the retry read the last line | A verdict asked of text the platform rewrote (e628efd4), through the runner | `modelAnswer` on the nothing-built path + `modelsOwnWords` at both readers. ✅ on merge (#3475) |
+| Q-214 | A question nudged as a stall | End-anchored closed invitation list | Closed phrase list over model prose | `REPLY_REQUEST` after a question in the closing section. ✅ on merge |
+| Q-215 | Two scope interviews for a confirmed order | No build-don't-interview rule | Upstream prompt gap | Prompt rule. ✅ on merge — watch the next bare app order |
+| Q-216 | READY_BEFORE_END about the abandoned attempt | Recorded before the retry | Measurement taken before the retry (sibling of WRITE_TIME_TYPECHECK, 2026-09-26) | Moved after the retry. ✅ on merge |
+| Q-217 | Our badge under the phone check's 32px | Sized before the check existed | Our own UI failing our own gate | 32px link and ×. ✅ on merge |
+| Q-218 | 5px sliders | Model styled the input's height | Generator guidance gap | Prompt rule. ✅ on merge — watch |
+| Q-219 | Review timeout | Kit stylesheet over the inline bound | Our template costing the review (8257ca59) | `appOwnStylesheet`. ✅ on merge |
+| Q-220 | `taskType: chat` for an app order | Purchase guard also deciding the label | One guard answering two questions | Platform build ⇒ `app_unsized`. ✅ on merge |
+| Q-221 | icon.svg divergence | Unknown — instrument named only the path | Instrument without the evidence | `describeDivergence`; 🟡 needs the next report |
+| Q-222 | Spacing hand-back struggle | Arithmetic handed to a model | — | Owned by #3474 |
+| Q-223 | Gate YELLOW on nothing-to-save | Tab/filter read as a save | — | Owned by #3471 |
+| Q-224 | Six argued not-defects | — | — | 🟡 admin agreement |
+
+## 2026-10-01 — Admin decisions on the queue: Q-087, Q-018, Q-085 built; four "not a defect" rows closed
+
+The admin accepted every recommendation in one line (*"aapki salah accepted"*). Q-065, Q-066, Q-067 and Q-068
+were left alone: PR #3467 (another session) already carries them.
+
+| ID | Decision | What changed | Lock |
+|---|---|---|---|
+| Q-087 | (a) | `bareTemplateRequestFor` in `goldenScaffolds/registry.ts`. A build verb plus one SIMPLE template's own name, and nothing else ("Build a calculator", "calculator banao", "ek gita app bana do"), seeds that template. Any other word still builds from scratch. A name two templates could answer ("notes", "timer") is on neither list, and the pro tier is excluded because its chip prompt is the spec that extends it. | `tests/aBareRequestGetsItsTemplate.test.ts`, reversion-proven (14 fail when the door is removed) |
+| Q-018 | (a) | A single text-file upload (`handleFilesUpload` and `resolveFileConflict` in `App.tsx`) now goes through the one edit seam, `applyIdeFileChange` → `source: 'ide-edit'`. **Found on the way: the upload used a raw `setFiles`, so the file never reached the build workspace at all.** The AI could not see a file the user had just uploaded. Now it does, and it joins `userFiles`, so `userFileGuard` protects it. Zip and repo imports keep `source: 'import'` and are not recorded. Binary uploads are not sent, because the seam carries text and a data URL written as text would be a corrupt image. | `tests/anUploadedFileIsTheUsers.test.ts`, reversion-proven |
+| Q-085 | (a) | `formAsksAi` in `journeyDerivation.ts`. A form whose own file, or a module it imports directly, calls an AI helper (`lib/ai`, `window.NavAI`, the gateway route, a chat-completions API, an AI SDK) gets a submit-only journey. It never gets create-and-reload. | `tests/anAiAskIsSubmittedNotReloaded.test.ts`, reversion-proven |
+| Q-024, Q-052, Q-086, Q-088 | not a defect | Closed as RESOLVED-not-a-defect on the admin's agreement. The evidence is in each row as last written (autopsies d382b398, 31254f9a, 1219c639, 52471441). | — |
+
+**Still to watch.** Q-085: the next AI-chat report should show #3451's reach getting to a form held in a sidebar-switched component.
+**Still open.** Binary single-file uploads still stay in the browser. A binary write path from the IDE to the workspace is a separate change, and nothing asked for it yet.
+
+## 2026-10-04 — Autopsy 0311186f (ALGO forex scalper: a pasted reply became an 8-module plan; two module turns, Weak)
+
+**What happened.** The user pasted an assistant's reply about an automatic forex scalper (advice, the six questions it had asked them, example values) and added "App name ALGO, LUXURY PERIUM". The engine counted 18 features and read the paste as a mega project. It split the request into 8 modules with the "App Shell" last, so both paid turns (₹8.30 and ₹7.98) built only constants, types and mock services, and the user saw nothing. Every user-facing line then spoke as if a whole app had failed to start.
+
+**Tally:** 0 self-heals · 0 workarounds · 1 skipped (the picture was never read) · 11 shipped wrong (nine are honesty defects shown to the user or the admin) · 1 struggle (the first typecheck paid 16.5 s to install the compiler).
+
+| # | Problem | Root cause → class | Fix | Lock |
+|---|---|---|---|---|
+| 1 | Release gate, `RELEASE_GATE_UNPROVEN` and `RUNTIME_UNCHECKED` were warnings ×2 on module turns | The 6a5fb04b module fix taught three readers (starter, preview, reviewer) and four were never hunted. **Class:** a fact about a module turn has to reach every reader of "is this the whole app?" | `awaitingShell` threaded into `releaseGate`, `runtimeUncheckedRecord`, the UNPROVEN block and the RELEASE_GATE severity | `tests/aModuleTurnIsNotTheWholeApp.test.ts` |
+| 2 | The user was told "could not verify end to end … open the preview" ×2 | same | The line is skipped on a module turn; the module progress line says what this turn did | same |
+| 3 | The recap said "Here's what I built … live preview didn't start — open the Preview tab" ×2 | same | `summarizeProject({ awaitingShell })` says "Built one part of your app … nothing to open yet" | same |
+| 4 | The bill sentence said "I could not confirm your app running … send a follow-up" ×2 | same | `decideMarkupOnProof({ awaitingShell })` names the module; it was wired at both bill paths | same (census of both calls) |
+| 5 | Our own 🧾 money notice was filed as an ERROR in problems | The narration classifier read "could not" as a failure verb | 🧾 is a platform notice, like ℹ️ | same |
+| 6 | 18 "features" → mega project → 8 modules | Questions ("Timeframe scalping? (1m / 5m?)") and settings ("SL = 0.25%", "Daily stop: -2%") were counted as features. **Class:** a line that asks or sets a value names no part of the app | `notAFeatureLine` in `enumeratedFeatures.ts`; `appScopeAnalyzer`'s bullet count reads the same rule | `tests/theForexPasteIsNotAnEightModuleProject.test.ts` |
+| 7 | `REQUIREMENT_GAPS` domain = real-estate; the builder was told to add listings, a map and an EMI calculator | "broker" was real estate's only word; no trading domain existed | New `trading` domain, placed last; "broker"/"listing" are stripped in a trading context. A property broker still reads as real estate | same |
+| 8 | `SUMMARY_OFF_TOPIC`: the user was warned the summary "never mentions" “**PERFECT level**” | Any quoted 2-word phrase was taken as the app's name | A quote is a name only where the sentence calls it one ("app called X", "the X app"); markdown inside the quotes is ignored | same + `offTopicSummary.test.ts` |
+| 9 | Module turns were promised 9–10 and 7–12 min; the accuracy line said "UNDER the band, 0.2×" | The ETA is computed from the whole request before project mode picks a module | `moduleTurnEta.ts`: on a module turn the ETA, the countdown and the accuracy promise are withdrawn, and no module-sized guess replaces them | same |
+| 10 | `PLANNING_CONTEXT` said the unread picture "is a photo, not a UI design" | `picturesSetAside` counted unread pictures | Counted only when the picture was read | same (source guard) |
+| 11 | A "continue" that built module 2 said "✏️ Editing your existing app (19 source files)" | The edit narration ran before the plan was read | It stands down when a continuation advances an unfinished plan | same (source guard) |
+| 12 | The picture was not read: vision is capped at 8 s | — | 🟡 **Q-091** (admin decision: raise the cap to 20 s only when a picture is attached) | — |
+| 13 | The first write-time typecheck took 16.5 s installing the compiler | Second occurrence of Q-063 | Recorded on Q-063 | — |
+| 14 | "No tests at all" ×2; module turns billed at real cost; idle sandbox; startTier "sonnet" | argued not defects | 🟡 **Q-092** | — |
+| 15 | A pasted reply is still sized as a spec (APP_SCOPE ~20 → mega roadmap) | — | 🟡 **Q-093** (decision; recommended to leave) | — |
+
+**Missing subsystem.** "Is this turn the whole app?" has no single owner. Each reader (starter, preview, reviewer, gate, recap, bill, ETA) asked it separately, and the module fact reached three of them. This PR threads `moduleAwaitsShell` into the rest. The real fix is one `turnScope` value that every verdict reads, alongside the open `turnKind` item.
+
+**Proactive.** Project mode orders modules by dependency, so the App Shell comes last and the user sees nothing for N−1 paid turns. Building the shell early, as a thin assembled app that grows with each module, would turn every module turn into something the user can open. That is a planner change and an admin decision; it is not built here.
+## 2026-10-04 — Autopsy 241215d1 (paper-trading app for NSE/BSE: build 1 stopped at 2.3 min, build 2 "Continue…" 17.1 min, gate RED)
+
+Two builds, Weak tier, both on `kimi-k2.7-code` (complex routing). Build 2 shipped a FastAPI + React app that worked
+(five curl-verified order flows, preview rendered), yet the release gate said "Not shippable". Ledger (rows in
+`BUILD_REPORT_QUEUE.md`, test `tests/thePaperTradingAutopsy.test.ts`, every fix reverted and seen to fail):
+
+- **Q-278 · an installer was run as a server.** `pip install --user fastapi uvicorn …` matched `\buvicorn\b`, took the
+  managed dev-server boot (port 8000 from the uvicorn default), restarted the install twice and returned pip's output
+  mixed with "[health-check] dev server did not come up on port 8000". Class: an installer's package list naming a
+  server. Only npm installers were exempt; now every common installer is, and `apt-get install python3-dev` too.
+- **Q-280 · a background job held the command for 300 s.** `python start_backend.py &` + `sleep; curl` waited out the
+  timeout because the job kept stdout open. Class: any backgrounded job without redirects, any language (the existing
+  `backgroundedServerSmokeCheckMs` only shortened it, for Node). `detachBackgroundJobs` now detaches such a job in the
+  bash tool; dev-server launches are untouched (the managed boot strips their `&`).
+- **Q-279 · PEP 668.** `pip --user` is refused in the sandbox; the builder prompt now says venv first and start Python
+  servers with uvicorn/gunicorn/flask so the sandbox manages them.
+- **Q-276 · the checks graded "continue".** Coverage, the feature probe and the claim audit read the 86-character
+  message; e725e002 had fixed only the sizers. `requestForChecks.ts` hands them the earlier request when the message
+  names nothing of its own (labels stripped, attachments excluded).
+- **Q-277 · memory cut the request at 2,000 characters** while the planner reads 4,000 — the continue turn never saw
+  the risk metrics and architecture rules. `REQUEST_EPISODE_MAX` 4,000 for requests only.
+- **Q-282 · the journey typed its marker into a ticker field**, the app refused an unknown symbol, and the gate went
+  RED on a working app. A lookup-key field now gets its own placeholder example ("e.g. RELIANCE").
+- **Q-283 · a dist-only "permanent copy" was kept for an app whose API is a Python server.** `snapshotSuitable` now asks
+  `detectBackendPresence` over the project files.
+- **Q-270 / Q-271 · domain and coverage words.** A `trading` domain (market words only); an investment portfolio is not
+  a gallery request.
+- **Q-281 · localhost governed as "an external host"** on 22 commands. Loopback is exempt; any other URL still counts.
+- **Q-285 · instrument:** the hardcoded-localhost readiness line names its first `file:line`.
+- **OPEN:** Q-284 (a Python backend is invisible to the service graph, the revival recipe and the wake path — next
+  self-started work). **BLOCKED:** Q-272 (reasoning rung on complex Weak builds — routing decision), Q-273 (11 s
+  trivial command, needs a second instance), Q-274 (what a "Python script" request delivers — product decision),
+  Q-275 (the request was cut mid-sentence before it reached us), Q-286 (eight items argued not defects).
+## 2026-10-04 — CI audit gate went red on every PR: four advisories published after 2026-10-01 (PR #3467)
+
+> Merged note: #3476 (another session) landed the same lockfile update and allowlist entries first; #3467 kept
+> `main`'s allowlist and adds only the `nodeForgeNeverVerifies` lock described below.
+
+`main` was green on 2026-10-01; the next run failed `audit:gate` with four NEW high advisories, and
+no dependency had changed. Each was traced, not waved through:
+- **`@fastify/busboy` 3.2.0 → 3.2.2** (GHSA-xjh9-v7x6-24jw, GHSA-x8mw-p69m-v3mx, multipart DoS). It is
+  RUNTIME (via `firebase-admin`, whose own range is `^3.0.0`), so it was FIXED: a lockfile-only update.
+- **`braces` / `chokidar`** (GHSA-vfj7-8cjw-p6xm). Affected range `*`, 3.0.3 is the latest, so no fix
+  exists. Reached only through `firebase-tools` (dev-only deploy CLI). Allowlisted with that reason.
+- **`node-forge`** (GHSA-86w9-cpqp-85rv, signature-VERIFY forgery). Affected range `*`, 1.4.0 is the
+  latest. Used only by `androidKeystore.ts` to CREATE a certificate and keystore, never to verify.
+  Allowlisted, and `tests/nodeForgeNeverVerifies.test.ts` holds the fact the entry depends on: a new
+  importer or any verify call fails CI (proven by reversion both ways).
+OPEN: remove the three allowlist entries when upstream publishes fixes.
+
+## 2026-10-04 — Autopsy: iPhone build SHANKU-AI/instamony run 36792748246 — each platform knows its own keys (PR #3467)
+
+The run died in 20 s at the iOS workflow's own pre-flight: `Missing Apple signing secret(s): IOS_ASC_KEY_ID
+IOS_ASC_ISSUER_ID IOS_ASC_KEY_BASE64 IOS_TEAM_ID`. The workflow was right; everything NavBharatAI said
+about it was wrong: `STALE_WORKFLOW`, "the build stopped while installing your app's libraries", and
+`navbharatCanFixItself: true`.
+
+**Class:** every reader of "is the signing key there?" knew only the ANDROID list and the ANDROID
+sentence. This is the SAME class the classifier's own comment recorded on an earlier report (run
+34935149896: a matcher written against an invented string), fixed then for one platform only — the
+sibling workflow prints a different sentence and was never hunted.
+
+| Item | Root cause | Fix | Lock |
+|---|---|---|---|
+| Q-230 wrong code | pattern matched `Missing signing secret(s)` only | reads both sentences; platform read from the names | census over every generated workflow's sentence |
+| Q-231 false "installing" | stage fallback reached | follows from Q-230 | real-log test |
+| Q-232 "can fix itself" | same | autoFixable false | real-log test |
+| Q-233 run started unchecked | dispatch guard + status route Android-only | `IOS_SIGNING_SECRETS`; iOS guard (409, `canCreateKey:false`); `signing-status?platform=ios`; panel pre-check | source guards |
+| Q-234 Android key button on iPhone (latent) | panel raised the offer on any MISSING_SIGNING_SECRET | Android only; Apple sentence for iPhone | source guard |
+| Q-235 GitHub summary says "installing" | diagnostic step infers stage from `node_modules` | pre-flight steps carry ids; prints `preflight` | runs the real generated script |
+| Q-236 `preflight: null` | `isSigningSecretFailure` Android-only | knows both lists | test |
+| Q-237 "Xcode too old" unclassified | no class | now honest UNKNOWN; a class needs a new cure family | OPEN in the queue |
+
+All fixes reversion-proven (`tests/eachPlatformKnowsItsOwnKeys.test.ts`). The missing keys themselves are
+the user's to add; NavBharatAI now says so before a run, in plain words, and cannot create Apple keys.
+
+## 2026-10-04 — Autopsy 7da1cdca: "Ek puzzle game bnao candy wala" — four of our own defects (PR #3467)
+
+Weak tier, build succeeded, the game rendered and played (₹110.75 billed on $0.30 real cost).
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-240/241 saved copy ≠ sandbox | a shell write never reached the captured writes, and captured writes win at save | npm's read-back (2026-09-27) fixed ONE instance | bash reads back every file it plainly wrote (`sed -i`, `tee`, redirects, `cp`/`mv`, inline `node -e`/`python -c` literal writes) | dispatcher test, reverted-and-failed |
+| Q-242 false "unstyled" | CSS defined in a script string was invisible to the class check | our own recipe failing our own gate | `classesDefinedInScriptStrings` | real shell census, reverted-and-failed |
+| Q-243 `three` missing | recipes NAMED their dependency and left the install to the model | 24 sites (7 game recipes + 22 `Add the dependency:` lines) | installed at the recipe doors under the npm lock, into the right package.json; busy/failed said honestly | dispatcher tests (game shell, QR), reverted-and-failed |
+| Q-244 edits to `melody.ts` | the "fixed in ANOTHER file" note never asked whether another module exports the name | a routing claim made without the evidence that decides it | bounded grep + `exportedElsewhere` | report's error, reverted-and-failed |
+| Q-245 3D shell for a 2D game | "LAST" step of every game, 3D-only nowhere said | — | prompt + tool text | text guard; real effect needs the next 2D game |
+
+Owned elsewhere (not duplicated): spacing snap and "a game that saves is not 'nothing to save'" (#3474 Q-091/Q-093);
+GLM crawl (Q-009, admin: leave); `startTier: "gemini"` (Q-052). OPEN here: Q-246 (shell `rm` resurrected by the
+save), Q-247 (explorer could not press ⏸), Q-248 (summary contradicts itself).
+## 2026-10-01 — Autopsy 6cd698cc: the repair that worked was undone, and a repair that changed nothing said it did
+
+Build: "Build an app best than chatgpt or gpt 5.6 free Life time in this app", Weak, ok, 10.6 min, ₹129.17.
+Already fixed on `main` after this build ran (14:19 UTC), so not re-fixed: the style resume skipping invented `nb-`
+classes, the "looks complete" narration over unstyled screens, and the SIMULATED "random song" example (#3459); a
+repair told "you read this the second time" (#3457 B); the crawl/timeout double strike (#3448).
+
+| ID | Problem | Root cause | Class | Siblings | Lock |
+|---|---|---|---|---|---|
+| Q-170 | The stylesheet repair wrote nothing and claimed "now defines every one of the 29 classes" | A run's final text was narrated whatever the run had changed | A repair's report of its own work was never checked against its writes | Every platform-requested runner (one door: `AgentRunner`'s narration); delegated writes counted via `changeCount()` | `theRepairThatWorkedWasUndone.test.ts` §1 |
+| Q-171 | The explorer repair fixed the bug in 61 s, then verified it itself until the 150 s cap; undone, ₹20.69 absorbed | It was given the reviewer's `judgeRepairPrompt` ("verify the app builds…"), the preview/browser tools, and the style hand-back | A repair the platform re-checks was told to check itself | The green functional repair had the same shape (same tools, same hand-back); both fixed | §2 |
+| Q-172 | TS1361 enum `import type` from the contract (f496c75b class again) | The heal ran only at the endgame; the write door and the timeout salvage had none | A deterministic fix applied in one place of three | Write-time typecheck + salvage now run the same fixes as the verify step | §3 |
+| Q-173 | Theme button crash: `store.set` handed out uncalled, reads `this` | Nothing named the pattern at write time | Unbound method handed out | Destructuring `const { set } = store` covered too | §4 |
+| Q-174 | Journey not run: icon send button named by `aria-label` | `submitTargetIn` read only inner text | Name read by text, while the browser uses the accessible name | type=submit and create-word branches both use `accessibleName` | §5 |
+| Q-175 | `SIMULATED_RESULT` on "mock API key" | `api` matched as a result noun | A credential read as a faked result | key / token / secret all excluded | §6 |
+| Q-176 | Eight items argued not defects | — | — | — | 🟡 needs the admin's agreement |
+| Q-085 | Chat-form journey | Q-174 makes the next chat journey run; in-memory chats would then FAIL the reload check | — | — | Decided by the admin (option a, submit-only); built in #3473, not here |
+
+Each fix was reverted in place and the suite failed, then restored. New flags (NOT set, default ON, `off` reverts):
+`AGENTV3_WRITE_TYPE_IMPORT_HEAL`, `AGENTV3_DETACHED_METHOD_NOTE`. The GLM crawls (≈30 s) are inside Q-009's accepted
+bounds. Housekeeping: rows Q-069..Q-080 (1219c639) left the open table — #3461 merged.
+
+## 2026-10-04 — Autopsy cf09c03c: "write a better prompt" built an app (PR #3470)
+
+Romanised Bengali, Weak, 3.6 min, ₹6.34. "Etake aro improve korar jonno ekta valo prompt likhe dao" asked for
+TEXT. "improve" locked it to an edit at HIGH, the workspace held only our starter, and the build replaced
+`src/App.tsx` with a page that displays a prompt. The turn before ("Create a image generated promt") was read
+as a picture request.
+
+🔴 **Recurrence:** the class is autopsy 6ae30b33's ("a build verb whose object is text the reply can write").
+That fix asked only the new-build verbs and had no "prompt" in its noun list; the edit verbs were never hunted.
+
+| ID | Problem | Root cause | Class | Siblings found and fixed | Test |
+|---|---|---|---|---|---|
+| Q-250 | Prompt request built an app | Edit branch never asked the written-content question | A verb whose object is text, read as an app order | New-build branch ("ek accha prompt likh do", "make a better prompt"), every edit verb, "image prompt" as a screen part | `aPromptIsTextNotAnApp` §1 |
+| Q-251 | "…generated promt" read as a picture | `detectImageIntent` had no notion of a prompt as the object | A prompt is text, not a picture | Shared detector: Pro, free chat, Professionals, SDA | §2 |
+| Q-253 | "I changed 10 files" (model wrote 2) | Summary counted `writtenFiles`, which our finishing passes also fill | Platform writes reported as the model's | Reviewer already used `reviewChangedPaths`; the summary now does too | §3 + `agentv3.test.ts` |
+| Q-254 | Lean review read inlined App.tsx twice | Kit stylesheet over the inline bound restored the tools | One omission withdrawing one-call mode | — | §4 |
+| Q-255 | "Editing your existing app" about our starter | — | Owned by #3475 (Q-206) | — | — |
+| Q-252 / Q-256 / Q-257 / Q-258 | Hindi reply to English (needs that turn's report) · ₹6.34 refund (admin) · slow first typecheck (Q-063 class, needs the ensure log) · eight items argued not defects | — | — | — | 🟡 in the queue |
+## 2026-10-01 — Q-021 done: PROGRESS.md's open root causes moved into the queue
+
+Four parallel read-only audits covered PROGRESS.md lines 1–87,401 (~260 "open root cause" markers). Each
+item was checked against later PROGRESS entries, the current code and the queue. Most July–August items
+were found CLOSED (e.g. coupon race, dead-sandbox recreate, preview door, in-flight call cancellation,
+turnKind, fail-open judge). The 67 still open (duplicates merged) are now rows Q-101…Q-167 in
+`BUILD_REPORT_QUEUE.md` — code-actionable ones OPEN, admin/infra/vendor ones 🟡 BLOCKED with what they need.
+"Unsure" items are marked as such in their row rather than guessed. Q-021 leaves the table.
+
+## 2026-10-04 — Queue sweep after #3467: Q-246, Q-237, Q-247 fixed; Q-249 and Q-248 recorded
+
+#3467 merged at 06:12Z; its 17 rows left the open table. The four rows it left OPEN were taken next
+(sixth rule, point 4):
+
+| Row | Problem | Root cause · class | Fix | Proof |
+|---|---|---|---|---|
+| Q-246 | A file the build wrote and later removed with the shell came back in the saved project | The final save lets captured writes win; only the delete guard's single SOURCE files were ever reconciled. Class: "the save keeps what the build recorded, whatever the shell did to it since" | `shellRemovedOperands` + `removedRecordedPaths` (shellWriteTargets.ts): any recorded file a command removed — stylesheet, non-source folder, glob, `mv` source — is confirmed gone in the sandbox, then forgotten. Sibling: a sub-agent's dispatcher had no deletion sink; it now shares the parent's (`deletionWiring`) | `aShellDeleteLeavesTheSavedProject`, reverted-and-failed (4 tests) |
+| Q-237 | "Xcode N is too old" read as UNKNOWN | No class for "the build machine, not the app, not the user's key" | `BUILD_MACHINE_TOO_OLD`, matched only on printed lines (never the echoed script); new `build-machine` cure family; autofix stops before a model; admin card column | `theBuildMachineIsNotTheApp` (census over the generated step), reverted-and-failed |
+| Q-247 | The explorer could not press "⏸" and could not say why | The skip note kept Playwright's first line and dropped the call log — the same class #3471 fixed for Q-192 the same hour (this PR's duplicate was dropped in the merge, safeguard #6 in real time) | On #3471's `pressFailureNote`: the cause line's colour codes are stripped (measured in a real browser, it read `\u001b[2m - <div …>`) | `aCoveredControlIsNamed`, real browser, reverted-and-failed |
+| Q-249 | WHAT covered "⏸" in 7da1cdca | 🟡 BLOCKED on the next report (the note now names it) | — | — |
+| Q-248 | Summary contradicts itself / claims unmeasured 44×44 | 🟡 BLOCKED — admin decision; recommendation: check size claims against the phone-layout measurement only | — | — |
+## 2026-10-04 — Autopsy 51ef24ad (Target-AS, "Build app in this format")
+- **JSX in `.ts`** (useAppState.ts edited ~5× before a rename): `tscErrorCause` gains `jsx-in-ts` — the write-time note and the repair loops now say "move it to `.tsx`, do not edit the JSX". The system prompt also says a JSX file is `.tsx` from its first write.
+- **Dead control shipped** ("Cloud Sync … is a UI-only toggle for now" + a "Sync All Data Now" button that did nothing): system-prompt rule NO CONTROL THAT DOES NOTHING; the build's own admission is recorded as the app finding `UI_ONLY_CONTROL` (`admittedInertControls`, claimAudit.ts).
+- **A 54-file port scored "simple" 15**: `workspaceSizedComplexity` — a build order over ≥20 of the user's own files opens as complex (source `workspace`).
+- **OPEN:** the frontend sub-agent hit its 40-step cap after spending steps reading Kotlin sources (REPEATED_READS 78/34). The real fix is a source digest handed to sub-agents on a port, which is not built yet. The ETA ("app_unsized", 8 min vs 19 actual) does not yet read the workspace size either.
+## 2026-10-04 — Correction to the 0311186f entry: one trading domain, not two
+
+The 0311186f ledger says a new `trading` domain was added "placed last". While this branch was open, #3471
+(autopsy 241215d1, a paper-trading app read as ecommerce) merged its OWN `trading` domain, placed early.
+Two entries with one key are the drifted-copy class, so the merge kept #3471's entry (it carries the order
+words: limit / stop-loss orders, order book, paper trading) and folded this branch's forex-scalper words
+into its pattern: forex, MT4/MT5, cTrader, algo trading, F&O, trading system/strategy/signals. A bare
+"scalper" is deliberately left out, because the domain now sits early in the list and a ticket-scalper app
+is not trading. `TRADING_CONTEXT` (the broker/listing strip) is unchanged. Both autopsies' tests pass on the
+merged state (`theForexPasteIsNotAnEightModuleProject`, `thePaperTradingAutopsy`).
+
+## 2026-10-04 — Autopsy d798ddd3 ("Calculator app", Weak, ok, ₹43.75, 3.7 min)
+
+The app rendered, typechecked, built for production, and 12 of its controls were pressed without a break.
+Then the lean review found two real bugs ("." after an operator → `NaN`; a digit after `Error` corrupts the
+display) and **both shipped**: the review wrote them as `**1. Bug: …**` without a severity tag, the parser
+read none, the review was headed ✅, and the one verified green repair had nothing to select.
+
+🔴 **This is Q-291 coming back.** #3474 (autopsy 536c8189) fixed the finding's WORDS inside a tagged line; the
+untagged LINE was the sibling it did not reach. The class is "a finding format we only recognise when the
+model obeys it", and it is now closed on both sides: the line is read (`readLabelledFinding`), and anything
+still missed is said (`REVIEW_FINDINGS_UNREAD`, a ⚠️ header instead of ✅).
+
+Tally: ✅ self-healed 2 (the 5 type errors fixed in one edit by the write-time typecheck; the undefined
+`.calc-*` classes) · 🔀 workaround 1 (GLM crawled 15 s, ladder fell to the reasoning rung) · ⏭️ skipped 1
+(the review's bugs, never repaired or offered) · ❌ shipped imperfect 2 (the two bugs; the off-grid spacing,
+already fixed by #3474 after this build ran) · 🥵 struggle 3 (a 9-file plan for a 2-file app; a contract call
+for one component; a 15.6 s first typecheck).
+
+| Item | Problem | Root cause → class | Siblings | Lock |
+|---|---|---|---|---|
+| Q-300 | review's two bugs shipped unread | severity read only from a tag → a finding format that fails silently when the model ignores it | `partialReview.hasSalvageableFindings` (same tag-only test); the review shown to the user cut mid-word (`summary.slice(0, 600)`) → `trimReviewSummary` | `tests/theCalculatorReviewWasNeverRead.test.ts` §1–3, reversion-proven |
+| Q-301 | 9 planned files, 6 of them "(provided)" by the planner itself | the plan counted entries the planner said it would not change | the handed-off plan (`plannedPaths`) reads the same filtered manifest | §4, reversion-proven |
+| Q-302 | contract call for one component, crawled 15 s | the contract pass ran whatever the plan's shape | — (one lane runs a contract) | §5 (real lane run), reversion-proven |
+| Q-303 | gate "1 thing(s) worth a look", unnamed | the gate got a count, never the findings | — | §6, reversion-proven |
+| Q-304 | 15.6 s first typecheck | Q-063 / Q-257 class, third occurrence | — | 🟡 needs the ensure log |
+| Q-305 | explorer cannot test a press that changes nothing on the first screen | judging by text on a fresh load | — | 🟡 `clickExplorer.ts` in flight in #3488 |
+| Q-306 | "Live preview" line for build-machine time the user did not choose | wording of an admin-designed line | — | 🟡 admin decision |
+| Q-307 | eight items argued not defects | — | — | 🟡 admin yes/no |
+
+Proactive: the biggest lever this report shows is that a **green app's review is now the place real bugs are
+found**, and the green repair is what turns that into a fixed app. The next report with a "Bug:" review should
+carry `REVIEW_FUNCTIONAL_REPAIRED` — that line is the proof this autopsy worked.
+
+### 2026-10-04 — d798ddd3 follow-up: admin decisions Q-306 (a) and Q-307 (yes)
+
+- **Q-306:** the "Live preview: N min — ₹X (the in-browser preview is free)" line was wrong on every build, not
+  only this one. The charge is `billableSandboxDetail` — the BUILD's machine time, capped at the build's own
+  duration — never a preview the user opened. Both surfaces now say "Build machine" and offer no free
+  alternative (`livePreviewChargeLine`, the "Why this cost?" panel). The amount and the field names
+  (`livePreviewSeconds` / `livePreviewInr`, read by bundled phone apps) are unchanged. `LIVE_SERVER_PAID_NOTE`,
+  shown when the user really presses Live, stays as it is. Locked in `tests/livePreviewCharge.test.ts`
+  (reversion-proven).
+- **Q-307:** the eight items argued not defects are accepted by the admin; resolved as not-a-defect.
+## 2026-10-04 — Admin decisions on the 0311186f rows: Q-091 built, Q-092 and Q-093 closed, Q-013 still blocked
+
+The admin answered the four open 0311186f rows with "aap kro, jo jo kar sakte", which accepts each recommendation.
+
+| ID | Decision | Result |
+|---|---|---|
+| Q-091 | (a) raise the picture-read bound | `visionReadCapMs` in `lib/attachmentReadOutcome.ts`: 20 s when the turn carries a picture, 8 s otherwise. The build route races `describeVisionAttachments` with it. The 8 s figure bounded a hang and was never measured; on 0311186f it abandoned the user's picture at exactly 8.0 s. Still a hard bound. Sibling check: the only fixed-time race on a vision read is this one. Professionals (`routes/professionals.ts`) and free chat (`routes/chat.ts`) rely on the chain's own per-provider timeout and have no 8 s cap. Locked by `tests/aPictureGetsTimeToBeRead.test.ts` (route reverted to 8 s ⇒ fails). Watch: `ATTACHMENTS_READ` on the next build with a picture. |
+| Q-092 | agreed: not defects | Resolved as not-a-defect, with the evidence in the row as written before removal: (1) "No tests at all" is true of the project and is a warning; (2) module turns billed at real cost is the documented project-mode rule; (3) 92–93% sandbox idle is between-turn idle, billed once; (4) `startTier: "sonnet"` on Weak is Q-052, already closed as not a defect. |
+| Q-093 | (a) leave | Resolved by decision: a pasted assistant reply stays sized as a spec. Detecting "this is an AI's answer" is a guess, and a wrong guess would shrink a real spec. The roadmap planner builds a visible first checkpoint, unlike project mode. Re-open if a report shows a pasted reply costing a user a slow or wrong build. |
+| Q-013 | still blocked | Needs the sentence App Mart → Publish prints on build 105+ (or the admin Errors view for a 500 on `/api/nav-store/status`). A session cannot read the phone or the production log. |
+
+## 2026-10-04 — Queue cleanup: 62 rows of merged PRs leave the open table (admin: "purani rows bhi saaf kar do")
+
+Every row in `BUILD_REPORT_QUEUE.md` marked IN PROGRESS with owner #3467, #3470, #3471, #3474 or #3475 was removed:
+17 + 10 + 12 + 4 + 19 = 62 rows. All five PRs are merged on `main` (checked against `git log origin/main`). Each
+removed row's id appears in this file's ledger for its PR (Q-241 as "Q-240/241"), so its root cause, fix, test and
+"watch" note stay on record here. Several rows ended with a "Watch:" line for the next real build; that is a live
+check to read on the next report, not unfinished work. Left in the table: the OPEN and 🟡 BLOCKED rows, and Q-091
+(IN PROGRESS, #3489).
+Merging `main` brought in #3488 (also merged), whose six rows (Q-237, Q-246, Q-247, Q-106, Q-112, Q-145) were removed the
+same way; their ledger is in that PR's PROGRESS entry. So 68 rows left the table in all.
+## 2026-10-04 — Queue items Q-106, Q-145, Q-112 and a Q-246 sibling (admin: "ek ek kar ke sabhi karo")
+
+All on PR #3488, each locked by a test proven by reversion.
+
+| Item | Problem | Root cause | Fix | Test |
+|---|---|---|---|---|
+| Q-106 | A file the build deleted could come back on the next restore | The durable store merges a partial save and carries root manifests forward; only the in-memory maps knew about the delete | After the final save, every path this build deleted that it did not persist is removed from the store (`deletionsToForgetDurably`) | `aDeleteIsDurable` |
+| Q-246 sibling | `codemod_move_file`'s old path was saved again | Its own `rm` never called `reconcileDeletions` | It does now | `aShellDeleteLeavesTheSavedProject` |
+| Q-145 | `execute` / `write` were refused as unknown tools | No alias; intent was unambiguous from the input's shape | `toolAlias.ts`: a fixed table, renamed only with the real tool's required fields and only to a tool this agent was offered | `aMadeUpToolNameRunsAsTheRealOne` |
+| Q-112 | New-tab links opened inside the phone app's own WebView | Fixed one link at a time; the next link written was bare again. (Measured: every JSX new-tab link already carried `rel`.) | One delegated listener in the native shell (`installExternalLinkHandler`) sends them to the system browser; our own origin, downloads and modified clicks are left alone | `aNewTabLinkOpensTheRealBrowser` |
+
+⚠️ Q-112 reaches phone users only with a fresh `.aab`/`.ipa` (bundled mode).
+- **Q-305 (unblocked by #3488's merge):** the explorer now tries a first-screen press that changed nothing once
+  more, after a control that DID change the screen (`MAX_PRIMED_RETRIES` = 3 in `clickExplorer.ts`). In a real
+  browser, a keypad's "AC" and "+/−" are now proven to respond after "7", and a dead "%" is named in words
+  ("it changed nothing, even after "7" was pressed first"). It is deliberately NOT a failing verdict: a control
+  that legitimately does nothing (memory recall with nothing stored) would otherwise spend a repair.
+
+## 2026-10-04 — Pending items closed: Q-284, Q-274, Q-304 (+ Q-063, Q-257), and four admin agreements (PR #3491)
+
+The admin said "sare pending kaam niptao — bas PR merge nahi karna". Ledger (test `tests/aPythonBackendComesBackWithItsApp.test.ts`,
+every fix reverted and seen to fail):
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-284 Python backend gone after a restart | every platform start (wake, our preview start, both in-build restarts) ran one command, `npm run dev`; nothing built the venv or started uvicorn; the service graph read only package.json | a backend the platform cannot see is never started | `pythonBackendBoot.ts`: one plan for the graph and every start path; encoded bounded boot (venv, install on manifest change, detached start, port wait); a backend-launch recipe is never replayed as the preview | real-bash run of the script; graph + census of the three `npm run dev` starts + the wake + recipe guards |
+| Q-274 "Python script" became a web app silently, "live" data was simulated | the deliverable's form was changed and nobody said so | a request form the preview cannot run | `scriptRequest.ts`: builder note + a start-of-build line to the user; `claimAudit` `live-data-claimed` | verbatim report prompt + precision set + claim rule |
+| Q-304 / Q-063 / Q-257 first typecheck 15–18 s | a fresh starter has no node_modules; the baked vite-react tree was used only by `_npmInstall` | a cold install on the first check | `PRIME_NODE_MODULES`: stage + atomic rename, used by `TSC_ENSURE`, the warm-up and `_npmInstall` (a plain `cp -a` could nest when two primers raced) | real-bash primer tests incl. two racing primers |
+| Q-194, Q-195, Q-272, Q-286 | argued not defects | — | the admin took the recommended options ("niptao") | evidence in each row |
+
+Still BLOCKED on evidence (unchanged): Q-193 (a skipped press's cause line, added by Q-192), Q-273 (an 11 s trivial
+command — needs a second instance), Q-275 (the request was cut mid-sentence before it reached us).

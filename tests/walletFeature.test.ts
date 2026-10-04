@@ -169,7 +169,8 @@ describe('🔒 every path that takes money now names itself', () => {
       ['src/server/sonic/sonicWs.ts', "feature: 'voice'"],
       ['src/server/routes/sda.ts', "feature: 'doctor'"],
       ['src/server/routes/professionals.ts', "feature: 'professionals'"],
-      ['src/server/routes/appAi.ts', "feature: 'app-assistant'"],
+      // Since 2026-10-04: one answer path for the published app AND the owner's preview.
+      ['src/server/lib/appAiAnswer.ts', "feature: 'app-assistant'"],
       ['src/server/tools/toolGate.ts', "feature: 'tools'"],
     ];
     for (const [file, tag] of expected) {

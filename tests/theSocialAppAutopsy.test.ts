@@ -62,7 +62,7 @@ describe('a store snapshot is stable, and a social app is offered a database', (
     expect(sharedDataNeed('landing page with links to our social media accounts').needed).toBe(false);
   });
   it('the offer reads the whole request, not only the last message', () => {
-    expect(readFileSync('src/server/routes/agentv3.ts', 'utf8')).toMatch(/const need = sharedDataNeed\(planning\.text\);/);
+    expect(readFileSync('src/server/routes/agentv3.ts', 'utf8')).toMatch(/const need = sharedDataNeed\(planning\.sizing\);/);
   });
 });
 

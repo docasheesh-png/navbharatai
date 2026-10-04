@@ -36,7 +36,7 @@
  * summary read that silence as "no TypeScript source was written this build". See
  * `writeTypecheckUntouched` and `writeTypecheckSummary`'s third argument.
  */
-import { robustTscCommand, TSC_BIN } from './tscCommand';
+import { robustTscCommand, TSC_BIN, PRIME_NODE_MODULES } from './tscCommand';
 import { suggestedPropertyRenames, type TscError } from './EndgameRepair';
 import { tscErrorCauses, tscCauseNote, remedyFileFor } from './tscErrorCause';
 
@@ -90,7 +90,9 @@ export function writeTypecheckCommand(): string {
 export const WARMUP_COMPILED_MARKER = 'NBAI_WARMUP_COMPILED';
 
 export function writeTypecheckWarmupCommand(): string {
-  return `if [ -x ${TSC_BIN} ] && [ -f tsconfig.json ] && [ ! package.json -nt node_modules ]; then `
+  // The baked tree is primed first (Q-304): a fresh starter has no node_modules at all, and a copy plus
+  // an atomic rename is seconds, where the first write's check would otherwise pay a cold install.
+  return `${PRIME_NODE_MODULES}if [ -x ${TSC_BIN} ] && [ -f tsconfig.json ] && [ ! package.json -nt node_modules ]; then `
     + `${TSC_BIN} --noEmit --incremental --tsBuildInfoFile ${WRITE_TYPECHECK_TSBUILDINFO} >/dev/null 2>&1; echo ${WARMUP_COMPILED_MARKER}; fi; true`;
 }
 
@@ -510,4 +512,61 @@ export function writeQualitySummary(noted: readonly string[], stillFlagged: read
     + `${ignored.length} had been noted and not fixed${names(ignored)}, ${neverNoted.length} never got a note${names(neverNoted)}`
     + (untouched.length ? `, ${untouched.length} not written by this build${names(untouched)}` : '')
     + '.';
+}
+
+// ── A TYPE-ONLY IMPORT OF A VALUE IS FIXED WHERE IT IS WRITTEN (autopsy 6cd698cc, 2026-10-01) ──────────────
+//
+// TS1361 — "'Theme' cannot be used as a value because it was imported using 'import type'" — has exactly one
+// correct fix (move that name into a value import), and this repo has had it twice: `fixTypeOnlyValueImports`
+// in EndgameRepair (driven by the compiler's own error) and in ImportExportReconcile (AST). Neither ran at
+// the WRITE: the fast lane's copy runs only when the lane finishes, the evaluate tool's only when a model calls
+// it, the endgame's only at the end. So in this build the write-time typecheck quoted 40 errors back to the
+// model, most of them TS1361 on an enum the shared contract declares, and the model spent five edit turns
+// (about a minute and a half of a reasoning engine) doing a string edit the platform already knew how to do.
+//
+// Now the write-time check applies the compiler-driven fix to files THIS build wrote (never a user's own
+// untouched file), lands it through the heal write path, and tells the model what it did instead of asking
+// it to. Exact by construction: tsc named the file, the line and the name.
+
+/** Kill switch for the write-door type-only import heal. Default ON; `off` quotes the errors as before. */
+export function typeOnlyWriteHealEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return String(env.AGENTV3_WRITE_TYPE_IMPORT_HEAL ?? '').trim().toLowerCase() !== 'off';
+}
+
+/** The value name a TS1361 error is about, or null. PURE. */
+export function typeOnlyErrorName(e: Pick<TscError, 'code' | 'message'>): string | null {
+  if (e.code !== 'TS1361') return null;
+  return /^'([A-Za-z_$][\w$]*)' cannot be used as a value because it was imported using 'import type'/.exec(e.message)?.[1] ?? null;
+}
+
+/** The TS1361 errors in files this build wrote — the ones the write door may fix. PURE. */
+export function typeOnlyHealTargets(errors: readonly TscError[], mine: ReadonlySet<string>): TscError[] {
+  return errors.filter((e) => typeOnlyErrorName(e) !== null && mine.has(e.file));
+}
+
+/** The errors still standing once `healed` (file → names fixed in it) has landed. PURE. */
+export function withoutHealedTypeOnly(errors: readonly TscError[], healed: ReadonlyMap<string, ReadonlySet<string>>): TscError[] {
+  return errors.filter((e) => {
+    const name = typeOnlyErrorName(e);
+    return !(name && healed.get(e.file)?.has(name));
+  });
+}
+
+/** The `fixed` lines `fixTypeOnlyValueImports` returns, as file → names. PURE. */
+export function healedTypeOnlyNames(fixed: readonly string[]): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  for (const line of fixed) {
+    const m = /^(.+?): imported '([A-Za-z_$][\w$]*)' as a value/.exec(line);
+    if (!m) continue;
+    if (!out.has(m[1])) out.set(m[1], new Set());
+    out.get(m[1])!.add(m[2]);
+  }
+  return out;
+}
+
+/** What the model is told the platform did. '' when nothing landed. PURE. */
+export function typeOnlyHealNote(healed: ReadonlyMap<string, ReadonlySet<string>>): string {
+  const parts = [...healed].map(([file, names]) => `${file} (${[...names].join(', ')})`);
+  if (parts.length === 0) return '';
+  return `\n🔧 Fixed automatically: ${parts.join('; ')} — each was an enum or other VALUE imported with \`import type\`, now imported with a plain \`import { … }\`. Nothing to do for these; import an enum the same way from now on.`;
 }

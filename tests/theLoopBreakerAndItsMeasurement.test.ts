@@ -60,7 +60,7 @@ describe('the report says whether the breaker was needed', () => {
   it('stays silent about ordinary work and speaks about a real loop', () => {
     expect(repeatedReadSummary(new Map([['a.ts', 2], ['b.ts', 2]]))).toBe('');
     const line = repeatedReadSummary(new Map([['src/App.tsx', 9], ['b.ts', 1]]));
-    expect(line).toContain('9× src/App.tsx');
+    expect(line).toContain('src/App.tsx (8 unchanged of 9 reads)');
     expect(line).toContain('80%');
   });
 });

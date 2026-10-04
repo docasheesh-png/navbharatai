@@ -121,7 +121,7 @@ describe.skipIf(!haveBrowser)('in a real browser', () => {
       await b.close();`);
     const out = JSON.parse(execFileSync(process.execPath, [script], { env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: BROWSERS }, timeout: 60_000 }).toString().trim().split('\n').pop()!);
     expect(out.before.link).not.toBe('none'); // a flex child's inline-flex reads back as flex
-    expect(out.before.xw).toBe(24);          // the app's own checkbox rule did not resize our ×
+    expect(out.before.xw).toBe(32);          // the app's own checkbox rule did not resize our ×
     expect(out.before.xRight).toBe(true);    // drawn to the right of the link
     expect(out.after.link).toBe('none');
     expect(out.after.x).toBe('none');

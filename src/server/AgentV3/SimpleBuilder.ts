@@ -21,6 +21,7 @@ import { deadlineFromBudget, isReasoningRungHandoff } from './turnDeadline';
 import { judgeRepair } from './repairAcceptance';
 import { scaffoldRestores, protectBoilerplateInRepair, SCAFFOLD_BOILERPLATE } from './scaffoldBoilerplate';
 import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
+import { isProjectConfigPath, existingFileBlock } from './existingConfig';
 import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports, fixTypeOnlyValueImports } from './ImportExportReconcile';
@@ -1144,7 +1145,7 @@ export function blueprintAdvisoryBlock(manifest: SimpleFileSpec[], contract?: st
   return parts.join('\n');
 }
 
-export function fileUserPrompt(prompt: string, file: SimpleFileSpec, manifest: SimpleFileSpec[], contract?: string, deps?: string, contractPath?: string): string {
+export function fileUserPrompt(prompt: string, file: SimpleFileSpec, manifest: SimpleFileSpec[], contract?: string, deps?: string, contractPath?: string, existing?: string | null): string {
   const listed = manifest.map((f) => `  - ${f.path}${f.purpose ? ` — ${f.purpose}` : ''}`);
   // The contract file is a real file of the app: list it, so "the complete file list" is complete.
   if (contractPath && !manifest.some((f) => f.path === contractPath)) {
@@ -1159,6 +1160,7 @@ export function fileUserPrompt(prompt: string, file: SimpleFileSpec, manifest: S
     deps || '',
     '',
     `Now write THIS file in full:\n  ${file.path}${file.purpose ? `\n  Purpose: ${file.purpose}` : ''}`,
+    existingFileBlock(file.path, existing),
     '',
     `Return ONLY the <<<FILE ${file.path}>>> … <<<ENDFILE>>> block.`,
   ].join('\n');
@@ -1352,6 +1354,11 @@ export interface SimpleBuildDeps {
    * and ran another nine minutes of model calls after it). Absent → today's behaviour.
    */
   signal?: AbortSignal;
+  /**
+   * Read a file the project already holds (preview bridge stripped), so a planned CONFIG file is edited
+   * rather than rewritten blind — see `isProjectConfigPath`. Absent → today's behaviour.
+   */
+  readExisting?: (path: string) => Promise<string | null>;
   /** Write the generated files (single batch). Throws on a hard failure. */
   writeFiles: (files: OneShotFile[]) => Promise<void>;
   /** Start the dev server + publish the preview. Best-effort. */
@@ -1842,7 +1849,12 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           // Anchoring every file call to the SAME absolute instant the lane's own race is bound by means
           // an abandoned closure's next attempt hits `bound.expired` and REFUSES BEFORE SPENDING — see
           // OpenAiToolRunner.runTurn — instead of starting another multi-minute call nobody will read.
-          const text = await deps.generate(fileSystemPrompt(deps.framework), fileUserPrompt(deps.prompt, spec, manifest, contract, depBlock, contractPath || undefined), { deadlineAt: laneStartedAt + overallMs });
+          // A config file the project already has is shown to the call that rewrites it (isProjectConfigPath).
+          const existing = deps.readExisting && isProjectConfigPath(spec.path) && deps.scaffoldPaths.includes(spec.path)
+            ? await deps.readExisting(spec.path).catch(() => null)
+            : null;
+          if (lapsed) return null;
+          const text = await deps.generate(fileSystemPrompt(deps.framework), fileUserPrompt(deps.prompt, spec, manifest, contract, depBlock, contractPath || undefined, existing), { deadlineAt: laneStartedAt + overallMs });
           if (lapsed) return null; // timed out while this call was in flight — discard, don't log
           const blocks = parseFileBlocks(text);
           const match = blocks.find((b) => b.path === spec.path) ?? blocks[0];

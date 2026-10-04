@@ -3439,12 +3439,18 @@ export function fastLaneCallIdentity(
   reported: boolean,
   usedProvider: string | undefined,
   claudeTierModel: string,
+  answered?: string | null,
 ): { provider: string; model: string } {
   // No provider ever reported in — we do not know who would have served it, and we must not guess.
   // 'unknown' is the same word `usageLedger`'s providerKey uses, so one vocabulary covers both.
   if (!reported) return { provider: 'unknown', model: 'unknown' };
   const provider = fastLaneProviderLabel(usedProvider);
-  return { provider, model: provider === 'anthropic' ? claudeTierModel : String(usedProvider || '').toLowerCase() };
+  // 🔴 THE MODEL THAT ANSWERED, NOT THE VENDOR'S NAME (autopsy dcce5d26, 2026-10-04). This returned
+  // `usedProvider.toLowerCase()` — "glm" — for every cheap-floor call, so the fast lane's per-call log
+  // (and the report's top-level `model`, derived from it) named a vendor where a model belongs. It is
+  // the expression `answeringModel.ts` replaced at five aux call sites (autopsy f152c1ab); this lane
+  // records through its own helper, so that fix never reached it. `answered` is `TurnResult.model`.
+  return { provider, model: answeringModel({ answered, planned: provider === 'anthropic' ? claudeTierModel : null, family: String(usedProvider || '').toLowerCase() }) };
 }
 
 /**
@@ -17288,6 +17294,11 @@ async function noteBuildOutcome(
         // survived was chance — autopsy 2720e553). Prompts that show it cap it themselves (60).
         const scaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
           .filter((p) => !/^(node_modules|\.git)\//.test(p));
+        // What both fast lanes read before rewriting a config file the project already has (existingConfig.ts).
+        const readExistingProjectFile = async (p: string): Promise<string | null> => {
+          const raw = await actuator.readFile(workspaceId, p).catch(() => null);
+          return raw == null ? null : withoutPreviewBridge(p, raw);
+        };
         // Shared side-effects for both fast lanes (Simple Builder + OneShot).
         // ONE fast-lane model round trip. Returns the provider's stop reason alongside the text so the
         // continuation wrapper below can tell "the model finished" from "the model ran out of budget"
@@ -17364,7 +17375,7 @@ async function noteBuildOutcome(
             try { buildDiag.recordLlmCall({ model: failedAs.model, provider: failedAs.provider, promptPreview, promptChars: promptPreview.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) }); } catch { /* diagnostics best-effort */ }
             throw err;
           }
-          const servedBy = fastLaneCallIdentity(providerReported, usedProvider, fbModel);
+          const servedBy = fastLaneCallIdentity(providerReported, usedProvider, fbModel, t.model);
           try { buildDiag.recordLlmCall({ model: servedBy.model, provider: servedBy.provider, promptPreview, promptChars: promptPreview.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true }); } catch { /* diagnostics best-effort */ }
           if (!fastLaneReasoningRung && fastLaneReasoningGateEnabled() && modelAlwaysReasons(servedBy.model)) {
             fastLaneReasoningRung = servedBy.model;
@@ -17766,6 +17777,8 @@ async function noteBuildOutcome(
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
         const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
+          // A planned config file the starter already has is edited, never rewritten blind (isProjectConfigPath).
+          readExisting: readExistingProjectFile,
           stopLane: () => (fastLaneReasoningRung
             ? `the lane's engine fell to ${fastLaneReasoningRung}, which reasons before every answer; the lane's per-file budget cannot carry that, so the files finished so far go to the full builder now`
             : null),
@@ -17901,7 +17914,7 @@ async function noteBuildOutcome(
           //    …and gated on what the lane above just MEASURED. See oneShotStillViable: in the dukaan
           //    report the manifest had planned 8 files, so "the manifest skips it" was already false,
           //    and this lane still ran for 150 seconds to fail at something a single call cannot do.
-          const os = await runOneShot({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog });
+          const os = await runOneShot({ prompt, framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog });
           buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
           if (os.ok) {
             // VERIFY GATE for the one-shot lane too (autopsy 2026-07-07: a NowPlaying.tsx TRUNCATED

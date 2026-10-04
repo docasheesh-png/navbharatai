@@ -22,6 +22,7 @@ import type { StartTier } from './RequestAnalyser';
 // hunted (fourth absolute rule, step 3) and the same failure returned two months later. Centralised
 // so a future reader finds every lane that races a deadline in one search.
 import { withTimeout } from './asyncUtils';
+import { isProjectConfigPath, existingConfigsBlock } from './existingConfig';
 
 /** Whether this build should TRY the OneShot lane. Simple/medium tiers (gemini/haiku) → yes;
  *  complex tiers (sonnet/opus) keep the full agentic loop. Pure + exported for testing. */
@@ -220,11 +221,12 @@ export function oneShotSystemPrompt(framework: string): string {
 }
 
 /** The user prompt: what to build + the existing scaffold the app starts from. */
-export function oneShotUserPrompt(prompt: string, scaffoldPaths: string[]): string {
+export function oneShotUserPrompt(prompt: string, scaffoldPaths: string[], existingConfigs: Readonly<Record<string, string | null | undefined>> = {}): string {
   const scaffold = scaffoldPaths.length
     ? `The project is already scaffolded with these files (edit/extend them, root is the project root):\n${scaffoldPaths.slice(0, 60).map((p) => `  - ${p}`).join('\n')}`
     : 'The project starts empty — create all files at the project root.';
-  return `Build this app:\n\n${prompt}\n\n${scaffold}\n\nReturn every file as <<<FILE …>>> … <<<ENDFILE>>> blocks now.`;
+  // A config file the project already has is shown before it can be rewritten (existingConfig.ts).
+  return `Build this app:\n\n${prompt}\n\n${scaffold}${existingConfigsBlock(existingConfigs)}\n\nReturn every file as <<<FILE …>>> … <<<ENDFILE>>> blocks now.`;
 }
 
 export interface OneShotResult {
@@ -239,6 +241,8 @@ export interface OneShotDeps {
   prompt: string;
   framework: string;
   scaffoldPaths: string[];
+  /** Read an existing project file (preview bridge stripped) — see existingConfig.ts. Absent → today's behaviour. */
+  readExisting?: (path: string) => Promise<string | null>;
   /** ONE cheap text-generation call (Haiku/Gemini/Grok). Returns the raw model text. */
   generate: (system: string, user: string) => Promise<string>;
   /** Write the generated files (single batch). Throws on a hard failure. */
@@ -299,7 +303,12 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
     // outside the timeout, so a stalled sandbox write hung the lane indefinitely. Now a stall in any
     // of generate / write falls back fast to the agentic loop.
     files = await withTimeout((async () => {
-      const text = await deps.generate(oneShotSystemPrompt(deps.framework), oneShotUserPrompt(deps.prompt, deps.scaffoldPaths));
+      const existingConfigs: Record<string, string | null> = {};
+      if (deps.readExisting) {
+        for (const p of deps.scaffoldPaths.filter(isProjectConfigPath)) existingConfigs[p] = await deps.readExisting(p).catch(() => null);
+      }
+      if (lapsed) throw new Error('one-shot-cancelled');
+      const text = await deps.generate(oneShotSystemPrompt(deps.framework), oneShotUserPrompt(deps.prompt, deps.scaffoldPaths, existingConfigs));
       // Checked BEFORE parsing as well as before writing: a lane that has already been handed off must
       // stop at the first opportunity, not merely stop short of the damage.
       if (lapsed) throw new Error('one-shot-cancelled');

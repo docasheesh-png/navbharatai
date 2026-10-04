@@ -88490,3 +88490,44 @@ nine prompts returned `chat`/5, including `hospital management system`**, a case
 test for. A derivation that returns the same answer for every input cannot fail, and *"not invented" is a
 weaker standard than "checked"* (the `E2B_USD_PER_HOUR` entry's words). It was caught by the one result
 that contradicted a documented fix.
+
+## 2026-10-04 — CI cancels the head's run when a branch is pushed twice (Q-500, measured)
+
+Both of today's PRs had their head CI run come back **`cancelled`**, and the first instinct — "the billing
+stop is back" — was wrong. Measured instead of assumed, across every run since CI resumed at 17:22 UTC:
+
+| | runs |
+|---|---|
+| success | 16 |
+| cancelled | 5 |
+| still running | 7 |
+
+**The shape, and it is consistent on PR branches:** each cancelled run had a sibling run on the SAME
+branch created **11–67 seconds earlier** that survived and went green, and the cancelled one is the
+**later** one — i.e. the run for the actual head, the one the merge gate reads. It is cut mid-step after
+1.1–4.3 minutes (mine at `typecheck:server`, 2 min 35 s).
+
+**What was ruled out, so nobody re-derives it:**
+- **Not the 15-minute cap `ci.yml` already records** (*"two consecutive runs were cancelled at exactly
+  15.0 and 15.1 minutes … a hard cap that comes from outside this file"*) — today's cuts are 1–4 minutes.
+- **Not concurrency.** Correlated every run's cancellation time against how many runs overlapped it:
+  runs **succeeded with 7 others overlapping** (18:25:40, 18:50:13), while cancellations happened at
+  6–8 overlapping. Overlap does not predict it; a same-branch sibling does.
+- **Not the code.** A plain re-run of the cancelled run succeeds — #3514 attempt 2 and #3520 attempt 2.
+- **Not anything in this repository.** No `concurrency:` block exists in any of the eight workflows
+  (grepped), and nothing in them cancels a run.
+- **The account's Actions billing cannot be read from a session** (`users/…/settings/billing/actions` is
+  refused by the session's GitHub proxy), so the earlier billing stop can be neither confirmed nor
+  excluded as the cause. Recorded as a 🟡 row rather than guessed at.
+
+🔑 **THE WORKAROUND EVERY SESSION CAN USE TODAY, AND IT COSTS NOTHING: push ONCE per branch.** Splitting
+a change into a code push and a docs push — which is exactly what I did on #3520 — is what produces the
+pair. If a second push is genuinely needed, **re-run the head's run afterwards** and read THAT result;
+the stale run's green says nothing about what would be merged.
+
+⚠️ **And the branch-takeover class fired for the third time today**, on #3514: its head moved from the
+`ae3da9f5` I pushed to `710a1d3e`, a forward-merge of `origin/main` made by automation. This one was
+legitimate and well-labelled — it resolved a real conflict (#3513 had removed Q-342, and the merge keeps
+it removed) and **every one of my edits survived**, verified file by file. Which is the point: the first
+takeover today looked like a loss and was not, and this one looked identical and was not either. **The
+check is always the head SHA and the diff, never the push.**

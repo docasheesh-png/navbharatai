@@ -89174,3 +89174,14 @@ can never run there, that a polyfill would only fake the result (data written to
 reaches the app), and that sample data belongs in the app's first load. Guidance only. Lock:
 `tests/browserCodeIsNotRunUnderNode.test.ts` (pure cases + the real dispatcher bash path).
 
+### 2026-10-04 — Q-115: an icon used once and imported nowhere is healed from the package itself
+
+Autopsy 424ecdab ended RED on `<IndianRupee />` and `<Clock />` — lucide-react icons used once and imported
+nowhere. `addMissingProjectImports` could only copy an import the project had already made, by design ("a guess
+that invents an import turns a broken build into one that will not parse"). The missing fact was the package's
+own export list, which the sandbox has: `readPackageExports` asks it with one bounded `node --input-type=module`
+run over the project's dependencies (only when an unbound JSX tag exists), and the JSX pass adds the import only
+for a single owning package. Precision rules: JSX tag names only (lucide exports an `Image` icon; `new Image()`
+must never be bound to it), the project's own module wins, ambiguity ⇒ nothing, inputs validated before the
+shell. Lock: `tests/anIconTheProjectNeverImportedIsHealed.test.ts`.
+

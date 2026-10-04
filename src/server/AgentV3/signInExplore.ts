@@ -17,14 +17,25 @@
  * 🔒 WHAT IT WILL NEVER DO, and each is the design, not a limitation to "improve" later:
  *   - invent credentials, guess common passwords, or try more than a handful of candidates — that is
  *     brute force against somebody's app, whatever the intent;
- *   - create an account — sign-up writes a real row, and on the user's own database that is their data;
+ *   - create an account in an app with a real backend — sign-up writes a real row, and on the user's own
+ *     database (or NavBharatAI's shared `NavData` rows) that is somebody's data;
  *   - print a credential — the report says WHERE the account came from, never what it is.
- * No credentials in the app ⇒ it says so (`AUTH_EXPLORE_NOT_RUN`) and every check runs as before.
+ *
+ * 🆕 THE ONE ACCOUNT IT MAY CREATE (queue Q-540, autopsy 68f0a486; admin decision 2026-10-04, option (b):
+ * "jo bhi function banaye jaye woh real hone chahiye"). A school app kept its users in `localStorage`, shipped
+ * no demo account, and so every screen behind its sign-in page — fees, attendance, uploads — went unchecked
+ * while the summary said they worked. When an app's accounts live in the BROWSER ALONE
+ * (`authLivesInTheBrowser`: no server, no hosted auth or database SDK, no network call that signs anyone
+ * in, and accounts kept in browser storage), signing up writes only into the check's own throwaway browser
+ * profile, which is discarded when the check ends. There, and only there, the check signs up ONE throwaway
+ * account through the app's own sign-up form and signs in with it. Every other app keeps the rule above.
+ * No way in ⇒ it says so (`AUTH_EXPLORE_NOT_RUN`) and every check runs as before.
  *
  * PURE: the candidate reader, the script builder and the output parser. The route runs the script.
  */
 import { playwrightImport, browserScriptRunLine } from './sandboxBrowserScript';
 import { DESTRUCTIVE_LOCAL_WORDS, SPENDING_LOCAL_WORDS, DEVANAGARI_NEVER_WORDS } from './localActionWords';
+import { detectBackendPresence } from './BackendPresence';
 
 /** Where the signed-in browser session is saved inside the sandbox, for the other checks to load. */
 export const SIGNED_IN_STATE_PATH = '/tmp/nbai-signed-in.json';
@@ -111,6 +122,37 @@ export function signInCandidates(files: Readonly<Record<string, string>>): SignI
   return out.slice(0, MAX_SIGN_IN_CANDIDATES);
 }
 
+/** Hosted sign-in or a hosted database: an account made there is a real row somebody owns. */
+const HOSTED_AUTH_OR_DATA = /@supabase\/|\bsupabase\b|\bfirebase\b|@firebase\/|auth0|@clerk\/|next-auth|\bnextauth\b|\bappwrite\b|pocketbase|aws-amplify|amazon-cognito|@nhost\/|better-auth|\blucia\b|\bpassport\b|@kinde|stytch|magic-sdk|@okta\/|\bNavData\b|mongodb(?:\+srv)?:\/\/|\bDATABASE_URL\b/i;
+/** A network call that signs someone in, or any call to an `/api/` route — a server owns the accounts. */
+const NETWORK_SIGN_IN = /(?:\bfetch|\baxios(?:\.\w+)?|\.(?:post|put))\s*\(\s*[`'"][^`'"]*(?:\/api\/|auth|log-?in|sign-?in|sign-?up|register|session|token|\/users?\b)/i;
+/** An app base URL read from the environment: the requests go to a server we cannot see. */
+const ENV_API_BASE = /import\.meta\.env\.VITE_\w*(?:API|BACKEND|SERVER)\w*|process\.env\.(?:NEXT_PUBLIC_|REACT_APP_)\w*(?:API|BACKEND|SERVER)\w*/;
+/** Browser storage — where a browser-only app keeps its accounts. */
+const BROWSER_STORE = /\b(?:localStorage|sessionStorage|indexedDB)\b|from\s*['"](?:localforage|dexie|idb-keyval|idb)['"]/;
+
+/**
+ * Do this app's accounts live in the BROWSER ALONE? (Q-540.) True only with all of: no backend
+ * (`detectBackendPresence`), no hosted auth or database SDK, no network call that signs anyone in, no API
+ * base URL from the environment — AND positive evidence: a file that handles a password also writes
+ * browser storage. Anything uncertain answers false, which keeps the old rule (no account is created).
+ * PURE.
+ */
+export function authLivesInTheBrowser(files: Readonly<Record<string, string>>): boolean {
+  const all = Object.entries(files ?? {}).filter(([, c]) => typeof c === 'string');
+  if (all.length === 0) return false;
+  if (detectBackendPresence(Object.fromEntries(all)).hasBackend) return false;
+  // Code, configuration and env files. A server directory or a serverless function is a backend even
+  // when nothing above recognised its framework.
+  // (`src/api/` is often a client module over localStorage, so only a ROOT `api/` counts — Vercel's functions.)
+  if (all.some(([p]) => /^(?:api|functions|netlify\/functions|supabase)\/|(?:^|\/)(?:server|backend)\/|^server\.[cm]?[jt]s$/i.test(p))) return false;
+  const code = all.filter(([p]) => /\.(?:[cm]?[jt]sx?|vue|svelte|html|json)$|(?:^|\/)\.env/i.test(p) && !/(?:^|\/)(?:node_modules|dist)\//.test(p) && !/package-lock\.json$/.test(p));
+  for (const [, c] of code) {
+    if (HOSTED_AUTH_OR_DATA.test(c) || NETWORK_SIGN_IN.test(c) || ENV_API_BASE.test(c)) return false;
+  }
+  return code.some(([p, c]) => !/\.json$/i.test(p) && /password/i.test(c) && BROWSER_STORE.test(c));
+}
+
 export interface SignedInScreen { path: string; html: string }
 export interface SignInRun {
   /** False when the script never reported (it could not run) — "we do not know", not "no wall". */
@@ -142,8 +184,10 @@ export function parseSignInOutput(stdout: string | null | undefined): SignInRun 
  * the page is never read as success. On success it saves the session and reads a few screens behind the
  * door by following the app's own same-origin links (never one whose name deletes, pays or signs out).
  */
-export function signInScript(previewUrl: string, candidates: readonly SignInCandidate[]): string {
+export function signInScript(previewUrl: string, candidates: readonly SignInCandidate[], opts: { mayCreateAccount?: boolean } = {}): string {
   const cfg = {
+    // Only ever true for an app whose accounts live in the browser alone (`authLivesInTheBrowser`).
+    mayCreateAccount: opts.mayCreateAccount === true,
     base: String(previewUrl ?? '').trim(),
     marker: SIGN_IN_RESULT_MARKER,
     state: SIGNED_IN_STATE_PATH,
@@ -243,6 +287,86 @@ async function attemptDemo(page, name) {
   return (await wallVisible(page)) ? 'still-on-wall' : 'signed-in';
 }
 
+// A THROWAWAY ACCOUNT, only where the app keeps its accounts in the browser alone (cfg.mayCreateAccount —
+// the server decides that from the app's files, never this script). It lives in this check's own browser
+// profile and is gone when the browser closes. Never printed: the report says only where it came from.
+const SIGN_UP = /sign ?up|register|create (an |your |new )?account|new account|join now|naya khata|khata banay|panjikaran|darj karein/i;
+function throwaway() {
+  const r = Math.random().toString(36).slice(2, 8);
+  return { identifier: 'nbai-check-' + r + '@example.com', username: 'nbaicheck' + r, password: 'Nb-check-' + r + '-9A' };
+}
+async function signUpControls(page) {
+  const all = page.locator('button, a[href], [role=button], [role=tab]');
+  const n = Math.min(await all.count(), 60);
+  const names = [];
+  for (let i = 0; i < n; i++) {
+    const el = all.nth(i);
+    if (!(await el.isVisible().catch(() => false))) continue;
+    const name = ((await el.innerText().catch(() => '')) || (await el.getAttribute('aria-label').catch(() => '')) || '').trim();
+    if (name && name.length <= 40 && SIGN_UP.test(name) && !NEVER.test(name) && !names.includes(name)) names.push(name);
+  }
+  return names;
+}
+async function fillSignUp(page, who) {
+  // The LAST visible password box: a page that keeps its sign-in form beside the new sign-up form puts
+  // the sign-up one second, and its "confirm password" box shares that form.
+  const pws = page.locator('input[type=password]');
+  let pw = null;
+  for (let i = Math.min(await pws.count(), 6) - 1; i >= 0 && !pw; i--) if (await pws.nth(i).isVisible().catch(() => false)) pw = pws.nth(i);
+  if (!pw) return false;
+  const form = pw.locator('xpath=ancestor::form[1]');
+  const scope = (await form.count()) > 0 ? form : page.locator('body');
+  const inputs = scope.locator('input, select, textarea');
+  const n = Math.min(await inputs.count(), 25);
+  for (let i = 0; i < n; i++) {
+    const el = inputs.nth(i);
+    if (!(await el.isVisible().catch(() => false)) || !(await el.isEditable().catch(() => false))) continue;
+    const tag = await el.evaluate((e) => e.tagName.toLowerCase()).catch(() => '');
+    const type = ((await el.getAttribute('type').catch(() => '')) || 'text').toLowerCase();
+    const hint = [await el.getAttribute('name').catch(() => ''), await el.getAttribute('id').catch(() => ''), await el.getAttribute('placeholder').catch(() => ''), await el.getAttribute('autocomplete').catch(() => ''), await el.getAttribute('aria-label').catch(() => '')].join(' ').toLowerCase();
+    if (tag === 'select') {
+      const opts = await el.locator('option').evaluateAll((os) => os.map((o) => o.value).filter((v) => v)).catch(() => []);
+      if (!(await el.inputValue().catch(() => '')) && opts.length) await el.selectOption(opts[0]).catch(() => {});
+      continue;
+    }
+    if (type === 'checkbox') { if (await el.getAttribute('required').catch(() => null) !== null) await el.check().catch(() => {}); continue; }
+    if (['radio', 'hidden', 'submit', 'button', 'file', 'range', 'color'].includes(type)) continue;
+    if (await el.inputValue().catch(() => '')) continue;
+    let v = 'NavBharat Check';
+    if (type === 'password') v = who.password;
+    else if (type === 'email' || hint.includes('email') || hint.includes('mail')) v = who.identifier;
+    else if (type === 'tel' || /phone|mobile/.test(hint)) v = '9876543210';
+    else if (type === 'number') v = '1';
+    else if (type === 'date') v = '2000-01-01';
+    else if (/user ?name|login|userid/.test(hint)) v = who.username;
+    await el.fill(v).catch(() => {});
+  }
+  const submit = scope.locator('button[type=submit], input[type=submit]').first();
+  if (await submit.count() > 0) await submit.click({ timeout: 4000 });
+  else {
+    const named = scope.locator('button').filter({ hasText: SIGN_UP }).first();
+    if (await named.count() > 0) await named.click({ timeout: 4000 });
+    else await pw.press('Enter');
+  }
+  await settle(page);
+  return true;
+}
+async function attemptSignUp(page, name, who) {
+  await page.goto(cfg.base, { waitUntil: 'domcontentloaded', timeout: 12000 });
+  await settle(page);
+  if (!(await wallVisible(page))) return 'no-wall';
+  const el = page.locator('button, a[href], [role=button], [role=tab]').filter({ hasText: name }).first();
+  if (await el.count() === 0) return 'still-on-wall';
+  await el.click({ timeout: 4000 });
+  await settle(page);
+  if (!(await fillSignUp(page, who))) return 'still-on-wall';
+  if (!(await wallVisible(page))) return 'signed-in';
+  // Most apps send a new account back to the sign-in page: sign in with it, like a person would.
+  const back = await attempt(page, { identifier: who.identifier, password: who.password });
+  if (back === 'signed-in') return back;
+  return await attempt(page, { identifier: who.username, password: who.password });
+}
+
 const browser = await chromium.launch({ args: ['--no-sandbox'] });
 try {
   const ctx = await browser.newContext(${JSON.stringify(BROWSER_PAGE_OPTIONS)});
@@ -268,8 +392,20 @@ try {
       if (r === 'signed-in') { signed = true; note = 'one-tap demo button on the sign-in page'; break; }
     }
   }
+  if (!signed && !note && cfg.mayCreateAccount) {
+    let names = [];
+    try { await page.goto(cfg.base, { waitUntil: 'domcontentloaded', timeout: 12000 }); await settle(page); names = await signUpControls(page); } catch (e) { names = []; }
+    const who = throwaway();
+    for (const name of names.slice(0, 2)) {
+      if (Date.now() - started > cfg.budgetMs - 10000) { note = 'ran out of time before signing in'; break; }
+      let r;
+      try { r = await attemptSignUp(page, name, who); } catch (e) { r = 'error'; }
+      if (r === 'signed-in') { signed = true; note = 'a throwaway account the check created — the app keeps its accounts in the browser only'; break; }
+    }
+    if (!signed && !note) note = names.length ? 'its sign-up form did not let a new account in' : 'the app ships no demo account, and its sign-in page has no sign-up to create one with';
+  }
   if (!signed) {
-    if (!note) note = cfg.candidates.length ? 'none of the demo accounts the app ships got past its sign-in page' : 'the app ships no demo account or demo button to sign in with';
+    if (!note) note = cfg.candidates.length ? 'none of the demo accounts the app ships got past its sign-in page' : 'the app ships no demo account or demo button to sign in with, and the check creates its own account only in an app that keeps its accounts in the browser alone';
     say({ signedIn: false, note, screens: [] });
   } else {
     await ctx.storageState({ path: cfg.state });

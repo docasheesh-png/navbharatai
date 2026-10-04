@@ -70,7 +70,9 @@ describe('wiring — every wallet credit is transactional, and none of them assi
   it('🔒 the admin adjustment runs inside a transaction', () => {
     const at = admin.indexOf("app.post('/api/admin/users/:userId/tokens'");
     expect(at).toBeGreaterThan(-1);
-    const block = admin.slice(at, at + 2200);
+    // To the next route, not a fixed window: the reason check added before the transaction (admin panel
+    // audit PR 1, 2026-10-04) moved it further down the handler.
+    const block = admin.slice(at, admin.indexOf('\n  app.', at + 10));
     expect(block).toContain('runTransaction(');
     expect(block).toContain('await tx.get(walletRef)');
     expect(block).not.toContain('await updateDoc(walletRef');

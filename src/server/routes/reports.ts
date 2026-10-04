@@ -677,6 +677,7 @@ export function registerReportRoutes(app: Express): void {
       status as 'open' | 'reviewed' | 'actioned' | 'dismissed',
       typeof req.body?.note === 'string' ? req.body.note : undefined,
     );
+    audit('ADMIN_USER_REPORT_STATUS', { id: String(routeParam(req.params.id) || ''), status, result: ok ? 'ok' : 'failed', ip: req.ip });
     if (!ok) return res.status(502).json({ error: 'Could not update that report.' });
     res.json({ ok: true, status });
   });

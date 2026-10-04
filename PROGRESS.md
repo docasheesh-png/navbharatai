@@ -88428,6 +88428,26 @@ module), with five false findings on the way. Ledger (problem → root cause →
 - 🟡 Q-396 (no-tests warning on module turns), Q-397 (ignored theme note), Q-398 (APP_SCOPE small word as reason):
   BLOCKED with options in the queue. Q-399 (crawl bench, Haiku planner) resolved as admin-decided behaviour.
 
+## 2026-10-04 — Admin panel audit, PR 1: safety + dead code (admin approved the sequenced plan)
+
+The admin forwarded a reviewed plan (external text, adapted): PR 1 safety, PR 2 the nine-tab menu, PR 3 gallery
+review / restore / App Check / audit log, PR 4 optional cleanup — one PR at a time, each waiting for approval.
+D2/D3/D4 work done earlier the same day is kept on the LOCAL branch `local/admin-d2-d3-d4` (not pushed) for PR 2/3.
+- **Confirmations + reasons.** Ban, token adjustment and messaging users go through `ConfirmActionDialog`. A ban and a
+  token change need the admin's own reason; a message to all users shows recipients + exact text. One rule,
+  `src/lib/adminActionReason.ts`, read by the screen and enforced by the server (placeholder reasons refused,
+  all-users broadcast needs `confirmScope: 'ALL_USERS'`). Token adjustments audit admin, user, amount, previous and
+  new balance, reason, result.
+- **Audit lines added:** release gate (before/after), update broadcast, build/APK report delete + clear-all, MFA
+  enrol start, push test, About page edit, user-report status, Firestore backup. Census in
+  `tests/adminActionsNeedAReason.test.ts` fails on a new mutating `/api/admin` route with no `audit(`.
+- **D1 (admin chose remove):** Maintenance Mode, Feature Flags, Pricing Configuration and the "Persisted feature
+  flags" card are gone with their state/handlers. **Intentionally kept:** `POST /api/admin/settings`,
+  `/api/admin/feature-flags` and `serverStats.maintenanceMode` (read by `/api/health`) — now written by no screen;
+  candidates for removal in a later PR once proven unused by any other caller.
+- Removed App.tsx's tokenless `/api/admin/analytics` fetch (always 401, result read by nothing).
+- ⚠️ An older bundled admin client (phone app) that still sends "Admin action" or an unscoped broadcast now gets an
+  honest refusal instead of a silent action.
 ### 2026-10-04 — Q-273 / Q-275 follow-up (autopsy 241215d1)
 
 - **Q-273 → fix in PR.** Problem: `python3 --version && which python3 → exit 0 (11s)`, while `head -50` took 1 s a
@@ -88689,7 +88709,100 @@ Nothing was reworded or dropped. A line-count check confirmed every line of the 
 **New rule:** when the admin sets a Cloud Run key, its name is recorded in `docs/claude/ENV_REGISTRY.md`, not in `CLAUDE.md`. Long histories and rationales go in the matching `docs/claude/` file.
 
 Also: Q-013's queue row now says #3496 is merged.
+- **PR 2 acceptance requirement (admin, 2026-10-04):** for every moved feature verify category, natural place, primary
+  action, separate/appropriate destructive actions, label = behaviour, no duplicate left elsewhere, same backend/API
+  correctly called, authorization intact, confirmation on destructive actions, audit on important actions. Where two
+  locations are both reasonable, decide from the feature's purpose and the admin's workflow and write the reason.
+  PR 2 is NOT complete without a "FEATURE LOCATION AUDIT" table (Feature | Old Location | New Location | Why |
+  Action Type | Permission | Audit Required). Anything unclear, duplicated or misplaced is named, not hidden.
+  D3 (the three duplicate cards) moves to PR 4.
 
+### 2026-10-04 — ⛔ NO FAKE BUTTON, NO FAKE FEATURE: the rule, enforced on the apps NavBharatAI builds (admin-mandated, unbreakable)
+
+Admin, verbatim: *"navbharatai kab bhi koi app banaye, usme koi bhi function fake nahi hona chahiye! jab 'login' button
+bane, to fake login na bane, real login button ho, google login, apple login, user se real api secret mange jaye! …
+agar koi button/feature fake banaya hai, ya dummy/demo banaya hai, to user ko clearly bataya jaye ki yeh button fake
+hai, aur bataya jaye kyu fake hai … 3 dot menu ke secret and keys ya settings ke secret and keys me yeh secret dalo!
+red colour me saf saf likho user ki language me ki iske bina kaam fake/dummy/demo hoga!!!"*
+
+**Root cause (why keys were never asked for).** Three guards existed and all three were blind to the same app:
+`AppRequirements` demands a key only when the app's code NAMES one (a package or an env var); `AuthenticityAnalysis`
+finds the WORDS mock / fake / simulate; `SEED_PASSWORD_RULE` told the builder how to seed a demo user and nothing said
+a seeded user is not a login. A login that checks `password === 'demo123'` names no key and carries no such word.
+**The class:** a feature whose real version needs the USER'S OWN credential (login, Google/Apple button, payment, OTP,
+email) implemented LOCALLY in ordinary code, so the machinery that demands the credential never fired. Siblings never
+hunted before: the one-shot lane carried NO honesty rule at all; `signInExplore` reads demo accounts out of apps (the
+engine had institutionalised them) while nothing told the user they were demos.
+
+**Fix at the class** (`src/server/AgentV3/fakeFeatureScan.ts`, zero model calls, flag `AGENTV3_NO_FAKE_FEATURES`, default ON):
+- the whole project is read by SHAPE, not words: a sign-in screen whose password lives in the app or is compared in the
+  browser; "Continue with Google" with no OAuth SDK/route; a pay action that marks itself paid with no gateway/UPI link;
+  an OTP the page makes up; "email sent" with no transport — each only when NO provider exists anywhere in the project;
+- a RED line in the user's language on the app's own screen (`withHonestyBanner` → `index.html` at the production-defaults
+  pass; idempotent, removed when the fake is made real; 36px dismiss so the mobile check does not flag it);
+- one 🔴 chat line per fake (11 languages) with files, exact keys and both paths (`⋮ More → Keys & Secrets` /
+  `Settings → App Settings → Secrets & API Keys`); admin finding `FAKE_FEATURE_SHIPPED` with a one-tap offer;
+- the fake IMPLIES the service (`impliedRequirementsFor`): new implied-only `login` catalogue entry + `login` recipe
+  (Supabase Auth first — real email, Google, Apple; one-tap database includes it), `payments_razorpay`, `sms`,
+  `email_api` — so the closing ask card asks for the exact keys, which it never could before;
+- `NO_FAKE_FEATURE_RULE` in ALL THREE lanes (architect, fast lane, one-shot), `SEED_PASSWORD_RULE` amended,
+  `fakeFeatureWriteNote` at write time beside `fakeResultWriteNote`.
+- Precision locks: PIN lock ≠ login, "mark as paid" ≠ payment, "message sent" ≠ email, comments/tests never, import
+  turns never, a request that asked for a demo/offline login/cash-only stands the matching rule down; every golden
+  scaffold passes the reader.
+- Proof: `tests/noFakeButtonNoFakeFeature.test.ts` (27 cases; 20 fail with the reader disabled — reversion-proven).
+- Docs: `docs/claude/ENV_REGISTRY.md` (full design), `CLAUDE.md` (one bullet under the second absolute rule),
+  `AppKnowledgeBase.ts`.
+
+**Honest limits, stated:** detection is by shape, so a fake in an unlisted shape is caught only by the prompt rule and
+the write-time note; the on-screen line needs an `index.html` (a Next.js app gets the chat line and the ask only);
+adding a key does not rewrite the fake code — the user is told to reply "make it real" or press the offer.
+**Watch on real builds:** `FAKE_FEATURE_SHIPPED` frequency and any red line on a screen the user says was real.
+
+**Siblings killed the same evening (admin: "isko wapas se polish karo aur rocksolid banao! sath kill the siblings"):**
+writing specialists carry the rule (`SubAgent.ts`); the feature-presence heal and the completion heal carry it in their
+own instruction (the two passes most likely to WRITE a fake login); the server-built in-browser preview carries the red
+block (`src/lib/honestyBanner.ts`, one definition of the markers, both renderers tested); the claim audit contradicts a
+summary that sells the demo (`feature-claimed-but-demo`); four more shapes (sign-up to localStorage, "reset link sent",
+"SMS sent", "uploaded to the cloud" with no storage → `storage`). Three other PRs' source guards were updated for the
+renamed `honestIndex` / the three-rule push. Test file now 33 cases.
+
+---
+
+## 2026-10-04 — Autopsy cc3ef776 (AI image generator app): an app's pictures need a key — and the owner is told which, where, and where to paste it
+
+**Report:** the admin's AI-image-generator build failed on every picture. Admin note: *"maine kaha tha, jab bhi app builder ai banawaya jaye to pollination ai, se image generatet karwayi jaye, par yeh to fail ho raha hai"*.
+
+**Root cause:** the image provider stopped answering anonymous requests (401, "key missing or invalid"), and a key may never be placed in browser code. The 2026-10-01 recipe was built on a keyless default that no longer exists. Asked how to proceed, the admin ruled: *"1. user ko saaf saaf bolo ki API keys chahiye. 2. user ko navbhatai api keys ka offer den, aur bhi api keys ke bare me bataye jaise grok.gemini,chatgpt user jo bhi select kare uski location/link bataye, user ko guide kare ki keys kaha dalni hai!!"*
+
+**What was built (PR `claude/app-image-keys`):**
+- The app's page asks NavBharatAI for every picture through `window.NavAI.image()`. In the published app this goes to `POST /api/app-ai/image` (signed app token). In the owner's preview it goes through the postMessage relay to `/api/app-ai/preview-image`. The server reads the owner's image key from the encrypted vault, so the key never reaches the page.
+- One table, `appImageKeyOptions.ts`, lists the keys:
+  - `NAVBHARATAI_API_KEY`
+  - `OPENAI_API_KEY`
+  - `GEMINI_API_KEY`
+  - `XAI_API_KEY`
+  - `POLLINATIONS_API_KEY`
+
+  Each entry has its link and the place to paste it. The builder's instruction, the recipe, the owner's error and the vault lookup all read this table.
+- Our own offer is a new Developer API permission, **Images** (`ai:images`), behind `POST /api/v1/images/generations` (standard images format, b64_json). Pricing matches the Image Generator: 5 free pictures a day, then ₹1 each, within the key's daily limit. The same key can be saved as an app's image key.
+- The owner sees the full list of options. A visitor sees only "not set up yet". A refused key is reported to the owner and never silently swapped for the NavBharatAI wallet.
+- Limits: 100 pictures a day per app, 10 per visitor, and 50 a day in the preview.
+
+**🔴 Reversal recorded:** the 2026-09-23 decision "no image door on the Developer API" was reversed on the admin's new instruction (the dated note is in `tests/theImageGeneratorHasFreeAndPaid.test.ts`).
+
+**Ledger (queue rows Q-570…Q-575):**
+
+| Row | Problem | State |
+|---|---|---|
+| Q-570 | Every picture failed (keyless 401) | Fixed in this PR |
+| Q-571 | The builder said "no key needed" | Fixed in this PR |
+| Q-572 | The phone-layout check blamed a scrolled row; the real culprit was the "Portrait" chip | Analyzer and template fixed in this PR |
+| Q-573 | `PREVIEW_SNAPSHOT_STALE` from `.env` | Fixed in this PR |
+| Q-574 | The warm primer had no `@types/react` | 🟡 Code fixed; the admin must run the `e2b-template` workflow |
+| Q-575 | `safe=true` no longer filters nudity | Fixed in this PR; filters are now named explicitly |
+
+**Not defects (with evidence in the reply):** the GLM crawl bench, ladder rung 2, and the ₹47.75 bill (the markup was earned by a preview that ran).
 ## 2026-10-04 — AUTOPSY 39e982bd: the app was off the user's screen for eight of its nine minutes
 
 Report `39e982bd` — *"BUILD PRIMECLASH ESPORTS — COMPLETE ANDROID APPLICATION"*, a 228-feature request
@@ -88846,6 +88959,58 @@ written down in plain words.
 second push creates a second run that somebody then has to cancel or wait out. Nothing is wrong with
 GitHub, nothing needs looking at in Actions settings, and the admin can ignore that request entirely.
 
+## 2026-10-04 — Q-514 and Q-517 from autopsy 39e982bd: the door the user sees, and a warning that became false
+
+Two of the five items that autopsy left OPEN, taken in order of user harm.
+
+### Q-514 — no app on earth labels a button "auth"
+
+`JOURNEY_NOT_RUN` → **RELEASE_GATE YELLOW**, *"whether it keeps what a user enters is untested"*. The
+one journey derived was the sign-in form in `src/screens/AuthScreen.tsx`, and the control the runner
+went looking for was named **`auth`** — the word the FILE carries. **Every app with a login screen is
+in that shape**, so a correct app is told its saving is untested.
+
+🔑 **THE GENERAL HALF IS NOT A SYNONYM TABLE, and it matters more than the table.** A file's word is
+CONCATENATED (`login`, `checkout`, `signup`) and a control's label is SPACED (`Log in`, `Check out`),
+and `pressReach` matched with `includes` — so **`"log in".includes("login")` is `false`**. No list of
+synonyms could ever have bridged that. The matcher now compares the LETTERS alone, which fixes
+`login`/`Log in` for every screen and needs no list.
+
+🔒 **The table is the remainder: one entry.** `auth` / `authentication` → `sign in`, `log in`, `login`
+— and deliberately only the NON-CREATING doors. "Sign up", "Register" and "Create account" are in
+`WRITE_VERBS`, so `pressReach` refuses them anyway (pressing one could create an account), and listing
+them would be noise that can never fire. A screen whose only door is "Sign up" stays unreachable,
+correctly, and a test asserts that every alias is a word `pressReach` will actually press.
+
+The failure note now names the words it looked for, so the next occurrence says which vocabulary missed.
+
+⚠️ **Said plainly: this may not have produced a journey for THAT build.** With Firebase unconfigured the
+app rendered its five tabs, and whether the sign-in form was reachable from them at all is not in the
+report. The fix is for the class — which is every login app — not for that one run.
+
+### Q-517 — "No tests at all" was false 17 seconds later
+
+The readiness gate records that warning before the E2E scaffold pass runs, so one report carried
+*"No tests at all"* at 19:30:09 and `E2E_SCAFFOLDED` writing a Playwright suite at 19:30:26, with
+`TEST_SUITE_UNVERIFIED` stating the honest end state in the same report. Two codes, one build,
+contradicting.
+
+The scaffold pass now clears that warning — **by its own sentence, never by its code.**
+`resolveOnRecheck` gained `messageIncludes`, because `READINESS_WARNING` carries many unrelated facts
+("Requested feature not found: search", …) and clearing the whole code would silence a real one in the
+same build. A precision test locks exactly that, and the existing whole-code callers (`EXPLORE_FAILED`,
+the heal table) are untouched.
+
+**Proof:** `tests/noAppLabelsAButtonAuth.test.ts` (14 cases), reversion-proven five ways — dropping the
+aliases fails 3, restoring the raw-substring match fails 1, dropping `reachAlso` from the generated
+module fails 2, dropping the message filter fails 1, dropping the call at the scaffold fails 1. The
+generated journey module is parsed with the real `node --check`, because that script has shipped broken
+twice before (a backtick inside a comment; a `\b` that reached the page as a backspace).
+
+**Still OPEN from that autopsy: Q-515, Q-516, Q-518** — the snapper-vs-scorer 21-value disagreement,
+`APP_SCOPE`'s false *"clone of Free Fire"* with the ecommerce domain, and the explorer passing
+*"View Details — nothing visibly changed"*. Each needs a cheap diagnosis or a precision corpus; none is
+guessed at.
 
 ### Correction (merging session, 2026-10-04 20:55 UTC) — half of Q-500's cancellations were the 30-minute cap
 
@@ -88855,3 +89020,25 @@ cancels of #3515 (19:57), #3518 (20:44) and #3523 (20:45) read "The job has exce
 of 30m0s" — `ci.yml`'s own `timeout-minutes: 30`, hit because eight or nine PR runs in flight slowed every run to
 21–30 min. The cap is now 45 (#3524 staging). Lesson, the fourth rule's first step: read the run's own last
 words before naming a cause — a cancelled run names its canceller.
+### 2026-10-04 — Admin decisions on the 68f0a486 / c70bcbb4 / 241215d1 open rows
+
+- **Q-541 and Q-527 (items argued not defects): agreed by the admin ("han, band kar do").** Resolved as
+  not-a-defect; the evidence for each is in the row text recorded in #3524 and in the ledgers above.
+- **Q-275 (a request that ended mid-sentence): closed by the admin as not ours.** Measured: 2,429 characters
+  ending at a line break; nothing on our side cuts there (server limit 20,000, no composer `maxLength`, no
+  long-paste conversion, the report stores the prompt in full).
+- **Q-540: the admin chose option (b)** — "navbharatai jo bhi app banaye, uske andar jo bhi function banaye jaye,
+  woh real hone chahiye, production grade". The explorer may sign up a throwaway account only in apps whose
+  sign-in lives in the browser alone. Being built in the follow-up PR.
+
+### 2026-10-04 — Follow-up to 68f0a486: Q-540 built (option b) and Q-542 (uploads in localStorage)
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-540 screens behind a sign-in page with no demo account never checked | the explorer could only use accounts the app ships | a check with no way past a door the app itself opens to anyone | `authLivesInTheBrowser(files)` — no backend, no hosted auth/database SDK, no `NavData`, no network sign-in, no API base URL, and a password handled beside browser storage — lets the sign-in check sign up ONE throwaway account through the app's own form (in its own discarded browser profile) and sign in with it. Every other app keeps "no account is ever created" | `tests/theSchoolAppBehindItsSignInPage.test.ts` (real browser, both sign-up shapes; reverted → 4 fail) |
+| Q-542 uploads as data URLs in localStorage, summary "uploads work" | nothing said where a file goes without a database; our social starter modelled `readAsDataURL` into `useCollection`, whose quota error was swallowed | file bytes in a small key-value store (localStorage, sessionStorage, NavData) | `browserFileStore.ts` IndexedDB store shipped as `src/lib/files.ts` in every pro starter; social starter uses it; failed saves shown on every screen; prompt rule; once-per-build write-time note; claim audit `uploads-in-small-store` | `tests/anUploadIsKeptWhereFilesBelong.test.ts` (real browser 6 MB proof; census over every starter, per file; each layer reverted → fails) |
+
+Siblings hunted: `readAsDataURL` across the whole repo — the only generated-app site was the social starter
+(the rest is NavBharatAI's own client sending images to APIs, not storing them). The `catch {}` that hid a
+failed save lived only in `proShell.ts`'s `useCollection`.
+

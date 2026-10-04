@@ -95,7 +95,7 @@ describe('Admin routes — announcement endpoint', () => {
     const routes = captureRoutes(register, fakeLimiter);
     const handler = routes.get('POST /api/admin/announcement');
 
-    const req = mockReq({ body: { message: 'Maintenance tonight 10pm', target: 'all' } });
+    const req = mockReq({ body: { message: 'Maintenance tonight 10pm', target: 'all', confirmScope: 'ALL_USERS' } });
     const res = mockRes();
     await handler!(req, res);
     expect(res.statusCode).toBe(200);
@@ -175,6 +175,44 @@ describe('Admin routes — metrics endpoint', () => {
   });
 });
 
+describe('Admin routes — high-impact actions are refused without their confirmation (admin panel audit PR 1)', () => {
+  it('a message to ALL users without the confirmed scope is refused and nothing is stored', async () => {
+    const register = await importAdminRoutes();
+    const routes = captureRoutes(register, fakeLimiter);
+    const before = (await (async () => {
+      const r = mockRes(); await routes.get('GET /api/admin/announcements')!(mockReq({}), r); return r.body;
+    })()) as unknown[];
+    const res = mockRes();
+    await routes.get('POST /api/admin/announcement')!(mockReq({ body: { message: 'oops', target: 'all' } }), res);
+    expect(res.statusCode).toBe(400);
+    const after = mockRes();
+    await routes.get('GET /api/admin/announcements')!(mockReq({}), after);
+    expect((after.body as unknown[]).length).toBe(before.length);
+  });
+
+  it('a ban without a real reason is refused', async () => {
+    const register = await importAdminRoutes();
+    const routes = captureRoutes(register, fakeLimiter);
+    const handler = routes.get('POST /api/admin/users/:userId/ban')!;
+    for (const reason of [undefined, '', '   ', 'Admin action']) {
+      const res = mockRes();
+      await handler(mockReq({ params: { userId: 'u1' }, body: { banned: true, reason } }), res);
+      expect(res.statusCode, String(reason)).toBe(400);
+    }
+  });
+
+  it('a token adjustment without a real reason is refused', async () => {
+    const register = await importAdminRoutes();
+    const routes = captureRoutes(register, fakeLimiter);
+    const handler = routes.get('POST /api/admin/users/:userId/tokens')!;
+    for (const reason of [undefined, '', 'Admin adjustment']) {
+      const res = mockRes();
+      await handler(mockReq({ params: { userId: 'u1' }, body: { delta: 500, reason } }), res);
+      expect(res.statusCode, String(reason)).toBe(400);
+    }
+  });
+});
+
 describe('Admin routes — announcements list', () => {
   it('GET /api/admin/announcements returns an array', async () => {
     const register = await importAdminRoutes();
@@ -196,7 +234,7 @@ describe('Admin routes — announcements list', () => {
     const getHandler = routes.get('GET /api/admin/announcements');
 
     // Post an announcement
-    const postReq = mockReq({ body: { message: 'Test notice for list', target: 'all' } });
+    const postReq = mockReq({ body: { message: 'Test notice for list', target: 'all', confirmScope: 'ALL_USERS' } });
     const postRes = mockRes();
     await postHandler!(postReq, postRes);
     expect(postRes.statusCode).toBe(200);

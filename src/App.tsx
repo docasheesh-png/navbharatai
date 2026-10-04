@@ -135,7 +135,6 @@ const DeploySuccessPanel = _lz(() => import('./components/panels/DeploySuccessPa
 
 const HistoryView      = _lz(() => import('./components/HistoryView'),          'HistoryView');
 const ProfessionalHistoryView = _lz(() => import('./components/professionals/ProfessionalHistoryView'), 'ProfessionalHistoryView');
-import axios from 'axios';
 
 import { useBuild } from './components/ide/BuildContext';
 import { useDevLogs } from './hooks/useDevLogs';
@@ -1019,25 +1018,13 @@ export default function App() {
 
 
 
-  // Platform SRE & Cost Analytics State (Admin Console)
-  const [adminAnalytics, setAdminAnalytics] = useState<any>(null);
-  const [loadingAdminAnalytics, setLoadingAdminAnalytics] = useState(false);
+  // The admin console's analytics are fetched by AdminDashboard itself, WITH the admin token. A second
+  // fetch lived here — tokenless, so it always got a 401, and its result was read by nothing. Removed in
+  // the admin panel audit (PR 1, 2026-10-04).
   // G2 — live metrics snapshot for the admin metrics dashboard panel.
   const [adminLiveMetrics, setAdminLiveMetrics] = useState<any>(null);
   const [loadingAdminMetrics, setLoadingAdminMetrics] = useState(false);
 
-
-  const fetchAdminAnalytics = async () => {
-    setLoadingAdminAnalytics(true);
-    try {
-      const res = await axios.get('/api/admin/analytics');
-      setAdminAnalytics(res.data);
-    } catch (err: any) {
-      console.error('Failed to fetch admin dashboard stats:', err);
-    } finally {
-      setLoadingAdminAnalytics(false);
-    }
-  };
 
   useEffect(() => {
     if (user) {
@@ -1048,12 +1035,6 @@ export default function App() {
       setBillingTransactions([]);
     }
   }, [user]);
-
-  useEffect(() => {
-    if (activeView === 'admin' && isAdmin) {
-      fetchAdminAnalytics();
-    }
-  }, [activeView, isAdmin]);
 
   const [githubRepoContext, setGithubRepoContext] = useState<any>(() => safeLocalJson<any>('navbharat_gh_context', null));
 

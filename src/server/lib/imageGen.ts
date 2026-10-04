@@ -211,6 +211,15 @@ export function pollinationsApiKey(env: NodeJS.ProcessEnv = process.env): string
 }
 
 /**
+ * 🔴 THE SAFETY FILTERS THE CURRENT API ACTUALLY ENABLES (2026-10-04, from the provider's own API docs).
+ * On `gen.pollinations.ai`, `safe` is a LIST: "true enables privacy,secrets; nsfw enables sexual,violence".
+ * So `safe=true` — what this code sent, believing it switched the nudity filter on — turns on only the
+ * privacy and secrets filters there. The filters are named explicitly so no alias can change their meaning
+ * again. The legacy anonymous link keeps `safe=true`, which on that door meant the NSFW filter.
+ */
+export const POLLINATIONS_SAFE_FILTERS = 'privacy,secrets,sexual,violence';
+
+/**
  * The keyed endpoint on the provider's current API. Same word guard, same size and seed rules as the
  * anonymous link — ONE prompt path, two doors. PURE.
  */
@@ -225,7 +234,7 @@ export function pollinationsKeyedUrl(
   const px = imagePixelsFor(size, custom?.width, custom?.height);
   const model = (env.IMAGE_GEN_POLLINATIONS_MODEL || '').trim() || 'flux';
   const base = (env.POLLINATIONS_BASE_URL || '').trim().replace(/\/+$/, '') || 'https://gen.pollinations.ai';
-  return `${base}/image/${encodeURIComponent(finalPrompt)}?width=${px.w}&height=${px.h}&seed=${pollinationsSeed(env)}&model=${encodeURIComponent(model)}&safe=true&nologo=true&private=true`;
+  return `${base}/image/${encodeURIComponent(finalPrompt)}?width=${px.w}&height=${px.h}&seed=${pollinationsSeed(env)}&model=${encodeURIComponent(model)}&safe=${POLLINATIONS_SAFE_FILTERS}&nologo=true&private=true`;
 }
 
 /**

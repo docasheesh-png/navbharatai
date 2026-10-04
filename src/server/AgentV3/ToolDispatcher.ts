@@ -98,7 +98,7 @@ import { orphansToHandBack } from './orphanHandBack';
 import { batchSizeNote } from './batchSize';
 import { pageDesignWriteNote, isPageFile, analyzeDesignCoverage, type DesignDefect } from './DesignCoverage';
 import { currentPass, runInPass, isGreenLatched, assertWriteAllowed } from './greenFreeze';
-import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets } from './shellWriteTargets';
+import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets, shellRemovedOperands, removedRecordedPaths } from './shellWriteTargets';
 import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames } from './tscErrorCause';
@@ -881,6 +881,29 @@ export class ToolDispatcher {
 
   setFileDeletionSink(sink: (paths: string[]) => void): void {
     if (typeof sink === 'function') this.fileDeletionSink = sink;
+  }
+
+  /**
+   * Every path the build has recorded for the saved project (queue Q-246). A shell command that removes
+   * one of them — any file kind, a folder, a glob, the source of a `mv` — is checked against the sandbox
+   * and forgotten, so the final save cannot put it back. Unset ⇒ only the delete guard's single source
+   * files are reconciled, as before.
+   */
+  private recordedPaths?: () => Iterable<string>;
+
+  setRecordedPaths(getter: () => Iterable<string>): void {
+    if (typeof getter === 'function') this.recordedPaths = getter;
+  }
+
+  /** The parent's deletion wiring, for a sub-agent's dispatcher (queue Q-246). */
+  deletionWiring(): { sink?: (paths: string[]) => void; recorded?: () => Iterable<string> } {
+    return { sink: this.fileDeletionSink, recorded: this.recordedPaths };
+  }
+
+  /** Called once at spawn: a sub-agent's shell deletions reach the parent's saved project too. */
+  shareDeletionWiring(w: { sink?: (paths: string[]) => void; recorded?: () => Iterable<string> } | undefined): void {
+    if (w?.sink) this.setFileDeletionSink(w.sink);
+    if (w?.recorded) this.setRecordedPaths(w.recorded);
   }
 
   /** Told when a delete of the user's own file is refused, so the build report says so. */
@@ -4873,8 +4896,16 @@ export class ToolDispatcher {
         // line already knew which source files the command would remove; nothing had ever acted on it
         // once the command succeeded, so a build that tidied up its own debris was then failed over the
         // debris. `fileDeletion.ts` carries the evidence and the three conditions.
-        if (deleteTargets.length > 0) {
-          try { await this.reconcileDeletions(deletionCandidates(deleteTargets, exitCode)); }
+        // …AND EVERYTHING ELSE A SHELL TOOK OUT (queue Q-246): a stylesheet, a folder, a glob, the source
+        // of a `mv`. Only recorded paths are named, and each is confirmed gone in the sandbox first.
+        let removedRecorded: string[] = [];
+        if (exitCode === 0 && this.recordedPaths) {
+          try { removedRecorded = removedRecordedPaths(shellRemovedOperands(command), this.recordedPaths()); }
+          catch { removedRecorded = []; }
+        }
+        if (deleteTargets.length > 0 || removedRecorded.length > 0) {
+          const candidates = [...new Set([...deletionCandidates(deleteTargets, exitCode), ...removedRecorded])];
+          try { await this.reconcileDeletions(candidates); }
           catch { /* reconciliation is best-effort — a failure simply keeps today's stale entry */ }
         }
         /**
@@ -10687,6 +10718,9 @@ export class ToolDispatcher {
             .catch(() => ({ exitCode: -1, stdout: '', stderr: '' }));
           removed = rm.exitCode === 0;
           if (removed) this.state?.recordFileChange({ path: from, kind: 'delete' }, agent);
+          // The old path must leave the build's own maps too, or the final save puts it back (Q-246's
+          // sibling: every other delete already reconciles; this rm did not).
+          if (removed) await this.reconcileDeletions([from]);
         }
         this.scheduleCheckpoint(`codemod move ${from} → ${to}`);
         return result.summary + (removed ? '' : `\nNOTE: could not delete the old file ${from} — remove it manually (its importers already point to ${to}).`);

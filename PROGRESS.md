@@ -89073,3 +89073,11 @@ A read-only audit of 21 migrated rows against today's code. Changes made from it
 - Still OPEN after the audit, unchanged: Q-111, Q-113, Q-115, Q-116, Q-126, Q-127, Q-133, Q-134, Q-135, Q-136,
   Q-143, Q-144, Q-146, Q-148, Q-163, Q-164; Q-162 needs a fresh repo-wide count before it can be judged.
 
+### 2026-10-04 — Q-113: the wallet load stops fetching usage logs no screen shows
+
+`usePaymentEngine.fetchWallet` fired four calls in parallel on every wallet load; the usage-logs call filled
+`billingLogs`, which App passed to `BillingPanel`, which destructured it and never read it. Removed end to end
+(fetch, state, prop). Lock: `tests/theWalletLoadFetchesOnlyWhatIsShown.test.ts` — no logs fetch, no `billingLogs`
+anywhere in the client, and every remaining call has a reader. Client typecheck, unused-import scan and the 200
+billing/payment tests green.
+

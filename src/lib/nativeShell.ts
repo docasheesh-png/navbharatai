@@ -233,6 +233,7 @@ export async function installNativeShellPolish(ctx: NativeShellContext, onBack: 
   if (typeof document !== 'undefined') {
     installKeyboardBehaviour(ctx, (name, value) => document.documentElement.style.setProperty(name, value));
     installTapHaptics(ctx, document);
+    installExternalLinkHandler(ctx, document);
   }
 
   return true;
@@ -396,4 +397,44 @@ export function installTapHaptics(
   };
   root.addEventListener('pointerdown', onDown, { passive: true });
   return () => root.removeEventListener('pointerdown', onDown, { passive: true } as unknown);
+}
+
+/**
+ * EVERY `target="_blank"` LINK OPENS IN THE REAL BROWSER ON THE PHONE (queue Q-112).
+ *
+ * Inside the Capacitor WebView a bare `<a target="_blank">` does not open Chrome or Safari: it
+ * navigates the app in place, or opens a chromeless view with no address bar and no way back. Two
+ * surfaces were fixed one at a time (the Publish list, the AI reply links via `openInRealBrowser`) and
+ * ~28 links stayed bare. Per-link fixes cannot finish this class, because the next link written is
+ * bare again. So, like the tap feedback above, this is ONE delegated listener: any unmodified primary
+ * click on an `a[target="_blank"]` whose resolved href is http(s) on ANOTHER origin is handed to the
+ * system browser.
+ *
+ * 🔒 What it leaves alone: a click a component already handled (`defaultPrevented` — `openInRealBrowser`
+ * runs first), a modified click, a `download` link, a non-http(s) scheme, and a link to our OWN origin
+ * (in the bundled app that origin is the app itself; handing `https://localhost/x` to Chrome opens
+ * nothing). Web: never installed.
+ */
+export function installExternalLinkHandler(
+  ctx: NativeShellContext,
+  root: { addEventListener: (t: string, cb: (e: Event) => void, o?: unknown) => void; removeEventListener: (t: string, cb: (e: Event) => void, o?: unknown) => void },
+  ownOrigin: () => string = () => (typeof location !== 'undefined' ? location.origin : ''),
+  open: (href: string) => void = (href) => { void import('./mobileNative').then((m) => m.openExternalUrl(href)).catch(() => {}); },
+): () => void {
+  if (!isNativeShell(ctx)) return () => {};
+  const onClick = (e: Event): void => {
+    const m = e as MouseEvent;
+    if (m.defaultPrevented || (m.button ?? 0) !== 0 || m.metaKey || m.ctrlKey || m.shiftKey || m.altKey) return;
+    const target = e.target as { closest?: (s: string) => unknown } | null;
+    const a = target?.closest?.('a[target="_blank"]') as { href?: string; hasAttribute?: (n: string) => boolean } | null | undefined;
+    if (!a || !a.href || a.hasAttribute?.('download')) return;
+    let url: URL;
+    try { url = new URL(a.href); } catch { return; }
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return;
+    if (url.origin === ownOrigin()) return;
+    m.preventDefault();
+    try { open(url.href); } catch { /* a link must never take the page down */ }
+  };
+  root.addEventListener('click', onClick);
+  return () => root.removeEventListener('click', onClick);
 }

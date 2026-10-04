@@ -166,7 +166,7 @@ describe('§4 a config file the starter already has is edited, never rewritten b
       scaffoldPaths: ['package.json', 'tsconfig.json', 'vite.config.ts', 'src/App.tsx', 'src/main.tsx'],
       readExisting: async (p) => { read.push(p); return `CURRENT-${p}`; },
       generate: async (_system, user) => {
-        if (user.includes('Plan the file list')) return 'src/App.tsx :: root\nsrc/Notes.tsx :: notes list\nvite.config.ts :: vite config\ntsconfig.json :: ts config';
+        if (user.includes('Plan the file list')) return 'src/App.tsx :: root\nsrc/Notes.tsx :: notes list\nvite.config.ts :: vite config\npackage.json :: manifest\ntsconfig.json :: ts config';
         const p = /Now write THIS file in full:\n {2}(\S+)/.exec(user)?.[1] ?? '';
         if (p) seen[p] = user;
         return `<<<FILE ${p}>>>\nexport default function X(){return null}\n<<<ENDFILE>>>`;
@@ -174,7 +174,9 @@ describe('§4 a config file the starter already has is edited, never rewritten b
       writeFiles: async () => {},
     });
     expect(seen['vite.config.ts']).toContain('CURRENT-vite.config.ts');
-    expect(seen['tsconfig.json']).toContain('CURRENT-tsconfig.json');
+    expect(seen['package.json']).toContain('CURRENT-package.json');
+    // Since autopsy 70e030bb the starter's compiler files are not planned at all (scaffoldBoilerplate.ts).
+    expect(seen['tsconfig.json']).toBeUndefined();
     expect(seen['src/App.tsx']).not.toContain('ALREADY EXISTS');
     expect(read).not.toContain('src/App.tsx');
   });
@@ -189,7 +191,8 @@ describe('§4 a config file the starter already has is edited, never rewritten b
   it('REVERSION GUARD: both lanes are wired to read the project file', () => {
     const src = readFileSync(join(process.cwd(), 'src/server/routes/agentv3.ts'), 'utf8');
     expect(src).toContain('readExisting: readExistingProjectFile,');
-    expect(src).toContain('runOneShot({ prompt, framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile,');
+    expect(src).toContain('framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile,');
+    expect(src).toContain('runOneShot({ prompt: prompt + unknownNameSuffix + requestScopeSuffix,');
     expect(src).toMatch(/withoutPreviewBridge\(p, raw\)/);
   });
 });

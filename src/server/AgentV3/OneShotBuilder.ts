@@ -23,6 +23,7 @@ import type { StartTier } from './RequestAnalyser';
 // so a future reader finds every lane that races a deadline in one search.
 import { withTimeout } from './asyncUtils';
 import { isProjectConfigPath, existingConfigsBlock } from './existingConfig';
+import { planProvidedFiles } from './scaffoldBoilerplate';
 
 /** Whether this build should TRY the OneShot lane. Simple/medium tiers (gemini/haiku) → yes;
  *  complex tiers (sonnet/opus) keep the full agentic loop. Pure + exported for testing. */
@@ -305,7 +306,8 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
     files = await withTimeout((async () => {
       const existingConfigs: Record<string, string | null> = {};
       if (deps.readExisting) {
-        for (const p of deps.scaffoldPaths.filter(isProjectConfigPath)) existingConfigs[p] = await deps.readExisting(p).catch(() => null);
+        const skip = new Set(planProvidedFiles(deps.scaffoldPaths));
+        for (const p of deps.scaffoldPaths.filter((x) => isProjectConfigPath(x) && !skip.has(x))) existingConfigs[p] = await deps.readExisting(p).catch(() => null);
       }
       if (lapsed) throw new Error('one-shot-cancelled');
       const text = await deps.generate(oneShotSystemPrompt(deps.framework), oneShotUserPrompt(deps.prompt, deps.scaffoldPaths, existingConfigs));
@@ -314,7 +316,12 @@ export async function runOneShot(deps: OneShotDeps): Promise<OneShotResult> {
       if (lapsed) throw new Error('one-shot-cancelled');
       // Same lane shape as the fast lane's per-file calls: no tool loop to read a write-time note, so a
       // missing React import is added here (autopsy d382b398, see ensureReactValueImport).
-      const parsed = parseFileBlocks(text).map((f) => ({ ...f, content: ensureReactValueImport(f.path, f.content) }));
+      // The starter's compiler files and the error boundary are correct as shipped; a one-shot answer that
+      // rewrites them is dropped, as the fast lane's plan drops them (scaffoldBoilerplate.ts, autopsy 70e030bb).
+      const provided = new Set(deps.scaffoldPaths.length ? planProvidedFiles(deps.scaffoldPaths) : []);
+      const parsed = parseFileBlocks(text)
+        .filter((f) => !provided.has(f.path))
+        .map((f) => ({ ...f, content: ensureReactValueImport(f.path, f.content) }));
       if (parsed.length < minFiles) throw new Error('no_files_parsed');
       if (lapsed) throw new Error('one-shot-cancelled');
       await deps.writeFiles(parsed);

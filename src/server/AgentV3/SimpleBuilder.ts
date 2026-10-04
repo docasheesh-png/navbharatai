@@ -19,7 +19,7 @@ import { posix } from 'node:path';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { deadlineFromBudget, isReasoningRungHandoff } from './turnDeadline';
 import { judgeRepair } from './repairAcceptance';
-import { scaffoldRestores, protectBoilerplateInRepair, SCAFFOLD_BOILERPLATE } from './scaffoldBoilerplate';
+import { scaffoldRestores, protectBoilerplateInRepair, planProvidedFiles } from './scaffoldBoilerplate';
 import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
 import { isProjectConfigPath, existingFileBlock } from './existingConfig';
 import { contractDriftReport } from './ContractMap';
@@ -323,8 +323,8 @@ export function dependencyContext(producers: OneShotFile[], perFileCap = 4000): 
  * (we could not look) keeps the old behaviour.
  */
 export function providedBoilerplate(scaffoldPaths: readonly string[] = []): string[] {
-  const all = Object.keys(SCAFFOLD_BOILERPLATE);
-  return scaffoldPaths.length ? all.filter((p) => scaffoldPaths.includes(p)) : all;
+  // The error boundary plus the starter's compiler files (autopsy 70e030bb) — one list, scaffoldBoilerplate.ts.
+  return planProvidedFiles(scaffoldPaths);
 }
 
 /** Where the app's entry lives, in words the planner can act on. */

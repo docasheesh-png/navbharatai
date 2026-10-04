@@ -71,6 +71,12 @@ export interface Journey {
    * it again after a reload. Absent ⇒ the form is reached by its route, as before. (Autopsy 2b1f845e.)
    */
   reach?: string;
+  /**
+   * The form asks for a password: a sign-in or sign-up form. It is driven signed OUT (a session would
+   * only redirect away from it), and it never becomes a create-persists journey — what is typed into it
+   * is a login, not an item that should appear in a list (autopsy 70e030bb).
+   */
+  signIn?: boolean;
 }
 
 /** How many journeys to derive. A journey is a browser session; twenty of them is a build delay. */
@@ -151,6 +157,18 @@ function formFields(source: string): Array<{ tag: string; labelText: string | nu
     const unique = text !== null && texts.filter((x) => x !== null && x.toLowerCase().includes(text.toLowerCase())).length === 1;
     return { tag: t.tag, labelText: unique ? text : null };
   });
+}
+
+/**
+ * 🔴 A FORM THAT ASKS FOR A PASSWORD IS A SIGN-IN, NOT A WAY TO ADD AN ITEM (autopsy 70e030bb, 2026-10-04).
+ * A notes app kept its login form and its notes list in one `App.tsx`; the journey typed a marker into
+ * the username box, pressed Login, and looked for it among the notes — "the item was submitted but
+ * never appeared on the page", RELEASE_GATE RED, on an app that worked. A password field is the one
+ * fact that settles it. PURE.
+ */
+export function isCredentialForm(tags: ReadonlyArray<{ tag: string }>): boolean {
+  return tags.some(({ tag }) => /\btype\s*=\s*\{?\s*["'\x60]password["'\x60]/i.test(tag)
+    || /\b(?:name|id|autoComplete)\s*=\s*\{?\s*["'\x60](?:current-|new-)?password["'\x60]/i.test(tag));
 }
 
 /** Every `<button>` in a file with its inner text, read with the shared JSX reader (see `inputScans`). */
@@ -1076,6 +1094,7 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
     let fields: JourneyField[] = [];
     let submit: Target | null = null;
     let formPath = '';
+    let credential = false;
     for (const candidate of formSourcesFor(path, files)) {
       if (usedForms.has(candidate.path)) continue;
       const tags = formFields(candidate.source);
@@ -1098,6 +1117,7 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
       formPath = candidate.path;
       fields = got;
       submit = btn;
+      credential = isCredentialForm(tags);
       break;
     }
     if (!submit || fields.length === 0) continue;
@@ -1119,7 +1139,7 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
     const feeds = formFeedsList(source, submit) !== 'no';
     const asksAi = formAsksAi(formPath, files);
 
-    if (listed && markerTyped && feeds && !noWrites && !asksAi) {
+    if (listed && markerTyped && feeds && !noWrites && !asksAi && !credential) {
       out.push({
         id: `create-persists:${path}`,
         kind: 'create-persists',
@@ -1135,7 +1155,9 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
         id: `form-submit:${path}`,
         kind: 'form-submit',
         route,
-        title: asksAi
+        title: credential
+          ? `Fill and submit the sign-in form on ${route} without the app breaking`
+          : asksAi
           ? (reach
             ? `Open the "${reach}" screen, ask the app's AI and check the app does not break`
             : `Ask the app's AI on ${route} and check the app does not break`)
@@ -1146,6 +1168,7 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
         // A submit still POSTs. Treated as a write unless it is plainly a search/filter form.
         writes: !/search|filter|query/i.test(path),
         ...(reach ? { reach } : {}),
+        ...(credential ? { signIn: true } : {}),
       });
     }
   }
@@ -1183,7 +1206,8 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
     const markerTyped = fields.some((f) => f.value.includes(marker));
     const feeds = formFeedsList(src, submit) !== 'no';
     const asksAi = formAsksAi(path, files);
-    const create = listed && markerTyped && feeds && !noWrites && !asksAi;
+    const credential = isCredentialForm(tags);
+    const create = listed && markerTyped && feeds && !noWrites && !asksAi && !credential;
     out.push({
       id: `${create ? 'create-persists' : 'form-submit'}:${path}`,
       kind: create ? 'create-persists' : 'form-submit',
@@ -1196,6 +1220,7 @@ export function deriveJourneys(input: DeriveJourneysInput): Journey[] {
       fields, submit,
       writes: create || !/search|filter|query/i.test(path),
       reach,
+      ...(credential ? { signIn: true } : {}),
     });
   }
   return out.slice(0, MAX_JOURNEYS);
@@ -1394,7 +1419,7 @@ export function journeyScript(previewUrl: string, journeys: readonly Journey[], 
     reach: ${JSON.stringify(j.reach ?? null)},
     // A sign-in form is driven signed OUT (a session would only redirect away from it); every other
     // journey runs behind the door when the app has one (signInExplore.ts).
-    pageOpts: ${newPageOptionsExpr(isSignInRoute(j.route) ? null : opts.storageState)},
+    pageOpts: ${newPageOptionsExpr(isSignInRoute(j.route) || j.signIn ? null : opts.storageState)},
     fields: (page) => [
 ${fills}
     ],

@@ -23,7 +23,12 @@
 //
 // PURE. Every function takes a ledger and returns a new one; nothing here touches I/O.
 
-export type SpecStatus = 'requested' | 'verified' | 'regressed' | 'dropped';
+/**
+ * `built` (slice 3) is weaker than `verified` and is named so: a requirement the platform cannot probe in a
+ * browser (a coupon box, an order-history page) is `built` once the build that asked for it passed its
+ * release gate. It is never claimed as seen working, and it can never be called regressed.
+ */
+export type SpecStatus = 'requested' | 'built' | 'verified' | 'regressed' | 'dropped';
 
 export interface SpecItem {
   /** Stable id, never reused: REQ-001. */
@@ -39,6 +44,13 @@ export interface SpecItem {
   lastChange: string;
   /** ms epoch of the last time a real browser saw its control. */
   verifiedAt?: number;
+  /** False for a requirement no browser probe can judge (slice 3). Absent = probe-able. */
+  probeable?: false;
+}
+
+/** Ledger key for a requirement that is a platform feature-table LABEL rather than a probe id. */
+export function labelKey(label: string): string {
+  return `label:${String(label || '').replace(/\s+/g, ' ').trim().slice(0, 80).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60)}`;
 }
 
 export interface AppSpec {
@@ -61,7 +73,7 @@ export function parseAppSpec(raw: unknown): AppSpec {
   if (!raw || typeof raw !== 'object') return { items: [], nextReq: 1 };
   const r = raw as { items?: unknown; nextReq?: unknown };
   const items: SpecItem[] = [];
-  const statuses = new Set<SpecStatus>(['requested', 'verified', 'regressed', 'dropped']);
+  const statuses = new Set<SpecStatus>(['requested', 'built', 'verified', 'regressed', 'dropped']);
   for (const it of Array.isArray(r.items) ? r.items : []) {
     if (!it || typeof it !== 'object') continue;
     const i = it as Record<string, unknown>;
@@ -72,6 +84,7 @@ export function parseAppSpec(raw: unknown): AppSpec {
       firstChange: typeof i.firstChange === 'string' ? i.firstChange : '',
       lastChange: typeof i.lastChange === 'string' ? i.lastChange : '',
       ...(typeof i.verifiedAt === 'number' ? { verifiedAt: i.verifiedAt } : {}),
+      ...(i.probeable === false ? { probeable: false as const } : {}),
     });
   }
   const maxSeen = items.reduce((m, it) => Math.max(m, Number(it.id.replace(/^REQ-/, '')) || 0), 0);
@@ -143,7 +156,7 @@ export function foldProbeResults(
   const restored: SpecItem[] = [];
   for (const p of probes) {
     const it = items.find((i) => i.feature === p.feature);
-    if (!it || it.status === 'dropped') continue;
+    if (!it || it.status === 'dropped' || it.probeable === false) continue;
     if (p.present && p.via === 'control') {
       if (it.status === 'regressed') restored.push(it);
       else if (it.status === 'requested') verified.push(it);
@@ -160,12 +173,56 @@ export function foldProbeResults(
 }
 
 /**
+ * Fold the feature LABELS this request asked for (the contract the builder is handed — the user's named
+ * features and the suggestions they ticked) into the ledger as non-probe-able requirements. A label the
+ * probe table already covers is skipped, so one requirement is never recorded twice.
+ * `alreadyProbed(label)` returns true when the label maps to probe ids that are already items.
+ */
+export function foldRequestedLabels(
+  spec: AppSpec,
+  labels: ReadonlyArray<string>,
+  changeId: string,
+  alreadyProbed: (label: string) => boolean = () => false,
+): AppSpec {
+  const items = spec.items.map((i) => ({ ...i }));
+  let nextReq = spec.nextReq;
+  for (const raw of labels) {
+    const label = String(raw || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    if (!label || alreadyProbed(label)) continue;
+    const key = labelKey(label);
+    const existing = items.find((i) => i.feature === key);
+    if (existing) {
+      if (existing.status === 'dropped') { existing.status = 'requested'; existing.lastChange = changeId; }
+      continue;
+    }
+    if (items.length >= MAX_SPEC_ITEMS) break;
+    items.push({ id: reqId(nextReq++), feature: key, label, status: 'requested', firstChange: changeId, lastChange: changeId, probeable: false });
+  }
+  return { items, nextReq };
+}
+
+/** Mark the given non-probe-able requirements BUILT — only ever called for a build that passed its gate. */
+export function markLabelsBuilt(spec: AppSpec, keys: ReadonlyArray<string>, changeId: string): { spec: AppSpec; built: SpecItem[] } {
+  const want = new Set(keys);
+  const built: SpecItem[] = [];
+  const items = spec.items.map((i) => {
+    if (i.probeable === false && want.has(i.feature) && i.status === 'requested') {
+      const n = { ...i, status: 'built' as const, lastChange: changeId };
+      built.push(n);
+      return n;
+    }
+    return i;
+  });
+  return { spec: { items, nextReq: spec.nextReq }, built };
+}
+
+/**
  * The features to re-probe on THIS build even though this request did not name them: everything the
  * app was seen to do before. This is what makes an edit answerable for the whole app, not only for the
  * sentence that started it.
  */
 export function regressionProbeFeatures(spec: AppSpec): string[] {
-  return spec.items.filter((i) => i.status === 'verified' || i.status === 'regressed').map((i) => i.feature);
+  return spec.items.filter((i) => i.probeable !== false && (i.status === 'verified' || i.status === 'regressed')).map((i) => i.feature);
 }
 
 /**
@@ -178,12 +235,13 @@ export function renderSpecForBuilder(spec: AppSpec, depth: 'light' | 'standard' 
   const verified = live.filter((i) => i.status === 'verified');
   const regressed = live.filter((i) => i.status === 'regressed');
   const pending = live.filter((i) => i.status === 'requested');
+  const built = live.filter((i) => i.status === 'built');
   if (depth === 'light') {
     return `App requirements on record: ${live.length} (${verified.length} verified working). Keep every one of them working — this change must not remove any.`;
   }
-  const line = (i: SpecItem) => `  • ${i.id} ${i.label} — ${i.status === 'verified' ? 'verified working in the running app' : i.status === 'regressed' ? 'WAS working, missing on the last check — restore it' : 'requested, not yet seen working'}`;
+  const line = (i: SpecItem) => `  • ${i.id} ${i.label} — ${i.status === 'verified' ? 'verified working in the running app' : i.status === 'regressed' ? 'WAS working, missing on the last check — restore it' : i.status === 'built' ? 'built by an earlier change' : 'requested, not yet seen working'}`;
   const out: string[] = ['APP REQUIREMENTS ON RECORD (from this app\'s earlier requests and checks — keep every one working):'];
-  for (const i of [...regressed, ...verified, ...pending].slice(0, 25)) out.push(line(i));
+  for (const i of [...regressed, ...verified, ...built, ...pending].slice(0, 25)) out.push(line(i));
   if (depth === 'deep') {
     out.push('');
     out.push('This change reaches across the app. Before editing, name which of the requirements above it touches, and after editing make sure each of them still works. A requirement you remove by accident is a broken app, even if the new change works.');

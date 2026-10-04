@@ -115,6 +115,8 @@ import { WRITE_TYPECHECK_NOT_READY_MARKER,
   typeOnlyWriteHealEnabled, typeOnlyHealTargets, withoutHealedTypeOnly, healedTypeOnlyNames, typeOnlyHealNote,
 } from './writeTimeTypecheck';
 import { scanAuthenticity, authenticitySummary, fakeResultWriteNote } from './AuthenticityAnalysis';
+import { fakeFeatureWriteNote, noFakeFeaturesEnabled } from './fakeFeatureScan';
+import { uploadStorageWriteNote } from './browserFileStore';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
 import type { AccessibilityIssue } from './AccessibilityAnalysis';
@@ -881,6 +883,8 @@ export class ToolDispatcher {
   private coverageRequest: string | null = null;
   /** The keyboard-only-game note is said once per build (touchPlayableGame.ts). */
   private _touchGameNoted = false;
+  /** Once per build: an upload read into text, with nowhere proper to keep it (Q-542 — `browserFileStore.ts`). */
+  private _uploadStorageNoted = false;
   /** The entry-first hand-back is said once per build (earlyPreview.ts, autopsy 39e982bd). */
   private _entryFirstNoted = false;
   setCoverageRequest(text: string | null): void {
@@ -3634,6 +3638,17 @@ export class ToolDispatcher {
       try { security += securityWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
       // A made-up result or made-up people (autopsy 33812996) — the builder hears it with the file open.
       try { security += fakeResultWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
+      // A login / payment / OTP / email that only pretends (admin 2026-10-04, NO FAKE BUTTON) — said while
+      // the file is open, where the real provider is cheapest to wire. Kill switch AGENTV3_NO_FAKE_FEATURES=off.
+      try { if (noFakeFeaturesEnabled()) security += fakeFeatureWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
+      // An uploaded file read into text, headed for a store that holds 5 MB (autopsy 68f0a486, Q-542) — once per
+      // build, with the IndexedDB file store the right fix needs, while the file is still open.
+      if (!this._uploadStorageNoted) {
+        try {
+          const n = uploadStorageWriteNote(p, files[p]);
+          if (n) { security += n; this._uploadStorageNoted = true; }
+        } catch { /* a note is best-effort */ }
+      }
     }
     // A second index.html in public/ shadows a Vite app's real entry (autopsy 876afca9) — said while open.
     let shadow = '';
@@ -9883,9 +9898,9 @@ export class ToolDispatcher {
       }
 
       case 'generate_image_ai': {
-        // AI image generation inside the user's app (admin 2026-10-01): Pollinations AI by default (no key),
-        // or — with server: true — the app's own route, where the owner's IMAGE_PROVIDER + IMAGE_API_KEY
-        // pick the engine and the key never reaches the browser. Pure generator in ImageAiGenerator.ts.
+        // AI image generation inside the user's app (admin 2026-10-01; keyless default removed 2026-10-04):
+        // through NavBharatAI (window.NavAI.image) with the OWNER's saved image key, or — with server: true —
+        // the app's own route reading the same key. The key never reaches the browser. ImageAiGenerator.ts.
         const iaServer = input['server'] === true || input['server'] === 'true';
         let iaReact = false;
         try { iaReact = /"react"\s*:/.test(await this.actuator.readFile(this.workspaceId, 'package.json')); } catch { iaReact = false; }
@@ -9904,8 +9919,8 @@ export class ToolDispatcher {
         }
         this.scheduleCheckpoint('ai image generation');
         const iaHeadline = iaServer
-          ? 'Wired AI image generation through the app\'s server (Pollinations AI until the owner sets their own key)'
-          : 'Wired AI image generation with Pollinations AI (no key needed)';
+          ? 'Wired AI image generation through the app\'s server (it needs an image API key — see below)'
+          : 'Wired AI image generation through NavBharatAI (it needs an image API key — see below)';
         return `${iaHeadline}:\n${iaWritten.join('\n')}\n\n${iacfg.instructions}`;
       }
 

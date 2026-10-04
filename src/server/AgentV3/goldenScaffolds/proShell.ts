@@ -21,7 +21,10 @@
  * variables: no UI library to install, nothing to resolve, nothing that can fail `npm install` on the
  * first build — and it inherits light/dark from the platform base for free.
  */
-export const proUiTsx = `import { useState, type ReactNode, type CSSProperties } from 'react';
+export const proUiTsx = `import { useEffect, useState, type ReactNode, type CSSProperties } from 'react';
+
+/** Raised by ./store when a save fails, so EVERY screen says so — never a change that only looks saved. */
+export const SAVE_ERROR_EVENT = 'app:save-error';
 
 /** The app frame: a fixed sidebar of sections, a titled top bar, and the active screen. */
 export function Shell(props: {
@@ -33,6 +36,19 @@ export function Shell(props: {
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  // One message per list, so a list that saves again clears only its own failure.
+  const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
+  const saveError = Object.values(saveErrors).find((m) => m) || '';
+  useEffect(() => {
+    const onError = (e: Event) => {
+      const d = (e as CustomEvent<{ key: string; message: string }>).detail;
+      if (!d || typeof d.key !== 'string') return;
+      const message = String(d.message || '');
+      setSaveErrors((all) => ((all[d.key] || '') === message ? all : { ...all, [d.key]: message }));
+    };
+    window.addEventListener(SAVE_ERROR_EVENT, onError);
+    return () => window.removeEventListener(SAVE_ERROR_EVENT, onError);
+  }, []);
   const current = props.nav.find((n) => n.id === props.active);
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)', color: 'var(--fg)' }}>
@@ -78,6 +94,11 @@ export function Shell(props: {
           <h1 style={{ fontSize: 17, fontWeight: 700, margin: 0, flex: 1 }}>{current ? current.label : props.brand}</h1>
           {props.actions}
         </header>
+        {saveError && (
+          <div role="alert" style={{ margin: '12px 20px 0', padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card)', fontSize: 14 }}>
+            {saveError}
+          </div>
+        )}
         <main style={{ padding: 20, maxWidth: 1100 }}>{props.children}</main>
       </div>
 
@@ -251,12 +272,31 @@ function read<T>(key: string, seed: T[]): T[] {
   }
 }
 
-/** A persistent list with create / update / remove. The seed is used only on first run. */
+/**
+ * A persistent list with create / update / remove. The seed is used only on first run.
+ * Lists live in localStorage, which holds about 5 MB for the whole app: keep FILES in ./files, never here.
+ * A save that fails is reported in \`saveError\` (and the console) — the app keeps working in memory, but it
+ * must never look saved when it is not.
+ */
 export function useCollection<T extends Entity>(key: string, seed: T[]) {
   const [items, setItems] = useState<T[]>(() => read<T>(key, seed));
+  const [saveError, setSaveError] = useState('');
 
   useEffect(() => {
-    try { localStorage.setItem(key, JSON.stringify(items)); } catch { /* quota or private mode — keep working in memory */ }
+    const report = (message: string) => {
+      setSaveError(message);
+      // The same name as SAVE_ERROR_EVENT in ./ui — the Shell shows it on every screen.
+      try { window.dispatchEvent(new CustomEvent('app:save-error', { detail: { key, message } })); } catch { /* no window */ }
+    };
+    try {
+      localStorage.setItem(key, JSON.stringify(items));
+      report('');
+    } catch (e) {
+      const full = e instanceof DOMException && e.name === 'QuotaExceededError';
+      const message = full ? 'This device is out of room, so the latest changes were not saved.' : 'Changes could not be saved on this device.';
+      console.error(message, e);
+      report(message);
+    }
   }, [key, items]);
 
   const add = useCallback((item: Omit<T, 'id'>) => {
@@ -273,7 +313,7 @@ export function useCollection<T extends Entity>(key: string, seed: T[]) {
     setItems((list) => list.filter((it) => it.id !== id));
   }, []);
 
-  return { items, setItems, add, update, remove };
+  return { items, setItems, add, update, remove, saveError };
 }
 
 /** Indian-format currency, which is what these apps are actually used for. */

@@ -27,6 +27,8 @@
 //
 // PURE. No I/O, no clock, no model call. Never throws.
 
+import { uploadsClaim } from './browserFileStore';
+
 export interface MeasuredFacts {
   /** Did the console capture actually run and return? */
   consoleCaptured: boolean;
@@ -54,6 +56,13 @@ export interface MeasuredFacts {
    * `undefined` means the caller could not tell us, and silence is never an accusation.
    */
   typecheckRan?: boolean;
+  /**
+   * The fake features fakeFeatureScan.ts found in the delivered app (admin 2026-10-04, NO FAKE BUTTON):
+   * 'login' | 'oauth-button' | 'payment' | 'otp' | 'email' | 'sms' | 'upload'. A summary that sells one of
+   * them as working ("✅ Login with Google", "Payments are integrated") is contradicted by the app itself.
+   * Omitted ⇒ nothing was measured, and silence is never an accusation.
+   */
+  fakeFeatures?: readonly string[];
   /** Did a screenshot tool call complete during this build? */
   screenshotTaken: boolean;
   /** Did a real browser open the preview and see it render? */
@@ -116,12 +125,19 @@ export interface MeasuredFacts {
    * app asked for live `yfinance` prices, shipped a simulated feed, and was described as working end to end.
    */
   liveDataRequested?: boolean;
+  /**
+   * Does the app put uploaded files, as text, into a store that holds about 5 MB for the whole app
+   * (`browserFileStore.ts` → `appKeepsUploadsInSmallStore`)? Read only by the `uploads-in-small-store` check;
+   * omitted ⇒ that check never runs. 🔴 Autopsy 68f0a486 (Q-542): a school app kept videos and PDFs as data
+   * URLs in localStorage and was described as having "drag-and-drop uploads" that work.
+   */
+  uploadsInSmallStore?: boolean;
 }
 
 /** "Everything lives in one HTML file", "a single HTML file" — never "single-page app", which is true. */
 const ONE_FILE_CLAIMED = /\b(?:in|lives\s+in|is|as|inside)\s+(?:just\s+|only\s+)?(?:one|a\s+single|single)\s+(?:html\s+|index\.html\s+)?file\b|\bsingle[\s-](?:html\s+)?file\s+app\b/i;
 
-export type ClaimKind = 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed';
+export type ClaimKind = 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store';
 
 /**
  * "the exact versions you specified" — a PLATFORM requirement credited to the user (autopsy 33812996).
@@ -132,6 +148,21 @@ export type ClaimKind = 'live-data-claimed' | 'one-file' | 'console-clean' | 'co
 const VERSIONS_ATTRIBUTED_TO_USER = /\bversions?\s+(?:that\s+)?you\s+(?:specified|asked\s+for|requested|gave|mentioned|wanted|provided)\b|\byour\s+(?:specified|requested)\s+versions?\b/i;
 /** A version number the user could have written: 7.6.9, v5, 18.3.1, @7.5.0. */
 const A_VERSION_NUMBER = /(?:^|[\s@v^~=])\d+\.\d+(?:\.\d+)?\b|\bv\d+\b/i;
+
+/** The feature word a summary uses for each fake kind, and what the app really has. */
+const FAKE_FEATURE_CLAIMS: Record<string, { feature: RegExp; label: string; measured: string }> = {
+  login: { feature: /\b(?:log[\s-]?in|sign[\s-]?in|sign[\s-]?up|authentication|auth)\b/i, label: 'login / sign-in', measured: 'the login checks a password written into the app itself' },
+  'oauth-button': { feature: /\b(?:google|apple|facebook|github)\s+(?:log[\s-]?in|sign[\s-]?in|sign[\s-]?up)\b|\b(?:log[\s-]?in|sign[\s-]?in|sign[\s-]?up|continue)\s+with\s+(?:google|apple|facebook|github)\b|\bo-?auth\b|\bsocial\s+(?:log[\s-]?in|sign[\s-]?in)\b/i, label: 'Google / Apple sign-in', measured: 'the "Continue with Google / Apple" control has no sign-in provider behind it' },
+  payment: { feature: /\b(?:payments?|checkout|razorpay|cashfree|stripe|upi)\b/i, label: 'payment', measured: 'the payment marks itself paid without any gateway or UPI link in the app' },
+  otp: { feature: /\botp\b|\bone[\s-]time\s+(?:password|code)\b|\bphone\s+verification\b/i, label: 'OTP verification', measured: 'the OTP is generated or checked by the page itself, with nothing that sends one' },
+  email: { feature: /\be-?mails?\b|\bnewsletter\b|\bcontact\s+form\b/i, label: 'email sending', measured: 'the app says "email sent" but has no way to send one' },
+  sms: { feature: /\bsms\b|\btext\s+messages?\b/i, label: 'SMS sending', measured: 'the app says "SMS sent" but has no way to send one' },
+  upload: { feature: /\b(?:cloud\s+)?uploads?\b|\bcloud\s+(?:storage|sync|backup)\b/i, label: 'cloud upload', measured: 'the app says a file reached the cloud or server, but has no storage to send it to' },
+};
+/** A line that calls the feature done: "works", "implemented", "integrated", "✅ …", "ready", "complete". */
+const FEATURE_DONE = /✅|\b(?:works?|working|implemented|integrated|added|ready|complete[d]?|done|functional|enabled|live|secure|real)\b/i;
+/** The same line already says it is not real — no contradiction to correct. */
+const ADMITS_DEMO = /\b(?:demo|sample|mock|placeholder|simulated|not\s+real|not\s+yet|coming\s+soon|needs?\s+(?:a\s+)?key|add\s+(?:your|a)\s+key|until\s+you)\b/i;
 
 export interface ClaimContradiction {
   kind: ClaimKind;
@@ -367,6 +398,22 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
   if (!text.trim()) return [];
   const out: ClaimContradiction[] = [];
 
+  // A FEATURE SOLD AS WORKING THAT ONLY PRETENDS (admin 2026-10-04, NO FAKE BUTTON). The app's own code
+  // was read by shape: a login whose password is written into it, a "Continue with Google" with nothing
+  // behind it, a payment that marks itself paid… A sentence in the summary that calls that feature done,
+  // working or integrated — without itself saying demo / sample / not real — is contradicted by the app.
+  for (const fake of facts.fakeFeatures ?? []) {
+    const spec = FAKE_FEATURE_CLAIMS[fake];
+    if (!spec) continue;
+    const line = text.split(/\n+/).find((l) => spec.feature.test(l) && FEATURE_DONE.test(l) && !ADMITS_DEMO.test(l));
+    if (!line) continue;
+    out.push({
+      kind: 'feature-claimed-but-demo',
+      claimed: `that ${spec.label} works`,
+      measured: `${spec.measured} — it is a demo until the real provider's key is added (the red line on the app's screen says which)`,
+    });
+  }
+
   // "A beautiful, polished UI" about a page the browser painted with the UA stylesheet alone (admin
   // 2026-09-28, the unstyled "secret calculator" that was "verified ✓").
   if (facts.renderUnstyled === true && DESIGN_CLAIMED.test(text)) {
@@ -448,6 +495,16 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
         measured: 'its code generates simulated prices and connects to no live data source, so the numbers on screen are sample data',
       });
     }
+  }
+
+  // "Drag-and-drop uploads" from an app that keeps uploaded files as text in localStorage (Q-542, autopsy
+  // 68f0a486). A sentence that already says where the files stay ("on this device", "5 MB") is honest.
+  if (facts.uploadsInSmallStore === true && uploadsClaim(text)) {
+    out.push({
+      kind: 'uploads-in-small-store',
+      claimed: 'that file uploads work',
+      measured: 'the app keeps each uploaded file as text in the browser\'s local storage, which holds about 5 MB for the whole app — one video or a few PDFs fill it, after which nothing more is saved, and the files stay on this one device',
+    });
   }
 
   // "the exact versions you specified" when the user wrote no version at all (autopsy 33812996).

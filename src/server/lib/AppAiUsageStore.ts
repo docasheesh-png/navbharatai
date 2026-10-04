@@ -80,6 +80,31 @@ class AppAiUsageStore {
   }
 
   /**
+   * How many CALLS this app and this visitor made today — the unit an image counter is capped in (a
+   * picture made on the owner's own key costs our wallet nothing, so a ₹ cap could never bind it, while
+   * the owner's provider bill grows with every picture a stranger asks for).
+   */
+  async callsToday(appId: string, visitorHash: string, day: string): Promise<{ appCalls: number; visitorCalls: number; known: boolean }> {
+    const db = this.getDb();
+    if (!db || !appId) return { appCalls: 0, visitorCalls: 0, known: false };
+    try {
+      const [app, visitor] = await Promise.all([
+        db.collection(APP_COLLECTION).doc(this.appDoc(appId, day)).get(),
+        visitorHash
+          ? db.collection(VISITOR_COLLECTION).doc(this.visitorDoc(appId, day, visitorHash)).get()
+          : Promise.resolve(null),
+      ]);
+      return {
+        appCalls: numberOf(app.exists ? (app.data() as { calls?: unknown }).calls : 0),
+        visitorCalls: numberOf(visitor?.exists ? (visitor.data() as { calls?: unknown }).calls : 0),
+        known: true,
+      };
+    } catch {
+      return { appCalls: 0, visitorCalls: 0, known: false };
+    }
+  }
+
+  /**
    * Add one answered call's ₹ to both totals.
    *
    * `increment` rather than read-modify-write: concurrent visitors are the normal case here, and a

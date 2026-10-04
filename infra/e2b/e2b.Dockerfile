@@ -79,6 +79,14 @@ RUN mkdir -p /home/user/.e-tools \
 # only less optimal), and _npmInstall's `files.exists` guard makes the whole
 # feature a no-op on any image where this dir is absent.
 #
+# CORRECTED 2026-10-04 (autopsy cc3ef776): drift is NOT only "less optimal". This primer lacked
+# @types/react and @types/react-dom, so a typecheck run on the copied tree before the delta install
+# finished saw React.Component with no members and failed with the error pair the scaffold fix of
+# 2026-08-24 had closed: "Property 'setState' / 'props' does not exist on type 'ErrorBoundary'". The
+# model then spent a turn installing the types. Every pinned package of the template is now here,
+# and tests/theScaffoldShipsNoKnownVulnerability.test.ts compares ALL of them, not a hand-picked list.
+# A change here reaches sandboxes only after the e2b-template workflow is run (it is manual).
+#
 # ROOT-CAUSE FIX (build kept failing at THIS step in ~1s — the package.json was never
 # validly written). The content used to be produced INLINE — first a multi-line
 # `printf '%s\n' '{' \ …`, then a single-line `node -e "JSON.stringify(…)"`. Both pack the
@@ -92,7 +100,7 @@ RUN mkdir -p /home/user/.e-tools \
 # `test -d` assertion fails the build loudly if the install produced nothing; diagnostics
 # print to the build log. No error suppression, no retries.
 RUN mkdir -p /home/user/.warm/vite-react \
-  && echo ewogICJuYW1lIjogInByb2plY3QiLAogICJ2ZXJzaW9uIjogIjAuMS4wIiwKICAicHJpdmF0ZSI6IHRydWUsCiAgInNjcmlwdHMiOiB7CiAgICAiZGV2IjogInZpdGUiLAogICAgImJ1aWxkIjogInRzYyAmJiB2aXRlIGJ1aWxkIiwKICAgICJwcmV2aWV3IjogInZpdGUgcHJldmlldyIKICB9LAogICJkZXBlbmRlbmNpZXMiOiB7CiAgICAicmVhY3QiOiAiXjE4LjMuMSIsCiAgICAicmVhY3QtZG9tIjogIl4xOC4zLjEiCiAgfSwKICAiZGV2RGVwZW5kZW5jaWVzIjogewogICAgIkB2aXRlanMvcGx1Z2luLXJlYWN0IjogIl41LjIuMCIsCiAgICAidHlwZXNjcmlwdCI6ICJeNS41LjMiLAogICAgInZpdGUiOiAiXjguMy4wIgogIH0KfQo= | base64 -d > /home/user/.warm/vite-react/package.json \
+  && echo ewogICJuYW1lIjogInByb2plY3QiLAogICJ2ZXJzaW9uIjogIjAuMS4wIiwKICAicHJpdmF0ZSI6IHRydWUsCiAgInNjcmlwdHMiOiB7CiAgICAiZGV2IjogInZpdGUiLAogICAgImJ1aWxkIjogInRzYyAmJiB2aXRlIGJ1aWxkIiwKICAgICJwcmV2aWV3IjogInZpdGUgcHJldmlldyIKICB9LAogICJkZXBlbmRlbmNpZXMiOiB7CiAgICAicmVhY3QiOiAiXjE4LjMuMSIsCiAgICAicmVhY3QtZG9tIjogIl4xOC4zLjEiCiAgfSwKICAiZGV2RGVwZW5kZW5jaWVzIjogewogICAgIkB0eXBlcy9yZWFjdCI6ICJeMTguMy4zIiwKICAgICJAdHlwZXMvcmVhY3QtZG9tIjogIl4xOC4zLjAiLAogICAgIkB2aXRlanMvcGx1Z2luLXJlYWN0IjogIl41LjIuMCIsCiAgICAidHlwZXNjcmlwdCI6ICJeNS41LjMiLAogICAgInZpdGUiOiAiXjguMy4wIgogIH0KfQo= | base64 -d > /home/user/.warm/vite-react/package.json \
   && echo === warm vite-react: environment === && node -v && npm -v && df -h \
   && echo === warm vite-react: generated package.json === && cat /home/user/.warm/vite-react/package.json \
   && echo === warm vite-react: npm install === \

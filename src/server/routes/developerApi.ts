@@ -8,6 +8,7 @@
 //   GET  /api/v1/builds                    read:builds       — the holder's apps, with live links where published
 //   POST /api/v1/chat/completions          ai:chat           — NavBharatAI's AI, on the holder's wallet, capped per key
 //   POST /api/v1/professionals/:id/chat    ai:professionals  — ask one of the ~80 expert AIs by id
+//   POST /api/v1/images/generations        ai:images         — make one AI picture (OpenAI images format, b64_json)
 //   GET  /api/v1/models                    (any valid key)   — so `client.models.list()` works
 //   GET  /api/v1/key                       (any valid key)   — what THIS key may do, and what it spent today
 //
@@ -25,7 +26,6 @@
 // AFTER the answer is out, exactly like every other assistant on the platform.
 
 import type { Express, Request, Response } from 'express';
-import * as admin from 'firebase-admin';
 import { rateLimiter } from '../lib/authMiddleware';
 import { apiKeyAuth, requireScope, apiAuthOf } from './apiKeys';
 import {
@@ -39,6 +39,9 @@ import { hasScope, effectiveScopes, FULL_ACCESS_SCOPE } from '../lib/ApiKeyManag
 import { getProfessional, listProfessionals } from '../professionals/registry';
 import { runProfessionalChatWithUsage } from '../professionals/engine';
 import { routeParam } from '../lib/expressCompat';
+import { emailForUid } from '../lib/uidEmail';
+import { imageForApiKey, IMAGES_SCOPE } from '../lib/apiKeyImage';
+import { readImageGenerationRequest } from '../lib/developerApi';
 import { apiKeyUsageStore } from '../lib/ApiKeyUsageStore';
 import { userCostStore } from '../lib/UserCostStore';
 import { triagePrompt, safetyExcerpt, blockMessage } from '../lib/promptSafety';
@@ -56,28 +59,7 @@ import { getConversationStore } from './agentv3';
 import { deploymentStore, isLiveDeployment, type DeploymentRecord } from '../AgentV3/DeploymentStore';
 import { effectiveAppName } from '../AgentV3/appName';
 
-/**
- * The holder's email, for the free-list courtesy — the list holds addresses, and a key carries only a
- * uid. Best-effort and cached: a lookup that fails means "not free-listed", which is the safe side
- * (a paying answer we could have waived costs pennies; a waived answer we should have charged is a
- * leak).
- */
-const emailCache = new Map<string, { email: string | null; at: number }>();
-const EMAIL_CACHE_MS = 10 * 60 * 1000;
-async function emailForUid(uid: string): Promise<string | null> {
-  const hit = emailCache.get(uid);
-  if (hit && Date.now() - hit.at < EMAIL_CACHE_MS) return hit.email;
-  let email: string | null = null;
-  try {
-    if (!process.env.VITEST) {
-      if (!admin.apps || admin.apps.length === 0) admin.initializeApp({});
-      const u = await admin.auth().getUser(uid);
-      email = u.email ?? null;
-    }
-  } catch { email = null; }
-  emailCache.set(uid, { email, at: Date.now() });
-  return email;
-}
+// The holder's email for the free-list courtesy — see lib/uidEmail.ts.
 
 /** Per-key request windows, per instance. Bounded by pruning; the ₹ cap is the durable defence. */
 const rateWindows = new Map<string, RateWindow>();
@@ -343,6 +325,31 @@ export function registerDeveloperApiRoutes(app: Express): void {
 
     // ── Money, AFTER the answer is out ──────────────────────────────────────────────────────
     settleKeyTurn(auth, now, gate.freeListed, run.spend);
+  });
+
+  // ── ai:images ───────────────────────────────────────────────────────────────────────────────
+  //
+  // The standard images-generations shape, so an existing SDK's `images.generate()` works by changing the
+  // base URL. One picture per call, returned as `b64_json` (a stored URL would be a public copy of the
+  // picture we would then have to keep). Every check, the engines and the charge are `imageForApiKey`'s,
+  // shared with an app whose owner saved this key as its image key — one door, priced one way.
+  app.post('/api/images/generations', ipLimiter, apiKeyAuth, requireScope(IMAGES_SCOPE), async (req: Request, res: Response) => {
+    const auth = apiAuthOf(req);
+    const now = Date.now();
+    if (!keyAllowedNow(auth.keyId, now)) {
+      res.status(429).json(apiError('rate_limited', 'Too many requests on this key. Please slow down to under 60 per minute.'));
+      return;
+    }
+    const request = readImageGenerationRequest(req.body);
+    if (!request.ok) { res.status(400).json(apiError('invalid_request', request.message)); return; }
+    const result = await imageForApiKey(auth, request.prompt, request.px, 'api', now);
+    if (!result.ok) { res.status(result.status).json(apiError(result.code, result.message)); return; }
+    res.json({
+      created: Math.floor(now / 1000),
+      data: [{ b64_json: result.image.base64, mime_type: result.image.mimeType }],
+      ...(result.freeLeftToday !== null ? { free_left_today: result.freeLeftToday } : {}),
+      charged_inr: result.chargedInr,
+    });
   });
 
   // ── ai:professionals ────────────────────────────────────────────────────────────────────────

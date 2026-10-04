@@ -92,7 +92,7 @@ export function needsLiveSearch(message: string): boolean {
 export function shapeSearchQuery(message: string, now: Date = new Date()): string {
   const m = String(message ?? '').trim();
   const today = now.toISOString().slice(0, 10);
-  const train = /\b(?:train|rail|gadi|gaadi|ट्रेन|रेल)\b/i.test(m) && m.match(/\b(\d{5})\b/);
+  const train = /(?<![\w\u0900-\u097F])(?:train|rail|gadi|gaadi|ट्रेन|रेल)(?![\w\u0900-\u097F])/i.test(m) && m.match(/\b(\d{5})\b/);
   if (train) return `train ${train[1]} live running status today`;
   const pnr = m.match(/\bpnr\D{0,12}(\d{10})\b/i) ?? m.match(/\b(\d{10})\b\D{0,12}pnr/i);
   if (pnr) return `PNR ${pnr[1]} status`;

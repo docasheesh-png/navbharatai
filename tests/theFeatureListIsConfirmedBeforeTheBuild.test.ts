@@ -170,7 +170,10 @@ describe('wiring', () => {
   it('both audits receive the answer', () => {
     expect(route).toContain('dispatcher.setDeclinedFeatures(declinedLabels(featureConfirmation));');
     // Four since autopsy a106df77: the home probe, the probe over the app's other screens, and the two post-heal re-probes.
-    expect((route.match(/checkFeaturePresence\(milestoneRequest \?\? checksRequest, [^\n]+?, declinedPresenceFeatures\(featureConfirmation\)\)/g) || []).length).toBe(4);
+    // Since change-engine slice 5 (2026-10-04) the four probes share ONE declined set: the user's answer
+    // PLUS what this request deliberately removes ("remove the delete button").
+    expect(route).toMatch(/const presenceDeclined = new Set<string>\(\[\.\.\.\(declinedPresenceFeatures\(featureConfirmation\) \?\? \[\]\), \.\.\.removedProbeFeatures\(milestoneRequest \?\? checksRequest\)\]\);/);
+    expect((route.match(/checkFeaturePresence\(milestoneRequest \?\? checksRequest, [^\n]+?, presenceDeclined\)/g) || []).length).toBe(4);
     expect(strip(src('src/server/AgentV3/ToolDispatcher.ts'))).toContain('analyzeRequirementCoverage(requestText, mem.graph(), snap.sources, this.declinedFeatures)');
   });
 

@@ -64,3 +64,24 @@ export function readStoreStatus(ok: boolean, body: unknown, httpStatus?: number)
   if (!ok) return { status: null, problem: `the server answered HTTP ${httpStatus ?? 'error'} instead of the store status` };
   return { status: null, problem: 'the server answered something that is not the store status' };
 }
+
+/**
+ * The report App Mart sends to the admin Errors view when the status could not be read (queue Q-013).
+ *
+ * The Publish tab already shows the user the server's sentence; this sends the SAME facts to
+ * `POST /api/logs/error`, so the admin learns which guard answered (429 / 401 / 500, and its words)
+ * without asking anybody for a screenshot. No account data: the HTTP status, the sentence and the
+ * platform name are all it carries. PURE.
+ */
+export function storeStatusReport(httpStatus: number | undefined, problem: string, platform: string | null): {
+  message: string;
+  type: string;
+  source: string;
+} {
+  const code = typeof httpStatus === 'number' && httpStatus > 0 ? `HTTP ${httpStatus}` : 'no HTTP status';
+  return {
+    message: `App Mart could not read the store status (${code}): ${problem.slice(0, 300)}`,
+    type: 'store-status-unreadable',
+    source: `app-mart/${platform || 'web'}`,
+  };
+}

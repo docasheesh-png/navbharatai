@@ -30,7 +30,7 @@
 //
 // PURE + deterministic + bounded. No model call, so the 99.9% path costs nothing at all.
 
-import { ILLEGAL_RULES, type PublishContentClass } from '../AgentV3/illegalContentRules';
+import { ILLEGAL_RULES, normalizeScanText, type PublishContentClass } from '../AgentV3/illegalContentRules';
 import { redactSecrets, redactPII } from '../AgentV3/SecretRedactor';
 
 export type SafetyVerdict = 'allow' | 'flag' | 'block';
@@ -59,7 +59,9 @@ export const PROMPT_SCAN_CAP = 100_000;
  * that refusing would sometimes be wrong, so the turn proceeds and a human decides later.
  */
 export function triagePrompt(text: string | null | undefined): PromptTriage {
-  const body = String(text ?? '').slice(0, PROMPT_SCAN_CAP);
+  // The same normal form the publish scanner reads (NFC, no zero-width characters), so a nukta
+  // written two ways or a ZWJ inside a word cannot split it past every pattern.
+  const body = normalizeScanText(String(text ?? '').slice(0, PROMPT_SCAN_CAP));
   if (!body.trim()) return ALLOWED;
 
   let flagged: PromptTriage | null = null;

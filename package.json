@@ -22,7 +22,7 @@
     "boot:check": "bash scripts/boot-check.sh",
     "deps:server-gate": "node scripts/serverDepsGate.mjs",
     "native:guard": "node scripts/nativeShellGuard.mjs",
-    "test:bundle": "node scripts/bundleBudget.mjs",
+    "test:bundle": "node scripts/bundleBudget.mjs && node scripts/noLookbehindInBundle.mjs",
     "test:load": "node scripts/loadTest.mjs",
     "audit:gate": "node scripts/auditGate.mjs",
     "license:gate": "node scripts/licenseGate.mjs",

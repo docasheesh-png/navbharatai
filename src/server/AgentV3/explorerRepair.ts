@@ -101,16 +101,20 @@ export function explorerRepairFindings(targets: PressResult[]): string[] {
           ? 'opens a page that does not exist'
           : p.verdict === 'unresponsive'
             ? `changes nothing on the screen (${p.note})`
-            : 'throws an error in the app';
+            : p.verdict === 'covered'
+              ? `is impossible — ${p.note}, so a user cannot reach the control at all`
+              : 'throws an error in the app';
     const fix = p.verdict === 'broken-link'
       ? 'Create the page it points to with real content, or point it at a page that exists.'
       : p.verdict === 'unresponsive'
         ? (p.kind === 'pick'
           ? 'Wire the menu to the list it sits above so choosing an option really sorts or filters that list.'
           : 'Wire the box to the list it sits above so typing really filters that list as the user types.')
-        : needsAbsentDevice(p.errors)
-          ? DEVICE_FIX
-          : 'Find the cause in the code that runs when it is used and fix it so the control does what its label says.';
+        : p.verdict === 'covered'
+          ? 'Fix the stacking so the control sits ABOVE whatever is over it and can be clicked: give the menu or overlay that holds it a higher z-index than the element on top, and make sure a full-screen canvas, image or backdrop does not sit over the controls (or does not receive pointer events) while they are meant to be used.'
+          : needsAbsentDevice(p.errors)
+            ? DEVICE_FIX
+            : 'Find the cause in the code that runs when it is used and fix it so the control does what its label says.';
     return `In a real browser, ${doing} "${p.label}"${where} ${what}.${said} ${fix} Do not remove, hide or disable the control — that is not a fix. ${NO_INVENTED_RESULT}`;
   });
 }

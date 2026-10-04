@@ -22,7 +22,7 @@ import { creatorLine } from './storeCreatorLine';
 import { SocialBar, CommentsSection, LikersSheet, ProfileSheet, CommentReportsAdmin, FollowButton, FollowersSheet } from './appMart/AppMartSocial';
 import { useSocialStats, useSignedIn, webKey, apkKey, fetchFeed, askToSignIn } from './appMart/appMartSocialApi';
 import { BROWSE_VIEWS, kindFilterOptions, shelvesFor, emptyViewMessage, viewNeedsSignIn, type BrowseView, type KindFilter } from './appMart/browseViews';
-import { readStoreStatus, type StoreStatus } from './appMart/storeStatus';
+import { readStoreStatus, storeStatusReport, type StoreStatus } from './appMart/storeStatus';
 import { parseAppMartTarget } from '../../lib/appMartTarget';
 
 // Nav App Store — publish your Android app, and install other people's.
@@ -295,6 +295,7 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
 
   const [reviewing, setReviewing] = useState('');
   const liveRef = useRef(true);
+  const statusReportedRef = useRef(false);
   useEffect(() => () => { liveRef.current = false; }, []);
 
   const loadStatus = useCallback(async () => {
@@ -304,6 +305,16 @@ export const NavAppStore: React.FC<NavAppStoreProps> = ({ initialWebAppId, initi
       // Only the real status may become the status. An `{ error }` body from a guard (429 / 401 / 500)
       // used to be stored as if it were one, and `.missing.join` then crashed the whole screen.
       const read = readStoreStatus(res.ok, data, res.status);
+      // Q-013: the same facts go to the admin Errors view, once per screen, so which guard answered
+      // is known without a screenshot.
+      if (read.problem && !statusReportedRef.current) {
+        statusReportedRef.current = true;
+        fetch('/api/logs/error', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...storeStatusReport(res.status, read.problem, nativePlatformName()), url: window.location.href, ts: Date.now() }),
+        }).catch(() => { /* reporting must never change what the screen shows */ });
+      }
       if (!liveRef.current) return;
       setStatus(read.status);
       setStatusProblem(read.problem);

@@ -44,18 +44,54 @@ export type IssueSeverity = 'info' | 'warning' | 'error';
  * Findings that measure OUR OWN PROCESS rather than the user's app. Recorded at warning severity so
  * a human notices them; never a reason to hesitate before shipping the app.
  */
-const PROCESS_ONLY_CODES = new Set([
+/** A finding's first clause, short enough to name inside a sentence. PURE. */
+export function findingLabel(message: unknown): string {
+  const first = String(message ?? '').split(/\n|\s[—–]\s|\.\s|\s\(|:\s/)[0].trim().replace(/[.:;,]+$/, '');
+  if (!first) return '';
+  const short = first.length > 60 ? `${first.slice(0, 57).trimEnd()}…` : first;
+  return short.charAt(0).toLowerCase() + short.slice(1);
+}
+
+export const PROCESS_ONLY_CODES = new Set([
   'BUILD_OFFER_ACCEPTED', 'ATTACHMENT_RECALLED',
+  // ── OUR OWN RUN, MEASURED IN 2026-10-04's CENSUS ────────────────────────────────────────────────
+  // Eight codes recorded at WARNING severity that were in no registry at all, so `isAppFinding` said
+  // yes to every one: each appeared in the USER's build-health card as a problem with THEIR app and
+  // took 6 points off their app's health score (`buildHealthCard.ts`). None of them is about the app.
+  // `HEAL_NOT_DURABLE` is the clearest proof that this was an omission and not a decision — its own
+  // comment at the recording site reads *"ADMIN-ONLY: the user never sees our repair passes"*, and
+  // `COST_CEILING_REACHED` is called "admin-only" in CLAUDE.md. Both were user-facing regardless.
+  //
+  // 🔒 WHY THIS MOVES NO MONEY. A RED gate flips a build to free only on `shippingIssueCount('error')`
+  // and every code here is a WARNING, so the error count cannot change. What does change is the
+  // gate's CAVEAT count — which is the point, and is what `shippingIssueCount`'s own docblock asks
+  // for: letting our process findings demote a green build to yellow "would make the gate's most
+  // important state unreachable in practice, which is the same as not having it".
+  //
+  // Locked by `tests/aProblemTheUserIsShownCanBeActedOn.test.ts`, which also fails when a NEW code is
+  // recorded at problem severity and left in no registry at all.
+  'COST_CEILING_REACHED',     // our spending ceiling stopped the build — our policy, not their code
+  'FUTILITY_BREAKER',         // our own loop breaker stopped the build
+  'VERIFY_DID_NOT_RUN',       // our fast-lane typecheck could not execute — the class of RUNTIME_UNCHECKED
+  'GREEN_GUARD_UNVERIFIED',   // "could not be opened to check this turn" — the class of PREVIEW_UNVERIFIED
+  'HEAL_NOT_DURABLE',         // our repair wrote twice to one file; the user never sees repair passes
+  'SUMMARY_OFF_TOPIC',        // about OUR closing summary's wording, and already said above the summary
+  'DATABASE_OFFER_AT_START',  // we OFFERED (or created) a database — a thing we did for them, not a fault
+  'TIME_TO_FIRST_CALL',       // our setup time before the first model call (it was in NEVER_SUGGEST only)
   // Our template seeding and a user's Stop (autopsy 31254f9a): facts about the ENGINE's run, never the app.
   'GOLDEN_SCAFFOLD_SKIPPED', 'LLM_CALL_STOPPED', 'SIMPLE_BUILD_STOPPED', 'DOMAIN_KNOWLEDGE', 'DURABLE_HOLDS_ONLY_STARTER',
   'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',
   // A repair's out-of-scope answer that OUR guard refused to write (autopsy eed79815): engine housekeeping.
   'REPAIR_OUT_OF_SCOPE',
+  // A review whose findings OUR parser could not read (autopsy d798ddd3) — our instrument.
+  'REVIEW_FINDINGS_UNREAD',
   // The user's pasted one-file app was kept as one file (pastedAppFormat.ts) — a decision, not a defect.
   'PASTED_APP_KEPT_ONE_FILE',
   // The user named a stack we do not build (unsupportedStack.ts) — a fact about OUR templates, not the app.
   'UNSUPPORTED_STACK',
-  'UNKNOWN_NAME_IN_REQUEST',
+  'UNKNOWN_NAME_IN_REQUEST', 'REQUEST_SCOPE_NOTE',
+  'SCRIPT_REQUEST_AS_WEB_APP', // a note to our builder and the user (scriptRequest.ts, Q-274)
+  'PYTHON_BACKEND_UP', // our own start of the app's Python server (pythonBackendBoot.ts, Q-284)
   // Whether OUR checks could sign in behind the app's login page (signInExplore.ts) — our instrument.
   'AUTH_EXPLORE_SIGNED_IN', 'AUTH_EXPLORE_NOT_RUN',
   // Whether the platform's additions to the reply reached the screen (summaryAdditions.ts): a fact about our delivery.
@@ -99,7 +135,7 @@ const PROCESS_ONLY_CODES = new Set([
   'LABELS_REPAIRED',
   // Our own deterministic design-kit restore (kitRestore.ts, autopsy e725e002) and the note that the
   // sizers read the whole request (planningRequest.ts) — engine housekeeping, never app findings.
-  'DESIGN_KIT_RESTORED', 'PLANNING_CONTEXT', 'DESIGN_KIT_KEPT', 'SHADOW_TWIN_REMOVED', 'USER_FILE_KEPT', 'FILES_REMOVED_TOLD', 'DURABLE_READ_FAILED',
+  'DESIGN_KIT_RESTORED', 'PLANNING_CONTEXT', 'DESIGN_KIT_KEPT', 'SHADOW_TWIN_REMOVED', 'DEAD_SALVAGE_REMOVED', 'DEAD_SALVAGE_KEPT', 'USER_FILE_KEPT', 'FILES_REMOVED_TOLD', 'DURABLE_READ_FAILED',
   // Our own deterministic 4px-grid snap (spacingSnap.ts, autopsy 536c8189) — housekeeping, and the thing
   // it replaced was a model hand-back that cost three calls and made the stylesheet worse.
   'SPACING_SNAPPED',
@@ -336,6 +372,8 @@ export const HEAL_RESOLVES: Readonly<Record<string, readonly string[]>> = {
   CSS_CLASSES_HEALED: ['CSS_CLASSES_UNDEFINED'],
   ACCESSIBILITY_HEALED: ['ACCESSIBILITY'],
   EXPLORE_REPAIRED: ['EXPLORE_FAILED'],
+  // Change engine slice 2: a feature an edit removed, restored by the feature heal.
+  FEATURE_REGRESSION_HEALED: ['FEATURE_REGRESSED'],
   REVIEW_FUNCTIONAL_REPAIRED: [],
   HOOKS_RULES_HEALED: [],
   INCOMPLETE_CODE_HEALED: [],
@@ -2327,6 +2365,25 @@ export class BuildDiagnostics {
       seen.add(`${i.phase} ${i.code} ${i.message}`);
     }
     return seen.size;
+  }
+
+  /**
+   * WHICH findings `shippingIssueCount` counted — the first clause of each distinct one, in the order
+   * recorded (autopsy d798ddd3: the gate said "1 thing(s) worth a look" and named nothing, so the reader
+   * had to search the timeline for which warning held a working calculator at YELLOW). Same filter as the
+   * count, so the two can never disagree. Pure over the recorded issues.
+   */
+  shippingIssueLabels(severity: IssueSeverity, max = 2): string[] {
+    const seen = new Set<string>();
+    const labels: string[] = [];
+    for (const i of this.issues) {
+      if (i.severity !== severity || i.autoResolved || !isAppFinding(i)) continue;
+      const key = `${i.phase} ${i.code} ${i.message}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      labels.push(findingLabel(i.message));
+    }
+    return labels.filter(Boolean).slice(0, Math.max(0, max));
   }
 
   /**

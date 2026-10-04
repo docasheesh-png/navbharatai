@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs';
 import { isDeadSandboxSignal, isDeadSandboxError } from '../src/server/AgentV3/sandbox/EngineerAI/actuators/sandboxHealth';
 import { binaryTextWriteRefusal } from '../src/server/AgentV3/binaryTextWrite';
 import { unsavedBuildAssets, persistBuildAssets, buildAssetsNote, parseChangedListing, CHANGED_SINCE_BASELINE_COMMAND } from '../src/server/AgentV3/buildAssets';
-import { leanReviewInline, reviewerInstruction } from '../src/server/AgentV3/ReviewerAgent';
+import { leanReviewInline, leanReviewAnswersInOneCall, reviewerInstruction } from '../src/server/AgentV3/ReviewerAgent';
 import { foldCostTelemetry, type CostTelemetryEntry } from '../src/server/AgentV3/AgentV3CostTelemetry';
 import { ToolDispatcher, type ActuatorPort } from '../src/server/AgentV3/ToolDispatcher';
 import { WorkspaceState } from '../src/server/AgentV3/WorkspaceState';
@@ -186,7 +186,10 @@ describe('a lean review is handed the code it judges', () => {
     'src/pages/CartPage.tsx': 'export function CartPage() { return null; }\n',
     'src/hooks/useCart.ts': 'export function useCart() {}\n',
     'e2e/smoke.spec.ts': 'test()',
-    'src/huge.ts': 'x'.repeat(20_000),
+    // Big enough that the WHOLE set cannot fit the total bound, which is what makes the per-file cap
+    // apply at all since autopsy 8b8743a3 — 20_000 used to be over the per-file cap and is comfortably
+    // inside the 60_000 total, so it is now handed over in full (see the case below).
+    'src/huge.ts': 'x'.repeat(70_000),
   };
 
   it('picks the app\'s own source, entry first, in full — never the config files', () => {
@@ -194,6 +197,22 @@ describe('a lean review is handed the code it judges', () => {
     expect(inline.files.map((f) => f.path)).toEqual(['src/App.tsx', 'src/pages/CartPage.tsx', 'src/hooks/useCart.ts']);
     expect(inline.files[0].content).toBe(content['src/App.tsx']);
     expect(inline.omitted).toEqual(['src/huge.ts']);
+  });
+
+  /**
+   * 🔴 autopsy 8b8743a3: a 3D driving game changed exactly ONE source file, a 22,306-byte `src/App.tsx`.
+   * It was over the per-file cap and so omitted — leaving nothing inline at all — although it fits the
+   * 60 KB total four times over. The review kept its tools and spent all 12 of its steps reading that one
+   * file 200 lines at a time, and reported nothing. The per-file cap exists only so one big file cannot
+   * take the budget from the others; when everything fits anyway there are no others to protect.
+   */
+  it('a single changed file over the per-file cap is still handed over when it fits the total', () => {
+    const only = { 'src/App.tsx': `// a real app\n${'y'.repeat(22_300)}\n` };
+    const inline = leanReviewInline(Object.keys(only), (p) => only[p as keyof typeof only]);
+    expect(inline.files.map((f) => f.path)).toEqual(['src/App.tsx']);
+    expect(inline.files[0].content).toBe(only['src/App.tsx']);
+    expect(inline.omitted).toEqual([]);
+    expect(leanReviewAnswersInOneCall(inline)).toBe(true);   // so it answers in one call, with no tools
   });
 
   it('the suggest instruction carries them in full and says not to read them again; a full review is unchanged', () => {

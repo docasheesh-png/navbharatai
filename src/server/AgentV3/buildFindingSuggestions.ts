@@ -133,6 +133,16 @@ export const FINDING_SUGGESTIONS: Array<{ code: string; title: string; detail: s
     prompt: 'When I press some of the buttons or links in the app, it shows an error, goes blank, or opens a page that does not exist. Find each one, fix the real cause, and make sure every button and link works.',
   },
   {
+    // The build itself ADMITTED a control does nothing ("Cloud Sync … is a UI-only toggle for now",
+    // autopsy 51ef24ad / #3488). A dead control is the user's app and the fix is the obvious one, so
+    // it gets a button rather than a warning they can only read. Classified here by the finding
+    // ratchet on its first real encounter — the code shipped with no registry entry.
+    code: 'UI_ONLY_CONTROL',
+    title: 'Make the control actually work',
+    detail: 'A switch or button was added to the screen that does not do anything yet.',
+    prompt: 'The build left one or more controls on the screen that look real but do nothing — a switch, button or toggle with no behaviour behind it. For each one, either implement what its label promises so it genuinely works end to end, or remove it. Do not leave a control that a user can press and that does nothing.',
+  },
+  {
     code: 'PAGE_RENDER_FAILED',
     title: 'Fix the page that did not load',
     detail: 'At least one page failed to open properly.',

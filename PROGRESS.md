@@ -87959,3 +87959,11 @@ All on PR #3488, each locked by a test proven by reversion.
 | Q-112 | New-tab links opened inside the phone app's own WebView | Fixed one link at a time; the next link written was bare again. (Measured: every JSX new-tab link already carried `rel`.) | One delegated listener in the native shell (`installExternalLinkHandler`) sends them to the system browser; our own origin, downloads and modified clicks are left alone | `aNewTabLinkOpensTheRealBrowser` |
 
 ⚠️ Q-112 reaches phone users only with a fresh `.aab`/`.ipa` (bundled mode).
+
+**THE FINDING RATCHET CAUGHT ITS FIRST ONE, before this PR even merged (2026-10-04).** Merging `main`
+in brought PR #3488's new `UI_ONLY_CONTROL` finding — *"the build says N control(s) do nothing yet"*,
+from autopsy 51ef24ad's "Cloud Sync … is a UI-only toggle for now" — and it arrived in no registry at
+all, so it would have reached the user's build-health card as a problem with their app with nothing to
+press. That is exactly the class this PR exists to close, and it took 87 seconds to find rather than a
+build report. Classified where it belongs: a dead control IS the user's app and the fix is the obvious
+one, so it gets an offer ("Make the control actually work") rather than a warning they can only read.

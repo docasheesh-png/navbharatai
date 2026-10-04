@@ -87961,3 +87961,14 @@ All on PR #3488, each locked by a test proven by reversion.
 | Q-112 | New-tab links opened inside the phone app's own WebView | Fixed one link at a time; the next link written was bare again. (Measured: every JSX new-tab link already carried `rel`.) | One delegated listener in the native shell (`installExternalLinkHandler`) sends them to the system browser; our own origin, downloads and modified clicks are left alone | `aNewTabLinkOpensTheRealBrowser` |
 
 ⚠️ Q-112 reaches phone users only with a fresh `.aab`/`.ipa` (bundled mode).
+
+**⚠️ TWO SESSIONS MET ON THIS CLASS THE SAME DAY, and the merge is recorded rather than quietly
+resolved.** PR #3488 (merged while this branch was in the gate) carries `tests/aCoveredControlIsNamed.test.ts`
+for queue item Q-247 — the candy report's "⏸" that *"could not be pressed and could not say why"*. Its fix
+is the NOTE (keep the call log's cause line, strip its ANSI colour codes); this one is the VERDICT. They are
+complementary, not duplicate, and both survive: the cause line is still carried for a press that really was
+ours. What had to change is that PR's real-browser assertion, which pinned the old `skipped`. **A
+transparent pad fixed over a pause button is a real defect whoever wrote it** — on the user's screen the app
+cannot be paused — so it is now `covered`, and that test's own point is kept because the note still NAMES
+the element (`div.tc-pad`). Its case is now a second, independent proof of the probe: a small transparent
+div rather than a full-screen canvas, so it also exercises the not-full-screen wording.

@@ -3836,6 +3836,25 @@ the flag entries above promise.
   vendor, no split. The label says what can still move it: more work adds to it, the checks at the end
   can only lower it, a build that fails is free.
 
+- **🧠 `AGENTV3_CHANGE_ENGINE` — the app remembers what it is supposed to do, across edits (built
+  2026-10-04, slice 1 of `docs/CHANGE_ENGINE.md`). ⚠️ NOT set; the code default is ON**, and `off` stops
+  every read, write and prompt block with no deploy. Lives in `src/server/AgentV3/changeEngine/`.
+  🔴 **WHY:** every "what did the user ask for?" check reads only the CURRENT prompt
+  (`currentRequestForCoverage` returns the last request on purpose — report 1682cd03), so an edit that
+  silently removed a working Delete button was graded against "make the header blue" and passed.
+  **What it does:** classifies each change (micro-ui … architectural / large → light / standard / deep,
+  higher risk wins); keeps a requirement ledger with stable `REQ-nnn` ids, **verified only by a control a
+  real browser saw** (prose never verifies); re-probes every verified requirement on a later edit
+  (`probeFeatures`, same guards as the coverage probe) and records **`FEATURE_REGRESSED`**; queues
+  unresolved APP findings as `ISS-nnn` moved only by evidence (FIXED/VERIFIED need a build that reached its
+  release gate unstopped); and leaves a `CHG-nnnn` record per build. Report codes `CHANGE_CLASSIFIED`,
+  `CHANGE_RECORDED` (info), `FEATURE_REGRESSED` (warning).
+  🔒 **Server-side only** (`app_engineering_memory_v1/{workspaceId}`, erased with the workspace) — NOT a
+  `.navbharat/` folder in the app (GitHub push, Green Freeze, forgeable by an imported repo, served on the
+  preview URL). Stored text is platform-authored except a redacted 160-char request digest; issue text
+  reaches the builder **fenced**, in the per-turn message, never the cached prefix.
+  ⚠️ **Slice 1 REPORTS a regression; it does not repair it** — feeding it to the feature heal is slice 2,
+  gated on real reports showing no false positives. **What to watch:** `FEATURE_REGRESSED` on edit builds.
 - **`AGENTV3_CONTRACT_FILE`** (default ON, set `off` to disable — added 2026-09-17, autopsy 57875eb3) —
   the fast lane's SHARED CONTRACT (the enums / interfaces / types every per-file call is handed) is now
   written as a REAL file, `src/types.ts` (or `types.ts` when the app has no `src/`), BEFORE any other file,

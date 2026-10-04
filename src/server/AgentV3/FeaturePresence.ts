@@ -369,22 +369,76 @@ export function checkFeaturePresence(prompt: string, html: string, declined?: Re
   // HONESTY GUARD (build #2): never judge features off an un-rendered SPA shell — we literally cannot see
   // the controls, so claiming they're missing is a false negative. Report nothing (probes:[]) instead.
   if (isUnrenderedSpaShell(html)) return empty;
-  const promptLower = prompt.toLowerCase();
   const htmlLower = html.toLowerCase();
   const textLower = visibleText(html).toLowerCase();
 
   const probes: FeatureProbeResult[] = [];
+  // Negation-aware (deep-test App #1): a feature the user DECLINED ("no delete", "without search")
+  // must not be probed, or we'd false-flag it missing. ONE selection, shared with the requirement
+  // ledger (`requestedProbeFeatures`), so what is recorded and what is graded cannot drift apart.
+  const asked = new Set(requestedProbeFeatures(prompt, declined).map((f) => f.feature));
   for (const def of FEATURES) {
-    if (declined?.has(def.feature)) continue;
-    // Negation-aware (deep-test App #1): a feature the user DECLINED ("no delete", "without search")
-    // must not be probed, or we'd false-flag it missing. Shares the RequirementCoverage guard.
-    if (!isAffirmativelyRequested(promptLower, def.requested)) continue; // not requested → don't probe
+    if (!asked.has(def.feature)) continue; // not requested (or declined) → don't probe
     let via: PresenceEvidence | false = false;
     try { via = def.present(htmlLower, textLower); } catch { via = false; }
     probes.push(via === false
       ? { feature: def.feature, label: def.label, present: false }
       : { feature: def.feature, label: def.label, present: true, via });
   }
+  return judgeProbes(probes, htmlLower);
+}
+
+/**
+ * Probe a GIVEN set of features by id, whatever the current prompt says (Change Engine, 2026-10-04).
+ *
+ * `checkFeaturePresence` probes only what THIS prompt asked for — correct for "did the change land?",
+ * and blind to "did the change break something the app already had?". The requirement ledger
+ * (changeEngine/appSpec.ts) remembers which features a real browser has SEEN working; this re-probes
+ * exactly those on a later build, so an edit that silently removes the Delete button is caught.
+ *
+ * 🔒 Same evidence rules, by construction: the same feature table, and the same guards
+ * (`judgeProbes` — unrendered shell, corroboration by a control-backed witness, sign-in wall). A
+ * regression may only be claimed where a missing-feature verdict could be. Unknown ids are ignored.
+ */
+export function probeFeatures(featureIds: ReadonlyArray<string>, html: string): FeaturePresenceResult {
+  const empty: FeaturePresenceResult = { probes: [], missing: [], present: [] };
+  if (!Array.isArray(featureIds) || featureIds.length === 0 || typeof html !== 'string' || !html.trim()) return empty;
+  if (isUnrenderedSpaShell(html)) return empty;
+  const wanted = new Set(featureIds);
+  const htmlLower = html.toLowerCase();
+  const textLower = visibleText(html).toLowerCase();
+  const probes: FeatureProbeResult[] = [];
+  for (const def of FEATURES) {
+    if (!wanted.has(def.feature)) continue;
+    let via: PresenceEvidence | false = false;
+    try { via = def.present(htmlLower, textLower); } catch { via = false; }
+    probes.push(via === false
+      ? { feature: def.feature, label: def.label, present: false }
+      : { feature: def.feature, label: def.label, present: true, via });
+  }
+  return judgeProbes(probes, htmlLower);
+}
+
+/**
+ * The probeable features THIS prompt asks for — the exact selection `checkFeaturePresence` probes,
+ * returned on its own so the requirement ledger records the same list the build is graded on.
+ */
+export function requestedProbeFeatures(prompt: string, declined?: ReadonlySet<string>): Array<{ feature: string; label: string }> {
+  if (typeof prompt !== 'string' || !prompt.trim()) return [];
+  const promptLower = prompt.toLowerCase();
+  return FEATURES
+    .filter((def) => !declined?.has(def.feature) && isAffirmativelyRequested(promptLower, def.requested))
+    .map((def) => ({ feature: def.feature, label: def.label }));
+}
+
+/** The feature ids and labels this module can probe — the vocabulary of the requirement ledger. */
+export function probeableFeatures(): Array<{ feature: string; label: string }> {
+  return FEATURES.map((f) => ({ feature: f.feature, label: f.label }));
+}
+
+/** The shared verdict rules behind both probes. Pure. */
+function judgeProbes(probes: FeatureProbeResult[], htmlLower: string): FeaturePresenceResult {
+  const empty: FeaturePresenceResult = { probes: [], missing: [], present: [] };
   const presentProbes = probes.filter((p) => p.present);
   // CAPTURE-CORROBORATION GUARD (deep-test build #4, 2026-07-17; widened by real report 1682cd03,
   // 2026-07-17): only report a REQUESTED feature "missing" once the capture is CORROBORATED — i.e. at

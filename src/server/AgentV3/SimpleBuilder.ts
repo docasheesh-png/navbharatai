@@ -19,8 +19,9 @@ import { posix } from 'node:path';
 import { mapWithConcurrency, withTimeout } from './asyncUtils';
 import { deadlineFromBudget, isReasoningRungHandoff } from './turnDeadline';
 import { judgeRepair } from './repairAcceptance';
-import { scaffoldRestores, protectBoilerplateInRepair, SCAFFOLD_BOILERPLATE } from './scaffoldBoilerplate';
+import { scaffoldRestores, protectBoilerplateInRepair, planProvidedFiles } from './scaffoldBoilerplate';
 import { parseFileBlocks, type OneShotFile } from './OneShotBuilder';
+import { isProjectConfigPath, existingFileBlock } from './existingConfig';
 import { contractDriftReport } from './ContractMap';
 import { classifyBuildOutcome, type BuildOutcome } from './BuildOutcome';
 import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports, fixTypeOnlyValueImports } from './ImportExportReconcile';
@@ -159,6 +160,45 @@ export function parseFileManifest(text: string): SimpleFileSpec[] {
   // 60 bounds a runaway manifest; anything the model plans within it is BUILT, never silently dropped
   // (and the unresolved-local-imports verify below catches any remaining gap honestly).
   return out.slice(0, 60);
+}
+
+/**
+ * A scaffold file the PLANNER ITSELF says it will not change is not a file to write (autopsy d798ddd3).
+ *
+ * 🔴 Planning "Calculator app", the model listed eleven files and marked six of them in its own words —
+ * `index.html :: HTML entry point (provided)`, `package.json :: … (provided)`, the three tsconfigs. They were
+ * counted as the plan: the shared-contract pass was asked to design a contract for package.json and the
+ * tsconfigs, and `ONESHOT_SKIPPED` said "the file plan had already found 9 files" for an app whose real
+ * work was two. Only a path that IS in the scaffold and whose purpose says it is unchanged is dropped — a
+ * planner that means to edit a scaffold file says what the edit is, and keeps it. PURE.
+ */
+const UNCHANGED_PURPOSE_RE = /\((?:provided|unchanged|existing|already (?:provided|scaffolded|exists|correct)|no changes?(?: needed| required)?|as[- ]is|keep as[- ]is)\)|\b(?:unchanged|no changes? (?:needed|required)|keep(?:s)? (?:it )?as[- ]is|already (?:provided|scaffolded|correct)(?: as shipped)?)\b/i;
+export function dropUnchangedScaffold(
+  manifest: SimpleFileSpec[],
+  scaffoldPaths: readonly string[] = [],
+): { kept: SimpleFileSpec[]; dropped: string[] } {
+  const scaffold = new Set(scaffoldPaths);
+  const dropped: string[] = [];
+  const kept = manifest.filter((m) => {
+    const unchanged = scaffold.has(m.path) && UNCHANGED_PURPOSE_RE.test(m.purpose || '');
+    if (unchanged) dropped.push(m.path);
+    return !unchanged;
+  });
+  return { kept, dropped };
+}
+
+/**
+ * A plan with at most ONE module besides the entry has nothing for a shared contract to agree on
+ * (autopsy d798ddd3). The calculator's real plan was `src/App.tsx` and a stylesheet; the contract pass —
+ * a whole model call — was spent designing "shared types" for one component, crawled for 15 s and ended
+ * the lane. A contract exists so isolated per-file calls agree on names; one module agrees with itself.
+ * The entry (`main.tsx`/`index.tsx`) only renders the root component, which the scaffold already does. PURE.
+ */
+const ENTRY_MODULE_RE = /(?:^|\/)(?:main|index)\.(?:tsx?|jsx?)$/i;
+const SOURCE_MODULE_RE = /\.(?:tsx?|jsx?|mjs|cjs|vue|svelte)$/i;
+export function contractHasNothingToShare(manifest: readonly SimpleFileSpec[]): boolean {
+  const modules = manifest.filter((m) => SOURCE_MODULE_RE.test(m.path) && !/\.d\.ts$/i.test(m.path) && !ENTRY_MODULE_RE.test(m.path));
+  return modules.length <= 1;
 }
 
 /**
@@ -322,8 +362,8 @@ export function dependencyContext(producers: OneShotFile[], perFileCap = 4000): 
  * (we could not look) keeps the old behaviour.
  */
 export function providedBoilerplate(scaffoldPaths: readonly string[] = []): string[] {
-  const all = Object.keys(SCAFFOLD_BOILERPLATE);
-  return scaffoldPaths.length ? all.filter((p) => scaffoldPaths.includes(p)) : all;
+  // The error boundary plus the starter's compiler files (autopsy 70e030bb) — one list, scaffoldBoilerplate.ts.
+  return planProvidedFiles(scaffoldPaths);
 }
 
 /** Where the app's entry lives, in words the planner can act on. */
@@ -1144,7 +1184,7 @@ export function blueprintAdvisoryBlock(manifest: SimpleFileSpec[], contract?: st
   return parts.join('\n');
 }
 
-export function fileUserPrompt(prompt: string, file: SimpleFileSpec, manifest: SimpleFileSpec[], contract?: string, deps?: string, contractPath?: string): string {
+export function fileUserPrompt(prompt: string, file: SimpleFileSpec, manifest: SimpleFileSpec[], contract?: string, deps?: string, contractPath?: string, existing?: string | null): string {
   const listed = manifest.map((f) => `  - ${f.path}${f.purpose ? ` — ${f.purpose}` : ''}`);
   // The contract file is a real file of the app: list it, so "the complete file list" is complete.
   if (contractPath && !manifest.some((f) => f.path === contractPath)) {
@@ -1159,6 +1199,7 @@ export function fileUserPrompt(prompt: string, file: SimpleFileSpec, manifest: S
     deps || '',
     '',
     `Now write THIS file in full:\n  ${file.path}${file.purpose ? `\n  Purpose: ${file.purpose}` : ''}`,
+    existingFileBlock(file.path, existing),
     '',
     `Return ONLY the <<<FILE ${file.path}>>> … <<<ENDFILE>>> block.`,
   ].join('\n');
@@ -1352,6 +1393,11 @@ export interface SimpleBuildDeps {
    * and ran another nine minutes of model calls after it). Absent → today's behaviour.
    */
   signal?: AbortSignal;
+  /**
+   * Read a file the project already holds (preview bridge stripped), so a planned CONFIG file is edited
+   * rather than rewritten blind — see `isProjectConfigPath`. Absent → today's behaviour.
+   */
+  readExisting?: (path: string) => Promise<string | null>;
   /** Write the generated files (single batch). Throws on a hard failure. */
   writeFiles: (files: OneShotFile[]) => Promise<void>;
   /** Start the dev server + publish the preview. Best-effort. */
@@ -1636,7 +1682,12 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       const planned = parseFileManifest(manifestText);
       const provided = new Set(providedBoilerplate(deps.scaffoldPaths));
       const droppedBoilerplate = planned.filter((m) => provided.has(m.path)).map((m) => m.path);
-      const keptBoilerplate = droppedBoilerplate.length ? planned.filter((m) => !provided.has(m.path)) : planned;
+      const keptProvided = droppedBoilerplate.length ? planned.filter((m) => !provided.has(m.path)) : planned;
+      // The planner's own "(provided)" entries — see dropUnchangedScaffold.
+      const { kept: keptBoilerplate, dropped: droppedUnchanged } = dropUnchangedScaffold(keptProvided, deps.scaffoldPaths);
+      if (droppedUnchanged.length) {
+        deps.log?.(`Leaving ${droppedUnchanged.length} file(s) the plan marks as unchanged out of the file list: ${droppedUnchanged.join(', ')}.`);
+      }
       // A second index.html in public/ shadows a Vite app's real entry (autopsy 876afca9) — see entryShadow.ts.
       const { kept, dropped: droppedShadow } = dropShadowingEntries(keptBoilerplate, deps.framework);
       if (droppedShadow.length) {
@@ -1696,7 +1747,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // MEASURED, INCLUDING WHEN IT IS KILLED. A contract call that ran to its cap and was cut off is
       // the strongest evidence this chain is slow, and it used to be discarded — see PreambleProgress.
       let contractCallMs = 0;
-      if (shareContract && contractCap > 0 && contractAffordable) {
+      const nothingShared = shareContract && contractHasNothingToShare(manifest);
+      if (nothingShared) {
+        clock.contractOutcome = 'not-needed';
+        deps.log?.('⏭️ No shared contract needed — the app has one component, so there is nothing for separate files to agree on.');
+      } else if (shareContract && contractCap > 0 && contractAffordable) {
         deps.log?.('Designing the shared types & component contract…');
         const contractStartedAt = Date.now();
         try {
@@ -1842,7 +1897,12 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
           // Anchoring every file call to the SAME absolute instant the lane's own race is bound by means
           // an abandoned closure's next attempt hits `bound.expired` and REFUSES BEFORE SPENDING — see
           // OpenAiToolRunner.runTurn — instead of starting another multi-minute call nobody will read.
-          const text = await deps.generate(fileSystemPrompt(deps.framework), fileUserPrompt(deps.prompt, spec, manifest, contract, depBlock, contractPath || undefined), { deadlineAt: laneStartedAt + overallMs });
+          // A config file the project already has is shown to the call that rewrites it (isProjectConfigPath).
+          const existing = deps.readExisting && isProjectConfigPath(spec.path) && deps.scaffoldPaths.includes(spec.path)
+            ? await deps.readExisting(spec.path).catch(() => null)
+            : null;
+          if (lapsed) return null;
+          const text = await deps.generate(fileSystemPrompt(deps.framework), fileUserPrompt(deps.prompt, spec, manifest, contract, depBlock, contractPath || undefined, existing), { deadlineAt: laneStartedAt + overallMs });
           if (lapsed) return null; // timed out while this call was in flight — discard, don't log
           const blocks = parseFileBlocks(text);
           const match = blocks.find((b) => b.path === spec.path) ?? blocks[0];

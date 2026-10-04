@@ -36,7 +36,7 @@
  * summary read that silence as "no TypeScript source was written this build". See
  * `writeTypecheckUntouched` and `writeTypecheckSummary`'s third argument.
  */
-import { robustTscCommand, TSC_BIN } from './tscCommand';
+import { robustTscCommand, TSC_BIN, PRIME_NODE_MODULES } from './tscCommand';
 import { suggestedPropertyRenames, type TscError } from './EndgameRepair';
 import { tscErrorCauses, tscCauseNote, remedyFileFor } from './tscErrorCause';
 
@@ -90,7 +90,9 @@ export function writeTypecheckCommand(): string {
 export const WARMUP_COMPILED_MARKER = 'NBAI_WARMUP_COMPILED';
 
 export function writeTypecheckWarmupCommand(): string {
-  return `if [ -x ${TSC_BIN} ] && [ -f tsconfig.json ] && [ ! package.json -nt node_modules ]; then `
+  // The baked tree is primed first (Q-304): a fresh starter has no node_modules at all, and a copy plus
+  // an atomic rename is seconds, where the first write's check would otherwise pay a cold install.
+  return `${PRIME_NODE_MODULES}if [ -x ${TSC_BIN} ] && [ -f tsconfig.json ] && [ ! package.json -nt node_modules ]; then `
     + `${TSC_BIN} --noEmit --incremental --tsBuildInfoFile ${WRITE_TYPECHECK_TSBUILDINFO} >/dev/null 2>&1; echo ${WARMUP_COMPILED_MARKER}; fi; true`;
 }
 

@@ -688,6 +688,18 @@ async function press(page, i) {
   }
 }
 
+// Why a press did not complete, read from Playwright's own call log (queue Q-247). Its first line is only
+// "Timeout 4000ms exceeded"; the element that took the click, or the state the click waited for, is
+// further down. A covered control is named with what covers it, so the next report can say whose it is.
+function pressFailureNote(e) {
+  const lines = String(e && e.message || e).split('\\n').map((l) => l.replace(/\\u001b\\[[0-9;]*m/g, '').trim().replace(/^-\\s*/, ''));
+  const cover = lines.find((l) => /intercepts pointer events/.test(l));
+  if (cover) return 'covered by ' + cover.replace(/\\s*intercepts pointer events.*$/, '').replace(/\\s+/g, ' ').slice(0, 100);
+  const state = lines.slice().reverse().find((l) => /element is not (?:visible|enabled|stable|attached)|outside of the viewport/.test(l));
+  if (state) return state.slice(0, 100);
+  return lines[0].slice(0, 120);
+}
+
 async function settle(page) {
   await page.waitForLoadState('networkidle', { timeout: 2500 }).catch(() => {});
   await page.waitForTimeout(500);
@@ -760,7 +772,7 @@ async function pressOne(browser, target, discoverAgainst) {
     // The press itself could not complete (covered, detached, timed out). That is our instrument,
     // not the app — reported as skipped, never as a failure.
     res.verdict = 'skipped';
-    res.note = 'could not be pressed: ' + String(e && e.message || e).split('\\n')[0].slice(0, 120);
+    res.note = 'could not be pressed: ' + pressFailureNote(e);
   }
   armed = false;
   await page.close().catch(() => {});
@@ -834,7 +846,7 @@ async function narrowOne(browser, target) {
     }
   } catch (e) {
     res.verdict = 'skipped';
-    res.note = 'could not be used: ' + String(e && e.message || e).split('\\n')[0].slice(0, 120);
+    res.note = 'could not be used: ' + pressFailureNote(e);
   }
   armed = false;
   await page.close().catch(() => {});

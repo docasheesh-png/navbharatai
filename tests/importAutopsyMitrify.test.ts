@@ -103,7 +103,7 @@ describe('ROOT CAUSE 2 — dependencies are installed before a command that need
     const at = e2b.indexOf('async ensureDependencies');
     const seg = e2b.slice(at, at + 1400);
     expect(seg).toContain('buildDepsStaleCheckCommand()');
-    expect(seg).toContain('this._npmInstall(sandbox)');
+    expect(seg).toContain('this._npmInstall(sandbox, workspaceId)');
   });
 
   it('the migration call site installs FIRST and skips the migration when the install fails', () => {

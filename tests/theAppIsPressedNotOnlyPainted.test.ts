@@ -202,7 +202,9 @@ describe('the wiring (source guards — tsc and vitest cannot see a missing call
   });
   it('the build card is emitted ONCE, merged — a second event would erase the journey\'s proof', () => {
     expect((route.match(/emit\(\{ type: 'verified'/g) ?? []).length).toBe(1);
-    expect(route).toMatch(/mergeUserProofs\(journeyProof, exploreProof\)/);
+    // Widened 2026-10-04: the card now also carries the platform's own checks (buildProofCard.ts),
+    // so the call takes a third proof. The pin is on "merged, once" — not on the argument count.
+    expect(route).toMatch(/mergeUserProofs\(journeyProof, exploreProof[,)]/);
   });
   it('its "did not look" codes are never counted against the app nor offered as a fix', () => {
     const diag = read('src/server/AgentV3/BuildDiagnostics.ts');

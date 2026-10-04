@@ -157,7 +157,7 @@ describe('the wiring itself', () => {
 
   it('it is checked BEFORE the command is run', () => {
     const guardAt = dispatcher.indexOf('shouldRefuseClone({');
-    const runAt = dispatcher.indexOf('await this.actuator.runCommand(this.workspaceId, effectiveCommand)');
+    const runAt = dispatcher.indexOf('await this.actuator.runCommand(this.workspaceId, background.command)');
     expect(guardAt).toBeGreaterThan(-1);
     expect(runAt).toBeGreaterThan(-1);
     expect(guardAt).toBeLessThan(runAt);

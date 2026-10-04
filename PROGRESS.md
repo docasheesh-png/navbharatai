@@ -88944,3 +88944,14 @@ ProjectPlan's project gate (`BIG_SOFTWARE_NOUN` — "स्कूल मैन�
 ("एक टूडू ऐप बनाओ") was already rescued in the live route by the platform's `new_build` floor; only its label
 was wrong, now `simple_app`.
 
+### 2026-10-04 — Q-150: a credential label is not a credential value
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-150 error logs flagged as credential leaks | `lineLogsCredential` = console call AND a sensitive word anywhere on the line | a label read as a value | reads values only: a sensitive name in code (`password`, `user.password`, `${apiKey}`), or a string label ending on one (`"password:"`, `` `token=${t}` ``) followed by a non-error value; `PostEditReviewer`'s label-matching "typo" entry replaced by the shared detector | `tests/theLabelIsNotTheValue.test.ts` (old detector → 5 fail; old reviewer → 2 fail incl. the census of console+credential regexes) |
+
+What it cost before: the false finding is the readiness gate's one HARD compliance block, and the deterministic
+heal (`credentialLogRedaction.ts`) "fixed" it by emptying the call — `console.error('Failed to reset password',
+err)` became `console.error()`, deleting a working error log. Recall went up too: `'API key:', key` and
+`` `token=${t}` `` were missed before and are caught now.
+

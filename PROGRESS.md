@@ -88427,3 +88427,12 @@ module), with five false findings on the way. Ledger (problem → root cause →
 - **Q-395** — a "continue" module turn showed the whole-app ETA and withdrew it seconds later; now never shown.
 - 🟡 Q-396 (no-tests warning on module turns), Q-397 (ignored theme note), Q-398 (APP_SCOPE small word as reason):
   BLOCKED with options in the queue. Q-399 (crawl bench, Haiku planner) resolved as admin-decided behaviour.
+
+### 2026-10-04 — Command-shape census (class behind Q-390) — Q-490
+
+#3506 fixed the instance (a path containing `vite`). The census of every command builder the platform runs found the
+rest of the class: a word inside a HYPHENATED name still counted (`ls /x/vite-react`, `cd my-dev-app`, `vite-node`).
+`vite` and `dev/serve/watch` now need whole names; `--watch`, `webpack-dev-server` and `vue-cli-service serve` stay
+launches. The warm-cache path had a second copy in `E2BActuator.ts`; it now reads `WARM_NODE_MODULES`. Locked by
+`tests/ourOwnCommandsAreNotDevServerLaunches.test.ts`, which fails when a new command builder is not classified.
+Queue: Q-370, Q-371 (#3497) and Q-390..Q-395, Q-399 (#3506) leave the open table on merge.

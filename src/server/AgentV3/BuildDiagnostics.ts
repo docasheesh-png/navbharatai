@@ -143,7 +143,7 @@ const PROCESS_ONLY_CODES = new Set([
   // that did not happen says something about OUR instrument, never about the user's app.
   'CHEAP_REVIEW_NOT_RUN',
   // How this turn was ROUTED is a fact about our engine, never a finding about the user's app.
-  'BUILD_ORDER_READ_AS_EDIT',
+  'BUILD_ORDER_READ_AS_EDIT', 'PORT_DIGEST',
   // How often the MODEL re-read files, a scan of the workspace we could not do, and a retry of our own:
   // three facts about our engine (autopsy de3bb2bb — REPEATED_READS was one of the two open warnings that
   // held a working app at YELLOW: "2 thing(s) worth a look").

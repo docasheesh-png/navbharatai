@@ -87893,3 +87893,8 @@ All on PR #3488, each locked by a test proven by reversion.
 | Q-112 | New-tab links opened inside the phone app's own WebView | Fixed one link at a time; the next link written was bare again. (Measured: every JSX new-tab link already carried `rel`.) | One delegated listener in the native shell (`installExternalLinkHandler`) sends them to the system browser; our own origin, downloads and modified clicks are left alone | `aNewTabLinkOpensTheRealBrowser` |
 
 ⚠️ Q-112 reaches phone users only with a fresh `.aab`/`.ipa` (bundled mode).
+
+## 2026-10-04 — Autopsy 51ef24ad, part 2: a port is handed its source project; its ETA is sized by it (Q-320, Q-321)
+- **Q-320:** `portDigest.ts` — on a build ORDER over a project with ≥3 non-web sources (Kotlin/Java/Swift/Dart), the original sources are read once and a bounded digest (screens, view-models, data files with their declarations; data models whole) is prepended to the architect's prompt and handed to every specialist (`SubAgentDeps.portDigest`). Report line `PORT_DIGEST` (process-only). `taskHandoff.filesNamedIn` now attaches `.kt/.java/.swift/.dart` paths a task names. Kill switch `AGENTV3_PORT_DIGEST=off`.
+- **Q-321:** the ETA of a turn the router sized by its project (`complexityDecision.source === 'workspace'`, #3487) counts the project's own screen files (`projectSizedComplexity`) and reads the `complex_app` fleet history.
+- Correction to part 1's note: the specialist's 40 steps were not mostly Kotlin reads — about 17 went to `index.css` edits against rules that did not exist (fixed in #3487, `missingCssSelectors`). Both halves were real.

@@ -40,6 +40,7 @@ import { fileBudgetForPrompt, overBudgetNote } from '../AgentV3/fileBudget';
 import { measuredRemainingMs, measuredEtaText, measuredRemainingFromSteps, stepEtaText, firstEtaLine, formatEtaRange, fleetEtaLine, finalChecksEtaLine } from '../AgentV3/progressEta';
 import { estimateIsEvidenced, unevidencedFirstEtaLine, unevidencedEtaTickLine, etaEvidenceNote, roughEstimateBand } from '../AgentV3/etaEvidence';
 import { decideComplexity, scaffoldedComplexityDecision, workspaceSizedComplexity } from '../AgentV3/complexityRouting';
+import { isPortTurn, collectPortSources, portDigest, foreignSourcePaths } from '../AgentV3/portDigest';
 import { planningRequest, planningContextNote, wasBuildRequest } from '../AgentV3/planningRequest';
 import { unrelatedToExistingApp, unrelatedRequestSteer, unrelatedRequestFallback } from '../AgentV3/unrelatedRequest';
 import { writeTypecheckSummary, writeTypecheckEnabled, shouldTypecheckWrite, writeQualitySummary } from '../AgentV3/writeTimeTypecheck';
@@ -434,7 +435,7 @@ import { abortOutcomeFor, ABORT_OUTCOME_CODES } from '../AgentV3/abortOutcome';
 import { sandboxWasUnavailable } from '../AgentV3/sandboxAvailability';
 import { outcomeCodeOf, providerFailuresLookDegraded, providerFailuresLookMisconfigured, buildStarvedItsOutputBudget, stoppedByUser, buildWasStopped } from '../AgentV3/BuildDiagnostics';
 import { ADVISORY_CAP_CODE } from '../AgentV3/advisoryCapOutcome';
-import { estimateBuildTime, complexityFromPrompt, liveEtaTick } from '../lib/BuildTimeEstimator';
+import { estimateBuildTime, complexityFromPrompt, projectSizedComplexity, liveEtaTick } from '../lib/BuildTimeEstimator';
 import { resolvePipelineDepth, scaleBuildSeconds, reviewerBudgetMs, reviewGraceMs, type PipelineDepth } from '../AgentV3/PipelineDepth';
 import { freeBuildWindow, noteFreeBuildStart, decideFreePause, freePauseMessage } from '../AgentV3/freeBuildTimeCap';
 import { correctionReserveMs, generationBudgetMs } from '../AgentV3/correctionReserve';
@@ -10660,6 +10661,8 @@ async function noteBuildOutcome(
     let readerAnswered = false;
     /** Set when a BUILD order was turned into an edit by the net below — recorded once a report exists. */
     let buildOrderReadAsEdit: { files: number; ownFiles: number; readerRan: boolean } | null = null;
+    /** The original project's digest on a PORT turn (portDigest.ts); '' otherwise. Read by every spawn. */
+    let portDigestText = '';
     /** What happened to the intention reader, in words the report can print (autopsy 6e646503). */
     let readerOutcome: ReaderOutcome | undefined;
     try {
@@ -14082,7 +14085,11 @@ async function noteBuildOutcome(
           // build records we ALREADY store durably, so this adds no storage and costs no provider spend.
           // Best-effort by construction: a history read that fails yields [], i.e. exactly today's
           // behaviour, and can never delay or fail a build.
-          const etaComplexity = complexityFromPrompt(planning.sizing);
+          // A port is estimated by the project it ports, as it is routed (autopsy 51ef24ad).
+          const etaByProject = complexityDecision.source === 'workspace';
+          const etaComplexity = etaByProject
+            ? projectSizedComplexity(complexityFromPrompt(planning.sizing), projectFilePaths)
+            : complexityFromPrompt(planning.sizing);
           const past = await recentBuildHistoryFor(
             workspaceId, etaComplexity,
             (id, n) => listDiagnosticsHistory(id, n) as Promise<any>,
@@ -14095,7 +14102,7 @@ async function noteBuildOutcome(
           // A seeded template is its own kind of build (autopsy 4a1c0157): the same `scaffoldWillSeed` that
           // routed it to the cheap rung picks the slice, so the ETA never prices template polish as a
           // from-scratch `complex_app`.
-          const etaFleetKey = analysis?.taskType ? etaTaskKey(analysis.taskType, scaffoldWillSeed) : null;
+          const etaFleetKey = etaByProject ? 'complex_app' : analysis?.taskType ? etaTaskKey(analysis.taskType, scaffoldWillSeed) : null;
           if (past.length === 0 && etaFleetKey) {
             try { fleet = fleetHistoryFromTelemetry(await withTimeout(agentV3CostTelemetry.list(7), 3_000, 'eta-fleet'), etaFleetKey, etaComplexity); } catch { /* best-effort */ }
           }
@@ -15066,6 +15073,7 @@ async function noteBuildOutcome(
         // words + the attachment + the earlier requests), and on a "Continue…" turn the request it continues
         // (requestForChecks.ts, autopsy 241215d1).
         userRequest: () => (checksRequest === prompt ? planning.text : checksRequest),
+        portDigest: () => portDigestText,
       };
       const spawnSubAgent = makeSubAgentSpawn(subAgentDeps);
       // Layer 84 (Multi-Model Ensemble): the Architect can call second_opinion to
@@ -15962,6 +15970,24 @@ async function noteBuildOutcome(
               message: 'This message read as an order to BUILD, and was turned into an edit because the workspace already had files.',
               detail: `${buildOrderReadAsEdit.files} file(s) in the workspace, ${buildOrderReadAsEdit.ownFiles} of them the user's own (the rest are the platform scaffold) · ${buildOrderReadAsEdit.readerRan ? 'intention reader answered' : describeReaderOutcome(readerOutcome)} · no "start over" wording · not an explicit complete-app request. A plan is created only on a fresh build, so Software Project Mode cannot run on this turn.`,
             });
+          }
+          // 📦 A PORT IS HANDED ITS SOURCE PROJECT ONCE (autopsy 51ef24ad) — see portDigest.ts. Only a build
+          // ORDER over a project of non-web sources; an ordinary edit never reads this.
+          if (process.env.AGENTV3_PORT_DIGEST !== 'off' && isPortTurn(buildOrderReadAsEdit !== null, fileTree)) {
+            try {
+              const sources = await collectPortSources(fileTree, async (p) => {
+                const raw = await actuator.readFile(workspaceId, p).catch(() => null);
+                return typeof raw === 'string' ? raw : null;
+              });
+              portDigestText = portDigest(sources, foreignSourcePaths(fileTree).length);
+              if (portDigestText) {
+                architectSystem = `${portDigestText}\n\n---\n\n${architectSystem}`;
+                buildDiag.record({
+                  phase: 'plan', severity: 'info', code: 'PORT_DIGEST', autoResolved: true,
+                  message: `The original project was read once and handed to the builder and every specialist: ${sources.length} of ${foreignSourcePaths(fileTree).length} source file(s), ${portDigestText.length} characters.`,
+                });
+              }
+            } catch { /* a head start, never a requirement — the builder can still read the files */ }
           }
           architectSystem = editModePrefix(fileTree) + '\n\n---\n\n' + architectSystem;
           // Warm the project graph from the PERSISTED sandbox files when memory is

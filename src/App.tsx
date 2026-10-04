@@ -304,7 +304,6 @@ export default function App() {
   const {
     wallet, setWallet,
     dailyUsage, setDailyUsage, incrementDailyUsage,
-    billingLogs, setBillingLogs,
     billingTransactions, setBillingTransactions,
     loadingWallet, setLoadingWallet,
     monthlyAiCost, setMonthlyAiCost,
@@ -1028,7 +1027,6 @@ export default function App() {
       fetchWallet();
     } else {
       setWallet(null);
-      setBillingLogs([]);
       setBillingTransactions([]);
     }
   }, [user]);
@@ -4096,7 +4094,6 @@ export default function App() {
               loadingWallet={loadingWallet}
               dailyUsage={dailyUsage}
               billingTransactions={billingTransactions}
-              billingLogs={billingLogs}
               activeBillingDetailTab={activeBillingDetailTab}
               couponCodeInput={couponCodeInput}
               isRedeemingCoupon={isRedeemingCoupon}

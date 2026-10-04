@@ -89203,3 +89203,11 @@ every file past the 80th stayed a stub (and the other call site already used 1,5
 start-new-reads bound (`WARM_INDEX_BUILD_START_MS`), so a big project cannot hold up the start; the instrument
 still names what is left. Lock: `tests/aBigProjectIsNotHollow.test.ts`.
 
+
+### 2026-10-04 — Q-154: the proxy hop count is measured, not guessed
+
+`trust proxy: true` keys anonymous rate limits on the left-most `X-Forwarded-For` entry, which the caller writes.
+The right value is a hop count, and a wrong count would key every anonymous user to one proxy address — so it is
+measured. New admin-only `GET /api/admin/proxy-hops` (`proxyHops.ts`, pure, nothing logged) shows what `req.ip`
+would be under each count for the admin's own request. 🟡 BLOCKED on the admin opening it once on the live site.
+Lock: `tests/theClientIsMeasuredNotGuessed.test.ts` (agrees with Express itself for every count).

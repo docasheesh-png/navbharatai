@@ -16,6 +16,7 @@
 // cheap is safe AND is the whole point (a new user's calculator must not cost a fortune).
 
 import { withoutUrls } from '../lib/promptUrls';
+import { withEnglishReading } from '../lib/devanagariTechTerms';
 import { isComplexAppPrompt, namesBusinessDomain, namesHeavyGame, namesPersonalTool, SIMPLE_APP_SIGNAL } from '../lib/appComplexitySignals';
 import { userAskedForAnAppToBeBuilt, describesWorkAlreadyStarted, type BuildIntent } from './IntentClassifier';
 import { withoutMachineText } from '../lib/machineText';
@@ -209,7 +210,9 @@ function classify(raw: string): { type: TaskType; matched: boolean } {
   // A link is not words: `translate.google.com` is not an order to translate (a9f8d186 / 33812996). Two sessions
   // fixed this class in parallel — `withoutUrls` (promptUrls.ts) and the shared `withoutMachineText`
   // (lib/machineText.ts); both run so neither PR's guarantee is weakened.
-  const p = withoutMachineText(withoutUrls(raw), { keepPasted: true });
+  // A Hindi request in Devanagari names its features in Devanagari — read it in English too (Q-104,
+  // `devanagariTechTerms.ts`), so every Latin signal below reads "लॉगिन, पेमेंट" as "login, payment".
+  const p = withEnglishReading(withoutMachineText(withoutUrls(raw), { keepPasted: true }));
   // Order matters: most-specific / highest-complexity wins when multiple match.
   if (RE.architecture.test(p)) return { type: 'architecture', matched: true };
   // SHARED complex-app verdict (single source of truth with the pipeline-DEPTH/ETA estimator, so the
@@ -762,7 +765,7 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
     score += 6;
     reasons.push('+6 multi-file project');
   }
-  if (RE.hardSignal.test(p)) {
+  if (RE.hardSignal.test(withEnglishReading(p))) {
     score += 15;
     reasons.push('+15 production/security/perf signal');
   }
@@ -782,8 +785,10 @@ export function analyzeRequest(input: AnalyserInput): AnalysisResult {
    *
    * Applied LAST, after every English-driven adjustment and after the simple-app cap, because it is
    * a FLOOR on the evidence that survives when there is no readable evidence — not another
-   * adjustment competing with them. It cannot interact with the cap above: `simple_app` is decided
-   * by an ASCII pattern, so a request this test calls unreadable can never have that task type.
+   * adjustment competing with them. Since Q-104 a Devanagari request can be `simple_app` (its
+   * "कैलकुलेटर" is glossed to "calculator"); if it is ALSO long enough to be unreadable here, the floor
+   * may lift it past the simple-app cap. That is the safe direction — a stronger model, never a weaker
+   * one — and the floor still reads only what survives: the count of enumerated parts.
    *
    * 🔒 A LATIN-SCRIPT PROMPT IS BYTE-IDENTICAL TO BEFORE. `signalsCouldNotRead` is false for
    * English and for romanized Hinglish, so this whole block is skipped on the common path — no new

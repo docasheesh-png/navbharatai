@@ -128,7 +128,9 @@ export const NATIVE_CAPABILITIES: readonly NativeCapability[] = [
     webFallback: 'let the user type the name and number',
     androidPermissions: [{ name: 'READ_CONTACTS' }],
     iosUsage: { NSContactsUsageDescription: 'The app finds the person you ask it to call or message.' },
-    asks: /\b(contacts?|phone\s*book|contact\s+list)\b/i,
+    // The PHONE's contacts — never a "Contact us" page, form or email (the same stray-word class as
+    // the scanner above; this one would have asked for READ_CONTACTS on a landing page).
+    asks: /\b(?:phone\s*book|contact\s+list|(?:phone|my|device|mobile|saved|import(?:ing)?|pick(?:ing)?\s+a)\s+contacts?|contacts?\s+(?:se|list|picker|from\s+(?:the\s+)?phone|access|sync))\b/i,
   },
   {
     id: 'torch',
@@ -167,7 +169,8 @@ export const NATIVE_CAPABILITIES: readonly NativeCapability[] = [
     web: 'works',
     androidPermissions: [{ name: 'ACCESS_COARSE_LOCATION' }, { name: 'ACCESS_FINE_LOCATION' }],
     iosUsage: { NSLocationWhenInUseUsageDescription: 'The app uses your location for the feature you asked for.' },
-    asks: /\b(location|gps|nearby|where\s+am\s+i|meri\s+location)\b/i,
+    // The DEVICE's location — never an "Event location" field or a shop's address.
+    asks: /\b(?:gps|nearby|where\s+am\s+i|meri\s+location|(?:current|my|live|user'?s?|device|real[-\s]?time)\s+location|location\s+(?:tracking|access|permission|based|sharing))\b/i,
   },
   {
     id: 'qr-scan',
@@ -184,7 +187,9 @@ export const NATIVE_CAPABILITIES: readonly NativeCapability[] = [
     androidPermissions: [{ name: 'CAMERA' }],
     androidMetaData: [{ name: 'com.google.mlkit.vision.DEPENDENCIES', value: 'barcode_ui' }],
     iosUsage: { NSCameraUsageDescription: 'The app scans QR codes and barcodes with your camera.' },
-    asks: /\b(qr|barcode|scan(?:ner)?)\b/i,
+    // A bare "scan" is not a camera (autopsy Sur Taal, 2026-10-04): "Music Scanner", "scan the audio
+    // files on the phone" handed a music player the barcode plugin. Scanning needs a CODE to scan.
+    asks: /\b(?:qr|bar\s*codes?)\b|\bscan(?:ner|ning)?\s+(?:the\s+|a\s+|an\s+)?(?:qr|bar\s*codes?|codes?|tickets?|products?|labels?|coupons?|upi)\b|\b(?:ticket|product|code|upi)\s+scan(?:ner|ning)?\b|qr\s*(?:code\s*)?(?:स्कैन|scan)/i,
   },
   {
     id: 'biometric',

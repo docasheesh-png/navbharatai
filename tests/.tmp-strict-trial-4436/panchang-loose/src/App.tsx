@@ -1,0 +1,386 @@
+import { useMemo, useState } from 'react';
+import ThemeToggle from './theme';
+
+const DEG = Math.PI / 180;
+const norm360 = (x: number) => ((x % 360) + 360) % 360;
+
+/** Julian Day at 0h UT of a civil calendar date (Gregorian). */
+function julianDay0(y: number, m: number, d: number): number {
+  let yy = y;
+  let mm = m;
+  if (mm <= 2) { yy -= 1; mm += 12; }
+  const a = Math.floor(yy / 100);
+  const b = Math.floor(a / 4);
+  const c = 2 - a + b;
+  const e = Math.floor(365.25 * (yy + 4716));
+  const f = Math.floor(30.6001 * (mm + 1));
+  return c + d + e + f - 1524.5;
+}
+
+/** Apparent geocentric position of the sun, plus the equation of time. NOAA solar-position algorithm. */
+function sunAt(jd: number) {
+  const t = (jd - 2451545) / 36525;
+  const l0 = norm360(280.46646 + t * (36000.76983 + t * 0.0003032));
+  const m = norm360(357.52911 + t * (35999.05029 - 0.0001537 * t));
+  const ecc = 0.016708634 - t * (0.000042037 + 0.0000001267 * t);
+  const ctr = Math.sin(m * DEG) * (1.914602 - t * (0.004817 + 0.000014 * t))
+    + Math.sin(2 * m * DEG) * (0.019993 - 0.000101 * t)
+    + Math.sin(3 * m * DEG) * 0.000289;
+  const omega = 125.04 - 1934.136 * t;
+  const appLon = l0 + ctr - 0.00569 - 0.00478 * Math.sin(omega * DEG);
+  const mean = 23 + (26 + (21.448 - t * (46.815 + t * (0.00059 - t * 0.001813))) / 60) / 60;
+  const obliq = mean + 0.00256 * Math.cos(omega * DEG);
+  const decl = Math.asin(Math.sin(obliq * DEG) * Math.sin(appLon * DEG)) / DEG;
+  const tanHalf = Math.tan((obliq / 2) * DEG);
+  const vy = tanHalf * tanHalf;
+  const eqTime = 4 * (vy * Math.sin(2 * l0 * DEG) - 2 * ecc * Math.sin(m * DEG)
+    + 4 * ecc * vy * Math.sin(m * DEG) * Math.cos(2 * l0 * DEG)
+    - 0.5 * vy * vy * Math.sin(4 * l0 * DEG) - 1.25 * ecc * ecc * Math.sin(2 * m * DEG)) / DEG;
+  return { lon: norm360(appLon), decl: decl, eqTime: eqTime, obliq: obliq };
+}
+
+/** Geocentric ecliptic longitude of the moon — the classical abbreviated series (about 0.2 deg). */
+function moonLon(jd: number): number {
+  const t = (jd - 2451545) / 36525;
+  const lp = 218.3164477 + 481267.88123421 * t;
+  const d = 297.8501921 + 445267.1114034 * t;
+  const m = 357.5291092 + 35999.0502909 * t;
+  const mp = 134.9633964 + 477198.8675055 * t;
+  const lon = lp
+    + 6.289 * Math.sin(mp * DEG)
+    - 1.274 * Math.sin((2 * d - mp) * DEG)
+    + 0.658 * Math.sin(2 * d * DEG)
+    - 0.186 * Math.sin(m * DEG)
+    - 0.059 * Math.sin((2 * mp - 2 * d) * DEG)
+    - 0.057 * Math.sin((mp - 2 * d + m) * DEG)
+    + 0.053 * Math.sin((mp + 2 * d) * DEG)
+    + 0.046 * Math.sin((2 * d - m) * DEG)
+    - 0.041 * Math.sin((mp - m) * DEG)
+    - 0.035 * Math.sin(d * DEG)
+    - 0.031 * Math.sin((mp + m) * DEG);
+  return norm360(lon);
+}
+
+/** Mean longitude of the ascending lunar node (Rahu). Exact enough to be quoted as given. */
+function rahuLon(jd: number): number {
+  const t = (jd - 2451545) / 36525;
+  return norm360(125.0445479 - 1934.1362891 * t + 0.0020754 * t * t);
+}
+
+/** Lahiri ayanamsa: 23 deg 51 min 11 sec at J2000, precessing about 50.29 arc-seconds a year. */
+function ayanamsa(jd: number): number {
+  return 23.853056 + 0.0139694 * ((jd - 2451545) / 365.2425);
+}
+
+const RASHI = [
+  'मेष', 'वृषभ', 'मिथुन', 'कर्क', 'सिंह', 'कन्या', 'तुला', 'वृश्चिक', 'धनु', 'मकर', 'कुंभ', 'मीन',
+];
+const NAKSHATRA = [
+  'अश्विनी', 'भरणी', 'कृत्तिका', 'रोहिणी', 'मृगशिरा', 'आर्द्रा', 'पुनर्वसु', 'पुष्य', 'आश्लेषा',
+  'मघा', 'पूर्वा फाल्गुनी', 'उत्तरा फाल्गुनी', 'हस्त', 'चित्रा', 'स्वाती', 'विशाखा', 'अनुराधा', 'ज्येष्ठा',
+  'मूल', 'पूर्वाषाढ़ा', 'उत्तराषाढ़ा', 'श्रवण', 'धनिष्ठा', 'शतभिषा', 'पूर्वा भाद्रपदा', 'उत्तरा भाद्रपदा', 'रेवती',
+];
+
+/** Where a sidereal longitude falls: rashi, degree in rashi, nakshatra and pada. Pure. */
+function placeOf(siderealLon: number) {
+  const lon = norm360(siderealLon);
+  const nakIndex = Math.floor(lon / (360 / 27));
+  const inNak = lon - nakIndex * (360 / 27);
+  return {
+    lon: lon,
+    rashiIndex: Math.floor(lon / 30),
+    rashi: RASHI[Math.floor(lon / 30)],
+    degInRashi: lon - Math.floor(lon / 30) * 30,
+    nakshatra: NAKSHATRA[nakIndex],
+    pada: Math.floor(inNak / (360 / 108)) + 1,
+  };
+}
+
+const CITIES: Array<{ name: string; lat: number; lon: number }> = [
+  { name: 'दिल्ली (Delhi)', lat: 28.6139, lon: 77.2090 },
+  { name: 'मुंबई (Mumbai)', lat: 19.0760, lon: 72.8777 },
+  { name: 'कोलकाता (Kolkata)', lat: 22.5726, lon: 88.3639 },
+  { name: 'चेन्नई (Chennai)', lat: 13.0827, lon: 80.2707 },
+  { name: 'बेंगलुरु (Bengaluru)', lat: 12.9716, lon: 77.5946 },
+  { name: 'हैदराबाद (Hyderabad)', lat: 17.3850, lon: 78.4867 },
+  { name: 'अहमदाबाद (Ahmedabad)', lat: 23.0225, lon: 72.5714 },
+  { name: 'पुणे (Pune)', lat: 18.5204, lon: 73.8567 },
+  { name: 'जयपुर (Jaipur)', lat: 26.9124, lon: 75.7873 },
+  { name: 'लखनऊ (Lucknow)', lat: 26.8467, lon: 80.9462 },
+  { name: 'वाराणसी (Varanasi)', lat: 25.3176, lon: 82.9739 },
+  { name: 'पटना (Patna)', lat: 25.5941, lon: 85.1376 },
+  { name: 'भोपाल (Bhopal)', lat: 23.2599, lon: 77.4126 },
+  { name: 'चंडीगढ़ (Chandigarh)', lat: 30.7333, lon: 76.7794 },
+  { name: 'गुवाहाटी (Guwahati)', lat: 26.1445, lon: 91.7362 },
+  { name: 'कोच्चि (Kochi)', lat: 9.9312, lon: 76.2673 },
+];
+// Every city above is in India, so one offset covers them all. Kept as a named constant rather than a
+// literal 5.5 scattered through the maths, because it is the one number a non-India build must change.
+const TZ = 5.5;
+
+const TITHI = [
+  'प्रतिपदा', 'द्वितीया', 'तृतीया', 'चतुर्थी', 'पंचमी', 'षष्ठी', 'सप्तमी', 'अष्टमी',
+  'नवमी', 'दशमी', 'एकादशी', 'द्वादशी', 'त्रयोदशी', 'चतुर्दशी',
+];
+const WEEKDAYS = ['रविवार', 'सोमवार', 'मंगलवार', 'बुधवार', 'गुरुवार', 'शुक्रवार', 'शनिवार'];
+
+// The traditional tables. Each value is WHICH eighth of the daytime that kaal occupies, counting from
+// sunrise, indexed by weekday (0 = Sunday). Deterministic rules, not opinions — which is why they can
+// be computed rather than looked up.
+const RAHU_PART = [8, 2, 7, 5, 6, 4, 3];
+const GULIKA_PART = [7, 6, 5, 4, 3, 2, 1];
+const YAMA_PART = [5, 4, 3, 2, 1, 7, 6];
+
+const CHOGHADIYA = ['उद्वेग', 'चर', 'लाभ', 'अमृत', 'काल', 'शुभ', 'रोग'];
+// Which entry of the cycle the daytime choghadiya starts on, by weekday.
+const CHOGHADIYA_START = [0, 3, 6, 2, 5, 1, 4];
+const QUALITY: Record<string, string> = {
+  'अमृत': 'शुभ', 'शुभ': 'शुभ', 'लाभ': 'शुभ', 'चर': 'मध्यम', 'उद्वेग': 'अशुभ', 'काल': 'अशुभ', 'रोग': 'अशुभ',
+};
+
+/** Minutes after local midnight as HH:MM, wrapping safely across a day boundary. */
+function hhmm(minutes: number | null): string {
+  if (minutes === null || !isFinite(minutes)) return '—';
+  const m = ((Math.round(minutes) % 1440) + 1440) % 1440;
+  const h = Math.floor(m / 60);
+  return String(h).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+}
+
+/** A minute span as "7 घं 12 मि". Rounds the WHOLE span first — rounding the remainder on its own can
+ *  print "60 मि", which is the kind of detail a user notices and nothing else would catch. */
+function dayLengthText(minutes: number): string {
+  const total = Math.round(minutes);
+  return Math.floor(total / 60) + ' घं ' + (total % 60) + ' मि';
+}
+
+/** Sunrise, sunset and solar noon for a place and date, in minutes after local midnight. */
+function solarDay(y: number, mo: number, d: number, lat: number, lon: number) {
+  const jd = julianDay0(y, mo, d) + (12 - TZ) / 24;
+  const s = sunAt(jd);
+  const noon = 720 - 4 * lon - s.eqTime + TZ * 60;
+  const cosH = Math.cos(90.833 * DEG) / (Math.cos(lat * DEG) * Math.cos(s.decl * DEG))
+    - Math.tan(lat * DEG) * Math.tan(s.decl * DEG);
+  if (cosH > 1 || cosH < -1) {
+    // A real polar case: the sun does not rise or set at all. Reported, never faked.
+    return { jd: jd, sun: s, noon: noon, sunrise: null as number | null, sunset: null as number | null };
+  }
+  const h = Math.acos(cosH) / DEG;
+  return { jd: jd, sun: s, noon: noon, sunrise: noon - 4 * h, sunset: noon + 4 * h };
+}
+
+function todayISO(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
+function App() {
+  const [cityIndex, setCityIndex] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem('panchang-city-v1'));
+      return Number.isInteger(saved) && saved >= 0 && saved < CITIES.length ? saved : 0;
+    } catch { return 0; }
+  });
+  const [manual, setManual] = useState(false);
+  const [latText, setLatText] = useState('28.6139');
+  const [lonText, setLonText] = useState('77.2090');
+  const [dateISO, setDateISO] = useState(todayISO);
+
+  const pickCity = (i: number) => {
+    setCityIndex(i);
+    try { localStorage.setItem('panchang-city-v1', String(i)); } catch { /* private mode */ }
+  };
+
+  const place = manual
+    ? { name: 'मेरा स्थान (custom)', lat: parseFloat(latText) || 0, lon: parseFloat(lonText) || 0 }
+    : CITIES[cityIndex];
+
+  const data = useMemo(() => {
+    const parts = dateISO.split('-').map((x) => parseInt(x, 10));
+    const y = parts[0];
+    const mo = parts[1];
+    const d = parts[2];
+    if (!y || !mo || !d) return null;
+    const sd = solarDay(y, mo, d, place.lat, place.lon);
+    const weekday = new Date(y, mo - 1, d).getDay();
+
+    // Tithi / nakshatra are read at SUNRISE, which is the moment a panchang is stated for.
+    const atSunrise = sd.sunrise === null ? sd.jd : julianDay0(y, mo, d) + (sd.sunrise / 60 - TZ) / 24;
+    const sLon = sunAt(atSunrise).lon;
+    const mLon = moonLon(atSunrise);
+    const ayan = ayanamsa(atSunrise);
+    const elong = norm360(mLon - sLon);
+    const tithiIndex = Math.floor(elong / 12);
+    const paksha = tithiIndex < 15 ? 'शुक्ल' : 'कृष्ण';
+    const withinPaksha = tithiIndex % 15;
+    const tithiName = withinPaksha === 14
+      ? (paksha === 'शुक्ल' ? 'पूर्णिमा' : 'अमावस्या')
+      : TITHI[withinPaksha];
+    const moonPlace = placeOf(mLon - ayan);
+    const sunPlace = placeOf(sLon - ayan);
+
+    if (sd.sunrise === null || sd.sunset === null) {
+      return { sd: sd, weekday: weekday, noSunEvent: true, dayLen: 0, tithiName: tithiName, paksha: paksha,
+        moonPlace: moonPlace, sunPlace: sunPlace, ayan: ayan, muhurat: [], kaal: [], chogh: [] };
+    }
+    // Copied out after the check: a property's narrowing does not reach into the closures below.
+    const sunrise = sd.sunrise;
+    const sunset = sd.sunset;
+
+    const dayLen = sunset - sunrise;
+    const eighth = dayLen / 8;
+    const muhurta = dayLen / 15;
+
+    const muhurat = [
+      { label: 'ब्रह्म मुहूर्त (Brahma Muhurat)', from: sunrise - 96, to: sunrise - 48,
+        note: 'सूर्योदय से 96 से 48 मिनट पहले' },
+      { label: 'अभिजित मुहूर्त (Abhijit)', from: sunrise + 7 * muhurta, to: sunrise + 8 * muhurta,
+        note: 'दिन के 15 मुहूर्तों में से 8वाँ' },
+    ];
+
+    const part = (n: number) => ({ from: sunrise + (n - 1) * eighth, to: sunrise + n * eighth });
+    const kaal = [
+      { label: 'राहु काल (Rahu Kaal)', ...part(RAHU_PART[weekday]) },
+      { label: 'गुलिक काल (Gulika)', ...part(GULIKA_PART[weekday]) },
+      { label: 'यमगण्ड (Yamaganda)', ...part(YAMA_PART[weekday]) },
+    ];
+
+    const chogh = [];
+    for (let i = 0; i < 8; i += 1) {
+      const name = CHOGHADIYA[(CHOGHADIYA_START[weekday] + i) % 7];
+      chogh.push({ name: name, quality: QUALITY[name], from: sunrise + i * eighth, to: sunrise + (i + 1) * eighth });
+    }
+
+    return { sd: sd, weekday: weekday, noSunEvent: false, dayLen: dayLen, tithiName: tithiName, paksha: paksha,
+      moonPlace: moonPlace, sunPlace: sunPlace, ayan: ayan, muhurat: muhurat, kaal: kaal, chogh: chogh };
+  }, [dateISO, place.lat, place.lon]);
+
+  const Row = (props: { label: string; value: string; note?: string }) => (
+    <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+      <span>
+        {props.label}
+        {props.note ? <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>{props.note}</span> : null}
+      </span>
+      <strong style={{ whiteSpace: 'nowrap' }}>{props.value}</strong>
+    </div>
+  );
+
+  return (
+    <div className="container" style={{ maxWidth: 580, paddingTop: 24, paddingBottom: 56 }}>
+      <div className="row" style={{ justifyContent: 'space-between', marginBottom: 4 }}>
+        <h1 style={{ margin: 0, fontSize: 24 }}>पंचांग और मुहूर्त</h1>
+        <ThemeToggle />
+      </div>
+      <p style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--muted)' }}>
+        Daily Panchang — आपके शहर के सूर्योदय से गणना किया हुआ
+      </p>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="field">
+          <label htmlFor="city">स्थान (Place)</label>
+          {manual ? (
+            <div className="row" style={{ gap: 8 }}>
+              <input aria-label="अक्षांश latitude" value={latText} onChange={(e) => setLatText(e.target.value)} placeholder="अक्षांश" />
+              <input aria-label="देशांतर longitude" value={lonText} onChange={(e) => setLonText(e.target.value)} placeholder="देशांतर" />
+            </div>
+          ) : (
+            <select id="city" value={String(cityIndex)} onChange={(e) => pickCity(Number(e.target.value))}>
+              {CITIES.map((c, i) => <option key={c.name} value={String(i)}>{c.name}</option>)}
+            </select>
+          )}
+        </div>
+        <button className="btn-ghost" onClick={() => setManual((v) => !v)} style={{ marginTop: 6 }}>
+          {manual ? 'शहर की सूची से चुनें' : 'अक्षांश/देशांतर खुद डालें'}
+        </button>
+        <div className="field" style={{ marginTop: 12 }}>
+          <label htmlFor="date">तारीख़ (Date)</label>
+          <input id="date" type="date" value={dateISO} onChange={(e) => setDateISO(e.target.value)} />
+        </div>
+      </div>
+
+      {!data ? (
+        <div className="nb-empty">एक मान्य तारीख़ चुनें।</div>
+      ) : (
+        <div>
+          <div className="card" style={{ marginBottom: 14 }}>
+            <h2 style={{ fontSize: 15, marginTop: 0 }}>सूर्य (Sun) — {WEEKDAYS[data.weekday]}</h2>
+            {data.noSunEvent ? (
+              <div className="alert">इस अक्षांश पर इस दिन सूर्य उदय या अस्त नहीं होता, इसलिए मुहूर्त की गणना नहीं की जा सकती।</div>
+            ) : (
+              <div>
+                <Row label="सूर्योदय (Sunrise)" value={hhmm(data.sd.sunrise)} />
+                <Row label="सूर्यास्त (Sunset)" value={hhmm(data.sd.sunset)} />
+                <Row label="मध्याह्न (Solar noon)" value={hhmm(data.sd.noon)} />
+                <Row label="दिनमान (Day length)" value={dayLengthText(data.dayLen)} />
+              </div>
+            )}
+          </div>
+
+          {!data.noSunEvent && (
+            <div>
+              <div className="card" style={{ marginBottom: 14 }}>
+                <h2 style={{ fontSize: 15, marginTop: 0 }}>शुभ मुहूर्त</h2>
+                {data.muhurat.map((m) => (
+                  <Row key={m.label} label={m.label} note={m.note} value={hhmm(m.from) + " – " + hhmm(m.to)} />
+                ))}
+              </div>
+
+              <div className="card" style={{ marginBottom: 14 }}>
+                <h2 style={{ fontSize: 15, marginTop: 0 }}>अशुभ काल (इन्हें टालें)</h2>
+                {data.kaal.map((k) => (
+                  <Row key={k.label} label={k.label} value={hhmm(k.from) + " – " + hhmm(k.to)} />
+                ))}
+              </div>
+
+              <div className="card" style={{ marginBottom: 14 }}>
+                <h2 style={{ fontSize: 15, marginTop: 0 }}>दिन का चौघड़िया</h2>
+                <div className="nb-table-wrap">
+                  <table className="nb-table">
+                    <thead>
+                      <tr><th>चौघड़िया</th><th>समय</th><th>स्वरूप</th></tr>
+                    </thead>
+                    <tbody>
+                      {data.chogh.map((c, i) => (
+                        <tr key={String(i)}>
+                          <td>{c.name}</td>
+                          <td>{hhmm(c.from) + " – " + hhmm(c.to)}</td>
+                          <td>
+                            <span className={c.quality === 'शुभ' ? 'badge badge-success' : c.quality === 'अशुभ' ? 'badge badge-danger' : 'badge badge-warning'}>
+                              {c.quality}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--muted)', margin: '10px 0 0' }}>
+                  यह सूर्योदय से सूर्यास्त तक का चौघड़िया है। रात्रि चौघड़िया जानबूझकर शामिल नहीं है।
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="card" style={{ marginBottom: 14 }}>
+            <h2 style={{ fontSize: 15, marginTop: 0 }}>तिथि और नक्षत्र (सूर्योदय पर)</h2>
+            <Row label="तिथि (Tithi)" value={data.paksha + " " + data.tithiName} />
+            <Row label="नक्षत्र (Nakshatra)" value={data.moonPlace.nakshatra + " — पाद " + data.moonPlace.pada} />
+            <Row label="चंद्र राशि (Moon sign)" value={data.moonPlace.rashi} />
+            <Row label="सूर्य राशि (Sun sign)" value={data.sunPlace.rashi} />
+            <Row label="अयनांश (Ayanamsa)" value={data.ayan.toFixed(3) + "°"} />
+          </div>
+
+          {/* 🔒 The accuracy statement, beside the numbers rather than hidden in an About screen. */}
+          <div className="alert" style={{ fontSize: 12 }}>
+            सूर्योदय, सूर्यास्त और मध्याह्न मानक खगोलीय सूत्रों से गिने गए हैं (लगभग 1 मिनट तक सही), और
+            सभी मुहूर्त तथा काल इन्हीं से निकाले गए हैं — कोई समय पहले से भरा हुआ नहीं है। तिथि और नक्षत्र
+            सरलीकृत चंद्र गणना पर आधारित हैं, इसलिए तिथि बदलने के आधे घंटे के आसपास प्रकाशित पंचांग से
+            अन्तर हो सकता है। शुद्ध धार्मिक निर्णय के लिए स्थानीय पंचांग से मिला लें।
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default App;

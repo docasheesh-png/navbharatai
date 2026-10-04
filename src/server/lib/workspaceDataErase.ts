@@ -39,6 +39,7 @@ export interface WorkspaceScopedCollection {
  *   workspace_diagnostics_v3  .doc(workspaceId)
  *   workspace_manual_edits_v3 .doc(workspaceId)
  *   project_plans_v3          .doc(workspaceId)
+ *   app_engineering_memory_v1 .doc(workspaceId)                      ← requirement ledger, issues, change log
  *
  * A GreenGuard snapshot lives in `workspace_files_v3` under a suffixed key that shares the user's
  * prefix, so the range below sweeps it up too — which is right: it is a copy of their app.
@@ -52,6 +53,7 @@ export const WORKSPACE_SCOPED_COLLECTIONS: readonly WorkspaceScopedCollection[] 
   { collection: 'workspace_diagnostics_v3' },
   { collection: 'workspace_manual_edits_v3' },
   { collection: 'project_plans_v3' },
+  { collection: 'app_engineering_memory_v1' },
 ];
 
 export type EraseRefusal = 'unusable-uid' | 'ambiguous-uid';

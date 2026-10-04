@@ -188,7 +188,7 @@ import {
 } from '../AgentV3/explorerRepair';
 import { explorerRepairBudget } from '../lib/explorerRepairBudget';
 import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS } from '../AgentV3/liveBuildCost';
-import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals } from '../AgentV3/releaseGate';
+import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals, type GateState } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary } from '../AgentV3/claimAudit';
 import { judgeRenderStyle, renderStyleNote, unstyledRenderUserNote, type RenderStyleVerdict, type RenderStyleEvidence } from '../AgentV3/renderStyle';
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths, greenRepairPrompt, readRepairVerdicts, type RepairVerdicts } from '../AgentV3/greenReviewPolicy';
@@ -379,10 +379,12 @@ import { shellModuleFor, retireUnbuiltPlan, projectModeEnabled, projectModeDiagn
 import { coordinateBeforeTurn, applyReplan, replanSystemPrompt, replanUserPrompt, LLM_REPLAN_THRESHOLD } from '../AgentV3/ProjectCoordinator';
 import { saveProjectPlan, loadProjectPlan, deleteProjectPlan } from '../AgentV3/ProjectPlanStore';
 import { withTimeout, mapWithConcurrency } from '../AgentV3/asyncUtils';
+import { beginChange, observeProbes, regressionsSoFar, settleChange, type ChangeSession } from '../AgentV3/changeEngine/changeSession';
+import { changeEngineEnabled } from '../AgentV3/changeEngine/engineeringMemoryStore';
 import { createLaneWriteFence } from '../AgentV3/laneWriteFence';
 import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from '../AgentV3/PreviewVerify';
 import { entryShadowRepairHint } from '../AgentV3/entryShadow';
-import { checkFeaturePresence, featurePresenceSummary, featurePresenceEvidence, featurePresenceRepairPrompt, featureHealEnabled, isSignInWall } from '../AgentV3/FeaturePresence';
+import { checkFeaturePresence, featurePresenceSummary, featurePresenceEvidence, featurePresenceRepairPrompt, featureHealEnabled, isSignInWall, probeFeatures, requestedProbeFeatures } from '../AgentV3/FeaturePresence';
 import { adoptHealResult } from '../AgentV3/healResult';
 import { signInExploreEnabled, signInScript, signInCandidates, parseSignInOutput, signInReportLine, isSignInRoute, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
 import { unsupportedStackRequested, unsupportedStackBuilderNote, unsupportedStackUserNote, builtWithLabel } from '../AgentV3/unsupportedStack';
@@ -12761,6 +12763,10 @@ async function noteBuildOutcome(
     // of every file the agent writes (reliable — straight from the write op, not a later listFiles that
     // can come back empty). See the "DURABLE FILE SAVE" block for the normal-completion path.
     const writtenFiles = new Map<string, string>();
+    /** The change being made to this app (changeEngine/changeSession.ts) — null for chat turns or when off. */
+    let changeSession: ChangeSession | null = null;
+    /** The release gate's verdict, once this build reached it — the evidence that its checks ran. */
+    let changeGateState: GateState | undefined;
     /**
      * Put the workspace back to a green snapshot — sandbox, durable store AND the captured-writes map.
      * The ONE revert every `verifyAfterFix` site uses. Before 2026-09-23 each site carried its own copy,
@@ -16315,6 +16321,22 @@ async function noteBuildOutcome(
           ?.text.replace(/^PLAN_STATE\n?/, '');
         const projectCtx = buildProjectContext({ files: tree, projectMap: ctxMem.projectMap(), recentRequests, lastPlan });
         if (projectCtx) buildPrompt = `${projectCtx}\n\n---\n\n${buildPrompt}`;
+        // CHANGE ENGINE — classify this change, load the app's requirement ledger and open issues, and
+        // hand the builder what it must keep working (changeEngine/changeSession.ts). Inside the per-turn
+        // message, never the cached system prefix. Best-effort: a failure leaves the build unchanged.
+        if (changeEngineEnabled() && (intent === 'new_build' || intent === 'edit_existing') && !isImportTurn) {
+          try {
+            const declinedIds = [...(declinedPresenceFeatures(featureConfirmation) ?? [])];
+            const begun = await withTimeout(beginChange({
+              workspaceId, prompt, isEdit: intent === 'edit_existing',
+              requested: requestedProbeFeatures(prompt, new Set(declinedIds)),
+              declined: declinedIds,
+            }), 5_000, 'change-engine-begin');
+            changeSession = begun.session;
+            if (begun.builderBlock) buildPrompt = `${begun.builderBlock}\n\n---\n\n${buildPrompt}`;
+            buildDiag.record({ phase: 'build', severity: 'info', code: 'CHANGE_CLASSIFIED', autoResolved: true, message: begun.reportLine });
+          } catch { /* the change engine is advisory — a build never waits on it */ }
+        }
         // FULLSTACK LAYOUT (admin 2026-08-15): if this app keeps its frontend under client/src (or
         // frontend/src, apps/web/src, …) instead of a top-level src/, say so up front — the builder was
         // guessing `src/App.tsx` on such apps and wasting steps on wrong-path errors. Deterministic,
@@ -21014,6 +21036,30 @@ async function noteBuildOutcome(
                   autoResolved: coverage.missing.length === 0,
                 });
               }
+              // CHANGE ENGINE — the requirement ledger (changeEngine/appSpec.ts). Record what the browser
+              // saw, then RE-PROBE what this app was seen to do before, so an edit that silently removes a
+              // working feature is caught instead of graded against the one sentence that started it.
+              if (changeSession) {
+                observeProbes(changeSession, coverage.probes);
+                const targets = changeSession.regressionTargets.filter((f) => !coverage.probes.some((p) => p.feature === f));
+                if (targets.length > 0 && !abort.signal.aborted) {
+                  let reg = probeFeatures(changeSession.regressionTargets, combineScreens(probeHtml, probedScreens));
+                  // A control on another screen is not gone — read the app's other screens before saying so.
+                  if (reg.missing.length > 0 && probedScreens.length === 0 && !readBehindSignIn) {
+                    const more = await readOtherScreens();
+                    if (more.length > 0) reg = probeFeatures(changeSession.regressionTargets, combineScreens(probeHtml, more));
+                  }
+                  observeProbes(changeSession, reg.probes.filter((p) => targets.includes(p.feature)));
+                }
+                const regressed = regressionsSoFar(changeSession);
+                if (regressed.length > 0) {
+                  buildDiag.record({
+                    phase: 'readiness', severity: 'warning', code: 'FEATURE_REGRESSED', autoResolved: false,
+                    message: `Was working before this change and is missing now: ${regressed.map((r) => `${r.id} ${r.label}`).join(', ')}`,
+                    detail: 'Re-probed from the app\'s requirement ledger — each of these had a real control seen in the running app on an earlier build.',
+                  });
+                }
+              }
             } catch { /* feature-presence is best-effort — never blocks a verified build */ }
             markAppRendered(shot.source, 'preview verify loop');
             break;
@@ -22084,6 +22130,7 @@ async function noteBuildOutcome(
           // made a clean Stop end with "2 unresolved" problems (autopsy 31254f9a). The verdict stays RED.
           autoResolved: gate.state === 'green' || gateEvidence.stoppedByUser === true,
         });
+        changeGateState = gate.state;
         // ── THE VERDICT MAY NO LONGER CONTRADICT THE EVIDENCE ────────────────────────────────────
         //
         // ADMIN REPORT 2026-08-12 (the dukaan stock app) — the worst failure this engine has produced,
@@ -24396,6 +24443,24 @@ async function noteBuildOutcome(
         try {
           const debtFindings = findingsToDebt({ security: getWorkspaceMemory(workspaceId).appSecurityFindings() });
           if (debtFindings.length) void recordDebt(userId, workspaceId, debtFindings, new Date().toISOString());
+        } catch { /* best-effort — never block the result */ }
+      }
+      // CHANGE ENGINE — fold this change into the app's memory: requirement ledger, issue queue, and a
+      // change record (changeEngine/changeSession.ts). One transaction, awaited only up to 4 s so the
+      // admin report carries the record; it can never delay or alter the user's result beyond that.
+      if (changeSession) {
+        try {
+          const settleIssues = buildDiag.report().issues;
+          const settled = await withTimeout(settleChange(changeSession, {
+            ok: result.ok === true,
+            stopped: abort.signal.aborted || buildWasStopped(settleIssues),
+            files: [...writtenFiles.keys()],
+            gate: changeGateState,
+            issues: settleIssues,
+          }), 4_000, 'change-engine-settle').catch(() => null);
+          if (settled) {
+            for (const line of settled.reportLines) buildDiag.record({ phase: 'build', severity: 'info', code: 'CHANGE_RECORDED', autoResolved: true, message: line });
+          }
         } catch { /* best-effort — never block the result */ }
       }
       if (userId && effectiveBilledUsd > 0 && billingActive) {

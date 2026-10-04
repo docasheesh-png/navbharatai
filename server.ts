@@ -188,8 +188,11 @@ import { assetLinksJson, malformedFingerprints, ASSET_LINKS_PATH } from './src/s
 import { rewriteProxyHeaders } from './src/server/lib/authProxyCookies';
 import { canonicalHostRedirect, canonicalHostFromEnv } from './src/server/lib/canonicalHost';
 import { auditEnv } from './src/server/audit_env';
+import { assertProductionConfig } from './src/server/lib/productionConfigContract';
 
 auditEnv();
+// The production configuration contract — before any route exists (productionConfigContract.ts).
+assertProductionConfig();
 
 // ── In-memory server stats ─────────────────────────────────────────────────
 // serverStats singleton — extracted to src/server/lib/serverStats.ts (Phase 1).

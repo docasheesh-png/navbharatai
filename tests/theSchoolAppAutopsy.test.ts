@@ -113,8 +113,8 @@ describe('5 · screens written while the entry is still the starter are answered
 
   it('every write door asks it, once per agent, never on a module turn that does not own the entry', () => {
     const d = read('src/server/AgentV3/ToolDispatcher.ts');
-    expect(d).toContain('const entryLate = await this.entryLateNoteFor(paths);');
-    expect(d).toContain('+ style + entryLate + security');
+    expect(d).toContain('shadow += await this.entryLateNoteFor(paths);');
+    expect(d).toMatch(/\+ security \+ shadow \+ theme \+ touch;/);
     expect(d).toMatch(/if \(this\._entryLateNoted \|\| this\._starterExpected \|\| !paths\.some\(isUiComponentPath\)\) return '';/);
   });
 });
@@ -165,7 +165,8 @@ describe('7 · a live "how long?" is answered with the ETA the user was shown', 
 
   it('every ETA line goes through the one emitter that remembers it', () => {
     const route = read('src/server/routes/agentv3.ts');
-    expect(route.match(/id: 'eta-live'/g)?.length).toBe(1);
+    // One listener, so no ETA emit site can forget to update it.
+    expect(route).toMatch(/events\.subscribe\(\(e\) => \{\s*if \(e\.type === 'narration' && \(e as \{ id\?: string \}\)\.id === 'eta-live'/);
     expect(route).toContain('currentEta: () => lastEtaShown');
   });
 });

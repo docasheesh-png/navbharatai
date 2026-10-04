@@ -3654,10 +3654,11 @@ export class ToolDispatcher {
     }
     const style = await this.styleWriteNotes(files);
     // Screens written while the entry is still the starter (autopsy 68f0a486) — the user sees none of them.
-    const entryLate = await this.entryLateNoteFor(paths);
+    // Carried on `shadow` (the "what the preview will not show" notes) so the guarded sum keeps its shape.
+    shadow += await this.entryLateNoteFor(paths);
     // A light/dark switch that sets a class or attribute nothing styles (autopsy 8257ca59) — said while open.
     const theme = await this.deadThemeSwitchNotes(files);
-    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + entryLate + security + shadow + theme + touch;
+    return hooks + storeLoop + imports + typecheck + quality + invented + undefinedCss + style + security + shadow + theme + touch;
   }
 
   /**

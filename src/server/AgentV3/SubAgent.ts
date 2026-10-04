@@ -155,6 +155,8 @@ export interface SubAgentDeps {
   kitKept?: () => KitKeptTally | undefined;
   /** The parent's stale-module-copy guard (shadowTwin.ts), so a sub-agent's writes are covered too (autopsy e725e002). */
   shadowTwins?: () => ShadowTwinTally | undefined;
+  /** The parent's deletion sink and recorded paths, so a sub-agent's `rm` leaves the saved project (queue Q-246). */
+  deletionWiring?: () => ReturnType<ToolDispatcher['deletionWiring']> | undefined;
 
   /**
    * The raw result of every sandbox `bash` command. Position 13, and never passed — so **not one
@@ -300,6 +302,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       if (sharedKit) childDispatcher.shareKitKept(sharedKit);
       const sharedTwins = deps.shadowTwins?.();
       if (sharedTwins) childDispatcher.shareShadowTwins(sharedTwins);
+      childDispatcher.shareDeletionWiring(deps.deletionWiring?.());
     } catch { /* never block a spawn */ }
     try {
       const pay = deps.serverlessPayment?.();

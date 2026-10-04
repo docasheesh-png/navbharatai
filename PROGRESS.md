@@ -87832,6 +87832,18 @@ turnKind, fail-open judge). The 67 still open (duplicates merged) are now rows Q
 `BUILD_REPORT_QUEUE.md` — code-actionable ones OPEN, admin/infra/vendor ones 🟡 BLOCKED with what they need.
 "Unsure" items are marked as such in their row rather than guessed. Q-021 leaves the table.
 
+## 2026-10-04 — Queue sweep after #3467: Q-246, Q-237, Q-247 fixed; Q-249 and Q-248 recorded
+
+#3467 merged at 06:12Z; its 17 rows left the open table. The four rows it left OPEN were taken next
+(sixth rule, point 4):
+
+| Row | Problem | Root cause · class | Fix | Proof |
+|---|---|---|---|---|
+| Q-246 | A file the build wrote and later removed with the shell came back in the saved project | The final save lets captured writes win; only the delete guard's single SOURCE files were ever reconciled. Class: "the save keeps what the build recorded, whatever the shell did to it since" | `shellRemovedOperands` + `removedRecordedPaths` (shellWriteTargets.ts): any recorded file a command removed — stylesheet, non-source folder, glob, `mv` source — is confirmed gone in the sandbox, then forgotten. Sibling: a sub-agent's dispatcher had no deletion sink; it now shares the parent's (`deletionWiring`) | `aShellDeleteLeavesTheSavedProject`, reverted-and-failed (4 tests) |
+| Q-237 | "Xcode N is too old" read as UNKNOWN | No class for "the build machine, not the app, not the user's key" | `BUILD_MACHINE_TOO_OLD`, matched only on printed lines (never the echoed script); new `build-machine` cure family; autofix stops before a model; admin card column | `theBuildMachineIsNotTheApp` (census over the generated step), reverted-and-failed |
+| Q-247 | The explorer could not press "⏸" and could not say why | The skip note kept Playwright's first line and dropped the call log — the same class #3471 fixed for Q-192 the same hour (this PR's duplicate was dropped in the merge, safeguard #6 in real time) | On #3471's `pressFailureNote`: the cause line's colour codes are stripped (measured in a real browser, it read `\u001b[2m - <div …>`) | `aCoveredControlIsNamed`, real browser, reverted-and-failed |
+| Q-249 | WHAT covered "⏸" in 7da1cdca | 🟡 BLOCKED on the next report (the note now names it) | — | — |
+| Q-248 | Summary contradicts itself / claims unmeasured 44×44 | 🟡 BLOCKED — admin decision; recommendation: check size claims against the phone-layout measurement only | — | — |
 ## 2026-10-04 — Autopsy 51ef24ad (Target-AS, "Build app in this format")
 - **JSX in `.ts`** (useAppState.ts edited ~5× before a rename): `tscErrorCause` gains `jsx-in-ts` — the write-time note and the repair loops now say "move it to `.tsx`, do not edit the JSX". The system prompt also says a JSX file is `.tsx` from its first write.
 - **Dead control shipped** ("Cloud Sync … is a UI-only toggle for now" + a "Sync All Data Now" button that did nothing): system-prompt rule NO CONTROL THAT DOES NOTHING; the build's own admission is recorded as the app finding `UI_ONLY_CONTROL` (`admittedInertControls`, claimAudit.ts).
@@ -87937,3 +87949,15 @@ generated module is code.**
 five things to build. The scorer recognised nothing in a GAME feature list written without software
 words. Widening `COMPLEX_APP_SIGNAL` toward game vocabulary needs a precision corpus first, or it drags
 ordinary prompts up a tier — so it is recorded, not guessed at.
+## 2026-10-04 — Queue items Q-106, Q-145, Q-112 and a Q-246 sibling (admin: "ek ek kar ke sabhi karo")
+
+All on PR #3488, each locked by a test proven by reversion.
+
+| Item | Problem | Root cause | Fix | Test |
+|---|---|---|---|---|
+| Q-106 | A file the build deleted could come back on the next restore | The durable store merges a partial save and carries root manifests forward; only the in-memory maps knew about the delete | After the final save, every path this build deleted that it did not persist is removed from the store (`deletionsToForgetDurably`) | `aDeleteIsDurable` |
+| Q-246 sibling | `codemod_move_file`'s old path was saved again | Its own `rm` never called `reconcileDeletions` | It does now | `aShellDeleteLeavesTheSavedProject` |
+| Q-145 | `execute` / `write` were refused as unknown tools | No alias; intent was unambiguous from the input's shape | `toolAlias.ts`: a fixed table, renamed only with the real tool's required fields and only to a tool this agent was offered | `aMadeUpToolNameRunsAsTheRealOne` |
+| Q-112 | New-tab links opened inside the phone app's own WebView | Fixed one link at a time; the next link written was bare again. (Measured: every JSX new-tab link already carried `rel`.) | One delegated listener in the native shell (`installExternalLinkHandler`) sends them to the system browser; our own origin, downloads and modified clicks are left alone | `aNewTabLinkOpensTheRealBrowser` |
+
+⚠️ Q-112 reaches phone users only with a fresh `.aab`/`.ipa` (bundled mode).

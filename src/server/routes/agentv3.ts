@@ -266,6 +266,7 @@ import { starterCompletedNote, srcHoldsOnlyOurStarter, holdsOnlyOurStarter, MAX_
 import { detectAppRequirements, unconfiguredRequirements, appRequirementsNotice } from '../AgentV3/AppRequirements';
 import { summaryAdditions } from '../AgentV3/summaryAdditions';
 import { deletedFilesNotice, userVisibleDeletions } from '../AgentV3/deletedFilesNotice';
+import { deletionsToForgetDurably } from '../AgentV3/fileDeletion';
 import { credentialGuardEnabled, credentialGuardInstruction, findBootKillingEnvGuards, bootKillingGuardSummary, bootKillerRepairInstruction } from '../AgentV3/missingCredentialGuard';
 import { inrToWalletTokens } from '../lib/payments';
 import { onboardingCreditStore, freeOnboardingLimit } from '../lib/OnboardingCreditStore';
@@ -15014,6 +15015,8 @@ async function noteBuildOutcome(
         kitKept: () => dispatcherForSubAgents?.sharedKitKept(),
         // And its stale-module-copy guard, armed on the parent (autopsy e725e002).
         shadowTwins: () => dispatcherForSubAgents?.sharedShadowTwins(),
+        // And its shell deletions, which must leave the saved project like the parent's (queue Q-246).
+        deletionWiring: () => dispatcherForSubAgents?.deletionWiring(),
         client, actuator, workspaceId, state, events, model, onlyOpus,
         // Tier fidelity + honest billing (admin 2026-07-13): sub-agents spend most of a build's
         // tokens — they must bill at the TIER's rate (Strong → Sonnet × 3, not Opus × 2) and run
@@ -15359,6 +15362,8 @@ async function noteBuildOutcome(
       // Every file this build removed, in order — the user is told about the ones their app had
       // (deletedFilesNotice.ts, queue Q-019). The admin line below stays as it was.
       const deletedThisBuild: string[] = [];
+      // What a shell command removes is checked against these (queue Q-246, shellWriteTargets.ts).
+      dispatcher.setRecordedPaths(() => [...writtenFiles.keys()]);
       dispatcher.setFileDeletionSink((paths) => {
         for (const p of paths) {
           writtenFiles.delete(p);
@@ -24084,6 +24089,25 @@ async function noteBuildOutcome(
             } catch { /* the guard must never cost a user their save — fall through to the plain save */ }
           }
           const finalSave = saved ? Promise.resolve() : saveWorkspaceFiles(workspaceId, toSave).catch(() => {});
+          // …AND THE DURABLE STORE FORGETS WHAT THIS BUILD DELETED (queue Q-106, fileDeletion.ts). The save
+          // above can MERGE a partial set or carry a root manifest forward, so a deleted file would stay in
+          // the index and come back with the next sandbox. Ordered AFTER the save: removing first would let
+          // the merge put it straight back.
+          const forgetDurably = deletionsToForgetDurably(deletedThisBuild, persisted);
+          if (forgetDurably.length > 0) {
+            try {
+              const forgotten = await withTimeout(
+                finalSave.then(() => removeWorkspaceFiles(workspaceId, forgetDurably)),
+                15_000, 'durable-delete',
+              );
+              if (forgotten > 0) {
+                buildDiag.record({
+                  phase: 'build', severity: 'info', code: 'DELETED_FILES_FORGOTTEN', autoResolved: true,
+                  message: `${forgotten} file(s) this build deleted were removed from the saved project too, so the next session does not bring them back: ${forgetDurably.slice(0, 8).join(', ')}${forgetDurably.length > 8 ? ` and ${forgetDurably.length - 8} more` : ''}.`,
+                });
+              }
+            } catch { /* best-effort — the save itself already happened */ }
+          }
           // THE COPY FOLLOWS EVERY PASS THAT CHANGED THE APP, NOT ONE (autopsy 876afca9, 2026-09-30).
           // The copy is taken right after the production build, and four passes may still write after it —
           // the vaccine repair, the runtime auto-fix, the reviewer's repair and the GreenGuard restore. Only

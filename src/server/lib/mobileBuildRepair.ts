@@ -44,6 +44,7 @@ export type RepairCode =
   | 'SIGNING_CREDENTIALS_WRONG'
   | 'GOOGLE_SERVICES_MISSING'
   | 'NPM_REGISTRY_AUTH'
+  | 'BUILD_MACHINE_TOO_OLD'
   | 'TYPE_GATE_BLOCKED_PACKAGING'
   | 'APP_CODE_BUILD_FAILED'
   | 'UNKNOWN';
@@ -180,6 +181,24 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
       summary: 'Your signing key is on the repository, but the password or alias saved with it does not match the key. Check that ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD are exactly the ones you set when you created the keystore.',
       autoFixable: false,
       needs: [],
+    };
+  }
+
+  // ── THE BUILD MACHINE, NOT THE APP (queue Q-237). The iOS pre-flight stops when the runner's newest
+  // Xcode is older than the one Apple accepts uploads from. Neither the user's code nor our workflow is
+  // wrong, so no repair applies and none is attempted. Matched only on what the step PRINTED: GitHub
+  // also echoes the step's script, whose `$MAJOR` is never a number, and a line holding `echo` is the
+  // script, never the answer (`failedStage` learned the same thing). ──
+  const machine = buildMachineTooOld(full);
+  if (machine) {
+    return {
+      code: 'BUILD_MACHINE_TOO_OLD',
+      summary: machine.xcode
+        ? `The build machine for this run had Xcode ${machine.xcode}, and Apple only accepts iPhone apps built with Xcode 26 or newer. Your app is fine — this is the build machine, not your code. Build again later.`
+        : 'The build machine for this run had no Xcode, which an iPhone build needs. Your app is fine — this is the build machine, not your code. Build again later.',
+      autoFixable: false,
+      needs: [],
+      detail: machine.xcode ? { xcode: machine.xcode } : undefined,
     };
   }
 
@@ -475,6 +494,21 @@ export function classifyBuildFailure(rawLog: string, workflowPath: string): Buil
  * answer. Pattern-matching a megabyte of Gradle output for the same fact is guesswork by comparison.
  * Older repositories have no marker, so this returns null and the text patterns above still decide.
  */
+/**
+ * The iOS pre-flight's two "this machine cannot build for Apple" sentences, read from what the step
+ * printed (queue Q-237). A line holding `echo` is the step's script, printed by GitHub before it runs,
+ * so it is never read as the answer. PURE.
+ */
+export function buildMachineTooOld(log: string): { xcode: string | null } | null {
+  for (const line of normalizeLog(log).split('\n')) {
+    if (/\becho\b/.test(line)) continue;
+    const old = line.match(/Xcode (\d+) is too old/);
+    if (old) return { xcode: old[1] };
+    if (/No Xcode on this runner/.test(line)) return { xcode: null };
+  }
+  return null;
+}
+
 export function failedStage(log: string): 'install' | 'webbuild' | 'capacitor' | 'android' | 'ios' | null {
   // `ios` joined the set on 2026-09-22, when the iOS workflow finally got a diagnostic step of its own:
   // without it here, an iOS build that named its stage honestly would still have read as "no marker".

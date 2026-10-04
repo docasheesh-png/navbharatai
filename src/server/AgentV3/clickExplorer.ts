@@ -480,7 +480,8 @@ export const PRESS_FAILURE_CAUSE = /intercepts pointer events|not visible|outsid
  * runner embeds this function's own source, so the browser lane and this file cannot drift. PURE.
  */
 export function pressFailureNote(prefix: string, message: string, causeSrc: string, causeFlags: string): string {
-  const lines = String(message || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  // Playwright colours its call log; the codes are not part of the reason (queue Q-247).
+  const lines = String(message || '').split('\n').map((l) => l.replace(/\u001b\[[0-9;]*m/g, '').trim()).filter(Boolean);
   const head = (lines[0] || '').slice(0, 120);
   const cause = new RegExp(causeSrc, causeFlags);
   let why = '';

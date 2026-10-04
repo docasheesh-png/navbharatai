@@ -5057,15 +5057,15 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 <div className="mt-1 ml-1 flex flex-col gap-0.5 border-l border-line pl-2">
                   <span>Input: {state.costBreakdown.inputTokens.toLocaleString()} tokens · Output: {state.costBreakdown.outputTokens.toLocaleString()} tokens</span>
                   <span>Engine: {state.costBreakdown.engine} · {state.costBreakdown.tier} tier</span>
-                  {/* LIVE PREVIEW (admin 2026-08-22) — shown only when it was actually charged, and named
-                      in NavBharatAI's own words. The free alternative is named beside it on purpose:
-                      telling the user how to spend less is what makes the total worth reading. */}
+                  {/* BUILD MACHINE TIME (admin 2026-08-22; renamed 2026-10-04, Q-306) — shown only when it was
+                      actually charged. It is the time the BUILD held our machine, capped at the build's own
+                      duration, never a live preview the user opened — so it is not called one, and no
+                      "free alternative" is offered for a choice the user never made. */}
                   {typeof state.costBreakdown.livePreviewInr === 'number' && state.costBreakdown.livePreviewInr > 0 && (
                     <span>
-                      Live preview: {(state.costBreakdown.livePreviewSeconds ?? 0) >= 60
+                      Build machine: {(state.costBreakdown.livePreviewSeconds ?? 0) >= 60
                         ? `${Math.round((state.costBreakdown.livePreviewSeconds ?? 0) / 60)} min`
                         : `${state.costBreakdown.livePreviewSeconds ?? 0} sec`} · ₹{state.costBreakdown.livePreviewInr.toFixed(2)}
-                      <span className="text-faint"> · in-browser preview is free</span>
                     </span>
                   )}
                   {(state.costBreakdown.discountInr ?? 0) > 0 && (state.costBreakdown.discountPct ?? 0) > 0 && (

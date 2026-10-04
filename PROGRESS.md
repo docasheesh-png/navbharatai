@@ -87880,3 +87880,14 @@ for one component; a 15.6 s first typecheck).
 Proactive: the biggest lever this report shows is that a **green app's review is now the place real bugs are
 found**, and the green repair is what turns that into a fixed app. The next report with a "Bug:" review should
 carry `REVIEW_FUNCTIONAL_REPAIRED` — that line is the proof this autopsy worked.
+
+### 2026-10-04 — d798ddd3 follow-up: admin decisions Q-306 (a) and Q-307 (yes)
+
+- **Q-306:** the "Live preview: N min — ₹X (the in-browser preview is free)" line was wrong on every build, not
+  only this one. The charge is `billableSandboxDetail` — the BUILD's machine time, capped at the build's own
+  duration — never a preview the user opened. Both surfaces now say "Build machine" and offer no free
+  alternative (`livePreviewChargeLine`, the "Why this cost?" panel). The amount and the field names
+  (`livePreviewSeconds` / `livePreviewInr`, read by bundled phone apps) are unchanged. `LIVE_SERVER_PAID_NOTE`,
+  shown when the user really presses Live, stays as it is. Locked in `tests/livePreviewCharge.test.ts`
+  (reversion-proven).
+- **Q-307:** the eight items argued not defects are accepted by the admin; resolved as not-a-defect.

@@ -1804,7 +1804,12 @@ export function livePreviewChargeLine(b: Pick<UserCostBreakdown, 'livePreviewSec
   if (!(b.livePreviewInr > 0) || !(b.livePreviewSeconds > 0)) return '';
   const mins = b.livePreviewSeconds / 60;
   const shown = mins >= 1 ? `${Math.round(mins)} min` : `${b.livePreviewSeconds} sec`;
-  return `Live preview: ${shown} — ₹${b.livePreviewInr.toFixed(2)} (the in-browser preview is free).`;
+  // 🔴 NAMED FOR WHAT IT MEASURES (admin chose "a", 2026-10-04, Q-306, autopsy d798ddd3). This charge is
+  // `billableSandboxDetail`: the machine time the BUILD held, capped at the build's own duration — never
+  // a live preview the user opened. It read "Live preview: 2 min — ₹0.60 (the in-browser preview is
+  // free)" on a build where the user opened nothing, which told them they had chosen a paid option and
+  // could have avoided it. The amount is unchanged; only the words now say what was charged.
+  return `Build machine: ${shown} — ₹${b.livePreviewInr.toFixed(2)}.`;
 }
 
 /** Minimal shape of the per-provider ledger the billing decision needs (structural — no import cycle). */

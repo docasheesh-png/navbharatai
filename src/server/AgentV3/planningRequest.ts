@@ -295,7 +295,7 @@ export function planningRequest(input: PlanningRequestInput): PlanningRequest {
 /** The admin line for `PLANNING_CONTEXT`. PURE. */
 export function planningContextNote(req: PlanningRequest, promptChars: number): string {
   const aside = req.picturesSetAside > 0
-    ? ` ${req.picturesSetAside} attached picture(s) were not read as part of the request: they are photos, not UI designs, so their descriptions say what the picture shows, not what to build (the builder still sees them).`
+    ? ` ${req.picturesSetAside} attached picture(s) or scanned PDF(s) were not read as part of the request: they are not UI designs, so their descriptions say what the file shows, not what to build (the builder still sees them).`
     : '';
   if (req.sources.length === 0) return `Sized and planned from the message alone (${promptChars} characters).${aside}`;
   const what = req.sources.map((s) => (s === 'attachment'

@@ -323,6 +323,7 @@ export const RETAINED_INDEFINITELY: readonly { collection: string; reason: strin
   { collection: 'workspace_embeddings_v3', reason: "a derived index of the user's code — deleting it degrades their builds" },
   { collection: 'workspace_diagnostics_v3', reason: 'one report per workspace, replaced in place — it does not grow with time' },
   { collection: 'project_plans_v3', reason: "the plan the user's app is being built against" },
+  { collection: 'app_engineering_memory_v1', reason: "the app's requirement ledger, open issues and change log — bounded per app, erased with the workspace" },
   { collection: 'app_builds', reason: "the user's own build record" },
   { collection: 'user_build_history', reason: "the user's own history; removed with their account, not with age" },
   { collection: 'user_costs', reason: 'money. A billing record deleted on a timer cannot be reconciled or disputed' },

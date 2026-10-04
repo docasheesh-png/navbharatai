@@ -168,11 +168,36 @@ export interface ReadyMark {
 export function readyOverrunNote(mark: ReadyMark | null | undefined, endStep: number, endMs: number, opts: { editingExistingApp?: boolean } = {}): string {
   // An edit is not judged at all (see `shouldCheckDone`), and "never judged finished" would read as
   // a finding about an app that was working before the turn began.
-  if (!mark && opts.editingExistingApp) return 'Not measured: this turn edited an app that already existed, so the project score cannot say when the request was done.';
+  if (!mark && opts.editingExistingApp) return 'Not measured: this turn ran as an edit of the files already in the project, so the project score cannot say when the request was done.';
   if (!mark) return 'The app was never judged finished during the build.';
   const steps = Math.max(0, endStep - mark.step);
   const secs = Math.max(0, Math.round((endMs - mark.elapsedMs) / 1000));
   if (steps === 0 && secs === 0) return `The app was judged finished at step ${mark.step} (${mark.score}/100) and the build ended there.`;
   return `The app was judged finished at step ${mark.step} (${mark.score}/100); the build then ran `
     + `${steps} more step(s) over ${secs}s before it ended.`;
+}
+
+/**
+ * 🔴 THE END-OF-TURN GATE IS A JUDGEMENT TOO (Q-310, autopsy d798ddd3, 2026-10-04). A calculator was
+ * finished in 9 steps and shipped in 3.7 min; the mid-build done check had not come due yet, so only the
+ * end-of-turn readiness gate judged it — and READY_BEFORE_END told the admin "The app was never judged
+ * finished during the build" about a build that gate had judged ready. The mark is the MEASUREMENT of
+ * when the app was first finished, so the gate that judged it records it, under the mid-build check's own
+ * rules: never on an edit of an existing app (`readyOverrunNote` says "Not measured" there), never before
+ * this run changed anything, never over a compile that just failed, and never over an earlier mark. PURE.
+ */
+export function endOfTurnReadyMark(p: {
+  existing: ReadyMark | null;
+  readiness: ReadinessReport | null | undefined;
+  typeErrors: number | null;
+  editingExistingApp: boolean;
+  wroteThisRun: boolean;
+  step: number;
+  elapsedMs: number;
+}): ReadyMark | null {
+  if (p.existing) return p.existing;
+  if (p.editingExistingApp || !p.wroteThisRun) return null;
+  if (p.typeErrors !== null && p.typeErrors > 0) return null;
+  if (!appIsDone(p.readiness) || !p.readiness) return null;
+  return { step: p.step, elapsedMs: p.elapsedMs, score: p.readiness.score };
 }

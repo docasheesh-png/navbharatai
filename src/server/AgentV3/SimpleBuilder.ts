@@ -163,6 +163,45 @@ export function parseFileManifest(text: string): SimpleFileSpec[] {
 }
 
 /**
+ * A scaffold file the PLANNER ITSELF says it will not change is not a file to write (autopsy d798ddd3).
+ *
+ * 🔴 Planning "Calculator app", the model listed eleven files and marked six of them in its own words —
+ * `index.html :: HTML entry point (provided)`, `package.json :: … (provided)`, the three tsconfigs. They were
+ * counted as the plan: the shared-contract pass was asked to design a contract for package.json and the
+ * tsconfigs, and `ONESHOT_SKIPPED` said "the file plan had already found 9 files" for an app whose real
+ * work was two. Only a path that IS in the scaffold and whose purpose says it is unchanged is dropped — a
+ * planner that means to edit a scaffold file says what the edit is, and keeps it. PURE.
+ */
+const UNCHANGED_PURPOSE_RE = /\((?:provided|unchanged|existing|already (?:provided|scaffolded|exists|correct)|no changes?(?: needed| required)?|as[- ]is|keep as[- ]is)\)|\b(?:unchanged|no changes? (?:needed|required)|keep(?:s)? (?:it )?as[- ]is|already (?:provided|scaffolded|correct)(?: as shipped)?)\b/i;
+export function dropUnchangedScaffold(
+  manifest: SimpleFileSpec[],
+  scaffoldPaths: readonly string[] = [],
+): { kept: SimpleFileSpec[]; dropped: string[] } {
+  const scaffold = new Set(scaffoldPaths);
+  const dropped: string[] = [];
+  const kept = manifest.filter((m) => {
+    const unchanged = scaffold.has(m.path) && UNCHANGED_PURPOSE_RE.test(m.purpose || '');
+    if (unchanged) dropped.push(m.path);
+    return !unchanged;
+  });
+  return { kept, dropped };
+}
+
+/**
+ * A plan with at most ONE module besides the entry has nothing for a shared contract to agree on
+ * (autopsy d798ddd3). The calculator's real plan was `src/App.tsx` and a stylesheet; the contract pass —
+ * a whole model call — was spent designing "shared types" for one component, crawled for 15 s and ended
+ * the lane. A contract exists so isolated per-file calls agree on names; one module agrees with itself.
+ * The entry (`main.tsx`/`index.tsx`) only renders the root component, which the scaffold already does. PURE.
+ */
+const ENTRY_MODULE_RE = /(?:^|\/)(?:main|index)\.(?:tsx?|jsx?)$/i;
+const SOURCE_MODULE_RE = /\.(?:tsx?|jsx?|mjs|cjs|vue|svelte)$/i;
+export function contractHasNothingToShare(manifest: readonly SimpleFileSpec[]): boolean {
+  const modules = manifest.filter((m) => SOURCE_MODULE_RE.test(m.path) && !/\.d\.ts$/i.test(m.path) && !ENTRY_MODULE_RE.test(m.path));
+  return modules.length <= 1;
+}
+
+/**
  * Cheap CSS sanity: net brace imbalance of a stylesheet (comments stripped). A positive number means
  * unclosed block(s) — postcss/vite will refuse the whole file ("Unclosed block", the exact overlay
  * from the Task-Manager report) and the app renders unstyled/dead while tsc stays green (it never
@@ -1643,7 +1682,12 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       const planned = parseFileManifest(manifestText);
       const provided = new Set(providedBoilerplate(deps.scaffoldPaths));
       const droppedBoilerplate = planned.filter((m) => provided.has(m.path)).map((m) => m.path);
-      const keptBoilerplate = droppedBoilerplate.length ? planned.filter((m) => !provided.has(m.path)) : planned;
+      const keptProvided = droppedBoilerplate.length ? planned.filter((m) => !provided.has(m.path)) : planned;
+      // The planner's own "(provided)" entries — see dropUnchangedScaffold.
+      const { kept: keptBoilerplate, dropped: droppedUnchanged } = dropUnchangedScaffold(keptProvided, deps.scaffoldPaths);
+      if (droppedUnchanged.length) {
+        deps.log?.(`Leaving ${droppedUnchanged.length} file(s) the plan marks as unchanged out of the file list: ${droppedUnchanged.join(', ')}.`);
+      }
       // A second index.html in public/ shadows a Vite app's real entry (autopsy 876afca9) — see entryShadow.ts.
       const { kept, dropped: droppedShadow } = dropShadowingEntries(keptBoilerplate, deps.framework);
       if (droppedShadow.length) {
@@ -1703,7 +1747,11 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
       // MEASURED, INCLUDING WHEN IT IS KILLED. A contract call that ran to its cap and was cut off is
       // the strongest evidence this chain is slow, and it used to be discarded — see PreambleProgress.
       let contractCallMs = 0;
-      if (shareContract && contractCap > 0 && contractAffordable) {
+      const nothingShared = shareContract && contractHasNothingToShare(manifest);
+      if (nothingShared) {
+        clock.contractOutcome = 'not-needed';
+        deps.log?.('⏭️ No shared contract needed — the app has one component, so there is nothing for separate files to agree on.');
+      } else if (shareContract && contractCap > 0 && contractAffordable) {
         deps.log?.('Designing the shared types & component contract…');
         const contractStartedAt = Date.now();
         try {

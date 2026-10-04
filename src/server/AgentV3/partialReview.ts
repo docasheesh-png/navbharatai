@@ -26,7 +26,7 @@
 // PURE — the impure half (subscribing to the stream) stays at the call site, so every rule below is
 // unit-testable against real reviewer output.
 
-import { parseReviewOutput, type ReviewResult } from './ReviewerAgent';
+import { parseReviewOutput, readLabelledFinding, type ReviewResult } from './ReviewerAgent';
 
 /** Reviewer text captured from the live event stream while the review was still running. */
 export interface SalvagedReview extends ReviewResult {
@@ -43,7 +43,8 @@ export interface SalvagedReview extends ReviewResult {
  */
 export function hasSalvageableFindings(text: unknown): boolean {
   if (typeof text !== 'string' || !text.trim()) return false;
-  return /\[(CRITICAL|WARNING|SUGGESTION)\]/i.test(text);
+  // An untagged "**1. Bug: …**" finding counts too — the sibling of `readLabelledFinding` (autopsy d798ddd3).
+  return /\[(CRITICAL|WARNING|SUGGESTION)\]/i.test(text) || text.split('\n').some((line) => readLabelledFinding(line) !== null);
 }
 
 /**

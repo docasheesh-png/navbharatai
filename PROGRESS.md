@@ -88446,3 +88446,86 @@ Nothing was reworded or dropped. A line-count check confirmed every line of the 
 **New rule:** when the admin sets a Cloud Run key, its name is recorded in `docs/claude/ENV_REGISTRY.md`, not in `CLAUDE.md`. Long histories and rationales go in the matching `docs/claude/` file.
 
 Also: Q-013's queue row now says #3496 is merged.
+
+## 2026-10-04 — AUTOPSY 39e982bd: the app was off the user's screen for eight of its nine minutes
+
+Report `39e982bd` — *"BUILD PRIMECLASH ESPORTS — COMPLETE ANDROID APPLICATION"*, a 228-feature request
+for a native Android esports app, built as milestone 1 of a mega-app roadmap. Weak tier, free user,
+`kimi-k2.7-code`, 9.5 min, `ok: true`, billed ₹111.23 (real cost $0.315 + $0.0056 of VM).
+`RELEASE_GATE: YELLOW`. 92/100 health, 185 recorded items.
+
+### The five buckets
+
+- ✅ **Self-healed (6):** the refusal rescued by `UNFINISHED_BUILD_RESUMED`; `IN_BUILD_GREEN_RACED`
+  retried and `GREEN_GUARD_SAVE` succeeded; the write-time typecheck caught `TS2345` in
+  `profileService.ts` and the model fixed it on the very next call; `SPACING_SNAPPED` snapped 6 values
+  with no model call; unused imports cleaned from one file; `npm audit fix` applied the compatible
+  security fixes.
+- 🔀 **Worked around (2):** the whole app built in React instead of the native Android the user asked
+  for — the platform's designed, disclosed substitution, recorded here because the ledger records
+  substitutions whoever decided them; and Firebase unconfigured, so the screens ran on sample data.
+- ⏭️ **Skipped (3):** the Playwright suite written and not run (`TEST_SUITE_UNVERIFIED`); the one
+  derived journey not reached (`JOURNEY_NOT_RUN`); the unused dependency deliberately not pruned (a
+  roadmap turn) — while the user was told to remove it.
+- ❌ **Shipped imperfect (8):** 13 dependency advisories, 5 high; the unused-dep contradiction;
+  `COMPLETE`/`ANDROID` reported as unknown services; `APP_SCOPE`'s false *"clone of Free Fire"*;
+  `REQUIREMENT_GAPS`' **ecommerce** domain asking about *inventory tracking*; *"No tests at all"* false
+  by the end of the build; a YELLOW gate on a journey that could not be reached; 21 of 27 off-grid
+  spacing values left.
+- 🥵 **Struggle (5):** **495 s to first render — 87% of the build**; the refusal turn (~70 s, one
+  871-token call, a user-visible *"⏳ Not finished yet"*); `npm install` + `npm audit fix` = **124 s
+  serial, 22% of the build**; the first write-time typecheck paying to install the compiler (Q-063's
+  class); and an ETA of 14.6–21.9 min against an actual 9.5 — **0.5×, outside the band**.
+
+### The missing subsystem
+
+**There is no mechanism that makes a prompt rule BIND.** Three of this report's items are rules the
+platform had already written down and had no way to enforce: the entry-first rule (`shellEarlyRule`,
+in the prompt since the day it shipped, ignored), the unsupported-stack brief (read correctly, acted on
+wrongly because of what it did not say), and the 4px grid (noted, 21 of 27 left). Every rule in this
+engine that actually changed behaviour became MECHANICAL — a write-time hand-back, a deterministic
+rewrite, a refusal at the door. **A rule that exists only as prose in a ~90 KB system prompt is a
+preference, not a rule**, and the honest way to read "the model ignored the instruction" is "the
+instruction was never binding". Two of the three are made mechanical by this change; the grid is Q-515.
+
+### Four root causes fixed at the class (PR, Q-510..Q-513)
+
+1. **The entry was written 23rd of 24.** `entryFirstWriteNote` is handed back ONCE, at the first source
+   write, while the entry is still our untouched starter — through `writeSteeringNotes`, so every write
+   door carries it. It asks `entryIsStillTheStarter`, the same question the readiness gate and every
+   render proof ask, so a plain-JavaScript app whose `index.html` no longer mounts `src/` is never
+   nagged about `App.tsx` (autopsy 4499741f's cost), and `_starterExpected` exempts a Project Mode
+   module that does not own the entry (6a5fb04b).
+2. **The builder refused instead of building.** `ALREADY_TOLD_LINE` in both stack briefs: the user is
+   already told by the platform, so do not spend a turn explaining — build. The resume stays as the last
+   line of defence; this is the 50/50 half that stops it being needed.
+3. **"Remove this package" about a package the plan is keeping.** `moreStepsPlanned` on
+   `unusedDependencyLine`, fed by the prune's OWN two facts.
+4. **Two English words reported as unknown services.** One `mostlyCapitals` definition, asked of the
+   whole request and of each line.
+
+Locked by `tests/theAppWasOffScreenForEightMinutes.test.ts` (21 cases), **reversion-proven five ways**:
+dropping the note from the shared return fails 4, dropping its once-per-build latch fails 1, dropping
+the already-told line fails 1, dropping `moreStepsPlanned` fails 1, judging the document instead of the
+line fails 2.
+
+### Two things worth recording beyond the fixes
+
+- ⚠️ **The SERVER typecheck caught what the frontend one could not.** `megaRoadmapActive` is
+  `boolean | MegaRoadmap`, not a boolean; `npm run typecheck` passed and `npm run typecheck:server`
+  failed. The gate has both for exactly this reason, and this is the first time in this session that the
+  second one earned its place.
+- ⚠️ **A second pinned source guard broke on a formatting change, two days running.** Yesterday it was
+  `theSizersReadWhatTheBuilderReads` pinning a one-line call; today `theThemeSwitchThatDidNotSwitch`
+  pinned the *whole* expression `+ security + shadow + theme + touch;`, so adding a note to the shared
+  return failed a test about the theme switch. **A source guard should pin its own term, never its
+  siblings' list** — relaxed to `/\+ theme\b/` inside the one shared return, and re-proven to still bite
+  by dropping the term. Worth remembering before writing the next one.
+
+### Five items left OPEN, honestly (Q-514..Q-518)
+
+The auth journey's reach word ("auth" can essentially never match a control); the snapper-vs-scorer
+21-value disagreement; `APP_SCOPE`'s false reason and the ecommerce domain; *"No tests at all"* left
+standing after the scaffold pass; and the explorer counting *"View Details — nothing visibly changed"*
+as a pass. Each needs a precision corpus or a cheap diagnosis rather than a guess, and each is recorded
+with what it would take.

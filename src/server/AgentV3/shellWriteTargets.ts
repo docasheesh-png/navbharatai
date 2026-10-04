@@ -114,8 +114,30 @@ export function shellWriteTargets(command: string): string[] {
       files.forEach(add);
     } else if (name === 'cp' || name === 'mv' || name === 'install') add(operands[operands.length - 1]);
     else if (name === 'rm' || name === 'truncate' || name === 'touch') operands.forEach(add);
+    else if (/^(?:node|nodejs|python3?|perl)$/.test(name)) scriptWriteTargets(rest).forEach(add);
   }
   return [...found];
+}
+
+/**
+ * Files an inline script writes by a LITERAL path — `node -e "fs.writeFileSync('src/a.css', …)"`,
+ * `python3 -c "open('src/a.py','w')…"`. A model rewrites a stylesheet this way as readily as with
+ * `sed -i` (autopsy 536c8189 used three `node -e` scripts on `src/index.css`), and such a write reached
+ * neither the Green Freeze nor the saved project. Only a quoted literal counts — a path built at run time
+ * is not knowable from the text, so it is left out rather than guessed (precision over recall).
+ */
+function scriptWriteTargets(args: readonly string[]): string[] {
+  const i = args.findIndex((a) => a === '-e' || a === '-c' || a === '--eval' || /^-[a-zA-Z]*[ec]$/.test(a));
+  const script = i >= 0 ? args[i + 1] : undefined;
+  if (!script) return [];
+  const out: string[] = [];
+  const patterns = [
+    /\b(?:writeFileSync|writeFile|appendFileSync|appendFile)\(\s*(['"`])([^'"`$]+?)\1/g,
+    /\bopen\(\s*(['"])([^'"]+?)\1\s*,\s*['"][wax]/g,
+    /\bPath\(\s*(['"])([^'"]+?)\1\s*\)\s*\.\s*write_(?:text|bytes)\(/g,
+  ];
+  for (const re of patterns) for (const m of script.matchAll(re)) out.push(m[2]);
+  return out;
 }
 
 /**
@@ -149,4 +171,88 @@ export function shellRemovalTargets(command: string): { paths: string[]; globs: 
     }
   }
   return { paths: [...paths], globs: [...globs] };
+}
+
+/** Folders a build generates or installs into — never the project's own source. */
+const NOT_SOURCE = /^(?:node_modules|dist|build|\.git|\.next|\.vite|coverage)\//;
+
+/** At most this many files are read back after one command (a glob-free command rarely names more). */
+export const MAX_READ_BACK = 20;
+
+/**
+ * The files to read back from the sandbox after a shell command, so a shell write reaches the saved
+ * project (ToolDispatcher.recordShellWrites). Removal-only commands are left out, generated folders are
+ * never source, and `skip` is a path already read back elsewhere. PURE.
+ */
+export function shellReadBackTargets(command: string, skip: string | null = null): string[] {
+  const removedOnly = new Set(shellRemovalTargets(command).paths);
+  return shellWriteTargets(command)
+    .filter((p) => p !== skip && !removedOnly.has(p) && !NOT_SOURCE.test(p))
+    .slice(0, MAX_READ_BACK);
+}
+
+/**
+ * WHAT A SHELL COMMAND TOOK OUT OF THE PROJECT (queue Q-246, candy report 7da1cdca).
+ *
+ * `fileDeletion.ts` drops a deleted file from the saved project, but only for what the delete guard
+ * parses: a single SOURCE file (`.ts`, `.tsx`, …) named by `rm`. Everything else a command removes stayed
+ * in the build's captured writes, and the final save lets captured writes win over the sandbox scan. So
+ * `rm src/old.css`, `rm -rf src/legacy`, `rm src/*.bak.ts` and the source of `mv a.ts b.ts` were all put
+ * back into the saved project, and restored into the next sandbox.
+ *
+ * This returns the operands that may have gone: the `rm` / `unlink` / `git rm` paths and globs, plus the
+ * sources of `mv` / `git mv` (every operand but the last; `-t DIR` is not read, precision over recall).
+ * The caller matches them against the paths it recorded and asks the sandbox before forgetting any. PURE.
+ */
+export function shellRemovedOperands(command: string): { paths: string[]; globs: string[] } {
+  const removal = shellRemovalTargets(command);
+  const paths = new Set(removal.paths);
+  const globs = new Set(removal.globs);
+  for (const variant of shellCommandVariants(String(command ?? ''))) {
+    for (const words of simpleCommands(withoutHeredocBodies(variant))) {
+      const args = words.filter((w, i) => !/^(?:[0-9]|&)?[<>]/.test(w) && !/^(?:[0-9]|&)?[<>]/.test(words[i - 1] ?? ''));
+      let [cmd, ...rest] = args;
+      if (!cmd) continue;
+      let name = cmd.split('/').pop() ?? cmd;
+      if (name === 'git' && rest[0] === 'mv') { name = 'git-mv'; rest = rest.slice(1); }
+      if (name !== 'mv' && name !== 'git-mv') continue;
+      if (rest.some((a) => a === '-t' || a.startsWith('--target-directory'))) continue;
+      const operands = rest.filter((a) => !a.startsWith('-'));
+      for (const src of operands.slice(0, -1)) {
+        const p = toWorkspacePath(src);
+        if (p) paths.add(p);
+      }
+    }
+  }
+  return { paths: [...paths], globs: [...globs] };
+}
+
+/** A shell glob as a regex over one path: `*` and `?` never cross a `/`. */
+function globRegex(glob: string): RegExp {
+  const body = glob.replace(/^\.\//, '').replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]');
+  return new RegExp(`^${body}$`);
+}
+
+/** At most this many recorded paths are checked against the sandbox after one command. */
+export const MAX_REMOVAL_PROBES = 200;
+
+/**
+ * The recorded paths a command's removed operands name: the path itself, everything under it when it is
+ * a folder, and every path a glob matches. Only RECORDED paths are returned, so this can never name a
+ * file the build did not save. Generated folders are never source. PURE.
+ */
+export function removedRecordedPaths(
+  removed: { paths: readonly string[]; globs: readonly string[] },
+  recorded: Iterable<string>,
+): string[] {
+  const res = removed.globs.map(globRegex);
+  const out: string[] = [];
+  for (const raw of recorded) {
+    const p = String(raw ?? '');
+    if (!p || NOT_SOURCE.test(p)) continue;
+    const named = removed.paths.some((r) => p === r || p.startsWith(`${r.replace(/\/+$/, '')}/`)) || res.some((re) => re.test(p));
+    if (named && !out.includes(p)) out.push(p);
+    if (out.length >= MAX_REMOVAL_PROBES) break;
+  }
+  return out;
 }

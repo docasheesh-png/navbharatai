@@ -31,6 +31,7 @@
 
 import { pressName, FAILING_VERDICTS, type ExploreRun, type PressResult, type PressVerdict, type UserProof } from './clickExplorer';
 import { strictReverify, verifyAfterFix } from './verifyAfterFix';
+import { PLATFORM_CHECKS_THE_FIX } from './repairScope';
 
 /** The green-freeze pass name (greenFreeze.ts ALLOWED_PASSES) and the billing phase share this word. */
 export const EXPLORER_REPAIR_PASS = 'explorer-repair';
@@ -112,6 +113,30 @@ export function explorerRepairFindings(targets: PressResult[]): string[] {
           : 'Find the cause in the code that runs when it is used and fix it so the control does what its label says.';
     return `In a real browser, ${doing} "${p.label}"${where} ${what}.${said} ${fix} Do not remove, hide or disable the control — that is not a fix. ${NO_INVENTED_RESULT}`;
   });
+}
+
+/**
+ * The explorer repair's own instruction (autopsy 6cd698cc). It used to be handed the code reviewer's prompt —
+ * "a strict code review found…", ending "After fixing, verify the app builds and the requested feature genuinely
+ * works" — so a correct fix was followed by the model's own build, dev server and browser, the budget ran out
+ * mid-press and the fix was undone. The evidence here is a real browser press, and the platform presses every
+ * button again itself (repairScope.ts). PURE.
+ */
+export function explorerRepairPrompt(userRequest: string, findings: readonly string[]): string {
+  const list = findings.map((f, i) => `${i + 1}. ${f}`).join('\n');
+  return [
+    'The app for this request is ALREADY built in the current workspace and it renders. A real browser test then',
+    'pressed its controls one by one and found these problems:',
+    '',
+    list,
+    '',
+    'Read the code that runs for each control and FIX the cause by editing the existing files (never rebuild,',
+    'keep everything that works).',
+    '',
+    PLATFORM_CHECKS_THE_FIX,
+    '',
+    `Original request, for reference: ${String(userRequest ?? '').slice(0, 800)}`,
+  ].join('\n');
 }
 
 // ── The budget ──────────────────────────────────────────────────────────────────────────────────────

@@ -8,7 +8,7 @@ import { authedHeaders } from '../../lib/authHeaders';
 // Hand-written copies here and on the server are exactly why "Build my APK now" did nothing: this file
 // asked for android-apk.yml while the server's own list had never heard of it.
 import { SHIP_WORKFLOWS, needsUserSecrets, type ShipWorkflowFile } from '../../lib/shipWorkflows';
-import { signingNotReadyMessage } from '../../lib/signingReadiness';
+import { signingNotReadyMessageFor, signingPlatformOf } from '../../lib/signingReadiness';
 
 // "Build my app and give me the file" — the real pipeline, end to end, inside NavBharatAI.
 //
@@ -384,14 +384,19 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
     // and the workflow's own pre-flight is still there to catch it honestly.
     if (needsUserSecrets(workflow)) {
       try {
+        // An iPhone build asks about its OWN Apple keys; asking it about Android's would be a question
+        // about a platform it never touches (report SHANKU-AI/instamony, 2026-10-01).
+        const platform = isIos(kind) ? 'ios' : 'android';
         const r = await fetch(
-          `/api/mobile-ship/signing-status?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`,
+          `/api/mobile-ship/signing-status?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}${platform === 'ios' ? '&platform=ios' : ''}`,
           { headers: await ghHeaders() },
         );
         const d = await r.json().catch(() => null);
         if (r.ok && d?.verdict === 'missing') {
-          setSigningGap(Array.isArray(d.missing) ? d.missing : []);
-          setError(signingNotReadyMessage(Array.isArray(d.missing) ? d.missing : []));
+          const missing: string[] = Array.isArray(d.missing) ? d.missing : [];
+          // Only the Android key can be made here; the button stays away from an iPhone build.
+          if (platform === 'android') setSigningGap(missing);
+          setError(signingNotReadyMessageFor(platform, missing));
           setPhase('ready');
           return;
         }
@@ -581,12 +586,18 @@ export const StoreBuildPanel: React.FC<StoreBuildPanelProps> = ({
           ? (fix.detail.missing as string[])
           : [];
         const signingFailure = fix?.code === 'MISSING_SIGNING_SECRET' && needsUserSecrets(workflow);
+        // The one-press key is an ANDROID keystore. On an iPhone build the missing keys are Apple's,
+        // which only the user's Apple account can issue, so that build gets the Apple instructions and
+        // never the button (report SHANKU-AI/instamony, 2026-10-01).
+        const appleKeys = signingFailure && (isIos(kind) || signingPlatformOf(missingSecrets) === 'ios');
         // An empty array is meaningful: it still raises the offer, for a log that named no secret.
-        if (signingFailure) setSigningGap(missingSecrets);
+        if (signingFailure && !appleKeys) setSigningGap(missingSecrets);
         setError(
           // A missing signing key is the ONE failure that is genuinely the user's to resolve, and only
-          // the Play Store path can hit it — the .apk build needs no key at all, so never say this there.
-          signingFailure
+          // the signed paths can hit it — the .apk build needs no key at all, so never say this there.
+          appleKeys
+            ? signingNotReadyMessageFor('ios', missingSecrets)
+            : signingFailure
             ? `${fix.summary} NavBharatAI can create this key for you — press “Create my signing key” below, and it is saved to your own repository.`
             : fix?.summary
               ? `${fix.summary} NavBharatAI could not fix this one on its own.`

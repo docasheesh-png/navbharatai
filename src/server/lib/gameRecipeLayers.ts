@@ -120,7 +120,60 @@ export function missingLayersNote(added: ReadonlyMap<string, LayerFile>): string
   for (const [path, f] of added) byRecipe.set(f.recipe, [...(byRecipe.get(f.recipe) ?? []), path]);
   const lines = [...byRecipe].map(([recipe, paths]) => {
     const deps = (GAME_RECIPES[recipe]?.().dependencies ?? []).map((d) => `${d.name}@${d.version}`);
-    return `- ${recipe} (not run yet): ${paths.join(', ')}${deps.length ? ` — add the dependency: ${deps.join(', ')}${recipe === 'generate_game_3d' ? ' (and @types/three)' : ''}` : ''}`;
+    return `- ${recipe} (not run yet): ${paths.join(', ')}${deps.length ? ` — needs ${deps.join(', ')}${recipe === 'generate_game_3d' ? ' (and @types/three)' : ''}` : ''}`;
   });
   return `\n\nℹ️ LAYERS ADDED: the files above import layers the project did not have, so they were written from their own recipes — exact recipe content, nothing overwritten:\n${lines.join('\n')}\nUse these files as they are; do NOT write your own versions of them.`;
+}
+
+/**
+ * THE PACKAGES A GAME RECIPE'S CODE IMPORTS ARE INSTALLED BY US, NOT LEFT TO THE MODEL (candy report
+ * 7da1cdca, 2026-10-04). The shell imports the 3D layer, the layer imports `three`, and the tool result
+ * only SAID "add the dependency: three". The model went on writing for two minutes while every
+ * typecheck quoted seven `Cannot find module 'three'` errors, then installed it by hand. A known package
+ * at a version the recipe already declares has one right answer, so it is not a model's decision.
+ */
+
+/** The versions game recipes declare, plus the type package `three` needs. */
+export function recipeDependencyVersions(): Map<string, { version: string; dev: boolean }> {
+  const out = new Map<string, { version: string; dev: boolean }>();
+  for (const gen of Object.values(GAME_RECIPES)) {
+    for (const d of gen().dependencies ?? []) if (!out.has(d.name)) out.set(d.name, { version: d.version, dev: false });
+  }
+  const three = out.get('three');
+  if (three && !out.has('@types/three')) out.set('@types/three', { version: three.version, dev: true });
+  return out;
+}
+
+const BARE_IMPORT_RE = /(?:import|export)\s[^'";]*?from\s*['"]([^'".][^'"]*)['"]|import\s*\(\s*['"]([^'".][^'"]*)['"]\s*\)|import\s*['"]([^'".][^'"]*)['"]/g;
+
+/** The package a bare specifier names (`three/examples/jsm/x` → `three`, `@a/b/c` → `@a/b`). PURE. */
+function packageOf(spec: string): string {
+  const parts = spec.split('/');
+  return spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+}
+
+/**
+ * The recipe-declared packages these files import that `package.json` does not list yet. Only packages a
+ * recipe DECLARES are returned — an unknown import is never guessed at. `@types/three` comes with
+ * `three`. PURE.
+ */
+export function recipeDependenciesNeeded(
+  files: Readonly<Record<string, string>>,
+  packageJson: string | null,
+): Array<{ name: string; version: string; dev: boolean }> {
+  const known = recipeDependencyVersions();
+  const imported = new Set<string>();
+  for (const content of Object.values(files)) {
+    for (const m of String(content ?? '').matchAll(BARE_IMPORT_RE)) imported.add(packageOf(m[1] ?? m[2] ?? m[3]));
+  }
+  if (imported.has('three')) imported.add('@types/three');
+  let listed = new Set<string>();
+  try {
+    const pkg = JSON.parse(packageJson ?? '{}') as Record<string, Record<string, string> | undefined>;
+    listed = new Set([...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})]);
+  } catch { return []; } // an unreadable manifest is not ours to rewrite
+  return [...imported]
+    .filter((n) => known.has(n) && !listed.has(n))
+    .sort()
+    .map((n) => ({ name: n, ...known.get(n)! }));
 }

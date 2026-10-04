@@ -450,3 +450,29 @@ export function nearestKitClass(invented: string): string | null {
   const best = hits.filter((h) => h.length === min);
   return best.length === 1 ? best[0] : null;
 }
+
+let kitBlockKeys: Set<string> | null = null;
+/** Every top-level kit block, keyed by its normalised prelude AND body. */
+function kitBlockSet(): Set<string> {
+  if (kitBlockKeys) return kitBlockKeys;
+  kitBlockKeys = new Set(parseCssBlocks(DESIGN_KIT_CSS).map((b) => `${norm(b.prelude)}{${norm(b.body)}}`));
+  return kitBlockKeys;
+}
+
+/**
+ * The APP's part of a stylesheet that carries the design kit: every top-level block that is not, byte for
+ * byte after whitespace, a block of the kit. A kit rule the app CHANGED stays (it is the app's now). Null
+ * when the stylesheet does not carry the kit (then all of it is the app's). PURE.
+ *
+ * 🔴 WHY (autopsy 0473628e). The builder appended its music player's rules to `src/index.css`, which holds
+ * our 897-line kit. The file was then too big to hand to the lean review in full, so the review lost its
+ * one-call, no-tools mode, read files one tool call at a time and timed out after 45 s with no verdict —
+ * our own template costing the review again (the 8257ca59 class), this time through a file the build
+ * legitimately edited. The review is about what the BUILD wrote; the kit is ours and is checked elsewhere.
+ */
+export function appOwnStylesheet(css: string): string | null {
+  if (typeof css !== 'string' || !stylesheetCarriesKit(css)) return null;
+  const kit = kitBlockSet();
+  const own = parseCssBlocks(css).filter((b) => !kit.has(`${norm(b.prelude)}{${norm(b.body)}}`));
+  return own.map((b) => `${b.prelude} {${b.body}}`).join('\n');
+}

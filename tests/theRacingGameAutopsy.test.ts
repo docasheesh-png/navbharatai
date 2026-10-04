@@ -161,8 +161,9 @@ describe('4 · every browser lane opens pages with reduced motion — one defini
     expect(mod).toContain("await loc.dispatchEvent('click');");
     expect(mod).not.toContain(`first().click({ timeout: 4000 })`);
     // A first press, a second-level control's parent, and a light/dark switch's further presses (autopsy
-    // 8257ca59) — every one through press(), never a raw click.
-    expect(mod.split('await press(page, ').length - 1).toBe(3);
+    // 8257ca59), and the primer a quiet control is retried after (autopsy d798ddd3, Q-305) — every one
+    // through press(), never a raw click.
+    expect(mod.split('await press(page, ').length - 1).toBe(4);
   });
   it('the generated explorer is still valid JavaScript with no raw control character', () => {
     const dir = mkdtempSync(join(tmpdir(), 'nbai-race-'));

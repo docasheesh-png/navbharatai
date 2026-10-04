@@ -2611,7 +2611,13 @@ export default function App() {
         // Store content in a ref-like way via a temp key — resolved in conflict handler
         setFiles(prev => ({ ...prev, [`__pending__${selectedFile.name}`]: content }));
       } else {
-        setFiles(prev => ({ ...prev, [selectedFile.name]: content }));
+        // A text file the user uploads goes through the ONE edit seam (queue Q-018, admin-approved
+        // 2026-10-01): it reaches the build workspace, and it is remembered as the user's own file, so
+        // no build deletes it unasked (`userFileGuard`). A raw `setFiles` kept it in this browser only.
+        // A binary file is not sent: the seam carries text, and a data URL written as text would be a
+        // corrupt image. A zip import never comes here; it is a project, not one file of the user's.
+        const next = { ...files, [selectedFile.name]: content };
+        if (isText) applyIdeFileChange(next); else setFiles(next);
         setHasGeneratedCode(true);
         setIsAppBuilt(true);
         saveFile(selectedFile.name, content).catch(() => {}); // persist
@@ -2620,7 +2626,7 @@ export default function App() {
     } catch {
       addToast('File read failed — try again', 'error');
     }
-  }, [files, addToast, handleZipImport]);
+  }, [files, addToast, handleZipImport, applyIdeFileChange]);
 
   const resolveFileConflict = useCallback(async (choice: 'replace' | 'merge') => {
     if (!fileUploadConflict) return;
@@ -2642,23 +2648,22 @@ export default function App() {
 
     // Non-ZIP conflict
     const pendingContent = files[`__pending__${file.name}`] || '';
-    setFiles(prev => {
-      const next = { ...prev };
-      delete next[`__pending__${file.name}`];
-      if (choice === 'replace') {
-        next[existingKey] = pendingContent;
-      } else {
-        // Keep both: add with _new suffix
-        const parts = file.name.split('.');
-        const newName = parts.length > 1
-          ? `${parts.slice(0, -1).join('.')}_new.${parts[parts.length - 1]}`
-          : `${file.name}_new`;
-        next[newName] = pendingContent;
-      }
-      return next;
-    });
+    const next = { ...files };
+    delete next[`__pending__${file.name}`];
+    if (choice === 'replace') {
+      next[existingKey] = pendingContent;
+    } else {
+      // Keep both: add with _new suffix
+      const parts = file.name.split('.');
+      const newName = parts.length > 1
+        ? `${parts.slice(0, -1).join('.')}_new.${parts[parts.length - 1]}`
+        : `${file.name}_new`;
+      next[newName] = pendingContent;
+    }
+    // Same seam as a first upload (Q-018): the user's text file reaches the workspace and is theirs.
+    if (isTextFile(file.name)) applyIdeFileChange(next); else setFiles(next);
     addToast(`${file.name} ${choice === 'replace' ? 'replaced' : 'added as ' + file.name.replace(/(\.[^.]+)$/, '_new$1')} ✓`, 'success');
-  }, [fileUploadConflict, files, addToast, handleZipImport]);
+  }, [fileUploadConflict, files, addToast, handleZipImport, applyIdeFileChange]);
 
 
 

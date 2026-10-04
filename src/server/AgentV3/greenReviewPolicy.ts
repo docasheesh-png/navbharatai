@@ -25,6 +25,8 @@
 // cannot lie about what it did. The caller wires two things: (1) skip the reviewer's WRITE pass when
 // green, (2) surface its findings as a dismissible "want me to fix these?" offer.
 
+import { PLATFORM_CHECKS_THE_FIX } from './repairScope';
+
 /** Master switch. Default ON — this is the fix the admin asked for. `off` restores the old behaviour. */
 export function greenStopEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.AGENTV3_GREEN_STOP !== 'off';
@@ -422,6 +424,8 @@ export function greenRepairPrompt(userRequest: string, findings: readonly string
     'End your reply with exactly one line per finding, in this form:',
     '  CONFIRMED <number>: <the input> gave <the wrong result> instead of <the right one>',
     '  NOT A BUG <number>: <why the code is already correct>',
+    '',
+    PLATFORM_CHECKS_THE_FIX,
     '',
     `Original request, for reference: ${userRequest.slice(0, 800)}`,
   ].join('\n');

@@ -119,6 +119,14 @@ export interface NavigatorFacts {
    */
   missingRequiredKeys?: number;
 
+  /**
+   * The app runs on NavBharatAI's own AI (charged to the owner's balance) and the owner has not yet
+   * looked at the "AI in this app" card in Keys & Secrets — where they can see what it costs, switch it
+   * off, or move it to their own key (admin 2026-10-04: "red dot, navigator se api keys ke liye notice").
+   * Cleared by OPENING that card, which is the whole ask: be told once. `undefined` ⇒ not known.
+   */
+  appAiNoticeUnseen?: boolean;
+
   /** Ids the user has dismissed. Ignored for `attention` actions — see law 4. */
   dismissed?: readonly string[];
 }
@@ -189,6 +197,19 @@ export function pendingActions(facts: NavigatorFacts): PendingAction[] {
       tone: 'attention',
       label: 'Add your keys',
       why: `Your app needs ${n} key${n === 1 ? '' : 's'} that are not saved yet — that part cannot run without ${n === 1 ? 'it' : 'them'}.`,
+    });
+  }
+
+  // D. The app spends the owner's balance on NavBharatAI's AI and they have not been shown that yet.
+  //    Red because the admin asked for red: it is about the owner's money, and it clears the moment
+  //    they open the card that explains it.
+  if (facts.appAiNoticeUnseen === true) {
+    out.push({
+      id: 'secrets.ai-notice',
+      path: ['more', 'secrets'],
+      tone: 'attention',
+      label: 'Your app uses NavBharatAI AI',
+      why: 'Its answers are charged to your balance. See the cost, switch it off, or use your own key.',
     });
   }
 

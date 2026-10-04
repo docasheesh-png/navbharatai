@@ -652,6 +652,13 @@ export async function reviewBuild(opts: ReviewBuildOpts): Promise<ReviewResult> 
     if (ok === false || isReviewFailureSummary(summary)) {
       return { passed: true, score: 0, issues: [], summary: 'Review did not complete.' };
     }
+    // 🔴 A REVIEW THAT DENIES THE CHANGES DID NOT REVIEW THEM (autopsy fde4b7f1). The build wrote 19
+    // files; the reviewer read one, met the re-read note "has NOT changed since", and answered "[PASS] No
+    // changes detected. The diff is empty" — a verdict about nothing, shown to the user as a passing
+    // review. When this turn changed files, that answer is the review failing, not the code passing.
+    if (reviewDeniedTheChanges(summary, opts.changedFiles)) {
+      return { passed: true, score: 0, issues: [], summary: 'Review did not complete.' };
+    }
     const issues = parseReviewOutput(summary);
     const criticalCount = issues.filter((i) => i.severity === 'critical').length;
     const passed = criticalCount === 0;
@@ -665,6 +672,17 @@ export async function reviewBuild(opts: ReviewBuildOpts): Promise<ReviewResult> 
   } catch {
     return { passed: true, score: 0, issues: [], summary: 'Review skipped.' };
   }
+}
+
+/**
+ * True when the review claims nothing changed although this turn DID change files — i.e. it reviewed
+ * nothing (autopsy fde4b7f1). Pure.
+ */
+export function reviewDeniedTheChanges(summary: unknown, changedFiles: readonly string[] | undefined): boolean {
+  if (typeof summary !== 'string') return false;
+  const changed = (changedFiles ?? []).filter((f) => typeof f === 'string' && f.trim()).length;
+  if (changed === 0) return false;
+  return /\bno (?:code )?changes? (?:were |was )?(?:detected|made|found|to review)\b|\b(?:the )?diff is empty\b|\bempty diff\b|\bnothing (?:has )?changed\b|\bunchanged from (?:their|its) prior state\b/i.test(summary);
 }
 
 /** True when a reviewer's returned summary is actually a failure/error string, not a real review. Pure. */

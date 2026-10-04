@@ -87949,6 +87949,27 @@ generated module is code.**
 five things to build. The scorer recognised nothing in a GAME feature list written without software
 words. Widening `COMPLEX_APP_SIGNAL` toward game vocabulary needs a precision corpus first, or it drags
 ordinary prompts up a tier — so it is recorded, not guessed at.
+## 2026-10-04 — Admin decisions on the 0311186f rows: Q-091 built, Q-092 and Q-093 closed, Q-013 still blocked
+
+The admin answered the four open 0311186f rows with "aap kro, jo jo kar sakte", which accepts each recommendation.
+
+| ID | Decision | Result |
+|---|---|---|
+| Q-091 | (a) raise the picture-read bound | `visionReadCapMs` in `lib/attachmentReadOutcome.ts`: 20 s when the turn carries a picture, 8 s otherwise. The build route races `describeVisionAttachments` with it. The 8 s figure bounded a hang and was never measured; on 0311186f it abandoned the user's picture at exactly 8.0 s. Still a hard bound. Sibling check: the only fixed-time race on a vision read is this one. Professionals (`routes/professionals.ts`) and free chat (`routes/chat.ts`) rely on the chain's own per-provider timeout and have no 8 s cap. Locked by `tests/aPictureGetsTimeToBeRead.test.ts` (route reverted to 8 s ⇒ fails). Watch: `ATTACHMENTS_READ` on the next build with a picture. |
+| Q-092 | agreed: not defects | Resolved as not-a-defect, with the evidence in the row as written before removal: (1) "No tests at all" is true of the project and is a warning; (2) module turns billed at real cost is the documented project-mode rule; (3) 92–93% sandbox idle is between-turn idle, billed once; (4) `startTier: "sonnet"` on Weak is Q-052, already closed as not a defect. |
+| Q-093 | (a) leave | Resolved by decision: a pasted assistant reply stays sized as a spec. Detecting "this is an AI's answer" is a guess, and a wrong guess would shrink a real spec. The roadmap planner builds a visible first checkpoint, unlike project mode. Re-open if a report shows a pasted reply costing a user a slow or wrong build. |
+| Q-013 | still blocked | Needs the sentence App Mart → Publish prints on build 105+ (or the admin Errors view for a 500 on `/api/nav-store/status`). A session cannot read the phone or the production log. |
+
+## 2026-10-04 — Queue cleanup: 62 rows of merged PRs leave the open table (admin: "purani rows bhi saaf kar do")
+
+Every row in `BUILD_REPORT_QUEUE.md` marked IN PROGRESS with owner #3467, #3470, #3471, #3474 or #3475 was removed:
+17 + 10 + 12 + 4 + 19 = 62 rows. All five PRs are merged on `main` (checked against `git log origin/main`). Each
+removed row's id appears in this file's ledger for its PR (Q-241 as "Q-240/241"), so its root cause, fix, test and
+"watch" note stay on record here. Several rows ended with a "Watch:" line for the next real build; that is a live
+check to read on the next report, not unfinished work. Left in the table: the OPEN and 🟡 BLOCKED rows, and Q-091
+(IN PROGRESS, #3489).
+Merging `main` brought in #3488 (also merged), whose six rows (Q-237, Q-246, Q-247, Q-106, Q-112, Q-145) were removed the
+same way; their ledger is in that PR's PROGRESS entry. So 68 rows left the table in all.
 ## 2026-10-04 — Queue items Q-106, Q-145, Q-112 and a Q-246 sibling (admin: "ek ek kar ke sabhi karo")
 
 All on PR #3488, each locked by a test proven by reversion.

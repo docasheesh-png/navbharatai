@@ -41,7 +41,7 @@ Seeded 2026-10-01 from the items the 6461025c and bee95692 autopsies left withou
 | Q-111 | L49276 | Slow-build alert threshold (10 min) is unmeasured | OPEN | — | Migrated from PROGRESS.md (Q-021, 2026-10-01). Needs the real build-duration distribution, then set the threshold from it. |
 | Q-113 | L54063 | Dead `billingLogs` chain (tidy-up; the leak itself is closed) | OPEN | — | Migrated from PROGRESS.md (Q-021, 2026-10-01). `usePaymentEngine.ts:85` → `App.tsx:308` → `BillingPanel.tsx:47`. |
 | Q-114 | L54328, L63575 | Build spend is not in `ai_usage_logs` (chat-only) | OPEN | — | Migrated from PROGRESS.md (Q-021, 2026-10-01). Two separate cost accountings. |
-| Q-115 | L54667 | Missing package exports (e.g. lucide icons) are not healed from the package's own types | IN PROGRESS | (this branch) | Migrated from PROGRESS.md (Q-021, 2026-10-01). Unsure-open. |
+| Q-115 | L54667 | Missing package exports (e.g. lucide icons) are not healed from the package's own types | IN PROGRESS | #3537 | Migrated from PROGRESS.md (Q-021, 2026-10-01). Unsure-open. |
 | Q-116 | L62255, L66215 | Pre-edit knowledge gate on a hollow graph: the graph fill shipped, the gate did not | OPEN | — | Migrated from PROGRESS.md (Q-021, 2026-10-01).  |
 | Q-117 | L65671, L68026 | Domain tie-break: "dhaba… order" resolves to ecommerce, not restaurant | 🟡 BLOCKED | — | Migrated from PROGRESS.md (Q-021, 2026-10-01). Pinned as a test deliberately — admin product decision. |
 | Q-118 | baa0b3c7 (L65379, L65467) | No guard against a destructive "fix" that deletes a feature component; TS-error→missing-package mapping | OPEN | — | Migrated from PROGRESS.md (Q-021, 2026-10-01).  |
@@ -56,7 +56,7 @@ Seeded 2026-10-01 from the items the 6461025c and bee95692 autopsies left withou
 | Q-127 | L74299, L74484 | Live-data context answers from the first source only (multi-source questions fail) | OPEN | — | Migrated from PROGRESS.md (Q-021, 2026-10-01). `liveDataSources.ts:312` `if (block) return block;`. |
 | Q-128 | L74040, L74103 | Two version systems (History tab vs Time Machine) | 🟡 BLOCKED | — | Migrated from PROGRESS.md (Q-021, 2026-10-01). One timeline is a product decision — admin. |
 | Q-129 | L83375 | Gemini runner cannot cancel an in-flight call on Stop | OPEN | — | Migrated from PROGRESS.md (Q-021, 2026-10-01). `GeminiToolRunner.ts` has no abort signal. |
-| Q-130 | L85697 | Free-build time cap counted per instance (an auto-continue elsewhere gets a fresh allowance) | IN PROGRESS | (this branch) | Migrated from PROGRESS.md (Q-021, 2026-10-01). Needs a durable per-workspace counter (`freeBuildTimeCap.ts:30` says so). |
+| Q-130 | L85697 | Free-build time cap counted per instance (an auto-continue elsewhere gets a fresh allowance) | IN PROGRESS | #3537 | Migrated from PROGRESS.md (Q-021, 2026-10-01). Needs a durable per-workspace counter (`freeBuildTimeCap.ts:30` says so). |
 | Q-131 | L82230 | Two definitions of "was the build stopped?" (abort signal vs timeline) | OPEN | — | Migrated from PROGRESS.md (Q-021, 2026-10-01). `routes/agentv3.ts` upsell reads the timeline version. |
 | Q-132 | L82126 | Some passes write the durable store directly, bypassing Green Freeze | OPEN | — | Migrated from PROGRESS.md (Q-021, 2026-10-01). Call sites not yet re-audited. |
 | Q-133 | bb688add (L73286) | Fast-lane contract affordability models cost as `min(cap, measured)` | OPEN | — | Migrated from PROGRESS.md (Q-021, 2026-10-01). Left unchanged pending more reports; complex builds bypass it. |

@@ -15793,7 +15793,8 @@ async function noteBuildOutcome(
           // app the user has (autopsy 0311186f: "✏️ Editing your existing app (19 source files)" about a plan
           // that had built constants and types). The module progress line says what this turn does.
           let continuesPlan = false;
-          if (projectModeEnabled(process.env, { userId, email }) && isContinuationMessage(prompt)) {
+          const planModeOn = projectModeEnabled(process.env, { userId, email });
+          if (planModeOn && isContinuationMessage(prompt)) {
             try {
               const plan = await withTimeout(loadProjectPlan(workspaceId), 3_000, 'plan-peek');
               continuesPlan = !!plan && !planComplete(plan);

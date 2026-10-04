@@ -88352,7 +88352,7 @@ in `BUILD_REPORT_QUEUE.md`; their ledgers stay in the two entries above. **Watch
 `PYTHON_BACKEND_UP` / `_NOT_UP` on a Python-backed app, the `SCRIPT_REQUEST_AS_WEB_APP` start line, and the first
 write-time typecheck on a fresh starter dropping well under 15 s. Still BLOCKED on evidence: Q-193, Q-273, Q-275.
 
-## 2026-10-04 — Autopsy "Sur Taal Music" (3 builds, workspace …1dda446e) — PR #PRNUM
+## 2026-10-04 — Autopsy "Sur Taal Music" (3 builds, workspace …1dda446e) — PR #3508
 
 A Hindi design note for one small offline music player. Build 1 split it into a 14-module Software Project
 Mode plan; build 2 ("continue") was stopped by the user and recorded as a FAILED module; build 3 — our own

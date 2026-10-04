@@ -299,6 +299,16 @@ export function signalsFoundNothing(prompt: string): boolean {
  */
 export function anAppWasOrderedButNotRecognised(prompt: string, buildIntent?: BuildIntent): boolean {
   const text = String(prompt ?? '');
+  // 🔴 THE LETTER FLOOR GUARDS A PURCHASE, NOT A LABEL (autopsy 0473628e). `signalsMatchedNothing` refuses
+  // anything under `MIN_LETTERS_TO_JUDGE_SCRIPT` letters so a scrap never buys a second model opinion
+  // (complexityRouting). But when the PLATFORM itself started a new build, "Music App" (8 letters) is an
+  // app order, and leaving it filed as `chat` sent its ETA to the history of a bucket named for something
+  // else. The label and the floor-15 score are routing-neutral (both under 20 → the same tier, the same
+  // complexity verdict); `signalsMatchedNothing` and its letter bar still decide every purchase.
+  if (buildIntent === 'new_build' && !describesWorkAlreadyStarted(text)) {
+    const p = text.toLowerCase();
+    if (p.trim() && !RE.greeting.test(p) && detectTaskType(p) === 'chat') return true;
+  }
   if (!signalsMatchedNothing(text)) return false;
   // The platform's OWN decision, when the caller has it, beats a second reading of the same prompt.
   // See `AnalyserInput.buildIntent` for the four measured shapes this rescues.

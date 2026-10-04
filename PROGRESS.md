@@ -87604,6 +87604,52 @@ is what was adopted. The rows leave `BUILD_REPORT_QUEUE.md`; this entry is their
   - **The real lever then:** a ladder change (another lead rung on Weak/Normal). That is the admin's routing
     decision, not a code fix.
 
+## 2026-10-01 — Autopsy a4be7fa2 + 3f959fde (Kerala-lottery data question, Telugu)
+
+Two builds in one workspace. Build 1 (stopped at 93 s, ₹0): "First data table lo draws check chesi e algorithm
+suitable check cheyu" with no file attached — the data had come in an earlier turn. Build 2 (17.6 min, ₹272.26):
+"Ipudu e data ni check cheyu …" with the sheet attached; a working Kerala Lottery Analyzer was delivered.
+
+| ID | Problem | Root cause | Class | Fix / state |
+|---|---|---|---|---|
+| Q-204 | The reply opened with "Now final summary. No more tools. … Proceed." | The model wrote its own plan into the ANSWER, then a gap, then the reply; the runner showed `turn.text` whole | A model's notes to itself shown as its answer | `answerAfterPlanning.ts` in `AgentRunner` (reply turns, before narration and summary). ✅ on merge |
+| Q-205 | 88 / LARGE / ~40 features for a question | Our own attachment label read as a messaging app (every attachment build); table rows counted as features; dates passed `isItem` | A label written for a model read by a word-matcher | `planning.sizing` for every deterministic sizer, `condenseDataTables`, `isDataValue`. ✅ on merge |
+| Q-206 | "Editing your existing app" about our starter | The starter-only reading ran only for `new_build`; the reader said edit | Starter counted as the user's app (sibling of 31254f9a) | Edit of a starter-only workspace → fresh build. ✅ on merge |
+| Q-207 | Specialist built a generic analyser | The child got the bare six-word message | A child handed less than the architect reads | `userRequest: () => planning.text`. ✅ on merge |
+| Q-208 | "needs a major-version upgrade" for "No fix available"; xlsx installed anyway | The note had two branches, neither for no-fix; the steer came only after the install | Advice that cannot be true; advice after the fact | `noFix` in the audit summary; `packageChoiceRule()` in both prompts. ✅ on merge |
+| Q-209 | Journey evidence named an orphan component | `dataEntryEvidence` read every file | Unreachable code read as the app | `unreferencedComponents`. ✅ on merge |
+| Q-210 | REPEATED_READS counted a specialist's first read as waste | Shared ledger compared across agents | A lying analyzer | Own-view comparison; honest worst list. ✅ on merge |
+| Q-211 | "BUILD_FAILED" for a planned hand-off | The outcome line ignored the reasoning-rung stop | Contradicting lines in one report | ✅ Fixed by #3468 (`sb.handedOff`), merged while this PR was open; this PR's duplicate was dropped at the merge |
+| Q-212 | "User should be asked" — nobody asked | The resume pushed on; its words did not say to ask the user | A need of the user's kept by the model | Resume message names it. ✅ on merge |
+| Q-200 | A data question became a ₹272 app | The reader's guess was trusted as a confirmed build | A build started on an unconfirmed verdict | Admin 2026-10-03: answer first, then offer. `buildConfirmation.ts`, `offer` lane, "yes" builds the offered request. ✅ on merge (#3475) |
+| Q-201 | Earlier attachment unavailable | No store for attachment text across turns | A file lived only for its own turn | Admin 2026-10-03: keep it, no cross-chat leak. `lib/attachmentMemory.ts` (per chat, masked, 50 KB, 30 days, uid-checked; purge + unsend delete). ✅ on merge (#3475) |
+| Q-202 | Orphan components after a pivot | No end-of-turn hand-back for unimported new files | — | 🟡 blocked on #3467 (same block) |
+| Q-203 | Six argued not-defects | — | — | ✅ RESOLVED as not-a-defect — the admin agreed 2026-10-03 ("de di sahmati"); removed from the open queue |
+
+Self-heals noted (each points to an existing class): `:)` written at the head of App.tsx and fixed by the model (the
+write-time parse note caught it); a TS2322 `null` narrowing under the strict-new trial (Q-008 data point); 12 type
+errors from consumers written before `types.ts` (the contract-first rule); invented `nb-` classes (#3459).
+
+## 2026-10-04 — Autopsy 0473628e ("Music App", Weak, 6.8 min, ₹99.11)
+
+The app shipped and rendered. The struggle was the first 40 s: the model asked scope questions twice, the platform retried
+and nudged instead of reading them as the questions they were, and the style hand-back then spent 8 edits on spacing.
+
+| ID | Problem | Root cause | Class | Fix / state |
+|---|---|---|---|---|
+| Q-213 | Retry after the model asked the user | The runner appends its own sentence to the summary; the retry read the last line | A verdict asked of text the platform rewrote (e628efd4), through the runner | `modelAnswer` on the nothing-built path + `modelsOwnWords` at both readers. ✅ on merge (#3475) |
+| Q-214 | A question nudged as a stall | End-anchored closed invitation list | Closed phrase list over model prose | `REPLY_REQUEST` after a question in the closing section. ✅ on merge |
+| Q-215 | Two scope interviews for a confirmed order | No build-don't-interview rule | Upstream prompt gap | Prompt rule. ✅ on merge — watch the next bare app order |
+| Q-216 | READY_BEFORE_END about the abandoned attempt | Recorded before the retry | Measurement taken before the retry (sibling of WRITE_TIME_TYPECHECK, 2026-09-26) | Moved after the retry. ✅ on merge |
+| Q-217 | Our badge under the phone check's 32px | Sized before the check existed | Our own UI failing our own gate | 32px link and ×. ✅ on merge |
+| Q-218 | 5px sliders | Model styled the input's height | Generator guidance gap | Prompt rule. ✅ on merge — watch |
+| Q-219 | Review timeout | Kit stylesheet over the inline bound | Our template costing the review (8257ca59) | `appOwnStylesheet`. ✅ on merge |
+| Q-220 | `taskType: chat` for an app order | Purchase guard also deciding the label | One guard answering two questions | Platform build ⇒ `app_unsized`. ✅ on merge |
+| Q-221 | icon.svg divergence | Unknown — instrument named only the path | Instrument without the evidence | `describeDivergence`; 🟡 needs the next report |
+| Q-222 | Spacing hand-back struggle | Arithmetic handed to a model | — | Owned by #3474 |
+| Q-223 | Gate YELLOW on nothing-to-save | Tab/filter read as a save | — | Owned by #3471 |
+| Q-224 | Six argued not-defects | — | — | 🟡 admin agreement |
+
 ## 2026-10-01 — Admin decisions on the queue: Q-087, Q-018, Q-085 built; four "not a defect" rows closed
 
 The admin accepted every recommendation in one line (*"aapki salah accepted"*). Q-065, Q-066, Q-067 and Q-068

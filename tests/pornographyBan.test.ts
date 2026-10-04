@@ -214,7 +214,7 @@ describe('the wiring — both surfaces, and no upsell after a refusal', () => {
   });
 
   it('the escalation guard reads the model\'s own answer', () => {
-    expect(route).toContain('const firstAttempt = readTurnAnswer(result.summary, prompt);');
+    expect(route).toContain('const firstAttempt = readTurnAnswer(modelsOwnWords(result), prompt);');
     expect(route).toContain('const firstAttemptRefused = firstAttempt.declined;');
     expect(route).toContain('modelRefused: firstAttemptRefused,');
   });

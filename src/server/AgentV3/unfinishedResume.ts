@@ -75,7 +75,11 @@ export function decideUnfinishedResume(input: UnfinishedResumeInput): Unfinished
       + 'There is still build time left. Do not describe what you will do next — act with tool calls NOW: '
       + 'hand the fixes to the right specialist with task() (one task per file group, all in this turn), '
       + 'or make MECHANICAL fixes (imports, types, props, names, paths) yourself with edit_file, then typecheck. Keep going until the app works. '
-      + 'If something genuinely stops you, say what it is in one sentence instead.',
+      + 'If something genuinely stops you, say what it is in one sentence instead. '
+      // Autopsy a4be7fa2 (2026-10-01): the model concluded, to itself, "the user should share the data"
+      // and ended its turn without asking — so nobody asked. A need of the user's goes TO the user.
+      + 'If what stops you is something only the user can give (a file, the data, a choice), ask THEM for it '
+      + 'directly, in their language, as your whole reply — never describe to yourself that they should be asked.',
   };
 }
 

@@ -89032,3 +89032,13 @@ the CLASS: `tests/aFrozenWriteIsNeverKept.test.ts` now fails when any post-latch
 and keeps the content (proven by injecting one at the entry-dedupe site → the census names agentv3.ts:25611).
 Row removed.
 
+### 2026-10-04 — Q-130: a free build's unattended chain is counted on every instance
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-130 free-build time cap counted per instance | the chain map lived in one instance's memory (`freeBuildTimeCap.ts` said so itself) | a limit on spend kept where only one instance can see it | `FreeBuildChainStore.ts` (Firestore `free_build_chains`); `noteFreeBuildStartShared` / `decideFreePauseShared` take the larger count, add the window exactly once, write back before the pause is announced; bounded (2.5 s) and fail-open | `tests/aFreeChainIsCountedOnEveryInstance.test.ts` (cross-instance, real-request reset, failing store, hung store); two source guards in `aFreeBuildHoldsTheMachineForLess.test.ts` follow the shared calls |
+
+The fail direction was checked deliberately: a store that cannot be read leaves the memory count (the old
+behaviour), and the window is added once even when the store hangs — an earlier draft with a route-level timeout
+and fallback would have counted it twice and stopped a build early.
+

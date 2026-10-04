@@ -979,7 +979,10 @@ export class AgentRunner {
           // WHITE-LABEL LAW: the honest sentence names OUR limit, never a vendor, a model or a ceiling
           // the user cannot act on. "The model replied without building" was false here in the one way
           // that matters — nothing replied — and it is the sentence that sent the user to buy credits.
-          let modelAnswer: string | undefined;
+          // The model's own words when the summary is about to carry ours as well (autopsy 0473628e): the
+          // nothing-built sentence below is appended AFTER the model's answer, so a reader that asks "did the
+          // model ask the user something?" of the summary reads OUR last line and never the model's question.
+          let modelAnswer: string | undefined = builtNothing && !starvedTurn && turn.text.trim() ? turn.text.trim() : undefined;
           let summary = builtNothing
             ? (starvedTurn
                 ? 'The build could not start writing files: NavBharatAI\u2019s engine ran out of room to answer before it began. '

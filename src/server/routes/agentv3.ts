@@ -475,7 +475,7 @@ import { prodBuildGateEnabled, buildScriptFrom, prodBuildCommand, judgeProdBuild
 import { previewSnapshotEnabled, snapshotChannelId, snapshotSuitable, shouldServeSnapshot, SNAPSHOT_NOTE, SNAPSHOT_WAKING_NOTE, PREVIEW_COPY_REFRESH_MS } from '../AgentV3/previewSnapshot';
 import { declaredPortFrom, DECLARED_PORT_FILES } from '../AgentV3/declaredPort';
 import { canServeFromSnapshot, SNAPSHOT_IDLE_NOTE } from '../AgentV3/snapshotServeDecision';
-import { workspaceContentHash, snapshotConfirmation, snapshotMatchesFiles, identitySource, fileContentHashes, savedDivergesFromSandbox, type SnapshotTaken } from '../AgentV3/snapshotIdentity';
+import { workspaceContentHash, snapshotConfirmation, snapshotMatchesFiles, identitySource, fileContentHashes, savedDivergesFromSandbox, type SnapshotTaken, describeDivergence } from '../AgentV3/snapshotIdentity';
 import { sandboxReasonMiddleware } from '../AgentV3/sandboxSessionZone';
 import { PEAK_MEMORY_PROBE, parsePeakMemory, describePeakMemory, describeSession, type SandboxSession } from '../AgentV3/sandboxSessions';
 import { sandboxRamGb } from '../AgentV3/sandboxRate';
@@ -537,7 +537,7 @@ import { attachmentMemoryEnabled, rememberableUid, saveAttachmentMemory, loadAtt
 import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild, userAskedForAnAppToBeBuilt, readerlessIntent, describeReaderOutcome, type ReaderOutcome } from '../AgentV3/IntentClassifier';
 import { fastLanePhaseSummary, dominantFastLanePhase } from '../AgentV3/fastLanePhases';
 import { emptyWasteLedger, recordWaste, wasteSummary, totalWasteCalls, type WasteKind } from '../AgentV3/providerWaste';
-import { readTurnAnswer, answeredWithoutBuilding } from '../AgentV3/turnAnswer';
+import { readTurnAnswer, answeredWithoutBuilding, modelsOwnWords } from '../AgentV3/turnAnswer';
 import { assessBuildInput } from '../AgentV3/buildableInput';
 import { decidePlanning } from '../AgentV3/ComplexityClassifier';
 import { analyzeRequest, type StartTier, type AnalysisResult } from '../AgentV3/RequestAnalyser';
@@ -618,7 +618,7 @@ import { floorTimeoutForTokens } from '../AgentV3/floorBudget';
 import { readyOverrunNote } from '../AgentV3/doneSignal';
 import { parseDevServerHealthLine } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { cssConsistencyError, findUndefinedClasses, cssHealEnabled, undefinedClassesNote, isProjectStylesheet, danglingStylesheetImports, withoutStylesheetImports } from '../AgentV3/CssConsistency';
-import { kitRestorePatch, kitRestoreNote } from '../AgentV3/kitRestore';
+import { kitRestorePatch, kitRestoreNote, appOwnStylesheet } from '../AgentV3/kitRestore';
 import { analyzeDesignCoverage, designRepairInstruction, designCoverageSummary } from '../AgentV3/DesignCoverage';
 import { auditRlsInSql, rlsAuditSummary } from '../AppMakerLab/generator/RlsPolicy';
 import { buildServiceGraph } from '../AgentV3/serviceGraph';
@@ -18138,13 +18138,9 @@ async function noteBuildOutcome(
       // and stopped immediately" are opposite facts and a missing line would read as the second.
       // This is the number the open decision needs — whether the loop should END itself at that point
       // rather than merely say so — and nobody has it today.
-      try {
-        buildDiag.record({
-          phase: 'build', severity: 'info', code: 'READY_BEFORE_END',
-          message: readyOverrunNote(result.readyAt, result.steps, Date.now() - buildStartedAt, { editingExistingApp: isEditMode }),
-          autoResolved: true,
-        });
-      } catch { /* an advisory line must never affect a build */ }
+      // READY_BEFORE_END is recorded AFTER the empty-build retry, beside WRITE_TIME_TYPECHECK (autopsy
+      // 0473628e): here it described the ABANDONED first attempt ("never judged finished") on a build whose
+      // retry then finished and shipped.
 
       /**
        * ── HOW THE ENGINE BEHAVED, MEASURED ON EVERY BUILD ────────────────────────────────────────
@@ -18252,7 +18248,7 @@ async function noteBuildOutcome(
       }
       // A policy refusal is not a capability failure — see `modelRefused`. Read from the answer the
       // model actually gave, so it holds for any refusal rather than only the pornography one.
-      const firstAttempt = readTurnAnswer(result.summary, prompt);
+      const firstAttempt = readTurnAnswer(modelsOwnWords(result), prompt);
       const firstAttemptRefused = firstAttempt.declined;
       // …and its SIBLING, read from the same answer by the same module that already decided this
       // exact question for the nudge, 156ms earlier in this turn (autopsy e628efd4). Never a second
@@ -18358,7 +18354,7 @@ async function noteBuildOutcome(
       // sentence, the empty-build flip and the free-tier upsell. They used to read `result.summary`
       // at their own moment, and the platform had by then overwritten it: the upsell found no refusal
       // in our own "please try again" and asked a user whose request the engine had declined for money.
-      const modelAnswer = readTurnAnswer(result.summary, prompt);
+      const modelAnswer = readTurnAnswer(modelsOwnWords(result), prompt);
       if (expectsArtifacts && writtenFiles.size === 0 && modelAnswer.declined && !abort.signal.aborted) {
         try {
           buildDiag.record({
@@ -18395,6 +18391,16 @@ async function noteBuildOutcome(
         buildDiag.record({
           phase: 'build', severity: 'info', code: 'WRITE_TIME_TYPECHECK',
           message: writeTypecheckSummary(wt, writeTypecheckEnabled(), tsWritten), autoResolved: true,
+        });
+      } catch { /* an advisory line must never affect a build */ }
+
+      // How much of the build ran after the readiness scan judged the app finished — read from the FINAL
+      // `result`, i.e. after the retry, so it describes the build that shipped (autopsy 0473628e).
+      try {
+        buildDiag.record({
+          phase: 'build', severity: 'info', code: 'READY_BEFORE_END',
+          message: readyOverrunNote(result.readyAt, result.steps, Date.now() - buildStartedAt, { editingExistingApp: isEditMode }),
+          autoResolved: true,
         });
       } catch { /* an advisory line must never affect a build */ }
 
@@ -22937,7 +22943,14 @@ async function noteBuildOutcome(
           // What THIS turn changed, and — for a suggest-only review — that code in full. Computed before
           // the spawn because whether the review may read at all depends on it (autopsy bee95692).
           const reviewChanged = reviewChangedPaths(writtenFiles, finishingPaths, preseededGolden);
-          const reviewInline = reviewPlan.mode === 'suggest' ? leanReviewInline(reviewChanged, (p) => writtenFiles.get(p)) : undefined;
+          // A stylesheet that carries our design kit is handed as the APP's part only (autopsy 0473628e): the
+          // 897-line kit made index.css too big to inline, so the review lost its one-call mode and timed out.
+          const reviewInline = reviewPlan.mode === 'suggest'
+            ? leanReviewInline(reviewChanged, (p) => {
+              const c = writtenFiles.get(p);
+              return typeof c === 'string' && /\.css$/i.test(p) ? (appOwnStylesheet(c) ?? c) : c;
+            })
+            : undefined;
           const reviewOneCall = leanReviewAnswersInOneCall(reviewInline);
           const reviewSpawn = makeSubAgentSpawn({
             ...subAgentDeps,
@@ -23722,9 +23735,13 @@ async function noteBuildOutcome(
         // where the two disagree means a restore brings back a file no check ever saw. Admin-only
         // evidence — it changes nothing that is saved.
         try {
-          const diverged = savedDivergesFromSandbox(identitySource(sandboxScan), identitySource(toSave));
+          const sandboxIdentity = identitySource(sandboxScan);
+          const savedIdentity = identitySource(toSave);
+          const diverged = savedDivergesFromSandbox(sandboxIdentity, savedIdentity);
           if (diverged.length > 0) {
             buildDiag.record({
+              // HOW they differ, per path (autopsy 0473628e) — a name alone left the cause unreadable.
+              detail: diverged.slice(0, 4).map((p) => describeDivergence(p, sandboxIdentity[p] ?? '', savedIdentity[p] ?? '')).join('\n'),
               phase: 'build', severity: 'warning', code: 'SAVED_SOURCE_DIVERGES',
               message: `${diverged.length} file(s) were saved with content different from what the sandbox is running: ${diverged.slice(0, 8).join(', ')}${diverged.length > 8 ? ` and ${diverged.length - 8} more` : ''}. Every browser check this build made looked at the sandbox, so the saved copy of ${diverged.length === 1 ? 'that file was' : 'those files were'} never checked. A write was recorded one way and landed another.`,
               autoResolved: false,

@@ -8,6 +8,8 @@ import rateLimit from 'express-rate-limit';
 import { corsMiddleware } from './src/server/lib/cors';
 import { trustedProxyHops, identityRateKey, addressRateKey } from './src/server/lib/clientAddress';
 import { denyServerOnlyArtifacts } from './src/server/lib/serverOnlyArtifacts';
+// Side-effect import: every axios error in this process loses its credential headers (P1, 2026-10-04).
+import './src/server/lib/axiosCredentialRedaction';
 import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
 import { spaFallbackShouldDefer } from './src/server/lib/spaFallback';
 import { noteWebsiteVisit } from './src/server/lib/ownAudience';

@@ -81,7 +81,9 @@ export function registerGithubRoutes(app: Express): void {
                       const content = Buffer.from(blobRes.data.content, 'base64').toString('utf-8');
                       files[item.path] = content;
                   } catch (err) {
-                      console.warn(`Failed to fetch blob for ${item.path}:`, err);
+                      // Status and message only — never the error object, which carries the request's
+                      // Authorization header (axiosCredentialRedaction.ts closes the class process-wide).
+                      console.warn(`Failed to fetch blob for ${item.path}: ${(err as any)?.response?.status ?? ''} ${(err as Error)?.message ?? ''}`);
                   }
               }
           }

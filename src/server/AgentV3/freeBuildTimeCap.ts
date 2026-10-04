@@ -24,13 +24,14 @@
 // BUNDLED, so a client change would reach them only through a new store build. The server decides
 // whether a pause is resumable; every client already obeys that.
 //
-// ✅ THE CHAIN IS SHARED ACROSS INSTANCES (queue Q-130, 2026-10-04). It used to live only in this
-// instance's memory, so an auto-continue that landed on another Cloud Run instance started a fresh
-// allowance. `noteFreeBuildStartShared` / `decideFreePauseShared` now read and write a durable copy
-// (`FreeBuildChainStore.ts`) and take the LARGER of the two counts. A store that cannot be read falls back
-// to the memory count — the old, more generous behaviour — so a failure can never stop a build early.
+// ✅ THE CHAIN IS DURABLE NOW (Q-130, 2026-10-04). It used to live only in this instance's memory, so an
+// auto-continue that landed on another Cloud Run instance started a fresh chain — a free request could
+// still run unattended for hours, one window per instance. `decideFreePauseDurable` keeps the chain in
+// one Firestore record per workspace and counts the LARGER of that record and this instance's memory.
+// Every failure (no database, a slow read, a write error) falls back to the memory count, which is the
+// old behaviour — so this can only ever be as generous as before, never stop a build it should not.
 //
-// Pure except for the chain map, which is plain module state with injected time.
+// Pure except for the chain map (plain module state with injected time) and the injected durable store.
 
 import { isContinuationMessage } from './ProjectPlan';
 
@@ -90,17 +91,8 @@ export function freeBuildWindow(paidSeconds: number, isFreeBuild: boolean, env: 
 
 // ── The unattended chain ─────────────────────────────────────────────────────────────────────────
 
-/** One workspace's unattended free time since the user's last real request. */
-export interface FreeChain { spentMs: number; touchedAt: number }
-type Chain = FreeChain;
+interface Chain { spentMs: number; touchedAt: number }
 const chains = new Map<string, Chain>();
-
-/** Where the chain is kept so every instance sees it. Every method fails open (see FreeBuildChainStore). */
-export interface FreeChainStore {
-  load(workspaceId: string): Promise<FreeChain | null>;
-  save(workspaceId: string, chain: FreeChain): Promise<void>;
-  clear(workspaceId: string): Promise<void>;
-}
 /** A record nobody has touched for this long is dropped, so the map cannot grow for ever. */
 const CHAIN_FORGET_MS = 6 * 60 * 60 * 1000;
 
@@ -141,47 +133,6 @@ export function decideFreePause(workspaceId: string, windowMs: number, env: Env 
   return { resumable: spentMs < allowance * 1000, spentSeconds, allowanceSeconds: allowance };
 }
 
-/**
- * `noteFreeBuildStart`, shared across instances: a real request also clears the durable chain, so the next
- * window — on whichever instance — starts from zero. Best-effort; never throws.
- */
-export async function noteFreeBuildStartShared(workspaceId: string, prompt: string, store: FreeChainStore, now: number = Date.now()): Promise<void> {
-  noteFreeBuildStart(workspaceId, prompt, now);
-  if (!isContinuationMessage(prompt)) await bounded(store.clear(workspaceId), undefined);
-}
-
-/** How long a store call may take before the shared functions carry on without it. */
-export const FREE_CHAIN_STORE_TIMEOUT_MS = 2_500;
-
-/** Resolve to the work's value, or `fallback` when it fails or takes longer than the store timeout. */
-function bounded<T>(work: Promise<T>, fallback: T): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<T>((resolve) => { timer = setTimeout(() => resolve(fallback), FREE_CHAIN_STORE_TIMEOUT_MS); });
-  return Promise.race([work.catch(() => fallback), late]).finally(() => { if (timer) clearTimeout(timer); });
-}
-
-/**
- * `decideFreePause`, shared across instances: the chain so far is the LARGER of this instance's count and
- * the durable one (a continuation may have run anywhere), the window is added, and the result is written
- * back before the pause is announced — so the client's auto-continue, wherever it lands, reads it.
- */
-export async function decideFreePauseShared(
-  workspaceId: string, windowMs: number, store: FreeChainStore, env: Env = process.env, now: number = Date.now(),
-): Promise<FreePauseDecision> {
-  prune(now);
-  // Each store call is bounded HERE, and the window is added exactly once below whatever the store does —
-  // so a slow or failing store can never count a window twice (which would stop a build early).
-  const durable = await bounded(store.load(workspaceId), null);
-  if (durable && now - durable.touchedAt <= CHAIN_FORGET_MS) {
-    const mine = chains.get(workspaceId);
-    if (!mine || durable.spentMs > mine.spentMs) chains.set(workspaceId, { spentMs: durable.spentMs, touchedAt: now });
-  }
-  const decision = decideFreePause(workspaceId, windowMs, env, now);
-  const chain = chains.get(workspaceId);
-  if (chain) await bounded(store.save(workspaceId, { ...chain }), undefined);
-  return decision;
-}
-
 /** The words for a free pause that waits for the user. Branded, no vendor, no upsell. */
 export function freePauseMessage(filesChangedSoFar: number): { narration: string; summary: string } {
   const n = Number.isFinite(filesChangedSoFar) && filesChangedSoFar > 0 ? Math.floor(filesChangedSoFar) : 0;
@@ -190,6 +141,56 @@ export function freePauseMessage(filesChangedSoFar: number): { narration: string
     narration: `⏱️ This build used its time for this request, and ${saved}. Send "continue" and I will keep building from exactly where I stopped.`,
     summary: `⏱️ This build used its time for this request, and ${saved}. Send "continue" and I will keep building from exactly where I stopped.`,
   };
+}
+
+// ── The durable chain (Q-130) ────────────────────────────────────────────────────────────────────
+
+/** Where a chain is kept between instances. Injected so tests never touch a database. */
+export interface FreeChainStore {
+  get(workspaceId: string): Promise<{ spentMs: number; touchedAt: number } | null>;
+  set(workspaceId: string, chain: { spentMs: number; touchedAt: number }): Promise<void>;
+  remove(workspaceId: string): Promise<void>;
+}
+
+/** How long a durable read may hold up the pause decision before the memory count answers alone. */
+export const DURABLE_CHAIN_TIMEOUT_MS = 2_000;
+
+function withinTimeout<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve(undefined), ms);
+    p.then((v) => { clearTimeout(t); resolve(v); }, () => { clearTimeout(t); resolve(undefined); });
+  });
+}
+
+/** A new real request starts a new chain everywhere, not only in this instance. */
+export async function noteFreeBuildStartDurable(
+  workspaceId: string, prompt: string, store: FreeChainStore | null, now: number = Date.now(),
+): Promise<void> {
+  noteFreeBuildStart(workspaceId, prompt, now);
+  if (!store || isContinuationMessage(prompt)) return;
+  await withinTimeout(store.remove(workspaceId), DURABLE_CHAIN_TIMEOUT_MS);
+}
+
+/**
+ * `decideFreePause`, counted across instances. The chain spent so far is the LARGER of the durable
+ * record and this instance's memory (a record older than the forget window counts as none), the window
+ * that just ended is added once, and the new total is written back. A store that is missing, slow or
+ * failing leaves exactly the memory-only answer.
+ */
+export async function decideFreePauseDurable(
+  workspaceId: string, windowMs: number, store: FreeChainStore | null, env: Env = process.env, now: number = Date.now(),
+): Promise<FreePauseDecision> {
+  const memoryBefore = chains.get(workspaceId)?.spentMs ?? 0;
+  const durable = store ? await withinTimeout(store.get(workspaceId), DURABLE_CHAIN_TIMEOUT_MS) : undefined;
+  const durableBefore = durable && now - durable.touchedAt <= CHAIN_FORGET_MS && Number.isFinite(durable.spentMs)
+    ? Math.max(0, durable.spentMs) : 0;
+  if (durableBefore > memoryBefore) chains.set(workspaceId, { spentMs: durableBefore, touchedAt: now });
+  const decision = decideFreePause(workspaceId, windowMs, env, now);
+  if (store) {
+    const chain = chains.get(workspaceId);
+    if (chain) await withinTimeout(store.set(workspaceId, { spentMs: chain.spentMs, touchedAt: chain.touchedAt }), DURABLE_CHAIN_TIMEOUT_MS);
+  }
+  return decision;
 }
 
 /** Test seam: forget every chain. */

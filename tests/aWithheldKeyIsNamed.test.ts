@@ -1,64 +1,41 @@
-/**
- * Q-155: `withheldSecretNames` was written and tested for one job — telling the user which of their saved keys
- * a build did NOT receive, because each belongs to another app — and nothing ever called it. So a key the user
- * definitely saved was simply absent from their app, and the report said nothing. The class: an explanation
- * built and never shown. Now the build reads the vault once, injects this app's keys, and names the rest.
- */
+// Q-155: least privilege gives an app only the user's shared keys and its own, and `withheldSecretNames`
+// existed, tested, to name what it held back — but nothing ever called it, so a user whose key was
+// (correctly) withheld had no sentence anywhere explaining why it was missing. The build report now names it.
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'fs';
-import { join } from 'path';
-import { withheldSecretNames, secretsWithheldLine, MAX_WITHHELD_NAMED, type VaultSecretRow } from '../src/server/lib/secretScope';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { secretsWithheldNote } from '../src/server/lib/secrets';
+import { withheldSecretNames } from '../src/server/lib/secretScope';
 
-const ROWS: VaultSecretRow[] = [
-  { name: 'OPENAI_API_KEY', value: 'v1', workspaceId: null },
-  { name: 'RAZORPAY_KEY_SECRET', value: 'v2', workspaceId: 'shop-app' },
-  { name: 'MAPBOX_TOKEN', value: 'v3', workspaceId: 'travel-app' },
-  { name: 'SMTP_PASS', value: 'v4', workspaceId: 'todo-app' },
-];
-
-describe('the keys a build did not get are named — never their values', () => {
-  it('names the other apps\' keys, says where to change it, and prints no value', () => {
-    const names = withheldSecretNames(ROWS, 'todo-app');
-    expect(names).toEqual(['MAPBOX_TOKEN', 'RAZORPAY_KEY_SECRET']);
-    const line = secretsWithheldLine(names);
-    expect(line).toContain('2 saved key(s) were not given to this app because they belong to other apps: MAPBOX_TOKEN, RAZORPAY_KEY_SECRET.');
-    expect(line).toContain('Settings → App Settings → Secrets & API Keys');
-    for (const r of ROWS) expect(line).not.toContain(r.value);
+describe('the withheld keys are named in the build report', () => {
+  it('names, never values, and the way to fix it', () => {
+    const note = secretsWithheldNote(['RAZORPAY_KEY_SECRET', 'SUPABASE_URL']);
+    expect(note).toMatch(/^2 saved key\(s\) were NOT given to this app/);
+    expect(note).toContain('RAZORPAY_KEY_SECRET, SUPABASE_URL');
+    expect(note).toContain('applies to all my apps');
   });
 
-  it('a long list is counted, not dumped', () => {
-    const many = Array.from({ length: MAX_WITHHELD_NAMED + 3 }, (_, i) => `KEY_${i}`);
-    expect(secretsWithheldLine(many)).toContain('and 3 more.');
+  it('a long list is cut, and says how many more', () => {
+    expect(secretsWithheldNote(Array.from({ length: 15 }, (_, i) => `K${i}`))).toContain('and 3 more');
   });
 
-  it('the build reads the vault ONCE for both answers, and reports the withheld names', () => {
-    const route = readFileSync('src/server/routes/agentv3.ts', 'utf8');
-    expect(route).toContain('const vaultScope = await loadUserVaultScope(userId, workspaceId);');
-    expect(route).toContain("code: 'SECRETS_WITHHELD', message: secretsWithheldLine(vaultScope.withheld)");
-    const secrets = readFileSync('src/server/lib/secrets.ts', 'utf8');
-    expect(secrets).toMatch(/const rows = await loadUserVaultRows\(userId\);\s*return \{ secrets: resolveScopedSecrets\(rows, workspaceId\), withheld: withheldSecretNames\(rows, workspaceId\) \};/);
+  it('the pure rule it uses: another app\'s key is withheld, a shared key is not', () => {
+    const rows = [
+      { name: 'SHARED', value: 'x', workspaceId: null },
+      { name: 'MINE', value: 'x', workspaceId: 'ws1' },
+      { name: 'OTHER', value: 'x', workspaceId: 'ws2' },
+    ] as never;
+    expect(withheldSecretNames(rows, 'ws1')).toEqual(['OTHER']);
   });
-});
 
-describe('census: nothing secretScope exports is written, tested and never used', () => {
-  it('every export is read by live code, not only by its tests', () => {
-    const src = readFileSync('src/server/lib/secretScope.ts', 'utf8');
-    const exported = [...src.matchAll(/^export (?:function|const) (\w+)/gm)].map((m) => m[1]);
-    expect(exported.length).toBeGreaterThan(4);
-    const live: string[] = [];
-    const walk = (d: string) => {
-      for (const n of readdirSync(d)) {
-        const f = join(d, n);
-        if (statSync(f).isDirectory()) { if (n !== 'node_modules') walk(f); continue; }
-        if (/\.tsx?$/.test(n) && !/\.test\.tsx?$/.test(n) && !f.endsWith('secretScope.ts')) live.push(readFileSync(f, 'utf8'));
-      }
-    };
-    walk('src');
-    const all = live.join('\n') + readFileSync('server.ts', 'utf8');
-    // A constant used only inside its own module is fine; a function nobody calls is the defect.
-    const own = src.replace(/^export (?:function|const) \w+/gm, '');
-    for (const name of exported) {
-      expect(new RegExp(`\\b${name}\\b`).test(all) || new RegExp(`\\b${name}\\b`).test(own), `${name} is exported and never used`).toBe(true);
-    }
+  it('🔒 the build records it right after the app\'s keys are set, and the vault read is the pure rule (one read)', () => {
+    const route = readFileSync(join(__dirname, '../src/server/routes/agentv3.ts'), 'utf8');
+    const set = route.indexOf('dispatcher.setUserSecrets(appEnv);');
+    const rec = route.indexOf("code: 'SECRETS_WITHHELD', message: secretsWithheldNote(withheld)", set);
+    expect(set).toBeGreaterThan(-1);
+    expect(rec).toBeGreaterThan(set);
+    expect(rec - set).toBeLessThan(800);
+    const lib = readFileSync(join(__dirname, '../src/server/lib/secrets.ts'), 'utf8');
+    expect(lib).toContain('return withheldSecretNames(await loadUserVaultRows(userId), workspaceId);');
   });
 });

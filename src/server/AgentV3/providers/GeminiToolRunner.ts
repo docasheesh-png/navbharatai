@@ -8,7 +8,7 @@
 
 import type { RunTurnParams, TurnResult, TurnRunner } from '../ClaudeClient';
 import { turnDeadline, BUDGET_EXHAUSTED_MESSAGE, BUDGET_REACHED_MESSAGE } from '../turnDeadline';
-import { throwIfStopped, raceStop } from '../stopSignal';
+import { raceStop, throwIfStopped } from '../stopSignal';
 import {
   toolDefsToGemini,
   transcriptToGemini,
@@ -77,16 +77,19 @@ export class GeminiToolRunner implements TurnRunner {
     if (systemInstruction) config.systemInstruction = systemInstruction;
     if (tools) config.tools = tools;
 
+    // STOP REACHES THIS FAMILY TOO (Q-129, 2026-10-04). The Claude and OpenAI-shaped runners already
+    // honoured the build's stop signal; this one never read it, so a Stop pressed during a Gemini/Vertex
+    // call waited out the whole call (up to the 120 s bound) before the build noticed. Now a stopped
+    // build never starts the call, the SDK is handed the signal so the HTTP request itself is
+    // cancelled, and the wait is raced against the stop so even a client that ignores the signal lets
+    // go at once — as `BuildStoppedError`, which the chain never counts as a provider failure.
+    throwIfStopped(params.signal);
+    if (params.signal) config.abortSignal = params.signal;
+
     // SIBLING of the same root cause (rule 3): this family bounds itself exactly like the GLM/Kimi one,
     // so it needed the caller's budget for exactly the same reason. With no deadline, unchanged.
     const bound = turnDeadline(this.opts.timeoutMs ?? 120_000, params.deadlineAt);
     if (bound.expired) throw new Error(BUDGET_EXHAUSTED_MESSAGE);
-    // 🔴 STOP MEANS STOP HERE TOO (queue Q-129). This was the one runner family that never read the build's
-    // stop signal, so a pressed Stop waited up to two minutes for a call the user no longer wanted. The
-    // signal is handed to the SDK (it cancels the HTTP request) and the wait is raced against it, so the
-    // build ends at once with the shared `BuildStoppedError` — never a provider failure, never a bench.
-    throwIfStopped(params.signal);
-    if (params.signal) config.abortSignal = params.signal;
     const response = await raceStop(withTimeout(
       this.client.models.generateContent({
         model: this.opts.model || params.model,

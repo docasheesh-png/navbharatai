@@ -34,7 +34,7 @@ const SNIPPET_MAX = 120;
 // Sensitive tokens that must never be logged or stored in plaintext on the client.
 // Deliberately high-precision (no bare "email"/"phone" — too noisy) so a hit is a
 // real data-protection problem, not a guess.
-const SENSITIVE = /\b(password|passwd|aadhaar|aadhar|\bpan\b|cvv|\bssn\b|credit[_-]?card|card[_-]?number|otp|secret|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|private[_-]?key|passport)\b/i;
+const SENSITIVE = /\b(password|passwd|aadhaar|aadhar|\bpan\b|cvv|\bssn\b|credit[_-]?card|card[_-]?number|otp|secret|api[_\s-]?key|apikey|access[_-]?token|refresh[_-]?token|private[_-]?key|passport)\b/i;
 
 // A client-side console.* sink — the sink that must never receive a credential/token.
 export const CONSOLE_CALL = /\bconsole\.(log|info|warn|error|debug)\s*\(/;
@@ -46,78 +46,50 @@ export const CONSOLE_CALL = /\bconsole\.(log|info|warn|error|debug)\s*\(/;
  * what this detector flags — one shared definition, so the two can never drift (rule 2).
  */
 export function lineLogsCredential(line: string): boolean {
-  const at = String(line ?? '').search(CONSOLE_CALL);
-  if (at < 0) return false;
-  const call = line.slice(at);
-  const { code, labels } = splitStrings(call);
-  // (a) A VALUE is logged: the sensitive name is code — `password`, `user.token`, `${apiKey}`.
-  if (SENSITIVE.test(code)) return true;
-  // (b) A label that introduces a value: "password:", `token=${t}`, "OTP is", followed by something that is
-  // not an error. "Failed to reset password", err names a task, not a credential (Q-150).
-  return labels.some((l) => SENSITIVE_LABEL_END.test(l.text) && l.next !== null && !ERRORISH.test(l.next.split('.')[0].trim()));
+  if (!CONSOLE_CALL.test(line) || !SENSITIVE.test(line)) return false;
+  const { code, text } = splitLiterals(line);
+  // A sensitive NAME is logged as a value: `console.log(password)`, `${accessToken}`.
+  if (SENSITIVE.test(code.replace(CONSOLE_CALL, ' '))) return true;
+  // 🔴 THE WORD IS ONLY IN THE LABEL (Q-150, autopsy 77bd487b). `console.error('[OTP SEND ERROR]', err)` and
+  // `'[ROTATE] secret re-encrypt failed:', err` were flagged as printing a credential — 7 findings, 0 leaks.
+  // A label naming a secret beside a VALUE is still a leak (`'password:', pw`), so the word in a label counts
+  // unless what is logged is only an error, or nothing at all.
+  if (!SENSITIVE.test(text)) return false;
+  const values = (code.replace(CONSOLE_CALL, ' ').match(/[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*/g) ?? [])
+    .filter((v) => !NEUTRAL_CALL.test(v));
+  return values.some((v) => !ERROR_VALUE.test(v));
 }
 
-/**
- * 🔴 THE LABEL IS NOT THE VALUE (queue Q-150, autopsy 77bd487b). This matched the WHOLE line, so
- * `console.error('Failed to reset password', err)` was a high-severity `pii-in-logs` finding: the build's
- * one hard compliance block, and then the "heal" emptied the call to `console.error()` — deleting a real
- * error log to fix a leak that never existed. A credential is leaked when its VALUE reaches the console:
- * the sensitive name is code, or a string label ends on it ("password:", `token=${…}`) and a value follows.
- */
-const SENSITIVE_LABEL_END = /\b(?:password|passwd|aadhaar|aadhar|pan|cvv|ssn|credit[_ -]?card|card[_ -]?number|otp|secret|api[_ -]?key|apikey|access[_ -]?token|refresh[_ -]?token|private[_ -]?key|passport|token)\s*(?:[:=]|\bis\b)\s*$/i;
-/** What follows the label is an error, not a value: `err`, `error`, `e`, `ex`, `reason`, `*Error`. */
-const ERRORISH = /^(?:err|error|e|ex|exc|exception|reason|\w*Error|\w*Err)$/i;
+/** What an error handler logs: the error itself, or a field of it. Never a credential. */
+const ERROR_VALUE = /^(?:err|error|e|ex|exc|exception|reason|cause|failure)(?:\??\.(?:message|stack|code|name|status|statusText|cause|response(?:\??\.(?:status|statusText|data))?))?$/i;
+/** Wrappers around a logged value, not values themselves. */
+const NEUTRAL_CALL = /^(?:JSON\.stringify|String|Number|Boolean|new|typeof|instanceof|await|undefined|null|true|false)$/;
 
 /**
- * The console call with every string's TEXT blanked (template `${…}` expressions kept as code), plus each
- * string piece and the argument or expression right after it. Single-line, quote-aware. PURE.
+ * One line split into its CODE (string literals emptied, template `${…}` kept) and its literal TEXT. A
+ * single-line scan, escape-aware, without nesting inside `${…}` — enough for a console call, and on a
+ * line it cannot read (an unterminated literal) the rest counts as text. PURE.
  */
-function splitStrings(call: string): { code: string; labels: Array<{ text: string; next: string | null }> } {
+function splitLiterals(line: string): { code: string; text: string } {
   let code = '';
-  const labels: Array<{ text: string; next: string | null }> = [];
-  const nextArg = (from: number): string | null => {
-    const m = /^\s*,\s*([\w$.]+)/.exec(call.slice(from));
-    return m ? m[1] : null;
-  };
-  let i = 0;
-  while (i < call.length) {
-    const c = call[i];
-    if (c === '"' || c === "'") {
-      let j = i + 1;
-      let text = '';
-      while (j < call.length && call[j] !== c) { if (call[j] === '\\') j++; else text += call[j]; j++; }
-      labels.push({ text, next: nextArg(j + 1) });
-      code += '""';
-      i = j + 1;
+  let text = '';
+  let quote: string | null = null;
+  let interp = 0;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote === null) {
+      if (c === '"' || c === "'" || c === '`') { quote = c; code += c; continue; }
+      if (c === '/' && line[i + 1] === '/') break; // a trailing comment is neither code nor a logged label
+      if (interp > 0 && c === '}') { interp--; quote = '`'; code += c; continue; }
+      code += c;
       continue;
     }
-    if (c === '`') {
-      let j = i + 1;
-      let text = '';
-      while (j < call.length && call[j] !== '`') {
-        if (call[j] === '\\') { j += 2; continue; }
-        if (call[j] === '$' && call[j + 1] === '{') {
-          let depth = 1;
-          let k = j + 2;
-          while (k < call.length && depth > 0) { if (call[k] === '{') depth++; else if (call[k] === '}') depth--; k++; }
-          const expr = call.slice(j + 2, k - 1);
-          labels.push({ text, next: expr.trim() || null });
-          code += ` ${expr} `;
-          text = '';
-          j = k;
-          continue;
-        }
-        text += call[j];
-        j++;
-      }
-      labels.push({ text, next: nextArg(j + 1) });
-      i = j + 1;
-      continue;
-    }
-    code += c;
-    i++;
+    if (c === '\\') { text += c + (line[i + 1] ?? ''); i++; continue; }
+    if (c === quote) { quote = null; code += c; continue; }
+    if (quote === '`' && c === '$' && line[i + 1] === '{') { interp++; quote = null; code += ' '; i++; continue; }
+    text += c;
   }
-  return { code, labels };
+  return { code, text };
 }
 
 // PII form-field signals — used to decide whether the app collects personal data

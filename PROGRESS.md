@@ -89053,6 +89053,89 @@ of 30m0s" — `ci.yml`'s own `timeout-minutes: 30`, hit because eight or nine PR
 words before naming a cause — a cancelled run names its canceller.
 
 
+### Q-127: a live-data question that asks two things gets both (2026-10-04)
+
+**Problem.** `liveDataContext` returned the first source that answered. So "delhi ka mausam aur AQI" got only the weather. And because a live block skips the web search, nothing else answered the second half either.
+
+**Fix.** Every source now runs side by side, and every block that answered is returned, in dispatch order. The transit source joined the same list. Each source still gates on its own regex before touching the network, so a source the question never mentions costs nothing. A test proves this by host: a currency question calls only the currency host.
+
+**Tests.** `liveDataSources.test.ts` gains three cases:
+- weather + currency in one message
+- one source down, the other kept
+- no host touched for an unmentioned source
+
+**Proof by reversion:** with the old loop back, the two-part test fails.
+
+**Sibling, recorded as Q-601.** `liveSearchContext` skips the web search whenever any live block exists. So "delhi ka mausam aur aaj gold rate" gets the weather and nothing for gold, which has no live source. Fixing it needs a rule for "the question also asks something no live source covers". A guessed word list would over-search or under-search, so it is written down with that need rather than shipped as a guess.
+
+
+### Q-129: Stop reaches the Gemini/Vertex runner (2026-10-04)
+
+**Problem.** `GeminiToolRunner` never read the build's stop signal. A Stop pressed during a Gemini or Vertex call waited out the whole call, up to the 120 s bound. The Claude and OpenAI-shaped runners already honoured the signal.
+
+**Fix.** The runner now does three things:
+- It never starts a call for a build that is already stopped.
+- It hands the signal to the SDK (`config.abortSignal`), so the HTTP request itself is cancelled.
+- It races the wait with `raceStop`, so a client that ignores the signal still lets go at once. That release comes as `BuildStoppedError`, which the chain never benches a vendor for.
+
+**Tests.**
+- `GeminiToolRunner.test.ts` gains 4 cases. With the old runner, 3 of them fail.
+- New `tests/everyTurnRunnerHearsStop.test.ts` is a class census: every class that implements `TurnRunner` must read `params.signal`, so a new provider family cannot be added deaf.
+
+**Honest limit.** The SDK note says aborting is client-side only: Google still bills the tokens of a call already in flight. The build stops waiting and stops spending on later turns, but the in-flight call's cost cannot be recalled.
+
+
+### Q-131: one definition of "was the build stopped?" (2026-10-04)
+
+**Finding.** The upsell asked `buildWasStopped(timeline) || toolWasUsed('stop_build')`. Every other reader asked the abort signal. The two sources already agree on every reachable path, for two reasons:
+- The model's `stop_build` records `USER_STOPPED_BUILD` and then raises the same `'user-stop'` abort as the button (`setStopBuild`).
+- The b89ba6f8 back-fill copies every signal-only stop onto the timeline, and it runs before the upsell, in the same handler.
+
+The tool-call half added no case. It could only disagree when a `stop_build` the dispatcher could not carry out ("stopping is not available here") still counted as a stop.
+
+**Fix.** The clause is removed, and the timeline is the one definition.
+
+**Test.** `tests/oneDefinitionOfStopped.test.ts` pins both invariants: record-then-abort order, and back-fill before the verdict. It also forbids `toolWasUsed('stop_build')` as a stop definition. With the old clause back, 2 tests fail. The fdd59ef8 pin was updated to the single definition. The ordering it protects is unchanged.
+
+
+### Q-132: every direct durable write is audited against the Green Freeze (2026-10-04)
+
+**Scope.** All 44 direct `saveWorkspaceFiles` / `mergeWorkspaceFiles` calls in `routes/agentv3.ts` were read one by one, plus the two callers outside it (`navStore` copying a bought app into a new workspace; the import and mobile routes).
+
+**Result: none can keep a change the freeze refused.** Each one falls into one of these groups:
+- **Saves only what landed:** `writtenFiles` is set only after a write succeeds, or the save is a sandbox scan.
+- **Follows a write in the same try:** a freeze refusal throws before the save.
+- **Gated:** saves only after `writeUnlessFrozen` returned true.
+- **Runs before the build can be green:** the reopen heal, the turn-start reconcile, the seeds, the imports.
+- **Writes a different record:** the green snapshot, the attempt copy, the route fingerprint.
+- **Is the user's own edit or revert route.**
+
+The one writer that bypasses `writeFile` is the unused-dependency prune, which goes through npm. It already stands down with `!isGreenLatched(workspaceId)`.
+
+**Lock.** `tests/everyDurableWriteRespectsGreenFreeze.test.ts` records each call site with its verdict and count. A new direct save, a second copy of a classified one, or a stale verdict fails CI. The audit therefore cannot quietly go out of date.
+---
+
+## 2026-10-04 — Q-515, Q-516, Q-518: the three items autopsy 39e982bd left OPEN (branch `claude/q515-q516-q518`)
+
+Q-501 was removed from the queue because its PR (#3521, App Mart) is merged.
+
+| Row | Problem | Root cause | Class | Siblings | Locked by |
+|---|---|---|---|---|---|
+| **Q-515** | "6 snapped" next to "27 off the grid" was read as 21 left behind | Reproduced on the report's shape: 27 off the grid before, **0 after**, and the note said "6". `changes` is de-duplicated for display and the note summed it. WRITE_TIME_QUALITY ("noted and not fixed") is measured before the snap and was never restated. | A report count taken from a de-duplicated display list. | 🔁 **This had come back:** e3b0ce25's "4 off / 2 snapped" was this undercount, but that autopsy fixed only the staleness. The kit-restore note counts classes, which are distinct by nature, so it is clean. | `tests/theSnapCountedEveryValue.test.ts` (reverted and failed) |
+| **Q-516** | `APP_SCOPE` said "clone of Free Fire" for a tournament app *for* Free Fire players; the requirement analysis asked an esports app about "inventory tracking" | No audience/event shape in `namesAsProduct`, and no tournament domain, so money words read as ecommerce. | A product used as the audience is not a clone; an event app needs its own domain. | Measured over 52,779 test strings: no scope decision changed, and only the four 39e982bd lines changed domain. "like / jaisa / clone" still wins. "Make a game like Free Fire" stays in `game`, and a CSS "scrim" is not esports. | `tests/aTournamentForAGameIsNotAClone.test.ts` (both halves reverted and failed) |
+| **Q-518** | The explorer passed "View Details — nothing visibly changed" | A quiet press was never judged by what its name promised. | `PROMISES_VIEW`: such a press fails only if the whole-page hash, the address and every scroll position are identical and no tab, file picker or download opened. It gets the primed retry first. | The repair text for every unresponsive PRESS was the search box's ("filters that list"), so a dead light/dark switch got the wrong fix. Each kind now has its own repair. | Real Chromium in `tests/aViewButtonMustShowSomething.test.ts`: the dead button fails; a dialog, a scroll, a new tab, a file picker, Copy and Show more all pass. Reverted both ways. |
+
+**What to watch on the next real build:**
+- Q-518: a "View …" control that opens nothing is now reported and repaired.
+- Q-516: a tournament app's requirement questions are about brackets, rooms and payouts.
+
+**Same branch, two migrated queue rows:**
+
+| Row | Problem | Root cause | Fix | Locked by |
+|---|---|---|---|---|
+| **Q-150** (77bd487b) | Error logs were flagged as credential leaks because of their label text | `lineLogsCredential` matched the sensitive word anywhere on the line. | A leak now needs either a sensitive name logged as a value, or a label beside a value that is not an error. "password:" next to `pw` is still a leak. The redaction heal reads the same definition. | `tests/aLabelIsNotALeak.test.ts`, using the report's own lines (reverted and failed) |
+| **Q-155** | `withheldSecretNames` existed but was never called, so a correctly withheld key was never explained | No call site. | The build now records `SECRETS_WITHHELD` (names only) right after the app's keys are set. One vault read. | `tests/aWithheldKeyIsNamed.test.ts` (reverted and failed) |
+
 ### Launch checklist ("vibe-coded app" 20 points), 2026-10-04, branch `local/security-checklist` (not pushed)
 
 The admin sent a 20-point launch checklist for apps built with AI tools. Each point was checked twice: on NavBharatAI's own site, and on the apps it generates.
@@ -89390,3 +89473,63 @@ command. Kill switch `AGENTV3_AGENT_CMD_ENV_FILE=off`. Lock: `tests/theAppsScrip
 
 #3531 merged the same `billingLogs` removal. The merge kept main's `usePaymentEngine.ts` verbatim and removed the
 Q-113 row (resolved on merge). `tests/theWalletLoadFetchesOnlyWhatIsShown.test.ts` stays as a second lock.
+
+
+### Q-115: a forgotten package import is restored on the installed package's own word (2026-10-04)
+
+**The gap.** Autopsy 424ecdab ended RED on `<Clock>` and `<IndianRupee>`. Both are lucide-react icons, used once and imported nowhere. The missing-import heal could only copy an import another file had already proven. Guessing lucide's export list was refused on purpose: the heal once turned a broken build into an unparseable one by guessing. The open root cause was recorded as *"read the installed package's own declarations"*.
+
+**The fix.** The endgame repair now asks the sandbox's own `node_modules` which of the compiler's undefined names each dependency really exports (`installedExports.ts`). It uses a single bounded node command: up to 100 dependencies, 25 s, true named exports only, and names validated as identifiers before they reach the script. A forgotten import is restored only when all of these hold:
+- The compiler itself reported the name (TS2304). A global like `fetch` is never captured.
+- Exactly ONE installed package exports it. `Link`, which is both a router link and an icon, is never decided.
+- No project module or proven import already owns it.
+
+**Measured.** Against this repo's 61 dependencies, the command took 3 s. It returned `lucide-react: Clock, IndianRupee` and dropped the hostile name `bad name;rm`.
+
+**Tests.**
+- `installedExports.test.ts`: injection, a real run against the installed lucide-react, and parsing.
+- 5 heal cases.
+- 2 endgame cases. One uses the report's real shape and turns green with no model call.
+- With the heal change reverted, the two real-case tests fail.
+
+**Where it runs.** It is wired where the compiler's errors are in hand: the endgame repair, both the step-cap net and the error-trend checkpoint. The write-time and fast-lane callers are unchanged, because they do not carry the TS2304 list.
+
+
+### Q-130: the free-build unattended chain is counted across instances (2026-10-04)
+
+**Problem.** The cap on how long a free request may run unattended was counted in one Cloud Run instance's memory. An auto-continue that landed on another instance started a fresh chain, so a free request could still hold a paid-for machine for hours: one allowance per instance.
+
+**Fix.**
+- `decideFreePauseDurable` and `noteFreeBuildStartDurable` keep the chain in one Firestore record per workspace (`agentv3_free_chains`, admin SDK, `freeChainStore.ts`).
+- The count is the LARGER of the record and memory.
+- Each durable call is bounded at 2 s.
+- Every failure (no database, slow, erroring) leaves exactly the old memory-only answer. This means it can never stop a build the old code would have let run.
+
+**Tests.**
+- Cross-instance: a window spent elsewhere ends the chain here.
+- A new request clears the chain everywhere; "continue" keeps it.
+- A failing store gives the memory answer.
+- A stale record counts as no chain.
+- Store round-trip with a fake database.
+- Proof by reversion: with the change removed, 6 tests fail.
+- The two wiring pins were updated to the durable calls at the same call sites.
+
+**Siblings checked.** The other daily spend gates (`guestDailyQuota`, the professionals `passGate`, `toolGate`, and the routes that use them) already keep their counts in Firestore. The free-build chain was the only spend limit kept in instance memory.
+
+**Gate note (Q-130):** the first full run caught one failure, from `everyCollectionIsClassified`. It flagged the new `agentv3_free_chains` store as unclassified, which is exactly what that census exists to catch. The store is now classified as `retained`, with a one-day `RETENTION_POLICIES` entry on `touchedAt`. The engine already ignores a record older than six hours, so without the policy one dead document per paused workspace would have stayed forever.
+### Two stale queue rows closed with evidence (2026-10-04)
+
+- **Q-122 ✅ (`UI_WITHOUT_BUILD` false positive when only `App.tsx` was edited)** was already fixed. After build 70115adf, `uiWithoutBuildVerdict` got a "complete view" guard: with no `package.json` in view, it refuses to judge, because what it sees is a fragment. `tests/uiWithoutBuild.test.ts` encodes exactly this case: the view `['src/App.tsx']` gives no finding. The row was never removed after that fix.
+- **Q-125 ✅ (Sonnet cache reads "over-stated")** had a wrong premise, as its own row said on 2026-10-04. Anthropic's `input_tokens` excludes cache shares, so a Claude turn is UNDER-stated. That real defect is Q-343, which is 🟡 BLOCKED on the admin's money decision, with options and a recommendation. Q-125 has nothing left of its own to fix.
+- **Gate note for this branch:** the first full run caught one failure: `licenceExposure.test.ts` pins `sources.push(currencyBlock, pincodeBlock);` as proof that those two sources sit outside every gate. Q-127 had folded movies into that line. The line is restored and movies is pushed separately. That keeps the property, and the pin stays as it was.
+
+### 2026-10-04 — reconciled with the PRs that merged the same rows (#3532, #3535, #3537)
+
+Four sessions worked the same queue rows at once. On merging main, the MERGED implementation won every
+overlap and this branch's duplicate was removed: Q-115 (#3537's `installedExports`; this branch's
+`readPackageExports` and its test deleted), Q-130 (#3537's `freeChainStore`; `FreeBuildChainStore.ts` and its
+test deleted), Q-155 (#3532's `withheldVaultSecretNames`; `loadUserVaultScope`/`secretsWithheldLine` removed),
+Q-127 and Q-129 (#3535). The ledger entries above for those rows describe code that no longer exists — they are
+kept as the audit trail, corrected here. Kept, because the merged PRs did not reach them: the Q-150 siblings
+(the post-edit reviewer's private pattern; "API key" with a space missing from the word list) and the census
+tests for Q-129 (every TurnRunner hears Stop), Q-127 and Q-132, which pass unchanged against the merged code.

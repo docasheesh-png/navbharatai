@@ -137,6 +137,20 @@ const TOOL_AFTER = /^[\s/]*(?:(?:ka|ki|ke|wala|wali|wale|se)\s+)?(?:api|apis|sdk
 // break ends it), so "I don't want a basic app, make a Spotify clone" still escalates.
 const PROHIBITED_BEFORE = /\b(?:do\s+not|don'?t|dont|never|avoid|must\s+not)\b(?![^.,;:!?\n]*\b(?:like|jaisa|jaise|similar\s+to|inspired\s+by)\b)[^.,;:!?\n]{0,40}$/i;
 
+// 🔴 A PRODUCT NAMED AS THE AUDIENCE OR THE EVENT IS NOT A CLONE REQUEST (Q-516, autopsy 39e982bd,
+// 2026-10-04). "PrimeClash Esports" — a tournament app FOR Free Fire players — was recorded as
+// *"LARGE — clone of Free Fire"*. The planner was still the right call (228 features escalate on their
+// own), but the stated reason was false, and a false reason sends the next autopsy to the wrong place.
+// The name was followed by who the app serves or what it hosts: players, a tournament, scrims, a room ID,
+// diamonds. That is the sixth shape of "the product being used" (after channels, content, markdown,
+// prohibitions and launch verbs). It is kept as its OWN list, guarded by a likeness word: "like PUBG
+// players fighting" or "Free Fire jaisa game" still names the product to clone, because "like" before
+// the name always wins. "for" before the name ("an app for Free Fire players") is the same audience shape.
+const AUDIENCE_AFTER = /^[\s/]*(?:(?:ka|ki|ke|wala|wali|wale|se)\s+)?(?:tournaments?|turnaments?|players?|gamers?|fans?|lovers|community|communities|e-?sports|scrims?|squads?|guilds?|clans?|uids?|ids?|room\s+ids?|custom\s+rooms?|leaderboards?|diamonds?|top[\s-]?ups?|redeem\s+codes?|rank(?:s|ing|ings)?|tips|tricks|guides?|news|stats|wiki|creators?|influencers?|followers)\b/i;
+const AUDIENCE_BEFORE = /\bfor\s+(?:the\s+|all\s+|our\s+|my\s+)?$/i;
+const LIKENESS_AFTER = /^[^.,;:!?\n]{0,40}\b(?:jaisa|jaise|jaisi|clone|replica|copy\s+(?:of|bana\w*))\b/i;
+const LIKENESS_BEFORE = /\b(?:like|jaisa|jaise|jaisi|clone\s+(?:of|like)|similar\s+to|inspired\s+by|copy\s+of|replica\s+of|version\s+of)\s+(?:the\s+|a\s+)?$/i;
+
 export function namesAsProduct(text: string, re: RegExp): boolean {
   const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
   for (const m of text.matchAll(g)) {
@@ -151,6 +165,8 @@ export function namesAsProduct(text: string, re: RegExp): boolean {
     // A list of channels ("WhatsApp/Drive/USB") inherits the preposition before its first item.
     const listHead = before.replace(/(?:[\w.-]+\s*\/\s*)+$/, '');
     if (TOOL_BEFORE.test(before) || TOOL_BEFORE.test(listHead) || TOOL_AFTER.test(after)) continue;
+    const after40 = noise(text.slice(at + m[0].length, at + m[0].length + 48));
+    if (!LIKENESS_BEFORE.test(before) && !LIKENESS_AFTER.test(after40) && (AUDIENCE_AFTER.test(after) || AUDIENCE_BEFORE.test(before) || AUDIENCE_BEFORE.test(listHead))) continue;
     return true;
   }
   return false;

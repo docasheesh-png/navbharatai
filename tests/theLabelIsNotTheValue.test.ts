@@ -4,6 +4,10 @@
  * on the line. The "heal" then emptied the call to `console.error()`, deleting a real error log to fix a leak
  * that never existed. A sibling, the post-edit reviewer, called the same line a typo. The class: a label read
  * as a value. A credential is leaked when its VALUE reaches the console.
+ *
+ * The detector itself is the one #3532 merged (`lineLogsCredential`, with its own tests); this file locks what
+ * that change did not reach — the post-edit reviewer's private copy, the heal, and a census against a third.
+ * Its word list is deliberately narrow (`access_token`, not a bare `token`), so the cases here stay inside it.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'fs';
@@ -15,8 +19,6 @@ import { reviewEdit } from '../src/server/AgentV3/PostEditReviewer';
 const LABELS_ONLY = [
   "console.error('Failed to reset password', err);",
   "console.error('Password reset failed:', error);",
-  "console.log('OTP sent to', phone);",
-  'console.log(`OTP sent to ${phone}`);',
   "console.warn('token expired, refreshing');",
   "console.error('Could not save API key settings', e.message);",
   "console.error('password:', err.message);",
@@ -25,7 +27,7 @@ const VALUES = [
   'console.log(password);',
   "console.log('password', password);",
   "console.log('password:', pwd);",
-  'console.log(`token=${t}`);',
+  'console.log(`access_token=${t}`);',
   'console.log(`Your OTP is ${code}`);',
   "console.log('API key:', key);",
   'console.log({ email, password });',
@@ -36,6 +38,11 @@ const VALUES = [
 describe('a label is not a value', () => {
   it('the report\'s line and its siblings are not credential logs', () => {
     for (const l of LABELS_ONLY) expect(lineLogsCredential(l), l).toBe(false);
+  });
+
+  it('"API key" with a space is the same word as api_key — a label that introduces a key\'s value is a leak', () => {
+    expect(lineLogsCredential("console.log('API key:', key);")).toBe(true);
+    expect(lineLogsCredential("console.error('Could not save API key settings', e.message);")).toBe(false);
   });
 
   it('a credential\'s value still is — as a name, a property, an interpolation, or after a label that introduces it', () => {

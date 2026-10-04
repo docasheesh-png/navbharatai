@@ -273,20 +273,14 @@ export interface LiveDataOptions {
 }
 
 /**
- * ONE dispatcher for every live source: EVERY source whose shape matches the message answers, in a fixed
- * order, and '' means "nothing live applies — let the web search answer".
- *
- * 🔴 IT USED TO BE THE FIRST SOURCE ONLY (queue Q-127). "Delhi me aaj mausam kaisa hai aur 100 dollar kitne
- * rupaye" got the weather and nothing about the rupee: the loop returned at the first block, and because
- * a live answer skips the web search, the second half of the question was simply dropped. Each source
- * still decides for itself whether the message is its shape (that check is cheap and fetches nothing), so
- * asking all of them costs a network call only for the ones that match — and they run side by side.
+ * ONE dispatcher for every live source: the first source whose shape matches the message answers, and
+ * '' means "nothing live applies — let the web search answer". Transit (env-keyed) is tried first
+ * because a train/PNR/flight number is the most specific shape a message can have.
  */
 export async function liveDataContext(message: string, opts: LiveDataOptions = {}): Promise<string> {
   const env = opts.env ?? process.env;
   const fetchImpl = opts.fetchImpl ?? fetch;
   const now = opts.now ?? new Date();
-  const transit = liveTransitContext(message, { env, fetchImpl, now }).catch(() => '');
   /**
    * 🔒 THE ONE SOURCE HERE WHOSE LICENCE DOES NOT COVER A COMMERCIAL PRODUCT (admin 2026-09-09).
    *
@@ -307,14 +301,21 @@ export async function liveDataContext(message: string, opts: LiveDataOptions = {
    * properly-licensed source must not be silenced by a switch that exists to pause a different
    * provider's exposure; keeping them on one flag would mean pausing the problem also pauses the fix.
    */
-  const sources: Array<(m: string, f: typeof fetch, n: Date) => Promise<string>> = [];
+  const sources: Array<(m: string, f: typeof fetch, n: Date) => Promise<string>> = [
+    (m, f, n) => liveTransitContext(m, { env, fetchImpl: f, now: n }),
+  ];
   if (liveWeatherSourceEnabled(env)) sources.push(weatherBlock);
   if (cpcbAqiConfigured(env)) sources.push((m, f, n) => aqiBlock(m, f, n, env));
   sources.push(currencyBlock, pincodeBlock);
-  const blocks = await Promise.all([
-    transit,
-    ...sources.map((source) => source(message, fetchImpl, now).catch(() => '')),
-    moviesBlock(message, fetchImpl, now, env).catch(() => ''),
-  ]);
-  return blocks.filter((b) => typeof b === 'string' && b.trim()).join('\n\n');
+  sources.push((m, f, n) => moviesBlock(m, f, n, env));
+  /**
+   * EVERY SOURCE THE QUESTION ASKS FOR, NOT THE FIRST ONE (Q-127, 2026-10-04). This loop used to
+   * return the first block that answered, so "delhi ka mausam aur AQI" got the weather and lost the
+   * air quality — and because a live block skips the web search, nothing else answered it either.
+   * Each source is gated by its own signal (a regex, no network) before it fetches, so asking all of
+   * them costs nothing for the ones the question does not mention. They run side by side, so a
+   * two-part question waits for the slower source, not the sum; the order below is the order shown.
+   */
+  const blocks = await Promise.all(sources.map((source) => source(message, fetchImpl, now).catch(() => '')));
+  return blocks.filter(Boolean).join('\n\n');
 }

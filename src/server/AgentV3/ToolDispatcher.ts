@@ -198,7 +198,8 @@ import { analyzeHooksRules, hookViolationWriteNote } from './HooksRulesAnalysis'
 import { dedupeDuplicateImports } from './DuplicateImportGuard';
 import { isReactFamilyFramework } from './frameworkFamily';
 import { analyzeImportExports } from './ImportExportAnalysis';
-import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports, fixTypeOnlyValueImports, readPackageExports } from './ImportExportReconcile';
+import { reconcileImportExports, addMissingProjectImports, fixWrongSourceImports, fixTypeOnlyValueImports } from './ImportExportReconcile';
+import { installedExportsCommand, parseInstalledExports } from './installedExports';
 import { analyzeJsxComponents } from './JsxComponentAnalysis';
 import { analyzeUndefinedHooks } from './UndefinedHookAnalysis';
 import { analyzeDependencyConstraints } from '../AI/reasoning/ConstraintSolver';
@@ -2031,17 +2032,19 @@ export class ToolDispatcher {
     } catch { return null; /* never block a write on the guard's own failure */ }
   }
 
-  /** One bounded sandbox run for the package-export question (Q-115). Returns stdout, or '' on any failure. */
-  private async packageExportsRun(command: string): Promise<string> {
-    try {
-      const r = await withTimeout(this.actuator.runCommand(this.workspaceId, command), 20_000, 'pkg-exports');
-      return String(r?.stdout ?? '');
-    } catch { return ''; }
-  }
-
-  endgameIo(): { runTsc: () => Promise<string>; readFiles: () => Promise<Record<string, string>>; writeFile: (path: string, content: string) => Promise<void>; runCommand: (command: string) => Promise<string> } {
+  endgameIo(): {
+    runTsc: () => Promise<string>;
+    readFiles: () => Promise<Record<string, string>>;
+    writeFile: (path: string, content: string) => Promise<void>;
+    installedExports: (names: string[]) => Promise<Record<string, string[]>>;
+  } {
     return {
-      runCommand: (command: string) => this.packageExportsRun(command),
+      // Q-115: ask the installed packages themselves which of these undefined names they export, so a
+      // forgotten `import { Clock } from 'lucide-react'` can be restored on the package's own word.
+      installedExports: async (names: string[]) => {
+        const r = await this.actuator.runCommand(this.workspaceId, installedExportsCommand(names));
+        return parseInstalledExports(`${r.stdout || ''}`);
+      },
       runTsc: async () => {
         // Slice 4 — INCREMENTAL tsc: the .tsbuildinfo cache makes every peek after the first
         // ~0.3-0.8s instead of ~2s, so the 25-step trend checkpoint and the endgame re-verifies are
@@ -5663,11 +5666,7 @@ export class ToolDispatcher {
           // exported by exactly one project module and is not declared/imported in the file. Same durable
           // write path; feeds the analyzers below.
           try {
-            // An icon used once and imported nowhere is healed from the installed package's own exports
-            // (Q-115) — asked only when an unbound JSX tag exists, bounded, and silent when unanswerable.
-            const packageExports = await readPackageExports(astFiles, (cmd) => this.packageExportsRun(cmd),
-              () => withTimeout(this.actuator.readFile(this.workspaceId, 'package.json'), 5_000, 'pkg-json-read'));
-            const addRes = await addMissingProjectImports(astFiles, { packageExports });
+            const addRes = await addMissingProjectImports(astFiles);
             if (addRes.added.length) {
               const changedFiles = new Set(addRes.added.map((a) => a.file));
               let landed = 0;

@@ -306,7 +306,8 @@ export async function liveDataContext(message: string, opts: LiveDataOptions = {
   ];
   if (liveWeatherSourceEnabled(env)) sources.push(weatherBlock);
   if (cpcbAqiConfigured(env)) sources.push((m, f, n) => aqiBlock(m, f, n, env));
-  sources.push(currencyBlock, pincodeBlock, (m, f, n) => moviesBlock(m, f, n, env));
+  sources.push(currencyBlock, pincodeBlock);
+  sources.push((m, f, n) => moviesBlock(m, f, n, env));
   /**
    * EVERY SOURCE THE QUESTION ASKS FOR, NOT THE FIRST ONE (Q-127, 2026-10-04). This loop used to
    * return the first block that answered, so "delhi ka mausam aur AQI" got the weather and lost the

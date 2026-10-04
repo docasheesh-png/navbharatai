@@ -88036,6 +88036,6 @@ The admin answered both open questions ("aapki dono suggestion banao"):
 
 Honest limits: "parental filter to protect children from porn" stays blocked (it carries "porn" — the admin's rule).
 At publish the scanner reads the whole bundle, where "report" is common (a footer); the unambiguous words are what keep
-an offending page refused there. The other nine scripts have no protective words yet → new row Q-330 (🟡 BLOCKED on a
+an offending page refused there. The other nine scripts have no protective words yet → new row Q-344 (🟡 BLOCKED on a
 native reader's word list).
 

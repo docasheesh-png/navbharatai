@@ -158,6 +158,7 @@ const NEVER_SUGGEST = new Set([
   'REVIEW_FINDINGS_UNREAD', // our parser could not read the review's findings (autopsy d798ddd3)
   'UNSUPPORTED_STACK', // the user is told in the ready message already (unsupportedStack.ts)
   'UNKNOWN_NAME_IN_REQUEST', // a note to our builder (unknownName.ts), never a finding
+  'REQUEST_SCOPE_NOTE', // a note to our builder (requestScope.ts), never a finding
   'SCRIPT_REQUEST_AS_WEB_APP', // a note to our builder and the user (scriptRequest.ts)
   'PYTHON_BACKEND_UP', // our own boot of the app's Python server (pythonBackendBoot.ts)
   'AUTH_EXPLORE_SIGNED_IN', 'AUTH_EXPLORE_NOT_RUN', // our sign-in instrument, never the app's defect

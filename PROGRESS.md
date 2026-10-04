@@ -87860,6 +87860,36 @@ into its pattern: forex, MT4/MT5, cTrader, algo trading, F&O, trading system/str
 is not trading. `TRADING_CONTEXT` (the broker/listing strip) is unchanged. Both autopsies' tests pass on the
 merged state (`theForexPasteIsNotAnEightModuleProject`, `thePaperTradingAutopsy`).
 
+## 2026-10-04 — Autopsy dcce5d26: "convert one existing website into an online APK"
+
+Weak, fresh workspace, user stopped at 20 s, ₹0. Ledger (✅ 0 self-heal · 🔀 0 workaround · ⏭️ 0 skip · ❌ 1 wrong
+route · 🥵 0 struggle, plus 3 defects found while working it):
+
+| ID | Problem | Root cause → class | Siblings | Lock |
+|---|---|---|---|---|
+| Q-330 | A website-to-APK request was built | `projectElsewhere` knew two ways of saying "elsewhere" (host, no-rebuild); a conversion of the user's own site into a phone app is a third, and "one existing" missed the determiner list | the reply gained the live-link limit + private .apk line; `apk_builder` KB entry says the same | §1–§2, reverted-and-failed |
+| Q-331 | Per-call `model: "glm"`, top-level `model: "glm"` | the f152c1ab `answeringModel` fix never reached the fast lane's own helper `fastLaneCallIdentity` | top-level model is derived from the same record (one fix) | §3, reverted-and-failed |
+| Q-332 | The lane's post-call reasoning-rung check was dead | it asked `modelAlwaysReasons` of a family label | woken by Q-331 | §3 |
+| Q-333 | The fast-lane plan rewrote the starter's tsconfig ×3, package.json, vite.config blind | per-file and one-shot calls never saw the working file → the cause behind `ViteConfigGuard` / HTML entry heals, and a silent loss of the strict-trial tsconfig | one-shot lane fixed in the same change (`existingConfig.ts`) | §4, reverted-and-failed |
+| Q-334 | Six items argued not defects | — | — | 🟡 BLOCKED on the admin's yes |
+
+## 2026-10-04 — Autopsy 70e030bb: "An app which takes notes from online classes"
+
+Weak, fresh workspace, app rendered, RELEASE_GATE RED on a false journey. Ledger (✅ 1 self-heal · 🔀 0 workaround ·
+⏭️ 1 skip · ❌ 3 shipped wrong · 🥵 1 struggle, plus 1 sibling found while working it):
+
+| ID | Problem | Root cause → class | Siblings | Lock |
+|---|---|---|---|---|
+| Q-335 | 🥵 Fast-lane verify TS6305 on every file; the full builder's first minutes undid it | the plan rewrote the starter's compiler files (tsconfig ×3, vite-env.d.ts) blind → a plan rewrites a starter file with no app content | one-shot lane filtered too; Q-333 (#3490) had only shown such a file its content | `theNotesAppAutopsy` §A |
+| Q-336 | ❌ "Stack: Vue" for a React app | a `.d.ts`'s ambient import counted as a dependency; Vue/Svelte outranked React without their own files | Svelte branch fixed together | §B |
+| Q-337 | ❌ JOURNEY_FAILED + RED on a working app | a password form read as an add-an-item form, and driven signed in | both journey loops (route forms, screen forms) | §C |
+| Q-338 | ⏭️ AUTH_EXPLORE_NOT_RUN although the app shipped a demo account | the seed pattern wanted a literal `password:` value; `passwordHash: hashPassword("demo123")` was invisible | — | §D |
+| Q-339 | ✅ prune removed `uuid`, left `@types/uuid` | `@types/*` is tooling, never removed with its package | — | §E |
+| Q-340 | ❌ unrequested login gate; "Clear Completed" deleted every note | nothing told a builder not to add sign-in or actions the request never named | architect, fast lane, one-shot all read `requestScope.ts`; the one-shot lane never got the unknown-name note either (fixed) | §F |
+| Q-341 | Four items argued not defects | — | — | 🟡 BLOCKED on the admin's yes |
+
+New key `AGENTV3_REQUEST_SCOPE` (default ON, `off` reverts). The #3490 test that expected `tsconfig.json` to be shown
+its content was updated: since this change the plan does not list it at all.
 ## 2026-10-04 — Autopsy d798ddd3 ("Calculator app", Weak, ok, ₹43.75, 3.7 min)
 
 The app rendered, typechecked, built for production, and 12 of its controls were pressed without a break.
@@ -87936,6 +87966,13 @@ All on PR #3488, each locked by a test proven by reversion.
 | Q-112 | New-tab links opened inside the phone app's own WebView | Fixed one link at a time; the next link written was bare again. (Measured: every JSX new-tab link already carried `rel`.) | One delegated listener in the native shell (`installExternalLinkHandler`) sends them to the system browser; our own origin, downloads and modified clicks are left alone | `aNewTabLinkOpensTheRealBrowser` |
 
 ⚠️ Q-112 reaches phone users only with a fresh `.aab`/`.ipa` (bundled mode).
+
+## 2026-10-04 — Queue IDs collided across four open PRs (found while keeping #3490 green)
+
+| ID | Problem | Root cause | Fix | Test |
+|---|---|---|---|---|
+| Q-342 | #3490, #3491, #3493 and #3495 each claimed Q-300..Q-315 for different problems | a session picks "the next free ID" from the copy of `BUILD_REPORT_QUEUE.md` it can read; rows in open PRs are invisible to it | #3490's rows renumbered to Q-330..Q-341 (its two ledgers above); the queue header says to look at open PRs' diffs too | `tests/theQueueIdsAreUnique.test.ts` fails a merged state with a duplicate row ID — reverted (a duplicated Q-091) and failed |
+| Q-343 | Claude turns' cache reads mostly unpriced, cache writes never priced (found re-checking Q-125, whose "over-stated" premise is wrong) | Anthropic's `input_tokens` excludes both cache shares; the ledger and `usageCostUsd` assume the OpenAI-style "input includes cache" meaning | — (a money decision) | 🟡 BLOCKED — options and recommendation in the queue row |
 - **Q-305 (unblocked by #3488's merge):** the explorer now tries a first-screen press that changed nothing once
   more, after a control that DID change the screen (`MAX_PRIMED_RETRIES` = 3 in `clickExplorer.ts`). In a real
   browser, a keypad's "AC" and "+/−" are now proven to respond after "7", and a dead "%" is named in words

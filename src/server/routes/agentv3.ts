@@ -392,6 +392,7 @@ import { adoptHealResult } from '../AgentV3/healResult';
 import { signInExploreEnabled, signInScript, signInCandidates, parseSignInOutput, signInReportLine, isSignInRoute, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
 import { unsupportedStackRequested, unsupportedStackBuilderNote, unsupportedStackUserNote, builtWithLabel } from '../AgentV3/unsupportedStack';
 import { unknownNameNoteEnabled, unknownNamesInRequest, unknownNameBuilderNote, unknownNameReportNote } from '../AgentV3/unknownName';
+import { requestScopeNote } from '../AgentV3/requestScope';
 import { bootPythonBackendFirst, backendBootReport, isPythonServerCommand, PYTHON_BOOT_BUDGET_MS } from '../AgentV3/pythonBackendBoot';
 import { scriptRequestNoteEnabled, scriptDeliverableRequested, liveDataRequested, scriptRequestBuilderNote, scriptRequestStartLine, scriptRequestReportNote } from '../AgentV3/scriptRequest';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
@@ -3447,12 +3448,18 @@ export function fastLaneCallIdentity(
   reported: boolean,
   usedProvider: string | undefined,
   claudeTierModel: string,
+  answered?: string | null,
 ): { provider: string; model: string } {
   // No provider ever reported in — we do not know who would have served it, and we must not guess.
   // 'unknown' is the same word `usageLedger`'s providerKey uses, so one vocabulary covers both.
   if (!reported) return { provider: 'unknown', model: 'unknown' };
   const provider = fastLaneProviderLabel(usedProvider);
-  return { provider, model: provider === 'anthropic' ? claudeTierModel : String(usedProvider || '').toLowerCase() };
+  // 🔴 THE MODEL THAT ANSWERED, NOT THE VENDOR'S NAME (autopsy dcce5d26, 2026-10-04). This returned
+  // `usedProvider.toLowerCase()` — "glm" — for every cheap-floor call, so the fast lane's per-call log
+  // (and the report's top-level `model`, derived from it) named a vendor where a model belongs. It is
+  // the expression `answeringModel.ts` replaced at five aux call sites (autopsy f152c1ab); this lane
+  // records through its own helper, so that fix never reached it. `answered` is `TurnResult.model`.
+  return { provider, model: answeringModel({ answered, planned: provider === 'anthropic' ? claudeTierModel : null, family: String(usedProvider || '').toLowerCase() }) };
 }
 
 /**
@@ -16142,6 +16149,11 @@ async function noteBuildOutcome(
       // chat to "the COACT backend"). New builds only, like the stack note above — see unknownName.ts.
       const unknownNamesAsked = intent === 'new_build' && !isImportTurn && unknownNameNoteEnabled() ? unknownNamesInRequest(prompt) : [];
       const unknownNameNote = unknownNameBuilderNote(unknownNamesAsked);
+      // A login nobody asked for is a wall in front of the app (autopsy 70e030bb, see requestScope.ts).
+      let requestScopeText = '';
+      try {
+        requestScopeText = requestScopeNote({ request: planning.text, newBuild: intent === 'new_build' && !isImportTurn, domain: analyzeRequirementGaps(planning.text).domain });
+      } catch { requestScopeText = ''; }
       // A script, a CLI, a Streamlit dashboard or a notebook is built as a web app, and the user hears that
       // BEFORE the build (Q-274, autopsy 241215d1 — a "self-contained Python script" became FastAPI + React
       // with a simulated feed, said nowhere). New builds only, like the two notes above — see scriptRequest.ts.
@@ -16332,6 +16344,10 @@ async function noteBuildOutcome(
       // THE USER NAMED A STACK WE DO NOT BUILD (autopsy 8e124182: "using PHP MVC architecture" was built
       // in React with a types file claiming a "PHP MVC backend"). Told to the builder here, to the user
       // in the ready message — see unsupportedStack.ts.
+      if (requestScopeText) {
+        buildPrompt = `${requestScopeText}\n\n---\n\n${buildPrompt}`;
+        buildDiag.record({ phase: 'plan', severity: 'info', code: 'REQUEST_SCOPE_NOTE', message: 'The request asks for no sign-in, so the builder was told to add no login or accounts and no control for a state the data does not have.', autoResolved: true });
+      }
       if (unknownNameNote) {
         buildPrompt = `${unknownNameNote}\n\n---\n\n${buildPrompt}`;
         buildDiag.record({ phase: 'plan', severity: 'info', code: 'UNKNOWN_NAME_IN_REQUEST', message: unknownNameReportNote(unknownNamesAsked), autoResolved: true });
@@ -16815,6 +16831,7 @@ async function noteBuildOutcome(
       const pastedBriefSuffix = pastedBrief ? `\n\n${pastedBrief}` : ''; // the fast lane reads the pasted app's checklist too
       const unknownNameSuffix = (unknownNameNote ? `\n\n${unknownNameNote}` : '') // and the unknown-word note (Q-067)
         + (scriptRequestNote ? `\n\n${scriptRequestNote}` : ''); // and the script-request note (Q-274)
+      const requestScopeSuffix = requestScopeText ? `\n\n${requestScopeText}` : ''; // and the request-scope rule (autopsy 70e030bb)
 
       // Universal Language (Layer 73): build in the user's language. If the
       // request is written in a distinctive non-Latin script we name the
@@ -17348,6 +17365,11 @@ async function noteBuildOutcome(
         // survived was chance — autopsy 2720e553). Prompts that show it cap it themselves (60).
         const scaffold = (await actuator.listFiles(workspaceId).catch(() => [] as string[]))
           .filter((p) => !/^(node_modules|\.git)\//.test(p));
+        // What both fast lanes read before rewriting a config file the project already has (existingConfig.ts).
+        const readExistingProjectFile = async (p: string): Promise<string | null> => {
+          const raw = await actuator.readFile(workspaceId, p).catch(() => null);
+          return raw == null ? null : withoutPreviewBridge(p, raw);
+        };
         // Shared side-effects for both fast lanes (Simple Builder + OneShot).
         // ONE fast-lane model round trip. Returns the provider's stop reason alongside the text so the
         // continuation wrapper below can tell "the model finished" from "the model ran out of budget"
@@ -17424,7 +17446,7 @@ async function noteBuildOutcome(
             try { buildDiag.recordLlmCall({ model: failedAs.model, provider: failedAs.provider, promptPreview, promptChars: promptPreview.length, responsePreview: '', responseChars: 0, finishReason: null, toolCalls: 0, inputTokens: 0, outputTokens: 0, latencyMs: Date.now() - startedAt, ok: false, error: err instanceof Error ? err.message : String(err) }); } catch { /* diagnostics best-effort */ }
             throw err;
           }
-          const servedBy = fastLaneCallIdentity(providerReported, usedProvider, fbModel);
+          const servedBy = fastLaneCallIdentity(providerReported, usedProvider, fbModel, t.model);
           try { buildDiag.recordLlmCall({ model: servedBy.model, provider: servedBy.provider, promptPreview, promptChars: promptPreview.length, responsePreview: t.text, responseChars: t.text.length, finishReason: t.stopReason, toolCalls: t.toolUses.length, inputTokens: t.usage.inputTokens, outputTokens: t.usage.outputTokens, latencyMs: Date.now() - startedAt, ok: true }); } catch { /* diagnostics best-effort */ }
           if (!fastLaneReasoningRung && fastLaneReasoningGateEnabled() && modelAlwaysReasons(servedBy.model)) {
             fastLaneReasoningRung = servedBy.model;
@@ -17825,7 +17847,9 @@ async function noteBuildOutcome(
           const c = await actuator.readFile(workspaceId, p).catch(() => null);
           if (isUntouchedStarterEntry(c)) { starterEntryPath = p; break; }
         }
-        const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
+        const sb = await runSimpleBuild({ prompt: planning.text + singleHtmlFileSuffix + pastedBriefSuffix + unknownNameSuffix + requestScopeSuffix, framework, scaffoldPaths: scaffold, starterEntryPath, complex: buildIsComplex, generate: fastGenerate,
+          // A planned config file the starter already has is edited, never rewritten blind (isProjectConfigPath).
+          readExisting: readExistingProjectFile,
           stopLane: () => (fastLaneReasoningRung
             ? `the lane's engine fell to ${fastLaneReasoningRung}, which reasons before every answer; the lane's per-file budget cannot carry that, so the files finished so far go to the full builder now`
             : null),
@@ -17961,7 +17985,7 @@ async function noteBuildOutcome(
           //    …and gated on what the lane above just MEASURED. See oneShotStillViable: in the dukaan
           //    report the manifest had planned 8 files, so "the manifest skips it" was already false,
           //    and this lane still ran for 150 seconds to fail at something a single call cannot do.
-          const os = await runOneShot({ prompt, framework, scaffoldPaths: scaffold, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog });
+          const os = await runOneShot({ prompt: prompt + unknownNameSuffix + requestScopeSuffix, framework, scaffoldPaths: scaffold, readExisting: readExistingProjectFile, generate: fastGenerate, writeFiles: laneFence.open('one-shot'), startPreview: fastPreview, log: fastLog });
           buildDiag.record({ phase: 'build', severity: 'info', code: os.ok ? 'ONESHOT_SUCCESS' : 'ONESHOT_FALLBACK', message: os.summary, autoResolved: true, detail: os.reason });
           if (os.ok) {
             // VERIFY GATE for the one-shot lane too (autopsy 2026-07-07: a NowPlaying.tsx TRUNCATED

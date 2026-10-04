@@ -320,8 +320,17 @@ export function parseExploreOutput(stdout: string | null | undefined): ExploreRu
       });
       // A retry after a primer REPLACES the first try of the same first-screen control (MAX_PRIMED_RETRIES).
       const last = run.presses[run.presses.length - 1];
-      // A retry that could not be pressed adds nothing: the first try stands.
-      if (last.primedBy && last.verdict === 'skipped') run.presses.pop();
+      /**
+       * A retry that could not be pressed adds nothing: the first try stands.
+       *
+       * ⚠️ `covered` BELONGS HERE WITH `skipped`, and leaving it out would have made autopsy 8b8743a3's
+       * fix state something false. A retry is only ever run for a first try that was `ok` and changed
+       * nothing, so the control was demonstrably pressable on a fresh screen; if the PRIMER then put
+       * something on top of it, replacing that result would report *"cannot be pressed at all"* about a
+       * control a user can press. Nothing is lost by standing down: a control genuinely covered on the
+       * fresh screen is reported by its own first try, which is never primed and never popped.
+       */
+      if (last.primedBy && (last.verdict === 'skipped' || last.verdict === 'covered')) run.presses.pop();
       else if (last.primedBy) {
         const first = run.presses.findIndex((p, i) => i < run.presses.length - 1 && p.label === last.label && !p.via && !p.kind && !p.primedBy);
         if (first >= 0) run.presses.splice(first, 1);

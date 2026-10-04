@@ -93,6 +93,26 @@ describe('a control that cannot be pressed is a finding, not a shrug', () => {
     expect(offer.prompt.length).toBeGreaterThan(40);
   });
 
+  it('⚠️ PRECISION: a PRIMED retry that comes back covered never replaces a first try that worked', () => {
+    // #3491 retries a control that changed nothing on a fresh screen, after pressing one that DID change
+    // it, and the retry REPLACES the first result. A retry is only run for a first try that was `ok`, so
+    // the control was pressable; if our own primer then covers it, saying "cannot be pressed at all"
+    // would be false. The first try stands — and a control covered on the fresh screen is reported by
+    // its own (never primed, never popped) first try, which the case below proves.
+    const run = parseExploreOutput([
+      summaryLine(),
+      press({ label: 'AC', verdict: 'ok', note: 'it responded', changed: false }),
+      press({ label: 'AC', verdict: 'covered', primedBy: '7', note: 'it cannot be pressed: div.pad is on top of it' }),
+    ].join('\n'));
+    expect(run.presses).toHaveLength(1);
+    expect(run.presses[0].verdict).toBe('ok');
+    expect(summarizeExplore(run).code).toBe('EXPLORE_PASSED');
+
+    // …while a control covered on the FRESH screen is still a failure, primer or no primer.
+    const fresh = parseExploreOutput([summaryLine(), press({ label: 'AC', verdict: 'covered', note: 'it cannot be pressed: div.pad is on top of it' })].join('\n'));
+    expect(summarizeExplore(fresh).code).toBe('EXPLORE_FAILED');
+  });
+
   it('⚠️ PRECISION: a press that really was OURS is still skipped and still proves nothing', () => {
     const ours = parseExploreOutput([
       summaryLine(),

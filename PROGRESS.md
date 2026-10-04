@@ -87886,6 +87886,49 @@ change before it saw #3491. That copy was discarded unpushed, because it edited 
 | Q-310: READY_BEFORE_END said "The app was never judged finished during the build" about a calculator the end-of-turn gate had judged ready (9 steps, 3.7 min) | Only the mid-build done check wrote `readyMark`, and on a short build it never came due | A measurement written by one of two places that make the same judgement | The end-of-turn gate is the only other `assessBuildReadiness` judgement in the runner. It now records the mark through `endOfTurnReadyMark` under the mid-build check's own rules (not on an edit, not before a write, not over a failed compile, never over an earlier mark) | `tests/theEndOfTurnGateJudgedItFinished.test.ts` (three reversions each failed) |
 
 Watch: READY_BEFORE_END on a short build reads "judged finished at step N".
+## 2026-10-04 — Autopsy d798ddd3 ("Calculator app", Weak, ok, ₹43.75, 3.7 min)
+
+The app rendered, typechecked, built for production, and 12 of its controls were pressed without a break.
+Then the lean review found two real bugs ("." after an operator → `NaN`; a digit after `Error` corrupts the
+display) and **both shipped**: the review wrote them as `**1. Bug: …**` without a severity tag, the parser
+read none, the review was headed ✅, and the one verified green repair had nothing to select.
+
+🔴 **This is Q-291 coming back.** #3474 (autopsy 536c8189) fixed the finding's WORDS inside a tagged line; the
+untagged LINE was the sibling it did not reach. The class is "a finding format we only recognise when the
+model obeys it", and it is now closed on both sides: the line is read (`readLabelledFinding`), and anything
+still missed is said (`REVIEW_FINDINGS_UNREAD`, a ⚠️ header instead of ✅).
+
+Tally: ✅ self-healed 2 (the 5 type errors fixed in one edit by the write-time typecheck; the undefined
+`.calc-*` classes) · 🔀 workaround 1 (GLM crawled 15 s, ladder fell to the reasoning rung) · ⏭️ skipped 1
+(the review's bugs, never repaired or offered) · ❌ shipped imperfect 2 (the two bugs; the off-grid spacing,
+already fixed by #3474 after this build ran) · 🥵 struggle 3 (a 9-file plan for a 2-file app; a contract call
+for one component; a 15.6 s first typecheck).
+
+| Item | Problem | Root cause → class | Siblings | Lock |
+|---|---|---|---|---|
+| Q-300 | review's two bugs shipped unread | severity read only from a tag → a finding format that fails silently when the model ignores it | `partialReview.hasSalvageableFindings` (same tag-only test); the review shown to the user cut mid-word (`summary.slice(0, 600)`) → `trimReviewSummary` | `tests/theCalculatorReviewWasNeverRead.test.ts` §1–3, reversion-proven |
+| Q-301 | 9 planned files, 6 of them "(provided)" by the planner itself | the plan counted entries the planner said it would not change | the handed-off plan (`plannedPaths`) reads the same filtered manifest | §4, reversion-proven |
+| Q-302 | contract call for one component, crawled 15 s | the contract pass ran whatever the plan's shape | — (one lane runs a contract) | §5 (real lane run), reversion-proven |
+| Q-303 | gate "1 thing(s) worth a look", unnamed | the gate got a count, never the findings | — | §6, reversion-proven |
+| Q-304 | 15.6 s first typecheck | Q-063 / Q-257 class, third occurrence | — | 🟡 needs the ensure log |
+| Q-305 | explorer cannot test a press that changes nothing on the first screen | judging by text on a fresh load | — | 🟡 `clickExplorer.ts` in flight in #3488 |
+| Q-306 | "Live preview" line for build-machine time the user did not choose | wording of an admin-designed line | — | 🟡 admin decision |
+| Q-307 | eight items argued not defects | — | — | 🟡 admin yes/no |
+
+Proactive: the biggest lever this report shows is that a **green app's review is now the place real bugs are
+found**, and the green repair is what turns that into a fixed app. The next report with a "Bug:" review should
+carry `REVIEW_FUNCTIONAL_REPAIRED` — that line is the proof this autopsy worked.
+
+### 2026-10-04 — d798ddd3 follow-up: admin decisions Q-306 (a) and Q-307 (yes)
+
+- **Q-306:** the "Live preview: N min — ₹X (the in-browser preview is free)" line was wrong on every build, not
+  only this one. The charge is `billableSandboxDetail` — the BUILD's machine time, capped at the build's own
+  duration — never a preview the user opened. Both surfaces now say "Build machine" and offer no free
+  alternative (`livePreviewChargeLine`, the "Why this cost?" panel). The amount and the field names
+  (`livePreviewSeconds` / `livePreviewInr`, read by bundled phone apps) are unchanged. `LIVE_SERVER_PAID_NOTE`,
+  shown when the user really presses Live, stays as it is. Locked in `tests/livePreviewCharge.test.ts`
+  (reversion-proven).
+- **Q-307:** the eight items argued not defects are accepted by the admin; resolved as not-a-defect.
 ## 2026-10-04 — Admin decisions on the 0311186f rows: Q-091 built, Q-092 and Q-093 closed, Q-013 still blocked
 
 The admin answered the four open 0311186f rows with "aap kro, jo jo kar sakte", which accepts each recommendation.
@@ -87950,3 +87993,23 @@ user their letter was loaded.
 Open: Q-359 (writing attachments into the project — a privacy/publish decision), Q-362 (an app's own error banner
 is unseen by every check — design decision), Q-364/365/366 (missing information), Q-367 (agreement). The user's
 published app still carries the broken worker and the vulnerable versions until it is edited again.
+- **Q-305 (unblocked by #3488's merge):** the explorer now tries a first-screen press that changed nothing once
+  more, after a control that DID change the screen (`MAX_PRIMED_RETRIES` = 3 in `clickExplorer.ts`). In a real
+  browser, a keypad's "AC" and "+/−" are now proven to respond after "7", and a dead "%" is named in words
+  ("it changed nothing, even after "7" was pressed first"). It is deliberately NOT a failing verdict: a control
+  that legitimately does nothing (memory recall with nothing stored) would otherwise spend a repair.
+
+## 2026-10-04 — Pending items closed: Q-284, Q-274, Q-304 (+ Q-063, Q-257), and four admin agreements (PR #3491)
+
+The admin said "sare pending kaam niptao — bas PR merge nahi karna". Ledger (test `tests/aPythonBackendComesBackWithItsApp.test.ts`,
+every fix reverted and seen to fail):
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-284 Python backend gone after a restart | every platform start (wake, our preview start, both in-build restarts) ran one command, `npm run dev`; nothing built the venv or started uvicorn; the service graph read only package.json | a backend the platform cannot see is never started | `pythonBackendBoot.ts`: one plan for the graph and every start path; encoded bounded boot (venv, install on manifest change, detached start, port wait); a backend-launch recipe is never replayed as the preview | real-bash run of the script; graph + census of the three `npm run dev` starts + the wake + recipe guards |
+| Q-274 "Python script" became a web app silently, "live" data was simulated | the deliverable's form was changed and nobody said so | a request form the preview cannot run | `scriptRequest.ts`: builder note + a start-of-build line to the user; `claimAudit` `live-data-claimed` | verbatim report prompt + precision set + claim rule |
+| Q-304 / Q-063 / Q-257 first typecheck 15–18 s | a fresh starter has no node_modules; the baked vite-react tree was used only by `_npmInstall` | a cold install on the first check | `PRIME_NODE_MODULES`: stage + atomic rename, used by `TSC_ENSURE`, the warm-up and `_npmInstall` (a plain `cp -a` could nest when two primers raced) | real-bash primer tests incl. two racing primers |
+| Q-194, Q-195, Q-272, Q-286 | argued not defects | — | the admin took the recommended options ("niptao") | evidence in each row |
+
+Still BLOCKED on evidence (unchanged): Q-193 (a skipped press's cause line, added by Q-192), Q-273 (an 11 s trivial
+command — needs a second instance), Q-275 (the request was cut mid-sentence before it reached us).

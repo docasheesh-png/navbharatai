@@ -80,7 +80,7 @@ import { injectPreviewBridge, withoutPreviewBridge, PREVIEW_BRIDGE_MARKER } from
 import { browseConsoleCaptureEnabled, CANCELLED_REQUEST_RE } from '../../../renderCheckConsole';
 import { gunzipSync } from 'zlib';
 import { LIST_PRUNE_DIRS, isListPrunedPath } from '../../../../lib/generatedDirs';
-import { NPM_INSTALL_LOCK } from '../../../tscCommand';
+import { NPM_INSTALL_LOCK, PRIME_NODE_MODULES } from '../../../tscCommand';
 
 const WORKSPACE_ROOT = '/home/user/workspace';
 
@@ -815,7 +815,9 @@ export class E2BActuator implements IEngineerActuator {
         const pkg = typeof pkgRaw === 'string' ? pkgRaw : (pkgRaw ? new TextDecoder().decode(pkgRaw as Uint8Array) : '');
         // Only prime for React-family apps — a Vue/Next/Python workspace must NOT get a React tree.
         if (/["']react["']\s*:/.test(pkg)) {
-          await sandbox.commands.run(`cp -a ${warmDir} ${WORKSPACE_ROOT}/node_modules`, {
+          // Staged and RENAMED into place (Q-304): the typecheck's own primer does the same, and a
+          // plain `cp -a` racing it would copy into an existing node_modules (node_modules/node_modules).
+          await sandbox.commands.run(PRIME_NODE_MODULES, {
             cwd: WORKSPACE_ROOT, timeoutMs: 60_000,
           }).catch(() => { /* copy is best-effort — a failure just falls through to a full install */ });
         }

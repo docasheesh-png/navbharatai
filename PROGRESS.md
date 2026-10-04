@@ -88925,3 +88925,19 @@ words before naming a cause — a cancelled run names its canceller.
 **Proof by reversion:** with the old loop back, the two-part test fails.
 
 **Sibling, recorded as Q-601.** `liveSearchContext` skips the web search whenever any live block exists. So "delhi ka mausam aur aaj gold rate" gets the weather and nothing for gold, which has no live source. Fixing it needs a rule for "the question also asks something no live source covers". A guessed word list would over-search or under-search, so it is written down with that need rather than shipped as a guess.
+
+
+### Q-129: Stop reaches the Gemini/Vertex runner (2026-10-04)
+
+**Problem.** `GeminiToolRunner` never read the build's stop signal. A Stop pressed during a Gemini or Vertex call waited out the whole call, up to the 120 s bound. The Claude and OpenAI-shaped runners already honoured the signal.
+
+**Fix.** The runner now does three things:
+- It never starts a call for a build that is already stopped.
+- It hands the signal to the SDK (`config.abortSignal`), so the HTTP request itself is cancelled.
+- It races the wait with `raceStop`, so a client that ignores the signal still lets go at once. That release comes as `BuildStoppedError`, which the chain never benches a vendor for.
+
+**Tests.**
+- `GeminiToolRunner.test.ts` gains 4 cases. With the old runner, 3 of them fail.
+- New `tests/everyTurnRunnerHearsStop.test.ts` is a class census: every class that implements `TurnRunner` must read `params.signal`, so a new provider family cannot be added deaf.
+
+**Honest limit.** The SDK note says aborting is client-side only: Google still bills the tokens of a call already in flight. The build stops waiting and stops spending on later turns, but the in-flight call's cost cannot be recalled.

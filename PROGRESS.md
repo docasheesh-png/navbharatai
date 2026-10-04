@@ -87872,3 +87872,17 @@ All on PR #3488, each locked by a test proven by reversion.
 | Q-112 | New-tab links opened inside the phone app's own WebView | Fixed one link at a time; the next link written was bare again. (Measured: every JSX new-tab link already carried `rel`.) | One delegated listener in the native shell (`installExternalLinkHandler`) sends them to the system browser; our own origin, downloads and modified clicks are left alone | `aNewTabLinkOpensTheRealBrowser` |
 
 ⚠️ Q-112 reaches phone users only with a fresh `.aab`/`.ipa` (bundled mode).
+
+## 2026-10-04 — Q-102 and Q-103: the safety triage and every word boundary read Hindi (admin: "Q-102 shuru karo")
+
+On PR #3488. Each item is test-locked and reversion-proven.
+
+| Item | Problem | Root cause | Class | Fix | Test |
+|---|---|---|---|---|---|
+| Q-102 | "पोर्न साइट बनाओ" and "बच्चों की अश्लील वीडियो वेबसाइट" were allowed; "porn site banao" was refused | Every illegal-content pattern was ASCII | The triage reads one script | Each rule has a Devanagari half (subject, context, intent, ADULT stand-down); both readers scan NFC with zero-width characters removed | `theBanReadsHindi` (16 fail on the old rules, 3 without the prompt normalization) |
+| Q-102 sibling | "app to block porn for parents" was shown the ban | The ADULT stand-down named `parental`/`blocker` only | A stand-down that stops at one word form | Inflected stems of the same words | same test |
+| Q-103 (class) | `/मत\b/` never read "don't"; "ट्रेन 12951" never reached live status; a Hindi "console is clean" claim was never audited; Hindi greetings unread | `\b` is ASCII and cannot see a Devanagari word | 28 boundaries in five files | Devanagari-aware lookarounds (consuming start in client code) | `aWordBoundaryCanSeeHindi`: a census over every shipped regex literal, 6 fail when reverted |
+
+Precision measured, not assumed: no Devanagari file in this repo (Gita template, AppKnowledgeBase) changed class, and the Hindi half of every rule mirrors its English twin.
+
+New rows, found while working: **Q-320** (🟡 admin decision: the CSAM and NCII rules block child-protection and deepfake-detection apps in English today; recommendation (b), a narrow stand-down that never applies when an unambiguously sexual word is present), **Q-321** (other Indian scripts still unread), **Q-322** (two client regexes use lookbehind, which iOS before 16.4 cannot parse).

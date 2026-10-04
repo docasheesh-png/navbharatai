@@ -219,6 +219,14 @@ promised to build it.** Every model refused — the model's virtue, never our de
   ⚠️ **Scoped to Pollinations on purpose** (admin: *"sirf pollination ai ke liye"*): chat and build keep
   their precision-first triage. Do NOT widen the word list into chat — a sexual-health question must
   still get an answer. Test-locked and reversion-proven in `tests/theImageGeneratorDrawsNoNudity.test.ts`.
+- 🔴 **UNTIL 2026-10-04 THE BAN COULD BE WALKED PAST IN HINDI (Q-102).** Every rule was ASCII, so "पोर्न
+  साइट बनाओ" was allowed while "porn site banao" was refused. Each rule in `illegalContentRules.ts` now
+  has a Devanagari half (its stand-down too), and both readers scan `normalizeScanText` (NFC, no
+  zero-width characters). ⚠️ **JavaScript's `\b` cannot see a Devanagari word**: `/मत\b/` matches
+  nothing. Use `(?<![\wऀ-ॿ])` / `(?![\wऀ-ॿ])`, or a consuming start in client
+  code (Safari 14 has no lookbehind). `tests/aWordBoundaryCanSeeHindi.test.ts` fails on any new one.
+  Other Indian scripts are still unread (Q-321). The illegal rules also block child-protection and
+  deepfake-detection apps, in both scripts; that is the admin's decision (Q-320).
 
 ### 🙋 READ THE MOOD FIRST — a question gets an answer, not an app (admin-mandated 2026-09-13)
 

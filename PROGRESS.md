@@ -87844,6 +87844,11 @@ turnKind, fail-open judge). The 67 still open (duplicates merged) are now rows Q
 | Q-247 | The explorer could not press "⏸" and could not say why | The skip note kept Playwright's first line and dropped the call log — the same class #3471 fixed for Q-192 the same hour (this PR's duplicate was dropped in the merge, safeguard #6 in real time) | On #3471's `pressFailureNote`: the cause line's colour codes are stripped (measured in a real browser, it read `\u001b[2m - <div …>`) | `aCoveredControlIsNamed`, real browser, reverted-and-failed |
 | Q-249 | WHAT covered "⏸" in 7da1cdca | 🟡 BLOCKED on the next report (the note now names it) | — | — |
 | Q-248 | Summary contradicts itself / claims unmeasured 44×44 | 🟡 BLOCKED — admin decision; recommendation: check size claims against the phone-layout measurement only | — | — |
+## 2026-10-04 — Autopsy 51ef24ad (Target-AS, "Build app in this format")
+- **JSX in `.ts`** (useAppState.ts edited ~5× before a rename): `tscErrorCause` gains `jsx-in-ts` — the write-time note and the repair loops now say "move it to `.tsx`, do not edit the JSX". The system prompt also says a JSX file is `.tsx` from its first write.
+- **Dead control shipped** ("Cloud Sync … is a UI-only toggle for now" + a "Sync All Data Now" button that did nothing): system-prompt rule NO CONTROL THAT DOES NOTHING; the build's own admission is recorded as the app finding `UI_ONLY_CONTROL` (`admittedInertControls`, claimAudit.ts).
+- **A 54-file port scored "simple" 15**: `workspaceSizedComplexity` — a build order over ≥20 of the user's own files opens as complex (source `workspace`).
+- **OPEN:** the frontend sub-agent hit its 40-step cap after spending steps reading Kotlin sources (REPEATED_READS 78/34). The real fix is a source digest handed to sub-agents on a port, which is not built yet. The ETA ("app_unsized", 8 min vs 19 actual) does not yet read the workspace size either.
 ## 2026-10-04 — Correction to the 0311186f entry: one trading domain, not two
 
 The 0311186f ledger says a new `trading` domain was added "placed last". While this branch was open, #3471

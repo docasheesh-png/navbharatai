@@ -85,8 +85,10 @@ export interface IllegalRule {
    * stand-down never applies when one is present. A request that carries such a word is refused exactly
    * as before, however protective it sounds.
    *
-   * ⚠️ The other nine Indian scripts have no protective words yet (they need a native reader), so their
-   * own words for the rule are listed in `unambiguous`: a request written in them stays on the strict side.
+   * ⚠️ The other nine Indian scripts carry only transliterated LOANWORDS as protective words (Q-344, admin
+   * 2026-10-04) — report, helpline, POCSO, detect, awareness — because native words need a native reader.
+   * Their unambiguous words (porn, obscene, naked, "sex" beside a medium, undress, "make a deepfake") are
+   * read the same way, so a guessed word there can only make the rule stricter.
    */
   protective?: { purpose: RegExp; unambiguous: RegExp };
 }
@@ -147,35 +149,27 @@ export function normalizeScanText(text: string): string {
  *
  * `SEXUAL_UNAMBIGUOUS` is what a child-protection or detection app has no reason to say. "sex" and
  * "sexual" alone are NOT in it — "report child sexual abuse" and "sex education" need both — but
- * "sexual videos", "sex chat" and the like are. Other scripts: the rule's own words, so a request in
- * them stays strict (no protective words there yet).
+ * "sexual videos", "sex chat" and the like are. The other nine scripts read their own lists from
+ * `indicSafetyWords.ts` (Q-344): protective LOANWORDS only (report, helpline, POCSO, detect, awareness),
+ * and the same unambiguous words — so a request using only native protective words stays strict.
  */
 const SEXUAL_UNAMBIGUOUS_LATIN =
   'porn\\w*|nud(?:e|es|ity)|naked|xxx|erotic\\w*|sexy|hardcore|sexting|'
   + '(?:explicit|sexual|sex)\\s+(?:photos?|pictures?|pics?|images?|videos?|clips?|content|stories|story|chats?|roleplay|role[-\\s]play|acts?|material)';
 const SEXUAL_UNAMBIGUOUS_DEVA = [
   'पोर्न', 'पॉर्न', 'नग्न', 'नंगी', 'नंगा' + END, 'एक्सएक्सएक्स', 'कामुक', 'अश्लील',
-  'सेक्स\\s*(?:वीडियो|फ' + NUKTA + 'ोटो|तस्वीर|चैट|कहानी)',
+  '(?:सेक्स|यौन)\\s*(?:वीडियो|फ' + NUKTA + 'ोटो|तस्वीर|चैट|कहानी|सामग्री|कंटेंट)',
 ];
-function unionWords(...lists: ScriptWords[]): ScriptWords {
-  const out = {} as Record<keyof ScriptWords, string[]>;
-  for (const list of lists) {
-    for (const [script, words] of Object.entries(list) as Array<[keyof ScriptWords, readonly string[]]>) {
-      out[script] = [...(out[script] ?? []), ...words];
-    }
-  }
-  return out;
-}
-
 const CSAM_PROTECTIVE = {
   purpose: withDevanagari(
     /\b(report\w*|prevent\w*|awareness|aware|pocso|helplines?|protect\w*|safety|safeguard\w*|detect\w*|educat\w*|ngos?|police|complaints?|moderat\w*|filter\w*|block(?:s|er|ers|ing|ed)?|counsel\w*)\b/i,
     ['रिपोर्ट', 'शिकायत', 'रोकथाम', 'रोकन', 'रोकने', 'जागरूक', 'पॉक्सो', 'पोक्सो', 'हेल्पलाइन', 'सुरक्षा', 'सुरक्षित', 'बचाव', 'बचान', 'बचाने', 'डिटेक्ट', 'पहचान', 'शिक्षा', 'शैक्षिक', 'पुलिस', 'एनजीओ', 'फ' + NUKTA + 'िल्टर', 'ब्लॉक', 'परामर्श', 'काउंसलिंग'],
+    W.CSAM_SIGNAL.protective,
   ),
   unambiguous: withDevanagari(
     new RegExp(`\\b(?:${SEXUAL_UNAMBIGUOUS_LATIN})\\b`, 'i'),
     SEXUAL_UNAMBIGUOUS_DEVA,
-    unionWords(W.CSAM_SIGNAL.subject, W.CSAM_SIGNAL.context),
+    W.CSAM_SIGNAL.unambiguous,
   ),
 };
 
@@ -183,6 +177,7 @@ const NCII_PROTECTIVE = {
   purpose: withDevanagari(
     /\b(detect\w*|report\w*|awareness|verif\w*|fact[-\s]?check\w*|identif\w*|spot(?:s|ting)?|authentic\w*|take[-\s]?downs?|complaints?|protect\w*|prevent\w*|educat\w*|police|helplines?)\b/i,
     ['पहचान', 'डिटेक्ट', 'रिपोर्ट', 'शिकायत', 'जागरूक', 'सत्यापन', 'जाँच', 'जांच', 'फ' + NUKTA + 'ैक्ट\\s*चेक', 'बचाव', 'सुरक्षा', 'रोकथाम', 'पुलिस', 'हेल्पलाइन', 'शिक्षा'],
+    W.NON_CONSENSUAL_IMAGERY.protective,
   ),
   // The sexual words, the undressing subjects, and any request to MAKE a fake (a detector never says so).
   unambiguous: withDevanagari(
@@ -197,7 +192,7 @@ const NCII_PROTECTIVE = {
       ...SEXUAL_UNAMBIGUOUS_DEVA, 'न्यूडिफ', 'कपड' + NUKTA + 'े\\s+उता', 'हिडन\\s+कैम', 'छिप' + '[ाे]' + '\\s+कैमर',
       'डीप\\s*फ' + NUKTA + 'े' + 'क\\s+(?:बना|जनरेटर)', 'फ' + NUKTA + 'े' + 'स\\s*स्वैप\\s+(?:बना|जनरेटर)',
     ],
-    unionWords(W.CSAM_SIGNAL.context, W.NON_CONSENSUAL_IMAGERY.subject),
+    W.NON_CONSENSUAL_IMAGERY.unambiguous,
   ),
 };
 

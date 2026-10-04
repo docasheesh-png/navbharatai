@@ -29,10 +29,14 @@ export function askUnrelatedEnabled(env: NodeJS.ProcessEnv = process.env): boole
 }
 
 /** A whole thing someone makes — never a part of one. */
-const WHOLE_THING = /\b(?:apps?|application|web\s*apps?|websites?|web\s*sites?|sites?|games?|dashboards?|portals?|stores?|shops?|pdfs?|e-?books?|ebooks?|documents?|landing\s+pages?|clones?|software|softwares)\b/i;
+// 🔴 A GAME CAN BE NAMED BY ITS KIND (autopsy e3b0ce25, 2026-10-04): "Build one block fitting puzzle"
+// named no word on the old list, so it read as "a part of an app" and was built INTO the PDF reader
+// that was here — the reader was replaced and the user was never asked. A puzzle, a quiz or a
+// calculator is a whole thing as surely as a "game" is.
+const WHOLE_THING = /\b(?:apps?|application|web\s*apps?|websites?|web\s*sites?|sites?|games?|puzzles?|quiz(?:zes)?|calculators?|trackers?|planners?|chatbots?|dashboards?|portals?|stores?|shops?|pdfs?|e-?books?|ebooks?|documents?|landing\s+pages?|clones?|software|softwares)\b/i;
 
 /** The order points at the app that is already here. */
-const POINTS_HERE = /\b(?:this|the|my|the\s+same|same|current|existing|our|isi|iss?|isme|ismein|isme|yahi|yahin|meri|mera|mere|apni|apna|apne|hamari|hamara)\s+(?:wali\s+|wala\s+|wale\s+)?(?:apps?|application|websites?|sites?|games?|projects?)\b|\b(?:isme|ismein|isi\s+me|isi\s+mein|in\s+it|to\s+it|into\s+it|here)\b/i;
+const POINTS_HERE = /\b(?:this|the|my|the\s+same|same|current|existing|our|isi|iss?|isme|ismein|isme|yahi|yahin|meri|mera|mere|apni|apna|apne|hamari|hamara)\s+(?:wali\s+|wala\s+|wale\s+)?(?:apps?|application|websites?|sites?|games?|puzzles?|quiz(?:zes)?|calculators?|trackers?|planners?|chatbots?|projects?)\b|\b(?:isme|ismein|isi\s+me|isi\s+mein|in\s+it|to\s+it|into\s+it|here)\b/i;
 
 /** "Make it …", "isko …" — the order is about the thing already here. */
 const ABOUT_IT = /\b(?:make|turn|convert|change|redesign|style|restyle)\s+it\b|\b(?:isko|ise|isse|usko|use)\s/i;
@@ -42,7 +46,7 @@ const COMPARISON = /\b(?:like|as)\s+(?:an?\s+)?(?:[a-z-]+\s+){0,2}(?:apps?|websi
 /** A change to something — this app's, by default. */
 const EDIT_VERB = /\b(?:add|jodo|jod\s+do|daalo|dalo|daal\s+do|lagao|laga\s+do|hatao|hata\s+do|remove|delete|change|update|badlo|badal\s+do|improve|translate|replace|rename|move|show|hide|insert|include|enable|disable)\b/i;
 /** "App me …", "app ko …", "website par …" — Hindi postpositions on THE app. */
-const APP_REFERENCE_HI = /\b(?:apps?|application|websites?|sites?|games?|project)\s+(?:me|mein|mai|mei|ko|ka|ki|ke|par|pe|se)\b/i;
+const APP_REFERENCE_HI = /\b(?:apps?|application|websites?|sites?|games?|puzzles?|quiz(?:zes)?|calculators?|trackers?|planners?|chatbots?|project)\s+(?:me|mein|mai|mei|ko|ka|ki|ke|par|pe|se)\b/i;
 /** Packaging or porting the app that is here — never a different app. */
 const PLATFORM = /\b(?:android|ios|iphone|ipad|mobile|installable|pwa|apk|aab|ipa|desktop|native|play\s*store|app\s*store|offline)\b/i;
 /** The whole-thing word followed by a PART of an app ("game mode", "pdf download", "store page"). */

@@ -184,7 +184,11 @@ export function offenderNote(r: BuildQualityLint, type: string): string {
 /** One line for the build report — the score plus the count, never a bare grade with no evidence. */
 export function designLintSummary(r: BuildQualityLint): string {
   const v = r.design.violations.length;
-  return `Design consistency ${r.design.score}/100 (${r.design.grade}) across ${r.fileCount} file(s)${r.truncated ? ', partially scanned' : ''}. ${designSummary(r.design)}${v ? ` ${r.design.violations.map((x) => `${x.message}${offenderNote(r, x.type)}`).join(' ')}` : ''}`.trim();
+  // Each finding once (autopsy e3b0ce25: the line read "grade A (98/100), 1 issue(s): ⚠ 4 spacing values
+  // are off … 4 spacing values are off …" — `designSummary` already carries the score and every message).
+  const head = `Design consistency ${r.design.score}/100 (${r.design.grade}) across ${r.fileCount} file(s)${r.truncated ? ', partially scanned' : ''}.`;
+  if (!v) return `${head} ${designSummary(r.design)}`.trim();
+  return `${head} ${r.design.violations.map((x) => `${x.message}${offenderNote(r, x.type)}`).join(' ')}`.trim();
 }
 
 /** One line for the build report, listing the real WCAG criteria rather than a score alone. */

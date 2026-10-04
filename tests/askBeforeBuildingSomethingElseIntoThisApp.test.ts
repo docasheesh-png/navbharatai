@@ -24,6 +24,14 @@ describe('1 · it asks only about a whole new thing that shares nothing with thi
     expect(ask('ek todo app bnao', CALENDAR, ['Calendar wala app bnao'])).toBe(true);
     expect(ask('Make a racing game', CALENDAR)).toBe(true);
   });
+  it('🔴 the report e3b0ce25: a block puzzle on a PDF reader (a game named by its kind)', () => {
+    expect(ask('Build one block fitting puzzle', ['index.html', 'src/App.tsx', 'src/main.tsx', 'package.json'], ['Make one PDF reader'])).toBe(true);
+    expect(ask('Build a calculator', CALENDAR, ['Calendar wala app bnao'])).toBe(true);
+    // …and an edit naming one of those kinds is still an edit.
+    expect(ask('add a puzzle mode', CALENDAR, ['Calendar wala app bnao'])).toBe(false);
+    expect(ask('make the puzzle harder', CALENDAR, ['Calendar wala app bnao'])).toBe(false);
+    expect(ask('quiz me timer lagao', CALENDAR, ['Calendar wala app bnao'])).toBe(false);
+  });
   it('🔒 an edit is never asked about', () => {
     expect(ask('Install button do', CALENDAR)).toBe(false);
     expect(ask('dark mode add karo', CALENDAR)).toBe(false);

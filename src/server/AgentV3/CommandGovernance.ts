@@ -65,7 +65,10 @@ const MEDIUM_RULES: Rule[] = [
   { level: 'medium', test: /\bgit\s+clean\s+-[a-z]*f/i, reason: 'git clean -f deletes untracked files' },
   { level: 'medium', test: /\bnpm\s+(install|i)\b[^\n]*\s(-g|--global)\b/i, reason: 'global npm install (affects the whole environment)' },
   { level: 'medium', test: /\b(kill|pkill|killall)\b[^\n]*-9\b/i, reason: 'force-kills processes (-9)' },
-  { level: 'medium', test: /\b(curl|wget)\b[^\n]*\bhttps?:\/\//i, reason: 'outbound network fetch to an external host' },
+  // A request to the app's own server inside the sandbox (`curl http://localhost:8000/health`) is not an
+  // external host (autopsy 241215d1: 22 checks of the app's own API each carried this warning). Any URL in
+  // the command that is NOT loopback still matches, because `[^\n]*` backtracks over every URL.
+  { level: 'medium', test: /\b(curl|wget)\b[^\n]*\bhttps?:\/\/(?!(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?![\w.-]))/i, reason: 'outbound network fetch to an external host' },
   { level: 'medium', test: /\btee\b[^\n]*\s\/(etc|usr|bin|boot|lib)\b|>\s*\/(etc|usr|bin|boot|lib)\//i, reason: 'writes into a system directory' },
 ];
 

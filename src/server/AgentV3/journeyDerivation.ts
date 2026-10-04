@@ -412,7 +412,33 @@ export function valueForInput(tag: string, marker: string): string {
   if (type === 'url' || /url|website|link/.test(hint)) return 'https://example.com';
   if (type === 'date') return '2030-01-01';
   if (type === 'checkbox' || type === 'radio') return '';
+  const example = lookupKeyExample(tag);
+  if (example) return example;
   return marker;
+}
+
+/** A field that names something that must already EXIST (a ticker, a product code, a PIN). */
+const LOOKUP_KEY_HINT = /\b(?:symbol|ticker|scrip|isin|sku|ifsc|pin\s?code|pincode|zip|postal|coupon|promo|voucher|product\s?code|item\s?code|hsn)\b/i;
+
+/**
+ * The example a lookup-key field's own placeholder gives (`placeholder="e.g. RELIANCE"` → `RELIANCE`).
+ *
+ * 🔴 WHY (autopsy 241215d1, 2026-10-04). A paper-trading app's order form takes a stock SYMBOL. The
+ * journey typed its marker there, the app (correctly) refused an order for a ticker that does not
+ * exist, the marker never appeared, and the release gate called the app "Not shippable — a real user
+ * journey failed" — about an order flow the build had verified with five curl calls. A made-up value
+ * in a field that must name an existing thing tests our input, not the app. The field's own example is
+ * the one value the app tells every user to type. Only a lookup-key field, and only when the
+ * placeholder gives an example: a "Task name, e.g. Buy milk" field still gets the marker, and a key
+ * field with no example keeps it too (the form then submits a value the app may reject — the same as
+ * before). PURE.
+ */
+export function lookupKeyExample(tag: string): string | null {
+  const name = `${ATTR(tag, 'name') || ''} ${ATTR(tag, 'id') || ''} ${ATTR(tag, 'aria-label') || ''}`;
+  const placeholder = ATTR(tag, 'placeholder') || '';
+  if (!LOOKUP_KEY_HINT.test(`${name} ${placeholder}`)) return null;
+  const m = placeholder.match(/\b(?:e\.?\s?g\.?|eg|for example|such as|like)\s*[:,-]?\s*([A-Za-z0-9][A-Za-z0-9._&-]{0,30})/i);
+  return m ? m[1].replace(/[.,]+$/, '') : null;
 }
 
 /**

@@ -25,7 +25,8 @@ import { frontendLayoutHint } from '../lib/frontendLayoutHint';
 import { fullstackBootHint, serverPortFromFiles } from '../lib/fullstackBootHint';
 import { megaRoadmapSystemPrompt, megaRoadmapUserPrompt, parseMegaRoadmap, roadmapGuardrail, summarizeRoadmapForDiag, publicRoadmapView, hardConstraintLines, type MegaRoadmap } from '../lib/megaRoadmap';
 import { saveMegaRoadmap, loadMegaRoadmap, type StoredMegaRoadmap } from '../AgentV3/MegaRoadmapStore';
-import { renderRequestedFeatureContract } from '../AgentV3/RequirementCoverage';
+import { renderRequestedFeatureContract, requestedFeatureLabels } from '../AgentV3/RequirementCoverage';
+import { requestForChecks } from '../AgentV3/requestForChecks';
 import { featurePlanFor, featureListsFor, sanitizeConfirmation, confirmedContractLabels, domainGuidanceStandsDown, declinedLabels, declinedPresenceFeatures } from '../AgentV3/featurePlan';
 import { partitionFrontendBackend, partitionSummary } from '../AgentV3/frontendBackendPartition';
 import { dedupeSameModuleImports } from '../AgentV3/FullStackGuards';
@@ -12326,6 +12327,9 @@ async function noteBuildOutcome(
         .catch(() => '')
       : '';
     const planning = planningRequest({ prompt, attachmentText: planningAttachmentText, picturesSetAside, recentTurns, conversationReply, userAppExists, appStillUnbuilt });
+    // What the end-of-build checks grade the app against: the message, or — when it names nothing to
+    // check ("Continue from where you left off…") — the earlier request it continues (autopsy 241215d1).
+    const checksRequest = requestForChecks(prompt, planning, requestedFeatureLabels(prompt).length);
     const buildComplexity = complexityFromPrompt(planning.text);
     const buildDepth: PipelineDepth = resolvePipelineDepth(
       (buildComplexity.moduleCount || 0) + (buildComplexity.featureCount || 0),
@@ -15192,6 +15196,9 @@ async function noteBuildOutcome(
       // The spawn factory above holds a thunk to this; assigned here, before any sub-agent can run,
       // so a child's write-time compiles accumulate into the object the report actually reads.
       dispatcherForSubAgents = dispatcher;
+      // Requirement coverage grades the request the builder was given, not only the message that
+      // continued it (requestForChecks.ts). A mega-roadmap milestone overrides this further down.
+      if (checksRequest !== prompt) dispatcher.setCoverageRequest(checksRequest);
       // THE FIRST WRITE'S TYPECHECK USED TO PAY A COLD COMPILE (autopsy ee0e6de5: 15 s, the later ones
       // ~1 s). Warmed once here, in the background, while the model is still on its first call. Only on
       // a turn that will write code; it never installs anything and never counts as evidence.
@@ -20910,7 +20917,7 @@ async function noteBuildOutcome(
                 const session = await signInBehindTheDoor(lastPreviewUrl);
                 if (session.signedIn && session.screens.length > 0) { probeHtml = session.screens.map((sc) => sc.html).join('\n'); readBehindSignIn = true; }
               }
-              let coverage = checkFeaturePresence(milestoneRequest ?? prompt, probeHtml, declinedPresenceFeatures(featureConfirmation));
+              let coverage = checkFeaturePresence(milestoneRequest ?? checksRequest, probeHtml, declinedPresenceFeatures(featureConfirmation));
               // A CONTROL ON ANOTHER SCREEN IS NOT MISSING (featureProbeScreens.ts, autopsy a106df77): when the
               // home screen leaves a requested control unseen, read the app's own routes and judge them together.
               // Paid only when something would otherwise be called missing; bounded in count and time. The
@@ -20937,7 +20944,7 @@ async function noteBuildOutcome(
               if (coverage.missing.length > 0 && !readBehindSignIn && !abort.signal.aborted) {
                 probedScreens = await readOtherScreens();
                 if (probedScreens.length > 0) {
-                  const wider = checkFeaturePresence(milestoneRequest ?? prompt, combineScreens(probeHtml, probedScreens), declinedPresenceFeatures(featureConfirmation));
+                  const wider = checkFeaturePresence(milestoneRequest ?? checksRequest, combineScreens(probeHtml, probedScreens), declinedPresenceFeatures(featureConfirmation));
                   if (wider.probes.length > 0) coverage = wider;
                 }
               }
@@ -20989,7 +20996,7 @@ async function noteBuildOutcome(
                       result = adoptHealResult(result, healResult as typeof result);
                       if (afterHtml) {
                         const afterScreens = probedScreens.length > 0 ? await readOtherScreens() : [];
-                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? prompt, combineScreens(afterHtml, afterScreens), declinedPresenceFeatures(featureConfirmation));
+                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? checksRequest, combineScreens(afterHtml, afterScreens), declinedPresenceFeatures(featureConfirmation));
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
                       }
                     }
@@ -21000,7 +21007,7 @@ async function noteBuildOutcome(
                       try {
                         const after = (await withTimeout(actuator.browseUrl(workspaceId, internalPreviewUrl(lastPreviewUrl)), 35_000, 'browseUrl')).html;
                         const afterScreens = probedScreens.length > 0 ? await readOtherScreens() : [];
-                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? prompt, combineScreens(after, afterScreens), declinedPresenceFeatures(featureConfirmation));
+                        const afterCoverage = checkFeaturePresence(milestoneRequest ?? checksRequest, combineScreens(after, afterScreens), declinedPresenceFeatures(featureConfirmation));
                         if (afterCoverage.probes.length > 0) coverage = afterCoverage;
                       } catch { /* re-open best-effort — keep the pre-heal coverage */ }
                     }
@@ -21665,7 +21672,10 @@ async function noteBuildOutcome(
             // version somebody deliberately shipped. Skipped entirely for a full-stack app, whose
             // server lives inside the sandbox — a static copy of that would render the shell and fail
             // every request behind it, which is worse than an honest expiry.
-            if (verdict.ok && previewSnapshotEnabled() && snapshotSuitable(pkgRaw)) {
+            if (verdict.ok && previewSnapshotEnabled() && snapshotSuitable(pkgRaw, {
+              ...(await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>))),
+              ...Object.fromEntries(writtenFiles),
+            })) {
               // ONE definition of "take the copy", run here and again after a kept repair (refreshPreviewCopy).
               const takePreviewCopy = async (): Promise<boolean> => {
                 if (!actuator.downloadDistFiles) return false;
@@ -22492,7 +22502,7 @@ async function noteBuildOutcome(
           // when the written files ARE the app — an edit turn writes a slice, and a slice of one is not a claim.
           appSourceFiles: isImportTurn || isEditMode ? undefined : Array.from(writtenFiles.keys()).filter((p) => /\.(?:[cm]?[jt]sx?|css|vue|svelte)$/i.test(p) && !/(?:^|\/)(?:node_modules|dist)\//.test(p)).length,
           // "the exact versions you specified" when the request named none (autopsy 33812996).
-          userRequest: prompt,
+          userRequest: checksRequest,
           // "TypeScript type-check passes cleanly" beside a release gate recording "the typecheck did
           // not run" — both in build 7bc15e40's own report. Read from the gate's own evidence, which
           // starts at 'not-run' and is only ever moved by a check that actually ran, so this cannot

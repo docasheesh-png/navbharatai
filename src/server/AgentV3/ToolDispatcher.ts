@@ -16,7 +16,7 @@ import { declaredRoutes, paramOnlyMatch, type DeclaredRoute } from './routerPath
 import { DECLARED_PORT_FILES } from './declaredPort';
 import { appPortsFrom, isSecondaryAppPort, type AppPortMap } from './appPorts';
 import { sandboxStore } from './SandboxStore';
-import { buildPreKillPortCommand } from './sandbox/EngineerAI/actuators/devServerHost';
+import { buildPreKillPortCommand, detachBackgroundJobs, isLongRunningCommand, BACKGROUND_JOB_LOG } from './sandbox/EngineerAI/actuators/devServerHost';
 import { pipedGateExitCodeWarning } from './pipedGateExitCode';
 import { verifyInjectedSecrets, preflightNarration, type SecretVerdict } from './secretPreflight';
 import { inspectCredentials } from './credentialSafety';
@@ -4455,7 +4455,16 @@ export class ToolDispatcher {
             }
           } catch { /* best-effort — the reactive DB-unreachable net below still catches a dead DB honestly */ }
         }
-        let { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, effectiveCommand);
+        // A BACKGROUNDED JOB NEVER HOLDS THE COMMAND'S PIPE (autopsy 241215d1): `python server.py &` then a
+        // `curl` waited out the whole 300 s timeout because the server kept stdout open. A dev-server
+        // launch is left to the managed boot, which strips its `&` itself (stripDevServerBackgrounding).
+        const background = isLongRunningCommand(effectiveCommand)
+          ? { command: effectiveCommand, detached: 0 }
+          : detachBackgroundJobs(effectiveCommand);
+        let { exitCode, stdout, stderr } = await this.actuator.runCommand(this.workspaceId, background.command);
+        if (background.detached > 0) {
+          stdout = `${stdout ?? ''}\n[note] ${background.detached === 1 ? 'The background job was' : `${background.detached} background jobs were`} started detached so this command could finish; its output goes to ${BACKGROUND_JOB_LOG} (read it with \`tail ${BACKGROUND_JOB_LOG}\`).`;
+        }
         // WHAT npm WROTE IS WHAT GETS SAVED (2026-09-27). A shell install edits package.json behind the
         // captured writes, and a package.json the model wrote earlier would otherwise win at the final
         // save — dropping the dependency just installed (see manifestRewrittenBy). Read it back and record
@@ -5119,7 +5128,9 @@ export class ToolDispatcher {
         if (envTemplateSecrets.length) extra.push({ severity: 'high', label: `${envTemplateSecrets.length} real secret(s) committed in an .env template` });
         for (const f of runnability.findings) extra.push({ severity: f.level === 'high' ? 'high' : 'medium', label: `Runnability: ${f.message}` });
         for (const i of securityConfig) extra.push({ severity: i.severity === 'high' ? 'high' : 'medium', label: `Security config (${i.rule})` });
-        if (hardcodedUrls.length) extra.push({ severity: 'medium', label: `${hardcodedUrls.length} hardcoded localhost URL(s)` });
+        // The label names WHERE (autopsy 241215d1: "1 hardcoded localhost URL(s)" with no file, so the
+        // report could not say whether it was app code or a help text).
+        if (hardcodedUrls.length) extra.push({ severity: 'medium', label: `${hardcodedUrls.length} hardcoded localhost URL(s) — first at ${hardcodedUrls[0].file}:${hardcodedUrls[0].line}` });
         if (sriIssues.length) extra.push({ severity: 'medium', label: `${sriIssues.length} third-party <script> without an integrity hash (SRI)` });
         if (cspIssues.length) extra.push({ severity: 'medium', label: `${cspIssues.length} static-SPA page(s) with third-party scripts but no Content-Security-Policy` });
         if (commentLangIssues.length) extra.push({ severity: 'medium', label: `${commentLangIssues.length} non-English code comment(s) (professional-English standard)` });

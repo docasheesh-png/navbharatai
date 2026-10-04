@@ -1847,6 +1847,8 @@ export interface BillingLedgerView {
   entries: () => ProviderModelEntry[];
   byProvider: () => Record<string, { inputTokens: number; outputTokens: number }>;
   total: () => { inputTokens: number; outputTokens: number };
+  /** How many model calls each provider answered (Q-164) — the Monitor's request count. Optional. */
+  callsByProvider?: () => Record<string, number>;
 }
 
 /**
@@ -12716,6 +12718,7 @@ async function noteBuildOutcome(
             // …and WHICH RUNG ran, so the admin's cost panel prices the model instead of the family's
             // dearest rate. The same entries the bill is priced from, one line above.
             providerEntries: billingCtx.providerLedger.entries(),
+            providerCalls: billingCtx.providerLedger.callsByProvider?.(),
             sandboxSeconds: watchdogLivePreview.measuredSeconds,
           });
           buildDiagRef?.setProviderTokens(decided.reconciledProviderUsage);
@@ -24739,6 +24742,7 @@ async function noteBuildOutcome(
         // …and WHICH RUNG ran. Without this the panel priced every provider at its family's dearest
         // rate — a `glm-4.7-flashx` build read 8.6× high on the screen used to judge engine spend.
         providerEntries: providerLedger.entries(),
+        providerCalls: providerLedger.callsByProvider?.(),
         // OUR VM cost, measured whether or not the user was charged for it.
         sandboxSeconds: livePreviewCharge.measuredSeconds,
       });

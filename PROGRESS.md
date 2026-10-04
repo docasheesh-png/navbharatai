@@ -88531,3 +88531,101 @@ legitimate and well-labelled — it resolved a real conflict (#3513 had removed 
 it removed) and **every one of my edits survived**, verified file by file. Which is the point: the first
 takeover today looked like a loss and was not, and this one looked identical and was not either. **The
 check is always the head SHA and the diff, never the push.**
+### 2026-10-04 — Q-396 and Q-398 (admin accepted both recommendations)
+
+- **Q-396:** a Project Mode module whose shell comes later is no longer told "No tests at all" — the warning reads
+  the same `_starterExpected` flag as the starter blocker. The shell turn and ordinary builds are unchanged.
+- **Q-398:** APP_SCOPE's reason now comes from the request's SUBJECT (first line, cut where the feature list
+  starts): a Sleep Timer in a music player is a feature, not what the app is. **The decision was deliberately left
+  unchanged:** narrowing it was measured to send 8 of 7,403 test prompts to the roadmap planner, which CLAUDE.md's
+  "never more eager" rule for that gate forbids without a decision. Sibling: appScope's feature count sizes a
+  sectioned spec by its sections (only ever smaller).
+### 2026-10-04 — Q-421 and Q-422 decided by the admin, Q-422 built
+
+- **Q-421 ✅** — admin: keep the ₹0 bill. The preview fell because of our own bug (Q-410/Q-414), so the "paid only
+  when the preview ran" rule applies as written. No code change.
+- **Q-422 ✅ (on merge)** — admin: keep waiting for the in-flight call, but show what is finished. `SimpleBuilder`
+  now saves and announces the finished files the moment the lane decides to hand off, and each in-flight file as
+  it lands; the catch awaits those saves before the salvage write. Kill switch `AGENTV3_HANDOFF_EARLY_SAVE=off`.
+  Test `tests/theHandOffShowsWhatIsFinished.test.ts`, reverted-and-failed (2 of 4).
+- **Q-414** stays 🟡: it waits for a report carrying the new `package.json was EMPTY` evidence line.
+## 2026-10-04 — Admin accepted every recommendation ("apke sare suggestion accepted! ab kam karo") — PR #3512
+
+| ID | Decision | What was done | Lock |
+|---|---|---|---|
+| Q-362 | (a) catch an app whose own screen shows an error | `visibleAppError.ts` reads the DOM the real browser captured after paint: an alert (`role="alert"` / `aria-live="assertive"`) or an element NAMED as an error (`react-pdf__message--error`, `errorBox`) whose own text says something failed, or a short line only a failing runtime writes ("TypeError: …", "Setting up fake worker failed", a line opening "Failed to load…"). Ignores `<pre>`/`<code>`/`<textarea>`, hidden subtrees, list items and table cells (the app's data), designed empty states and whole-page text. Both render checks (render rescue, preview verify) record `APP_SHOWS_ERROR` (warning, once per build); a later render check that no longer shows it clears it. One-tap offer "Fix the error your app shows". Never a gate, never a repair by itself, moves no money. | `tests/anAppThatShowsItsOwnErrorIsNotDone.test.ts` (the real react-pdf element from 981ce4cc + 13 designed pages that must stay clean); reverted twice (route call removed; error-name words emptied) and failed each time |
+| Q-461 | (a) leave the Kimi starvation; re-measure after Q-451 | Resolved as decided behaviour. Watch: a Weak build where `kimi-k2.7-code` starves on a turn that is NOT a bloated duplicate-build context. | — |
+| Q-359 | (a) keep today's rule: an attachment never becomes a project file | Resolved as decided behaviour; Q-358 keeps it honest. | — |
+| Q-367, Q-224, Q-464 | agree the argued "not a defect" items | Resolved as not-a-defect with the evidence already in their rows. | — |
+
+Still open from these reports (missing information): Q-364, Q-365, Q-366, Q-221, Q-462, Q-463.
+### 2026-10-04 — Command-shape census (class behind Q-390) — Q-490
+
+#3506 fixed the instance (a path containing `vite`). The census of every command builder the platform runs found the
+rest of the class: a word inside a HYPHENATED name still counted (`ls /x/vite-react`, `cd my-dev-app`, `vite-node`).
+`vite` and `dev/serve/watch` now need whole names; `--watch`, `webpack-dev-server` and `vue-cli-service serve` stay
+launches. The warm-cache path had a second copy in `E2BActuator.ts`; it now reads `WARM_NODE_MODULES`. Locked by
+`tests/ourOwnCommandsAreNotDevServerLaunches.test.ts`, which fails when a new command builder is not classified.
+Queue: Q-370, Q-371 (#3497) and Q-390..Q-395, Q-399 (#3506) leave the open table on merge.
+## 2026-10-04 — RESOLUTION of autopsy 8b8743a3, and what the two merges really did
+
+**Both PRs are MERGED and their work is on `main` — verified from the merged state, not from the push.**
+`#3495` merged at 16:10:40 (`merge_commit_sha bc1a9a62`), `#3492` at 15:37:49 (`959c01eb`). On current
+`main`, `tests/aButtonNobodyCanPressIsNotAPass.test.ts`, `tests/aProblemTheUserIsShownCanBeActedOn.test.ts`
+and `tests/aCoveredControlIsNamed.test.ts` run **35 passed**, which is the only proof that mattered: both
+branches had commits pushed onto them by the forward-merge sweep after my last push, so "the push
+succeeded" said nothing about what the merge carried.
+
+- **`#3495`'s head at merge was `0b80cad9`, and I pushed `39ee701f`.** The sweep's commits sit between
+  them. The merge is correct all the same — `covered`, the lean-review single-file case and the
+  non-data-input rule are all on `main` and locked by their tests.
+- **`#3504` was closed UNMERGED at 15:40:45, three minutes after `#3492` merged — and that was right.**
+  The takeover head `077c98ca` that `#3492` merged already carried my net diff, so `#3504` was a
+  duplicate of work already on `main`. ⚠️ **It also shows the rescue was the wrong instinct, not merely
+  unnecessary:** I replayed the diff onto a clean branch because I read a takeover as a loss. A branch
+  whose head has moved is not a branch whose work is gone — the first question is "what does the merged
+  diff contain?", and only then "does it still need rescuing?". `#3504`'s renumbered Q-390/Q-391 then
+  collided with `#3506`, which is the second cost of the same wrong instinct.
+- **The one thing in `#3492` that changed between my gate and the merge:** the `FEATURE_REGRESSED` offer
+  merged as *"Restore the feature this change removed"* rather than the earlier *"Bring back what stopped
+  working"*. Same code, same prompt intent, my own comment above it; recorded so nobody reads the
+  difference as a lost edit.
+
+**Q-315 (the CI billing stop) is RESOLVED, and not by any code.** GitHub Actions began starting jobs
+again; `main` has run green since 17:22 UTC and runs are queuing normally. The row is removed. ⚠️ Nothing
+in the repository fixed it and nothing in the repository can detect it in advance — the tell is a
+check-run with **zero steps** and GitHub's own annotation about account payments. Diagnosing it as a code
+failure is the mistake to avoid next time.
+
+**Queue:** Q-310, Q-311, Q-312 ✅ (merged in `#3495`) and Q-315 ✅ removed from the open table. **Q-313
+stays OPEN** (the game-vocabulary sizing gap — a widening of `COMPLEX_APP_SIGNAL` needs a precision
+corpus first, and guessing it would drag ordinary prompts up a tier). **Q-314 stays 🟡** awaiting the
+admin's yes that its six items are correct reports rather than defects.
+## 2026-10-04 — CLAUDE.md shrunk from 563 KB to 71 KB (admin: "han")
+
+`CLAUDE.md` is loaded into every message of every session. At 563 KB (about 140,000 tokens) it was the largest single cost of the admin's Claude usage. Six sections were moved **verbatim** into `docs/claude/`:
+
+| File | What | Size |
+|---|---|---|
+| `ENV_REGISTRY.md` | the Cloud Run key registry, the money audit, the Cloud Run audit | 375 KB |
+| `ROUTING_AND_BILLING.md` | model routing, three tiers, billing, one wallet, White-Label Law | 68 KB |
+| `PRODUCT_POLICY_PRECEDENTS.md` | porn ban, read the mood, zero files, provider facts, server-body rule | 19 KB |
+| `THEME_RULES.md` | colour tokens and the theme rules | 16 KB |
+| `RELEASE.md` | Play Store and App Store releases | 13 KB |
+| `SCALE_PLAN.md` | the do-not-build-now scale plan | 9 KB |
+
+Nothing was reworded or dropped. A line-count check confirmed every line of the old file is in the new `CLAUDE.md` or one of these files. `CLAUDE.md` keeps every absolute rule, the safeguards, the session-concurrency rules and the merge rule in full. It also has a short binding summary in place of each moved section, and a "before you touch X, read Y" table under **Where things live**.
+
+**New rule:** when the admin sets a Cloud Run key, its name is recorded in `docs/claude/ENV_REGISTRY.md`, not in `CLAUDE.md`. Long histories and rationales go in the matching `docs/claude/` file.
+
+Also: Q-013's queue row now says #3496 is merged.
+
+### Correction (merging session, 2026-10-04 19:40 UTC) — Q-500's cancellations were deliberate, not GitHub's
+
+The five `cancelled` runs above were cancelled by the merging session (`actions/runs/<id>/cancel`) on PRs
+it had already reviewed and queued for a staging push, to spend one Actions run per PR after the admin's
+"kam se kam $ kharch karna". Nothing in GitHub, the account, or the workflows cancels a run. The row is
+RESOLVED as not-a-defect; the class fix is the "queued; do not push; interim CI cancelled" comment the
+merging session now posts on each PR at the moment it cancels. Re-running a cancelled run on such a PR
+spends minutes for a result the merge gate never reads. The author's workaround ("push once per branch")
+is still good advice for a different reason: every push is a billed run.

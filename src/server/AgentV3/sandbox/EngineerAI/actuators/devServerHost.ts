@@ -437,10 +437,13 @@ function isDevServerInvocation(rawSegment: string): boolean {
   if (PM_ONE_SHOT_SUBCOMMAND.test(segment)) return false;
   if (OTHER_INSTALLER_ONE_SHOT.test(segment)) return false;
   // Any Vite invocation is a dev/preview server EXCEPT `vite build` (compiles then exits).
-  const isVite = /\bvite(?:\.js)?\b/i.test(segment) && !/\bvite(?:\.js)?\b[^\n]*\bbuild\b/i.test(segment);
+  // A word inside a HYPHENATED name is not that command (the Sur Taal census): `vite-react`, `my-vite-app`
+  // and `my-dev-app` are folders, not Vite or a dev script. A flag (`--watch`) is still a word.
+  const isVite = /(?<![\w-])vite(?:\.js)?(?![\w-])/i.test(segment) && !/\bvite(?:\.js)?\b[^\n]*\bbuild\b/i.test(segment);
   return (
     isVite ||
-    /\b(?:dev|serve|watch|livereload)\b/i.test(segment) ||
+    /(?<!\w)(?<!\w-)(?:dev|serve|watch|livereload)(?![\w-])/i.test(segment) ||
+    /\bwebpack-dev-server\b|\bvue-cli-service\s+serve\b/i.test(segment) ||
     // `npm run preview` (and pnpm/yarn) runs `vite preview` — a long-running static server that serves
     // the built dist. Missing `preview` here made it run in the FOREGROUND and block for the full 5-min
     // command timeout (deadline_exceeded), wasting ~10 min per build when the agent tried it and the

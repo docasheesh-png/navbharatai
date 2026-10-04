@@ -377,7 +377,7 @@ for (const d of DOMAINS) {
 const NON_DOMAIN_USES: RegExp[] = [
   // restaurant — an app's MENU BUTTON is navigation, not a list of dishes (autopsy Sur Taal, 2026-10-04:
   // a music player's "More/Menu बटन" made it a restaurant app with KOT and GST billing to INCLUDE).
-  /\bmore\s*\/\s*menu\b|\bmenu\s*(?:\/\s*more|button|btn|icon|bar|drawer|toggle|बटन|आइकन)\b|\b(?:hamburger|dropdown|drop-down|context|side|overflow|kebab|navigation|nav|options?|settings|main|top|app)\s+menus?\b/gi,
+  /\bmore\s*\/\s*menu\b|\bmenu\s*(?:\/\s*more|button|btn|icon|bar|drawer|toggle)\b|\bmenu\s*(?:बटन|आइकन)(?![\wऀ-ॿ])|\b(?:hamburger|dropdown|drop-down|context|side|overflow|kebab|navigation|nav|options?|settings|main|top|app)\s+menus?\b/gi,
   // jobs — a duty, praise, or a background task. None of them is employment.
   /\b(?:your|my|our|his|her|their|its)\s+jobs?\b/gi,
   /\b(?:good|great|nice|excellent|amazing|fine|bad|poor|terrible|lousy)\s+jobs?\b/gi,

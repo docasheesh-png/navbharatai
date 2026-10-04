@@ -25,6 +25,7 @@ import { splitByProject } from './nestedRepoProbe';
 import { isNonAppPath } from '../lib/nonAppPaths';
 import { openTagsAt, enclosingTag, tagName, hasAttr } from './jsxTags';
 import { stripCommentsForMarkup } from './stripCodeComments';
+import { classAttributeValues } from './CssConsistency';
 
 export interface FocusOwner {
   /** The component file that grabs initial focus. */
@@ -134,7 +135,7 @@ function isDialogTag(tag: string): boolean {
   if (/(Modal|Dialog|Drawer|BottomSheet|Popover)(\.[\w]+)?$/.test(name)) return true;
   if (/(?<![-\w])role\s*=\s*\{?\s*["'](alert)?dialog["']/i.test(tag)) return true;
   if (hasAttr(tag, 'aria-modal') && !/aria-modal\s*=\s*\{?\s*["']?false/i.test(tag)) return true;
-  const cls = /(?<![-\w])className\s*=\s*\{?\s*["'`]([^"'`]*)["'`]/.exec(tag)?.[1] ?? '';
+  const cls = classAttributeValues(tag)[0] ?? '';
   return /(^|[\s_-])(modal|dialog|drawer|bottom-sheet)([\s_-]|$)/i.test(cls);
 }
 

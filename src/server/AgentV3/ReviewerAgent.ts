@@ -540,7 +540,13 @@ export function isStylesheetPath(path: string): boolean {
 export function reviewerInstruction(opts: Omit<ReviewBuildOpts, 'spawn'>): string {
   const { userRequest, fileTree, fileSample } = opts;
   const scope = reviewScope(opts.changedFiles, fileTree.length);
+  // 🔴 A FILE HANDED IN FULL IS NOT ALSO SHOWN CUT TO 500 CHARACTERS (autopsy e3b0ce25). The lean review
+  // got its four changed files in full AND, above them, the same files as 500-character samples — and
+  // answered "Since the provided content was truncated, I need the full source", then wrote out a fake
+  // `read_file` call in a review that has no tools. A sample of a file the review already holds is noise.
+  const inlined = new Set(opts.mode === 'suggest' ? (opts.inlineFiles?.files ?? []).map((f) => f.path) : []);
   const fileContext = fileSample
+    .filter(({ path }) => !inlined.has(path))
     .slice(0, 5)
     .map(
       ({ path, content }) =>
@@ -571,9 +577,7 @@ export function reviewerInstruction(opts: Omit<ReviewBuildOpts, 'spawn'>): strin
       'one file — but do not go looking for unrelated issues elsewhere.',
       '',
     ] : []),
-    'SAMPLE FILE CONTENTS:',
-    fileContext,
-    '',
+    ...(fileContext ? ['SAMPLE FILE CONTENTS (the first 500 characters of each):', fileContext, ''] : []),
     'For each issue, prefix the line with [CRITICAL], [WARNING], or [SUGGESTION]:',
     'Start EVERY finding\'s line with its tag — a finding written without one ("**1. Bug: …**") is not read, so it is never fixed.',
     '  [CRITICAL] = feature is missing or completely broken.',
@@ -674,6 +678,13 @@ export async function reviewBuild(opts: ReviewBuildOpts): Promise<ReviewResult> 
       return { passed: true, score: 0, issues: [], summary: 'Review did not complete.' };
     }
     const issues = parseReviewOutput(summary);
+    // 🔴 AN ANSWER WITH NO VERDICT IS NOT A REVIEW (autopsy e3b0ce25). "I'll read the complete files …
+    // function read_file({file_path: "src/types.ts"}) {}" carried no [PASS], no tagged finding and no
+    // score, and was shown to the user as "✅ Build Review". Asking what a review IS (a verdict) rather
+    // than listing what a non-review says catches every shape of it.
+    if (!reviewGaveAVerdict(summary, issues.length)) {
+      return { passed: true, score: 0, issues: [], summary: 'Review did not complete.' };
+    }
     const criticalCount = issues.filter((i) => i.severity === 'critical').length;
     const passed = criticalCount === 0;
     const scoreMatch = summary.match(/score[:\s]+(\d+)/i);
@@ -697,6 +708,21 @@ export function reviewDeniedTheChanges(summary: unknown, changedFiles: readonly 
   const changed = (changedFiles ?? []).filter((f) => typeof f === 'string' && f.trim()).length;
   if (changed === 0) return false;
   return /\bno (?:code )?changes? (?:were |was )?(?:detected|made|found|to review)\b|\b(?:the )?diff is empty\b|\bempty diff\b|\bnothing (?:has )?changed\b|\bunchanged from (?:their|its) prior state\b/i.test(summary);
+}
+
+/**
+ * True when the reviewer's answer contains a verdict: a [PASS], a finding we parsed, a stated score, a
+ * "no issues found" sentence, or defect prose (which `reviewHasUnreadFindings` reports honestly). The
+ * instruction asks for "[PASS]" or tagged findings and "Score: N/100"; an answer with none of them reviewed
+ * nothing. PURE.
+ */
+export function reviewGaveAVerdict(summary: unknown, parsedIssues: number): boolean {
+  if (typeof summary !== 'string' || !summary.trim()) return false;
+  if (parsedIssues > 0) return true;
+  if (/\[pass\]/i.test(summary) || /score[:\s]+\d+/i.test(summary)) return true;
+  const sentences = summary.split(/(?<=[.!?])\s+|\n+/).map((x) => x.replace(/^[#>*\s\d.)-]+/, ''));
+  if (sentences.some((x) => NO_FINDINGS_RE.test(x))) return true;
+  return reviewHasUnreadFindings({ issues: [], summary });
 }
 
 /** True when a reviewer's returned summary is actually a failure/error string, not a real review. Pure. */

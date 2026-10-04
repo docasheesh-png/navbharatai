@@ -88371,6 +88371,44 @@ Q-461–Q-464 (🟡). The overlapping fixes this session had written were droppe
   architect writes shared pieces before parallel screens; case-only twin files are named at write time.
 - **Q-452–Q-459** file formats, a stopped module → pending, READY on a module turn, the write-time typecheck never
   waits for an install, deprecated packages, mixed-script words, ETA follows the complexity router, delegation role.
+## 2026-10-04 — Autopsy 1eaa5f5a ("Make one PDF reader") + e3b0ce25 ("Build one block fitting puzzle")
+
+**The headline: since #3491 (13:52 UTC) every write-time typecheck was run as a dev-server launch.** The primer
+copies `/home/user/.warm/vite-react/node_modules`; `isDevServerInvocation` read "vite" in that PATH as a program.
+Each typecheck was then prefixed `BROWSER=none` (a syntax error in front of `if`), the dev server on 5173 was
+killed first, the check timed out at 30 s, and the health check ran installs and restarts. In the same build the
+sandbox's `package.json` was found empty twice, every npm command failed with EJSONPARSE, and the preview went
+down. Third instance of the "a word inside data read as a command" class (`/dev/null` 2026-08-16, `--save-dev`).
+
+| ID | Problem | Root cause → fix | Lock |
+|---|---|---|---|
+| Q-410..413 | typecheck misrouted, BROWSER=none syntax error, dev server killed, typecheck never ran | paths judged by their last part — **shipped by #3506 (`pathsAsBasenames`, Q-390)**, found by both sessions the same day; this PR's own copy was withdrawn on merge and only its census was kept | `aTypecheckIsNotADevServer.test.ts` (census of every command the platform builds) |
+| Q-414 | package.json emptied twice | 🟡 writer unknown; restore + evidence in the one install path | `anEmptyManifestIsPutBack.test.ts` |
+| Q-415 | PREVIEW_SERVER_DOWN ×2 | Q-414 | — |
+| Q-416/417 | puzzle built over the PDF reader without asking; pdf.js and "PDF Reader" title left behind | "puzzle" etc. are whole things | `askBeforeBuildingSomethingElseIntoThisApp.test.ts` |
+| Q-418 | `.null` false class finding | per-quote literal reader, one shared function | `anExpressionIsNotAClassName.test.ts` |
+| Q-419/420 | fake tool call shown as ✅ review; review told files were cut | a review needs a verdict; no samples of inlined files | `aReviewWithoutAVerdictIsNotAReview.test.ts` |
+| Q-421 | ₹0 bill on a build whose app rendered | 🟡 admin decision (recommend keep ₹0: our bug took the preview down) | — |
+| Q-422 | fast lane waited 67 s after deciding to hand off | 🟡 admin decision | — |
+| Q-423 | design line duplicated and stale after the snap | print once; re-lint after the snap | `theDesignLineSaysWhatIsTrueNow.test.ts` |
+
+Not defects (recorded so nobody re-opens them): `requestAnalysis.startTier: "gemini"` is the complexity band's
+historical key, with `startBand` printed beside it (2026-09-17); the GLM crawl bench was the designed resilience.
+**Watch:** no `BROWSER=none` and no `Killed` in launch logs; `WRITE_TIME_TYPECHECK` compiling again; any
+`package.json was EMPTY` line (it names the writer — Q-414).
+## 2026-10-04 — Q-344: the other nine scripts stand down on transliterated loanwords (next PR after #3494)
+
+The admin approved transliterated English loanwords as the protective words ("ok, go ahead"), and decided the
+merging session merges #3494, not this one.
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-344 child-protection / deepfake-detection apps refused in Bengali, Tamil, Telugu, Urdu… | Q-320's stand-down had protective words only in English and Hindi | a safety word list in one script and not its siblings | `indicSafetyWords.ts` gains `protective` (report, helpline, POCSO, detect, awareness per script) and `unambiguous` (porn, obscene, naked, "sex"/"sexual" beside a medium, undress, deepfake + make/generator) for CSAM and NCII; `illegalContentRules.ts` reads them | `tests/aProtectiveAppIsNotTheOffence.test.ts` — fix removed → 8 fail |
+| Sibling found: "शिशुओं की यौन सामग्री रिपोर्ट" (sexual content) passed the Hindi stand-down | the Devanagari unambiguous list paired only "सेक्स" with a medium | same | "(सेक्स|यौन)" beside video/photo/chat/story/content | same test |
+
+Honest limit: only loanwords stand down, so a request using a native protective word (শনাক্ত, கண்டறி) stays
+refused. Words in the `unambiguous` lists that were guessed can only make the rule stricter, never looser.
+
 ### 2026-10-04 — Autopsy "Sur Taal" (music player, builds b8c31d3d / c497c9cb) — Q-390..Q-399
 
 A music player described in eight numbered Hindi design sections became a 23-module project (one "continue" per

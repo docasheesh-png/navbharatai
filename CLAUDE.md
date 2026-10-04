@@ -234,7 +234,9 @@ promised to build it.** Every model refused — the model's virtue, never our de
   erotic, sexy, "sexual videos", "undress", "make a deepfake"); then the request is refused as before. One
   function, `protectiveStandDown`, read by the prompt triage AND the publish scanner. ⚠️ "sex"/"sexual"
   alone are deliberately NOT unambiguous ("report child sexual abuse" needs them). The other nine scripts
-  have no protective words yet and stay strict (Q-344). `tests/aProtectiveAppIsNotTheOffence.test.ts`.
+  stand down only on transliterated LOANWORDS (Q-344, admin "ok, go ahead" 2026-10-04): report, helpline,
+  POCSO, detect, awareness; a native-only request stays strict until a native reader adds words.
+  `tests/aProtectiveAppIsNotTheOffence.test.ts`.
   ⚠️ **NO LOOKBEHIND MAY REACH THE WEB BUNDLE (Q-322).** Safari before 16.4 (iOS 15) throws on one and
   takes its screen down — the Image Generator did not open there. A server file the client imports is
   client code too. `scripts/noLookbehindInBundle.mjs` (in `npm run test:bundle`) reads the built bundle.
@@ -3276,6 +3278,14 @@ the flag entries above promise.
   says so, `null` means *not supplied* and never zero, and `writeTypecheckUntouched` makes the
   silence unrepresentable as a fact about the build. Test-locked and reversion-proven four ways in
   `tests/theCounterWatchedOneLaneOfTwo.test.ts`.
+- **🧭 A PATH IS NOT A PROGRAM (autopsies Sur Taal + e3b0ce25, 2026-10-04; no flag).** `isDevServerInvocation`
+  reads each path by its LAST part (`pathsAsBasenames`, #3506): the typecheck primer copies
+  `/home/user/.warm/vite-react/node_modules`, and "vite" in that directory name made every write-time typecheck a
+  dev-server launch (BROWSER=none syntax error, the running server killed, a 30 s timeout). Two sessions found it
+  the same day; #3506 shipped the fix. ⚠️ **Any new command the platform builds for itself goes into the census in
+  `tests/aTypecheckIsNotADevServer.test.ts`.** Same autopsy: an EMPTY sandbox `package.json` is restored in
+  `_npmInstall` (the one install path) with the machine's state recorded (`emptyManifest.ts`) — which process
+  emptied it is OPEN (Q-414).
 - **🔧 A REPAIR THE PLATFORM CHECKS DOES NOT CHECK ITSELF, AND A REPAIR THAT CHANGED NOTHING SAYS SO (autopsy
   6cd698cc, 2026-10-01).** The explorer repair fixed a theme button in 61 s, then ran the production build, a dev
   server, the preview and a browser of its own (its prompt was the reviewer's `judgeRepairPrompt`, "verify the app

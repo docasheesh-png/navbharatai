@@ -31,6 +31,21 @@ interface DomainDef {
   features: Array<{ label: string; re: RegExp }>;
 }
 
+/**
+ * 🔴 A HINDI KEYWORD MUST BE A WHOLE WORD (autopsy Sur Taal, 2026-10-04). JavaScript's `\b` knows no
+ * Devanagari, so `सामान` ("goods", the ecommerce signal) matched inside `सामान्य` ("common") — "समर्थित
+ * सामान्य Audio Formats" made an offline music player an ECOMMERCE app, and the build was told it lacked
+ * payments, a cart, a checkout and order management. `जिम` (gym) sits the same way inside `जिम्मेदारी`
+ * ("responsibility"). Every Devanagari run in these patterns is therefore bounded: no Devanagari letter
+ * before it, and no virama (्) after it — a virama means the word goes on into a conjunct, i.e. it is a
+ * different word — while an inflection (दुकानों, मरीज़ों) still matches. Server-only (a lookbehind is
+ * fine here). PURE.
+ */
+export function boundDevanagari(re: RegExp): RegExp {
+  const source = re.source.replace(/[\u0900-\u097F]+/g, (run) => `(?<![\u0900-\u097F])${run}(?!\u094D)`);
+  return source === re.source ? re : new RegExp(source, re.flags);
+}
+
 // Each feature carries a regex that decides whether the prompt already MENTIONS it (so we only ask about
 // what's genuinely missing). Kept deterministic + dependency-free.
 const DOMAINS: DomainDef[] = [
@@ -312,6 +327,12 @@ const DOMAINS: DomainDef[] = [
     ],
   },
 ];
+// Bound every Devanagari keyword (see boundDevanagari) — once, here, so no reader can miss it.
+for (const d of DOMAINS) {
+  d.re = boundDevanagari(d.re);
+  for (const f of d.features) f.re = boundDevanagari(f.re);
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 // ORDINARY ENGLISH IS NOT A DOMAIN (autopsy of buildId 424ecdab, 2026-09-14).
@@ -354,6 +375,9 @@ const DOMAINS: DomainDef[] = [
 // SPECIFIC construction, never a bare word, and removal only ever DELETES evidence: it cannot invent a
 // domain that was not already matching. The genuine-classification corpus is asserted unchanged.
 const NON_DOMAIN_USES: RegExp[] = [
+  // restaurant — an app's MENU BUTTON is navigation, not a list of dishes (autopsy Sur Taal, 2026-10-04:
+  // a music player's "More/Menu बटन" made it a restaurant app with KOT and GST billing to INCLUDE).
+  /\bmore\s*\/\s*menu\b|\bmenu\s*(?:\/\s*more|button|btn|icon|bar|drawer|toggle|बटन|आइकन)\b|\b(?:hamburger|dropdown|drop-down|context|side|overflow|kebab|navigation|nav|options?|settings|main|top|app)\s+menus?\b/gi,
   // jobs — a duty, praise, or a background task. None of them is employment.
   /\b(?:your|my|our|his|her|their|its)\s+jobs?\b/gi,
   /\b(?:good|great|nice|excellent|amazing|fine|bad|poor|terrible|lousy)\s+jobs?\b/gi,
@@ -616,7 +640,17 @@ export function indiaFirstGuidance(domain: string): string {
  * Indic scripts. Ties are broken by feature score, and `>=` keeps the EARLIER domain — so every existing
  * classification is byte-identical unless a later domain is strictly more specific. Pure.
  */
+/**
+ * A MEDIA PLAYER IS NOT A BUSINESS (autopsy Sur Taal, 2026-10-04; earlier 6a4a799f "Blue Berry"). No domain
+ * in this table describes a music, audio or video player, so every match on one is a stray word — its
+ * "resume" a CV, its "सामान्य" goods, its "Menu" a restaurant — and the build was handed jobs, shop or
+ * kitchen features to INCLUDE. When the request names a player app, no business domain is inferred.
+ * Precision: it needs the word PLAYER (a "music store" or "music class" keeps its domain). PURE.
+ */
+export const MEDIA_PLAYER_APP = /\b(?:music|audio|mp3|song|video|media|podcast|radio|fm)\s*[-\s]?\s*players?\b|(?:म्यूजिक|म्यूज़िक|संगीत|ऑडियो|वीडियो|गाने|गानों)\s*(?:का\s*)?प्लेयर/i;
+
 function selectDomain(text: string): DomainDef | undefined {
+  if (MEDIA_PLAYER_APP.test(text)) return undefined;
   return DOMAINS
     .filter((d) => d.re.test(text) || indicDomainMatches(d.key, text))
     .reduce<DomainDef | undefined>(

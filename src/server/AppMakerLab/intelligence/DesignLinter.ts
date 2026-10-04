@@ -158,12 +158,23 @@ function scoreToGrade(score: number): 'A' | 'B' | 'C' | 'D' {
  * Lint generated code for design-consistency issues. Deterministic — same code in, same result out.
  * Returns a 0–100 score, a grade, and concrete violations. Empty/tiny code → a perfect, honest 100.
  */
-export function lintDesign(code: string): DesignLintResult {
+/**
+ * A file that IS the palette — a design-token module (autopsy Sur Taal, 2026-10-04). `src/design/colors.ts`
+ * exporting `darkPalette`, `lightPalette` and the accent choices was graded C for "38 distinct colours"
+ * — the CSS rule above, missed in its TypeScript sibling: tokens declared as `bg: '#0d0d1a'` in a theme
+ * module instead of `--bg: #0d0d1a` in a stylesheet. Only a module whose PATH says it is the palette
+ * (a `design/`, `theme/` or `tokens/` folder, or a colors/palette/theme/tokens file) — a component with
+ * many inline colours is still counted. PURE.
+ */
+export const TOKEN_MODULE_PATH = /(?:^|\/)(?:design|theme|themes|tokens?|design-tokens)\/[^/]+\.(?:[cm]?[jt]sx?)$|(?:^|\/)(?:colou?rs|palette|palettes|theme|themes|tokens|design-tokens)\.(?:[cm]?[jt]sx?)$/i;
+
+export function lintDesign(code: string, opts: { tokenModuleCode?: string } = {}): DesignLintResult {
   const src = typeof code === 'string' ? code : '';
   const allColors = extractHexColors(src);
   // The palette itself is not a violation of the palette — see `extractTokenColors`. What the budget
   // is for is ad-hoc colour, so only colours used OUTSIDE a token declaration are counted against it.
-  const tokenColors = new Set(extractTokenColors(src));
+  // Every colour a design-token MODULE declares is a token too (`TOKEN_MODULE_PATH`).
+  const tokenColors = new Set([...extractTokenColors(src), ...extractHexColors(opts.tokenModuleCode ?? '')]);
   const colors = allColors.filter((c) => !tokenColors.has(c));
   const fonts = extractFontFamilies(src);
   const spacing = extractSpacingPx(src);

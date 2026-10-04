@@ -1361,6 +1361,8 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '      (A payment is PAID only when a SERVER verified the gateway signature — never from the browser',
     '       checkout\'s success callback. An app with no server records orders as "payment pending".)',
     '      uploads → generate_storage · realtime → generate_realtime · full-text search → generate_search',
+    '      (No database connected? A saved upload goes into IndexedDB as the file itself — src/lib/files.ts,',
+    '       saveFile/useFileUrl — never a data URL in localStorage/NavData: 5 MB for the whole app. Say files stay on this device.)',
     '    • phone OTP → generate_otp · SMS → generate_sms · newsletter signup → generate_newsletter · team',
     '      alerts → generate_notify (Slack/Discord) · your own DB → generate_db_config',
     '    • analytics → generate_analytics · error tracking → generate_error_tracking · feature flags →',

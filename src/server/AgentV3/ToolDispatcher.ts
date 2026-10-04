@@ -116,6 +116,7 @@ import { WRITE_TYPECHECK_NOT_READY_MARKER,
 } from './writeTimeTypecheck';
 import { scanAuthenticity, authenticitySummary, fakeResultWriteNote } from './AuthenticityAnalysis';
 import { fakeFeatureWriteNote, noFakeFeaturesEnabled } from './fakeFeatureScan';
+import { uploadStorageWriteNote } from './browserFileStore';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
 import type { AccessibilityIssue } from './AccessibilityAnalysis';
@@ -882,6 +883,8 @@ export class ToolDispatcher {
   private coverageRequest: string | null = null;
   /** The keyboard-only-game note is said once per build (touchPlayableGame.ts). */
   private _touchGameNoted = false;
+  /** Once per build: an upload read into text, with nowhere proper to keep it (Q-542 — `browserFileStore.ts`). */
+  private _uploadStorageNoted = false;
   /** The entry-first hand-back is said once per build (earlyPreview.ts, autopsy 39e982bd). */
   private _entryFirstNoted = false;
   setCoverageRequest(text: string | null): void {
@@ -3638,6 +3641,14 @@ export class ToolDispatcher {
       // A login / payment / OTP / email that only pretends (admin 2026-10-04, NO FAKE BUTTON) — said while
       // the file is open, where the real provider is cheapest to wire. Kill switch AGENTV3_NO_FAKE_FEATURES=off.
       try { if (noFakeFeaturesEnabled()) security += fakeFeatureWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
+      // An uploaded file read into text, headed for a store that holds 5 MB (autopsy 68f0a486, Q-542) — once per
+      // build, with the IndexedDB file store the right fix needs, while the file is still open.
+      if (!this._uploadStorageNoted) {
+        try {
+          const n = uploadStorageWriteNote(p, files[p]);
+          if (n) { security += n; this._uploadStorageNoted = true; }
+        } catch { /* a note is best-effort */ }
+      }
     }
     // A second index.html in public/ shadows a Vite app's real entry (autopsy 876afca9) — said while open.
     let shadow = '';

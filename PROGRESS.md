@@ -88428,6 +88428,26 @@ module), with five false findings on the way. Ledger (problem → root cause →
 - 🟡 Q-396 (no-tests warning on module turns), Q-397 (ignored theme note), Q-398 (APP_SCOPE small word as reason):
   BLOCKED with options in the queue. Q-399 (crawl bench, Haiku planner) resolved as admin-decided behaviour.
 
+## 2026-10-04 — Admin panel audit, PR 1: safety + dead code (admin approved the sequenced plan)
+
+The admin forwarded a reviewed plan (external text, adapted): PR 1 safety, PR 2 the nine-tab menu, PR 3 gallery
+review / restore / App Check / audit log, PR 4 optional cleanup — one PR at a time, each waiting for approval.
+D2/D3/D4 work done earlier the same day is kept on the LOCAL branch `local/admin-d2-d3-d4` (not pushed) for PR 2/3.
+- **Confirmations + reasons.** Ban, token adjustment and messaging users go through `ConfirmActionDialog`. A ban and a
+  token change need the admin's own reason; a message to all users shows recipients + exact text. One rule,
+  `src/lib/adminActionReason.ts`, read by the screen and enforced by the server (placeholder reasons refused,
+  all-users broadcast needs `confirmScope: 'ALL_USERS'`). Token adjustments audit admin, user, amount, previous and
+  new balance, reason, result.
+- **Audit lines added:** release gate (before/after), update broadcast, build/APK report delete + clear-all, MFA
+  enrol start, push test, About page edit, user-report status, Firestore backup. Census in
+  `tests/adminActionsNeedAReason.test.ts` fails on a new mutating `/api/admin` route with no `audit(`.
+- **D1 (admin chose remove):** Maintenance Mode, Feature Flags, Pricing Configuration and the "Persisted feature
+  flags" card are gone with their state/handlers. **Intentionally kept:** `POST /api/admin/settings`,
+  `/api/admin/feature-flags` and `serverStats.maintenanceMode` (read by `/api/health`) — now written by no screen;
+  candidates for removal in a later PR once proven unused by any other caller.
+- Removed App.tsx's tokenless `/api/admin/analytics` fetch (always 401, result read by nothing).
+- ⚠️ An older bundled admin client (phone app) that still sends "Admin action" or an unscoped broadcast now gets an
+  honest refusal instead of a silent action.
 ### 2026-10-04 — Q-273 / Q-275 follow-up (autopsy 241215d1)
 
 - **Q-273 → fix in PR.** Problem: `python3 --version && which python3 → exit 0 (11s)`, while `head -50` took 1 s a
@@ -88689,6 +88709,13 @@ Nothing was reworded or dropped. A line-count check confirmed every line of the 
 **New rule:** when the admin sets a Cloud Run key, its name is recorded in `docs/claude/ENV_REGISTRY.md`, not in `CLAUDE.md`. Long histories and rationales go in the matching `docs/claude/` file.
 
 Also: Q-013's queue row now says #3496 is merged.
+- **PR 2 acceptance requirement (admin, 2026-10-04):** for every moved feature verify category, natural place, primary
+  action, separate/appropriate destructive actions, label = behaviour, no duplicate left elsewhere, same backend/API
+  correctly called, authorization intact, confirmation on destructive actions, audit on important actions. Where two
+  locations are both reasonable, decide from the feature's purpose and the admin's workflow and write the reason.
+  PR 2 is NOT complete without a "FEATURE LOCATION AUDIT" table (Feature | Old Location | New Location | Why |
+  Action Type | Permission | Audit Required). Anything unclear, duplicated or misplaced is named, not hidden.
+  D3 (the three duplicate cards) moves to PR 4.
 
 ### 2026-10-04 — ⛔ NO FAKE BUTTON, NO FAKE FEATURE: the rule, enforced on the apps NavBharatAI builds (admin-mandated, unbreakable)
 
@@ -88871,6 +88898,58 @@ written down in plain words.
 second push creates a second run that somebody then has to cancel or wait out. Nothing is wrong with
 GitHub, nothing needs looking at in Actions settings, and the admin can ignore that request entirely.
 
+## 2026-10-04 — Q-514 and Q-517 from autopsy 39e982bd: the door the user sees, and a warning that became false
+
+Two of the five items that autopsy left OPEN, taken in order of user harm.
+
+### Q-514 — no app on earth labels a button "auth"
+
+`JOURNEY_NOT_RUN` → **RELEASE_GATE YELLOW**, *"whether it keeps what a user enters is untested"*. The
+one journey derived was the sign-in form in `src/screens/AuthScreen.tsx`, and the control the runner
+went looking for was named **`auth`** — the word the FILE carries. **Every app with a login screen is
+in that shape**, so a correct app is told its saving is untested.
+
+🔑 **THE GENERAL HALF IS NOT A SYNONYM TABLE, and it matters more than the table.** A file's word is
+CONCATENATED (`login`, `checkout`, `signup`) and a control's label is SPACED (`Log in`, `Check out`),
+and `pressReach` matched with `includes` — so **`"log in".includes("login")` is `false`**. No list of
+synonyms could ever have bridged that. The matcher now compares the LETTERS alone, which fixes
+`login`/`Log in` for every screen and needs no list.
+
+🔒 **The table is the remainder: one entry.** `auth` / `authentication` → `sign in`, `log in`, `login`
+— and deliberately only the NON-CREATING doors. "Sign up", "Register" and "Create account" are in
+`WRITE_VERBS`, so `pressReach` refuses them anyway (pressing one could create an account), and listing
+them would be noise that can never fire. A screen whose only door is "Sign up" stays unreachable,
+correctly, and a test asserts that every alias is a word `pressReach` will actually press.
+
+The failure note now names the words it looked for, so the next occurrence says which vocabulary missed.
+
+⚠️ **Said plainly: this may not have produced a journey for THAT build.** With Firebase unconfigured the
+app rendered its five tabs, and whether the sign-in form was reachable from them at all is not in the
+report. The fix is for the class — which is every login app — not for that one run.
+
+### Q-517 — "No tests at all" was false 17 seconds later
+
+The readiness gate records that warning before the E2E scaffold pass runs, so one report carried
+*"No tests at all"* at 19:30:09 and `E2E_SCAFFOLDED` writing a Playwright suite at 19:30:26, with
+`TEST_SUITE_UNVERIFIED` stating the honest end state in the same report. Two codes, one build,
+contradicting.
+
+The scaffold pass now clears that warning — **by its own sentence, never by its code.**
+`resolveOnRecheck` gained `messageIncludes`, because `READINESS_WARNING` carries many unrelated facts
+("Requested feature not found: search", …) and clearing the whole code would silence a real one in the
+same build. A precision test locks exactly that, and the existing whole-code callers (`EXPLORE_FAILED`,
+the heal table) are untouched.
+
+**Proof:** `tests/noAppLabelsAButtonAuth.test.ts` (14 cases), reversion-proven five ways — dropping the
+aliases fails 3, restoring the raw-substring match fails 1, dropping `reachAlso` from the generated
+module fails 2, dropping the message filter fails 1, dropping the call at the scaffold fails 1. The
+generated journey module is parsed with the real `node --check`, because that script has shipped broken
+twice before (a backtick inside a comment; a `\b` that reached the page as a backspace).
+
+**Still OPEN from that autopsy: Q-515, Q-516, Q-518** — the snapper-vs-scorer 21-value disagreement,
+`APP_SCOPE`'s false *"clone of Free Fire"* with the ecommerce domain, and the explorer passing
+*"View Details — nothing visibly changed"*. Each needs a cheap diagnosis or a precision corpus; none is
+guessed at.
 
 ### Correction (merging session, 2026-10-04 20:55 UTC) — half of Q-500's cancellations were the 30-minute cap
 
@@ -88880,3 +88959,25 @@ cancels of #3515 (19:57), #3518 (20:44) and #3523 (20:45) read "The job has exce
 of 30m0s" — `ci.yml`'s own `timeout-minutes: 30`, hit because eight or nine PR runs in flight slowed every run to
 21–30 min. The cap is now 45 (#3524 staging). Lesson, the fourth rule's first step: read the run's own last
 words before naming a cause — a cancelled run names its canceller.
+### 2026-10-04 — Admin decisions on the 68f0a486 / c70bcbb4 / 241215d1 open rows
+
+- **Q-541 and Q-527 (items argued not defects): agreed by the admin ("han, band kar do").** Resolved as
+  not-a-defect; the evidence for each is in the row text recorded in #3524 and in the ledgers above.
+- **Q-275 (a request that ended mid-sentence): closed by the admin as not ours.** Measured: 2,429 characters
+  ending at a line break; nothing on our side cuts there (server limit 20,000, no composer `maxLength`, no
+  long-paste conversion, the report stores the prompt in full).
+- **Q-540: the admin chose option (b)** — "navbharatai jo bhi app banaye, uske andar jo bhi function banaye jaye,
+  woh real hone chahiye, production grade". The explorer may sign up a throwaway account only in apps whose
+  sign-in lives in the browser alone. Being built in the follow-up PR.
+
+### 2026-10-04 — Follow-up to 68f0a486: Q-540 built (option b) and Q-542 (uploads in localStorage)
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-540 screens behind a sign-in page with no demo account never checked | the explorer could only use accounts the app ships | a check with no way past a door the app itself opens to anyone | `authLivesInTheBrowser(files)` — no backend, no hosted auth/database SDK, no `NavData`, no network sign-in, no API base URL, and a password handled beside browser storage — lets the sign-in check sign up ONE throwaway account through the app's own form (in its own discarded browser profile) and sign in with it. Every other app keeps "no account is ever created" | `tests/theSchoolAppBehindItsSignInPage.test.ts` (real browser, both sign-up shapes; reverted → 4 fail) |
+| Q-542 uploads as data URLs in localStorage, summary "uploads work" | nothing said where a file goes without a database; our social starter modelled `readAsDataURL` into `useCollection`, whose quota error was swallowed | file bytes in a small key-value store (localStorage, sessionStorage, NavData) | `browserFileStore.ts` IndexedDB store shipped as `src/lib/files.ts` in every pro starter; social starter uses it; failed saves shown on every screen; prompt rule; once-per-build write-time note; claim audit `uploads-in-small-store` | `tests/anUploadIsKeptWhereFilesBelong.test.ts` (real browser 6 MB proof; census over every starter, per file; each layer reverted → fails) |
+
+Siblings hunted: `readAsDataURL` across the whole repo — the only generated-app site was the social starter
+(the rest is NavBharatAI's own client sending images to APIs, not storing them). The `catch {}` that hid a
+failed save lived only in `proShell.ts`'s `useCollection`.
+

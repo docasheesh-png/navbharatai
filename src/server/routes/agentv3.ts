@@ -398,7 +398,8 @@ import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from 
 import { entryShadowRepairHint } from '../AgentV3/entryShadow';
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceEvidence, featurePresenceRepairPrompt, featureHealEnabled, isSignInWall, probeFeatures, requestedProbeFeatures } from '../AgentV3/FeaturePresence';
 import { adoptHealResult } from '../AgentV3/healResult';
-import { signInExploreEnabled, signInScript, signInCandidates, parseSignInOutput, signInReportLine, isSignInRoute, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
+import { appKeepsUploadsInSmallStore } from '../AgentV3/browserFileStore';
+import { signInExploreEnabled, signInScript, signInCandidates, authLivesInTheBrowser, parseSignInOutput, signInReportLine, isSignInRoute, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
 import { unsupportedStackRequested, unsupportedStackBuilderNote, unsupportedStackUserNote, builtWithLabel } from '../AgentV3/unsupportedStack';
 import { unknownNameNoteEnabled, unknownNamesInRequest, unknownNameBuilderNote, unknownNameReportNote } from '../AgentV3/unknownName';
 import { requestScopeNote } from '../AgentV3/requestScope';
@@ -20624,7 +20625,7 @@ async function noteBuildOutcome(
         let run: SignInRun = { ran: false, signedIn: false, note: 'the sign-in check did not run', screens: [] };
         try {
           if (actuator.runCommand) {
-            const out = await withTimeout(actuator.runCommand(workspaceId, signInScript(previewUrl, signInCandidates(files))), SIGN_IN_BUDGET_MS + 15_000, 'sign-in-explore');
+            const out = await withTimeout(actuator.runCommand(workspaceId, signInScript(previewUrl, signInCandidates(files), { mayCreateAccount: authLivesInTheBrowser(files) })), SIGN_IN_BUDGET_MS + 15_000, 'sign-in-explore');
             run = parseSignInOutput(out.stdout);
           }
         } catch { /* our instrument, never the app's verdict */ }
@@ -20962,6 +20963,12 @@ async function noteBuildOutcome(
                   + (auth ? ` The sign-in test reads its selectors from ${auth.file}, so they keep working as long as that form does.` : ''),
                 autoResolved: true,
               });
+              // 🔴 "No tests at all" IS NOW FALSE (autopsy 39e982bd / Q-517). The readiness gate records
+              // that warning before this pass runs, so report 39e982bd carried it at 19:30:09 and a
+              // Playwright suite 17 seconds later — two codes in one build contradicting, with
+              // TEST_SUITE_UNVERIFIED stating the honest end state in the same report. Cleared by its own
+              // sentence, never by its code: READINESS_WARNING carries many unrelated facts.
+              buildDiag.resolveOnRecheck('READINESS_WARNING', { messageIncludes: 'No tests at all' });
             }
           } else if (decision.reason) {
             // Recorded even when nothing was written: a silent skip cannot be told from a broken skip.
@@ -23160,6 +23167,10 @@ async function noteBuildOutcome(
           buildWasRequested: userAskedToBuildAnApp,
           // "Live NSE prices" from code that only simulates them (Q-274, autopsy 241215d1).
           liveDataRequested: liveDataAsked,
+          // "Drag-and-drop uploads" from an app that keeps the files as text in localStorage (Q-542, autopsy
+          // 68f0a486). Judged only when the written files ARE the app — an edit's slice cannot see where the
+          // rest of the app keeps its files.
+          uploadsInSmallStore: isImportTurn || isEditMode ? undefined : appKeepsUploadsInSmallStore(Object.fromEntries(writtenFiles)),
           // "Everything lives in one HTML file" about a multi-file project (autopsy dfd24058). Counted only
           // when the written files ARE the app — an edit turn writes a slice, and a slice of one is not a claim.
           appSourceFiles: isImportTurn || isEditMode ? undefined : Array.from(writtenFiles.keys()).filter((p) => /\.(?:[cm]?[jt]sx?|css|vue|svelte)$/i.test(p) && !/(?:^|\/)(?:node_modules|dist)\//.test(p)).length,

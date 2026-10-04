@@ -27,6 +27,8 @@
 //
 // PURE. No I/O, no clock, no model call. Never throws.
 
+import { uploadsClaim } from './browserFileStore';
+
 export interface MeasuredFacts {
   /** Did the console capture actually run and return? */
   consoleCaptured: boolean;
@@ -123,12 +125,19 @@ export interface MeasuredFacts {
    * app asked for live `yfinance` prices, shipped a simulated feed, and was described as working end to end.
    */
   liveDataRequested?: boolean;
+  /**
+   * Does the app put uploaded files, as text, into a store that holds about 5 MB for the whole app
+   * (`browserFileStore.ts` → `appKeepsUploadsInSmallStore`)? Read only by the `uploads-in-small-store` check;
+   * omitted ⇒ that check never runs. 🔴 Autopsy 68f0a486 (Q-542): a school app kept videos and PDFs as data
+   * URLs in localStorage and was described as having "drag-and-drop uploads" that work.
+   */
+  uploadsInSmallStore?: boolean;
 }
 
 /** "Everything lives in one HTML file", "a single HTML file" — never "single-page app", which is true. */
 const ONE_FILE_CLAIMED = /\b(?:in|lives\s+in|is|as|inside)\s+(?:just\s+|only\s+)?(?:one|a\s+single|single)\s+(?:html\s+|index\.html\s+)?file\b|\bsingle[\s-](?:html\s+)?file\s+app\b/i;
 
-export type ClaimKind = 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed';
+export type ClaimKind = 'feature-claimed-but-demo' | 'live-data-claimed' | 'one-file' | 'console-clean' | 'console-clean-but-errors' | 'typecheck-clean' | 'screenshot-seen' | 'preview-renders' | 'ui-described' | 'app-delivered' | 'design-claimed' | 'user-attributed' | 'uploads-in-small-store';
 
 /**
  * "the exact versions you specified" — a PLATFORM requirement credited to the user (autopsy 33812996).
@@ -486,6 +495,16 @@ export function auditSummaryClaims(summary: string, facts: MeasuredFacts): Claim
         measured: 'its code generates simulated prices and connects to no live data source, so the numbers on screen are sample data',
       });
     }
+  }
+
+  // "Drag-and-drop uploads" from an app that keeps uploaded files as text in localStorage (Q-542, autopsy
+  // 68f0a486). A sentence that already says where the files stay ("on this device", "5 MB") is honest.
+  if (facts.uploadsInSmallStore === true && uploadsClaim(text)) {
+    out.push({
+      kind: 'uploads-in-small-store',
+      claimed: 'that file uploads work',
+      measured: 'the app keeps each uploaded file as text in the browser\'s local storage, which holds about 5 MB for the whole app — one video or a few PDFs fill it, after which nothing more is saved, and the files stay on this one device',
+    });
   }
 
   // "the exact versions you specified" when the user wrote no version at all (autopsy 33812996).

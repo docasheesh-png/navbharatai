@@ -24962,7 +24962,13 @@ async function noteBuildOutcome(
           // copies the signal onto the timeline, and this asks the broader of the two questions —
           // "did this build reach the point of having a capability to judge?" — which is NO whether
           // the person or their own sentence stopped it.
-          const stopped = buildWasStopped(buildDiag.report().issues) || buildDiag.toolWasUsed('stop_build');
+          // ONE DEFINITION OF "STOPPED" (Q-131, 2026-10-04). This used to add `|| toolWasUsed('stop_build')`,
+          // a second answer to the same question. It never agreed more often than the timeline alone — the
+          // model's `stop_build` records USER_STOPPED_BUILD and then raises the same abort as the button
+          // (setStopBuild above), and the back-fill copies every other stop onto the timeline — but it
+          // disagreed in the one case that matters: a `stop_build` the dispatcher could NOT carry out
+          // ("stopping is not available here") still counted as a stop. The timeline is the one source.
+          const stopped = buildWasStopped(buildDiag.report().issues);
           // …AND OUR OWN INTERRUPTIONS, which `stopped` above cannot see (2026-09-26). It reads
           // `USER_STOPPED_BUILD`, which only a user or model stop writes; a deploy draining the build,
           // a newer build reclaiming its lock, the reaper, or an abort we cannot explain write nothing

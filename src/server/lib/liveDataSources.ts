@@ -281,8 +281,6 @@ export async function liveDataContext(message: string, opts: LiveDataOptions = {
   const env = opts.env ?? process.env;
   const fetchImpl = opts.fetchImpl ?? fetch;
   const now = opts.now ?? new Date();
-  const transit = await liveTransitContext(message, { env, fetchImpl, now }).catch(() => '');
-  if (transit) return transit;
   /**
    * 🔒 THE ONE SOURCE HERE WHOSE LICENCE DOES NOT COVER A COMMERCIAL PRODUCT (admin 2026-09-09).
    *
@@ -303,13 +301,21 @@ export async function liveDataContext(message: string, opts: LiveDataOptions = {
    * properly-licensed source must not be silenced by a switch that exists to pause a different
    * provider's exposure; keeping them on one flag would mean pausing the problem also pauses the fix.
    */
-  const sources: Array<(m: string, f: typeof fetch, n: Date) => Promise<string>> = [];
+  const sources: Array<(m: string, f: typeof fetch, n: Date) => Promise<string>> = [
+    (m, f, n) => liveTransitContext(m, { env, fetchImpl: f, now: n }),
+  ];
   if (liveWeatherSourceEnabled(env)) sources.push(weatherBlock);
   if (cpcbAqiConfigured(env)) sources.push((m, f, n) => aqiBlock(m, f, n, env));
   sources.push(currencyBlock, pincodeBlock);
-  for (const source of sources) {
-    const block = await source(message, fetchImpl, now).catch(() => '');
-    if (block) return block;
-  }
-  return moviesBlock(message, fetchImpl, now, env).catch(() => '');
+  sources.push((m, f, n) => moviesBlock(m, f, n, env));
+  /**
+   * EVERY SOURCE THE QUESTION ASKS FOR, NOT THE FIRST ONE (Q-127, 2026-10-04). This loop used to
+   * return the first block that answered, so "delhi ka mausam aur AQI" got the weather and lost the
+   * air quality — and because a live block skips the web search, nothing else answered it either.
+   * Each source is gated by its own signal (a regex, no network) before it fetches, so asking all of
+   * them costs nothing for the ones the question does not mention. They run side by side, so a
+   * two-part question waits for the slower source, not the sum; the order below is the order shown.
+   */
+  const blocks = await Promise.all(sources.map((source) => source(message, fetchImpl, now).catch(() => '')));
+  return blocks.filter(Boolean).join('\n\n');
 }

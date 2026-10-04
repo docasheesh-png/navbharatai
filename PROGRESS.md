@@ -89052,6 +89052,67 @@ of 30m0s" — `ci.yml`'s own `timeout-minutes: 30`, hit because eight or nine PR
 21–30 min. The cap is now 45 (#3524 staging). Lesson, the fourth rule's first step: read the run's own last
 words before naming a cause — a cancelled run names its canceller.
 
+
+### Q-127: a live-data question that asks two things gets both (2026-10-04)
+
+**Problem.** `liveDataContext` returned the first source that answered. So "delhi ka mausam aur AQI" got only the weather. And because a live block skips the web search, nothing else answered the second half either.
+
+**Fix.** Every source now runs side by side, and every block that answered is returned, in dispatch order. The transit source joined the same list. Each source still gates on its own regex before touching the network, so a source the question never mentions costs nothing. A test proves this by host: a currency question calls only the currency host.
+
+**Tests.** `liveDataSources.test.ts` gains three cases:
+- weather + currency in one message
+- one source down, the other kept
+- no host touched for an unmentioned source
+
+**Proof by reversion:** with the old loop back, the two-part test fails.
+
+**Sibling, recorded as Q-601.** `liveSearchContext` skips the web search whenever any live block exists. So "delhi ka mausam aur aaj gold rate" gets the weather and nothing for gold, which has no live source. Fixing it needs a rule for "the question also asks something no live source covers". A guessed word list would over-search or under-search, so it is written down with that need rather than shipped as a guess.
+
+
+### Q-129: Stop reaches the Gemini/Vertex runner (2026-10-04)
+
+**Problem.** `GeminiToolRunner` never read the build's stop signal. A Stop pressed during a Gemini or Vertex call waited out the whole call, up to the 120 s bound. The Claude and OpenAI-shaped runners already honoured the signal.
+
+**Fix.** The runner now does three things:
+- It never starts a call for a build that is already stopped.
+- It hands the signal to the SDK (`config.abortSignal`), so the HTTP request itself is cancelled.
+- It races the wait with `raceStop`, so a client that ignores the signal still lets go at once. That release comes as `BuildStoppedError`, which the chain never benches a vendor for.
+
+**Tests.**
+- `GeminiToolRunner.test.ts` gains 4 cases. With the old runner, 3 of them fail.
+- New `tests/everyTurnRunnerHearsStop.test.ts` is a class census: every class that implements `TurnRunner` must read `params.signal`, so a new provider family cannot be added deaf.
+
+**Honest limit.** The SDK note says aborting is client-side only: Google still bills the tokens of a call already in flight. The build stops waiting and stops spending on later turns, but the in-flight call's cost cannot be recalled.
+
+
+### Q-131: one definition of "was the build stopped?" (2026-10-04)
+
+**Finding.** The upsell asked `buildWasStopped(timeline) || toolWasUsed('stop_build')`. Every other reader asked the abort signal. The two sources already agree on every reachable path, for two reasons:
+- The model's `stop_build` records `USER_STOPPED_BUILD` and then raises the same `'user-stop'` abort as the button (`setStopBuild`).
+- The b89ba6f8 back-fill copies every signal-only stop onto the timeline, and it runs before the upsell, in the same handler.
+
+The tool-call half added no case. It could only disagree when a `stop_build` the dispatcher could not carry out ("stopping is not available here") still counted as a stop.
+
+**Fix.** The clause is removed, and the timeline is the one definition.
+
+**Test.** `tests/oneDefinitionOfStopped.test.ts` pins both invariants: record-then-abort order, and back-fill before the verdict. It also forbids `toolWasUsed('stop_build')` as a stop definition. With the old clause back, 2 tests fail. The fdd59ef8 pin was updated to the single definition. The ordering it protects is unchanged.
+
+
+### Q-132: every direct durable write is audited against the Green Freeze (2026-10-04)
+
+**Scope.** All 44 direct `saveWorkspaceFiles` / `mergeWorkspaceFiles` calls in `routes/agentv3.ts` were read one by one, plus the two callers outside it (`navStore` copying a bought app into a new workspace; the import and mobile routes).
+
+**Result: none can keep a change the freeze refused.** Each one falls into one of these groups:
+- **Saves only what landed:** `writtenFiles` is set only after a write succeeds, or the save is a sandbox scan.
+- **Follows a write in the same try:** a freeze refusal throws before the save.
+- **Gated:** saves only after `writeUnlessFrozen` returned true.
+- **Runs before the build can be green:** the reopen heal, the turn-start reconcile, the seeds, the imports.
+- **Writes a different record:** the green snapshot, the attempt copy, the route fingerprint.
+- **Is the user's own edit or revert route.**
+
+The one writer that bypasses `writeFile` is the unused-dependency prune, which goes through npm. It already stands down with `!isGreenLatched(workspaceId)`.
+
+**Lock.** `tests/everyDurableWriteRespectsGreenFreeze.test.ts` records each call site with its verdict and count. A new direct save, a second copy of a classified one, or a stale verdict fails CI. The audit therefore cannot quietly go out of date.
 ---
 
 ## 2026-10-04 — Q-515, Q-516, Q-518: the three items autopsy 39e982bd left OPEN (branch `claude/q515-q516-q518`)
@@ -89152,3 +89213,10 @@ Siblings hunted: `readAsDataURL` across the whole repo — the only generated-ap
 (the rest is NavBharatAI's own client sending images to APIs, not storing them). The `catch {}` that hid a
 failed save lived only in `proShell.ts`'s `useCollection`.
 
+
+
+### Two stale queue rows closed with evidence (2026-10-04)
+
+- **Q-122 ✅ (`UI_WITHOUT_BUILD` false positive when only `App.tsx` was edited)** was already fixed. After build 70115adf, `uiWithoutBuildVerdict` got a "complete view" guard: with no `package.json` in view, it refuses to judge, because what it sees is a fragment. `tests/uiWithoutBuild.test.ts` encodes exactly this case: the view `['src/App.tsx']` gives no finding. The row was never removed after that fix.
+- **Q-125 ✅ (Sonnet cache reads "over-stated")** had a wrong premise, as its own row said on 2026-10-04. Anthropic's `input_tokens` excludes cache shares, so a Claude turn is UNDER-stated. That real defect is Q-343, which is 🟡 BLOCKED on the admin's money decision, with options and a recommendation. Q-125 has nothing left of its own to fix.
+- **Gate note for this branch:** the first full run caught one failure: `licenceExposure.test.ts` pins `sources.push(currencyBlock, pincodeBlock);` as proof that those two sources sit outside every gate. Q-127 had folded movies into that line. The line is restored and movies is pushed separately. That keeps the property, and the pin stays as it was.

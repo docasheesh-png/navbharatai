@@ -134,6 +134,40 @@ function visibleText(html: string): string {
     .trim();
 }
 
+
+/**
+ * 🧭 A NAV BAR IS NOT THE APP (Q-147, migrated from PROGRESS.md L20755; closed 2026-10-04).
+ *
+ * Every render verdict in this file is decided by the WHOLE page's visible text against a 5-character
+ * floor. An app whose shell painted and whose content did not — a bottom nav reading "Matches
+ * Leaderboard Wallet Profile" over an empty content area — clears that floor by thirty characters and
+ * is recorded as **rendered**, which then earns the render proof, the green latch and the markup.
+ *
+ * 🔒 IT FIRES ONLY WHERE THE APP ITSELF DECLARED THE REGION, and that is the whole precision argument.
+ * `<main>` and `role="main"` are a statement by the app's own author about where its content goes; an
+ * app that declares neither is left exactly as it is today. So this can never invent a defect out of a
+ * layout it does not understand — it can only read the one the app wrote down.
+ *
+ * ⚠️ And it needs the page to have painted SOMETHING: with no text anywhere, the existing blank-page
+ * and empty-root rules already own the verdict and say it better. This is for the case they cannot see
+ * — a page that is not blank and is not the app either.
+ *
+ * Returns the main region's visible text when the app declares one, or null when it does not. PURE.
+ */
+export function mainRegionText(html: string): string | null {
+  const h = String(html ?? '');
+  // The LAST opening tag before the first close is the innermost wrapper; a nested <main> is malformed
+  // markup, so the simple non-greedy match is the honest reading of a well-formed page.
+  const tagged = /<main\b[^>]*>([\s\S]*?)<\/main>/i.exec(h);
+  if (tagged) return visibleText(tagged[1]);
+  const roled = /<([a-z][\w-]*)\b[^>]*role\s*=\s*["']main["'][^>]*>([\s\S]*?)<\/\1>/i.exec(h);
+  if (roled) return visibleText(roled[2]);
+  return null;
+}
+
+/** The floor the whole-page check already uses, applied to the region the app says holds its content. */
+export const MAIN_REGION_MIN_TEXT = 5;
+
 /** Words that separate a server ERROR payload from a friendly JSON greeting like {"status":"ok"}. */
 const JSON_ERROR_WORDS = /\b(error|failed|failure|required|missing|invalid|unauthori[sz]ed|forbidden|not\s+found|cannot|can't|unexpected|exception|denied|unavailable|timeout|timed\s+out|crash)\b/i;
 
@@ -335,6 +369,17 @@ export function analyzePreviewHtml(html: string, capture: PreviewCaptureContext 
   if (problems.length === 0 && text.length < 5) {
     if (blind) return blindVerdict(capture, 'the preview showed no visible content');
     problems.push('the preview rendered no visible content (a blank page)');
+  }
+
+  // 🧭 THE SHELL PAINTED AND THE APP DID NOT (Q-147) — see `mainRegionText`. Only where the app itself
+  // declared `<main>` or `role="main"`, and only when something else on the page DID paint, so the
+  // blank-page and empty-root rules above keep every verdict they already owned.
+  if (problems.length === 0 && text.length >= MAIN_REGION_MIN_TEXT) {
+    const main = mainRegionText(h);
+    if (main !== null && main.length < MAIN_REGION_MIN_TEXT) {
+      if (blind) return blindVerdict(capture, "the app's main content area is empty");
+      problems.push("only the app's shell rendered — its own main content area is empty, so the page has navigation and no app in it");
+    }
   }
 
   return { rendered: problems.length === 0, problems };

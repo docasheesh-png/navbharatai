@@ -88931,3 +88931,52 @@ Siblings hunted: `readAsDataURL` across the whole repo — the only generated-ap
 (the rest is NavBharatAI's own client sending images to APIs, not storing them). The `catch {}` that hid a
 failed save lived only in `proShell.ts`'s `useCollection`.
 
+
+## 2026-10-04 — the older queue: Q-147 and Q-150, two analysers that lied to the user
+
+With autopsy 39e982bd closed, the next actionable rows. Both are FALSE verdicts shown to a user — the
+class the fifth rule names outright: *"every false finding (a lying analyzer is a defect — fixing the
+analyzer resolves it)"*.
+
+### Q-147 — a nav bar is not the app
+
+Every render verdict in `PreviewVerify.ts` was decided by the WHOLE page's visible text against a
+five-character floor. An app whose SHELL painted and whose content did not — a bottom nav reading
+*"Matches Leaderboard Wallet Profile"* over an empty content area — clears that floor by thirty
+characters and is recorded as **rendered**. That verdict then earns the render proof, the green latch
+and, under the markup rule, the user's money.
+
+`mainRegionText` + the same floor refuse it. 🔒 **It fires only where the app ITSELF declared the
+region** — `<main>` or `role="main"`, its own author's statement about where content goes — so an app
+that declares neither is byte-identical to today, and the check can never invent a defect out of a
+layout it does not understand. It also requires that something else on the page DID paint, so the
+blank-page and empty-root rules keep every verdict they already owned and keep saying it better. A
+blind capture (a curl fetch of an SPA) stays `inconclusive`, never "broken".
+
+### Q-150 — an error message about a password is not a leaked password
+
+`lineLogsCredential` was `console.* AND a sensitive word anywhere on the line`. So each of these was
+reported as a **HIGH-severity `pii-in-logs`** finding — the accusation that the user's app writes
+credentials into the browser console:
+
+```
+console.error('Failed to save password', err);
+console.warn('OTP request failed');
+console.log('Invalid API key provided');
+```
+
+**None of them logs a value.** The word is in the LABEL, describing what went wrong, which is exactly
+what a careful developer writes — and the deterministic redaction heal shares this definition, so it
+then rewrote lines that were already correct.
+
+The distinction is the ARGUMENT, not the word: a leak logs an EXPRESSION whose name is sensitive. The
+string literals' contents are blanked and the test is re-asked of the code that remains — a template
+literal's `${…}` kept, because that is where a logged value hides. 🔒 One shape is kept deliberately:
+a literal that NAMES the field as the value about to follow (`'password=' + pw`, `"api_key: ", k`) is
+still a leak, so narrowing the check loses nothing it catches today. Measured: 7 label-only lines now
+pass, 7 real leaks still caught.
+
+**Proof:** `tests/aNavBarIsNotTheApp.test.ts` (12 cases), reversion-proven five ways — dropping the
+main-region check fails 2, judging an app that declares no main region fails 1, restoring the
+whole-line credential match fails 2, dropping the label-assigns-value shape fails 1, blanking a
+template literal's interpolations fails 2.

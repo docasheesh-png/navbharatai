@@ -46,7 +46,88 @@ export const CONSOLE_CALL = /\bconsole\.(log|info|warn|error|debug)\s*\(/;
  * what this detector flags — one shared definition, so the two can never drift (rule 2).
  */
 export function lineLogsCredential(line: string): boolean {
-  return CONSOLE_CALL.test(line) && SENSITIVE.test(line);
+  const raw = String(line ?? '');
+  if (!CONSOLE_CALL.test(raw)) return false;
+  if (!SENSITIVE.test(raw)) return false;
+  // 🔴 AN ERROR MESSAGE *ABOUT* A PASSWORD IS NOT A LEAKED PASSWORD (Q-150, report 77bd487b; closed
+  // 2026-10-04). The test was `console.* AND a sensitive word anywhere on the line`, so every one of
+  // these was reported to the user as a HIGH-severity data-protection finding — `pii-in-logs`, the
+  // accusation that their app writes credentials into the browser console:
+  //
+  //     console.error('Failed to save password', err);
+  //     console.warn('OTP request failed');
+  //     console.log('Invalid API key provided');
+  //
+  // None of them logs a value. The word is in the LABEL, describing what went wrong — which is exactly
+  // what a careful developer writes. A high-severity finding that is wrong is worse than none: the user
+  // is told their app leaks secrets, and the deterministic redaction heal that shares this definition
+  // then rewrites a line that was already correct.
+  //
+  // 🔑 THE DISTINCTION IS THE ARGUMENT, NOT THE WORD: a leak logs an EXPRESSION whose name is
+  // sensitive. So the string literals' CONTENTS are removed and the sensitive test is re-asked of what
+  // is left — the code. `console.log(password)`, `console.log('pw:', password)`,
+  // `console.log({ apiKey })` and `console.log(\`otp: ${otp}\`)` all keep their evidence (a template
+  // literal's `${…}` is code, so it is kept); a label-only line has nothing left to match.
+  //
+  // 🔒 ONE SHAPE IS KEPT DELIBERATELY: a literal that NAMES the field as a value about to follow —
+  // `'password=' + pw`, `"api_key: "` before another argument — is still a leak, because the label is
+  // the assignment. Without that, narrowing the check would have lost a real case it catches today.
+  const noStrings = withoutStringLiterals(raw);
+  if (SENSITIVE.test(noStrings)) return true;
+  return LABEL_ASSIGNS_VALUE.test(raw) && /,|\+/.test(noStrings);
+}
+
+/**
+ * A string literal that names a sensitive field as the value that FOLLOWS it — `'password='`,
+ * `"api key: "`, `` `otp -> ` ``. The label is the assignment, so what comes after it is the value.
+ */
+const LABEL_ASSIGNS_VALUE = /(?:password|passwd|aadhaar|aadhar|pan|cvv|ssn|credit[_-]?card|card[_-]?number|otp|secret|api[_\s-]?key|apikey|access[_-]?token|refresh[_-]?token|private[_-]?key|passport)\s*(?:=|:|->|is)\s*["'`]/i;
+
+/**
+ * The line with every string literal's CONTENTS blanked, so what remains is the code. A template
+ * literal keeps its `${…}` interpolations — those are expressions, not label text. PURE.
+ */
+export function withoutStringLiterals(line: string): string {
+  let out = '';
+  let i = 0;
+  const s = String(line ?? '');
+  while (i < s.length) {
+    const c = s[i];
+    if (c === "'" || c === '"') {
+      const quote = c;
+      out += quote;
+      i++;
+      while (i < s.length && s[i] !== quote) { if (s[i] === '\\') i++; i++; }
+      out += quote;
+      i++;
+      continue;
+    }
+    if (c === '`') {
+      out += '`';
+      i++;
+      while (i < s.length && s[i] !== '`') {
+        if (s[i] === '\\') { i += 2; continue; }
+        // `${…}` is code inside a literal — kept, because that is where a logged value hides.
+        if (s[i] === '$' && s[i + 1] === '{') {
+          let depth = 0;
+          while (i < s.length) {
+            out += s[i];
+            if (s[i] === '{') depth++;
+            else if (s[i] === '}') { depth--; i++; if (depth === 0) break; continue; }
+            i++;
+          }
+          continue;
+        }
+        i++;
+      }
+      out += '`';
+      i++;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
 }
 
 // PII form-field signals — used to decide whether the app collects personal data

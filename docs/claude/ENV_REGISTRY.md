@@ -2508,6 +2508,66 @@ the flag entries above promise.
   this build wrote, and says so; the fast lane's timeout salvage runs the same `deterministicImportFixes` as its
   verify) and **`AGENTV3_DETACHED_METHOD_NOTE`** (a write-time note names a method that reads `this` and is handed
   out uncalled, e.g. `return store.set`; `detachedMethod.ts`). Test: `tests/theRepairThatWorkedWasUndone.test.ts`.
+- **⛔ `AGENTV3_NO_FAKE_FEATURES` — NO FAKE BUTTON, NO FAKE FEATURE (admin-mandated 2026-10-04, unbreakable;
+  verbatim: *"koi bhi function fake nahi hona chahiye! 'login' button bane to fake login na bane, real login
+  button ho, google login, apple login, user se real api secret mange jaye! … agar koi button/feature fake
+  banaya hai to user ko clearly bataya jaye ki yeh fake hai, aur kyu … 3 dot menu ke secret and keys me yeh
+  secret dalo! red colour me saf saf likho user ki language me"*). ⚠️ NOT set; default ON; `off` reverts
+  every reader with no deploy (and removes an earlier on-screen line on the next build).** Module
+  `src/server/AgentV3/fakeFeatureScan.ts`.
+  🔴 **WHY THE KEY WAS NEVER ASKED FOR:** `AppRequirements` demands a key only when the app's code NAMES one
+  (a package or an env var); `AuthenticityAnalysis` finds the WORDS mock/fake/simulate; `SEED_PASSWORD_RULE`
+  told the builder how to seed a demo user. A login that checks `password === 'demo123'` names no key and
+  carries no such word — so all three were blind to it, and the user got a button that only pretends. The
+  class: a feature whose real version needs the USER'S OWN credential (login, Google/Apple button, payment,
+  OTP, email) built LOCALLY so nothing ever asked for the credential.
+  **What runs now, on every successful non-import build (zero model calls):** (1) the WHOLE project is read by
+  SHAPE — a sign-in screen whose password lives in the app or is compared in the browser, a "Continue with
+  Google" with no OAuth SDK/route, a pay action that marks itself paid with no gateway or UPI link, an OTP the
+  page makes up, "email sent" with no transport — each only when NO provider exists anywhere in the project;
+  (2) a **RED line in the user's language is put on the app's own screen** (`withHonestyBanner`, injected into
+  `index.html` at the production-defaults pass, idempotent, removed when the fake is made real, dismissible for
+  the session, 36px thumb target so the mobile check does not flag it) naming the feature, "DEMO — not real",
+  the exact key names and `NavBharatAI → ⋮ More → Keys & Secrets`; (3) the chat gets one 🔴 line per fake in
+  the user's language (11 languages) with the files, the keys and BOTH paths, and the admin report
+  `FAKE_FEATURE_SHIPPED` (warning, an app finding with a one-tap "Make the demo feature real" offer);
+  (4) the fake IMPLIES the service it stands in for (`impliedRequirementsFor` → the new implied-only `login`
+  catalogue entry, `payments_razorpay`, `sms`, `email_api`), so the closing ask card asks for the exact keys
+  (Supabase Auth's two for a login — real email, Google and Apple sign-in; the one-tap database includes it);
+  (5) the builder is told at write time (`fakeFeatureWriteNote`), and `NO_FAKE_FEATURE_RULE` is in all THREE
+  lanes (architect, fast lane, one-shot — the one-shot lane carried no honesty rule at all until this day);
+  `SEED_PASSWORD_RULE` now says a seeded account is never the app's login.
+  🔒 **Precision first:** a PIN lock on a diary is not a login, "mark as paid" in an expense tracker is not a
+  payment, a chat's "message sent" is not an email, a comment is not the app, an import turn is never scanned,
+  and a request that ASKED for a demo / offline login / cash-only stands the matching rule down. A false
+  positive costs one red line on a working screen; a false negative is the fake button the admin saw.
+  ⚠️ **Honest limits:** detection is by shape, so a fake written in a shape not listed is missed (then the
+  prompt rule and the write-time note are the only guard); the on-screen line needs an `index.html` (a
+  Next.js app gets the chat line and the ask only); and adding the key does NOT rewrite the fake code — the
+  user is told to reply "make it real" (or press the offer), which is the honest sequence. Test-locked and
+  reversion-proven (20 of 27 cases fail with the reader disabled) in `tests/noFakeButtonNoFakeFeature.test.ts`,
+  which also runs the reader over every golden scaffold.
+  🧬 **SIBLINGS KILLED IN THE SAME CHANGE (admin: "sath kill the siblings"):** (a) every writing SPECIALIST
+  carries the rule (`SubAgent.ts` — until then only the architect's prompt did, and specialists write the
+  login screen as often); (b) the two heals most likely to WRITE a fake — the feature-presence heal ("add
+  the missing login") and the completion heal ("implement the stub for real") — carry it in their own
+  instruction; (c) the server-built in-browser preview (`runtime/ReactPreview.ts`) builds its own `<body>`
+  and now carries the red block from `index.html` (`src/lib/honestyBanner.ts`, ONE definition of the
+  markers; the client renderer reuses the app's body, so it rides along by construction — tested both);
+  (d) the claim audit contradicts a summary that SELLS the demo ("✅ Login with Google is implemented") with
+  `feature-claimed-but-demo`, fed from the same findings; (e) four more shapes: a sign-up that keeps its
+  accounts in `localStorage`, "reset / verification link sent", "SMS sent to your mobile" (→ `sms`), and
+  "uploaded / synced to the cloud" with no storage (→ `storage`). `FAKE_FEATURE_SHIPPED` stays the one code.
+  🤝 **ONE JUDGEMENT WITH THE SIGN-IN EXPLORER, AND OUR OWN TEMPLATE WAS THE FIRST CATCH (same day).** #3526
+  (Q-540) added `authLivesInTheBrowser` — the explorer's decision that an app's accounts live in the browser
+  alone — which is the very fake this scanner discloses. They disagreed on the school app Q-540 was built for
+  (`localStorage.setItem(USERS_KEY, …)` behind a constant), so the explorer knew what the user was never told.
+  The scanner now asks that same function (plus a sign-in surface; a password-manager request stands down),
+  and its own separate sign-up shape is gone so the two cannot drift. The first thing the shared judgement
+  caught was **our own "Login page" template**: any valid email + 8 characters showed "Signed in". It is now a
+  REAL sign-in — Supabase Auth's REST API (no new dependency) with `VITE_SUPABASE_URL` /
+  `VITE_SUPABASE_ANON_KEY`: email log in / sign up, Google / GitHub / Apple through the provider's page — and
+  until those keys are saved a red line says sign-in is not connected and nobody is ever shown as signed in.
 - **`AGENTV3_WRITE_SECURITY`** (NOT set; default ON, `off` disables — added 2026-09-30, autopsy 466c260a) —
   `scanSecurity`'s medium/high findings (an XSS sink such as `dangerouslySetInnerHTML` / raw `innerHTML`, a
   hardcoded secret) are handed back with every write (`securityWriteNote`, via `writeSteeringNotes`). Before

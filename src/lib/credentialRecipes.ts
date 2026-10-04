@@ -152,6 +152,38 @@ export type KeylessRoute =
  */
 export const CREDENTIAL_RECIPES: CredentialRecipe[] = [
   {
+    // A REAL login where the build shipped a demo one (fakeFeatureScan.ts, admin 2026-10-04). Supabase
+    // Auth first: real email, Google and Apple sign-in on a free project, and the same two keys the
+    // one-tap database already provides — so the keyless route genuinely does the same job.
+    id: 'login',
+    keyless: 'NavBharatAI can create a database for you in one tap from Settings → App Settings → Database — it already includes real email, Google and Apple login, so you may need no separate login provider.',
+    keylessKey: 'db-auth',
+    options: [
+      {
+        provider: 'Supabase Auth',
+        link: 'https://supabase.com/dashboard/project/_/settings/api',
+        linkLabel: 'supabase.com/dashboard',
+        path: 'your project → Project Settings → API (then Authentication → Providers to turn on Google / Apple)',
+        cost: 'Free tier. Google and Apple sign-in are switched on under Authentication → Providers.',
+        vars: [
+          { name: 'VITE_SUPABASE_URL', where: 'Project Settings → API → Project URL' },
+          { name: 'VITE_SUPABASE_ANON_KEY', where: 'Project Settings → API → Project API keys → anon / public' },
+        ],
+      },
+      {
+        provider: 'Firebase Auth',
+        link: 'https://console.firebase.google.com/',
+        linkLabel: 'console.firebase.google.com',
+        path: 'your project → Project Settings → General → Your apps → SDK setup and configuration (then Authentication → Sign-in method)',
+        cost: 'Free Spark plan. Google and Apple sign-in are switched on under Authentication → Sign-in method.',
+        vars: [
+          { name: 'VITE_FIREBASE_API_KEY', where: 'Project Settings → General → Your apps → apiKey' },
+          { name: 'VITE_FIREBASE_AUTH_DOMAIN', where: 'Project Settings → General → Your apps → authDomain' },
+        ],
+      },
+    ],
+  },
+  {
     id: 'payments_razorpay',
     keyless: 'To take money in India you may not need this at all — a UPI link accepts real payments with no gateway account and no fees.',
     keylessKey: 'upi',

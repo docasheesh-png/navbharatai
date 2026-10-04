@@ -115,6 +115,7 @@ import { WRITE_TYPECHECK_NOT_READY_MARKER,
   typeOnlyWriteHealEnabled, typeOnlyHealTargets, withoutHealedTypeOnly, healedTypeOnlyNames, typeOnlyHealNote,
 } from './writeTimeTypecheck';
 import { scanAuthenticity, authenticitySummary, fakeResultWriteNote } from './AuthenticityAnalysis';
+import { fakeFeatureWriteNote, noFakeFeaturesEnabled } from './fakeFeatureScan';
 import { uploadStorageWriteNote } from './browserFileStore';
 import type { AuthenticityIssue } from './AuthenticityAnalysis';
 import { scanAccessibility, accessibilitySummary } from './AccessibilityAnalysis';
@@ -3649,6 +3650,9 @@ export class ToolDispatcher {
       try { security += securityWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
       // A made-up result or made-up people (autopsy 33812996) — the builder hears it with the file open.
       try { security += fakeResultWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
+      // A login / payment / OTP / email that only pretends (admin 2026-10-04, NO FAKE BUTTON) — said while
+      // the file is open, where the real provider is cheapest to wire. Kill switch AGENTV3_NO_FAKE_FEATURES=off.
+      try { if (noFakeFeaturesEnabled()) security += fakeFeatureWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
       // An uploaded file read into text, headed for a store that holds 5 MB (autopsy 68f0a486, Q-542) — once per
       // build, with the IndexedDB file store the right fix needs, while the file is still open.
       if (!this._uploadStorageNoted) {

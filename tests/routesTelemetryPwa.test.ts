@@ -284,10 +284,11 @@ describe('pwa routes (durable hosting — Firestore-backed, signed-in saves)', (
 
   it('service worker is served as javascript with the right scope header', () => {
     const res = mockRes();
-    routes.get('GET /pwa/:id/sw.js')!(mockReq({ params: { id: 'sw1' } }), res);
+    // A minted id (16 hex) — anything else is never echoed into the script (forensic audit 2026-10-04).
+    routes.get('GET /pwa/:id/sw.js')!(mockReq({ params: { id: 'abcdef0123456789' } }), res);
     expect(res.headers['content-type']).toContain('javascript');
-    expect(res.headers['service-worker-allowed']).toBe('/pwa/sw1');
-    expect(String(res.sent)).toContain("CACHE='nb-pwa-sw1'");
+    expect(res.headers['service-worker-allowed']).toBe('/pwa/abcdef0123456789');
+    expect(String(res.sent)).toContain("CACHE='nb-pwa-abcdef0123456789'");
   });
 });
 

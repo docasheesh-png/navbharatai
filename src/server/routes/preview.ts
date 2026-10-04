@@ -14,6 +14,8 @@ import { buildProxyUrl } from '../runtime/proxyUrl';
 import { buildVuePreview } from '../runtime/VuePreview';
 import { sendSafeError } from '../lib/httpError';
 import { splatPath, routeParam } from '../lib/expressCompat';
+import { sendUntrustedHtml } from '../lib/untrustedHtml';
+import { verifyFirebaseToken } from '../lib/authMiddleware';
 
 // ── Server-side esbuild bundler for React/TS preview ────────────────────────
 // Eliminates the browser-side Babel CDN + complex require() runtime entirely.
@@ -342,6 +344,9 @@ export function registerPreviewRoutes(app: Express, limiter: RequestHandler = pr
   });
 
   app.post('/api/preview', limiter, async (req: Request, res: Response) => {
+    // An account is required (forensic audit 2026-10-04): this route turns a caller's files into a page
+    // served from our origin. No screen calls it today; a signed-in caller is the minimum for that.
+    if (!(await verifyFirebaseToken(req))) return res.status(401).json({ error: 'Please sign in to start a preview.' });
     try {
       const { projectId, files } = req.body || {};
       if (!files || typeof files !== 'object') {
@@ -404,7 +409,7 @@ export function registerPreviewRoutes(app: Express, limiter: RequestHandler = pr
     if (!html) {
       return res.status(404).send('<!DOCTYPE html><meta charset="utf-8"><body style="font-family:system-ui;background:#0d1117;color:#c9d1d9;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>Preview expired or not found.</p></body>');
     }
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(html);
+    // A caller's HTML on our origin: sandboxed into an opaque origin (untrustedHtml.ts).
+    sendUntrustedHtml(res, html);
   });
 }

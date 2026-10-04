@@ -397,6 +397,7 @@ import { analyzePreviewHtml, hasFrontendSource, buildPreviewRepairPrompt } from 
 import { entryShadowRepairHint } from '../AgentV3/entryShadow';
 import { checkFeaturePresence, featurePresenceSummary, featurePresenceEvidence, featurePresenceRepairPrompt, featureHealEnabled, isSignInWall, probeFeatures, requestedProbeFeatures } from '../AgentV3/FeaturePresence';
 import { adoptHealResult } from '../AgentV3/healResult';
+import { appKeepsUploadsInSmallStore } from '../AgentV3/browserFileStore';
 import { signInExploreEnabled, signInScript, signInCandidates, authLivesInTheBrowser, parseSignInOutput, signInReportLine, isSignInRoute, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
 import { unsupportedStackRequested, unsupportedStackBuilderNote, unsupportedStackUserNote, builtWithLabel } from '../AgentV3/unsupportedStack';
 import { unknownNameNoteEnabled, unknownNamesInRequest, unknownNameBuilderNote, unknownNameReportNote } from '../AgentV3/unknownName';
@@ -23138,6 +23139,10 @@ async function noteBuildOutcome(
           buildWasRequested: userAskedToBuildAnApp,
           // "Live NSE prices" from code that only simulates them (Q-274, autopsy 241215d1).
           liveDataRequested: liveDataAsked,
+          // "Drag-and-drop uploads" from an app that keeps the files as text in localStorage (Q-542, autopsy
+          // 68f0a486). Judged only when the written files ARE the app — an edit's slice cannot see where the
+          // rest of the app keeps its files.
+          uploadsInSmallStore: isImportTurn || isEditMode ? undefined : appKeepsUploadsInSmallStore(Object.fromEntries(writtenFiles)),
           // "Everything lives in one HTML file" about a multi-file project (autopsy dfd24058). Counted only
           // when the written files ARE the app — an edit turn writes a slice, and a slice of one is not a claim.
           appSourceFiles: isImportTurn || isEditMode ? undefined : Array.from(writtenFiles.keys()).filter((p) => /\.(?:[cm]?[jt]sx?|css|vue|svelte)$/i.test(p) && !/(?:^|\/)(?:node_modules|dist)\//.test(p)).length,

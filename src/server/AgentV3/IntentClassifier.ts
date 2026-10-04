@@ -181,11 +181,17 @@ export function bananaMeansBuild(lower: string): boolean {
  * something that already exists ("the notes"). Wrong toward chat costs one message, and the chat reply
  * offers to build; wrong toward build cost this user seven minutes and ₹88.
  */
+// `prompts?` / `promts?` (the common misspelling): autopsy cf09c03c, "ekta valo prompt likhe dao" and
+// "Create a image generated promt" — a prompt is text the reply writes, exactly like a caption.
 const CONTENT_NOUN =
-  /\b(?:question paper|questions?|mcqs?|answers?|essays?|poems?|poetry|story|stories|notes|summary|summaries|paragraphs?|speech|speeches|articles?|captions?|jokes?|cover letter|letters?|emails?|resume|cv|bio|outline|translation|worksheets?|shayari|shayri|kavita|nibandh|kahani|kahaniyan|patra|lekh|bhashan|sawal|sawaal|savaal|prashn|prashna|uttar|jawab)\b/;
-/** Screen parts: "make the question CARD bigger" is an edit of an app, not a request for questions. */
+  /\b(?:prompts?|promts?|question paper|questions?|mcqs?|answers?|essays?|poems?|poetry|story|stories|notes|summary|summaries|paragraphs?|speech|speeches|articles?|captions?|jokes?|cover letter|letters?|emails?|resume|cv|bio|outline|translation|worksheets?|shayari|shayri|kavita|nibandh|kahani|kahaniyan|patra|lekh|bhashan|sawal|sawaal|savaal|prashn|prashna|uttar|jawab)\b/;
+/**
+ * Screen parts: "make the question CARD bigger" is an edit of an app, not a request for questions.
+ * The UI words from `dialog` on were added with `prompts?` (autopsy cf09c03c): "add a confirmation prompt
+ * before delete" and "show the install prompt" name a piece of an app, not text to write.
+ */
 const SCREEN_PART =
-  /\b(?:card|cards|section|tab|tabs|field|box|font|colou?r|size|bigger|smaller|larger|style|view|panel|item|items|row|rows|column|image|icon|heading|title|label|list)\b/;
+  /\b(?:card|cards|section|tab|tabs|field|box|font|colou?r|size|bigger|smaller|larger|style|view|panel|item|items|row|rows|column|image|icon|heading|title|label|list|dialog|popup|pop-up|modal|confirm|confirmation|alert|toast|button|form|screen|page|login|signup|install|pwa|permission)\b/;
 /** A content noun pointed at ("the notes", "my resume") names something that may already exist. */
 const POINTED_CONTENT = new RegExp(`\\b(?:the|this|that|these|those|my|our|its|yeh|ye|iska|isko)\\s+${CONTENT_NOUN.source.slice(2, -2)}\\b`);
 
@@ -193,8 +199,46 @@ const POINTED_CONTENT = new RegExp(`\\b(?:the|this|that|these|those|my|our|its|y
 export function ordersWrittenContent(lower: string): boolean {
   if (!CONTENT_NOUN.test(lower)) return false;
   if (mentionsBuildNoun(lower)) return false;
-  if (SCREEN_PART.test(lower)) return false;
+  // "image prompt" / "prompt for a picture" name the PROMPT's subject, not a piece of a screen (autopsy
+  // cf09c03c: "Create a image generated promt" failed here on "image"). Only that phrase is set aside.
+  if (SCREEN_PART.test(lower.replace(PROMPT_SUBJECT_PHRASE, ' prompt '))) return false;
   return !POINTED_CONTENT.test(lower);
+}
+
+/** The words that say what a prompt is FOR: "image (generated|generation) prompt", "prompt for an image". */
+const PROMPT_SUBJECT_PHRASE =
+  /\b(?:images?|pictures?|photos?|logo|art|video|icon)\s+(?:generat\w*\s+)?(?:prompts?|promts?)\b|\b(?:prompts?|promts?)\s+(?:for|of)\s+(?:an?\s+|the\s+)?(?:images?|pictures?|photos?|logo|art|video|icon)\b/g;
+
+/**
+ * A verb that asks US to write something out: "likhe dao", "write", "draft", "give me". Read only beside an
+ * EDIT verb (`asksForWrittenText`), where it is what tells "improve … write a better prompt" (text) from
+ * "improve the caption" (perhaps an app's label). English, Hinglish, romanised Bengali.
+ */
+const WRITE_FOR_ME = /\b(?:write|rewrite|draft|compose|suggest|give me|likh|likho|likhna|likh do|likh de|likhe|likhiye|lekho|lekh|likhe dao|likhe din|de do|dedo|dao)\b/;
+
+/**
+ * 🔴 AUTOPSY cf09c03c (2026-10-04). "Etake aro improve korar jonno ekta valo prompt likhe dao" (romanised
+ * Bengali: "write a good prompt to improve this further") was read as `edit_existing` at HIGH, because
+ * "improve" is an edit verb. The workspace held only our starter, so the build replaced `src/App.tsx`
+ * with a page showing a prompt and charged ₹6.34. The user wanted a few lines of text.
+ *
+ * 🔑 THE CLASS IS 6ae30b33's, AND THAT FIX WAS INCOMPLETE: a verb whose OBJECT is text the reply can
+ * write, read as an order for an app. 6ae30b33 checked only the NEW-build verbs, and its noun list had no
+ * "prompt". The edit verbs (improve, rewrite, correct, change …) were never asked.
+ *
+ * An edit verb + unpointed text + a write verb ⇒ text (chat, LOW so the reader still decides). PURE.
+ */
+export function asksForWrittenText(lower: string): boolean {
+  return ordersWrittenContent(lower) && WRITE_FOR_ME.test(lower);
+}
+
+/**
+ * An edit verb whose object is a text noun and no part of a screen ("improve this essay", "change the
+ * caption"). It may be the user's text or an app's label, so the verdict keeps its intent and loses its
+ * lock: the reader decides with the conversation and the project in view. PURE.
+ */
+export function namesTextNotScreen(lower: string): boolean {
+  return CONTENT_NOUN.test(lower) && !mentionsBuildNoun(lower) && !SCREEN_PART.test(lower);
 }
 
 export function firstNewBuildOrder(lower: string): string | undefined {
@@ -943,6 +987,12 @@ function classifyIntentWithConfidenceCore(message: string): IntentWithConfidence
   if (nbSignal && ordersWrittenContent(lower)) return { intent: 'chat', confidence: 'low', signal: 'content-request' };
   if (nbSignal) return { intent: 'new_build', confidence: doubt ? 'low' : 'high', signal: nbSignal };
   const editSignal = firstSignalWord(lower, EDIT_SIGNALS);
+  // The EDIT verbs carry the same class (autopsy cf09c03c): "Etake aro improve korar jonno ekta valo prompt
+  // likhe dao" asks for a better PROMPT, and "improve" locked it to an edit at HIGH. With a write verb and
+  // unpointed text it is an order for text; any other text noun only costs the lock, so "change the caption
+  // to Welcome" still reaches the reader as an edit. See `asksForWrittenText`.
+  if (editSignal && asksForWrittenText(lower)) return { intent: 'chat', confidence: 'low', signal: 'content-request' };
+  if (editSignal && namesTextNotScreen(lower)) return { intent: 'edit_existing', confidence: 'low', signal: editSignal };
   if (editSignal) return { intent: 'edit_existing', confidence: doubt ? 'low' : 'high', signal: editSignal };
   // A comparison/explanation ask ("compare X and Y") → chat, even if it mentions a build-flavored
   // noun in passing. High confidence so length/code-heuristics below can't override it either.

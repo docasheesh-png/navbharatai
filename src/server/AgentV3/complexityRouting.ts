@@ -49,7 +49,7 @@ export { signalsMatchedNothing } from './RequestAnalyser';
 
 export type ComplexityVerdict = 'simple' | 'complex';
 /** Where a verdict came from — recorded in the build report so a routing choice is never a mystery. */
-export type ComplexitySource = 'deterministic' | 'model' | 'model-unavailable' | 'disabled' | 'scaffold';
+export type ComplexitySource = 'deterministic' | 'model' | 'model-unavailable' | 'disabled' | 'scaffold' | 'workspace';
 
 export interface ComplexityDecision {
   verdict: ComplexityVerdict;
@@ -324,6 +324,31 @@ export async function decideComplexity(
   } catch {
     return { ...base, verdict: unknownFallback, source: 'model-unavailable', reason: standsOrNot('the second opinion was unavailable') };
   }
+}
+
+/**
+ * A BUILD ORDER OVER A BIG EXISTING PROJECT IS NOT A SMALL APP (autopsy `51ef24ad`, 2026-10-04).
+ * "Build app in this format" over a 54-file Android project scored 15 — the scorer reads the PROMPT,
+ * and five words name nothing — so a nine-screen port opened on the cheapest rung, its ETA said 8 min
+ * and it ran 19. The size was known: `buildOrderReadAsEdit` had already counted the user's own files.
+ * The prompt is not the scope when it POINTS at the scope. Applies only to a build order turned into an
+ * edit (a small "change the colour" edit in a big app is not a build order and stays untouched), and
+ * only upgrades — it never turns a complex verdict simple. PURE.
+ */
+export const PORT_OWN_FILES_LINE = 20;
+
+export function workspaceSizedComplexity(
+  decision: ComplexityDecision,
+  buildOrderOverProject: { ownFiles: number } | null | undefined,
+): ComplexityDecision {
+  const own = Number(buildOrderOverProject?.ownFiles ?? 0);
+  if (!buildOrderOverProject || !Number.isFinite(own) || own < PORT_OWN_FILES_LINE) return decision;
+  if (decision.verdict === 'complex' || decision.source === 'disabled') return decision;
+  return {
+    verdict: 'complex', score: decision.score, source: 'workspace',
+    reason: `a build order over an existing project of ${own} of the user's own files — the request points at that `
+      + `project, so its size, not the ${decision.score} the prompt's words scored, decides the routing`,
+  };
 }
 
 /**

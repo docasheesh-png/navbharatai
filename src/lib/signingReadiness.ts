@@ -33,13 +33,49 @@ export const ANDROID_SIGNING_SECRETS = [
   'ANDROID_KEY_PASSWORD',
 ] as const;
 
+/**
+ * The four repository secrets `ios-ipa.yml` requires, exactly as the generated workflow spells them.
+ *
+ * 🔴 WHY THIS LIST EXISTS (report SHANKU-AI/instamony run 36792748246, 2026-10-01). Every reader of
+ * "is the signing key there?" knew only the ANDROID list, so an iPhone build with none of its Apple
+ * keys was dispatched without a check, died in 20 seconds, and was then classified as STALE_WORKFLOW
+ * ("the build stopped while installing your app's libraries", "NavBharatAI can fix this itself") —
+ * three false statements about a run whose log named all four missing secrets. Each platform now has
+ * ONE list here, and `tests/eachPlatformKnowsItsOwnKeys.test.ts` asserts both against the workflows
+ * the ship kit really generates.
+ */
+export const IOS_SIGNING_SECRETS = [
+  'IOS_ASC_KEY_ID',
+  'IOS_ASC_ISSUER_ID',
+  'IOS_ASC_KEY_BASE64',
+  'IOS_TEAM_ID',
+] as const;
+
+export type SigningPlatform = 'android' | 'ios';
+
+/** The secrets a platform's signed build needs. The one place that answers "which list?". */
+export function signingSecretsFor(platform: SigningPlatform): readonly string[] {
+  return platform === 'ios' ? IOS_SIGNING_SECRETS : ANDROID_SIGNING_SECRETS;
+}
+
+/** Which platform a list of missing secret names belongs to. Android when nothing says otherwise. */
+export function signingPlatformOf(missing: readonly string[] | null | undefined): SigningPlatform {
+  const ios = new Set<string>(IOS_SIGNING_SECRETS);
+  return Array.isArray(missing) && missing.some((m) => ios.has(String(m ?? '').trim().toUpperCase()))
+    ? 'ios'
+    : 'android';
+}
+
 export type SigningVerdict = 'ready' | 'missing' | 'unknown';
 
 /** Which required secrets are NOT on the repository. Case-insensitive: GitHub upper-cases names. */
-export function missingSigningSecrets(names: readonly string[] | null | undefined): string[] {
-  if (!Array.isArray(names)) return [...ANDROID_SIGNING_SECRETS];
+export function missingSigningSecrets(
+  names: readonly string[] | null | undefined,
+  required: readonly string[] = ANDROID_SIGNING_SECRETS,
+): string[] {
+  if (!Array.isArray(names)) return [...required];
   const have = new Set(names.map((n) => String(n ?? '').trim().toUpperCase()).filter(Boolean));
-  return ANDROID_SIGNING_SECRETS.filter((s) => !have.has(s));
+  return required.filter((s) => !have.has(s));
 }
 
 /**
@@ -49,9 +85,33 @@ export function missingSigningSecrets(names: readonly string[] | null | undefine
  * that blocked the build would turn one GitHub hiccup into "you cannot ship", which is a worse failure
  * than the one this whole module exists to prevent.
  */
-export function signingVerdict(names: readonly string[] | null | undefined): SigningVerdict {
+export function signingVerdict(
+  names: readonly string[] | null | undefined,
+  required: readonly string[] = ANDROID_SIGNING_SECRETS,
+): SigningVerdict {
   if (names == null) return 'unknown';
-  return missingSigningSecrets(names).length === 0 ? 'ready' : 'missing';
+  return missingSigningSecrets(names, required).length === 0 ? 'ready' : 'missing';
+}
+
+/**
+ * What the user is told when the APPLE keys are not there. Unlike the Android key, NavBharatAI cannot
+ * create these: Apple issues them only inside the user's own Apple Developer account, so the sentence
+ * says where each one is and never offers a button that would make an Android keystore instead.
+ */
+export function appleSigningNotReadyMessage(missing: readonly string[]): string {
+  const all = missing.length === 0 || missing.length >= IOS_SIGNING_SECRETS.length;
+  return (all
+    ? 'An iPhone build has to be signed with your own Apple keys, and this repository does not have them yet. '
+    : `Your Apple keys are only partly set up — ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} still missing. `)
+    + 'Apple issues these only to your own Apple Developer account, so NavBharatAI cannot create them for you. '
+    + 'Create an App Store Connect API key (App Store Connect → Users and Access → Integrations), then add '
+    + `${all ? IOS_SIGNING_SECRETS.join(', ') : 'the missing ones'} in GitHub → your repository → Settings → Secrets and variables → Actions. `
+    + 'SHIPPING.md in your repository says where each value is.';
+}
+
+/** The not-ready sentence for whichever platform these missing names belong to. */
+export function signingNotReadyMessageFor(platform: SigningPlatform, missing: readonly string[]): string {
+  return platform === 'ios' ? appleSigningNotReadyMessage(missing) : signingNotReadyMessage(missing);
 }
 
 /**
@@ -142,12 +202,13 @@ export function signingLookupNote(reason: SigningLookupReason): string {
 }
 
 /**
- * Did this build fail for want of the Android signing secrets? Read from the failure's own detail, so
+ * Did this build fail for want of the signing secrets (either platform)? Read from the failure's own detail, so
  * it cannot drift from what the classifier actually produced.
  */
 export function isSigningSecretFailure(detail: Record<string, string | string[]> | null | undefined): boolean {
   const missing = detail?.['missing'];
   if (!Array.isArray(missing) || missing.length === 0) return false;
-  const known = new Set<string>(ANDROID_SIGNING_SECRETS);
+  // Both platforms: the gate's report matters as much for an iPhone build as for a Play bundle.
+  const known = new Set<string>([...ANDROID_SIGNING_SECRETS, ...IOS_SIGNING_SECRETS]);
   return missing.some((m) => known.has(String(m ?? '').trim().toUpperCase()));
 }

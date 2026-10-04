@@ -72,6 +72,18 @@ export const MAX_SECOND_LEVEL_CLICKS = 8;
 /** At most this many second-level presses under any one first-level control, so one busy tab cannot spend the budget. */
 export const MAX_SECOND_LEVEL_PER_PARENT = 2;
 
+/**
+ * A press that changed nothing on a FRESH screen is tried once more after a control that DID change the
+ * screen (autopsy d798ddd3, Q-306's sibling Q-305). A calculator's "AC", "+/−" and "%" on a display of 0
+ * change nothing, correctly, so the explorer recorded "it responded (nothing visibly changed)" — and a dead
+ * clear button would have read exactly the same. Pressing "7" first gives such a control something to act
+ * on. This many retries at most, and only first-screen presses.
+ *
+ * 🔒 Still unchanged after that is reported in words, never as a failure: a "memory recall" with nothing
+ * stored legitimately does nothing, and a failing verdict would spend a repair on it.
+ */
+export const MAX_PRIMED_RETRIES = 3;
+
 /** How long one fresh page load may take before that control is given up on. */
 export const EXPLORE_LOAD_TIMEOUT_MS = 12_000;
 
@@ -226,6 +238,11 @@ export interface PressResult {
    * a first-screen press. It is a name a person can follow ("open Settings, then press Save").
    */
   via?: string;
+  /**
+   * The control pressed FIRST on a retry, because this one changed nothing on a fresh screen
+   * (`MAX_PRIMED_RETRIES`). The retry's result replaces the first one.
+   */
+  primedBy?: string;
 }
 
 /** How a press is named to a person: the control, and the screen it was found on when that is not the first. */
@@ -285,7 +302,16 @@ export function parseExploreOutput(stdout: string | null | undefined): ExploreRu
         changed: o.changed === true,
         ...(o.kind === 'type' || o.kind === 'pick' ? { kind: o.kind as PressKind } : {}),
         ...(typeof o.via === 'string' && o.via.trim() ? { via: o.via.slice(0, 60) } : {}),
+        ...(typeof o.primedBy === 'string' && o.primedBy.trim() ? { primedBy: o.primedBy.slice(0, 60) } : {}),
       });
+      // A retry after a primer REPLACES the first try of the same first-screen control (MAX_PRIMED_RETRIES).
+      const last = run.presses[run.presses.length - 1];
+      // A retry that could not be pressed adds nothing: the first try stands.
+      if (last.primedBy && last.verdict === 'skipped') run.presses.pop();
+      else if (last.primedBy) {
+        const first = run.presses.findIndex((p, i) => i < run.presses.length - 1 && p.label === last.label && !p.via && !p.kind && !p.primedBy);
+        if (first >= 0) run.presses.splice(first, 1);
+      }
     } else if (o.type === 'out-of-time') {
       run.outOfTime = true;
     }
@@ -448,6 +474,34 @@ export function mergeUserProofs(...proofs: ReadonlyArray<UserProof | null | unde
 }
 
 /** Build the in-sandbox runner. PURE — returns a shell command string. */
+/**
+ * The line of Playwright's call log that says WHY a press could not complete.
+ *
+ * 🔴 WHY (autopsy 5759ad8b, 2026-10-01). A mandi-price app's third tab, "🌤️ Mausam", was reported as
+ * *"could not be pressed: locator.click: Timeout 4000ms exceeded."* — the first line of the error, which
+ * says that it failed and never why. Playwright's own call log, a few lines below, names the cause
+ * ("<nav …> intercepts pointer events", "element is outside of the viewport", "element is not visible"),
+ * and whether that is the app's defect (a bar covering a button) or our instrument's is exactly the
+ * question the report could not answer. The note now carries that line.
+ */
+export const PRESS_FAILURE_CAUSE = /intercepts pointer events|not visible|outside of the viewport|not enabled|is disabled|not stable|detached|not attached|not editable|not a <select>/i;
+
+/**
+ * `prefix` + the error's first line + the last call-log line naming a cause. Self-contained on purpose: the
+ * runner embeds this function's own source, so the browser lane and this file cannot drift. PURE.
+ */
+export function pressFailureNote(prefix: string, message: string, causeSrc: string, causeFlags: string): string {
+  // Playwright colours its call log; the codes are not part of the reason (queue Q-247).
+  const lines = String(message || '').split('\n').map((l) => l.replace(/\u001b\[[0-9;]*m/g, '').trim()).filter(Boolean);
+  const head = (lines[0] || '').slice(0, 120);
+  const cause = new RegExp(causeSrc, causeFlags);
+  let why = '';
+  for (let i = lines.length - 1; i > 0; i--) {
+    if (cause.test(lines[i])) { why = lines[i].replace(/^-\s*/, ''); break; }
+  }
+  return prefix + head + (why ? ' — ' + why.slice(0, 160) : '');
+}
+
 export function clickExplorerScript(previewUrl: string, opts: { blockWrites: boolean; maxClicks?: number; budgetMs?: number; storageState?: string | null }): string {
   const base = String(previewUrl ?? '').trim();
   const cfg = {
@@ -456,6 +510,7 @@ export function clickExplorerScript(previewUrl: string, opts: { blockWrites: boo
     maxClicks: Math.max(1, Math.min(MAX_EXPLORE_CLICKS, opts.maxClicks ?? MAX_EXPLORE_CLICKS)),
     maxSecond: MAX_SECOND_LEVEL_CLICKS,
     perParent: MAX_SECOND_LEVEL_PER_PARENT,
+    maxPrimed: MAX_PRIMED_RETRIES,
     budgetMs: Math.max(10_000, opts.budgetMs ?? EXPLORE_BUDGET_MS),
     loadMs: EXPLORE_LOAD_TIMEOUT_MS,
     blockWrites: opts.blockWrites === true,
@@ -469,6 +524,7 @@ export function clickExplorerScript(previewUrl: string, opts: { blockWrites: boo
     sortSrc: SORT_CONTROL.source, sortFlags: SORT_CONTROL.flags,
     themeSrc: THEME_CONTROL.source, themeFlags: THEME_CONTROL.flags,
     maxThemePresses: MAX_THEME_PRESSES,
+    causeSrc: PRESS_FAILURE_CAUSE.source, causeFlags: PRESS_FAILURE_CAUSE.flags,
   };
   return `cat > /tmp/nbai-explore.mjs <<'NBAI_EOF'
 ${clickExplorerModule(cfg)}
@@ -486,6 +542,9 @@ const cfg = ${JSON.stringify(cfg)};
 const say = (o) => console.log(cfg.marker + JSON.stringify(o));
 const started = Date.now();
 const noise = new RegExp(cfg.noiseSrc, cfg.noiseFlags);
+// This file's own pressFailureNote, embedded by value — bound to a const so a bundler that renames the
+// declaration cannot break the calls below.
+const pressFailureNote = ${pressFailureNote.toString()};
 
 // Runs INSIDE the page. It must mirror pressDecision() exactly — the same regexes are passed in.
 function collect(a) {
@@ -715,7 +774,16 @@ async function pressOne(browser, target, discoverAgainst) {
       await press(page, parent.i);
       await settle(page);
     }
-    const again = await page.evaluate(collect, target.parentKey ? wide : cfg);
+    let again = await page.evaluate(collect, target.parentKey ? wide : cfg);
+    // A retry: press the control that DID change the screen first, unarmed (it was judged on its own press).
+    if (target.primerKey) {
+      const primer = again.chosen.find((c) => c.key === target.primerKey);
+      if (!primer) { res.note = 'the control it was to be tried after was not there on a fresh load'; await page.close().catch(() => {}); return { res, revealed }; }
+      await press(page, primer.i);
+      await settle(page);
+      again = await page.evaluate(collect, cfg);
+      res.primedBy = target.primerLabel;
+    }
     const hit = again.chosen.find((c) => c.key === target.key);
     if (!hit) { res.note = 'the control was not there on a fresh load'; await page.close().catch(() => {}); return { res, revealed }; }
     const before = await page.evaluate(measure);
@@ -734,6 +802,12 @@ async function pressOne(browser, target, discoverAgainst) {
     else if (missingPage) { res.verdict = 'broken-link'; res.note = 'it opened a page that does not exist'; }
     else if (res.errors.length > 0) { res.verdict = 'error'; res.note = 'the app threw an error when it was pressed'; }
     else { res.verdict = 'ok'; res.note = moved ? 'it opened another page, which loaded' : 'it responded'; }
+    res.moved = moved;
+    if (res.verdict === 'ok' && res.primedBy) {
+      res.note = res.changed
+        ? 'it responded once "' + res.primedBy + '" had been pressed first'
+        : 'it changed nothing, even after "' + res.primedBy + '" was pressed first';
+    }
     // A light/dark switch must change the page's colours within a full cycle of presses (THEME_CONTROL).
     if (res.verdict === 'ok' && !moved && lookBefore !== null) {
       let presses = 1;
@@ -760,7 +834,7 @@ async function pressOne(browser, target, discoverAgainst) {
     // The press itself could not complete (covered, detached, timed out). That is our instrument,
     // not the app — reported as skipped, never as a failure.
     res.verdict = 'skipped';
-    res.note = 'could not be pressed: ' + String(e && e.message || e).split('\\n')[0].slice(0, 120);
+    res.note = pressFailureNote('could not be pressed: ', String(e && e.message || e), cfg.causeSrc, cfg.causeFlags);
   }
   armed = false;
   await page.close().catch(() => {});
@@ -834,7 +908,7 @@ async function narrowOne(browser, target) {
     }
   } catch (e) {
     res.verdict = 'skipped';
-    res.note = 'could not be used: ' + String(e && e.message || e).split('\\n')[0].slice(0, 120);
+    res.note = pressFailureNote('could not be used: ', String(e && e.message || e), cfg.causeSrc, cfg.causeFlags);
   }
   armed = false;
   await page.close().catch(() => {});
@@ -867,10 +941,12 @@ try {
     const second = [];
     const queued = new Set();
     let outOfTime = false;
+    const firstPressed = [];
     for (const target of plan.chosen) {
       if (Date.now() - started > cfg.budgetMs - 8000) { outOfTime = true; break; }
       const { res, revealed } = await pressOne(browser, target, firstScreen);
       say(res);
+      firstPressed.push({ target, res });
       let taken = 0;
       for (const c of revealed) {
         if (taken >= cfg.perParent || queued.has(c.key)) continue;
@@ -878,6 +954,14 @@ try {
         second.push({ key: c.key, label: c.label, tag: c.tag, parentKey: target.key, via: target.label });
         taken++;
       }
+    }
+    // A press that changed nothing on a fresh screen is tried again after one that changed it (MAX_PRIMED_RETRIES).
+    const primer = firstPressed.find((p) => p.res.verdict === 'ok' && p.res.changed && !p.res.moved && !p.target.theme);
+    const quiet = primer ? firstPressed.filter((p) => p !== primer && p.res.verdict === 'ok' && !p.res.changed && !p.target.theme) : [];
+    for (const p of quiet.slice(0, Number.isFinite(cfg.maxPrimed) ? cfg.maxPrimed : 0)) {
+      if (outOfTime || Date.now() - started > cfg.budgetMs - 8000) { outOfTime = true; break; }
+      const { res } = await pressOne(browser, Object.assign({}, p.target, { primerKey: primer.target.key, primerLabel: primer.target.label }), null);
+      say(res);
     }
     // The search boxes and sort menus of the first screen, before any inner screen.
     for (const target of (plan.narrow || [])) {

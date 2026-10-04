@@ -17,6 +17,7 @@ import { DESIGN_KIT_BRIEF } from './systemPrompt';
 import { shellEarlyRule, writesTheEntry } from './earlyPreview';
 import { NO_EVAL_RULE, NO_FAKED_RESULT_RULE } from './noEvalRule';
 import { IMAGE_IN_APP_RULE } from './inAppImageGeneration';
+import { packageChoiceRule } from '../lib/unfixablePackages';
 import { stylesheetCarriesKit } from './kitRestore';
 import type { AgentRole, ToolName } from './types';
 
@@ -71,6 +72,8 @@ export interface SubAgentDeps {
    * every sub-agent's turns count toward the user's charge — previously they were dropped entirely.
    */
   usageSink?: import('./UsageSink').UsageSink;
+  /** The parent's admin-report recorder, so a specialist's end-of-turn notes (STYLE_RULES_RESUMED) are recorded. */
+  onNote?: (note: { code: string; message: string; detail?: string }) => void;
 
   /**
    * C2 — the project's protected paths, as a GETTER rather than a value.
@@ -152,6 +155,8 @@ export interface SubAgentDeps {
   kitKept?: () => KitKeptTally | undefined;
   /** The parent's stale-module-copy guard (shadowTwin.ts), so a sub-agent's writes are covered too (autopsy e725e002). */
   shadowTwins?: () => ShadowTwinTally | undefined;
+  /** The parent's deletion sink and recorded paths, so a sub-agent's `rm` leaves the saved project (queue Q-246). */
+  deletionWiring?: () => ReturnType<ToolDispatcher['deletionWiring']> | undefined;
 
   /**
    * The raw result of every sandbox `bash` command. Position 13, and never passed — so **not one
@@ -297,6 +302,7 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       if (sharedKit) childDispatcher.shareKitKept(sharedKit);
       const sharedTwins = deps.shadowTwins?.();
       if (sharedTwins) childDispatcher.shareShadowTwins(sharedTwins);
+      childDispatcher.shareDeletionWiring(deps.deletionWiring?.());
     } catch { /* never block a spawn */ }
     try {
       const pay = deps.serverlessPayment?.();
@@ -360,6 +366,10 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
         try { return (deps.expectsArtifacts?.() ?? false) && roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools); }
         catch { return false; }
       })(),
+      // Q-066 (autopsy de3bb2bb): a specialist that WRITES files is handed back, once, the undefined classes
+      // and page defects in its own files before its turn ends — the same check the architect gets.
+      styleHandBack: roleExpectsArtifacts(deps.toolsOverride ?? cfg.tools),
+      onNote: deps.onNote,
     });
     // Give the specialist the live project map (Phase 2) so it knows the codebase
     // the Architect has built so far — what files/components/routes exist and what
@@ -411,6 +421,8 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
     }
     // A writing specialist builds the image screen too, so it reads the same image-generation rule.
     if (roleExpectsArtifacts(cfg.tools)) contextBlocks.push(IMAGE_IN_APP_RULE);
+    // …and the packages not to install (autopsy 3f959fde: the Frontend specialist installed xlsx).
+    if (roleExpectsArtifacts(cfg.tools)) contextBlocks.push(packageChoiceRule());
     if (roleExpectsArtifacts(cfg.tools)) {
       try {
         const raw = await deps.actuator.readFile(deps.workspaceId, 'src/index.css');

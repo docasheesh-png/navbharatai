@@ -167,7 +167,14 @@ const FEATURES: FeatureSpec[] = [
   },
   { label: 'blog / articles', request: /\b(blog|articles?)\b/i, artifact: /(blog|article|post|feed)/i },
   { label: 'analytics / reports / charts', request: /\b(analytics|reports?|charts?|graphs?|statistics)\b/i, artifact: /(analytic|report|chart|graph|stat|metric|dashboard)/i },
-  { label: 'gallery / portfolio', request: /\b(gallery|portfolio)\b/i, artifact: /(gallery|portfolio|lightbox)/i },
+  // An INVESTMENT portfolio is holdings, not a gallery of work (autopsy 241215d1: a paper-trading app's
+  // "portfolio balance", "PORTFOLIO TRACKING" and its `Portfolio` class were read as a request for a gallery).
+  {
+    label: 'gallery / portfolio',
+    request: /\b(gallery|portfolio)\b/i,
+    notRequest: /\b(?:stock|share|equity|investment|trading|crypto|mutual[\s-]+fund|financial|demat|paper)\s+portfolios?\b|\bportfolios?\s+(?:tracking|tracker|balance|value|holdings?|p\s?&\s?l|pnl|summary|management|metrics|risk|returns?|allocation|equity|cash)\b|\bportfolios?\s+(?:of\s+)?(?:stocks|shares|assets|holdings|investments|funds)\b|`portfolio`/gi,
+    artifact: /(gallery|portfolio|lightbox)/i,
+  },
   { label: 'password reset', request: /\b(forgot password|reset password|password reset)\b/i, artifact: /(forgot|reset|password)/i },
 ];
 

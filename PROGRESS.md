@@ -88447,3 +88447,32 @@ module), with five false findings on the way. Ledger (problem → root cause →
     and the report stores the prompt in full. Nothing of ours cuts there.
   - Needs: the user's original text, or the admin's decision on asking the user when a request visibly ends
     mid-sentence.
+
+### 2026-10-04 — Autopsy 68f0a486 ("Gyan Spark Academy", school app, Weak, 8.4 min, GREEN) — Q-500..Q-511
+
+The build ran at 16:06 UTC, **before #3506 (Q-390) was deployed at 16:27**. So two of its problems are my #3491's
+warm-cache primer being read as a dev-server launch. #3506 fixed the classification. Recipes saved during that window
+were still stored and still trusted, and that was not fixed until this change.
+
+Tally: ✅ 2 self-healed (invented classes; unused imports) · 🔀 0 · ⏭️ 1 (screens behind the sign-in page never
+checked) · ❌ 7 (bad revival recipe, false publish consent, empty review, mislabelled hand-back, ±3% ETA band,
+invented ETA answer, GREEN from a sign-in form) · 🥵 2 (two 30 s typecheck timeouts; entry written last, 375 s of
+the starter page).
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-500 recipe `[ -d …/vite-react/node_modules ]` | typecheck read as a launch before #3506; `serverLaunchCommand` had its own `\bvite` regex | a second "is this a launch?" answer, and stored data never re-checked | `isUsableRecipe` asks the launcher's classifier on save AND read; one classifier in `serverLaunchCommand` | `tests/theSchoolAppAutopsy.test.ts` (reverted → fails) |
+| Q-501 typecheck >30 s ×2, never ran | same as Q-500 | — | #3506 (merged), verified on main: all four typecheck/primer commands read "not a launch" | same test |
+| Q-502 deploy tool on for "upload karne ke liye" | `upload\s+kar` pattern | a publish word naming an app feature | occurrence read in its sentence | same test (report prompt) |
+| Q-503 review "I will read the files" | no-tools review told to read with tools | an instruction for tools the agent lacks | line only for agents with `read_file` (user half: #3509) | same test |
+| Q-504 hand-back note "0 … 0" | note counted two of four kinds | a report line about part of what happened | counts a11y too | same test |
+| Q-505 entry written last | prompt rule skipped | a rule with nothing behind it | write-time note at the second screen | same test |
+| Q-506 ETA band ±3% | band from confidence only | precision claimed without a measured spread | weighted SD floor; telemetry sum of squares | same test |
+| Q-507 model's own "2-3 min" | the model had no ETA | an answer the platform owns, invented by the model | shown ETA line handed to the model | same test (report message) |
+| Q-508 GREEN from the sign-in form | any passed journey counted | a door mistaken for the house | sign-in-only ⇒ unreachable; "reloaded" only when it was | same test |
+| Q-509 `.text-muted`/`.btn-success` invented | kit has half a family | self-heal of an upstream invitation | kit completes the family | same test |
+| Q-510 screens behind sign-in unchecked | explorer never creates an account | — | 🟡 admin decision (options in queue) | — |
+| Q-511 six items argued not defects | — | — | 🟡 admin agreement | — |
+
+Earlier fixes this missed: #3491 tested the primer only where it ran, not every command that carries it (#3506
+found the launch reading). This report found what #3506 also missed: data already stored by the bug.

@@ -4177,6 +4177,17 @@ the flag entries above promise.
   chat surface (a prompt the user GIVES is still a picture). Same change: on an edit, "I changed N files" counts
   what the turn authored (`reviewChangedPaths`), and an omitted stylesheet no longer gives the lean review its
   tools back. Test: `tests/aPromptIsTextNotAnApp.test.ts`.
+- **📱 "TURN MY WEBSITE INTO AN APK" IS ANSWERED, AND A STARTER CONFIG IS EDITED, NOT REWRITTEN (autopsy dcce5d26,
+  2026-10-04; no flag).** "I want to convert one existing website into an online APK but not publically" was built
+  on a fresh workspace. `projectElsewhere.ts` now counts a CONVERSION of the user's own site or app into a phone
+  app (existing / possessive / "this" / a link) as "the thing is elsewhere", and the reply says the honest limit:
+  the APK Builder packages a web app whose code is in the project, never a live link by itself. A request to
+  build a converter still builds. Same report: the fast lane's per-call `model` named the vendor ("glm") —
+  `fastLaneCallIdentity` now reads `TurnResult.model` (`answeringModel`), which also woke its dead
+  reasoning-rung check; and a planned config file the starter already has (`package.json`, `tsconfig*.json`,
+  `vite.config.*`, root `index.html`) is handed its current content in both fast lanes (`existingConfig.ts`).
+  ⚠️ Never let a lane write a project config file blind — that is what `ViteConfigGuard` and the HTML entry guard
+  were cleaning up after. Test: `tests/aWebsiteToApkIsAnsweredNotBuilt.test.ts`.
 - **🙋 `AGENTV3_CONFIRM_BUILD` + 📎 `AGENTV3_ATTACHMENT_MEMORY` (admin 2026-10-03, Q-200 / Q-201). ⚠️ NEITHER is set;
   both default ON; `off` reverts each alone.** `buildConfirmation.ts`: see "READ THE MOOD FIRST" above — an unconfirmed
   build is answered and offered, and a "yes" builds the offered request. `lib/attachmentMemory.ts`: the latest

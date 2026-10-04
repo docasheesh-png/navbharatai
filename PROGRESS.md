@@ -87842,3 +87842,16 @@ into its pattern: forex, MT4/MT5, cTrader, algo trading, F&O, trading system/str
 "scalper" is deliberately left out, because the domain now sits early in the list and a ticket-scalper app
 is not trading. `TRADING_CONTEXT` (the broker/listing strip) is unchanged. Both autopsies' tests pass on the
 merged state (`theForexPasteIsNotAnEightModuleProject`, `thePaperTradingAutopsy`).
+
+## 2026-10-04 — Autopsy dcce5d26: "convert one existing website into an online APK"
+
+Weak, fresh workspace, user stopped at 20 s, ₹0. Ledger (✅ 0 self-heal · 🔀 0 workaround · ⏭️ 0 skip · ❌ 1 wrong
+route · 🥵 0 struggle, plus 3 defects found while working it):
+
+| ID | Problem | Root cause → class | Siblings | Lock |
+|---|---|---|---|---|
+| Q-300 | A website-to-APK request was built | `projectElsewhere` knew two ways of saying "elsewhere" (host, no-rebuild); a conversion of the user's own site into a phone app is a third, and "one existing" missed the determiner list | the reply gained the live-link limit + private .apk line; `apk_builder` KB entry says the same | §1–§2, reverted-and-failed |
+| Q-301 | Per-call `model: "glm"`, top-level `model: "glm"` | the f152c1ab `answeringModel` fix never reached the fast lane's own helper `fastLaneCallIdentity` | top-level model is derived from the same record (one fix) | §3, reverted-and-failed |
+| Q-302 | The lane's post-call reasoning-rung check was dead | it asked `modelAlwaysReasons` of a family label | woken by Q-301 | §3 |
+| Q-303 | The fast-lane plan rewrote the starter's tsconfig ×3, package.json, vite.config blind | per-file and one-shot calls never saw the working file → the cause behind `ViteConfigGuard` / HTML entry heals, and a silent loss of the strict-trial tsconfig | one-shot lane fixed in the same change (`existingConfig.ts`) | §4, reverted-and-failed |
+| Q-304 | Six items argued not defects | — | — | 🟡 BLOCKED on the admin's yes |

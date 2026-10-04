@@ -296,7 +296,11 @@ export function extractFacts(file: string, content: string): FileFacts {
     components: [...new Set(components)],
     routes: [...routes],
     imports: [...new Set(imports)],
-    dependencies: [...depSet],
+    // 🔴 A DECLARATION FILE DECLARES; IT DOES NOT DEPEND (autopsy 70e030bb). A generated `vite-env.d.ts`
+    // carried `declare module '*.vue' { import type { DefineComponent } from 'vue' … }` in a React app,
+    // `vue` became a project dependency, and the user was told "Stack: Vue". An ambient `.d.ts` import
+    // installs nothing and runs nothing, so it names no dependency.
+    dependencies: /\.d\.[cm]?ts$/i.test(file) ? [] : [...depSet],
     references: isCode(file) ? extractReferences(code) : [],
     // Security scanning runs on ALL files (secrets live in config/.env too).
     // 🔒 RAW `content`, NEVER the comment-stripped `code`, and this is load-bearing: a key pasted

@@ -173,6 +173,42 @@ export function keyDecision(input: {
   return { allow: true };
 }
 
+// ── Images ───────────────────────────────────────────────────────────────────────────────────────
+
+export const MAX_IMAGE_PROMPT_CHARS = 2_000;
+
+export type ImageGenerationVerdict =
+  | { ok: true; prompt: string; px: { w: number; h: number } }
+  | { ok: false; message: string };
+
+/**
+ * Read a `POST /images/generations` body in the standard shape: `prompt`, optional `size` ("1024x1024"),
+ * or `width`/`height`. One picture per call and base64 only — said plainly when asked for more. PURE.
+ */
+export function readImageGenerationRequest(body: unknown): ImageGenerationVerdict {
+  const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+  const prompt = typeof b.prompt === 'string' ? b.prompt.trim() : '';
+  if (!prompt) return { ok: false, message: 'Send "prompt": a description of the picture.' };
+  if (prompt.length > MAX_IMAGE_PROMPT_CHARS) return { ok: false, message: `"prompt" is too long — at most ${MAX_IMAGE_PROMPT_CHARS} characters.` };
+  if (b.n !== undefined && Number(b.n) !== 1) return { ok: false, message: 'One picture per request: send "n": 1 (or leave it out).' };
+  if (b.response_format !== undefined && b.response_format !== 'b64_json') {
+    return { ok: false, message: 'Pictures are returned as "b64_json" only. Leave "response_format" out or send "b64_json".' };
+  }
+  let w: unknown = b.width;
+  let h: unknown = b.height;
+  if (typeof b.size === 'string') {
+    const m = /^\s*(\d{2,4})\s*x\s*(\d{2,4})\s*$/i.exec(b.size);
+    if (!m) return { ok: false, message: '"size" must look like "1024x1024".' };
+    w = Number(m[1]);
+    h = Number(m[2]);
+  }
+  const side = (v: unknown) => {
+    const n = Math.round(Number(v));
+    return Number.isFinite(n) && n > 0 ? Math.min(1536, Math.max(256, n)) : 1024;
+  };
+  return { ok: true, prompt, px: { w: side(w), h: side(h) } };
+}
+
 // ── The response ─────────────────────────────────────────────────────────────────────────────────
 
 /** The one model name a caller ever sees. The vendor behind it is admin-only (White-Label Law). */
@@ -350,6 +386,7 @@ export const SCOPE_ROUTES: Readonly<Record<SpecificApiScope, { method: 'GET' | '
   'read:builds': { method: 'GET', path: '/api/v1/builds' },
   'ai:chat': { method: 'POST', path: '/api/v1/chat/completions' },
   'ai:professionals': { method: 'POST', path: '/api/v1/professionals/:id/chat' },
+  'ai:images': { method: 'POST', path: '/api/v1/images/generations' },
 };
 
 // ── Addressing an expert ─────────────────────────────────────────────────────────────────────────

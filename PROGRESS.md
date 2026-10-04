@@ -88717,6 +88717,101 @@ Also: Q-013's queue row now says #3496 is merged.
   Action Type | Permission | Audit Required). Anything unclear, duplicated or misplaced is named, not hidden.
   D3 (the three duplicate cards) moves to PR 4.
 
+### 2026-10-04 — ⛔ NO FAKE BUTTON, NO FAKE FEATURE: the rule, enforced on the apps NavBharatAI builds (admin-mandated, unbreakable)
+
+Admin, verbatim: *"navbharatai kab bhi koi app banaye, usme koi bhi function fake nahi hona chahiye! jab 'login' button
+bane, to fake login na bane, real login button ho, google login, apple login, user se real api secret mange jaye! …
+agar koi button/feature fake banaya hai, ya dummy/demo banaya hai, to user ko clearly bataya jaye ki yeh button fake
+hai, aur bataya jaye kyu fake hai … 3 dot menu ke secret and keys ya settings ke secret and keys me yeh secret dalo!
+red colour me saf saf likho user ki language me ki iske bina kaam fake/dummy/demo hoga!!!"*
+
+**Root cause (why keys were never asked for).** Three guards existed and all three were blind to the same app:
+`AppRequirements` demands a key only when the app's code NAMES one (a package or an env var); `AuthenticityAnalysis`
+finds the WORDS mock / fake / simulate; `SEED_PASSWORD_RULE` told the builder how to seed a demo user and nothing said
+a seeded user is not a login. A login that checks `password === 'demo123'` names no key and carries no such word.
+**The class:** a feature whose real version needs the USER'S OWN credential (login, Google/Apple button, payment, OTP,
+email) implemented LOCALLY in ordinary code, so the machinery that demands the credential never fired. Siblings never
+hunted before: the one-shot lane carried NO honesty rule at all; `signInExplore` reads demo accounts out of apps (the
+engine had institutionalised them) while nothing told the user they were demos.
+
+**Fix at the class** (`src/server/AgentV3/fakeFeatureScan.ts`, zero model calls, flag `AGENTV3_NO_FAKE_FEATURES`, default ON):
+- the whole project is read by SHAPE, not words: a sign-in screen whose password lives in the app or is compared in the
+  browser; "Continue with Google" with no OAuth SDK/route; a pay action that marks itself paid with no gateway/UPI link;
+  an OTP the page makes up; "email sent" with no transport — each only when NO provider exists anywhere in the project;
+- a RED line in the user's language on the app's own screen (`withHonestyBanner` → `index.html` at the production-defaults
+  pass; idempotent, removed when the fake is made real; 36px dismiss so the mobile check does not flag it);
+- one 🔴 chat line per fake (11 languages) with files, exact keys and both paths (`⋮ More → Keys & Secrets` /
+  `Settings → App Settings → Secrets & API Keys`); admin finding `FAKE_FEATURE_SHIPPED` with a one-tap offer;
+- the fake IMPLIES the service (`impliedRequirementsFor`): new implied-only `login` catalogue entry + `login` recipe
+  (Supabase Auth first — real email, Google, Apple; one-tap database includes it), `payments_razorpay`, `sms`,
+  `email_api` — so the closing ask card asks for the exact keys, which it never could before;
+- `NO_FAKE_FEATURE_RULE` in ALL THREE lanes (architect, fast lane, one-shot), `SEED_PASSWORD_RULE` amended,
+  `fakeFeatureWriteNote` at write time beside `fakeResultWriteNote`.
+- Precision locks: PIN lock ≠ login, "mark as paid" ≠ payment, "message sent" ≠ email, comments/tests never, import
+  turns never, a request that asked for a demo/offline login/cash-only stands the matching rule down; every golden
+  scaffold passes the reader.
+- Proof: `tests/noFakeButtonNoFakeFeature.test.ts` (27 cases; 20 fail with the reader disabled — reversion-proven).
+- Docs: `docs/claude/ENV_REGISTRY.md` (full design), `CLAUDE.md` (one bullet under the second absolute rule),
+  `AppKnowledgeBase.ts`.
+
+**Honest limits, stated:** detection is by shape, so a fake in an unlisted shape is caught only by the prompt rule and
+the write-time note; the on-screen line needs an `index.html` (a Next.js app gets the chat line and the ask only);
+adding a key does not rewrite the fake code — the user is told to reply "make it real" or press the offer.
+**Watch on real builds:** `FAKE_FEATURE_SHIPPED` frequency and any red line on a screen the user says was real.
+
+**Siblings killed the same evening (admin: "isko wapas se polish karo aur rocksolid banao! sath kill the siblings"):**
+writing specialists carry the rule (`SubAgent.ts`); the feature-presence heal and the completion heal carry it in their
+own instruction (the two passes most likely to WRITE a fake login); the server-built in-browser preview carries the red
+block (`src/lib/honestyBanner.ts`, one definition of the markers, both renderers tested); the claim audit contradicts a
+summary that sells the demo (`feature-claimed-but-demo`); four more shapes (sign-up to localStorage, "reset link sent",
+"SMS sent", "uploaded to the cloud" with no storage → `storage`). Three other PRs' source guards were updated for the
+renamed `honestIndex` / the three-rule push. Test file now 33 cases.
+
+---
+
+## 2026-10-04 — Autopsy cc3ef776 (AI image generator app): an app's pictures need a key — and the owner is told which, where, and where to paste it
+
+**Report:** the admin's AI-image-generator build failed on every picture. Admin note: *"maine kaha tha, jab bhi app builder ai banawaya jaye to pollination ai, se image generatet karwayi jaye, par yeh to fail ho raha hai"*.
+
+**Root cause:** the image provider stopped answering anonymous requests (401, "key missing or invalid"), and a key may never be placed in browser code. The 2026-10-01 recipe was built on a keyless default that no longer exists. Asked how to proceed, the admin ruled: *"1. user ko saaf saaf bolo ki API keys chahiye. 2. user ko navbhatai api keys ka offer den, aur bhi api keys ke bare me bataye jaise grok.gemini,chatgpt user jo bhi select kare uski location/link bataye, user ko guide kare ki keys kaha dalni hai!!"*
+
+**What was built (PR `claude/app-image-keys`):**
+- The app's page asks NavBharatAI for every picture through `window.NavAI.image()`. In the published app this goes to `POST /api/app-ai/image` (signed app token). In the owner's preview it goes through the postMessage relay to `/api/app-ai/preview-image`. The server reads the owner's image key from the encrypted vault, so the key never reaches the page.
+- One table, `appImageKeyOptions.ts`, lists the keys:
+  - `NAVBHARATAI_API_KEY`
+  - `OPENAI_API_KEY`
+  - `GEMINI_API_KEY`
+  - `XAI_API_KEY`
+  - `POLLINATIONS_API_KEY`
+
+  Each entry has its link and the place to paste it. The builder's instruction, the recipe, the owner's error and the vault lookup all read this table.
+- Our own offer is a new Developer API permission, **Images** (`ai:images`), behind `POST /api/v1/images/generations` (standard images format, b64_json). Pricing matches the Image Generator: 5 free pictures a day, then ₹1 each, within the key's daily limit. The same key can be saved as an app's image key.
+- The owner sees the full list of options. A visitor sees only "not set up yet". A refused key is reported to the owner and never silently swapped for the NavBharatAI wallet.
+- Limits: 100 pictures a day per app, 10 per visitor, and 50 a day in the preview.
+
+**🔴 Reversal recorded:** the 2026-09-23 decision "no image door on the Developer API" was reversed on the admin's new instruction (the dated note is in `tests/theImageGeneratorHasFreeAndPaid.test.ts`).
+
+**Ledger (queue rows Q-570…Q-575):**
+
+| Row | Problem | State |
+|---|---|---|
+| Q-570 | Every picture failed (keyless 401) | Fixed in this PR |
+| Q-571 | The builder said "no key needed" | Fixed in this PR |
+| Q-572 | The phone-layout check blamed a scrolled row; the real culprit was the "Portrait" chip | Analyzer and template fixed in this PR |
+| Q-573 | `PREVIEW_SNAPSHOT_STALE` from `.env` | Fixed in this PR |
+| Q-574 | The warm primer had no `@types/react` | 🟡 Code fixed; the admin must run the `e2b-template` workflow |
+| Q-575 | `safe=true` no longer filters nudity | Fixed in this PR; filters are now named explicitly |
+
+**Not defects (with evidence in the reply):** the GLM crawl bench, ladder rung 2, and the ₹47.75 bill (the markup was earned by a preview that ran).
+**One judgement with the sign-in explorer, and our own template (admin: "jo bhi kaam bacha hai, complete karo").**
+#3526 (Q-540, staged into this branch by the merging session) added `authLivesInTheBrowser` — the same fact this
+scanner discloses — and the two disagreed on Q-540's own school app (accounts written under a constant key). The
+scanner now asks that function; its separate sign-up shape is removed. The shared judgement's first catch was OUR
+"Login page" template: any valid email + 8 characters showed "Signed in". It is now real Supabase Auth (REST, no new
+dependency; email, Google, GitHub, Apple) and shows a red "not connected" line with the two key names until they are
+saved. Locked in `tests/noFakeButtonNoFakeFeature.test.ts` (agreement census + template test); 602 template tests
+green, strict and loose typecheck of every starter included. Q-421/Q-422 queue rows removed (#3518 merged).
+
 ## 2026-10-04 — AUTOPSY 39e982bd: the app was off the user's screen for eight of its nine minutes
 
 Report `39e982bd` — *"BUILD PRIMECLASH ESPORTS — COMPLETE ANDROID APPLICATION"*, a 228-feature request
@@ -88817,6 +88912,53 @@ merging session now posts on each PR at the moment it cancels. Re-running a canc
 spends minutes for a result the merge gate never reads. The author's workaround ("push once per branch")
 is still good advice for a different reason: every push is a billed run.
 
+## 2026-10-04 — Security checklist (21 points) applied to NavBharatAI itself
+
+The admin forwarded a 21-point "don't ship until you check this" list (external text, adapted). Audited against
+the code; five real gaps fixed as classes (local branch `local/security-checklist`, locked by
+`tests/thePlatformKeepsItsSecretsOutOfGit.test.ts`, every fix reversion-proven):
+- `.gitignore` / `.dockerignore` did not ignore a live `.env` → both now do (`.env`, `.env.*`, `!.env.example`).
+- No secret scan of THIS repo (the engine scanned users' apps only) → CI census with `scanSecurity` + a reasoned
+  allowlist (Firebase web keys, PEM header text, templates). Local history (7,372 commits, shallow clone) scanned:
+  only test fakes.
+- `trust proxy true` made `req.ip` the caller-written first X-Forwarded-For entry → admin login lockout, OTP send
+  limit, bot guard, auth rate limits bypassable with one header. Now one hop (`TRUSTED_PROXY_HOPS`) +
+  `clientAddress()` (last entry); OTP / phone-exchange / client-error routes use it. navbharatai.com → 216.239.38.21
+  (Google Cloud Run front end), so one hop is the real topology; `guestDailyQuota` has relied on it since 09-27.
+- Phone build pushed a workspace `.env` whole (static apps: packaged into the APK at `www/.env`) → static drops it,
+  others keep only client-public lines (`publicEnvOnly.ts`).
+- GitHub push excluded only a root `.env` → one definition `src/lib/envFile.ts`, any depth.
+- Census: every `/api/admin` route guarded server-side.
+OPEN (admin's, BLOCKED — console access): (1) confirm the LIVE Firestore rules of database `navbharat-prod` match
+`firestore.rules` — no pipeline deploys them, and `.firebaserc` points at the hosting project; (2) set Firebase
+Storage rules to deny client access on the project's buckets (the client never uses Storage; the web config is
+public); (3) turn on GitHub secret scanning / push protection if the plan allows; (4) decision: the documented
+`verifiedUid ?? claimedUid` fallback on v5.0 workspace routes (private reads already verified-only).
+## 2026-10-04 — Firebase Crashlytics, built after a three-part audit (admin: "Ask the council")
+
+**What existed before:**
+- No crash reporter in either phone app.
+- JS errors went to `/api/logs/error` from three separate places: two in `main.tsx` and one in `ErrorBoundary`. None had dedup or a rate limit, and nothing was redacted on either side.
+- The offline queue had no size bound.
+
+**Found by the audit and fixed here:**
+- **P1, source disclosure.** `dist/server.cjs.map`, 27 MB of server source, sat in the folder `express.static` serves. `privateBuildFiles.ts` now refuses it and every other `*.map`, and `firebase.json` ignores them. This could not be confirmed against production from the session (egress refused), so the exposure was inferred from the code.
+- **P2.** The client error intake logged raw messages, URLs (with query strings) and the caller's IP. It is now sanitized, field-capped and rate-limited, and the IP is no longer logged.
+
+**Built:**
+- `src/lib/observability/`: one reporter, one sanitizer, and the Crashlytics sink.
+- Native wiring: Android Gradle and manifest (collection in release builds only); iOS SwiftPM option plus a dSYM upload step in fastlane.
+- A `crash_test` build that both store workflows refuse to upload.
+- Privacy Policy §3.4 and §7, guarded by `privacyPolicyTruth.test.ts`.
+- `docs/CRASHLYTICS.md`.
+- Tests: `tests/crashReportsCarryNoSecrets.test.ts` (56 cases). Reversion-proven three ways (Bearer redaction, dedup, the re-entrancy guard).
+
+**OPEN (rule 6):**
+1. **Not verified on a device or a native build.** The session cannot build Android or iOS: Google's Maven host and macOS are unreachable. The Gradle plugin version `3.0.6` and the fastlane `upload-symbols` path are unverified until `android-app.yml` and an `ios-ipa.yml` dry run go green.
+2. iOS `CFBundleShortVersionString` is never set, so iOS reports are told apart only by build number. The fix (setting it per build) changes App Store version trains and is the admin's call.
+3. JS stacks from the minified bundle are not de-minified in Crashlytics. Crashlytics has no JS source-map support.
+4. `vite.config.ts` still defines `process.env.GEMINI_API_KEY` into the client. Verified harmless today: no build sets it, and no client code reads it. It is a latent footgun, recorded rather than changed here.
+5. The admin must enable Crashlytics in Firebase Console and update both store privacy declarations BEFORE the first build ships.
 ## 2026-10-04 — CORRECTION to the Q-500 note above: the cancelled CI runs were another session's own cancels
 
 **The 19:xx note titled *"CI cancels the head's run when a branch is pushed twice"* reached the wrong
@@ -88971,6 +89113,84 @@ The tool-call half added no case. It could only disagree when a `stop_build` the
 The one writer that bypasses `writeFile` is the unused-dependency prune, which goes through npm. It already stands down with `!isGreenLatched(workspaceId)`.
 
 **Lock.** `tests/everyDurableWriteRespectsGreenFreeze.test.ts` records each call site with its verdict and count. A new direct save, a second copy of a classified one, or a stale verdict fails CI. The audit therefore cannot quietly go out of date.
+---
+
+## 2026-10-04 — Q-515, Q-516, Q-518: the three items autopsy 39e982bd left OPEN (branch `claude/q515-q516-q518`)
+
+Q-501 was removed from the queue because its PR (#3521, App Mart) is merged.
+
+| Row | Problem | Root cause | Class | Siblings | Locked by |
+|---|---|---|---|---|---|
+| **Q-515** | "6 snapped" next to "27 off the grid" was read as 21 left behind | Reproduced on the report's shape: 27 off the grid before, **0 after**, and the note said "6". `changes` is de-duplicated for display and the note summed it. WRITE_TIME_QUALITY ("noted and not fixed") is measured before the snap and was never restated. | A report count taken from a de-duplicated display list. | 🔁 **This had come back:** e3b0ce25's "4 off / 2 snapped" was this undercount, but that autopsy fixed only the staleness. The kit-restore note counts classes, which are distinct by nature, so it is clean. | `tests/theSnapCountedEveryValue.test.ts` (reverted and failed) |
+| **Q-516** | `APP_SCOPE` said "clone of Free Fire" for a tournament app *for* Free Fire players; the requirement analysis asked an esports app about "inventory tracking" | No audience/event shape in `namesAsProduct`, and no tournament domain, so money words read as ecommerce. | A product used as the audience is not a clone; an event app needs its own domain. | Measured over 52,779 test strings: no scope decision changed, and only the four 39e982bd lines changed domain. "like / jaisa / clone" still wins. "Make a game like Free Fire" stays in `game`, and a CSS "scrim" is not esports. | `tests/aTournamentForAGameIsNotAClone.test.ts` (both halves reverted and failed) |
+| **Q-518** | The explorer passed "View Details — nothing visibly changed" | A quiet press was never judged by what its name promised. | `PROMISES_VIEW`: such a press fails only if the whole-page hash, the address and every scroll position are identical and no tab, file picker or download opened. It gets the primed retry first. | The repair text for every unresponsive PRESS was the search box's ("filters that list"), so a dead light/dark switch got the wrong fix. Each kind now has its own repair. | Real Chromium in `tests/aViewButtonMustShowSomething.test.ts`: the dead button fails; a dialog, a scroll, a new tab, a file picker, Copy and Show more all pass. Reverted both ways. |
+
+**What to watch on the next real build:**
+- Q-518: a "View …" control that opens nothing is now reported and repaired.
+- Q-516: a tournament app's requirement questions are about brackets, rooms and payouts.
+
+**Same branch, two migrated queue rows:**
+
+| Row | Problem | Root cause | Fix | Locked by |
+|---|---|---|---|---|
+| **Q-150** (77bd487b) | Error logs were flagged as credential leaks because of their label text | `lineLogsCredential` matched the sensitive word anywhere on the line. | A leak now needs either a sensitive name logged as a value, or a label beside a value that is not an error. "password:" next to `pw` is still a leak. The redaction heal reads the same definition. | `tests/aLabelIsNotALeak.test.ts`, using the report's own lines (reverted and failed) |
+| **Q-155** | `withheldSecretNames` existed but was never called, so a correctly withheld key was never explained | No call site. | The build now records `SECRETS_WITHHELD` (names only) right after the app's keys are set. One vault read. | `tests/aWithheldKeyIsNamed.test.ts` (reverted and failed) |
+
+### Launch checklist ("vibe-coded app" 20 points), 2026-10-04, branch `local/security-checklist` (not pushed)
+
+The admin sent a 20-point launch checklist for apps built with AI tools. Each point was checked twice: on NavBharatAI's own site, and on the apps it generates.
+
+**Fixed in this change (commit eb55c4211):**
+- **`/robots.txt` and `/sitemap.xml`.** Before this, both were answered with `index.html` and a 200 by the SPA catch-all. They are now real server routes (`src/server/lib/siteIndex.ts`, `routes/siteIndex.ts`), and the page list is derived from `legalPaths.ts`.
+  - The class: a server-owned path registered after the catch-all. The fix lists both paths in `spaFallback.ts` `SERVER_ROUTE_EXACT`.
+- **`index.html` meta.**
+  - It had no meta description and no canonical URL.
+  - `og:image` and `twitter:image` were relative; crawlers do not reliably resolve those.
+  - The share text was Devanagari, which breaks the UI language rule.
+  - All of these are fixed.
+- **Generated apps' `twitter:card`.** `appDefaults` always said `summary_large_image`, even with no `og:image`. Now it says `summary` unless the page has an image. This is the same rule `SeoGenerator.ts` already used, so the two siblings now agree.
+- **Lock:** `tests/theSiteCanBeFoundAndShared.test.ts` (12 tests). I reverted the `spaFallback` and `appDefaults` fixes and 2 tests failed; with the fixes back, they pass.
+
+**Already present (verified):**
+- Privacy and terms pages (`legalPaths.ts`).
+- HTTPS (Cloud Run).
+- Favicon, apple-touch-icon and manifest.
+- Every real `<img>` in the client has alt text. All 11 grep hits were comments or strings.
+- No third-party trackers and no cookies, so no consent banner is needed.
+- Secrets are kept out of the frontend (the security checklist commit).
+- Generated apps already get meta, a manifest, an icon and `robots.txt` (`appDefaults`), plus an offered 404 suggestion (`nextBuildSuggestions.ts`).
+
+**Proposed, not built (admin decisions):**
+- An `og:image` and a sitemap for published apps, generated at publish time. The final URL is only known per hosting provider.
+- Privacy and terms pages for generated apps that collect data.
+- A spam guard (honeypot plus rate limit) for public forms in generated apps.
+- A page-speed and image-size check in the build verdict.
+
+
+### A client write reads the server's answer (2026-10-04, same branch): Q-113 plus a security sibling sweep
+
+**Why I started.** Working queue row Q-113 (the dead `billingLogs` chain) led to a larger class.
+
+**Q-113.** The wallet load fetched `/api/wallet/:uid/logs` on every load, and nothing has rendered it since 2026-09-14. The fetch, the state, the `App.tsx` threading and the `BillingPanel` prop are removed. The server route stays, so already-installed phone bundles keep working.
+
+**The class.** `fetch` resolves for a 401, 403 or 500 alike. A client write followed by a success message therefore told the user something happened whether or not it did. A census found 28 client writes whose Response was thrown away. The real defects:
+- **Team:** remove member, change role and revoke invite always said they succeeded. A refused remove left the member with access. This one is security.
+- **Share for review:** revoke cleared the link from the screen while the link stayed live.
+- **Profile budget:** the editor closed over a refused save. `saveError` was set but never rendered, so the "invalid amount" message was invisible too.
+- **Admin:** APK report delete, clear and mark, and the complaint status change, dropped rows the server still held.
+- **Stop:** a Stop that never reached the server left the build running under a screen that said it had stopped. Now the real Stop button comes back with the reason.
+- **Permission answer:** an answer that never landed was auto-denied after the timeout. Now the question is put back on screen.
+- **Chat delete and IDE file delete:** a failed server delete was silent, and the item came back on the next load. Now the user is told.
+- **App Mart owner settings, including unpublish; built-app forget; webhook delete; review comments:** failures were silent. Now the user is told.
+
+**The fix.** `src/lib/serverAnswer.ts` `writeFailure(res, fallback)` is the one reader: it returns null on 2xx, else the server's `error` text.
+
+**The lock.** `tests/aClientWriteReadsTheServerAnswer.test.ts` is a census of every client write whose answer is discarded.
+- The 10 remaining ones are each argued safe: read-marks, terminal close/resize, a self-healing queue item, upload abort, a failure count, and two code-sample strings.
+- A new discarded write fails CI, and so does a stale allowlist entry.
+- Reverting TeamCollaboration and usePaymentEngine made 3 tests fail; with the fixes back, they pass.
+
+**Found and recorded, not done here (Q-600).** `tsc --noUnusedLocals` lists 93 client locals nothing reads. They sit mostly in `App.tsx` and `AgentV3Panel.tsx`, which several live sessions edit, so sweeping them now would collide. The class lock that fits is a per-file ratchet in CI, like `themeTokensOnly`.
 ### 2026-10-04 — Admin decisions on the 68f0a486 / c70bcbb4 / 241215d1 open rows
 
 - **Q-541 and Q-527 (items argued not defects): agreed by the admin ("han, band kar do").** Resolved as

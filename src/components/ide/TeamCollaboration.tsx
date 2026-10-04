@@ -3,6 +3,7 @@ import { usePagedList } from '../../hooks/usePagedList';
 import { LoadMore } from '../../components/common/LoadMore';
 import { MentionInbox } from './MentionInbox';
 import { teamAuthHeader } from './teamAuth';
+import { writeFailure } from '../../lib/serverAnswer';
 import {
   Users,
   Mail,
@@ -280,16 +281,29 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
     showToast('Invite link copied');
   };
 
+  // REVOCATIONS TELL THE TRUTH (2026-10-04). These three used to show "Invite revoked" / "Role
+  // updated" / "Member removed" whatever the server answered — a refused remove left the member with
+  // full access while the owner was told it was gone. The screen still updates at once, and it is put
+  // back, with the server's own reason, when the server did not accept the change.
   const revokeInvite = async (id: string) => {
     const invite = pendingInvites.find(i => i.id === id);
     setPendingInvites(prev => prev.filter(i => i.id !== id));
     // Also revoke on the backend so the link truly stops working (not just hidden locally).
     const token = invite?.inviteUrl ? new URLSearchParams(new URL(invite.inviteUrl).search).get('join') : null;
     if (token) {
+      let failure: string | null;
       try {
         const authHeader = await teamAuthHeader();
-        await fetch(`/api/team/invite/${encodeURIComponent(token)}/revoke`, { method: 'POST', headers: authHeader });
-      } catch { /* local removal already done; backend revoke is best-effort */ }
+        const res = await fetch(`/api/team/invite/${encodeURIComponent(token)}/revoke`, { method: 'POST', headers: authHeader });
+        failure = await writeFailure(res, 'The invite could not be revoked, so its link still works.');
+      } catch {
+        failure = 'The invite could not be revoked (no connection), so its link still works.';
+      }
+      if (failure) {
+        if (invite) setPendingInvites(prev => (prev.some(i => i.id === id) ? prev : [invite, ...prev]));
+        showToast(failure, 'error');
+        return;
+      }
     }
     showToast('Invite revoked');
   };
@@ -300,14 +314,23 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
     setMembers(prev => prev.map(m => m.id === memberId ? { ...m, role: newRole } : m));
     setMenuOpen(null);
     if (target && !target.isYou && userId) {
+      let failure: string | null;
       try {
         const authHeader = await teamAuthHeader();
-        await fetch('/api/team/member/role', {
+        const res = await fetch('/api/team/member/role', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...authHeader },
           body: JSON.stringify({ teamId: userId, uid: memberId, role: newRole }),
         });
-      } catch { /* local update stands; backend is best-effort */ }
+        failure = await writeFailure(res, 'The role could not be changed.');
+      } catch {
+        failure = 'The role could not be changed (no connection).';
+      }
+      if (failure) {
+        setMembers(prev => prev.map(m => m.id === memberId ? { ...m, role: target.role } : m));
+        showToast(failure, 'error');
+        return;
+      }
     }
     showToast('Role updated');
   };
@@ -318,14 +341,23 @@ export const TeamCollaboration: React.FC<TeamCollaborationProps> = ({ userId, pr
     setMembers(prev => prev.filter(m => m.id !== memberId));
     setMenuOpen(null);
     if (target && !target.isYou && userId) {
+      let failure: string | null;
       try {
         const authHeader = await teamAuthHeader();
-        await fetch('/api/team/member/remove', {
+        const res = await fetch('/api/team/member/remove', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...authHeader },
           body: JSON.stringify({ teamId: userId, uid: memberId }),
         });
-      } catch { /* local removal stands; backend is best-effort */ }
+        failure = await writeFailure(res, 'The member could not be removed and still has access.');
+      } catch {
+        failure = 'The member could not be removed (no connection) and still has access.';
+      }
+      if (failure) {
+        setMembers(prev => (prev.some(m => m.id === memberId) ? prev : [...prev, target]));
+        showToast(failure, 'error');
+        return;
+      }
     }
     showToast('Member removed');
   };

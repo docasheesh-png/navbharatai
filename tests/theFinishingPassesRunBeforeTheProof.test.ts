@@ -306,8 +306,9 @@ describe('the rest of the review, locked at the source', () => {
   const block = src.slice(src.indexOf('const finishingPaths = new Set<string>()'), src.indexOf("process.env.AGENTV3_RENDER_RESCUE !== 'off'"));
 
   it('the live preview keeps its console bridge when index.html is patched; the saved source stays clean', () => {
-    expect(block).toContain("hasPreviewBridge(sandboxIndex) ? injectPreviewBridge(defaults.indexHtml, 'live') : defaults.indexHtml");
-    expect(block).toContain('writtenFiles.set(idxPath, defaults.indexHtml)');
+    // `honestIndex` is the defaults' index.html plus the red demo line (fakeFeatureScan.ts, 2026-10-04).
+    expect(block).toContain("hasPreviewBridge(sandboxIndex) ? injectPreviewBridge(honestIndex, 'live') : honestIndex");
+    expect(block).toContain('writtenFiles.set(idxPath, honestIndex)');
   });
 
   it('every finishing write moves the in-build tick, so a concurrent proof cannot save a half-finished tree', () => {

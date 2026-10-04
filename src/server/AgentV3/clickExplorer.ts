@@ -164,6 +164,25 @@ export const SEARCH_CONTROL = /search|filter|find|look ?up|query|खोज|ढ�
  */
 export const THEME_CONTROL = /\btheme\b|\bdark\b|\bappearance\b|\b(?:light|night|day) ?mode\b|🌓|🌗|🌘|🌒|🌑|🌙|🌛|🌜|☀|🌞|🔆|थीम|डार्क/iu;
 
+/**
+ * 👁 A CONTROL WHOSE NAME PROMISES SOMETHING TO LOOK AT MUST SHOW SOMETHING (Q-518, autopsy 39e982bd,
+ * 2026-10-04). The explorer recorded *"OK \"View Details\" — it responded (nothing visibly changed)"* and
+ * counted it as a pass. A "Copy" or "Save" legitimately changes nothing on the screen, which is why a quiet
+ * press is never judged on its own; but a control that says View, Details, Open, Read more or Learn more
+ * promises a screen, a panel, a dialog or a page, and when pressing it leaves the whole page byte-identical
+ * — the DOM, the text, the address, the scroll position — and opens no new tab and no file picker, the
+ * promise was not kept. That is the `UI_ONLY_CONTROL` class, reached by observation.
+ *
+ * 🔒 Precision first, because an `unresponsive` press is reported and repaired:
+ *   • "nothing changed" is the whole-page hash (`measure`), so a modal, an expanded row, a route change or a
+ *     toggled class all count as changed;
+ *   • a press that scrolled the page or any scrolling box (a "View menu" that scrolls to its section), opened
+ *     a popup (a "View on map" in a new tab) or a file picker ("Open file") did something, and passes;
+ *   • "Show more" / "Load more" are deliberately absent — at the end of a list they correctly do nothing;
+ *   • a bare "More" or "See" is absent too ("See" is a verb in a sentence-like label).
+ */
+export const PROMISES_VIEW = /\b(?:view|details?|open|read more|learn more|know more|more info|see details|see all|view all)\b|विवरण|देखें/iu;
+
 /** Presses a theme switch is given before "it changed nothing" may be said (Auto → Light → Dark). */
 export const MAX_THEME_PRESSES = 3;
 
@@ -257,6 +276,11 @@ export interface PressResult {
    * (`MAX_PRIMED_RETRIES`). The retry's result replaces the first one.
    */
   primedBy?: string;
+  /**
+   * What the control's NAME promised, when the explorer judged it by that promise: `theme` (the colours must
+   * change — THEME_CONTROL) or `view` (something must appear — PROMISES_VIEW). Absent on every other press.
+   */
+  expects?: 'theme' | 'view';
 }
 
 /** How a press is named to a person: the control, and the screen it was found on when that is not the first. */
@@ -317,6 +341,7 @@ export function parseExploreOutput(stdout: string | null | undefined): ExploreRu
         ...(o.kind === 'type' || o.kind === 'pick' ? { kind: o.kind as PressKind } : {}),
         ...(typeof o.via === 'string' && o.via.trim() ? { via: o.via.slice(0, 60) } : {}),
         ...(typeof o.primedBy === 'string' && o.primedBy.trim() ? { primedBy: o.primedBy.slice(0, 60) } : {}),
+        ...(o.expects === 'theme' || o.expects === 'view' ? { expects: o.expects as 'theme' | 'view' } : {}),
       });
       // A retry after a primer REPLACES the first try of the same first-screen control (MAX_PRIMED_RETRIES).
       const last = run.presses[run.presses.length - 1];
@@ -432,8 +457,11 @@ function failureSentence(p: PressResult): string {
       ? `Choosing a different option in ${pressName(p)} changed nothing on the screen.`
       : p.kind === 'type'
         ? `Typing into ${pressName(p)} changed nothing on the screen — it does not search the list.`
-        // A PRESS is judged unresponsive only for a light/dark switch (THEME_CONTROL).
-        : `Pressing ${pressName(p)} never changed the app's colours — the light/dark switch does not switch the theme.`;
+        // A PRESS is judged unresponsive only by what its name promised: a view (PROMISES_VIEW) or a
+        // light/dark switch (THEME_CONTROL). A record written before `expects` existed was a theme switch.
+        : p.expects === 'view'
+          ? `Pressing ${pressName(p)} showed nothing — the screen stayed exactly the same, so whatever it should open is not there.`
+          : `Pressing ${pressName(p)} never changed the app's colours — the light/dark switch does not switch the theme.`;
     default: return `${doing} ${pressName(p)} caused an error in the app.`;
   }
 }
@@ -548,6 +576,7 @@ export function clickExplorerScript(previewUrl: string, opts: { blockWrites: boo
     sortSrc: SORT_CONTROL.source, sortFlags: SORT_CONTROL.flags,
     themeSrc: THEME_CONTROL.source, themeFlags: THEME_CONTROL.flags,
     maxThemePresses: MAX_THEME_PRESSES,
+    viewSrc: PROMISES_VIEW.source, viewFlags: PROMISES_VIEW.flags,
     causeSrc: PRESS_FAILURE_CAUSE.source, causeFlags: PRESS_FAILURE_CAUSE.flags,
   };
   return `cat > /tmp/nbai-explore.mjs <<'NBAI_EOF'
@@ -638,7 +667,8 @@ function collect(a) {
       // may say only "Auto" or "🌓", so its aria-label and title are read too.
       const named = [label, el.getAttribute('aria-label') || '', el.getAttribute('title') || ''].join(' ');
       const theme = !!(a.themeSrc && new RegExp(a.themeSrc, a.themeFlags).test(named));
-      chosen.push({ i: chosen.length, tag, label, key, theme });
+      const view = !theme && !!(a.viewSrc && new RegExp(a.viewSrc, a.viewFlags).test(named));
+      chosen.push({ i: chosen.length, tag, label, key, theme, view });
     }
   }
   return { found: nodes.length, chosen, skipped, keys: Array.from(seen) };
@@ -650,7 +680,19 @@ function measure() {
   const text = (root && root.innerText || '').trim();
   const rich = !!(root && root.querySelector('img, svg, canvas, video, iframe, input, button, textarea, select'));
   const hash = (s) => { let x = 5381; for (let i = 0; i < s.length; i++) x = ((x << 5) + x + s.charCodeAt(i)) | 0; return x; };
-  return { len: text.length, head: text.slice(0, 160), rich, sig: document.body ? hash(document.body.innerHTML) + ':' + hash(document.body.innerText || '') : '' };
+  // Where every scrolling box stands (PROMISES_VIEW): a "View menu" that scrolls to its section changes no
+  // DOM at all, and it did something.
+  // A scroll that cannot be read is '' on both sides — it never costs the measurement itself.
+  let scroll = '';
+  try {
+    scroll = Math.round(window.scrollX) + ',' + Math.round(window.scrollY);
+    const boxes = document.body.getElementsByTagName('*');
+    for (let n = 0; n < boxes.length && n < 3000; n++) {
+      const b = boxes[n];
+      if (b.scrollTop || b.scrollLeft) scroll += '|' + n + ':' + Math.round(b.scrollTop) + ',' + Math.round(b.scrollLeft);
+    }
+  } catch (e) { scroll = ''; }
+  return { len: text.length, head: text.slice(0, 160), rich, scroll, sig: document.body ? hash(document.body.innerHTML) + ':' + hash(document.body.innerText || '') : '' };
 }
 
 // The page's COLOURS: html, body and the first 60 visible elements of the app, leaving out the pressed
@@ -867,6 +909,11 @@ async function pressOne(browser, target, discoverAgainst) {
   page.on('pageerror', (e) => { if (armed && res.errors.length < 3) res.errors.push(String(e && e.message || e).slice(0, 200)); });
   page.on('console', (m) => { if (armed && m.type() === 'error') { const t = String(m.text()); if (!noise.test(t) && res.errors.length < 3) res.errors.push(t.slice(0, 200)); } });
   page.on('response', (r) => { try { if (armed && r.request().isNavigationRequest() && r.frame() === page.mainFrame()) navStatus = r.status(); } catch {} });
+  // A new tab, a file picker or a download is something the press DID, though the page itself is unchanged.
+  let openedElsewhere = false;
+  page.on('popup', () => { if (armed) openedElsewhere = true; });
+  page.on('filechooser', () => { if (armed) openedElsewhere = true; });
+  page.on('download', () => { if (armed) openedElsewhere = true; });
   try {
     await load(page);
     if (target.parentKey) {
@@ -925,6 +972,17 @@ async function pressOne(browser, target, discoverAgainst) {
       if (res.errors.length > 0) { res.verdict = 'error'; res.note = 'the app threw an error when it was pressed again'; }
       else if (verdictLook === 'changed') { res.changed = true; res.note = presses > 1 ? "it changed the app's colours on press " + presses : "it changed the app's colours"; }
       else if (verdictLook === 'same') { res.verdict = 'unresponsive'; res.note = 'pressing it ' + presses + " times never changed the app's colours — a light/dark switch that does not switch"; }
+    }
+    if (hit.theme) res.expects = 'theme';
+    // A control whose name promises something to look at must show something (PROMISES_VIEW): the page,
+    // its address and every scroll position byte-identical, and no tab, picker or download, is a promise
+    // not kept. Anything at all that moved is a pass, exactly as before.
+    if (hit.view) {
+      res.expects = 'view';
+      if (res.verdict === 'ok' && !res.changed && !moved && !openedElsewhere && after && after.scroll === before.scroll) {
+        res.verdict = 'unresponsive';
+        res.note = 'its name promises something to look at, and pressing it changed nothing — not the screen, the address or the scroll position';
+      }
     }
     armed = false;
     // Only a press that WORKED and CHANGED the screen can open a new screen worth exploring; a broken
@@ -1061,7 +1119,9 @@ try {
     }
     // A press that changed nothing on a fresh screen is tried again after one that changed it (MAX_PRIMED_RETRIES).
     const primer = firstPressed.find((p) => p.res.verdict === 'ok' && p.res.changed && !p.res.moved && !p.target.theme);
-    const quiet = primer ? firstPressed.filter((p) => p !== primer && p.res.verdict === 'ok' && !p.res.changed && !p.target.theme) : [];
+    // A "View details" that showed nothing on a fresh screen gets the same second chance (PROMISES_VIEW): it may
+    // need something chosen first, and the retry's verdict replaces the first one.
+    const quiet = primer ? firstPressed.filter((p) => p !== primer && (p.res.verdict === 'ok' || (p.res.verdict === 'unresponsive' && p.res.expects === 'view')) && !p.res.changed && !p.target.theme) : [];
     for (const p of quiet.slice(0, Number.isFinite(cfg.maxPrimed) ? cfg.maxPrimed : 0)) {
       if (outOfTime || Date.now() - started > cfg.budgetMs - 8000) { outOfTime = true; break; }
       const { res } = await pressOne(browser, Object.assign({}, p.target, { primerKey: primer.target.key, primerLabel: primer.target.label }), null);

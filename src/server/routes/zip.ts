@@ -10,6 +10,7 @@ import { verifyFirebaseToken } from '../lib/authMiddleware';
 import path from 'path';
 import crypto from 'crypto';
 import type { Express, Request, Response, RequestHandler } from 'express';
+import { interopDefault } from '../lib/interopDefault';
 
 /** No-op middleware used when no rate limiter is injected (e.g. unit tests). */
 const passthrough: RequestHandler = (_req, _res, next) => next();
@@ -262,7 +263,8 @@ export function registerZipRoutes(app: Express, limiter: RequestHandler = passth
     }
     const safeName = (appName || 'navbharat-app').replace(/[^a-zA-Z0-9-_]/g, '-').slice(0, 40);
     try {
-      const ZipStream = require('zip-stream');
+      // zip-stream 7 is ESM-only: `require()` hands back the module namespace, not the class (#3501).
+      const ZipStream = interopDefault<new (opts: { level: number }) => any>(require('zip-stream'));
       const archive = new ZipStream({ level: 6 });
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader('Content-Disposition', `attachment; filename="${safeName}.zip"`);

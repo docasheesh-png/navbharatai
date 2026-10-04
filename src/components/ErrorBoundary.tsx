@@ -1,4 +1,11 @@
 import { Component, ErrorInfo, ReactNode } from "react";
+import { recordError } from "../lib/observability";
+
+/** The innermost component named in a React component stack, e.g. "BillingPanel". Never props. */
+export function firstComponent(componentStack: string | null | undefined): string {
+  const m = /^\s*(?:at\s+)?([A-Z][A-Za-z0-9_$]{0,60})/m.exec(componentStack ?? '');
+  return m ? m[1] : 'unknown';
+}
 
 interface Props {
   children: ReactNode;
@@ -28,27 +35,15 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("ErrorBoundary caught:", error.message, errorInfo.componentStack);
-    // P2.2 — report React render errors to the backend error tracker (→ Cloud Error
-    // Reporting + admin view). Best-effort, production-only, never throws.
-    if (import.meta.env?.PROD) {
-      try {
-        fetch('/api/logs/error', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: error.message,
-            type: 'react-render',
-            stack: (error.stack || '').slice(0, 2000),
-            // A repeat tells us this is a HARD failure, not a blip — the difference between an error
-            // worth a glance and one that is trapping a real user right now.
-            retries: this.state.retries,
-            source: (errorInfo.componentStack || '').slice(0, 1000),
-            url: typeof window !== 'undefined' ? window.location.href : undefined,
-            ts: Date.now(),
-          }),
-        }).catch(() => {});
-      } catch { /* reporting must never break the fallback UI */ }
-    }
+    // P2.2 — through the ONE reporter (src/lib/observability): sanitized, deduplicated, rate-limited,
+    // production-only and unable to throw. In the phone apps this is also a Crashlytics non-fatal.
+    // `retries` says whether this is a HARD failure (a retry already failed) or a first blip; the
+    // component stack names WHICH screen broke without carrying any of its data.
+    recordError(error, {
+      kind: 'react-render',
+      url: typeof window !== 'undefined' ? window.location.href : undefined,
+      keys: { retries: this.state.retries, component: firstComponent(errorInfo.componentStack) },
+    });
   }
 
   public render() {
@@ -61,7 +56,7 @@ export class ErrorBoundary extends Component<Props, State> {
             </div>
             <div>
               <h2 className="text-sm font-black text-ink uppercase tracking-widest">Something went wrong</h2>
-              <p className="text-[10px] text-faint font-bold uppercase tracking-wider mt-1">{this.state.errorMessage || 'An unexpected error occurred'}</p>
+              <p className="text-[10px] text-faint font-bold uppercase tracking-wider mt-1">This screen hit an unexpected error.</p>
             </div>
             {/* 🔒 A RETRY THAT CANNOT WORK MUST NOT BE THE ONLY WAY OUT (admin 2026-08-27).
                 This button used to do one thing: clear the flag and re-render THE SAME children, with

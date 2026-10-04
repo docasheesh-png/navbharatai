@@ -86,7 +86,7 @@ describe('a repair must never invent the result', () => {
     expect(NO_FAKED_RESULT_RULE).toMatch(/song recogniser, a QR\/barcode scanner/);
     expect(architectSystemPrompt('vite-react')).toContain(NO_FAKED_RESULT_RULE);
     expect(readFileSync('src/server/AgentV3/SimpleBuilder.ts', 'utf8')).toMatch(/BUILD_WHAT_WAS_ASKED_RULE,\n\s*NO_FAKED_RESULT_RULE,/);
-    expect(readFileSync('src/server/AgentV3/SubAgent.ts', 'utf8')).toContain('contextBlocks.push(`${NO_EVAL_RULE}\\n${NO_FAKED_RESULT_RULE}`)');
+    expect(readFileSync('src/server/AgentV3/SubAgent.ts', 'utf8')).toContain('contextBlocks.push(`${NO_EVAL_RULE}\\n${NO_FAKED_RESULT_RULE}\\n${NO_FAKE_FEATURE_RULE}`)');
   });
 });
 

@@ -46,7 +46,50 @@ export const CONSOLE_CALL = /\bconsole\.(log|info|warn|error|debug)\s*\(/;
  * what this detector flags — one shared definition, so the two can never drift (rule 2).
  */
 export function lineLogsCredential(line: string): boolean {
-  return CONSOLE_CALL.test(line) && SENSITIVE.test(line);
+  if (!CONSOLE_CALL.test(line) || !SENSITIVE.test(line)) return false;
+  const { code, text } = splitLiterals(line);
+  // A sensitive NAME is logged as a value: `console.log(password)`, `${accessToken}`.
+  if (SENSITIVE.test(code.replace(CONSOLE_CALL, ' '))) return true;
+  // 🔴 THE WORD IS ONLY IN THE LABEL (Q-150, autopsy 77bd487b). `console.error('[OTP SEND ERROR]', err)` and
+  // `'[ROTATE] secret re-encrypt failed:', err` were flagged as printing a credential — 7 findings, 0 leaks.
+  // A label naming a secret beside a VALUE is still a leak (`'password:', pw`), so the word in a label counts
+  // unless what is logged is only an error, or nothing at all.
+  if (!SENSITIVE.test(text)) return false;
+  const values = (code.replace(CONSOLE_CALL, ' ').match(/[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*/g) ?? [])
+    .filter((v) => !NEUTRAL_CALL.test(v));
+  return values.some((v) => !ERROR_VALUE.test(v));
+}
+
+/** What an error handler logs: the error itself, or a field of it. Never a credential. */
+const ERROR_VALUE = /^(?:err|error|e|ex|exc|exception|reason|cause|failure)(?:\??\.(?:message|stack|code|name|status|statusText|cause|response(?:\??\.(?:status|statusText|data))?))?$/i;
+/** Wrappers around a logged value, not values themselves. */
+const NEUTRAL_CALL = /^(?:JSON\.stringify|String|Number|Boolean|new|typeof|instanceof|await|undefined|null|true|false)$/;
+
+/**
+ * One line split into its CODE (string literals emptied, template `${…}` kept) and its literal TEXT. A
+ * single-line scan, escape-aware, without nesting inside `${…}` — enough for a console call, and on a
+ * line it cannot read (an unterminated literal) the rest counts as text. PURE.
+ */
+function splitLiterals(line: string): { code: string; text: string } {
+  let code = '';
+  let text = '';
+  let quote: string | null = null;
+  let interp = 0;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote === null) {
+      if (c === '"' || c === "'" || c === '`') { quote = c; code += c; continue; }
+      if (c === '/' && line[i + 1] === '/') break; // a trailing comment is neither code nor a logged label
+      if (interp > 0 && c === '}') { interp--; quote = '`'; code += c; continue; }
+      code += c;
+      continue;
+    }
+    if (c === '\\') { text += c + (line[i + 1] ?? ''); i++; continue; }
+    if (c === quote) { quote = null; code += c; continue; }
+    if (quote === '`' && c === '$' && line[i + 1] === '{') { interp++; quote = null; code += ' '; i++; continue; }
+    text += c;
+  }
+  return { code, text };
 }
 
 // PII form-field signals — used to decide whether the app collects personal data

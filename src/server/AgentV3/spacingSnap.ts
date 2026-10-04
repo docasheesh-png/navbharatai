@@ -59,8 +59,15 @@ export const MAX_SNAP_FILES = 8;
 export interface SpacingSnapPatch {
   path: string;
   content: string;
-  /** What moved, smallest first: `['6px → 4px', '10px → 8px']`. For the admin report only. */
+  /** Each DISTINCT move, once: `['6px → 4px', '10px → 8px']`. For the admin report only. */
   changes: string[];
+  /**
+   * How many values moved — every occurrence, not every distinct move (Q-515, autopsy 39e982bd). The
+   * report said "6 spacing value(s) … were snapped" beside `DESIGN_CONSISTENCY`'s "27 off the grid", and
+   * the autopsy read the difference as 21 values left behind. All 27 had moved; 6 was the number of
+   * DISTINCT `from → to` pairs, because `changes` is de-duplicated for display and the note summed it.
+   */
+  snapped: number;
 }
 
 /**
@@ -109,7 +116,7 @@ export function isCoherentOtherGrid(offGrid: readonly number[], grid: number = S
  * Rewrite one file's off-grid spacing. Returns null when nothing changes, or when the file carries its
  * own rhythm (more off-grid values than on-grid ones — see `otherGrid` above). PURE.
  */
-export function snapSpacingInSource(source: string, grid: number = SPACING_GRID): { content: string; changes: string[] } | null {
+export function snapSpacingInSource(source: string, grid: number = SPACING_GRID): { content: string; changes: string[]; snapped: number } | null {
   if (typeof source !== 'string' || source.length === 0) return null;
   // The lint judges the SHIPPED markup, so a commented-out value is neither counted nor rewritten. The
   // offsets of a stripped copy do not line up with the original, so the comment ranges are what the
@@ -152,7 +159,7 @@ export function snapSpacingInSource(source: string, grid: number = SPACING_GRID)
   }
   if (changes.length === 0) return null;
   out += source.slice(last);
-  return { content: out, changes: [...new Set(changes)] };
+  return { content: out, changes: [...new Set(changes)], snapped: changes.length };
 }
 
 /** `[start, end)` of every block and line comment, so a rewrite can skip them. PURE. */
@@ -185,22 +192,24 @@ export function spacingSnapPatches(
     try { off = offGridSpacing(extractSpacingPx(stripCommentsForMarkup(content)), SPACING_GRID).length; } catch { continue; }
     if (off === 0) continue;
     total += off;
-    let patch: { content: string; changes: string[] } | null = null;
+    let patch: { content: string; changes: string[]; snapped: number } | null = null;
     try { patch = snapSpacingInSource(content, SPACING_GRID); } catch { patch = null; }
-    if (patch && patch.content !== content) candidates.push({ path, content: patch.content, changes: patch.changes });
+    if (patch && patch.content !== content) candidates.push({ path, content: patch.content, changes: patch.changes, snapped: patch.snapped });
   }
   // THE FINDING'S OWN THRESHOLD: below it the report says nothing, so neither does this.
   if (total <= MAX_OFFGRID) return [];
-  return candidates.sort((a, b) => (b.changes.length - a.changes.length) || a.path.localeCompare(b.path)).slice(0, MAX_SNAP_FILES);
+  return candidates.sort((a, b) => (b.snapped - a.snapped) || a.path.localeCompare(b.path)).slice(0, MAX_SNAP_FILES);
 }
 
 /** One sentence for the admin report — never user-facing, so it may name the mechanism. */
 export function spacingSnapNote(patches: readonly SpacingSnapPatch[]): string {
-  const values = patches.reduce((n, p) => n + p.changes.length, 0);
-  const shown = [...new Set(patches.flatMap((p) => p.changes))].slice(0, 8).join(', ');
+  const values = patches.reduce((n, p) => n + p.snapped, 0);
+  const distinct = [...new Set(patches.flatMap((p) => p.changes))];
+  const shown = distinct.slice(0, 8).join(', ');
   const where = patches.map((p) => p.path).join(', ');
   return `${values} spacing value(s) in ${patches.length} file(s) this build wrote were off the ${SPACING_GRID}px grid `
-    + `and were snapped to the nearest multiple, deterministically, with no model call — ${where}: ${shown}. `
+    + `and were snapped to the nearest multiple, deterministically, with no model call — ${where}: `
+    + `${distinct.length} distinct move(s): ${shown}${distinct.length > 8 ? ', …' : ''}. `
     + 'Until 2026-10-01 this list was handed to the model at the end of its turn (autopsy 536c8189), which '
     + 'spent three calls writing regex scripts over the stylesheet and moved on-grid values off the grid.';
 }

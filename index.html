@@ -59,18 +59,26 @@
          see those files for why all three are needed. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
+    <!-- SEARCH + LINK PREVIEWS (launch checklist 2026-10-04). A search result shows `description`; WhatsApp,
+         Telegram, Facebook and X show the og/twitter tags. Image URLs are ABSOLUTE because crawlers do not
+         reliably resolve a relative og:image, and the text is English per the UI language rule. -->
+    <meta name="description" content="NavBharatAI is the AI app maker for India. Describe the app, website or game you want, in English or your own language, and get a working app with a live preview in minutes." />
+    <link rel="canonical" href="https://navbharatai.com/" />
+
     <!-- Open Graph (Metadata for WhatsApp, Telegram, Discord link sharing) -->
-    <meta property="og:title" content="NavBharatAI v5.0" />
-    <meta property="og:description" content="नए भारत का अपना AI - Sovereign Intelligent Enterprise Architect Console" />
-    <meta property="og:image" content="/logo.png" />
+    <meta property="og:site_name" content="NavBharatAI" />
+    <meta property="og:title" content="NavBharatAI — AI App Maker" />
+    <meta property="og:description" content="Describe your app in plain words and get a working app, website or game in minutes." />
+    <meta property="og:image" content="https://navbharatai.com/logo.png" />
+    <meta property="og:image:alt" content="NavBharatAI logo" />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://navbharatai.com" />
-    
+    <meta property="og:url" content="https://navbharatai.com/" />
+
     <!-- Twitter Card (Twitter/X preview metadata) -->
     <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="NavBharatAI v5.0" />
-    <meta name="twitter:description" content="नए भारत का अपना AI - Sovereign Intelligent Enterprise Architect Console" />
-    <meta name="twitter:image" content="/logo.png" />
+    <meta name="twitter:title" content="NavBharatAI — AI App Maker" />
+    <meta name="twitter:description" content="Describe your app in plain words and get a working app, website or game in minutes." />
+    <meta name="twitter:image" content="https://navbharatai.com/logo.png" />
   </head>
   <body>
     <!-- 🔴 THE FIRST FRAME, AND WHY IT IS HTML RATHER THAN REACT (2026-09-19, measured).

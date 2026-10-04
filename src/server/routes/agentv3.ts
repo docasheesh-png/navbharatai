@@ -58,6 +58,7 @@ import { nativeCapabilityBrief, requestedCapabilities } from '../AgentV3/nativeC
 import { starterSuiteOnly, starterSuiteNote, testFilesIn } from '../AgentV3/e2eAutoScaffold';
 import { labelFieldsFromPlaceholder } from '../AppMakerLab/intelligence/A11yLinter';
 import { highSeverityAuthenticityIssues, authenticityRepairInstruction, simulatedDataIssues, simulatedDataNotice, simulatedDataSubjectLabel, simulatedResultIssues, simulatedResultNotice } from '../AgentV3/AuthenticityAnalysis';
+import { findFakeFeatures, fakeFeatureNotice, fakeFeatureReportLine, impliedRequirementsFor, noFakeFeaturesEnabled, withHonestyBanner, type FakeFeatureFinding } from '../AgentV3/fakeFeatureScan';
 import { isUnreachable } from '../AgentV3/appReachability';
 import { dedupeDuplicateImports } from '../AgentV3/DuplicateImportGuard';
 import { parallelBuildEnabled, lockedActuator } from '../AgentV3/parallelBuild';
@@ -532,7 +533,7 @@ import { VirtualFileSystem } from '../project/ProjectModel';
 import { applyPreviewDomain, internalPreviewUrl } from '../AgentV3/PreviewDomain';
 import { validateProjectForPreview, devScriptPort, missingPreviewReason, resolveDevRunCommand, classifyDevServerFailure, userFacingPreviewFailure, cleanPreviewLogForUser } from '../AgentV3/sandbox/EngineerAI/actuators/DevServerRecovery';
 import { buildBuildInstallCommand } from '../AgentV3/sandbox/EngineerAI/actuators/devServerHost';
-import { loadUserVaultSecrets } from '../lib/secrets';
+import { loadUserVaultSecrets, withheldVaultSecretNames, secretsWithheldNote } from '../lib/secrets';
 import { secretRequestPrompt, postBuildKeyAsks, postBuildKeyPrompt } from '../AgentV3/secretRequest';
 import { connectActions } from '../AgentV3/connectActions';
 import { saveUserActions } from '../AgentV3/UserActionStore';
@@ -12957,6 +12958,9 @@ async function noteBuildOutcome(
     // of every file the agent writes (reliable — straight from the write op, not a later listFiles that
     // can come back empty). See the "DURABLE FILE SAVE" block for the normal-completion path.
     const writtenFiles = new Map<string, string>();
+    // Fake login / payment / OTP / email found in the WHOLE project (fakeFeatureScan.ts) — computed once at
+    // the production-defaults pass (the red on-screen line), read again by the disclosure and the key ask.
+    let fakeFeatures: FakeFeatureFinding[] = [];
     /** The change being made to this app (changeEngine/changeSession.ts) — null for chat turns or when off. */
     let changeSession: ChangeSession | null = null;
     /** The release gate's verdict, once this build reached it — the evidence that its checks ran. */
@@ -15651,6 +15655,12 @@ async function noteBuildOutcome(
           // keep it OUT of the built app's .env; it is only used to build the DB context prompt below.
           const { [DB_PROVIDER_MARKER]: _dbMarker, ...appEnv } = vaultSecrets;
           dispatcher.setUserSecrets(appEnv);
+          // WHICH SAVED KEYS THIS APP DID NOT GET (Q-155). Least privilege's own failure mode is "I saved that
+          // key — why is it not in my app?"; the build report now answers it by name. Names only, never values.
+          try {
+            const withheld = await withheldVaultSecretNames(userId, workspaceId);
+            if (withheld.length > 0) buildDiag.record({ phase: 'plan', severity: 'info', code: 'SECRETS_WITHHELD', message: secretsWithheldNote(withheld), autoResolved: true });
+          } catch { /* a report line — never a reason a build changes */ }
           // CONNECTED SERVICES (MCP). Fetched ONCE here, before the loop, so the tool list the model
           // sees is fixed for the whole build — a server that changes its tools mid-build cannot swap
           // one out from under a call the model has already decided to make.
@@ -19943,6 +19953,18 @@ async function noteBuildOutcome(
                 if (after && buildDiag.resolveOnRecheck('DESIGN_CONSISTENCY') > 0 && after.design.violations.length > 0) {
                   buildDiag.record({ phase: 'build', severity: 'warning', code: 'DESIGN_CONSISTENCY', ...obs(`After the spacing snap: ${designLintSummary(after)}`) });
                 }
+                // Q-515 (autopsy 39e982bd): WRITE_TIME_QUALITY is measured before the snap too, so it said
+                // src/theme.css "had been noted and not fixed" while the snap then fixed every value in it,
+                // and the autopsy read that as 21 values left. It stays true about the MODEL; this line says
+                // what is true about the APP now.
+                if (after) {
+                  const stillFlagged = [...new Set(Object.values(after.offenders ?? {}).flat().map((o) => o.path))];
+                  const nowClear = landed.map((p) => p.path).filter((path) => !stillFlagged.includes(path));
+                  if (nowClear.length > 0) {
+                    buildDiag.record({ phase: 'build', severity: 'info', code: 'WRITE_TIME_QUALITY', autoResolved: true,
+                      message: `After the spacing snap: ${nowClear.join(', ')} ${nowClear.length === 1 ? 'is' : 'are'} no longer flagged — any "noted and not fixed" above describes the model's turn, not the app as shipped.` });
+                  }
+                }
               } catch { /* the earlier finding stands */ }
             } catch { /* deterministic and best-effort — it can never affect a build */ }
           };
@@ -21167,6 +21189,22 @@ async function noteBuildOutcome(
           const display = resolveAppDisplayName({ chosenName: chosenAppName, indexHtml, prompt, appSource });
           const appName = display.name;
           const defaults = planAppDefaults(indexHtml, appName, { description: display.description, shortName: display.shortName });
+          // ⛔ NO FAKE BUTTON, NO FAKE FEATURE (admin 2026-10-04). The WHOLE project is read — an edit turn's
+          // writes are a diff, and the provider that makes a login real may live in a file this turn never
+          // touched — and every login / payment / OTP / email that only pretends gets a RED line on the app's
+          // own screen, in the user's language, naming the key and where to paste it. Idempotent: a fake made
+          // real loses its line on the next build. Never on an import (the user's own code is not our fake),
+          // never a failed build. Kill switch AGENTV3_NO_FAKE_FEATURES=off (which also removes an old line).
+          const fakeLang = detectLanguageHint(prompt)?.code ?? null;
+          try {
+            if (noFakeFeaturesEnabled() && !isImportTurn) {
+              const whole = { ...(await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>))), ...Object.fromEntries(writtenFiles) };
+              fakeFeatures = findFakeFeatures(whole, prompt).filter((f) => !isUnreachable(dispatcher.lastReachability, f.file));
+            } else {
+              fakeFeatures = [];
+            }
+          } catch { fakeFeatures = []; }
+          const honestIndex = withHonestyBanner(defaults.indexHtml ?? indexHtml, fakeFeatures, fakeLang);
           const savedDefaults: Record<string, string> = {};
           // Did the index.html patch actually LAND? `defaults.added` lists the TAGS the generator
           // intended, and the files are a separate set — so the two must be reported separately.
@@ -21217,7 +21255,7 @@ async function noteBuildOutcome(
           // "The script has an unsupported MIME type ('text/html')" as a broken app. The reference now
           // lands only after the files it names.
           // Patch index.html only when the generator actually changed it.
-          if (defaults.indexHtml != null && indexHtml != null && defaults.indexHtml !== indexHtml) {
+          if (honestIndex != null && indexHtml != null && honestIndex !== indexHtml) {
             try {
               // The SANDBOX copy keeps the preview bridge it was served with (the live console and the
               // Visual Edit picker); the dev server injects it only when it starts, and nothing re-adds
@@ -21225,12 +21263,12 @@ async function noteBuildOutcome(
               const sandboxIndex = await actuator.readFile(workspaceId, idxPath).catch(() => '');
               await actuator.writeFile(
                 workspaceId, idxPath,
-                hasPreviewBridge(sandboxIndex) ? injectPreviewBridge(defaults.indexHtml, 'live') : defaults.indexHtml,
+                hasPreviewBridge(sandboxIndex) ? injectPreviewBridge(honestIndex, 'live') : honestIndex,
               );
-              writtenFiles.set(idxPath, defaults.indexHtml);
+              writtenFiles.set(idxPath, honestIndex);
               noteFinishingWrite(idxPath);
-              try { getWorkspaceMemory(workspaceId).indexFile(idxPath, defaults.indexHtml); } catch { /* index best-effort */ }
-              savedDefaults[idxPath] = defaults.indexHtml;
+              try { getWorkspaceMemory(workspaceId).indexFile(idxPath, honestIndex); } catch { /* index best-effort */ }
+              savedDefaults[idxPath] = honestIndex;
               indexPatched = true;
             } catch { /* one write failing must not block the rest */ }
           }
@@ -22312,7 +22350,7 @@ async function noteBuildOutcome(
                       await sandboxStore.saveSnapshot(workspaceId, url, at, filesHash).catch(() => {});
                       // The paths travel with the copy for THIS build only, so a mismatch can say which
                       // side holds what — see staleDetail. The hash is still what decides.
-                      snapshotTaken = { url, filesHash, filePaths: source ? Object.keys(source) : undefined, fileHashes: source ? fileContentHashes(source) : undefined };
+                      snapshotTaken = { url, filesHash, filePaths: source ? Object.keys(identitySource(source)) : undefined, fileHashes: source ? fileContentHashes(identitySource(source)) : undefined };
                       // THE COPY IS CURRENT, AND THE SURFACE SHOULD KNOW NOW (sandboxLifetime.ts).
                       // Raising the flag lets the idle sweep use the shorter snapshot window; the event
                       // lets the frame move to the real build output the moment the build settles,
@@ -23126,6 +23164,8 @@ async function noteBuildOutcome(
           // that made `browseUrl` record its console is what makes this fact real.
           consoleErrorsFound: runtimeErrorsRemaining,
           screenshotTaken: buildDiag.toolWasUsed('screenshot'),
+          // "✅ Login with Google" about a login whose password is written into the app (fakeFeatureScan.ts).
+          fakeFeatures: fakeFeatures.map((f) => f.kind),
           // THE LEDGER, not this pass's local memory (2026-09-21). Three lines of this same function
           // already asked `renderProvenNow()`; asking a narrower source here let the platform accuse
           // the model of claiming a working preview in a report that itself proves one rendered.
@@ -23231,6 +23271,21 @@ async function noteBuildOutcome(
               detail: faked.slice(0, 5).map((i) => `${i.file}:${i.line} ${i.snippet}`).join(' · '),
             });
           }
+        }
+      } catch { /* the disclosure is best-effort — it must never break the build */ }
+
+      // ⛔ A LOGIN / PAYMENT / OTP / EMAIL THAT ONLY PRETENDS IS SAID SO, IN RED (admin 2026-10-04: "no fake
+      // button"). The findings were computed at the production-defaults pass over the whole project (and the
+      // red line put on the app's own screen there); this is the chat half — one line per fake, in the user's
+      // language, naming the files, the exact key names and both paths — and the admin finding. The closing
+      // ask card asks for those keys (APP_REQUIREMENTS below reads `fakeFeatures` too). Never a failed build.
+      try {
+        if (result.ok && expectsArtifacts && !isImportTurn && fakeFeatures.length > 0) {
+          result = { ...result, summary: `${result.summary}${fakeFeatureNotice(fakeFeatures, detectLanguageHint(prompt)?.code ?? null)}` };
+          buildDiag.record({
+            phase: 'readiness', severity: 'warning', code: 'FAKE_FEATURE_SHIPPED', autoResolved: false,
+            message: `${fakeFeatureReportLine(fakeFeatures)} — disclosed to the user in the summary and as a red line on the app's own screen.`.slice(0, 900),
+          });
         }
       } catch { /* the disclosure is best-effort — it must never break the build */ }
 
@@ -24527,7 +24582,7 @@ async function noteBuildOutcome(
             const before = snapshotConfirmation({
               taken: snapshotTaken,
               persistedHash: workspaceContentHash(identitySource(persisted)),
-              persistedPaths: Object.keys(persisted ?? {}),
+              persistedPaths: Object.keys(identitySource(persisted)),
             });
             if (before.action !== 'restamp') {
               armAdvisoryCap(PREVIEW_COPY_REFRESH_MS + 20_000);
@@ -24568,9 +24623,9 @@ async function noteBuildOutcome(
             const verdict = snapshotConfirmation({
               taken: snapshotTaken,
               persistedHash: workspaceContentHash(identitySource(persisted)),
-              persistedPaths: Object.keys(persisted ?? {}),
-              persistedFileHashes: fileContentHashes(persisted),
-              sandboxFileHashes: sandboxScan && persisted === toSave ? fileContentHashes(sandboxScan) : undefined,
+              persistedPaths: Object.keys(identitySource(persisted)),
+              persistedFileHashes: fileContentHashes(identitySource(persisted)),
+              sandboxFileHashes: sandboxScan && persisted === toSave ? fileContentHashes(identitySource(sandboxScan)) : undefined,
             });
             if (verdict.action === 'restamp') {
               const at = Date.now();
@@ -25759,7 +25814,12 @@ async function noteBuildOutcome(
       // the detector is pure static analysis. Kill switch AGENTV3_APP_REQUIREMENTS=off.
       if (result.ok && expectsArtifacts && (process.env.AGENTV3_APP_REQUIREMENTS ?? '').trim().toLowerCase() !== 'off') {
         try {
-          const missing = unconfiguredRequirements(detectAppRequirements({ files: writtenFiles, prompt }), vaultSecrets);
+          // A fake login / payment / OTP / email IMPLIES the service it stands in for (fakeFeatureScan.ts): the
+          // app names no key — that is what makes it a fake — so the detector above would never ask. A service
+          // the code also names keeps the detected entry (its own matched names win).
+          const detected = detectAppRequirements({ files: writtenFiles, prompt });
+          const implied = impliedRequirementsFor(fakeFeatures).filter((r) => !detected.some((d) => d.id === r.id));
+          const missing = unconfiguredRequirements([...detected, ...implied], vaultSecrets);
           const notice = appRequirementsNotice(missing, detectLanguageHint(prompt)?.code ?? null);
           if (notice) {
             result = { ...result, summary: `${result.summary ? `${result.summary}\n\n` : ''}${notice}` };

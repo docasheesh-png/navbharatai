@@ -42,6 +42,8 @@ const config: CapacitorConfig = {
       spm: {
         packageOptions: {
           '@capacitor-firebase/app-check': { symlink: true },
+          // Same SwiftPM identity collision, with Firebase's own `FirebaseCrashlytics` (the plugin README asks for it).
+          '@capacitor-firebase/crashlytics': { symlink: true },
         },
       },
     },

@@ -89279,3 +89279,8 @@ failed save lived only in `proShell.ts`'s `useCollection`.
 - **Q-122 ✅ (`UI_WITHOUT_BUILD` false positive when only `App.tsx` was edited)** was already fixed. After build 70115adf, `uiWithoutBuildVerdict` got a "complete view" guard: with no `package.json` in view, it refuses to judge, because what it sees is a fragment. `tests/uiWithoutBuild.test.ts` encodes exactly this case: the view `['src/App.tsx']` gives no finding. The row was never removed after that fix.
 - **Q-125 ✅ (Sonnet cache reads "over-stated")** had a wrong premise, as its own row said on 2026-10-04. Anthropic's `input_tokens` excludes cache shares, so a Claude turn is UNDER-stated. That real defect is Q-343, which is 🟡 BLOCKED on the admin's money decision, with options and a recommendation. Q-125 has nothing left of its own to fix.
 - **Gate note for this branch:** the first full run caught one failure: `licenceExposure.test.ts` pins `sources.push(currencyBlock, pincodeBlock);` as proof that those two sources sit outside every gate. Q-127 had folded movies into that line. The line is restored and movies is pushed separately. That keeps the property, and the pin stays as it was.
+
+
+### Queue rows closed on merge (2026-10-04)
+
+Q-113 (#3531), Q-127 / Q-129 / Q-131 / Q-132 (#3535) and Q-115 / Q-130 (#3537) are merged. Their ledgers are in the entries above, so they leave `BUILD_REPORT_QUEUE.md`'s open table. Three of these rows had gone back to "OPEN" with no owner during the staging merges. That shows why a row's state must follow the merge itself, not a copy of the file on one branch.

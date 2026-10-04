@@ -354,7 +354,19 @@ export function registerPaymentRoutes(app: Express, paymentLimiter: RateLimitReq
       // This route needs no sign-in (an order id is enough to ask), so it never returns the order OWNER's
       // balances (forensic audit 2026-10-04): anyone holding an order id used to read them. No client
       // reads them from here; the wallet is fetched through the owner-checked wallet route.
-      const { currentBalance: _balance, tokenBalance: _tokens, ...publicResult } = (result.data ?? {}) as Record<string, unknown>;
+      const { currentBalance: _balance, tokenBalance: _tokens, buyerUid, ...publicResult } = (result.data ?? {}) as Record<string, unknown>;
+      // A GIFT CODE is money in the hand of whoever reads it (Q-630, forensic audit 2026-10-04). The order id
+      // travels in the redirect URL, so knowing it proves nothing: the code goes only to the BUYER's own
+      // verified token. Anyone else still learns the order succeeded; the buyer also gets the code from the
+      // owner-checked `/api/payment/gift-codes`.
+      if ('giftCode' in publicResult) {
+        const callerUid = await verifyFirebaseToken(req).catch(() => null);
+        if (!callerUid || callerUid !== buyerUid) {
+          delete publicResult.giftCode;
+          delete publicResult.giftFaceInr;
+          publicResult.giftCodeDelivered = 'to-buyer-only';
+        }
+      }
       return res.json(publicResult);
     } else {
       return res.status(400).json({ error: result.error });

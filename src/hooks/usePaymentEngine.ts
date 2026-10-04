@@ -422,7 +422,7 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
         orderId: paymentSession.orderId,
         isSimulator: paymentSession.isSimulator,
         transactionStatus: status
-      });
+      }, { headers: await authedHeaders() }); // the buyer's token: a gift code is returned only to its buyer (Q-630)
       if (res.data.success) {
         addLog(`Payment for ORDER #${paymentSession.orderId} verified successfully! credited ₹${paymentSession.orderAmount}.`, 'success');
         reportPurchaseOnce(paymentSession.orderId, Number(paymentSession.orderAmount));
@@ -555,7 +555,7 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
    */
   const verifyOrderAndReport = useCallback(async (orderRef: string) => {
     try {
-      const res = await axios.post('/api/payment/verify-payment', { orderId: orderRef });
+      const res = await axios.post('/api/payment/verify-payment', { orderId: orderRef }, { headers: await authedHeaders() });
       const data = res.data || {};
       if (data.professionalPass) {
         addLog(`Professional Pass activated for Order #${orderRef} (${data.days} days).`, 'success');

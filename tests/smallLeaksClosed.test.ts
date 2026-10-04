@@ -18,7 +18,7 @@ describe('verify-payment never returns the order owner\'s balances', () => {
   it('the route strips them before answering a caller it did not identify', () => {
     const src = readFileSync('src/server/routes/payment.ts', 'utf8');
     const route = src.slice(src.indexOf("app.post('/api/payment/verify-payment'"), src.indexOf("app.post('/api/payment/reconcile'"));
-    expect(route).toMatch(/currentBalance: _balance, tokenBalance: _tokens, \.\.\.publicResult/);
+    expect(route).toMatch(/currentBalance: _balance, tokenBalance: _tokens, buyerUid, \.\.\.publicResult/);
     expect(route).not.toMatch(/return res\.json\(result\.data\)/);
   });
 });

@@ -382,7 +382,8 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
           randomBytes: (n: number) => new Uint8Array(randomBytes(n)),
         });
         try { await updateDoc(txRef, { giftCode: code, fulfilledAt: new Date().toISOString() }); } catch { /* the code exists; the audit note is best-effort */ }
-        return { success: true, data: { giftCode: code, giftFaceInr: face, paidInr: Number(txData.amountPaid) || 0 } };
+        // `buyerUid` is for the route's owner check only; `verify-payment` strips it before answering (Q-630).
+        return { success: true, data: { giftCode: code, giftFaceInr: face, paidInr: Number(txData.amountPaid) || 0, buyerUid: txData.userId } };
       }
 
       const walletRef = doc(db, 'user_token_wallets', txData.userId);

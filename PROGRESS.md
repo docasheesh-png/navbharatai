@@ -88967,6 +88967,7 @@ put back.
 | P2 | `.env` not ignored by git / docker; no Permissions-Policy | missing config | secrets in repo/image | ignore files (identical to #3531); policy header | `localSecretsAndUnusedFeaturesStayOut` |
 | P2 | Production could boot with a test switch on | no config contract | silent security downgrade | `assertProductionConfig` (VITEST fatal; warnings for missing keys) | `productionRefusesASwitchedOffControl` |
 | P2 | Firestore: owner could write any field of `users`; template `posts`/`groups` open; `userId` re-assignable; collab comments rewritable; no Storage rules | permissive template rules | client writes the server never reads safely | rules write only what the app writes; deny-all `storage.rules` | `firestoreRulesAuditHardening` (emulator) |
+| P2 | Q-630: `verify-payment` (no sign-in) returned a fulfilled gift order's CODE to whoever held the order id — which travels in the redirect URL | the route answered with the fulfilment data as-is | a bearer value handed to an unidentified caller | code only to the buyer's verified token; client sends it | `aGiftCodeGoesOnlyToItsBuyer` |
 | P3 | Legacy `/create-order` unauthenticated; `verify-payment` returned balances by order id; Repo Analyst forwarded the session token to GitHub | dead / over-sharing routes | small leaks | 410; balances stripped; GitHub token only | `smallLeaksClosed` |
 
 **Overlap with other sessions (honest record).** #3531 carries the same trust-proxy / `clientAddress` /
@@ -88978,4 +88979,4 @@ be removed.
 
 **Not fixed in this PR — every item is a row in `BUILD_REPORT_QUEUE.md`:** Q-140 (P0, builder preview
 same-origin, infra-blocked), Q-610 (rules must be deployed by hand to `gen-lang-client-0866594388`), Q-611
-(rotate credentials in git history), Q-612 … Q-630.
+(rotate credentials in git history), Q-612 … Q-629. Q-630 was found by the row verification and fixed here.

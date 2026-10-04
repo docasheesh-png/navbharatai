@@ -88984,3 +88984,13 @@ phone-number-like secret cannot be told from a real one by shape, and guessing w
 Q-153 re-checked the same day: its upstream half is already shipped (`envLoading.ts`); the remaining runtime half
 is recorded in the queue with the breakage it must avoid (`NODE_ENV=production` reaching the agent's `npm install`).
 
+### 2026-10-04 — Q-139: a cut-off stylesheet or package.json is a syntax error
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-139 no truncation guard for CSS/JSON writes | `findSyntaxErrors` / `firstSyntaxError` filtered to JS/TS before parsing | a truncation guard blind to every file type but one | JSON via `JSON.parse` (BOM stripped; tsconfig/jsconfig/.vscode/eslintrc/babelrc/prettierrc JSONC skipped); CSS via esbuild's parser, counting only the cut-off warnings; a write-guard hint per file type | `tests/aCutOffStylesheetIsBroken.test.ts` (reverted → 3 fail); `SyntaxCheck.test.ts`'s "invalid JSON is skipped" fixture updated to valid JSON with the reason beside it |
+
+HTML is deliberately not judged — a browser renders a truncated document, and no parser signature tells a cut-off
+page from a valid one, so a rule there would be a guess. Every consumer of the gate now sees JSON/CSS too: the
+write guard, the final readiness count, the heal before/after comparison and the store preflight.
+

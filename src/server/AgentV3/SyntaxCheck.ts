@@ -23,6 +23,45 @@ export interface SyntaxErrorInfo {
 }
 
 const JS_TS = /\.(mjs|cjs|jsx?|tsx?)$/i;
+
+/**
+ * 🆕 A CUT-OFF CSS OR JSON FILE IS JUST AS BROKEN (queue Q-139). This gate parsed JS/TS only, so a
+ * truncated `package.json` or a stylesheet that ends mid-rule went through the write path unreported —
+ * esbuild has no opinion on them as JS. JSON is parsed with `JSON.parse` (free, exact). CSS goes through
+ * esbuild's CSS parser, which only WARNS — so only the warnings that mean "this file stops in the middle"
+ * count: an unclosed `{`, an unterminated string, an unterminated comment. Anything else a CSS file can
+ * say (Tailwind's `@apply`, an unknown property) is never an error here.
+ */
+const JSON_FILE = /\.json$/i;
+/** JSON-with-comments files: their own tools accept comments and trailing commas, so JSON.parse cannot judge them. */
+const JSONC_FILE = /(?:^|\/)(?:tsconfig|jsconfig)[\w.-]*\.json$|(?:^|\/)\.vscode\/|(?:^|\/)\.eslintrc[\w.-]*\.json$|devcontainer\.json$|(?:^|\/)\.?(?:babelrc|prettierrc|swcrc)[\w.-]*\.json$/i;
+const CSS_FILE = /\.css$/i;
+const CSS_CUT_OFF = /Expected "\}" to go with "\{"|Unterminated string token|to terminate multi-line comment/;
+
+/** Is this a file the gate can judge at all? PURE. */
+export function isParseableFile(path: string): boolean {
+  if (JS_TS.test(path)) return !DECL.test(path);
+  if (JSON_FILE.test(path)) return !JSONC_FILE.test(path);
+  return CSS_FILE.test(path);
+}
+
+/** One CSS or JSON file's first syntax error, or null. Never throws. */
+async function dataFileError(path: string, content: string): Promise<SyntaxErrorInfo | null> {
+  if (JSON_FILE.test(path)) {
+    try { JSON.parse(content.replace(/^\uFEFF/, '')); return null; } catch (e) {
+      return { path, message: `invalid JSON — ${(e instanceof Error ? e.message : String(e)).slice(0, 200)}` };
+    }
+  }
+  try {
+    const r = await transform(content, { loader: 'css', logLevel: 'silent', sourcefile: path });
+    const cut = r.warnings.find((w) => CSS_CUT_OFF.test(w.text || ''));
+    return cut ? { path, message: cut.text, line: cut.location?.line, column: cut.location?.column } : null;
+  } catch (e) {
+    const err = e as { errors?: Array<{ text?: string; location?: { line?: number; column?: number } | null }> };
+    const first = err.errors?.[0];
+    return { path, message: (first?.text || (e instanceof Error ? e.message : String(e))).slice(0, 300), line: first?.location?.line, column: first?.location?.column };
+  }
+}
 // Type-declaration files are parsed differently (ambient) and never ship as runnable code — skip them
 // so a valid `.d.ts` is never mis-flagged.
 const DECL = /\.d\.ts$/i;
@@ -35,13 +74,19 @@ function loaderFor(path: string): 'ts' | 'tsx' | 'js' | 'jsx' {
 }
 
 /**
- * Parse every JS/TS/JSX/TSX file with esbuild and return the SYNTAX errors (path + message + location).
+ * Parse every JS/TS/JSX/TSX file with esbuild — and every CSS and JSON file for the cut-off class (Q-139) — and return the SYNTAX errors (path + message + location).
  * Type errors are NOT reported (esbuild only parses). Bounded to 20 files. Never throws.
  */
 export async function findSyntaxErrors(files: Record<string, string>): Promise<SyntaxErrorInfo[]> {
   const out: SyntaxErrorInfo[] = [];
   for (const [path, content] of Object.entries(files)) {
-    if (!JS_TS.test(path) || DECL.test(path) || typeof content !== 'string' || content.trim() === '') continue;
+    if (!isParseableFile(path) || typeof content !== 'string' || content.trim() === '') continue;
+    if (!JS_TS.test(path)) {
+      const bad = await dataFileError(path, content);
+      if (bad) out.push(bad);
+      if (out.length >= 20) break;
+      continue;
+    }
     try {
       await transform(content, { loader: loaderFor(path), logLevel: 'silent', sourcefile: path });
     } catch (e) {
@@ -73,7 +118,7 @@ export function syntaxRepairInstruction(errors: readonly SyntaxErrorInfo[]): str
  * write-time parse guard. Never throws.
  */
 export async function firstSyntaxError(path: string, content: string): Promise<SyntaxErrorInfo | null> {
-  if (!JS_TS.test(path) || DECL.test(path)) return null; // not a parseable source file → no opinion
+  if (!isParseableFile(path)) return null; // not a file this gate can judge → no opinion
   const errs = await findSyntaxErrors({ [path]: content });
   return errs[0] ?? null;
 }
@@ -139,6 +184,12 @@ export function parseGuardDecision(
   // App.tsx's JSX in a condition were refused with "The character "}" is not valid inside a JSX element" —
   // and a hint that led with DUPLICATE declarations, which it was not. The model patched a fragment again,
   // was refused again, and only then rewrote the component with replace_symbol, which worked first time.
+  // A cut-off CSS or JSON file (Q-139): the JS hints below would send the model looking for a duplicate
+  // const in a stylesheet.
+  if (!JS_TS.test(path)) {
+    return head + `The file looks cut off or unbalanced. Write the WHOLE file again in one write, ending cleanly ` +
+      `(every "{" closed${JSON_FILE.test(path) ? ', valid JSON with no trailing text' : ''}).`;
+  }
   if (isJsxStructureError(errNew) && !isDuplicateDeclarationError(errNew)) {
     return head +
       `An edit that wraps, moves or adds JSX left a tag or a brace unbalanced. Patching fragments of a ` +

@@ -89233,3 +89233,15 @@ agent's `npm install`, so the fix is narrow: when the whole command is `node|tsx
 (not build/dev/start/test/lint/install hooks), it runs under Node's `--env-file=.env` — dotenv syntax, and the
 environment always wins. Missing `.env`, or npm not being the plain Node script, falls back to the original
 command. Kill switch `AGENTV3_AGENT_CMD_ENV_FILE=off`. Lock: `tests/theAppsScriptSeesItsEnv.test.ts`.
+
+### 2026-10-04 — the last migrated rows re-checked: Q-152 already fixed; Q-136, Q-160, Q-101 recorded blocked
+
+- **Q-152 ✅ (already fixed):** bulk landing (2026-08-03) turned a large import's landing from one round trip per
+  file into one archive + one extract; the minutes lazy materialization was designed to hide no longer exist.
+- **Q-136 🟡:** the click explorer already reaches a state-routed app's screens; its blank test is root-level,
+  so an empty main area after a tab press passes (the Q-147 class, third lane). Blocked only because
+  `clickExplorer.ts` is in three other sessions' open PRs.
+- **Q-160 🟡:** writing back to a user's own folder is irreversible from our side — options and a recommendation
+  ("Save to folder" on a press, skipping files changed on disk) are in the row.
+- **Q-101 🟡:** the evidence ledger's read half exists; the write half rewires every verdict and is recommended
+  as a three-PR sequence after the engine PRs in flight land.

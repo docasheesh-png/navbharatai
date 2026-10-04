@@ -1,6 +1,11 @@
 // AN IMAGE APP MAKES REAL PICTURES (admin 2026-10-01): "jab user apni api key dalna chahe kisi aur provider
 // ki to bhi dal sakta ho, jab chahe change kare, agar user keys na de, to default pollination ai".
 //
+// 🔴 2026-10-04 (build cc3ef776): the keyless default no longer exists at the provider (it answers 401 to
+// every request without a key), so the admin ruled: "user ko saaf saaf bolo ki API keys chahiye … navbhatai
+// api keys ka offer den … grok, gemini, chatgpt … guide kare ki keys kaha dalni hai". The browser engine now
+// asks NavBharatAI (window.NavAI.image) and the server engine refuses honestly ("needs-key") with no key.
+//
 // The `generate_image_ai` recipe writes a modular image engine into the user's app. These tests:
 //   1. compile every file it writes with the REAL TypeScript compiler, under the strictest settings a Vite
 //      project uses (a recipe that does not compile in the user's app is worse than none);
@@ -74,9 +79,28 @@ describe('1 · what the recipe writes', () => {
     expect(Object.keys(c.files).sort()).toEqual(['src/lib/imageAi.ts', 'src/lib/useImageGenerator.ts']);
     expect(c.envKeys).toEqual([]);
     expect(c.files['src/lib/imageAi.ts']).toContain('const SERVER_ENDPOINT: string | null = null;');
-    expect(c.files['src/lib/imageAi.ts']).toContain('https://image.pollinations.ai/prompt/');
-    expect(c.files['src/lib/imageAi.ts']).toContain('&safe=true');
-    expect(c.files['src/lib/imageAi.ts']).toContain('private=true');
+    expect(c.files['src/lib/imageAi.ts']).toContain('class NavAIImageProvider');
+    // 🔒 cc3ef776: no anonymous call to a provider that answers 401 to every keyless request.
+    expect(c.files['src/lib/imageAi.ts']).not.toMatch(/pollinations\.ai/);
+  });
+
+  it('🔒 cc3ef776: the builder is told keys are REQUIRED, every option with its link, and where to paste it', () => {
+    for (const server of [false, true]) {
+      const text = generateImageAiIntegration({ server, react: true }).instructions;
+      expect(text).toContain('need an image API key');
+      for (const s of ['NAVBHARATAI_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'XAI_API_KEY', 'POLLINATIONS_API_KEY',
+        'https://platform.openai.com/api-keys', 'https://aistudio.google.com/apikey', 'https://console.x.ai', 'https://enter.pollinations.ai',
+        'Keys & Secrets']) {
+        expect(text, s).toContain(s);
+      }
+      expect(text).toContain('Never say the pictures are free or that no key is needed.');
+      expect(text.replace('Never say the pictures are free or that no key is needed.', '')).not.toMatch(/no (api )?key (is )?needed|keyless/i);
+    }
+  });
+
+  it('🔒 the download link that opens a new tab carries rel=noopener (no reverse tabnabbing)', () => {
+    const src = generateImageAiIntegration({ server: false, react: false }).files['src/lib/imageAi.ts']!;
+    expect(src).toMatch(/link\.rel = 'noopener noreferrer';\s+link\.target = '_blank';/);
   });
 
   it('server mode: the client posts to the route, the server module and .env.example are written', () => {
@@ -121,56 +145,61 @@ interface Client {
   releaseImage(img: Img): void;
 }
 
-describe('3 · the browser engine, run against a fake network', () => {
+describe('3 · the browser engine asks NavBharatAI (window.NavAI.image), run against a fake NavAI', () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
   const client = () => load<Client>(generateImageAiIntegration({ server: false, react: false }).files['src/lib/imageAi.ts']!, 'client');
-  const png = () => new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { status: 200, headers: { 'content-type': 'image/png' } });
+  const PNG = 'data:image/png;base64,' + Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64');
+  const navAI = (image: (p: string, o: { width: number; height: number }) => Promise<string>) => {
+    const fn = vi.fn(image);
+    vi.stubGlobal('NavAI', { image: fn });
+    return fn;
+  };
 
-  it('a prompt becomes a real Pollinations request and a picture', async () => {
-    const calls: string[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (u: string) => { calls.push(u); return png(); }));
+  it('a prompt goes to NavAI.image with its size, and the data URL becomes a picture with bytes', async () => {
+    const f = navAI(async () => PNG);
+    const fetchSpy = vi.fn(); vi.stubGlobal('fetch', fetchSpy);
     const m = await client();
     const img = await m.generateImage({ prompt: '  a red fort at sunset ', width: 768, height: 512, seed: 7 });
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toBe('https://image.pollinations.ai/prompt/a%20red%20fort%20at%20sunset?width=768&height=512&seed=7&model=flux&nologo=true&private=true&safe=true');
-    expect(img.provider).toBe('Pollinations AI');
+    expect(f).toHaveBeenCalledWith('a red fort at sunset', { width: 768, height: 512 });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(img.provider).toBe('NavBharatAI');
     expect(img.blob?.size).toBe(4);
+    expect(img.blob?.type).toBe('image/png');
     expect(img.url.startsWith('blob:')).toBe(true);
     m.releaseImage(img);
   });
 
-  it('an empty or over-long prompt is refused before any request', async () => {
-    const f = vi.fn(); vi.stubGlobal('fetch', f);
+  it('🔒 cc3ef776: outside NavBharatAI (no window.NavAI) the error is "needs-key" in words, and nothing is called', async () => {
+    const fetchSpy = vi.fn(); vi.stubGlobal('fetch', fetchSpy);
+    vi.stubGlobal('NavAI', undefined);
+    const m = await client();
+    await expect(m.generateImage({ prompt: 'tiger' })).rejects.toMatchObject({ code: 'needs-key', retryable: false, message: expect.stringContaining('Keys & Secrets') });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('the gateway\'s "needs-key" refusal reaches the page with the owner\'s guidance, not retried', async () => {
+    const f = navAI(async () => { throw Object.assign(new Error('This app needs an image API key. Add one in Keys & Secrets.'), { code: 'needs-key' }); });
+    const m = await client();
+    await expect(m.generateImage({ prompt: 'tiger' })).rejects.toMatchObject({ code: 'needs-key', message: 'This app needs an image API key. Add one in Keys & Secrets.' });
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  it('an empty or over-long prompt is refused before NavAI is asked', async () => {
+    const f = navAI(async () => PNG);
     const m = await client();
     await expect(m.generateImage({ prompt: '   ' })).rejects.toMatchObject({ code: 'invalid-prompt' });
     await expect(m.generateImage({ prompt: 'x'.repeat(1001) })).rejects.toMatchObject({ code: 'invalid-prompt' });
     expect(f).not.toHaveBeenCalled();
   });
 
-  it('a busy answer is retried, then the picture arrives; onRetry is told', async () => {
-    let n = 0;
-    vi.stubGlobal('fetch', vi.fn(async () => (++n === 1 ? new Response('busy', { status: 503 }) : png())));
+  it('an answer that is not an image data URL is not a picture', async () => {
+    navAI(async () => 'https://example.com/cat.png');
     const m = await client();
-    const seen: number[] = [];
-    vi.useFakeTimers();
-    const p = m.generateImage({ prompt: 'tiger' }, { onRetry: (a: number) => seen.push(a) });
-    await vi.runAllTimersAsync();
-    await expect(p).resolves.toMatchObject({ provider: 'Pollinations AI' });
-    expect(seen).toEqual([1]);
+    await expect(m.generateImage({ prompt: 'tiger' })).rejects.toMatchObject({ code: 'failed' });
   });
 
-  it('a refusal is final and says so in words; a non-image answer is not a picture', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('no', { status: 401 })));
-    const m = await client();
-    await expect(m.generateImage({ prompt: 'tiger' }, { retries: 0 })).rejects.toMatchObject({ code: 'refused', retryable: false });
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>', { status: 200, headers: { 'content-type': 'text/html' } })));
-    await expect(m.generateImage({ prompt: 'tiger' }, { retries: 0 })).rejects.toMatchObject({ code: 'failed' });
-  });
-
-  it('a slow engine times out, and the message is about time', async () => {
-    vi.stubGlobal('fetch', vi.fn((_u: string, init: { signal: AbortSignal }) => new Promise((_r, rej) => {
-      init.signal.addEventListener('abort', () => rej(new Error('aborted')));
-    })));
+  it('a slow answer times out, and the message is about time', async () => {
+    navAI(() => new Promise<string>(() => undefined));
     const m = await client();
     vi.useFakeTimers();
     const p = m.generateImage({ prompt: 'tiger' }, { timeoutMs: 1000, retries: 0 });
@@ -179,21 +208,8 @@ describe('3 · the browser engine, run against a fake network', () => {
     await check;
   });
 
-  it('when the browser will not hand over the bytes, the picture is still shown (no download blob)', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
-    class FakeImage { onload: (() => void) | null = null; onerror: (() => void) | null = null; set src(v: string) { if (v) queueMicrotask(() => this.onload?.()); } }
-    vi.stubGlobal('Image', FakeImage);
-    const m = await client();
-    const img = await m.generateImage({ prompt: 'tiger', seed: 1 }, { retries: 0 });
-    expect(img.blob).toBeNull();
-    expect(img.url).toContain('https://image.pollinations.ai/prompt/tiger');
-  });
-
   it('a stop from the user is a cancel, never retried', async () => {
-    const f = vi.fn((_u: string, init: { signal: AbortSignal }) => new Promise((_r, rej) => {
-      init.signal.addEventListener('abort', () => rej(new Error('aborted')));
-    }));
-    vi.stubGlobal('fetch', f);
+    const f = navAI(() => new Promise<string>(() => undefined));
     const m = await client();
     const ctl = new AbortController();
     const p = m.generateImage({ prompt: 'tiger' }, { signal: ctl.signal });
@@ -223,20 +239,57 @@ interface Server {
   imageRoute(): (req: { body?: unknown; ip?: string }, res: Res) => Promise<void>;
 }
 
-describe('4 · the server engine: no key ⇒ Pollinations, a key ⇒ that provider, a key never leaks', () => {
-  afterEach(() => vi.unstubAllGlobals());
+describe('4 · the server engine: no key ⇒ an honest needs-key, a key ⇒ that provider, a key never leaks', () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
   const server = () => load<Server>(generateImageAiIntegration({ server: true, react: false }).files['server/lib/imageAi.ts']!, 'server');
   const png = () => new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { status: 200, headers: { 'content-type': 'image/png' } });
 
-  it('no IMAGE_API_KEY: keyless Pollinations, no Authorization header, the picture comes back', async () => {
-    const calls: Array<{ url: string; headers: Record<string, string> }> = [];
-    vi.stubGlobal('fetch', vi.fn(async (u: string, init: { headers: Record<string, string> }) => { calls.push({ url: u, headers: init.headers }); return png(); }));
+  it('🔒 cc3ef776: no key at all ⇒ 503 "needs-key" naming where to add one, and NOTHING is sent anywhere', async () => {
+    const f = vi.fn(); vi.stubGlobal('fetch', f);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const m = await server();
     const out = await m.handleImageRequest({ prompt: 'tiger', seed: 5 }, 'a', { IMAGE_PROVIDER: 'openai', IMAGE_MODEL: 'gpt-image-1' });
+    expect(out.status).toBe(503);
+    expect(out.body).toMatchObject({ code: 'needs-key', error: expect.stringContaining('Keys & Secrets') });
+    expect(f).not.toHaveBeenCalled();
+    err.mockRestore();
+  });
+
+  it.each([
+    ['NAVBHARATAI_API_KEY', 'nbai_owner_key_123', 'https://navbharatai.com/api/v1/images/generations'],
+    ['OPENAI_API_KEY', 'sk-owner-openai', 'https://api.openai.com/v1/images/generations'],
+    ['GEMINI_API_KEY', 'AIzaOwnerGemini', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent'],
+    ['XAI_API_KEY', 'xai-owner', 'https://api.x.ai/v1/images/generations'],
+    ['GROK_API_KEY', 'xai-owner-grok', 'https://api.x.ai/v1/images/generations'],
+  ])('a key saved by its own name (%s) goes to that company only, in a header', async (name, key, url) => {
+    const calls: Array<{ url: string; init: { headers: Record<string, string> } }> = [];
+    const b64 = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64');
+    vi.stubGlobal('fetch', vi.fn(async (u: string, init: { headers: Record<string, string> }) => {
+      calls.push({ url: u, init });
+      const body = u.includes('generativelanguage')
+        ? { candidates: [{ content: { parts: [{ inlineData: { data: b64 } }] } }] }
+        : { data: [{ b64_json: b64 }] };
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const m = await server();
+    const out = await m.handleImageRequest({ prompt: 'tiger' }, `k-${name}`, { [name]: key });
     expect(out.status).toBe(200);
-    expect(out.headers['X-Image-Provider']).toBe('Pollinations AI');
-    expect(calls[0]!.url).toBe('https://image.pollinations.ai/prompt/tiger?width=1024&height=1024&seed=5&model=flux&nologo=true&private=true&safe=true');
-    expect(calls[0]!.headers).toEqual({});
+    expect(out.headers['Content-Type']).toBe('image/png');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe(url);
+    expect(calls[0]!.url).not.toContain(key);
+    expect(Object.values(calls[0]!.init.headers).join(' ')).toContain(key);
+  });
+
+  it('IMAGE_API_KEY with no IMAGE_PROVIDER: the provider is read from an unmistakable key shape', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => {
+      calls.push(u);
+      return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { status: 200, headers: { 'content-type': 'image/png' } });
+    }));
+    const m = await server();
+    await m.handleImageRequest({ prompt: 'tiger' }, 'shape', { IMAGE_API_KEY: 'sk_pollinations_secret' });
+    expect(calls[0]!.startsWith('https://gen.pollinations.ai/image/tiger?')).toBe(true);
   });
 
   it('IMAGE_PROVIDER=pollinations with a key: the keyed host, the key in a header, never in the address', async () => {
@@ -246,6 +299,8 @@ describe('4 · the server engine: no key ⇒ Pollinations, a key ⇒ that provid
     await m.handleImageRequest({ prompt: 'tiger' }, 'b', { IMAGE_PROVIDER: 'pollinations', IMAGE_API_KEY: 'sk_secret' });
     expect(calls[0]!.url.startsWith('https://gen.pollinations.ai/image/tiger?')).toBe(true);
     expect(calls[0]!.url).not.toContain('sk_secret');
+    // 🔒 on the current API safe=true alone is only privacy — the nudity filter must be named.
+    expect(calls[0]!.url).toContain('&private=true&safe=privacy,secrets,sexual,violence');
     expect(calls[0]!.headers).toEqual({ Authorization: 'Bearer sk_secret' });
   });
 
@@ -279,11 +334,11 @@ describe('4 · the server engine: no key ⇒ Pollinations, a key ⇒ that provid
     const f = vi.fn(); vi.stubGlobal('fetch', f);
     const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const m = await server();
-    const out = await m.handleImageRequest({ prompt: 'tiger' }, 'e', { IMAGE_API_KEY: 'sk-whose' });
+    const out = await m.handleImageRequest({ prompt: 'tiger' }, 'e', { IMAGE_API_KEY: 'whose-key-is-this-0123' });
     expect(out.status).toBe(500);
     expect(out.body).toEqual({ error: 'Image generation is not set up correctly on this server.', code: 'not-configured' });
     expect(f).not.toHaveBeenCalled();
-    expect(JSON.stringify(err.mock.calls)).not.toContain('sk-whose');
+    expect(JSON.stringify(err.mock.calls)).not.toContain('whose-key-is-this-0123');
     err.mockRestore();
   });
 
@@ -301,11 +356,11 @@ describe('4 · the server engine: no key ⇒ Pollinations, a key ⇒ that provid
     vi.stubGlobal('fetch', vi.fn(async () => new Response('slow down', { status: 429, headers: { 'retry-after': '12' } })));
     const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const m = await server();
-    const up = await m.handleImageRequest({ prompt: 'tiger' }, 'g', {});
+    const up = await m.handleImageRequest({ prompt: 'tiger' }, 'g', { POLLINATIONS_API_KEY: 'sk_rate' });
     expect(up.status).toBe(429);
     expect(up.headers['Retry-After']).toBe('12');
     vi.stubGlobal('fetch', vi.fn(async () => png()));
-    const env = { IMAGE_RATE_PER_MINUTE: '2' };
+    const env = { IMAGE_RATE_PER_MINUTE: '2', POLLINATIONS_API_KEY: 'sk_rate' };
     expect((await m.handleImageRequest({ prompt: 'a' }, 'h', env)).status).toBe(200);
     expect((await m.handleImageRequest({ prompt: 'a' }, 'h', env)).status).toBe(200);
     expect((await m.handleImageRequest({ prompt: 'a' }, 'h', env)).status).toBe(429);
@@ -316,6 +371,7 @@ describe('4 · the server engine: no key ⇒ Pollinations, a key ⇒ that provid
 
   it('the Express-style route sends bytes for a picture and JSON for an error', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => png()));
+    vi.stubEnv('POLLINATIONS_API_KEY', 'sk_route_test');
     const m = await server();
     const seen = { code: 0, sent: null as unknown, json: null as unknown };
     const res: Res = {

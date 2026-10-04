@@ -31,7 +31,11 @@ if (isNativeShell(typeof window !== 'undefined' ? window as never : ({} as never
 }
 import { BuildProvider } from './components/ide/BuildContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { offlineQueue, installOfflineQueueFlush } from './lib/offlineQueue';
+import { installOfflineQueueFlush } from './lib/offlineQueue';
+import { initializeObservability, recordError, setAppContext, crashTestTools } from './lib/observability';
+import { productionObservabilityDeps } from './lib/observability/native';
+import { nativePlatformName } from './lib/mobileNative';
+import { nativeAppBuild } from './lib/appBuildId';
 import { SW_UPDATE_MIN_INTERVAL_MS, shouldCheckForUpdate } from './swUpdateCheck';
 import { ConsentBanner } from './components/ConsentBanner';
 import { InviteAcceptGate } from './components/InviteAcceptGate';
@@ -170,32 +174,31 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
   });
 }
 
-// 12.1 — Global error tracking (reports unhandled errors to backend).
-// P3.2 — routed through the offline queue: if a report fails because the device is
-// offline, it is buffered and replayed on reconnect (these endpoints are allowlisted
-// as safe to replay). installOfflineQueueFlush() drives the reconnect replay.
+// 12.1 — Global error tracking, through the ONE reporter (src/lib/observability). It sanitizes every
+// field, drops duplicates and storms, and never throws. In the phone apps an error also becomes a
+// Crashlytics non-fatal; everywhere it reaches `/api/logs/error` (Cloud Error Reporting + admin Errors).
+// P3.2 — the log POST goes through the offline queue, so an offline report is replayed on reconnect.
+initializeObservability(productionObservabilityDeps());
+setAppContext({
+  platform: nativePlatformName(),
+  environment: import.meta.env.PROD ? 'production' : 'development',
+  web_build: __BUILD_TIME__,
+});
+void nativeAppBuild().then((build) => { if (build) setAppContext({ native_build: build }); }).catch(() => {});
 if (import.meta.env.PROD) {
   installOfflineQueueFlush();
   window.addEventListener('error', (e) => {
-    void offlineQueue.postWithFallback('/api/logs/error', JSON.stringify({
-      message: e.message,
-      source: e.filename,
-      line: e.lineno,
-      col: e.colno,
-      stack: e.error?.stack?.slice(0, 2000),
-      url: window.location.href,
-      ts: Date.now(),
-    }));
+    // A failed <img>/<script> load also fires `error` on window, with no Error and no message. That is a
+    // resource miss, not a crash, and reporting it would drown the real ones.
+    if (!e.error && !e.message) return;
+    recordError(e.error ?? e.message, { kind: 'window-error', url: window.location.href });
   });
   window.addEventListener('unhandledrejection', (e) => {
-    void offlineQueue.postWithFallback('/api/logs/error', JSON.stringify({
-      message: String(e.reason),
-      type: 'unhandledrejection',
-      url: window.location.href,
-      ts: Date.now(),
-    }));
+    recordError(e.reason, { kind: 'unhandled-rejection', url: window.location.href });
   });
 }
+const crashTest = crashTestTools();
+if (crashTest) (window as unknown as { __nbaiCrashTest?: typeof crashTest }).__nbaiCrashTest = crashTest;
 
 // 12.3 — Core Web Vitals measurement via PerformanceObserver.
 // P-UX.1 — GDPR/DPDP: this is non-essential telemetry, so it only starts once the user has granted

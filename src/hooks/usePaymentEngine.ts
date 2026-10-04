@@ -19,6 +19,7 @@ import { purchaseRail, type StoreConfig, type PurchaseOutcome } from '../lib/sto
 import { launchPlayPurchase, consumePlayPurchase, pendingPlayPurchases, playBillingAvailable, outcomeForNativeStatus } from '../lib/playBillingNative';
 import { fetchPlatformFeePct, DEFAULT_PLATFORM_FEE_PCT } from '../lib/platformFee';
 import { unlockHeaders } from '../lib/appLock';
+import { recordNonFatal } from '../lib/observability';
 
 export interface UsePaymentEngineDeps {
   /** The signed-in Firebase user (or null when anonymous). Payment actions no-op when null. */
@@ -591,6 +592,8 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
       }
     } catch (err: any) {
       const serverMsg = err?.response?.data?.error;
+      // The HTTP status only — never the order id, the amount or the server's text.
+      recordNonFatal('Payment verification request failed', 'payments', { http_status: Number(err?.response?.status) || 0 });
       addLog(`Error verifying payment for Order #${orderRef}: ${serverMsg || err.message}`, 'error');
       alert(`❌ ${serverMsg || `Error verifying payment: ${err.message}`} Please contact support if money was deducted.`);
     } finally {

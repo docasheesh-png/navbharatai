@@ -311,7 +311,7 @@ stores. So the declaration is derived from the code and the policy together, nev
 | **Health & Fitness** | **NOT collected** | Doctor AI / Pharmacist / First Aid / Maternity are hidden on every native shell — `medicalFeaturesHidden(isNativeApp())`, `src/lib/playCompliance.ts` |
 | **Third-party advertising** | **NONE in the app** | the Meta pixel refuses to load on a native shell — `shouldLoadPixel(… isNative …)` returns false, wired at `src/main.tsx` |
 | **Tracking (ATT prompt)** | **No** — so no `NSUserTrackingUsageDescription` and no ATT prompt | nothing on iOS links activity to third-party data; the pixel is web-only and the Meta **Android** SDK is Android-only |
-| **Diagnostics / Crash data** | **NOT collected** | there is no crash reporter in the app; the Sentry references in this repo are code the BUILD ENGINE writes into *users'* apps, not ours |
+| **Diagnostics / Crash data** | **COLLECTED since the first build containing Firebase Crashlytics (2026-10-04)** — Crash Data + Other Diagnostic Data; purpose **App Functionality**; **linked to the user** (a one-way hash of the account id is attached when signed in); **not used for tracking** | `src/lib/observability/` + `@capacitor-firebase/crashlytics`; Privacy Policy §3.4. ⚠️ Update this App Store answer BEFORE the first such build is submitted. (The Sentry references in this repo are still code the BUILD ENGINE writes into *users'* apps, not ours.) |
 
 **Server-side visit counting** (Policy §11.1) sets no cookie, downloads no script and stores nothing on
 the device; the daily-rotating hash cannot be joined to an account. It is covered by the Usage Data row
@@ -704,3 +704,19 @@ confused again:
 
 One D-U-N-S serves **both stores**: Apple also requires it for an organization account, which would
 move the App Store listing from the admin's personal name to the company's.
+
+
+## Crash reporting and the store declarations (2026-10-04)
+
+The first `.aab` / `.ipa` built after the Crashlytics change collects crash data. **Both store
+declarations must say so before that build is submitted.** A declaration that contradicts the app is a
+policy violation, not a typo.
+
+- **Google Play → App content → Data safety.** Under *App info and performance*, declare **Crash logs**
+  and **Diagnostics** as collected. Not shared, beyond Google as a service provider. Purpose: **App
+  functionality**. Processing is not optional, because crash reporting is part of keeping the app working.
+  Data is encrypted in transit.
+- **App Store Connect → App Privacy.** Declare **Crash Data** and **Other Diagnostic Data**. Mark them as
+  **linked to the user**, because the hashed account id is attached. Mark them **not used for tracking**.
+  Purpose: **App Functionality**.
+- The full architecture is in `docs/CRASHLYTICS.md`.

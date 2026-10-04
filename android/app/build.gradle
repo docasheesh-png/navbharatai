@@ -23,6 +23,10 @@ android {
         versionCode System.getenv("ANDROID_VERSION_CODE") ? System.getenv("ANDROID_VERSION_CODE").toInteger() : 1
         versionName System.getenv("ANDROID_VERSION_NAME") ?: "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        // Crash reporting is collected ONLY from release builds (the Play .aab/.apk). A debug build — the
+        // android-app.yml artifact, a developer's emulator — sends nothing, so test crashes never mix
+        // with real users' data. Read by the meta-data in AndroidManifest.xml.
+        manifestPlaceholders = [crashlyticsCollectionEnabled: "false"]
 
         // ── META (Facebook / Instagram) APP EVENTS ────────────────────────────────────────────
         // WHY THIS EXISTS: Meta can only optimise an ad campaign for an outcome it can observe, and
@@ -98,6 +102,7 @@ android {
     }
     buildTypes {
         release {
+            manifestPlaceholders = [crashlyticsCollectionEnabled: "true"]
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
             // Play Console warning (admin 2026-09-29): "This App Bundle contains native code, and you've
@@ -172,6 +177,8 @@ try {
     def servicesJSON = file('google-services.json')
     if (servicesJSON.text) {
         apply plugin: 'com.google.gms.google-services'
+        // Crashlytics (2026-10-04) — same condition: without the Firebase app id there is nowhere to report.
+        apply plugin: 'com.google.firebase.crashlytics'
     }
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")

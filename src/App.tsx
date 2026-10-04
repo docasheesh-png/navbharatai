@@ -1,5 +1,6 @@
 import UpdateBanner from './components/UpdateBanner';
 import { platformFixRequestPrompt } from './lib/platformFixRequest';
+import { setUserContext, clearUserContext, setCrashKey, setFeatureContext, featureAreaForView, recordNonFatal } from './lib/observability';
 import React, { useState, useRef, useEffect, useLayoutEffect, lazy, Suspense, useMemo, useCallback } from 'react';
 // Native GitHub OAuth return — the deep-link parse and the resume decision, kept pure and tested.
 import { tokenFromDeepLink, ticketFromDeepLink, redeemGithubTicket, resumeOutcome, RESUME_GRACE_MS, GITHUB_CANCELLED_MESSAGE } from './lib/githubOauthReturn';
@@ -465,6 +466,8 @@ export default function App() {
   // instead of switching to the History tab. Which surfaces get it lives in lib/historySurface.ts.
   const [historyPopupOpen, setHistoryPopupOpen] = useState(false);
   useEffect(() => { if (activeView !== 'history') setHistoryInitialFilter('all'); }, [activeView]);
+  // Crash reports say which screen and product area the user was in (view ids only, never content).
+  useEffect(() => { setCrashKey('screen', activeView); setFeatureContext(featureAreaForView(activeView)); }, [activeView]);
   // A popup belongs to the screen it was opened over. Leaving the Free chat with it still open would
   // leave the list hanging over whatever came next, so changing view always dismisses it. Opening the
   // popup does NOT change activeView, so this can never close it the moment it opens.
@@ -1376,6 +1379,10 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoadingUser(false);
+      // Crash reports name the user only by a one-way hash of the uid, and forget it on sign-out. Every
+      // sign-out path (TopNav, App, AppLockGate, signOutEverywhere) ends here with `null`.
+      if (currentUser) setUserContext(currentUser.uid);
+      else clearUserContext();
       if (currentUser) {
         setShowAuth(false);
         // Native push notifications (admin 2026-07-26): register this device's FCM token now that a
@@ -3124,6 +3131,7 @@ export default function App() {
                 // The ticket is single-purpose and short-lived; a failure here is a dead end, not
                 // something to retry silently. Say so and clear the overlay rather than spinning.
                 addLog('GitHub sign-in could not be completed. Please try connecting again.', 'error');
+                recordNonFatal('GitHub sign-in ticket could not be redeemed', 'github');
                 setGithubRedirectingMessage(null);
                 void import('@capacitor/browser').then(({ Browser }) => Browser.close().catch(() => {})).catch(() => {});
                 return;

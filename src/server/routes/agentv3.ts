@@ -22354,7 +22354,7 @@ async function noteBuildOutcome(
                       await sandboxStore.saveSnapshot(workspaceId, url, at, filesHash).catch(() => {});
                       // The paths travel with the copy for THIS build only, so a mismatch can say which
                       // side holds what — see staleDetail. The hash is still what decides.
-                      snapshotTaken = { url, filesHash, filePaths: source ? Object.keys(source) : undefined, fileHashes: source ? fileContentHashes(source) : undefined };
+                      snapshotTaken = { url, filesHash, filePaths: source ? Object.keys(identitySource(source)) : undefined, fileHashes: source ? fileContentHashes(identitySource(source)) : undefined };
                       // THE COPY IS CURRENT, AND THE SURFACE SHOULD KNOW NOW (sandboxLifetime.ts).
                       // Raising the flag lets the idle sweep use the shorter snapshot window; the event
                       // lets the frame move to the real build output the moment the build settles,
@@ -24586,7 +24586,7 @@ async function noteBuildOutcome(
             const before = snapshotConfirmation({
               taken: snapshotTaken,
               persistedHash: workspaceContentHash(identitySource(persisted)),
-              persistedPaths: Object.keys(persisted ?? {}),
+              persistedPaths: Object.keys(identitySource(persisted)),
             });
             if (before.action !== 'restamp') {
               armAdvisoryCap(PREVIEW_COPY_REFRESH_MS + 20_000);
@@ -24627,9 +24627,9 @@ async function noteBuildOutcome(
             const verdict = snapshotConfirmation({
               taken: snapshotTaken,
               persistedHash: workspaceContentHash(identitySource(persisted)),
-              persistedPaths: Object.keys(persisted ?? {}),
-              persistedFileHashes: fileContentHashes(persisted),
-              sandboxFileHashes: sandboxScan && persisted === toSave ? fileContentHashes(sandboxScan) : undefined,
+              persistedPaths: Object.keys(identitySource(persisted)),
+              persistedFileHashes: fileContentHashes(identitySource(persisted)),
+              sandboxFileHashes: sandboxScan && persisted === toSave ? fileContentHashes(identitySource(sandboxScan)) : undefined,
             });
             if (verdict.action === 'restamp') {
               const at = Date.now();

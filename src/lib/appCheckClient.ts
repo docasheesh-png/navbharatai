@@ -15,6 +15,7 @@
 // Everything is dependency-injected so the rules are testable without a browser or a device.
 
 import { isAppCheckProtected } from './appCheckRoutes';
+import { recordNonFatal } from './observability';
 
 export const APP_CHECK_HEADER = 'X-Firebase-AppCheck';
 /** The longest a request waits for a token. A request that waits longer goes without one. */
@@ -183,6 +184,7 @@ export async function installAppCheck(
     return 'installed';
   } catch (err) {
     try { console.warn('[app-check] not started:', err instanceof Error ? err.message : err); } catch { /* ignore */ }
+    recordNonFatal('App Check did not start', 'native', { reason: err instanceof Error ? err.name : 'unknown' });
     return 'failed';
   }
 }

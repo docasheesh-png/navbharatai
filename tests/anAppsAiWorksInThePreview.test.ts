@@ -136,7 +136,8 @@ describe('the switch and the notice', () => {
 describe('wiring', () => {
   const owner = read('src/server/routes/appAiOwner.ts');
   it('every owner route is a STRICT owner check (verified uid owns the workspace)', () => {
-    expect(owner.match(/await ownerOf\(req, workspaceId\)/g)).toHaveLength(3);
+    // 4 since 2026-10-04: the preview's picture route is an owner route too.
+    expect(owner.match(/await ownerOf\(req, workspaceId\)/g)).toHaveLength(4);
     expect(owner).toMatch(/ownedByVerifiedUid\(uid, workspaceId\)/);
   });
   it('the preview counter is separate from the published app and uses the preview cap', () => {

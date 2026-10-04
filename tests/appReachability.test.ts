@@ -162,10 +162,26 @@ describe('the wiring — parsed from the CODE, comments stripped', () => {
     expect(block).toContain('unreachableCodeObservation(');
   });
 
+  /**
+   * ⚠️ UPDATED 2026-10-04, AND THE REASON MATTERS MORE THAN THE EDIT. This pinned the heal's INPUT
+   * spelling — `.filter((s) => !isUnreachable(dispatcher.lastReachability, s.file))` — and passed for
+   * two months while the heal's VERDICT, fourteen lines below it, asked the unfiltered question and
+   * left the build NOT-ready over a file nothing imports (Q-640). A pin that watches one of two
+   * readers is a pin that certifies the bug. The invariant is unchanged and now asked of BOTH; the
+   * spelling moved to the one shared name (`loadedFindings`), which is what makes a third reader
+   * impossible to forget. `tests/aHealThatFixedEverythingIsToldSo.test.ts` carries the census.
+   */
   it('the incomplete-code heal never completes a stub in a file the app does not load', () => {
     const src = strip(readFileSync('src/server/routes/agentv3.ts', 'utf8'));
-    const at = src.indexOf('const stubs = highSeverityAuthenticityIssues(Object.fromEntries(writtenFiles))');
+    const at = src.indexOf('const stubs = loadedFindings(highSeverityAuthenticityIssues(Object.fromEntries(writtenFiles))');
     expect(at).toBeGreaterThan(-1);
-    expect(src.slice(at, at + 200)).toContain('.filter((s) => !isUnreachable(dispatcher.lastReachability, s.file))');
+    expect(src.slice(at, at + 200)).toContain('dispatcher.lastReachability');
+  });
+
+  it('…and its verdict asks the same question its input asked', () => {
+    const src = strip(readFileSync('src/server/routes/agentv3.ts', 'utf8'));
+    const at = src.indexOf('const after = loadedFindings(highSeverityAuthenticityIssues(Object.fromEntries(writtenFiles))');
+    expect(at).toBeGreaterThan(-1);
+    expect(src.slice(at, at + 200)).toContain('dispatcher.lastReachability');
   });
 });

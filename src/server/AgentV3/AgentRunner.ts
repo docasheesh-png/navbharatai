@@ -1087,7 +1087,10 @@ export class AgentRunner {
               if (decision.resume) {
                 styleResumes++;
                 summaryBeforeStyleResume = turn.text.trim() || null;
-                try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: `${agentRole}: ${styleResumeNote(style.missing.length, style.pages.length, (style.offGrid ?? []).length)}`, detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.offGrid ?? []).map((o) => `${o.file}:off-grid(${o.values.join(',')})`)].join(' ') }); } catch { /* a note must never fail a build */ }
+                // A specialist's text is forwarded to the chat too (SubAgent re-emits narration).
+                const styleNotice = handBackNotice('style', turn.text);
+                if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
+                try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: `${agentRole}:${styleResumeNote(style.missing.length, style.pages.length, (style.offGrid ?? []).length)}`, detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.offGrid ?? []).map((o) => `${o.file}:off-grid(${o.values.join(',')})`)].join(' ') }); } catch { /* a note must never fail a build */ }
                 pushPlatformTurn(decision.message);
                 continue;
               }

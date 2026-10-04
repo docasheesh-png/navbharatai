@@ -52,8 +52,32 @@ export function findingLabel(message: unknown): string {
   return short.charAt(0).toLowerCase() + short.slice(1);
 }
 
-const PROCESS_ONLY_CODES = new Set([
+export const PROCESS_ONLY_CODES = new Set([
   'BUILD_OFFER_ACCEPTED', 'ATTACHMENT_RECALLED',
+  // ── OUR OWN RUN, MEASURED IN 2026-10-04's CENSUS ────────────────────────────────────────────────
+  // Eight codes recorded at WARNING severity that were in no registry at all, so `isAppFinding` said
+  // yes to every one: each appeared in the USER's build-health card as a problem with THEIR app and
+  // took 6 points off their app's health score (`buildHealthCard.ts`). None of them is about the app.
+  // `HEAL_NOT_DURABLE` is the clearest proof that this was an omission and not a decision — its own
+  // comment at the recording site reads *"ADMIN-ONLY: the user never sees our repair passes"*, and
+  // `COST_CEILING_REACHED` is called "admin-only" in CLAUDE.md. Both were user-facing regardless.
+  //
+  // 🔒 WHY THIS MOVES NO MONEY. A RED gate flips a build to free only on `shippingIssueCount('error')`
+  // and every code here is a WARNING, so the error count cannot change. What does change is the
+  // gate's CAVEAT count — which is the point, and is what `shippingIssueCount`'s own docblock asks
+  // for: letting our process findings demote a green build to yellow "would make the gate's most
+  // important state unreachable in practice, which is the same as not having it".
+  //
+  // Locked by `tests/aProblemTheUserIsShownCanBeActedOn.test.ts`, which also fails when a NEW code is
+  // recorded at problem severity and left in no registry at all.
+  'COST_CEILING_REACHED',     // our spending ceiling stopped the build — our policy, not their code
+  'FUTILITY_BREAKER',         // our own loop breaker stopped the build
+  'VERIFY_DID_NOT_RUN',       // our fast-lane typecheck could not execute — the class of RUNTIME_UNCHECKED
+  'GREEN_GUARD_UNVERIFIED',   // "could not be opened to check this turn" — the class of PREVIEW_UNVERIFIED
+  'HEAL_NOT_DURABLE',         // our repair wrote twice to one file; the user never sees repair passes
+  'SUMMARY_OFF_TOPIC',        // about OUR closing summary's wording, and already said above the summary
+  'DATABASE_OFFER_AT_START',  // we OFFERED (or created) a database — a thing we did for them, not a fault
+  'TIME_TO_FIRST_CALL',       // our setup time before the first model call (it was in NEVER_SUGGEST only)
   // Our template seeding and a user's Stop (autopsy 31254f9a): facts about the ENGINE's run, never the app.
   'GOLDEN_SCAFFOLD_SKIPPED', 'LLM_CALL_STOPPED', 'SIMPLE_BUILD_STOPPED', 'DOMAIN_KNOWLEDGE', 'DURABLE_HOLDS_ONLY_STARTER',
   'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',

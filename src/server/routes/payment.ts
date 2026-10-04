@@ -55,7 +55,17 @@ export function isValidCashfreeSignature(opts: {
   const v2 = crypto.createHmac('sha256', secret).update(timestamp + rawBody).digest('base64');
   const v1Base64 = crypto.createHmac('sha256', secret).update(rawBody).digest('base64');
   const v1Hex = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-  return signature === v2 || signature === v1Base64 || signature === v1Hex;
+  // CONSTANT-TIME (forensic audit 2026-10-04): `===` returns as soon as a character differs, so the time a
+  // rejection takes leaks how much of a guessed signature was right. Each candidate is compared in full.
+  return [v2, v1Base64, v1Hex].some((expected) => timingSafeStringEqual(signature, expected));
+}
+
+/** Equal-length strings compared in constant time; different lengths are simply unequal. */
+export function timingSafeStringEqual(a: string, b: string): boolean {
+  const x = Buffer.from(String(a), 'utf8');
+  const y = Buffer.from(String(b), 'utf8');
+  if (x.length !== y.length) return false;
+  return crypto.timingSafeEqual(x, y);
 }
 
 /**

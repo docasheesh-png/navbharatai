@@ -88961,3 +88961,13 @@ err)` became `console.error()`, deleting a working error log. Recall went up too
 |---|---|---|---|---|
 | Q-155 `withheldSecretNames` never shown | written and tested with the scoping change (2026-08-17), never called | an explanation built and never shown | `loadUserVaultScope` (one vault read → injected keys + withheld names); the build records `SECRETS_WITHHELD` with names only and the Settings path | `tests/aWithheldKeyIsNamed.test.ts` — names, no values, list capped; source guards on the one read; census: every `secretScope` export is used by live code |
 
+### 2026-10-04 — Q-147: the app's frame is not its page
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-147 chrome-only render read as rendered | `analyzePreviewHtml` judged visible text, which the nav supplies; sibling `PageRouteCheck.classifyPage` judged body text the same way | the frame judged as the page | grace for an empty main inside the shared paint deadline (no capture is slower than before); a main region still LITERALLY empty in a browser capture that saw paint is named in both checks; one predicate `MAIN_REGION_EMPTY_JS` | `tests/onlyTheFrameRendered.test.ts` — precision (canvas, spinner, image, empty-state never accused; curl / unmarked captures never judged), real browser for both scripts, each half reverted → fails |
+
+The precision trap, measured before shipping: stopping at first paint photographs `<main>` empty while a page
+fetches (`if (!data) return null`), so the verdict alone would have accused working apps. The grace is what
+makes the verdict safe; it is bounded by the existing paint deadline so the 30 s script timeouts still hold.
+

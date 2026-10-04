@@ -222,3 +222,15 @@ export default function App() {
     expect(journeys[0].fields.some((f) => f.value.includes('nbai-mark-1'))).toBe(false);
   });
 });
+
+describe('8 · the user\'s request is remembered whole, up to what the planner reads', () => {
+  it('the request cap is at least the planner\'s, and a long request survives memory', async () => {
+    const { REQUEST_EPISODE_MAX, WorkspaceMemory } = await import('../src/server/AgentV3/WorkspaceMemory');
+    const { PLANNING_EARLIER_REQUEST_MAX } = await import('../src/server/AgentV3/planningRequest');
+    expect(REQUEST_EPISODE_MAX).toBeGreaterThanOrEqual(PLANNING_EARLIER_REQUEST_MAX);
+    const mem = new WorkspaceMemory();
+    mem.recordRequest(PROMPT, undefined, 'build');
+    expect(mem.recentRequestTurns(1)[0].text).toBe(PROMPT);
+    expect(PROMPT.length).toBeGreaterThan(2000);
+  });
+});

@@ -14,13 +14,15 @@ import type { Request, Response, NextFunction } from 'express';
 
 export const SERVER_ONLY_ARTIFACTS: readonly string[] = Object.freeze(['server.cjs', 'server.cjs.map']);
 
-/** Is this request path one of the server's own artifacts (or a precompressed copy of one)? PURE. */
+/** Is this request path one of the server's own artifacts, any source map, or a precompressed copy of one? PURE. */
 export function isServerOnlyArtifactPath(rawPath: string): boolean {
   let p = rawPath;
   try { p = decodeURIComponent(rawPath); } catch { /* a malformed escape is not one of our files */ }
   const norm = path.posix.normalize(p.replace(/\\/g, '/')).toLowerCase();
   const base = path.posix.basename(norm).replace(/\.(?:br|gz)$/, '');
-  return SERVER_ONLY_ARTIFACTS.includes(base);
+  // Any source map, too: a map is for reading an error on OUR side, never something a visitor downloads.
+  // Decided on the DECODED name — `/server.cjs.m%61p` is the same file to the static handler.
+  return SERVER_ONLY_ARTIFACTS.includes(base) || base.endsWith('.map');
 }
 
 /** Express middleware: answer 404 for a server artifact before any static handler can serve it. */

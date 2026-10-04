@@ -1,8 +1,8 @@
 import type { Express, Request, Response } from 'express';
 import { errorTracker } from '../observability/ErrorTracker';
+import { clientAddress } from '../lib/clientAddress';
 import { recordAnalyticsEvent, getFunnel } from '../lib/AnalyticsPipeline';
 import { sendSafeError } from '../lib/httpError';
-import { clientAddress } from '../lib/clientAddress';
 
 /**
  * Registers self-contained telemetry/analysis routes extracted from the

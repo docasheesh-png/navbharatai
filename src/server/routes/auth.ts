@@ -1,11 +1,11 @@
 import type { Express, Request, Response } from 'express';
 import { verifyFirebaseToken, getAdminAuthForPhone, getAdminAuthForExchange } from '../lib/authMiddleware';
+import { clientAddress } from '../lib/clientAddress';
 import { exchangePhoneIdToken } from '../lib/phoneTokenExchange';
 import { otpSendDecision, phoneOwnerUid, phoneForLog, type OtpPurpose } from '../lib/phoneGate';
 import { consumeDurableRate } from '../lib/DurableRateLimit';
 import { normalizePhoneForGift } from '../lib/giftIdentity';
 import { parseOtpOutcome, recordOtpOutcome } from '../lib/otpOutcomes';
-import { clientAddress } from '../lib/clientAddress';
 
 /**
  * Authentication routes extracted from the server.ts monolith (Phase 1).

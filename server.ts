@@ -6,13 +6,15 @@ import crypto from 'crypto';
 import net from 'net';
 import rateLimit from 'express-rate-limit';
 import { corsMiddleware } from './src/server/lib/cors';
-import { trustedProxyHops, identityRateKey, addressRateKey } from './src/server/lib/clientAddress';
+import { TRUSTED_PROXY_HOPS } from './src/server/lib/clientAddress';
 import { denyServerOnlyArtifacts } from './src/server/lib/serverOnlyArtifacts';
 // Side-effect import: every axios error in this process loses its credential headers (P1, 2026-10-04).
 import './src/server/lib/axiosCredentialRedaction';
 import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
 import { spaFallbackShouldDefer } from './src/server/lib/spaFallback';
 import { noteWebsiteVisit } from './src/server/lib/ownAudience';
+// The rate-limit keys (forensic audit 2026-10-04): an address string, or a verified uid — never a request.
+import { identityRateKey, addressRateKey } from './src/server/lib/clientAddress';
 import { registerTelemetryRoutes } from './src/server/routes/telemetry';
 import { registerTeamRoutes } from './src/server/routes/team';
 import { registerShareRoutes } from './src/server/routes/share';
@@ -417,11 +419,12 @@ setInterval(() => {
   const PORT = Number(process.env.PORT || 8080);
   // aiRouter — shared singleton from src/server/lib/aiRouter.ts (Phase 1, AI-core).
 
-  // Trust proxy for correct req.protocol, req.get('host') and req.ip behind Cloud Run's front end.
-  // 🔒 A HOP COUNT, NEVER `true` (forensic audit 2026-10-04): `true` made `req.ip` the leftmost
-  // X-Forwarded-For entry — the one the CALLER writes — so every per-IP rate limit below was bypassed by
-  // sending a different header on each request. See clientAddress.ts.
-  app.set('trust proxy', trustedProxyHops());
+  // Trust EXACTLY ONE proxy hop — Google's Cloud Run front end (navbharatai.com resolves to it). With
+  // `true`, req.ip was the FIRST X-Forwarded-For entry, which the caller writes, so every per-address
+  // limit (admin login lockout, OTP sends, the bot guard, auth rate limits) could be walked past with one
+  // header. One hop makes req.ip the address Google saw — the same answer as clientAddress().
+  // req.protocol / req.hostname still come from that trusted hop. See src/server/lib/clientAddress.ts.
+  app.set('trust proxy', TRUSTED_PROXY_HOPS);
 
     app.use(express.json({
       limit: '30mb',  // room for vision attachments (images/PDFs as base64)

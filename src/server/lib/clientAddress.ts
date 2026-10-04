@@ -1,53 +1,30 @@
-// The address a request REALLY came from — the one place this server decides it.
+// THE CALLER'S ADDRESS, READ FROM THE ONE PLACE A CALLER CANNOT WRITE (security checklist, 2026-10-04).
 //
-// 🔴 WHY (forensic audit 2026-10-04). `server.ts` ran `app.set('trust proxy', true)`. Under `true`, Express
-// believes EVERY entry of X-Forwarded-For, so `req.ip` is the LEFTMOST entry — the one the caller wrote.
-// Every per-IP limit in the server keyed on it (chat 20/min, payment 5/min, admin login 5/min, the
-// adaptive bot guard, the OTP and phone-exchange buckets), so a script that sent a fresh
-// `X-Forwarded-For: <random>` on each request was a fresh visitor every time and none of those limits
-// applied to it. Five more places read the header by hand and took the same leftmost entry. Our own
-// app scanner (`SecurityAnalysis.ts`) flags this exact line in the apps users build.
+// navbharatai.com resolves to Google's Cloud Run front end (216.239.38.21), which APPENDS the address it
+// saw to X-Forwarded-For. So in "a, b, c" only the LAST entry was written by Google; everything before
+// it is whatever the caller sent. Reading the FIRST entry — which is what `req.ip` returned while the
+// server ran `app.set('trust proxy', true)`, and what three routes parsed by hand — let anyone choose
+// their own address with one header, and so walk past every per-address limit: the admin login
+// lockout, the OTP send limit (real SMS money), the adaptive bot guard and the auth rate limits.
 //
-// THE FACT IT RESTS ON (already relied on by `guestDailyQuota.ts`, live since 2026-09-27): Cloud Run's
-// front end APPENDS the address it saw to X-Forwarded-For. So with ONE trusted hop the LAST entry is the
-// one a caller cannot write. `trust proxy` is set to that same hop count, so `req.ip`, express-rate-limit
-// and this helper all agree.
+// `guestDailyQuota.ts` found this on 2026-09-27 and fixed it for itself only. This module is that fix
+// made the ONE definition, and `server.ts` now sets `trust proxy` to exactly one hop so `req.ip` gives
+// the same answer for every caller that reads it (express-rate-limit included).
 //
-// `TRUST_PROXY_HOPS` (0–5, default 1) exists for one reason only: if a load balancer or CDN is ever put
-// IN FRONT of Cloud Run, it adds a hop, and the right answer moves one entry left. Set it then — never to
-// "trust everything".
+// PURE.
 
 import type { Request } from 'express';
 import { ipKeyGenerator } from 'express-rate-limit';
 
-export const DEFAULT_TRUSTED_PROXY_HOPS = 1;
-const MAX_TRUSTED_PROXY_HOPS = 5;
+/** How many proxies sit between the internet and this server: Google's front end, and nothing else. */
+export const TRUSTED_PROXY_HOPS = 1;
 
-/** How many proxies in front of this server are trusted to append to X-Forwarded-For. */
-export function trustedProxyHops(raw: string | undefined = process.env.TRUST_PROXY_HOPS): number {
-  if (raw === undefined || raw.trim() === '') return DEFAULT_TRUSTED_PROXY_HOPS;
-  const n = Number(raw.trim());
-  return Number.isInteger(n) && n >= 0 && n <= MAX_TRUSTED_PROXY_HOPS ? n : DEFAULT_TRUSTED_PROXY_HOPS;
-}
-
-/**
- * The caller's address, read exactly as Express reads `req.ip` under `trust proxy = hops`: the socket
- * is the first trusted hop, each further trusted hop consumes one X-Forwarded-For entry from the RIGHT,
- * and the first entry nobody trusted is the answer. A caller can prepend anything; it is never read.
- */
-export function clientAddress(
-  req: Pick<Request, 'headers' | 'socket'>,
-  hops: number = trustedProxyHops(),
-): string {
-  const socket = req.socket?.remoteAddress || '';
-  if (hops <= 0) return socket || 'unknown';
-  const header = req.headers?.['x-forwarded-for'];
-  const fwd = (Array.isArray(header) ? header.join(',') : String(header ?? ''))
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (fwd.length === 0) return socket || 'unknown';
-  return fwd[Math.max(0, fwd.length - hops)];
+/** The address the trusted front end saw. Never an entry the caller could have written. */
+export function clientAddress(req: Pick<Request, 'headers' | 'socket'>): string {
+  const raw = req.headers['x-forwarded-for'];
+  const header = Array.isArray(raw) ? raw.join(',') : String(raw ?? '');
+  const entries = header.split(',').map((s) => s.trim()).filter(Boolean);
+  return entries[entries.length - 1] || req.socket?.remoteAddress || 'unknown';
 }
 
 /**

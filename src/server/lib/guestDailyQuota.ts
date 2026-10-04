@@ -28,10 +28,10 @@
 // locking visitors out of a free chat. The per-minute and per-hour limiters stay in force regardless.
 
 import type { Request, Response, NextFunction } from 'express';
+import { clientAddress } from './clientAddress';
 import { createHash } from 'crypto';
 import { doc, getServerDb, runTransaction } from './serverDb';
 import { verifyFirebaseIdentity } from './authMiddleware';
-import { clientAddress } from './clientAddress';
 
 /** The header the app sends with its anonymous device id. */
 export const GUEST_ID_HEADER = 'x-nb-guest';
@@ -74,11 +74,13 @@ export function readGuestId(value: unknown): string | null {
 }
 
 /**
- * The address this request came from, for the backstop only — the server's ONE reading of it
- * (`clientAddress.ts`): Cloud Run's front end APPENDS the address it saw to X-Forwarded-For, so the LAST
- * entry is the one a caller cannot write.
+ * The address this request came from, for the backstop only. Cloud Run's front end APPENDS the address
+ * it saw to X-Forwarded-For, so the LAST entry is the one a caller cannot write; the first entry, which
+ * `req.ip` returns under `trust proxy`, is whatever the caller claimed.
  */
 export function requestAddress(req: Pick<Request, 'headers' | 'socket'>): string {
+  // The one definition lives in clientAddress.ts (security checklist 2026-10-04); kept under this name
+  // because callers and tests already import it from here.
   return clientAddress(req);
 }
 

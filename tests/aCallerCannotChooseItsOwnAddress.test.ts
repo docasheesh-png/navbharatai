@@ -12,7 +12,7 @@ import rateLimit from 'express-rate-limit';
 import type { AddressInfo } from 'node:net';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { clientAddress, trustedProxyHops, DEFAULT_TRUSTED_PROXY_HOPS, addressRateKey, identityRateKey } from '../src/server/lib/clientAddress';
+import { clientAddress, TRUSTED_PROXY_HOPS, addressRateKey, identityRateKey } from '../src/server/lib/clientAddress';
 import { requestAddress } from '../src/server/lib/guestDailyQuota';
 
 const req = (xff: string | string[] | undefined, socket = '10.1.2.3') =>
@@ -28,11 +28,6 @@ describe('clientAddress reads the entry the caller cannot write', () => {
     expect(clientAddress(req(undefined))).toBe('10.1.2.3');
   });
 
-  it('two trusted hops move the answer one entry left; zero trusts nothing but the socket', () => {
-    expect(clientAddress(req('6.6.6.6, 203.0.113.9, 35.191.0.1'), 2)).toBe('203.0.113.9');
-    expect(clientAddress(req('6.6.6.6, 203.0.113.9'), 0)).toBe('10.1.2.3');
-  });
-
   it('a header split over several lines is one list', () => {
     expect(clientAddress(req(['6.6.6.6', '203.0.113.9']))).toBe('203.0.113.9');
   });
@@ -41,18 +36,14 @@ describe('clientAddress reads the entry the caller cannot write', () => {
     expect(requestAddress(req('6.6.6.6, 203.0.113.9'))).toBe(clientAddress(req('6.6.6.6, 203.0.113.9')));
   });
 
-  it('TRUST_PROXY_HOPS: a hop count only — "true", negatives and junk fall back to one hop', () => {
-    expect(trustedProxyHops(undefined)).toBe(DEFAULT_TRUSTED_PROXY_HOPS);
-    expect(DEFAULT_TRUSTED_PROXY_HOPS).toBe(1);
-    expect(trustedProxyHops('2')).toBe(2);
-    expect(trustedProxyHops('0')).toBe(0);
-    for (const bad of ['true', '-1', '1.5', '99', 'all', '']) expect(trustedProxyHops(bad)).toBe(1);
+  it('exactly one trusted hop: Google\'s front end, and nothing else', () => {
+    expect(TRUSTED_PROXY_HOPS).toBe(1);
   });
 });
 
 describe('a real Express app with the server\'s setting and limiter', () => {
   const app = express();
-  app.set('trust proxy', trustedProxyHops());
+  app.set('trust proxy', TRUSTED_PROXY_HOPS);
   const limiter = rateLimit({ windowMs: 60_000, max: 2, keyGenerator: (r) => addressRateKey(r), standardHeaders: true, legacyHeaders: false });
   // The server's identity key with a stub verifier: a token "good-<uid>" is that account, anything else is not.
   const verify = async (r: express.Request) => { const h = r.headers.authorization ?? ''; return h.startsWith('Bearer good-') ? h.slice(12) : null; };
@@ -141,6 +132,6 @@ describe('census: one place decides the caller\'s address', () => {
       .filter((f) => !NOT_OUR_REQUESTS.has(f))
       .filter((f) => /\.set\(\s*['"`]trust proxy['"`]\s*,\s*true\b/.test(readFileSync(f, 'utf8')));
     expect(offenders).toEqual([]);
-    expect(readFileSync('server.ts', 'utf8')).toMatch(/app\.set\('trust proxy', trustedProxyHops\(\)\)/);
+    expect(readFileSync('server.ts', 'utf8')).toMatch(/app\.set\('trust proxy', TRUSTED_PROXY_HOPS\)/);
   });
 });

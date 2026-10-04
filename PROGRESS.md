@@ -88216,3 +88216,10 @@ At publish the scanner reads the whole bundle, where "report" is common (a foote
 an offending page refused there. The other nine scripts have no protective words yet → new row Q-344 (🟡 BLOCKED on a
 native reader's word list).
 
+## 2026-10-04 — Queue pruned after #3491 merged (admin merged it 13:52 UTC)
+
+#3491 carried autopsy d798ddd3 (Q-300..307) and the pending items (Q-284, Q-274, Q-304 with Q-063 / Q-257, and
+Q-194, Q-195, Q-272, Q-286 resolved as not defects). All sixteen rows are now ✅ and are removed from the open table
+in `BUILD_REPORT_QUEUE.md`; their ledgers stay in the two entries above. **Watch on the next real builds:**
+`PYTHON_BACKEND_UP` / `_NOT_UP` on a Python-backed app, the `SCRIPT_REQUEST_AS_WEB_APP` start line, and the first
+write-time typecheck on a fresh starter dropping well under 15 s. Still BLOCKED on evidence: Q-193, Q-273, Q-275.

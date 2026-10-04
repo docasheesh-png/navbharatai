@@ -69,7 +69,7 @@ describe('and the build report names the waste, so the next one can judge the nu
     expect(line).toContain('55 file reads');
     expect(line).toContain('9 distinct');
     expect(line).toContain('46 of them (84%)');
-    expect(line).toContain('12× server/backupJob.ts');
+    expect(line).toContain('server/backupJob.ts (11 unchanged of 12 reads)');
   });
 
   it('stays silent on ordinary work — a couple of re-reads is not a finding', () => {

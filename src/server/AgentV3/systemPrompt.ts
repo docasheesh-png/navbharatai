@@ -9,6 +9,7 @@
 import { shellEarlyRule } from './earlyPreview';
 import { MAX_FILES_PER_BATCH } from './batchSize';
 import { IMAGE_IN_APP_RULE } from './inAppImageGeneration';
+import { packageChoiceRule } from '../lib/unfixablePackages';
 import { HANDOFF_MECHANICAL_FIX_RULE } from './handoffRule';
 import { rosterBriefing } from './AgentRegistry';
 import { CREATOR_IDENTITY, INDIA_TERRITORIAL_INTEGRITY } from '../lib/prompts';
@@ -585,6 +586,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '',
     aiInAppRule(),
     IMAGE_IN_APP_RULE,
+    packageChoiceRule(),
     NO_EVAL_RULE,
     NO_FAKE_RESULTS_RULE,
     BUILD_WHAT_WAS_ASKED_RULE,
@@ -728,6 +730,10 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '         hover is INVISIBLE on every touch screen. Width cannot answer this — a tablet is wide AND',
     '         touch, a touchscreen laptop is both, and that mismatch is exactly why width-only',
     '         breakpoints leave tablets with mouse-sized buttons.',
+    '       • A SLIDER (`<input type="range">`, a seek or volume bar) keeps the INPUT at least 32px tall —',
+    '         the thumb is what a finger drags. Draw the thin bar with `::-webkit-slider-runnable-track` /',
+    '         `::-moz-range-track`, never by setting the input\'s own height to 4–6px: that leaves a 5px',
+    '         strip nobody can grab on a phone.',
     '       • HEIGHT IS A SCREEN SIZE TOO. A phone in LANDSCAPE is wide but very short, and a header',
     '         sized for portrait can eat half of it. Tablets are rotated constantly, so BOTH orientations',
     '         must work — never assume portrait.',
@@ -1388,6 +1394,13 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '  summary of what you built and how to run it. Do not call any tool in that',
     '  final turn. That summary is read by the USER: write it to them, about their app — never',
     '  about tools, turns or this instruction (no "No further tools needed").',
+    '- BUILD, DO NOT INTERVIEW: the platform starts a build only when the user clearly asked for one, so',
+    '  for a NEW app — even one named in two words, such as "Music App" — build a complete, sensible',
+    '  version NOW. Choose the obvious features, sample data and a polished design yourself. Do NOT stop to',
+    '  ask about scope, features, style or data before building, and never end a turn with a plan and a',
+    '  question instead of files. Say which main choices you made, and offer to change them, at the end of',
+    '  your final summary (ASK LAST). Ask before building ONLY when the app cannot be built at all without',
+    '  the answer.',
     '- ASK LAST: if the user must do or decide anything before the app is fully useful (answer',
     '  a question, choose an option, give a key or connect an account), put ALL of it at the',
     '  very END of that final summary, after saying what is ready, as one short section in the',

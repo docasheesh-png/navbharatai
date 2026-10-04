@@ -4026,11 +4026,16 @@ export class ToolDispatcher {
         const unchanged = prior !== undefined && prior.content === full;
         const nothingWritten = prior !== undefined && prior.writeSeq === this._writeSeq;
         const stalls = unchanged && nothingWritten ? (prior?.stalls ?? 0) + 1 : 0;
-        const unchangedRereads = (prior?.unchangedRereads ?? 0) + (unchanged ? 1 : 0);
-        this._readLedger.set(ledgerKey, { count: readCount, content: full, writeSeq: this._writeSeq, stalls, unchangedRereads });
         const own = this._ownReads.get(ledgerKey);
         const ownCount = (own?.count ?? 0) + 1;
         const ownUnchanged = own !== undefined && own.content === full;
+        // 🔴 A SPECIALIST'S FIRST READ IS NOT A WASTED RE-READ (autopsy 3f959fde, 2026-10-01). The report
+        // counted a file "re-read unchanged" whenever ANY agent had read it before — so the Frontend
+        // specialist's first look at `src/App.tsx`, which it needed because a child starts with an empty
+        // context, was billed in REPEATED_READS as a step that "buys nothing". Waste is THIS agent reading
+        // what it already holds; the shared ledger keeps counting every read for the totals.
+        const unchangedRereads = (prior?.unchangedRereads ?? 0) + (ownUnchanged && !(ownCount === 2 && own?.handed === true) ? 1 : 0);
+        this._readLedger.set(ledgerKey, { count: readCount, content: full, writeSeq: this._writeSeq, stalls, unchangedRereads });
         const ownStalls = ownUnchanged && own.writeSeq === this._writeSeq ? own.stalls + 1 : 0;
         this._ownReads.set(ledgerKey, { count: ownCount, content: full, writeSeq: this._writeSeq, stalls: ownStalls });
         // A file handed over in the task, read for the first time, is a copy the agent HOLDS — but it did

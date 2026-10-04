@@ -35,6 +35,7 @@ import { asPlatformRequest } from './platformRequest';
 import { repairClaimWithoutChange, repairClaimNote, NO_CHANGE_LINE } from './repairClaim';
 import { streamThinkingToChat } from './thinkingStream';
 import { PROMPT_PREVIEW_SEPARATOR } from './promptPreviewShape';
+import { answerAfterPlanning } from './answerAfterPlanning';
 
 /**
  * AgentRunner — the native tool-use loop (RC-1), the heart of P1.
@@ -894,6 +895,15 @@ export class AgentRunner {
           }
         } catch { /* a meter must never be able to fail a build */ }
 
+        // A reply turn that opens with the model's notes to itself ("Now final summary. No more
+        // tools. … Proceed.") followed by a gap and the real answer shows only the answer
+        // (answerAfterPlanning.ts, autopsy 3f959fde). Applied before the narration and the summary
+        // read the text, so both see the same answer. The diagnostics above keep the raw text.
+        if (turn.toolUses.length === 0) {
+          const answer = answerAfterPlanning(turn.text);
+          if (answer !== turn.text) turn = { ...turn, text: answer };
+        }
+
         usage.inputTokens += turn.usage.inputTokens;
         usage.outputTokens += turn.usage.outputTokens;
         usage.cacheCreationInputTokens += turn.usage.cacheCreationInputTokens;
@@ -992,7 +1002,10 @@ export class AgentRunner {
           // WHITE-LABEL LAW: the honest sentence names OUR limit, never a vendor, a model or a ceiling
           // the user cannot act on. "The model replied without building" was false here in the one way
           // that matters — nothing replied — and it is the sentence that sent the user to buy credits.
-          let modelAnswer: string | undefined;
+          // The model's own words when the summary is about to carry ours as well (autopsy 0473628e): the
+          // nothing-built sentence below is appended AFTER the model's answer, so a reader that asks "did the
+          // model ask the user something?" of the summary reads OUR last line and never the model's question.
+          let modelAnswer: string | undefined = builtNothing && !starvedTurn && turn.text.trim() ? turn.text.trim() : undefined;
           let summary = builtNothing
             ? (starvedTurn
                 ? 'The build could not start writing files: NavBharatAI\u2019s engine ran out of room to answer before it began. '

@@ -71,6 +71,10 @@ const INVITATION_TO_REPLY = new RegExp(
   'iu',
 );
 
+/** A closing line that asks the user to answer, anywhere in it (the closing section must hold a question). */
+const REPLY_REQUEST =
+  /^(?:please\s+)?(?:reply|answer|respond|write back)\b|\b(?:let (?:me|us) know|tell me)\b|\b(?:once|when|as soon as) you (?:reply|answer|confirm|tell me|let me know|choose|pick|decide)\b/iu;
+
 function withoutTrailingDecoration(line: string): string {
   let s = line;
   for (let i = 0; i < 4; i++) {
@@ -107,6 +111,14 @@ export function turnAskedTheUser(text: string | null | undefined): boolean {
   // A question mark in the last line with only an invitation to reply after it — or a last line that
   // IS only that invitation, right after a line ending in a question — is the turn handing the
   // decision back. *"Ready? Let's build it."* is still a stall: what follows its question is an intent.
+  // 🔴 A CLOSING THAT ASKS FOR A REPLY, AFTER QUESTIONS, IS A QUESTION (autopsy 0473628e). "…2. Should I start
+  // with sample tracks, or upload your own? (If uploads need saving, connect a database.)\n\nReply with your
+  // must-haves and I'll get building right away." The question sits two lines up, behind a parenthetical, and
+  // the closing line asks for a reply without ending on one of the phrases above, so the turn was read as a
+  // stall and nudged into a build, while the same engine's previous turn, which ended on its question, was
+  // left as an answer. A reply request anywhere in the closing line counts, provided the closing section
+  // (the six lines before it) asks something. "Ready? Let's build it." asks for nothing and stays a stall.
+  if (REPLY_REQUEST.test(tail) && lines.slice(-7, -1).some((l) => /[?？؟]/.test(l))) return true;
   if (!INVITATION_TO_REPLY.test(tail)) return false;
   if (/[?？؟]/.test(tail)) return true;
   const before = lines[lines.length - 2];

@@ -218,6 +218,63 @@ export function computeCreditedWallet(
  * Verifies a Cashfree order (or simulates when keys are placeholder), then
  * credits the user's wallet/tokens idempotently.
  */
+/** A wallet document for an account that has never had one. */
+function newWalletFor(userId: string): Record<string, any> {
+  return {
+    userId,
+    unlockedModes: [],
+    tokenBalance: 0,
+    totalTokensPurchased: 0,
+    totalTokensUsed: 0,
+    totalMoneySpent: 0,
+    lastRechargeAt: null,
+    walletLedger: [],
+    remaining_balance: 0,
+    total_balance: 0,
+    total_output_tokens_used: 0,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * A GIFT CODE product: mint the code, credit NOBODY's wallet, and return.
+ *
+ * 🔴 THE BUYER IS NOT CREDITED, and that is the product rather than an omission. They bought a code for
+ * somebody else; crediting their own balance as well would hand out the money twice. `balanceAdded` was
+ * written as 0 at order creation for the same reason.
+ *
+ * Runs AFTER the order was claimed (PENDING→SUCCESS), and again on any later call that finds the order
+ * claimed but carrying no code (Q-613): `mintCodeForOrder` is idempotent on the order id, so a resumed
+ * mint returns the same code and never mints twice — the webhook, the redirect return and the sign-in
+ * reconcile sweep can all arrive for one order.
+ *
+ * ⚠️ THE FACE VALUE COMES FROM THE TX DOC, which the SERVER wrote from its own arithmetic at order
+ * creation — never from a client field.
+ */
+async function fulfilGiftOrder(db: any, txRef: any, orderId: string, txData: any): Promise<{ success: boolean; data?: any; error?: string }> {
+  const face = Number((txData as { giftFaceInr?: unknown }).giftFaceInr);
+  if (!Number.isFinite(face) || face <= 0) {
+    console.error(
+      `[GIFT] Order ${orderId} paid ₹${txData.amountPaid} but carries no face value — NOTHING minted; ` +
+      `this payment needs a manual refund.`,
+    );
+    try { await updateDoc(txRef, { fulfilmentError: 'gift_face_missing', fulfilledAt: new Date().toISOString() }); } catch { /* logged above */ }
+    return { success: false, error: 'That gift purchase could not be completed. Please contact support for a refund.' };
+  }
+  const code = await mintCodeForOrder(db, {
+    orderId,
+    buyerUid: txData.userId,
+    faceInr: face,
+    paidInr: Number(txData.amountPaid) || 0,
+    feeInr: recordedPlatformFee(txData),
+    nowMs: Date.now(),
+    randomBytes: (n: number) => new Uint8Array(randomBytes(n)),
+  });
+  try { await updateDoc(txRef, { giftCode: code, fulfilledAt: new Date().toISOString() }); } catch { /* the code exists; the audit note is best-effort */ }
+  // `buyerUid` is for the route's owner check only; `verify-payment` strips it before answering (Q-630).
+  return { success: true, data: { giftCode: code, giftFaceInr: face, paidInr: Number(txData.amountPaid) || 0, buyerUid: txData.userId } };
+}
+
 export async function verifyPaymentInternal(orderId: string): Promise<{ success: boolean; data?: any; error?: string }> {
   const db = getDb() as any;
   if (!db) return { success: false, error: 'Database not initialized' };
@@ -231,6 +288,12 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
 
     const txData = txSnap.data();
     if (txData.paymentStatus === 'SUCCESS') {
+      // A GIFT order claimed but never minted (the process died between the claim and the mint) is
+      // finished here, not reported as done: `mintCodeForOrder` is idempotent on the order id, so the
+      // webhook's retry or the buyer's next check completes it (Q-613, forensic audit 2026-10-04).
+      if (String(txData.productType || '') === 'gift_code' && !txData.giftCode && !txData.fulfilmentError) {
+        return fulfilGiftOrder(db, txRef, orderId, txData);
+      }
       return { success: true, data: { alreadyProcessed: true, balanceAdded: txData.balanceAdded } };
     }
 
@@ -281,12 +344,46 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
       }
     }
 
+    if (isPaid && !['professional_pass', 'gift_code'].includes(String(txData.productType || ''))) {
+      // 🔴 ONE TRANSACTION FOR THE CLAIM AND THE CREDIT (Q-613, forensic audit 2026-10-04). They used to be
+      // two: the PENDING→SUCCESS flip committed, THEN the wallet credit ran. A process that died between
+      // them (a deploy, an OOM, a lost Firestore call) left the order SUCCESS with nothing credited — and
+      // every later call (the webhook's retry, the buyer's check, the reconcile sweep, which reads only
+      // PENDING) answered "already processed". The customer had paid and would never be credited. Now both
+      // writes commit together or not at all, so a retry always finds the order still PENDING and finishes
+      // it. Exactly-once is unchanged: a concurrent caller re-reads SUCCESS inside its own transaction.
+      // (SECURITY C4: tokens still derive from the VERIFIED paid amount inside computeCreditedWallet.)
+      const walletRef = doc(db, 'user_token_wallets', txData.userId);
+      const credited = await runTransaction(db, async (tx: any) => {
+        const snap = await tx.get(txRef);
+        if (!snap.exists() || snap.data().paymentStatus === 'SUCCESS') return null; // claimed by a concurrent call
+        const walletSnap = await tx.get(walletRef);
+        const walletData = walletSnap.exists() ? walletSnap.data() : newWalletFor(txData.userId);
+        const { wallet } = computeCreditedWallet(walletData, snap.data() as WalletCreditTx, new Date().toISOString());
+        tx.update(txRef, { paymentStatus: 'SUCCESS', paymentReference: cfOrderIdRef });
+        tx.set(walletRef, wallet);
+        return wallet;
+      });
+      if (!credited) {
+        return { success: true, data: { alreadyProcessed: true, balanceAdded: txData.balanceAdded } };
+      }
+      return {
+        success: true,
+        data: {
+          balanceAdded: txData.balanceAdded,
+          currentBalance: credited.remaining_balance,
+          tokenBalance: credited.tokenBalance,
+        },
+      };
+    }
+
     if (isPaid) {
       // SECURITY (H1): atomically claim the PENDING→SUCCESS flip so N concurrent /verify-payment calls
       // on ONE genuinely-paid order can't each credit the wallet (a TOCTOU double-spend — the old
       // getDoc-status → updateDoc → credit had a race window). Only the caller that WINS the flip
-      // proceeds to credit; the others observe SUCCESS and return alreadyProcessed. The credit block
-      // below therefore runs for exactly one caller per order and needs no further locking.
+      // proceeds; the others observe SUCCESS and return alreadyProcessed. Since Q-613 this separate claim
+      // serves only the PASS and GIFT products (wallet credits claim inside their own transaction above);
+      // a gift order claimed but not yet minted is resumed by the SUCCESS branch at the top.
       const claimedNow = await runTransaction(db, async (tx: any) => {
         const snap = await tx.get(txRef);
         if (!snap.exists()) return false;
@@ -363,67 +460,11 @@ export async function verifyPaymentInternal(orderId: string): Promise<{ success:
        * and for the same reason: the amount paid and the thing delivered are two different numbers.
        */
       if (String(txData.productType || '') === 'gift_code') {
-        const face = Number((txData as { giftFaceInr?: unknown }).giftFaceInr);
-        if (!Number.isFinite(face) || face <= 0) {
-          console.error(
-            `[GIFT] Order ${orderId} paid ₹${txData.amountPaid} but carries no face value — NOTHING minted; ` +
-            `this payment needs a manual refund.`,
-          );
-          try { await updateDoc(txRef, { fulfilmentError: 'gift_face_missing', fulfilledAt: new Date().toISOString() }); } catch { /* logged above */ }
-          return { success: false, error: 'That gift purchase could not be completed. Please contact support for a refund.' };
-        }
-        const code = await mintCodeForOrder(db, {
-          orderId,
-          buyerUid: txData.userId,
-          faceInr: face,
-          paidInr: Number(txData.amountPaid) || 0,
-          feeInr: recordedPlatformFee(txData),
-          nowMs: Date.now(),
-          randomBytes: (n: number) => new Uint8Array(randomBytes(n)),
-        });
-        try { await updateDoc(txRef, { giftCode: code, fulfilledAt: new Date().toISOString() }); } catch { /* the code exists; the audit note is best-effort */ }
-        // `buyerUid` is for the route's owner check only; `verify-payment` strips it before answering (Q-630).
-        return { success: true, data: { giftCode: code, giftFaceInr: face, paidInr: Number(txData.amountPaid) || 0, buyerUid: txData.userId } };
+        return fulfilGiftOrder(db, txRef, orderId, txData);
       }
 
-      const walletRef = doc(db, 'user_token_wallets', txData.userId);
-      const DEFAULT_WALLET: Record<string, any> = {
-        userId: txData.userId,
-        unlockedModes: [],
-        tokenBalance: 0,
-        totalTokensPurchased: 0,
-        totalTokensUsed: 0,
-        totalMoneySpent: 0,
-        lastRechargeAt: null,
-        walletLedger: [],
-        remaining_balance: 0,
-        total_balance: 0,
-        total_output_tokens_used: 0,
-        updatedAt: new Date().toISOString(),
-      };
-
-      // CONCURRENCY (fix): credit the wallet INSIDE a transaction that re-reads the wallet
-      // in-transaction. Two concurrent credits to the SAME wallet (two orders, webhook + client
-      // poll, or a coupon credit) used to lost-update because the old getDoc→compute→full setDoc ran
-      // outside any transaction. Now Firestore aborts+retries this transaction on a concurrent commit,
-      // so every credit re-reads the latest balance and adds its delta on top — never overwrites.
-      // (SECURITY C4: tokens still derive from the VERIFIED paid amount inside computeCreditedWallet.)
-      const integratedWallet = await runTransaction(db, async (tx: any) => {
-        const walletSnap = await tx.get(walletRef);
-        const walletData = walletSnap.exists() ? walletSnap.data() : { ...DEFAULT_WALLET };
-        const { wallet } = computeCreditedWallet(walletData, txData as WalletCreditTx, new Date().toISOString());
-        tx.set(walletRef, wallet);
-        return wallet;
-      });
-
-      return {
-        success: true,
-        data: {
-          balanceAdded: txData.balanceAdded,
-          currentBalance: integratedWallet.remaining_balance,
-          tokenBalance: integratedWallet.tokenBalance
-        }
-      };
+      // Unreachable: wallet products are claimed and credited in one transaction above; pass and gift
+      // orders returned in their branches.
     }
 
     return { success: false, error: 'Order not paid or invalid status' };

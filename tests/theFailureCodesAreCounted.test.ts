@@ -46,7 +46,7 @@ describe('every failure class the classifier can emit is deliberately filed', ()
    */
   const KNOWN = [
     'ANDROID_PLATFORM_MISSING', 'ANDROID_RESOURCE_LINKING', 'APP_CODE_BUILD_FAILED',
-    'BUILD_SCRIPT_MISSING', 'GOOGLE_SERVICES_MISSING', 'GRADLEW_NOT_EXECUTABLE',
+    'BUILD_MACHINE_TOO_OLD', 'BUILD_SCRIPT_MISSING', 'GOOGLE_SERVICES_MISSING', 'GRADLEW_NOT_EXECUTABLE',
     'JAVA_VERSION_TOO_OLD', 'MISSING_SIGNING_SECRET', 'NODE_OUT_OF_MEMORY', 'NPM_CI_NO_LOCK',
     'NPM_LOCK_CACHE', 'NPM_PACKAGE_NOT_FOUND', 'NPM_PEER_CONFLICT', 'NPM_REGISTRY_AUTH',
     'NPM_VERSION_NOT_FOUND', 'SDK_LICENSE_NOT_ACCEPTED', 'SIGNING_CREDENTIALS_WRONG',
@@ -158,7 +158,7 @@ describe('the summary is a count of what happened, and says what it does NOT kno
   it('🔑 the cure split is what stops the biggest number being read as the wrong instruction', () => {
     // 5 of these 11 are a missing signing key. However good the repair loop becomes, those 5 do not move.
     const s = summariseBuildOutcomes(rows);
-    expect(cureSplit(s)).toEqual({ repairable: 5, 'user-credentials': 5, unclassified: 1 });
+    expect(cureSplit(s)).toEqual({ repairable: 5, 'user-credentials': 5, 'build-machine': 0, unclassified: 1 });
   });
 
   it('is PURE — the same rows answer the same way, and empty is empty rather than zero-percent', () => {

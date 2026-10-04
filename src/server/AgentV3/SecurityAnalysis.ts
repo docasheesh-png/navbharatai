@@ -7,6 +7,7 @@
 // never a synthetic "looks secure".
 
 import { enclosingTag } from './jsxTags';
+import { isLiveEnvFilePath } from '../../lib/envFile';
 
 export type Severity = 'high' | 'medium' | 'low';
 
@@ -66,9 +67,9 @@ export function isFixtureFile(file: string): boolean {
 // Real code vulns (private-key, aws-key, jwt-none, eval, …) are NOT demoDowngrade → they stay high here too.
 // PURE.
 export function isEnvSecretsFile(file: string): boolean {
-  const base = (file || '').toLowerCase().split('/').pop() || '';
-  if (!/^\.env(?:\.[a-z0-9_.-]+)?$/.test(base)) return false;          // .env, .env.local, .env.production, …
-  return !/\.(?:example|sample|template|dist|tpl)$/.test(base);        // but NOT a committed .env.example template
+  // The ONE definition lives in src/lib/envFile.ts so the client-safe modules (the phone-build
+  // assembler, imported by the APK screen) share it without pulling this scanner into the web bundle.
+  return isLiveEnvFilePath(file);
 }
 
 // Placeholder / non-real-credential markers. MUST be tested against the captured credential VALUE

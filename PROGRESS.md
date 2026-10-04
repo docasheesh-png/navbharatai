@@ -88912,6 +88912,28 @@ merging session now posts on each PR at the moment it cancels. Re-running a canc
 spends minutes for a result the merge gate never reads. The author's workaround ("push once per branch")
 is still good advice for a different reason: every push is a billed run.
 
+## 2026-10-04 — Security checklist (21 points) applied to NavBharatAI itself
+
+The admin forwarded a 21-point "don't ship until you check this" list (external text, adapted). Audited against
+the code; five real gaps fixed as classes (local branch `local/security-checklist`, locked by
+`tests/thePlatformKeepsItsSecretsOutOfGit.test.ts`, every fix reversion-proven):
+- `.gitignore` / `.dockerignore` did not ignore a live `.env` → both now do (`.env`, `.env.*`, `!.env.example`).
+- No secret scan of THIS repo (the engine scanned users' apps only) → CI census with `scanSecurity` + a reasoned
+  allowlist (Firebase web keys, PEM header text, templates). Local history (7,372 commits, shallow clone) scanned:
+  only test fakes.
+- `trust proxy true` made `req.ip` the caller-written first X-Forwarded-For entry → admin login lockout, OTP send
+  limit, bot guard, auth rate limits bypassable with one header. Now one hop (`TRUSTED_PROXY_HOPS`) +
+  `clientAddress()` (last entry); OTP / phone-exchange / client-error routes use it. navbharatai.com → 216.239.38.21
+  (Google Cloud Run front end), so one hop is the real topology; `guestDailyQuota` has relied on it since 09-27.
+- Phone build pushed a workspace `.env` whole (static apps: packaged into the APK at `www/.env`) → static drops it,
+  others keep only client-public lines (`publicEnvOnly.ts`).
+- GitHub push excluded only a root `.env` → one definition `src/lib/envFile.ts`, any depth.
+- Census: every `/api/admin` route guarded server-side.
+OPEN (admin's, BLOCKED — console access): (1) confirm the LIVE Firestore rules of database `navbharat-prod` match
+`firestore.rules` — no pipeline deploys them, and `.firebaserc` points at the hosting project; (2) set Firebase
+Storage rules to deny client access on the project's buckets (the client never uses Storage; the web config is
+public); (3) turn on GitHub secret scanning / push protection if the plan allows; (4) decision: the documented
+`verifiedUid ?? claimedUid` fallback on v5.0 workspace routes (private reads already verified-only).
 ## 2026-10-04 — Firebase Crashlytics, built after a three-part audit (admin: "Ask the council")
 
 **What existed before:**
@@ -89029,6 +89051,63 @@ cancels of #3515 (19:57), #3518 (20:44) and #3523 (20:45) read "The job has exce
 of 30m0s" — `ci.yml`'s own `timeout-minutes: 30`, hit because eight or nine PR runs in flight slowed every run to
 21–30 min. The cap is now 45 (#3524 staging). Lesson, the fourth rule's first step: read the run's own last
 words before naming a cause — a cancelled run names its canceller.
+
+
+### Launch checklist ("vibe-coded app" 20 points), 2026-10-04, branch `local/security-checklist` (not pushed)
+
+The admin sent a 20-point launch checklist for apps built with AI tools. Each point was checked twice: on NavBharatAI's own site, and on the apps it generates.
+
+**Fixed in this change (commit eb55c4211):**
+- **`/robots.txt` and `/sitemap.xml`.** Before this, both were answered with `index.html` and a 200 by the SPA catch-all. They are now real server routes (`src/server/lib/siteIndex.ts`, `routes/siteIndex.ts`), and the page list is derived from `legalPaths.ts`.
+  - The class: a server-owned path registered after the catch-all. The fix lists both paths in `spaFallback.ts` `SERVER_ROUTE_EXACT`.
+- **`index.html` meta.**
+  - It had no meta description and no canonical URL.
+  - `og:image` and `twitter:image` were relative; crawlers do not reliably resolve those.
+  - The share text was Devanagari, which breaks the UI language rule.
+  - All of these are fixed.
+- **Generated apps' `twitter:card`.** `appDefaults` always said `summary_large_image`, even with no `og:image`. Now it says `summary` unless the page has an image. This is the same rule `SeoGenerator.ts` already used, so the two siblings now agree.
+- **Lock:** `tests/theSiteCanBeFoundAndShared.test.ts` (12 tests). I reverted the `spaFallback` and `appDefaults` fixes and 2 tests failed; with the fixes back, they pass.
+
+**Already present (verified):**
+- Privacy and terms pages (`legalPaths.ts`).
+- HTTPS (Cloud Run).
+- Favicon, apple-touch-icon and manifest.
+- Every real `<img>` in the client has alt text. All 11 grep hits were comments or strings.
+- No third-party trackers and no cookies, so no consent banner is needed.
+- Secrets are kept out of the frontend (the security checklist commit).
+- Generated apps already get meta, a manifest, an icon and `robots.txt` (`appDefaults`), plus an offered 404 suggestion (`nextBuildSuggestions.ts`).
+
+**Proposed, not built (admin decisions):**
+- An `og:image` and a sitemap for published apps, generated at publish time. The final URL is only known per hosting provider.
+- Privacy and terms pages for generated apps that collect data.
+- A spam guard (honeypot plus rate limit) for public forms in generated apps.
+- A page-speed and image-size check in the build verdict.
+
+
+### A client write reads the server's answer (2026-10-04, same branch): Q-113 plus a security sibling sweep
+
+**Why I started.** Working queue row Q-113 (the dead `billingLogs` chain) led to a larger class.
+
+**Q-113.** The wallet load fetched `/api/wallet/:uid/logs` on every load, and nothing has rendered it since 2026-09-14. The fetch, the state, the `App.tsx` threading and the `BillingPanel` prop are removed. The server route stays, so already-installed phone bundles keep working.
+
+**The class.** `fetch` resolves for a 401, 403 or 500 alike. A client write followed by a success message therefore told the user something happened whether or not it did. A census found 28 client writes whose Response was thrown away. The real defects:
+- **Team:** remove member, change role and revoke invite always said they succeeded. A refused remove left the member with access. This one is security.
+- **Share for review:** revoke cleared the link from the screen while the link stayed live.
+- **Profile budget:** the editor closed over a refused save. `saveError` was set but never rendered, so the "invalid amount" message was invisible too.
+- **Admin:** APK report delete, clear and mark, and the complaint status change, dropped rows the server still held.
+- **Stop:** a Stop that never reached the server left the build running under a screen that said it had stopped. Now the real Stop button comes back with the reason.
+- **Permission answer:** an answer that never landed was auto-denied after the timeout. Now the question is put back on screen.
+- **Chat delete and IDE file delete:** a failed server delete was silent, and the item came back on the next load. Now the user is told.
+- **App Mart owner settings, including unpublish; built-app forget; webhook delete; review comments:** failures were silent. Now the user is told.
+
+**The fix.** `src/lib/serverAnswer.ts` `writeFailure(res, fallback)` is the one reader: it returns null on 2xx, else the server's `error` text.
+
+**The lock.** `tests/aClientWriteReadsTheServerAnswer.test.ts` is a census of every client write whose answer is discarded.
+- The 10 remaining ones are each argued safe: read-marks, terminal close/resize, a self-healing queue item, upload abort, a failure count, and two code-sample strings.
+- A new discarded write fails CI, and so does a stale allowlist entry.
+- Reverting TeamCollaboration and usePaymentEngine made 3 tests fail; with the fixes back, they pass.
+
+**Found and recorded, not done here (Q-600).** `tsc --noUnusedLocals` lists 93 client locals nothing reads. They sit mostly in `App.tsx` and `AgentV3Panel.tsx`, which several live sessions edit, so sweeping them now would collide. The class lock that fits is a per-file ratchet in CI, like `themeTokensOnly`.
 ### 2026-10-04 — Admin decisions on the 68f0a486 / c70bcbb4 / 241215d1 open rows
 
 - **Q-541 and Q-527 (items argued not defects): agreed by the admin ("han, band kar do").** Resolved as
@@ -89306,3 +89385,8 @@ command. Kill switch `AGENTV3_AGENT_CMD_ENV_FILE=off`. Lock: `tests/theAppsScrip
   ("Save to folder" on a press, skipping files changed on disk) are in the row.
 - **Q-101 🟡:** the evidence ledger's read half exists; the write half rewires every verdict and is recommended
   as a three-PR sequence after the engine PRs in flight land.
+
+### 2026-10-04 — Q-113 resolved by #3531 (merged); this branch's identical change folded into it
+
+#3531 merged the same `billingLogs` removal. The merge kept main's `usePaymentEngine.ts` verbatim and removed the
+Q-113 row (resolved on merge). `tests/theWalletLoadFetchesOnlyWhatIsShown.test.ts` stays as a second lock.

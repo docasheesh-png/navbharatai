@@ -142,14 +142,14 @@ export function usePaymentEngine({ user, addLog }: UsePaymentEngineDeps) {
     setLoadingWallet(true);
     try {
       const walletHeaders = await authedHeaders();
-      // Fire the wallet, transactions and usage calls IN PARALLEL (was 4 sequential awaits).
+      // Fire the wallet, transactions and usage calls IN PARALLEL (was sequential awaits). The usage
+      // LOG call that used to ride here was dropped (Q-113): nothing has rendered it since its table was
+      // removed on 2026-09-14, so it cost a Firestore read on every wallet load for nobody.
       // On a native app these are cross-origin to the production API and often hit a cold instance;
       // serialising them made a cold post-login stack up round-trip after round-trip (the "app is slow
-      // to load after login on the app" symptom). allSettled keeps each independent — a failed logs/
+      // to load after login on the app" symptom). allSettled keeps each independent — a failed
       // transactions call never loses the wallet balance, exactly like the old per-call resilience.
       const usageUrl = `/api/user/usage/${encodeURIComponent(user.uid)}`;
-      // (The usage-LOGS call that ran here was read by nothing — every login paid one more round-trip to a
-      // cold instance for a list no screen showed. Removed with its state and prop, queue Q-113.)
       const [walletR, txsR, usageR] = await Promise.allSettled([
         axios.get(`/api/wallet/${user.uid}?email=${encodeURIComponent(user.email || '')}&name=${encodeURIComponent(user.displayName || '')}`, { headers: walletHeaders }),
         axios.get(`/api/wallet/${user.uid}/transactions`, { headers: walletHeaders }),

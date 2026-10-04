@@ -74,6 +74,13 @@ const state = {
   area: 'app' as FeatureArea,
   appKeys: {} as Record<string, string | number | boolean>,
   dropped: 0,
+  /**
+   * Bumped on every reset. An async continuation (the uid hash, the SDK load) captures the generation it
+   * started in and does nothing if the module was reset meanwhile — otherwise a `setUserId` begun under one
+   * set of deps lands in the sink installed after the reset (seen as an order-dependent CI failure in
+   * tests/crashReportsCarryNoSecrets.test.ts: a `{ kind: 'user' }` call reaching a non-production harness).
+   */
+  generation: 0,
 };
 
 function safe(fn: () => unknown): void {
@@ -157,13 +164,14 @@ function crashlytics(): Promise<CrashlyticsSink | null> {
   const deps = state.deps;
   if (!deps) return Promise.resolve(null);
   if (state.crashlytics) return Promise.resolve(state.crashlytics);
+  const gen = state.generation;
   if (!state.crashlyticsLoad) {
     // Loaded ONCE. A failed load is remembered as null, so a broken SDK is not retried in a loop.
     state.crashlyticsLoad = deps.loadCrashlytics()
       .then((sink) => { state.crashlytics = sink; return sink; })
       .catch(() => null);
   }
-  return state.crashlyticsLoad;
+  return state.crashlyticsLoad.then((sink) => (state.generation === gen ? sink : null));
 }
 
 /**
@@ -259,8 +267,9 @@ export async function crashUserId(uid: string): Promise<string | null> {
 export function setUserContext(uid: string): void {
   setCrashKey('signed_in', true);
   if (!state.deps?.enabled) return;
+  const gen = state.generation;
   safe(() => crashUserId(uid).then((id) => {
-    if (!id) return;
+    if (!id || state.generation !== gen || !state.deps?.enabled) return;
     return crashlytics().then((sink) => sink?.setUserId(id));
   }));
 }
@@ -288,6 +297,7 @@ export function crashTestTools(): { nonFatal: () => void; crash: () => void } | 
 
 /** Test-only: reset every piece of module state. */
 export function __resetObservability(): void {
+  state.generation++;
   state.deps = null;
   state.crashlytics = null;
   state.crashlyticsLoad = null;

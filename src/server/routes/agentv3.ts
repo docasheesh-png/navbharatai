@@ -23281,13 +23281,14 @@ async function noteBuildOutcome(
               } catch { stylesheets = undefined; /* could not look ⇒ the findings stand */ }
             }
             const checked = refuteReviewByEvidence(review, { typecheck: gateEvidence.typecheck, stylesheets });
-            if (checked.refuted.length > 0) {
+            if (checked.refuted.length > 0 || checked.amended.length > 0) {
               review = checked.review;
               try {
                 buildDiag.record({
                   phase: 'build', severity: 'info', code: 'REVIEW_REFUTED_BY_EVIDENCE', autoResolved: true,
-                  message: `${checked.refuted.length} reviewer finding(s) were contradicted by the platform's own evidence (a passing typecheck, or the stylesheets that define the classes named) — dropped rather than shown to the user or repaired.`,
-                  detail: checked.refuted.map((i) => i.message.slice(0, 200)).join(' | '),
+                  message: `${checked.refuted.length} reviewer finding(s) were contradicted by the platform's own evidence (a passing typecheck, or the stylesheets that define the classes named) — dropped rather than shown to the user or repaired.`
+                    + (checked.amended.length > 0 ? ` ${checked.amended.length} more kept their other points with the refuted "will not compile" sentence removed.` : ''),
+                  detail: [...checked.refuted, ...checked.amended].map((i) => i.message.slice(0, 200)).join(' | '),
                 });
               } catch { /* best-effort */ }
             }

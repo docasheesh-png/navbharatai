@@ -97,6 +97,38 @@ export function claimsCompileFailure(message: string): boolean {
   return COMPILE_FAILURE_CLAIM_RE.test(claimOf(message));
 }
 
+/** A sentence about how the code is TYPED or WIRED — the kind of cause a "will not compile" rests on. */
+const TYPE_LEVEL_RE = /\b(import(?:s|ed|ing)?|export(?:s|ed)?|types?|typed|enums?|interfaces?|declar\w*|modules?|generics?|tsconfig|annotat\w*|casts?|signature|circular)\b/i;
+/** A sentence about what a USER meets — never swallowed with a refuted compile claim. */
+const BEHAVIOUR_RE = /\b(click\w*|press\w*|tap\w*|crash\w*|render\w*|display\w*|shows?|shown|sav(?:e|es|ed|ing)|load\w*|data|users?|buttons?|pages?|screens?|los(?:e|es|t)|security|xss|secret|leak\w*|slow|freez\w*|blank)\b/i;
+
+function sentencesOf(message: string): string[] {
+  const t = String(message ?? '')
+    .replace(/^\s*\[(critical|warning|major|minor|high|low|suggestion)\]\s*/i, '')
+    .replace(/^\s*\(confidence:\s*\w+\)\s*/i, '')
+    .trim();
+  return t.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
+}
+
+/**
+ * A compile claim LATER in a finding (autopsy f496c75b: "src/game/types.ts imports the enum as a type.
+ * This file will not compile."). Only the first sentence used to count, so a passing typecheck could not
+ * refute it. Now, with the compiler passed: 'whole' when every other sentence is about how the code is
+ * typed or wired (the claim IS the finding); the finding WITHOUT its compile sentences when it also says
+ * something about behaviour (that part stands, untouched); null when no later sentence claims a compile
+ * failure. PURE.
+ */
+export function laterCompileClaim(message: string): 'whole' | string | null {
+  const parts = sentencesOf(message);
+  if (parts.length < 2) return null;
+  const compile = parts.slice(1).filter((x) => COMPILE_FAILURE_CLAIM_RE.test(x));
+  if (compile.length === 0) return null;
+  const rest = parts.filter((x) => !compile.includes(x));
+  if (rest.every((x) => TYPE_LEVEL_RE.test(x) && !BEHAVIOUR_RE.test(x))) return 'whole';
+  const prefix = String(message).match(/^\s*(?:\[[a-z]+\]\s*)?(?:\(confidence:\s*\w+\)\s*)?/i)?.[0] ?? '';
+  return prefix + rest.join(' ');
+}
+
 /**
  * Split a review into what stands and what the evidence refutes. Nothing is refuted unless the compiler
  * really passed, so a build whose typecheck failed or never ran keeps every finding exactly as before.
@@ -109,12 +141,18 @@ export function claimsCompileFailure(message: string): boolean {
 export function refuteReviewByEvidence(
   review: ReviewResult,
   evidence: PlatformEvidence,
-): { review: ReviewResult; refuted: ReviewIssue[] } {
-  if (!review) return { review, refuted: [] };
+): { review: ReviewResult; refuted: ReviewIssue[]; amended: ReviewIssue[] } {
+  if (!review) return { review, refuted: [], amended: [] };
   const sheets = evidence?.stylesheets && Object.keys(evidence.stylesheets).length > 0 ? evidence.stylesheets : null;
   const refutedSet = new Set<ReviewIssue>();
+  const amendedMap = new Map<ReviewIssue, string>();
   if (evidence?.typecheck === 'passed') {
-    for (const i of review.issues) if (claimsCompileFailure(i.message)) refutedSet.add(i);
+    for (const i of review.issues) {
+      if (claimsCompileFailure(i.message)) { refutedSet.add(i); continue; }
+      const later = laterCompileClaim(i.message);
+      if (later === 'whole') refutedSet.add(i);
+      else if (later) amendedMap.set(i, later);
+    }
   }
   if (sheets) {
     const classClaims = review.issues.map((i) => ({ i, names: missingClassClaim(i.message) })).filter((c) => c.names);
@@ -127,8 +165,10 @@ export function refuteReviewByEvidence(
     }
   }
   const refuted = review.issues.filter((i) => refutedSet.has(i));
-  if (refuted.length === 0) return { review, refuted: [] };
-  const kept = review.issues.filter((i) => !refuted.includes(i));
+  const amended = review.issues.filter((i) => amendedMap.has(i) && !refutedSet.has(i));
+  if (refuted.length === 0 && amended.length === 0) return { review, refuted: [], amended: [] };
+  const kept = review.issues.filter((i) => !refuted.includes(i))
+    .map((i) => (amendedMap.has(i) ? { ...i, message: amendedMap.get(i)! } : i));
   const summaryRepeatsRefuted = refuted.some((i) => {
     const claim = claimOf(i.message).slice(0, 40).toLowerCase();
     return claim.length > 0 && String(review.summary ?? '').toLowerCase().includes(claim);
@@ -139,5 +179,6 @@ export function refuteReviewByEvidence(
   return {
     review: { ...review, issues: kept, passed: !kept.some((i) => i.severity === 'critical'), summary },
     refuted,
+    amended,
   };
 }

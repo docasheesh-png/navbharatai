@@ -1913,6 +1913,22 @@ function starterCompletedOf(actuator: unknown, workspaceId: string): string {
  * "sandbox=warm · restore=nothing saved yet" about a workspace whose store held 12 files. A machine that
  * was already up was not restored by this setup. PURE.
  */
+/**
+ * The `sandbox=` field of THIS setup's line (autopsy f496c75b). `SETUP_TIMING` said "warm" while
+ * `SANDBOX_SESSION` said the machine "came up created-fresh" — both true, from two points of view: the
+ * origin is how THIS build found the machine, the session is how the machine itself came up, possibly
+ * minutes earlier for another caller (the Files tab, the preview door). A warm or resumed setup now says
+ * how and when the machine it found came up, so the two lines read as one story. PURE.
+ */
+export function setupOriginText(origin: string | null, session: { origin?: string; reason?: string; startedAt?: number } | null, now: number): string {
+  const base = origin ?? 'unreported';
+  if ((origin !== 'warm' && origin !== 'resumed') || !session?.origin || session.origin === origin) return base;
+  const ago = typeof session.startedAt === 'number' && Number.isFinite(session.startedAt)
+    ? ` ${Math.max(0, Math.round((now - session.startedAt) / 1000))}s earlier`
+    : '';
+  return `${base} (the machine came up ${session.origin}${ago}${session.reason ? `, started by ${session.reason}` : ''})`;
+}
+
 export function setupRestoreText(origin: string | null, restore: string | null): string {
   if (origin === 'warm' || origin === 'resumed') return `n/a — the machine was already up${restore ? ` (when it came up: ${restore})` : ''}`;
   return restore ?? 'n/a (warm or resumed)';
@@ -14246,7 +14262,7 @@ async function noteBuildOutcome(
             // alongside it, because "had an id and still came up cold" is the interesting case.
             detail: `resume-id lookup ${resumeLookupMs}ms · sandbox create/connect + scaffold + install `
               + `${ensureWorkspaceMs}ms · had-resume-id=${resumeSandboxId ? 'yes' : 'no'} · `
-              + `sandbox=${sandboxOriginOf(actuator, workspaceId) ?? 'unreported'} · `
+              + `sandbox=${setupOriginText(sandboxOriginOf(actuator, workspaceId), sandboxSessionOf(actuator, workspaceId), Date.now())} · `
               // Both halves of the same line, added by two sessions on the same day and kept together
               // deliberately: `restore=` says whether a fresh machine was refilled from the durable
               // store (#2818), `started-by=` says what caused the machine to exist at all (#2820).

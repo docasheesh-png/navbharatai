@@ -17,6 +17,10 @@ export function registerReleaseGateRoutes(app: Express): void {
     const sha = typeof req.query.sha === 'string' ? req.query.sha : undefined;
     const config = await releaseGateStore.get();
     const decision = evaluateReleaseGate(config, Date.now(), sha);
+    // Q-141 — a pipeline asking this endpoint is the ONLY evidence that a freeze reaches the pipeline
+    // at all, so it is recorded. Deliberately not awaited: the pipeline is waiting on the answer, and
+    // the record is worth nothing if it costs the answer a round trip.
+    void releaseGateStore.noteChecked(sha);
     res.json({
       allowed: decision.allowed,
       reason: decision.reason,

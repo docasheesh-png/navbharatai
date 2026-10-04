@@ -16,7 +16,7 @@
 
 import { classifyChange, describeChangeClassification, type ChangeClassification } from './changeClassifier';
 import {
-  foldRequestedFeatures, foldProbeResults, regressionProbeFeatures, renderSpecForBuilder, foldRequestedLabels, markLabelsBuilt, labelKey,
+  foldRequestedFeatures, foldProbeResults, regressionProbeFeatures, renderSpecForBuilder, foldRequestedLabels, markLabelsBuilt, labelKey, dropItems,
   type ProbeOutcome, type SpecItem, type AppSpec,
 } from './appSpec';
 import {
@@ -30,6 +30,7 @@ import { redactProvidersText } from '../../lib/providerRedaction';
 import type { BuildIssue } from '../BuildDiagnostics';
 import type { ProjectGraph } from '../WorkspaceMemory';
 import { computeImpactSet, renderImpactForBuilder } from './impactSet';
+import { requestedRemovals } from './requestConsistency';
 import { requestedProbeFeatures } from '../FeaturePresence';
 
 export interface ChangeSession {
@@ -47,6 +48,8 @@ export interface ChangeSession {
   regressionTargets: string[];
   /** Issue ids handed to the builder in this build's context. */
   assignedIssueIds: string[];
+  /** Ledger ids this request deliberately removes (slice 5) — dropped at settle, never defended. */
+  removedIds?: string[];
   /** Probe outcomes observed during this build, merged (last observation per feature wins). */
   probes: Map<string, ProbeOutcome>;
   /** The ledger as it stood when this change began (empty for a new build). */
@@ -83,12 +86,18 @@ export async function beginChange(input: {
   // A NEW build in a workspace that held another app is a different app: its old requirements are not
   // this app's, so they are neither shown nor re-probed (they are retired at settle, kept for history).
   const spec: AppSpec = input.isEdit ? mem.spec : { items: [], nextReq: mem.spec.nextReq };
-  const regressionTargets = input.isEdit ? regressionProbeFeatures(spec) : [];
+  // Slice 5 — a requirement the user is deliberately removing is neither re-probed nor restored.
+  const removals = input.isEdit ? requestedRemovals(input.prompt, spec) : [];
+  const removedFeatures = new Set(removals.map((r) => r.feature));
+  const regressionTargets = input.isEdit ? regressionProbeFeatures(spec).filter((f) => !removedFeatures.has(f)) : [];
   const workable = input.isEdit && classification.depth !== 'light' ? workableIssues(mem.queue) : [];
 
   const parts: string[] = [];
-  const specBlock = input.isEdit ? renderSpecForBuilder(spec, classification.depth) : '';
+  const specBlock = input.isEdit ? renderSpecForBuilder(dropItems(spec, removals.map((r) => r.id), 'pending'), classification.depth) : '';
   if (specBlock) parts.push(specBlock);
+  if (removals.length > 0) {
+    parts.push(`The current request removes ${removals.map((r) => `${r.id} ${r.label}`).join(', ')} on purpose — remove it cleanly (its code, its imports, any route or menu entry), and do not keep or restore it.`);
+  }
   // Slice 4 — where this change lands and what depends on it, from the import graph. Edits only (a new
   // build has no prior graph worth reading), and never on a micro change (one file, no need for a map).
   // File names are the app's own text, so the block travels fenced as data.
@@ -109,11 +118,12 @@ export async function beginChange(input: {
     requestedLabels: (input.contractLabels ?? []).map((l) => redactSecrets(String(l))).slice(0, 40),
     regressionTargets,
     assignedIssueIds: workable.map((i) => i.id),
+    removedIds: removals.map((r) => r.id),
     probes: new Map(),
     priorSpec: spec,
   };
   const specLive = spec.items.filter((i) => i.status !== 'dropped').length;
-  const reportLine = `${describeChangeClassification(classification)} · ${specLive} requirement(s) on record · ${regressionTargets.length} re-probed for regression · ${workable.length} open issue(s) handed to the builder · impact ${impact.seeds.length} file(s) + ${impact.dependents.length} dependent(s)`;
+  const reportLine = `${describeChangeClassification(classification)} · ${specLive} requirement(s) on record · ${regressionTargets.length} re-probed for regression · ${workable.length} open issue(s) handed to the builder · impact ${impact.seeds.length} file(s) + ${impact.dependents.length} dependent(s)${removals.length ? ` · removes ${removals.map((r) => r.id).join(', ')} on request` : ''}`;
   return { session, builderBlock: parts.join('\n\n'), reportLine };
 }
 
@@ -164,6 +174,7 @@ export function foldSettle(mem: EngineeringMemory, session: ChangeSession, input
   if (!session.isEdit) {
     spec = { nextReq: spec.nextReq, items: spec.items.map((i) => (i.status === 'dropped' ? i : { ...i, status: 'dropped' as const, lastChange: changeId })) };
   }
+  spec = dropItems(spec, session.removedIds ?? [], changeId);
   spec = foldRequestedFeatures(spec, session.requested, changeId, new Set(session.declined));
   const probedFeatures = new Set(session.requested.map((r) => r.feature));
   spec = foldRequestedLabels(spec, session.requestedLabels ?? [], changeId, (label) => {

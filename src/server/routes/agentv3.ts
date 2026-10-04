@@ -19510,7 +19510,15 @@ async function noteBuildOutcome(
         for (const u of unusedDeps) {
           if (prunedDeps.includes(u.name)) continue;
           if (stoppedFresh.has(u.name)) continue;
-          const line = unusedDependencyLine(u.name, { unfinished: buildUnfinished, addedThisBuild: addedThisBuild.has(u.name) });
+          // A SUCCESSFUL step of a planned app is in the same position for a different reason: the code
+          // that imports the package is in a later STEP. The prune above already stands down for it
+          // (`!megaRoadmapActive && !projectModuleRef`); the warning now reads the same two facts
+          // instead of telling the user to remove what the plan is keeping (autopsy 39e982bd).
+          const line = unusedDependencyLine(u.name, {
+            unfinished: buildUnfinished,
+            addedThisBuild: addedThisBuild.has(u.name),
+            moreStepsPlanned: !!megaRoadmapActive || !!projectModuleRef,
+          });
           buildDiag.record({ phase: 'build', severity: line.severity, code: 'INTEGRITY_UNUSED_DEP', ...obs(line.message), ...(line.autoResolved ? { autoResolved: true } : {}) });
         }
         // A shared stylesheet imported by several modules is a FACT, never a defect (autopsy de3bb2bb): a

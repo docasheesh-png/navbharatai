@@ -229,13 +229,39 @@ export async function pruneBuildAddedDeps(candidates: readonly string[], package
  * package THIS build added is "not used yet", not unused — removing it would break the next turn, which
  * writes the screens that need it. Such a line is information about where the build stopped, never a
  * finding against the app. A package the user already had is reported as before.
+ *
+ * 🔴 THE SIBLING THAT WAS NEVER HUNTED (autopsy 39e982bd, 2026-10-04). A build that SUCCEEDS can be in
+ * the same position for a different reason: it is **step 1 of a planned 6**, so the code that imports
+ * the package is in a later STEP rather than a later turn. `PrimeClash eSports` installed
+ * `react-router-dom` for the screens its roadmap plans in steps 3–5, and the report told the user
+ * *"removing it shrinks the install"* — about a package the engine had deliberately kept.
+ *
+ * 🔑 AND THE PLATFORM ALREADY KNEW. The prune above stands down for exactly this case, in its own
+ * words — *"never on a roadmap milestone turn (a package for a later module is not unused yet)"* — and
+ * `megaRoadmapActive` / `projectModuleRef` are in scope three lines from the call that wrote the
+ * warning. One fact, two readers, one of them told: this repo's headline class, so the predicate is a
+ * PARAMETER here rather than a second guess at the plan.
+ *
+ * ⚠️ `moreStepsPlanned` means "this app's own plan has later steps", NEVER "the build might continue".
+ * A package the USER already had is reported exactly as before even on a milestone turn — the plan says
+ * nothing about a dependency the plan did not add.
  */
-export function unusedDependencyLine(name: string, opts: { unfinished: boolean; addedThisBuild: boolean }): { severity: 'info' | 'warning'; message: string; autoResolved?: true } {
+export function unusedDependencyLine(
+  name: string,
+  opts: { unfinished: boolean; addedThisBuild: boolean; moreStepsPlanned?: boolean },
+): { severity: 'info' | 'warning'; message: string; autoResolved?: true } {
   if (opts.unfinished && opts.addedThisBuild) {
     return {
       severity: 'info',
       autoResolved: true,
       message: `"${name}" was installed by this build, which ended before the files that use it were written — it is not used yet, and it is kept for the next turn.`,
+    };
+  }
+  if (opts.moreStepsPlanned === true && opts.addedThisBuild) {
+    return {
+      severity: 'info',
+      autoResolved: true,
+      message: `"${name}" was installed by this build for a later step of this app's plan — it is not used yet, and it is kept for that step. Nothing to remove.`,
     };
   }
   return {

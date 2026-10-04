@@ -89020,3 +89020,15 @@ wrong. The one real gap — our own interruptions reaching the upsell — is clo
 (`buildAbortCause.ts`, exhaustive over `AbortCause`), wired at both upsell sites and locked by
 `tests/ourOwnInterruptionIsNotAnEngineLimit.test.ts`. Row removed.
 
+### 2026-10-04 — Q-132 closed: re-audited, already fixed, now locked by a census
+
+Q-132 ("passes write the durable store directly, bypassing Green Freeze" — five route sites recorded in 2026-09)
+was re-audited site by site against today's route. The class was closed by later work: `writeUnlessFrozen`
+(SignBridge autopsy, 12 call sites — keeps a fix on any sandbox failure EXCEPT a freeze refusal) and
+`ToolDispatcher.landHealWrite` (the heal sites). Every durable save after the first `latchGreen` follows
+"sandbox write, then record", so a refusal throws before anything is kept; the two pre-latch sites that swallow
+a failure (integrity normalisation, the heal revert) run before the latch exists. What was missing was a lock on
+the CLASS: `tests/aFrozenWriteIsNeverKept.test.ts` now fails when any post-latch site swallows a sandbox write
+and keeps the content (proven by injecting one at the entry-dedupe site → the census names agentv3.ts:25611).
+Row removed.
+

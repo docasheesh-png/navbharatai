@@ -158,6 +158,8 @@ const NEVER_SUGGEST = new Set([
   'REVIEW_FINDINGS_UNREAD', // our parser could not read the review's findings (autopsy d798ddd3)
   'UNSUPPORTED_STACK', // the user is told in the ready message already (unsupportedStack.ts)
   'UNKNOWN_NAME_IN_REQUEST', // a note to our builder (unknownName.ts), never a finding
+  'SCRIPT_REQUEST_AS_WEB_APP', // a note to our builder and the user (scriptRequest.ts)
+  'PYTHON_BACKEND_UP', // our own boot of the app's Python server (pythonBackendBoot.ts)
   'AUTH_EXPLORE_SIGNED_IN', 'AUTH_EXPLORE_NOT_RUN', // our sign-in instrument, never the app's defect
   'DESIGN_KIT_RESTORED', 'PLANNING_CONTEXT', 'DESIGN_KIT_KEPT', 'SHADOW_TWIN_REMOVED', 'USER_FILE_KEPT', 'FILES_REMOVED_TOLD', 'DURABLE_READ_FAILED', 'LLM_CALL_HANDED_OFF', 'REPEATED_READS', 'WORKSPACE_SCAN_FAILED', 'EMPTY_BUILD_RETRY', // our own housekeeping (autopsy e725e002, 4d538ca3, d382b398, de3bb2bb)
   'RELEASE_GATE', 'TIME_TO_FIRST_CALL', 'RUNTIME_UNCHECKED', 'RUNTIME_VERIFIED', 'APP_RENDERED',

@@ -87941,3 +87941,18 @@ All on PR #3488, each locked by a test proven by reversion.
   browser, a keypad's "AC" and "+/−" are now proven to respond after "7", and a dead "%" is named in words
   ("it changed nothing, even after "7" was pressed first"). It is deliberately NOT a failing verdict: a control
   that legitimately does nothing (memory recall with nothing stored) would otherwise spend a repair.
+
+## 2026-10-04 — Pending items closed: Q-284, Q-274, Q-304 (+ Q-063, Q-257), and four admin agreements (PR #3491)
+
+The admin said "sare pending kaam niptao — bas PR merge nahi karna". Ledger (test `tests/aPythonBackendComesBackWithItsApp.test.ts`,
+every fix reverted and seen to fail):
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-284 Python backend gone after a restart | every platform start (wake, our preview start, both in-build restarts) ran one command, `npm run dev`; nothing built the venv or started uvicorn; the service graph read only package.json | a backend the platform cannot see is never started | `pythonBackendBoot.ts`: one plan for the graph and every start path; encoded bounded boot (venv, install on manifest change, detached start, port wait); a backend-launch recipe is never replayed as the preview | real-bash run of the script; graph + census of the three `npm run dev` starts + the wake + recipe guards |
+| Q-274 "Python script" became a web app silently, "live" data was simulated | the deliverable's form was changed and nobody said so | a request form the preview cannot run | `scriptRequest.ts`: builder note + a start-of-build line to the user; `claimAudit` `live-data-claimed` | verbatim report prompt + precision set + claim rule |
+| Q-304 / Q-063 / Q-257 first typecheck 15–18 s | a fresh starter has no node_modules; the baked vite-react tree was used only by `_npmInstall` | a cold install on the first check | `PRIME_NODE_MODULES`: stage + atomic rename, used by `TSC_ENSURE`, the warm-up and `_npmInstall` (a plain `cp -a` could nest when two primers raced) | real-bash primer tests incl. two racing primers |
+| Q-194, Q-195, Q-272, Q-286 | argued not defects | — | the admin took the recommended options ("niptao") | evidence in each row |
+
+Still BLOCKED on evidence (unchanged): Q-193 (a skipped press's cause line, added by Q-192), Q-273 (an 11 s trivial
+command — needs a second instance), Q-275 (the request was cut mid-sentence before it reached us).

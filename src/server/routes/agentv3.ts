@@ -392,6 +392,8 @@ import { adoptHealResult } from '../AgentV3/healResult';
 import { signInExploreEnabled, signInScript, signInCandidates, parseSignInOutput, signInReportLine, isSignInRoute, SIGNED_IN_STATE_PATH, SIGN_IN_BUDGET_MS, type SignInRun } from '../AgentV3/signInExplore';
 import { unsupportedStackRequested, unsupportedStackBuilderNote, unsupportedStackUserNote, builtWithLabel } from '../AgentV3/unsupportedStack';
 import { unknownNameNoteEnabled, unknownNamesInRequest, unknownNameBuilderNote, unknownNameReportNote } from '../AgentV3/unknownName';
+import { bootPythonBackendFirst, backendBootReport, isPythonServerCommand, PYTHON_BOOT_BUDGET_MS } from '../AgentV3/pythonBackendBoot';
+import { scriptRequestNoteEnabled, scriptDeliverableRequested, liveDataRequested, scriptRequestBuilderNote, scriptRequestStartLine, scriptRequestReportNote } from '../AgentV3/scriptRequest';
 import { detectTestPlan, parseTestOutcome, vaccineEnabled, testOutcomeRepairPrompt, suitePresentButRunnerMissing, withSandboxBrowsers } from '../AgentV3/testRunner';
 import { generateFuzzPlan, interpretFuzzErrors, fuzzSummary, fuzzRepairPrompt, redTeamEnabled, type FuzzInput, type FuzzCase, type FuzzVerdict } from '../AgentV3/FuzzProbe';
 import { billedAmountUsd, sonnetEquivalentUsd, powerToTier, type BillingPowerLevel } from '../AgentV3/pricing';
@@ -6023,7 +6025,9 @@ async function noteBuildOutcome(
       const proven = await raceTimeout(sandboxStore.getRecipe(workspaceId), 4_000, 'previewRecipe').catch(() => null);
       // Named rather than inlined: this exact string is what gets stored as the revival recipe below,
       // so the command that revives the preview is BY CONSTRUCTION the command that just started it.
-      const devRunCommand = proven?.devCommand || resolveDevRunCommand(diagPkgRaw);
+      // A recipe recorded from the BACKEND's launch (a Python server started last) cannot bring the app
+      // back: it would start the API and no front end. The backend has its own boot below (Q-284).
+      const devRunCommand = (proven?.devCommand && !isPythonServerCommand(proven.devCommand) ? proven.devCommand : '') || resolveDevRunCommand(diagPkgRaw);
       // 🔒 THE APP'S KEYS, BEFORE IT STARTS (admin 2026-08-22: "preview ek baar chal jata hai, phir
       // wapas chalao to nahi chalta, chahe kuch kar lo").
       //
@@ -6043,6 +6047,13 @@ async function noteBuildOutcome(
         const note = bootEnvNote(envResult);
         if (note) sendStage(note, 70);
       } catch { /* the app boots as it would have — this can only add keys, never remove them */ }
+      // 🐍 THE PYTHON BACKEND FIRST (Q-284, autopsy 241215d1). A recreated sandbox has no venv and no
+      // server; waking only `npm run dev` brought back a front end whose every API call failed.
+      const pyBoot = await bootPythonBackendFirst(
+        (c) => withTimeout(actuator.runCommand(workspaceId, c), PYTHON_BOOT_BUDGET_MS, 'python-backend-wake'),
+        durableFiles,
+      ).catch(() => null);
+      if (pyBoot) sendStage(backendBootReport(pyBoot.plan, pyBoot.outcome, 'wake'), 72);
       const result = await withTimeout(actuator.runCommand(workspaceId, devRunCommand), previewWakeBudgetMs(), 'preview-diagnose');
       let combined = `${result.stdout || ''}\n${result.stderr || ''}`.trim();
       // 🔒 THE TABLES, NOT JUST THE SERVER (admin 2026-09-08, the third link in the dead-preview chain).
@@ -12889,6 +12900,28 @@ async function noteBuildOutcome(
     // of every file the agent writes (reliable — straight from the write op, not a later listFiles that
     // can come back empty). See the "DURABLE FILE SAVE" block for the normal-completion path.
     const writtenFiles = new Map<string, string>();
+    // 🐍 Q-284: every platform start of this app brings its Python backend up first (pythonBackendBoot.ts).
+    // The project is the durable files plus this build's writes — a backend written in an earlier turn
+    // and untouched by this one is the normal case, and a turn-scoped view would never see it.
+    const startPythonBackendFirst = async (where: string, maxMs: number = PYTHON_BOOT_BUDGET_MS): Promise<void> => {
+      try {
+        const files = { ...(await loadWorkspaceFiles(workspaceId).catch(() => ({} as Record<string, string>))), ...Object.fromEntries(writtenFiles) };
+        const boot = await bootPythonBackendFirst(
+          (c) => withTimeout(actuator.runCommand(workspaceId, c), Math.max(10_000, Math.min(PYTHON_BOOT_BUDGET_MS, maxMs)), `python-backend-${where}`),
+          files,
+        );
+        if (boot) {
+          buildDiagRef?.record({
+            phase: 'preview',
+            severity: boot.outcome.state === 'not-up' || boot.outcome.state === 'unknown' ? 'warning' : 'info',
+            code: boot.outcome.state === 'not-up' || boot.outcome.state === 'unknown' ? 'PYTHON_BACKEND_NOT_UP' : 'PYTHON_BACKEND_UP',
+            message: backendBootReport(boot.plan, boot.outcome, where),
+            detail: boot.outcome.tail || undefined,
+            autoResolved: boot.outcome.state === 'up' || boot.outcome.state === 'already',
+          });
+        }
+      } catch { /* the front end still starts — the report says what it can */ }
+    };
     /**
      * Put the workspace back to a green snapshot — sandbox, durable store AND the captured-writes map.
      * The ONE revert every `verifyAfterFix` site uses. Before 2026-09-23 each site carried its own copy,
@@ -16109,6 +16142,12 @@ async function noteBuildOutcome(
       // chat to "the COACT backend"). New builds only, like the stack note above — see unknownName.ts.
       const unknownNamesAsked = intent === 'new_build' && !isImportTurn && unknownNameNoteEnabled() ? unknownNamesInRequest(prompt) : [];
       const unknownNameNote = unknownNameBuilderNote(unknownNamesAsked);
+      // A script, a CLI, a Streamlit dashboard or a notebook is built as a web app, and the user hears that
+      // BEFORE the build (Q-274, autopsy 241215d1 — a "self-contained Python script" became FastAPI + React
+      // with a simulated feed, said nowhere). New builds only, like the two notes above — see scriptRequest.ts.
+      const liveDataAsked = liveDataRequested(prompt);
+      const scriptFormAsked = intent === 'new_build' && !isImportTurn && scriptRequestNoteEnabled() ? scriptDeliverableRequested(prompt) : null;
+      const scriptRequestNote = scriptRequestBuilderNote(scriptFormAsked, liveDataAsked);
       // The deadline finalizer prices the same build and must use the same fact — see billingCtx.
       billingCtx.expectsArtifacts = expectsArtifacts;
       // The mandatory readiness gate audits code v5.0 BUILT — it must NOT judge a freshly-imported
@@ -16296,6 +16335,11 @@ async function noteBuildOutcome(
       if (unknownNameNote) {
         buildPrompt = `${unknownNameNote}\n\n---\n\n${buildPrompt}`;
         buildDiag.record({ phase: 'plan', severity: 'info', code: 'UNKNOWN_NAME_IN_REQUEST', message: unknownNameReportNote(unknownNamesAsked), autoResolved: true });
+      }
+      if (scriptFormAsked && scriptRequestNote) {
+        buildPrompt = `${scriptRequestNote}\n\n---\n\n${buildPrompt}`;
+        emit({ type: 'narration', agent: 'architect', text: scriptRequestStartLine(scriptFormAsked, liveDataAsked), ts: Date.now() });
+        buildDiag.record({ phase: 'plan', severity: 'info', code: 'SCRIPT_REQUEST_AS_WEB_APP', message: scriptRequestReportNote(scriptFormAsked, liveDataAsked), autoResolved: true });
       }
       if (unsupportedStackAsked) {
         buildPrompt = `${unsupportedStackBuilderNote(unsupportedStackAsked, framework)}\n\n---\n\n${buildPrompt}`;
@@ -16769,7 +16813,8 @@ async function noteBuildOutcome(
       if (singleHtmlFileRule) buildPrompt = `${singleHtmlFileRule}\n\n${buildPrompt}`;
       const singleHtmlFileSuffix = singleHtmlFileRule ? `\n\n${singleHtmlFileRule}` : ''; // the fast lane's copy of the same rule
       const pastedBriefSuffix = pastedBrief ? `\n\n${pastedBrief}` : ''; // the fast lane reads the pasted app's checklist too
-      const unknownNameSuffix = unknownNameNote ? `\n\n${unknownNameNote}` : ''; // and the unknown-word note (Q-067)
+      const unknownNameSuffix = (unknownNameNote ? `\n\n${unknownNameNote}` : '') // and the unknown-word note (Q-067)
+        + (scriptRequestNote ? `\n\n${scriptRequestNote}` : ''); // and the script-request note (Q-274)
 
       // Universal Language (Layer 73): build in the user's language. If the
       // request is written in a distinctive non-Latin script we name the
@@ -16972,7 +17017,8 @@ async function noteBuildOutcome(
             // The planner decides every module's files before a builder sees the stack note, so it gets the
             // note too — or a Kotlin request is planned as Gradle modules the builder may not write (autopsy
             // 042e472f, 2026-10-01). The plan's goal carries it, so every module turn reads it again.
-            const plannerGoalBase = unknownNameNote ? `${unknownNameNote}\n\n---\n\n${prompt}` : prompt;
+            const plannerGoalNotes = [unknownNameNote, scriptRequestNote].filter(Boolean).join('\n\n');
+            const plannerGoalBase = plannerGoalNotes ? `${plannerGoalNotes}\n\n---\n\n${prompt}` : prompt;
             const plannerGoal = unsupportedStackAsked ? `${unsupportedStackBuilderNote(unsupportedStackAsked, framework)}\n\n---\n\n${plannerGoalBase}` : plannerGoalBase;
             const modules = parsePlannedModules(await ppGenerate(projectPlanSystemPrompt(framework), projectPlanUserPrompt(plannerGoal, ppScaffold)));
             if (modules.length >= MIN_PROJECT_MODULES) {
@@ -19365,10 +19411,13 @@ async function noteBuildOutcome(
                 phase: 'build',
                 severity: 'info',
                 code: graph.multiService ? 'SERVICE_GRAPH_MULTI' : 'SERVICE_GRAPH_SINGLE',
-                message: graph.summary + (graph.multiService
-                  // Say the limitation out loud rather than let a green build imply all of it ran.
-                  ? ' ⚠️ Only the primary service is started today; the others are described, not run.'
-                  : ''),
+                message: graph.summary
+                  // A Python server IS started — before the front end, on every platform start and wake (Q-284).
+                  + (graph.services.some((sv) => sv.id.startsWith('python:')) ? ' The Python server is started before the front end on every start and wake.' : '')
+                  // Say the remaining limitation out loud rather than let a green build imply all of it ran.
+                  + (graph.services.filter((sv) => !sv.id.startsWith('python:')).length > 1
+                    ? ' ⚠️ Only the primary service is started today; the others are described, not run.'
+                    : ''),
                 autoResolved: true,
               });
             }
@@ -20449,6 +20498,8 @@ async function noteBuildOutcome(
           const startedAt = Date.now();
           // The health-check wrapper in devServerHost recognises this command, installs stale deps and
           // waits for the port — the same single call the revive path below trusts.
+          // Bounded by the same remaining-build budget the front end's start gets.
+          await startPythonBackendFirst('platform-preview', budget);
           const started = await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), budget, 'platform-preview-start')
             .catch((e) => ({ stdout: '', stderr: e instanceof Error ? e.message : String(e), exitCode: -1 }));
           const health = parseDevServerHealthLine(`${started.stdout}\n${started.stderr}`);
@@ -21093,7 +21144,13 @@ async function noteBuildOutcome(
             // read-back confirmed — is what turns every later revival from rediscovery into replay.
             // Best-effort and silent on failure: it can never affect a build that has already succeeded.
             try {
-              const launch = lastDevServerLaunch(workspaceId);
+              const lastLaunch = lastDevServerLaunch(workspaceId);
+              // The LAST launch may be the app's Python backend (started after the front end). That is
+              // not how the preview comes back: the recipe is the front end, on the port that rendered,
+              // and the backend has its own boot (Q-284, pythonBackendBoot.ts).
+              const launch = lastLaunch && isPythonServerCommand(lastLaunch.command)
+                ? { command: resolveDevRunCommand(await actuator.readFile(workspaceId, 'package.json').catch(() => null)), port: previewUrlPort(lastPreviewUrl) ?? undefined }
+                : lastLaunch;
               const check = buildRecipe({ devCommand: launch?.command, port: launch?.port, framework: null, now: Date.now() });
               previewRecipeSaved = check.ok && check.recipe ? await sandboxStore.saveRecipe(workspaceId, check.recipe) : false;
               // Say it now, while the preview is up. A promise the user only discovers is broken days
@@ -21288,6 +21345,7 @@ async function noteBuildOutcome(
               // Sized to the work, not to a wall — the same budget the wake route uses, for the same
               // reason (previewWake.ts): a restart that has to reinstall cannot finish in 90 s, and a
               // timeout here never stops the install it started.
+              await startPythonBackendFirst('preview-revive');
               await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), previewWakeBudgetMs(), 'preview-server-revive');
             } catch { /* the re-check below is the real verdict — a failed restart just means another try */ }
             buildDiag.record({
@@ -22582,6 +22640,7 @@ async function noteBuildOutcome(
             events.emit({ type: 'narration', agent: 'architect', text: '🔌 The preview server had stopped — restarting it…', ts: Date.now() });
             const restartedAt = Date.now();
             try {
+              await startPythonBackendFirst('runtime-revive');
               await withTimeout(actuator.runCommand(workspaceId, 'npm run dev'), previewWakeBudgetMs(), 'runtime-server-revive');
             } catch { /* the next capture is the real verdict */ }
             buildDiag.record({
@@ -22763,6 +22822,8 @@ async function noteBuildOutcome(
           // the builds where every runtime check skipped.
           filesWritten: writtenFiles.size,
           buildWasRequested: userAskedToBuildAnApp,
+          // "Live NSE prices" from code that only simulates them (Q-274, autopsy 241215d1).
+          liveDataRequested: liveDataAsked,
           // "Everything lives in one HTML file" about a multi-file project (autopsy dfd24058). Counted only
           // when the written files ARE the app — an edit turn writes a slice, and a slice of one is not a claim.
           appSourceFiles: isImportTurn || isEditMode ? undefined : Array.from(writtenFiles.keys()).filter((p) => /\.(?:[cm]?[jt]sx?|css|vue|svelte)$/i.test(p) && !/(?:^|\/)(?:node_modules|dist)\//.test(p)).length,

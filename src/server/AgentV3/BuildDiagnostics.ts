@@ -66,6 +66,8 @@ const PROCESS_ONLY_CODES = new Set([
   // The user named a stack we do not build (unsupportedStack.ts) — a fact about OUR templates, not the app.
   'UNSUPPORTED_STACK',
   'UNKNOWN_NAME_IN_REQUEST',
+  'SCRIPT_REQUEST_AS_WEB_APP', // a note to our builder and the user (scriptRequest.ts, Q-274)
+  'PYTHON_BACKEND_UP', // our own start of the app's Python server (pythonBackendBoot.ts, Q-284)
   // Whether OUR checks could sign in behind the app's login page (signInExplore.ts) — our instrument.
   'AUTH_EXPLORE_SIGNED_IN', 'AUTH_EXPLORE_NOT_RUN',
   // Whether the platform's additions to the reply reached the screen (summaryAdditions.ts): a fact about our delivery.

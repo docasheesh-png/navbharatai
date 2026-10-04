@@ -1448,6 +1448,12 @@ export interface SimpleBuildResult {
   /** TRUE when the lane ended because the build was asked to stop — never a failure of the app. */
   stopped?: boolean;
   /**
+   * TRUE when the lane handed its plan to the full builder because the next engine reasons before every
+   * answer — a planned handoff, never a failure (autopsy 8f797751: the report called it "could not
+   * produce the app" and `BUILD_FAILED` beside `LLM_CALL_HANDED_OFF`).
+   */
+  handedOff?: boolean;
+  /**
    * WHERE THE FAST LANE'S MINUTES WENT (autopsy `21b431e1`, 2026-09-22). Measurement only — nothing
    * reads it to make a decision.
    *
@@ -2092,12 +2098,16 @@ export async function runSimpleBuild(deps: SimpleBuildDeps): Promise<SimpleBuild
         deps.log?.('Still building your app — your work so far is saved and I am carrying on from it.');
       } catch { /* salvage is best-effort — on failure the full builder starts from the scaffold as before */ }
     }
+    const handedOff = isReasoningRungHandoff(e) || /reasons before every answer/i.test(reason);
     return {
       ok: false,
+      ...(handedOff ? { handedOff: true } : {}),
       filesWritten: salvagedPaths?.length ?? 0,
       summary: salvagedPaths?.length
         ? `Simple build timed out after generating ${salvagedPaths.length} file(s) — the full builder continues from them.`
-        : 'Simple build could not produce the app — switching to the full builder.',
+        : handedOff
+          ? 'Fast lane handed its plan to the full builder: the next engine reasons before every answer, which the lane cannot carry — a planned handoff, not a failure.'
+          : 'Simple build could not produce the app — switching to the full builder.',
       reason,
       outcome: 'BUILD_FAILED',
       salvagedPaths,

@@ -13,7 +13,10 @@ import { noteHeal } from './HealLedger';
 import { decideSupersede } from './previewSupersede';
 import { missingRanges, latestVersionsCommand, versionHint } from './npmVersionHint';
 import { cdnPdfWorkerNote } from './pdfWorkerSource';
-import { peerConflicts, peerDataCommand, peerConflictHint, etargetRecommendation, etargetHintLine, forcesPeers } from './peerCompatHint';
+import { parallelSiblingBrief, readSiblingTasks } from './parallelSiblings';
+import { caseOnlyTwins, caseTwinCheckable, caseTwinNote } from './caseTwin';
+import { mixedScriptWriteNote } from './scriptIntegrity';
+import { peerConflicts, peerDataCommand, peerConflictHint, etargetRecommendation, etargetHintLine, forcesPeers, installedPackageNames, deprecationCommand, deprecationHint } from './peerCompatHint';
 import { declaredRoutes, paramOnlyMatch, type DeclaredRoute } from './routerPaths';
 import { DECLARED_PORT_FILES } from './declaredPort';
 import { appPortsFrom, isSecondaryAppPort, type AppPortMap } from './appPorts';
@@ -104,7 +107,7 @@ import { shellWriteTargets, shellRemovalTargets, shellReadBackTargets, shellRemo
 import { unfixableInstallNote } from '../lib/unfixablePackages';
 import { shadowingTwins, shadowTwinEnabled, removablePath, shadowTwinToolNote, type ShadowTwinTally } from './shadowTwin';
 import { tscErrorCauses, tscCauseNote, exportTargetCandidates, exportSearchCommand, missingExportNames } from './tscErrorCause';
-import {
+import { WRITE_TYPECHECK_NOT_READY_MARKER,
   writeTypecheckEnabled, shouldTypecheckWrite, writeTypecheckCommand, writeTypecheckWarmupCommand, WARMUP_COMPILED_MARKER, writeTypecheckNote, writeTypecheckCleanNote, WriteTypecheckQueue,
   shouldProbeTsconfig, probeExhausted, isMissingFileError, type TsProjectVerdict,
   emptyWriteTypecheckStats, splitByWrittenFiles, WRITE_TYPECHECK_TIMEOUT_MS, MAX_WRITE_TYPECHECK_TIMEOUTS,
@@ -694,11 +697,15 @@ export class ToolDispatcher {
       if (peerNote) notes.push(peerNote);
       return notes.length > 0 ? notes.join('\n\n') : null;
     }
-    if (!forcesPeers(command)) return null;
+    // A successful install of a package npm calls deprecated (autopsy Sur Taal: music-metadata-browser).
+    const depCmd = deprecationCommand(installedPackageNames(command));
+    const deprecated = depCmd ? deprecationHint(await run(depCmd).catch(() => '')) : null;
+    if (!forcesPeers(command)) return deprecated;
     const conflicts = peerConflicts(await run('npm ls --depth=0 2>&1 | head -60'));
-    if (conflicts.length === 0) return null;
+    if (conflicts.length === 0) return deprecated;
     const dataCmd = peerDataCommand(conflicts.map((c) => c.pkg));
-    return peerConflictHint(conflicts, dataCmd ? await run(dataCmd) : '', true);
+    const forced = peerConflictHint(conflicts, dataCmd ? await run(dataCmd) : '', true);
+    return [forced, deprecated].filter(Boolean).join('\n\n') || null;
   }
 
   private async recordShellWrites(command: string, skip: string | null): Promise<void> {
@@ -3198,6 +3205,7 @@ export class ToolDispatcher {
       if (unprobed) s.compiledUnprobed += 1;
       let silentRun = false; // tsc printed nothing at all — the only output that means "clean"
       let neverRan = false; // the compiler did not look at the project — neither clean nor failed
+      let notReady = false; // the compiler was not ready (an install running) — the check stood down at once
       let errors = await this._writeTypecheckQueue.run(async () => {
         const command = writeTypecheckCommand();
         const startedAt = Date.now();
@@ -3215,6 +3223,7 @@ export class ToolDispatcher {
           return null;
         }
         const durationMs = Date.now() - startedAt;
+        if (String(r.stdout ?? '').includes(WRITE_TYPECHECK_NOT_READY_MARKER)) { notReady = true; return null; }
         s.runs += 1;
         s.elapsedMs += durationMs;
         s.timeouts = 0; // a run that finished resets the consecutive-timeout count
@@ -3232,7 +3241,10 @@ export class ToolDispatcher {
         // errors too, which is why a clean run here is evidence only through the bridge above, never on its own.
         return parseTscErrors(combined);
       });
-      if (errors === null) return '';
+      if (errors === null) {
+        if (notReady) { s.skipped += tsPaths.length; s.skippedNotReady = (s.skippedNotReady ?? 0) + tsPaths.length; }
+        return '';
+      }
       if (neverRan) {
         s.notRunRuns += 1;
         return '';
@@ -3540,6 +3552,25 @@ export class ToolDispatcher {
    * Order is the one `write_file` always used (hooks → imports → typecheck → quality). Each part is
    * best-effort on its own and can only append a sentence — never block, fail or change a write.
    */
+  /**
+   * A file in the same directory whose name differs only in letter case (autopsy Sur Taal). The directory
+   * is listed fresh each time: parallel specialists each have their own dispatcher, and the twin is the
+   * file a SIBLING wrote a moment ago, which no cached listing has seen. Never throws.
+   */
+  private async caseTwinNoteFor(path: string): Promise<string> {
+    try {
+      if (!caseTwinCheckable(path)) return '';
+      const slash = path.lastIndexOf('/');
+      const dir = slash < 0 ? '.' : path.slice(0, slash);
+      if (!/^[\w@./-]+$/.test(dir)) return '';
+      const listed = await withTimeout(this.actuator.runCommand(this.workspaceId, `ls -1 '${dir}' 2>/dev/null`), 5_000, 'case-twin-ls');
+      const twins = caseOnlyTwins(path, String(listed?.stdout ?? '').split('\n'));
+      return caseTwinNote(path, twins);
+    } catch {
+      return '';
+    }
+  }
+
   private async writeSteeringNotes(files: Record<string, string>): Promise<string> {
     const paths = Object.keys(files ?? {});
     if (paths.length === 0) return '';
@@ -3585,6 +3616,10 @@ export class ToolDispatcher {
       try { shadow += entryShadowNote(p, this.framework ?? 'vite-react'); } catch { /* a note is best-effort */ }
       // A pdf.js worker loaded from a CDN path built from the version (autopsy 981ce4cc) — said while open.
       try { shadow += cdnPdfWorkerNote(p, files[p]); } catch { /* a note is best-effort */ }
+      // `icons.tsx` beside `Icons.tsx` (autopsy Sur Taal) — said while the file is open.
+      shadow += await this.caseTwinNoteFor(p);
+      // A word that mixes two scripts ("अरijit", same autopsy) — said while the file is open.
+      try { shadow += mixedScriptWriteNote(p, files[p]); } catch { /* a note is best-effort */ }
     }
     // At a STYLESHEET write, every screen's classes still without a rule; and a page's own design defects
     // (autopsy e6d46cde) — both used to wait for a 100-second repair pass after the app was done. A SCREEN
@@ -10405,7 +10440,7 @@ export class ToolDispatcher {
         }
         if (isPlanningOnlyRole(role)) return PLAN_YOURSELF_NOTE;
         this.events?.emit({ type: 'agent_spawned', agent: role, task: instruction, ts: Date.now() });
-        const result = await this.spawnSubAgent(role, instruction + await this.stylesheetBriefFor(role));
+        const result = await this.spawnSubAgent(role, instruction + parallelSiblingBrief(readSiblingTasks(input)) + await this.stylesheetBriefFor(role));
         if (!Array.isArray(result.written) || result.written.length > 0) { this._delegateWrote = true; this._delegateWrites += 1; }
         return taskResultWithWrites(role, result);
       }

@@ -14196,7 +14196,7 @@ async function noteBuildOutcome(
           // A seeded template is its own kind of build (autopsy 4a1c0157): the same `scaffoldWillSeed` that
           // routed it to the cheap rung picks the slice, so the ETA never prices template polish as a
           // from-scratch `complex_app`.
-          const etaFleetKey = etaByProject ? 'complex_app' : analysis?.taskType ? etaTaskKey(analysis.taskType, scaffoldWillSeed) : null;
+          const etaFleetKey = etaByProject ? 'complex_app' : analysis?.taskType ? etaTaskKey(analysis.taskType, scaffoldWillSeed, buildIsComplex) : null;
           if (past.length === 0 && etaFleetKey) {
             try { fleet = fleetHistoryFromTelemetry(await withTimeout(agentV3CostTelemetry.list(7), 3_000, 'eta-fleet'), etaFleetKey, etaComplexity); } catch { /* best-effort */ }
           }
@@ -18605,7 +18605,7 @@ async function noteBuildOutcome(
       try {
         buildDiag.record({
           phase: 'build', severity: 'info', code: 'READY_BEFORE_END',
-          message: readyOverrunNote(result.readyAt, result.steps, Date.now() - buildStartedAt, { editingExistingApp: isEditMode }),
+          message: readyOverrunNote(result.readyAt, result.steps, Date.now() - buildStartedAt, { editingExistingApp: isEditMode, projectModule: projectModuleRef?.name ?? null }),
           autoResolved: true,
         });
       } catch { /* an advisory line must never affect a build */ }
@@ -24049,9 +24049,15 @@ async function noteBuildOutcome(
       // note reflects the settled statuses. Best-effort — never affects the build result.
       if (projectPlanRef && projectModuleRef) {
         try {
+          // A module the USER stopped (or our own server interrupted) did not fail — it was not finished
+          // (autopsy Sur Taal: "❌ Module "UI Config" failed" 1.2 s after the user pressed Stop, and the
+          // plan then read "1 failed" on every later turn). It goes back to pending.
+          const interruptedModule = !result.ok && abort.signal.aborted && interruptedBeforeAnyVerdict(abortCauseOf(abort.signal));
           let settled = result.ok
             ? markModuleStatus(projectPlanRef, projectModuleRef.id, 'done')
-            : markModuleStatus(projectPlanRef, projectModuleRef.id, 'failed', (result.summary || 'The build turn for this module failed.').slice(0, 300));
+            : interruptedModule
+              ? markModuleStatus(projectPlanRef, projectModuleRef.id, 'pending')
+              : markModuleStatus(projectPlanRef, projectModuleRef.id, 'failed', (result.summary || 'The build turn for this module failed.').slice(0, 300));
           // A turn that built other modules' files too: those modules are done — never queue a turn to
           // rebuild what this one already wrote (autopsy 8e124182; reconcilePlanWithWrites).
           if (result.ok) {
@@ -24066,6 +24072,8 @@ async function noteBuildOutcome(
             events.emit({ type: 'narration', agent: 'architect', text: `🏁 All ${settled.modules.length} modules are complete — the project plan is finished.`, ts: Date.now() });
           } else if (result.ok) {
             events.emit({ type: 'narration', agent: 'architect', text: `✅ Module "${projectModuleRef.name}" done — ${planProgressLine(settled)}. Continuing with the next module…`, ts: Date.now() });
+          } else if (interruptedModule) {
+            events.emit({ type: 'narration', agent: 'architect', text: `⏸️ Module "${projectModuleRef.name}" was stopped before it finished — its files so far are saved. Say "continue" to pick it up again.`, ts: Date.now() });
           } else {
             const reason = planBlockedReason(settled);
             events.emit({ type: 'narration', agent: 'architect', text: `❌ Module "${projectModuleRef.name}" failed — ${reason ?? 'say "continue" after reviewing to retry the remaining modules.'}`, ts: Date.now() });

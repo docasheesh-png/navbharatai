@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { offerWatchLive } from './earlyPreviewCue';
 import { platformFixRequestPrompt, fixErrorAndContinuePrompt, errorCanBeFixedByEditingTheApp } from '../../lib/platformFixRequest';
+import { CONTINUE_INTERRUPTED_BUILD_PROMPT, CONTINUE_PAST_BUDGET_PROMPT, CONTINUE_AND_FIX_BUILD_PROMPT } from '../../lib/continueBuildPrompts';
 import { appRanDespiteFailedVerdict, fixRemainingIssuePrompt, appRunningNoticeText } from './failedButRunning';
 import { publicTierLabel } from '../../lib/engineLabels';
 import { sessionIsPro } from '../../lib/sessionRouting';
@@ -4759,7 +4760,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                     <div className="mt-2 flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => { void send({ text: 'Continue the build from where it left off and finish the remaining steps.', importUrl: '' }); }}
+                        onClick={() => { void send({ text: CONTINUE_INTERRUPTED_BUILD_PROMPT, importUrl: '' }); }}
                         className="px-2.5 py-1 rounded-md bg-amber-500 text-zinc-950 text-xs font-medium hover:bg-amber-400 transition-colors"
                       >
                         Continue building
@@ -4940,7 +4941,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                 </div>
                 {!running && (
                   <button
-                    onClick={() => fixWithAI('Continue building from where you left off and finish the app — I understand this uses more of my budget.')}
+                    onClick={() => fixWithAI(CONTINUE_PAST_BUDGET_PROMPT)}
                     className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-on-accent bg-sky-600 hover:bg-sky-500 rounded px-2.5 py-1"
                   >
                     <Sparkles className="w-3.5 h-3.5" /> Continue building
@@ -4984,7 +4985,7 @@ export function AgentV3Panel({ userId, email, resume, freshOpenNonce, openPrevie
                   </div>
                   {!running && (
                     <button
-                      onClick={() => fixWithAI('Continue from where you left off and finish/fix the build so the app works end-to-end.')}
+                      onClick={() => fixWithAI(CONTINUE_AND_FIX_BUILD_PROMPT)}
                       className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-on-accent bg-indigo-600 hover:bg-indigo-500 rounded px-2.5 py-1"
                     >
                       <Sparkles className="w-3.5 h-3.5" /> Fix with AI

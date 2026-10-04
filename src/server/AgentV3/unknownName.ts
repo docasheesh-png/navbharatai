@@ -41,6 +41,21 @@ const COMMON_ACRONYMS = new Set([
   'IMPS', 'BHIM', 'EPF', 'PF', 'ESI', 'CA', 'CS', 'MBA', 'BBA', 'BCA', 'MCA', 'BTECH', 'MTECH', 'PHD', 'MBBS',
 ]);
 
+/**
+ * File and media FORMATS — a kind of file, never a service (autopsy Sur Taal, 2026-10-04: a music player's
+ * "supported formats: MP3, WAV, AAC, FLAC, OGG" told the builder WAV, AAC and FLAC were unknown names it must
+ * not build a client for). One family, so a format is never added one name at a time.
+ */
+const FILE_FORMATS = [
+  'WAV', 'AAC', 'FLAC', 'OGG', 'OPUS', 'M4A', 'WMA', 'AIFF', 'ALAC', 'MIDI', 'MID', 'AMR', 'LRC', 'ID3',
+  'MKV', 'AVI', 'MOV', 'WEBM', 'FLV', 'WMV', 'M4V', 'MPEG', 'MPG', '3GP', 'SRT', 'VTT',
+  'JPEG', 'WEBP', 'HEIC', 'HEIF', 'AVIF', 'TIFF', 'TIF', 'BMP', 'ICO', 'RAW', 'PSD',
+  'DOC', 'DOCX', 'XLS', 'XLSX', 'PPT', 'PPTX', 'ODT', 'ODS', 'RTF', 'TXT', 'EPUB', 'MD', 'YAML', 'YML', 'TOML',
+  'ZIP', 'RAR', 'TAR', 'GZ', '7Z', 'EXE', 'DMG', 'ISO', 'TTF', 'OTF', 'WOFF', 'WOFF2', 'GLB', 'GLTF', 'OBJ', 'STL',
+  'HD', 'FHD', 'UHD', 'HDR', 'FPS', 'BPM', 'EQ', 'DJ', 'DPI', 'RGB', 'HEX',
+];
+for (const f of FILE_FORMATS) COMMON_ACRONYMS.add(f);
+
 /** Services, platforms and stacks NavBharatAI knows by name — the request may really mean to connect them. */
 const KNOWN_SERVICES = new Set([
   'STRIPE', 'RAZORPAY', 'CASHFREE', 'PAYTM', 'PHONEPE', 'PAYPAL', 'FIREBASE', 'SUPABASE', 'MONGODB', 'MYSQL',

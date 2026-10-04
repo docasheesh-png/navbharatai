@@ -88351,3 +88351,23 @@ Q-194, Q-195, Q-272, Q-286 resolved as not defects). All sixteen rows are now �
 in `BUILD_REPORT_QUEUE.md`; their ledgers stay in the two entries above. **Watch on the next real builds:**
 `PYTHON_BACKEND_UP` / `_NOT_UP` on a Python-backed app, the `SCRIPT_REQUEST_AS_WEB_APP` start line, and the first
 write-time typecheck on a fresh starter dropping well under 15 s. Still BLOCKED on evidence: Q-193, Q-273, Q-275.
+
+## 2026-10-04 — Autopsy "Sur Taal Music" (3 builds, workspace …1dda446e) — PR #PRNUM
+
+A Hindi design note for one small offline music player. Build 1 split it into a 14-module Software Project
+Mode plan; build 2 ("continue") was stopped by the user and recorded as a FAILED module; build 3 — our own
+"Continue building" button — was not recognised as a continuation, so the paused plan was abandoned and the whole
+note became one edit: four parallel frontend specialists each built the whole app, the 25-minute free window
+closed with 33–47 type errors, RED, $3.35 of NavBharatAI's money, ₹0 billed.
+
+⚠️ **The same report was autopsied by another session at the same time (#3506, opened first).** It owns the
+sizing, Devanagari-domain, phone-power and palette items (Q-390–Q-399, recorded here as Q-425). This PR carries
+only what #3506 does not: Q-410–Q-420 (fixed, `tests/theSurTaalAutopsy.test.ts`, reversion-proven) and
+Q-421–Q-424 (🟡). The overlapping fixes this session had written were dropped rather than raced.
+
+- **Q-410** our own continue sentences are shared constants (`src/lib/continueBuildPrompts.ts`) and "continue the
+  build" is a continuation — the noun "build" (697b38ee's class, one stage earlier) no longer reads as an order.
+- **Q-411** parallel writers are told each other's tasks and the shared-file rules (`parallelSiblings.ts`); the
+  architect writes shared pieces before parallel screens; case-only twin files are named at write time.
+- **Q-412–Q-419** file formats, a stopped module → pending, READY on a module turn, the write-time typecheck never
+  waits for an install, deprecated packages, mixed-script words, ETA follows the complexity router, delegation role.

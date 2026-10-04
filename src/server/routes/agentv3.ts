@@ -195,6 +195,7 @@ import { liveCostEnabled, liveCostInr, shouldEmitLiveCost, LIVE_COST_MIN_GAP_MS 
 import { releaseGate, releaseGateSummary, type RuntimeEvidence, type QualitySignals, type GateState } from '../AgentV3/releaseGate';
 import { auditSummaryClaims, claimCorrection, claimAuditSummary, admittedInertControls } from '../AgentV3/claimAudit';
 import { judgeRenderStyle, renderStyleNote, unstyledRenderUserNote, type RenderStyleVerdict, type RenderStyleEvidence } from '../AgentV3/renderStyle';
+import { visibleAppError, appShowsErrorNote, APP_SHOWS_ERROR_CODE } from '../AgentV3/visibleAppError';
 import { reviewerShouldWrite, toReviewSuggestions, reviewSuggestionSummary, reviewSuggestionCard, greenReviewPlan, greenFunctionalRepairEnabled, greenRepairPlan, greenRepairOutcome, greenRepairUserLine, changedWorkspacePaths, greenRepairPrompt, readRepairVerdicts, type RepairVerdicts } from '../AgentV3/greenReviewPolicy';
 import { scaffoldFilesInTscErrors, canonicalScaffold, protectBoilerplateInRepair } from '../AgentV3/scaffoldBoilerplate';
 import { greenFreezeEnabled, latchGreen, clearGreenLatch, isGreenLatched, runInPass, setGreenFreezeObserver, setWriteObserver, GreenFreezeError } from '../AgentV3/greenFreeze';
@@ -13296,7 +13297,28 @@ async function noteBuildOutcome(
       // No provider name is surfaced to the user (kept to server telemetry only).
       const costLadderOn = process.env.AGENTV3_COST_LADDER !== 'off';
       const analysis = costLadderOn
-        ? analyzeRequest({ prompt: planning.sizing, powerMode: onlyOpus, pinnedModel: powerSpecResolved.pinnedModel, buildIntent: intent })
+        /**
+         * 📏 `fileCount` IS PASSED, AND UNTIL 2026-10-04 IT WAS NOT (autopsy 8b8743a3, Q-313).
+         * `projectFileCount` has been in scope since ~2,600 lines above this call, and the analyser's
+         * own docblock justifies excluding an EDIT from the unsized-app floor with *"an edit is not an
+         * app being ordered, **and its file count already raises the score**"* — a compensation that
+         * never ran. So every edit was sized as if the workspace were empty: measured, the reported
+         * build scored `chat/5` where `chat/11` was the honest number, and every edit of a large
+         * project scored the same as an edit of an empty one.
+         *
+         * 🔒 MEASURED BLAST RADIUS before wiring it (24 realistic prompts × both build intents ×
+         * fileCount 0/14/40): **one** prompt changes tier — *"optimise the bundle, it loads slowly in
+         * production"* on a real project, gemini → haiku, which is the right direction — and **zero**
+         * cross the 40 line that decides which rung OPENS a build. So this moves the report's number
+         * and not the money. `AGENTV3_SIZE_PROJECT=off` reverts it with no deploy.
+         */
+        ? analyzeRequest({
+            prompt: planning.sizing,
+            powerMode: onlyOpus,
+            pinnedModel: powerSpecResolved.pinnedModel,
+            buildIntent: intent,
+            ...(process.env.AGENTV3_SIZE_PROJECT === 'off' ? {} : { fileCount: projectFileCount }),
+          })
         : undefined;
       if (analysis) {
         console.log(
@@ -20454,6 +20476,25 @@ async function noteBuildOutcome(
         const note = renderStyleNote(v, where);
         if (note) { try { buildDiag.record({ phase: 'preview', ...note }); } catch { /* diagnostics best-effort */ } }
       };
+      /**
+       * DOES THE RENDERED APP SHOW ITS OWN ERROR MESSAGE? (visibleAppError.ts, Q-362, autopsy 981ce4cc —
+       * a PDF app was "READY 92/100" and published while its screen said "Failed to load PDF file".) A page
+       * that paints an error is painted, so the render verdict cannot see it. Recorded once; a LATER render
+       * check of the app that no longer shows it clears it. Evidence only — never a gate, never a repair.
+       */
+      let appErrorRecorded = false;
+      const noteVisibleError = (shot: { source?: 'browser' | 'curl'; html?: string }, where: string): void => {
+        if (shot.source !== 'browser') return; // a curl snapshot never ran the app
+        const err = visibleAppError(String(shot.html ?? ''));
+        try {
+          if (err && !appErrorRecorded) {
+            appErrorRecorded = true;
+            buildDiag.record({ phase: 'preview', ...appShowsErrorNote(err, where) });
+          } else if (!err && appErrorRecorded) {
+            buildDiag.resolveOnRecheck(APP_SHOWS_ERROR_CODE);
+          }
+        } catch { /* diagnostics best-effort */ }
+      };
       // THE WAKE-UP GUARANTEE, as a fact rather than a hope. `true` = the revival recipe is stored AND
       // was read back, so this preview can be brought up again without guessing. `false` = the preview
       // works but the recipe could not be stored, which the user is told plainly at the only moment it
@@ -21214,7 +21255,7 @@ async function noteBuildOutcome(
           // admin actually saw, yet the rescue upgraded to success). The full-workspace readiness result
           // that found it is already on the diagnostics timeline — no re-analysis.
           const runtimeCrashBlocker = buildDiag.hasRuntimeCrashBlocker();
-          if (verdict.rendered) noteRenderStyle(shot, 'render rescue');
+          if (verdict.rendered) { noteRenderStyle(shot, 'render rescue'); noteVisibleError(shot, 'render rescue'); }
           // We looked, the answer was conclusive, and the app did not render. That — and only that — is
           // evidence a repair has something real to aim at.
           if (!verdict.rendered && !verdict.inconclusive && !verdict.serverDown) previewProvenBroken = true;
@@ -21299,7 +21340,7 @@ async function noteBuildOutcome(
             attempt -= 1; // a second look is not a repair attempt
             continue;
           }
-          if (verdict.rendered) noteRenderStyle(shot, 'preview verify');
+          if (verdict.rendered) { noteRenderStyle(shot, 'preview verify'); noteVisibleError(shot, 'preview verify'); }
           if (verdict.rendered && consoleErrs.length === 0 && await renderIsOnlyTheStarter()) {
             // Rendered — but the starter page, not an app. Not a proof, and not a defect a repair pass
             // could fix either (there is nothing to repair), so the loop ends here without spending one.

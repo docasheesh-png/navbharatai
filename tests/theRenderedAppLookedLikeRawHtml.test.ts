@@ -155,8 +155,8 @@ describe('4 · 🔒 the wiring, read from the source — tsc and vitest cannot s
   });
 
   it('both render checks that see the app paint hand the shot to the judge', () => {
-    expect(route).toContain("if (verdict.rendered) noteRenderStyle(shot, 'render rescue');");
-    expect(route).toContain("if (verdict.rendered) noteRenderStyle(shot, 'preview verify');");
+    expect(route).toContain("if (verdict.rendered) { noteRenderStyle(shot, 'render rescue');");
+    expect(route).toContain("if (verdict.rendered) { noteRenderStyle(shot, 'preview verify');");
     // A curl snapshot never ran the app's CSS and is never judged.
     expect(route).toContain("if (shot.source !== 'browser') return;");
   });

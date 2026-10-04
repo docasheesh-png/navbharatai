@@ -5525,7 +5525,10 @@ export class ToolDispatcher {
             ? `${errorBoundary.brokenBoundaries[0]} is named like an error boundary but implements none — fix that file, do NOT add another`
             : 'React app has no error boundary' });
         }
-        if (testCoverage.findings.some((f) => f.level === 'high')) extra.push({ severity: 'medium', label: 'No tests at all' });
+        // A Project Mode module that does not assemble the app is judged on its own files (Q-396, Sur Taal):
+        // "No tests at all" is true of the unfinished app and was repeated on every module turn. It returns on
+        // the shell module's turn, where the whole app is judged.
+        if (!this._starterExpected && testCoverage.findings.some((f) => f.level === 'high')) extra.push({ severity: 'medium', label: 'No tests at all' });
         // Best-effort design-consistency pass (P-PIPE.C stage 32 — advisory, NEVER a readiness
         // blocker, exactly like SEO): lint the generated style-bearing code for palette/typography/
         // spacing/token consistency so a build reports its visual polish, not just its correctness.

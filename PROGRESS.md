@@ -88377,3 +88377,16 @@ Not defects (recorded so nobody re-opens them): `requestAnalysis.startTier: "gem
 historical key, with `startBand` printed beside it (2026-09-17); the GLM crawl bench was the designed resilience.
 **Watch:** no `BROWSER=none` and no `Killed` in launch logs; `WRITE_TIME_TYPECHECK` compiling again; any
 `package.json was EMPTY` line (it names the writer — Q-414).
+## 2026-10-04 — Q-344: the other nine scripts stand down on transliterated loanwords (next PR after #3494)
+
+The admin approved transliterated English loanwords as the protective words ("ok, go ahead"), and decided the
+merging session merges #3494, not this one.
+
+| Item | Root cause | Class | Fix | Lock |
+|---|---|---|---|---|
+| Q-344 child-protection / deepfake-detection apps refused in Bengali, Tamil, Telugu, Urdu… | Q-320's stand-down had protective words only in English and Hindi | a safety word list in one script and not its siblings | `indicSafetyWords.ts` gains `protective` (report, helpline, POCSO, detect, awareness per script) and `unambiguous` (porn, obscene, naked, "sex"/"sexual" beside a medium, undress, deepfake + make/generator) for CSAM and NCII; `illegalContentRules.ts` reads them | `tests/aProtectiveAppIsNotTheOffence.test.ts` — fix removed → 8 fail |
+| Sibling found: "शिशुओं की यौन सामग्री रिपोर्ट" (sexual content) passed the Hindi stand-down | the Devanagari unambiguous list paired only "सेक्स" with a medium | same | "(सेक्स|यौन)" beside video/photo/chat/story/content | same test |
+
+Honest limit: only loanwords stand down, so a request using a native protective word (শনাক্ত, கண்டறி) stays
+refused. Words in the `unambiguous` lists that were guessed can only make the rule stricter, never looser.
+

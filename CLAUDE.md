@@ -234,7 +234,9 @@ promised to build it.** Every model refused — the model's virtue, never our de
   erotic, sexy, "sexual videos", "undress", "make a deepfake"); then the request is refused as before. One
   function, `protectiveStandDown`, read by the prompt triage AND the publish scanner. ⚠️ "sex"/"sexual"
   alone are deliberately NOT unambiguous ("report child sexual abuse" needs them). The other nine scripts
-  have no protective words yet and stay strict (Q-344). `tests/aProtectiveAppIsNotTheOffence.test.ts`.
+  stand down only on transliterated LOANWORDS (Q-344, admin "ok, go ahead" 2026-10-04): report, helpline,
+  POCSO, detect, awareness; a native-only request stays strict until a native reader adds words.
+  `tests/aProtectiveAppIsNotTheOffence.test.ts`.
   ⚠️ **NO LOOKBEHIND MAY REACH THE WEB BUNDLE (Q-322).** Safari before 16.4 (iOS 15) throws on one and
   takes its screen down — the Image Generator did not open there. A server file the client imports is
   client code too. `scripts/noLookbehindInBundle.mjs` (in `npm run test:bundle`) reads the built bundle.

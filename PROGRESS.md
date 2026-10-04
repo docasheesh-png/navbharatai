@@ -87856,3 +87856,16 @@ and Q-223 (#3471) merged with their owners, Q-255 rode #3475. Q-202's blocker (#
 `unreferencedComponents` PROVES nothing reaches them (one unresolved import ⇒ nothing named), tests/stories/`ui/`
 excluded, folded into the one-time `STYLE_RULES_RESUMED` hand-back (detail `<path>:unimported`). Watch: that detail on
 the next build that changes course, and no `:unimported` on an ordinary build.
+
+## 2026-10-04 — Autopsy d798ddd3 ("Calculator app"): the one item #3491 does not own (Q-310)
+
+PR #3491, from another live session, already carries this report's main fix: the lean review's untagged
+"**1. Bug: …**" findings are now read and repaired (Q-300), plus Q-301–Q-307. This session had built the same parser
+change before it saw #3491. That copy was discarded unpushed, because it edited the same `ReviewerAgent.ts` region
+(the concurrency rule). The one item that PR's ledger does not hold is fixed here, in #3493:
+
+| Item | Root cause | Class | Siblings | Lock |
+|---|---|---|---|---|
+| Q-310: READY_BEFORE_END said "The app was never judged finished during the build" about a calculator the end-of-turn gate had judged ready (9 steps, 3.7 min) | Only the mid-build done check wrote `readyMark`, and on a short build it never came due | A measurement written by one of two places that make the same judgement | The end-of-turn gate is the only other `assessBuildReadiness` judgement in the runner. It now records the mark through `endOfTurnReadyMark` under the mid-build check's own rules (not on an edit, not before a write, not over a failed compile, never over an earlier mark) | `tests/theEndOfTurnGateJudgedItFinished.test.ts` (three reversions each failed) |
+
+Watch: READY_BEFORE_END on a short build reads "judged finished at step N".

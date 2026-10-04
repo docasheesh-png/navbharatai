@@ -83,6 +83,6 @@ describe('the report says what it knows', () => {
   });
 
   it('a "continue" that builds the next module is not an edit of an existing app', () => {
-    expect(ROUTE).toMatch(/if \(!continuesPlan\) events\.emit\(\{[\s\S]{0,120}Editing your existing app/);
+    expect(ROUTE).toMatch(/if \(!continuesPlan\) events\.emit\(\{[\s\S]{0,120}text: editBannerText\(/);
   });
 });

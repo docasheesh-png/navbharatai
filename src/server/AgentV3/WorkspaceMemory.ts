@@ -76,8 +76,11 @@ export interface Episode {
   lane?: RequestLane;
 }
 
-/** The lane that answered a user's request. */
-export type RequestLane = 'chat' | 'build';
+/**
+ * The lane that answered a user's request. `offer`: answered in chat because a build was NOT confirmed,
+ * with an offer to build it (`buildConfirmation.ts`). A "yes" to that offer builds the recorded text.
+ */
+export type RequestLane = 'chat' | 'build' | 'offer';
 
 /**
  * Is this recorded error one a clean, whole-project compile makes stale? The texts are the ones this
@@ -470,7 +473,7 @@ export class WorkspaceMemory {
     const ep: Episode = { ts: typeof ts === 'number' && ts > 0 ? ts : Date.now(), kind, text: text.slice(0, 2000), file };
     // Set only when real: an `undefined` field is a value Firestore refuses to store.
     if (typeof resolvedAt === 'number' && resolvedAt > 0) ep.resolvedAt = resolvedAt;
-    if (lane === 'chat' || lane === 'build') ep.lane = lane;
+    if (lane === 'chat' || lane === 'build' || lane === 'offer') ep.lane = lane;
     this.episodes.push(ep);
     if (this.episodes.length > MAX_EPISODES) this.episodes.splice(0, this.episodes.length - MAX_EPISODES);
   }
@@ -502,6 +505,14 @@ export class WorkspaceMemory {
       .filter((e) => e.kind === 'request')
       .slice(-Math.max(1, limit))
       .map((e) => (e.lane ? { text: e.text, lane: e.lane } : { text: e.text }));
+  }
+  /** The most recent request with its lane and time, or null. For "was the last turn an offer, and when?" */
+  lastRequestTurn(): { text: string; lane?: RequestLane; ts: number } | null {
+    for (let i = this.episodes.length - 1; i >= 0; i--) {
+      const e = this.episodes[i];
+      if (e.kind === 'request') return e.lane ? { text: e.text, lane: e.lane, ts: e.ts } : { text: e.text, ts: e.ts };
+    }
+    return null;
   }
   recordError(text: string, file?: string, ts?: number, resolvedAt?: number): void { this.episode('error', text, file, ts, resolvedAt); }
   recordFix(text: string, file?: string, ts?: number): void { this.episode('fix', text, file, ts); }

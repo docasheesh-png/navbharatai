@@ -532,6 +532,8 @@ import { isReactProject } from '../runtime/ReactPreview';
 import { isVueProject } from '../runtime/VuePreview';
 import { CREATOR_IDENTITY, recencyDirective, INDIA_TERRITORIAL_INTEGRITY, LINK_POLICY } from '../lib/prompts';
 import { liveSearchContext } from '../lib/liveSearchContext';
+import { buildConfirmation, buildConfirmationEnabled, isOfferAcceptance, OFFER_LIFETIME_MS, BUILD_OFFER_STEER } from '../AgentV3/buildConfirmation';
+import { attachmentMemoryEnabled, rememberableUid, saveAttachmentMemory, loadAttachmentMemory, deleteAttachmentMemory, shouldRecallAttachment, refersToEarlierAttachment } from '../lib/attachmentMemory';
 import { classifyIntentSmartDetailed, classifyIntentWithConfidence, wantsFreshStart, isExplicitCompleteBuild, userAskedForAnAppToBeBuilt, readerlessIntent, describeReaderOutcome, type ReaderOutcome } from '../AgentV3/IntentClassifier';
 import { fastLanePhaseSummary, dominantFastLanePhase } from '../AgentV3/fastLanePhases';
 import { emptyWasteLedger, recordWaste, wasteSummary, totalWasteCalls, type WasteKind } from '../AgentV3/providerWaste';
@@ -4205,6 +4207,7 @@ export function registerAgentV3Routes(app: Express): void {
             deletePlan: deleteProjectPlan,
             deleteMemory: deleteWorkspaceMemory,
             deleteDiagnostics: deleteDiagnostics,
+            deleteAttachmentMemory,
             // MARK, never delete: the app stays live at its public URL (a shared link must not die
             // because someone tidied their chat list), and keeping the record is what lets admin
             // takedown still reach it. Recorded as an open gap in ROADMAP §10.4: such an app cannot
@@ -6715,6 +6718,8 @@ async function noteBuildOutcome(
             purgedMemory = true;
           }
         } catch { /* memory purge is best-effort — never fail the unsend */ }
+        // An unsent message may be the one that carried the file this chat keeps (Q-201): forget it too.
+        await deleteAttachmentMemory(cid).catch(() => { /* best-effort */ });
       }
 
       if (!truncated && !purgedMemory && !stopped && forbidden) {
@@ -9872,7 +9877,11 @@ async function noteBuildOutcome(
       res.status(503).json({ error: 'AgentV3 requires ANTHROPIC_API_KEY to be configured.' });
       return;
     }
-    const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+    // What the user TYPED. `prompt` is the request this turn works on, and differs only when the turn is a
+    // "yes" to our offer to build (Q-200): then it becomes the request that was offered, and the typed
+    // "yes" is what the chat history keeps.
+    const typedPrompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+    let prompt = typedPrompt;
     if (!prompt) {
       res.status(400).json({ error: 'A non-empty "prompt" is required.' });
       return;
@@ -10513,10 +10522,13 @@ async function noteBuildOutcome(
     // (planningRequest.ts). A photo that is not a UI design is left out of it (autopsy 19641ab5).
     let planningAttachmentText = '';
     let picturesSetAside = 0;
+    // The masked text of attached DOCUMENTS (never pictures) that this chat keeps for its next message (Q-201).
+    let rememberableDocs = '';
     if (docAttachments.length > 0) {
       send({ type: 'narration', agent: 'architect', text: `📎 Reading ${docAttachments.length} file(s)…`, ts: Date.now() });
       try {
         const docs = await buildDocumentContext(docAttachments);
+        rememberableDocs = docs ? redactPII(docs) : '';
         // Bounded (8s) — a stalled vision provider must not hang the request before the deadline
         // timer is armed; on timeout we proceed without the image description.
         const images = docAttachments.filter((a) => isVisionAttachment(a.type, a.name));
@@ -10673,6 +10685,75 @@ async function noteBuildOutcome(
       // so a question is answered, not built, on a slow free router too (autopsy 6e646503).
       readerOutcome = 'failed';
       if (classifyIntentWithConfidence(prompt).confidence !== 'high') intent = readerlessIntent(prompt);
+    }
+
+    /**
+     * 🙋 A BUILD STARTS ONLY WHEN THE USER CERTAINLY ASKED FOR ONE (admin 2026-10-03, Q-200 — see
+     * `buildConfirmation.ts`). "Ipudu e data ni check cheyu" with a sheet attached named nothing to build;
+     * the reader answered build and the route trusted it: 17.6 minutes and ₹272 to answer a question. A
+     * `new_build` — or an "edit" of a chat that holds nothing of the user's — now goes ahead only when the
+     * MESSAGE confirms it. Otherwise the chat answers and offers, and the turn is remembered as an offer.
+     *
+     * A "yes" to that offer (within `OFFER_LIFETIME_MS`, with nothing else in the message) builds the
+     * request that was OFFERED: `prompt` becomes it, so the planner, the title and the builder all read the
+     * user's real request instead of "haan". The chat history keeps what they typed (`typedPrompt`).
+     */
+    const importingThisTurn = zipImports.length > 0 || (typeof req.body?.importUrl === 'string' && req.body.importUrl.trim() !== '');
+    const lastRequestTurn = (() => {
+      try { return getWorkspaceMemory(intentWorkspaceId).lastRequestTurn(); } catch { return null; }
+    })();
+    const offerAccepted = buildConfirmationEnabled()
+      && lastRequestTurn !== null
+      && lastRequestTurn.lane === 'offer'
+      && Date.now() - lastRequestTurn.ts <= OFFER_LIFETIME_MS
+      && rawAttachments.length === 0
+      && !importingThisTurn
+      && isOfferAcceptance(typedPrompt);
+    if (offerAccepted && lastRequestTurn) {
+      console.log('[AGENTV3] the user said yes to our offer to build — building the request that was offered');
+      prompt = lastRequestTurn.text;
+      intent = 'new_build';
+      readerAnswered = false;
+      readerSaysUnclear = false;
+    }
+    const buildCheck = buildConfirmationEnabled()
+      && !offerAccepted
+      && !importingThisTurn
+      && (intent === 'new_build' || (intent === 'edit_existing' && !earlierRequestLeftAnApp))
+      ? buildConfirmation(prompt)
+      : null;
+    const offerToBuild = buildCheck !== null && !buildCheck.confirmed;
+    if (offerToBuild) {
+      console.log(`[AGENTV3] a build was not confirmed by the message (${buildCheck!.reason}) — answering, and offering to build`);
+      intent = 'chat';
+    }
+
+    /**
+     * 📎 A FILE SENT IN THIS CHAT IS STILL HERE ON THE NEXT MESSAGE, AND NEVER IN ANOTHER CHAT (admin
+     * 2026-10-03, Q-201 — see `lib/attachmentMemory.ts`). The latest attached document's masked text is kept
+     * per chat (50 KB, 30 days), and handed back only to a later message in the SAME chat that brings no file
+     * of its own and either talks about the data/file or says yes to an offer.
+     */
+    let recalledAttachment: { names: string[]; truncated: boolean } | null = null;
+    if (attachmentMemoryEnabled() && rememberableUid(userId)) {
+      if (rememberableDocs.trim()) {
+        const names = docAttachments.filter((a) => !isVisionAttachment(a.type, a.name)).map((a) => String(a.name ?? 'file'));
+        void saveAttachmentMemory({ uid: userId, workspaceId: intentWorkspaceId, text: rememberableDocs, names }).catch(() => {});
+      } else if (shouldRecallAttachment({ message: typedPrompt, hasAttachmentNow: rawAttachments.length > 0, offerAccepted })) {
+        const loaded = await raceTimeout(loadAttachmentMemory(userId, intentWorkspaceId), 3_000, 'attachmentMemory').catch(() => null);
+        // A bare "yes" brings back only the file that came WITH the offer, not an older one from this chat.
+        const kept = loaded && (!offerAccepted || refersToEarlierAttachment(typedPrompt)
+          || (lastRequestTurn !== null && loaded.savedAt >= lastRequestTurn.ts - 10 * 60_000))
+          ? loaded
+          : null;
+        if (kept) {
+          const block = fenceUntrusted('attached files (sent earlier in this chat)', kept.text);
+          attachmentContext = attachmentContext ? `${attachmentContext}\n\n${block}` : block;
+          planningAttachmentText = planningAttachmentText ? `${planningAttachmentText}\n\n${block}` : block;
+          recalledAttachment = { names: kept.names, truncated: kept.truncated };
+          send({ type: 'narration', agent: 'architect', text: `📎 Using the file you sent earlier in this chat${kept.names.length ? ` (${kept.names.join(', ')})` : ''}.`, ts: Date.now() });
+        }
+      }
     }
 
     /**
@@ -10971,6 +11052,10 @@ async function noteBuildOutcome(
         // returning the canned `inputCheck.message`) is what keeps the question in the USER'S OWN
         // LANGUAGE, which LANGUAGE_RULE already governs on this path.
         const clarifyWhatToBuild = askWhatToBuild;
+        // Q-200: the turn was diverted because a build was not confirmed, and no more specific answer took it.
+        // The reply answers, then offers; the turn is remembered as an offer so a "yes" builds this request.
+        const answerThenOffer = offerToBuild && !clarifyWhatToBuild && !askUnrelated && !answerProjectElsewhere
+          && !answerPictureRequest && !answerSpreadsheet && !echoesPlatformNotice;
         let chatPrompt = attachmentContext
           ? `${prompt}\n\nThe user attached file(s); here is the extracted content:\n\n${attachmentContext}`
           : prompt;
@@ -11016,7 +11101,7 @@ async function noteBuildOutcome(
         // prompt-keyed cache could serve one turn's answer to the other. Excluded outright rather
         // than reasoned around: the other conditions happen to cover it today, and that is exactly
         // the kind of coincidence that stops being true after an unrelated edit.
-        const cacheable = !askUnrelated && !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !answerPictureRequest && !answerSpreadsheet && !clarifyWhatToBuild && chatCacheEnabled();
+        const cacheable = !answerThenOffer && !askUnrelated && !attachmentContext && !chatWorkspaceContext && !chatPreviewHealth && !chatSessionRecall && !echoesPlatformNotice && !answerProjectElsewhere && !answerPictureRequest && !answerSpreadsheet && !clarifyWhatToBuild && chatCacheEnabled();
         const cacheKey = cacheable ? hashKey(['chatv1', prompt]) : '';
         let reply: string;
         // The spreadsheet this reply carries, when it made one — rides on the narration line and the
@@ -11084,7 +11169,8 @@ async function noteBuildOutcome(
                 + (answerProjectElsewhere ? projectElsewhereSteer(projectElsewhere) : '')
                 + (askUnrelated ? unrelatedRequestSteer(unrelated?.existingHint ?? '', rawAttachments.length > 0) : '')
                 + (answerPictureRequest ? PICTURE_REQUEST_STEER : '')
-                + (ambiguousBuildAsk && !clarifyWhatToBuild && !answerProjectElsewhere && !askUnrelated && !answerPictureRequest
+                + (answerThenOffer ? BUILD_OFFER_STEER : '')
+                + (ambiguousBuildAsk && !answerThenOffer && !clarifyWhatToBuild && !answerProjectElsewhere && !askUnrelated && !answerPictureRequest
                   ? "\n\nThis message was ambiguous — it might be a request to build or change something "
                     + "in the user's app, phrased in an unusual way, OR it might just be a genuine "
                     + "question/comment. Answer it naturally, but if it plausibly could mean \"build/fix "
@@ -11123,7 +11209,7 @@ async function noteBuildOutcome(
           const chatWsId = deriveWorkspaceId(userId, req.body?.sessionId);
           const chatMem = getWorkspaceMemory(chatWsId);
           // Our own notice is not one of the user's requests, and must never become "earlier context".
-          if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, 'chat');
+          if (!echoesPlatformNotice) chatMem.recordRequest(prompt, undefined, answerThenOffer ? 'offer' : 'chat');
           // Hydration at intent-time is a 3-second RACE, so it can be marked done while the read never
           // landed — `saveWorkspaceMemoryFor` checks the read itself, not the re-entrancy flag.
           void saveWorkspaceMemoryFor(chatWsId, chatMem).catch(() => {});
@@ -13225,6 +13311,17 @@ async function noteBuildOutcome(
         });
       }
       buildDiagRef = buildDiag; // expose to the outer catch so a build crash is captured too
+      // Q-200 / Q-201: decided before this report existed, so carried here.
+      if (offerAccepted) {
+        try {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'BUILD_OFFER_ACCEPTED', message: 'The user said yes to our offer to build; this build runs on the request that was offered.', autoResolved: true, detail: `typed: "${typedPrompt.slice(0, 80)}"` });
+        } catch { /* observation only */ }
+      }
+      if (recalledAttachment) {
+        try {
+          buildDiag.record({ phase: 'build', severity: 'info', code: 'ATTACHMENT_RECALLED', message: `The file sent earlier in this chat was handed to this build (${recalledAttachment.names.length} file(s)${recalledAttachment.truncated ? ', cut to 50 KB' : ''}).`, autoResolved: true });
+        } catch { /* observation only */ }
+      }
       // Say when the free limit shortened this build's window (freeBuildTimeCap.ts) — a build that stops
       // at 25 minutes must not read, in the report, as one that hit the 30-minute paid cap.
       if (freeWindow.capped) {
@@ -22673,7 +22770,7 @@ async function noteBuildOutcome(
             // caused, and the summary below them (the live order). A single end-of-write stamp
             // put the prompt underneath its own build's activity.
             turn: [
-              { role: 'user', content: prompt, ts: buildStartedAt },
+              { role: 'user', content: typedPrompt, ts: buildStartedAt },
               ...(narrationDigest ? [{ role: 'assistant' as const, content: narrationDigest, ts: buildStartedAt + 1 }] : []),
               { role: 'assistant', content: result.summary || '', ts: Date.now() },
             ],
@@ -25162,7 +25259,7 @@ async function noteBuildOutcome(
             userId: userId ?? 'anon',
             workspaceId,
             title: deriveTitle(prompt),
-            turn: [{ role: 'user' as const, content: prompt, ts: Date.now() - 1000 }, failTurn],
+            turn: [{ role: 'user' as const, content: typedPrompt, ts: Date.now() - 1000 }, failTurn],
             patch: { status: 'error', updatedAt: Date.now() },
           }).catch(() => {});
         }

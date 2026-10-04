@@ -119,7 +119,7 @@ export interface PlanningRequest {
  */
 export function wasBuildRequest(turn: { text: string; lane?: RequestLane }): boolean {
   if (!turn || typeof turn.text !== 'string') return false;
-  if (turn.lane === 'chat') return false;
+  if (turn.lane === 'chat' || turn.lane === 'offer') return false;
   if (turn.lane === 'build') return true;
   return classifyIntentWithConfidence(turn.text).intent !== 'chat';
 }

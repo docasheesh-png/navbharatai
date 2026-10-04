@@ -45,6 +45,7 @@ export type IssueSeverity = 'info' | 'warning' | 'error';
  * a human notices them; never a reason to hesitate before shipping the app.
  */
 const PROCESS_ONLY_CODES = new Set([
+  'BUILD_OFFER_ACCEPTED', 'ATTACHMENT_RECALLED',
   // Our template seeding and a user's Stop (autopsy 31254f9a): facts about the ENGINE's run, never the app.
   'GOLDEN_SCAFFOLD_SKIPPED', 'LLM_CALL_STOPPED', 'SIMPLE_BUILD_STOPPED', 'DOMAIN_KNOWLEDGE', 'DURABLE_HOLDS_ONLY_STARTER',
   'PROJECT_MODULE_AWAITS_SHELL', 'PROJECT_PLAN_RETIRED', 'REVIEW_DEFERRED_TO_SHELL', 'BUILD_ASSETS_SAVED', 'MOBILE_LAYOUT_NOT_RUN', 'MOBILE_LAYOUT_OK',

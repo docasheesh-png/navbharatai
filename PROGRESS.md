@@ -87440,10 +87440,10 @@ suitable check cheyu" with no file attached — the data had come in an earlier 
 | Q-210 | REPEATED_READS counted a specialist's first read as waste | Shared ledger compared across agents | A lying analyzer | Own-view comparison; honest worst list. ✅ on merge |
 | Q-211 | "BUILD_FAILED" for a planned hand-off | The outcome line ignored the reasoning-rung stop | Contradicting lines in one report | ✅ Fixed by #3468 (`sb.handedOff`), merged while this PR was open; this PR's duplicate was dropped at the merge |
 | Q-212 | "User should be asked" — nobody asked | The resume pushed on; its words did not say to ask the user | A need of the user's kept by the model | Resume message names it. ✅ on merge |
-| Q-200 | A data question became a ₹272 app | Routing | — | 🟡 admin decision (recommend chat answer + offer) |
-| Q-201 | Earlier attachment unavailable | No store for attachment text across turns | — | 🟡 admin decision (privacy; recommend bounded per-workspace keep) |
+| Q-200 | A data question became a ₹272 app | The reader's guess was trusted as a confirmed build | A build started on an unconfirmed verdict | Admin 2026-10-03: answer first, then offer. `buildConfirmation.ts`, `offer` lane, "yes" builds the offered request. ✅ on merge (#3475) |
+| Q-201 | Earlier attachment unavailable | No store for attachment text across turns | A file lived only for its own turn | Admin 2026-10-03: keep it, no cross-chat leak. `lib/attachmentMemory.ts` (per chat, masked, 50 KB, 30 days, uid-checked; purge + unsend delete). ✅ on merge (#3475) |
 | Q-202 | Orphan components after a pivot | No end-of-turn hand-back for unimported new files | — | 🟡 blocked on #3467 (same block) |
-| Q-203 | Six argued not-defects | — | — | 🟡 admin agreement |
+| Q-203 | Six argued not-defects | — | — | ✅ RESOLVED as not-a-defect — the admin agreed 2026-10-03 ("de di sahmati"); removed from the open queue |
 
 Self-heals noted (each points to an existing class): `:)` written at the head of App.tsx and fixed by the model (the
 write-time parse note caught it); a TS2322 `null` narrowing under the strict-new trial (Q-008 data point); 12 type

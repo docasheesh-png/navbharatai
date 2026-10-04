@@ -7,6 +7,7 @@ import net from 'net';
 import rateLimit from 'express-rate-limit';
 import { corsMiddleware } from './src/server/lib/cors';
 import { trustedProxyHops, identityRateKey, addressRateKey } from './src/server/lib/clientAddress';
+import { denyServerOnlyArtifacts } from './src/server/lib/serverOnlyArtifacts';
 import { registerPwaRoutes, type PwaStore } from './src/server/routes/pwa';
 import { spaFallbackShouldDefer } from './src/server/lib/spaFallback';
 import { noteWebsiteVisit } from './src/server/lib/ownAudience';
@@ -558,6 +559,8 @@ setInterval(() => {
       console.log(`[PRODUCTION] Serving static files from: ${distPath}`);
       // The build's ready-made brotli-11 / gzip-9 copies of JS/CSS (written by scripts/precompress.mjs in
       // the Dockerfile). Falls through to express.static below whenever there is no copy.
+      // The server's own bundle and its sourcemap live in dist/ too — never served (serverOnlyArtifacts.ts).
+      app.use(denyServerOnlyArtifacts());
       app.use(precompressedStatic(distPath));
       // 12.7 — CDN-friendly Cache-Control headers for static assets
       app.use(express.static(distPath, {

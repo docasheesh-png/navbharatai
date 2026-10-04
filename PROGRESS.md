@@ -89211,3 +89211,16 @@ The right value is a hop count, and a wrong count would key every anonymous user
 measured. New admin-only `GET /api/admin/proxy-hops` (`proxyHops.ts`, pure, nothing logged) shows what `req.ip`
 would be under each count for the admin's own request. 🟡 BLOCKED on the admin opening it once on the live site.
 Lock: `tests/theClientIsMeasuredNotGuessed.test.ts` (agrees with Express itself for every count).
+
+### 2026-10-04 — Q-162: every API route has a caller, or a written reason — and two dead features found
+
+Recounted: 526 `/api` routes, 85 with nothing in the app calling them. The class is a server action whose
+client half was never wired, and it hid two real defects: (1) the community gallery's review queue — every
+submission is created `pending` and `POST /api/gallery/admin/:id/review` is the only path to `approved`, but no
+screen called it, so "Send for review" promised a review nobody could perform and the gallery could never list a
+single app. New `GalleryReviewQueue` inside the Gallery screen, shown only when the server says the viewer is a
+reviewer; Approve appears only beside code that was opened. (2) Closing a version preview never called the stop
+route, so the old version kept its port; `stopVersionPreview` now runs on dismiss (best effort). Lock:
+`tests/everyRouteHasACaller.test.ts` + `tests/fixtures/uncalledApiRoutesBaseline.json` (new uncalled route fails CI;
+baseline only shrinks; every entry carries its reason kind). 45 `undecided` routes are 🟡 BLOCKED on the admin's
+yes to deciding each one when its file is next touched.

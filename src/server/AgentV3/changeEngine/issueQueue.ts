@@ -52,6 +52,8 @@ export interface QueuedIssue {
   cleanPasses: number;
   /** The change ids that saw it. Last 5. */
   changes: string[];
+  /** The file it was found in, when the finding names one (security findings do). */
+  file?: string;
 }
 
 export interface IssueQueue {
@@ -101,6 +103,7 @@ export function parseIssueQueue(raw: unknown): IssueQueue {
       seenCount: Number(i.seenCount) || 1,
       cleanPasses: Number(i.cleanPasses) || 0,
       changes: Array.isArray(i.changes) ? (i.changes as unknown[]).filter((c): c is string => typeof c === 'string').slice(-5) : [],
+      ...(typeof i.file === 'string' ? { file: i.file.slice(0, 200) } : {}),
     });
   }
   const maxSeen = issues.reduce((m, it) => Math.max(m, Number(it.id.replace(/^ISS-/, '')) || 0), 0);
@@ -122,11 +125,17 @@ export function queueableFindings(issues: ReadonlyArray<Pick<BuildIssue, 'phase'
 
 export interface QueueFoldInput {
   /** Unresolved app findings of THIS build (already redacted). */
-  findings: ReadonlyArray<{ code: string; severity: 'warning' | 'error'; message: string }>;
+  findings: ReadonlyArray<{ code: string; severity: 'warning' | 'error'; message: string; file?: string }>;
   changeId: string;
   now: number;
   /** True only when the build reached its release gate — the evidence that its checks ran. */
   checksRan: boolean;
+  /**
+   * Was the check that found THIS issue able to see it this time? Absence only fixes an issue whose check
+   * could have found it — a security finding in a file this build never analysed is not gone, it is unseen.
+   * Default: yes.
+   */
+  couldSee?: (issue: QueuedIssue) => boolean;
 }
 
 export interface QueueFold {
@@ -169,6 +178,7 @@ export function foldBuildFindings(queue: IssueQueue, input: QueueFoldInput): Que
       id: issId(nextIss++), key, code: f.code, severity: f.severity, message: f.message.slice(0, 240),
       status: f.severity === 'error' ? 'triaged' : 'detected',
       firstSeen: input.now, lastSeen: input.now, seenCount: 1, cleanPasses: 0, changes: [input.changeId],
+      ...(f.file ? { file: f.file.slice(0, 200) } : {}),
     };
     issues.push(it);
     opened.push(it);
@@ -177,6 +187,7 @@ export function foldBuildFindings(queue: IssueQueue, input: QueueFoldInput): Que
   if (input.checksRan) {
     for (const it of issues) {
       if (seenKeys.has(it.key) || !OPEN.has(it.status)) continue;
+      if (input.couldSee && !input.couldSee(it)) continue; // unseen is not fixed
       it.cleanPasses += 1;
       if (it.status === 'fixed' && it.cleanPasses >= 2) { it.status = 'verified'; verified.push(it); }
       else if (it.status === 'triaged' || it.status === 'assigned') { it.status = 'fixed'; fixed.push(it); }

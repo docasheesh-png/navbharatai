@@ -153,6 +153,29 @@ export interface SettleInput {
   gate?: 'green' | 'yellow' | 'red' | 'unknown';
   /** All issues the build recorded (from the build report). */
   issues: ReadonlyArray<BuildIssue>;
+  /**
+   * Security findings from the static analysis of the app's code (slice 6). They used to go ONLY to the
+   * tech-debt register, which nothing ever read back — here they become owned issues the next edit sees.
+   */
+  security?: ReadonlyArray<{ severity?: string; message?: string; rule?: string; file?: string }>;
+  /** The files the security analysis actually read this build — only these can clear a security issue. */
+  securityScanned?: ReadonlyArray<string>;
+}
+
+/** Security findings as queue findings. High is an error (a leaked key is not a style note). Pure. */
+export function securityFindings(list: SettleInput['security']): Array<{ code: string; severity: 'warning' | 'error'; message: string; file?: string }> {
+  const out: Array<{ code: string; severity: 'warning' | 'error'; message: string; file?: string }> = [];
+  for (const f of list ?? []) {
+    if (!f || typeof f.message !== 'string' || !f.message.trim()) continue;
+    if (f.severity !== 'high' && f.severity !== 'medium') continue; // low is advice, not an issue to own
+    out.push({
+      code: `SECURITY${f.rule ? `:${String(f.rule).slice(0, 40)}` : ''}`,
+      severity: f.severity === 'high' ? 'error' : 'warning',
+      message: `${f.message}${f.file ? ` (${f.file})` : ''}`,
+      ...(f.file ? { file: String(f.file) } : {}),
+    });
+  }
+  return out;
 }
 
 export interface SettleResult {
@@ -192,11 +215,16 @@ export function foldSettle(mem: EngineeringMemory, session: ChangeSession, input
   }
 
   let queue = markAssigned(mem.queue, session.assignedIssueIds, changeId);
-  const findings = queueableFindings(input.issues).map((f) => ({ ...f, message: redactProvidersText(redactSecrets(f.message)) }));
+  const findings = [...queueableFindings(input.issues), ...securityFindings(input.security)]
+    .map((f) => ({ ...f, message: redactProvidersText(redactSecrets(f.message)) }));
   // Checks ran only when the build reached its release gate without being stopped. A stopped or failed
   // build fixes nothing in this ledger: "we did not look" is never "it is gone".
   const checksRan = !!input.gate && input.ok && !input.stopped;
-  const qFold = foldBuildFindings(queue, { findings, changeId, now, checksRan });
+  const scanned = new Set(input.securityScanned ?? []);
+  const qFold = foldBuildFindings(queue, {
+    findings, changeId, now, checksRan,
+    couldSee: (it) => !it.code.startsWith('SECURITY') || (!!it.file && scanned.has(it.file)),
+  });
   queue = qFold.queue;
 
   const reqIds = new Set<string>();

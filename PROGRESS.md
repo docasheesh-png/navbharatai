@@ -87875,7 +87875,7 @@ All on PR #3488, each locked by a test proven by reversion.
 
 ## 2026-10-04 — Q-102 and Q-103: the safety triage and every word boundary read Hindi (admin: "Q-102 shuru karo")
 
-On PR #3488. Each item is test-locked and reversion-proven.
+On a new PR after #3488 merged (it carried Q-106, Q-145, Q-112, Q-237, Q-246 and Q-247, whose rows leave the open table here). Each item is test-locked and reversion-proven.
 
 | Item | Problem | Root cause | Class | Fix | Test |
 |---|---|---|---|---|---|

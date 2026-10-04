@@ -51,8 +51,9 @@ describe('the guard that only ran on your phone', () => {
       .toBeLessThan(ship.indexOf('/actions/workflows/${workflow}/dispatches'));
   });
 
-  it('guards ANDROID only — the iOS workflow needs Apple credentials, a different set entirely', () => {
+  it('the Android guard asks Android names only — the iOS workflow needs Apple credentials, a different set entirely', () => {
     // Asking about Android's four secret names on the iOS path would refuse every legitimate iOS build.
+    // Since 2026-10-04 iOS has its OWN guard against the Apple list (tests/eachPlatformKnowsItsOwnKeys).
     expect(ship).not.toContain('if (needsUserSecrets(workflow)) {\n      let names');
     const guard = ship.slice(ship.indexOf('if (workflow === SHIP_WORKFLOWS.androidAab) {'));
     expect(guard.slice(0, 900)).not.toMatch(/iosIpa/);

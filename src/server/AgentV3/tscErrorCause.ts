@@ -174,8 +174,59 @@ export function remedyFileFor(e: TscError, sources: Readonly<Record<string, stri
     const target = resolveRelativeSpecifier(e?.file ?? '', missing[1] ?? '');
     return target || null;
   }
+  // The name exists — in another module. The import path is what is wrong, so the fix is HERE.
+  if (exportedElsewhere(e, sources)) return null;
   const hit = exportMissingIn(e, sources);
   return hit ? hit.target : null;
+}
+
+/**
+ * A "has no exported member" error whose name another project module DOES export: the import names the
+ * wrong module (candy report 7da1cdca, 2026-10-04). `CandyGame.tsx` imported `TUNES` from
+ * `../audio/melody` while `src/audio/tunes.ts` exports it. The note said the fix was in `melody.ts`, so
+ * the model edited a recipe library file four times — one edit refused as a duplicate export — instead
+ * of changing one import line. Only modules the caller holds count, and the wrong target must certainly
+ * not export the name. PURE.
+ */
+export function exportedElsewhere(
+  e: TscError,
+  sources: Readonly<Record<string, string>> = {},
+): { name: string; spec: string; importer: string; wrong: string; exportedBy: string[] } | null {
+  const gap = exportMissingIn(e, sources);
+  if (!gap) return null;
+  const norm = (k: string) => String(k).replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '');
+  const importer = norm(e?.file ?? '');
+  const exportedBy = Object.entries(sources || {})
+    .map(([k, v]) => [norm(k), String(v ?? '')] as const)
+    .filter(([k, v]) => k !== gap.target && k !== importer && /\.(?:tsx?|jsx?)$/.test(k) && exportsName(v, gap.name) === true)
+    .map(([k]) => k)
+    .sort();
+  return exportedBy.length > 0 ? { name: gap.name, spec: gap.spec, importer, wrong: gap.target, exportedBy } : null;
+}
+
+/** The names of "has no exported member" errors, at most `MAX_EXPORT_TARGETS`. PURE. */
+export function missingExportNames(errors: readonly TscError[] | null | undefined): string[] {
+  const out: string[] = [];
+  for (const e of errors || []) {
+    const m = NO_EXPORTED_MEMBER_RE.exec(String(e?.message ?? ''));
+    const name = m?.[2] ?? '';
+    if (!/^[A-Za-z_$][\w$]*$/.test(name) || out.includes(name)) continue;
+    out.push(name);
+    if (out.length >= MAX_EXPORT_TARGETS) break;
+  }
+  return out;
+}
+
+/**
+ * A bounded search for project files that mention exporting one of `names` — a candidate list only;
+ * `exportsName` decides. Names are identifiers (checked above), so nothing here reaches the shell
+ * unescaped. PURE.
+ */
+export function exportSearchCommand(names: readonly string[]): string {
+  const safe = names.filter((n) => /^[A-Za-z_$][\w$]*$/.test(n)).map((n) => n.replace(/\$/g, '\\$'));
+  if (safe.length === 0) return '';
+  return `grep -rlE --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' `
+    + `"export[^=]*\\b(${safe.join('|')})\\b" src 2>/dev/null | head -4`;
 }
 
 /** The resolved target of a "no exported member" error that certainly does not export the name. */
@@ -516,6 +567,16 @@ export function tscErrorCauses(
             + `Do not keep re-reading the index: it is not the file being read.`);
           continue;
         }
+      }
+      // 🔴 THE NAME IS EXPORTED — BY A DIFFERENT MODULE (candy report 7da1cdca). The import path is the
+      // bug; adding a second export to the wrong file is how a recipe library file got edited four times.
+      const elsewhere = exportedElsewhere(e, sources);
+      if (elsewhere) {
+        add(`export-elsewhere:${elsewhere.importer}:${elsewhere.name}`,
+          `\`${elsewhere.name}\` is exported by \`${elsewhere.exportedBy.join('` and `')}\`, not by \`${elsewhere.wrong}\`. `
+          + `Fix the IMPORT in \`${elsewhere.importer}\`: import \`${elsewhere.name}\` from \`${elsewhere.exportedBy[0]}\` `
+          + `(a relative path from \`${elsewhere.importer}\`). Do NOT add \`${elsewhere.name}\` to \`${elsewhere.wrong}\`.`);
+        continue;
       }
       // 🔴 THE EXPORT IS MISSING FROM THE OTHER FILE (autopsy 2a7fa4b0) — the error names the importer,
       // so the importer is what gets rewritten, three times, while the file that must change waits.

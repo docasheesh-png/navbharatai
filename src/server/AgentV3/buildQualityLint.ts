@@ -41,6 +41,13 @@ const NOT_APP_DESIGN = /(^|\/)(node_modules|dist|build|coverage|\.next|out)\//i;
 const GENERATED = /(\.min\.(css|js)|\.bundle\.js|-lock\.json)$/i;
 
 /**
+ * The same three predicates, for `spacingSnap.ts`. ONE definition on purpose: the snap rewrites exactly
+ * the values the `DESIGN_CONSISTENCY` finding counts, and a private copy of the
+ * file selection there is the drifted-copy class this repo has already paid for four times.
+ */
+export { LINTABLE as LINTABLE_DESIGN_FILE, NOT_APP_DESIGN as NOT_APP_DESIGN_FILE, GENERATED as GENERATED_FILE };
+
+/**
  * Total characters fed to the linters.
  *
  * They are regex scanners over one string, so cost grows with input and a 60-file app could hand them
@@ -228,40 +235,14 @@ export function a11yHandBack(r: BuildQualityLint | null | undefined, max = 6): A
   return [...byFile.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(0, max).map(([file, issues]) => ({ file, issues }));
 }
 
-/** At most this many distinct values named per file in the hand-back. */
-export const OFF_GRID_VALUES_LISTED = 10;
-
 /**
- * Spacing values off the 4px grid in the files THIS build wrote, for the end-of-turn hand-back
- * (Q-037 / Q-022, autopsies dfd24058 and e49afa97). Both builds shipped `DESIGN_CONSISTENCY` warnings for
- * spacing in a stylesheet the build itself wrote, after the write-time note had named it and the model
- * had moved on — and nothing at the end of the turn asked again.
+ * 🔴 `offGridHandBack` LIVED HERE AND IS GONE (autopsy 536c8189, 2026-10-01). It collected the
+ * `DESIGN_CONSISTENCY` spacing values so the end-of-turn hand-back could ask the MODEL to snap them.
+ * The first real build to meet that hand-back spent three model calls writing `node -e` regex scripts
+ * over a 634-line stylesheet and moved ON-grid values OFF the grid. `round(v / 4) * 4` has exactly one
+ * right answer, so `spacingSnap.ts` does it by construction and this function had no caller left.
  *
- * 🔒 ONLY WHAT THIS BUILD WROTE (Q-015: the same finding on a build that never touched the file). A value
- * in a file the build did not write is the user's, and handing it back would send the model to restyle
- * code nobody asked it to change.
- * 🔒 THE SAME THRESHOLD AS THE FINDING: nothing is handed back unless the written files together carry more
- * than `MAX_OFFGRID` off-grid values, so a hand-back never costs a turn over a value the report would not
- * even have named. Same file selection and comment stripping as `lintBuiltApp`. PURE.
+ * Deleted rather than kept "for the report": the snap's own note says what moved, and the finding says
+ * what is left. A collector nothing calls is the dead code the admin has twice asked to be removed.
  */
-export function offGridHandBack(
-  files: Record<string, string>,
-  written: Iterable<string>,
-  max = 6,
-): Array<{ file: string; values: string[]; count: number }> {
-  const wrote = new Set([...(written ?? [])].map((p) => String(p).replace(/^\.?\/+/, '')));
-  const found: Array<{ file: string; values: string[]; count: number }> = [];
-  let total = 0;
-  for (const [path, content] of Object.entries(files || {})) {
-    if (!wrote.has(path) || typeof content !== 'string') continue;
-    if (!LINTABLE.test(path) || NOT_APP_DESIGN.test(path) || GENERATED.test(path)) continue;
-    let off: number[] = [];
-    try { off = offGridSpacing(extractSpacingPx(stripCommentsForMarkup(content)), SPACING_GRID); } catch { continue; }
-    if (off.length === 0) continue;
-    total += off.length;
-    const values = [...new Set(off)].sort((a, b) => a - b).slice(0, OFF_GRID_VALUES_LISTED).map((v) => `${v}px`);
-    found.push({ file: path, values, count: off.length });
-  }
-  if (total <= MAX_OFFGRID) return [];
-  return found.sort((a, b) => (b.count - a.count) || a.file.localeCompare(b.file)).slice(0, max);
-}
+

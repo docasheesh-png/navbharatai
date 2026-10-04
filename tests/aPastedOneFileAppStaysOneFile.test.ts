@@ -127,7 +127,7 @@ describe('the route wiring (source guards)', () => {
   it('a seeded page is improved in place: no fast-lane regeneration, no milestones, no module plan', () => {
     expect(route).toContain('const fastLaneWouldRun = !goldenPreseeded && pastedSeed.size === 0 && oneShotEnabled()');
     expect(route).toContain("if (envFlag('AGENTV3_MEGA_ROADMAP', true) && intent === 'new_build' && !isEditMode && !pastedFormat.keep) {");
-    expect(route).toContain("if (!pPlan && intent === 'new_build' && !isEditMode && !pastedFormat.keep && detectMegaProject(planning.text)) {");
+    expect(route).toContain("if (!pPlan && intent === 'new_build' && !isEditMode && !pastedFormat.keep && detectMegaProject(planning.sizing)) {");
   });
 
   it('the user\'s own page is never billed as our delivered work unless the build changed it', () => {

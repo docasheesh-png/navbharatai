@@ -148,9 +148,17 @@ export function doneStyleNote(missing: readonly string[], sheet: string | undefi
 }
 
 /** One sentence for the admin report — never user-facing, so it may name the mechanism. */
-export function styleResumeNote(missingCount: number, pageCount = 0, orphanCount = 0): string {
-  return `The model ended its turn while ${missingCount} class name(s) had no style rule and ${pageCount} page(s) fell `
-    + 'short of the design standard, so it was handed them and told to fix them before finishing (once). Before '
+export function styleResumeNote(missingCount: number, pageCount = 0, orphanCount = 0, a11yCount = 0): string {
+  // 🔴 The count of what was handed back, never a sentence about two of its four parts (autopsy 68f0a486:
+  // "0 class name(s) … 0 page(s)" headed a hand-back whose only item was an unlabelled upload field).
+  const parts = [
+    missingCount > 0 ? `${missingCount} class name(s) had no style rule` : '',
+    pageCount > 0 ? `${pageCount} page(s) fell short of the design standard` : '',
+    a11yCount > 0 ? `${a11yCount} file(s) had controls a screen reader cannot name` : '',
+  ].filter(Boolean);
+  const what = parts.length > 0 ? parts.join(', ') : `${missingCount} class name(s) had no style rule and ${pageCount} page(s) fell short of the design standard`;
+  return `The model ended its turn while ${what}, `
+    + 'so it was handed them and told to fix them before finishing (once). Before '
     + '2026-10-01 the turn ended here and a separate end-of-build repair pass, in a fresh context, fixed them. '
     + 'Spacing off the 4px grid is NOT handed back (autopsy 536c8189) — it is snapped deterministically instead.'
     + (orphanCount > 0

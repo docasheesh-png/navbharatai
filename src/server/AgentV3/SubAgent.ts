@@ -396,7 +396,10 @@ export function makeSubAgentSpawn(deps: SubAgentDeps): SubAgentSpawn {
       // `git clone <the same repo> workspace/mitrify` and put a second copy of the user's app inside
       // their app. One line closes the gap, and it is true by construction: it is emitted only when
       // the project graph actually holds files, so a from-scratch build never sees it.
-      projectMap
+      // 🔴 ONLY TO AN AGENT THAT CAN READ (autopsy 68f0a486, 2026-10-04). The lean review runs with NO tools
+      // and the changed files in its message; told to "read them with read_file", it answered "I will read
+      // the files and review" and ended — a review of nothing, in its one call.
+      projectMap && (deps.toolsOverride ?? cfg.tools).includes('read_file' as ToolName)
         ? 'These files are ALREADY in your workspace, at the workspace root — read them with '
           + '`read_file`, `glob` and `grep`. Never `git clone` this project: every command runs from '
           + 'the workspace root, so a clone puts a second copy of the app inside the app.'

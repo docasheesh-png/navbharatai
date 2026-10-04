@@ -1065,7 +1065,7 @@ export class AgentRunner {
                   // (autopsy 536c8189 — it is snapped deterministically in `spacingSnap.ts`).
                   const styleNotice = handBackNotice('style', turn.text);
                   if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
-                  try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length, style.orphans?.length ?? 0), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.orphans ?? []).map((o) => `${o}:unimported`)].join(' ') }); } catch { /* a note must never fail a build */ }
+                  try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: styleResumeNote(style.missing.length, style.pages.length, style.orphans?.length ?? 0, style.a11y?.length ?? 0), detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`), ...(style.orphans ?? []).map((o) => `${o}:unimported`)].join(' ') }); } catch { /* a note must never fail a build */ }
                   pushPlatformTurn(decision.message);
                   continue;
                 }
@@ -1134,7 +1134,7 @@ export class AgentRunner {
                 // A specialist's text is forwarded to the chat too (SubAgent re-emits narration).
                 const styleNotice = handBackNotice('style', turn.text);
                 if (styleNotice) events.emit({ type: 'narration', agent: agentRole, text: styleNotice, ts: Date.now() });
-                try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: `${agentRole}:${styleResumeNote(style.missing.length, style.pages.length)}`, detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`)].join(' ') }); } catch { /* a note must never fail a build */ }
+                try { this.opts.onNote?.({ code: 'STYLE_RULES_RESUMED', message: `${agentRole}:${styleResumeNote(style.missing.length, style.pages.length, 0, style.a11y?.length ?? 0)}`, detail: [...style.missing.slice(0, 20).map((c) => `.${c}`), ...style.pages.map((p) => `${p.file}:${p.defects.join('+')}`), ...(style.a11y ?? []).map((a) => `${a.file}:a11y`)].join(' ') }); } catch { /* a note must never fail a build */ }
                 pushPlatformTurn(decision.message);
                 continue;
               }

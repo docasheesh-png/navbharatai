@@ -87357,7 +87357,7 @@ open PR's CI failed with it (#3462 first).
 Weak build, 6.9 min, ₹96.58, rendered at 268 s, inside its ETA band. The build itself went well. The judges around it did not.
 
 **Ledger (problem → root cause → class → siblings → lock):**
-- **Q-089 · the sizers were blind.** "Can you make this app" had no attachment and no earlier BUILD request; the app was
+- **Q-110 · the sizers were blind.** "Can you make this app" had no attachment and no earlier BUILD request; the app was
   described in CHAT, which `planningRequest` drops by design (6ae30b33). Complexity 15 ("recognised nothing"), and the
   fast-lane planner planned "Main app component with counter logic". **Class:** a judge that reads less than the
   worker (e725e002), here via a pointer ("this app") into the conversation. **Fix:** `conversationReference.ts`
@@ -87366,23 +87366,39 @@ Weak build, 6.9 min, ₹96.58, rendered at 268 s, inside its ETA band. The build
   workspace with no finished app. **Siblings:** every sizer already reads `planning.text`, so one input covers the
   complexity score, routing, ETA, project mode, scope and the fast lane. **Lock:** `tests/theMandiBhavAutopsy.test.ts`,
   reverted-and-failed.
-- **Q-090 · the gate said "untested" about an app with nothing to save.** The journey check (correctly) said the filters
+- **Q-111 · the gate said "untested" about an app with nothing to save.** The journey check (correctly) said the filters
   act as you type; the gate's `appOnlyShowsWhatItHolds` counted the bottom tab bar (`onClick={() => setScreen('mandi')}`)
   as a save. **Class:** two readers of "does this app keep input?" disagreeing. **Fix:** a plain button / click counts
   unless its handler only changes what is shown (`handlerOnlyChangesView`, `pressCanKeepInput`). The stale comment that a
   `none-derivable` app "can never earn GREEN" is corrected (it can since 8257ca59, when its controls were pressed).
   **Lock:** same file, reverted-and-failed; the existing lookup suite (74 tests) unchanged.
-- **Q-091 · a skipped press gave no cause.** "Mausam — Timeout 4000ms exceeded" was the error's first line only.
+- **Q-112 · a skipped press gave no cause.** "Mausam — Timeout 4000ms exceeded" was the error's first line only.
   **Fix:** `pressFailureNote` adds Playwright's call-log line naming the cause; the runner embeds the function by value
   (bound to a const, so a bundler rename cannot break it — checked with the real esbuild bundle and `node --check`).
 - **Already fixed by PRs merged after this build ran (19:53 IST):** the plan hand-off's "NOT written yet" (Q-079, #3461),
   the contract hand-off narration (Q-078, #3461), the reviewer told to run tsc (Q-080, #3461), "✅ The app looks
   complete" over undefined classes (2f723acb, #3459), the non-unique `edit_file` error without match regions (#3459),
   the 12 off-grid values in a stylesheet this build wrote (#3458).
-- **Open:** Q-092 (why the third tab could not be pressed — needs the cause line or the source), Q-093
-  (`LIST_WITHOUT_EMPTY_STATE` on function-returned sample lists — your choice), Q-094 (four items argued not defects).
+- **Open:** Q-113 (why the third tab could not be pressed — needs the cause line or the source), Q-114
+  (`LIST_WITHOUT_EMPTY_STATE` on function-returned sample lists — your choice), Q-115 (four items argued not defects).
   Recurrences recorded on Q-063 (17 s first typecheck) and Q-052 (`startTier: "gemini"`). The two GLM crawls (30 s, 7%)
   fall under Q-009, which you closed as provider weather in #3465; the crawl bench behaved as designed.
+## 2026-10-01 — Autopsy 8f797751 (maths solver, stopped at 6.4 min, 6 s after the dev server came up)
+
+- **A ✅** At 4.6 min the model said "Your Math Solver app is ready … Open the Preview tab"; the platform
+  handed the turn back to style 41 unstyled classes and told only the admin report. No preview existed,
+  and the user stopped. Both hand-backs (style, unfinished) now put "⏳ Not finished yet …" in the chat
+  (`handBackNotice.ts`).
+- **B ✅** The fast lane's planned handoff was labelled "could not produce the app" / `BUILD_FAILED` beside
+  `LLM_CALL_HANDED_OFF`; now `handedOff` and an honest outcome line. (The contract-phase handoff wording,
+  and "Building 11 file(s)" before nothing was built, were already fixed on main by #3461.)
+- **C 🟡 → Q-090** Publish a preview the first time the app compiles clean, mid-build — admin decision.
+- **Q-009** recurred (GLM crawled twice).
+- Not defects: `mathjs` imported before it was installed (the note named the fix; the model wrote the
+  files the same note listed first, then installed); a `types.ts` syntax slip and a non-existent
+  `math.solve`, both self-corrected; a duplicate declaration refused by the write guard; one-file batches
+  (model choice); a manual `tsc` after the clean note; a brand-new workspace given our starter (expected).
+Tests: `tests/readyWasSaidBeforeThePreview.test.ts`, proven by reversion.
 ## 2026-10-01 — Autopsy 52471441 ("Build a calculator", Weak, stopped by the user at 38 s)
 
 **What happened.** Setup took 8 s. The fast lane's file-list call (a ~500-token prompt) crawled on GLM `glm-4.7-flashx`

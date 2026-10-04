@@ -17629,7 +17629,7 @@ async function noteBuildOutcome(
           buildDiag.record(sb.ok
             ? { phase: 'build', severity: 'info', code: `OUTCOME_${sb.outcome}`, message: `Build outcome: ${sb.outcome}`, autoResolved: true }
             // A stop is not a BUILD_FAILED and is not handed to anyone (autopsy 3d1bfe2a).
-            : { phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_OUTCOME', message: sb.stopped ? 'Fast-lane outcome: stopped by the user — not a failure, and not handed off.' : `Fast-lane outcome (handed off to the full builder): ${sb.outcome}`, autoResolved: true });
+            : { phase: 'build', severity: 'info', code: 'SIMPLE_BUILD_OUTCOME', message: sb.stopped ? 'Fast-lane outcome: stopped by the user — not a failure, and not handed off.' : sb.handedOff ? 'Fast-lane outcome: handed its plan to the full builder before a reasoning engine — not a failure.' : `Fast-lane outcome (handed off to the full builder): ${sb.outcome}`, autoResolved: true });
         }
         // HANDOFF FRAMING (StudySync root cause, 2026-07-16): when the fast lane timed out but SALVAGED
         // its finished files into the workspace, the full builder must treat them as ITS OWN prior work

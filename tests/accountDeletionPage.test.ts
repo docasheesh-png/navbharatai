@@ -122,6 +122,7 @@ describe('the built-app eraser and the page do not drift apart', () => {
       workspace_manual_edits_v3: /projects and built apps/i,
       project_plans_v3: /projects and built apps/i,
       app_engineering_memory_v1: /projects and built apps/i,
+      app_ai_settings: /projects and built apps/i,
     };
     for (const { collection } of WORKSPACE_SCOPED_COLLECTIONS) {
       const phrase = described[collection];

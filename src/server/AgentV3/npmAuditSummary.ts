@@ -26,6 +26,14 @@ export interface NpmAuditSummary {
   moderate: number;
   low: number;
   info: number;
+  /**
+   * npm said no release of an affected package fixes it ("No fix available", or "may require
+   * choosing a different dependency"). Then no upgrade, major or not, helps; the package has to be
+   * replaced. Absent when npm did not say so.
+   */
+  noFix?: boolean;
+  /** The packages npm listed with "No fix available", when its report names them. */
+  noFixPackages?: string[];
 }
 
 /** npm 7+: "8 vulnerabilities (4 moderate, 4 high)" · npm 6: "found 8 vulnerabilities (…)". */
@@ -52,7 +60,43 @@ const empty = (): NpmAuditSummary => ({ total: 0, critical: 0, high: 0, moderate
 export function parseNpmAuditSummary(output: string | undefined | null): NpmAuditSummary | null {
   const text = typeof output === 'string' ? output : '';
   if (!text) return null;
+  const summary = parseCounts(text);
+  if (!summary || summary.total <= 0) return summary;
+  // When npm also offers `npm audit fix` (with or without --force), some of what it found IS
+  // fixable, so "nothing fixes these" would be false for those; the ordinary advice stands.
+  const noFix = npmSaysNoFix(text) && !/To address (?:all )?issues/i.test(text);
+  if (!noFix) return summary;
+  const pkgs = noFixPackageNames(text);
+  return { ...summary, noFix: true, ...(pkgs.length ? { noFixPackages: pkgs } : {}) };
+}
 
+/**
+ * 🔴 "NO FIX AVAILABLE" WAS READ AS "A MAJOR UPGRADE FIXES IT" (autopsy 3f959fde, 2026-10-01).
+ * `npm audit fix` printed `xlsx * · Severity: high · No fix available` and "Some issues need review,
+ * and may require choosing a different dependency." The note then told the user that what remains
+ * "needs a major-version upgrade". There is no such upgrade: no release of that package fixes it.
+ * PURE.
+ */
+export function npmSaysNoFix(output: string | undefined | null): boolean {
+  const text = typeof output === 'string' ? output : '';
+  return /\bNo fix available\b/i.test(text) || /may require\s+choosing\s+a\s+different\s+dependency/i.test(text);
+}
+
+/**
+ * The package names npm's report block lists with "No fix available". A block reads
+ * `xlsx  *` / `Severity: high` / advisory lines / `No fix available` / `node_modules/xlsx`. PURE.
+ */
+export function noFixPackageNames(output: string | undefined | null): string[] {
+  const text = typeof output === 'string' ? output : '';
+  const names: string[] = [];
+  const blockRe = /^([@a-z0-9][\w.@/-]*)[ \t]+\S[^\n]*\nSeverity:[^\n]*\n((?:(?!\n\n)[\s\S])*)/gim;
+  for (let m = blockRe.exec(text); m; m = blockRe.exec(text)) {
+    if (/No fix available/i.test(m[2]) && !names.includes(m[1])) names.push(m[1]);
+  }
+  return names;
+}
+
+function parseCounts(text: string): NpmAuditSummary | null {
   let last: NpmAuditSummary | null = null;
 
   // Grouped form first — it carries the per-severity breakdown, which is the whole point.
@@ -130,7 +174,10 @@ export function npmAuditNote(
   // and is a way to take a working app down while claiming to secure it. What changes is that we stop
   // pretending an option remains when the safe one is spent — the honest line names the real situation
   // and leaves the judgement with the person who owns the app.
-  const action = opts?.compatibleFixAlreadyRun
+  const named = s.noFixPackages?.length ? s.noFixPackages.map((p) => `\`${p}\``).join(', ') : null;
+  const action = s.noFix
+    ? ` npm reports that no release of ${named ?? 'the affected package'} fixes ${s.total === 1 ? 'it' : 'them'} yet, so no upgrade will help — the only remedy is to replace ${named ? (s.noFixPackages!.length === 1 ? 'that package' : 'those packages') : 'it'} with a maintained alternative. That changes the app's code, so it is left for you to decide.`
+    : opts?.compatibleFixAlreadyRun
     ? ' The compatible fixes were already applied automatically during this build, so what remains needs a major-version upgrade — that can change how the app behaves, so it is left for you to decide.'
     : ' Running `npm audit fix` applies the compatible fixes; it does not upgrade across a major version, so it will not change how the app behaves.';
   return serious > 0

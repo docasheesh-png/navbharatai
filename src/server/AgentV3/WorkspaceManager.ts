@@ -39,6 +39,8 @@ export interface PurgeDeps {
    * later decide about taking such apps offline.
    */
   releaseDeployment: (workspaceId: string) => Promise<void>;
+  /** The chat's kept attachment text (Q-201, `lib/attachmentMemory.ts`). Optional so older callers compile. */
+  deleteAttachmentMemory?: (workspaceId: string) => Promise<void>;
 }
 
 /**
@@ -63,6 +65,7 @@ export async function purgeWorkspace(deps: PurgeDeps, workspaceId: string): Prom
   await run('memory', deps.deleteMemory);
   await run('diagnostics', deps.deleteDiagnostics);
   await run('deployment', deps.releaseDeployment);
+  if (deps.deleteAttachmentMemory) await run('attachment-memory', deps.deleteAttachmentMemory);
   return { workspaceId, stores, ok: stores.every((s) => s.ok) };
 }
 

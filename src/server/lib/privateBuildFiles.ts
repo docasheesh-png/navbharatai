@@ -1,3 +1,4 @@
+import { isServerOnlyArtifactPath } from './serverOnlyArtifacts';
 // FILES IN dist/ THAT ARE NOT FOR THE PUBLIC (crash-reporting audit, 2026-10-04).
 //
 // `npm run build` writes the SERVER bundle (`dist/server.cjs`) and its source map (`dist/server.cjs.map`,
@@ -10,6 +11,7 @@
 
 /** True for a request path that must never be served from dist/. */
 export function isPrivateBuildFile(path: string): boolean {
-  const p = (path || '').toLowerCase().split('?')[0];
-  return /^\/server\.c?js$/.test(p) || /\.map$/.test(p);
+  // ONE decoded check (merge of #3529 and #3538, 2026-10-04): the raw-path version here let
+  // `/server.cjs.m%61p` through, which `isServerOnlyArtifactPath` decodes and normalizes first.
+  return isServerOnlyArtifactPath((path || '').split('?')[0]);
 }

@@ -56,3 +56,14 @@ describe('one list for both lanes', () => {
     expect(deny).toBeLessThan(src.indexOf('app.use(express.static(distPath'));
   });
 });
+
+describe('the two private-file predicates are one (merge of #3529 and #3538)', () => {
+  it('isPrivateBuildFile decodes and normalizes exactly like isServerOnlyArtifactPath', async () => {
+    const { isPrivateBuildFile } = await import('../src/server/lib/privateBuildFiles');
+    for (const p of ['/server.cjs', '/server.cjs.map', '/server.cjs.m%61p', '/assets/app.js.map', '/assets/app.js', '/index.html', '/a/../server.cjs?x=1']) {
+      expect(isPrivateBuildFile(p), p).toBe(isServerOnlyArtifactPath(p.split('?')[0]));
+    }
+    expect(isPrivateBuildFile('/server.cjs.m%61p')).toBe(true);
+    expect(isPrivateBuildFile('/assets/app.js')).toBe(false);
+  });
+});

@@ -16,7 +16,6 @@ import { noteWebsiteVisit } from './src/server/lib/ownAudience';
 // The rate-limit keys (forensic audit 2026-10-04): an address string, or a verified uid — never a request.
 import { identityRateKey, addressRateKey } from './src/server/lib/clientAddress';
 import { registerTelemetryRoutes } from './src/server/routes/telemetry';
-import { isPrivateBuildFile } from './src/server/lib/privateBuildFiles';
 import { registerTeamRoutes } from './src/server/routes/team';
 import { registerShareRoutes } from './src/server/routes/share';
 import { audit } from './src/server/lib/audit';

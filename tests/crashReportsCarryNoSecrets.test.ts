@@ -304,7 +304,9 @@ describe('§6 the server sanitizes again, and never serves the private build fil
 
   it('the guard is mounted before every static handler, and Firebase Hosting ignores the same files', () => {
     const server = read('server.ts');
-    const guard = server.indexOf('isPrivateBuildFile(req.path)');
+    // Since the merge with #3538 the mount is the unified, decoded guard (serverOnlyArtifacts.ts);
+    // isPrivateBuildFile delegates to the same predicate, asserted in theServerSourceIsNeverServed.
+    const guard = server.indexOf('app.use(denyServerOnlyArtifacts());');
     expect(guard).toBeGreaterThan(0);
     expect(guard).toBeLessThan(server.indexOf('app.use(precompressedStatic(distPath))'));
     expect(guard).toBeLessThan(server.indexOf('app.use(express.static(distPath'));

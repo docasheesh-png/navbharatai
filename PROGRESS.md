@@ -87887,6 +87887,32 @@ into its pattern: forex, MT4/MT5, cTrader, algo trading, F&O, trading system/str
 is not trading. `TRADING_CONTEXT` (the broker/listing strip) is unchanged. Both autopsies' tests pass on the
 merged state (`theForexPasteIsNotAnEightModuleProject`, `thePaperTradingAutopsy`).
 
+## 2026-10-04 — Q-202 closed: a screen this build wrote and nothing shows is handed back (autopsy 3f959fde)
+
+#3475 merged (admin): Q-200, Q-201, Q-204–Q-210, Q-212–Q-220 are ✅ and their queue rows are removed; Q-222 (#3474)
+and Q-223 (#3471) merged with their owners, Q-255 rode #3475. Q-202's blocker (#3467) merged, so it was taken next.
+
+| Item | Root cause | Class | Siblings | Lock |
+|---|---|---|---|---|
+| Q-202 `DataPreview.tsx` / `AlgorithmSuggestions.tsx` left imported by nothing after the build changed course | The end of a turn checked styles, design and labels but not whether the screens the build wrote are reachable; `healOrphanPages` covers routed PAGES only | A build-written artifact with no end-of-turn reachability check | The architect's own write set never sees a specialist's writes (where abandoned screens usually come from) — the dispatcher now asks the build's write set (`setBuildWrites`, pre-seed left out); a specialist and a module awaiting its shell are deliberately not handed orphans | `tests/aScreenNothingShowsIsHandedBack.test.ts` (14 cases; four reversions each failed) |
+
+`orphanHandBack.ts` (`AGENTV3_ORPHAN_HANDBACK`, default ON): only files this build wrote, only when
+`unreferencedComponents` PROVES nothing reaches them (one unresolved import ⇒ nothing named), tests/stories/`ui/`
+excluded, folded into the one-time `STYLE_RULES_RESUMED` hand-back (detail `<path>:unimported`). Watch: that detail on
+the next build that changes course, and no `:unimported` on an ordinary build.
+
+## 2026-10-04 — Autopsy d798ddd3 ("Calculator app"): the one item #3491 does not own (Q-345)
+
+PR #3491, from another live session, already carries this report's main fix: the lean review's untagged
+"**1. Bug: …**" findings are now read and repaired (Q-300), plus Q-301–Q-307. This session had built the same parser
+change before it saw #3491. That copy was discarded unpushed, because it edited the same `ReviewerAgent.ts` region
+(the concurrency rule). The one item that PR's ledger does not hold is fixed here, in #3493:
+
+| Item | Root cause | Class | Siblings | Lock |
+|---|---|---|---|---|
+| Q-345: READY_BEFORE_END said "The app was never judged finished during the build" about a calculator the end-of-turn gate had judged ready (9 steps, 3.7 min) | Only the mid-build done check wrote `readyMark`, and on a short build it never came due | A measurement written by one of two places that make the same judgement | The end-of-turn gate is the only other `assessBuildReadiness` judgement in the runner. It now records the mark through `endOfTurnReadyMark` under the mid-build check's own rules (not on an edit, not before a write, not over a failed compile, never over an earlier mark) | `tests/theEndOfTurnGateJudgedItFinished.test.ts` (three reversions each failed) |
+
+Watch: READY_BEFORE_END on a short build reads "judged finished at step N".
 ---
 
 ## 2026-10-04 — A PROBLEM WE SHOW THE USER IS EITHER OURS TO OWN OR THEIRS TO PRESS (census; PR #3490)
@@ -88081,6 +88107,36 @@ All on PR #3488, each locked by a test proven by reversion.
 
 ⚠️ Q-112 reaches phone users only with a fresh `.aab`/`.ipa` (bundled mode).
 
+## 2026-10-04 — Autopsy 981ce4cc ("Edit pdf"): a file noun is not an app edit; a stale dev-server pre-bundle; peer-blind npm hints (PR #3493)
+
+A scanned experience letter attached with "Edit pdf", in a chat holding only our starter. The engine built a PDF
+annotation app (98 model calls, Weak, 80-step cap) and published it broken: the admin's screenshot shows "Setting
+up fake worker failed: Cannot load script at …pdfjs-dist@3.11.174/build/pdf.worker.min.mjs" and "Failed to load
+PDF file".
+
+**The chain, traced in the report's own lines:** "Edit" read as a certain edit → no offer → build. `npm install
+react-pdf` → ERESOLVE (react-pdf@11 needs React 19) with no hint → two invented versions (ETARGET) → the hint said
+"use react-pdf@^11" → forced with `--legacy-peer-deps` → crash `(0 , import_react.use) is not a function`. The model
+then installed react-pdf@9.2.1 (which supports React 18), but the RUNNING dev server was reused ("already healthy —
+reused it") and kept serving its pre-bundled react-pdf@11 (same `react-pdf.js?v=24816a75:32103`). Believing 9.2.1
+was broken, it downgraded to react-pdf@8.0.2 / pdfjs-dist@3.11.174 (a published advisory), whose worker file is
+`.js`, not the `.mjs` its CDN URL named. Separately, it wrote a made-up PDF ("Created PDF placeholder") and told the
+user their letter was loaded.
+
+| Item | Root cause | Class | Siblings | Lock |
+|---|---|---|---|---|
+| Q-350 build of "Edit pdf" | edit verb + any object ⇒ HIGH | an edit verb whose object is not a screen (6ae30b33, cf09c03c) | text nouns already covered; file nouns added | `FILE_NOUN`, test reversion-proven |
+| Q-351/352 "your existing app" about our starter | banner/note counted files, not owners | the starter counted as the user's work (31254f9a) | banner + READY note | `editBannerText` |
+| Q-353 stale pre-bundle | reuse asked "is an install needed?", never "is the server older than the install?" | a cache that outlives its input | every reuse goes through the one fast path | `buildPrebundleStaleCheckCommand`, shell-tested |
+| Q-354/355 peer-blind hints | hint picked "latest"; ERESOLVE and forced installs said nothing | advice that ignores the project | ETARGET, ERESOLVE, forced install | `peerCompatHint.ts` |
+| Q-357 CDN worker URL | a versioned file name built into a CDN path | — | pdf.js only (precision) | `pdfWorkerSource.ts` |
+| Q-358 made-up PDF + false claim | nothing said the bytes were absent | stand-in data (Q-PR-2 class) | every binary attachment | `attachedBytesNote` |
+| Q-360 blind a11y edits | count without location | — | write-time note | `unlabelledFieldLines` |
+| Q-361 ambiguous anchor | only the not-found error taught append | — | both edit errors | `ambiguousEditRegions` |
+
+Open: Q-359 (writing attachments into the project — a privacy/publish decision), Q-362 (an app's own error banner
+is unseen by every check — design decision), Q-364/365/366 (missing information), Q-367 (agreement). The user's
+published app still carries the broken worker and the vulnerable versions until it is edited again.
 **THE FINDING RATCHET CAUGHT ITS FIRST ONE, before this PR even merged (2026-10-04).** Merging `main`
 in brought PR #3488's new `UI_ONLY_CONTROL` finding — *"the build says N control(s) do nothing yet"*,
 from autopsy 51ef24ad's "Cloud Sync … is a UI-only toggle for now" — and it arrived in no registry at

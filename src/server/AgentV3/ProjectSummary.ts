@@ -130,7 +130,7 @@ const ENGINE_CONFIG_PATH = /^(\.env(\..*)?|\.gitignore|\.npmrc|\.nvmrc)$/;
  */
 const NOTE_PATH = /\.(md|mdx|markdown|txt)$/i;
 
-export function summarizeProject(graph: ProjectGraph, request: string, opts?: { previewLive?: boolean; changedFiles?: number; editMode?: boolean; changedPaths?: string[] }): string {
+export function summarizeProject(graph: ProjectGraph, request: string, opts?: { previewLive?: boolean; changedFiles?: number; editMode?: boolean; changedPaths?: string[]; awaitingShell?: string | null }): string {
   void request; // reserved for future tailoring; summary is graph-derived for now.
   if (!graph || graph.files.length === 0) return '';
   // Default TRUE (backward-compatible) — the caller passes the REAL preview state (whether a live
@@ -164,6 +164,17 @@ export function summarizeProject(graph: ProjectGraph, request: string, opts?: { 
   // that wrote documents and nothing else says exactly that, and the project's size is labelled as the
   // project's, never as this run's output.
   const onlyNotes = paths.some((p) => NOTE_PATH.test(p)) && paths.every((p) => NOTE_PATH.test(p) || ENGINE_CONFIG_PATH.test(p));
+  // 🧩 A PROJECT MODULE IS ONE PART OF AN APP (autopsy 0311186f). Its recap said "Here's what I built … The
+  // live preview didn't start automatically — open the Preview tab", about a turn that wrote two type
+  // files for an app whose shell is the plan's last module. There is nothing to open yet, and saying so
+  // is the whole message.
+  const awaitingShell = String(opts?.awaitingShell ?? '').trim();
+  if (awaitingShell && !analysisOnly) {
+    lines.push(`🧩 Built one part of your app${typeof changed === 'number' && changed > 0 ? `: ${changed} file${changed === 1 ? '' : 's'}${named}` : ''}.`);
+    lines.push(`Stack: ${stack}`);
+    lines.push(`There is nothing to open yet: the "${awaitingShell}" module puts the app together, and the preview starts then.`);
+    return lines.join('\n');
+  }
   if (analysisOnly) {
     lines.push(ANALYSIS_ONLY_HEADLINE);
   } else if (onlyNotes) {

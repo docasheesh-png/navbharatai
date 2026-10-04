@@ -12476,6 +12476,7 @@ async function noteBuildOutcome(
             // Absent ⇒ false ⇒ the rule stands down, which is the direction that cannot over-charge.
             expectsArtifacts: billingCtx.expectsArtifacts === true,
             enabled: markupNeedsPreview(),
+            awaitingShell: moduleAwaitsShell,
           });
           watchdogBilledUsd = wdMarkup.billedUsd;
           if (!wdMarkup.markupApplied) {
@@ -21933,6 +21934,8 @@ async function noteBuildOutcome(
         // ending paths, so the two can never tell the reader different stories about one build.
         try { gateEvidence.stoppedByUser = stoppedByUser(buildDiag.report().issues); }
         catch { /* the honest wording is best-effort; the verdict itself is unaffected */ }
+        // A project module that does not own the app's entry has nothing to run yet (autopsy 0311186f).
+        if (moduleAwaitsShell) gateEvidence.awaitingShell = moduleAwaitsShell;
         let gate = releaseGate(gateEvidence, gateFindings(), gateQuality);
 
         // ── THE BUDGET LEDGER: where this build's clock actually went ────────────────────────────
@@ -22077,12 +22080,15 @@ async function noteBuildOutcome(
           // was proven — but as an ERROR it made `counts.errors = 1` on a report whose own outcome line says
           // "STOPPED BY THE USER — no failure of the app or the engine is implied". The gate reads the same
           // `stoppedByUser` fact for its headline; the severity now reads it too.
-          severity: gate.state === 'red' && !result.ok && gateEvidence.stoppedByUser !== true ? 'error' : gate.state === 'green' ? 'info' : 'warning',
+          // 🧩 …AND A MODULE TURN WHOSE APP IS PUT TOGETHER LATER IS NOT UNPROVEN, IT IS NOT DUE (autopsy 0311186f):
+          // two module turns each carried three "nothing proven to run" warnings about an app that did not exist yet.
+          severity: gate.state === 'red' && !result.ok && gateEvidence.stoppedByUser !== true ? 'error'
+            : gate.state === 'green' || (gate.state === 'unknown' && !!moduleAwaitsShell) ? 'info' : 'warning',
           code: 'RELEASE_GATE',
           message: releaseGateSummary(gate),
           // A STOPPED build's RED is the user's own decision, not an item anyone must act on — leaving it open
           // made a clean Stop end with "2 unresolved" problems (autopsy 31254f9a). The verdict stays RED.
-          autoResolved: gate.state === 'green' || gateEvidence.stoppedByUser === true,
+          autoResolved: gate.state === 'green' || gateEvidence.stoppedByUser === true || (gate.state === 'unknown' && !!moduleAwaitsShell),
         });
         // ── THE VERDICT MAY NO LONGER CONTRADICT THE EVIDENCE ────────────────────────────────────
         //
@@ -22164,7 +22170,7 @@ async function noteBuildOutcome(
         // ships unproven, because nothing counted it. `RELEASE_GATE_UNPROVEN` is a first-class finding,
         // so the admin Failure Category panel can answer that from real builds — and only then is there
         // evidence to justify a stronger rule.
-        if (gate.state === 'unknown' && result.ok) {
+        if (gate.state === 'unknown' && result.ok && !moduleAwaitsShell) {
           buildDiag.record({
             phase: 'readiness', severity: 'warning', code: 'RELEASE_GATE_UNPROVEN',
             // NOT auto-resolved: nothing resolved it. The build simply ended without proof.
@@ -22435,7 +22441,7 @@ async function noteBuildOutcome(
               pageConsoleEvidence?.errors ?? [],
               { previewRendered: renderProvenNow() },
             );
-            buildDiag.record(fromPages ?? runtimeUncheckedRecord({ previewRendered: renderProvenNow() }));
+            buildDiag.record(fromPages ?? runtimeUncheckedRecord({ previewRendered: renderProvenNow(), awaitingShell: moduleAwaitsShell }));
           } else {
             buildDiag.record(runtimeVerifiedRecord());
           }
@@ -22721,7 +22727,7 @@ async function noteBuildOutcome(
           // writtenFiles counts only dispatcher writes (AI edits), NOT imported files, so a read-only
           // import+survey gets "I analyzed your project — no files were changed" instead of the false
           // "Here's what I built". An edit run says "I changed N file(s)"; a fresh build keeps "built".
-          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl, changedFiles: writtenFiles.size, editMode: isEditMode, changedPaths: [...writtenFiles.keys()] });
+          const summaryText = summarizeProject(getWorkspaceMemory(workspaceId).graph(), prompt, { previewLive: !!lastPreviewUrl, changedFiles: writtenFiles.size, editMode: isEditMode, changedPaths: [...writtenFiles.keys()], awaitingShell: moduleAwaitsShell });
           if (summaryText) events.emit({ type: 'narration', agent: 'architect', text: summaryText, ts: Date.now() });
         } catch { /* summary is best-effort — never affects the build */ }
       }
@@ -24047,6 +24053,7 @@ async function noteBuildOutcome(
         previewProven: buildObs.previewRendered === true,
         expectsArtifacts,
         enabled: markupNeedsPreview(),
+        awaitingShell: moduleAwaitsShell,
       });
       /**
        * 🔴 A MONEY STATEMENT IS MADE ONCE, AFTER THE MONEY IS FINAL (autopsy 586295b7, 2026-09-20).

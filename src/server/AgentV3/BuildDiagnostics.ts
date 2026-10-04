@@ -1781,7 +1781,9 @@ export class BuildDiagnostics {
         // ℹ️ IS OUR OWN INFORMATION MARK (autopsy dfd81a3a): "ℹ️ Handling this message normally (project
         // plan stays paused at … — 1 failed)" was filed as an ERROR because the progress line inside it
         // counts a failed module. A line the platform opened with ℹ️ is a notice, whatever it quotes.
-        const platformNotice = /^\s*ℹ️/.test(t);
+        // 🧾 is our own money notice (autopsy 0311186f): "🧾 I could not confirm your app running here, so you
+        // have been charged only…" landed in the problems list as an ERROR, though it states a bill, not a fault.
+        const platformNotice = /^\s*(?:ℹ️|🧾)/.test(t);
         if (statusLike && problemWord && !platformNotice
           && !(remediationIntent && !failureVerb)
           && !(echoesPrompt && !failureVerb)) {

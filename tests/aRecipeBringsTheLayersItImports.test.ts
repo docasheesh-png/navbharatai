@@ -89,6 +89,17 @@ describe('the missing-import healer does not touch correct recipe code', () => {
     expect(r.added).toEqual([]);
   });
 
+  it('walks each file ONCE, not once per exported name (17 s → under 2 s on the recipe set, 2026-10-05)', () => {
+    // The candidate loop used to call getDescendantsOfKind for every name the project exports, so its
+    // cost was files × names × identifiers — and this healer runs on real builds with a missing import.
+    const src = read('src/server/AgentV3/ImportExportReconcile.ts');
+    const fn = src.slice(src.indexOf('export async function addMissingProjectImports'), src.indexOf('export interface TypeOnlyValueFix'));
+    const loop = fn.slice(fn.indexOf('for (const [name, cand] of candidates)'), fn.indexOf('const spec = cand.isPackage'));
+    expect(loop.length).toBeGreaterThan(200);
+    expect(loop).not.toContain('getDescendantsOfKind');
+    expect(loop).toContain('idsByName.get(name)');
+  });
+
   it('a member\'s own name is not a use — but a real bare use still is', async () => {
     const files = {
       'src/core/state.ts': 'export const state = { score: 0 };\n',

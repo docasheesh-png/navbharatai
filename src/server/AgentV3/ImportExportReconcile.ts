@@ -466,6 +466,21 @@ export async function addMissingProjectImports(files: Record<string, string>, op
       }
     } catch { continue; }
 
+    // Every identifier in the file, grouped by its text — walked ONCE. The loop below used to call
+    // getDescendantsOfKind for every candidate name, so a file was re-walked once per exported name in
+    // the whole project: our own game library (34 files, ~400 exported names, ~20 000 identifiers) took
+    // 17 s here, on the path every real build with a missing import goes through (found 2026-10-05).
+    // Same identifiers, same order per name, so every verdict below is unchanged.
+    const idsByName = new Map<string, any[]>();
+    try {
+      for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
+        const text = id.getText();
+        if (!candidates.has(text)) continue;
+        const list = idsByName.get(text);
+        if (list) list.push(id); else idsByName.set(text, [id]);
+      }
+    } catch { continue; }
+
     // Candidate: iterate the (small) set of project-exported names and see if THIS file uses one as a
     // value without declaring/importing it.
     for (const [name, cand] of candidates) {
@@ -474,8 +489,7 @@ export async function addMissingProjectImports(files: Record<string, string>, op
       if (local.has(name)) continue;                // already declared/imported here
       let usedAsValue = false;
       try {
-        for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
-          if (id.getText() !== name) continue;
+        for (const id of idsByName.get(name) ?? []) {
           const parent = id.getParent?.();
           const pk = parent?.getKind?.();
           // Exclude the `.name` of a property access (obj.CANVAS_HEIGHT), object-literal keys, type

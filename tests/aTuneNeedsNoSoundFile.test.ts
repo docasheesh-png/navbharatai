@@ -481,7 +481,11 @@ describe('the tool is really reachable — an unwired generator is invisible', (
   it('the GAME tool stops implying a silent game is the end of it', () => {
     // Its honest limit was true and also a dead end for anyone who cannot produce an .mp3. Both the
     // tool description and the build plan now point at the synthesiser.
-    expect(read('src/server/AgentV3/ToolCatalog.ts')).toContain('call generate_melody, which synthesises them');
+    // Since 2026-10-05 the game layer synthesises its own effects (fx/synth.ts — aGameIsNeverSilent), so
+    // the tool no longer has a silent case to point away from: it says a game is never silent, and that
+    // the music is generate_melody.
+    expect(read('src/server/AgentV3/ToolCatalog.ts')).toContain('needs NO sound files');
+    expect(read('src/server/AgentV3/ToolCatalog.ts')).toContain('Music is generate_melody.');
     expect(read('src/server/AgentV3/systemPrompt.ts')).toContain('generate_melody');
   });
 

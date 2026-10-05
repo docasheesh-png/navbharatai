@@ -91007,3 +91007,73 @@ says a weapon is two things, both from the library.
 
 The generated modules typecheck strictly. They were also rendered in a real browser: a rack of all eight,
 plus a rifleman, a swordsman and an archer at full draw, with no console errors.
+
+### 2026-10-05 — Game engine G6: a game is never silent (fx/synth.ts)
+
+**Found while choosing the next engine item, and it is a root cause, not a feature gap.** The feedback table
+fires a sound by NAME on every hit, jump and pickup (`audio.play('shoot')`). `AudioManager.play` only played a
+buffer LOADED under that name, and a generated game ships no sound files. So every call found nothing and
+returned quietly: **every game NavBharatAI built was silent.**
+
+The earlier answer was a prompt line ("call generate_melody too and a game is never silent"). It only covered
+tunes and chimes, not a gunshot or a thud. The particle column of the table had a test that every preset it
+names exists; the sound column had none. That missing sibling is how a whole column could point at nothing.
+
+**The fix, at the root:**
+- **`src/game/fx/synth.ts`** (new, pure, no DOM) has 30 recipes. Each is a few layers of
+  sine/square/saw/triangle/white/brown noise, with an exponential pitch sweep, a two-pole low-pass sweep, an
+  attack/hold/decay envelope, arpeggio notes, vibrato and tremolo.
+  - Weapons: shoot, shotgun, laser, empty, reload, swing.
+  - Bodies: impact, hit, hurt, die, death, explosion, boss_die.
+  - Movement: jump, land, step.
+  - Rewards: pickup, coin, heal, powerup, combo, newbest, levelup, achievement.
+  - Interface: click, error.
+  - World: thunder, and seamless loops for rain and wind (an equal-power crossfade of the tail into the head).
+  - Every sound is normalised, with 3 ms edges so nothing clicks, capped at 4.5 s, and deterministic.
+- **`AudioManager.play` falls back to the built-in voice.** A file under that name plays first; otherwise the
+  voice is rendered once at the context's own sample rate and cached. A file loaded later still wins.
+  `prewarm()` renders every voice after `unlock()`, one per tick, so the first shot never pays for its own
+  synthesis. `play` now returns a stop function (for loops), and `has(name)` was added.
+- **The feedback table now covers the weapon cycle and the rewards.** WEAPON_EMPTY, WEAPON_RELOADED,
+  MELEE_SWING and MELEE_HIT are heard. COMBO_MILESTONE, NEW_BEST, LEVEL_UP, ACHIEVEMENT_UNLOCKED,
+  GOAL_COMPLETED and DAILY_REWARD play on the `ui` bus (a new `category` field).
+- **Stale text corrected in the same change:**
+  - the prompt's "generate_melody — the SOUND ITSELF… vfx only loads files";
+  - both tool descriptions;
+  - the module instructions;
+  - `aTuneNeedsNoSoundFile`, which pinned the old wording (its intent — no dead end for a silent game — now
+    holds outright).
+
+**Locked by `tests/aGameIsNeverSilent.test.ts`** (11 cases). They run the generated modules with a recording
+Web Audio stand-in:
+- **CENSUS:** every sound the table names has a voice, and so does every `audio.play('…')` literal in the game
+  layers.
+- Every voice is audible, never clips, is finite, and starts and ends at silence.
+- Durations fit their kind.
+- Pitch moves the right way: a jump rises, a death falls, an explosion sits below a shot.
+- The same name always gives the same sound.
+- Loops are exact and seamless, with no near-silent quarter.
+- `play('shoot')` with nothing loaded starts a sound at the context's rate, and an unknown name stays quiet.
+- A loaded file wins, a voice is rendered once, and a loop returns a working stop.
+- Rewards are on the `ui` bus.
+
+**Proven by reversion:** without the fallback, THE BUG case fails. With one recipe deleted, the census fails.
+The generated modules typecheck strictly. A 16-second reel of the voices was rendered to WAV for the admin.
+
+**Found on the way, and fixed in the same change:**
+
+1. **The missing-import healer re-walked every file once per exported name.** `addMissingProjectImports` called
+   `getDescendantsOfKind(Identifier)` inside its per-candidate loop, so its cost was files × exported names ×
+   identifiers. On our own game library (34 files, ~400 names, ~20 000 identifiers) that was 17.6 s, and this
+   healer runs on real builds with a missing import. It surfaced as a timeout in `aRecipeBringsTheLayersItImports`
+   once the CPU was busy.
+   - **The fix:** identifiers are indexed by name in ONE walk per file. Each name sees the same identifiers in
+     the same order, so every verdict is unchanged — all 46 healer tests are green. It now takes 1.7 s.
+   - **Locked by** a structural guard: the per-candidate loop must not walk the AST.
+   - **Siblings checked and judged bounded:**
+     - `readsAsValue` walks once per type-only import in a file (a handful);
+     - the JSX and hook analyses loop over a fixed set of node kinds;
+     - neither multiplies by the project's export count.
+2. **The G5 weapon prompt rule named `generate_game_systems` before the numbered tool list.** That broke the
+   prompt-order test, which reads first mentions. The full G5 gate caught it, and the rule now names the
+   module, `weapon.ts`.

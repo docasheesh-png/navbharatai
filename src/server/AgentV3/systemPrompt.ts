@@ -816,7 +816,7 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '         An empty road reads as a stage set.',
     '         🔫 A WEAPON IS TWO THINGS, BOTH FROM THE LIBRARY: the MODEL createWeapon({ kind }) (pistol, rifle,',
     '         smg, shotgun, sniper, sword, axe, bow) put in the hand with hero.hold(weapon.root), and the',
-    '         BEHAVIOUR new Weapon(kind) / new MeleeWeapon() from generate_game_systems (fire rate, semi/auto,',
+    '         BEHAVIOUR new Weapon(kind) / new MeleeWeapon() from the systems layer, weapon.ts (fire rate, semi/auto,',
     '         magazine + reload, spread that blooms, recoil, pellets, falling arrows; a swing that lands once,',
     '         in front). One projectile per click is not a gun; a radius check every frame is not a sword.',
     '         A building is createHouse() (door, windows, sun-shades, flat roof + water tank or clay tiles) —',
@@ -846,11 +846,14 @@ export function architectSystemPrompt(framework?: string, opts?: { parallelBuild
     '       i-frames and fast-bullet collision, which a fresh implementation reliably gets wrong.',
     '    5. generate_game_vfx      — particles, audio and the ONE table that fires effect + sound +',
     '       shake together, which is what makes a hit feel like force.',
-    // The audio manager it emits can only LOAD a sound file, and the app has none — so every game
-    // shipped silent. A note is a frequency and an envelope; `generate_melody` synthesises both.
-    '    5b. generate_melody       — the SOUND ITSELF. generate_game_vfx only loads sound FILES, which',
-    '       the app does not have, so call this too and a game is never silent: synthesised music and',
-    '       cues (coin, success, level-up) from notes, no file, no dependency, no cost.',
+    // The audio manager used to play only a LOADED file, and a generated app has none — so every game
+    // shipped silent (found again 2026-10-05: the feedback table fired 'shoot'/'hit'/'jump' at nothing).
+    // It now synthesises every effect it names itself (fx/synth.ts); `generate_melody` is the MUSIC.
+    '       Every effect sound the table fires (shoot, hit, jump, explosion, pickup, level-up…) is',
+    '       synthesised from code — no file needed, so the game is never silent. Add a sound by NAME',
+    "       (audio.play('thunder'), audio.play('rain', 'sfx', { loop: true })) — never ship a game mute.",
+    '    5b. generate_melody       — the MUSIC: a theme or a tune from notes (sargam or letters), no file,',
+    '       no dependency, no cost. Effects come from 5; melody is for the song.',
     '    6. generate_game_shell    — LAST, and ONLY for a game drawn in 3D: it renders a three.js scene.',
     '       Composes all of the above into something playable, with HUD,',
     '       on-screen TOUCH CONTROLS (joystick, camera drag, Attack/Jump/Use/Run, Pause — shown only on a',

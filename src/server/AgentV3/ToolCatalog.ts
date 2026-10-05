@@ -2296,8 +2296,8 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'Call this whenever an app needs a tune, background music, a jingle, a chime, or a success / '
         + 'error / coin / level-up cue, and whenever the user asks for a melody, a dhun, sargam, a '
         + 'raga exercise, a music or riyaaz app, or a metronome-like practice tool. '
-        + 'IT IS ALSO THE ANSWER TO A SILENT GAME: generate_game_vfx can only LOAD a sound file, which '
-        + 'the app does not have, so use this for its music and its cues instead of leaving it quiet. '
+        + 'For a GAME it is the music: generate_game_vfx already synthesises every sound EFFECT (shots, '
+        + 'hits, jumps, explosions, pickups, level-up), so use this for the theme and the tunes. '
         + 'Emits src/audio: a notation reader, a player and a small tune library. '
         + 'READS BOTH NOTATIONS in one line of text — Indian sargam (Sa Re Ga Ma Pa Dha Ni, komal as '
         + '_Re, teevra as Ma#, RELATIVE to the tune\'s tonic so one line transposes to any key) and '
@@ -2333,14 +2333,18 @@ export function defaultToolCatalog(): ClaudeToolDef[] {
         + 'trauma + hit-stop, so a hit reads as force instead of a state change. Author reactions in that '
         + 'table and keep gameplay emitting events only — never call particles or audio inline from '
         + 'gameplay code, or the reactions drift and half the game ends up feeling weaker. '
-        + 'Adds no dependency. Sound FILES are the app\'s to supply; a missing one plays silently and warns — so for music and cues call generate_melody, which synthesises them and needs no file.',
+        + 'Adds no dependency and needs NO sound files: every sound the table fires has a voice synthesised '
+        + 'from code (src/game/fx/synth.ts — shoot, shotgun, laser, reload, empty, swing, impact, hit, hurt, '
+        + 'die, death, explosion, boss_die, jump, land, step, pickup, coin, heal, powerup, combo, newbest, '
+        + 'levelup, achievement, click, error, thunder, and the loops rain and wind), so a game is never '
+        + 'silent. A file loaded under the same name replaces a voice. Music is generate_melody.',
       input_schema: {
         type: 'object',
         properties: {
           include: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional subset: particles, audio, feedback. Default = all.',
+            description: 'Optional subset: particles, synth, audio, feedback. Default = all.',
           },
         },
       },

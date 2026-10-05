@@ -483,7 +483,7 @@ export class CameraRig {
 
 const WORLD = `import * as THREE from 'three';
 import { sharedMaterial, paletteColor, type PaletteName } from './materials';
-import { surfaceMaterial, enableAO, getDetailLevel, type Detail, type SurfaceKind } from './surfaces';
+import { surfaceMaterial, enableAO, getDetailLevel, mergeGeometries, type Detail, type SurfaceKind } from './surfaces';
 
 /**
  * Procedural world building — an environment with no asset library.
@@ -668,32 +668,6 @@ export function buildingGeometry(width = 4, height = 3, depth = 4): THREE.Buffer
   roof.rotateY(Math.PI / 4);
   roof.translate(0, height + height * 0.25, 0);
   return mergeGeometries([base, roof]);
-}
-
-/** Merge without pulling in BufferGeometryUtils — keeps the generated app's import surface small. */
-function mergeGeometries(list: THREE.BufferGeometry[]): THREE.BufferGeometry {
-  const merged = new THREE.BufferGeometry();
-  const positions: number[] = [];
-  const normals: number[] = [];
-  // 🔴 UVs TRAVEL WITH THE MESH. This used to copy only positions and normals, so every merged shape —
-  // buildingGeometry() and treeGeometry() — came out with NO uv set. A brick or plaster surfaceMaterial
-  // on a house then had nothing to map its texture with and rendered as one flat colour, and enableAO()
-  // (which copies uv) silently did nothing. A part without uvs gets zeros rather than shifting the rest.
-  const uvs: number[] = [];
-  for (const g of list) {
-    const nonIndexed = g.index ? g.toNonIndexed() : g;
-    const p = nonIndexed.attributes.position.array as ArrayLike<number>;
-    const n = nonIndexed.attributes.normal.array as ArrayLike<number>;
-    const uv = nonIndexed.attributes.uv?.array as ArrayLike<number> | undefined;
-    for (let i = 0; i < p.length; i++) positions.push(p[i]);
-    for (let i = 0; i < n.length; i++) normals.push(n[i]);
-    const vertices = p.length / 3;
-    for (let i = 0; i < vertices * 2; i++) uvs.push(uv ? uv[i] : 0);
-  }
-  merged.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  merged.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-  merged.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  return merged;
 }
 `;
 
@@ -991,6 +965,46 @@ export function enableAO(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
   if (uv && !geometry.getAttribute('uv2')) geometry.setAttribute('uv2', uv.clone());
   return geometry;
 }
+
+/**
+ * THE ONE MERGE for every 3D module (world, objects, humanoid) — without pulling in BufferGeometryUtils,
+ * which keeps the generated app's import surface small. A Mesh in the list is merged AT ITS POSE (its
+ * position/rotation/scale are applied to its vertices), so small details that share a material become
+ * one mesh: one draw call instead of one each, which is what keeps a scene of ten cars smooth on a phone.
+ *
+ * 🔴 UVs TRAVEL WITH THE MESH. An earlier copy of this copied only positions and normals, so every merged
+ * shape came out with NO uv set: a brick or plaster surfaceMaterial then had nothing to map its texture
+ * with and rendered as one flat colour, and enableAO() (which copies uv) silently did nothing. A part
+ * without uvs gets zeros rather than shifting the rest.
+ */
+export function mergeGeometries(list: Array<THREE.BufferGeometry | THREE.Mesh>): THREE.BufferGeometry {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const uvs: number[] = [];
+  for (const item of list) {
+    let g: THREE.BufferGeometry;
+    if ((item as THREE.Mesh).isMesh) {
+      const m = item as THREE.Mesh;
+      m.updateMatrix();
+      g = m.geometry.clone().applyMatrix4(m.matrix);
+    } else {
+      g = item as THREE.BufferGeometry;
+    }
+    const flat = g.index ? g.toNonIndexed() : g;
+    const p = flat.attributes.position.array as ArrayLike<number>;
+    const n = flat.attributes.normal.array as ArrayLike<number>;
+    const uv = flat.attributes.uv?.array as ArrayLike<number> | undefined;
+    for (let i = 0; i < p.length; i++) positions.push(p[i]);
+    for (let i = 0; i < n.length; i++) normals.push(n[i]);
+    const vertices = p.length / 3;
+    for (let i = 0; i < vertices * 2; i++) uvs.push(uv ? uv[i] : 0);
+  }
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  merged.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  merged.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  return merged;
+}
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1148,10 +1162,13 @@ export function setEnvironmentIntensity(scene: THREE.Scene, intensity: number): 
 // and it reads as a character rather than a shape.
 //
 // PROPORTION IS THE WHOLE TRICK. Bodies are read by ratio, not detail: head ≈ 1/7.5 of height, arm
-// span ≈ height, elbow at the waist, knee at mid-thigh-to-floor. Get those right with plain boxes and
-// the eye accepts a person; get them wrong with a beautiful mesh and it reads as a toy.
+// span ≈ height, elbow at the waist, knee at mid-thigh-to-floor. Get them wrong with a beautiful mesh
+// and it reads as a toy. Proportion is necessary but NOT sufficient: built from plain boxes, even the
+// right ratios read as stacked blocks (Phase 2, 2026-10-05 — the admin's "FAIL" bar). So the parts are
+// rounded and tapered too; see createHumanoid.
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 const HUMANOID = `import * as THREE from 'three';
+import { mergeGeometries } from './surfaces';
 
 export interface HumanoidOptions {
   /** Total height in world units. Everything else is derived from it. Default 1.8 (an adult). */
@@ -1180,21 +1197,50 @@ export interface Humanoid {
   dispose: () => void;
 }
 
-function limb(w: number, h: number, d: number, material: THREE.Material, yOffset: number): THREE.Mesh {
-  const geo = new THREE.BoxGeometry(w, h, d);
-  // Move the geometry so the JOINT is at the top of the segment — rotating the group then swings the
-  // limb from the shoulder/hip instead of from its middle, which is the difference between a walk and
-  // a puppet flailing.
-  geo.translate(0, yOffset, 0);
-  const mesh = new THREE.Mesh(geo, material);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  return mesh;
+/**
+ * A rounded limb segment hanging DOWN from its joint at y = 0: a lathed capsule that tapers from r0 at
+ * the joint to r1 at the far end. The joint at the top is what makes a rotated group swing the limb from
+ * the shoulder or hip instead of from its middle — the difference between a walk and a puppet flailing.
+ * Rounded and tapered is the difference between an arm and a stack of blocks.
+ */
+function segment(r0: number, r1: number, length: number, material: THREE.Material, radial = 12): THREE.Mesh {
+  const pts: THREE.Vector2[] = [];
+  const cap = 5;
+  // Caps are held to 45% of the length each, so a short thick piece can never fold through itself.
+  const h0 = Math.min(r0, length * 0.45), h1 = Math.min(r1, length * 0.45);
+  for (let i = 0; i <= cap; i++) {                     // the far end's rounded cap, from its pole up
+    const a = -Math.PI / 2 + (i / cap) * (Math.PI / 2);
+    pts.push(new THREE.Vector2(Math.cos(a) * r1, -length + h1 + Math.sin(a) * h1));
+  }
+  for (let i = 0; i <= cap; i++) {                     // the joint end's cap, up to its pole
+    const a = (i / cap) * (Math.PI / 2);
+    pts.push(new THREE.Vector2(Math.cos(a) * r0, -h0 + Math.sin(a) * h0));
+  }
+  pts[0].x = 0; pts[pts.length - 1].x = 0;
+  const m = new THREE.Mesh(new THREE.LatheGeometry(pts, radial), material);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+
+/** An ellipsoid: heads, hands, shoulders, the pelvis. */
+function blob(rx: number, ry: number, rz: number, material: THREE.Material, w = 14, h = 10): THREE.Mesh {
+  const g = new THREE.SphereGeometry(1, w, h);
+  g.scale(rx, ry, rz);
+  const m = new THREE.Mesh(g, material);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
 }
 
 /**
  * Build a proportioned, jointed figure. Pure geometry + groups — no loaders, no network, so it can
  * never fail to arrive.
+ *
+ * 🔒 ROUNDED ANATOMY, NOT BLOCKS (admin 2026-10-05, Phase 2: "if the human still looks like stacked
+ * blocks: FAIL"). Every part is a lathed or ellipsoid shape: a torso that narrows at the waist and widens
+ * at the chest, flattened front-to-back; tapered capsule limbs; round shoulders, hands, a head with ears,
+ * eyes, a nose and a hair cap; shoes with a heel and a toe. The joints and the gait are unchanged.
  */
 export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
   const H = options.height ?? 1.8;
@@ -1211,13 +1257,25 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
   const trouserM = mat(options.trousers ?? 0x2a2f3a, 0.9);
   const shoeM = mat(options.shoes ?? 0x14161a, 0.7);
   const hairM = mat(options.hair ?? 0x1b1410, 0.85);
+  const eyeM = mat(0x1a1410, 0.4);
+  const keep = <T extends THREE.Mesh>(m: T): T => { disposables.push(m.geometry); return m; };
+  // Parts of one joint that share a material become ONE mesh (one draw call): a crowd of figures at
+  // ~16 draw calls each instead of ~27 is the difference on a phone.
+  const baked = (parts: THREE.Mesh[], material: THREE.Material): THREE.Mesh => {
+    const m = keep(new THREE.Mesh(mergeGeometries(parts), material));
+    m.castShadow = true;
+    m.receiveShadow = true;
+    return m;
+  };
 
-  // The ratios. These numbers are the character.
+  // The ratios. These numbers are the character. torsoH is crotch → base of the neck: with the neck
+  // and the head on top it lands the crown at H (it was 0.30·H, which left a 1.8 m figure 1.66 m tall).
   const headH = H / 7.5;
   const legH = H * 0.47;
   const thighH = legH * 0.52;
   const shinH = legH - thighH;
-  const torsoH = H * 0.30;
+  const torsoH = H * 0.35;
+  const neckLen = headH * 0.18;
   const armH = H * 0.44;
   const upperArmH = armH * 0.47;
   const foreArmH = armH - upperArmH;
@@ -1236,41 +1294,81 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
   chest.position.y = torsoH * 0.55;
   spine.add(chest);
 
-  const torso = limb(shoulderW * 1.75, torsoH, limbT * 1.5, shirtM, torsoH * 0.5 - torsoH * 0.55 + torsoH * 0.05);
+  // Torso: lathed from a side profile — hips, a narrower waist, a broad chest, sloping shoulders into
+  // the neck — then flattened front-to-back, because a body is not round.
+  const t = torsoH;
+  const torsoProfile = [
+    [0, -0.6 * t], [hipW * 1.42, -0.58 * t], [hipW * 1.5, -0.45 * t], [shoulderW * 0.68, -0.12 * t],
+    [shoulderW * 0.78, 0.1 * t], [shoulderW * 0.84, 0.28 * t], [shoulderW * 0.8, 0.4 * t],
+    [shoulderW * 0.5, 0.48 * t], [headH * 0.2, 0.51 * t], [0, 0.52 * t],
+  ].map(([r, y]) => new THREE.Vector2(r, y));
+  const torsoGeo = new THREE.LatheGeometry(torsoProfile, 18);
+  torsoGeo.scale(1, 1, 0.58);
+  const torso = keep(new THREE.Mesh(torsoGeo, shirtM));
+  torso.castShadow = true;
+  torso.receiveShadow = true;
   chest.add(torso);
-  disposables.push(torso.geometry);
+  // Pelvis in the trouser colour, so the legs grow out of a body rather than out of the shirt hem.
+  const pelvis = keep(blob(hipW * 1.42, t * 0.15, hipW * 0.95, trouserM));
+  pelvis.position.y = -0.02 * H;
+  hips.add(pelvis);
 
   const neck = new THREE.Group();
   neck.position.y = torsoH * 0.5;
   chest.add(neck);
+  const neckMesh = keep(segment(headH * 0.18, headH * 0.2, headH * 0.5, skinM, 10));
+  neckMesh.position.y = neckLen + headH * 0.32;
+  neck.add(neckMesh);
   const head = new THREE.Group();
+  head.position.y = neckLen;       // a visible neck: the head sits ON it, not sunk into the shoulders
   neck.add(head);
 
-  const headMesh = new THREE.Mesh(new THREE.BoxGeometry(headH * 0.72, headH, headH * 0.78), skinM);
-  headMesh.position.y = headH * 0.5;
-  headMesh.castShadow = true;
-  head.add(headMesh);
-  disposables.push(headMesh.geometry);
-
-  const hairMesh = new THREE.Mesh(new THREE.BoxGeometry(headH * 0.78, headH * 0.3, headH * 0.84), hairM);
-  hairMesh.position.y = headH * 0.92;
-  hairMesh.castShadow = true;
-  head.add(hairMesh);
-  disposables.push(hairMesh.geometry);
+  // Head: an egg, wider at the cranium than the jaw, deeper than it is wide. Face on +Z.
+  const hw = headH * 0.38, hh = headH * 0.52, hd = headH * 0.44;
+  const skull = blob(hw, hh, hd, skinM, 18, 14);
+  skull.position.y = headH * 0.5;
+  const jaw = blob(hw * 0.78, hh * 0.46, hd * 0.8, skinM, 14, 8);
+  jaw.position.set(0, headH * 0.3, hd * 0.06);
+  const nose = blob(hw * 0.13, hh * 0.17, hd * 0.2, skinM, 8, 6);
+  nose.position.set(0, headH * 0.47, hd * 0.98);
+  const face: THREE.Mesh[] = [skull, jaw, nose];
+  const eyes: THREE.Mesh[] = [];
+  for (const side of [-1, 1]) {
+    const ear = blob(hw * 0.12, hh * 0.22, hd * 0.2, skinM, 8, 6);
+    ear.position.set(side * hw * 0.98, headH * 0.5, 0);
+    face.push(ear);
+    const eye = blob(hw * 0.11, hw * 0.11, hw * 0.06, eyeM, 8, 6);
+    eye.position.set(side * hw * 0.38, headH * 0.58, hd * 0.9);
+    eyes.push(eye);
+  }
+  head.add(baked(face, skinM));
+  head.add(baked(eyes, eyeM));
+  // Hair: a cap over the crown and the back of the head, leaving the face open.
+  const hairGeo = new THREE.SphereGeometry(1, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.56);
+  hairGeo.scale(hw * 1.08, hh * 1.04, hd * 1.1);
+  const hair = keep(new THREE.Mesh(hairGeo, hairM));
+  hair.position.set(0, headH * 0.53, -hd * 0.06);
+  hair.rotation.x = -0.32;
+  hair.castShadow = true;
+  head.add(hair);
 
   const arm = (side: number) => {
     const shoulder = new THREE.Group();
     shoulder.position.set(side * shoulderW, torsoH * 0.38, 0);
     chest.add(shoulder);
-    const upper = limb(limbT, upperArmH, limbT, shirtM, -upperArmH * 0.5);
-    shoulder.add(upper);
-    disposables.push(upper.geometry);
+    const deltoid = blob(limbT * 0.56, limbT * 0.5, limbT * 0.54, shirtM, 12, 8);
+    deltoid.position.set(-side * limbT * 0.12, -limbT * 0.08, 0);
+    shoulder.add(baked([deltoid, segment(limbT * 0.55, limbT * 0.46, upperArmH + limbT * 0.2, shirtM)], shirtM));
     const elbow = new THREE.Group();
     elbow.position.y = -upperArmH;
     shoulder.add(elbow);
-    const fore = limb(limbT * 0.88, foreArmH, limbT * 0.88, skinM, -foreArmH * 0.5);
-    elbow.add(fore);
-    disposables.push(fore.geometry);
+    // A hand: a flattened mitten with a thumb, palm turned in toward the thigh.
+    const hand = blob(limbT * 0.3, limbT * 0.62, limbT * 0.45, skinM, 10, 8);
+    hand.position.y = -foreArmH - limbT * 0.35;
+    const thumb = blob(limbT * 0.13, limbT * 0.28, limbT * 0.13, skinM, 6, 5);
+    thumb.position.set(-side * limbT * 0.05, -foreArmH - limbT * 0.2, limbT * 0.32);
+    thumb.rotation.x = 0.5;
+    elbow.add(baked([segment(limbT * 0.43, limbT * 0.33, foreArmH, skinM), hand, thumb], skinM));
     return { shoulder, elbow };
   };
 
@@ -1278,20 +1376,27 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
     const hip = new THREE.Group();
     hip.position.set(side * hipW, 0, 0);
     hips.add(hip);
-    const thigh = limb(limbT * 1.15, thighH, limbT * 1.15, trouserM, -thighH * 0.5);
-    hip.add(thigh);
-    disposables.push(thigh.geometry);
+    hip.add(keep(segment(limbT * 0.72, limbT * 0.52, thighH + limbT * 0.3, trouserM)));
     const knee = new THREE.Group();
     knee.position.y = -thighH;
     hip.add(knee);
-    const shin = limb(limbT, shinH, limbT, trouserM, -shinH * 0.5);
-    knee.add(shin);
-    disposables.push(shin.geometry);
-    const foot = new THREE.Mesh(new THREE.BoxGeometry(limbT * 1.1, limbT * 0.55, limbT * 2.1), shoeM);
-    foot.position.set(0, -shinH + limbT * 0.2, limbT * 0.5);
+    knee.add(keep(segment(limbT * 0.52, limbT * 0.4, shinH, trouserM)));
+    // Shoe: a side profile — heel, low instep, rounded toe — extruded and bevelled. Toe on +Z.
+    const fl = limbT * 2.3, fh = limbT * 0.78, fw = limbT * 0.95, fb = limbT * 0.12;
+    const shoeShape = new THREE.Shape();
+    const sp = [[-0.3, 0], [0.62, 0], [0.74, 0.14], [0.72, 0.36], [0.5, 0.52], [0.12, 0.8], [-0.18, 1], [-0.32, 0.7]];
+    shoeShape.moveTo(sp[0][0] * fl, sp[0][1] * fh);
+    for (let i = 1; i < sp.length; i++) shoeShape.lineTo(sp[i][0] * fl, sp[i][1] * fh);
+    shoeShape.closePath();
+    const shoeGeo = new THREE.ExtrudeGeometry(shoeShape, {
+      depth: fw - 2 * fb, bevelEnabled: true, bevelThickness: fb, bevelSize: fb, bevelSegments: 2, curveSegments: 1,
+    });
+    shoeGeo.translate(0, 0, -(fw - 2 * fb) / 2);
+    shoeGeo.rotateY(-Math.PI / 2);
+    const foot = keep(new THREE.Mesh(shoeGeo, shoeM));
+    foot.position.set(0, -shinH - limbT * 0.08 + fb, 0);
     foot.castShadow = true;
     knee.add(foot);
-    disposables.push(foot.geometry);
     return { hip, knee };
   };
 
@@ -1368,8 +1473,9 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
 //
 // 🔒 WHAT MAKES AN OBJECT READ AS REAL, AND IT IS NOT POLYGON COUNT. It is SILHOUETTE and PROPORTION.
 // A car is not a box with wheels: it is a bonnet line, a raked windscreen, a roof, a boot, and wheels
-// sunk into arches — get that outline right in twelve boxes and the eye accepts a car; get it wrong in
-// twelve thousand triangles and it stays a shape. Every builder below is written to that rule, which
+// sunk into arches — get that outline wrong in twelve thousand triangles and it stays a shape. (The
+// first version drew the right outline in twelve boxes, and the render still read as boxes: since Phase
+// 2, 2026-10-05, the outline is the SHAPE itself — an extruded side profile, lathed limbs and bodies.) Every builder below is written to that rule, which
 // is also why they stay cheap enough to run on a mid-range Android.
 //
 // 🔒 THE HONEST CEILING, IN CODE SO NOBODY OVERSELLS IT. This produces objects that unmistakably READ
@@ -1378,7 +1484,7 @@ export function createHumanoid(options: HumanoidOptions = {}): Humanoid {
 // feature this codebase forbids. Say "real-looking", never "photorealistic".
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 const OBJECTS = `import * as THREE from 'three';
-import { surfaceMaterial, enableAO, getDetailLevel, setDetailLevel, type SurfaceKind, type Detail } from './surfaces';
+import { surfaceMaterial, enableAO, getDetailLevel, setDetailLevel, mergeGeometries, type SurfaceKind, type Detail } from './surfaces';
 
 // The detail tier lives in surfaces.ts so the ground reads the same setting as the objects; it is
 // re-exported here so \`import { setDetailLevel } from './objects'\` keeps working everywhere.
@@ -1433,106 +1539,201 @@ export interface CarOptions extends BaseOpts { color?: number; length?: number }
  * A car built from its real silhouette, at real proportions: ~4.3 m long, 1.8 m wide, 1.45 m tall,
  * 2.6 m wheelbase, 0.32 m wheel radius. Those five numbers are most of why it reads as a car.
  *
- * \`real\` adds the things you only notice up close and miss immediately when they are gone: a raked
- * windscreen, dark glass, wheel arches, tyre + rim as separate materials, lights that actually emit,
- * a grille and mirrors.
+ * 🔒 THE BODY IS A PROFILE, NOT BOXES (admin 2026-10-05, Phase 2: "if the player vehicle still looks like
+ * a box: FAIL"). The side outline — nose, bonnet, raked windscreen, curved roof, backlight, boot, and the
+ * two wheel wells cut out of the sill — is drawn once and extruded across the width with a rounded bevel.
+ * Both tiers get that shape; \`real\` adds what you only notice up close: door seams and handles, spoked
+ * rims, grilles, a plate, dark well liners, clearcoat paint. Locked by tests/aHeroObjectIsNotABox.test.ts.
  */
 export function createCar(options: CarOptions = {}): THREE.Group {
   const d = tier(options);
   const L = options.length ?? 4.3;
+  const s = L / 4.3;                 // every number below is metres on a 4.3 m saloon, scaled by s
   const W = L * 0.42;
   const paint = options.color ?? 0xb42b2b;
+  const real = d === 'real';
   const group = new THREE.Group();
 
-  const bodyMat = d === 'real'
+  const bodyMat = real
     ? new THREE.MeshPhysicalMaterial({ color: paint, roughness: 0.28, metalness: 0.85, clearcoat: 1, clearcoatRoughness: 0.08 })
     : new THREE.MeshStandardMaterial({ color: paint, roughness: 0.5, metalness: 0.3 });
-  const glassMat = new THREE.MeshPhysicalMaterial({ color: 0x0d1114, roughness: 0.06, metalness: 0, transmission: d === 'real' ? 0.55 : 0, transparent: true, opacity: d === 'real' ? 0.5 : 0.75 });
+  // Glass is DARK and REFLECTIVE, not see-through: the greenhouse is a solid volume, so transmission
+  // would show the sky through the whole cabin and read as a glass brick.
+  const glassMat = real
+    ? new THREE.MeshPhysicalMaterial({ color: 0x0b0f13, roughness: 0.04, metalness: 0.2, clearcoat: 1, clearcoatRoughness: 0.02 })
+    : new THREE.MeshStandardMaterial({ color: 0x10151a, roughness: 0.2, metalness: 0.3 });
   const trimMat = new THREE.MeshStandardMaterial({ color: 0x15181c, roughness: 0.6, metalness: 0.5 });
   const tyreMat = shared('fabric', d, 0x14161a, 2);
   const rimMat = new THREE.MeshStandardMaterial({ color: 0xc6ccd4, roughness: 0.25, metalness: 1 });
 
-  // Lower body: the mass that sits between the wheels.
-  const lower = mesh(new THREE.BoxGeometry(W, L * 0.13, L), bodyMat, d);
-  lower.position.y = L * 0.115;
-  group.add(lower);
+  const wheelR = L * 0.075;
+  const axleZ = 1.3 * s;             // 2.6 m wheelbase
+  const wellR = 0.41 * s;            // the cut-out the tyre sits in, a little larger than the tyre
+  const sill = 0.2 * s;              // ground clearance under the doors
 
-  // Bonnet and boot are LOWER than the cabin — that step is the car's outline.
-  const bonnet = mesh(new THREE.BoxGeometry(W * 0.96, L * 0.055, L * 0.3), bodyMat, d);
-  bonnet.position.set(0, L * 0.2, L * 0.32);
-  group.add(bonnet);
-  const boot = mesh(new THREE.BoxGeometry(W * 0.96, L * 0.06, L * 0.24), bodyMat, d);
-  boot.position.set(0, L * 0.2, -L * 0.36);
-  group.add(boot);
-
-  // Cabin: narrower than the body and set back, so the greenhouse reads as glass on a shoulder.
-  const cabin = mesh(new THREE.BoxGeometry(W * 0.86, L * 0.11, L * 0.42), bodyMat, d);
-  cabin.position.set(0, L * 0.245, -L * 0.02);
-  group.add(cabin);
-
-  if (d === 'real') {
-    // Raked windscreen and backlight — the single most car-like detail there is.
-    const wind = mesh(new THREE.BoxGeometry(W * 0.8, L * 0.1, L * 0.02), glassMat, d);
-    wind.position.set(0, L * 0.245, L * 0.185);
-    wind.rotation.x = -0.55;
-    group.add(wind);
-    const rear = mesh(new THREE.BoxGeometry(W * 0.78, L * 0.09, L * 0.02), glassMat, d);
-    rear.position.set(0, L * 0.245, -L * 0.225);
-    rear.rotation.x = 0.62;
-    group.add(rear);
-    for (const side of [-1, 1]) {
-      const win = mesh(new THREE.BoxGeometry(L * 0.015, L * 0.075, L * 0.34), glassMat, d);
-      win.position.set(side * W * 0.435, L * 0.25, -L * 0.02);
-      group.add(win);
-      const mirror = mesh(new THREE.BoxGeometry(L * 0.05, L * 0.022, L * 0.03), trimMat, d);
-      mirror.position.set(side * W * 0.56, L * 0.235, L * 0.14);
-      group.add(mirror);
+  // A side profile is the car. It is drawn in (z = length, y = height), front at +z, then extruded
+  // across the width with a bevel so every edge is rounded — never a box with a box on top.
+  const scaled = (pts: number[][]) => pts.map(([z, y]) => [z * s, y * s]);
+  const wellArc = (cz: number): number[][] => {
+    const a = Math.asin(Math.min(1, (wheelR - sill) / wellR));
+    const out: number[][] = [];
+    const n = real ? 14 : 6;
+    for (let i = 0; i <= n; i++) {
+      const t = Math.PI + a - ((Math.PI + 2 * a) * i) / n; // rear foot → over the top → front foot
+      out.push([cz + Math.cos(t) * wellR, wheelR + Math.sin(t) * wellR]);
     }
-    // Grille + bumpers: dark bands that break the paint and stop the front reading as a slab.
-    const grille = mesh(new THREE.BoxGeometry(W * 0.7, L * 0.045, L * 0.02), trimMat, d);
-    grille.position.set(0, L * 0.155, L * 0.5);
-    group.add(grille);
-    for (const z of [L * 0.5, -L * 0.5]) {
-      const bumper = mesh(new THREE.BoxGeometry(W * 1.01, L * 0.05, L * 0.03), trimMat, d);
-      bumper.position.set(0, L * 0.09, z);
-      group.add(bumper);
-    }
-    // Lights that EMIT. An unlit "light" is a coloured sticker.
-    for (const side of [-1, 1]) {
-      const head = new THREE.Mesh(new THREE.BoxGeometry(W * 0.22, L * 0.035, L * 0.015), new THREE.MeshBasicMaterial({ color: 0xfff3d0 }));
-      head.position.set(side * W * 0.3, L * 0.185, L * 0.503);
-      group.add(head);
-      const tail = new THREE.Mesh(new THREE.BoxGeometry(W * 0.2, L * 0.03, L * 0.015), new THREE.MeshBasicMaterial({ color: 0xd82b1e }));
-      tail.position.set(side * W * 0.31, L * 0.2, -L * 0.503);
-      group.add(tail);
+    return out;
+  };
+  const shapeOf = (pts: number[][]): THREE.Shape => {
+    const sh = new THREE.Shape();
+    sh.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) sh.lineTo(pts[i][0], pts[i][1]);
+    sh.closePath();
+    return sh;
+  };
+  const extrudeAcross = (pts: number[][], width: number, bevel: number): THREE.BufferGeometry => {
+    const depth = Math.max(0.01, width - 2 * bevel);
+    const g = new THREE.ExtrudeGeometry(shapeOf(pts), {
+      depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel,
+      bevelSegments: real ? 4 : 1, curveSegments: 1,
+    });
+    g.translate(0, 0, -depth / 2);
+    g.rotateY(-Math.PI / 2);          // profile z → model +Z (the front), extrusion → model X
+    g.computeVertexNormals();
+    return g;
+  };
+
+  // Body: nose, bonnet, shoulder line, boot deck, tail — with the two wheel wells cut out of the sill.
+  const bodyPts = [
+    ...scaled([[2.02, 0.22], [2.12, 0.3], [2.16, 0.42], [2.15, 0.56], [2.1, 0.66], [1.98, 0.74],
+      [1.6, 0.8], [1.2, 0.85], [0.92, 0.88], [0, 0.9], [-1, 0.93], [-1.5, 0.95], [-1.85, 0.96],
+      [-2.05, 0.93], [-2.13, 0.86], [-2.17, 0.72], [-2.17, 0.5], [-2.12, 0.32], [-2.04, 0.22]]),
+    ...wellArc(-axleZ),
+    ...wellArc(axleZ),
+  ];
+  const bodyBevel = 0.05 * s;
+  group.add(mesh(extrudeAcross(bodyPts, W, bodyBevel), bodyMat, d));
+
+  // Greenhouse: raked windscreen, curved roof, sloping backlight — narrower than the body, so the
+  // glass sits on a shoulder the way it does on every real car.
+  const Wg = W * 0.8;
+  const glassBevel = 0.06 * s;
+  group.add(mesh(extrudeAcross(scaled([[0.98, 0.86], [0.12, 1.36], [-0.1, 1.41], [-0.5, 1.43], [-0.9, 1.4],
+    [-1.05, 1.36], [-1.62, 0.92], [-1.6, 0.86]]), Wg, glassBevel), glassMat, d));
+  // Roof skin in paint over the top of the glass.
+  group.add(mesh(extrudeAcross(scaled([[0.16, 1.3], [0.16, 1.33], [0.1, 1.375], [-0.1, 1.425], [-0.5, 1.445],
+    [-0.9, 1.415], [-1.07, 1.355], [-1.07, 1.3]]), Wg + 0.02 * s, glassBevel), bodyMat, d));
+
+  // Small parts that share a material are BAKED into one mesh per material: a car of 70 separate
+  // meshes is 70 draw calls, and ten of them in a scene is what makes a mid-range phone stutter.
+  const paintParts: THREE.Mesh[] = [];
+  const trimParts: THREE.Mesh[] = [];
+  const chromeParts: THREE.Mesh[] = [];
+  const box = (w: number, h: number, dd: number, x: number, y: number, z: number, rx = 0) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, dd));
+    m.position.set(x, y, z);
+    m.rotation.x = rx;
+    return m;
+  };
+  // A thin box laid along a line of the profile, on one side of the car.
+  const strut = (z0: number, y0: number, z1: number, y1: number, x: number, thick: number) => {
+    const dz = (z1 - z0) * s, dy = (y1 - y0) * s;
+    return box(0.09 * s, thick * s, Math.hypot(dz, dy), x, ((y0 + y1) / 2) * s, ((z0 + z1) / 2) * s, Math.atan2(-dy, dz));
+  };
+  // A pillar WRAPS the greenhouse's rounded corner (0.09 m deep, its outer face just proud of the side
+  // glass). A thin strip on the side face left the curved glass beside it, so it read as a loose fin.
+  const glassSide = Wg / 2 + glassBevel - 0.042 * s;
+  const bodySide = W / 2;
+  for (const side of [-1, 1]) {
+    // Pillars frame the glass into a windscreen, side windows and a backlight.
+    paintParts.push(strut(0.98, 0.88, 0.2, 1.32, side * glassSide, 0.07));
+    paintParts.push(strut(-0.3, 0.9, -0.34, 1.37, side * glassSide, 0.09));
+    paintParts.push(strut(-1.02, 1.32, -1.56, 0.95, side * glassSide, 0.1));
+    // Wing mirror on a stalk, at the front of the door.
+    paintParts.push(box(0.1 * s, 0.09 * s, 0.17 * s, side * (bodySide + 0.09 * s), 1.0 * s, 0.8 * s));
+    trimParts.push(box(0.1 * s, 0.03 * s, 0.05 * s, side * (bodySide + 0.03 * s), 0.96 * s, 0.82 * s));
+    // Black sill between the wheels.
+    trimParts.push(box(0.03 * s, 0.09 * s, 1.75 * s, side * (bodySide + 0.01 * s), 0.25 * s, 0));
+    if (real) {
+      // Door shut-lines and handles: what makes a painted surface read as a door.
+      for (const [z, y0, y1] of [[0.93, 0.62, 0.9], [-0.3, 0.3, 0.92], [-1.04, 0.74, 0.95]]) {
+        trimParts.push(box(0.006 * s, (y1 - y0) * s, 0.014 * s, side * (bodySide + 0.002 * s), ((y0 + y1) / 2) * s, z * s));
+      }
+      for (const z of [0.15, -0.95]) chromeParts.push(box(0.025 * s, 0.03 * s, 0.16 * s, side * (bodySide + 0.012 * s), 0.8 * s, z * s));
     }
   }
+  if (real) {
+    // Grilles and diffuser: dark breaks that stop the nose and tail reading as a slab.
+    trimParts.push(box(W * 0.56, 0.13 * s, 0.03 * s, 0, 0.4 * s, 2.215 * s));
+    trimParts.push(box(W * 0.36, 0.07 * s, 0.03 * s, 0, 0.6 * s, 2.19 * s));
+    trimParts.push(box(W * 0.7, 0.1 * s, 0.03 * s, 0, 0.29 * s, -2.21 * s));
+    const plate = mesh(new THREE.BoxGeometry(0.52 * s, 0.11 * s, 0.03 * s), new THREE.MeshStandardMaterial({ color: 0xe8e6df, roughness: 0.6 }), d);
+    plate.position.set(0, 0.52 * s, -2.225 * s);
+    group.add(plate);
+  }
+  group.add(mesh(mergeGeometries(paintParts), bodyMat, d));
+  group.add(mesh(mergeGeometries(trimParts), trimMat, d));
+  if (chromeParts.length) group.add(mesh(mergeGeometries(chromeParts), rimMat, d));
 
-  // Wheels at the real wheelbase, sunk into arches so they belong to the car rather than sit beside it.
-  const wheelR = L * 0.075;
-  const seg = d === 'real' ? 24 : 10;
-  const wheelbase = L * 0.6;
+  // Lights that EMIT, laid on the nose and tail surfaces. An unlit "light" is a coloured sticker.
+  for (const side of [-1, 1]) {
+    const head = new THREE.Mesh(new THREE.BoxGeometry(W * 0.24, 0.12 * s, 0.025 * s), new THREE.MeshBasicMaterial({ color: 0xfff3d0 }));
+    head.position.set(side * W * 0.31, 0.722 * s, 2.098 * s);
+    head.rotation.x = -0.985;
+    group.add(head);
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(W * 0.27, 0.09 * s, 0.025 * s), new THREE.MeshBasicMaterial({ color: 0xd82b1e }));
+    tail.position.set(side * W * 0.3, 0.8 * s, -2.215 * s);
+    group.add(tail);
+  }
+
+  // Wheels: a rounded tyre (lathed from its cross-section) on a spoked rim, sitting IN the wells.
+  const seg = real ? 28 : 12;
+  const tyreW = 0.22 * s;
+  const rimR = wheelR * 0.64;
+  const linerMat = new THREE.MeshStandardMaterial({ color: 0x0b0c0e, roughness: 0.95, side: THREE.DoubleSide });
   for (const sx of [-1, 1]) {
     for (const sz of [1, -1]) {
       const wheel = new THREE.Group();
-      const tyre = mesh(new THREE.CylinderGeometry(wheelR, wheelR, W * 0.16, seg), tyreMat, d);
+      const h = tyreW / 2;
+      const profile = [[rimR, -h], [wheelR * 0.9, -h], [wheelR * 0.97, -h * 0.86], [wheelR, -h * 0.55], [wheelR, h * 0.55],
+        [wheelR * 0.97, h * 0.86], [wheelR * 0.9, h], [rimR, h], [rimR, -h]].map(([r, y]) => new THREE.Vector2(r, y));
+      const tyre = mesh(new THREE.LatheGeometry(profile, seg), tyreMat, d);
       tyre.rotation.z = Math.PI / 2;
       wheel.add(tyre);
-      if (d === 'real') {
-        const rim = mesh(new THREE.CylinderGeometry(wheelR * 0.6, wheelR * 0.6, W * 0.17, seg), rimMat, d);
-        rim.rotation.z = Math.PI / 2;
-        wheel.add(rim);
-        // 🔴 THE ARCH BELONGS TO THE BODY, NOT THE WHEEL. It used to be a child of this wheel group at
-        // x = sx * W * 0.5 — ON TOP of the group's own x = sx * W * 0.48 — so it rendered almost a full
-        // car-width outside the body, floating beside the car, and \`rollWheels\` (which spins the wheel
-        // group) spun it too. Fixed to the body at the wheel's own centre, it frames the tyre and stays put.
-        const arch = mesh(new THREE.TorusGeometry(wheelR * 1.18, L * 0.012, 6, 14, Math.PI), trimMat, d);
-        arch.position.set(sx * W * 0.5, wheelR, (sz * wheelbase) / 2);
-        arch.rotation.y = Math.PI / 2;
+      const rim = mesh(new THREE.CylinderGeometry(rimR, rimR, tyreW * 0.8, seg), real ? trimMat : rimMat, d);
+      rim.rotation.z = Math.PI / 2;
+      wheel.add(rim);
+      if (real) {
+        // Five spokes, a hub and the rim's bright lip on the OUTER face, baked into one mesh, so a
+        // rolling wheel visibly turns. The lip is a flat ring, not a torus — a torus in a wheel group is
+        // what the old floating arch was, and the arch test keeps wheel groups free of them.
+        const face = sx * tyreW * 0.42;
+        const faceParts: THREE.Mesh[] = [];
+        const hub = new THREE.Mesh(new THREE.CylinderGeometry(rimR * 0.28, rimR * 0.28, 0.03 * s, 12));
+        hub.rotation.z = Math.PI / 2;
+        hub.position.x = face;
+        faceParts.push(hub);
+        const lip = new THREE.Mesh(new THREE.RingGeometry(rimR * 0.84, rimR, seg));
+        lip.rotation.y = (sx * Math.PI) / 2;
+        lip.position.x = face + sx * 0.012 * s;
+        faceParts.push(lip);
+        for (let k = 0; k < 5; k++) {
+          const a = (k / 5) * Math.PI * 2;
+          faceParts.push(box(0.03 * s, rimR * 0.8, 0.045 * s, face, Math.cos(a) * rimR * 0.5, Math.sin(a) * rimR * 0.5, a));
+        }
+        wheel.add(mesh(mergeGeometries(faceParts), rimMat, d));
+        // 🔴 THE ARCH BELONGS TO THE BODY, NOT THE WHEEL (a child of the wheel group spun with it and,
+        // offset twice, floated a car-width outside the body). It is the dark liner of the wheel well,
+        // fixed to the body over the wheel's own centre, so the well reads as a hole, not painted metal.
+        // Its radius is the well's AFTER the body bevel (the bevel grows the outline into the well).
+        const linerR = wellR - bodyBevel - 0.01 * s;
+        const arch = mesh(new THREE.CylinderGeometry(linerR, linerR, 0.5 * s, 18, 1, true, -0.35, Math.PI + 0.7), linerMat, d);
+        arch.rotation.z = Math.PI / 2;
+        arch.position.set(sx * (bodySide - 0.25 * s), wheelR, sz * axleZ);
         arch.name = 'wheel-arch';
         group.add(arch);
       }
-      wheel.position.set(sx * W * 0.48, wheelR, (sz * wheelbase) / 2);
+      wheel.position.set(sx * (bodySide - h - 0.01 * s), wheelR, sz * axleZ);
       wheel.name = 'wheel';
       group.add(wheel);
     }
@@ -2048,91 +2249,236 @@ export function createHouse(options: HouseOptions = {}): THREE.Group {
 export interface AnimalOptions extends BaseOpts { height?: number; color?: number; kind?: 'deer' | 'dog' | 'cow' | 'horse' }
 export interface Animal { root: THREE.Group; update: (dt: number, speed: number) => void }
 
-/**
- * A quadruped with real proportions and a real GAIT.
- *
- * The gait is the whole thing: a four-legged animal moves DIAGONAL pairs together (front-left with
- * rear-right). Move all four in phase and it reads as a toy being dragged, which is what most
- * generated animals do.
- */
-/** Height to the top of the head, in metres, by kind. */
+/** Height to the top of the head, in metres, by kind. The built animal is scaled to land exactly on it. */
 export const ANIMAL_HEIGHT: Readonly<Record<'deer' | 'dog' | 'cow' | 'horse', number>> = { dog: 0.62, deer: 1.25, cow: 1.5, horse: 1.75 };
 
+/**
+ * A rounded, tapered piece rising from y = 0 to y = len (r0 at the base, r1 at the tip).
+ * 🔴 The end caps are capped at 45% of the length each: with round caps, a piece shorter than r0 + r1
+ * folded back through itself and rendered as a flat disc (a dog's short thick neck did exactly that).
+ */
+function taperGeo(r0: number, r1: number, len: number, radial: number): THREE.BufferGeometry {
+  const pts: THREE.Vector2[] = [];
+  const cap = 4;
+  const h0 = Math.min(r0, len * 0.45), h1 = Math.min(r1, len * 0.45);
+  for (let i = 0; i <= cap; i++) {
+    const a = -Math.PI / 2 + (i / cap) * (Math.PI / 2);
+    pts.push(new THREE.Vector2(Math.cos(a) * r0, h0 + Math.sin(a) * h0));
+  }
+  for (let i = 0; i <= cap; i++) {
+    const a = (i / cap) * (Math.PI / 2);
+    pts.push(new THREE.Vector2(Math.cos(a) * r1, len - h1 + Math.sin(a) * h1));
+  }
+  pts[0].x = 0; pts[pts.length - 1].x = 0;
+  return new THREE.LatheGeometry(pts, radial);
+}
+
+function ellipsoid(rx: number, ry: number, rz: number, d: Detail): THREE.BufferGeometry {
+  const g = d === 'real' ? new THREE.SphereGeometry(1, 16, 12) : new THREE.SphereGeometry(1, 9, 6);
+  g.scale(rx, ry, rz);
+  return g;
+}
+
+/**
+ * Anatomy per kind, in units of the animal's own height (the whole rig is scaled to ANIMAL_HEIGHT
+ * afterwards). These numbers ARE the animal: a horse is a long neck carried high on long legs, a cow is
+ * a deep barrel on short legs with its head forward, a deer is slender legs and a small head held up, a
+ * dog is a short body, a snout and a tail that curls up.
+ */
+const ANATOMY = {
+  horse: { bL: 0.9, bR: 0.165, bW: 0.78, bY: 0.6, legR: 0.03, neckL: 0.4, neckTilt: 0.62, neckR: 0.075, headL: 0.3, headR: 0.06, snout: 0.62, droop: 0.78, ear: 'up', tail: 'hair', mane: true, horns: false, antlers: false, hump: false, paw: false },
+  cow:   { bL: 0.95, bR: 0.2, bW: 0.86, bY: 0.62, legR: 0.046, neckL: 0.22, neckTilt: 1.0, neckR: 0.095, headL: 0.27, headR: 0.075, snout: 0.85, droop: 0.75, ear: 'side', tail: 'tuft', mane: false, horns: true, antlers: false, hump: true, paw: false },
+  deer:  { bL: 0.72, bR: 0.12, bW: 0.74, bY: 0.6, legR: 0.022, neckL: 0.34, neckTilt: 0.42, neckR: 0.05, headL: 0.2, headR: 0.05, snout: 0.5, droop: 0.95, ear: 'big', tail: 'short', mane: false, horns: false, antlers: true, hump: false, paw: false },
+  dog:   { bL: 0.92, bR: 0.17, bW: 0.78, bY: 0.55, legR: 0.045, neckL: 0.26, neckTilt: 0.6, neckR: 0.1, headL: 0.36, headR: 0.12, snout: 0.45, droop: 0.6, ear: 'up', tail: 'curl', mane: false, horns: false, antlers: false, hump: false, paw: true },
+} as const;
+
+/**
+ * A quadruped with real anatomy and a real GAIT.
+ *
+ * 🔒 SILHOUETTE, NOT BOXES (admin 2026-10-05, Phase 2). The body is a lathed barrel, deeper at the chest
+ * than the rump; legs are tapered, thick at the shoulder and fine at the cannon, ending in hooves or paws;
+ * the neck rises from the chest and the head tapers to a muzzle with eyes, ears and a dark nose. Each kind
+ * carries what identifies it at a glance: a horse's mane and hair tail, an Indian cow's hump and horns, a
+ * deer's antlers and white scut, a dog's snout and curled tail.
+ *
+ * The gait is the other half: a four-legged animal moves DIAGONAL pairs together (front-left with
+ * rear-right). Move all four in phase and it reads as a toy being dragged.
+ */
 export function createAnimal(options: AnimalOptions = {}): Animal {
   const d = tier(options);
+  const real = d === 'real';
   const kind = options.kind ?? 'deer';
   // 🔴 SIZE BY KIND. Every kind used to default to 1.4 m, so a dog stood as tall as a horse — the four
   // animals rendered as one animal four times. Real heights to the top of the head, roughly.
   const H = options.height ?? ANIMAL_HEIGHT[kind];
-  const long = kind === 'dog' ? 1.25 : kind === 'cow' ? 1.45 : 1.35;
-  const bodyL = H * long;
+  const A = ANATOMY[kind] ?? ANATOMY.deer;
   const col = options.color ?? (kind === 'cow' ? 0xd8cfc2 : kind === 'dog' ? 0x9a6b3f : 0x8a5f38);
   // The hide is the near-white PLASTER grain, so the tint IS the animal's colour. It used to be 'fabric',
   // whose own texture is blue-grey: multiplied by a tint it turned a white cow purple and browns black.
   const hide = shared('plaster', d, col, 3);
   const dark = new THREE.MeshStandardMaterial({ color: 0x2a211a, roughness: 0.8, metalness: 0 });
+  const hair = new THREE.MeshStandardMaterial({ color: kind === 'horse' ? 0x2b1d14 : 0x3a2c22, roughness: 0.95, metalness: 0 });
+  const radial = real ? 14 : 7;
   const root = new THREE.Group();
+  const rig = new THREE.Group();   // built at unit height, then scaled so the head lands on H
+  root.add(rig);
+  const torso = new THREE.Group(); // body, neck and tail move together; the legs stay planted
+  rig.add(torso);
 
-  const body = mesh(new THREE.BoxGeometry(H * 0.42, H * 0.4, bodyL), hide, d);
-  body.position.y = H * 0.68;
-  root.add(body);
-  // Chest deeper than the rump — the line that makes it an animal rather than a crate.
-  if (d === 'real') {
-    const chest = mesh(new THREE.BoxGeometry(H * 0.46, H * 0.44, bodyL * 0.35), hide, d);
-    chest.position.set(0, H * 0.66, bodyL * 0.28);
-    root.add(chest);
+  // Body: a barrel lathed along its length — rounded rump, deepest at the chest.
+  const prof = [[0, -0.5], [0.55, -0.48], [0.86, -0.4], [0.95, -0.2], [0.93, 0], [0.98, 0.2], [1, 0.32], [0.82, 0.44], [0.45, 0.49], [0, 0.5]];
+  const bodyGeo = new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r * A.bR, y * A.bL)), radial + 4);
+  bodyGeo.rotateX(Math.PI / 2);          // length along +Z, chest at the front
+  bodyGeo.scale(A.bW, 1, 1);
+  const body = mesh(bodyGeo, hide, d);
+  body.position.y = A.bY;
+  torso.add(body);
+  if (A.hump) {
+    // The zebu hump over the shoulders — the Indian cow's silhouette.
+    const hump = mesh(ellipsoid(A.bR * 0.42, A.bR * 0.4, A.bR * 0.55, d), hide, d);
+    hump.position.set(0, A.bY + A.bR * 0.82, A.bL * 0.3);
+    torso.add(hump);
   }
 
+  // Neck: rises from the top of the chest, leaning forward by neckTilt.
   const neck = new THREE.Group();
-  neck.position.set(0, H * 0.8, bodyL * 0.44);
-  root.add(neck);
-  const neckMesh = mesh(new THREE.CylinderGeometry(H * 0.11, H * 0.15, H * 0.36, d === 'real' ? 10 : 5), hide, d);
-  neckMesh.position.y = H * 0.18;
-  neckMesh.rotation.x = kind === 'cow' ? 0.5 : 0.3;
+  neck.position.set(0, A.bY + A.bR * 0.45, A.bL * 0.38);
+  neck.rotation.x = A.neckTilt;
+  torso.add(neck);
+  const neckMesh = mesh(taperGeo(A.neckR * 1.35, A.neckR, A.neckL, radial), hide, d);
+  neckMesh.scale.x = 0.8;
   neck.add(neckMesh);
+  if (A.mane) {
+    const mane = mesh(taperGeo(A.neckR * 0.5, A.neckR * 0.35, A.neckL * 1.02, radial), hair, d);
+    mane.scale.set(0.35, 1, 1);
+    mane.position.z = -A.neckR * 0.75;
+    neck.add(mane);
+  }
 
-  const head = mesh(new THREE.BoxGeometry(H * 0.17, H * 0.19, H * 0.32), hide, d);
-  head.position.set(0, H * 0.34, H * 0.1);
+  // Head: tapers from the cranium to the muzzle, carried forward and tipped down by droop.
+  const head = new THREE.Group();
+  head.position.y = A.neckL;
+  head.rotation.x = A.droop - A.neckTilt;
   neck.add(head);
-  if (d === 'real') {
-    const muzzle = mesh(new THREE.BoxGeometry(H * 0.12, H * 0.12, H * 0.13), dark, d);
-    muzzle.position.set(0, H * 0.3, H * 0.24);
-    neck.add(muzzle);
-    for (const side of [-1, 1]) {
-      const ear = mesh(new THREE.BoxGeometry(H * 0.03, H * 0.09, H * 0.05), hide, d);
-      ear.position.set(side * H * 0.08, H * 0.43, H * 0.02);
-      neck.add(ear);
+  const headGeo = taperGeo(A.headR, A.headR * A.snout, A.headL, radial);
+  headGeo.rotateX(Math.PI / 2);           // its length along +Z
+  headGeo.translate(0, 0, -A.headR * 0.7);
+  // The head's parts are baked into one mesh per material — a head of eight pieces is one draw call
+  // for the hide, one for the dark nose and eyes, one for horns or antlers.
+  const part = (geo: THREE.BufferGeometry) => new THREE.Mesh(geo);
+  const headMesh = part(headGeo);
+  headMesh.scale.set(0.82, 1, 1);
+  const hideParts: THREE.Mesh[] = [headMesh];
+  const darkParts: THREE.Mesh[] = [];
+  const hornParts: THREE.Mesh[] = [];
+  const tipZ = A.headL - A.headR * 0.7;
+  const nose = part(ellipsoid(A.headR * A.snout * 0.75, A.headR * A.snout * 0.6, A.headR * 0.25, d));
+  nose.position.set(0, 0, tipZ - A.headR * 0.12);
+  darkParts.push(nose);
+  for (const side of [-1, 1]) {
+    if (real) {
+      const eye = part(ellipsoid(A.headR * 0.16, A.headR * 0.16, A.headR * 0.12, d));
+      eye.position.set(side * A.headR * 0.68, A.headR * 0.35, A.headR * 0.15);
+      darkParts.push(eye);
+    }
+    // Ears: upright and pointed (horse, dog), big and spread (deer), out to the side (cow).
+    const earLen = A.ear === 'big' ? A.headR * 1.7 : A.ear === 'side' ? A.headR * 1.0 : A.headR * 0.95;
+    const ear = part(taperGeo(A.headR * 0.28, A.headR * 0.06, earLen, real ? 8 : 5));
+    ear.scale.z = 0.45;
+    ear.position.set(side * A.headR * 0.5, A.headR * 0.65, -A.headR * 0.35);
+    ear.rotation.z = -side * (A.ear === 'side' ? 1.35 : A.ear === 'big' ? 0.75 : 0.25);
+    hideParts.push(ear);
+    if (A.horns) {
+      const horn = part(taperGeo(A.headR * 0.22, A.headR * 0.05, A.headR * 1.3, real ? 8 : 5));
+      horn.position.set(side * A.headR * 0.45, A.headR * 0.8, -A.headR * 0.45);
+      horn.rotation.set(-0.35, 0, -side * 0.55);
+      hornParts.push(horn);
+    }
+    if (A.antlers) {
+      // A main beam sweeping up and back, with two tines off it (posed in the beam's frame, then
+      // carried into the head's frame so the whole rack bakes into one mesh).
+      const beam = part(taperGeo(A.headR * 0.18, A.headR * 0.09, A.headR * 4, real ? 6 : 4));
+      beam.position.set(side * A.headR * 0.4, A.headR * 0.8, -A.headR * 0.4);
+      beam.rotation.set(-0.45, 0, -side * 0.45);
+      beam.updateMatrix();
+      hornParts.push(beam);
+      for (const [at, tilt] of [[0.35, 0.9], [0.7, 0.7]]) {
+        const tine = part(taperGeo(A.headR * 0.12, A.headR * 0.05, A.headR * 1.6, real ? 6 : 4));
+        tine.position.y = A.headR * 4 * at;
+        tine.rotation.x = tilt;
+        tine.updateMatrix();
+        tine.matrix.premultiply(beam.matrix);
+        tine.matrix.decompose(tine.position, tine.quaternion, tine.scale);
+        hornParts.push(tine);
+      }
     }
   }
+  head.add(mesh(mergeGeometries(hideParts), hide, d));
+  head.add(mesh(mergeGeometries(darkParts), dark, d));
+  if (hornParts.length) {
+    const hornColor = A.antlers ? 0x6b5338 : 0xcfc3a8;
+    head.add(mesh(mergeGeometries(hornParts), new THREE.MeshStandardMaterial({ color: hornColor, roughness: 0.7 }), d));
+  }
 
+  // Legs: tapered, thick at the top, fine at the cannon, ending in a hoof or a paw.
+  const hipY = A.bY - A.bR * 0.25;
+  const footH = A.paw ? A.legR * 1.2 : A.legR * 1.6;
+  const upperL = (hipY - footH) * 0.52;
+  const lowerL = hipY - footH - upperL;
   const legs: Array<{ hip: THREE.Group; knee: THREE.Group }> = [];
   for (const sz of [1, -1]) {
     for (const sx of [-1, 1]) {
       const hip = new THREE.Group();
-      hip.position.set(sx * H * 0.17, H * 0.55, sz * bodyL * 0.34);
-      root.add(hip);
-      const upper = mesh(new THREE.BoxGeometry(H * 0.1, H * 0.3, H * 0.1), hide, d);
-      upper.position.y = -H * 0.15;
+      // Inside the barrel's footprint: the top of a leg belongs to the body, it is not bolted beside it.
+      hip.position.set(sx * A.bR * A.bW * 0.45, hipY, sz * A.bL * 0.33);
+      rig.add(hip);
+      const thick = sz < 0 ? 1.6 : 1.35;   // the hindquarters carry the bigger muscle
+      const upper = mesh(taperGeo(A.legR * thick, A.legR * 1.05, upperL + A.legR, radial), hide, d);
+      upper.rotation.x = Math.PI;          // hangs down from the hip
+      upper.position.y = A.legR;
       hip.add(upper);
       const knee = new THREE.Group();
-      knee.position.y = -H * 0.3;
+      knee.position.y = -upperL;
       hip.add(knee);
-      const lower = mesh(new THREE.BoxGeometry(H * 0.075, H * 0.25, H * 0.075), hide, d);
-      lower.position.y = -H * 0.125;
+      const lower = mesh(taperGeo(A.legR * 1.0, A.legR * 0.8, lowerL + A.legR * 0.5, radial), hide, d);
+      lower.rotation.x = Math.PI;
+      lower.position.y = A.legR * 0.5;
       knee.add(lower);
-      const hoof = mesh(new THREE.BoxGeometry(H * 0.09, H * 0.06, H * 0.11), dark, d);
-      hoof.position.y = -H * 0.27;
-      knee.add(hoof);
+      const foot = A.paw
+        ? mesh(ellipsoid(A.legR * 1.15, footH * 0.55, A.legR * 1.6, d), hide, d)
+        : mesh(new THREE.CylinderGeometry(A.legR * 0.95, A.legR * 1.2, footH, radial), dark, d);
+      foot.position.set(0, -lowerL - footH * 0.5, A.paw ? A.legR * 0.5 : 0);
+      knee.add(foot);
       legs.push({ hip, knee });
     }
   }
 
+  // Tail: a long hair tail (horse), a thin tail with a tuft (cow), a white scut (deer), a curl (dog).
   const tail = new THREE.Group();
-  tail.position.set(0, H * 0.78, -bodyL * 0.48);
-  root.add(tail);
-  const tailMesh = mesh(new THREE.CylinderGeometry(H * 0.02, H * 0.035, H * 0.3, 6), hide, d);
-  tailMesh.position.y = -H * 0.15;
-  tail.add(tailMesh);
+  tail.position.set(0, A.bY + A.bR * 0.55, -A.bL * 0.47);
+  torso.add(tail);
+  if (A.tail === 'hair') {
+    const t = mesh(taperGeo(A.legR * 1.4, A.legR * 0.6, A.bY * 0.75, radial), hair, d);
+    t.rotation.x = Math.PI + 0.3;      // down and BACK, away from the rump
+    tail.add(t);
+  } else if (A.tail === 'tuft') {
+    const len = A.bY * 0.7, lean = 0.12;
+    const t = mesh(taperGeo(A.legR * 0.45, A.legR * 0.35, len, real ? 6 : 4), hide, d);
+    t.rotation.x = Math.PI + lean;
+    tail.add(t);
+    // The tuft sits ON the tail's tip, wherever the lean puts it.
+    const tuft = mesh(ellipsoid(A.legR * 0.7, A.legR * 2.2, A.legR * 0.7, d), hair, d);
+    tuft.position.set(0, -Math.cos(lean) * len, -Math.sin(lean) * len);
+    tail.add(tuft);
+  } else if (A.tail === 'short') {
+    const t = mesh(ellipsoid(A.bR * 0.25, A.bR * 0.4, A.bR * 0.18, d), new THREE.MeshStandardMaterial({ color: 0xece6da, roughness: 0.9 }), d);
+    t.position.z = -A.bR * 0.05;
+    tail.add(t);
+  } else {
+    const t = mesh(taperGeo(A.legR * 0.9, A.legR * 0.45, A.bL * 0.38, radial), hide, d);
+    t.rotation.x = -0.6;                 // up and back: a dog's tail is carried, not dragged
+    tail.add(t);
+  }
 
   let phase = 0;
   const update = (dt: number, speed: number) => {
@@ -2146,11 +2492,15 @@ export function createAnimal(options: AnimalOptions = {}): Animal {
       legs[i].hip.rotation.x = s * swing;
       legs[i].knee.rotation.x = Math.max(0, -s * swing * 1.3);
     }
-    body.position.y = H * 0.68 + (moving ? Math.abs(Math.sin(phase * 2)) * 0.02 : 0);
-    neck.rotation.x = moving ? -0.05 - swing * 0.1 : Math.sin(phase * 0.5) * 0.04;
+    torso.position.y = moving ? Math.abs(Math.sin(phase * 2)) * 0.012 : 0;
+    neck.rotation.x = A.neckTilt + (moving ? 0.05 + swing * 0.1 : Math.sin(phase * 0.5) * 0.04);
     tail.rotation.x = Math.sin(phase * 0.8) * 0.14;
   };
   update(0, 0);
+  // Land the top of the head on H exactly, whatever the anatomy table adds up to.
+  rig.updateMatrixWorld(true);
+  const top = new THREE.Box3().setFromObject(rig).max.y;
+  rig.scale.setScalar(H / (top > 0 ? top : 1));
   return { root, update };
 }
 
@@ -2572,7 +2922,8 @@ export function generateGame3D(include?: string[]): Game3DResult {
     if (files['src/game/three/surfaces.ts']) files['src/game/three/environment.ts'] = FILES['src/game/three/environment.ts'];
     // objects.ts imports surfaces.ts directly, and surfaces then pulls environment in above — so an
     // object asked for on its own still arrives with something to be made of and something to reflect.
-    if (files['src/game/three/objects.ts']) {
+    // objects.ts AND humanoid.ts import surfaces.ts (the detail tier, the one shared merge).
+    if (files['src/game/three/objects.ts'] || files['src/game/three/humanoid.ts']) {
       files['src/game/three/surfaces.ts'] = FILES['src/game/three/surfaces.ts'];
       files['src/game/three/environment.ts'] = FILES['src/game/three/environment.ts'];
     }
